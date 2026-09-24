@@ -1,8 +1,9 @@
+#include "../../mono.engine/control/tests/HookFixture.hpp"
+
 #include <engine/audio/Device.hpp>
 #include <engine/audio/Sample.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/AudioObservation.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -115,7 +116,7 @@ TEST_CASE(
 		return true;
 	});
 	engine::control::Surface surface("client-control-audio", "client audio control boundary test");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 
 	std::vector<engine::world::DataFactoryReply> observed;
 	const auto answer = [&](std::string_view tool, nlohmann::json arguments) {
@@ -331,7 +332,9 @@ TEST_CASE(
 	REQUIRE(world.IsValid());
 	const auto host = std::make_shared<client::DataAudioObservationHost>();
 	engine::control::Surface surface("client-data-audio", "client data audio tests");
-	surface.Enable(std::array{engine::control::features::DataAudioObservation(worlds, host)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataAudioObservation(worlds, host)}
+	);
 	const auto findTool = [&](std::string_view name) {
 		return std::find_if(surface.Registered().begin(), surface.Registered().end(), [&](const auto &entry) {
 			return entry.Name == name;
@@ -597,12 +600,14 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"audio observation MCP feature registers both bounded data-factory tools", "[client][audio][data-factory]"
+	"audio observation MCP hook registers both bounded data-factory tools", "[client][audio][data-factory]"
 ) {
 	engine::world::Universe worlds;
 	const auto host = std::make_shared<client::DataAudioObservationHost>();
 	engine::control::Surface surface("client-data-audio", "client data audio tests");
-	surface.Enable(std::array{engine::control::features::DataAudioObservation(worlds, host)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataAudioObservation(worlds, host)}
+	);
 	bool observation = false;
 	bool waveform = false;
 	for (const auto &tool : surface.Registered()) {
@@ -634,7 +639,9 @@ TEST_CASE(
 	REQUIRE(decoy.Create(decoySettings).IsValid());
 	const auto host = std::make_shared<client::DataAudioObservationHost>();
 	engine::control::Surface surface("client-data-audio", "client data audio tests");
-	surface.Enable(std::array{engine::control::features::DataAudioObservation(decoy, host, &session)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataAudioObservation(decoy, host, &session)}
+	);
 	const auto observation =
 		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &tool) {
 			return tool.Name == "get_audio_observation";

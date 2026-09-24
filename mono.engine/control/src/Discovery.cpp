@@ -102,7 +102,7 @@ namespace engine::control {
 		json DescribeHooks(const Surface &surface) {
 			json hooks = json::array();
 			for (const HookStatus &hook : surface.Hooks().Active()) {
-				if (hook.State != HookState::Active) continue;
+				if (hook.State != HookState::Active && hook.State != HookState::Draining) continue;
 				json limits = json::object();
 				for (const HookLimit &limit : hook.Descriptor.Limits) {
 					limits[limit.Name] = limit.Maximum;

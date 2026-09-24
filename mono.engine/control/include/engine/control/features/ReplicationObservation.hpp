@@ -200,19 +200,4 @@ namespace engine::control {
 		);
 	}
 
-	namespace features {
-		// Returns the replication-observation feature for one world.
-		inline Feature ReplicationObservation(
-			world::DataFactorySession *session,
-			replication::ReplicationObservations &observations,
-			std::string worldName
-		) {
-			return Feature{
-				"replication_observation",
-				[session, &observations, worldName = std::move(worldName)](Surface &surface) {
-					AddReplicationObservationTools(surface, session, observations, worldName);
-				}
-			};
-		}
-	}
 }

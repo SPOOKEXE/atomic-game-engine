@@ -1419,17 +1419,4 @@ namespace engine::control {
 		});
 	}
 
-	namespace features {
-		// World and ECS inspection, with writes when the product permits them.
-		// A product that owns a richer engine_info row can omit the generic one.
-		inline Feature
-		Universe(world::Universe &universe, bool writable = true, bool includeEngineInfo = true) {
-			return Feature{
-				"universe",
-				[&universe, writable, includeEngineInfo](Surface &surface) {
-					surface.AddUniverseTools(universe, writable, includeEngineInfo);
-				},
-			};
-		}
-	}
 }

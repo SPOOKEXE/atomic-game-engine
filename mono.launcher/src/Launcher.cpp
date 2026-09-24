@@ -17,6 +17,8 @@ namespace launcher {
 	Launcher::~Launcher() {
 		ControlServer.Stop();
 		LauncherControlHook.Close();
+		for (auto hook = BuiltinControlHooks.rbegin(); hook != BuiltinControlHooks.rend(); ++hook)
+			hook->Close();
 		// **Interface before renderer**, because the imgui backend releases GPU
 		// objects the device owns and the device goes away with the renderer.
 		Interface.Shutdown();

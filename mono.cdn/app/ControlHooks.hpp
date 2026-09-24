@@ -3,6 +3,7 @@
 #include <engine/control/HookRegistry.hpp>
 
 #include <string>
+#include <vector>
 
 namespace cdn {
 	class Origin;
@@ -23,6 +24,7 @@ namespace cdn {
 		engine::control::Server &ControlServer;
 	};
 
-	// Installs the ordered MCP vocabulary this content origin can answer.
-	engine::control::HookLease ConfigureControlHooks(ControlHookContext context, std::string &failure);
+	// Activates the ordered MCP vocabulary. The caller keeps all returned leases alive.
+	std::vector<engine::control::HookLease>
+	ConfigureControlHooks(ControlHookContext context, std::string &failure);
 }

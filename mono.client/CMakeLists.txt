@@ -12,7 +12,7 @@ mono_add_library(client
 		Engine::core
 		Engine::parallel
 		# The loopback MCP transport and registry. It stays closed until
-		# `--mcp-port` is supplied; the feature list lives in Client.cpp.
+		# `--mcp-port` is supplied; the hook manifest lives in ControlHooks.cpp.
 		Engine::control
 		Engine::ecs
 		Engine::world

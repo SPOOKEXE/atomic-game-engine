@@ -1,0 +1,1166 @@
+{
+  "initialize": {
+    "capabilities": {
+      "prompts": {
+        "listChanged": false
+      },
+      "resources": {
+        "listChanged": false,
+        "subscribe": false
+      },
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "instructions": "Open modes, configure child options, and supervise a staged program.",
+    "protocolVersion": "2025-06-18",
+    "serverInfo": {
+      "name": "launcher",
+      "title": "atomic - launcher"
+    }
+  },
+  "tools": [
+    {
+      "description": "The engine's layer stack, bottom to top: every module at each height, with its tier. A layer may see every layer below it and none above it, so this table is what decides which module may include which. The programs are listed separately - they are what links modules and nothing links them. Call module_may_link to ask about one edge.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "name": "layer_table"
+    },
+    {
+      "description": "One module or program: which layer and tier it is, every first-party target it links, and everything that links it. `linkedBy` is what would have to be rebuilt and reviewed if this module's interface changed. With no name, every module in layer order.",
+      "inputSchema": {
+        "properties": {
+          "name": {
+            "description": "The module or program. Omit for all of them.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "module_get"
+    },
+    {
+      "description": "Whether one module is allowed to link another, and why. This is the question the architecture check answers, decided here from the same two rules: a tier may link shared and its own tier, and a layer may see every layer below it and none above it. Ask before writing an include - an edge that runs upward is refused at configure time and the fix is almost never to widen the rule.",
+      "inputSchema": {
+        "properties": {
+          "from": {
+            "description": "The module doing the linking.",
+            "type": "string"
+          },
+          "to": {
+            "description": "What it would link.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "module_may_link"
+    },
+    {
+      "description": "The most recent lines this program has logged, newest last. Filter by minimum level and by category - a category is one area of the engine, usually one module, and log_level lists the ones this build registers. Only the last 1024 lines are kept, and `dropped` says how many scrolled off before the oldest one shown.",
+      "inputSchema": {
+        "properties": {
+          "category": {
+            "description": "Only lines from this area. Default all of them.",
+            "type": "string"
+          },
+          "level": {
+            "description": "The lowest severity to include. Default trace.",
+            "enum": [
+              "trace",
+              "debug",
+              "info",
+              "warning",
+              "error"
+            ],
+            "type": "string"
+          },
+          "lines": {
+            "description": "How many lines at most. Default 50, capped at 1024.",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "log_tail"
+    },
+    {
+      "description": "Reads or changes what this program logs, while it runs. With no argument it lists every category the build has registered and the severity floor each is at. `set` takes the same text the engine.log-level setting does: a bare level for everything, or comma-separated category=level overrides, or both - `warning,net=trace`. Statements below the compiled floor were removed by the preprocessor and cannot be switched on.",
+      "inputSchema": {
+        "properties": {
+          "set": {
+            "description": "A level, or category=level terms, or both.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "log_level"
+    },
+    {
+      "description": "Every counter, gauge and distribution this process has recorded. A counter accumulates and is drained once a frame, so its value is a rate; a gauge is a level as last set; a histogram carries a mean, a maximum and nearest-rank percentiles over its recent window, which is what says whether a server holding its tick rate on average is still missing a fiftieth of its ticks. Times are nanoseconds. Reading changes nothing.",
+      "inputSchema": {
+        "properties": {
+          "prefix": {
+            "description": "Only names starting with this. Default all of them.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "metrics_read"
+    },
+    {
+      "description": "Pure data-factory capability discovery. Reports this host's callable MCP operations and their schemas, and names unsupported proposed capture capabilities instead of guessing from renderer internals. It does not create, load, reset, or mutate a world.",
+      "inputSchema": {
+        "properties": {
+          "contract_version": {
+            "type": "string"
+          },
+          "requested_channels": {
+            "items": {
+              "maxLength": 128,
+              "pattern": "^[a-z0-9_]+$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "schema_version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "negotiate"
+    },
+    {
+      "description": "Moves the mouse pointer to client coordinates through this program's input boundary.",
+      "inputSchema": {
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "name": "emulate_mouse_move"
+    },
+    {
+      "description": "Clicks, presses, or releases a mouse button at client coordinates through this program's input boundary. Omit down for one complete click.",
+      "inputSchema": {
+        "properties": {
+          "button": {
+            "enum": [
+              "left",
+              "middle",
+              "right"
+            ],
+            "type": "string"
+          },
+          "down": {
+            "type": "boolean"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "name": "emulate_click"
+    },
+    {
+      "description": "Turns the mouse wheel by a signed number of vertical notches through this program's input boundary.",
+      "inputSchema": {
+        "properties": {
+          "notches": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "notches"
+        ],
+        "type": "object"
+      },
+      "name": "emulate_mouse_wheel"
+    },
+    {
+      "description": "Presses, releases, or taps one named keyboard key through this program's input boundary. Omit down for one complete key press.",
+      "inputSchema": {
+        "properties": {
+          "down": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "modifiers": {
+            "items": {
+              "enum": [
+                "shift",
+                "control",
+                "alt",
+                "gui"
+              ],
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
+      "name": "emulate_key"
+    },
+    {
+      "description": "Sends UTF-8 text through this program's input boundary.",
+      "inputSchema": {
+        "properties": {
+          "text": {
+            "maxLength": 16384,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "emulate_text"
+    },
+    {
+      "description": "List launcher modes, the open form, and the supervised child's current state.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "name": "launcher_status"
+    },
+    {
+      "description": "Open a launcher mode and its form. Use launcher_status to see available mode ids.",
+      "inputSchema": {
+        "properties": {
+          "mode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "name": "launcher_open_mode"
+    },
+    {
+      "description": "Set one declared option on the open mode. Values may contain several entries for repeatable options.",
+      "inputSchema": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "launcher_set_option"
+    },
+    {
+      "description": "Start the open mode with the current form options.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "name": "launcher_launch"
+    },
+    {
+      "description": "Request a polite stop of the supervised child.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "name": "launcher_stop"
+    },
+    {
+      "description": "Close the launcher and stop its supervised child. Also ends headless MCP-only sessions.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "name": "launcher_quit"
+    }
+  ],
+  "resources": [
+    {
+      "description": "Every module by height, with the rule that decides which may include which. ReadResourceFile this before adding an include across modules.",
+      "mimeType": "text/markdown",
+      "name": "The layer stack",
+      "uri": "atomic://architecture/layers"
+    },
+    {
+      "description": "Every module and program as JSON: tier, layer, what it links, what links it, and the sideways edges each is allowed. The same data the architecture check enforces.",
+      "mimeType": "application/json",
+      "name": "The module graph",
+      "uri": "atomic://architecture/modules"
+    },
+    {
+      "description": "The invariants specific to root. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (root)",
+      "uri": "atomic://agents/root"
+    },
+    {
+      "description": "The invariants specific to cdn. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (cdn)",
+      "uri": "atomic://agents/cdn"
+    },
+    {
+      "description": "The invariants specific to client. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (client)",
+      "uri": "atomic://agents/client"
+    },
+    {
+      "description": "The invariants specific to discord. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (discord)",
+      "uri": "atomic://agents/discord"
+    },
+    {
+      "description": "The invariants specific to engine. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine)",
+      "uri": "atomic://agents/engine"
+    },
+    {
+      "description": "The invariants specific to engine/assets. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/assets)",
+      "uri": "atomic://agents/engine/assets"
+    },
+    {
+      "description": "The invariants specific to engine/audio. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/audio)",
+      "uri": "atomic://agents/engine/audio"
+    },
+    {
+      "description": "The invariants specific to engine/bake. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/bake)",
+      "uri": "atomic://agents/engine/bake"
+    },
+    {
+      "description": "The invariants specific to engine/bakegraph. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/bakegraph)",
+      "uri": "atomic://agents/engine/bakegraph"
+    },
+    {
+      "description": "The invariants specific to engine/collision. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/collision)",
+      "uri": "atomic://agents/engine/collision"
+    },
+    {
+      "description": "The invariants specific to engine/control. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/control)",
+      "uri": "atomic://agents/engine/control"
+    },
+    {
+      "description": "The invariants specific to engine/core. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/core)",
+      "uri": "atomic://agents/engine/core"
+    },
+    {
+      "description": "The invariants specific to engine/datastore. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/datastore)",
+      "uri": "atomic://agents/engine/datastore"
+    },
+    {
+      "description": "The invariants specific to engine/delivery. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/delivery)",
+      "uri": "atomic://agents/engine/delivery"
+    },
+    {
+      "description": "The invariants specific to engine/ecs. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/ecs)",
+      "uri": "atomic://agents/engine/ecs"
+    },
+    {
+      "description": "The invariants specific to engine/effects. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/effects)",
+      "uri": "atomic://agents/engine/effects"
+    },
+    {
+      "description": "The invariants specific to engine/game. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/game)",
+      "uri": "atomic://agents/engine/game"
+    },
+    {
+      "description": "The invariants specific to engine/graph. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/graph)",
+      "uri": "atomic://agents/engine/graph"
+    },
+    {
+      "description": "The invariants specific to engine/gui. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/gui)",
+      "uri": "atomic://agents/engine/gui"
+    },
+    {
+      "description": "The invariants specific to engine/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/imagegraph)",
+      "uri": "atomic://agents/engine/imagegraph"
+    },
+    {
+      "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/imagegraphio)",
+      "uri": "atomic://agents/engine/imagegraphio"
+    },
+    {
+      "description": "The invariants specific to engine/input. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/input)",
+      "uri": "atomic://agents/engine/input"
+    },
+    {
+      "description": "The invariants specific to engine/msl. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/msl)",
+      "uri": "atomic://agents/engine/msl"
+    },
+    {
+      "description": "The invariants specific to engine/net. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/net)",
+      "uri": "atomic://agents/engine/net"
+    },
+    {
+      "description": "The invariants specific to engine/parallel. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/parallel)",
+      "uri": "atomic://agents/engine/parallel"
+    },
+    {
+      "description": "The invariants specific to engine/physics. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/physics)",
+      "uri": "atomic://agents/engine/physics"
+    },
+    {
+      "description": "The invariants specific to engine/render. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/render)",
+      "uri": "atomic://agents/engine/render"
+    },
+    {
+      "description": "The invariants specific to engine/replication. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/replication)",
+      "uri": "atomic://agents/engine/replication"
+    },
+    {
+      "description": "The invariants specific to engine/resources. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/resources)",
+      "uri": "atomic://agents/engine/resources"
+    },
+    {
+      "description": "The invariants specific to engine/scene. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/scene)",
+      "uri": "atomic://agents/engine/scene"
+    },
+    {
+      "description": "The invariants specific to engine/script. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/script)",
+      "uri": "atomic://agents/engine/script"
+    },
+    {
+      "description": "The invariants specific to engine/scripthost. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/scripthost)",
+      "uri": "atomic://agents/engine/scripthost"
+    },
+    {
+      "description": "The invariants specific to engine/scriptjs. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/scriptjs)",
+      "uri": "atomic://agents/engine/scriptjs"
+    },
+    {
+      "description": "The invariants specific to engine/scriptluau. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/scriptluau)",
+      "uri": "atomic://agents/engine/scriptluau"
+    },
+    {
+      "description": "The invariants specific to engine/spatial. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/spatial)",
+      "uri": "atomic://agents/engine/spatial"
+    },
+    {
+      "description": "The invariants specific to engine/ui. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/ui)",
+      "uri": "atomic://agents/engine/ui"
+    },
+    {
+      "description": "The invariants specific to engine/world. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/world)",
+      "uri": "atomic://agents/engine/world"
+    },
+    {
+      "description": "The invariants specific to launcher. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (launcher)",
+      "uri": "atomic://agents/launcher"
+    },
+    {
+      "description": "The invariants specific to network. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (network)",
+      "uri": "atomic://agents/network"
+    },
+    {
+      "description": "The invariants specific to server. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (server)",
+      "uri": "atomic://agents/server"
+    },
+    {
+      "description": "The invariants specific to studio. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (studio)",
+      "uri": "atomic://agents/studio"
+    },
+    {
+      "description": "The invariants specific to studio/nodegraph. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (studio/nodegraph)",
+      "uri": "atomic://agents/studio/nodegraph"
+    },
+    {
+      "description": "The invariants specific to tools. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (tools)",
+      "uri": "atomic://agents/tools"
+    },
+    {
+      "description": "The invariants specific to tools/docgen. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (tools/docgen)",
+      "uri": "atomic://agents/tools/docgen"
+    },
+    {
+      "description": "The invariants specific to tools/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (tools/imagegraph)",
+      "uri": "atomic://agents/tools/imagegraph"
+    },
+    {
+      "description": "The invariants specific to tools/pxcimport. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (tools/pxcimport)",
+      "uri": "atomic://agents/tools/pxcimport"
+    },
+    {
+      "description": "The invariants specific to unified_tests. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (unified_tests)",
+      "uri": "atomic://agents/unified_tests"
+    },
+    {
+      "description": "Every class, property, enum and datatype a script may name, generated from the class table by `just bindings`. Large - a couple of hundred kilobytes.",
+      "mimeType": "application/json",
+      "name": "The scripting manifest",
+      "uri": "atomic://bindings/manifest"
+    },
+    {
+      "description": "The type declarations every Luau script in this engine is checked against, and the file script_check uses.",
+      "mimeType": "text/plain",
+      "name": "The Luau declarations",
+      "uri": "atomic://bindings/luau"
+    }
+  ],
+  "prompts": [
+    {
+      "arguments": [
+        {
+          "description": "The module under review. Omit to start from the whole stack.",
+          "name": "module",
+          "required": false
+        }
+      ],
+      "description": "Review a change against this engine's layer stack, using the module graph tools on this surface.",
+      "name": "architecture-review"
+    },
+    {
+      "arguments": [],
+      "description": "Build an isolated scene through the engine MCP host and export verified observations with the same tools available to an external factory.",
+      "name": "data-factory"
+    },
+    {
+      "arguments": [],
+      "description": "Scaffold a new mono.engine module with its tier, tests, AGENTS.md and graph entry.",
+      "name": "new-module"
+    },
+    {
+      "arguments": [],
+      "description": "Summarise a change, name the areas it touches, and find the lower-level and higher-level places it should have touched and did not.",
+      "name": "pr-analysis"
+    },
+    {
+      "arguments": [],
+      "description": "Review one area of the codebase against docs/CODE_QUALITY.md and fix what it finds, code or tests.",
+      "name": "review-code"
+    },
+    {
+      "arguments": [],
+      "description": "Work through the completion checklist in docs/CODE_QUALITY.md before a pull request.",
+      "name": "run-checklist"
+    }
+  ],
+  "negotiate": {
+    "contract_version": "1",
+    "headless_cpu": {
+      "name": "headless_cpu",
+      "reason": "not declared by this control host",
+      "supported": false
+    },
+    "hooks": [
+      {
+        "id": "builtin.architecture",
+        "limits": {},
+        "revision": "v1",
+        "state": "active",
+        "tools": [
+          "layer_table",
+          "module_get",
+          "module_may_link"
+        ]
+      },
+      {
+        "id": "builtin.diagnostics",
+        "limits": {},
+        "revision": "v1",
+        "state": "active",
+        "tools": [
+          "log_tail",
+          "log_level",
+          "metrics_read"
+        ]
+      },
+      {
+        "id": "builtin.resources",
+        "limits": {},
+        "revision": "v1",
+        "state": "active",
+        "tools": []
+      },
+      {
+        "id": "builtin.prompts",
+        "limits": {},
+        "revision": "v1",
+        "state": "active",
+        "tools": []
+      },
+      {
+        "id": "builtin.discovery",
+        "limits": {},
+        "revision": "v1",
+        "state": "active",
+        "tools": [
+          "negotiate"
+        ]
+      },
+      {
+        "id": "launcher.product",
+        "limits": {
+          "queued_events": 64
+        },
+        "revision": "v1",
+        "state": "active",
+        "tools": [
+          "emulate_mouse_move",
+          "emulate_click",
+          "emulate_mouse_wheel",
+          "emulate_key",
+          "emulate_text",
+          "launcher_status",
+          "launcher_open_mode",
+          "launcher_set_option",
+          "launcher_launch",
+          "launcher_stop",
+          "launcher_quit"
+        ]
+      }
+    ],
+    "limits": [
+      {
+        "maximum": 64,
+        "name": "requested_channels",
+        "supported": true
+      },
+      {
+        "name": "channels",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "script_bytes",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "entities",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "pixels",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "image_bytes",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "checkpoint_bytes",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "readbacks_in_flight",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "render_recursion",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "operation_time",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "resource_ttl",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      }
+    ],
+    "offscreen_gpu": {
+      "name": "offscreen_gpu",
+      "reason": "capture channels are not implemented by this host",
+      "supported": false
+    },
+    "operations": [
+      {
+        "input_schema": {
+          "type": "object"
+        },
+        "name": "layer_table"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "name": {
+              "description": "The module or program. Omit for all of them.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "module_get"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "from": {
+              "description": "The module doing the linking.",
+              "type": "string"
+            },
+            "to": {
+              "description": "What it would link.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        "name": "module_may_link"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "category": {
+              "description": "Only lines from this area. Default all of them.",
+              "type": "string"
+            },
+            "level": {
+              "description": "The lowest severity to include. Default trace.",
+              "enum": [
+                "trace",
+                "debug",
+                "info",
+                "warning",
+                "error"
+              ],
+              "type": "string"
+            },
+            "lines": {
+              "description": "How many lines at most. Default 50, capped at 1024.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "name": "log_tail"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "set": {
+              "description": "A level, or category=level terms, or both.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "log_level"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "prefix": {
+              "description": "Only names starting with this. Default all of them.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "metrics_read"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "contract_version": {
+              "type": "string"
+            },
+            "requested_channels": {
+              "items": {
+                "maxLength": 128,
+                "pattern": "^[a-z0-9_]+$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            "schema_version": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "negotiate"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_mouse_move"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "button": {
+              "enum": [
+                "left",
+                "middle",
+                "right"
+              ],
+              "type": "string"
+            },
+            "down": {
+              "type": "boolean"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_click"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "notches": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "notches"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_mouse_wheel"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "down": {
+              "type": "boolean"
+            },
+            "key": {
+              "type": "string"
+            },
+            "modifiers": {
+              "items": {
+                "enum": [
+                  "shift",
+                  "control",
+                  "alt",
+                  "gui"
+                ],
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_key"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "text": {
+              "maxLength": 16384,
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_text"
+      },
+      {
+        "input_schema": {
+          "type": "object"
+        },
+        "name": "launcher_status"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "mode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        "name": "launcher_open_mode"
+      },
+      {
+        "input_schema": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "values": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "name": "launcher_set_option"
+      },
+      {
+        "input_schema": {
+          "type": "object"
+        },
+        "name": "launcher_launch"
+      },
+      {
+        "input_schema": {
+          "type": "object"
+        },
+        "name": "launcher_stop"
+      },
+      {
+        "input_schema": {
+          "type": "object"
+        },
+        "name": "launcher_quit"
+      }
+    ],
+    "requested_channels": [
+      {
+        "name": "rgb_linear_hdr",
+        "reason": "capture channels are not implemented by this host",
+        "supported": false
+      }
+    ],
+    "schema_version": "1",
+    "unsupported_operations": [
+      {
+        "name": "reset_world",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "pause",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "resume",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "step",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "snapshot",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "render_only",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "poll_render_only",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "capture",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "capture_render_screenshot",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "checkpoint",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "restore",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "seek_backward",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "apply_intervention",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      },
+      {
+        "name": "step_and_capture",
+        "reason": "this host does not implement the data-factory operation",
+        "supported": false
+      }
+    ]
+  }
+}

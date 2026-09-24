@@ -140,12 +140,4 @@ namespace engine::control {
 		);
 	}
 
-	namespace features {
-		// Returns the physics-observation feature for this session.
-		inline Feature PhysicsObservation(world::DataFactorySession &session) {
-			return Feature{"physics_observation", [&session](Surface &surface) {
-							   AddPhysicsObservationTools(surface, session);
-						   }};
-		}
-	}
 }

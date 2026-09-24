@@ -7,9 +7,8 @@
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/audio/Wav.hpp>
-#include <engine/control/Features.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/PhysicsObservation.hpp>
 #include <engine/control/features/Script.hpp>
@@ -1667,19 +1666,17 @@ namespace client {
 		DataCaptureHook.reset();
 		ControlSurface.SetDataCaptureAvailabilityProvider({});
 		if (DataCapture) {
-			// The bridge borrows the renderer. Once its hook starts draining, cancel
-			// every outstanding owner ticket and finish its owner pump before teardown.
-			DataCapture->CancelPending();
-			DataCapture->Pump();
+			// The hook drain normally owns cancellation. Keep this fallback for work
+			// admitted without an active capture hook.
+			if (DataCapture->HasPending()) {
+				DataCapture->CancelPending();
+				DataCapture->Pump();
+			}
 			ENGINE_ASSERT(!DataCapture->HasPending());
-			ControlSurface.PumpHooks();
-			const auto hooks = ControlSurface.Hooks().Active();
-			ENGINE_ASSERT(std::none_of(hooks.begin(), hooks.end(), [](const auto &hook) {
-				return hook.Descriptor.Id == "client.data-capture";
-			}));
 		}
 		DataFactoryLifecycleHook.reset();
 		RenderGraphHook.reset();
+		PermanentControlHooks.clear();
 		ControlSurface.SetRenderGraphProvider({});
 		if (DataCapture && DataCaptureDriverWorld.IsValid() && DataCaptureDriverTicket) {
 			const std::string instance(Universe_->NameOf(DataCaptureDriverWorld).Text());
@@ -1705,6 +1702,16 @@ namespace client {
 			if (callback.Valid()) runtime->Release(callback);
 		}
 		DataCaptureDriverCallback = {};
+		if (DataCapture) {
+			const bool discarded = DataCapture->DiscardTerminal();
+			ENGINE_ASSERT(discarded);
+			ControlSurface.PumpHooks();
+			const auto hooks = ControlSurface.Hooks().Active();
+			ENGINE_ASSERT(std::none_of(hooks.begin(), hooks.end(), [](const auto &hook) {
+				return hook.Descriptor.Id == "client.data-capture";
+			}));
+			ENGINE_ASSERT(!DataCapture->HasOutstanding());
+		}
 		// The bridge owns renderer capture tickets. Tear it down while the renderer
 		// still exists so a ticket that remained pending after the bounded drain is
 		// cancelled by its one owner before device teardown.

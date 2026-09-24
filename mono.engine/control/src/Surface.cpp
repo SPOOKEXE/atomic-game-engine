@@ -62,61 +62,10 @@ namespace engine::control {
 		  FactoryOperations(std::make_shared<DataFactoryOperationLedger>()) {}
 
 	void Surface::Add(Tool tool) {
-		if (CurrentRegistration != nullptr) {
-			CurrentRegistration->Add(std::move(tool));
-			return;
+		if (CurrentRegistration == nullptr) {
+			throw std::logic_error("surface rows must be added by a named hook activation");
 		}
-		std::string failure;
-		HookLease lease = HookRegistry_.ActivateBuiltin(
-			{.Id = "builtin.compat." + std::to_string(++NextBuiltinRegistration),
-			 .Revision = "v1",
-			 .Purpose = "Compatibility registration retained for the surface lifetime.",
-			 .Dependencies = {},
-			 .Limits = {}},
-			[this, tool = std::move(tool)](HookRegistration &registration) mutable {
-				struct ResetRegistration {
-					Surface &Owner;
-					HookRegistration *Previous;
-					~ResetRegistration() {
-						Owner.CurrentRegistration = Previous;
-					}
-				} reset{*this, CurrentRegistration};
-				CurrentRegistration = &registration;
-				Add(std::move(tool));
-			},
-			failure,
-			true
-		);
-		if (!lease.IsValid()) throw std::runtime_error(failure);
-		BuiltinHooks.push_back(std::move(lease));
-	}
-
-	void Surface::Enable(std::span<const Feature> features) {
-		for (const Feature &feature : features) {
-			if (!feature.Install) continue;
-			std::string failure;
-			HookLease lease = HookRegistry_.ActivateBuiltin(
-				{.Id = "builtin." + feature.Name,
-				 .Revision = "v1",
-				 .Purpose = "Built-in feature registration.",
-				 .Dependencies = {},
-				 .Limits = {}},
-				[this, &feature](HookRegistration &registration) {
-					struct ResetRegistration {
-						Surface &Owner;
-						HookRegistration *Previous;
-						~ResetRegistration() {
-							Owner.CurrentRegistration = Previous;
-						}
-					} reset{*this, CurrentRegistration};
-					CurrentRegistration = &registration;
-					feature.Install(*this);
-				},
-				failure
-			);
-			if (!failure.empty()) throw std::runtime_error(failure);
-			BuiltinHooks.push_back(std::move(lease));
-		}
+		CurrentRegistration->Add(std::move(tool));
 	}
 
 	HookLease
@@ -162,63 +111,17 @@ namespace engine::control {
 	}
 
 	void Surface::AddResource(Resource resource) {
-		if (CurrentRegistration != nullptr) {
-			CurrentRegistration->Add(std::move(resource));
-			return;
+		if (CurrentRegistration == nullptr) {
+			throw std::logic_error("surface rows must be added by a named hook activation");
 		}
-		std::string failure;
-		HookLease lease = HookRegistry_.ActivateBuiltin(
-			{.Id = "builtin.compat." + std::to_string(++NextBuiltinRegistration),
-			 .Revision = "v1",
-			 .Purpose = "Compatibility registration retained for the surface lifetime.",
-			 .Dependencies = {},
-			 .Limits = {}},
-			[this, resource = std::move(resource)](HookRegistration &registration) mutable {
-				struct ResetRegistration {
-					Surface &Owner;
-					HookRegistration *Previous;
-					~ResetRegistration() {
-						Owner.CurrentRegistration = Previous;
-					}
-				} reset{*this, CurrentRegistration};
-				CurrentRegistration = &registration;
-				AddResource(std::move(resource));
-			},
-			failure,
-			true
-		);
-		if (!lease.IsValid()) throw std::runtime_error(failure);
-		BuiltinHooks.push_back(std::move(lease));
+		CurrentRegistration->Add(std::move(resource));
 	}
 
 	void Surface::AddPrompt(Prompt prompt) {
-		if (CurrentRegistration != nullptr) {
-			CurrentRegistration->Add(std::move(prompt));
-			return;
+		if (CurrentRegistration == nullptr) {
+			throw std::logic_error("surface rows must be added by a named hook activation");
 		}
-		std::string failure;
-		HookLease lease = HookRegistry_.ActivateBuiltin(
-			{.Id = "builtin.compat." + std::to_string(++NextBuiltinRegistration),
-			 .Revision = "v1",
-			 .Purpose = "Compatibility registration retained for the surface lifetime.",
-			 .Dependencies = {},
-			 .Limits = {}},
-			[this, prompt = std::move(prompt)](HookRegistration &registration) mutable {
-				struct ResetRegistration {
-					Surface &Owner;
-					HookRegistration *Previous;
-					~ResetRegistration() {
-						Owner.CurrentRegistration = Previous;
-					}
-				} reset{*this, CurrentRegistration};
-				CurrentRegistration = &registration;
-				AddPrompt(std::move(prompt));
-			},
-			failure,
-			true
-		);
-		if (!lease.IsValid()) throw std::runtime_error(failure);
-		BuiltinHooks.push_back(std::move(lease));
+		CurrentRegistration->Add(std::move(prompt));
 	}
 
 	size_t Surface::Count() const {

@@ -2029,25 +2029,4 @@ namespace engine::control {
 		});
 	}
 
-	namespace features {
-		// Registers read-only scene inspection, export, and bounded physics-query tools for one universe.
-		Feature DataScene(
-			world::Universe &universe,
-			std::shared_ptr<script::DataCaptureBridge> bridge,
-			world::DataFactorySession *session,
-			script::GltfMeshSource meshSource,
-			script::GltfTextureSource textureSource
-		) {
-			return Feature{
-				"data_scene",
-				[&universe,
-				 bridge = std::move(bridge),
-				 session,
-				 meshSource = std::move(meshSource),
-				 textureSource = std::move(textureSource)](Surface &surface) {
-					surface.AddDataSceneTools(universe, bridge, session, meshSource, textureSource);
-				}
-			};
-		}
-	}
 }

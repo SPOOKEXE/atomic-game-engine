@@ -14,13 +14,22 @@ namespace engine::script {
 	class DataAudioObservationBridge;
 }
 
+namespace engine::control {
+	class Surface;
+}
+
 namespace engine::render {
 	class Renderer;
+	class ScriptDataCaptureBridge;
 }
 
 namespace engine::world {
 	class DataFactorySession;
 	class Universe;
+}
+
+namespace engine::graph {
+	class PipelineDocument;
 }
 
 namespace client {
@@ -45,6 +54,13 @@ namespace client {
 		engine::world::DataFactorySession &Session;
 	};
 
+	// Captures client-owned state needed to install ticketed data capture tools.
+	struct DataCaptureHookContext {
+		engine::control::Surface &Surface;
+		engine::world::DataFactorySession &Session;
+		std::shared_ptr<engine::render::ScriptDataCaptureBridge> Bridge;
+	};
+
 	// Produces the control-owned copy of the renderer's latest visibility snapshot.
 	engine::control::features::VisibilitySnapshotReply
 	VisibilityObservationSnapshot(const engine::render::Renderer &renderer);
@@ -63,4 +79,14 @@ namespace client {
 	// Activates the bridge-owned audio metadata and readers as one provider transaction.
 	engine::control::HookLease
 	ActivateDataAudioObservationHook(DataAudioObservationHookContext context, std::string &failure);
+
+	// Activates the client capture provider and drains its tickets on hook close.
+	engine::control::HookLease ActivateDataCaptureHook(DataCaptureHookContext context, std::string &failure);
+
+	// Preserves renderer admission details in the existing render-graph tool error.
+	bool RenderGraphAdmissionFailure(
+		const engine::render::Renderer &renderer,
+		const engine::graph::PipelineDocument &document,
+		std::string &failure
+	);
 }

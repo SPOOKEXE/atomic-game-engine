@@ -1,3 +1,5 @@
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/VisibilityObservation.hpp>
 #include <engine/testing/Suite.hpp>
@@ -42,7 +44,9 @@ TEST_CASE(
 	"visibility observation MCP feature exposes schema and snapshot identity", "[control][visibility]"
 ) {
 	engine::control::Surface surface("visibility", "visibility test");
-	surface.Enable(std::array{engine::control::features::VisibilityObservations([] { return Snapshot(2); })});
+	engine::control::test::Install(surface, std::array{engine::control::test::VisibilityObservations([] {
+									   return Snapshot(2);
+								   })});
 	const auto &tool = Tool(surface);
 	const auto schema = tool.Schema();
 	CHECK(schema["type"] == "object");
@@ -64,9 +68,9 @@ TEST_CASE(
 
 TEST_CASE("visibility observation MCP feature filters and bounds rows", "[control][visibility]") {
 	engine::control::Surface surface("visibility", "visibility test");
-	surface.Enable(std::array{engine::control::features::VisibilityObservations([] {
-		return Snapshot(600, 4);
-	})});
+	engine::control::test::Install(surface, std::array{engine::control::test::VisibilityObservations([] {
+									   return Snapshot(600, 4);
+								   })});
 	const auto &tool = Tool(surface);
 	std::string failure;
 	const auto filtered = tool.Call({{"world", "other.world"}, {"entity", 2}}, failure);
@@ -86,9 +90,9 @@ TEST_CASE(
 	"[control][visibility]"
 ) {
 	engine::control::Surface surface("visibility", "visibility test");
-	surface.Enable(std::array{engine::control::features::VisibilityObservations([] {
-		return engine::control::features::VisibilitySnapshotReply{};
-	})});
+	engine::control::test::Install(surface, std::array{engine::control::test::VisibilityObservations([] {
+									   return engine::control::features::VisibilitySnapshotReply{};
+								   })});
 	const auto &tool = Tool(surface);
 	std::string failure;
 	const auto invalid = tool.Call(nlohmann::json::object(), failure);

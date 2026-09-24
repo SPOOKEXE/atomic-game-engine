@@ -1051,7 +1051,7 @@ namespace server {
 		// @param nowSeconds The current time.
 		void TouchWorld(engine::world::WorldId world, double nowSeconds);
 
-		// Adds this server's own tools after the engine feature list.
+		// Adds this server's own tools after the permanent engine hooks.
 		//
 		// **In `src/Control.cpp`, beside the state it reads**, which is the same
 		// place the editor keeps its own. The product hook owns the rows and only
@@ -1060,7 +1060,7 @@ namespace server {
 		// @since v0.19
 		void RegisterControlTools(engine::control::HookRegistration &registration);
 
-		// Installs the core and data-factory control features this product can support for this run.
+		// Activates this run's ordered core and data-factory control hooks.
 		void ConfigureControlHooks();
 
 		// The control surface. Started only when asked; a server that was never
@@ -1074,6 +1074,7 @@ namespace server {
 			"MCP-owned world through the data-factory lifecycle tools."
 		};
 		engine::control::HookLease ProductControlHook;
+		std::vector<engine::control::HookLease> BuiltinControlHooks;
 
 		Options Settings;
 

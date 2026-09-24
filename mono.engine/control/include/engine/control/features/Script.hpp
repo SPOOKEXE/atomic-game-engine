@@ -301,10 +301,4 @@ namespace engine::control {
 		});
 	}
 
-	namespace features {
-		// The live class catalogue and bounded Luau type checking.
-		inline Feature Script() {
-			return Feature{"script", [](Surface &surface) { surface.AddScriptTools(); }};
-		}
-	}
 }

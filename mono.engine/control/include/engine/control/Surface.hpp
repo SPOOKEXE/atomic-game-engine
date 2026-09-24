@@ -47,18 +47,6 @@ namespace engine::control {
 	class Surface;
 	class DataFactoryOperationLedger;
 
-	// One named group of tools, resources, or prompts a program elects to
-	// expose. The installer runs immediately and is not retained.
-	//
-	// @since v0.20
-	struct Feature {
-		// Stable feature identity and its immediate installer.
-		//@{
-		std::string Name;
-		std::function<void(Surface &)> Install;
-		//@}
-	};
-
 	// One thing a program can be asked to do.
 	//
 	// @since v0.8
@@ -226,19 +214,12 @@ namespace engine::control {
 		Surface(Surface &&) = delete;
 		Surface &operator=(Surface &&) = delete;
 
-		// Adds one row during built-in feature or active-hook installation. A legacy
-		// direct call is recorded as a surface-lifetime built-in activation.
+		// Adds one row during a named hook installation.
+		// Calls outside registration throw instead of creating an implicit owner.
 		void Add(Tool tool);
 
-		// Enables a program's explicit feature list, in order.
-		//
-		// A later feature may replace a row from an earlier one through `Add`,
-		// which is how product-specific tools refine shared engine tools without
-		// a second registry or a switch in the protocol.
-		//
-		// @param features Borrowed for this call. Installers are not retained.
-		// @since v0.20
-		void Enable(std::span<const Feature> features);
+		// The Add* installation helpers below require an active registration,
+		// supplied by ActivateHook.
 
 		// Activates an optional provider through owned transactional registration.
 		// During installation, Add, AddResource, and AddPrompt stage rows in the
@@ -395,12 +376,12 @@ namespace engine::control {
 		// Installs rig export tools, optionally fencing reads to a data-factory session revision.
 		void AddRigExportTools(world::Universe &universe, world::DataFactorySession *session = nullptr);
 
-		// Adds one resource. Later rows win, as `Add` does.
+		// Adds one resource during an active registration. Calls outside one throw.
 		//
 		// @since v0.19
 		void AddResource(Resource resource);
 
-		// Adds one prompt. Later rows win, as `Add` does.
+		// Adds one prompt during an active registration. Calls outside one throw.
 		//
 		// @since v0.19
 		void AddPrompt(Prompt prompt);
@@ -505,13 +486,11 @@ namespace engine::control {
 		HookRegistry HookRegistry_;
 		HookRegistration *CurrentRegistration = nullptr;
 		std::vector<Tool> Tools;
-		uint64_t NextBuiltinRegistration = 0;
 		std::function<DataCaptureAvailability()> CaptureAvailabilityProvider;
 		RenderGraphProvider RenderGraphProviderCallback;
 		std::shared_ptr<DataFactoryOperationLedger> FactoryOperations;
 		std::vector<Resource> Resources;
 		std::vector<Prompt> Prompts;
 		bool Profiling = false;
-		std::vector<HookLease> BuiltinHooks;
 	};
 }

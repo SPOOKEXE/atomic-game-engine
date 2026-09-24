@@ -9,11 +9,11 @@
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/audio/Wav.hpp>
-#include <engine/control/Features.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/PhysicsObservation.hpp>
+#include <engine/control/features/RenderGraph.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Assert.hpp>
@@ -44,6 +44,9 @@
 #include <engine/physics/Clock.hpp>
 #include <engine/render/DebugText.hpp>
 #include <engine/render/MeshTable.hpp>
+#include <engine/render/PipelineAdmission.hpp>
+#include <engine/render/Renderer.hpp>
+#include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/render/TextureTable.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -82,12 +85,27 @@
 #include <network/SessionKey.hpp>
 #include <nlohmann/json.hpp>
 #include <span>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace client {
+
+	bool RenderGraphAdmissionFailure(
+		const engine::render::Renderer &renderer,
+		const engine::graph::PipelineDocument &document,
+		std::string &failure
+	) {
+		const engine::render::PipelineAdmissionResult admission = renderer.ValidatePipelineDocument(document);
+		if (admission) {
+			failure.clear();
+			return false;
+		}
+		failure = "unavailable: " + engine::render::FormatPipelineFailure(*admission.Failure);
+		return true;
+	}
 
 	engine::control::features::VisibilitySnapshotReply
 	VisibilityObservationSnapshot(const engine::render::Renderer &renderer) {
@@ -191,17 +209,83 @@ namespace client {
 			failure
 		);
 	}
+
+	engine::control::HookLease ActivateDataCaptureHook(DataCaptureHookContext context, std::string &failure) {
+		return context.Surface.ActivateHook(
+			{.Id = "client.data-capture",
+			 .Revision = "v1",
+			 .Purpose = "Owns client capture tickets.",
+			 .Dependencies = {"client.data-factory-lifecycle"},
+			 .Limits = {}},
+			[context](engine::control::HookRegistration &registration) {
+				for (const char *name :
+					 {"poll_capture",
+					  "get_resource",
+					  "release_capture",
+					  "cancel_capture",
+					  "poll_view_camera_mutation",
+					  "cancel_view_camera_mutation"})
+					registration.KeepToolDuringDrain(name);
+				registration.SetDrain([bridge = context.Bridge] {
+					if (bridge == nullptr) return true;
+					bridge->CancelPending();
+					bridge->Pump();
+					return !bridge->HasOutstanding();
+				});
+				registration.SetRelease([context] {
+					context.Surface.SetDataCaptureAvailabilityProvider({});
+				});
+				context.Surface.AddDataCaptureTools(context.Session, context.Bridge);
+				context.Surface.SetDataCaptureAvailabilityProvider([context] {
+					const auto hooks = context.Surface.Hooks().Active();
+					const bool active = std::any_of(hooks.begin(), hooks.end(), [](const auto &hook) {
+						return hook.Descriptor.Id == "client.data-capture" &&
+							   hook.State == engine::control::HookState::Active;
+					});
+					if (!active || !context.Bridge) return engine::control::DataCaptureAvailability{};
+					const auto capabilities = context.Bridge->Capabilities();
+					return engine::control::DataCaptureAvailability{
+						.Available = capabilities.Available,
+						.Channels = capabilities.Channels,
+						.Detail = capabilities.Detail,
+					};
+				});
+			},
+			failure
+		);
+	}
+
 	void Client::ConfigureControlHooks() {
-		const std::array manifest{
-			engine::control::features::Universe(*Universe_),
-			engine::control::features::Architecture(),
-			engine::control::features::Script(),
-			engine::control::features::Diagnostics(),
-			engine::control::features::Resources(),
-			engine::control::features::Prompts(),
-			engine::control::features::Discovery(),
+		struct PermanentHook {
+			const char *Id;
+			std::function<void()> Install;
 		};
-		ControlSurface.Enable(manifest);
+		const std::array manifest{
+			PermanentHook{
+				"builtin.universe", [this] { ControlSurface.AddUniverseTools(*Universe_, true, true); }
+			},
+			PermanentHook{"builtin.architecture", [this] { ControlSurface.AddArchitectureTools(); }},
+			PermanentHook{"builtin.script", [this] { ControlSurface.AddScriptTools(); }},
+			PermanentHook{"builtin.diagnostics", [this] { ControlSurface.AddDiagnosticTools(); }},
+			PermanentHook{"builtin.resources", [this] { ControlSurface.AddStandardResources(); }},
+			PermanentHook{"builtin.prompts", [this] { ControlSurface.AddStandardPrompts(); }},
+			PermanentHook{"builtin.discovery", [this] { ControlSurface.AddDiscoveryTools(); }},
+		};
+		PermanentControlHooks.reserve(manifest.size());
+		for (const PermanentHook &hook : manifest) {
+			std::string failure;
+			auto lease = ControlSurface.ActivateHook(
+				{.Id = hook.Id,
+				 .Revision = "v1",
+				 .Purpose = "Built-in feature registration.",
+				 .Dependencies = {},
+				 .Limits = {}},
+				[&hook](engine::control::HookRegistration &) { hook.Install(); },
+				failure
+			);
+			if (!lease.IsValid()) throw std::runtime_error(failure);
+			PermanentControlHooks.push_back(std::move(lease));
+		}
 		struct InputControlHookContext {
 			Client &Host;
 			engine::control::Surface &Surface;
@@ -263,7 +347,7 @@ namespace client {
 			 .Dependencies = {},
 			 .Limits = {}},
 			[renderGraphContext](engine::control::HookRegistration &) {
-				engine::control::features::RenderGraph().Install(renderGraphContext.Surface);
+				engine::control::features::RenderGraph(renderGraphContext.Surface);
 			},
 			renderGraphFailure
 		));
@@ -404,39 +488,10 @@ namespace client {
 				DataScriptPackageHook.reset();
 			}
 			std::string captureFailure;
-			DataCaptureHook.emplace(dataFactoryContext.Surface.ActivateHook(
-				{.Id = "client.data-capture",
-				 .Revision = "v1",
-				 .Purpose = "Owns client capture tickets.",
-				 .Dependencies = {"client.data-factory-lifecycle"},
-				 .Limits = {}},
-				[dataFactoryContext](engine::control::HookRegistration &registration) {
-					registration.SetDrain([bridge = dataFactoryContext.Capture] {
-						return bridge == nullptr || !bridge->HasPending();
-					});
-					registration.SetRelease([dataFactoryContext] {
-						dataFactoryContext.Surface.SetDataCaptureAvailabilityProvider({});
-					});
-					engine::control::features::DataCapture(
-						dataFactoryContext.Session, dataFactoryContext.Capture
-					)
-						.Install(dataFactoryContext.Surface);
-					dataFactoryContext.Surface.SetDataCaptureAvailabilityProvider([dataFactoryContext] {
-						const auto hooks = dataFactoryContext.Surface.Hooks().Active();
-						const bool active = std::any_of(hooks.begin(), hooks.end(), [](const auto &hook) {
-							return hook.Descriptor.Id == "client.data-capture" &&
-								   hook.State == engine::control::HookState::Active;
-						});
-						if (!active || !dataFactoryContext.Capture)
-							return engine::control::DataCaptureAvailability{};
-						const auto capabilities = dataFactoryContext.Capture->Capabilities();
-						return engine::control::DataCaptureAvailability{
-							.Available = capabilities.Available,
-							.Channels = capabilities.Channels,
-							.Detail = capabilities.Detail,
-						};
-					});
-				},
+			DataCaptureHook.emplace(ActivateDataCaptureHook(
+				{.Surface = dataFactoryContext.Surface,
+				 .Session = dataFactoryContext.Session,
+				 .Bridge = dataFactoryContext.Capture},
 				captureFailure
 			));
 			if (!DataCaptureHook->IsValid()) DataCaptureHook.reset();
@@ -448,7 +503,7 @@ namespace client {
 				 .Dependencies = {"client.data-factory-lifecycle"},
 				 .Limits = {}},
 				[dataFactoryContext](engine::control::HookRegistration &) {
-					engine::control::features::DataScene(
+					dataFactoryContext.Surface.AddDataSceneTools(
 						dataFactoryContext.Universe,
 						dataFactoryContext.Capture,
 						&dataFactoryContext.Session,
@@ -499,7 +554,7 @@ namespace client {
 							}
 							return engine::script::GltfTextureSourceStatus::Unsupported;
 						}
-					).Install(dataFactoryContext.Surface);
+					);
 				},
 				dataSceneFailure
 			));

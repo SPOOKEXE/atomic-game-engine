@@ -4,8 +4,7 @@
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/control/DataScriptPackage.hpp>
-#include <engine/control/Features.hpp>
-#include <engine/control/features/DataFactory.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/PhysicsObservation.hpp>
 #include <engine/control/features/Script.hpp>
@@ -398,6 +397,9 @@ namespace server {
 		FactorySceneControlHook.Close();
 		FactoryLifecycleControlHook.Close();
 		ProductControlHook.Close();
+		for (auto hook = BuiltinControlHooks.rbegin(); hook != BuiltinControlHooks.rend(); ++hook)
+			hook->Close();
+		BuiltinControlHooks.clear();
 		// Runtime cleanup detaches hooks from its borrowed store.
 		Runtimes.clear();
 		DataFactory.reset();
@@ -4010,6 +4012,9 @@ namespace server {
 		FactorySceneControlHook.Close();
 		FactoryLifecycleControlHook.Close();
 		ProductControlHook.Close();
+		for (auto hook = BuiltinControlHooks.rbegin(); hook != BuiltinControlHooks.rend(); ++hook)
+			hook->Close();
+		BuiltinControlHooks.clear();
 		// Runtime cleanup detaches hooks from its borrowed store.
 		Runtimes.clear();
 		DataFactory.reset();

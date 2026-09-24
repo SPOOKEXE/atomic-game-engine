@@ -1,4 +1,5 @@
-#include <engine/control/Features.hpp>
+#include "../../mono.engine/control/tests/HookFixture.hpp"
+
 #include <engine/control/HookRegistry.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataScene.hpp>
@@ -16,10 +17,10 @@ TEST_SUITE_ID("studio.controlhooks")
 TEST_CASE("Studio product hook owns its engine info row", "[studio][control]") {
 	engine::world::Universe worlds;
 	engine::control::Surface surface("studio", "studio hook test");
-	surface.Enable(
+	engine::control::test::Install(
+		surface,
 		std::array{
-			engine::control::features::Universe(worlds, true, false),
-			engine::control::features::Diagnostics(false)
+			engine::control::test::Universe(worlds, true, false), engine::control::test::Diagnostics(false)
 		}
 	);
 

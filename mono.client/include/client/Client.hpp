@@ -644,6 +644,8 @@ namespace client {
 			"A shipped atomic game client. Its universe contains local scenes and may also contain a "
 			"replica received from a dedicated server. Replica writes are refused by their store."
 		};
+		// Permanent product rows have named leases so shutdown removes them before borrowed services.
+		std::vector<engine::control::HookLease> PermanentControlHooks;
 		// A tap releases on the next input frame so scripts and GUI see its down edge.
 		std::vector<engine::control::InputAutomationEvent> PendingControlInput;
 		std::vector<engine::control::InputAutomationEvent> DeferredControlRelease;

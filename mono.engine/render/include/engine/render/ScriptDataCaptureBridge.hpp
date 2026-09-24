@@ -93,6 +93,10 @@ namespace engine::render {
 		void CancelPending();
 		// Reports whether tickets still need renderer or session work.
 		bool HasPending() const;
+		// Reports whether any capture or mutation ticket still belongs to a caller.
+		bool HasOutstanding() const;
+		// Drops terminal tickets and their retained bytes during host shutdown.
+		bool DiscardTerminal();
 
 	  private:
 		struct Entry {

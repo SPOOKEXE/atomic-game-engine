@@ -1,10 +1,13 @@
 // Control input automation reaches the host only after the public MCP boundary validates it.
 
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <utility>
@@ -39,10 +42,14 @@ TEST_CASE(
 ) {
 	std::vector<InputAutomationEvent> received;
 	Surface surface("test", "test");
-	surface.AddInputTools([&](const InputAutomationEvent &event, std::string &) {
-		received.push_back(event);
-		return json{{"queued", true}};
-	});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::Custom("input-automation", [&received](Surface &owner) {
+			owner.AddInputTools([&received](const InputAutomationEvent &event, std::string &) {
+				received.push_back(event);
+				return json{{"queued", true}};
+			});
+		})}
+	);
 
 	bool failed = false;
 	CHECK(Call(surface, "emulate_mouse_move", {{"x", 7.5}, {"y", 3.0}}, failed)["queued"]);

@@ -2737,6 +2737,18 @@
         "name": "AGENTS.md (engine/gui)",
         "uri": "atomic://agents/engine/gui"
       },
+      "atomic://agents/engine/imagegraph": {
+        "description": "The invariants specific to engine/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraph)",
+        "uri": "atomic://agents/engine/imagegraph"
+      },
+      "atomic://agents/engine/imagegraphio": {
+        "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphio)",
+        "uri": "atomic://agents/engine/imagegraphio"
+      },
       "atomic://agents/engine/input": {
         "description": "The invariants specific to engine/input. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -2880,6 +2892,18 @@
         "mimeType": "text/markdown",
         "name": "AGENTS.md (tools/docgen)",
         "uri": "atomic://agents/tools/docgen"
+      },
+      "atomic://agents/tools/imagegraph": {
+        "description": "The invariants specific to tools/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (tools/imagegraph)",
+        "uri": "atomic://agents/tools/imagegraph"
+      },
+      "atomic://agents/tools/pxcimport": {
+        "description": "The invariants specific to tools/pxcimport. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (tools/pxcimport)",
+        "uri": "atomic://agents/tools/pxcimport"
       },
       "atomic://agents/unified_tests": {
         "description": "The invariants specific to unified_tests. AGENTS.md rule: read this before changing anything in it.",
@@ -6153,6 +6177,18 @@
         "name": "AGENTS.md (engine/gui)",
         "uri": "atomic://agents/engine/gui"
       },
+      "atomic://agents/engine/imagegraph": {
+        "description": "The invariants specific to engine/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraph)",
+        "uri": "atomic://agents/engine/imagegraph"
+      },
+      "atomic://agents/engine/imagegraphio": {
+        "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphio)",
+        "uri": "atomic://agents/engine/imagegraphio"
+      },
       "atomic://agents/engine/input": {
         "description": "The invariants specific to engine/input. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -6296,6 +6332,18 @@
         "mimeType": "text/markdown",
         "name": "AGENTS.md (tools/docgen)",
         "uri": "atomic://agents/tools/docgen"
+      },
+      "atomic://agents/tools/imagegraph": {
+        "description": "The invariants specific to tools/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (tools/imagegraph)",
+        "uri": "atomic://agents/tools/imagegraph"
+      },
+      "atomic://agents/tools/pxcimport": {
+        "description": "The invariants specific to tools/pxcimport. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (tools/pxcimport)",
+        "uri": "atomic://agents/tools/pxcimport"
       },
       "atomic://agents/unified_tests": {
         "description": "The invariants specific to unified_tests. AGENTS.md rule: read this before changing anything in it.",

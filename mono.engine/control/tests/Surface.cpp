@@ -10,11 +10,11 @@
 // `AGENTS.md` says so in those words. These cases open with the storage tools
 // this version added, and cover the shared table around them.
 
+#include "HookFixture.hpp"
+
 #include <engine/control/DataFactoryOperationLedger.hpp>
-#include <engine/control/Features.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
@@ -29,6 +29,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <functional>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -40,7 +41,6 @@
 TEST_SUITE_ID("engine.control.surface")
 TEST_DEPENDS("engine.ecs.schema")
 
-using engine::control::Feature;
 using engine::control::Surface;
 using engine::control::Tool;
 using engine::core::Name;
@@ -60,6 +60,12 @@ using engine::world::WorldSettings;
 using nlohmann::json;
 
 namespace {
+	void RegisterCustomFeature(Surface &surface, std::string name, std::function<void(Surface &)> install) {
+		engine::control::test::Install(
+			surface, std::array{engine::control::test::Custom(std::move(name), std::move(install))}
+		);
+	}
+
 	// The component table is process-wide and nothing unregisters, so a case
 	// naming a component another suite in this binary also names would be
 	// agreeing with it rather than declaring its own.
@@ -115,6 +121,12 @@ namespace {
 		WorldSettings settings;
 		settings.Name = Name(name);
 		return universe.Create(settings);
+	}
+
+	void EnableUniverse(Surface &surface, Universe &universe, bool writable = true) {
+		engine::control::test::Install(
+			surface, std::array{engine::control::test::Universe(universe, writable)}
+		);
 	}
 
 	const json *Named(const json &values, const char *name) {
@@ -497,7 +509,7 @@ TEST_CASE("the handshake reports the program and its tools", "[control]") {
 	MakeWorld(universe, "control-handshake");
 
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 
 	const json opened = Ask(surface, "initialize");
 	REQUIRE(opened.contains("result"));
@@ -527,7 +539,7 @@ TEST_CASE("an unknown tool is a refusal rather than a protocol error", "[control
 	MakeWorld(universe, "control-unknown");
 
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 
 	bool failed = false;
 	Called(surface, "no_such_tool", json::object(), failed);
@@ -539,17 +551,19 @@ TEST_CASE("an unknown tool is a refusal rather than a protocol error", "[control
 
 TEST_CASE("a refused tool retains its structured recovery payload", "[control]") {
 	Surface surface("test", "a suite");
-	surface.Add(
-		Tool{
-			"guarded_write",
-			"Refuses a stale write with the current versions.",
-			nullptr,
-			[](const json &, std::string &failure) {
-				failure = "version_conflict";
-				return json{{"status", "version_conflict"}, {"current_versions", json{{"scene", 7}}}};
-			},
-		}
-	);
+	RegisterCustomFeature(surface, "guarded-write", [](Surface &owner) {
+		owner.Add(
+			Tool{
+				"guarded_write",
+				"Refuses a stale write with the current versions.",
+				nullptr,
+				[](const json &, std::string &failure) {
+					failure = "version_conflict";
+					return json{{"status", "version_conflict"}, {"current_versions", json{{"scene", 7}}}};
+				},
+			}
+		);
+	});
 
 	bool failed = false;
 	const json reply = Called(surface, "guarded_write", json::object(), failed);
@@ -568,7 +582,7 @@ TEST_CASE("discovery reads each surface's installed capture readiness", "[contro
 			.Detail = "renderer readback is ready",
 		};
 	});
-	supported.Enable(std::array{engine::control::features::Discovery()});
+	engine::control::test::Install(supported, std::array{engine::control::test::Discovery()});
 
 	const json available =
 		Called(supported, "negotiate", json{{"requested_channels", {"rgb_linear_hdr", "shading_normal"}}});
@@ -587,7 +601,7 @@ TEST_CASE("discovery reads each surface's installed capture readiness", "[contro
 			.Detail = "renderer is not ready",
 		};
 	});
-	unavailable.Enable(std::array{engine::control::features::Discovery()});
+	engine::control::test::Install(unavailable, std::array{engine::control::test::Discovery()});
 	const json absent = Called(unavailable, "negotiate", json{{"requested_channels", {"rgb_linear_hdr"}}});
 	CHECK_FALSE(absent["requested_channels"][0]["supported"]);
 	CHECK(absent["requested_channels"][0]["reason"] == "renderer is not ready");
@@ -600,7 +614,7 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	engine::world::DataFactorySession session(universe);
 	auto bridge = std::make_shared<FakeCapture>();
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataCapture(session, bridge)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataCapture(session, bridge)});
 	const auto current = session.Inspect("capture-world");
 	const json mutation = Called(
 		surface,
@@ -861,7 +875,7 @@ TEST_CASE(
 	engine::world::DataFactorySession session(universe);
 	auto bridge = std::make_shared<FakeCapture>();
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataCapture(session, bridge)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataCapture(session, bridge)});
 	const auto current = session.Inspect("capture-bundle-world");
 	auto request = [&](std::string operation, json options = CaptureBundleOptions()) {
 		return json{
@@ -1047,7 +1061,7 @@ TEST_CASE("data scene discovery reports capture hooks as stable records", "[cont
 	MakeWorld(universe, "capture-capabilities");
 	auto bridge = std::make_shared<FakeCapture>();
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataScene(universe, bridge)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe, bridge)});
 	const json reply = Called(
 		surface,
 		"get_capture_channels",
@@ -1077,22 +1091,24 @@ TEST_CASE("data scene discovery reports capture hooks as stable records", "[cont
 TEST_CASE("a later owned row cannot replace an earlier row", "[control]") {
 	Surface surface("test", "a suite");
 
-	surface.Add(Tool{"thing", "first", nullptr, [](const json &, std::string &) { return json(1); }});
+	RegisterCustomFeature(surface, "first", [](Surface &owner) {
+		owner.Add(Tool{"thing", "first", nullptr, [](const json &, std::string &) { return json(1); }});
+	});
 	REQUIRE(surface.Count() == 1);
 
-	CHECK_THROWS(surface.Add(Tool{"thing", "second", nullptr, [](const json &, std::string &) {
-									  return json(2);
-								  }}));
+	CHECK_THROWS(RegisterCustomFeature(surface, "second", [](Surface &owner) {
+		owner.Add(Tool{"thing", "second", nullptr, [](const json &, std::string &) { return json(2); }});
+	}));
 	CHECK(surface.Count() == 1);
 	CHECK(surface.Registered().front().Description == "first");
 	CHECK(Called(surface, "thing", json::object()) == 1);
 }
 
-TEST_CASE("a feature list refuses cross-owner rows and retains the first feature", "[control]") {
+TEST_CASE("named hooks refuse cross-owner rows and retain the first hook", "[control]") {
 	Surface surface("test", "a suite");
 
 	const std::array features{
-		Feature{
+		engine::control::test::Spec{
 			"base",
 			[](Surface &registry) {
 				registry.Add(Tool{"thing", "shared feature", nullptr, [](const json &, std::string &) {
@@ -1100,14 +1116,14 @@ TEST_CASE("a feature list refuses cross-owner rows and retains the first feature
 								  }});
 			},
 		},
-		engine::control::features::Custom("product", [](Surface &registry) {
+		engine::control::test::Custom("product", [](Surface &registry) {
 			registry.Add(Tool{"thing", "product feature", nullptr, [](const json &, std::string &) {
 								  return 2;
 							  }});
 		}),
 	};
 
-	CHECK_THROWS(surface.Enable(features));
+	CHECK_THROWS(engine::control::test::Install(surface, features));
 
 	REQUIRE(surface.Count() == 1);
 	CHECK(surface.Registered().front().Description == "shared feature");
@@ -1116,9 +1132,9 @@ TEST_CASE("a feature list refuses cross-owner rows and retains the first feature
 
 TEST_CASE("omitted engine features publish none of their rows", "[control]") {
 	Surface surface("test", "a suite");
-	const std::array features{engine::control::features::Architecture()};
+	const std::array features{engine::control::test::Architecture()};
 
-	surface.Enable(features);
+	engine::control::test::Install(surface, features);
 
 	bool architecture = false;
 	for (const Tool &tool : surface.Registered()) {
@@ -1132,7 +1148,7 @@ TEST_CASE("omitted engine features publish none of their rows", "[control]") {
 
 TEST_CASE("class_list counts the classes returned after filtering", "[control]") {
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::Script()});
+	engine::control::test::Install(surface, std::array{engine::control::test::Script()});
 
 	const auto root = Classes::RegisterInstanceRoot();
 	const std::string className = Unique("class-list");
@@ -1146,36 +1162,40 @@ TEST_CASE("class_list counts the classes returned after filtering", "[control]")
 
 TEST_CASE("discovery reports the final callable registry and schema", "[control][discovery]") {
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::Discovery()});
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
 	size_t calls = 0;
 
-	// A product row can arrive after the feature list. Discovery reads the
+	// A product row can arrive after discovery is installed. Discovery reads the
 	// registry at call time, so it describes that row instead of a snapshot from
 	// installation before the product finished registering its vocabulary.
-	surface.Add(
-		Tool{
-			"host_probe",
-			"A host-specific probe.",
-			[] {
-				return json{{"type", "object"}, {"properties", json{{"label", json{{"type", "string"}}}}}};
-			},
-			[&calls](const json &, std::string &) {
-				calls++;
-				return json::object();
-			},
-		}
-	);
-	surface.Add(
-		Tool{
-			"capture",
-			"An unrelated host tool named capture.",
-			nullptr,
-			[&calls](const json &, std::string &) {
-				calls++;
-				return json::object();
-			},
-		}
-	);
+	RegisterCustomFeature(surface, "host-probes", [&calls](Surface &owner) {
+		owner.Add(
+			Tool{
+				"host_probe",
+				"A host-specific probe.",
+				[] {
+					return json{
+						{"type", "object"}, {"properties", json{{"label", json{{"type", "string"}}}}}
+					};
+				},
+				[&calls](const json &, std::string &) {
+					calls++;
+					return json::object();
+				},
+			}
+		);
+		owner.Add(
+			Tool{
+				"capture",
+				"An unrelated host tool named capture.",
+				nullptr,
+				[&calls](const json &, std::string &) {
+					calls++;
+					return json::object();
+				},
+			}
+		);
+	});
 
 	const json result = Called(surface, "negotiate", json::object());
 	CHECK(result["engine_version"] == std::string(engine::core::Version()));
@@ -1197,10 +1217,11 @@ TEST_CASE("headless data factories omit presenter-only operations", "[control][d
 	Universe universe;
 	engine::world::DataFactorySession session(universe);
 	Surface surface("headless", "a headless data factory");
-	surface.Enable(
+	engine::control::test::Install(
+		surface,
 		std::array{
-			engine::control::features::Discovery(),
-			engine::control::features::DataFactory(session, {.RenderOnly = false}),
+			engine::control::test::Discovery(),
+			engine::control::test::DataFactory(session, {.RenderOnly = false}),
 		}
 	);
 
@@ -1223,7 +1244,7 @@ TEST_CASE("headless data factories omit presenter-only operations", "[control][d
 
 TEST_CASE("discovery refuses unknown versions and oversized requests", "[control][discovery]") {
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::Discovery()});
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
 
 	bool failed = false;
 	const json version = Called(surface, "negotiate", json{{"contract_version", "unknown"}}, failed);
@@ -1258,7 +1279,7 @@ TEST_CASE(
 	"discovery names unavailable channels and limits instead of promising them", "[control][discovery]"
 ) {
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::Discovery()});
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
 
 	const json result =
 		Called(surface, "negotiate", json{{"requested_channels", json::array({"rgb", "made_up"})}});
@@ -1278,7 +1299,7 @@ TEST_CASE(
 
 TEST_CASE("discovery accepts its exact requested-channel bounds", "[control][discovery]") {
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::Discovery()});
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
 
 	const std::vector<std::string> channels(64, std::string(128, 'a'));
 	const json result = Called(surface, "negotiate", json{{"requested_channels", channels}});
@@ -1303,7 +1324,7 @@ TEST_CASE(
 			{"resources", json::array()}
 		};
 	});
-	surface.Enable(std::array{engine::control::features::RenderGraph()});
+	engine::control::test::Install(surface, std::array{engine::control::test::RenderGraph()});
 	const json result = Called(
 		surface,
 		"get_render_graph",
@@ -1364,7 +1385,7 @@ TEST_CASE(
 
 TEST_CASE("render graph feature is absent without a provider", "[control][render-graph]") {
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::RenderGraph()});
+	engine::control::test::Install(surface, std::array{engine::control::test::RenderGraph()});
 	const json listed = Ask(surface, "tools/list");
 	REQUIRE(listed.contains("result"));
 	for (const json &tool : listed["result"]["tools"]) {
@@ -1382,7 +1403,7 @@ TEST_CASE("render graph tool refuses provider graph bounds", "[control][render-g
 		}
 		return json{{"nodes", std::move(nodes)}, {"resources", json::array()}};
 	});
-	surface.Enable(std::array{engine::control::features::RenderGraph()});
+	engine::control::test::Install(surface, std::array{engine::control::test::RenderGraph()});
 	bool failed = false;
 	(void)Called(
 		surface,
@@ -1427,7 +1448,7 @@ TEST_CASE("component_list names what a game declared and how many carry it", "[c
 	Components::Describe(id).Destruct(value.data(), 1);
 
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 
 	const json listed = Called(surface, "component_list", json::object());
 	REQUIRE(listed.contains("components"));
@@ -1475,7 +1496,7 @@ TEST_CASE("entity_query answers with the entities carrying every named component
 	Components::Describe(one).Destruct(value.data(), 1);
 
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 
 	const json wide = Called(surface, "entity_query", json{{"components", json::array({first})}});
 	CHECK(wide["total"] == 2);
@@ -1517,7 +1538,7 @@ TEST_CASE("entity_query says when it truncated", "[control]") {
 	Components::Describe(id).Destruct(value.data(), 1);
 
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 
 	const json capped =
 		Called(surface, "entity_query", json{{"components", json::array({component})}, {"limit", 2}});
@@ -1549,7 +1570,7 @@ TEST_CASE("component_get and component_set read and write one entity's fields", 
 	universe.Enter(world, [&](Store &store) { entity = store.Create(); });
 
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 
 	// **Null rather than an empty object for a component nobody attached**, so
 	// "not carried" and "carried and every field is zero" stay different
@@ -1613,7 +1634,7 @@ TEST_CASE("entity lifecycle tools create, parent, remove, and destroy on the own
 	Universe universe;
 	const WorldId world = MakeWorld(universe, "control-lifecycle");
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 
 	const json parent = Called(surface, "entity_create", json{{"class", className}, {"name", "Parent"}});
 	const json child = Called(
@@ -1665,7 +1686,7 @@ TEST_CASE("entity lifecycle tools refuse invalid and protected mutations", "[con
 		store.Protect(fixture);
 	});
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 	Called(
 		surface,
 		"component_set",
@@ -1728,7 +1749,7 @@ TEST_CASE("a component the engine declares is refused with a reason", "[control]
 	universe.Enter(world, [&](Store &store) { entity = store.Create(); });
 
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe);
+	EnableUniverse(surface, universe);
 
 	// `ecs.Hierarchy` is the storage's own and has no field list at run time.
 	// "There is no such component" would send a reader looking for a typo,
@@ -1761,7 +1782,7 @@ TEST_CASE("a read-only surface offers neither write tool", "[control]") {
 	MakeWorld(universe, "control-readonly");
 
 	Surface surface("test", "a suite");
-	surface.AddUniverseTools(universe, false);
+	EnableUniverse(surface, universe, false);
 
 	// A tool that always fails is worse than one that was never listed, which
 	// is the rule `instance_set` already followed and the storage pair now
@@ -1794,8 +1815,8 @@ TEST_CASE(
 	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
 
 	Surface surface("test", "a suite");
-	surface.Enable(
-		std::array{engine::control::features::Discovery(), engine::control::features::DataFactory(session)}
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::Discovery(), engine::control::test::DataFactory(session)}
 	);
 	const json negotiated = Called(surface, "negotiate", json::object());
 	for (const json &unavailable : negotiated["unsupported_operations"]) {
@@ -1933,7 +1954,7 @@ TEST_CASE("data-factory backward seek is fenced and idempotent", "[control][data
 	});
 	session.SetRehydrate([](Universe &, WorldId, std::string &) { return true; });
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 
 	const auto initial = session.Inspect("control-data-factory-seek");
 	REQUIRE(
@@ -2007,7 +2028,7 @@ TEST_CASE(
 	});
 
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 	const auto pause = session.Inspect("control-data-factory-actions");
 	REQUIRE(
 		Called(
@@ -2068,7 +2089,7 @@ TEST_CASE(
 		return true;
 	});
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 
 	const json listed = Ask(surface, "tools/list");
 	for (const char *name : {"world_create", "world_reset", "world_retire"}) {
@@ -2170,7 +2191,7 @@ TEST_CASE("data-factory world tools canonicalize numeric operation arguments", "
 		return true;
 	});
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 
 	const json integerTickRate{
 		{"instance_id", "canonical-tick-rate"}, {"seed", 7u}, {"tick_rate", 60u}, {"operation_id", "create"}
@@ -2232,7 +2253,7 @@ TEST_CASE("data-factory ledger retains replay results on its owning surface", "[
 		return true;
 	});
 	Surface original("test", "a suite");
-	original.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(original, std::array{engine::control::test::DataFactory(session)});
 	const auto lifecycle = session.Inspect("surface-ledger-lifetime");
 	const json request{
 		{"instance_id", "surface-ledger-lifetime"},
@@ -2257,7 +2278,7 @@ TEST_CASE(
 		return true;
 	});
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 	const auto current = session.Inspect("control-render-only");
 	Called(
 		surface,
@@ -2363,7 +2384,7 @@ TEST_CASE("data-factory intervention is guarded, typed, and idempotent", "[contr
 		return true;
 	});
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 	const auto current = session.Inspect("control-intervention");
 	Called(
 		surface,
@@ -2421,10 +2442,10 @@ TEST_CASE(
 	});
 	auto bridge = std::make_shared<FakeCapture>();
 	Surface surface("test", "a suite");
-	surface.Enable(
+	engine::control::test::Install(
+		surface,
 		std::array{
-			engine::control::features::DataFactory(session),
-			engine::control::features::DataCapture(session, bridge)
+			engine::control::test::DataFactory(session), engine::control::test::DataCapture(session, bridge)
 		}
 	);
 	const auto before = session.Inspect("cross-tool-policy");
@@ -2482,7 +2503,7 @@ TEST_CASE(
 		return true;
 	});
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 	const json accepted{
 		{"instance_id", "ledger-existing"},
 		{"seed", 7u},

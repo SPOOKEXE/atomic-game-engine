@@ -3401,7 +3401,7 @@ namespace studio {
 		// Answers everything the socket parked since the last frame.
 		void PumpControl();
 
-		// Enables this product's ordered engine and studio feature list once.
+		// Installs this product's ordered permanent control hooks once.
 		void EnableControlFeatures();
 		// Activates the editor-owned control rows after the shared rows are available.
 		void ActivateControlHooks();
@@ -3565,6 +3565,8 @@ namespace studio {
 			"independently - `world_run` starts one without starting the rest, and stopping restores "
 			"the snapshot taken when it started."
 		};
+		// Permanent product rows close while their editor-owned services still exist.
+		std::vector<engine::control::HookLease> PermanentControlHooks;
 		// Owns the editor-only rows while the control surface is available.
 		engine::control::HookLease StudioControlHook;
 		// Owns input automation while the Studio window accepts queued events.

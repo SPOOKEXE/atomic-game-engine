@@ -102,12 +102,4 @@ namespace engine::control::features {
 		};
 	}
 
-	// Installs a read-only view of the most recent renderer-owned visibility snapshot.
-	inline Feature VisibilityObservations(std::function<VisibilitySnapshotReply()> snapshot) {
-		return {
-			.Name = "visibility-observations", .Install = [snapshot = std::move(snapshot)](Surface &surface) {
-				surface.Add(VisibilityObservationsTool(snapshot));
-			}
-		};
-	}
 }

@@ -1906,6 +1906,9 @@ namespace engine::render {
 			}
 			for (auto &[ticket, entry] : Mutations) {
 				(void)ticket;
+				if (entry.Status != ViewMutationStatus::Pending &&
+					entry.Status != ViewMutationStatus::AppliedAwaitingRestore)
+					continue;
 				if (!entry.Handle.IsValid()) {
 					entry.Status = ViewMutationStatus::Cancelled;
 					continue;
@@ -1931,5 +1934,27 @@ namespace engine::render {
 				   return entry.second.Status == ViewMutationStatus::Pending ||
 						  entry.second.Status == ViewMutationStatus::AppliedAwaitingRestore;
 			   });
+	}
+
+	bool ScriptDataCaptureBridge::HasOutstanding() const {
+		std::lock_guard lock(Mutex);
+		return !Entries.empty() || !Mutations.empty();
+	}
+
+	bool ScriptDataCaptureBridge::DiscardTerminal() {
+		std::lock_guard lock(Mutex);
+		if (std::any_of(
+				Entries.begin(), Entries.end(), [](const auto &entry) { return !entry.second.Terminal; }
+			) ||
+			std::any_of(Mutations.begin(), Mutations.end(), [](const auto &entry) {
+				return entry.second.Status == ViewMutationStatus::Pending ||
+					   entry.second.Status == ViewMutationStatus::AppliedAwaitingRestore ||
+					   entry.second.Handle.IsValid();
+			}))
+			return false;
+		Entries.clear();
+		Mutations.clear();
+		RetainedBytes = 0;
+		return true;
 	}
 }

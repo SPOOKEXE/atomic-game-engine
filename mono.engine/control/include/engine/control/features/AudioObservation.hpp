@@ -448,7 +448,7 @@ namespace engine::control {
 		return rows;
 	}
 
-	// Installs the coordinated audio rows through a built-in feature activation.
+	// Installs the coordinated audio rows during a named hook activation.
 	inline void AddDataAudioObservationTools(
 		Surface &surface,
 		world::Universe &universe,
@@ -462,18 +462,4 @@ namespace engine::control {
 		surface.Add(std::move(rows.Waveform));
 	}
 
-	namespace features {
-		// Registers the bridge-backed audio observation feature on a control surface.
-		inline Feature DataAudioObservation(
-			world::Universe &universe,
-			std::shared_ptr<script::DataAudioObservationBridge> bridge,
-			world::DataFactorySession *session = nullptr
-		) {
-			return Feature{
-				"audio_observation", [&universe, bridge = std::move(bridge), session](Surface &surface) {
-					AddDataAudioObservationTools(surface, universe, bridge, session);
-				}
-			};
-		}
-	}
 }

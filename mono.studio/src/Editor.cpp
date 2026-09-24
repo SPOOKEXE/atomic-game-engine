@@ -971,6 +971,7 @@ namespace studio {
 		StudioInputControlHook.Close();
 		StudioSceneRenderingHook.Close();
 		StudioControlHook.Close();
+		PermanentControlHooks.clear();
 
 		// **Before anything is torn down**, because the graph's history is what
 		// is being written and a snapshot taken after the universe has gone is

@@ -1,6 +1,7 @@
 // The owned hook registry's atomic publication and guarded removal rules.
 
-#include <engine/control/Features.hpp>
+#include "HookFixture.hpp"
+
 #include <engine/control/HookRegistry.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/testing/Suite.hpp>
@@ -87,68 +88,86 @@ TEST_CASE("owned hooks publish atomically and report both collision owners", "[c
 	CHECK(surface.Count() == 1);
 }
 
-TEST_CASE(
-	"direct registration creates built-in owned rows and cannot replace an active hook", "[control][hooks]"
-) {
+TEST_CASE("surface rows require an explicit owner and cannot replace an active hook", "[control][hooks]") {
 	Surface surface("test", "hook registry");
 	std::string failure;
-	HookLease lease = surface.Hooks().Activate(
+	CHECK_THROWS(surface.Add(Tool{"unowned_tool", "unowned tool", nullptr, [](const json &, std::string &) {
+									  return json{};
+								  }}));
+	CHECK_THROWS(surface.AddResource(
+		Resource{"atomic://test/unowned", "unowned resource", "test", "text/plain", [](std::string &) {
+					 return std::string{};
+				 }}
+	));
+	CHECK_THROWS(
+		surface.AddPrompt(Prompt{"unowned_prompt", "unowned prompt", {}, [](const json &, std::string &) {
+									 return std::string{};
+								 }})
+	);
+	CHECK(surface.Count() == 0);
+	CHECK(surface.Readable().empty());
+	CHECK(surface.Prompted().empty());
+	CHECK(surface.Hooks().Active().empty());
+
+	HookLease lease = surface.ActivateHook(
 		Descriptor("test.owned-rows"),
-		[](HookRegistration &rows) {
-			rows.Add(Tool{"owned_tool", "owned tool", nullptr, [](const json &, std::string &) {
-							  return json{};
-						  }});
-			rows.Add(
+		[&surface](HookRegistration &) {
+			surface.Add(Tool{"owned_tool", "owned tool", nullptr, [](const json &, std::string &) {
+								 return json{};
+							 }});
+			surface.AddResource(
 				Resource{"atomic://test/owned", "owned resource", "test", "text/plain", [](std::string &) {
 							 return std::string{};
 						 }}
 			);
-			rows.Add(Prompt{"owned_prompt", "owned prompt", {}, [](const json &, std::string &) {
+			surface.AddPrompt(Prompt{"owned_prompt", "owned prompt", {}, [](const json &, std::string &) {
+										 return std::string{};
+									 }});
+		},
+		failure
+	);
+	REQUIRE(failure.empty());
+	CHECK(surface.Hooks().OwnsTool("owned_tool"));
+	CHECK(surface.Hooks().OwnsResource("atomic://test/owned"));
+	CHECK(surface.Hooks().OwnsPrompt("owned_prompt"));
+	CHECK(surface.Count() == 1);
+
+	HookLease duplicate = surface.Hooks().Activate(
+		Descriptor("test.duplicate-rows"),
+		[](HookRegistration &rows) {
+			rows.Add(Tool{"owned_tool", "replacement", nullptr, [](const json &, std::string &) {
+							  return json{};
+						  }});
+			rows.Add(Resource{"atomic://test/owned", "replacement", "test", "text/plain", [](std::string &) {
+								  return std::string{};
+							  }});
+			rows.Add(Prompt{"owned_prompt", "replacement", {}, [](const json &, std::string &) {
 								return std::string{};
 							}});
 		},
 		failure
 	);
-	REQUIRE(failure.empty());
-	surface.Add(Tool{"unowned_tool", "unowned tool", nullptr, [](const json &, std::string &) {
-						 return json{};
-					 }});
-	CHECK(surface.Hooks().OwnsTool("unowned_tool"));
-	surface.AddResource(
-		Resource{"atomic://test/unowned", "unowned resource", "test", "text/plain", [](std::string &) {
-					 return std::string{};
-				 }}
-	);
-	CHECK(surface.Hooks().OwnsResource("atomic://test/unowned"));
-	CHECK_NOTHROW(
-		surface.AddPrompt(Prompt{"unowned_prompt", "unowned prompt", {}, [](const json &, std::string &) {
-									 return std::string{};
-								 }})
-	);
-	CHECK_THROWS(surface.Add(Tool{"owned_tool", "replacement", nullptr, [](const json &, std::string &) {
-									  return json{};
-								  }}));
-	CHECK_THROWS(surface.AddResource(
-		Resource{"atomic://test/owned", "replacement", "test", "text/plain", [](std::string &) {
-					 return std::string{};
-				 }}
-	));
-	CHECK_THROWS(surface.AddPrompt(Prompt{"owned_prompt", "replacement", {}, [](const json &, std::string &) {
-											  return std::string{};
-										  }}));
+	CHECK_FALSE(duplicate.IsValid());
+	CHECK(failure.find("test.owned-rows") != std::string::npos);
+	CHECK(failure.find("test.duplicate-rows") != std::string::npos);
 }
 
 TEST_CASE("hook resource and prompt collisions publish no rows", "[control][hooks]") {
 	Surface surface("test", "hook registry");
-	surface.AddResource(
-		Resource{"atomic://test/collision", "existing", "test", "text/plain", [](std::string &) {
-					 return std::string{};
-				 }}
-	);
-	surface.AddPrompt(Prompt{"collision", "existing", {}, [](const json &, std::string &) {
-								 return std::string{};
-							 }});
 	std::string failure;
+	HookLease existing = surface.Hooks().Activate(
+		Descriptor("test.existing-rows"),
+		[](HookRegistration &rows) {
+			rows.Add(Resource{"atomic://test/collision", "existing", "test", "text/plain", [](std::string &) {
+								  return std::string{};
+							  }});
+			rows.Add(Prompt{"collision", "existing", {}, [](const json &, std::string &) {
+								return std::string{};
+							}});
+		},
+		failure
+	);
+	REQUIRE(existing.IsValid());
 	HookLease resource = surface.Hooks().Activate(
 		Descriptor("test.resource-collision"),
 		[](HookRegistration &rows) {
@@ -185,8 +204,12 @@ TEST_CASE("hook resource and prompt collisions publish no rows", "[control][hook
 
 TEST_CASE("negotiate reports active hook metadata and control generation", "[control][hooks][discovery]") {
 	Surface surface("test", "hook registry");
-	surface.AddDiscoveryTools();
-	CHECK(Call(surface, "negotiate")["control_generation"] == 0);
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
+	const json builtin = Call(surface, "negotiate");
+	CHECK(builtin["control_generation"] == 1);
+	REQUIRE(builtin["hooks"].size() == 1);
+	CHECK(builtin["hooks"][0]["id"] == "builtin.discovery");
+	CHECK(builtin["hooks"][0]["tools"] == json::array({"negotiate"}));
 	std::string failure;
 	HookLease lease = surface.Hooks().Activate(
 		{.Id = "test.discovery",
@@ -203,23 +226,25 @@ TEST_CASE("negotiate reports active hook metadata and control generation", "[con
 	);
 	REQUIRE(failure.empty());
 	const json active = Call(surface, "negotiate");
-	CHECK(active["control_generation"] == 1);
-	REQUIRE(active["hooks"].size() == 1);
-	CHECK(active["hooks"][0]["id"] == "test.discovery");
-	CHECK(active["hooks"][0]["state"] == "active");
-	CHECK(active["hooks"][0]["revision"] == "v7");
-	CHECK(active["hooks"][0]["tools"] == json::array({"hook_probe"}));
-	CHECK(active["hooks"][0]["limits"] == json{{"records", 12}, {"bytes", 4096}});
+	CHECK(active["control_generation"] == 2);
+	REQUIRE(active["hooks"].size() == 2);
+	CHECK(active["hooks"][0]["id"] == "builtin.discovery");
+	CHECK(active["hooks"][1]["id"] == "test.discovery");
+	CHECK(active["hooks"][1]["state"] == "active");
+	CHECK(active["hooks"][1]["revision"] == "v7");
+	CHECK(active["hooks"][1]["tools"] == json::array({"hook_probe"}));
+	CHECK(active["hooks"][1]["limits"] == json{{"records", 12}, {"bytes", 4096}});
 
 	lease.Close();
 	const json removed = Call(surface, "negotiate");
-	CHECK(removed["control_generation"] == 2);
-	CHECK(removed["hooks"].empty());
+	CHECK(removed["control_generation"] == 4);
+	REQUIRE(removed["hooks"].size() == 1);
+	CHECK(removed["hooks"][0]["id"] == "builtin.discovery");
 }
 
 TEST_CASE("negotiate hides draining hook tools with tools/list", "[control][hooks][discovery]") {
 	Surface surface("test", "hook registry");
-	surface.AddDiscoveryTools();
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
 	bool terminal = false;
 	std::string failure;
 	HookLease lease = surface.ActivateHook(
@@ -247,8 +272,48 @@ TEST_CASE("negotiate hides draining hook tools with tools/list", "[control][hook
 
 	terminal = true;
 	surface.PumpHooks();
-	CHECK(surface.Hooks().Active().empty());
+	REQUIRE(surface.Hooks().Active().size() == 1);
+	CHECK(surface.Hooks().Active()[0].Descriptor.Id == "builtin.discovery");
 	CHECK(surface.Count() == 1);
+}
+
+TEST_CASE("draining hooks expose only named cleanup calls", "[control][hooks][discovery]") {
+	Surface surface("test", "hook registry");
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
+	bool released = false;
+	std::string failure;
+	HookLease lease = surface.ActivateHook(
+		Descriptor("test.cleanup"),
+		[&released](HookRegistration &rows) {
+			rows.SetDrain([&released] { return released; });
+			rows.Add(Tool{"submit", "submit", nullptr, [](const json &, std::string &) {
+							  return json{{"status", "queued"}};
+						  }});
+			rows.Add(Tool{"release", "release", nullptr, [&released](const json &, std::string &) {
+							  released = true;
+							  return json{{"status", "released"}};
+						  }});
+			rows.KeepToolDuringDrain("release");
+		},
+		failure
+	);
+	REQUIRE(lease.IsValid());
+	const uint64_t beforeClose = surface.Hooks().ControlGeneration();
+	lease.Close();
+	CHECK(surface.Hooks().ControlGeneration() == beforeClose + 1);
+	CHECK(Named(Ask(surface, "tools/list")["result"]["tools"], "submit") == nullptr);
+	CHECK(Named(Ask(surface, "tools/list")["result"]["tools"], "release") != nullptr);
+	CHECK(Call(surface, "submit")["error"] == "hook is draining: submit");
+	const json draining = Call(surface, "negotiate");
+	const auto hook = std::find_if(draining["hooks"].begin(), draining["hooks"].end(), [](const json &row) {
+		return row["id"] == "test.cleanup";
+	});
+	REQUIRE(hook != draining["hooks"].end());
+	CHECK((*hook)["state"] == "draining");
+	CHECK((*hook)["tools"] == json::array({"release"}));
+	CHECK(Call(surface, "release")["status"] == "released");
+	CHECK_FALSE(lease.IsValid());
+	CHECK(Named(Ask(surface, "tools/list")["result"]["tools"], "release") == nullptr);
 }
 
 TEST_CASE("hook release owns provider callbacks through failed and closed activation", "[control][hooks]") {
@@ -548,12 +613,20 @@ TEST_CASE("a throwing drain predicate leaves the registry usable", "[control][ho
 
 TEST_CASE("built-in registrations cannot replace another built-in row", "[control][hooks]") {
 	Surface surface("test", "hook registry");
-	surface.Enable(std::array{engine::control::features::Custom("first", [](Surface &owner) {
-		owner.Add(Tool{"duplicate", "test", nullptr, [](const json &, std::string &) { return json{}; }});
-	})});
-	CHECK_THROWS(surface.Enable(std::array{engine::control::features::Custom("second", [](Surface &owner) {
-		owner.Add(Tool{"duplicate", "test", nullptr, [](const json &, std::string &) { return json{}; }});
-	})}));
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::Custom("first", [](Surface &owner) {
+			owner.Add(Tool{"duplicate", "test", nullptr, [](const json &, std::string &) { return json{}; }});
+		})}
+	);
+	CHECK_THROWS(
+		engine::control::test::Install(
+			surface, std::array{engine::control::test::Custom("second", [](Surface &owner) {
+				owner.Add(Tool{"duplicate", "test", nullptr, [](const json &, std::string &) {
+								   return json{};
+							   }});
+			})}
+		)
+	);
 	CHECK(surface.Registered().size() == 1);
 }
 

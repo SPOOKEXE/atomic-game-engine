@@ -1,5 +1,20 @@
 # v0.25 MCP consolidation and cleanup plan
 
+## Implementation status (2026-09-24)
+
+Stages 0 through 5 are implemented in the working tree. The plan and initial inventory below remain as the record of the migration; their descriptions of feature arrays and `Surface::Enable` are historical. The active registration and capture contracts are in [control MCP](../mono.engine/control/docs/MCP.md).
+
+- Stage 0: product tool and resource contract fixtures, plus stdio bridge transcripts, pin the existing names, schemas, order, and error behavior.
+- Stage 1: named hook leases provide transactional activation, generation changes, collision rejection, and safe close and drain behavior.
+- Stage 2: products own their optional hook leases, and the client and Studio activate their always-on hooks through named manifests.
+- Stage 3: the data factory uses explicit lifecycle ownership and replay behavior, with factory and product contracts covering registration and removal.
+- Stage 4: capture submission closes before bridge teardown, while known poll, read, release, and cancel tools remain available during drain. Shutdown discards retained terminal tickets. MCP transcripts, bridge tests, client tests, and the hidden headless GPU close case exercise this path.
+- Stage 5: the server, CDN, launcher, client, and Studio use owned hook manifests. Production `Feature`, `Surface::Enable`, `BuiltinHooks`, `ActivateBuiltin`, and dead feature factories are removed. Test-only callers use local hook fixtures.
+
+The linked development build passed the focused suites: control 144 cases/741592 assertions, MCP bridge 16/1692, client MCP contract 13/1267, Studio MCP contract 2/485, server MCP contract 4/261, CDN MCP contract 1/104, and launcher MCP contract 2/32. The server and CDN headless presets also passed their control, bridge, and product MCP suites, followed by `just check-server-is-headless` and `just check-cdn-is-bare`.
+
+[Performance evidence](v025-MCP-PERF-EVIDENCE.md) records paired HEAD/current control and Vulkan capture runs in the `bench` preset, including three new pairs with the desktop apps open at the user's request, along with a passing 128-cycle capture-hook soak. The paired runs used matching fixtures; host contention prevents a timing improvement claim. A rebuilt headless Vulkan test passes three real capture activation, close, and drain cycles, including access to a ready ticket after world retirement. Finite product launch and shutdown smokes passed for client, Studio, server, CDN, and launcher: each bound an MCP listener, listed tools, exited with status 0, and refused a new connection after exit. Broad CI remains open.
+
 ## Decision
 
 Keep one engine-hosted MCP surface. Keep `mcpbridge` as the byte-only stdio

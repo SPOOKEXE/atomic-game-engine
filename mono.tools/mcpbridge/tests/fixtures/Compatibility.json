@@ -32,8 +32,16 @@
     "arguments": {"requested_channels": ["rgb_linear_hdr"]},
     "contract_version": "1",
     "schema_version": "1",
-    "control_generation": 0,
-    "hooks": [],
+    "control_generation": 1,
+    "hooks": [
+      {
+        "id": "builtin.mcpbridge.compatibility",
+        "state": "active",
+        "revision": "v1",
+        "tools": ["echo", "refuse", "negotiate"],
+        "limits": {}
+      }
+    ],
     "requested_channels": [
       {
         "name": "rgb_linear_hdr",

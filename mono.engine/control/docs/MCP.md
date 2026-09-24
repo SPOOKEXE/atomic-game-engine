@@ -65,11 +65,31 @@ providers locally, where it already owns the typed world, renderer, capture,
 or factory service. The shared control module does not link renderer adapters
 or load native plugins at runtime.
 
-Each active provider has a stable hook ID, revision, state, tool names, and
+Each product installs its permanent named hooks from a local
+`ControlHooks.cpp` manifest through `Surface::ActivateHook` and retains their
+leases until shutdown. These hooks use stable IDs of the form
+`builtin.<name>`. They appear in `negotiate` under `hooks` and advance
+`control_generation` when activated, closed, or removed. Optional providers
+use the same activation API with a typed context, dependencies, and limits.
+`Surface::Add`, `AddResource`, and `AddPrompt` only stage rows during a named
+hook activation; calls outside registration throw.
+
+World-owning client, server, and interactive Studio modes keep `Universe` in
+their permanent manifests. Its hook lease and the referenced `Universe` share
+the product lifetime. A Studio factory-only surface omits those world-backed
+rows.
+
+Each live provider has a stable hook ID, revision, state, tool names, and
 declared numeric limits. `negotiate` returns these under `hooks` and includes a
-monotonic `control_generation`. A successful hook activation or completed
-removal advances that generation. The hook list reports active providers, while
-`operations` reports the callable tool table at the time of the response.
+monotonic `control_generation`. Activation, the start of draining, and completed
+removal each advance that generation. The hook list reports live registrations,
+while `operations` reports the callable tool table at the time of the response.
+
+The `mcpbridge` compatibility transcript uses the synthetic owner
+`builtin.mcpbridge.compatibility`. Its fixture records the owner's visible hook
+metadata and generation because the synthetic rows are installed through a
+named activation. Product hosts keep their own local manifests and reviewed
+hook expectations.
 
 ```json
 {
@@ -88,8 +108,14 @@ removal advances that generation. The hook list reports active providers, while
 
 A hook stages its tools, resources, and prompts as one registration. A name or
 URI collision rejects the activation, leaving the existing surface unchanged.
-Closing a hook first blocks new calls to its rows. Existing calls retain their
-activation guard until they return; rows disappear after the hook has drained.
+Closing a hook first blocks new submissions. A provider may name cleanup tools
+that remain listed and callable while it drains retained work. The client capture
+hook keeps `poll_capture`, `get_resource`, `cancel_capture`, `release_capture`,
+`poll_view_camera_mutation`, and `cancel_view_camera_mutation` available until
+their tickets are released or terminal mutation results are polled. Existing
+calls retain their activation guard until they return; rows disappear after the
+hook has drained. The host discards any terminal tickets still retained at
+shutdown, before destroying the capture bridge.
 Dependencies keep an owner hook from completing removal until its dependent
 hooks have closed.
 

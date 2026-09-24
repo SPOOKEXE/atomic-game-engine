@@ -10,11 +10,11 @@
 # `shared`, and it has to be: a headless server exposes its worlds through this
 # and links no client code at all.
 #
-# L13 because tools may coordinate lower layers, while each optional feature
+# L13 because tools may coordinate lower layers, while each optional hook
 # carries the includes for the state it exposes. The transport itself stays
 # dependency-light enough for a content origin with no worlds.
 #
-# Each product links the registry, selects an explicit feature list, and opens
+# Each product links the registry, installs an explicit hook manifest, and opens
 # its port only when told to. `SECURITY.md` carries why listening is a decision
 # rather than a default.
 mono_add_library(control
@@ -40,6 +40,10 @@ mono_add_library(control
 # belong to the test executable rather than to every control consumer.
 if(TARGET test_control)
 	target_link_libraries(test_control PRIVATE Engine::ecs Engine::replication Engine::script Engine::world)
+endif()
+
+if(TARGET bench_control)
+	target_link_libraries(bench_control PRIVATE Engine::world)
 endif()
 
 # The checked-in target graph, compiled in.

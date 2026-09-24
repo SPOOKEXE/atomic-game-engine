@@ -1,3 +1,5 @@
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/TemporalSample.hpp>
 #include <engine/core/Name.hpp>
@@ -76,7 +78,9 @@ namespace {
 			Session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) {
 				return true;
 			});
-			Control.Enable(std::array{engine::control::features::TemporalSample(Worlds, Session)});
+			engine::control::test::Install(
+				Control, std::array{engine::control::test::TemporalSample(Worlds, Session)}
+			);
 			Worlds.Enter(Id, [](engine::ecs::Store &) {
 				if (!engine::ecs::Components::Find(Name("scene.Camera")).IsValid())
 					engine::scene::RegisterSceneComponents();

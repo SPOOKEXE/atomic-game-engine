@@ -1,3 +1,5 @@
+#include "HookFixture.hpp"
+
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/Surface.hpp>
@@ -95,7 +97,7 @@ TEST_CASE("glTF scene export MCP returns a checksummed GLB with stable IDs", "[c
 	engine::world::Universe universe;
 	const auto world = World(universe, "gltf");
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto part = engine::scene::MakePart(
@@ -176,7 +178,7 @@ TEST_CASE("glTF scene export embeds editable image maps as PNG buffer views", "[
 	engine::world::Universe universe;
 	const auto world = World(universe, "gltf.textures");
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto image = store.CreateInstance(engine::scene::EditableImageClass(), "Pixel");
@@ -231,8 +233,9 @@ TEST_CASE("glTF scene export uses a host's resident mesh source", "[control][glt
 	bool sourceCalled = false;
 	bool textureCalled = false;
 	engine::control::Surface surface("test", "test");
-	surface.Enable(
-		std::array{engine::control::features::DataScene(
+	engine::control::test::Install(
+		surface,
+		std::array{engine::control::test::DataScene(
 			universe,
 			{},
 			nullptr,
@@ -302,7 +305,7 @@ TEST_CASE("glTF scene export omits binary structures when a scene has no geometr
 	World(universe, "gltf.empty");
 	const auto cameraOnly = World(universe, "gltf.camera");
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(cameraOnly, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto camera = store.Create();
@@ -338,7 +341,7 @@ TEST_CASE("glTF scene export retains and releases large GLB resources", "[contro
 	engine::world::Universe universe;
 	const auto world = World(universe, "gltf.large");
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto editable = store.CreateInstance(engine::scene::EditableMeshClass(), "LargeMesh");
@@ -453,7 +456,9 @@ TEST_CASE("glTF resource reads keep their source lifecycle fence", "[control][gl
 		}
 	});
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe, {}, &session)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataScene(universe, {}, &session)}
+	);
 	const auto current = session.Inspect("gltf.fenced");
 	REQUIRE(current.Status == engine::world::DataFactoryStatus::Ok);
 	const json options{
@@ -505,7 +510,9 @@ TEST_CASE("raw scene extract preserves portable mesh and source texture sections
 			out.Pixels.assign(sourcePixels.begin(), sourcePixels.end());
 			return engine::script::GltfTextureSourceStatus::Available;
 		};
-	surface.Enable(std::array{engine::control::features::DataScene(universe, {}, nullptr, {}, source)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataScene(universe, {}, nullptr, {}, source)}
+	);
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto part = engine::scene::MakePart(
@@ -628,7 +635,9 @@ TEST_CASE("raw scene resource reads keep their source lifecycle fence", "[contro
 		Identify(store, part, "raw/fenced");
 	});
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe, {}, &session)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataScene(universe, {}, &session)}
+	);
 	const auto current = session.Inspect("raw.fenced");
 	REQUIRE(current.Status == engine::world::DataFactoryStatus::Ok);
 	const json options{

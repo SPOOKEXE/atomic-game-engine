@@ -233,12 +233,4 @@ namespace engine::control {
 	inline void Surface::AddRigExportTools(world::Universe &universe, world::DataFactorySession *session) {
 		Add(RigExportTool(universe, session));
 	}
-	namespace features {
-		// Registers bounded rig export, optionally fenced to the supplied session revision.
-		inline Feature RigExport(world::Universe &universe, world::DataFactorySession *session = nullptr) {
-			return Feature{"rig-export", [&universe, session](Surface &surface) {
-							   surface.AddRigExportTools(universe, session);
-						   }};
-		}
-	}
 }

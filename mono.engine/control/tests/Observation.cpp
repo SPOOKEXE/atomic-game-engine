@@ -1,3 +1,5 @@
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/PhysicsObservation.hpp>
 #include <engine/control/features/ReplicationObservation.hpp>
@@ -15,6 +17,26 @@ TEST_DEPENDS("engine.physics.observation")
 TEST_DEPENDS("engine.replication.observation")
 
 using nlohmann::json;
+
+namespace engine::control::test {
+	inline Spec PhysicsObservation(world::DataFactorySession &session) {
+		return {"physics_observation", [&session](Surface &surface) {
+					AddPhysicsObservationTools(surface, session);
+				}};
+	}
+	inline Spec ReplicationObservation(
+		world::DataFactorySession *session,
+		replication::ReplicationObservations &observations,
+		std::string worldName
+	) {
+		return {
+			"replication_observation",
+			[session, &observations, worldName = std::move(worldName)](Surface &surface) {
+				AddReplicationObservationTools(surface, session, observations, worldName);
+			}
+		};
+	}
+}
 
 namespace {
 	json Call(engine::control::Surface &surface, std::string_view name, const json &arguments, bool &failed) {
@@ -69,10 +91,11 @@ TEST_CASE(
 	));
 
 	engine::control::Surface surface("test", "test");
-	surface.Enable(
+	engine::control::test::Install(
+		surface,
 		std::array{
-			engine::control::features::PhysicsObservation(session),
-			engine::control::features::ReplicationObservation(&session, queue, "observed"),
+			engine::control::test::PhysicsObservation(session),
+			engine::control::test::ReplicationObservation(&session, queue, "observed"),
 		}
 	);
 	bool failed = false;
@@ -121,8 +144,8 @@ TEST_CASE(
 	CHECK(Call(surface, "replication_observation_poll", revision, failed).at("records").empty());
 
 	engine::control::Surface listening("test", "listening");
-	listening.Enable(
-		std::array{engine::control::features::ReplicationObservation(nullptr, queue, "observed")}
+	engine::control::test::Install(
+		listening, std::array{engine::control::test::ReplicationObservation(nullptr, queue, "observed")}
 	);
 	REQUIRE(queue.Record(
 		{.Hook = engine::replication::ReplicationHook::AuthorityRejected,

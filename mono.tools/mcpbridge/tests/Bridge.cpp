@@ -19,6 +19,8 @@
 // nowhere else: the tools registered below touch no world, and `Universe::Enter`
 // is what makes the single-threaded rule a rule.
 
+#include "../../../mono.engine/control/tests/HookFixture.hpp"
+
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Paths.hpp>
@@ -27,6 +29,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <filesystem>
@@ -129,64 +132,69 @@ namespace {
 	// A surface that touches no world, so it can be answered from the pump
 	// thread.
 	void Fill(Surface &surface) {
-		surface.AddArchitectureTools();
+		engine::control::test::Install(
+			surface, std::array{engine::control::test::Custom("bridge.baseline", [](Surface &owner) {
+				owner.AddArchitectureTools();
 
-		surface.Add(
-			Tool{
-				"echo",
-				"Returns whatever it was given, so the suite can prove an argument survives the pipe "
-				"unchanged in both directions.",
-				[] {
-					return json{
-						{"type", "object"},
-						{"properties", json{{"text", json{{"type", "string"}}}}},
-						{"required", json::array({"text"})},
-					};
-				},
-				[](const json &arguments, std::string &failure) -> json {
-					if (!arguments.contains("text")) {
-						failure = "echo needs `text`";
-						return nullptr;
+				owner.Add(
+					Tool{
+						"echo",
+						"Returns whatever it was given, so the suite can prove an argument survives the pipe "
+						"unchanged in both directions.",
+						[] {
+							return json{
+								{"type", "object"},
+								{"properties", json{{"text", json{{"type", "string"}}}}},
+								{"required", json::array({"text"})},
+							};
+						},
+						[](const json &arguments, std::string &failure) -> json {
+							if (!arguments.contains("text")) {
+								failure = "echo needs `text`";
+								return nullptr;
+							}
+							return json{{"text", arguments.at("text")}};
+						},
 					}
-					return json{{"text", arguments.at("text")}};
-				},
-			}
-		);
+				);
 
-		surface.Add(
-			Tool{
-				"explode",
-				"Throws, so the suite can prove an escaping exception arrives as a tool error rather "
-				"than as a closed connection.",
-				nullptr,
-				[](const json &, std::string &) -> json { throw std::runtime_error("boom"); },
-			}
-		);
-
-		surface.AddResource(
-			Resource{
-				"atomic://bridge/baseline",
-				"Bridge baseline",
-				"A readable resource that proves mcpbridge forwards resource reads without parsing them.",
-				"text/plain",
-				[](std::string &) { return "bridge baseline resource"; },
-			}
-		);
-		surface.AddPrompt(
-			engine::control::Prompt{
-				"bridge_baseline",
-				"Renders a fixed prompt through the bridge.",
-				{engine::control::PromptArgument{
-					"subject", "The subject to name in the baseline prompt.", true
-				}},
-				[](const json &arguments, std::string &failure) {
-					if (!arguments.contains("subject") || !arguments["subject"].is_string()) {
-						failure = "bridge_baseline needs subject";
-						return std::string{};
+				owner.Add(
+					Tool{
+						"explode",
+						"Throws, so the suite can prove an escaping exception arrives as a tool error rather "
+						"than as a closed connection.",
+						nullptr,
+						[](const json &, std::string &) -> json { throw std::runtime_error("boom"); },
 					}
-					return "bridge baseline prompt for " + arguments["subject"].get<std::string>();
-				},
-			}
+				);
+
+				owner.AddResource(
+					Resource{
+						"atomic://bridge/baseline",
+						"Bridge baseline",
+						"A readable resource that proves mcpbridge forwards resource reads without parsing "
+						"them.",
+						"text/plain",
+						[](std::string &) { return "bridge baseline resource"; },
+					}
+				);
+				owner.AddPrompt(
+					engine::control::Prompt{
+						"bridge_baseline",
+						"Renders a fixed prompt through the bridge.",
+						{engine::control::PromptArgument{
+							"subject", "The subject to name in the baseline prompt.", true
+						}},
+						[](const json &arguments, std::string &failure) {
+							if (!arguments.contains("subject") || !arguments["subject"].is_string()) {
+								failure = "bridge_baseline needs subject";
+								return std::string{};
+							}
+							return "bridge baseline prompt for " + arguments["subject"].get<std::string>();
+						},
+					}
+				);
+			})}
 		);
 	}
 

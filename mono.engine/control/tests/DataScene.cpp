@@ -1,5 +1,6 @@
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -56,6 +57,19 @@ using engine::world::WorldSettings;
 using nlohmann::json;
 
 namespace {
+	void EnableCameraRenderingData(
+		Surface &surface, Universe &universe, engine::world::DataFactorySession *session = nullptr
+	) {
+		engine::control::test::Install(
+			surface,
+			std::array{
+				engine::control::test::Custom("camera-rendering-data", [&universe, session](Surface &owner) {
+					owner.Add(engine::control::features::CameraRenderingDataTool(universe, session));
+				})
+			}
+		);
+	}
+
 	json Call(Surface &surface, std::string_view name, const json &arguments, bool &failed) {
 		const json request{
 			{"jsonrpc", "2.0"},
@@ -107,7 +121,7 @@ TEST_CASE("large scene snapshot chunks reconstruct one exact bounded response", 
 	Universe universe;
 	const WorldId world = World(universe, "large_snapshot");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		engine::scene::RegisterSceneClasses();
@@ -195,7 +209,7 @@ TEST_CASE(
 	Universe universe;
 	const WorldId world = World(universe, "lighting");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
@@ -242,7 +256,7 @@ TEST_CASE("data-scene MCP reports the Sun resource override provenance", "[contr
 	Universe universe;
 	const WorldId world = World(universe, "sun_override");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
@@ -275,11 +289,11 @@ TEST_CASE("data-scene MCP tools use stable scene and camera identifiers", "[cont
 	Universe universe;
 	const WorldId world = World(universe, "scene");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	CHECK(std::none_of(surface.Registered().begin(), surface.Registered().end(), [](const auto &tool) {
 		return tool.Name == "get_camera_rendering_data";
 	}));
-	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
+	EnableCameraRenderingData(surface, universe);
 
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
@@ -434,8 +448,8 @@ TEST_CASE("camera object observations reject diagonal screen-bound false positiv
 	Universe universe;
 	const WorldId world = World(universe, "diagonal");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
-	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
+	EnableCameraRenderingData(surface, universe);
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -475,8 +489,8 @@ TEST_CASE("data-scene refuses finite geometry whose derived corners overflow", "
 	Universe universe;
 	const WorldId world = World(universe, "overflow");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
-	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
+	EnableCameraRenderingData(surface, universe);
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -508,8 +522,8 @@ TEST_CASE(
 	Universe universe;
 	const WorldId world = World(universe, "parent-frame");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
-	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
+	EnableCameraRenderingData(surface, universe);
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity parent = store.CreateInstance(engine::scene::PartClass(), "Parent");
@@ -545,8 +559,8 @@ TEST_CASE("rolled camera projects an object along its look vector", "[control][d
 	Universe universe;
 	const WorldId world = World(universe, "rolled-camera");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
-	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
+	EnableCameraRenderingData(surface, universe);
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -582,8 +596,8 @@ TEST_CASE("camera projection keeps extreme finite depth denominators truthful", 
 	Universe universe;
 	const WorldId world = World(universe, "extreme-projection");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
-	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
+	EnableCameraRenderingData(surface, universe);
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -624,8 +638,8 @@ TEST_CASE("camera projection preserves a clipped UINT32_MAX right edge", "[contr
 	Universe universe;
 	const WorldId world = World(universe, "wide-edge");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
-	surface.Add(engine::control::features::CameraRenderingDataTool(universe));
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
+	EnableCameraRenderingData(surface, universe);
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		const Entity camera = store.Create();
@@ -659,7 +673,7 @@ TEST_CASE("data-scene MCP exposes read-only script-declared event narratives", "
 	Universe universe;
 	const WorldId world = World(universe, "narratives");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	const json unavailableReply = json::parse(surface.Answer(
 		json{
 			{"jsonrpc", "2.0"},
@@ -716,7 +730,7 @@ TEST_CASE("data-scene MCP snapshot refuses duplicate stable identifiers", "[cont
 	Universe universe;
 	const WorldId world = World(universe, "duplicates");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		for (int index = 0; index < 2; index++) {
@@ -739,7 +753,7 @@ TEST_CASE("data-scene MCP queries prepared collider geometry", "[control][datasc
 	Universe universe;
 	const WorldId world = World(universe, "queries");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::EnsureClassTree();
@@ -841,7 +855,7 @@ TEST_CASE(
 	Universe universe;
 	const WorldId world = World(universe, "physics_observation");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	Entity body;
 
 	universe.Enter(world, [&](engine::ecs::Store &store) {
@@ -1060,15 +1074,16 @@ TEST_CASE(
 	REQUIRE(World(decoy, "fenced").IsValid());
 
 	Surface surface("test", "test");
-	surface.Enable(
+	engine::control::test::Install(
+		surface,
 		std::array{
-			engine::control::features::DataFactory(session),
+			engine::control::test::DataFactory(session),
 			// The supplied universe is deliberately a same-name decoy. Factory reads
 			// must resolve through the session-owned universe instead.
-			engine::control::features::DataScene(decoy, {}, &session),
+			engine::control::test::DataScene(decoy, {}, &session),
 		}
 	);
-	surface.Add(engine::control::features::CameraRenderingDataTool(decoy, &session));
+	EnableCameraRenderingData(surface, decoy, &session);
 	const auto current = session.Inspect("fenced");
 	REQUIRE(current.Status == DataFactoryStatus::Ok);
 	const json revision{
@@ -1159,7 +1174,7 @@ TEST_CASE("compatibility data-scene reads reject factory revision fields", "[con
 	Universe universe;
 	REQUIRE(World(universe, "compatibility").IsValid());
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	bool failed = false;
 	const json response = Call(
 		surface,
@@ -1183,7 +1198,7 @@ TEST_CASE("data-scene MCP returns only explicit authored affordances", "[control
 	Universe universe;
 	const WorldId world = World(universe, "affordances");
 	Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneComponents();
 		engine::scene::EnsureClassTree();

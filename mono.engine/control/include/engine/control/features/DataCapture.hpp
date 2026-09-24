@@ -1539,13 +1539,3 @@ namespace engine::control {
 		Add(action("cancel_capture", false));
 	}
 }
-
-namespace engine::control::features {
-	// Installs the ticketed capture tools backed by the supplied product-owned bridge.
-	inline Feature
-	DataCapture(world::DataFactorySession &session, std::shared_ptr<script::DataCaptureBridge> bridge) {
-		return Feature{"data_capture", [&session, bridge = std::move(bridge)](Surface &surface) {
-						   surface.AddDataCaptureTools(session, bridge);
-					   }};
-	}
-}

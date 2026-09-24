@@ -2,7 +2,6 @@
 
 #include "ControlAutomation.hpp"
 
-#include <engine/control/Features.hpp>
 #include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
@@ -14,6 +13,7 @@
 #include <SDL3/SDL_timer.h>
 
 #include <array>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <studio/DataFactoryHost.hpp>
@@ -87,41 +87,64 @@ namespace studio {
 	}
 
 	void Editor::EnableControlFeatures() {
+		struct PermanentHook {
+			const char *Id;
+			std::function<void()> Install;
+		};
 		struct StudioControlManifest {
-			std::array<engine::control::Feature, 6> Factory;
-			std::array<engine::control::Feature, 8> Interactive;
+			std::array<PermanentHook, 6> Factory;
+			std::array<PermanentHook, 8> Interactive;
 		};
 		const StudioControlManifest manifest{
 			.Factory =
 				{
-					engine::control::features::Architecture(),
-					engine::control::features::Script(),
-					engine::control::features::Diagnostics(),
-					engine::control::features::Resources(),
-					engine::control::features::Prompts(),
-					engine::control::features::Discovery(),
+					PermanentHook{"builtin.architecture", [this] { ControlSurface.AddArchitectureTools(); }},
+					PermanentHook{"builtin.script", [this] { ControlSurface.AddScriptTools(); }},
+					PermanentHook{"builtin.diagnostics", [this] { ControlSurface.AddDiagnosticTools(); }},
+					PermanentHook{"builtin.resources", [this] { ControlSurface.AddStandardResources(); }},
+					PermanentHook{"builtin.prompts", [this] { ControlSurface.AddStandardPrompts(); }},
+					PermanentHook{"builtin.discovery", [this] { ControlSurface.AddDiscoveryTools(); }},
 				},
 			.Interactive = {
 				// Studio owns its richer engine_info row through its product hook.
-				engine::control::features::Universe(*Universe, true, false),
-				engine::control::features::Architecture(),
-				engine::control::features::Script(),
-				engine::control::features::Diagnostics(false),
-				engine::control::features::Build(),
-				engine::control::features::Resources(),
-				engine::control::features::Prompts(),
-				engine::control::features::Discovery(),
+				PermanentHook{
+					"builtin.universe", [this] { ControlSurface.AddUniverseTools(*Universe, true, false); }
+				},
+				PermanentHook{"builtin.architecture", [this] { ControlSurface.AddArchitectureTools(); }},
+				PermanentHook{"builtin.script", [this] { ControlSurface.AddScriptTools(); }},
+				PermanentHook{"builtin.diagnostics", [this] { ControlSurface.AddDiagnosticTools(false); }},
+				PermanentHook{"builtin.build", [this] { ControlSurface.AddBuildTools(); }},
+				PermanentHook{"builtin.resources", [this] { ControlSurface.AddStandardResources(); }},
+				PermanentHook{"builtin.prompts", [this] { ControlSurface.AddStandardPrompts(); }},
+				PermanentHook{"builtin.discovery", [this] { ControlSurface.AddDiscoveryTools(); }},
 			},
+		};
+		const auto install = [this](const auto &hooks) {
+			PermanentControlHooks.reserve(hooks.size());
+			for (const PermanentHook &hook : hooks) {
+				std::string failure;
+				auto lease = ControlSurface.ActivateHook(
+					{.Id = hook.Id,
+					 .Revision = "v1",
+					 .Purpose = "Built-in feature registration.",
+					 .Dependencies = {},
+					 .Limits = {}},
+					[&hook](engine::control::HookRegistration &) { hook.Install(); },
+					failure
+				);
+				if (!lease.IsValid()) throw std::runtime_error(failure);
+				PermanentControlHooks.push_back(std::move(lease));
+			}
 		};
 		if (FactoryHost != nullptr) {
 			// A factory session owns world state and lifecycle. Ordinary Studio
 			// universe tools would mutate the same world outside that session.
-			ControlSurface.Enable(manifest.Factory);
+			install(manifest.Factory);
 			FactoryHost->InstallTools({.Surface = ControlSurface, .RendererReady = true});
 			return;
 		}
 
-		ControlSurface.Enable(manifest.Interactive);
+		install(manifest.Interactive);
 		ActivateControlHooks();
 		struct StudioInputControlHookContext {
 			Editor &Host;

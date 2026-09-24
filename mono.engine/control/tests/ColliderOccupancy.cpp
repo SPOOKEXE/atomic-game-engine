@@ -1,5 +1,6 @@
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Attributes.hpp>
@@ -81,7 +82,7 @@ namespace {
 				return true;
 			});
 			Id = Create();
-			Control.Enable(std::array{engine::control::features::DataFactory(Session)});
+			engine::control::test::Install(Control, std::array{engine::control::test::DataFactory(Session)});
 			Worlds.Enter(Id, [](engine::ecs::Store &) {
 				engine::scene::RegisterSceneComponents();
 				engine::physics::RegisterPhysicsComponents();

@@ -1,15 +1,18 @@
-// The fixed direct transcript for the MCP wire contract.
+// The fixed named-hook transcript for the MCP wire contract.
 //
 // `Bridge.cpp` sends the same family of requests through the real stdio
 // adapter. This suite keeps the transport-independent contract close to its
 // reviewed fixture, so a change in dispatch does not need a socket failure to
 // be noticed.
 
+#include "../../../mono.engine/control/tests/HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -44,68 +47,76 @@ namespace {
 	}
 
 	void MakeSurface(Surface &surface, const json &fixture) {
-		surface.Add(
-			Tool{
-				fixture["tool"]["name"],
-				"Returns its text argument so a compatibility transcript can prove request and result "
-				"envelopes.",
-				[] {
-					return json{
-						{"type", "object"},
-						{"properties", json{{"text", json{{"type", "string"}}}}},
-						{"required", json::array({"text"})}
-					};
-				},
-				[](const json &arguments, std::string &failure) -> json {
-					if (!arguments.contains("text") || !arguments["text"].is_string()) {
-						failure = "echo needs text";
-						return nullptr;
+		engine::control::test::Install(
+			surface,
+			std::array{engine::control::test::Custom("mcpbridge.compatibility", [&fixture](Surface &owner) {
+				owner.Add(
+					Tool{
+						fixture["tool"]["name"],
+						"Returns its text argument so a compatibility transcript can prove request and "
+						"result "
+						"envelopes.",
+						[] {
+							return json{
+								{"type", "object"},
+								{"properties", json{{"text", json{{"type", "string"}}}}},
+								{"required", json::array({"text"})}
+							};
+						},
+						[](const json &arguments, std::string &failure) -> json {
+							if (!arguments.contains("text") || !arguments["text"].is_string()) {
+								failure = "echo needs text";
+								return nullptr;
+							}
+							return json{{"text", arguments["text"]}};
+						},
 					}
-					return json{{"text", arguments["text"]}};
-				},
-			}
-		);
-		surface.Add(
-			Tool{
-				fixture["refusedTool"]["name"],
-				"Refuses predictably so the fixture preserves MCP tool-error envelopes.",
-				nullptr,
-				[reason = fixture["refusedTool"]["reason"].get<std::string>()](
-					const json &, std::string &failure
-				) -> json {
-					failure = reason;
-					return nullptr;
-				},
-			}
-		);
-		surface.AddResource(
-			Resource{
-				fixture["resource"]["uri"],
-				"Compatibility baseline",
-				"A fixed readable resource for the baseline MCP transcript.",
-				"text/plain",
-				[text = fixture["resource"]["text"].get<std::string>()](std::string &) { return text; },
-			}
-		);
-		surface.AddPrompt(
-			Prompt{
-				fixture["prompt"]["name"],
-				"Renders one fixed baseline prompt.",
-				{PromptArgument{"subject", "A subject for the fixture prompt.", true}},
-				[](const json &arguments, std::string &failure) -> std::string {
-					if (!arguments.contains("subject") || !arguments["subject"].is_string()) {
-						failure = "baseline_prompt needs subject";
-						return {};
+				);
+				owner.Add(
+					Tool{
+						fixture["refusedTool"]["name"],
+						"Refuses predictably so the fixture preserves MCP tool-error envelopes.",
+						nullptr,
+						[reason = fixture["refusedTool"]["reason"].get<std::string>()](
+							const json &, std::string &failure
+						) -> json {
+							failure = reason;
+							return nullptr;
+						},
 					}
-					return "baseline prompt for " + arguments["subject"].get<std::string>();
-				},
-			}
+				);
+				owner.AddResource(
+					Resource{
+						fixture["resource"]["uri"],
+						"Compatibility baseline",
+						"A fixed readable resource for the baseline MCP transcript.",
+						"text/plain",
+						[text = fixture["resource"]["text"].get<std::string>()](std::string &) {
+							return text;
+						},
+					}
+				);
+				owner.AddPrompt(
+					Prompt{
+						fixture["prompt"]["name"],
+						"Renders one fixed baseline prompt.",
+						{PromptArgument{"subject", "A subject for the fixture prompt.", true}},
+						[](const json &arguments, std::string &failure) -> std::string {
+							if (!arguments.contains("subject") || !arguments["subject"].is_string()) {
+								failure = "baseline_prompt needs subject";
+								return {};
+							}
+							return "baseline prompt for " + arguments["subject"].get<std::string>();
+						},
+					}
+				);
+				owner.AddDiscoveryTools();
+			})}
 		);
-		surface.AddDiscoveryTools();
 	}
 }
 
-TEST_CASE("the direct compatibility transcript preserves MCP envelopes", "[mcpbridge][compatibility]") {
+TEST_CASE("the named compatibility transcript preserves MCP envelopes", "[mcpbridge][compatibility]") {
 	const json fixture = Fixture();
 	Surface surface(fixture["server"]["name"], fixture["server"]["purpose"]);
 	MakeSurface(surface, fixture);
@@ -164,6 +175,10 @@ TEST_CASE("the direct compatibility transcript preserves MCP envelopes", "[mcpbr
 	const json negotiation = json::parse(negotiated["result"]["content"][0]["text"].get<std::string>());
 	CHECK(negotiation["contract_version"] == fixture["negotiate"]["contract_version"]);
 	CHECK(negotiation["schema_version"] == fixture["negotiate"]["schema_version"]);
+	// This synthetic named owner is visible in discovery and advances its generation.
+	REQUIRE(negotiation["hooks"].size() == 1);
+	CHECK(negotiation["hooks"][0]["id"] == "builtin.mcpbridge.compatibility");
+	CHECK(negotiation["control_generation"] == 1);
 	CHECK(negotiation["control_generation"] == fixture["negotiate"]["control_generation"]);
 	CHECK(negotiation["hooks"] == fixture["negotiate"]["hooks"]);
 	CHECK(negotiation["requested_channels"] == fixture["negotiate"]["requested_channels"]);

@@ -16,7 +16,6 @@
 
 #include "ControlAutomation.hpp"
 
-#include <engine/control/Features.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>

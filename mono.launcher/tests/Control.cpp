@@ -3,9 +3,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <imgui.h>
 #include <launcher/Launcher.hpp>
 #include <nlohmann/json.hpp>
+#include <string>
+#include <string_view>
+#include <utility>
 
 TEST_SUITE_ID("launcher.control")
 
@@ -26,22 +31,58 @@ namespace launcher {
 namespace {
 	using nlohmann::json;
 
-	json Call(launcher::Launcher &launcher, int id, const char *name, json arguments = json::object()) {
+	json
+	Ask(launcher::Launcher &launcher, int id, std::string_view method, json parameters = json::object()) {
 		return launcher::LauncherControlProbe::Answer(
 			launcher,
-			json{
-				{"jsonrpc", "2.0"},
-				{"id", id},
-				{"method", "tools/call"},
-				{"params", {{"name", name}, {"arguments", std::move(arguments)}}}
-			}
+			json{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}, {"params", std::move(parameters)}}
 		);
+	}
+
+	json Call(launcher::Launcher &launcher, int id, const char *name, json arguments = json::object()) {
+		return Ask(launcher, id, "tools/call", {{"name", name}, {"arguments", std::move(arguments)}});
 	}
 
 	json Value(const json &response) {
 		REQUIRE_FALSE(response.at("result").value("isError", false));
 		return json::parse(response.at("result").at("content").at(0).at("text").get<std::string>());
 	}
+
+	json Fixture() {
+		std::ifstream input(std::filesystem::path(__FILE__).parent_path() / "fixtures" / "McpContracts.json");
+		REQUIRE(input.good());
+		return json::parse(input);
+	}
+
+	json StableInitialize(json value) {
+		value["serverInfo"].erase("version");
+		return value;
+	}
+
+	json StableNegotiation(json value) {
+		value.erase("control_generation");
+		value.erase("engine_version");
+		return value;
+	}
+}
+
+TEST_CASE("headless launcher MCP manifest is the reviewed contract", "[launcher][mcp]") {
+	launcher::Launcher launcher;
+	launcher::Options options;
+	options.Headless = true;
+	options.ControlPort = 0;
+	REQUIRE(launcher.Initialise(options));
+	const json expected = Fixture();
+
+	CHECK(StableInitialize(Ask(launcher, 1, "initialize").at("result")) == expected.at("initialize"));
+	CHECK(Ask(launcher, 2, "tools/list").at("result").at("tools") == expected.at("tools"));
+	CHECK(Ask(launcher, 3, "resources/list").at("result").at("resources") == expected.at("resources"));
+	CHECK(Ask(launcher, 4, "prompts/list").at("result").at("prompts") == expected.at("prompts"));
+	CHECK(
+		StableNegotiation(
+			Value(Call(launcher, 5, "negotiate", {{"requested_channels", {"rgb_linear_hdr"}}}))
+		) == expected.at("negotiate")
+	);
 }
 
 TEST_CASE("headless launcher MCP controls its mode and exits cleanly", "[launcher][mcp]") {
@@ -50,45 +91,6 @@ TEST_CASE("headless launcher MCP controls its mode and exits cleanly", "[launche
 	options.Headless = true;
 	options.ControlPort = 0;
 	REQUIRE(launcher.Initialise(options));
-
-	const json listed = launcher::LauncherControlProbe::Answer(
-		launcher, {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/list"}}
-	);
-	bool hasStatus = false;
-	bool hasQuit = false;
-	bool hasClick = false;
-	bool hasKey = false;
-	for (const json &tool : listed.at("result").at("tools")) {
-		hasStatus |= tool.at("name") == "launcher_status";
-		hasQuit |= tool.at("name") == "launcher_quit";
-		hasClick |= tool.at("name") == "emulate_click";
-		hasKey |= tool.at("name") == "emulate_key";
-	}
-	CHECK(hasStatus);
-	CHECK(hasQuit);
-	CHECK(hasClick);
-	CHECK(hasKey);
-	const json negotiated = Value(Call(launcher, 7, "negotiate"));
-	const auto hook =
-		std::find_if(negotiated["hooks"].begin(), negotiated["hooks"].end(), [](const json &row) {
-			return row["id"] == "launcher.product";
-		});
-	REQUIRE(hook != negotiated["hooks"].end());
-	CHECK(
-		hook->at("tools") == json(
-								 {"emulate_mouse_move",
-								  "emulate_click",
-								  "emulate_mouse_wheel",
-								  "emulate_key",
-								  "emulate_text",
-								  "launcher_status",
-								  "launcher_open_mode",
-								  "launcher_set_option",
-								  "launcher_launch",
-								  "launcher_stop",
-								  "launcher_quit"}
-							 )
-	);
 
 	CHECK(Value(Call(launcher, 10, "emulate_click", {{"x", 5}, {"y", 5}})).at("queued") == true);
 	launcher::LauncherControlProbe::Frame(launcher);

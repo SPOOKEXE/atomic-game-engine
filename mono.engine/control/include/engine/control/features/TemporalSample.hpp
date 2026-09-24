@@ -372,12 +372,4 @@ namespace engine::control {
 		Add(TemporalSampleTool(universe, session));
 	}
 
-	namespace features {
-		// Registers snapshot-bound camera and object pose sampling for a data-factory session.
-		inline Feature TemporalSample(world::Universe &universe, world::DataFactorySession &session) {
-			return Feature{"temporal_sample", [&universe, &session](Surface &surface) {
-							   surface.AddTemporalSampleTools(universe, session);
-						   }};
-		}
-	}
 }

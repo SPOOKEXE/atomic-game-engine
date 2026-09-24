@@ -35,13 +35,5 @@ namespace engine::control {
 		// Builds the camera calibration row for a host that owns scene rendering.
 		Tool CameraRenderingDataTool(world::Universe &universe, world::DataFactorySession *session = nullptr);
 
-		// Registers read-only scene inspection, export, and bounded physics-query tools for one universe.
-		Feature DataScene(
-			world::Universe &universe,
-			std::shared_ptr<script::DataCaptureBridge> bridge = {},
-			world::DataFactorySession *session = nullptr,
-			script::GltfMeshSource meshSource = {},
-			script::GltfTextureSource textureSource = {}
-		);
 	}
 }

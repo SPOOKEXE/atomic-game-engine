@@ -1,4 +1,3 @@
-#include <engine/control/Features.hpp>
 #include <engine/core/Log.hpp>
 
 #include <SDL3/SDL.h>

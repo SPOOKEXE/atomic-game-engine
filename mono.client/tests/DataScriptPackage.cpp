@@ -1,7 +1,8 @@
+#include "../../mono.engine/control/tests/HookFixture.hpp"
+
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/script/DataScriptPackage.hpp>
 #include <engine/testing/Suite.hpp>
@@ -24,6 +25,19 @@ namespace {
 
 	std::string SourceHash(std::string_view source) {
 		return engine::assets::Hasher::Of(std::as_bytes(std::span(source.data(), source.size()))).ToHex();
+	}
+
+	void
+	AddPackageTool(engine::control::Surface &surface, engine::control::DataScriptPackageExecutor execute) {
+		engine::control::test::Install(
+			surface,
+			std::array{engine::control::test::Custom(
+				"client.data-script-package.test",
+				[execute = std::move(execute)](engine::control::Surface &owner) mutable {
+					client::AddDataScriptPackageTool(owner, std::move(execute));
+				}
+			)}
+		);
 	}
 
 	const engine::control::Tool &PackageTool(engine::control::Surface &surface) {
@@ -85,7 +99,7 @@ TEST_CASE(
 ) {
 	engine::control::Surface surface("test", "test");
 	unsigned calls = 0;
-	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &request) {
+	AddPackageTool(surface, [&calls](const engine::script::DataScriptRequest &request) {
 		calls++;
 		engine::script::DataScriptResult result;
 		result.Ran = true;
@@ -125,9 +139,9 @@ TEST_CASE("client package tool shares lifecycle and capture operation ids", "[cl
 		[](engine::world::WorldId, engine::world::DataFactoryPauseScope, bool, std::string &) { return true; }
 	);
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 	unsigned calls = 0;
-	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &request) {
+	AddPackageTool(surface, [&calls](const engine::script::DataScriptRequest &request) {
 		calls++;
 		engine::script::DataScriptResult result;
 		result.Ran = true;
@@ -190,7 +204,7 @@ TEST_CASE("client package tool shares lifecycle and capture operation ids", "[cl
 
 TEST_CASE("client package tool bounds hostile bytes and declares Luau only", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
-	client::AddDataScriptPackageTool(surface, [](const engine::script::DataScriptRequest &) {
+	AddPackageTool(surface, [](const engine::script::DataScriptRequest &) {
 		return engine::script::DataScriptResult{};
 	});
 	std::string failure;
@@ -213,7 +227,7 @@ TEST_CASE("client package tool bounds hostile bytes and declares Luau only", "[c
 TEST_CASE("client package tool preserves unsigned lifecycle values and canonical base64", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
 	unsigned calls = 0;
-	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
+	AddPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
 		calls++;
 		engine::script::DataScriptResult result;
 		result.Ran = true;
@@ -236,7 +250,7 @@ TEST_CASE("client package tool preserves unsigned lifecycle values and canonical
 TEST_CASE("client package tool applies manifest byte budgets before execution", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
 	unsigned calls = 0;
-	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
+	AddPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
 		calls++;
 		return engine::script::DataScriptResult{};
 	});
@@ -258,7 +272,7 @@ TEST_CASE("client package tool applies manifest byte budgets before execution", 
 TEST_CASE("client package tool fences new operation ids when its ledger is full", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
 	unsigned calls = 0;
-	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
+	AddPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
 		calls++;
 		engine::script::DataScriptResult result;
 		result.Ran = true;
@@ -307,7 +321,7 @@ TEST_CASE("client package tool fences new operation ids when its ledger is full"
 TEST_CASE("client package tool returns domain failures as strict value replies", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
 	unsigned calls = 0;
-	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
+	AddPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
 		calls++;
 		engine::script::DataScriptResult result;
 		result.Error = "active_script_runtime_unsupported";
@@ -330,7 +344,7 @@ TEST_CASE("client package tool returns domain failures as strict value replies",
 TEST_CASE("client package tool keeps failed package replies out of MCP errors", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
 	unsigned calls = 0;
-	client::AddDataScriptPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
+	AddPackageTool(surface, [&calls](const engine::script::DataScriptRequest &) {
 		calls++;
 		engine::script::DataScriptResult result;
 		result.Error = "active_script_runtime_unsupported";
@@ -364,7 +378,7 @@ TEST_CASE("client package tool keeps failed package replies out of MCP errors", 
 
 TEST_CASE("client package tool returns caught executor exceptions as value replies", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
-	client::AddDataScriptPackageTool(
+	AddPackageTool(
 		surface, [](const engine::script::DataScriptRequest &) -> engine::script::DataScriptResult {
 			throw std::runtime_error("deliberate executor exception");
 		}
@@ -382,7 +396,7 @@ TEST_CASE("client package tool returns caught executor exceptions as value repli
 TEST_CASE("client package tool keeps exact final base64 bytes and bounds asset rows", "[client][mcp]") {
 	engine::control::Surface surface("test", "test");
 	std::string source;
-	client::AddDataScriptPackageTool(surface, [&source](const engine::script::DataScriptRequest &request) {
+	AddPackageTool(surface, [&source](const engine::script::DataScriptRequest &request) {
 		source = request.Source;
 		engine::script::DataScriptResult result;
 		result.Ran = true;

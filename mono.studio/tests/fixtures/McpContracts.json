@@ -121,6 +121,7 @@
           "state": "active",
           "tools": [
             "engine_info",
+            "viewport_behavior_diagnostics",
             "world_run",
             "selection_get",
             "select",
@@ -607,6 +608,13 @@
             "type": "object"
           },
           "name": "engine_info"
+        },
+        {
+          "input_schema": {
+            "additionalProperties": false,
+            "type": "object"
+          },
+          "name": "viewport_behavior_diagnostics"
         },
         {
           "input_schema": {
@@ -1100,6 +1108,18 @@
         "name": "AGENTS.md (engine/gui)",
         "uri": "atomic://agents/engine/gui"
       },
+      "atomic://agents/engine/imagegraph": {
+        "description": "The invariants specific to engine/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraph)",
+        "uri": "atomic://agents/engine/imagegraph"
+      },
+      "atomic://agents/engine/imagegraphio": {
+        "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphio)",
+        "uri": "atomic://agents/engine/imagegraphio"
+      },
       "atomic://agents/engine/input": {
         "description": "The invariants specific to engine/input. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -1244,6 +1264,18 @@
         "name": "AGENTS.md (tools/docgen)",
         "uri": "atomic://agents/tools/docgen"
       },
+      "atomic://agents/tools/imagegraph": {
+        "description": "The invariants specific to tools/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (tools/imagegraph)",
+        "uri": "atomic://agents/tools/imagegraph"
+      },
+      "atomic://agents/tools/pxcimport": {
+        "description": "The invariants specific to tools/pxcimport. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (tools/pxcimport)",
+        "uri": "atomic://agents/tools/pxcimport"
+      },
       "atomic://agents/unified_tests": {
         "description": "The invariants specific to unified_tests. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -1283,166 +1315,33 @@
     },
     "server": "atomic-studio",
     "tool_rows": {
-      "engine_components": {
-        "description": "Every component type this engine registers, with its size, whether it is a tag, whether a save file can carry it and whether replication has a compact form for it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Use component_list instead for the components a game declared for itself, and instance_get to read one off a particular instance.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "engine_components"
-      },
-      "world_list": {
-        "description": "Every scene, with its state, its tick statistics and how many instances it holds. A world is a scene; the universe is the game.",
-        "inputSchema": {
-          "type": "object"
-        },
-        "name": "world_list"
-      },
-      "world_tree": {
-        "description": "The instance tree of one scene, as an author sees it in the explorer. Depth-limited and count-limited; ask for more when you know where you are going.",
+      "class_get": {
+        "description": "One class: what it derives from, and every property it exposes with the type it carries, whether it can be written and whether a script can see it at all. This is the live class table rather than the checked-in manifest, so it describes what this process registered. Use instance_get to read the values off a particular instance.",
         "inputSchema": {
           "properties": {
-            "depth": {
-              "description": "Levels to descend. Default 3.",
-              "type": "integer"
-            },
-            "limit": {
-              "description": "Instances at most. Default 200.",
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "world_tree"
-      },
-      "instance_get": {
-        "description": "Every property of one instance, by the id world_tree reported.",
-        "inputSchema": {
-          "properties": {
-            "id": {
-              "description": "The entity id.",
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id"
-          ],
-          "type": "object"
-        },
-        "name": "instance_get"
-      },
-      "entity_create": {
-        "description": "Creates an authoritative entity in a scene. Give a class name to create an instance from its defaults; omit class for a raw entity. An instance may have a name and a parent instance id. Raw names are unique within their scene. Refused on replicas.",
-        "inputSchema": {
-          "properties": {
-            "class": {
-              "type": "string"
-            },
             "name": {
               "type": "string"
-            },
-            "parent": {
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "entity_create"
-      },
-      "entity_destroy": {
-        "description": "Destroys one entity in a scene. For an instance, also destroys its descendants. World fixtures and replica scenes are protected.",
-        "inputSchema": {
-          "properties": {
-            "id": {
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
             }
           },
           "required": [
-            "id"
+            "name"
           ],
           "type": "object"
         },
-        "name": "entity_destroy"
+        "name": "class_get"
       },
-      "instance_set": {
-        "description": "Writes one property of one instance. Vector3 and Color3 take an object of named components; an enum takes its member name as a string.",
+      "class_list": {
+        "description": "Every class this process registers, with what it derives from. A class is what Instance.new names and what a save file carries; its properties are what a script may read and write. Inheritance is set inclusion here, so a query for a base class matches every derived instance. Call class_get for one class's properties.",
         "inputSchema": {
           "properties": {
-            "id": {
-              "type": "integer"
-            },
-            "property": {
-              "type": "string"
-            },
-            "value": {},
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "property",
-            "value"
-          ],
-          "type": "object"
-        },
-        "name": "instance_set"
-      },
-      "component_list": {
-        "description": "Every component a game declared for itself, with its fields and how many entities in a scene carry it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Components the engine declares are not listed here - those are reached as properties, through instance_get.",
-        "inputSchema": {
-          "properties": {
-            "world": {
-              "description": "Which scene, by name.",
+            "derivedFrom": {
+              "description": "Only classes that are a kind of this one.",
               "type": "string"
             }
           },
           "type": "object"
         },
-        "name": "component_list"
-      },
-      "entity_query": {
-        "description": "Every entity in a scene carrying all of the named components. This is the query a system runs, asked from outside: name the components and get the ids back, then read one with component_get or instance_get.",
-        "inputSchema": {
-          "properties": {
-            "components": {
-              "description": "Every one an entity must carry. Call component_list first.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "limit": {
-              "description": "Ids at most. Default 200.",
-              "type": "integer"
-            },
-            "world": {
-              "description": "Which scene, by name.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "components"
-          ],
-          "type": "object"
-        },
-        "name": "entity_query"
+        "name": "class_list"
       },
       "component_get": {
         "description": "The values one entity holds for one component, field by field. Null when the entity does not carry it - which is a different answer from carrying it with every field at zero.",
@@ -1467,6 +1366,19 @@
           "type": "object"
         },
         "name": "component_get"
+      },
+      "component_list": {
+        "description": "Every component a game declared for itself, with its fields and how many entities in a scene carry it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Components the engine declares are not listed here - those are reached as properties, through instance_get.",
+        "inputSchema": {
+          "properties": {
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "component_list"
       },
       "component_remove": {
         "description": "Removes one game-declared component from an entity in a scene. Engine-owned components, protected fixtures, and replica scenes cannot be changed here.",
@@ -1516,12 +1428,264 @@
         },
         "name": "component_set"
       },
-      "profile_frame": {
-        "description": "The last frame as a flame graph: one span per scope with its depth, its parent, its inclusive time and its self time. Collection is switched on by the first call, so the first reply is empty and the next one is not.",
+      "emulate_click": {
+        "description": "Clicks, presses, or releases a mouse button at client coordinates through this program's input boundary. Omit down for one complete click.",
+        "inputSchema": {
+          "properties": {
+            "button": {
+              "enum": [
+                "left",
+                "middle",
+                "right"
+              ],
+              "type": "string"
+            },
+            "down": {
+              "type": "boolean"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_click"
+      },
+      "emulate_key": {
+        "description": "Presses, releases, or taps one named keyboard key through this program's input boundary. Omit down for one complete key press.",
+        "inputSchema": {
+          "properties": {
+            "down": {
+              "type": "boolean"
+            },
+            "key": {
+              "type": "string"
+            },
+            "modifiers": {
+              "items": {
+                "enum": [
+                  "shift",
+                  "control",
+                  "alt",
+                  "gui"
+                ],
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_key"
+      },
+      "emulate_mouse_move": {
+        "description": "Moves the mouse pointer to client coordinates through this program's input boundary.",
+        "inputSchema": {
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_mouse_move"
+      },
+      "emulate_mouse_wheel": {
+        "description": "Turns the mouse wheel by a signed number of vertical notches through this program's input boundary.",
+        "inputSchema": {
+          "properties": {
+            "notches": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "notches"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_mouse_wheel"
+      },
+      "emulate_text": {
+        "description": "Sends UTF-8 text through this program's input boundary.",
+        "inputSchema": {
+          "properties": {
+            "text": {
+              "maxLength": 16384,
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        "name": "emulate_text"
+      },
+      "engine_components": {
+        "description": "Every component type this engine registers, with its size, whether it is a tag, whether a save file can carry it and whether replication has a compact form for it. A component is the storage under the class tree: an instance is an entity and a class is a set of these. Use component_list instead for the components a game declared for itself, and instance_get to read one off a particular instance.",
         "inputSchema": {
           "type": "object"
         },
-        "name": "profile_frame"
+        "name": "engine_components"
+      },
+      "engine_info": {
+        "description": "The editor's own state: which game is open, whether it has unsaved changes, how many frames have been drawn, which scene is active and what is selected.",
+        "inputSchema": {
+          "type": "object"
+        },
+        "name": "engine_info"
+      },
+      "entity_create": {
+        "description": "Creates an authoritative entity in a scene. Give a class name to create an instance from its defaults; omit class for a raw entity. An instance may have a name and a parent instance id. Raw names are unique within their scene. Refused on replicas.",
+        "inputSchema": {
+          "properties": {
+            "class": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parent": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "entity_create"
+      },
+      "entity_destroy": {
+        "description": "Destroys one entity in a scene. For an instance, also destroys its descendants. World fixtures and replica scenes are protected.",
+        "inputSchema": {
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "name": "entity_destroy"
+      },
+      "entity_query": {
+        "description": "Every entity in a scene carrying all of the named components. This is the query a system runs, asked from outside: name the components and get the ids back, then read one with component_get or instance_get.",
+        "inputSchema": {
+          "properties": {
+            "components": {
+              "description": "Every one an entity must carry. Call component_list first.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "limit": {
+              "description": "Ids at most. Default 200.",
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "components"
+          ],
+          "type": "object"
+        },
+        "name": "entity_query"
+      },
+      "get_camera_rendering_data": {
+        "description": "Camera calibration for a stable authored camera id, or the scene's active camera.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "get_camera_rendering_data"
+      },
+      "instance_get": {
+        "description": "Every property of one instance, by the id world_tree reported.",
+        "inputSchema": {
+          "properties": {
+            "id": {
+              "description": "The entity id.",
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "name": "instance_get"
+      },
+      "instance_set": {
+        "description": "Writes one property of one instance. Vector3 and Color3 take an object of named components; an enum takes its member name as a string.",
+        "inputSchema": {
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "property": {
+              "type": "string"
+            },
+            "value": {},
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "property",
+            "value"
+          ],
+          "type": "object"
+        },
+        "name": "instance_set"
       },
       "layer_table": {
         "description": "The engine's layer stack, bottom to top: every module at each height, with its tier. A layer may see every layer below it and none above it, so this table is what decides which module may include which. The programs are listed separately - they are what links modules and nothing links them. Call module_may_link to ask about one edge.",
@@ -1529,6 +1693,58 @@
           "type": "object"
         },
         "name": "layer_table"
+      },
+      "list_command_palette": {
+        "description": "Lists Studio command-palette entries from the live operator table, including stable ids, shortcuts, availability and refusal reasons.",
+        "inputSchema": {
+          "properties": {
+            "query": {
+              "description": "Optional fuzzy filter, ranked exactly like the palette.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "list_command_palette"
+      },
+      "log_level": {
+        "description": "Reads or changes what this program logs, while it runs. With no argument it lists every category the build has registered and the severity floor each is at. `set` takes the same text the engine.log-level setting does: a bare level for everything, or comma-separated category=level overrides, or both - `warning,net=trace`. Statements below the compiled floor were removed by the preprocessor and cannot be switched on.",
+        "inputSchema": {
+          "properties": {
+            "set": {
+              "description": "A level, or category=level terms, or both.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "log_level"
+      },
+      "log_tail": {
+        "description": "The tail of the output panel: the engine log and everything scripts have printed.",
+        "inputSchema": {
+          "properties": {
+            "lines": {
+              "description": "From the end. Default 50.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "name": "log_tail"
+      },
+      "metrics_read": {
+        "description": "Every counter, gauge and distribution this process has recorded. A counter accumulates and is drained once a frame, so its value is a rate; a gauge is a level as last set; a histogram carries a mean, a maximum and nearest-rank percentiles over its recent window, which is what says whether a server holding its tick rate on average is still missing a fiftieth of its ticks. Times are nanoseconds. Reading changes nothing.",
+        "inputSchema": {
+          "properties": {
+            "prefix": {
+              "description": "Only names starting with this. Default all of them.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "metrics_read"
       },
       "module_get": {
         "description": "One module or program: which layer and tier it is, every first-party target it links, and everything that links it. `linkedBy` is what would have to be rebuilt and reviewed if this module's interface changed. With no name, every module in layer order.",
@@ -1564,107 +1780,6 @@
         },
         "name": "module_may_link"
       },
-      "class_list": {
-        "description": "Every class this process registers, with what it derives from. A class is what Instance.new names and what a save file carries; its properties are what a script may read and write. Inheritance is set inclusion here, so a query for a base class matches every derived instance. Call class_get for one class's properties.",
-        "inputSchema": {
-          "properties": {
-            "derivedFrom": {
-              "description": "Only classes that are a kind of this one.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "class_list"
-      },
-      "class_get": {
-        "description": "One class: what it derives from, and every property it exposes with the type it carries, whether it can be written and whether a script can see it at all. This is the live class table rather than the checked-in manifest, so it describes what this process registered. Use instance_get to read the values off a particular instance.",
-        "inputSchema": {
-          "properties": {
-            "name": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "name"
-          ],
-          "type": "object"
-        },
-        "name": "class_get"
-      },
-      "script_check": {
-        "description": "Type-checks Luau against the engine's generated declarations, without running any of it. Give `source` for a draft or `path` for a file in the repository. Every diagnostic the editor's language server would show comes back here, because both go through the same declaration file. Nothing is evaluated: this surface will not run a script, because a tool runs inside the program's frame and there is nothing here that could interrupt a loop.",
-        "inputSchema": {
-          "properties": {
-            "path": {
-              "description": "A path relative to the repository root, instead of `source`.",
-              "type": "string"
-            },
-            "source": {
-              "description": "Luau to check.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "script_check"
-      },
-      "log_level": {
-        "description": "Reads or changes what this program logs, while it runs. With no argument it lists every category the build has registered and the severity floor each is at. `set` takes the same text the engine.log-level setting does: a bare level for everything, or comma-separated category=level overrides, or both - `warning,net=trace`. Statements below the compiled floor were removed by the preprocessor and cannot be switched on.",
-        "inputSchema": {
-          "properties": {
-            "set": {
-              "description": "A level, or category=level terms, or both.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "log_level"
-      },
-      "metrics_read": {
-        "description": "Every counter, gauge and distribution this process has recorded. A counter accumulates and is drained once a frame, so its value is a rate; a gauge is a level as last set; a histogram carries a mean, a maximum and nearest-rank percentiles over its recent window, which is what says whether a server holding its tick rate on average is still missing a fiftieth of its ticks. Times are nanoseconds. Reading changes nothing.",
-        "inputSchema": {
-          "properties": {
-            "prefix": {
-              "description": "Only names starting with this. Default all of them.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "metrics_read"
-      },
-      "test_run": {
-        "description": "Starts this repository's test suites and returns immediately. `all` runs every suite, which took 171 seconds of suite time when this was written; the default runs only the suites a change could have affected, by the same cascading signature `just test` uses. It runs the binaries that are built and does not build them. Poll test_result for the outcome - nothing here blocks, because a tool runs inside the program's frame.",
-        "inputSchema": {
-          "properties": {
-            "all": {
-              "description": "Run every suite rather than the affected ones.",
-              "type": "boolean"
-            },
-            "verbose": {
-              "description": "Name every suite that was skipped.",
-              "type": "boolean"
-            }
-          },
-          "type": "object"
-        },
-        "name": "test_run"
-      },
-      "test_result": {
-        "description": "How the run test_run started is getting on. While it runs, that is all this says. When it has finished it carries the summary, every suite that failed, and how long it took; pass `full` for the whole generated report, which is tens of kilobytes of per-suite tables. A non-zero exit with no failed suites means the runner itself refused - read `summary`.",
-        "inputSchema": {
-          "properties": {
-            "full": {
-              "description": "Include the whole report rather than the summary.",
-              "type": "boolean"
-            }
-          },
-          "type": "object"
-        },
-        "name": "test_result"
-      },
       "negotiate": {
         "description": "Pure data-factory capability discovery. Reports this host's callable MCP operations and their schemas, and names unsupported proposed capture capabilities instead of guessing from renderer internals. It does not create, load, reset, or mutate a world.",
         "inputSchema": {
@@ -1689,87 +1804,19 @@
         },
         "name": "negotiate"
       },
-      "engine_info": {
-        "description": "The editor's own state: which game is open, whether it has unsaved changes, how many frames have been drawn, which scene is active and what is selected.",
+      "open_window": {
+        "description": "Shows, restores and raises the Studio window, then reports its client geometry.",
         "inputSchema": {
           "type": "object"
         },
-        "name": "engine_info"
+        "name": "open_window"
       },
-      "world_run": {
-        "description": "Starts or stops one scene. `play` runs both halves in this process, `server` runs only Script instances, and `edit` stops it and restores the snapshot taken when it started - which is what makes running a scene non-destructive.",
-        "inputSchema": {
-          "properties": {
-            "mode": {
-              "enum": [
-                "edit",
-                "server",
-                "play"
-              ],
-              "type": "string"
-            },
-            "world": {
-              "description": "Which scene. Defaults to the active one.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "mode"
-          ],
-          "type": "object"
-        },
-        "name": "world_run"
-      },
-      "selection_get": {
-        "description": "What is selected in the editor right now.",
+      "profile_frame": {
+        "description": "The last frame as a flame graph: one span per scope with its depth, its parent, its inclusive time and its self time. Collection is switched on by the first call, so the first reply is empty and the next one is not.",
         "inputSchema": {
           "type": "object"
         },
-        "name": "selection_get"
-      },
-      "select": {
-        "description": "Selects instances in a scene, replacing whatever was selected.",
-        "inputSchema": {
-          "properties": {
-            "ids": {
-              "items": {
-                "type": "integer"
-              },
-              "type": "array"
-            },
-            "world": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "select"
-      },
-      "log_tail": {
-        "description": "The tail of the output panel: the engine log and everything scripts have printed.",
-        "inputSchema": {
-          "properties": {
-            "lines": {
-              "description": "From the end. Default 50.",
-              "type": "integer"
-            }
-          },
-          "type": "object"
-        },
-        "name": "log_tail"
-      },
-      "list_command_palette": {
-        "description": "Lists Studio command-palette entries from the live operator table, including stable ids, shortcuts, availability and refusal reasons.",
-        "inputSchema": {
-          "properties": {
-            "query": {
-              "description": "Optional fuzzy filter, ranked exactly like the palette.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": "list_command_palette"
+        "name": "profile_frame"
       },
       "run_palette_command": {
         "description": "Runs one Studio command-palette entry by the stable id returned by list_command_palette. The same live availability poll used by menus and the palette can refuse it.",
@@ -1808,12 +1855,47 @@
         },
         "name": "screenshot"
       },
-      "open_window": {
-        "description": "Shows, restores and raises the Studio window, then reports its client geometry.",
+      "script_check": {
+        "description": "Type-checks Luau against the engine's generated declarations, without running any of it. Give `source` for a draft or `path` for a file in the repository. Every diagnostic the editor's language server would show comes back here, because both go through the same declaration file. Nothing is evaluated: this surface will not run a script, because a tool runs inside the program's frame and there is nothing here that could interrupt a loop.",
+        "inputSchema": {
+          "properties": {
+            "path": {
+              "description": "A path relative to the repository root, instead of `source`.",
+              "type": "string"
+            },
+            "source": {
+              "description": "Luau to check.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "script_check"
+      },
+      "select": {
+        "description": "Selects instances in a scene, replacing whatever was selected.",
+        "inputSchema": {
+          "properties": {
+            "ids": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "world": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "select"
+      },
+      "selection_get": {
+        "description": "What is selected in the editor right now.",
         "inputSchema": {
           "type": "object"
         },
-        "name": "open_window"
+        "name": "selection_get"
       },
       "set_window_geometry": {
         "description": "Sets the Studio client window position and size, then reports the geometry accepted by the window system.",
@@ -1842,137 +1924,95 @@
         },
         "name": "set_window_geometry"
       },
-      "get_camera_rendering_data": {
-        "description": "Camera calibration for a stable authored camera id, or the scene's active camera.",
+      "test_result": {
+        "description": "How the run test_run started is getting on. While it runs, that is all this says. When it has finished it carries the summary, every suite that failed, and how long it took; pass `full` for the whole generated report, which is tens of kilobytes of per-suite tables. A non-zero exit with no failed suites means the runner itself refused - read `summary`.",
+        "inputSchema": {
+          "properties": {
+            "full": {
+              "description": "Include the whole report rather than the summary.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "name": "test_result"
+      },
+      "test_run": {
+        "description": "Starts this repository's test suites and returns immediately. `all` runs every suite, which took 171 seconds of suite time when this was written; the default runs only the suites a change could have affected, by the same cascading signature `just test` uses. It runs the binaries that are built and does not build them. Poll test_result for the outcome - nothing here blocks, because a tool runs inside the program's frame.",
+        "inputSchema": {
+          "properties": {
+            "all": {
+              "description": "Run every suite rather than the affected ones.",
+              "type": "boolean"
+            },
+            "verbose": {
+              "description": "Name every suite that was skipped.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "name": "test_run"
+      },
+      "viewport_behavior_diagnostics": {
+        "description": "One completed focused viewport's virtual behavior pose and bounded culling, LOD, light, particle, and portal evidence. This is a read-only product diagnostic for capture gates.",
         "inputSchema": {
           "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "type": "object"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options"
-          ],
           "type": "object"
         },
-        "name": "get_camera_rendering_data"
+        "name": "viewport_behavior_diagnostics"
       },
-      "emulate_mouse_move": {
-        "description": "Moves the mouse pointer to client coordinates through this program's input boundary.",
+      "world_list": {
+        "description": "Every scene, with its state, its tick statistics and how many instances it holds. A world is a scene; the universe is the game.",
         "inputSchema": {
-          "properties": {
-            "x": {
-              "type": "number"
-            },
-            "y": {
-              "type": "number"
-            }
-          },
-          "required": [
-            "x",
-            "y"
-          ],
           "type": "object"
         },
-        "name": "emulate_mouse_move"
+        "name": "world_list"
       },
-      "emulate_click": {
-        "description": "Clicks, presses, or releases a mouse button at client coordinates through this program's input boundary. Omit down for one complete click.",
+      "world_run": {
+        "description": "Starts or stops one scene. `play` runs both halves in this process, `server` runs only Script instances, and `edit` stops it and restores the snapshot taken when it started - which is what makes running a scene non-destructive.",
         "inputSchema": {
           "properties": {
-            "button": {
+            "mode": {
               "enum": [
-                "left",
-                "middle",
-                "right"
+                "edit",
+                "server",
+                "play"
               ],
               "type": "string"
             },
-            "down": {
-              "type": "boolean"
-            },
-            "x": {
-              "type": "number"
-            },
-            "y": {
-              "type": "number"
-            }
-          },
-          "required": [
-            "x",
-            "y"
-          ],
-          "type": "object"
-        },
-        "name": "emulate_click"
-      },
-      "emulate_mouse_wheel": {
-        "description": "Turns the mouse wheel by a signed number of vertical notches through this program's input boundary.",
-        "inputSchema": {
-          "properties": {
-            "notches": {
-              "type": "number"
-            }
-          },
-          "required": [
-            "notches"
-          ],
-          "type": "object"
-        },
-        "name": "emulate_mouse_wheel"
-      },
-      "emulate_key": {
-        "description": "Presses, releases, or taps one named keyboard key through this program's input boundary. Omit down for one complete key press.",
-        "inputSchema": {
-          "properties": {
-            "down": {
-              "type": "boolean"
-            },
-            "key": {
-              "type": "string"
-            },
-            "modifiers": {
-              "items": {
-                "enum": [
-                  "shift",
-                  "control",
-                  "alt",
-                  "gui"
-                ],
-                "type": "string"
-              },
-              "type": "array",
-              "uniqueItems": true
-            }
-          },
-          "required": [
-            "key"
-          ],
-          "type": "object"
-        },
-        "name": "emulate_key"
-      },
-      "emulate_text": {
-        "description": "Sends UTF-8 text through this program's input boundary.",
-        "inputSchema": {
-          "properties": {
-            "text": {
-              "maxLength": 16384,
+            "world": {
+              "description": "Which scene. Defaults to the active one.",
               "type": "string"
             }
           },
           "required": [
-            "text"
+            "mode"
           ],
           "type": "object"
         },
-        "name": "emulate_text"
+        "name": "world_run"
+      },
+      "world_tree": {
+        "description": "The instance tree of one scene, as an author sees it in the explorer. Depth-limited and count-limited; ask for more when you know where you are going.",
+        "inputSchema": {
+          "properties": {
+            "depth": {
+              "description": "Levels to descend. Default 3.",
+              "type": "integer"
+            },
+            "limit": {
+              "description": "Instances at most. Default 200.",
+              "type": "integer"
+            },
+            "world": {
+              "description": "Which scene, by name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "world_tree"
       }
     },
     "required_tools": [
@@ -1991,25 +2031,6 @@
     "forbidden_tools": []
   },
   "factory": {
-    "server": "atomic-studio",
-    "required_tools": [
-      "world_create",
-      "world_reset",
-      "begin_raw_scene_extract",
-      "physics_observation_records",
-      "world_select",
-      "negotiate"
-    ],
-    "forbidden_tools": [
-      "world_list",
-      "world_run",
-      "render_only",
-      "entity_create",
-      "entity_destroy",
-      "component_remove",
-      "emulate_mouse_move",
-      "emulate_mouse_wheel"
-    ],
     "initialize": {
       "capabilities": {
         "prompts": {
@@ -4362,6 +4383,18 @@
         "name": "AGENTS.md (engine/gui)",
         "uri": "atomic://agents/engine/gui"
       },
+      "atomic://agents/engine/imagegraph": {
+        "description": "The invariants specific to engine/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraph)",
+        "uri": "atomic://agents/engine/imagegraph"
+      },
+      "atomic://agents/engine/imagegraphio": {
+        "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphio)",
+        "uri": "atomic://agents/engine/imagegraphio"
+      },
       "atomic://agents/engine/input": {
         "description": "The invariants specific to engine/input. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -4506,6 +4539,18 @@
         "name": "AGENTS.md (tools/docgen)",
         "uri": "atomic://agents/tools/docgen"
       },
+      "atomic://agents/tools/imagegraph": {
+        "description": "The invariants specific to tools/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (tools/imagegraph)",
+        "uri": "atomic://agents/tools/imagegraph"
+      },
+      "atomic://agents/tools/pxcimport": {
+        "description": "The invariants specific to tools/pxcimport. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (tools/pxcimport)",
+        "uri": "atomic://agents/tools/pxcimport"
+      },
       "atomic://agents/unified_tests": {
         "description": "The invariants specific to unified_tests. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -4537,6 +4582,7 @@
         "uri": "atomic://bindings/manifest"
       }
     },
+    "server": "atomic-studio",
     "tool_rows": {
       "begin_raw_scene_extract": {
         "description": "Captures one fenced scene as portable raw mesh and texture sections with an inline manifest.",
@@ -5425,6 +5471,64 @@
         },
         "name": "get_scene_snapshot"
       },
+      "get_scene_snapshot_chunk": {
+        "description": "Returns at most 32768 bytes of the retained exact snapshot JSON as base64 at its original revision.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "byte_begin": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "byte_end": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "hash": {
+              "type": "string"
+            },
+            "instance_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "properties": {
+                "expected_tick": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_epoch": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "expected_world_version": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "expected_tick",
+                "expected_world_epoch",
+                "expected_world_version"
+              ],
+              "type": "object"
+            },
+            "resource_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "options",
+            "resource_id",
+            "hash",
+            "byte_begin",
+            "byte_end"
+          ],
+          "type": "object"
+        },
+        "name": "get_scene_snapshot_chunk"
+      },
       "get_signed_distance_field": {
         "description": "Samples a bounded world-space signed-distance grid at cell centres against one retained paused snapshot. Distances are metres, negative inside and positive outside. Exact values require one authored analytic box, sphere or cylinder; unions and baked geometry are returned as unknown.",
         "inputSchema": {
@@ -5968,6 +6072,26 @@
         },
         "name": "release_raw_scene_extract"
       },
+      "release_scene_snapshot": {
+        "description": "Releases one retained scene snapshot, including after its world revision changes.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "instance_id": {
+              "type": "string"
+            },
+            "resource_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instance_id",
+            "resource_id"
+          ],
+          "type": "object"
+        },
+        "name": "release_scene_snapshot"
+      },
       "restore": {
         "description": "Restores a compatible checkpoint through a scratch universe and starts a fresh epoch.",
         "inputSchema": {
@@ -6439,85 +6563,25 @@
           "type": "object"
         },
         "name": "world_select"
-      },
-      "get_scene_snapshot_chunk": {
-        "description": "Returns at most 32768 bytes of the retained exact snapshot JSON as base64 at its original revision.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "byte_begin": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "byte_end": {
-              "minimum": 1,
-              "type": "integer"
-            },
-            "hash": {
-              "type": "string"
-            },
-            "instance_id": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "options": {
-              "properties": {
-                "expected_tick": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_epoch": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "expected_world_version": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "expected_tick",
-                "expected_world_epoch",
-                "expected_world_version"
-              ],
-              "type": "object"
-            },
-            "resource_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "options",
-            "resource_id",
-            "hash",
-            "byte_begin",
-            "byte_end"
-          ],
-          "type": "object"
-        },
-        "name": "get_scene_snapshot_chunk"
-      },
-      "release_scene_snapshot": {
-        "description": "Releases one retained scene snapshot, including after its world revision changes.",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "instance_id": {
-              "type": "string"
-            },
-            "resource_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "instance_id",
-            "resource_id"
-          ],
-          "type": "object"
-        },
-        "name": "release_scene_snapshot"
       }
-    }
+    },
+    "required_tools": [
+      "world_create",
+      "world_reset",
+      "begin_raw_scene_extract",
+      "physics_observation_records",
+      "world_select",
+      "negotiate"
+    ],
+    "forbidden_tools": [
+      "world_list",
+      "world_run",
+      "render_only",
+      "entity_create",
+      "entity_destroy",
+      "component_remove",
+      "emulate_mouse_move",
+      "emulate_mouse_wheel"
+    ]
   }
 }

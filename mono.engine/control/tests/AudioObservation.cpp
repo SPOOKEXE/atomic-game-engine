@@ -1,3 +1,5 @@
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/AudioObservation.hpp>
 #include <engine/core/Name.hpp>
@@ -145,7 +147,9 @@ TEST_CASE(
 	universe.Create(settings);
 	Surface surface("test", "test");
 	const auto bridge = std::make_shared<FakeBridge>();
-	surface.Enable(std::array{engine::control::features::DataAudioObservation(universe, bridge)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataAudioObservation(universe, bridge)}
+	);
 
 	bool failed = false;
 	const json observation = Call(surface, "get_audio_observation", {{"instance_id", "audio"}}, failed);

@@ -447,6 +447,8 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 	);
 	const core::Name pipeline("bridge-packed-data-capture");
 	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto firstPipeline = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(firstPipeline);
 
 	world::Universe worlds;
 	const world::WorldId world = worlds.Create({.Name = core::Name("data-world")});
@@ -482,6 +484,10 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 	uint64_t ticket = 0;
 	std::string detail;
 	REQUIRE(bridge.Queue("data-world", request, ticket, detail));
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto queuedPipeline = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(queuedPipeline);
+	CHECK(queuedPipeline->Revision != firstPipeline->Revision);
 	render::SceneTarget target{64, 64};
 	render::View view;
 	view.WorldName = core::Name("data-world");
@@ -500,6 +506,15 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 		if (poll.Status == "pending") SDL_Delay(1);
 	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
 	REQUIRE(poll.Status == "ready");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto replacementPipeline = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(replacementPipeline);
+	CHECK(replacementPipeline->Revision != queuedPipeline->Revision);
+	bridge.CancelPending();
+	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+	REQUIRE(bridge.Poll("data-world", ticket, poll, detail));
+	CHECK(poll.Status == "ready");
 	const auto packed = std::ranges::find_if(poll.Planes, [](const script::DataCaptureBridgePlane &plane) {
 		return plane.Channel == "packed/depth_ao_roughness";
 	});
@@ -529,6 +544,8 @@ TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gp
 	CHECK(gpuPacked->RowStride == gpuPacked->Width * 16);
 	CHECK(gpuBytes == bytes);
 	REQUIRE(bridge.Release("data-world", ticket, detail));
+	CHECK_FALSE(bridge.Poll("data-world", ticket, poll, detail));
+	CHECK_FALSE(bridge.ReadPlane("data-world", ticket, packed->Resource, 0, packed->ByteSize, bytes, detail));
 }
 
 TEST_CASE(
@@ -1152,7 +1169,7 @@ TEST_CASE("script view.camera validates a queued snapshot on its owner", "[rende
 }
 
 TEST_CASE(
-	"script view.camera rejects an armed patch after its snapshot becomes stale", "[render][data-capture]"
+	"script view.camera preserves terminal replies while cancelling pending work", "[render][data-capture]"
 ) {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
@@ -1186,10 +1203,22 @@ TEST_CASE(
 	bridge.PrepareView(fresh);
 	CHECK(fresh.SnapshotId.empty());
 	bridge.Pump();
+	uint64_t pendingTicket = 0;
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"data-world",
+		MutationRequest("data-world", pipeline.Text(), installed->Revision, "pending-snapshot"),
+		pendingTicket,
+		detail
+	));
+	bridge.CancelPending();
+	bridge.Pump();
 	engine::script::ViewCameraMutationPoll poll;
 	REQUIRE(bridge.PollViewCameraMutation("data-world", ticket, poll, detail));
 	CHECK(poll.Terminal);
 	CHECK(poll.Status == "stale");
+	REQUIRE(bridge.PollViewCameraMutation("data-world", pendingTicket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "cancelled");
 	CHECK_FALSE(
 		renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, installed->Revision), fresh)
 	);
@@ -1253,9 +1282,6 @@ TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[
 	const FrameResult restoredFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
 	REQUIRE(restoredFrame.Submitted);
 	bridge.Pump();
-	REQUIRE(bridge.PollViewCameraMutation("data-world", appliedTicket, poll, detail));
-	CHECK(poll.Terminal);
-	CHECK(poll.Status == "applied");
 
 	REQUIRE(
 		session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
@@ -1285,6 +1311,9 @@ TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[
 	bridge.CancelPending();
 	bridge.Pump();
 	CHECK_FALSE(bridge.HasPending());
+	REQUIRE(bridge.PollViewCameraMutation("data-world", appliedTicket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "applied");
 	REQUIRE(bridge.PollViewCameraMutation("data-world", cancelledTicket, poll, detail));
 	CHECK(poll.Terminal);
 	CHECK(poll.Status == "cancelled");
@@ -1418,6 +1447,8 @@ TEST_CASE("script capture does not retain a scene sidecar for a stale snapshot",
 	REQUIRE(session.Resume("data-world", 0).Status == engine::world::DataFactoryStatus::Ok);
 	View view = MutationView(snapshot, pipeline);
 	bridge.PrepareView(view);
+	bridge.Pump();
+	bridge.CancelPending();
 	bridge.Pump();
 	engine::script::DataCaptureBridgePoll reply;
 	REQUIRE(bridge.Poll("data-world", ticket, reply, detail));
@@ -1672,6 +1703,8 @@ TEST_CASE(
 	View currentView = MutationView({}, pipeline);
 	CHECK_FALSE(bridge.PrepareView(currentView));
 	CHECK(currentView.SnapshotId == secondSnapshot);
+	bridge.CancelPending();
+	bridge.Pump();
 	engine::script::DataCaptureBridgePoll poll;
 	REQUIRE(bridge.Poll("data-world", currentTicket, poll, detail));
 	CHECK(poll.Status == "failed");
@@ -1972,6 +2005,70 @@ TEST_CASE("script capture owner cancellation drains every pending kind", "[rende
 	CHECK(mutation.Status == "cancelled");
 }
 
+TEST_CASE("script capture shutdown discards only terminal retained tickets", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t captureTicket = 0;
+	uint64_t mutationTicket = 0;
+	REQUIRE(bridge.Queue("data-world", Request(), captureTicket, detail));
+	REQUIRE(bridge.QueueViewCameraMutation("data-world", MutationRequest(), mutationTicket, detail));
+	CHECK(bridge.HasOutstanding());
+	CHECK_FALSE(bridge.DiscardTerminal());
+	bridge.CancelPending();
+	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+	CHECK(bridge.HasOutstanding());
+	REQUIRE(bridge.DiscardTerminal());
+	CHECK_FALSE(bridge.HasOutstanding());
+	engine::script::DataCaptureBridgePoll capture;
+	CHECK_FALSE(bridge.Poll("data-world", captureTicket, capture, detail));
+	engine::script::ViewCameraMutationPoll mutation;
+	CHECK_FALSE(bridge.PollViewCameraMutation("data-world", mutationTicket, mutation, detail));
+}
+
+TEST_CASE("renderer pipeline reset preserves terminal bridge tickets", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const std::string snapshot = PauseAndSnapshot(worlds, session);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("capture-reset-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	auto request = Request();
+	request.SnapshotId = snapshot;
+	request.Pipeline = pipeline.Text();
+	request.CaptureNode = "data-capture";
+	uint64_t ticket = 0;
+	REQUIRE(bridge.Queue("data-world", request, ticket, detail));
+	View view = MutationView(snapshot, pipeline);
+	ScriptDataCaptureBridge::PreparedView prepared;
+	CHECK_FALSE(bridge.PrepareView(view, &prepared));
+	REQUIRE(prepared.Captures == std::vector<uint64_t>{ticket});
+	CHECK_FALSE(bridge.HasPending());
+	engine::script::DataCaptureBridgePoll beforeReset;
+	REQUIRE(bridge.Poll("data-world", ticket, beforeReset, detail));
+	CHECK(beforeReset.Status == "failed");
+
+	renderer.ResetPipelines();
+	bridge.CancelPending();
+	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+	engine::script::DataCaptureBridgePoll reply;
+	REQUIRE(bridge.Poll("data-world", ticket, reply, detail));
+	CHECK(reply.Status == beforeReset.Status);
+	REQUIRE(bridge.Release("data-world", ticket, detail));
+}
+
 TEST_CASE("script capture tears down one instance without touching another", "[render][data-capture]") {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
@@ -1980,12 +2077,18 @@ TEST_CASE("script capture tears down one instance without touching another", "[r
 	std::string detail;
 	uint64_t retiring = 0;
 	uint64_t retained = 0;
+	uint64_t retiringMutation = 0;
 	REQUIRE(bridge.Queue("retiring-world", Request("retiring-world"), retiring, detail));
 	REQUIRE(bridge.Queue("retained-world", Request("retained-world"), retained, detail));
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"retiring-world", MutationRequest("retiring-world"), retiringMutation, detail
+	));
 	REQUIRE(bridge.TeardownInstance("retiring-world", detail));
 	engine::script::DataCaptureBridgePoll reply;
 	CHECK_FALSE(bridge.Poll("retiring-world", retiring, reply, detail));
 	CHECK(bridge.Poll("retained-world", retained, reply, detail));
+	engine::script::ViewCameraMutationPoll mutation;
+	CHECK_FALSE(bridge.PollViewCameraMutation("retiring-world", retiringMutation, mutation, detail));
 	uint64_t replacement = 0;
 	CHECK(bridge.Queue("retiring-world", Request("retiring-world"), replacement, detail));
 	CHECK_FALSE(bridge.TeardownInstance("", detail));

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <engine/control/features/DataFactory.hpp>
+#include <engine/control/Surface.hpp>
 
 // The data-factory lifecycle tools. The host owns the session; this adapter
 // validates MCP input before inspecting or mutating that session.

@@ -86,7 +86,8 @@ namespace {
 
 	bool Connect(asio::ip::tcp::socket &socket, uint16_t port) {
 		std::error_code failure;
-		for (int attempt = 0; attempt < 200; ++attempt) {
+		const Clock::time_point deadline = Clock::now() + std::chrono::seconds(10);
+		while (Clock::now() < deadline) {
 			socket.connect({asio::ip::address_v4::loopback(), port}, failure);
 			if (!failure) return true;
 			std::error_code ignored;

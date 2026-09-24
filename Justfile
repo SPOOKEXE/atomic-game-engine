@@ -195,6 +195,40 @@ data-capture-hook-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_render
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.render.bench.data-capture-hooks --all --samples {{samples}}
 
+# Repeat a fixed headless Vulkan data-capture workload in the release-optimised preset.
+data-capture-gpu-profile captures="30":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    if ! MONO_DATA_CAPTURE_PROFILE=1 MONO_DATA_CAPTURE_PROFILE_CAPTURES={{captures}} timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.data-capture-gpu-profile --samples 1; then
+        echo "data-capture-gpu-profile failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
+
+# Release-optimised MCP discovery, capture dispatch, and provider lifecycle cost.
+mcp-control-profile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_control
+    if ! timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_control --suite engine.control.bench.mcp-control --samples 1; then
+        echo "mcp-control-profile failed or exceeded its 180s deadline" >&2
+        exit 1
+    fi
+
+# Repeatedly activate and remove the real capture tool provider around a
+# synthetic 64 KiB pending ticket, then report live-byte slope and ownership.
+mcp-capture-hook-soak cycles="128":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_control
+    if ! MONO_MCP_CAPTURE_SOAK=1 MONO_MCP_CAPTURE_SOAK_CYCLES={{cycles}} timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_control --suite engine.control.bench.mcp-control --samples 1; then
+        echo "mcp-capture-hook-soak failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
+
 # The normal benchmark runner reports only wall time. This GPU suite also emits
 # CPU recording, Vulkan timestamp, residency, allocation, cache and transfer
 # counters, so invoke its selected suite directly in the optimized preset.

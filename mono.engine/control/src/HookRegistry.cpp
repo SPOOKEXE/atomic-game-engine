@@ -16,16 +16,16 @@ namespace engine::control {
 		std::vector<Prompt> Prompts;
 		std::string Failure;
 		std::function<bool()> Drain;
+		std::vector<std::string> DrainTools;
 		std::function<void()> Release;
 	};
 
 	struct HookRegistryState {
 		struct Activation {
 			HookStatus Status;
-			bool Builtin = false;
-			bool Hidden = false;
 			size_t Guards = 0;
 			std::function<bool()> Drain;
+			std::vector<std::string> DrainTools;
 			std::function<void()> Release;
 		};
 
@@ -195,6 +195,10 @@ namespace engine::control {
 		State->Drain = std::move(drained);
 	}
 
+	void HookRegistration::KeepToolDuringDrain(std::string name) {
+		State->DrainTools.push_back(std::move(name));
+	}
+
 	void HookRegistration::SetRelease(std::function<void()> release) {
 		State->Release = std::move(release);
 	}
@@ -209,22 +213,6 @@ namespace engine::control {
 
 	HookLease
 	HookRegistry::Activate(HookDescriptor descriptor, const HookInstaller &installer, std::string &failure) {
-		return ActivateImpl(std::move(descriptor), installer, failure, false);
-	}
-
-	HookLease HookRegistry::ActivateBuiltin(
-		HookDescriptor descriptor, const HookInstaller &installer, std::string &failure, bool hidden
-	) {
-		return ActivateImpl(std::move(descriptor), installer, failure, true, hidden);
-	}
-
-	HookLease HookRegistry::ActivateImpl(
-		HookDescriptor descriptor,
-		const HookInstaller &installer,
-		std::string &failure,
-		bool builtin,
-		bool hidden
-	) {
 		failure.clear();
 		if (descriptor.Id.empty() || descriptor.Revision.empty()) {
 			failure = "hook id and revision must not be empty";
@@ -252,6 +240,12 @@ namespace engine::control {
 		if (!registration.Failure().empty()) {
 			if (registration.State->Release) registration.State->Release();
 			failure = std::string(registration.Failure());
+			return {};
+		}
+		for (const std::string &name : registration.State->DrainTools) {
+			if (Has(registration.State->Tools, name)) continue;
+			if (registration.State->Release) registration.State->Release();
+			failure = "draining tool is not registered by hook " + descriptor.Id + ": " + name;
 			return {};
 		}
 
@@ -303,9 +297,8 @@ namespace engine::control {
 			.Resources = {},
 			.Prompts = {},
 		};
-		activation.Builtin = builtin;
-		activation.Hidden = hidden;
 		activation.Drain = std::move(registration.State->Drain);
+		activation.DrainTools = std::move(registration.State->DrainTools);
 		activation.Release = std::move(registration.State->Release);
 		HookLease lease(State, activation.Status.Descriptor.Id, generation);
 		std::vector<std::string> tools, resources, prompts;
@@ -388,14 +381,22 @@ namespace engine::control {
 			failure = exception.what();
 			return {};
 		}
-		if (!hidden) State->ControlGeneration++;
+		State->ControlGeneration++;
 		return lease;
 	}
 
 	std::vector<HookStatus> HookRegistry::Active() const {
 		std::vector<HookStatus> active;
 		for (const HookRegistryState::Activation &activation : State->Activations) {
-			if (!activation.Hidden) active.push_back(activation.Status);
+			HookStatus status = activation.Status;
+			if (status.State == HookState::Draining) {
+				std::erase_if(status.Tools, [&activation](const std::string &name) {
+					return std::ranges::find(activation.DrainTools, name) == activation.DrainTools.end();
+				});
+				status.Resources.clear();
+				status.Prompts.clear();
+			}
+			active.push_back(std::move(status));
 		}
 		return active;
 	}
@@ -418,9 +419,12 @@ namespace engine::control {
 
 	bool HookRegistry::VisibleTool(std::string_view name) const {
 		const auto owner = State->ToolOwners.find(std::string(name));
-		return owner == State->ToolOwners.end() ||
-			   (Find(*State, owner->second.first, owner->second.second) != nullptr &&
-				Find(*State, owner->second.first, owner->second.second)->Status.State == HookState::Active);
+		if (owner == State->ToolOwners.end()) return true;
+		const auto *activation = Find(*State, owner->second.first, owner->second.second);
+		return activation != nullptr &&
+			   (activation->Status.State == HookState::Active ||
+				(activation->Status.State == HookState::Draining &&
+				 std::ranges::find(activation->DrainTools, name) != activation->DrainTools.end()));
 	}
 	bool HookRegistry::VisibleResource(std::string_view uri) const {
 		const auto owner = State->ResourceOwners.find(std::string(uri));
@@ -438,9 +442,9 @@ namespace engine::control {
 	void HookRegistry::Close(std::string_view id, uint64_t generation) {
 		HookRegistryState::Activation *activation = Find(*State, id, generation);
 		if (activation == nullptr || activation->Status.State == HookState::Draining) return;
-		// A close makes callbacks unavailable immediately. Dependants delay removal,
-		// not the state change, so a provider cannot accept new calls while retiring.
+		// Only named cleanup tools stay callable while retained work drains.
 		activation->Status.State = HookState::Draining;
+		State->ControlGeneration++;
 		if (HasActiveDependent(*State, id)) {
 			return;
 		}
@@ -452,7 +456,7 @@ namespace engine::control {
 		const auto owner = State->ToolOwners.find(std::string(tool));
 		if (owner == State->ToolOwners.end()) return false;
 		HookRegistryState::Activation *activation = Find(*State, owner->second.first, owner->second.second);
-		if (activation == nullptr || activation->Status.State != HookState::Active ||
+		if (activation == nullptr || !VisibleTool(tool) ||
 			owner->second != std::pair{std::string(expectedId), expectedGeneration})
 			return false;
 		activation->Guards++;
@@ -519,7 +523,6 @@ namespace engine::control {
 				State->PromptOwners.erase(owner);
 			}
 		}
-		const bool hidden = activation->Hidden;
 		if (activation->Release) activation->Release();
 		State->Activations.erase(
 			std::remove_if(
@@ -531,7 +534,7 @@ namespace engine::control {
 			),
 			State->Activations.end()
 		);
-		if (!hidden) State->ControlGeneration++;
+		State->ControlGeneration++;
 		Reap();
 	}
 

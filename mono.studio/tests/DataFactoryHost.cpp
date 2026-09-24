@@ -1,5 +1,6 @@
+#include "../../mono.engine/control/tests/HookFixture.hpp"
+
 #include <engine/assets/ContentHash.hpp>
-#include <engine/control/Features.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Name.hpp>
@@ -392,7 +393,7 @@ TEST_CASE("Studio factory exposes fenced authored-affordance reads", "[studio][d
 	std::string detail;
 	REQUIRE(host.Start(worlds, Callbacks(), detail));
 	engine::control::Surface surface("studio-test", "test");
-	surface.Enable(std::array{engine::control::features::Discovery()});
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
 	host.InstallTools({.Surface = surface, .RendererReady = true});
 
 	const auto created = host.Session()->CreateWorld(Request("affordances", "create"));

@@ -1,6 +1,8 @@
 // The multi-camera row is a protocol contract: it coordinates one checked
 // lifecycle revision and one renderer frame without claiming an atomic simulation step.
 
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataScene.hpp>
@@ -174,8 +176,12 @@ namespace {
 			WorldSettings settings;
 			settings.Name = Name("capture-world");
 			UniverseRef.Create(settings);
-			SurfaceRef.Enable(std::array{engine::control::features::DataCapture(Session, Bridge)});
-			SurfaceRef.Enable(std::array{engine::control::features::DataScene(UniverseRef, Bridge)});
+			engine::control::test::Install(
+				SurfaceRef, std::array{engine::control::test::DataCapture(Session, Bridge)}
+			);
+			engine::control::test::Install(
+				SurfaceRef, std::array{engine::control::test::DataScene(UniverseRef, Bridge)}
+			);
 		}
 
 		Universe UniverseRef;
