@@ -36,6 +36,7 @@ namespace {
 	struct LitScene {
 		engine::ecs::Store World{"portal-lighting"};
 		engine::ecs::Scheduler Systems;
+		std::filesystem::path PreviousAssets = engine::core::Paths::Assets();
 
 		explicit LitScene(const char *scene) {
 			engine::parallel::Jobs::Start(2);
@@ -54,6 +55,7 @@ namespace {
 		}
 
 		~LitScene() {
+			engine::core::Paths::SetAssetsOverride(PreviousAssets);
 			engine::parallel::Jobs::Stop();
 		}
 
