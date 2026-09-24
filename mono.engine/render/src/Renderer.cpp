@@ -1378,6 +1378,13 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::AddTextureBatch(std::span<const TextureBatchImage> images, core::Name owner) {
+		if (State == nullptr || State->Device == nullptr || !State->Textures.AddBatch(images, owner))
+			return false;
+		++State->ResourceEpoch;
+		return true;
+	}
+
 	void Renderer::ExpectTexture(const core::Name &name, core::Name owner) {
 		if (State != nullptr && name.IsValid() && !State->Textures.Expecting(name, owner)) {
 			State->Textures.Expect(name, owner);

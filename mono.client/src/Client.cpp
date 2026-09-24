@@ -1743,6 +1743,7 @@ namespace client {
 		}
 		PresentationLink.reset();
 		PortalImages.reset();
+		LiveImageGraphs.Clear(Renderer);
 
 		// **Not guarded by the window, and that guard was the reason nothing
 		// caught the above.** Tearing the renderer down only when there was a
@@ -4135,14 +4136,28 @@ namespace client {
 										: EditableMeshes.RefreshLods(store, Renderer, owner);
 				const auto images =
 					Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
-				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
+				const auto graphImages =
+					LiveImageGraphs.Refresh(store, Renderer, owner, engine::core::Paths::Assets());
+				VisualResourcesChanged =
+					meshes > 0 || images > 0 || graphImages > 0 || VisualResourcesChanged;
 			});
 		};
 		{
 			ENGINE_HEAP_SCOPE("client.editable");
-			for (const auto world : Simulated)
+			LiveImageGraphs.BeginFrame();
+			std::vector<engine::world::WorldId> preparedWorlds(Simulated.begin(), Simulated.end());
+			if (ReportedJoin) preparedWorlds.push_back(Replicated);
+			std::vector<engine::core::Name> liveOwners;
+			liveOwners.reserve(preparedWorlds.size());
+			for (const auto world : preparedWorlds)
+				liveOwners.push_back(Universe_->NameOf(world));
+			for (size_t offset = 0; offset < preparedWorlds.size(); ++offset) {
+				const auto world = preparedWorlds[(LiveImageWorldCursor + offset) % preparedWorlds.size()];
 				prepareEditable(world);
-			if (ReportedJoin) prepareEditable(Replicated);
+			}
+			if (!preparedWorlds.empty())
+				LiveImageWorldCursor = (LiveImageWorldCursor + 1) % preparedWorlds.size();
+			LiveImageGraphs.RetireInactiveOwners(Renderer, liveOwners);
 		}
 
 		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui(factoryPaused)) {

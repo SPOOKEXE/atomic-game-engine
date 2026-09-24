@@ -29,7 +29,9 @@ a module that exists is listed. Run `just docs-pages` after adding one;
 - @subpage md_mono_8engine_2bake_2AGENTS
 - @subpage md_mono_8engine_2bakegraph_2AGENTS
 - @subpage md_mono_8engine_2graph_2AGENTS
+- @subpage md_mono_8engine_2imagegraph_2AGENTS
 - @subpage md_mono_8engine_2script_2AGENTS
+- @subpage md_mono_8engine_2imagegraphio_2AGENTS
 - @subpage md_mono_8engine_2scriptjs_2AGENTS
 - @subpage md_mono_8engine_2scriptluau_2AGENTS
 - @subpage md_mono_8engine_2delivery_2AGENTS
@@ -58,3 +60,5 @@ a module that exists is listed. Run `just docs-pages` after adding one;
 - @subpage md_mono_8unified__tests_2AGENTS
 - @subpage md_mono_8tools_2AGENTS
 - @subpage md_mono_8tools_2docgen_2AGENTS
+- @subpage md_mono_8tools_2pxcimport_2AGENTS
+- @subpage md_mono_8tools_2imagegraph_2AGENTS

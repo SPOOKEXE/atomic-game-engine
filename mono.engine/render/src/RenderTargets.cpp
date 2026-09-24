@@ -249,6 +249,8 @@ namespace engine::render {
 				slot.Phase = slot.Cancelled ? ResourceImagePhase::Free : ResourceImagePhase::Ready;
 			}
 		}
+		for (auto &slot : GraphResources.Transform3D)
+			if (slot.Phase == GraphResourceCache::Transform3DPhase::Recorded) ReleaseTransform3D(slot);
 		for (const StagedSceneFrame &staged : GraphResources.StagedSceneFrames) {
 			if (staged.Slot >= SceneSlots.size() || staged.Frame >= SceneSlot::RETAINED_FRAMES) {
 				continue;
@@ -268,7 +270,13 @@ namespace engine::render {
 				submission.Images[submission.ImageCount++] = index;
 			}
 		}
-		if (GraphResources.StagedSceneFrames.empty() && submission.ImageCount == 0) {
+		for (uint32_t index = 0; index < GraphResources.Transform3D.size(); index++) {
+			if (GraphResources.Transform3D[index].Phase == GraphResourceCache::Transform3DPhase::Recorded) {
+				submission.Transform3DSlots[submission.Transform3DCount++] = index;
+			}
+		}
+		if (GraphResources.StagedSceneFrames.empty() && submission.ImageCount == 0 &&
+			submission.Transform3DCount == 0) {
 			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
 			FinishPortalImports(command, submitted);
 			return submitted;
@@ -280,11 +288,23 @@ namespace engine::render {
 			return false;
 		}
 
+		// `RetainSceneFrame` records the counters before this command is handed to
+		// SDL. Publish the confirmed submission outcome with that retained image,
+		// so `SceneFrameResult` never reports its completed pixels as unsubmitted.
+		for (const StagedSceneFrame &staged : GraphResources.StagedSceneFrames) {
+			if (staged.Slot >= SceneSlots.size() || staged.Frame >= SceneSlot::RETAINED_FRAMES) continue;
+			SceneSlot::RetainedFrame &frame = SceneSlots[staged.Slot].Retained[staged.Frame];
+			if (frame.Sequence == staged.Sequence) frame.Result.Submitted = true;
+		}
 		FinishPortalImports(command, true);
 		submission.Fence = fence;
 		submission.Frames = std::move(GraphResources.StagedSceneFrames);
 		for (uint32_t index = 0; index < submission.ImageCount; index++) {
 			GraphResources.Images[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
+		}
+		for (uint32_t index = 0; index < submission.Transform3DCount; index++) {
+			GraphResources.Transform3D[submission.Transform3DSlots[index]].Phase =
+				GraphResourceCache::Transform3DPhase::Submitted;
 		}
 		GraphResources.PendingSceneSubmissions.push_back(std::move(submission));
 		GraphResources.StagedSceneFrames.clear();
@@ -329,6 +349,51 @@ namespace engine::render {
 			}
 
 			SDL_ReleaseGPUFence(Device, submission.Fence);
+			for (uint32_t transform = 0; transform < submission.Transform3DCount; transform++) {
+				auto &slot = GraphResources.Transform3D[submission.Transform3DSlots[transform]];
+				const bool superseded = std::any_of(
+					GraphResources.Transform3D.begin(),
+					GraphResources.Transform3D.end(),
+					[&slot](const GraphResourceCache::Transform3DSlot &candidate) {
+						return candidate.Owner == slot.Owner && candidate.Name == slot.Name &&
+							   candidate.Generation > slot.Generation;
+					}
+				);
+				auto published = std::find_if(
+					GraphResources.PublishedTransform3DOutputs.begin(),
+					GraphResources.PublishedTransform3DOutputs.end(),
+					[&slot](const GraphResourceCache::PublishedTransform3D &candidate) {
+						return candidate.Owner == slot.Owner && candidate.Name == slot.Name;
+					}
+				);
+				const bool obsolete = published != GraphResources.PublishedTransform3DOutputs.end() &&
+									  published->Generation >= slot.Generation;
+				if (slot.Succeeded && !slot.Cancelled && !superseded && !obsolete) {
+					SDL_GPUTexture *retired = nullptr;
+					const size_t bytes = size_t(slot.Width) * slot.Height * 4;
+					if (Textures.ReplaceAdopt(
+							slot.Name,
+							slot.Resources.Rendered,
+							slot.Width,
+							slot.Height,
+							bytes,
+							slot.Owner,
+							retired
+						)) {
+						slot.Resources.Rendered = nullptr;
+						if (retired != nullptr) GraphResources.RetiredTextures.push_back(retired);
+						if (published == GraphResources.PublishedTransform3DOutputs.end()) {
+							GraphResources.PublishedTransform3DOutputs.push_back(
+								{.Owner = slot.Owner, .Name = slot.Name, .Generation = slot.Generation}
+							);
+						} else {
+							published->Generation = slot.Generation;
+						}
+						++ResourceEpoch;
+					}
+				}
+				ReleaseTransform3D(slot);
+			}
 			for (uint32_t image = 0; image < submission.ImageCount; image++) {
 				CollectResourceImage(submission.Images[image]);
 			}

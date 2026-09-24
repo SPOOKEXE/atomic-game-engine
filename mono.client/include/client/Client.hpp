@@ -59,6 +59,7 @@
 #include <client/DataAudioObservation.hpp>
 #include <client/DataFactoryRehydrator.hpp>
 #include <client/DataFactoryRenderOnly.hpp>
+#include <client/ImageGraphRuntime.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
 #include <client/SettingsMenu.hpp>
@@ -472,6 +473,8 @@ namespace client {
 
 		// The identical ledger, for `EditableImage`.
 		engine::render::EditableImageUploader EditableImages;
+		ImageGraphRuntime LiveImageGraphs;
+		size_t LiveImageWorldCursor = 0;
 
 		engine::render::OverlayImage Overlay;
 

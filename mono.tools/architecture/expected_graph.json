@@ -68,7 +68,8 @@
         "assets",
         "bake",
         "bakegraph",
-        "core"
+        "core",
+        "imagegraph"
       ]
     },
     "assets": {
@@ -134,6 +135,7 @@
         "game",
         "graph",
         "gui",
+        "imagegraph",
         "input",
         "msl",
         "net",
@@ -305,6 +307,31 @@
         "parallel"
       ]
     },
+    "imagegraph": {
+      "tier": "shared",
+      "layer": 9,
+      "links": [
+        "core"
+      ]
+    },
+    "imagegraphio": {
+      "tier": "shared",
+      "layer": 10,
+      "links": [
+        "assets",
+        "bake",
+        "bakegraph",
+        "core",
+        "imagegraph"
+      ]
+    },
+    "imagegraph_runner": {
+      "tier": "shared",
+      "links": [
+        "core",
+        "imagegraph"
+      ]
+    },
     "input": {
       "tier": "client",
       "layer": 12,
@@ -418,6 +445,17 @@
         "parallel",
         "scene",
         "spatial"
+      ]
+    },
+    "pxcimport": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "bake",
+        "bakegraph",
+        "core",
+        "imagegraph",
+        "imagegraphio"
       ]
     },
     "render": {
@@ -616,6 +654,8 @@
         "game",
         "graph",
         "gui",
+        "imagegraph",
+        "imagegraphio",
         "input",
         "msl",
         "net",
@@ -690,6 +730,7 @@
         "game",
         "graph",
         "gui",
+        "imagegraph",
         "input",
         "msl",
         "net",
@@ -761,6 +802,7 @@
         "game",
         "graph",
         "gui",
+        "imagegraph",
         "input",
         "msl",
         "net",
@@ -859,6 +901,8 @@
         "game",
         "graph",
         "gui",
+        "imagegraph",
+        "imagegraphio",
         "input",
         "msl",
         "net",
@@ -901,6 +945,7 @@
         "game",
         "graph",
         "gui",
+        "imagegraph",
         "input",
         "msl",
         "net",

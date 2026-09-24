@@ -20,6 +20,7 @@
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/GraphRunner.hpp>
+#include <engine/render/ImageGraphTransform3D.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/render/PipelineAdmission.hpp>
 #include <engine/render/PortalCaptureTreeCompose.hpp>
@@ -1704,6 +1705,8 @@ namespace engine::render {
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
+		// Publishes one bounded texture generation under several names atomically.
+		bool AddTextureBatch(std::span<const TextureBatchImage> images, core::Name owner = {});
 
 		// Says that content is on its way under this name, and that it is not.
 		//
@@ -2703,6 +2706,12 @@ namespace engine::render {
 		// @return The handles, both empty before Initialise.
 		BackendHandles Backend() const;
 
+		// Queues one bounded Transform Image 3D generation for render-thread recording.
+		imagegraph::TransformImage3DQueueResult
+		QueueTransformImage3D(imagegraph::TransformImage3DLiveRequest request);
+		bool CancelTransformImage3D(core::Name owner, core::Name name, uint64_t generation);
+		void DropTransformImage3DOwner(core::Name owner);
+
 	  private:
 		bool AdoptResourceImagesInternal(
 			std::span<const uint64_t> tokens,
@@ -2781,6 +2790,7 @@ namespace engine::render {
 		friend class ViewRecording;
 		friend class DataFactoryHookBind;
 		friend class FrameBatch;
+		friend struct test_support::TransformImage3DResidentTestAccess;
 
 		// The thread that called `Initialise`, and the only one that may record.
 		//

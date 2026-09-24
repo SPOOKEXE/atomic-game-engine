@@ -18,6 +18,7 @@
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Gravity.hpp>
+#include <engine/scene/ImageGraphBinding.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
@@ -43,6 +44,7 @@
 #include <engine/scene/Volume.hpp>
 #include <engine/scene/Wire.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -50,6 +52,8 @@
 namespace engine::scene {
 
 	namespace {
+		constexpr uint8_t IMAGE_GRAPH_BINDING_FORMAT_VERSION = 2;
+
 		void WriteGpuParticleFields(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *fields = static_cast<const GpuParticleField *>(source);
 			for (size_t index = 0; index < count; ++index) {
@@ -158,6 +162,120 @@ namespace engine::scene {
 				affordances[index].Enabled = reader.ReadBool();
 				affordances[index].Reserved[0] = 0;
 				affordances[index].Reserved[1] = 0;
+			}
+		}
+
+		std::string_view TickPolicyText(ImageGraphTickPolicy policy) {
+			switch (policy) {
+			case ImageGraphTickPolicy::Fixed:
+				return "fixed";
+			case ImageGraphTickPolicy::World:
+				return "world";
+			}
+			return {};
+		}
+
+		bool ParseTickPolicy(std::string_view text, ImageGraphTickPolicy &policy) {
+			if (text == "fixed") {
+				policy = ImageGraphTickPolicy::Fixed;
+				return true;
+			}
+			if (text == "world") {
+				policy = ImageGraphTickPolicy::World;
+				return true;
+			}
+			return false;
+		}
+
+		std::string_view ImageGraphColorSpaceText(ImageGraphColorSpace colorSpace) {
+			return colorSpace == ImageGraphColorSpace::Display ? "display" : "linear";
+		}
+
+		bool ParseImageGraphColorSpace(std::string_view text, ImageGraphColorSpace &colorSpace) {
+			if (text == "display")
+				colorSpace = ImageGraphColorSpace::Display;
+			else if (text == "linear")
+				colorSpace = ImageGraphColorSpace::Linear;
+			else
+				return false;
+			return true;
+		}
+
+		bool ValidBindingSelectorText(std::string_view text) {
+			return !text.empty() && text.size() <= IMAGE_GRAPH_BINDING_MAXIMUM_NAME_BYTES &&
+				   text.find('\0') == std::string_view::npos;
+		}
+
+		// Default-constructed rows must round-trip even before a sink is authored.
+		bool EmptyImageGraphBinding(const ImageGraphBinding &binding) {
+			return !binding.Graph.IsValid() && !binding.Output.IsValid() && !binding.Texture.IsValid() &&
+				   binding.Seed == 0 && binding.FixedTick == 0 &&
+				   binding.TickPolicy == ImageGraphTickPolicy::Fixed &&
+				   binding.ColorSpace == ImageGraphColorSpace::Display &&
+				   std::all_of(binding.Reserved.begin(), binding.Reserved.end(), [](uint8_t byte) {
+					   return byte == 0;
+				   });
+		}
+
+		void WriteImageGraphBindings(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *bindings = static_cast<const ImageGraphBinding *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				const ImageGraphBinding &binding = bindings[index];
+				if (EmptyImageGraphBinding(binding)) {
+					writer.WriteUInt8(0);
+					continue;
+				}
+				if (!IsValidImageGraphBinding(binding)) {
+					// Keep malformed authored rows distinct from the valid empty marker.
+					writer.WriteUInt8(0xFF);
+					continue;
+				}
+
+				writer.WriteUInt8(IMAGE_GRAPH_BINDING_FORMAT_VERSION);
+				writer.WriteString(binding.Graph.Text());
+				writer.WriteString(binding.Output.Text());
+				writer.WriteString(binding.Texture.Text());
+				writer.WriteUInt64(binding.Seed);
+				writer.WriteString(TickPolicyText(binding.TickPolicy));
+				writer.WriteUInt64(binding.FixedTick);
+				writer.WriteString(ImageGraphColorSpaceText(binding.ColorSpace));
+			}
+		}
+
+		void ReadImageGraphBindings(core::ByteReader &reader, void *destination, size_t count) {
+			auto *bindings = static_cast<ImageGraphBinding *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				ImageGraphBinding binding;
+				const uint8_t version = reader.ReadUInt8();
+				if (version == 0 && !reader.Failed()) {
+					bindings[index] = binding;
+					continue;
+				}
+				if (version != 1 && version != IMAGE_GRAPH_BINDING_FORMAT_VERSION) {
+					reader.Fail();
+					continue;
+				}
+
+				const std::string_view graph = reader.ReadString();
+				const std::string_view output = reader.ReadString();
+				const std::string_view texture = reader.ReadString();
+				binding.Seed = reader.ReadUInt64();
+				const std::string_view tickPolicy = reader.ReadString();
+				binding.FixedTick = reader.ReadUInt64();
+				const std::string_view colorSpace = version == 1 ? std::string_view{} : reader.ReadString();
+				if (reader.Failed() || !ValidBindingSelectorText(graph) ||
+					!ValidBindingSelectorText(output) || !ValidBindingSelectorText(texture) ||
+					!ParseTickPolicy(tickPolicy, binding.TickPolicy) ||
+					(version != 1 && !ParseImageGraphColorSpace(colorSpace, binding.ColorSpace))) {
+					reader.Fail();
+					continue;
+				}
+
+				binding.Graph = core::Name(graph);
+				binding.Output = core::Name(output);
+				binding.Texture = core::Name(texture);
+				if (!IsValidImageGraphBinding(binding)) reader.Fail();
+				bindings[index] = binding;
 			}
 		}
 
@@ -1905,6 +2023,15 @@ namespace engine::scene {
 		// padding while the renderer owns all device-local particles.
 		ecs::Components::Register<GpuParticleField>(
 			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields
+		);
+
+		// Appended because component ids are registration order. The graph itself
+		// remains a separately authored document and every cross-world selector is text.
+		ecs::Components::Register<ImageGraphBinding>(
+			"scene.ImageGraphBinding",
+			WriteImageGraphBindings,
+			ReadImageGraphBindings,
+			IMAGE_GRAPH_BINDING_MAXIMUM_SERIALISED_BYTES
 		);
 	}
 

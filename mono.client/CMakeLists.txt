@@ -34,6 +34,7 @@ mono_add_library(client
 		# the render node kinds. Undeclared until v0.19, arriving through
 		# `Engine::render`.
 		Engine::graph
+		Engine::imagegraph
 
 		Engine::render
 
@@ -154,4 +155,18 @@ mono_add_program(client
 if(TARGET test_client)
 	add_dependencies(test_client client)
 	target_link_libraries(test_client PRIVATE Vendor::asio Vendor::json)
+	set(m7_gif_source "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/m7_variable/three-colour.gif")
+	set(m7_gif_baked "${MONO_STAGE_ROOT}/tests/m7-variable/three-colour.atex")
+	add_custom_command(
+		OUTPUT "${m7_gif_baked}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/tests/m7-variable"
+		COMMAND $<TARGET_FILE:assetc>
+			--input "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/m7_variable"
+			--output "${MONO_STAGE_ROOT}/tests/m7-variable"
+			--quiet
+		DEPENDS assetc "${m7_gif_source}"
+		COMMENT "Baking variable-duration GIF for client GPU test"
+		VERBATIM)
+	add_custom_target(client_m7_gif_fixture DEPENDS "${m7_gif_baked}")
+	add_dependencies(test_client client_m7_gif_fixture)
 endif()

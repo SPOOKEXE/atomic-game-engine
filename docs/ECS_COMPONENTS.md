@@ -44,7 +44,7 @@ state until v0.19.
 | `effects.Beam` | 712 | 8 | yes | . | yes | . | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control. |
 | `effects.Decal` | 28 | 4 | yes | . | . | . | A single image projected onto one face of its parent BasePart, with colour, transparency and draw order. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
-| `effects.ParticleEmitter` | 1300 | 4 | yes | . | . | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
+| `effects.ParticleEmitter` | 1300 | 4 | yes | . | yes | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
 | `effects.ParticleSystem` | 400 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
 | `effects.RibbonBuffer` | 48 | 8 | yes | . | . | . | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer. |
 | `effects.Texture` | 44 | 4 | yes | . | . | . | A tiled image projected onto one face of its parent BasePart, including tile size, offset, colour, transparency and draw order. |
@@ -204,6 +204,7 @@ state until v0.19.
 | `scene.GpuParticleField` | 72 | 4 | yes | . | . | . | Authored request for a deterministic analytical storm particle field, including enabled layers, normalized count, reset seed, and per-layer colour, opacity and size. |
 | `scene.Gravity` | 12 | 4 | yes | yes | . | . | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default. |
 | `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
+| `scene.ImageGraphBinding` | 32 | 8 | yes | . | . | . | Per-sink reference to a saved image graph and selected output, the texture name to publish, deterministic seed, and fixed or world tick policy; pixels remain derived host output. |
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
 | `scene.IntValue` | 8 | 8 | yes | yes | . | . | The signed 64-bit integer stored by an `IntValue` instance. |
 | `scene.JointInstance` | 80 | 8 | yes | yes | . | . | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld. |
@@ -309,4 +310,4 @@ state until v0.19.
 
 ---
 
-232 components registered by the engine, 0 without a purpose line.
+233 components registered by the engine, 0 without a purpose line.

@@ -2,6 +2,7 @@
 
 #include "FramePreparation.hpp"
 #include "GraphHistory.hpp"
+#include "ImageGraphTransform3D.hpp"
 #include "PortalCaptureTreeWork.hpp"
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
@@ -742,6 +743,34 @@ namespace engine::render {
 			// Resource-image requests share frame submission fences with retained
 			// scene frames, so their slots and fence ledger are one ownership unit.
 			static constexpr size_t RESOURCE_IMAGE_CAPACITY = 12;
+			// Composer 3D work is limited to four in-flight owner/name generations.
+			// Slots retain copied source bytes until the submission fence proves their
+			// device resources can be retired or adopted.
+			static constexpr size_t TRANSFORM_3D_CAPACITY = 4;
+			enum class Transform3DPhase : uint8_t { Free, Queued, Recorded, Submitted, Ready, Failed };
+			struct Transform3DSlot {
+				Transform3DPhase Phase = Transform3DPhase::Free;
+				core::Name Owner;
+				core::Name Name;
+				uint64_t Generation = 0;
+				imagegraph::TransformImage3DRequest Request;
+				imagegraph::TransformImage3DLiveResources Resources;
+				uint32_t Width = 0, Height = 0;
+				uint64_t SourceBytes = 0;
+				uint64_t ScratchBytes = 0;
+				bool Cancelled = false;
+				// A slot can have commands referenced even when a later recorder step
+				// failed. It stays alive through the fence, but only a complete pass is
+				// eligible to replace the last good table texture.
+				bool Succeeded = false;
+			};
+			// A completed transform becomes a texture-table entry. This ledger makes
+			// an older fence unable to replace a newer completed owner/name output.
+			struct PublishedTransform3D {
+				core::Name Owner;
+				core::Name Name;
+				uint64_t Generation = 0;
+			};
 			struct StagedSceneFrame {
 				size_t Slot = 0;
 				uint32_t Frame = 0;
@@ -752,6 +781,8 @@ namespace engine::render {
 				std::vector<StagedSceneFrame> Frames;
 				std::array<uint32_t, RESOURCE_IMAGE_CAPACITY> Images{};
 				uint32_t ImageCount = 0;
+				std::array<uint32_t, TRANSFORM_3D_CAPACITY> Transform3DSlots{};
+				uint32_t Transform3DCount = 0;
 			};
 			enum class ResourceImagePhase : uint8_t { Free, Queued, Recorded, Submitted, Ready };
 			struct ResourceImageSlot {
@@ -785,6 +816,10 @@ namespace engine::render {
 			};
 
 			std::array<ResourceImageSlot, RESOURCE_IMAGE_CAPACITY> Images;
+			std::array<Transform3DSlot, TRANSFORM_3D_CAPACITY> Transform3D;
+			std::vector<PublishedTransform3D> PublishedTransform3DOutputs;
+			uint64_t Transform3DSourceBytes = 0;
+			uint64_t Transform3DScratchBytes = 0;
 			std::array<ResidentImagePair, 4> ResidentImageCache{};
 			size_t NextResidentCache = 0;
 			uint64_t NextResourceImageToken = 1;
@@ -2090,6 +2125,8 @@ namespace engine::render {
 		);
 		void CollectResourceImage(uint32_t slot);
 		void ReleaseResidentImage(ResourceImageSlot &slot);
+		void ReleaseTransform3D(GraphResourceCache::Transform3DSlot &slot);
+		void RecordTransform3D(SDL_GPUCommandBuffer *command);
 		uint64_t NextSceneSequence = 1;
 
 		// The slot the frame in progress is drawing into.
