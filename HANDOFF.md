@@ -89,23 +89,31 @@ and optimization audit, seamless portals, and Pixel Composer. All remain open.
   `test_client` build passed; focused sequence checks passed 51, 34, and 11
   assertions respectively. Renderer texture publication remains open. Per
   particle age playback needs separate GPU paging.
-- Native Transform Image 3D now records a bounded pass into the existing
-  batch command. The focused Vulkan recorder case passed 19 assertions. The
+- Native Transform Image 3D records a bounded pass into the existing batch
+  command. The focused Vulkan recorder case passed 19 assertions. The
   recorder preserves resources until the submit fence, including a failed
-  render pass after copy commands. `PollSceneFrames` currently releases all
-  completed 3D slots without adopting successful output into `TextureTable`.
-  Complete fence based publication, exact owner/name generation retirement,
-  cancellation/refusal retention of the prior texture, sampling usage on the
-  output texture, GPU accounting, and focused tests. The adoption agent hit
-  a usage limit before implementing this chunk.
+  render pass after copy commands. A later uncommitted edit now makes
+  `PollSceneFrames` call `TextureTable::ReplaceAdopt` for successful completed
+  generations, while older, cancelled, and failed slots are released. The
+  focused GPU test now checks exact owner/name publication, replacement by a
+  newer generation, and cancellation retaining the previous output. That test
+  initially exposed reversed `Succeeded` assignments in the untracked live
+  recorder; the assignments were corrected and the Vulkan case passed 35
+  assertions. Add failed pass, owner retirement, and GPU accounting checks
+  before calling the edit complete. `QueueTransformImage3D` still has no product
+  caller outside tests; `client/ImageGraphRuntime.cpp` uses the synchronous
+  `ExecuteTransformImage3D` adapter. Wire the resident path into graph output
+  publication before claiming native graph playback. These renderer source and test files remain
+  untracked alongside the previous agent's implementation, so they were not
+  included in the handoff commit.
 - Source ownership from the prior parallel work is no longer active because
   those agents hit a usage limit. Before resuming, inspect the live worktree
   and build processes rather than assuming a gate completed.
 
 ## Linked worktrees
 
-The last audit found 27 linked worktrees, all dirty. Twenty five have since
-been closed, leaving 2. `git worktree prune --dry-run --verbose` found no stale
+The last audit found 27 linked worktrees, all dirty. All 27 have since
+been closed, leaving only the main checkout. `git worktree prune --dry-run --verbose` found no stale
 records. Twenty four clean idle `/tmp` worktrees had already been safely
 removed. The table gives tracked and
 untracked status counts, not an assessment of the changes. Start with the
@@ -168,6 +176,18 @@ visual parity result is assessed. The portal worktree's host-only Ready fence
 change weakens the replica check and was not merged. The main checkout has a
 newer source/destination fence condition and a destination prediction seed;
 the focused portal adoption test passed 12 assertions in one case.
+The detached portal worktree's source diff was saved at
+`/tmp/atomic-head-portal-source.patch`, its base commit is preserved by
+`codex/archived-head-portal`, and its worktree was removed. The older harness
+may still offer useful real transfer coverage, but needs porting to the
+current test and cannot justify the host-only fence change.
+The tornado cap worktree's source and binary world diff is saved at
+`/tmp/atomic-tornado-isolated-cap-fix.patch`, and its capture script is at
+`/tmp/atomic-capture-tornado-isolated.sh`. Its branch ref remains. The current
+TornadoSim example and GPU particle tests passed 143 and 126 assertions. The
+worktree's all-parcel shader and 2.1 million triangle capture threshold do not
+fit the newer bounded depth-sliced path, so its uncommitted experiment was not
+merged. Visual parity remains open.
 The broader `test_client '[client][portal]'` selector initially exited 42:
 six cases passed and two GPU cases failed during client initialization because
 `PortalLighting.cpp` left a process wide assets override set to
@@ -176,16 +196,8 @@ restores its prior assets path. After rebuilding, the same selector passed
 422,745 assertions in eight cases. The strict 30/60/144/240 product matrix
 remains open.
 
-| Worktree | Tracked | Untracked |
-| --- | ---: | ---: |
-| `/tmp/atomic-game-engine-tornado-isolated-cap-fix` | 26 | 1 |
-| `/tmp/atomic-game-engine-head-portal` | 47 | 1 |
-
-For each worktree: inspect its branch, status, meaningful diff, and module
-instructions; identify its intended outcome; complete source and focused
-verification; record any remaining blocker; then remove the worktree only
-when clean and no longer needed. The primary checkout's Pixel Composer work
-can continue through independent small items while this queue progresses.
+The primary checkout's unfinished product work continues below. Archived
+patches are reference material, not accepted code.
 
 ## Last verification and environment
 
@@ -194,9 +206,10 @@ can continue through independent small items while this queue progresses.
   benchmark passed `git diff --cached --check` before integration.
 - At 09:14 UTC, the filesystem had about 114 GiB free. Avoid duplicating full
   build trees without checking space first.
-- Two commits were created in this handoff session. `5e30f523` preserved the
+- Three commits were created in this handoff session. `5e30f523` preserved the
   original benchmark commit's author and message and contains only
   `mono.engine/replication/benchmarks/PriorityRefinement.cpp`. The second
-  contains this handoff and the portal lighting test fixture cleanup.
+  contains this handoff and the portal lighting test fixture cleanup. The third
+  updates the handoff after worktree cleanup and GPU validation.
 - Web reference for worktree removal semantics:
   <https://git-scm.com/docs/git-worktree>.
