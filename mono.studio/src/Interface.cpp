@@ -1,3 +1,5 @@
+#include "ImageComposerInternal.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
@@ -52,7 +54,7 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// - every bump costs everybody their layout.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v20";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v21";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -102,6 +104,7 @@ namespace studio {
 			{"History", PluginDock::Left},
 			{"Assets", PluginDock::Left},
 			{"Render Pipeline", PluginDock::Bottom},
+			{"Image Composer", PluginDock::Bottom},
 			{"Pipeline Profile", PluginDock::Bottom},
 			{"Network", PluginDock::Right},
 			{"Team Create", PluginDock::Right},
@@ -457,6 +460,9 @@ namespace studio {
 			Skinned("CDN", [&] { DrawCdn(); });
 			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
 			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
+			if (ShowImageComposer) {
+				Skinned("Image Composer", [&] { DrawImageComposer(Renderer, ShowImageComposer); });
+			}
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
 			// TODO(asset-pipeline): draw the asset processing graph beside its catalogue.
 			Skinned("Network", [&] { DrawNetwork(); });
@@ -1380,6 +1386,7 @@ namespace studio {
 
 		ImGui::SeparatorText("Render");
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
+		ImGui::MenuItem("Image Composer", nullptr, &ShowImageComposer);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
 		ImGui::MenuItem("Physics Profiler", nullptr, &ShowPhysicsSolver);
 

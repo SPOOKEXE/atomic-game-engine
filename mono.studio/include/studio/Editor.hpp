@@ -5132,6 +5132,24 @@ namespace studio {
 		bool OrbitCamera = false;
 		bool DirectionLocked = false;
 		std::unordered_map<std::string, std::string> ComponentConfigDrafts;
+
+		// Unsaved ImageGraphBinding fields for the one selected entity.
+		// The binding itself is read from the Store on each Components draw.
+		struct ImageGraphBindingForm {
+			WorldId World;
+			Entity Instance;
+			std::string Graph;
+			std::string Output;
+			std::string Texture;
+			std::string Message;
+			uint64_t Seed = 0;
+			uint64_t FixedTick = 0;
+			bool UseWorldTick = false;
+			bool LinearColorSpace = false;
+			bool Dirty = false;
+			bool Initialized = false;
+		};
+		ImageGraphBindingForm ImageGraphBindingFormState;
 		//@}
 
 		// Whether particle emitters are drawn in Studio viewports. Kept separate
@@ -5760,12 +5778,12 @@ namespace studio {
 		// Number of content asset profiles.
 		std::unordered_map<uint32_t, ContentAssetProfile> ContentAssetProfiles;
 
-		// Whether each node editor is open. Closed by default: they are for
-		// somebody editing a pipeline, and every other session should not pay a
-		// panel for it.
+		// Node authoring panels are closed by default; they open when a person is
+		// editing one of these graphs.
 		//@{
 		bool ShowRenderPipeline = false;
 		bool ShowAssetsPipeline = false;
+		bool ShowImageComposer = false;
 
 		// The frame as a grid rather than as a canvas: every pass across the
 		// top, every resource down the side. See `Editor::DrawPipelineProfile`.

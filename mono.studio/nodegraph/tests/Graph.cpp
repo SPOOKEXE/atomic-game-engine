@@ -64,6 +64,28 @@ TEST_CASE("a link is refused for a specific reason", "[nodegraph]") {
 	CHECK(graph.Add("nobody.registered.this", 0.0f, 0.0f) == NO_NODE);
 }
 
+TEST_CASE("instance inputs participate in typed linking and evaluation hashes", "[nodegraph]") {
+	RegisterFixtureNodes();
+	Graph graph;
+
+	const NodeId source = graph.Add("field.source", 0.0f, 0.0f);
+	const NodeId sink = graph.Add("field.terrace", 240.0f, 0.0f);
+	REQUIRE(source != NO_NODE);
+	REQUIRE(sink != NO_NODE);
+	REQUIRE(graph.SetDynamicInputs(sink, {Port("Extra", "data.FIELD")}));
+	CHECK(graph.Connect(source, "Out", sink, "Extra") == LinkResult::Made);
+	CHECK(graph.Connect(source, "Out", sink, "Missing") == LinkResult::NoSuchPort);
+
+	const uint64_t connected = graph.Hash(sink);
+	REQUIRE(graph.SetDynamicInputs(sink, {Port("Extra", "data.FIELD"), Port("Second", "data.NUMBER")}));
+	CHECK(graph.Hash(sink) != connected);
+
+	CHECK_FALSE(graph.SetDynamicInputs(sink, {Port("In", "data.FIELD")}));
+	CHECK(graph.LinkInto(sink, "Extra") != nullptr);
+	REQUIRE(graph.SetDynamicInputs(sink, {Port("Second", "data.NUMBER")}));
+	CHECK(graph.LinkInto(sink, "Extra") == nullptr);
+}
+
 TEST_CASE("a cycle is refused before it exists", "[nodegraph]") {
 	RegisterFixtureNodes();
 	Graph graph;

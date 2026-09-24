@@ -41,6 +41,14 @@ mono_add_library(studio
 
 		Engine::graph
 
+		# L9, `shared`. The durable image graph document, public node schemas and
+		# deterministic CPU evaluator used by the Image Composer adapter.
+		Engine::imagegraph
+
+		# L10, `shared`. Source-backed PXCX projection into a native image graph,
+		# retaining the checked archive as the lossless source.
+		Engine::imagegraphio
+
 		# L6, `shared`. The simulation. **Named here rather than reached
 		# through `Engine::script`**, which is where it was arriving from: since
 		# v0.13 this editor prepares and ticks a `PhysicsWorld` on every world it

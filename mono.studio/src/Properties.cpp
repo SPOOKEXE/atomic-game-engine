@@ -1,11 +1,14 @@
 #include "LodPreview.hpp"
 #include "PropertyWidgets.hpp"
 
+#include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/imagegraph/Document.hpp>
 #include <engine/render/ShaderCompiler.hpp>
+#include <engine/scene/ImageGraphBinding.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -21,6 +24,7 @@
 #include <span>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
+#include <studio/ImageGraph.hpp>
 #include <studio/Projection.hpp>
 #include <studio/PropertySelection.hpp>
 #include <studio/Widgets.hpp>
@@ -1489,6 +1493,12 @@ namespace studio {
 		};
 		std::optional<PropertyEdit> propertyEdit;
 		CollectionTagEdit tagEdit;
+		struct BindingEdit {
+			WorldId World;
+			Entity Instance;
+			studio::ImageGraphBindingDraft Draft;
+		};
+		std::optional<BindingEdit> bindingEdit;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 		std::optional<PanelProjection> focusedProjection;
 		if (FocusedViewport < Overlays.size() && ViewportWorld(FocusedViewport) == SelectionWorld) {
@@ -1593,6 +1603,108 @@ namespace studio {
 				}
 			}
 			tagEdit = DrawCollectionTags(store, Selection, CollectionTagDraft);
+			if (Selection.size() == 1) {
+				const engine::scene::ImageGraphBinding *binding =
+					store.Get<engine::scene::ImageGraphBinding>(instance);
+				ImageGraphBindingForm &form = ImageGraphBindingFormState;
+				if (!form.Initialized || form.World != SelectionWorld || form.Instance != instance) {
+					form = ImageGraphBindingForm{};
+					form.World = SelectionWorld;
+					form.Instance = instance;
+					form.Initialized = true;
+				}
+				const auto loadBindingFields = [&] {
+					if (binding == nullptr) {
+						form.Graph.clear();
+						form.Output.clear();
+						form.Texture.clear();
+						form.Seed = 0;
+						form.FixedTick = 0;
+						form.UseWorldTick = false;
+						form.LinearColorSpace = false;
+						return;
+					}
+					form.Graph = binding->Graph.Text();
+					form.Output = binding->Output.Text();
+					form.Texture = binding->Texture.Text();
+					form.Seed = binding->Seed;
+					form.FixedTick = binding->FixedTick;
+					form.UseWorldTick = binding->TickPolicy == engine::scene::ImageGraphTickPolicy::World;
+					form.LinearColorSpace =
+						binding->ColorSpace == engine::scene::ImageGraphColorSpace::Linear;
+				};
+				if (!form.Dirty) loadBindingFields();
+
+				if (ImGui::CollapsingHeader("Image Graph Binding", ImGuiTreeNodeFlags_DefaultOpen)) {
+					if (binding == nullptr) {
+						ImGui::TextDisabled("This entity has no image graph binding.");
+					} else {
+						const std::string currentGraph(binding->Graph.Text());
+						const std::string currentOutput(binding->Output.Text());
+						const std::string currentTexture(binding->Texture.Text());
+						ImGui::TextWrapped(
+							"Current: %s / %s -> %s",
+							currentGraph.c_str(),
+							currentOutput.c_str(),
+							currentTexture.c_str()
+						);
+						ImGui::SameLine();
+						if (ImGui::SmallButton("Reload fields")) {
+							loadBindingFields();
+							form.Dirty = false;
+							form.Message.clear();
+						}
+					}
+
+					bool draftChanged = false;
+					draftChanged |= TextField("##binding-graph", form.Graph, "graph name");
+					draftChanged |= TextField("##binding-output", form.Output, "output id");
+					draftChanged |= TextField("##binding-texture", form.Texture, "texture owner name");
+					draftChanged |= ImGui::InputScalar("Seed", ImGuiDataType_U64, &form.Seed);
+					draftChanged |= ImGui::Checkbox("Use world tick", &form.UseWorldTick);
+					if (ImGui::RadioButton("Display", !form.LinearColorSpace)) {
+						form.LinearColorSpace = false;
+						draftChanged = true;
+					}
+					ImGui::SameLine();
+					if (ImGui::RadioButton("Linear", form.LinearColorSpace)) {
+						form.LinearColorSpace = true;
+						draftChanged = true;
+					}
+					if (form.UseWorldTick) {
+						ImGui::TextDisabled("Fixed tick is kept for a later switch to fixed policy.");
+					}
+					ImGui::BeginDisabled(form.UseWorldTick);
+					draftChanged |= ImGui::InputScalar("Fixed tick", ImGuiDataType_U64, &form.FixedTick);
+					ImGui::EndDisabled();
+					if (draftChanged) {
+						form.Dirty = true;
+						form.Message.clear();
+					}
+					if (!form.Message.empty()) ImGui::TextWrapped("Binding: %s", form.Message.c_str());
+					ImGui::BeginDisabled(!authoritative);
+					if (ImGui::Button("Apply binding")) {
+						studio::ImageGraphBindingDraft draft;
+						draft.Graph = form.Graph;
+						draft.Output = form.Output;
+						draft.Texture = form.Texture;
+						draft.Seed = form.Seed;
+						draft.FixedTick = form.FixedTick;
+						draft.TickPolicy = form.UseWorldTick ? engine::scene::ImageGraphTickPolicy::World
+															 : engine::scene::ImageGraphTickPolicy::Fixed;
+						draft.ColorSpace = form.LinearColorSpace
+											   ? engine::scene::ImageGraphColorSpace::Linear
+											   : engine::scene::ImageGraphColorSpace::Display;
+						bindingEdit = BindingEdit{SelectionWorld, instance, std::move(draft)};
+					}
+					ImGui::EndDisabled();
+					if (!authoritative) {
+						ImGui::TextDisabled("Bindings can only be authored in an authoritative world.");
+					}
+				}
+			} else if (ImGui::CollapsingHeader("Image Graph Binding")) {
+				ImGui::TextDisabled("Select one entity to create or update its binding.");
+			}
 
 			// Structural properties must remain reachable after removing their backing tag.
 			const auto attached = store.ComponentsOf(instance);
@@ -1840,6 +1952,46 @@ namespace studio {
 											: engine::scene::RemoveTag(store, instance, tagEdit.Tag);
 				}
 			});
+		}
+		if (bindingEdit) {
+			engine::imagegraph::Document document;
+			engine::scene::ImageGraphBinding candidate;
+			std::string failure;
+			if (!ReadImageGraphDocument(
+					engine::core::Paths::Assets(), bindingEdit->Draft.Graph, document, failure
+				) ||
+				!BuildImageGraphBinding(bindingEdit->Draft, document, candidate, failure)) {
+				ImageGraphBindingFormState.Message = std::move(failure);
+			} else {
+				bool wrote = false;
+				bool changed = false;
+				Universe->Enter(bindingEdit->World, [&](Store &store) {
+					if (!store.Alive(bindingEdit->Instance)) return;
+					const engine::scene::ImageGraphBinding *existing =
+						store.Get<engine::scene::ImageGraphBinding>(bindingEdit->Instance);
+					const bool same =
+						existing != nullptr && existing->Seed == candidate.Seed &&
+						existing->FixedTick == candidate.FixedTick && existing->Graph == candidate.Graph &&
+						existing->Output == candidate.Output && existing->Texture == candidate.Texture &&
+						existing->TickPolicy == candidate.TickPolicy &&
+						existing->Reserved == candidate.Reserved;
+					if (same) {
+						wrote = true;
+						return;
+					}
+					wrote = engine::scene::SetImageGraphBinding(store, bindingEdit->Instance, candidate);
+					changed = wrote;
+				});
+				if (!wrote) {
+					ImageGraphBindingFormState.Message =
+						"selected entity could not accept the image graph binding";
+				} else {
+					modified |= changed;
+					ImageGraphBindingFormState.Dirty = false;
+					ImageGraphBindingFormState.Message =
+						changed ? "binding updated" : "binding already matches";
+				}
+			}
 		}
 		if (modified && authoritative) {
 			MarkModified();

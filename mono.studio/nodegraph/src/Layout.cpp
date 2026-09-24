@@ -30,7 +30,9 @@ namespace nodegraph {
 			return derived;
 		}
 		const NodeType *type = NodeTypes::Find(node.Type);
-		return type != nullptr ? type->Inputs : std::vector<PortSpec>{};
+		std::vector<PortSpec> inputs = type != nullptr ? type->Inputs : std::vector<PortSpec>{};
+		inputs.insert(inputs.end(), node.DynamicInputs.begin(), node.DynamicInputs.end());
+		return inputs;
 	}
 
 	std::vector<PortSpec> OutputsOf(const Node &node) {

@@ -89,3 +89,17 @@ TEST_CASE("a collapsed node keeps its ports and loses its body", "[nodegraph]") 
 	// And an uncollapsed neighbour is untouched.
 	CHECK(LayoutOf(*graph.Find(source)).Widgets.size() == 2);
 }
+
+TEST_CASE("instance inputs have canvas rows and hit-test layout", "[nodegraph]") {
+	RegisterFixtureNodes();
+	Graph graph;
+	const NodeId array = graph.Add("field.terrace", 0.0f, 0.0f);
+	REQUIRE(array != NO_NODE);
+	REQUIRE(graph.SetDynamicInputs(array, {Port("item-1", "data.FIELD")}));
+
+	const NodeLayout layout = LayoutOf(*graph.Find(array));
+	const PlacedPort *port = PortIn(layout, "item-1", true);
+	REQUIRE(port != nullptr);
+	CHECK(port->Y > 0.0f);
+	CHECK(port->Y < layout.Height);
+}

@@ -116,6 +116,10 @@ namespace nodegraph {
 		// type that grows a widget does not invalidate every saved graph.
 		std::unordered_map<std::string, Value> Widgets;
 
+		// Extra instance-specific inputs, in display order. Ordinary nodes leave
+		// this empty; editors use it for schemas whose input count is authored.
+		std::vector<PortSpec> DynamicInputs;
+
 		// What a person renamed it to, or empty to show the type's title.
 		std::string Label;
 
@@ -246,6 +250,10 @@ namespace nodegraph {
 		// The same question, changing nothing. What a drag asks every frame.
 		LinkResult
 		CanConnect(NodeId from, const std::string &fromPort, NodeId to, const std::string &toPort) const;
+
+		// Replaces one node's additional inputs and drops links made invalid by
+		// removing or changing their type.
+		bool SetDynamicInputs(NodeId id, std::vector<PortSpec> inputs);
 
 		// Removes whatever link ends on an input port.
 		//

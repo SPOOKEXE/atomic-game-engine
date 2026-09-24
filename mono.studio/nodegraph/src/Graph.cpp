@@ -153,8 +153,10 @@ namespace nodegraph {
 			return LinkResult::NoSuchPort;
 		}
 
-		const PortSpec *out = FindPort(sourceType->Outputs, fromPort);
-		const PortSpec *in = FindPort(sinkType->Inputs, toPort);
+		const std::vector<PortSpec> outputs = OutputsOf(*source);
+		const std::vector<PortSpec> inputs = InputsOf(*sink);
+		const PortSpec *out = FindPort(outputs, fromPort);
+		const PortSpec *in = FindPort(inputs, toPort);
 		if (out == nullptr || in == nullptr) {
 			return LinkResult::NoSuchPort;
 		}
@@ -170,6 +172,41 @@ namespace nodegraph {
 			return LinkResult::WouldCycle;
 		}
 		return LinkResult::Made;
+	}
+
+	bool Graph::SetDynamicInputs(NodeId id, std::vector<PortSpec> inputs) {
+		Node *node = Find(id);
+		if (node == nullptr || node->Compressed()) return false;
+
+		const NodeType *type = NodeTypes::Find(node->Type);
+		if (type == nullptr) return false;
+		std::unordered_set<std::string> names;
+		for (const PortSpec &port : type->Inputs)
+			names.insert(port.Name);
+		for (const PortSpec &port : inputs) {
+			if (port.Name.empty() || DataTypes::Find(port.Type) == nullptr || !names.insert(port.Name).second)
+				return false;
+		}
+
+		node->DynamicInputs = std::move(inputs);
+		const std::vector<PortSpec> available = InputsOf(*node);
+		Wires.erase(
+			std::remove_if(
+				Wires.begin(),
+				Wires.end(),
+				[&](const Link &link) {
+					if (link.To != id) return false;
+					const PortSpec *input = FindPort(available, link.ToPort);
+					const Node *source = Find(link.From);
+					if (input == nullptr || source == nullptr) return true;
+					const std::vector<PortSpec> outputs = OutputsOf(*source);
+					const PortSpec *output = FindPort(outputs, link.FromPort);
+					return output == nullptr || !DataTypes::CanConnect(output->Type, input->Type);
+				}
+			),
+			Wires.end()
+		);
+		return true;
 	}
 
 	LinkResult
@@ -640,6 +677,7 @@ namespace nodegraph {
 			}
 			Node *placed = Find(id);
 			placed->Widgets = node.Widgets;
+			placed->DynamicInputs = node.DynamicInputs;
 			placed->Label = node.Label;
 			placed->Collapsed = node.Collapsed;
 			placed->Proxies = node.Proxies;
@@ -749,8 +787,9 @@ namespace nodegraph {
 			// The inputs, in port order, each contributing its own hash, which
 			// is what makes an edit upstream invalidate exactly the sub-tree
 			// below it.
-			for (const PortSpec &port : type->Inputs) {
+			for (const PortSpec &port : InputsOf(*node)) {
 				hash = MixText(hash, port.Name);
+				hash = MixText(hash, port.Type);
 				if (const Link *link = LinkInto(id, port.Name); link != nullptr) {
 					const uint64_t upstream = Hash(link->From);
 					hash = Mix(hash, &upstream, sizeof(upstream));

@@ -154,7 +154,7 @@ namespace nodegraph {
 			inputs.Widgets = &node->Widgets;
 			bool waiting = false;
 
-			for (const PortSpec &port : type->Inputs) {
+			for (const PortSpec &port : InputsOf(*node)) {
 				const Link *link = graph.LinkInto(id, port.Name);
 				if (link == nullptr) {
 					continue;

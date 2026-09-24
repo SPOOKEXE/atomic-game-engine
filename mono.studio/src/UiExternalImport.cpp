@@ -16,7 +16,7 @@ namespace studio {
 	using engine::ecs::NULL_ENTITY;
 
 	namespace {
-		void FileIssue(
+		void ExternalImportFileIssue(
 			engine::gui::DocumentReport &report, const std::filesystem::path &path, const char *reason
 		) {
 			report.Issues.push_back({path.string(), reason, 0});
@@ -26,18 +26,18 @@ namespace studio {
 		ReadSource(const std::filesystem::path &path, std::string &out, engine::gui::DocumentReport &report) {
 			std::ifstream input(path, std::ios::binary | std::ios::ate);
 			if (!input) {
-				FileIssue(report, path, "could not open UI import file");
+				ExternalImportFileIssue(report, path, "could not open UI import file");
 				return false;
 			}
 			const std::streampos length = input.tellg();
 			if (length < 0 || static_cast<uint64_t>(length) > UiDesignImportLimits::HARD_MAXIMUM_BYTES) {
-				FileIssue(report, path, "UI import exceeds byte limit");
+				ExternalImportFileIssue(report, path, "UI import exceeds byte limit");
 				return false;
 			}
 			std::string source(static_cast<size_t>(length), '\0');
 			input.seekg(0);
 			if (!source.empty() && !input.read(source.data(), length)) {
-				FileIssue(report, path, "could not read UI import file");
+				ExternalImportFileIssue(report, path, "could not read UI import file");
 				return false;
 			}
 			out = std::move(source);
