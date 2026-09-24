@@ -375,6 +375,10 @@ namespace client {
 		}
 		const auto requestEye =
 			[&](core::Name destination, render::View &eye, core::Name retain, bool primary) {
+				// A frame whose route did not resolve names no destination. Submitting
+				// it would take over an eye slot and remove its source, retiring the
+				// request in flight; under enough latency no reply could ever land.
+				if (!destination.IsValid()) return;
 				eye.EyePlayer = view.EyePlayer;
 				size_t slot = 0;
 				if (PortalEyeDestinations[1] == destination)

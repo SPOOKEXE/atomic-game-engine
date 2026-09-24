@@ -57,7 +57,7 @@ class PortalProductAcceptanceTest(unittest.TestCase):
 				lines.append(
 					"portal product impairment "
 					f"rtt_ms={rtt} jitter_ms={jitter} loss_percent={loss} arrived=10 dropped={loss} "
-					f"duplicated=1 reordered=1 delayed={rtt} adoptions=2"
+					f"duplicated=1 reordered=1 delayed={rtt} adoptions=2 awaiting_image_body_frames=0"
 				)
 			log.write_text("\n".join(lines) + "\n", encoding="utf-8")
 			cells = MODULE.product_impairment_cells(log)

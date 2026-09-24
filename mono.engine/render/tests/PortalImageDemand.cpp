@@ -814,3 +814,21 @@ TEST_CASE(
 	REQUIRE(BuildPortalEyeDemand(core::Name("eye"), eye, SETTINGS, changed) == PortalDemandStatus::Ready);
 	CHECK(changed.Request.Key.CameraRevision != selected.Request.Key.CameraRevision);
 }
+
+TEST_CASE(
+	"a demanded portal without an accepted image reports that it awaits one", "[render][portal-demand]"
+) {
+	using engine::render::PortalDemandStatus;
+	using engine::render::PortalPresentation;
+	engine::render::PortalView local;
+	CHECK(engine::render::PresentationOf(local) == PortalPresentation::Current);
+
+	engine::render::PortalView external;
+	external.ExternalImage = true;
+	external.ImageDemandStatus = PortalDemandStatus::Hidden;
+	CHECK(engine::render::PresentationOf(external) == PortalPresentation::Unrequested);
+	external.ImageDemandStatus = PortalDemandStatus::Ready;
+	CHECK(engine::render::PresentationOf(external) == PortalPresentation::AwaitingImage);
+	external.ImportedImage = 7;
+	CHECK(engine::render::PresentationOf(external) == PortalPresentation::Current);
+}

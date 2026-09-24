@@ -26,7 +26,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCT_IMPAIRMENT_PATTERN = re.compile(
 	r"portal product impairment rtt_ms=(\d+) jitter_ms=(\d+) loss_percent=(\d+) arrived=(\d+) dropped=(\d+) "
-	r"duplicated=(\d+) reordered=(\d+) delayed=(\d+) adoptions=(\d+)"
+	r"duplicated=(\d+) reordered=(\d+) delayed=(\d+) adoptions=(\d+) awaiting_image_body_frames=(\d+)"
 )
 FAILURE_PATTERN = re.compile(r"PortalWalk\.cpp:(\d+): failed: (.*?) for:")
 IMPAIRMENT_PATTERN = re.compile(
@@ -74,7 +74,18 @@ def product_impairment_cells(log: Path) -> list[dict[str, Any]]:
 		if not match:
 			continue
 		values = [int(group) for group in match.groups()]
-		names = ("rtt_ms", "jitter_ms", "loss_percent", "arrived", "dropped", "duplicated", "reordered", "delayed", "adoptions")
+		names = (
+			"rtt_ms",
+			"jitter_ms",
+			"loss_percent",
+			"arrived",
+			"dropped",
+			"duplicated",
+			"reordered",
+			"delayed",
+			"adoptions",
+			"awaiting_image_body_frames",
+		)
 		cells.append({**dict(zip(names, values)), "status": "failed" if failures else "passed", "failures": failures})
 		failures = {}
 	actual = {(cell["rtt_ms"], cell["jitter_ms"], cell["loss_percent"]) for cell in cells}

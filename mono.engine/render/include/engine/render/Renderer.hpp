@@ -404,6 +404,27 @@ namespace engine::render {
 		uint32_t TagFilter = 0;
 	};
 
+	// What a portal can show this frame. The degraded states are named so a
+	// frame missing destination content says why, instead of passing as
+	// continuity or failing without a reason.
+	enum class PortalPresentation {
+		// Drawn from the local world, or from an accepted destination image.
+		Current,
+		// The planner did not demand an image: hidden, invalid or unsupported.
+		// PortalView::ImageDemandStatus and ImageHiddenReason say which.
+		Unrequested,
+		// Demanded, but no destination image has been accepted yet, so nothing
+		// beyond the aperture can be drawn, including a body already past it.
+		AwaitingImage,
+	};
+
+	// Classifies one portal view from its demand outcome and accepted image.
+	inline PortalPresentation PresentationOf(const PortalView &view) {
+		if (!view.ExternalImage) return PortalPresentation::Current;
+		if (view.ImageDemandStatus != PortalDemandStatus::Ready) return PortalPresentation::Unrequested;
+		return view.ImportedImage != 0 ? PortalPresentation::Current : PortalPresentation::AwaitingImage;
+	}
+
 	// How many levels of portal recursion a renderer will go to.
 	//
 	// **A ceiling rather than a budget**, because the pool is allocated per level

@@ -415,7 +415,16 @@ namespace client {
 		if (subjectFollowing && !carriedArm && history.Route.empty() && history.Started &&
 			history.World == authored.Text() && !sameMap(history.FromInput, {}))
 			history = {};
-		auto resolve = [&](const core::Name &name) {
+		// A route can start before a replica learns its authored name, and then
+		// records the local one. Map a local name to the authored name it now
+		// carries; without that the route would stop resolving for good once the
+		// identity lands.
+		auto resolve = [&](core::Name name) {
+			for (const auto &entry : worlds)
+				if (entry.Authored.IsValid() && universe.NameOf(entry.Id) == name) {
+					name = entry.Authored;
+					break;
+				}
 			if (name == authored) return visualWorld;
 			return ResolveDestinationWorld(worlds, visualWorld, name);
 		};
