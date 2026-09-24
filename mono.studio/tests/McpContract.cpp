@@ -215,6 +215,18 @@ namespace {
 			REQUIRE(text);
 			CHECK_FALSE((*text)["result"].value("isError", false));
 			CHECK(json::parse((*text)["result"]["content"][0]["text"].get<std::string>())["queued"] == true);
+			const auto behavior =
+				Ask(socket, 11, "tools/call", {{"name", "viewport_behavior_diagnostics"}, {"arguments", {}}});
+			REQUIRE(behavior);
+			CHECK_FALSE((*behavior)["result"].value("isError", false));
+			const json behaviorData =
+				json::parse((*behavior)["result"]["content"][0]["text"].get<std::string>());
+			CHECK(behaviorData.contains("behavior_pose"));
+			CHECK(behaviorData.contains("culling"));
+			CHECK(behaviorData.contains("lod"));
+			CHECK(behaviorData.contains("lighting"));
+			CHECK(behaviorData.contains("particles"));
+			CHECK(behaviorData.contains("portal_demand"));
 		}
 		const json observed{
 			{"server", (*opened)["result"]["serverInfo"]["name"]},

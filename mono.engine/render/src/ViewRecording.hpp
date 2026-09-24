@@ -196,8 +196,8 @@ namespace engine::render {
 		// more, and a projection built from the world's would be a different one.
 		scene::Camera DrawCamera;
 		float NearestPane = 0.0f;
-		glm::mat4 CameraMatrix{1.0f};
 		scene::CameraMatrices Matrices;
+		scene::CameraMatrices BehaviourMatrices;
 		glm::mat4 LightViewProjection{1.0f};
 		core::AABB SceneBounds;
 		core::AABB DirectionalShadowBounds;

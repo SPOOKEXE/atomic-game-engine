@@ -737,8 +737,10 @@ namespace engine::render {
 		// The eye transform and lens for this invocation.
 		//@{
 		core::CFrame CameraFrame;
-		// The pose used for visibility and camera-dependent collection. Empty keeps
-		// ordinary views on CameraFrame, so projection and inspection stay one pose.
+		// The pose used for culling and camera-dependent collection. Empty keeps
+		// ordinary views on CameraFrame. The free CameraFrame still supplies raster
+		// projection, so callers can inspect from a different position while these
+		// camera-dependent decisions stay anchored to VisibilityFrame.
 		std::optional<core::CFrame> VisibilityFrame;
 		// arch-waiver ecs-copy: each View is one render invocation, not retained world state.
 		scene::Camera Camera;
@@ -754,7 +756,7 @@ namespace engine::render {
 		bool CameraCut = false;
 		//@}
 
-		// Returns the frame used for visibility culling.
+		// Returns the frame used for culling and camera-dependent collection.
 		const core::CFrame &VisibilityCameraFrame() const {
 			return VisibilityFrame.has_value() ? *VisibilityFrame : CameraFrame;
 		}

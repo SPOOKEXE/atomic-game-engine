@@ -54,12 +54,12 @@ namespace engine::render {
 			const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
 			SDL_SetGPUViewport(pass, &viewport);
 			if (DrawInterface && Request.GameInterfaceHook) {
-				const auto lighting = LightingAt(Request.CameraFrame.Position, 0, 0);
+				const auto lighting = LightingAt(Request.VisibilityCameraFrame.Position, 0, 0);
 				Result.DrawCalls += Request.GameInterfaceHook->RecordWorld(
 					Command,
 					pass,
 					Matrices.ViewProjection,
-					Request.CameraFrame,
+					Request.VisibilityCameraFrame,
 					{lighting.Ambient.x, lighting.Ambient.y, lighting.Ambient.z},
 					{lighting.Direction.x, lighting.Direction.y, lighting.Direction.z},
 					colour.Width,

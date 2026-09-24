@@ -638,7 +638,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("deferred-lighting"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
+			const core::Vector3 &behaviourEye = recording.Request.VisibilityCameraFrame.Position;
 			Impl::SurfaceBank &bank = *recording.Bank;
 			const LightUniforms &lightUniforms = recording.SceneLights;
 			const Impl::PbrDimensions &pbrDimensions = recording.PbrDimensions;
@@ -740,10 +740,10 @@ namespace engine::render {
 					const SeamLightProjector leftProjector = projectorOf(left);
 					const SeamLightProjector rightProjector = projectorOf(right);
 					const float leftDistance = SeamLightInfluenceDistanceSquared(
-						leftProjector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+						leftProjector, State->VisibleInstances, State->DrawOrder, behaviourEye
 					);
 					const float rightDistance = SeamLightInfluenceDistanceSquared(
-						rightProjector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+						rightProjector, State->VisibleInstances, State->DrawOrder, behaviourEye
 					);
 					if (leftDistance != rightDistance) {
 						return leftDistance < rightDistance;
@@ -1487,7 +1487,7 @@ namespace engine::render {
 				depth.Height != target.Height)
 				return false;
 
-			const core::Vector3 eye = recording.Request.CameraFrame.Position;
+			const core::Vector3 eye = recording.Request.VisibilityCameraFrame.Position;
 			// The directional sun is projected at the eye's own far distance. A
 			// fixed kilometre point can lie behind an ordinary 500 metre camera far
 			// plane and incorrectly suppress every shaft.

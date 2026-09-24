@@ -67,7 +67,7 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
-			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
+			const core::Vector3 &behaviourEye = recording.Request.VisibilityCameraFrame.Position;
 			const core::AABB &sceneBounds = recording.SceneBounds;
 			const glm::mat4 &lightViewProjection = recording.LightViewProjection;
 			const uint32_t sceneReflected = recording.SceneReflected;
@@ -261,7 +261,7 @@ namespace engine::render {
 					const PortalBeamProjector projector =
 						PortalBeamFromPair(*portal, *partner, sceneBounds, sun);
 					float influence = PortalBeamInfluenceDistanceSquared(
-						projector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+						projector, State->VisibleInstances, State->DrawOrder, behaviourEye
 					);
 					if (!std::isfinite(influence)) {
 						// A visible portal can show a child view whose receivers did not
@@ -271,7 +271,7 @@ namespace engine::render {
 							if (row < State->VisibleInstances.size() &&
 								State->VisibleInstances[row].Surface == portal->Index) {
 								const float distance = scene::RectangleDistance(
-									portal->Centre, portal->First, portal->Second, cameraFrame.Position
+									portal->Centre, portal->First, portal->Second, behaviourEye
 								);
 								influence = distance * distance;
 								break;

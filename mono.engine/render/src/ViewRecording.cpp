@@ -145,6 +145,7 @@ namespace engine::render {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
 		const core::CFrame &cameraFrame = Request.CameraFrame;
+		const core::CFrame &behaviourFrame = Request.VisibilityCameraFrame;
 		const scene::Camera &camera = Request.Camera;
 		OverlayImage &overlay = *Request.Overlay;
 		const std::span<const SurfaceView> surfaces = Request.Surfaces;
@@ -216,8 +217,8 @@ namespace engine::render {
 		auto &targetHeight = TargetHeight;
 		auto &nearestPane = NearestPane;
 		auto &drawCamera = DrawCamera;
-		auto &cameraMatrix = CameraMatrix;
 		auto &matrices = Matrices;
+		auto &behaviourMatrices = BehaviourMatrices;
 		auto &lightViewProjection = LightViewProjection;
 		auto &sceneBounds = SceneBounds;
 		auto &plan = Plan;
@@ -323,27 +324,31 @@ namespace engine::render {
 		// to need it - CodeParade's `GH_CLAMP(NearestPortalDist() * 0.5f, ...)`,
 		// which the demo applies to its one and only camera.
 		//
-		// **Measured off the panes this frame was handed rather than off the
-		// world**, because that is the same set the pass below draws through and
-		// the renderer has no store to ask. `scene::NearestSeamDistance` answers
-		// the same question from a store, from the same functions, for a caller
-		// that has one.
+		// **Measured from the behavior eye**, because portal captures use that
+		// pose even while the visible raster remains a free inspection view.
 		nearestPane = std::numeric_limits<float>::infinity();
+		float visibleNearestPane = std::numeric_limits<float>::infinity();
 		for (const PortalView &portal : portals) {
 			nearestPane = std::min(
 				nearestPane,
+				scene::RectangleDistance(portal.Centre, portal.First, portal.Second, behaviourFrame.Position)
+			);
+			visibleNearestPane = std::min(
+				visibleNearestPane,
 				scene::RectangleDistance(portal.Centre, portal.First, portal.Second, cameraFrame.Position)
 			);
 		}
 
-		// **One adapted copy used by every projection this frame builds**, so the
-		// cull, the portal recursion and the opaque draw cannot disagree about
-		// where the near plane is. A cull run against a larger near plane than
-		// the draw uses throws away exactly the geometry the smaller one exists
-		// to keep.
+		// The screen and behavior eye can be in different rooms. Adapt their near
+		// planes separately so the inspection raster and portal captures each fit
+		// the panes they actually use.
 		drawCamera = camera;
 		if (!source.Projection) {
-			drawCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, nearestPane);
+			drawCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, visibleNearestPane);
+		}
+		scene::Camera behaviourCamera = camera;
+		if (!source.Projection) {
+			behaviourCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, nearestPane);
 		}
 
 		// **Claimed here only if the caller did not claim it first.** `WaitForFrame`
@@ -351,7 +356,7 @@ namespace engine::render {
 		// caller that does not is no worse off than before, because this is the
 		// same acquisition at the same point in the frame. See `Impl::BeginFrame`.
 		if (State->BatchActive) {
-			command = State->BatchCommand;
+			command = State->BatchSubmit.Command;
 			if (State->BatchFinal) {
 				swapchain = State->BatchSwapchain;
 				width = State->BatchWidth;
@@ -538,10 +543,9 @@ namespace engine::render {
 		// point. Culling first means the sort runs over what survives rather
 		// than over the world, and the upload carries only what is drawn.
 		//
-		// The frustum comes from the same `ResolveCamera` the draw does, so it
-		// cannot disagree with what was actually projected. A frustum built from
-		// a field of view and an aspect ratio kept separately is the bug that
-		// pops geometry at the screen edge on one machine and not another.
+		// Culling follows the behavior camera. The screen matrices remain attached
+		// to `cameraFrame`, so inspection can move without changing what the world
+		// submits, the selected LOD, or the portal captures.
 
 		// **Every surface camera's view, resolved before any pass runs.** Each
 		// is used twice: to render into its own texture now, and - one frame
@@ -687,6 +691,10 @@ namespace engine::render {
 		const float cameraAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 		matrices = source.Projection ? scene::ResolveSurfaceCamera(cameraFrame, *source.Projection)
 									 : scene::ResolveCamera(cameraFrame, drawCamera, cameraAspect);
+		behaviourMatrices = behaviourFrame.FuzzyEq(cameraFrame, 0.0f) ? matrices
+							: source.Projection
+								? scene::ResolveSurfaceCamera(behaviourFrame, *source.Projection)
+								: scene::ResolveCamera(behaviourFrame, behaviourCamera, cameraAspect);
 		State->ActiveDataCaptureSource.ProjectionAvailable = true;
 		State->ActiveDataCaptureSource.Width = sceneWidth;
 		State->ActiveDataCaptureSource.Height = sceneHeight;
@@ -698,7 +706,6 @@ namespace engine::render {
 			State->DataCaptureSources.resize(targetSlot + 1);
 		}
 		State->DataCaptureSources[targetSlot] = State->ActiveDataCaptureSource;
-		cameraMatrix = matrices.ViewProjection;
 		if (sharedCaptures) {
 			const auto budget = source.SurfaceBudget.value_or(
 				View::SurfaceCaptureBudget{
@@ -715,8 +722,8 @@ namespace engine::render {
 			const SurfaceCaptureRequest keyedCaptureRequest{
 				.Mirrors = surfaces,
 				.Portals = portals,
-				.Frame = cameraFrame,
-				.Projection = Matrices.Projection,
+				.Frame = behaviourFrame,
+				.Projection = BehaviourMatrices.Projection,
 				.PixelBudget = capturePixels,
 				.Width = sceneWidth,
 				.Height = sceneHeight,
@@ -760,9 +767,9 @@ namespace engine::render {
 		entityFlow.Clear();
 		viewpoints.Clear();
 		graph::Viewpoint fallbackViewpoint;
-		fallbackViewpoint.Frame = cameraFrame;
-		fallbackViewpoint.Lens = drawCamera;
-		fallbackViewpoint.Projection = matrices.ViewProjection;
+		fallbackViewpoint.Frame = behaviourFrame;
+		fallbackViewpoint.Lens = behaviourCamera;
+		fallbackViewpoint.Projection = behaviourMatrices.ViewProjection;
 		fallbackViewpoint.Fitted = true;
 
 		size_t visibleCount = instances.size();
@@ -1125,7 +1132,7 @@ namespace engine::render {
 
 			(void)graph::VisibleSurfaces(
 				instances,
-				cameraMatrix,
+				matrices.ViewProjection,
 				std::span<const graph::SurfaceEye>(eyes, acceptedCount),
 				std::span<bool>(surfaceVisible, scene::MAX_SURFACES),
 				std::span<float>(surfaceCoverage, scene::MAX_SURFACES),
@@ -1263,7 +1270,7 @@ namespace engine::render {
 		// the wrong eye, which is a compositing error confined to the second
 		// bounce and cheaper than an ordering pass per surface.
 		wantSurface = acceptedCount > 0;
-		sceneEye = wantSurface ? accepted[0].View->Frame.Position : cameraFrame.Position;
+		sceneEye = wantSurface ? accepted[0].View->Frame.Position : behaviourFrame.Position;
 
 		// **One signature shared by every surface, and that is not a shortcut.**
 		// Each camera's matrix is in it because a surface pass draws the *other*
@@ -1781,7 +1788,7 @@ namespace engine::render {
 			lightViewProjection,
 			glm::mat4{1.0f},
 		};
-		lighting = LightingAt(cameraFrame.Position, 0.0f, 0.0f);
+		lighting = LightingAt(behaviourFrame.Position, 0.0f, 0.0f);
 
 		uniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
 		uniforms.LightViewProjection = lightViewProjection;
@@ -1802,9 +1809,10 @@ namespace engine::render {
 		uniforms.OutdoorAmbient = State->OutdoorAmbient;
 		uniforms.Direct = State->Direct;
 		uniforms.Eye =
-			glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 1.0f};
-		const core::Vector3 forward = cameraFrame.LookVector();
-		uniforms.CameraDepth = glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(cameraFrame.Position)};
+			glm::vec4{behaviourFrame.Position.X, behaviourFrame.Position.Y, behaviourFrame.Position.Z, 1.0f};
+		const core::Vector3 forward = behaviourFrame.LookVector();
+		uniforms.CameraDepth =
+			glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(behaviourFrame.Position)};
 		uniforms.FogColour = glm::vec4{
 			WorkingFromDisplay(State->FogColour.r),
 			WorkingFromDisplay(State->FogColour.g),
@@ -1950,7 +1958,7 @@ namespace engine::render {
 	void ViewRecording::PackInstances() {
 		ENGINE_PROFILE_CAT("pack instances", core::ProfileCategory::Render);
 		Impl *const State = this->State;
-		const core::CFrame &cameraFrame = Request.CameraFrame;
+		const core::CFrame &behaviourFrame = Request.VisibilityCameraFrame;
 		const uint32_t uploadCount = UploadCount;
 		const uint32_t sceneCount = SceneCount;
 		const uint32_t cameraBase = sceneCount;
@@ -2297,7 +2305,7 @@ namespace engine::render {
 					);
 					billboardInstance = instance;
 					billboardInstance.Frame = core::CFrame::FromMatrix(
-						instance.Frame.Position, cameraFrame.RightVector(), -cameraFrame.LookVector()
+						instance.Frame.Position, behaviourFrame.RightVector(), -behaviourFrame.LookVector()
 					);
 					billboardInstance.HalfExtent.Z = instance.HalfExtent.Y;
 					billboardInstance.Texture = billboard;
@@ -2347,7 +2355,9 @@ namespace engine::render {
 			// disappoints.
 			constexpr float OCCLUDER_SCORE = 0.1f;
 
-			const glm::vec3 eye{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z};
+			const glm::vec3 eye{
+				behaviourFrame.Position.X, behaviourFrame.Position.Y, behaviourFrame.Position.Z
+			};
 			const auto base = static_cast<uint32_t>(cameraBase);
 			const uint32_t opaqueEnd = base + plainOpaque;
 
@@ -2848,6 +2858,9 @@ namespace engine::render {
 				   Pipeline->RetainedNodes[context.Node.Value - 1] != 0;
 		});
 
+		State->StageProbe.ActivateView(
+			State->FrameCounter, Request.Source->WorldName.Text(), Request.TargetSlot, State->BatchFinal
+		);
 		struct ProbedRunner final : graph::NodeRunner {
 			graph::NodeRunner &Inner;
 			std::function<void(const graph::RunContext &, bool, bool)> Probe;
@@ -2865,6 +2878,7 @@ namespace engine::render {
 				if (!State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)) return;
 				ClosePass();
 				const auto save = [&](const Impl::NamedTexture &texture, std::string_view resource) {
+					if (!State->StageProbe.Wants(context.Name.Text(), resource)) return;
 					std::ostringstream metadata;
 					metadata << "\"pipeline\":" << RenderStageProbe::Quote(Pipeline->Name.Text())
 							 << ",\"stage\":" << RenderStageProbe::Quote(context.Name.Text())
@@ -2878,6 +2892,11 @@ namespace engine::render {
 							 << Request.Source->CameraFrame.Position.Z << "]"
 							 << ",\"before\":" << (before ? "true" : "false")
 							 << ",\"node_accepted\":" << (accepted ? "true" : "false");
+					if (State->StageProbe.TransitionMode())
+						metadata << ",\"transition_from\":"
+								 << RenderStageProbe::Quote(State->StageProbe.TransitionFrom)
+								 << ",\"transition_to\":"
+								 << RenderStageProbe::Quote(State->StageProbe.TransitionTo);
 					State->StageProbe.Record(
 						State->Device,
 						Command,
@@ -3121,13 +3140,10 @@ namespace engine::render {
 			SDL_EndGPURenderPass(pass);
 		}
 
-		// Every earlier view has finished recording, but the command buffer still
-		// belongs to the batch. The last view alone transfers ownership to SDL.
+		// Every earlier view leaves command ownership with FrameBatch. The last
+		// view submits it, then hands the terminal result back for shared cleanup.
 		if (State->BatchActive && !State->BatchFinal) {
 			return;
-		}
-		if (State->BatchActive) {
-			State->BatchCommand = nullptr;
 		}
 
 		// Before the submit rather than after it, so a frame that fails to
@@ -3147,30 +3163,40 @@ namespace engine::render {
 			bool sceneSubmitted = false;
 			{
 				ENGINE_PROFILE_CAT("submit.scene", core::ProfileCategory::Render);
-				sceneSubmitted = State->SubmitSceneCommand(command);
+				sceneSubmitted = State->BatchActive ? State->SubmitFrameBatchCommand(command)
+													: State->SubmitSceneCommand(command);
+			}
+			const bool batchOwned = State->BatchActive;
+			if (batchOwned) {
+				State->BatchSubmit = {
+					command,
+					sceneSubmitted ? Impl::BatchSubmitStatus::Submitted : Impl::BatchSubmitStatus::Failed,
+				};
 			}
 			result.Submitted = sceneSubmitted;
 			if (!sceneSubmitted) {
-				State->VisibilityWorking.Invalidate();
-				State->VisibilityCompleted = {};
-				State->StageProbe.Clear(State->Device);
-				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
-				State->CompleteResidentUploads(false);
-				State->DiscardPendingGraphHistoryWrites(command);
-				State->ClearSubmittedGraphHistoryWrites();
-				State->Timestamps.Abandon(timingSlot);
-				if (timingSlot < VulkanTimestamps::SLOTS) {
-					State->PendingMarks[timingSlot].clear();
-					State->AbandonCaptureTimings(timingSlot);
+				if (!batchOwned) {
+					State->VisibilityWorking.Invalidate();
+					State->VisibilityCompleted = {};
+					State->StageProbe.Clear(State->Device);
+					ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
+					State->CompleteResidentUploads(false);
+					State->DiscardPendingGraphHistoryWrites(command);
+					State->ClearSubmittedGraphHistoryWrites();
+					State->Timestamps.Abandon(timingSlot);
+					if (timingSlot < VulkanTimestamps::SLOTS) {
+						State->PendingMarks[timingSlot].clear();
+						State->AbandonCaptureTimings(timingSlot);
+					}
 				}
 				if (capture != nullptr) {
 					gpu::ReleaseTransferBuffer(State->Device, capture);
 				}
-				State->DropDownloads();
+				if (!batchOwned) State->DropDownloads();
 				return;
 			}
-			State->VisibilityCompleted = State->VisibilityWorking.Snapshot();
-			{
+			if (!batchOwned) {
+				State->VisibilityCompleted = State->VisibilityWorking.Snapshot();
 				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
 				State->CompleteResidentUploads(true);
 				State->CommitPendingGraphHistoryWrites(command);

@@ -8,6 +8,12 @@
 
 #include <engine/core/types/CFrame.hpp>
 
+#include <utility>
+
+namespace engine::render {
+	struct View;
+}
+
 namespace studio {
 
 	// Editor-session diagnostics applied to one viewport panel.
@@ -36,6 +42,25 @@ namespace studio {
 			VirtualFrustum = engine::core::CFrame(FrozenFrustum.Position, inspectionFrame.Rotation());
 			return VirtualFrustum;
 		}
+
+		// Resolves the behavior pose through the selected visual-world route while
+		// leaving the inspection frame available for raster projection and picking.
+		template <typename ResolveRoute>
+		engine::core::CFrame ResolveBehaviourFrame(
+			const engine::core::CFrame &inspectionFrame, ResolveRoute &&resolveRoute
+		) const {
+			engine::core::CFrame frame = EffectiveFrustum(inspectionFrame);
+			std::forward<ResolveRoute>(resolveRoute)(frame);
+			return frame;
+		}
+
+		// Keeps raster projection on the inspection pose and supplies the routed
+		// behavior pose only when it differs.
+		void ApplyCameraFrames(
+			engine::render::View &view,
+			const engine::core::CFrame &inspectionFrame,
+			const engine::core::CFrame &behaviourFrame
+		) const;
 
 	  private:
 		mutable engine::core::CFrame VirtualFrustum;

@@ -871,7 +871,7 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
-			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
+			const core::CFrame &behaviourFrame = recording.Request.VisibilityCameraFrame;
 			const bool haveInstances = recording.HaveInstances;
 			const auto &claimed = recording.Claimed;
 			Impl::SurfaceBank &bank = *recording.Bank;
@@ -957,7 +957,7 @@ namespace engine::render {
 				};
 				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
 
-				const LightingUniforms plainLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+				const LightingUniforms plainLighting = lightingAt(behaviourFrame.Position, 0.0f, 0.0f);
 				const ShadowBinding shadow = shadowBinding();
 				const bool surfaceImagesEnabled = graphEnabled(core::Name("mirror-capture"));
 				LightingUniforms mirroredUniforms{};
@@ -995,7 +995,7 @@ namespace engine::render {
 								lightViewProjection,
 								shown.Sampling,
 							};
-							mirroredUniforms = lightingAt(cameraFrame.Position, 1.0f, shown.ImageOpacity);
+							mirroredUniforms = lightingAt(behaviourFrame.Position, 1.0f, shown.ImageOpacity);
 							mirroredUniforms.Mirror.x = static_cast<float>(shown.Effect);
 							mirroredUniforms.Mirror.z =
 								!hdr && shown.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ? 1.0f

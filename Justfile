@@ -1361,6 +1361,14 @@ studio-resize: (build "studio")
 studio-viewport-isolation: (build "studio")
     ./scripts/studio-viewport-isolation-test.sh ./{{build}}/studio/studio
 
+# Captures the View-menu virtual-camera position lock, a translation-only free
+# inspection view, a recapture and an unlock. The script retains scene BMPs,
+# menu XWDs and read-only renderer diagnostics for each phase.
+#
+# It is not part of `just check`: it requires X11, a Vulkan device and xdotool.
+studio-virtual-camera-capture: (build "studio")
+    ./scripts/studio-virtual-camera-capture-test.sh ./{{build}}/studio/studio
+
 # Run the headless server. `just host --ticks 100` passes flags through.
 host *args: (build "server")
     ./{{build}}/server/server {{args}}

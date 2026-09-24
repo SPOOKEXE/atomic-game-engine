@@ -20,6 +20,7 @@
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/render/Animation.hpp>
+#include <engine/render/Renderer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -77,6 +78,24 @@
 namespace studio {
 
 	using engine::core::CFrame;
+
+	void ViewportDiagnostics::ApplyCameraFrames(
+		engine::render::View &view,
+		const engine::core::CFrame &inspectionFrame,
+		const engine::core::CFrame &behaviourFrame
+	) const {
+		view.CameraFrame = inspectionFrame;
+		const bool sameFrame = behaviourFrame.Position == inspectionFrame.Position &&
+							   behaviourFrame.QuaternionX == inspectionFrame.QuaternionX &&
+							   behaviourFrame.QuaternionY == inspectionFrame.QuaternionY &&
+							   behaviourFrame.QuaternionZ == inspectionFrame.QuaternionZ &&
+							   behaviourFrame.QuaternionW == inspectionFrame.QuaternionW;
+		if (sameFrame) {
+			view.VisibilityFrame.reset();
+		} else {
+			view.VisibilityFrame = behaviourFrame;
+		}
+	}
 	using engine::core::LogLevel;
 	using engine::core::Name;
 	using engine::core::Vector3;
@@ -2284,6 +2303,7 @@ namespace studio {
 		// shared visual scene. Presenting is PreRender only, so this does not tick
 		// either world twice.
 		std::optional<engine::scene::ActiveCamera> restoreRuntimeCamera;
+		engine::core::CFrame behaviourEye;
 		{
 			ENGINE_PROFILE_CAT("present views", engine::core::ProfileCategory::ECS);
 			if (shown.IsValid() && shown != visual) {
@@ -2312,10 +2332,13 @@ namespace studio {
 				});
 			}
 
-			if (shown.IsValid() && IsReplicaWorld(shown)) {
-				visual =
-					client::ResolveCameraPortalWorld(*Universe, shown, visual, eye, lens, PortalImages.get());
-			}
+			behaviourEye = diagnostics.ResolveBehaviourFrame(eye, [&](engine::core::CFrame &frame) {
+				if (shown.IsValid() && IsReplicaWorld(shown)) {
+					visual = client::ResolveCameraPortalWorld(
+						*Universe, shown, visual, frame, lens, PortalImages.get()
+					);
+				}
+			});
 			if (visual.IsValid() && Universe->IsRemote(visual)) {
 				ReleaseViewerCamera(viewport);
 			} else if (visual.IsValid()) {
@@ -2336,7 +2359,6 @@ namespace studio {
 					// An edit viewport owns this generated camera outright. A client
 					// viewport uses the same per-panel camera only while the authority
 					// prepares its camera-dependent surface views.
-					const engine::core::CFrame &behaviourEye = diagnostics.EffectiveFrustum(eye);
 					EnsureViewerCamera(
 						viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow
 					);
@@ -2420,7 +2442,7 @@ namespace studio {
 		}
 
 		const bool remoteEye = visual.IsValid() && Universe->IsRemote(visual);
-		const engine::core::CFrame &cullingEye = diagnostics.EffectiveFrustum(eye);
+		const engine::core::CFrame &cullingEye = behaviourEye;
 		// Remember the exact eye the texture below is rendered from. A hosted
 		// client may have moved its camera during `PreRender`; recording the eye
 		// before that phase would project overlays through the previous room.
@@ -2840,10 +2862,7 @@ namespace studio {
 		engine::render::View view;
 		{
 			ENGINE_PROFILE_CAT("build render view", engine::core::ProfileCategory::Render);
-			view.CameraFrame = eye;
-			if (diagnostics.FrustumLocked) {
-				view.VisibilityFrame = cullingEye;
-			}
+			diagnostics.ApplyCameraFrames(view, eye, cullingEye);
 			view.Camera = lens;
 			view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 												  : std::span<const engine::scene::DrawInstance>{};
@@ -2892,7 +2911,7 @@ namespace studio {
 
 		if (PortalImages && drawingWorld && remoteEye && shown.IsValid() && target.IsValid()) {
 			engine::render::View remote;
-			remote.CameraFrame = eye;
+			diagnostics.ApplyCameraFrames(remote, eye, cullingEye);
 			remote.Camera = lens;
 			remote.Target = view.Target;
 			remote.Slot = view.Slot;

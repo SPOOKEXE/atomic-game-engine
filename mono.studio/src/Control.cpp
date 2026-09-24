@@ -86,6 +86,13 @@ namespace studio {
 			return nullptr;
 		}
 
+		json CameraPose(const engine::core::CFrame &frame) {
+			return {
+				{"position", {frame.Position.X, frame.Position.Y, frame.Position.Z}},
+				{"rotation", {frame.QuaternionX, frame.QuaternionY, frame.QuaternionZ, frame.QuaternionW}},
+			};
+		}
+
 		// Where `mcpbridge` is, spelled the way somebody would have to type it.
 		//
 		// **A guess that is checked.** The bridge stages beside this program -
@@ -228,6 +235,68 @@ namespace studio {
 						 json{
 							 {"port", editor->ControlServer.Port()},
 							 {"served", editor->ControlServer.Served()},
+						 }},
+					};
+				},
+			}
+		);
+
+		registration.Add(
+			Tool{
+				"viewport_behavior_diagnostics",
+				"One completed focused viewport's virtual behavior pose and bounded culling, LOD, light, "
+				"particle, and portal evidence. This is a read-only product diagnostic for capture gates.",
+				[] { return json{{"type", "object"}, {"additionalProperties", false}}; },
+				[editor](const json &, std::string &) {
+					// The scene texture and this result publish at the same fence. The UI's
+					// ViewportResults mirror is refreshed only while its panel is drawn, so
+					// it can still describe a cached redraw after an MCP screenshot request.
+					// Match the View menu's focused panel so this read-only tool reports the
+					// same lock state the user just changed.
+					const size_t viewport = editor->FocusedViewport;
+					const ViewportState *diagnosticViewport = editor->ExtraAt(viewport);
+					const ViewportDiagnostics &diagnostics = diagnosticViewport != nullptr
+																 ? diagnosticViewport->Diagnostics
+																 : editor->MainViewportDiagnostics;
+					engine::core::CFrame inspection =
+						diagnosticViewport != nullptr ? diagnosticViewport->Frame : editor->CameraFrame;
+					if (viewport < editor->Overlays.size() && editor->Overlays[viewport].Presented &&
+						editor->Overlays[viewport].PresentedWorld == editor->ViewportWorld(viewport)) {
+						inspection = editor->Overlays[viewport].PresentedFrame;
+					}
+					const engine::render::FrameResult frame = editor->Renderer.SceneFrameResult(viewport);
+					const engine::core::CFrame behaviour = diagnostics.EffectiveFrustum(inspection);
+
+					return json{
+						{"completed", frame.Submitted},
+						{"viewport", viewport},
+						{"frustum_locked", diagnostics.FrustumLocked},
+						{"inspection_pose", CameraPose(inspection)},
+						{"behavior_pose", CameraPose(behaviour)},
+						{"culling",
+						 json{
+							 {"visible_draw_calls", frame.DrawCalls},
+							 {"frustum_rejected", frame.Culled},
+							 {"submitted_draw_calls", frame.DrawCalls},
+							 {"submitted_triangles", frame.Triangles}
+						 }},
+						{"lod",
+						 json{
+							 {"enabled", editor->Prefs.EnableLODCulling},
+							 {"submitted_triangles", frame.Triangles}
+						 }},
+						{"lighting", json{{"selected_lights", editor->Lights.size()}}},
+						{"particles",
+						 json{
+							 {"batches", editor->Particles.Batches.size()},
+							 {"blocks", editor->Particles.BlockCount},
+							 {"layout_revision", editor->Particles.LayoutRevision}
+						 }},
+						{"portal_demand",
+						 json{
+							 {"requested_portals", editor->Portals.size()},
+							 {"submitted_passes", frame.PortalPasses},
+							 {"surface_budget_exceeded", frame.SurfaceBudgetExceeded}
 						 }},
 					};
 				},

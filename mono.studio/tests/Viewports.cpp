@@ -14,6 +14,8 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/render/PortalImageDemand.hpp>
+#include <engine/render/Renderer.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -34,6 +36,7 @@
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
+#include <studio/ViewportDiagnostics.hpp>
 #include <studio/Viewports.hpp>
 
 namespace studio {
@@ -73,6 +76,31 @@ namespace studio {
 				}
 			});
 			REQUIRE(updated);
+		}
+
+		static void SetInspectionFrame(Editor &editor, engine::core::CFrame frame) {
+			const engine::core::Vector3 angles = frame.ToAngles();
+			editor.CameraFrame = frame;
+			editor.CameraYaw = angles.Y;
+			editor.CameraPitch = angles.X;
+		}
+
+		static engine::core::CFrame PresentedFrame(const Editor &editor, size_t viewport) {
+			return editor.Overlays[viewport].PresentedFrame;
+		}
+
+		static engine::core::CFrame ViewerFrame(Editor &editor, size_t viewport) {
+			const Editor::ViewerCamera &viewer = editor.Viewers[viewport];
+			engine::core::CFrame frame;
+			bool found = false;
+			editor.Universe->Enter(viewer.World, [&](const engine::ecs::Store &store) {
+				if (const auto *transform = store.Get<engine::scene::Transform>(viewer.Instance)) {
+					frame = transform->Frame;
+					found = true;
+				}
+			});
+			REQUIRE(found);
+			return frame;
 		}
 
 		static float PresentedFieldOfView(const Editor &editor, size_t viewport) {
@@ -393,6 +421,129 @@ TEST_CASE(
 
 	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 0) == 0.61f);
 	CHECK(studio::ViewportCameraProbe::PresentedFieldOfView(editor, 1) == 1.19f);
+}
+
+TEST_CASE(
+	"frustum lock freezes camera behavior while preserving free inspection projection",
+	"[studio][viewports][camera][render]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	studio::ViewportCameraProbe::Present(editor, 0);
+
+	const engine::core::CFrame locked(
+		engine::core::Vector3{2.0f, 3.0f, 4.0f}, engine::core::CFrame::Angles(0.2f, 0.4f, 0.1f).Rotation()
+	);
+	const engine::core::CFrame inspection(
+		engine::core::Vector3{9.0f, 8.0f, 7.0f}, engine::core::CFrame::Angles(-0.3f, 1.1f, 0.0f).Rotation()
+	);
+	studio::ViewportCameraProbe::SetInspectionFrame(editor, inspection);
+	editor.MainViewportDiagnostics.LockFrustum(locked);
+	studio::ViewportCameraProbe::Present(editor, 0);
+
+	const engine::core::CFrame rendered = studio::ViewportCameraProbe::PresentedFrame(editor, 0);
+	CHECK(rendered.Position == inspection.Position);
+	CHECK(rendered.LookVector() == inspection.LookVector());
+	const engine::core::CFrame behaviour = studio::ViewportCameraProbe::ViewerFrame(editor, 0);
+	CHECK(behaviour.Position == locked.Position);
+	CHECK(behaviour.LookVector() == inspection.LookVector());
+
+	studio::ViewportCameraProbe::SetOverlayRectangle(editor, 0, 40.0f, 20.0f, 800.0f, 400.0f, 1600, 800);
+	const studio::PanelProjection projection = studio::ViewportCameraProbe::Projection(editor, 0);
+	CHECK(projection.Eye == inspection.Position);
+
+	const engine::core::CFrame unlocked(
+		engine::core::Vector3{-5.0f, 1.0f, 12.0f}, engine::core::CFrame::Angles(0.1f, -0.7f, 0.0f).Rotation()
+	);
+	studio::ViewportCameraProbe::SetInspectionFrame(editor, unlocked);
+	editor.MainViewportDiagnostics.FrustumLocked = false;
+	studio::ViewportCameraProbe::Present(editor, 0);
+	CHECK(studio::ViewportCameraProbe::PresentedFrame(editor, 0).Position == unlocked.Position);
+	CHECK(studio::ViewportCameraProbe::ViewerFrame(editor, 0).Position == unlocked.Position);
+}
+
+TEST_CASE(
+	"routed virtual camera position drives remote eye demand while inspection stays free",
+	"[studio][viewports][camera][portal-demand]"
+) {
+	using namespace engine;
+	studio::ViewportDiagnostics diagnostics;
+	const core::CFrame locked(
+		core::Vector3{2.0f, 3.0f, 4.0f}, core::CFrame::Angles(.2f, .4f, .1f).Rotation()
+	);
+	const core::CFrame inspection(
+		core::Vector3{90.0f, -12.0f, 45.0f}, core::CFrame::Angles(-.3f, 1.1f, -.2f).Rotation()
+	);
+	diagnostics.LockFrustum(locked);
+
+	scene::SeamTransform route;
+	route.Frame = core::CFrame(core::Vector3{40.0f, 5.0f, -7.0f}) * core::CFrame::Angles(.1f, .8f, .2f);
+	const core::CFrame behaviour = diagnostics.ResolveBehaviourFrame(inspection, [&](core::CFrame &frame) {
+		frame = route.Place(frame);
+	});
+	CHECK((inspection.Position == core::Vector3{90.0f, -12.0f, 45.0f}));
+	CHECK(behaviour.Position == route.Point(locked.Position));
+	CHECK(behaviour.LookVector().Dot(route.Rotate(inspection.LookVector())) > .99999f);
+
+	render::View remote;
+	diagnostics.ApplyCameraFrames(remote, inspection, behaviour);
+	CHECK(remote.VisibilityFrame.has_value());
+	CHECK(remote.VisibilityCameraFrame().Position == behaviour.Position);
+	CHECK(remote.VisibilityCameraFrame().QuaternionX == behaviour.QuaternionX);
+	CHECK(remote.VisibilityCameraFrame().QuaternionY == behaviour.QuaternionY);
+	CHECK(remote.VisibilityCameraFrame().QuaternionZ == behaviour.QuaternionZ);
+	CHECK(remote.VisibilityCameraFrame().QuaternionW == behaviour.QuaternionW);
+	render::PortalImageDemand demand;
+	REQUIRE(
+		render::BuildPortalEyeDemand(
+			core::Name("viewport-eye"), remote, {.Width = 64, .Height = 64}, demand
+		) == render::PortalDemandStatus::Ready
+	);
+	CHECK(demand.Request.Position[0] == behaviour.Position.X);
+	CHECK(demand.Request.Position[1] == behaviour.Position.Y);
+	CHECK(demand.Request.Position[2] == behaviour.Position.Z);
+	CHECK(remote.CameraFrame.Position == inspection.Position);
+	CHECK(remote.CameraFrame.LookVector() == inspection.LookVector());
+	CHECK(demand.Request.Orientation[0] == behaviour.Rotation().x);
+	CHECK(demand.Request.Orientation[1] == behaviour.Rotation().y);
+	CHECK(demand.Request.Orientation[2] == behaviour.Rotation().z);
+	CHECK(demand.Request.Orientation[3] == behaviour.Rotation().w);
+
+	const core::CFrame unlocked(
+		core::Vector3{-5.0f, 1.0f, 12.0f}, core::CFrame::Angles(.1f, -.7f, 0.0f).Rotation()
+	);
+	diagnostics.FrustumLocked = false;
+	const core::CFrame liveBehaviour =
+		diagnostics.ResolveBehaviourFrame(unlocked, [&](core::CFrame &frame) { frame = route.Place(frame); });
+	CHECK(liveBehaviour.Position == route.Point(unlocked.Position));
+	render::View liveRemote;
+	diagnostics.ApplyCameraFrames(liveRemote, unlocked, liveBehaviour);
+	CHECK(liveRemote.VisibilityFrame.has_value());
+	CHECK(liveRemote.VisibilityCameraFrame().Position == liveBehaviour.Position);
+	CHECK(liveRemote.VisibilityCameraFrame().QuaternionX == liveBehaviour.QuaternionX);
+	CHECK(liveRemote.VisibilityCameraFrame().QuaternionY == liveBehaviour.QuaternionY);
+	CHECK(liveRemote.VisibilityCameraFrame().QuaternionZ == liveBehaviour.QuaternionZ);
+	CHECK(liveRemote.VisibilityCameraFrame().QuaternionW == liveBehaviour.QuaternionW);
+	render::PortalImageDemand liveDemand;
+	REQUIRE(
+		render::BuildPortalEyeDemand(
+			core::Name("viewport-eye"), liveRemote, {.Width = 64, .Height = 64}, liveDemand
+		) == render::PortalDemandStatus::Ready
+	);
+	CHECK(liveDemand.Request.Position[0] == liveBehaviour.Position.X);
+	CHECK(liveDemand.Request.Position[1] == liveBehaviour.Position.Y);
+	CHECK(liveDemand.Request.Position[2] == liveBehaviour.Position.Z);
+	CHECK(liveRemote.CameraFrame.Position == unlocked.Position);
+	CHECK(liveRemote.CameraFrame.LookVector() == unlocked.LookVector());
+
+	render::View ordinary;
+	diagnostics.ApplyCameraFrames(ordinary, unlocked, unlocked);
+	CHECK_FALSE(ordinary.VisibilityFrame.has_value());
+	CHECK(ordinary.VisibilityCameraFrame().Position == unlocked.Position);
+	CHECK(ordinary.CameraFrame.QuaternionX == unlocked.QuaternionX);
+	CHECK(ordinary.CameraFrame.QuaternionY == unlocked.QuaternionY);
+	CHECK(ordinary.CameraFrame.QuaternionZ == unlocked.QuaternionZ);
+	CHECK(ordinary.CameraFrame.QuaternionW == unlocked.QuaternionW);
 }
 
 TEST_CASE(

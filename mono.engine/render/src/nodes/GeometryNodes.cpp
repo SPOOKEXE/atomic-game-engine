@@ -775,8 +775,8 @@ namespace engine::render {
 			SDL_SetGPUViewport(pass, &SceneViewport);
 			SDL_SetGPUScissor(pass, &SceneScissor);
 			SDL_PushGPUVertexUniformData(Command, 0, &Frame, sizeof(Frame));
-			const core::Vector3 eye = Request.CameraFrame.Position;
-			const core::Vector3 forward = Request.CameraFrame.LookVector();
+			const core::Vector3 eye = Request.VisibilityCameraFrame.Position;
+			const core::Vector3 forward = Request.VisibilityCameraFrame.LookVector();
 			const std::array<glm::vec4, 2> peelUniforms{
 				glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(eye)},
 				glm::vec4{depthRule->SourceQuantum, depthRule->NextRepresentable ? 1.0f : 0.0f, 0, 0},
@@ -883,8 +883,8 @@ namespace engine::render {
 				auto *pass = SDL_BeginGPURenderPass(Command, targets, 1, phase == 0 ? &depthTarget : nullptr);
 				if (!pass) return false;
 				++recordedPasses;
-				const auto eye = Request.CameraFrame.Position;
-				const auto forward = Request.CameraFrame.LookVector();
+				const auto eye = Request.VisibilityCameraFrame.Position;
+				const auto forward = Request.VisibilityCameraFrame.LookVector();
 				const std::array<glm::vec4, 3> capture{
 					glm::vec4{eye.X, eye.Y, eye.Z, 0},
 					glm::vec4{forward.X, forward.Y, forward.Z, 0},
@@ -986,12 +986,12 @@ namespace engine::render {
 					++recordedPasses;
 					const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
 					SDL_SetGPUViewport(batchPass, &viewport);
-					const auto lighting = LightingAt(Request.CameraFrame.Position, 0, 0);
+					const auto lighting = LightingAt(Request.VisibilityCameraFrame.Position, 0, 0);
 					WorldInterfaceCapture capture;
 					capture.Command = Command;
 					capture.Pass = batchPass;
 					capture.ViewProjection = Matrices.ViewProjection;
-					capture.Camera = Request.CameraFrame;
+					capture.Camera = Request.VisibilityCameraFrame;
 					capture.Ambient = {lighting.Ambient.x, lighting.Ambient.y, lighting.Ambient.z};
 					capture.Sun = {lighting.Direction.x, lighting.Direction.y, lighting.Direction.z};
 					capture.Width = colour.Width;
@@ -1030,7 +1030,8 @@ namespace engine::render {
 						 State->OverlaySampler}
 					};
 					SDL_BindGPUFragmentSamplers(merge, 0, samplers, 4);
-					const auto eye = Request.CameraFrame.Position, forward = Request.CameraFrame.LookVector();
+					const auto eye = Request.VisibilityCameraFrame.Position;
+					const auto forward = Request.VisibilityCameraFrame.LookVector();
 					struct Uniforms {
 						glm::mat4 Inverse;
 						glm::vec4 CameraDepth, Flags;
@@ -1080,7 +1081,6 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
-			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
 			const core::CFrame &visibilityCameraFrame = recording.Request.VisibilityCameraFrame;
 			FrameOverlayHook *const gameInterfaceHook = recording.Request.GameInterfaceHook;
 			const std::span<const effects::RibbonRun> ribbonRuns = recording.Request.RibbonRuns;
@@ -1174,7 +1174,8 @@ namespace engine::render {
 						guardProjection * matrices.View, lightViewProjection, glm::mat4{1.0f}
 					};
 					SDL_PushGPUVertexUniformData(command, 0, &guardFrame, sizeof(guardFrame));
-					const LightingUniforms guardLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+					const LightingUniforms guardLighting =
+						lightingAt(visibilityCameraFrame.Position, 0.0f, 0.0f);
 					result.DrawCalls += State->DrawSlots(
 						command,
 						guard,
@@ -1262,8 +1263,12 @@ namespace engine::render {
 				GridUniforms gridUniforms;
 				gridUniforms.ViewProjection = matrices.ViewProjection;
 				gridUniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
-				gridUniforms.Eye =
-					glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 0.0f};
+				gridUniforms.Eye = glm::vec4{
+					visibilityCameraFrame.Position.X,
+					visibilityCameraFrame.Position.Y,
+					visibilityCameraFrame.Position.Z,
+					0.0f
+				};
 				gridUniforms.Params =
 					glm::vec4{groundGrid.Step, groundGrid.Major, groundGrid.Reach, groundGrid.Strength};
 				gridUniforms.Offset = glm::vec4{groundGrid.Offset.X, groundGrid.Offset.Z, 0.0f, 0.0f};
@@ -1317,7 +1322,7 @@ namespace engine::render {
 				// instance samples the surface is per instance and the uniform
 				// is per draw, so the split is a third draw rather than a
 				// per-fragment branch on data the shader does not have.
-				const LightingUniforms lighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+				const LightingUniforms lighting = lightingAt(visibilityCameraFrame.Position, 0.0f, 0.0f);
 				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 
 				// Both samplers, every draw. A shadow map that was not rendered
@@ -1498,7 +1503,7 @@ namespace engine::render {
 							matrices.ViewProjection, lightViewProjection, glm::mat4{1.0f}
 						};
 						SDL_PushGPUVertexUniformData(command, 0, &frame, sizeof(frame));
-						const auto metadataLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+						const auto metadataLighting = lightingAt(visibilityCameraFrame.Position, 0.0f, 0.0f);
 						result.DrawCalls += State->DrawSlots(
 							command,
 							metadataPass,
