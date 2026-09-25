@@ -415,6 +415,17 @@ bench *args:
 # Every benchmark, whatever changed.
 bench-all *args: (bench "--all" args)
 
+#   just engine-stress-bench            # 5 samples, CPU suites
+#   just engine-stress-bench 11 1       # 11 samples, GPU suites too
+#
+# One table: module, stress target, row, min, spread, and the 2026-09-22 audit
+# figure where one exists. Device suites run only with gpu=1.
+# Run every engine and CDN benchmark suite into docs/ENGINE_STRESS_TEST.md.
+engine-stress-bench samples="5" gpu="0":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench
+    python3 scripts/engine-stress-report.py --build .cache/build/bench --samples {{samples}} {{ if gpu == "1" { "--gpu" } else { "" } }}
+
 # Lookup across a large, text-sorted bake-pipeline set. Output stays on the
 # terminal so a busy machine cannot turn one measurement into a stored claim.
 bakegraph-pipeline-set-bench samples="5":

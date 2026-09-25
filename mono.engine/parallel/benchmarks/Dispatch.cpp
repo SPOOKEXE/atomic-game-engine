@@ -4,6 +4,7 @@
 #include <engine/testing/Bench.hpp>
 
 #include <cstddef>
+#include <vector>
 
 TEST_SUITE_ID("engine.parallel.bench.dispatch")
 
@@ -96,4 +97,39 @@ BENCH("For · dispatched, 128 empty ranges, four workers", 5000) {
 	}
 	Jobs::Stop();
 	Jobs::Start(0);
+}
+
+// --- pinned placement dispatch -------------------------------------------------
+//
+// Every pinned worker scans the whole task list and skips tasks assigned to
+// others, so these rows separate the handover from that scan. With no pinned
+// workers the span runs inline and the rows measure the fallback instead.
+
+namespace dispatch_bench {
+	// Round-robin task placement over the pinned prefix, rebuilt per row.
+	const std::vector<unsigned> &Spread(size_t tasks) {
+		static std::vector<unsigned> assignment;
+		const unsigned pinned = Jobs::PinnedWorkerCount();
+		assignment.resize(tasks);
+		for (size_t task = 0; task < tasks; task++) {
+			assignment[task] = pinned == 0 ? 0 : static_cast<unsigned>(task % pinned);
+		}
+		return assignment;
+	}
+}
+
+BENCH("ForWorkers · 64 empty pinned tasks", 2000) {
+	const std::vector<unsigned> &assignment = Spread(64);
+	for (int pass = 0; pass < 2000; pass++) {
+		Jobs::ForWorkers(assignment, [](size_t begin, size_t end) { Nothing(begin, end); });
+	}
+}
+
+BENCH("ForWorkers · 1024 empty pinned tasks", 500) {
+	// Sixteen times the tasks over the same workers: growth here beyond the
+	// per-task body is the per-worker scan of every other worker's tasks.
+	const std::vector<unsigned> &assignment = Spread(1024);
+	for (int pass = 0; pass < 500; pass++) {
+		Jobs::ForWorkers(assignment, [](size_t begin, size_t end) { Nothing(begin, end); });
+	}
 }

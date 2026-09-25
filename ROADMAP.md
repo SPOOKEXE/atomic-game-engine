@@ -92,16 +92,17 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] implement the seamless portal plan's body splitting, transfer fences, dynamic island solving, and destination prediction seed. Focused portal adoption and client portal tests pass.
 - [x] establish the Pixel Composer reference inventory from the supplied five PXC projects and captures, with 990 documented node rows. Five spatial warp nodes, a bounded audio capture parser, and `.aseq` sequence bake and GIF timing slices have focused passing tests.
 - [x] complete the virtual camera lock acceptance. Client portal world selection and remote, neighbor, and trailing-eye handoff carry the frozen behavior pose while the inspection view stays free. The client build, focused portal demand checks, Studio routed-view test, and Vulkan recursion fixture pass. A live Xvfb Studio capture exercised the View menu, showed changed inspection pixels and position with the locked behavior signature retained across culling, Auto LOD, lighting, particles, and portal demand, then verified recapture and unlock.
+- [x] Can you make a just benchmark job that builds a docs/ENGINE_STRESS_TEST.md markdown file with the stress
+  test components mentioned in "ENGINE_STRESS_AUDIT_2026-09-22.md" as one big table? I plan to remove this
+  document and I think it would be good to have in general. Expand where appropriate to include more
+  benchmark variants.
 - [_] pass the strict process-hosted portal product capture at 30 and 60 Hz reliably. One run on 2026-09-24, `/tmp/atomic-portal-product-final-1-NkxJ4k`, passed 21,853 assertions. On 2026-09-25 it failed most runs, including 3 of 3 on the tree from before that day's portal changes, so the pass does not reproduce. See the v0.26 flakiness item.
 
 - [_] finish MCP cleanup acceptance with broad CI on the final tree. Three paired release control and Vulkan capture runs under normal desktop load are recorded with contention and timing spread. A headless Vulkan test passes 94 assertions across three capture activation, close, and drain cycles. On 2026-09-25 every `just preset=ci check` step passed on the committed tree except one order-dependent Studio pipeline test, since fixed in `6a468a42`. One full rerun on the final tree remains.
 - [x] make the portal acceptance matrix runnable and fix the latency livelock it found. `just portal-product-acceptance` runs product walks at 144 and 240 FPS, a variable frame and stall schedule, the 24-cell RTT, jitter, loss, duplicate, and reorder grid, matched seam captures, and uncaptured timing. Without capture the seam scene achieves 240.0 FPS at 1080p. A stale camera route livelocked every cell at 150 ms RTT or more; `676df971` fixes it. Missing destination images now report `AwaitingImage`.
 - [_] pass the portal acceptance matrix in `docs/to-delete/v025-SEAMLESS-PORTALS.md`. It runs, but unimpaired and impaired product walks fail intermittently. The v0.26 flakiness item is the blocker.
 
-- [_] Can you make a just benchmark job that builds a docs/ENGINE_STRESS_TEST.md markdown file with the stress
-  test components mentioned in "ENGINE_STRESS_AUDIT_2026-09-22.md" as one big table? I plan to remove this
-  document and I think it would be good to have in general. Expand where appropriate to include more
-  benchmark variants.
+- [_] trace and fix the intermittent portal product walk failures. After the return crossing, a resting body behind the source pane can be transferred back without moving, about 44 frames later. Logging hides the race, so reason from `PortalTransfer.cpp` arrival and sweep detection and `PortalCrossing.cpp` stable-side state. Then rerun the strict 30/60 walk, the 144/240 FPS, stall and fault walks, and the impairment grid until each passes repeatedly.
 
 - [_] measure and implement the remaining stress candidates, including a matched 200-client Authority `RecoverRows` rerun with complete profiling evidence.
 - [_] complete the native Pixel Composer graph, Studio workflow, documented node catalogue, animation, audio, simulation, 3D, PXC interchange, and engine output bindings through M0 to M7 in `docs/v026-pixel-composer.md`. The Audio Window static slice is present; the larger work remains open. Verify every documented row and product workflow. Exact executable parity remains unverified without a licensed reference build.
@@ -109,8 +110,6 @@ The milestone headings below are development labels. Not in line with project ve
 The [v0.25 roadmap audit](docs/v025-roadmap-audit.md) records source evidence and verification limits for the original 49 items. Its 132-case GPU result and selected release benchmarks are historical gates; the portal, MCP, stress, and Pixel Composer gates above remain open.
 
 ### v0.26
-
-- [_] trace and fix the intermittent portal product walk failures. After the return crossing, a resting body behind the source pane can be transferred back without moving, about 44 frames later. Logging hides the race, so reason from `PortalTransfer.cpp` arrival and sweep detection and `PortalCrossing.cpp` stable-side state. Then rerun the strict 30/60 walk, the 144/240 FPS, stall and fault walks, and the impairment grid until each passes repeatedly.
 
 - [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
 - [_] go over render system and consolidate/improve hooks, nodes, graph system and visualiser of graph system

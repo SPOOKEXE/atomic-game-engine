@@ -50,6 +50,27 @@ namespace barrier_bench {
 	};
 	const Pool Workers;
 
+	// Adds one world of `entities` moving entities with the integrate system.
+	void AddIntegratingWorld(Universe &universe, size_t index, size_t entities) {
+		WorldSettings world;
+		world.Name = Name("bench.world." + std::to_string(index));
+		world.TickRate = 60.0;
+
+		const WorldId id = universe.Create(world);
+		universe.Enter(id, [entities](Store &store, Scheduler &systems) {
+			for (size_t entity = 0; entity < entities; entity++) {
+				const Entity made = store.Create();
+				store.Set<Position>(made, Position{static_cast<float>(entity)});
+				store.Set<Velocity>(made, Velocity{1.0f});
+			}
+			systems.Add("integrate", Phase::Simulation, [](Store &world) {
+				world.Each<Position, const Velocity>(
+					[](Entity, Position &position, const Velocity &velocity) { position.X += velocity.X; }
+				);
+			});
+		});
+	}
+
 	// A universe of `worlds` worlds with `entities` each, built once.
 	//
 	// Lazily, because a universe binds its driver thread on construction and
@@ -74,26 +95,35 @@ namespace barrier_bench {
 
 		auto universe = std::make_unique<Universe>(settings);
 		for (size_t index = 0; index < worlds; index++) {
-			WorldSettings world;
-			world.Name = Name("bench.world." + std::to_string(index));
-			world.TickRate = 60.0;
-
-			const WorldId id = universe->Create(world);
-			universe->Enter(id, [entities](Store &store, Scheduler &systems) {
-				for (size_t entity = 0; entity < entities; entity++) {
-					const Entity made = store.Create();
-					store.Set<Position>(made, Position{static_cast<float>(entity)});
-					store.Set<Velocity>(made, Velocity{1.0f});
-				}
-				systems.Add("integrate", Phase::Simulation, [](Store &world) {
-					world.Each<Position, const Velocity>(
-						[](Entity, Position &position, const Velocity &velocity) { position.X += velocity.X; }
-					);
-				});
-			});
+			AddIntegratingWorld(*universe, index, entities);
 		}
 
 		built.emplace_back(Key{worlds, entities, mode}, std::move(universe));
+		return *built.back().second;
+	}
+
+	// One heavy world of 100k and seven light worlds of 1k, built once per mode.
+	// Lanes are balanced by world count, so this is the shape that shows whether
+	// balancing by measured world cost would pay.
+	Universe &LopsidedUniverse(ExecutionMode mode) {
+		static std::vector<std::pair<ExecutionMode, std::unique_ptr<Universe>>> built;
+
+		for (auto &[key, universe] : built) {
+			if (key == mode) {
+				return *universe;
+			}
+		}
+
+		UniverseSettings settings;
+		settings.Mode = mode;
+
+		auto universe = std::make_unique<Universe>(settings);
+		AddIntegratingWorld(*universe, 0, 100'000);
+		for (size_t index = 1; index < 8; index++) {
+			AddIntegratingWorld(*universe, index, 1'000);
+		}
+
+		built.emplace_back(mode, std::move(universe));
 		return *built.back().second;
 	}
 
@@ -187,6 +217,37 @@ BENCH("Tick · 4 worlds of 100k, parallel", 20) {
 
 BENCH("Tick · 4 worlds of 100k, serial", 20) {
 	Universe &universe = UniverseOf(4, 100'000, ExecutionMode::WorldSerial);
+	for (int pass = 0; pass < 20; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 8 worlds of 100k, parallel", 10) {
+	// Past the 2- and 4-world crossover, where every lane has a large world.
+	Universe &universe = UniverseOf(8, 100'000, ExecutionMode::WorldParallel);
+	for (int pass = 0; pass < 10; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 8 worlds of 100k, serial", 10) {
+	Universe &universe = UniverseOf(8, 100'000, ExecutionMode::WorldSerial);
+	for (int pass = 0; pass < 10; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 1 world of 100k and 7 of 1k, parallel", 20) {
+	// Read against the serial row below and `1 world of 100k`: the gap to the
+	// single world is what the light worlds cost when they share lanes.
+	Universe &universe = LopsidedUniverse(ExecutionMode::WorldParallel);
+	for (int pass = 0; pass < 20; pass++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+}
+
+BENCH("Tick · 1 world of 100k and 7 of 1k, serial", 20) {
+	Universe &universe = LopsidedUniverse(ExecutionMode::WorldSerial);
 	for (int pass = 0; pass < 20; pass++) {
 		universe.Tick(1.0f / 60.0f);
 	}
