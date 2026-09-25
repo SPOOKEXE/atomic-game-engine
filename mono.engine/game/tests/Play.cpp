@@ -384,3 +384,30 @@ TEST_CASE(
 		CHECK_FALSE(script::AppliedPortalPlayerInput(store, returned));
 	});
 }
+
+TEST_CASE("a resting player's pose is still captured", "[game][play][portal-input-schedule]") {
+	// A body that stops sleeps, and a sleeping body has no `scene::Motion`. The
+	// pose acknowledgement must continue while the player stands still.
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	world::Universe worlds;
+	const auto world = worlds.Create({.Name = core::Name("rest")});
+	ecs::Entity player;
+	worlds.Enter(world, [&](ecs::Store &store) {
+		scene::InstallServices(store);
+		REQUIRE(script::ConfigurePortalTransfers(store, 7));
+		player = scene::AddPlayer(store, "idle", false, 1);
+		REQUIRE(scene::LoadCharacter(store, player) != ecs::NULL_ENTITY);
+	});
+	worlds.Tick(1.0f / 60);
+	worlds.Enter(world, [&](ecs::Store &store) {
+		const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, player));
+		REQUIRE(rig);
+		store.Remove<scene::Motion>(rig->Root);
+		const auto sample = game::CapturePlayerMotion(store, player, 42);
+		REQUIRE(sample);
+		CHECK(sample->Motion.InputTick == 42);
+		CHECK(sample->Motion.Linear == core::Vector3{});
+		CHECK(sample->Motion.Frame.Position == store.Get<scene::Transform>(rig->Root)->Frame.Position);
+	});
+}

@@ -392,6 +392,23 @@ That reads as the renderer dropping triangles at random. It shipped that way
 once and was diagnosed from a screenshot rather than from the symptom
 description.
 
+**Surface slots are the exception and draw both faces.** A portal or mirror is
+a part with thickness, and a camera walking through the pane stands inside it,
+where every face is a back face. Culled, the hole vanishes and the room behind
+the pane shows through. `SlotTwoSided` marks rows with a surface index, and
+`DrawSlots` swaps in the no-cull twin that `TwoSidedFor` finds for the pipeline
+it would otherwise bind. An authored shader variant has no twin and stays culled.
+
+## A remote eye composes the body on the viewer
+
+A remote eye reply is a round trip old, and a body baked into it is that old
+too. When `PortalEyeGeometrySource::ComposeBody` is set, `SubmitEye` asks a
+remote producer for opaque-lighting layers without the viewer's body, at half
+the display's longest side so four layers stay small and inside the pixel
+budget. `ComposeEyeBody` then draws the body's current rows over the latest
+layers every frame. The composed image is bound as complete-world, because the
+eye output takes only finished pictures.
+
 **Geometry that can be asserted without a GPU should live where a test can reach
 it.** `AdornmentGeometry.hpp` is the module's public example: it is a public
 header precisely so `tests/AdornmentGeometry.cpp` can check every triangle it

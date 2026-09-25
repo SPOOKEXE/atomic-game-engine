@@ -1,4 +1,5 @@
 #include "PortalContacts.hpp"
+#include "PortalObservation.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Bytes.hpp>
@@ -42,7 +43,10 @@ namespace engine::script {
 		constexpr uint32_t MAGIC = 0x35545050;
 		constexpr size_t MAXIMUM_ACTIVE = 16;
 		constexpr size_t MAXIMUM_NATIVE_INPUTS = 64;
-		constexpr size_t MAXIMUM_FORWARDED_INPUTS = 64;
+		// Forwarded input is held from the seal until the destination commits and
+		// acknowledges it, so this bounds how long a seal may last before input
+		// is lost: about four seconds at 60 Hz, past a 300 ms client round trip.
+		constexpr size_t MAXIMUM_FORWARDED_INPUTS = 256;
 		struct ScheduledMove {
 			uint64_t InputTick = 0;
 			uint64_t PhysicsTick = 0;
@@ -115,6 +119,9 @@ namespace engine::script {
 			bool HadOwner = false;
 			scene::NetworkOwner OriginalOwner;
 			uint64_t DestinationIncarnation = 0;
+			// Newest input the source applied to this body itself before H. The sealed
+			// baseline states it so the destination does not replay those rows.
+			uint64_t LocalInputTick = 0;
 			uint64_t RetryAt = 0;
 			uint64_t AdmittedIncarnation = 0;
 			world::Ticket Ticket;
@@ -147,6 +154,9 @@ namespace engine::script {
 			uint64_t AppliedMove = 0;
 			uint64_t AppliedJump = 0;
 			uint64_t AppliedInputTick = 0;
+			// Input the committed baseline already includes; forwarded rows at or
+			// before it were applied by the source and are skipped here.
+			uint64_t BaselineInputTick = 0;
 			std::optional<PortalTransferMotion> Motion;
 			bool MotionReplyPending = false;
 			bool InputClosed = false;
@@ -624,6 +634,15 @@ namespace engine::script {
 			record.Animation.clear();
 			(void)scene::CancelPortalCrossing(store, record.Root);
 			record.Receipt.Stage = PortalTransferStage::Refused;
+			portal_observation::Handoff(
+				store,
+				record.Subject,
+				record.Root,
+				PortalHandoffEvent::Refused,
+				record.Receipt.Id.Sequence,
+				0,
+				record.Receipt.DestinationWorld
+			);
 			record.Receipt.Diagnostic = std::move(diagnostic);
 			record.Body.clear();
 		}
@@ -663,6 +682,15 @@ namespace engine::script {
 			record.Ticket = ticket;
 			record.RetryAt = store.Time().Tick + RETRY_TICKS;
 			(void)scene::CommitPortalCrossing(store, record.Root, record.Receipt.Fence.AuthorityEpoch);
+			portal_observation::Handoff(
+				store,
+				record.Subject,
+				record.Root,
+				PortalHandoffEvent::Committing,
+				record.Receipt.Id.Sequence,
+				0,
+				record.Receipt.DestinationWorld
+			);
 			if (record.Receipt.Kind == scene::PortalBodyKind::Player)
 				(void)scene::RemoveCharacter(store, record.Subject);
 			store.DestroyInstance(record.Subject);
@@ -705,6 +733,52 @@ namespace engine::script {
 			return !collision;
 		}
 
+		struct SlideResult {
+			core::CFrame End;
+			bool Contacted = false;
+			// False when the collision index was missing or a query hit its candidate bound.
+			bool Complete = true;
+		};
+
+		// Moves a collider through this world with a bounded sequence of sliding
+		// contacts, as local motion does in `CopiedContacts`. A walking body grazes
+		// the floor that holds it up; stopping at that contact would strand it.
+		// Each blocking contact keeps the continuous step's bite so the solver
+		// still reports it.
+		SlideResult SlideCollider(
+			const ecs::Store &store,
+			const scene::Collider &collider,
+			const core::CFrame &from,
+			core::Vector3 remaining,
+			core::Vector3 angular,
+			Entity ignore
+		) {
+			SlideResult result;
+			result.End = from;
+			for (int slide = 0; slide < 4 && remaining.MagnitudeSquared() > 1e-12f; ++slide) {
+				const auto hit = physics::SweepPlacement(store, collider, result.End, remaining, angular, ignore, true);
+				if (!hit.Complete) {
+					result.Complete = false;
+					return result;
+				}
+				if (!hit.Hit) {
+					result.End = physics::Advanced(result.End, remaining, angular, 1);
+					break;
+				}
+				result.Contacted = true;
+				const float reach = remaining.Magnitude() + angular.Magnitude() * collider.Extent.Magnitude();
+				const float fraction =
+					std::min(1.0f, hit.Fraction + physics::CONTINUOUS_BITE / std::max(reach, .001f));
+				result.End = physics::Advanced(result.End, remaining, angular, fraction);
+				remaining = remaining * (1 - fraction);
+				const float into = remaining.Dot(hit.Normal);
+				if (into < 0) remaining = remaining - hit.Normal * into;
+				angular = {};
+				if (hit.ConservativeFallback) break;
+			}
+			return result;
+		}
+
 		bool ResolveSuffix(ecs::Store &store, scene::PortalBodyCopy &body, std::string &failure) {
 			if (!body.Sweep) return true;
 			scene::Collider collider;
@@ -733,42 +807,15 @@ namespace engine::script {
 				return false;
 			}
 			physics::SyncBroadphase(store);
-			// Resolve a bounded sequence of sliding contacts, as local motion does in
-			// `CopiedContacts`. A walking body's suffix grazes the floor that holds it
-			// up, and stopping at that contact would put the body down on the pane it
-			// just left instead of where the source world moved it. Each blocking
-			// contact keeps the continuous step's bite so the solver still reports it.
-			auto current = sweep.From;
-			auto remaining = sweep.Displacement;
-			auto angular = sweep.AngularDisplacement;
-			bool contacted = false;
-			for (int slide = 0; slide < 4 && remaining.MagnitudeSquared() > 1e-12f; ++slide) {
-				const auto hit = physics::SweepPlacement(
-					store, collider, current, remaining, angular, ecs::NULL_ENTITY, true
-				);
-				if (!hit.Complete) {
-					failure = "destination suffix collision query is unavailable or exceeds its candidate bound";
-					return false;
-				}
-				if (!hit.Hit) {
-					current = physics::Advanced(current, remaining, angular, 1);
-					remaining = {};
-					break;
-				}
-				contacted = true;
-				const float reach =
-					remaining.Magnitude() + angular.Magnitude() * collider.Extent.Magnitude();
-				const float fraction =
-					std::min(1.0f, hit.Fraction + physics::CONTINUOUS_BITE / std::max(reach, .001f));
-				current = physics::Advanced(current, remaining, angular, fraction);
-				remaining = remaining * (1 - fraction);
-				const float into = remaining.Dot(hit.Normal);
-				if (into < 0) remaining = remaining - hit.Normal * into;
-				angular = {};
-				if (hit.ConservativeFallback) break;
+			const auto slid = SlideCollider(
+				store, collider, sweep.From, sweep.Displacement, sweep.AngularDisplacement, ecs::NULL_ENTITY
+			);
+			if (!slid.Complete) {
+				failure = "destination suffix collision query is unavailable or exceeds its candidate bound";
+				return false;
 			}
-			if (!contacted) return true;
-			const auto adjustment = current * root.Frame.Inverse();
+			if (!slid.Contacted) return true;
+			const auto adjustment = slid.End * root.Frame.Inverse();
 			for (auto &node : body.Nodes)
 				for (auto &component : node.Components) {
 					if (component.Type != "scene.Transform" && component.Type != "scene.PreviousTransform")
@@ -808,6 +855,29 @@ namespace engine::script {
 			return true;
 		}
 
+		// Maps the source's input clock onto this world at the current tick, using the
+		// newest applied forwarded row. Native input queued later is timed from here.
+		void AnchorForwardClock(ecs::Store &store, const Incoming &record, const scene::Character &rig) {
+			if (record.Move.InputTick == 0 || record.Move.StepSeconds <= 0 || store.Time().Delta <= 0) return;
+			if (!store.Has<PlayerInputClock>(record.Subject)) store.Set(record.Subject, PlayerInputClock{});
+			auto *clock = store.GetMutable<PlayerInputClock>(record.Subject);
+			if (clock->Root != rig.Root || clock->Humanoid != rig.Humanoid) *clock = {};
+			if (!clock->Native && record.Move.InputTick > clock->AnchorInputTick) {
+				clock->Root = rig.Root;
+				clock->Humanoid = rig.Humanoid;
+				clock->AnchorWorldTick = store.Time().Tick;
+				clock->AnchorInputTick = record.Move.InputTick;
+				clock->InputStep = record.Move.StepSeconds;
+				clock->WorldStep = store.Time().Delta;
+				clock->AppliedInputTick = record.Move.InputTick;
+				clock->LastQueuedInputTick = record.Move.InputTick;
+			} else if (clock->Native && record.Move.InputTick > clock->AppliedInputTick) {
+				// Input sent to the previous host before takeover still precedes
+				// every queued native tick, so it remains the applied frontier.
+				clock->AppliedInputTick = record.Move.InputTick;
+			}
+		}
+
 		void ApplyForwardMove(ecs::Store &store, Incoming &record) {
 			if (!record.Committed || record.InputClosed) return;
 			if (!store.Alive(record.Subject)) {
@@ -824,26 +894,10 @@ namespace engine::script {
 			record.AppliedMove = record.Move.Sequence;
 			record.AppliedJump = record.Move.JumpSequence;
 			record.AppliedInputTick = record.Move.InputTick;
-			if (record.Move.InputTick != 0 && record.Move.StepSeconds > 0 && store.Time().Delta > 0) {
-				if (!store.Has<PlayerInputClock>(record.Subject))
-					store.Set(record.Subject, PlayerInputClock{});
-				auto *clock = store.GetMutable<PlayerInputClock>(record.Subject);
-				if (clock->Root != rig->Root || clock->Humanoid != rig->Humanoid) *clock = {};
-				if (!clock->Native && record.Move.InputTick > clock->AnchorInputTick) {
-					clock->Root = rig->Root;
-					clock->Humanoid = rig->Humanoid;
-					clock->AnchorWorldTick = store.Time().Tick;
-					clock->AnchorInputTick = record.Move.InputTick;
-					clock->InputStep = record.Move.StepSeconds;
-					clock->WorldStep = store.Time().Delta;
-					clock->AppliedInputTick = record.Move.InputTick;
-					clock->LastQueuedInputTick = record.Move.InputTick;
-				} else if (clock->Native && record.Move.InputTick > clock->AppliedInputTick) {
-					// Input sent to the previous host before takeover still precedes
-					// every queued native tick, so it remains the applied frontier.
-					clock->AppliedInputTick = record.Move.InputTick;
-				}
-			}
+			AnchorForwardClock(store, record, *rig);
+			portal_observation::Input(
+				store, record.Subject, PortalInputRoute::Forwarded, record.Move.InputTick, humanoid->MoveDirection
+			);
 			static const core::LogCategory controlTrace("portal-input");
 			if (controlTrace.Enabled(core::LogLevel::Trace)) {
 				const auto *root = store.Get<scene::Transform>(rig->Root);
@@ -870,6 +924,83 @@ namespace engine::script {
 			}
 			core::Metrics::Count("world.portal.move.applied", 1);
 		}
+		// Between the source's seal at H and this world's commit the body stood still
+		// while the client kept predicting it. The rows for that window arrive here
+		// together after commit. Replaying them one world step at a time would leave
+		// this world behind the client for the rest of the session, so all but the
+		// newest step's worth are moved through at once: the client's prediction
+		// model (walk speed along each direction for its step), resolved against this
+		// world with sliding contacts. Returns false and leaves the rows when the
+		// body or the collision index cannot support it; they then replay in time.
+		//
+		// The source holds its consumed input at H while frozen
+		// (`FrozenPortalPlayerInput`), so the client predicted every one of these
+		// rows and this lands the body where the client showed it.
+		bool CatchUpForwardedMoves(ecs::Store &store, Incoming &record, double step) {
+			if (!record.Committed || record.InputClosed || record.PendingMoveCount == 0 || step <= 0) return false;
+			double backlog = 0;
+			for (size_t index = 0; index < record.PendingMoveCount; ++index) {
+				const double seconds = record.PendingMoves[index].StepSeconds;
+				if (!(seconds > 0)) return false;
+				backlog += seconds;
+			}
+			// Up to two steps is ordinary arrival jitter, not a frozen window.
+			if (backlog <= 2 * step + 1e-6) return false;
+			size_t overdue = 0;
+			for (double left = backlog;
+				 overdue < record.PendingMoveCount && left - record.PendingMoves[overdue].StepSeconds >= step - 1e-6;
+				 ++overdue)
+				left -= record.PendingMoves[overdue].StepSeconds;
+			if (overdue == 0 || !store.Alive(record.Subject)) return false;
+			const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, record.Subject));
+			if (!rig) return false;
+			auto *humanoid = store.GetMutable<scene::Humanoid>(rig->Humanoid);
+			const auto *collider = store.Get<scene::Collider>(rig->Root);
+			const auto *transform = store.Get<scene::Transform>(rig->Root);
+			if (!humanoid || !collider || !transform) return false;
+			core::Vector3 displacement;
+			for (size_t index = 0; index < overdue; ++index) {
+				const auto &move = record.PendingMoves[index];
+				displacement = displacement + record.Through.Rotate(move.Direction) *
+												  (humanoid->WalkSpeed * static_cast<float>(move.StepSeconds));
+			}
+			// Height belongs to gravity and ground contact, which the solver keeps.
+			displacement.Y = 0;
+			if (!store.HasResource<physics::PhysicsWorld>()) return false;
+			const core::CFrame from = transform->Frame;
+			physics::SyncBroadphase(store);
+			const auto slid = SlideCollider(store, *collider, from, displacement, {}, rig->Root);
+			if (!slid.Complete) return false;
+			store.Set(rig->Root, scene::Transform{slid.End});
+			for (size_t index = 0; index < overdue; ++index) {
+				const auto &move = record.PendingMoves[index];
+				portal_observation::Input(
+					store,
+					record.Subject,
+					PortalInputRoute::CaughtUp,
+					move.InputTick,
+					record.Through.Rotate(move.Direction)
+				);
+			}
+			const auto &last = record.PendingMoves[overdue - 1];
+			humanoid = store.GetMutable<scene::Humanoid>(rig->Humanoid);
+			humanoid->MoveDirection = record.Through.Rotate(last.Direction);
+			humanoid->JumpRequested |= last.JumpSequence > record.AppliedJump;
+			record.Move = last;
+			record.AppliedMove = last.Sequence;
+			record.AppliedJump = last.JumpSequence;
+			record.AppliedInputTick = last.InputTick;
+			AnchorForwardClock(store, record, *rig);
+			std::move(
+				record.PendingMoves.begin() + overdue,
+				record.PendingMoves.begin() + record.PendingMoveCount,
+				record.PendingMoves.begin()
+			);
+			record.PendingMoveCount -= overdue;
+			core::Metrics::Count("world.portal.move.caught-up", overdue);
+			return true;
+		}
+
 		bool AcknowledgeMove(ecs::Store &store, const TransferState &state, const Incoming &record) {
 			if (record.Move.Sequence == 0 && !record.InputClosed) return false;
 			Message ack;
@@ -917,6 +1048,16 @@ namespace engine::script {
 				found->PendingMoveCount = static_cast<size_t>(retained - found->PendingMoves.begin());
 				found->Receipt.AcknowledgedInputTick =
 					std::max(found->Receipt.AcknowledgedInputTick, inputTick);
+				if (closed != 0 && !found->InputClosed)
+					portal_observation::Handoff(
+						store,
+						found->Subject,
+						found->Root,
+						PortalHandoffEvent::InputClosed,
+						found->Receipt.Id.Sequence,
+						inputTick,
+						found->Receipt.DestinationWorld
+					);
 				found->InputClosed |= closed != 0;
 				return;
 			}
@@ -1022,6 +1163,25 @@ namespace engine::script {
 						return;
 					}
 					baseline.Sweep = record.Sweep;
+					// The source kept simulating with input it also forwarded since Begin, so
+					// H already contains every move it applied: scheduled ones through its
+					// clock, immediate ones through `NotePortalPlayerInputApplied`.
+					if (record.Receipt.Kind == scene::PortalBodyKind::Player) {
+						baseline.AppliedInputTick = std::max(
+							AppliedPortalPlayerInput(store, record.Subject).value_or(0), record.LocalInputTick
+						);
+						// From here the body is frozen and holds exactly this input.
+						record.LocalInputTick = baseline.AppliedInputTick;
+					}
+					portal_observation::Handoff(
+						store,
+						record.Subject,
+						record.Root,
+						PortalHandoffEvent::Sealed,
+						record.Receipt.Id.Sequence,
+						baseline.AppliedInputTick,
+						record.Receipt.DestinationWorld
+					);
 					if (baseline.Sweep) {
 						const auto *root = store.Get<scene::Transform>(record.Root);
 						if (root == nullptr) {
@@ -1297,6 +1457,26 @@ namespace engine::script {
 				}
 				found->Subject = body.Kind == scene::PortalBodyKind::Player ? arrival.Player : arrival.Root;
 				found->ArrivalFrame = store.Get<scene::Transform>(arrival.Root)->Frame;
+				found->BaselineInputTick = body.AppliedInputTick;
+				{
+					PortalArrivalRecord arrived;
+					if (auto *log = portal_observation::Begin(store, found->Subject, arrival.Root, arrived.Stamp)) {
+						arrived.Transfer = found->Id.Sequence;
+						arrived.Position = found->ArrivalFrame->Position;
+						arrived.BaselineInputTick = found->BaselineInputTick;
+						arrived.Source.Assign(found->Id.SourceWorld);
+						log->Arrivals.Append(arrived);
+					}
+					portal_observation::Handoff(
+						store,
+						found->Subject,
+						arrival.Root,
+						PortalHandoffEvent::Committed,
+						found->Id.Sequence,
+						found->BaselineInputTick,
+						found->Id.SourceWorld
+					);
+				}
 				found->Committed = true;
 				found->Body.clear();
 				ApplyForwardMove(store, *found);
@@ -1368,6 +1548,14 @@ namespace engine::script {
 			ENGINE_PROFILE("portal native input");
 			if (store.AdoptOnly()) return;
 			std::vector<Entity> started;
+			// Recorded after the walk: a log row is a resource write, not a row move,
+			// but keeping every write outside `Each` matches the rest of this pass.
+			struct Applied {
+				Entity Player;
+				uint64_t InputTick;
+				core::Vector3 Direction;
+			};
+			std::vector<Applied> observed;
 			store.Each<PlayerInputClock>([&](Entity player, PlayerInputClock &clock) {
 				if (!clock.Native) return;
 				const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, player));
@@ -1387,6 +1575,7 @@ namespace engine::script {
 					humanoid->MoveDirection = move.Direction;
 					humanoid->JumpRequested |= move.Jump;
 					clock.AppliedInputTick = move.InputTick;
+					observed.push_back({player, move.InputTick, move.Direction});
 					clock.Begin = (clock.Begin + 1) % MAXIMUM_NATIVE_INPUTS;
 					--clock.Count;
 					if (previousDirection != core::Vector3{} && humanoid->MoveDirection == core::Vector3{}) {
@@ -1421,6 +1610,10 @@ namespace engine::script {
 					core::Metrics::Count("world.portal.native.applied", 1);
 				}
 			});
+			for (const auto &applied : observed)
+				portal_observation::Input(
+					store, applied.Player, PortalInputRoute::Scheduled, applied.InputTick, applied.Direction
+				);
 			for (const Entity player : started)
 				ClosePortalPlayerMoveForwarding(store, player);
 		}
@@ -1532,6 +1725,7 @@ namespace engine::script {
 					for (size_t index = 0; index < record.PendingMoveCount; ++index)
 						WriteMove(writer, record.PendingMoves[index]);
 					writer.WriteUInt64(record.AcknowledgedMove);
+					writer.WriteUInt64(record.LocalInputTick);
 					writer.WriteBool(record.InputClosed);
 					WriteSweep(writer, record.Sweep);
 					WriteMouth(writer, record.SourceMouth);
@@ -1559,6 +1753,7 @@ namespace engine::script {
 					writer.WriteUInt64(record.AppliedMove);
 					writer.WriteUInt64(record.AppliedJump);
 					writer.WriteUInt64(record.AppliedInputTick);
+					writer.WriteUInt64(record.BaselineInputTick);
 					WriteMotion(writer, record.Motion);
 					writer.WriteBool(record.MotionReplyPending);
 					writer.WriteBool(record.InputClosed);
@@ -1637,6 +1832,7 @@ namespace engine::script {
 					for (size_t index = 0; index < record.PendingMoveCount; ++index)
 						record.PendingMoves[index] = ReadMove(reader);
 					record.AcknowledgedMove = reader.ReadUInt64();
+					record.LocalInputTick = reader.ReadUInt64();
 					record.InputClosed = StrictBool(reader);
 					record.Sweep = ReadSweep(reader);
 					record.SourceMouth = ReadMouth(reader);
@@ -1691,6 +1887,7 @@ namespace engine::script {
 					record.AppliedMove = reader.ReadUInt64();
 					record.AppliedJump = reader.ReadUInt64();
 					record.AppliedInputTick = reader.ReadUInt64();
+					record.BaselineInputTick = reader.ReadUInt64();
 					record.Motion = ReadMotion(reader);
 					record.MotionReplyPending = StrictBool(reader);
 					record.InputClosed = StrictBool(reader);
@@ -1770,6 +1967,7 @@ namespace engine::script {
 		// Snapshot restoration needs the contact codec and channel callbacks
 		// before a configured world's state is read.
 		(void)RegisterPortalContacts();
+		portal_observation::Register();
 		ecs::Components::Register<TransferState>("script.PortalTransfers", WriteStates, ReadStates);
 		ecs::Components::Register<PlayerInputClock>(
 			"script.PortalPlayerInput", WriteInputClocks, ReadInputClocks
@@ -1879,6 +2077,7 @@ namespace engine::script {
 		if (incarnation == 0 || store.AdoptOnly() || world::Postbox(store).IsReplica()) return false;
 		RegisterPortalTransferComponents();
 		if (!scene::ConfigureBodyIdentityAuthority(store, incarnation)) return false;
+		portal_observation::Prepare(store);
 		if (const auto *previous = State(store); previous != nullptr)
 			return previous->Incarnation == incarnation &&
 				   previous->RequirePlayerAdmission == requirePlayerAdmission &&
@@ -2093,6 +2292,9 @@ namespace engine::script {
 			}
 			out = record.Receipt.Id;
 			state->NextSequence++;
+			portal_observation::Handoff(
+				store, subject, root, PortalHandoffEvent::Offered, out.Sequence, 0, destination
+			);
 			state->Out.push_back(std::move(record));
 			// Source authority remains live until H. Prepared seals the final capture and
 			// CommitSealed retires it after the destination has acknowledged that baseline.
@@ -2206,7 +2408,46 @@ namespace engine::script {
 		// wins and the cumulative JumpSequence keeps any jump among them.
 		const double step = store.Time().Delta;
 		for (auto &record : state->In) {
-			if (record.PendingMoveCount == 0) continue;
+			// Rows the committed baseline already contains were applied by the source.
+			// Count them as applied without replaying them, which would repeat their
+			// motion and start this world's input clock behind the client's.
+			if (record.Committed && record.BaselineInputTick != 0) {
+				size_t included = 0;
+				while (included < record.PendingMoveCount &&
+					   record.PendingMoves[included].InputTick != 0 &&
+					   record.PendingMoves[included].InputTick <= record.BaselineInputTick) {
+					const auto &move = record.PendingMoves[included++];
+					portal_observation::Input(
+						store,
+						record.Subject,
+						PortalInputRoute::Included,
+						move.InputTick,
+						record.Through.Rotate(move.Direction)
+					);
+					record.Move = move;
+					record.AppliedMove = move.Sequence;
+					record.AppliedJump = move.JumpSequence;
+					record.AppliedInputTick = move.InputTick;
+				}
+				if (included != 0) {
+					if (!record.InputClosed && store.Alive(record.Subject))
+						if (const auto *rig =
+								store.Get<scene::Character>(scene::CharacterOf(store, record.Subject)))
+							AnchorForwardClock(store, record, *rig);
+					std::move(
+						record.PendingMoves.begin() + included,
+						record.PendingMoves.begin() + record.PendingMoveCount,
+						record.PendingMoves.begin()
+					);
+					record.PendingMoveCount -= included;
+					core::Metrics::Count("world.portal.move.included", included);
+				}
+			}
+			const bool caughtUp = CatchUpForwardedMoves(store, record, step);
+			if (record.PendingMoveCount == 0) {
+				if (caughtUp) AcknowledgeMove(store, *state, record);
+				continue;
+			}
 			size_t consumed = 0;
 			double seconds = 0;
 			do {
@@ -2336,6 +2577,11 @@ namespace engine::script {
 						scene::PortalBodySweep Sweep;
 						physics::PortalMouthMotion SourceMouth;
 						physics::PortalMouthMotion DestinationMouth;
+						bool Direct = false;
+						float PriorOffset = 0;
+						float CurrentOffset = 0;
+						core::Vector3 Prior;
+						core::Vector3 Current;
 					};
 					std::vector<Crossing> crossings;
 					const auto gather = [&](Entity subject, Entity root, scene::PortalBodyKind kind) {
@@ -2358,7 +2604,8 @@ namespace engine::script {
 								seams, from, currentFrame.Position, true, hop, index
 							);
 						};
-						if (!crosses(previousFrame.Position)) {
+						const bool direct = crosses(previousFrame.Position);
+						if (!direct) {
 							const bool awaitingArrivalMovement =
 								std::any_of(state->In.begin(), state->In.end(), [&](const Incoming &record) {
 									return record.Committed && record.Subject == subject &&
@@ -2457,7 +2704,12 @@ namespace engine::script {
 							 hop.Through,
 							 {start, currentFrame.Position - start.Position, angularVelocity * remaining},
 							 mouth(seam.Pane, seam.Centre),
-							 mouth(seam.Far, seam.Destination.Position)}
+							 mouth(seam.Far, seam.Destination.Position),
+							 direct,
+							 prior,
+							 current,
+							 previousFrame.Position,
+							 currentFrame.Position}
 						);
 					};
 					struct Candidate {
@@ -2490,19 +2742,42 @@ namespace engine::script {
 					for (const auto &crossing : crossings) {
 						PortalTransferId id;
 						std::string failure;
-						if (!BeginTransfer(
-								store,
-								crossing.Subject,
-								crossing.Kind,
-								crossing.Destination,
-								crossing.Through,
-								id,
-								failure,
-								crossing.Sweep,
-								crossing.SourceMouth,
-								crossing.DestinationMouth
-							))
-							ENGINE_WARN("portal crossing refused: {}", failure);
+						const bool begun = BeginTransfer(
+							store,
+							crossing.Subject,
+							crossing.Kind,
+							crossing.Destination,
+							crossing.Through,
+							id,
+							failure,
+							crossing.Sweep,
+							crossing.SourceMouth,
+							crossing.DestinationMouth
+						);
+						// A subject already crossing is refused every tick it stays past the
+						// plane. That is expected, so only a first refusal is worth a row.
+						const bool duplicate =
+							!begun && std::any_of(state->Out.begin(), state->Out.end(), [&](const auto &r) {
+								return r.Subject == crossing.Subject && Active(r);
+							});
+						if (!duplicate) {
+							PortalCrossingRecord record;
+							if (auto *log = portal_observation::Begin(
+									store, crossing.Subject, crossing.Subject, record.Stamp
+								)) {
+								record.Begun = begun;
+								record.Direct = crossing.Direct;
+								record.Transfer = begun ? id.Sequence : 0;
+								record.PriorOffset = crossing.PriorOffset;
+								record.CurrentOffset = crossing.CurrentOffset;
+								record.Prior = crossing.Prior;
+								record.Current = crossing.Current;
+								record.Destination.Assign(crossing.Destination);
+								record.Reason.Assign(failure);
+								log->Crossings.Append(record);
+							}
+						}
+						if (!begun && !duplicate) ENGINE_WARN("portal crossing refused: {}", failure);
 					}
 				},
 				ecs::SystemOrder{{}, {}, {"character.portal"}, {"physics.contacts"}}
@@ -2657,6 +2932,32 @@ namespace engine::script {
 		return clock->AppliedInputTick;
 	}
 
+	void NotePortalPlayerInputApplied(ecs::Store &store, Entity sourcePlayer, uint64_t inputTick) {
+		if (inputTick == 0 || store.AdoptOnly()) return;
+		auto *state = State(store);
+		if (!state) return;
+		for (auto it = state->Out.rbegin(); it != state->Out.rend(); ++it) {
+			if (it->Subject != sourcePlayer || it->Receipt.Kind != scene::PortalBodyKind::Player) continue;
+			// Only a live source body takes input; H is sealed when Preparing ends.
+			if (it->Receipt.Stage == PortalTransferStage::Preparing)
+				it->LocalInputTick = std::max(it->LocalInputTick, inputTick);
+			return;
+		}
+	}
+	std::optional<uint64_t> FrozenPortalPlayerInput(const ecs::Store &store, Entity sourcePlayer) {
+		const auto *state = State(store);
+		if (!state) return std::nullopt;
+		for (auto it = state->Out.rbegin(); it != state->Out.rend(); ++it) {
+			if (it->Subject != sourcePlayer || it->Receipt.Kind != scene::PortalBodyKind::Player) continue;
+			const auto stage = it->Receipt.Stage;
+			if (!it->BaselineSealed || it->InputClosed ||
+				(stage != PortalTransferStage::Prepared && stage != PortalTransferStage::Committing &&
+				 stage != PortalTransferStage::Committed))
+				return std::nullopt;
+			return it->LocalInputTick;
+		}
+		return std::nullopt;
+	}
 	void ClosePortalPlayerMoveForwarding(ecs::Store &store, Entity destinationPlayer) {
 		if (store.AdoptOnly() || world::Postbox(store).IsReplica()) return;
 		auto *state = State(store);
@@ -2667,6 +2968,15 @@ namespace engine::script {
 				continue;
 			record.InputClosed = true;
 			AcknowledgeMove(store, *state, record);
+			portal_observation::Handoff(
+				store,
+				record.Subject,
+				ecs::NULL_ENTITY,
+				PortalHandoffEvent::InputClosed,
+				record.Id.Sequence,
+				record.AppliedInputTick,
+				record.Id.SourceWorld
+			);
 		}
 	}
 	std::optional<PortalTransferReceipt>

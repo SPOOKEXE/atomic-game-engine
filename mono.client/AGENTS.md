@@ -484,3 +484,21 @@ which client has them is replication's answer, already given.
 whichever block it lands in. `audio/AGENTS.md` names that as the one place
 "close enough to the frame" is wrong, and a `Play` posted without a deadline is
 exactly the convenience it warns will be reached for.
+
+## Another room is drawn from a local copy first
+
+A pane or an eye that looks into another world draws it from a local replica of
+that world whenever one is ready: the approach copy offered before a crossing,
+the successor being handed the player, or the retained copy of the room just
+left. A local copy draws any camera at once from replicated state, and keeps
+drawing its last received state while updates are late. `ResolveDestinationWorld`
+therefore prefers a world in this process over a remote endpoint of the same
+view, and the retained copy is kept while the eye's world still has a seam into
+it. A remote endpoint's image is the fallback, and its eye requests ask for
+layers without the body so the client composes the current body over them.
+
+Before any state for a room has arrived there is nothing to draw beyond the
+pane. An eye that crosses into such a room is held at the doorway on the side
+it came from (`HoldEyeAtDoorway`), where the source view shows the pane
+awaiting its image. Only that first contact may be empty.
+

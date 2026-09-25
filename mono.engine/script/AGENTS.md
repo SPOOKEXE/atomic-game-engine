@@ -851,3 +851,32 @@ replica fills from the wire, so what it has to ask each tick is what arrived.
 The record of what has already started is the runtime's own - two VMs over one
 world would each answer it separately - which is why it is a member rather than
 a tag on the row.
+
+## Portal input follows the client's clock through a transfer
+
+A transferred player must not fall behind the client that predicts it. Five
+rules in `PortalTransfer.cpp` keep the destination on the client's input clock,
+and each has a focused test.
+
+- The source body stays live until it seals H, so the sealed baseline states
+  `AppliedInputTick`, the newest input already inside it. The destination counts
+  forwarded rows at or before it as `Included` and never replays them.
+  `NotePortalPlayerInputApplied` records what the source applied immediately.
+- Rows forwarded while the source was frozen between H and commit arrive
+  together. All but the newest world step's worth are moved through at once,
+  with the client's prediction model and sliding contacts, as `CaughtUp`. The
+  source holds them unsent until commit, so `MAXIMUM_FORWARDED_INPUTS` bounds
+  how long a seal may last before input is dropped.
+- While the body is frozen the source reports consumed input only through H
+  (`FrozenPortalPlayerInput`, held with `Authority::HoldConsumedInput`). The
+  client keeps predicting the forwarded rows, so it shows the lead the
+  destination catches up to instead of being pulled back to the frozen body.
+- Forwarded rows drain one world step of input time per tick, coalescing inside
+  a step as native input does. One row per tick falls behind a faster client.
+- Forwarding closes when the first native move is applied, not when it is
+  queued, so input already sent to the previous host fills the time between.
+
+`PortalObservation.hpp` records crossings, arrivals, input routes and handoff
+stages into a bounded ring per world. Read it with `CopyPortalObservations`
+before guessing at a race; enabling trace logs changes the timing it depends on.
+

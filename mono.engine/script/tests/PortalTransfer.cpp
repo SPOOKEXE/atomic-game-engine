@@ -12,6 +12,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
+#include <engine/script/PortalObservation.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -1555,4 +1556,128 @@ TEST_CASE(
 			REQUIRE(PortalTransferOfPlayer(store, pair.Player)->Motion->InputTick == 9000);
 		});
 	}
+}
+
+TEST_CASE(
+	"portal observations follow one traced transfer across both worlds",
+	"[script][portal-transfer][portal-observation]"
+) {
+	CHECK(
+		std::vector<std::string_view>(PortalObservationHooks().begin(), PortalObservationHooks().end()) ==
+		std::vector<std::string_view>{"portal.crossing", "portal.arrival", "portal.input", "portal.handoff"}
+	);
+	Pair pair;
+	constexpr uint64_t TRACE = 0xabc;
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		store.Set(pair.Root, scene::ObservationTrace{TRACE});
+	});
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) { SetPortalObservationTrace(store, 7); });
+	const auto id = pair.Begin();
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		// The source body is live until H, so 9000 is already in the baseline.
+		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {0, 0, -1}, false, 9000, 1.0 / 60));
+		NotePortalPlayerInputApplied(store, pair.Player, 9000);
+		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {1, 0, 0}, false, 9001, 1.0 / 60));
+	});
+	pair.Tick(12);
+
+	pair.Worlds.Enter(pair.Source, [&](const ecs::Store &store) {
+		const auto observed = CopyPortalObservations(store);
+		std::vector<PortalHandoffEvent> events;
+		for (const auto &record : observed.Handoffs) {
+			CHECK(record.Stamp.Trace == TRACE);
+			CHECK(record.Transfer == id.Sequence);
+			CHECK(record.Peer.View() == "destination");
+			if (record.Event == PortalHandoffEvent::Sealed) CHECK(record.InputTick == 9000);
+			events.push_back(record.Event);
+		}
+		REQUIRE(events.size() >= 3);
+		CHECK(events[0] == PortalHandoffEvent::Offered);
+		CHECK(events[1] == PortalHandoffEvent::Sealed);
+		CHECK(events[2] == PortalHandoffEvent::Committing);
+		for (size_t index = 1; index < observed.Handoffs.size(); ++index)
+			CHECK(observed.Handoffs[index].Stamp.Sequence > observed.Handoffs[index - 1].Stamp.Sequence);
+	});
+	pair.Worlds.Enter(pair.Destination, [&](const ecs::Store &store) {
+		const auto observed = CopyPortalObservations(store);
+		CHECK(observed.Overwritten == 0);
+		REQUIRE(observed.Arrivals.size() == 1);
+		CHECK(observed.Arrivals[0].Stamp.Trace == TRACE);
+		CHECK(observed.Arrivals[0].Transfer == id.Sequence);
+		CHECK(observed.Arrivals[0].BaselineInputTick == 9000);
+		CHECK(observed.Arrivals[0].Source.View() == "source");
+		REQUIRE_FALSE(observed.Handoffs.empty());
+		CHECK(observed.Handoffs[0].Event == PortalHandoffEvent::Committed);
+		std::vector<std::pair<PortalInputRoute, uint64_t>> inputs;
+		for (const auto &record : observed.Inputs) {
+			CHECK(record.Stamp.Trace == TRACE);
+			inputs.emplace_back(record.Route, record.InputTick);
+		}
+		CHECK(
+			inputs == std::vector<std::pair<PortalInputRoute, uint64_t>>{
+						  {PortalInputRoute::Included, 9000}, {PortalInputRoute::Forwarded, 9001}
+					  }
+		);
+	});
+}
+
+TEST_CASE(
+	"a committed body catches up with input forwarded while its source was frozen",
+	"[script][portal-transfer][portal-observation][portal-catch-up]"
+) {
+	Pair pair;
+	pair.Worlds.Enter(pair.Destination, [](ecs::Store &store) { physics::PreparePhysicsWorld(store); });
+	const auto id = pair.Begin();
+	pair.Tick(9);
+	ecs::Entity player, root;
+	core::Vector3 before;
+	float walkSpeed = 0;
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		player = PortalTransferPlayer(store, id);
+		REQUIRE(player != ecs::NULL_ENTITY);
+		const auto rig = *store.Get<scene::Character>(scene::CharacterOf(store, player));
+		root = rig.Root;
+		before = store.Get<scene::Transform>(root)->Frame.Position;
+		walkSpeed = store.Get<scene::Humanoid>(rig.Humanoid)->WalkSpeed;
+	});
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		// Twelve rows of one client step each reach the destination together, as
+		// the rows for a sealed source's frozen window do.
+		for (uint64_t tick = 9100; tick < 9112; ++tick)
+			REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {0, 0, -1}, false, tick, 1.0 / 60));
+	});
+	pair.Tick(2);
+	pair.Worlds.Enter(pair.Destination, [&](ecs::Store &store) {
+		const auto after = store.Get<scene::Transform>(root)->Frame.Position;
+		// All but the newest step's worth move at once, along the rotated direction.
+		const auto moved = after - before;
+		CHECK(moved.Z == Catch::Approx(-11 * walkSpeed / 60).margin(.01f));
+		CHECK(std::abs(moved.X) < .01f);
+		CHECK(AppliedPortalPlayerInput(store, player) == 9111);
+		std::vector<std::pair<PortalInputRoute, uint64_t>> inputs;
+		for (const auto &record : CopyPortalObservations(store).Inputs)
+			if (record.InputTick >= 9100) inputs.emplace_back(record.Route, record.InputTick);
+		REQUIRE(inputs.size() == 12);
+		for (uint64_t index = 0; index < 11; ++index)
+			CHECK(inputs[index] == std::pair{PortalInputRoute::CaughtUp, 9100 + index});
+		CHECK(inputs[11] == std::pair{PortalInputRoute::Forwarded, uint64_t{9111}});
+	});
+}
+
+TEST_CASE(
+	"a frozen source body reports the input it holds", "[script][portal-transfer][portal-move][portal-catch-up]"
+) {
+	Pair pair;
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		CHECK_FALSE(FrozenPortalPlayerInput(store, pair.Player));
+	});
+	(void)pair.Begin();
+	pair.Tick(9);
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		// Sealed and committed: later input is forwarded, never applied here.
+		const auto frozen = FrozenPortalPlayerInput(store, pair.Player);
+		REQUIRE(frozen);
+		REQUIRE(ForwardPortalPlayerMove(store, pair.Player, {0, 0, -1}, false, *frozen + 5, 1.0 / 60));
+		CHECK(FrozenPortalPlayerInput(store, pair.Player) == frozen);
+	});
 }

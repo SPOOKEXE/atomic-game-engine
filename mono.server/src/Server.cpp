@@ -46,11 +46,14 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/PortalObservation.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
+
+#include "ObservationSink.hpp"
 
 #include <algorithm>
 #include <array>
@@ -916,6 +919,12 @@ namespace server {
 		}
 		if (Settings.TestDropNextPortalCrossedAcknowledgement)
 			driver.Hosts.Arguments.emplace_back("--test-drop-next-portal-crossed-acknowledgement");
+		if (!Settings.ObserveDirectory.empty()) {
+			driver.Hosts.Arguments.emplace_back("--observe-dir");
+			driver.Hosts.Arguments.emplace_back(Settings.ObserveDirectory.string());
+			driver.Hosts.Arguments.emplace_back("--observe-trace");
+			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.ObserveTrace));
+		}
 		if (!Settings.TestPortalFaultReport.empty()) {
 			driver.Hosts.Arguments.emplace_back("--test-portal-fault-report");
 			driver.Hosts.Arguments.emplace_back(Settings.TestPortalFaultReport.string());
@@ -2984,6 +2993,16 @@ namespace server {
 								store, request.Claim.Transfer, request.Claim.DestinationIncarnation
 							);
 						});
+					if (accepted && !departure.Accepted)
+						Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+							script::ObservePortalSession(
+								store,
+								ecs::NULL_ENTITY,
+								script::PortalHandoffEvent::Admitted,
+								departure.Request.Claim.Transfer.Sequence,
+								departure.Request.Claim.Destination
+							);
+						});
 					departure.Accepted = accepted;
 				}
 			}
@@ -3172,6 +3191,16 @@ namespace server {
 				crossed.Fence = receipt.Fence;
 				departure.CrossedSent =
 					Replication->SendTo(client, game::EncodePortalSession(crossed), nowSeconds);
+				if (departure.CrossedSent)
+					Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+						script::ObservePortalSession(
+							store,
+							ecs::NULL_ENTITY,
+							script::PortalHandoffEvent::CrossedNotified,
+							departure.Request.Claim.Transfer.Sequence,
+							departure.Request.Claim.Destination
+						);
+					});
 				// Adoption can wait after physical commit. Renew until the destination
 				// confirms adoption; the source connection may remain for presentation.
 			}
@@ -3226,6 +3255,16 @@ namespace server {
 				transfer.Through = departure.Request.Through;
 				departure.Notified =
 					Replication->SendTo(client, game::EncodePortalSession(transfer), nowSeconds);
+				if (departure.Notified)
+					Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+						script::ObservePortalSession(
+							store,
+							ecs::NULL_ENTITY,
+							script::PortalHandoffEvent::ClientNotified,
+							departure.Request.Claim.Transfer.Sequence,
+							departure.Request.Claim.Destination
+						);
+					});
 			}
 		}
 		for (auto &[_, departure] : PortalDepartures) {
@@ -3293,6 +3332,16 @@ namespace server {
 						}
 						break;
 					}
+					if (!departure.Route)
+						Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+							script::ObservePortalSession(
+								store,
+								ecs::NULL_ENTITY,
+								script::PortalHandoffEvent::Routed,
+								departure.Request.Claim.Transfer.Sequence,
+								departure.Request.Claim.Destination
+							);
+						});
 					departure.Route = request;
 					break;
 				}
@@ -3550,6 +3599,14 @@ namespace server {
 			ENGINE_PROFILE_CAT("Server::ApplyInputs", engine::core::ProfileCategory::Simulation);
 			ApplyInputs();
 		}
+		// A body frozen for a portal transfer applies none of the input it forwards,
+		// so that input is not consumed here. The client keeps predicting it, and
+		// what it shows is what the destination catches up to after commit.
+		Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+			for (const auto &[index, occupant] : Players)
+				if (const auto frozen = engine::script::FrozenPortalPlayerInput(store, occupant.Instance))
+					Replication->Authority().HoldConsumedInput({index, occupant.Generation}, *frozen);
+		});
 		Replication->ClearInputs();
 
 		Replication->Advance(nowSeconds);
@@ -4231,6 +4288,18 @@ namespace server {
 				// Other deployments start their fixed frame through Driver here.
 				if (!HostExchange)
 					Driver_->Tick(delta, static_cast<double>(engine::core::Clock::Nanoseconds()) / 1e9);
+				if (!Settings.ObserveDirectory.empty()) {
+					if (!Observations) {
+						Observations = std::make_unique<ObservationSink>();
+						if (!Observations->Open(
+								Settings.ObserveDirectory,
+								IsHost() ? Settings.HostName : std::string("driver"),
+								Settings.ObserveTrace
+							))
+							Settings.ObserveDirectory.clear();
+					}
+					if (Observations) Observations->Collect(Worlds());
+				}
 
 				if (Link == nullptr && !Settings.RemoteWorlds.empty()) {
 					const engine::world::DriverStatistics &driverStats = Driver_->Statistics();

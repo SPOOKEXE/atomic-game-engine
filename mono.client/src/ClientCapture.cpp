@@ -174,6 +174,24 @@ namespace client {
 								   (PortalNext ? pending(PortalNext->Content) : 0);
 		if (PortalPrevious)
 			frame["retained_world"] = std::string(Universe_->NameOf(PortalPrevious->World).Text());
+		// Whether every room behind a pane of the input world has been seen as a
+		// ready local copy. Before that the client has no state of its own for
+		// the room, so what a pane or eye shows there is whatever arrived first.
+		{
+			std::vector<WorldIdentity> worlds;
+			SurveyWorlds(*Universe_, worlds);
+			for (const auto &known : worlds)
+				if (known.IsReplica && known.Ready && known.Authored.IsValid())
+					CapturedReadyDestinations.insert(std::string(known.Authored.Text()));
+			std::vector<scene::PortalSeam> seams;
+			Universe_->Enter(inputWorld, [&](ecs::Store &store) { scene::GatherPortalSeams(store, seams); });
+			bool seen = true;
+			for (const auto &seam : seams)
+				if (seam.Crosses && seam.DestinationWorld.IsValid() &&
+					!CapturedReadyDestinations.contains(std::string(seam.DestinationWorld.Text())))
+					seen = false;
+			frame["portal_destinations_seen"] = seen;
+		}
 		if (PortalDrawing) {
 			const bool successor = PortalNext && PortalDrawing == &PortalNext->View;
 			frame["observed_successor"] = successor;
@@ -226,6 +244,7 @@ namespace client {
 		if (view.EyeImage != 0) {
 			frame["eye_image_handle"] = view.EyeImage;
 			frame["eye_capture"] = captureOf(view.EyeImageKey);
+			frame["eye_composed"] = PortalEyeComposed;
 		}
 		if (view.EyePlayer) frame["eye_player"] = *view.EyePlayer;
 		if (Connection) {
@@ -390,7 +409,8 @@ namespace client {
 			}
 		});
 		std::string presentedEyeWorld = frame.value("eye_world", std::string(view.WorldName.Text()));
-		if (PortalPrevious && PortalDrawing == &PortalPrevious->View) {
+		// A held or trailing redraw shows the old route, so name the world it ends in.
+		if (PortalPrevious && PortalDrawing == &PortalPrevious->View && !PortalPrevious->DrawnAsEye) {
 			Universe_->Enter(PortalPrevious->World, [&](ecs::Store &store) {
 				const auto *active = store.Resource<scene::ActiveCamera>();
 				const auto *history = active ? store.Get<scene::CameraPortalView>(active->Entity) : nullptr;

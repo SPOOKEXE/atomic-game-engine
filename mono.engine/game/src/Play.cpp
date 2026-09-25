@@ -4,6 +4,7 @@
 #include <engine/game/Play.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/script/PortalObservation.hpp>
 #include <engine/script/PortalTransfer.hpp>
 
 #include <cmath>
@@ -147,9 +148,14 @@ namespace engine::game {
 		const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, player));
 		if (!rig) return {};
 		const auto *root = store.Get<scene::Transform>(rig->Root);
-		const auto *velocity = store.Get<scene::Motion>(rig->Root);
 		const auto *humanoid = store.Get<scene::Humanoid>(rig->Humanoid);
-		if (!root || !velocity || !humanoid) return {};
+		if (!root || !humanoid) return {};
+		// A sleeping body carries no `scene::Motion`: it is at rest. A player
+		// standing still still needs its pose acknowledged, or the client's
+		// unconfirmed input grows for as long as it waits.
+		const auto *velocity = store.Get<scene::Motion>(rig->Root);
+		const scene::Motion resting;
+		if (!velocity) velocity = &resting;
 		PlayerMotion sample{
 			player,
 			rig->Root,
@@ -193,6 +199,8 @@ namespace engine::game {
 		const auto previousDirection = humanoid->MoveDirection;
 		humanoid->MoveDirection = move.Direction;
 		humanoid->JumpRequested = humanoid->JumpRequested || move.Jump;
+		if (forwarded) script::NotePortalPlayerInputApplied(store, player, inputTick);
+		script::ObservePortalNativeInput(store, player, inputTick, move.Direction);
 		if (previousDirection != core::Vector3{} && humanoid->MoveDirection == core::Vector3{}) {
 			ENGINE_LOG(
 				core::LogLevel::Trace,

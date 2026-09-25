@@ -76,6 +76,8 @@ namespace client {
 		bool IsReplica = false;
 		// A replica becomes a presentation destination after one complete tick.
 		bool Ready = true;
+		// Hosted in another process and reached only through presentation.
+		bool IsRemote = false;
 	};
 
 	// Every world in the universe, with the name its panes are addressed by.
@@ -108,7 +110,9 @@ namespace client {
 	// interpolated view, and pointing it at the authority would show a room
 	// nobody's character is in. So a replica prefers a replica of the same
 	// `View`, after its first complete tick. Joining replicas are excluded;
-	// until then the live authority remains the presentation source.
+	// until then the live authority remains the presentation source. Among
+	// equal views a world in this process beats a remote endpoint, because it
+	// draws any camera at once where the endpoint answers a round trip later.
 	//
 	// Pure, and deliberately: `SurveyWorlds` does the entering once and this
 	// decides, so a pass resolving several names pays for one walk.

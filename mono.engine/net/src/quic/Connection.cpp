@@ -982,6 +982,9 @@ namespace engine::net::quic {
 			// a probe above its maximum would measure the wrong thing.
 			options.no_pmtud = 1;
 			options.handshake_timeout = 10 * NGTCP2_SECONDS;
+			// BBR rather than the default Cubic: a loss-based window reads random
+			// loss as congestion and collapses on a lossy player link. See AGENTS.md.
+			options.cc_algo = NGTCP2_CC_ALGO_BBR;
 		}
 
 		bool RandomConnectionId(ngtcp2_cid &cid) {
@@ -1299,11 +1302,74 @@ namespace engine::net::quic {
 		inside.ScratchDatagram.resize(Transport::MAXIMUM_DATAGRAM_BYTES);
 		size_t sent = 0;
 
+		// Which kind of packet goes next.
+		//
+		// **Control streams before unreliable messages.** Every channel not marked
+		// bulk carries something small whose delay is visible - an input, an
+		// acknowledgement, a portal handoff message - while a lost or late
+		// unreliable message is replaced by the next one. Draining every queued
+		// datagram first let a congested window go entirely to deltas, and a
+		// control message waited seconds behind them under loss.
+		//
+		// **Bulk streams take turns with unreliable messages**, so neither a join
+		// snapshot nor the deltas beside it can hold the other still. A channel
+		// blocked on the peer's window is skipped for the rest of this flush
+		// rather than ending it for every other channel.
+		std::array<bool, MAXIMUM_CHANNELS> blocked{};
+		bool datagramTurn = true;
+		const auto bulk = [&](uint8_t channel) {
+			return (inside.Config.BulkChannels >> channel & 1u) != 0;
+		};
 		for (int guard = 0; guard < 256; guard++) {
 			ngtcp2_pkt_info info{};
 			ngtcp2_ssize written = 0;
 
-			if (!inside.PendingDatagrams.empty()) {
+			// One stream per call, round-robined by taking the first with
+			// unsubmitted bytes among the channels of one priority. ngtcp2 packs
+			// what it can and reports how much of the vector it took.
+			int64_t stream = -1;
+			std::array<ngtcp2_vec, 4> vectors{};
+			size_t count = 0;
+			uint8_t chosen = 0;
+			const auto pick = [&](bool bulkChannels) {
+				for (uint8_t step = 0; step < MAXIMUM_CHANNELS; step++) {
+					const auto channel = static_cast<uint8_t>((inside.NextChannel + step) % MAXIMUM_CHANNELS);
+					auto &outbound = inside.Channels[channel];
+					if (outbound.Stream < 0 || blocked[channel] || bulk(channel) != bulkChannels) {
+						continue;
+					}
+					uint64_t at = outbound.Base;
+					for (const std::vector<std::byte> &chunk : outbound.Chunks) {
+						if (count == vectors.size()) {
+							break;
+						}
+						const uint64_t end = at + chunk.size();
+						if (end > outbound.Submitted) {
+							const size_t from =
+								outbound.Submitted > at ? static_cast<size_t>(outbound.Submitted - at) : 0;
+							vectors[count].base =
+								reinterpret_cast<uint8_t *>(const_cast<std::byte *>(chunk.data() + from));
+							vectors[count].len = chunk.size() - from;
+							count++;
+						}
+						at = end;
+					}
+					if (count > 0) {
+						stream = outbound.Stream;
+						chosen = channel;
+						return;
+					}
+				}
+			};
+			pick(false);
+			bool sendDatagram = false;
+			if (count == 0) {
+				pick(true);
+				sendDatagram = !inside.PendingDatagrams.empty() && (count == 0 || datagramTurn);
+				datagramTurn = !sendDatagram;
+			}
+
+			if (sendDatagram) {
 				const std::vector<std::byte> &next = inside.PendingDatagrams.front();
 				ngtcp2_vec vector{
 					reinterpret_cast<uint8_t *>(const_cast<std::byte *>(next.data())), next.size()
@@ -1338,44 +1404,7 @@ namespace engine::net::quic {
 					continue;
 				}
 			} else {
-				// One stream per call, round-robined by taking the first with
-				// unsubmitted bytes. ngtcp2 packs what it can and reports how
-				// much of the vector it took.
-				int64_t stream = -1;
-				std::array<ngtcp2_vec, 4> vectors{};
-				size_t count = 0;
-				uint8_t chosen = 0;
-
-				for (uint8_t step = 0; step < MAXIMUM_CHANNELS; step++) {
-					const auto channel = static_cast<uint8_t>((inside.NextChannel + step) % MAXIMUM_CHANNELS);
-					auto &outbound = inside.Channels[channel];
-					if (outbound.Stream < 0) {
-						continue;
-					}
-					uint64_t at = outbound.Base;
-					for (const std::vector<std::byte> &chunk : outbound.Chunks) {
-						if (count == vectors.size()) {
-							break;
-						}
-						const uint64_t end = at + chunk.size();
-						if (end > outbound.Submitted) {
-							const size_t from =
-								outbound.Submitted > at ? static_cast<size_t>(outbound.Submitted - at) : 0;
-							vectors[count].base =
-								reinterpret_cast<uint8_t *>(const_cast<std::byte *>(chunk.data() + from));
-							vectors[count].len = chunk.size() - from;
-							count++;
-						}
-						at = end;
-					}
-					if (count > 0) {
-						stream = outbound.Stream;
-						chosen = channel;
-						inside.NextChannel = static_cast<uint8_t>((channel + 1) % MAXIMUM_CHANNELS);
-						break;
-					}
-				}
-
+				if (count > 0) inside.NextChannel = static_cast<uint8_t>((chosen + 1) % MAXIMUM_CHANNELS);
 				ngtcp2_ssize taken = 0;
 				written = ngtcp2_conn_writev_stream(
 					inside.Conn,
@@ -1402,7 +1431,8 @@ namespace engine::net::quic {
 					// Rate-limited: this is a per-tick path and a blocked channel
 					// stays blocked for as long as the peer takes to acknowledge.
 					ENGINE_DEBUG_EVERY(1.0, "channel {} is blocked on the peer's window", chosen);
-					break;
+					blocked[chosen] = true;
+					continue;
 				}
 			}
 

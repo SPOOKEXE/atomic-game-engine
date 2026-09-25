@@ -27,6 +27,10 @@ namespace engine::render {
 		std::span<const scene::DrawInstance> Instances;
 		// Joint poses referenced by the copied body rows.
 		std::span<const core::CFrame> JointFrames;
+		// A remote producer's image is a round trip old when it lands. When set,
+		// the request asks for layers without the body and `ComposeEyeBody` draws
+		// the body's current rows over them, so it keeps up with the viewer.
+		bool ComposeBody = false;
 	};
 
 	// One render-owner adapter shared by all viewports. The universe's presentation
@@ -113,6 +117,16 @@ namespace engine::render {
 		// The host owns the result until replacement, expiry or viewport/world removal.
 		// A refusal returns a compatible preceding result, or zero before the first success.
 		uint64_t ComposeBodyImage(core::Name portal, const View &body);
+		// Draws the current body rows of `geometry` into the latest eye image of
+		// `viewSlot`, when that image is layers its producer rendered without the
+		// body (see `PortalEyeGeometrySource::ComposeBody`). Zero otherwise, and
+		// the caller shows the image as it arrived.
+		uint64_t ComposeEyeBody(
+			world::WorldId source,
+			size_t viewSlot,
+			core::Name destination,
+			const PortalEyeGeometrySource &geometry
+		);
 		// Copies body geometry immediately, then pulls the accepted tree's source shadows.
 		// One job may be active. Pump advances it; the accepted capture has a fixed
 		// ten-second lease shared by subsequent poses, never renewed by another job.

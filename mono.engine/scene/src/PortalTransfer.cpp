@@ -33,7 +33,7 @@ namespace engine::scene {
 		using core::Vector3;
 		using ecs::Entity;
 		using ecs::NULL_ENTITY;
-		constexpr uint32_t MAGIC = 0x31425450;
+		constexpr uint32_t MAGIC = 0x32425450;
 		constexpr size_t MAXIMUM_COMPONENT_BYTES = 8192;
 		size_t ComponentByteLimit(std::string_view type) {
 			return type == "scene.AnimationBuffer" ? MAXIMUM_PORTAL_ANIMATION_BYTES + 8
@@ -97,6 +97,7 @@ namespace engine::scene {
 			ServiceComponent,
 			PortalTransit,
 			BodyIdentity,
+			ObservationTrace,
 			TextContent,
 			Skeleton,
 			Bone,
@@ -480,6 +481,7 @@ namespace engine::scene {
 			writer.WriteString(body.Root);
 			writer.WriteString(body.Humanoid);
 			writer.WriteBool(body.RootSleeping);
+			writer.WriteUInt64(body.AppliedInputTick);
 			writer.WriteBool(body.Sweep.has_value());
 			if (body.Sweep) {
 				writer.WriteRaw(&body.Sweep->From, sizeof(body.Sweep->From));
@@ -805,6 +807,7 @@ namespace engine::scene {
 		body.Root = ReadText(input);
 		body.Humanoid = ReadText(input, true);
 		body.RootSleeping = input.ReadBool();
+		body.AppliedInputTick = input.ReadUInt64();
 		const uint8_t swept = input.ReadUInt8();
 		if (swept > 1) input.Fail();
 		if (swept == 1) {

@@ -2,6 +2,7 @@
 
 // @tier L12 · shared
 
+#include <optional>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
@@ -584,6 +585,15 @@ namespace engine::replication {
 		// @param client The client to clear.
 		void ClearInputs(ClientId client);
 
+		// Reports no input past `through` as consumed at the next `ClearInputs`.
+		// For input the game took but did not apply to what it replicates, such
+		// as moves forwarded from a frozen portal body: the client keeps
+		// predicting them until an authority actually applies them.
+		//
+		// @param client  The client whose next clear is held.
+		// @param through The newest input tick that counts as consumed.
+		void HoldConsumedInput(ClientId client, uint64_t through);
+
 		// What one client's stream is doing.
 		//
 		// @since v0.3
@@ -940,6 +950,8 @@ namespace engine::replication {
 			std::vector<Input> Pending;
 			uint64_t ConsumedInput = 0;
 			uint64_t AcknowledgedInput = 0;
+			// Set by `HoldConsumedInput` for one `ClearInputs`.
+			std::optional<uint64_t> ConsumedHold;
 
 			// Accepted inbound state, cleared by the host once applied. Same
 			// shape as `Pending` and for the same reason: this module carries

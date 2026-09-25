@@ -63,7 +63,11 @@ namespace client {
 		PortalPrevious = std::make_unique<PortalObservation>();
 		auto &observation = *PortalPrevious;
 		observation.World = world;
-		observation.HoldDisplayEye = true;
+		// The hold redraws the source route for the adoption frame, so it applies only
+		// when the display last drew that world. When it already drew the arrived eye,
+		// holding would swap that frame for the source world's view: a frame with
+		// neither the body nor the pane's image.
+		observation.HoldDisplayEye = DisplayedWorld == Universe_->NameOf(world);
 		observation.View.Pipeline = PipelineSelected;
 		observation.Socket = std::move(Socket);
 		observation.Connection = std::move(Connection);
@@ -246,6 +250,7 @@ namespace client {
 	) {
 		using namespace engine;
 		ENGINE_PROFILE("client portal eye");
+		if (prepareNative) PortalEyeComposed = false;
 		bool retainedCharacter = false;
 		Universe_->Enter(inputWorld, [&](ecs::Store &store) {
 			render::SelectFirstPersonBody(store, view);
@@ -271,6 +276,7 @@ namespace client {
 					PortalPrevious->View, PortalPrevious->World, observedView, width, height
 				)) {
 				view = std::move(observedView);
+				PortalPrevious->DrawnAsEye = false;
 				// Input ownership changes between frames. Keep the already drawn source
 				// route for this one display draw, then resolve the adopted eye normally.
 				PortalPrevious->HoldDisplayEye = false;
@@ -278,8 +284,10 @@ namespace client {
 			}
 		}
 		const auto now = std::chrono::steady_clock::now();
+		const auto sourceVisibility = view.VisibilityFrame;
+		const auto sourceLens = view.Camera;
 		auto visibilityFrame = view.VisibilityCameraFrame();
-		const auto selected = ResolveCameraPortalWorld(
+		auto selected = ResolveCameraPortalWorld(
 			*Universe_,
 			inputWorld,
 			inputWorld,
@@ -296,30 +304,44 @@ namespace client {
 				if (const auto *replica = store.Resource<world::Replica>(); replica && replica->Of.IsValid())
 					eyeWorld = replica->Of;
 			});
+		// With nothing yet to draw beyond the pane, hold the eye at the doorway on
+		// the side it came from. The source view then shows the pane awaiting its
+		// image, which names the state, instead of an empty frame.
+		if (prepareNative && selected != inputWorld && !PortalEyeDrawable(selected, eyeWorld) &&
+			HoldEyeAtDoorway(view, inputWorld, sourceVisibility)) {
+			view.Camera = sourceLens;
+			selected = inputWorld;
+			eyeWorld = Universe_->NameOf(inputWorld);
+			Universe_->Enter(inputWorld, [&](ecs::Store &store) {
+				if (const auto *replica = store.Resource<world::Replica>(); replica && replica->Of.IsValid())
+					eyeWorld = replica->Of;
+			});
+		}
+		if (prepareNative && selected == inputWorld)
+			PortalSourceEye = {inputWorld, view.VisibilityCameraFrame().Position};
 		if (prepareNative && PortalPrevious && selected.IsValid() && eyeWorld.IsValid() &&
 			eyeWorld != PortalPrevious->Authored) {
-			std::vector<scene::PortalSeam> visibleSeams;
+			std::vector<scene::PortalSeam> selectedSeams;
+			// A remote world whose topology has not arrived says nothing either way.
+			bool known = true;
 			if (Universe_->IsRemote(selected)) {
-				if (const auto *topology = PortalImages->Topology(selected, now))
-					visibleSeams = topology->Seams;
+				const auto *topology = PortalImages->Topology(selected, now);
+				known = topology != nullptr;
+				if (topology) selectedSeams = topology->Seams;
 			} else {
 				Universe_->Enter(selected, [&](ecs::Store &store) {
-					scene::GatherPortalSeams(store, visibleSeams);
+					scene::GatherPortalSeams(store, selectedSeams);
 				});
 			}
-			const bool visible = std::any_of(visibleSeams.begin(), visibleSeams.end(), [&](const auto &seam) {
-				if (!seam.Crosses || seam.DestinationWorld != PortalPrevious->Authored) return false;
-				render::PortalImageDemand demand;
-				return render::BuildPortalImageDemand(
-						   seam,
-						   core::Name("observed-world-visibility"),
-						   view,
-						   view.Slot,
-						   {.Width = width, .Height = height},
-						   demand
-					   ) == render::PortalDemandStatus::Ready;
+			// A camera that turns away from the pane it came through often turns back,
+			// and one that leads its subject crosses back before the subject does and
+			// before any approach replica is ready. Keep the one observation while
+			// this world still has a seam into it, so that view is drawn from this
+			// replica rather than from a remote image that cannot draw nested portals.
+			const bool linked = std::any_of(selectedSeams.begin(), selectedSeams.end(), [&](const auto &seam) {
+				return seam.Crosses && seam.DestinationWorld == PortalPrevious->Authored;
 			});
-			if (!visible) DropPortalObservation();
+			if (known && !linked) DropPortalObservation();
 		}
 		if (!prepareNative) {
 			if (selected == inputWorld && !retainedCharacter) return false;
@@ -390,8 +412,11 @@ namespace client {
 				}
 				PortalEyeDestinations[slot] = destination;
 				eye.Slot = PORTAL_EYE_VIEW + slot;
-				// Prefer the authenticated producer over a transient local body replica.
-				const auto producer = Universe_->Find(destination);
+				// The route already chose a local copy of this room when one is ready.
+				const auto producer = primary && selected.IsValid() && !Universe_->IsRemote(selected) &&
+											  destination == eyeWorld
+										  ? selected
+										  : PortalEyeProducer(destination, core::Clock::Seconds());
 				if (producer.IsValid()) (void)PortalImages->RequestTopology(Rendered, producer, now);
 				const bool transferEye = primary && PortalNext && PortalNext->Crossed && PortalNext->Ready &&
 										 destination == PortalNext->ArrivedEyeWorld;
@@ -401,7 +426,7 @@ namespace client {
 					eye,
 					{.Width = width, .Height = height},
 					now,
-					{inputWorld, view.Instances, view.JointFrames},
+					{inputWorld, view.Instances, view.JointFrames, !view.EyePlayer},
 					transferEye
 				);
 				if (!Settings.CaptureSequence.empty() && transferEye) {
@@ -440,8 +465,10 @@ namespace client {
 			if (!seam.Crosses || !seam.DestinationWorld.IsValid() || seam.DestinationWorld == eyeWorld)
 				continue;
 			const float distance = scene::SeamDistance(seam, view.VisibilityCameraFrame().Position);
-			// Limit speculative work to one aperture diameter around the mouth.
-			if (distance > 2 * std::max(seam.First.Magnitude(), seam.Second.Magnitude())) continue;
+			// Limit speculative work to one and a half aperture diameters around the
+			// mouth. A composed eye's layers are several times a plain image, and at
+			// a 300 ms round trip one diameter of lead let the camera cross first.
+			if (distance > 3 * std::max(seam.First.Magnitude(), seam.Second.Magnitude())) continue;
 			if (!nearest || distance < nearestDistance) {
 				nearest = &seam;
 				nearestDistance = distance;
@@ -449,7 +476,7 @@ namespace client {
 		}
 		bool neighbourReady = nearest == nullptr;
 		if (nearest) {
-			const auto producer = Universe_->Find(nearest->DestinationWorld);
+			const auto producer = PortalEyeProducer(nearest->DestinationWorld, core::Clock::Seconds());
 			if (producer.IsValid()) {
 				(void)PortalImages->RequestTopology(Rendered, producer, now);
 				const auto through = scene::SeamMapping(*nearest);
@@ -459,6 +486,26 @@ namespace client {
 				neighbour.Camera = view.Camera;
 				neighbour.Camera.NearPlane *= through.Scale;
 				neighbour.Camera.FarPlane *= through.Scale;
+				// This image is shown the moment the eye crosses, from just past the far
+				// pane. A camera still before the source pane maps behind the far pane,
+				// and eye requests carry no clip plane, so it would render the far pane's
+				// own portal surface across the whole view. Keep it on the room side.
+				// The camera crosses from its current side of the source pane to the
+				// other, so the room it enters lies along the mapped crossing direction.
+				const float sourceSide = scene::SeamOffset(*nearest, view.VisibilityCameraFrame().Position);
+				const auto roomSide = through.Rotate(nearest->Normal) * (sourceSide < 0 ? 1.0f : -1.0f);
+				const float roomLength = roomSide.Magnitude();
+				if (roomLength > 0) {
+					const auto facing = roomSide * (1.0f / roomLength);
+					const auto centre = through.Point(nearest->Centre);
+					const float clearance = 2 * neighbour.Camera.NearPlane;
+					const auto clear = [&](core::CFrame &frame) {
+						const float depth = (frame.Position - centre).Dot(facing);
+						if (depth < clearance) frame.Position = frame.Position + facing * (clearance - depth);
+					};
+					clear(neighbour.CameraFrame);
+					if (neighbour.VisibilityFrame) clear(*neighbour.VisibilityFrame);
+				}
 				requestEye(nearest->DestinationWorld, neighbour, eyeWorld, false);
 				if (!InitialPortalViewsReady) {
 					// Look input may already have started another refresh. Require a usable
@@ -504,6 +551,7 @@ namespace client {
 						PortalPrevious->View, PortalPrevious->World, sourceView, width, height
 					)) {
 					view = std::move(sourceView);
+					PortalPrevious->DrawnAsEye = false;
 					return true;
 				}
 			}
@@ -518,6 +566,7 @@ namespace client {
 					PortalPrevious->View, PortalPrevious->World, observedView, width, height
 				)) {
 				view = std::move(observedView);
+				PortalPrevious->DrawnAsEye = true;
 				return true;
 			}
 		}
@@ -544,6 +593,17 @@ namespace client {
 			PreparePortalWorldView(PortalNext->View, PortalNext->World, view, width, height))
 			return true;
 		remote.EyeImage = selected.IsValid() ? PortalImages->Image(remote.Slot, remote.EyeImageKey) : 0;
+		// A third-person body is drawn here at its current pose; the image is older.
+		if (remote.EyeImage != 0 && !view.EyePlayer)
+			if (const auto composed = PortalImages->ComposeEyeBody(
+					Rendered,
+					remote.Slot,
+					eyeWorld,
+					{inputWorld, view.Instances, view.JointFrames, true}
+				)) {
+				remote.EyeImage = composed;
+				PortalEyeComposed = prepareNative;
+			}
 		if (!Settings.CaptureSequence.empty() && PortalNext && inputWorld == PortalNext->World) {
 			PortalSuccessor::EyeProbe probe =
 				PortalNext->CapturedEyeProbe.value_or(PortalSuccessor::EyeProbe{});
@@ -645,7 +705,11 @@ namespace client {
 					PortalNext->Following = message;
 				return true;
 			}
-			DropPortalObservation();
+			// A return keeps its retained view of the destination. The display may be
+			// drawing that world through the pane, and the successor's own connection
+			// is not drawable for many frames. Adoption replaces the observation.
+			if (!PortalPrevious || PortalPrevious->Authored.Text() != message.Claim.Destination)
+				DropPortalObservation();
 			PortalNext = std::make_unique<PortalSuccessor>();
 			auto &next = *PortalNext;
 			next.Offer = message;
@@ -788,6 +852,69 @@ namespace client {
 			};
 		}
 		return PortalCaptureDestination(Rendered, approach, successor);
+	}
+
+	bool Client::PortalEyeDrawable(engine::world::WorldId selected, engine::core::Name eyeWorld) const {
+		if (!selected.IsValid()) return false;
+		// The route resolves only ready local copies, and they draw any camera.
+		if (!Universe_->IsRemote(selected)) return true;
+		for (size_t slot = 0; slot < std::size(PortalEyeDestinations); ++slot)
+			if (PortalEyeDestinations[slot] == eyeWorld &&
+				PortalImages->Image(PORTAL_EYE_VIEW + slot, engine::core::Name("viewport-eye")) != 0)
+				return true;
+		return false;
+	}
+
+	bool Client::HoldEyeAtDoorway(
+		engine::render::View &view,
+		engine::world::WorldId inputWorld,
+		const std::optional<engine::core::CFrame> &sourceVisibility
+	) {
+		using namespace engine;
+		if (!PortalSourceEye || PortalSourceEye->World != inputWorld) return false;
+		const auto at = sourceVisibility.value_or(view.CameraFrame).Position;
+		std::vector<scene::PortalSeam> seams;
+		Universe_->Enter(inputWorld, [&](ecs::Store &store) { scene::GatherPortalSeams(store, seams); });
+		// The pane the eye went through: its side changed since the last source eye.
+		const scene::PortalSeam *crossed = nullptr;
+		float nearest = 0;
+		for (const auto &seam : seams) {
+			if (!seam.Crosses) continue;
+			const float before = scene::SeamOffset(seam, PortalSourceEye->Position);
+			const float after = scene::SeamOffset(seam, at);
+			if ((before < 0) == (after < 0)) continue;
+			const float distance = scene::SeamDistance(seam, at);
+			if (!crossed || distance < nearest) {
+				crossed = &seam;
+				nearest = distance;
+			}
+		}
+		if (!crossed) return false;
+		// Two near planes short of the pane, on the side the eye came from.
+		const float before = scene::SeamOffset(*crossed, PortalSourceEye->Position);
+		const float target = (before < 0 ? -2.0f : 2.0f) * view.Camera.NearPlane;
+		const auto shift = crossed->Normal * (target - scene::SeamOffset(*crossed, at));
+		view.VisibilityFrame = sourceVisibility;
+		view.CameraFrame.Position = view.CameraFrame.Position + shift;
+		if (view.VisibilityFrame) view.VisibilityFrame->Position = view.VisibilityFrame->Position + shift;
+		return true;
+	}
+
+	engine::world::WorldId Client::PortalEyeProducer(engine::core::Name destination, double nowSeconds) {
+		// The same rule `UpdatePortalImages` applies to pane images. An admitted
+		// replica answers within a frame and composes the current body, where the
+		// remote endpoint's reply is a round trip old when it lands.
+		const auto admitted = AdmittedPortalCaptureWorld(nowSeconds);
+		if (admitted.IsValid() && admitted != Rendered) {
+			std::vector<WorldIdentity> worlds;
+			SurveyWorlds(*Universe_, worlds);
+			const auto found = std::find_if(worlds.begin(), worlds.end(), [&](const auto &candidate) {
+				return candidate.Id == admitted && candidate.IsReplica && candidate.Ready &&
+					   candidate.Authored == destination;
+			});
+			if (found != worlds.end()) return admitted;
+		}
+		return Universe_->Find(destination);
 	}
 
 	void Client::PumpPortalApproach(double nowSeconds) {
@@ -1165,6 +1292,10 @@ namespace client {
 				evidence.Distance = next.ReadinessDistance;
 			}
 		});
+		// The range gates prewarm, not adoption. A body the source says has crossed
+		// belongs to this destination however far it walked while the handoff
+		// finished, and under latency it can walk past the exit distance first.
+		if (next.Crossed) evidence.Distance = 0;
 		evidence.RetainedCapture =
 			PortalImages->Image(PORTAL_SUCCESSOR_VIEW, core::Name("viewport-eye")) != 0;
 		evidence.RetainedCaptureFresh = evidence.RetainedCapture;

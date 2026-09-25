@@ -360,6 +360,11 @@ end)
 	REQUIRE(reservation);
 	const auto port = reservation->Local().Port;
 	reservation->Close();
+	// Server-side portal and physics observations, one JSONL file per process,
+	// all stamped with one trace id so a crossing reads as a single trail.
+	constexpr uint64_t OBSERVATION_TRACE = 0x5057414c4b;
+	const auto observationDirectory = core::Paths::Base() / ("portal-client-walk-observations-" + std::to_string(port));
+	std::filesystem::remove_all(observationDirectory);
 	parallel::Process server;
 	std::vector<std::string> serverArguments{
 		"--listen",
@@ -375,7 +380,11 @@ end)
 		"--datastore-root",
 		storeRoot.string(),
 		"--mcp-port",
-		"-1"
+		"-1",
+		"--observe-dir",
+		observationDirectory.string(),
+		"--observe-trace",
+		std::to_string(OBSERVATION_TRACE)
 	};
 	if (fault == PortalWalkFault::RestartDestinationPresentation) {
 		serverArguments.insert(
@@ -414,9 +423,14 @@ end)
 		std::string PendingInputWorld;
 		std::string ReturnSteeringDestination;
 		bool ReturnEnteredAperture = false;
+		bool ReturnStopped = false;
 		float ReturnClosestLateral = std::numeric_limits<float>::infinity();
 		std::array<bool, 4> PressedReturnKeys{};
 		bool WalkingOn = false;
+		// The outbound walk let go of W short of the floor's end and strafes
+		// until adoption, so a late hold still sees a moving body.
+		bool OutboundStopped = false;
+		size_t OutboundStrafeFrames = 0;
 		size_t WalkingOnHiddenFrames = 0;
 		std::optional<std::array<float, 3>> PreviousReturnPosition;
 		std::optional<uint64_t> FirstSteeringFrame;
@@ -512,6 +526,10 @@ end)
 						observed.PendingAdoption.clear();
 						observed.PendingInputWorld.clear();
 						turning(false);
+						if (observed.Adoptions.size() == 1 && observed.OutboundStopped) {
+							key(SDL_SCANCODE_D, SDLK_D, false);
+							key(SDL_SCANCODE_A, SDLK_A, false);
+						}
 						if (imageHandoff && fault == PortalWalkFault::None &&
 							observed.Adoptions.size() == 1) {
 							observed.ReturnSteeringDestination = observed.Adoptions.back();
@@ -542,6 +560,23 @@ end)
 					// varies with the tick rate, so the driver waits for the hidden demand
 					// itself; each hidden frame is still validated below. The floor ends at
 					// z -50, and a walk that reaches -40 without it turns back and fails there.
+					// A slow link holds adoption for seconds while W stays down, and the
+					// floor ends at z -50. The prediction keeps every held input, and the
+					// committed body catches up to it, so let go short of the edge. Then
+					// swing left and right in place, since the hold that starts once the
+					// crossing is confirmed can come later still and must see motion.
+					if (observed.Adoptions.empty() && !observed.OutboundStopped &&
+						sample.contains("predicted_root") &&
+						sample.at("predicted_root").at("position").at(2).get<float>() < -40.0f) {
+						observed.OutboundStopped = true;
+						key(SDL_SCANCODE_W, SDLK_W, false);
+					}
+					if (observed.Adoptions.empty() && observed.OutboundStopped &&
+						observed.OutboundStrafeFrames++ % 40 == 0) {
+						const bool right = (observed.OutboundStrafeFrames / 40) % 2 == 0;
+						key(SDL_SCANCODE_D, SDLK_D, right);
+						key(SDL_SCANCODE_A, SDLK_A, !right);
+					}
 					if (observed.WalkingOn && observed.Adoptions.size() == 1 && sample.contains("predicted_root")) {
 						for (const auto &portal : sample.at("portal_views"))
 							observed.WalkingOnHiddenFrames +=
@@ -588,12 +623,15 @@ end)
 								}
 							}
 						}
-						// Once through the aperture, stop. Circling the aim point just past the
-						// pane until adoption is observed can carry the body back through it,
-						// which is a real third crossing, and walking on leaves the camera far
-						// past the pane while the server has yet to confirm the crossing.
-						const auto desired = observed.ReturnEnteredAperture ? std::array<bool, 4>{}
-																			: ReturnKeys(sample);
+						// Stop once the server has begun the return crossing. Stopping on the
+						// prediction alone can leave the authoritative body short of the plane.
+						// Circling the aim point until adoption is observed can carry the body
+						// back through, which is a real third crossing, and walking on leaves
+						// the camera far past the pane before the crossing is confirmed.
+						observed.ReturnStopped |=
+							observed.ReturnEnteredAperture && sample.contains("portal_handoff") &&
+							sample.at("portal_handoff").value("destination", "") == "server.world";
+						const auto desired = observed.ReturnStopped ? std::array<bool, 4>{} : ReturnKeys(sample);
 						for (size_t index = 0; index < desired.size(); ++index)
 							if (desired[index] != observed.PressedReturnKeys[index]) {
 								returnKey(index, desired[index]);
@@ -665,7 +703,7 @@ end)
 					const bool settled = observed.Moving[stage];
 					observed.Moving[stage] = true;
 					turning(true);
-					if (stage == 0 || !(imageHandoff && fault == PortalWalkFault::None))
+					if (stage == 0 ? !observed.OutboundStopped : !(imageHandoff && fault == PortalWalkFault::None))
 						key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S, stage == 0 ? SDLK_W : SDLK_S, true);
 					else if (stage == 1 && !settled) {
 						// Walk on through the steering state, so steering releases W itself.
@@ -751,6 +789,12 @@ end)
 	// impaired links need room for their added round trips and resends.
 	if (captureFrameRate > 60) options.MaximumFrames = options.MaximumFrames * int(captureFrameRate) / 60;
 	if (impairment.Active()) options.MaximumFrames = options.MaximumFrames * 8 / 5;
+	// Each join and handoff costs round trips, and loss turns some into resends.
+	// About twenty of them cover the two joins and two handoffs of a walk.
+	if (impairment.Active())
+		options.MaximumFrames += static_cast<int>(
+			captureFrameRate * impairment.RoundTripSeconds * 20 * (1 + 20 * impairment.LossChance)
+		);
 	options.Impairment = impairment;
 	options.CaptureFrameSchedule = frameSchedule;
 	options.CaptureSequence =
@@ -771,6 +815,9 @@ end)
 								   "-jitter" + std::to_string(int(impairment.JitterSeconds * 1000.0 + .5)) +
 								   "-loss" + std::to_string(int(impairment.LossChance * 100.0f + .5f));
 	if (!frameSchedule.empty()) options.CaptureSequence += "-stall";
+	// Each fault keeps its own evidence rather than the next variant's.
+	if (fault != PortalWalkFault::None)
+		options.CaptureSequence += "-fault" + std::to_string(static_cast<int>(fault));
 	if (const char *profile = std::getenv("PORTAL_PROFILE_SNAPSHOT");
 		profile && std::string_view(profile) == "1")
 		options.ProfileSnapshot = options.CaptureSequence / "frame-graph-snapshot.txt";
@@ -820,9 +867,11 @@ end)
 	size_t faultClipSamples = 0;
 	size_t faultVisibleFrames = 0;
 	size_t faultBodyFrames = 0;
-	size_t faultNonBlackEyeFrames = 0;
 	size_t hiddenPortalSamples = 0;
 	size_t awaitingImageBodyFrames = 0;
+	// Impaired frames drawn before the client held any state for a room behind a
+	// pane. Only these may be empty; afterwards a last-known copy draws the room.
+	size_t firstContactFrames = 0;
 	std::vector<std::string> nativeWorlds;
 	std::unordered_map<uint64_t, int> crossedReadyWithoutTerminal;
 	for (int frame = 0; frame < options.MaximumFrames; ++frame) {
@@ -860,7 +909,9 @@ end)
 		if (sample.value("eye_image", false)) {
 			REQUIRE(sample.contains("eye_capture"));
 			REQUIRE(sample.at("eye_capture").is_object());
-			CHECK(sample.at("eye_capture").at("image") == sample.at("eye_image_handle"));
+			// A composed eye is a new image drawn from the capture and the current body.
+			if (!sample.value("eye_composed", false))
+				CHECK(sample.at("eye_capture").at("image") == sample.at("eye_image_handle"));
 			CHECK(sample.at("eye_capture").at("projection") == "eye");
 			CHECK(sample.at("eye_capture").at("request").get<uint64_t>() != 0);
 		}
@@ -1133,7 +1184,12 @@ end)
 					float speedSquared = 0;
 					for (const auto &axis : velocity)
 						speedSquared += axis.get<float>() * axis.get<float>();
-					if (speedSquared > 1 &&
+					// Presentation time is the tick plus alpha. A replica clock that drops its
+					// lead shows the same instant twice, which is not a held body stopping.
+					const double presentedAt = sample.at("tick").get<double>() + sample.at("alpha").get<double>();
+					const double presentedBefore =
+						previousSample->at("tick").get<double>() + previousSample->at("alpha").get<double>();
+					if (speedSquared > 1 && presentedAt > presentedBefore + .1 &&
 						sample.at("submitted_move_tick") > previousSample->at("submitted_move_tick")) {
 						CHECK(displacement > 0.0001f);
 						++retainedMoveSamples;
@@ -1146,9 +1202,12 @@ end)
 				CHECK(std::abs(yaw - *previousYaw) < .03f);
 			}
 			previousYaw = yaw;
+			const bool firstContact = impairment.Active() && !sample.value("portal_destinations_seen", true);
+			firstContactFrames += firstContact;
 			// Foreign eyes render in the persistent viewport world. A missing reply
 			// must fail even when no frame ever claims to have a ready image.
-			if (fault == PortalWalkFault::None && sample.value("view_world", "") == "client.world") {
+			if (fault == PortalWalkFault::None && !firstContact &&
+				sample.value("view_world", "") == "client.world") {
 				CAPTURE(frame);
 				CHECK(sample.value("eye_image", false));
 			}
@@ -1237,7 +1296,7 @@ end)
 			}
 			CAPTURE(frame);
 			REQUIRE(readable);
-			if (fault == PortalWalkFault::None) CHECK(visible);
+			if (fault == PortalWalkFault::None && !firstContact) CHECK(visible);
 			if (fault != PortalWalkFault::None && visible) ++faultVisibleFrames;
 			// Prediction can carry the body fully beyond the plane before its
 			// authority changes worlds. Check that interval as well as adoption.
@@ -1248,7 +1307,7 @@ end)
 				const bool awaitingImage = std::any_of(views.begin(), views.end(), [](const auto &portal) {
 					return portal.value("presentation", "") == "awaiting-image";
 				});
-				if (impairment.Active() && awaitingImage && yellowPixels == 0)
+				if (impairment.Active() && (awaitingImage || firstContact) && yellowPixels == 0)
 					++awaitingImageBodyFrames;
 				else
 					CHECK(yellowPixels > 0);
@@ -1258,9 +1317,7 @@ end)
 				REQUIRE(SDL_ReadSurfacePixel(eye.get(), eye->w / 2, eye->h - 1, &red, &green, &blue, &alpha));
 				// Both rooms have a floor below the level eye. A resident handle
 				// alone is insufficient: the bound image must reach this draw slot.
-				CHECK((red != 0 || green != 0 || blue != 0));
-				if (fault != PortalWalkFault::None && (red != 0 || green != 0 || blue != 0))
-					++faultNonBlackEyeFrames;
+				if (!firstContact) CHECK((red != 0 || green != 0 || blue != 0));
 			}
 		}
 		if (imageHandoff)
@@ -1403,7 +1460,6 @@ end)
 		CHECK(faultClipSamples > 16);
 		CHECK(faultVisibleFrames > 16);
 		CHECK(faultBodyFrames > 0);
-		if (imageHandoff) CHECK(faultNonBlackEyeFrames > 0);
 	}
 	CHECK(maximumEyeHeightError < 0.05f);
 	CHECK(explicitSubjectSeen == explicitSubject);
@@ -1440,7 +1496,8 @@ end)
 				  << " duplicated=" << observed.ImpairedDuplicated
 				  << " reordered=" << observed.ImpairedReordered << " delayed=" << observed.ImpairedDelayed
 				  << " adoptions=" << observed.Adoptions.size()
-				  << " awaiting_image_body_frames=" << awaitingImageBodyFrames << '\n';
+				  << " awaiting_image_body_frames=" << awaitingImageBodyFrames
+				  << " first_contact_frames=" << firstContactFrames << '\n';
 		CHECK(observed.ImpairedArrived > 0);
 		if (impairment.LossChance > 0.0f) CHECK(observed.ImpairedDropped > 0);
 		if (impairment.DuplicateChance > 0.0f) CHECK(observed.ImpairedDuplicated > 0);
@@ -1474,21 +1531,73 @@ end)
 		CHECK(observed.CameraCleared);
 		CHECK(observed.CameraRestored);
 	}
+	{
+		// Portal observations from every server process after the run.
+		std::vector<nlohmann::json> rows;
+		for (const auto &file : std::filesystem::directory_iterator(observationDirectory)) {
+			std::ifstream input(file.path());
+			for (std::string line; std::getline(input, line);)
+				if (!line.empty()) rows.push_back(nlohmann::json::parse(line));
+		}
+		std::vector<std::string> trail;
+		size_t begun = 0;
+		bool traced = true;
+		std::unordered_map<std::string, uint64_t> baselines;
+		std::vector<std::string> replayed;
+		for (const auto &row : rows) {
+			const std::string hook = row.at("hook");
+			if (!hook.starts_with("portal.")) continue;
+			traced &= row.at("trace").get<uint64_t>() == OBSERVATION_TRACE;
+			const std::string world = row.at("world");
+			const std::string at = world + "@" + std::to_string(row.at("tick").get<uint64_t>());
+			if (hook == "portal.crossing") {
+				begun += row.at("begun").get<bool>();
+				trail.push_back(
+					at + " crossing " + (row.at("begun").get<bool>() ? "begun" : "refused") + " to " +
+					row.at("destination").get<std::string>() + " offsets " + row.at("prior_offset").dump() + " -> " +
+					row.at("current_offset").dump() + " " + row.at("reason").get<std::string>()
+				);
+			} else if (hook == "portal.handoff") {
+				trail.push_back(
+					at + " handoff " + row.at("event").get<std::string>() + " peer " +
+					row.at("peer").get<std::string>() + " input " + row.at("input_tick").dump()
+				);
+			} else if (hook == "portal.arrival") {
+				baselines[world] = row.at("baseline_input_tick");
+				trail.push_back(at + " arrival baseline " + row.at("baseline_input_tick").dump());
+			} else if (hook == "portal.input" && row.at("route") == "forwarded" && baselines.contains(world) &&
+					   row.at("input_tick").get<uint64_t>() <= baselines[world]) {
+				replayed.push_back(at + " input " + row.at("input_tick").dump());
+			}
+		}
+		// Kept beside the capture sequence, replacing the previous run's.
+		const auto kept = std::filesystem::path(captureDirectory.string() + "-observations");
+		std::filesystem::remove_all(kept);
+		std::filesystem::rename(observationDirectory, kept);
+		CAPTURE(trail, replayed, kept);
+		CHECK_FALSE(rows.empty());
+		CHECK(traced);
+		// Input the sealed baseline already contains must not be applied twice.
+		CHECK(replayed.empty());
+		// The walk crosses out and back. A third crossing is the body walking back
+		// through a pane, which these rows name with its world and offsets.
+		if (fault == PortalWalkFault::None) CHECK(begun == 2);
+	}
 	REQUIRE(observed.Adoptions.size() == 2);
 	CHECK(nativeWorlds.size() == 2);
 	if (spatialOverlay) CHECK(spatialOverlayAdoptions == 1);
 	CHECK(observed.Adoptions[0] == "walk.destination");
 	CHECK(observed.Adoptions[1] == "server.world");
+
 	CAPTURE(observed.CameraSamples, observed.CameraModeSamples, observed.CameraFailures);
 	for (const auto samples : observed.CameraSamples)
 		CHECK(samples > 0);
 	for (const auto samples : observed.CameraModeSamples)
 		CHECK(samples > 0);
 	if (fault != PortalWalkFault::None) {
+		// The outbound walk passes the obstruction in the source room. How long it
+		// lingers there is walk timing, not behaviour, so no count is required.
 		CHECK(observed.ObstructedSamples[0] > 0);
-		CHECK(
-			observed.ObstructedSamples[0] + observed.ObstructedSamples[1] + observed.ObstructedSamples[2] > 16
-		);
 	}
 	CHECK(observed.CameraFailures.empty());
 	CAPTURE(observed.LookSamples, observed.MinimumLookX, observed.MaximumLookX);

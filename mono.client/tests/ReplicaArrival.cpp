@@ -425,6 +425,7 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// row. A capture consumer asks its own world for them, so sending the
 		// authority's declared observations to every gameplay replica is wrong.
 		// Portal contact requests and native input queues belong to the authority's tick exchange.
+		// Portal observation rings are process-local evidence, as event narratives are.
 		// Text composition, binding results, virtual focus and anchors, presentation
 		// samples, and resolved styles are derived from one viewer's input, source
 		// revisions, timeline, or display. Their authored inputs cross separately.
@@ -439,7 +440,7 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 			name == "script.DataCaptureDriver" || name == "script.EventNarratives" ||
 			name == "script.TeleportRequestHandler" || name == "script.TeleportRequestOutbox" ||
 			name == "script.PortalTransfers" || name == "script.PortalContactRequests" ||
-			name == "script.PortalPlayerInput";
+			name == "script.PortalPlayerInput" || name == "script.PortalObservationLog";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}
