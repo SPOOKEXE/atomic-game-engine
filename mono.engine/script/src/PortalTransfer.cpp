@@ -733,21 +733,42 @@ namespace engine::script {
 				return false;
 			}
 			physics::SyncBroadphase(store);
-			const auto hit = physics::SweepPlacement(
-				store, collider, sweep.From, sweep.Displacement, sweep.AngularDisplacement
-			);
-			if (!hit.Complete) {
-				failure = "destination suffix collision query is unavailable or exceeds its candidate bound";
-				return false;
+			// Resolve a bounded sequence of sliding contacts, as local motion does in
+			// `CopiedContacts`. A walking body's suffix grazes the floor that holds it
+			// up, and stopping at that contact would put the body down on the pane it
+			// just left instead of where the source world moved it. Each blocking
+			// contact keeps the continuous step's bite so the solver still reports it.
+			auto current = sweep.From;
+			auto remaining = sweep.Displacement;
+			auto angular = sweep.AngularDisplacement;
+			bool contacted = false;
+			for (int slide = 0; slide < 4 && remaining.MagnitudeSquared() > 1e-12f; ++slide) {
+				const auto hit = physics::SweepPlacement(
+					store, collider, current, remaining, angular, ecs::NULL_ENTITY, true
+				);
+				if (!hit.Complete) {
+					failure = "destination suffix collision query is unavailable or exceeds its candidate bound";
+					return false;
+				}
+				if (!hit.Hit) {
+					current = physics::Advanced(current, remaining, angular, 1);
+					remaining = {};
+					break;
+				}
+				contacted = true;
+				const float reach =
+					remaining.Magnitude() + angular.Magnitude() * collider.Extent.Magnitude();
+				const float fraction =
+					std::min(1.0f, hit.Fraction + physics::CONTINUOUS_BITE / std::max(reach, .001f));
+				current = physics::Advanced(current, remaining, angular, fraction);
+				remaining = remaining * (1 - fraction);
+				const float into = remaining.Dot(hit.Normal);
+				if (into < 0) remaining = remaining - hit.Normal * into;
+				angular = {};
+				if (hit.ConservativeFallback) break;
 			}
-			if (!hit.Hit) return true;
-			const float reach = sweep.Displacement.Magnitude() +
-								sweep.AngularDisplacement.Magnitude() * collider.Extent.Magnitude();
-			const float fraction =
-				std::min(1.0f, hit.Fraction + physics::CONTINUOUS_BITE / std::max(reach, .001f));
-			const auto clamped =
-				physics::Advanced(sweep.From, sweep.Displacement, sweep.AngularDisplacement, fraction);
-			const auto adjustment = clamped * root.Frame.Inverse();
+			if (!contacted) return true;
+			const auto adjustment = current * root.Frame.Inverse();
 			for (auto &node : body.Nodes)
 				for (auto &component : node.Components) {
 					if (component.Type != "scene.Transform" && component.Type != "scene.PreviousTransform")
@@ -817,6 +838,10 @@ namespace engine::script {
 					clock->WorldStep = store.Time().Delta;
 					clock->AppliedInputTick = record.Move.InputTick;
 					clock->LastQueuedInputTick = record.Move.InputTick;
+				} else if (clock->Native && record.Move.InputTick > clock->AppliedInputTick) {
+					// Input sent to the previous host before takeover still precedes
+					// every queued native tick, so it remains the applied frontier.
+					clock->AppliedInputTick = record.Move.InputTick;
 				}
 			}
 			static const core::LogCategory controlTrace("portal-input");
@@ -1342,6 +1367,7 @@ namespace engine::script {
 		void PumpNativeMoves(ecs::Store &store) {
 			ENGINE_PROFILE("portal native input");
 			if (store.AdoptOnly()) return;
+			std::vector<Entity> started;
 			store.Each<PlayerInputClock>([&](Entity player, PlayerInputClock &clock) {
 				if (!clock.Native) return;
 				const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, player));
@@ -1354,6 +1380,9 @@ namespace engine::script {
 				while (clock.Count != 0) {
 					const auto &move = clock.Pending[clock.Begin];
 					if (move.PhysicsTick > store.Time().Tick) break;
+					// Forwarding stays open until native control actually starts, so
+					// input already sent to the previous host fills the time before it.
+					if (started.empty() || started.back() != player) started.push_back(player);
 					const auto previousDirection = humanoid->MoveDirection;
 					humanoid->MoveDirection = move.Direction;
 					humanoid->JumpRequested |= move.Jump;
@@ -1392,6 +1421,8 @@ namespace engine::script {
 					core::Metrics::Count("world.portal.native.applied", 1);
 				}
 			});
+			for (const Entity player : started)
+				ClosePortalPlayerMoveForwarding(store, player);
 		}
 
 		void WriteInputClocks(ByteWriter &writer, const void *values, size_t count) {
@@ -2166,17 +2197,30 @@ namespace engine::script {
 				Process(store, *state, delivery.From.Text(), message);
 			}
 		}
-		// Consume one queued control record at this fixed tick boundary. A batched
-		// packet must not collapse a turn, stop, or jump into its final row.
+		// Consume one world step of queued control at this fixed tick boundary. A
+		// batched packet must not collapse several ticks of turns, stops or jumps
+		// into its final row, but a client stepping faster than this world has to
+		// drain at its own rate: one row per tick falls further behind the client
+		// every tick, and native takeover then schedules against that stale input.
+		// Rows inside one step coalesce as native input does. The last direction
+		// wins and the cumulative JumpSequence keeps any jump among them.
+		const double step = store.Time().Delta;
 		for (auto &record : state->In) {
 			if (record.PendingMoveCount == 0) continue;
-			record.Move = record.PendingMoves[0];
+			size_t consumed = 0;
+			double seconds = 0;
+			do {
+				record.Move = record.PendingMoves[consumed++];
+				seconds += record.Move.StepSeconds;
+			} while (consumed < record.PendingMoveCount && record.Move.StepSeconds > 0 &&
+					 record.PendingMoves[consumed].StepSeconds > 0 &&
+					 seconds + record.PendingMoves[consumed].StepSeconds <= step + 1e-6);
 			std::move(
-				record.PendingMoves.begin() + 1,
+				record.PendingMoves.begin() + consumed,
 				record.PendingMoves.begin() + record.PendingMoveCount,
 				record.PendingMoves.begin()
 			);
-			--record.PendingMoveCount;
+			record.PendingMoveCount -= consumed;
 			ApplyForwardMove(store, record);
 			if (record.Committed) AcknowledgeMove(store, *state, record);
 		}
@@ -2600,7 +2644,6 @@ namespace engine::script {
 		}
 		clock->LastQueuedInputTick = inputTick;
 		clock->Native = true;
-		ClosePortalPlayerMoveForwarding(store, player);
 		core::Metrics::Count("world.portal.native.queued", 1);
 		return Result::Queued;
 	}

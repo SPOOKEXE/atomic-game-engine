@@ -228,6 +228,8 @@ namespace engine::script {
 	// A portal input disposition value.
 	enum class PortalInputDisposition : uint8_t { Immediate, Queued, Refused };
 	// Queues timed native input against the last forwarded physics assignment.
+	// Forwarding from the previous host stays open until the first queued move
+	// is applied, so input sent there before takeover still fills that time.
 	// Untimed local control cancels pending input and applies immediately.
 	PortalInputDisposition SchedulePortalPlayerMove(
 		ecs::Store &store,
