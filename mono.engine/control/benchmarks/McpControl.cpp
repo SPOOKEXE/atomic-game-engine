@@ -1,5 +1,6 @@
 // Release cost of MCP tool discovery, dispatch, and optional capture-hook lifetime.
 
+#include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/HookRegistry.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
@@ -343,20 +344,37 @@ namespace {
 			});
 	}
 
+	// The surface's operation ledger fences every operation_id for its whole
+	// lifetime, and each run of the capture row spends WARMUP_OPERATIONS +
+	// OPERATIONS_PER_BATCH fresh ids. The row therefore owns a fixture that is
+	// rebuilt, between runs, before a run would overflow the ledger.
+	Fixture &CaptureFixture() {
+		constexpr size_t LEDGER = control::DataFactoryOperationLedger::MAXIMUM_ENTRIES;
+		constexpr size_t PER_RUN = WARMUP_OPERATIONS + OPERATIONS_PER_BATCH;
+		static std::unique_ptr<Fixture> fixture;
+		if (fixture && fixture->Surface.DataFactoryOperations()->Recent(LEDGER).size() + PER_RUN > LEDGER) {
+			fixture->FinishWithoutTickets();
+			fixture.reset();
+		}
+		if (!fixture) fixture = std::make_unique<Fixture>();
+		return *fixture;
+	}
+
 	void RunCaptureSubmission() {
-		Fixture &fixture = BenchFixture();
+		Fixture &fixture = CaptureFixture();
+		Distribution &submissions = BenchFixture().Measurements.CaptureSubmit;
 		fixture.EnsureActive();
 		const auto submit = [&](bool measured) {
 			const std::string request = fixture.CaptureRequest();
 			std::string reply;
 			if (measured)
-				fixture.Measurements.CaptureSubmit.Measure([&] { reply = fixture.Surface.Answer(request); });
+				submissions.Measure([&] { reply = fixture.Surface.Answer(request); });
 			else
 				reply = fixture.Surface.Answer(request);
 			const nlohmann::json response = nlohmann::json::parse(reply);
 			const nlohmann::json &result = response.at("result");
 			if (result.value("isError", true))
-				throw std::runtime_error("capture submission returned an MCP error result");
+				throw std::runtime_error("capture submission returned an MCP error result: " + reply);
 			const nlohmann::json content =
 				nlohmann::json::parse(result.at("content").at(0).at("text").get<std::string>());
 			if (content.value("status", "") != "queued")
