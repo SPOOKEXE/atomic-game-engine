@@ -416,6 +416,8 @@ end)
 		bool ReturnEnteredAperture = false;
 		float ReturnClosestLateral = std::numeric_limits<float>::infinity();
 		std::array<bool, 4> PressedReturnKeys{};
+		bool WalkingOn = false;
+		size_t WalkingOnHiddenFrames = 0;
 		std::optional<std::array<float, 3>> PreviousReturnPosition;
 		std::optional<uint64_t> FirstSteeringFrame;
 		size_t SteeringFrames = 0;
@@ -534,8 +536,27 @@ end)
 								observed.Adoptions.size() == 1 ? SDLK_W : SDLK_S,
 								false);
 					}
+					// The settled destination walks on until its trailing camera has left the
+					// return pane behind it, so that pane's demand is seen hidden before the
+					// steered return turns back towards it. The camera's lag behind the body
+					// varies with the tick rate, so the driver waits for the hidden demand
+					// itself; each hidden frame is still validated below. The floor ends at
+					// z -50, and a walk that reaches -40 without it turns back and fails there.
+					if (observed.WalkingOn && observed.Adoptions.size() == 1 && sample.contains("predicted_root")) {
+						for (const auto &portal : sample.at("portal_views"))
+							observed.WalkingOnHiddenFrames +=
+								portal.value("external", false) && portal.value("demand_status", "") == "hidden";
+						if (observed.WalkingOnHiddenFrames >= 3 ||
+							sample.at("predicted_root").at("position").at(2).get<float>() < -40.0f)
+							observed.WalkingOn = false;
+					}
+					// Steer only once the destination camera has settled, as the outbound
+					// walk waits before pressing W. Steering from adoption keeps the body
+					// moving, so the stage never records the rest samples it is checked on.
 					if (imageHandoff && fault == PortalWalkFault::None && observed.Adoptions.size() == 1 &&
-						sample.value("subject_is_humanoid", false) && sample.contains("predicted_root") &&
+						observed.Moving[1] && !observed.WalkingOn &&
+						sample.value("subject_is_humanoid", false) &&
+						sample.contains("predicted_root") &&
 						sample.contains("control_basis") && sample.contains("control_angles")) {
 						observed.FirstSteeringFrame.emplace(capturedFrame - 1);
 						++observed.SteeringFrames;
@@ -567,7 +588,12 @@ end)
 								}
 							}
 						}
-						const auto desired = ReturnKeys(sample);
+						// Once through the aperture, stop. Circling the aim point just past the
+						// pane until adoption is observed can carry the body back through it,
+						// which is a real third crossing, and walking on leaves the camera far
+						// past the pane while the server has yet to confirm the crossing.
+						const auto desired = observed.ReturnEnteredAperture ? std::array<bool, 4>{}
+																			: ReturnKeys(sample);
 						for (size_t index = 0; index < desired.size(); ++index)
 							if (desired[index] != observed.PressedReturnKeys[index]) {
 								returnKey(index, desired[index]);
@@ -636,10 +662,17 @@ end)
 				++observed.CameraModeSamples[stage];
 				if (stage < 2 && observed.CameraModeSamples[stage] >= 3 &&
 					(stage != 0 || !warmPortal || observed.PortalReady)) {
+					const bool settled = observed.Moving[stage];
 					observed.Moving[stage] = true;
 					turning(true);
 					if (stage == 0 || !(imageHandoff && fault == PortalWalkFault::None))
 						key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S, stage == 0 ? SDLK_W : SDLK_S, true);
+					else if (stage == 1 && !settled) {
+						// Walk on through the steering state, so steering releases W itself.
+						returnKey(0, true);
+						observed.PressedReturnKeys[0] = true;
+						observed.WalkingOn = true;
+					}
 				}
 			} else if (observed.CameraModeSamples[stage] >= 3) {
 				if (observed.CameraFailures.size() < 8) observed.CameraFailures.emplace_back(message);
@@ -1120,8 +1153,10 @@ end)
 				CHECK(sample.value("eye_image", false));
 			}
 			// The eye stays a fixed head offset above the presented player. A world
-			// Y value is not invariant once that player moves through a portal.
-			if (sample.contains("presented_predicted_root")) {
+			// Y value is not invariant once that player moves through a portal. A
+			// cleared subject holds the camera still (checked above) while the
+			// player walks on, so those frames have no head offset to keep.
+			if (!clearedFrame && sample.contains("presented_predicted_root")) {
 				const float eyeHeight = sample.at("camera").at("position").at(1).get<float>();
 				const float rootHeight =
 					sample.at("presented_predicted_root").at("position").at(1).get<float>();
