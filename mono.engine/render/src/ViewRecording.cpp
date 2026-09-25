@@ -1991,6 +1991,7 @@ namespace engine::render {
 		State->SlotPackedPbrChannels.resize(uploadCount);
 		State->SlotResample.resize(uploadCount);
 		State->SlotShadowDetail.resize(uploadCount);
+		State->SlotTwoSided.resize(uploadCount);
 		State->SlotShader.resize(uploadCount);
 		State->SlotTags.resize(uploadCount);
 		State->SlotRig.resize(uploadCount);
@@ -2039,6 +2040,7 @@ namespace engine::render {
 				State->SlotResample[drawSlot] = instance.Resample;
 				State->SlotShadowDetail[drawSlot] = instance.Alpha != scene::AlphaMode::Opaque ||
 													instance.SeamNormal.MagnitudeSquared() > 0.0f;
+				State->SlotTwoSided[drawSlot] = instance.Surface >= 0;
 				State->SlotShader[drawSlot] = instance.Shader;
 				State->SlotTags[drawSlot] = instance.TagMask;
 				State->SlotRig[drawSlot] = instance.Rig;
@@ -2243,6 +2245,7 @@ namespace engine::render {
 						State->SlotThickness[drawSlot] = State->SlotThickness[sceneSlot];
 						State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
 						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
+						State->SlotTwoSided[drawSlot] = State->SlotTwoSided[sceneSlot];
 						State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
 						State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
 						State->SlotRig[drawSlot] = State->SlotRig[sceneSlot];

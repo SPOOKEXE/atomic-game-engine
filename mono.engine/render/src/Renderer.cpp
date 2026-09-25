@@ -857,6 +857,9 @@ namespace engine::render {
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
 		}
+		for (const auto &[culled, twin] : State->TwoSidedPipelines)
+			SDL_ReleaseGPUGraphicsPipeline(device, twin);
+		State->TwoSidedPipelines.clear();
 		if (State->ForwardPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->ForwardPipeline);
 		}

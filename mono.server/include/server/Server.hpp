@@ -69,6 +69,7 @@ namespace engine::game {
 
 namespace server {
 	class ContentRelay;
+	class ObservationSink;
 	class RetainedBodyGrants;
 	struct ContentRelayStatistics;
 }
@@ -331,6 +332,13 @@ namespace server {
 
 		// Test-only append-only report for deterministic fault evidence. Empty leaves it off.
 		std::filesystem::path TestPortalFaultReport;
+
+		// Directory for physics and portal observation records, one JSONL file per
+		// process. Hosts inherit it. Empty leaves observation files off.
+		std::filesystem::path ObserveDirectory;
+
+		// Default trace id stamped on portal observation records. Zero is untraced.
+		uint64_t ObserveTrace = 0;
 
 		// The worlds this host was granted, by name.
 		//
@@ -1223,6 +1231,7 @@ namespace server {
 		bool TestPresentationRestarted = false;
 		std::unique_ptr<engine::replication::Listener> Replication;
 		std::unique_ptr<engine::replication::ReplicationObservations> ReplicationObservationRecords;
+		std::unique_ptr<ObservationSink> Observations;
 
 		// What Discord is told this server is hosting, or null when nothing is
 		// configured. Off unless `discord.enabled` and `discord.app-id` are

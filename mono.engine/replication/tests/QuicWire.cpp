@@ -459,6 +459,31 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE("held input stays unconfirmed until the hold lifts", "[replication][input-clock]") {
+	// A portal source forwards input it does not apply while its body is frozen.
+	// Holding the consumed frontier keeps that input in the client's prediction.
+	Pair pair({}, {}, WireMode::Quic);
+	REQUIRE(pair.Admit());
+	pair.Settle(203);
+	REQUIRE(pair.Client->Joined());
+	REQUIRE(pair.Client->Submit(10, Bytes("applied"), pair.Now));
+	REQUIRE(pair.Client->Submit(11, Bytes("forwarded"), pair.Now));
+	pair.Settle(300);
+	REQUIRE_FALSE(pair.Server->Inputs().empty());
+	const ClientId client = pair.Server->Inputs().front().Client;
+	pair.Server->Authority().HoldConsumedInput(client, 10);
+	pair.Server->ClearInputs();
+	pair.Settle(310);
+	REQUIRE(pair.Client->Unconfirmed().size() == 1);
+	CHECK(pair.Client->Unconfirmed().front().Tick == 11);
+	// The hold lasts one clear. The next input moves the frontier past it.
+	REQUIRE(pair.Client->Submit(12, Bytes("native"), pair.Now));
+	pair.Settle(320);
+	pair.Server->ClearInputs();
+	pair.Settle(330);
+	CHECK(pair.Client->Unconfirmed().empty());
+}
+
 TEST_CASE(
 	"continued inputs precede newer submissions through budget refusal", "[replication][input-continuation]"
 ) {

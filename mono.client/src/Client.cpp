@@ -4820,6 +4820,7 @@ namespace client {
 		} else if (!namedCaptureBound && PortalImages) {
 			PortalImages->RemoveViewport(view.Slot);
 		}
+		DisplayedWorld = view.WorldName;
 
 		const bool observedEye = PortalDrawing != nullptr;
 		engine::render::WorldViewInterface observedInterface(

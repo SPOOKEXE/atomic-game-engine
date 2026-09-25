@@ -224,6 +224,14 @@ namespace engine::script {
 	);
 	// Native destination input takes over permanently from the previous host.
 	void ClosePortalPlayerMoveForwarding(ecs::Store &store, ecs::Entity destinationPlayer);
+	// Records that the source applied this player's input tick to its still-live
+	// body, so the sealed baseline tells the destination not to replay it.
+	void NotePortalPlayerInputApplied(ecs::Store &store, ecs::Entity sourcePlayer, uint64_t inputTick);
+	// The newest input a sealed source body holds while it is frozen for a player
+	// transfer, or nothing when this world still applies the player's input.
+	// Later input is forwarded rather than applied, so a host must not report it
+	// consumed: the client keeps predicting it until the destination applies it.
+	std::optional<uint64_t> FrozenPortalPlayerInput(const ecs::Store &store, ecs::Entity sourcePlayer);
 
 	// A portal input disposition value.
 	enum class PortalInputDisposition : uint8_t { Immediate, Queued, Refused };

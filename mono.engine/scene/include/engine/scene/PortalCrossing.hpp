@@ -40,6 +40,14 @@ namespace engine::scene {
 		uint64_t Generation = 1;
 	};
 
+	// Optional caller-chosen id stamped on observation records about this body,
+	// such as `script::PortalObservationLog` rows. It travels with the body
+	// through a portal, so one id follows a player across worlds and processes.
+	struct ObservationTrace {
+		// Zero means untraced.
+		uint64_t Id = 0;
+	};
+
 	// One authority owns one monotonically assigned key space. This is a world
 	// resource so a save, replay, or transferred host continues the sequence
 	// instead of minting a process-local replacement identity.

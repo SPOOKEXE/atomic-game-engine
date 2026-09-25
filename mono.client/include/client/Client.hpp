@@ -371,6 +371,19 @@ namespace client {
 		void DropPortalObservation();
 		void RetainPortalObservation(engine::world::WorldId world);
 		engine::world::WorldId AdmittedPortalCaptureWorld(double nowSeconds) const;
+		// The world that answers an eye request into `destination`: the admitted
+		// local replica of it when there is one, else its remote endpoint.
+		engine::world::WorldId PortalEyeProducer(engine::core::Name destination, double nowSeconds);
+		// Whether the eye can be drawn in `selected`: a local copy, or a remote
+		// endpoint that has already answered with an image.
+		bool PortalEyeDrawable(engine::world::WorldId selected, engine::core::Name eyeWorld) const;
+		// Moves an eye that crossed into an undrawable room back to the source
+		// side of the pane it went through. False when that pane is unknown.
+		bool HoldEyeAtDoorway(
+			engine::render::View &view,
+			engine::world::WorldId inputWorld,
+			const std::optional<engine::core::CFrame> &sourceVisibility
+		);
 		struct PortalWorldView;
 		bool PreparePortalWorldView(
 			PortalWorldView &packet,
@@ -716,6 +729,9 @@ namespace client {
 
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;
+		// The world the last displayed frame drew. At adoption it decides whether
+		// the source route was on screen and so worth holding for one more frame.
+		engine::core::Name DisplayedWorld;
 
 		// The one rendering profile library loaded with this universe.
 		// arch-waiver ecs-copy: the authored library, which is a property of the
@@ -873,11 +889,14 @@ namespace client {
 			engine::world::WorldId World;
 			engine::core::Name Authored;
 			bool HoldDisplayEye = false;
+			// True when the last draw from `View` was the eye resolved into this
+			// world, rather than a held or trailing redraw of the old route.
+			bool DrawnAsEye = false;
 			std::unique_ptr<engine::net::Transport> Socket;
 			std::unique_ptr<engine::replication::Connector> Connection;
 			std::unique_ptr<ContentSession> Content;
 		};
-		// One former body world, retained only while the crossing view needs it.
+		// One former body world, retained while the eye world still has a seam into it.
 		std::unique_ptr<PortalObservation> PortalPrevious;
 		// Borrows the selected packet for this draw; cleared when its session retires.
 		PortalWorldView *PortalDrawing = nullptr;
@@ -885,6 +904,17 @@ namespace client {
 		std::unique_ptr<PortalSuccessor> PortalNext;
 		uint64_t NextPortalReplica = 1;
 		engine::core::Name PortalEyeDestinations[2];
+		// Whether the last prepared eye is the body composed over an eye capture
+		// rather than the capture itself.
+		bool PortalEyeComposed = false;
+		// Authored worlds a capture has seen as ready local copies.
+		std::unordered_set<std::string> CapturedReadyDestinations;
+		// Where the eye last stood on the input world's own side of every pane.
+		struct PortalSourceEyePose {
+			engine::world::WorldId World;
+			engine::core::Vector3 Position;
+		};
+		std::optional<PortalSourceEyePose> PortalSourceEye;
 		// Initial entry waits once; body-world adoption preserves this viewport lifetime.
 		bool InitialPortalViewsReady = false;
 

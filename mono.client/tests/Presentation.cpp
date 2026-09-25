@@ -673,6 +673,34 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE("a ready local copy beats a remote endpoint of the same name", "[client][portal-arrival-route]") {
+	// A product client's copies carry no view, so the view rule ties and the
+	// remote endpoint, registered first, used to win. Each camera sent to it
+	// waits a round trip; the copy draws the same room at once.
+	engine::replication::RegisterReplicationComponents();
+	Universe worlds;
+	const auto source = worlds.Create({.Name = Name("client.replica")});
+	const auto remote = worlds.Create({.Name = Name("Far")});
+	const auto copy = worlds.Create({.Name = Name("client.portal.approach.1")});
+	worlds.Enter(source, [](Store &store) { store.SetResource(engine::world::Replica{true, Name("Near"), {}}); });
+	worlds.Enter(copy, [](Store &store) {
+		store.SetResource(engine::world::Replica{true, Name("Far"), {}});
+		store.SetResource(engine::replication::SnapshotBuffer{});
+		engine::physics::PreparePhysicsWorld(store);
+	});
+	std::vector<client::WorldIdentity> surveyed;
+	client::SurveyWorlds(worlds, surveyed);
+	for (auto &entry : surveyed)
+		if (entry.Id == remote) entry.IsRemote = true;
+	// Until the copy has a tick, the endpoint is the only live room.
+	CHECK(client::ResolveDestinationWorld(surveyed, source, Name("Far")) == remote);
+	worlds.Enter(copy, [](Store &store) { client::RecordReplicatedTick(store, 3); });
+	client::SurveyWorlds(worlds, surveyed);
+	for (auto &entry : surveyed)
+		if (entry.Id == remote) entry.IsRemote = true;
+	CHECK(client::ResolveDestinationWorld(surveyed, source, Name("Far")) == copy);
+}
+
 TEST_CASE("portal routes wait for a destination replica snapshot", "[client][portal-arrival-route]") {
 	engine::replication::RegisterReplicationComponents();
 	Universe worlds;

@@ -4,6 +4,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/PortalCaptureTreeImport.hpp>
+#include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PortalResidentImages.hpp>
 #include <engine/render/PortalShadowTransport.hpp>
@@ -652,11 +653,34 @@ namespace engine::render {
 			traceEye("source-invalid-or-remote");
 			return 0;
 		}
+		// A remote reply lands a round trip after its request, so its body would
+		// be that old. Ask for layers without the body and compose it here instead.
+		// Layers are several times a plain image's bytes, and on a slow link a late
+		// full-size image is worse than a timely half-size one, so ask at half the
+		// longest side. That also keeps four layers inside the pixel budget.
+		std::string composedBody;
+		if (geometry.ComposeBody && destination.World.IsValid() && state.Universe.IsRemote(destination.World) &&
+			geometry.World.IsValid() && !state.Universe.IsRemote(geometry.World))
+			state.Universe.Enter(geometry.World, [&](ecs::Store &store) {
+				composedBody = PortalBodyPlayer(store);
+			});
+		auto fitted = settings;
+		if (!composedBody.empty()) {
+			const uint32_t half = std::max(settings.Width, settings.Height) / 2;
+			fitted.MaximumExtent = std::min({fitted.MaximumExtent, 256u, std::max(half, 64u)});
+			fitted.RecursionDepth = 0;
+		}
 		PortalImageDemand demand;
 		const core::Name key("viewport-eye");
-		if (BuildPortalEyeDemand(key, view, settings, demand) != PortalDemandStatus::Ready) {
+		if (BuildPortalEyeDemand(key, view, fitted, demand) != PortalDemandStatus::Ready) {
 			traceEye("demand-refused");
 			return 0;
+		}
+		if (!composedBody.empty()) {
+			demand.Request.OrderedLayers = true;
+			demand.Request.Scope = PortalImageScope::OpaqueLighting;
+			demand.Request.EyePlayer = composedBody;
+			demand.Binding.ExpectedScope = PortalImageScope::OpaqueLighting;
 		}
 		demand.Request.TransferEye = transferEye;
 		if (transferEye) core::Metrics::Count("render.portal.transfer-eye.submitted", 1);
@@ -1007,6 +1031,48 @@ namespace engine::render {
 			}
 		}
 		return 0;
+	}
+	uint64_t PortalImageHost::ComposeEyeBody(
+		world::WorldId source,
+		size_t viewSlot,
+		core::Name destination,
+		const PortalEyeGeometrySource &geometry
+	) {
+		auto &state = *State;
+		const core::Name key("viewport-eye");
+		const auto capture = Capture(viewSlot, key);
+		if (!capture || capture->EyePlayer.empty() ||
+			capture->Binding.ExpectedScope != PortalImageScope::OpaqueLighting || !geometry.World.IsValid() ||
+			state.Universe.IsRemote(geometry.World))
+			return 0;
+		std::vector<std::byte> bytes;
+		std::string error;
+		bool collected = false;
+		state.Universe.Enter(geometry.World, [&](ecs::Store &store) {
+			collected = CollectPortalEyeGeometry(
+				store, destination, geometry.Instances, geometry.JointFrames, bytes, error
+			);
+		});
+		if (!collected) return 0;
+		const auto sourceName = state.Universe.NameOf(source);
+		std::vector<scene::DrawInstance> copied, bodyRows;
+		std::vector<core::CFrame> joints;
+		PortalDrawSelection selected{capture->EyePlayer, {}};
+		if (!bytes.empty() && !AppendPortalDraws(bytes, sourceName, copied, joints, error, &selected)) return 0;
+		// No rows is a body that has not crossed yet: the layers alone are right.
+		for (const auto index : selected.Hidden)
+			bodyRows.push_back(copied[index]);
+		// At the capture's own size: its layers are sampled one to one, and the
+		// eye output scales the finished picture to the display.
+		SceneTarget target{capture->Width, capture->Height};
+		View body;
+		body.World = source.Index;
+		body.WorldName = sourceName;
+		body.Slot = viewSlot;
+		body.Target = &target;
+		body.Instances = bodyRows;
+		body.JointFrames = joints;
+		return ComposeBodyImage(key, body);
 	}
 	uint64_t PortalImageHost::ComposeBodyImage(core::Name portal, const View &body) {
 		auto &state = *State;

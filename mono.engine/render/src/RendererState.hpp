@@ -476,6 +476,16 @@ namespace engine::render {
 		}
 
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
+		// No-cull twins of the back-face-culled opaque pipelines, as (culled,
+		// twin) pairs. Portal and mirror surfaces draw through them, so a camera
+		// standing inside a pane's part still sees the face it looks through.
+		std::vector<std::pair<SDL_GPUGraphicsPipeline *, SDL_GPUGraphicsPipeline *>> TwoSidedPipelines;
+		// The twin of `culled`, or null when it has none.
+		SDL_GPUGraphicsPipeline *TwoSidedFor(SDL_GPUGraphicsPipeline *culled) const {
+			for (const auto &[original, twin] : TwoSidedPipelines)
+				if (original == culled) return twin;
+			return nullptr;
+		}
 		SDL_GPUGraphicsPipeline *HdrOpaquePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrWireframeOpaquePipeline = nullptr;
@@ -1285,6 +1295,8 @@ namespace engine::render {
 		std::vector<scene::SurfaceResampleMode> SlotResample;
 		// Whether a shadow run needs per-material alpha or seam state.
 		std::vector<uint8_t> SlotShadowDetail;
+		// Whether the slot is a surface's part and draws both faces.
+		std::vector<uint8_t> SlotTwoSided;
 
 		// Which shader each slot asks for, or an invalid name for the engine's.
 		//
@@ -1508,7 +1520,8 @@ namespace engine::render {
 				   SlotShader[next] == SlotShader[slot] && SlotSeam[next] == SlotSeam[slot] &&
 				   SlotSeamFirst[next] == SlotSeamFirst[slot] &&
 				   SlotSeamSecond[next] == SlotSeamSecond[slot] &&
-				   SlotSeamCentre[next] == SlotSeamCentre[slot] && SlotSeamLight[next] == SlotSeamLight[slot];
+				   SlotSeamCentre[next] == SlotSeamCentre[slot] && SlotSeamLight[next] == SlotSeamLight[slot] &&
+				   SlotTwoSided[next] == SlotTwoSided[slot];
 		}
 
 		// One phase of the occlusion-culled pass for `DrawSlots`: where its

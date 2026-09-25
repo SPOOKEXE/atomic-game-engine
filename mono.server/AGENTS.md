@@ -267,6 +267,15 @@ which has one reader. The read side of `core::Metrics` - counters, gauges and
 histograms with nearest-rank percentiles - arrived at v0.19; before that there
 was nothing to report.
 
+## Observation files are written after the tick, one per process
+
+`--observe-dir DIR` makes every process append its local worlds' physics and
+portal observation records to `DIR/<process>.jsonl` after each tick, with
+`--observe-trace ID` as the default trace id. The driver forwards both to its
+hosts, so one directory holds a whole run. `ObservationSink` reads the same
+value copies the MCP features do and keeps a cursor per world, so each record is
+written once. It never runs inside a tick.
+
 ## The server registers MCP tools of its own
 
 `src/Control.cpp` is `Server::RegisterControlTools`, called from `Run` when

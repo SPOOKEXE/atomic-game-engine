@@ -54,6 +54,11 @@ namespace engine::render {
 	// in source coordinates so its producer can forward that pose into child views.
 	// Foreign rows and local synthetic copies are omitted. Output is transactional;
 	// no crossing geometry produces an empty payload, not an encoded empty picture.
+	// The player whose body portal captures leave out for the viewer to compose:
+	// the held subject while a camera hold lasts, else the local player. Empty
+	// when neither carries an identity.
+	std::string PortalBodyPlayer(const ecs::Store &store);
+
 	bool CollectPortalEyeGeometry(
 		ecs::Store &store,
 		core::Name destination,

@@ -237,6 +237,18 @@ namespace engine::render {
 		opaque.target_info.has_depth_stencil_target = true;
 
 		OpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
+		// A surface's part is drawn from inside when the camera stands in it,
+		// which a pane with thickness allows. Culled, its far face vanishes and
+		// the world behind the pane shows through the hole.
+		const auto twoSided = [this](SDL_GPUGraphicsPipeline *culled, SDL_GPUGraphicsPipelineCreateInfo info) {
+			if (culled == nullptr || info.rasterizer_state.cull_mode == SDL_GPU_CULLMODE_NONE) return;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			if (auto *twin = SDL_CreateGPUGraphicsPipeline(Device, &info))
+				TwoSidedPipelines.emplace_back(culled, twin);
+			else
+				ENGINE_WARN("two-sided surface pipeline unavailable: {}", SDL_GetError());
+		};
+		twoSided(OpaquePipeline, opaque);
 		if (!OpaquePipeline) {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());
 		}
@@ -245,6 +257,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipelineCreateInfo forward = opaque;
 		forward.target_info.color_target_descriptions = &forwardTarget;
 		ForwardPipeline = SDL_CreateGPUGraphicsPipeline(Device, &forward);
+		twoSided(ForwardPipeline, forward);
 		if (ForwardPipeline == nullptr) {
 			ENGINE_ERROR("forward pipeline: {}", SDL_GetError());
 		}
@@ -304,6 +317,7 @@ namespace engine::render {
 			SDL_GPUGraphicsPipelineCreateInfo hdrOpaque = opaque;
 			hdrOpaque.target_info.color_target_descriptions = &hdrTarget;
 			HdrOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
+			twoSided(HdrOpaquePipeline, hdrOpaque);
 			hdrOpaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
 			hdrOpaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
 			HdrWireframeOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
@@ -329,6 +343,7 @@ namespace engine::render {
 				ENGINE_INFO("gbuffer pipeline probe forced unavailable for test");
 			} else {
 				GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
+				twoSided(GBufferPipeline, gbuffer);
 			}
 			if (GBufferPipeline == nullptr) {
 				if (forceFailure) {
@@ -374,6 +389,7 @@ namespace engine::render {
 		depthPeel.target_info.num_color_targets = 2;
 		if (pbrSupported) {
 			DepthPeelPipeline = SDL_CreateGPUGraphicsPipeline(Device, &depthPeel);
+			twoSided(DepthPeelPipeline, depthPeel);
 			if (DepthPeelPipeline == nullptr) {
 				ENGINE_ERROR("depth peel pipeline: {}", SDL_GetError());
 			}
@@ -531,7 +547,9 @@ namespace engine::render {
 		const auto packedPipeline = [&](SDL_GPUGraphicsPipelineCreateInfo info, SDL_GPUShader *vertex) {
 			info.vertex_shader = vertex;
 			info.vertex_input_state = SDL_GPUVertexInputState{};
-			return SDL_CreateGPUGraphicsPipeline(Device, &info);
+			auto *made = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			twoSided(made, info);
+			return made;
 		};
 		PackedOpaquePipeline = packedPipeline(opaque, packedOpaqueVertex);
 		PackedForwardPipeline = packedPipeline(forward, packedOpaqueVertex);

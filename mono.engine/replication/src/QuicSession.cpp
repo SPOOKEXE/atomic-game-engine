@@ -54,6 +54,19 @@ namespace engine::replication {
 		return {1, true};
 	}
 
+	namespace {
+		// A join snapshot is the one bulk channel. Marking it lets control
+		// messages - input, acknowledgements, user and portal messages - go out
+		// ahead of deltas while the snapshot takes turns with them.
+		net::quic::ConnectionSettings ConnectionSettingsOf(const QuicSessionSettings &settings) {
+			net::quic::ConnectionSettings connection = settings.Connection;
+			connection.BulkChannels = static_cast<uint16_t>(
+				connection.BulkChannels | (1u << QuicRouteFor(MessageKind::SnapshotChunk).Channel)
+			);
+			return connection;
+		}
+	}
+
 	QuicSession::QuicSession(
 		std::unique_ptr<net::quic::Connection> connection, const QuicSessionSettings &settings
 	)
@@ -70,7 +83,7 @@ namespace engine::replication {
 		const QuicSessionSettings &settings
 	) {
 		std::unique_ptr<net::quic::Connection> connection =
-			net::quic::Connection::Connect(transport, peer, nowSeconds, settings.Connection);
+			net::quic::Connection::Connect(transport, peer, nowSeconds, ConnectionSettingsOf(settings));
 		if (connection == nullptr) {
 			return nullptr;
 		}
@@ -85,7 +98,7 @@ namespace engine::replication {
 		const QuicSessionSettings &settings
 	) {
 		std::unique_ptr<net::quic::Connection> connection =
-			net::quic::Connection::Accept(transport, peer, datagram, nowSeconds, settings.Connection);
+			net::quic::Connection::Accept(transport, peer, datagram, nowSeconds, ConnectionSettingsOf(settings));
 		if (connection == nullptr) {
 			return nullptr;
 		}

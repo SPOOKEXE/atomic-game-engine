@@ -273,6 +273,7 @@ namespace client {
 			WorldIdentity found;
 			found.Id = candidate;
 			found.Authored = universe.NameOf(candidate);
+			found.IsRemote = universe.IsRemote(candidate);
 
 			universe.Enter(candidate, [&found](Store &store) {
 				const auto *replica = store.Resource<engine::world::Replica>();
@@ -328,24 +329,28 @@ namespace client {
 			return {};
 		}
 
-		engine::world::WorldId first;
-		for (const WorldIdentity &known : worlds) {
-			if (known.Id == viewer || known.Authored != wanted || !known.Ready) {
-				continue;
-			}
-			if (known.View == view) {
-				return known.Id;
-			}
-			if (!first.IsValid()) {
-				first = known.Id;
-			}
-		}
-
+		// **Same view first, then a world in this process.** A local copy draws
+		// any camera every frame from replicated state; a remote endpoint answers
+		// each camera a round trip later and needs its topology first. Ties keep
+		// registration order.
+		//
 		// **The fallback is deliberate rather than a leftover.** A client whose
 		// universe holds one replica and the authority it mirrors has no second
 		// copy to find, and showing the authority is a live room rather than
 		// nothing.
-		return first;
+		engine::world::WorldId best;
+		int bestRank = -1;
+		for (const WorldIdentity &known : worlds) {
+			if (known.Id == viewer || known.Authored != wanted || !known.Ready) {
+				continue;
+			}
+			const int rank = (known.View == view ? 2 : 0) + (known.IsRemote ? 0 : 1);
+			if (rank > bestRank) {
+				best = known.Id;
+				bestRank = rank;
+			}
+		}
+		return best;
 	}
 
 	engine::world::WorldId ResolveCameraPortalWorld(

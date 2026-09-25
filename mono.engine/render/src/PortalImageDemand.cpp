@@ -168,6 +168,14 @@ namespace engine::render {
 		}
 	}
 
+	std::string PortalBodyPlayer(const ecs::Store &store) {
+		const auto *local = store.Resource<scene::LocalPlayer>();
+		const auto *held = store.Resource<scene::CameraCharacterHold>();
+		const auto player = held && held->Active ? held->Player : local ? local->Instance : ecs::NULL_ENTITY;
+		const auto *identity = store.Get<scene::PlayerIdentity>(player);
+		return identity ? std::to_string(identity->UserId) : std::string{};
+	}
+
 	PortalDemandStatus BuildPortalEyeDemand(
 		core::Name cameraKey,
 		const View &eye,
@@ -379,16 +387,7 @@ namespace engine::render {
 		std::span<const scene::SurfaceSlot> slots
 	) {
 		demands.clear();
-		std::string bodyPlayer;
-		if (settings.ComposePlayerBody) {
-			const auto *local = store.Resource<scene::LocalPlayer>();
-			const auto *held = store.Resource<scene::CameraCharacterHold>();
-			const auto player = held && held->Active ? held->Player
-								: local				 ? local->Instance
-													 : ecs::NULL_ENTITY;
-			const auto *identity = store.Get<scene::PlayerIdentity>(player);
-			if (identity) bodyPlayer = std::to_string(identity->UserId);
-		}
+		const std::string bodyPlayer = settings.ComposePlayerBody ? PortalBodyPlayer(store) : std::string{};
 		PortalImageDemandCounts counts;
 		std::vector<scene::PortalSeam> seams;
 		scene::GatherPortalSeams(store, seams);

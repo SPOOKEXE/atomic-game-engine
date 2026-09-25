@@ -3001,9 +3001,16 @@ namespace engine::replication {
 	void Authority::ClearInputs(ClientId client) {
 		if (Client *found = Reach(client); found != nullptr) {
 			for (const auto &input : found->Pending)
-				found->ConsumedInput = std::max(found->ConsumedInput, input.Tick);
+				found->ConsumedInput = std::max(
+					found->ConsumedInput, found->ConsumedHold ? std::min(input.Tick, *found->ConsumedHold) : input.Tick
+				);
 			found->Pending.clear();
+			found->ConsumedHold.reset();
 		}
+	}
+
+	void Authority::HoldConsumedInput(ClientId client, uint64_t through) {
+		if (Client *found = Reach(client); found != nullptr) found->ConsumedHold = through;
 	}
 
 	Authority::ClientStatus Authority::StatusOf(ClientId client) const {

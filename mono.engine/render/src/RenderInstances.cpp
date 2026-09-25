@@ -145,7 +145,8 @@ namespace engine::render {
 								  SDL_GPUGraphicsPipeline *native,
 								  const core::Name &shader,
 								  core::Name owner,
-								  uint32_t &materialSamplerCount) {
+								  uint32_t &materialSamplerCount,
+								  bool twoSided) {
 			SDL_GPUGraphicsPipeline *want = native;
 			bool authoredMaterial = native != base;
 			if (mesh.Packed) {
@@ -154,6 +155,8 @@ namespace engine::render {
 				authoredMaterial = variant != nullptr;
 			}
 			if (want == nullptr) return false;
+			if (twoSided)
+				if (auto *twin = TwoSidedFor(want)) want = twin;
 			// The binding count comes from the pipeline that was actually selected.
 			// A valid authored name can still fall back for packed meshes, LODs, or
 			// a pass family without a matching variant. Those pipelines are engine
@@ -551,7 +554,9 @@ namespace engine::render {
 					const LodDrawLevel &levelDraw = draw.Levels[level];
 					const MeshEntry &mesh = *levelDraw.Mesh;
 					uint32_t materialSamplerCount = 11;
-					if (!bindMesh(mesh, native, shader, SlotContentOwner[slot], materialSamplerCount))
+					if (!bindMesh(
+							mesh, native, shader, SlotContentOwner[slot], materialSamplerCount, SlotTwoSided[slot]
+						))
 						continue;
 					uint32_t lodArgument = levelDraw.FirstArgument;
 					const auto issue = [&](const LodDrawRange &cluster) {
@@ -656,7 +661,7 @@ namespace engine::render {
 				WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
 			SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
 			uint32_t materialSamplerCount = 11;
-			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot], materialSamplerCount)) {
+			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot], materialSamplerCount, SlotTwoSided[slot])) {
 				slotRun++;
 				slot += run;
 				continue;

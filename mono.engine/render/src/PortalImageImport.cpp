@@ -809,7 +809,12 @@ namespace engine::render {
 
 	uint64_t Renderer::ComposePortalBodyImage(const PortalImageCapture &capture, const View &body) {
 		if (capture.Tree != 0) return ComposePortalCaptureTree(capture.Tree, body);
-		return ComposePortalBodyImageInternal(capture, body, capture.Binding);
+		// A composed eye is a finished picture and is drawn by the eye output,
+		// which takes only complete-world images. A pane samples it either way.
+		auto output = capture.Binding;
+		if (output.ExpectedProjection == PortalImageProjection::Eye)
+			output.ExpectedScope = PortalImageScope::CompleteWorld;
+		return ComposePortalBodyImageInternal(capture, body, output);
 	}
 
 	uint64_t Renderer::ComposePortalBodyImageInternal(

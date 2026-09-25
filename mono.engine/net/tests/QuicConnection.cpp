@@ -557,3 +557,35 @@ TEST_CASE("a handshake completes over two real UDP sockets", "[net][quic][connec
 	CHECK(client->State() == ConnectionState::Established);
 	CHECK(server->State() == ConnectionState::Established);
 }
+
+TEST_CASE(
+	"a control message goes out ahead of queued unreliable messages",
+	"[net][quic][connection][scheduling]"
+) {
+	// Under a congested window the unreliable backlog used to take every packet
+	// first, and a control message waited seconds behind deltas it outlives.
+	Fixture fixture;
+	REQUIRE(fixture.Settle());
+	const std::vector<std::byte> delta(900, std::byte{7});
+	for (int index = 0; index < 200; index++) REQUIRE(fixture.Client->SendUnreliable(9, delta, fixture.Now));
+	REQUIRE(fixture.Client->Send(4, Text("portal crossed"), fixture.Now));
+	fixture.Step();
+
+	CHECK(Messages(*fixture.Server, 4) == std::vector<std::string>{"portal crossed"});
+	// The window, not the queue, bounds the first flush.
+	CHECK(fixture.Client->Stats().Datagrams < 200);
+}
+
+TEST_CASE("a bulk channel takes turns with unreliable messages", "[net][quic][connection][scheduling]") {
+	Fixture fixture;
+	fixture.ServerSide.BulkChannels = 1u << 0;
+	REQUIRE(fixture.Settle());
+	const std::vector<std::byte> snapshot(200 * 1024, std::byte{5});
+	REQUIRE(fixture.Server->Send(0, snapshot, fixture.Now));
+	for (int index = 0; index < 20; index++)
+		REQUIRE(fixture.Server->SendUnreliable(9, std::vector<std::byte>(900, std::byte{7}), fixture.Now));
+	fixture.Step();
+
+	// A large reliable message on a bulk channel cannot hold the unreliable queue still.
+	CHECK(fixture.Server->Stats().Datagrams > 0);
+}

@@ -310,6 +310,15 @@ tick it describes; a client acknowledges the last tick it applied; prediction
 replays the inputs after that tick. A design that agreed on wall time instead
 would need the two clocks to agree, and they do not.
 
+## Consumed means applied to what this authority replicates
+
+`ClearInputs` reports every taken input as consumed, and the client drops what
+is consumed from its prediction. When the game takes input without applying it
+to replicated state, as a portal source does while its body is frozen and the
+input is forwarded, it calls `HoldConsumedInput` first. The held input stays
+unconfirmed, so the client keeps predicting it instead of being pulled back to
+a body that is not moving. The hold covers one `ClearInputs`.
+
 ## Prediction is the local player and nothing else. Dead reckoning is not prediction
 
 **Amended at v0.15, on purpose and here, because the rule as written forbade
