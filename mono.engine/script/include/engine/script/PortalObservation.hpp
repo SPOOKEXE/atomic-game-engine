@@ -49,7 +49,8 @@ namespace engine::script {
 		std::array<char, Bytes> Value{};
 		void Assign(std::string_view text) {
 			const size_t copied = text.size() < Bytes - 1 ? text.size() : Bytes - 1;
-			for (size_t index = 0; index < copied; ++index) Value[index] = text[index];
+			for (size_t index = 0; index < copied; ++index)
+				Value[index] = text[index];
 			Value[copied] = '\0';
 		}
 		std::string_view View() const {
@@ -180,7 +181,8 @@ namespace engine::script {
 		std::vector<Record> Copy() const {
 			std::vector<Record> copied;
 			copied.reserve(Count);
-			for (size_t index = 0; index < Count; ++index) copied.push_back(Records[(First + index) % Capacity]);
+			for (size_t index = 0; index < Count; ++index)
+				copied.push_back(Records[(First + index) % Capacity]);
 			return copied;
 		}
 		uint64_t Overwritten() const {
@@ -231,7 +233,11 @@ namespace engine::script {
 	// Records a host session stage (`Routed` through `CrossedNotified`) for a
 	// transfer, so the player session and the transfer read as one trail.
 	void ObservePortalSession(
-		ecs::Store &store, ecs::Entity player, PortalHandoffEvent event, uint64_t transfer, std::string_view peer
+		ecs::Store &store,
+		ecs::Entity player,
+		PortalHandoffEvent event,
+		uint64_t transfer,
+		std::string_view peer
 	);
 
 	// Records one input a host applied straight to the humanoid, outside the

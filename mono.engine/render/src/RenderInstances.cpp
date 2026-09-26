@@ -555,7 +555,12 @@ namespace engine::render {
 					const MeshEntry &mesh = *levelDraw.Mesh;
 					uint32_t materialSamplerCount = 11;
 					if (!bindMesh(
-							mesh, native, shader, SlotContentOwner[slot], materialSamplerCount, SlotTwoSided[slot]
+							mesh,
+							native,
+							shader,
+							SlotContentOwner[slot],
+							materialSamplerCount,
+							SlotTwoSided[slot]
 						))
 						continue;
 					uint32_t lodArgument = levelDraw.FirstArgument;
@@ -661,7 +666,9 @@ namespace engine::render {
 				WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
 			SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
 			uint32_t materialSamplerCount = 11;
-			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot], materialSamplerCount, SlotTwoSided[slot])) {
+			if (!bindMesh(
+					*mesh, native, shader, SlotContentOwner[slot], materialSamplerCount, SlotTwoSided[slot]
+				)) {
 				slotRun++;
 				slot += run;
 				continue;

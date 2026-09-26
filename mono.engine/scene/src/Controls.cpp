@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -140,6 +141,16 @@ namespace engine::scene {
 		if (went == nullptr || went->Serial == controller->SeenTransit) {
 			return false;
 		}
+		ENGINE_LOG(
+			core::LogLevel::Info,
+			"scene",
+			"DIAG FollowPortalTransit serial={} went=({},{},{}) scale={}",
+			went->Serial,
+			went->Frame.Position.X,
+			went->Frame.Position.Y,
+			went->Frame.Position.Z,
+			went->Scale
+		);
 
 		// Cumulative maps retain every crossing since this viewer last presented.
 		// Resolve their relative affine map before replacing the consumer baseline.
@@ -326,7 +337,8 @@ namespace engine::scene {
 			return false;
 		}
 
-		const Transform *subject = store.Get<Transform>(CameraSubjectRoot(store, active->Entity));
+		const ecs::Entity diagSubject = CameraSubjectRoot(store, active->Entity);
+		const Transform *subject = store.Get<Transform>(diagSubject);
 		if (subject == nullptr || !store.Alive(active->Entity)) {
 			// No subject is a free camera, which is what an editor has. Left
 			// where it is rather than moved to the origin.
@@ -350,6 +362,36 @@ namespace engine::scene {
 		if (engine::scene::PortalCrossing(store, head, pose.Position, carried)) {
 			pose = carried.Place(pose);
 		}
+		const auto *diagChar = store.Get<Character>(CharacterOf(store, diagSubject));
+		ENGINE_LOG(
+			core::LogLevel::Info,
+			"scene",
+			"DIAG PlaceCamera subjectEntity={} rigRoot={} diagRigRoot=({},{},{}) transit={} pred={} subject=({},{},{}) dist={} occluded={} orbit=({},{},{}) final=({},{},{})",
+			diagSubject.Id,
+			diagChar != nullptr ? diagChar->Root.Id : 0u,
+			diagChar != nullptr && store.Get<Transform>(diagChar->Root) != nullptr
+				? store.Get<Transform>(diagChar->Root)->Frame.Position.X
+				: -1.0f,
+			diagChar != nullptr && store.Get<Transform>(diagChar->Root) != nullptr
+				? store.Get<Transform>(diagChar->Root)->Frame.Position.Y
+				: -1.0f,
+			diagChar != nullptr && store.Get<Transform>(diagChar->Root) != nullptr
+				? store.Get<Transform>(diagChar->Root)->Frame.Position.Z
+				: -1.0f,
+			store.Get<PortalTransit>(diagSubject) != nullptr ? 1 : 0,
+			0,
+			subject->Frame.Position.X,
+			subject->Frame.Position.Y,
+			subject->Frame.Position.Z,
+			distance,
+			controller->OccludedDistance,
+			CameraOrbit(*controller, subject->Frame.Position, distance).Position.X,
+			CameraOrbit(*controller, subject->Frame.Position, distance).Position.Y,
+			CameraOrbit(*controller, subject->Frame.Position, distance).Position.Z,
+			pose.Position.X,
+			pose.Position.Y,
+			pose.Position.Z
+		);
 
 		// **And never left standing in the glass.** The crossing above answers
 		// which room the eye is in; it does not stop the eye landing *inside*

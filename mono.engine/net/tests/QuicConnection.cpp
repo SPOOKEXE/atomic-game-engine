@@ -559,15 +559,15 @@ TEST_CASE("a handshake completes over two real UDP sockets", "[net][quic][connec
 }
 
 TEST_CASE(
-	"a control message goes out ahead of queued unreliable messages",
-	"[net][quic][connection][scheduling]"
+	"a control message goes out ahead of queued unreliable messages", "[net][quic][connection][scheduling]"
 ) {
 	// Under a congested window the unreliable backlog used to take every packet
 	// first, and a control message waited seconds behind deltas it outlives.
 	Fixture fixture;
 	REQUIRE(fixture.Settle());
 	const std::vector<std::byte> delta(900, std::byte{7});
-	for (int index = 0; index < 200; index++) REQUIRE(fixture.Client->SendUnreliable(9, delta, fixture.Now));
+	for (int index = 0; index < 200; index++)
+		REQUIRE(fixture.Client->SendUnreliable(9, delta, fixture.Now));
 	REQUIRE(fixture.Client->Send(4, Text("portal crossed"), fixture.Now));
 	fixture.Step();
 

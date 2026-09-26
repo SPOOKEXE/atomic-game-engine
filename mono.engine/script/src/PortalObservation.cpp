@@ -22,7 +22,8 @@ namespace engine::script {
 		void WriteLogs(core::ByteWriter &, const void *, size_t) {}
 		void ReadLogs(core::ByteReader &, void *destination, size_t count) {
 			auto *logs = static_cast<PortalObservationLog *>(destination);
-			for (size_t index = 0; index < count; ++index) logs[index] = PortalObservationLog{};
+			for (size_t index = 0; index < count; ++index)
+				logs[index] = PortalObservationLog{};
 		}
 
 		uint64_t TraceOf(const ecs::Store &store, ecs::Entity entity) {
@@ -98,7 +99,11 @@ namespace engine::script {
 	}
 
 	void ObservePortalSession(
-		ecs::Store &store, ecs::Entity player, PortalHandoffEvent event, uint64_t transfer, std::string_view peer
+		ecs::Store &store,
+		ecs::Entity player,
+		PortalHandoffEvent event,
+		uint64_t transfer,
+		std::string_view peer
 	) {
 		portal_observation::Handoff(store, player, ecs::NULL_ENTITY, event, transfer, 0, peer);
 	}
@@ -113,7 +118,9 @@ namespace engine::script {
 
 		void Register() {
 			if (!ecs::Components::Assigned<PortalObservationLog>().IsValid())
-				ecs::Components::Register<PortalObservationLog>("script.PortalObservationLog", WriteLogs, ReadLogs);
+				ecs::Components::Register<PortalObservationLog>(
+					"script.PortalObservationLog", WriteLogs, ReadLogs
+				);
 		}
 
 		void Prepare(ecs::Store &store) {
@@ -162,8 +169,9 @@ namespace engine::script {
 			const core::Vector3 &direction
 		) {
 			PortalInputRecord record;
-			const auto *rig = store.Alive(subject) ? store.Get<scene::Character>(scene::CharacterOf(store, subject))
-												   : nullptr;
+			const auto *rig = store.Alive(subject)
+								  ? store.Get<scene::Character>(scene::CharacterOf(store, subject))
+								  : nullptr;
 			auto *log = Begin(store, subject, rig ? rig->Root : ecs::NULL_ENTITY, record.Stamp);
 			if (log == nullptr) return;
 			record.Route = route;

@@ -756,7 +756,8 @@ namespace engine::script {
 			SlideResult result;
 			result.End = from;
 			for (int slide = 0; slide < 4 && remaining.MagnitudeSquared() > 1e-12f; ++slide) {
-				const auto hit = physics::SweepPlacement(store, collider, result.End, remaining, angular, ignore, true);
+				const auto hit =
+					physics::SweepPlacement(store, collider, result.End, remaining, angular, ignore, true);
 				if (!hit.Complete) {
 					result.Complete = false;
 					return result;
@@ -896,7 +897,11 @@ namespace engine::script {
 			record.AppliedInputTick = record.Move.InputTick;
 			AnchorForwardClock(store, record, *rig);
 			portal_observation::Input(
-				store, record.Subject, PortalInputRoute::Forwarded, record.Move.InputTick, humanoid->MoveDirection
+				store,
+				record.Subject,
+				PortalInputRoute::Forwarded,
+				record.Move.InputTick,
+				humanoid->MoveDirection
 			);
 			static const core::LogCategory controlTrace("portal-input");
 			if (controlTrace.Enabled(core::LogLevel::Trace)) {
@@ -937,7 +942,8 @@ namespace engine::script {
 		// (`FrozenPortalPlayerInput`), so the client predicted every one of these
 		// rows and this lands the body where the client showed it.
 		bool CatchUpForwardedMoves(ecs::Store &store, Incoming &record, double step) {
-			if (!record.Committed || record.InputClosed || record.PendingMoveCount == 0 || step <= 0) return false;
+			if (!record.Committed || record.InputClosed || record.PendingMoveCount == 0 || step <= 0)
+				return false;
 			double backlog = 0;
 			for (size_t index = 0; index < record.PendingMoveCount; ++index) {
 				const double seconds = record.PendingMoves[index].StepSeconds;
@@ -947,8 +953,8 @@ namespace engine::script {
 			// Up to two steps is ordinary arrival jitter, not a frozen window.
 			if (backlog <= 2 * step + 1e-6) return false;
 			size_t overdue = 0;
-			for (double left = backlog;
-				 overdue < record.PendingMoveCount && left - record.PendingMoves[overdue].StepSeconds >= step - 1e-6;
+			for (double left = backlog; overdue < record.PendingMoveCount &&
+										left - record.PendingMoves[overdue].StepSeconds >= step - 1e-6;
 				 ++overdue)
 				left -= record.PendingMoves[overdue].StepSeconds;
 			if (overdue == 0 || !store.Alive(record.Subject)) return false;
@@ -961,8 +967,9 @@ namespace engine::script {
 			core::Vector3 displacement;
 			for (size_t index = 0; index < overdue; ++index) {
 				const auto &move = record.PendingMoves[index];
-				displacement = displacement + record.Through.Rotate(move.Direction) *
-												  (humanoid->WalkSpeed * static_cast<float>(move.StepSeconds));
+				displacement =
+					displacement + record.Through.Rotate(move.Direction) *
+									   (humanoid->WalkSpeed * static_cast<float>(move.StepSeconds));
 			}
 			// Height belongs to gravity and ground contact, which the solver keeps.
 			displacement.Y = 0;
@@ -1460,7 +1467,8 @@ namespace engine::script {
 				found->BaselineInputTick = body.AppliedInputTick;
 				{
 					PortalArrivalRecord arrived;
-					if (auto *log = portal_observation::Begin(store, found->Subject, arrival.Root, arrived.Stamp)) {
+					if (auto *log =
+							portal_observation::Begin(store, found->Subject, arrival.Root, arrived.Stamp)) {
 						arrived.Transfer = found->Id.Sequence;
 						arrived.Position = found->ArrivalFrame->Position;
 						arrived.BaselineInputTick = found->BaselineInputTick;
@@ -2413,8 +2421,7 @@ namespace engine::script {
 			// motion and start this world's input clock behind the client's.
 			if (record.Committed && record.BaselineInputTick != 0) {
 				size_t included = 0;
-				while (included < record.PendingMoveCount &&
-					   record.PendingMoves[included].InputTick != 0 &&
+				while (included < record.PendingMoveCount && record.PendingMoves[included].InputTick != 0 &&
 					   record.PendingMoves[included].InputTick <= record.BaselineInputTick) {
 					const auto &move = record.PendingMoves[included++];
 					portal_observation::Input(

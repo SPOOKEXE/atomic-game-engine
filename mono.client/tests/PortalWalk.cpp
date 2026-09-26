@@ -363,7 +363,8 @@ end)
 	// Server-side portal and physics observations, one JSONL file per process,
 	// all stamped with one trace id so a crossing reads as a single trail.
 	constexpr uint64_t OBSERVATION_TRACE = 0x5057414c4b;
-	const auto observationDirectory = core::Paths::Base() / ("portal-client-walk-observations-" + std::to_string(port));
+	const auto observationDirectory =
+		core::Paths::Base() / ("portal-client-walk-observations-" + std::to_string(port));
 	std::filesystem::remove_all(observationDirectory);
 	parallel::Process server;
 	std::vector<std::string> serverArguments{
@@ -577,10 +578,11 @@ end)
 						key(SDL_SCANCODE_D, SDLK_D, right);
 						key(SDL_SCANCODE_A, SDLK_A, !right);
 					}
-					if (observed.WalkingOn && observed.Adoptions.size() == 1 && sample.contains("predicted_root")) {
+					if (observed.WalkingOn && observed.Adoptions.size() == 1 &&
+						sample.contains("predicted_root")) {
 						for (const auto &portal : sample.at("portal_views"))
-							observed.WalkingOnHiddenFrames +=
-								portal.value("external", false) && portal.value("demand_status", "") == "hidden";
+							observed.WalkingOnHiddenFrames += portal.value("external", false) &&
+															  portal.value("demand_status", "") == "hidden";
 						if (observed.WalkingOnHiddenFrames >= 3 ||
 							sample.at("predicted_root").at("position").at(2).get<float>() < -40.0f)
 							observed.WalkingOn = false;
@@ -590,8 +592,7 @@ end)
 					// moving, so the stage never records the rest samples it is checked on.
 					if (imageHandoff && fault == PortalWalkFault::None && observed.Adoptions.size() == 1 &&
 						observed.Moving[1] && !observed.WalkingOn &&
-						sample.value("subject_is_humanoid", false) &&
-						sample.contains("predicted_root") &&
+						sample.value("subject_is_humanoid", false) && sample.contains("predicted_root") &&
 						sample.contains("control_basis") && sample.contains("control_angles")) {
 						observed.FirstSteeringFrame.emplace(capturedFrame - 1);
 						++observed.SteeringFrames;
@@ -631,7 +632,8 @@ end)
 						observed.ReturnStopped |=
 							observed.ReturnEnteredAperture && sample.contains("portal_handoff") &&
 							sample.at("portal_handoff").value("destination", "") == "server.world";
-						const auto desired = observed.ReturnStopped ? std::array<bool, 4>{} : ReturnKeys(sample);
+						const auto desired =
+							observed.ReturnStopped ? std::array<bool, 4>{} : ReturnKeys(sample);
 						for (size_t index = 0; index < desired.size(); ++index)
 							if (desired[index] != observed.PressedReturnKeys[index]) {
 								returnKey(index, desired[index]);
@@ -703,7 +705,8 @@ end)
 					const bool settled = observed.Moving[stage];
 					observed.Moving[stage] = true;
 					turning(true);
-					if (stage == 0 ? !observed.OutboundStopped : !(imageHandoff && fault == PortalWalkFault::None))
+					if (stage == 0 ? !observed.OutboundStopped
+								   : !(imageHandoff && fault == PortalWalkFault::None))
 						key(stage == 0 ? SDL_SCANCODE_W : SDL_SCANCODE_S, stage == 0 ? SDLK_W : SDLK_S, true);
 					else if (stage == 1 && !settled) {
 						// Walk on through the steering state, so steering releases W itself.
@@ -1186,7 +1189,8 @@ end)
 						speedSquared += axis.get<float>() * axis.get<float>();
 					// Presentation time is the tick plus alpha. A replica clock that drops its
 					// lead shows the same instant twice, which is not a held body stopping.
-					const double presentedAt = sample.at("tick").get<double>() + sample.at("alpha").get<double>();
+					const double presentedAt =
+						sample.at("tick").get<double>() + sample.at("alpha").get<double>();
 					const double presentedBefore =
 						previousSample->at("tick").get<double>() + previousSample->at("alpha").get<double>();
 					if (speedSquared > 1 && presentedAt > presentedBefore + .1 &&
@@ -1554,8 +1558,8 @@ end)
 				begun += row.at("begun").get<bool>();
 				trail.push_back(
 					at + " crossing " + (row.at("begun").get<bool>() ? "begun" : "refused") + " to " +
-					row.at("destination").get<std::string>() + " offsets " + row.at("prior_offset").dump() + " -> " +
-					row.at("current_offset").dump() + " " + row.at("reason").get<std::string>()
+					row.at("destination").get<std::string>() + " offsets " + row.at("prior_offset").dump() +
+					" -> " + row.at("current_offset").dump() + " " + row.at("reason").get<std::string>()
 				);
 			} else if (hook == "portal.handoff") {
 				trail.push_back(
@@ -1565,7 +1569,8 @@ end)
 			} else if (hook == "portal.arrival") {
 				baselines[world] = row.at("baseline_input_tick");
 				trail.push_back(at + " arrival baseline " + row.at("baseline_input_tick").dump());
-			} else if (hook == "portal.input" && row.at("route") == "forwarded" && baselines.contains(world) &&
+			} else if (hook == "portal.input" && row.at("route") == "forwarded" &&
+					   baselines.contains(world) &&
 					   row.at("input_tick").get<uint64_t>() <= baselines[world]) {
 				replayed.push_back(at + " input " + row.at("input_tick").dump());
 			}

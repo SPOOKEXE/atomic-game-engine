@@ -682,7 +682,9 @@ TEST_CASE("a ready local copy beats a remote endpoint of the same name", "[clien
 	const auto source = worlds.Create({.Name = Name("client.replica")});
 	const auto remote = worlds.Create({.Name = Name("Far")});
 	const auto copy = worlds.Create({.Name = Name("client.portal.approach.1")});
-	worlds.Enter(source, [](Store &store) { store.SetResource(engine::world::Replica{true, Name("Near"), {}}); });
+	worlds.Enter(source, [](Store &store) {
+		store.SetResource(engine::world::Replica{true, Name("Near"), {}});
+	});
 	worlds.Enter(copy, [](Store &store) {
 		store.SetResource(engine::world::Replica{true, Name("Far"), {}});
 		store.SetResource(engine::replication::SnapshotBuffer{});

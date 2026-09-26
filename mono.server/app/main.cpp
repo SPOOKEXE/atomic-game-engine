@@ -382,7 +382,8 @@ int main(int argc, char **argv) {
 		arguments.Has("test-drop-next-portal-crossed-acknowledgement");
 	if (auto report = arguments.Get("test-portal-fault-report")) options.TestPortalFaultReport = *report;
 	if (auto directory = arguments.Get("observe-dir")) options.ObserveDirectory = *directory;
-	options.ObserveTrace = static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("observe-trace", 0)));
+	options.ObserveTrace =
+		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("observe-trace", 0)));
 	options.Processes = static_cast<uint32_t>(arguments.GetInteger("processes", options.Processes));
 	if (arguments.Has("physical-core")) {
 		options.PhysicalCore =
