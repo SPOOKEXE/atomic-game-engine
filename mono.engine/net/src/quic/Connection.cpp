@@ -1317,9 +1317,7 @@ namespace engine::net::quic {
 		// rather than ending it for every other channel.
 		std::array<bool, MAXIMUM_CHANNELS> blocked{};
 		bool datagramTurn = true;
-		const auto bulk = [&](uint8_t channel) {
-			return (inside.Config.BulkChannels >> channel & 1u) != 0;
-		};
+		const auto bulk = [&](uint8_t channel) { return (inside.Config.BulkChannels >> channel & 1u) != 0; };
 		for (int guard = 0; guard < 256; guard++) {
 			ngtcp2_pkt_info info{};
 			ngtcp2_ssize written = 0;

@@ -97,8 +97,9 @@ namespace engine::replication {
 		double nowSeconds,
 		const QuicSessionSettings &settings
 	) {
-		std::unique_ptr<net::quic::Connection> connection =
-			net::quic::Connection::Accept(transport, peer, datagram, nowSeconds, ConnectionSettingsOf(settings));
+		std::unique_ptr<net::quic::Connection> connection = net::quic::Connection::Accept(
+			transport, peer, datagram, nowSeconds, ConnectionSettingsOf(settings)
+		);
 		if (connection == nullptr) {
 			return nullptr;
 		}

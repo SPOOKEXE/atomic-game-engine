@@ -1520,8 +1520,8 @@ namespace engine::render {
 				   SlotShader[next] == SlotShader[slot] && SlotSeam[next] == SlotSeam[slot] &&
 				   SlotSeamFirst[next] == SlotSeamFirst[slot] &&
 				   SlotSeamSecond[next] == SlotSeamSecond[slot] &&
-				   SlotSeamCentre[next] == SlotSeamCentre[slot] && SlotSeamLight[next] == SlotSeamLight[slot] &&
-				   SlotTwoSided[next] == SlotTwoSided[slot];
+				   SlotSeamCentre[next] == SlotSeamCentre[slot] &&
+				   SlotSeamLight[next] == SlotSeamLight[slot] && SlotTwoSided[next] == SlotTwoSided[slot];
 		}
 
 		// One phase of the occlusion-culled pass for `DrawSlots`: where its

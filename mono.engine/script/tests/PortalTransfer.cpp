@@ -1665,7 +1665,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"a frozen source body reports the input it holds", "[script][portal-transfer][portal-move][portal-catch-up]"
+	"a frozen source body reports the input it holds",
+	"[script][portal-transfer][portal-move][portal-catch-up]"
 ) {
 	Pair pair;
 	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {

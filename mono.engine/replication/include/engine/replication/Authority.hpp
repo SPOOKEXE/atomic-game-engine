@@ -2,7 +2,6 @@
 
 // @tier L12 · shared
 
-#include <optional>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
@@ -14,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>

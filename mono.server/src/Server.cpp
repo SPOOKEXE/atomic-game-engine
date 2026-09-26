@@ -1,3 +1,4 @@
+#include "ObservationSink.hpp"
 #include "RetainedBodyGrant.hpp"
 
 #include <engine/assets/ChunkStore.hpp>
@@ -46,14 +47,12 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Codec.hpp>
-#include <engine/script/PortalObservation.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/script/PortalObservation.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
-
-#include "ObservationSink.hpp"
 
 #include <algorithm>
 #include <array>

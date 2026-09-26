@@ -338,9 +338,10 @@ namespace client {
 			// before any approach replica is ready. Keep the one observation while
 			// this world still has a seam into it, so that view is drawn from this
 			// replica rather than from a remote image that cannot draw nested portals.
-			const bool linked = std::any_of(selectedSeams.begin(), selectedSeams.end(), [&](const auto &seam) {
-				return seam.Crosses && seam.DestinationWorld == PortalPrevious->Authored;
-			});
+			const bool linked =
+				std::any_of(selectedSeams.begin(), selectedSeams.end(), [&](const auto &seam) {
+					return seam.Crosses && seam.DestinationWorld == PortalPrevious->Authored;
+				});
 			if (known && !linked) DropPortalObservation();
 		}
 		if (!prepareNative) {
@@ -413,10 +414,10 @@ namespace client {
 				PortalEyeDestinations[slot] = destination;
 				eye.Slot = PORTAL_EYE_VIEW + slot;
 				// The route already chose a local copy of this room when one is ready.
-				const auto producer = primary && selected.IsValid() && !Universe_->IsRemote(selected) &&
-											  destination == eyeWorld
-										  ? selected
-										  : PortalEyeProducer(destination, core::Clock::Seconds());
+				const auto producer =
+					primary && selected.IsValid() && !Universe_->IsRemote(selected) && destination == eyeWorld
+						? selected
+						: PortalEyeProducer(destination, core::Clock::Seconds());
 				if (producer.IsValid()) (void)PortalImages->RequestTopology(Rendered, producer, now);
 				const bool transferEye = primary && PortalNext && PortalNext->Crossed && PortalNext->Ready &&
 										 destination == PortalNext->ArrivedEyeWorld;
@@ -596,10 +597,7 @@ namespace client {
 		// A third-person body is drawn here at its current pose; the image is older.
 		if (remote.EyeImage != 0 && !view.EyePlayer)
 			if (const auto composed = PortalImages->ComposeEyeBody(
-					Rendered,
-					remote.Slot,
-					eyeWorld,
-					{inputWorld, view.Instances, view.JointFrames, true}
+					Rendered, remote.Slot, eyeWorld, {inputWorld, view.Instances, view.JointFrames, true}
 				)) {
 				remote.EyeImage = composed;
 				PortalEyeComposed = prepareNative;

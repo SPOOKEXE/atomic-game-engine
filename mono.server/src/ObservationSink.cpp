@@ -20,12 +20,11 @@ namespace server {
 			return json::array({value.X, value.Y, value.Z});
 		}
 
-		json Row(
-			std::string_view process,
+		json
+		Row(std::string_view process,
 			std::string_view world,
 			std::string_view hook,
-			const engine::script::PortalObservationStamp &stamp
-		) {
+			const engine::script::PortalObservationStamp &stamp) {
 			return {
 				{"process", process},
 				{"world", world},

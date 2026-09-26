@@ -659,8 +659,9 @@ namespace engine::render {
 		// full-size image is worse than a timely half-size one, so ask at half the
 		// longest side. That also keeps four layers inside the pixel budget.
 		std::string composedBody;
-		if (geometry.ComposeBody && destination.World.IsValid() && state.Universe.IsRemote(destination.World) &&
-			geometry.World.IsValid() && !state.Universe.IsRemote(geometry.World))
+		if (geometry.ComposeBody && destination.World.IsValid() &&
+			state.Universe.IsRemote(destination.World) && geometry.World.IsValid() &&
+			!state.Universe.IsRemote(geometry.World))
 			state.Universe.Enter(geometry.World, [&](ecs::Store &store) {
 				composedBody = PortalBodyPlayer(store);
 			});
@@ -1058,7 +1059,8 @@ namespace engine::render {
 		std::vector<scene::DrawInstance> copied, bodyRows;
 		std::vector<core::CFrame> joints;
 		PortalDrawSelection selected{capture->EyePlayer, {}};
-		if (!bytes.empty() && !AppendPortalDraws(bytes, sourceName, copied, joints, error, &selected)) return 0;
+		if (!bytes.empty() && !AppendPortalDraws(bytes, sourceName, copied, joints, error, &selected))
+			return 0;
 		// No rows is a body that has not crossed yet: the layers alone are right.
 		for (const auto index : selected.Hidden)
 			bodyRows.push_back(copied[index]);

@@ -183,6 +183,7 @@ scene.Transient | Marks an instance made by whoever is looking rather than by th
 scene.VectorField2D | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
 scene.VectorField3D | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
 scene.Visual | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame.
+scene.ObservationTrace | Optional caller-chosen id stamped on observation records about this body. It travels with the body through portals, so one id follows a player across worlds and processes.
 scene.Volume | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer.
 scene.WorldBounds | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it.
 
@@ -260,5 +261,6 @@ gui.VirtualAnchorState | Viewer-local keyed scroll anchor preserved while a virt
 gui.VirtualCollection | A bounded keyed data page, total item count, extent policy and overscan for one virtual scrolling collection.
 gui.VirtualFocusState | Viewer-local stable key and index used to restore focus after virtual row recycling.
 
+script.PortalObservationLog | Resource: bounded rings of portal crossing, arrival, input and handoff records, stamped with each subject's trace id. Hooks and the server observation sink read them; the oldest rows are overwritten and counted.
 script.PortalPlayerInput | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue.
 script.PortalTransfers | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages.

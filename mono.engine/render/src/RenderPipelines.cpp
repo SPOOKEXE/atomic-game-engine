@@ -240,14 +240,15 @@ namespace engine::render {
 		// A surface's part is drawn from inside when the camera stands in it,
 		// which a pane with thickness allows. Culled, its far face vanishes and
 		// the world behind the pane shows through the hole.
-		const auto twoSided = [this](SDL_GPUGraphicsPipeline *culled, SDL_GPUGraphicsPipelineCreateInfo info) {
-			if (culled == nullptr || info.rasterizer_state.cull_mode == SDL_GPU_CULLMODE_NONE) return;
-			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			if (auto *twin = SDL_CreateGPUGraphicsPipeline(Device, &info))
-				TwoSidedPipelines.emplace_back(culled, twin);
-			else
-				ENGINE_WARN("two-sided surface pipeline unavailable: {}", SDL_GetError());
-		};
+		const auto twoSided =
+			[this](SDL_GPUGraphicsPipeline *culled, SDL_GPUGraphicsPipelineCreateInfo info) {
+				if (culled == nullptr || info.rasterizer_state.cull_mode == SDL_GPU_CULLMODE_NONE) return;
+				info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+				if (auto *twin = SDL_CreateGPUGraphicsPipeline(Device, &info))
+					TwoSidedPipelines.emplace_back(culled, twin);
+				else
+					ENGINE_WARN("two-sided surface pipeline unavailable: {}", SDL_GetError());
+			};
 		twoSided(OpaquePipeline, opaque);
 		if (!OpaquePipeline) {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());

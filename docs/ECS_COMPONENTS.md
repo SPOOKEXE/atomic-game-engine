@@ -222,6 +222,7 @@ state until v0.19.
 | `scene.NetworkOwner` | 8 | 8 | yes | yes | . | . | Which `Player` simulates this body; a null handle means the server does. `ReclaimAbandonedOwnership` scans it every tick and clears owners that have gone. |
 | `scene.NumberValue` | 8 | 8 | yes | yes | . | . | The double-precision number stored by a `NumberValue` instance. |
 | `scene.ObjectValue` | 8 | 8 | yes | yes | . | . | The entity reference stored by an `ObjectValue` instance. |
+| `scene.ObservationTrace` | 8 | 8 | yes | . | . | . | Optional caller-chosen id stamped on observation records about this body. It travels with the body through portals, so one id follows a player across worlds and processes. |
 | `scene.PhysicsProperties` | 16 | 4 | yes | yes | . | . | Per-part density, friction and elasticity overrides, used by the narrow phase and by the mass computation only when the `Custom` flag is set. |
 | `scene.Pivot` | 28 | 4 | yes | yes | . | . | The handle an instance is posed about, stored in its own frame and composed as `Transform::Frame * Offset`. `PivotOf`, `PivotTo` and the editor gizmo read it. |
 | `scene.PlayerCharacter` | 8 | 8 | yes | yes | . | . | On a `Player`: the character `Model` it currently owns, or null between death and respawn. It backs the `Player.Character` property. |
@@ -290,6 +291,7 @@ state until v0.19.
 | `script.JavaScriptSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column. |
 | `script.LuaSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference. |
 | `script.PortalContactRequests` | 32 | 8 | yes | . | . | . | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts. |
+| `script.PortalObservationLog` | 65648 | 8 | yes | . | yes | . | Resource: bounded rings of portal crossing, arrival, input and handoff records, stamped with each subject's trace id. Hooks and the server observation sink read them; the oldest rows are overwritten and counted. |
 | `script.PortalPlayerInput` | 2136 | 8 | yes | . | yes | . | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue. |
 | `script.PortalTransfers` | 104 | 8 | yes | . | . | . | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages. |
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
@@ -310,4 +312,4 @@ state until v0.19.
 
 ---
 
-233 components registered by the engine, 0 without a purpose line.
+235 components registered by the engine, 0 without a purpose line.

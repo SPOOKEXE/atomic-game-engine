@@ -18,7 +18,8 @@ namespace engine::script::portal_observation {
 
 	// Fills a stamp for `subject`, whose trace comes from its own or `root`'s
 	// `scene::ObservationTrace`, else the world default. Null without a log.
-	PortalObservationLog *Begin(ecs::Store &store, ecs::Entity subject, ecs::Entity root, PortalObservationStamp &stamp);
+	PortalObservationLog *
+	Begin(ecs::Store &store, ecs::Entity subject, ecs::Entity root, PortalObservationStamp &stamp);
 
 	// Records a handoff stage change with a peer world.
 	void Handoff(

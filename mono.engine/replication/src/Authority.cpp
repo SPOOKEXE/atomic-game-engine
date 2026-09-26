@@ -3002,7 +3002,8 @@ namespace engine::replication {
 		if (Client *found = Reach(client); found != nullptr) {
 			for (const auto &input : found->Pending)
 				found->ConsumedInput = std::max(
-					found->ConsumedInput, found->ConsumedHold ? std::min(input.Tick, *found->ConsumedHold) : input.Tick
+					found->ConsumedInput,
+					found->ConsumedHold ? std::min(input.Tick, *found->ConsumedHold) : input.Tick
 				);
 			found->Pending.clear();
 			found->ConsumedHold.reset();

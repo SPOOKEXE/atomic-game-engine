@@ -1770,11 +1770,13 @@ namespace engine::scene {
 			"scene.ObservationTrace",
 			[](core::ByteWriter &writer, const void *source, size_t count) {
 				const auto *traces = static_cast<const ObservationTrace *>(source);
-				for (size_t index = 0; index < count; ++index) writer.WriteUInt64(traces[index].Id);
+				for (size_t index = 0; index < count; ++index)
+					writer.WriteUInt64(traces[index].Id);
 			},
 			[](core::ByteReader &reader, void *destination, size_t count) {
 				auto *traces = static_cast<ObservationTrace *>(destination);
-				for (size_t index = 0; index < count; ++index) traces[index].Id = reader.ReadUInt64();
+				for (size_t index = 0; index < count; ++index)
+					traces[index].Id = reader.ReadUInt64();
 			}
 		);
 		ecs::Components::Register<PortalCrossingState>("scene.PortalCrossing");
