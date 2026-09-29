@@ -1012,8 +1012,7 @@ namespace engine::replication {
 			uint32_t Entry = 0;
 
 			// Where this row's encoded value sits inside its entry's `Values`,
-			// and how long it is. `Deferred` rows get their offset when `Pack`
-			// first selects them; their fixed width is already known here.
+			// and how long it is.
 			//
 			// **A span rather than a row number times a stride, because a row is
 			// not a fixed width.** A component may serialise to a different
@@ -1035,8 +1034,6 @@ namespace engine::replication {
 			size_t BearingSlot = NOWHERE;
 
 			float Hint = 0.0f;
-
-			bool Deferred = false;
 		};
 
 		// How much of a delta a packing pass got onto the wire.
@@ -1442,8 +1439,7 @@ namespace engine::replication {
 
 		void BuildComponents(Lane &lane, ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
 		void Prioritise(Lane &lane, ClientId client, uint64_t tick);
-		Placement
-		Pack(Lane &lane, Client &client, const ecs::Store &store, Delta &delta, size_t messageLimit);
+		Placement Pack(Lane &lane, Client &client, const Delta &delta, size_t messageLimit);
 		void Record(Lane &lane, Client &client, const Placement &placed, uint64_t tick);
 		void EmitStructure(Client &client, const Structure &structure);
 
