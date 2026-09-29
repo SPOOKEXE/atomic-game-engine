@@ -414,9 +414,8 @@ TEST_CASE(
 
 	const std::span<const std::vector<std::byte>> firstOutgoing = pair.Authority_.Outgoing(pair.Handle);
 	REQUIRE(firstOutgoing.size() == 2);
-	// Each pack stages one row beyond the allowance before its final flush
-	// refuses it, so three values are encoded per pass and only two are sent.
-	CHECK(FixedWidthWrites.load(std::memory_order_relaxed) == 6);
+	// Encode each offered row once; both packing passes reuse the same bytes.
+	CHECK(FixedWidthWrites.load(std::memory_order_relaxed) == ROWS);
 	CHECK(
 		firstOutgoing[0] ==
 		FixedWidthPacket(
@@ -443,7 +442,7 @@ TEST_CASE(
 
 	const std::span<const std::vector<std::byte>> retryOutgoing = pair.Authority_.Outgoing(pair.Handle);
 	REQUIRE(retryOutgoing.size() == 2);
-	CHECK(FixedWidthWrites.load(std::memory_order_relaxed) == 6);
+	CHECK(FixedWidthWrites.load(std::memory_order_relaxed) == ROWS);
 	CHECK(
 		retryOutgoing[0] ==
 		FixedWidthPacket(

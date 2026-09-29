@@ -659,3 +659,87 @@ change, require identical ordered pairs and manifolds, contact events, and
 final body state across the settings, and retain the stacked and scattered
 rows as controls. This is a proposed measurement only; production behavior and
 the prior broadphase default remain unchanged.
+
+### Matched 200-client recovery deferral rerun, 2026-09-30
+
+The fixed-width serialization deferral is rejected. It reduced the recorded
+recovery phase slightly, but increased packing and whole-tick cost in both
+compute modes. The runtime now encodes offered values in `BuildComponents`
+once and lets both packing passes reuse those bytes. The deferred row flag,
+packing-time store lookup, intermediate writer, and late source-buffer append
+have been removed. The exact packet-order and current-value retry fixture is
+retained; its writer-count check covers one eager encode per offered row.
+
+Both frozen servers were built with `release-tests`: GCC, first-party `-O3`,
+Tracy enabled, heap hooks and assertions disabled. The baseline differed from
+the candidate only by replacing the `BuildComponents` deferral predicate with
+`false`; all other static libraries matched by SHA256. Both variants used the
+same loadtest executable and staged `Stress.luau`, QUIC, 200 clients, a
+45-second harness, a 57-second server, 30 Hz ticks and input, random-heading
+seed 1, heading changes every 30 ticks, and 30-tick profile windows. Serial
+runs passed `--force-serial-compute`; the parallel runs used the default.
+The binary copies, source variants, cache settings, common-library hashes,
+and machine-readable results remain under
+`.cache/build/release-tests/stress-ab/`. Each capture's metadata records
+server, harness, and scene hashes. The host was a Ryzen 9 9900X with 24 logical
+CPUs. Build jobs were stopped and the documentation retrieval process was
+suspended for the timing window; ordinary desktop processes remained running.
+
+| Compute | Variant | Ticks | Tick p50 / p95 / p99 ms | Overruns | Recovery p95 ms | Pack p95 ms | Dropped scopes |
+|---|---|---:|---|---:|---:|---:|---:|
+| Serial | Eager baseline | 552 | 107.861 / 138.521 / 143.048 | 478 | 26.004 | 5.521 | 0 |
+| Serial | Deferred candidate | 497 | 134.712 / 150.296 / 156.272 | 421 | 25.045 | 14.055 | 0 |
+| Parallel | Eager baseline | 1,312 | 20.720 / 77.869 / 99.158 | 452 | 554.356 | 7.134 | 88,224 |
+| Parallel | Deferred candidate | 1,260 | 22.288 / 82.770 / 98.761 | 486 | 518.313 | 183.209 | 83,302 |
+
+Every run admitted all 200 sessions and ended with all 200 Playing, none
+streaming or timed out. Serial baseline/candidate sent 201,362/201,444 inputs
+and applied 1,341,358/1,215,106 deltas; parallel baseline/candidate sent
+197,849/198,272 inputs and applied 2,648,461/2,248,700 deltas. The random seed
+fixes submitted headings, but a slower server completes different ticks and
+receives different acknowledgements. These are matched configurations with
+real network feedback, not identical internal execution traces. One pair per
+compute mode establishes no broad regression threshold or precise speed ratio.
+
+Recovery and packing figures are complete lane timing histograms from
+`Authority::ReportPhases`, summed across publishing lanes per sample. They
+measure producer work, not owner-thread elapsed time. The serial captures
+folded all 552/497 frames with zero dropped scopes and retain whole-run and
+windowed flame graphs. Parallel flame graphs are explicitly incomplete;
+`FrameGraph` refuses off-owner live scopes as well as bounded overflow. Their
+retained-scope percentages must not be used as complete frame-time shares.
+The serial total also includes reported work, so its summed folded self time
+must not be equated with wall time.
+
+The measured packing increase is a phase result. Source inspection confirms
+that deferral added a second component lookup and an intermediate encoded
+buffer append before copying into the packet. `Pack` can run twice after
+priority selection, so the intermediate cache also supported reuse on the
+second pass. This audit does not attribute the measured increase to one
+lookup, copy, allocator, or lock without finer evidence.
+
+Raw captures use labels `recoverrows-{baseline,candidate}-{serial,parallel}-20260930`
+in `.cache/stress/`, with server and client logs, folded stacks, whole-run
+SVG/text, window snapshots, and averaged SVG/text. The first candidate serial
+wrapper exited 2 after the server and harness had completed and the whole-run
+SVG was written: editing the executing shell script changed its read offset
+and caused an EOF error. Its complete raw profile and final session report
+were retained, and its averaged output was regenerated directly. Subsequent
+runs used an immutable script copy and exited 0.
+
+The stress wrapper now clears the current label's old folded artifact before
+launch and rejects a nonzero server exit. A bounded fake server stayed alive
+past the two-second readiness check, then exited 7 while its fake harness
+exited 0. The wrapper exited 1 with `FAIL: the server exited 7`, removed the
+precreated stale folded file, and printed no success. Shell syntax and diff
+checks pass.
+
+After removing the deferred path, a fresh `release-tests` build of the server,
+loadtest, and replication test binary passed. The exact packet/retry gate
+passed 62 assertions in one case; priority, recovery, and parallel publishing
+checks passed 274 assertions in 27 cases. The complete replication suite
+passed 22,928 assertions in 284 cases, including variable-width serialization,
+loss, QUIC/datagram, and serial/parallel publication coverage. The three changed
+C++ files pass `clang-format-21 --dry-run --Werror`; the scoped diff check
+passes. No additional post-removal timing is claimed beyond the frozen eager
+baseline above.
