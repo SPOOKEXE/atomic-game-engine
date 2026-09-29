@@ -92,6 +92,7 @@ done
 serverSeconds=$((seconds + 12))
 
 echo "stress: starting the server on port $port for ${serverSeconds}s"
+rm -f "$out/$label.folded"
 windowArgs=()
 if [ "$windowTicks" -gt 0 ]; then
 	windowArgs=(--profile-window "$windowTicks")
@@ -145,7 +146,16 @@ timeout $((seconds + 60)) "$harness" \
 harnessStatus=$?
 set -e
 
-wait "$serverPid" || true
+set +e
+wait "$serverPid"
+serverStatus=$?
+set -e
+
+if [ "$serverStatus" -ne 0 ]; then
+	echo "FAIL: the server exited $serverStatus"
+	tail -30 "$out/${label}_server.log"
+	exit 1
+fi
 
 if [ $harnessStatus -ne 0 ]; then
 	echo "FAIL: the harness exited $harnessStatus (124 means it never exited at all)"
