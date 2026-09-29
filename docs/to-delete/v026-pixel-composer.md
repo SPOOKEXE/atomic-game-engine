@@ -31,11 +31,12 @@ name, screenshot or binary string.
 
 At M0, identify the latest official Pixel Composer build and record its version, release channel, release date and
 platform. If a licensed executable becomes available, also record its hash and run controlled captures. The current
-candidate is
-[1.21.10 beta, dated September 13, 2026](https://makham.itch.io/pixel-composer/devlog/1662052/12110-beta);
+candidate, rechecked September 30, 2026, is
+[1.22 stable, dated September 28, 2026](https://makham.itch.io/pixel-composer/devlog/1680206/122-stable);
 record whether the official build can be acquired and run for reference captures. Use
+[1.21.10 beta, dated September 13, 2026](https://makham.itch.io/pixel-composer/devlog/1662052/12110-beta) or
 [1.21.0 stable, dated April 28, 2026](https://makham.itch.io/pixel-composer/devlog/1502094/1210-stable) as a
-comparison fallback if the beta is not reproducible. A fallback does not permit omitting features in newer
+comparison fallback if the current build is not reproducible. A fallback does not permit omitting features in newer
 documentation: the inventory must reconcile every current documentation row to the pinned build, marking build
 availability or behavior as unresolved until verified. Archive the exact documentation snapshot used for the
 inventory with its retrieval date and content hashes. Supplied project version strings remain unidentified unless
@@ -159,9 +160,10 @@ loss, rebind and failed admission each retire one generation exactly once.
 
 ### M0: inventory and reference harness
 
-1. Archive the retrieved official documentation pages with retrieval date and content hashes. Record 1.21.10 beta as
-   the current official build candidate and 1.21.0 stable as a comparison fallback. Reconcile every current
-   documentation row against available build evidence; no current row may be omitted because it was added after a
+1. Archive the retrieved official documentation pages with retrieval date and content hashes. Record 1.22 stable as
+   the current official build candidate and retain the September 23 snapshot's 1.21.10 beta and 1.21.0 stable as
+   comparison fallbacks. Reconcile every current documentation row against available build evidence;
+   no current row may be omitted because it was added after a
    fallback. Build node and product-workflow matrices with fixtures.
 2. Characterise the supplied GIF and PNG captures as visual references. Keep a reference capture runner ready for a
    licensed executable, but record its gate as unavailable by the user's choice. This does not block documented
