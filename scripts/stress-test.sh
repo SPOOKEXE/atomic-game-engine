@@ -30,6 +30,8 @@
 # Optional positional arguments after `windowTicks` select deterministic movement:
 # `randomHeadingSeed` and `randomHeadingEveryTicks`. A zero seed keeps the
 # fixed heading spread used by existing stress runs.
+# The tenth argument, `forceSerialCompute` (0 or 1), retains worker work on the
+# profiling owner for complete live-scope captures. Match it across A/B runs.
 
 set -euo pipefail
 
@@ -44,6 +46,12 @@ sceneName=${6:-Stress.luau}
 windowTicks=${7:-0}
 randomHeadingSeed=${8:-0}
 randomHeadingEveryTicks=${9:-30}
+forceSerialCompute=${10:-0}
+
+case "$forceSerialCompute" in
+	0|1) ;;
+	*) echo "FAIL: forceSerialCompute must be 0 or 1" >&2; exit 1 ;;
+esac
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 out="$root/.cache/stress"
@@ -68,8 +76,13 @@ done
 	echo "clients   $clients"
 	echo "seconds   $seconds"
 	echo "scene     $sceneName"
+	echo "profile_window  $windowTicks"
+	echo "force_serial_compute  $forceSerialCompute"
 	echo "random_heading_seed  $randomHeadingSeed"
 	echo "random_heading_every_ticks  $randomHeadingEveryTicks"
+	echo "server_sha256  $(sha256sum "$server" | awk '{print $1}')"
+	echo "loadtest_sha256  $(sha256sum "$harness" | awk '{print $1}')"
+	echo "scene_sha256  $(sha256sum "$scene" | awk '{print $1}')"
 	echo "captured  $(date -Is)"
 } > "$out/${label}_meta.txt"
 
@@ -87,6 +100,10 @@ if [ "$windowTicks" -gt 0 ]; then
 	# which run wrote them.
 	rm -f "$out/${label}".window*.folded
 fi
+computeArgs=()
+if [ "$forceSerialCompute" -eq 1 ]; then
+	computeArgs=(--force-serial-compute)
+fi
 timeout $((serverSeconds + 30)) "$server" \
 	--game "$scene" \
 	--listen "$port" \
@@ -95,6 +112,7 @@ timeout $((serverSeconds + 30)) "$server" \
 	--seconds "$serverSeconds" \
 	--profile-out "$out/$label.folded" \
 	"${windowArgs[@]}" \
+	"${computeArgs[@]}" \
 	> "$out/${label}_server.log" 2>&1 &
 serverPid=$!
 
