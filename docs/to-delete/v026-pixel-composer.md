@@ -257,7 +257,12 @@ it returns the sampled array in deterministic order. `image.audio_recording` als
 capture. With that input and declared timeline FPS, Match Timeline uses the source formula
 `tick / frames_per_second * sample_rate`; it otherwise returns a named diagnostic. Static seconds and progress
 locations, multichannel audio, WAV import, audio-driven keyframes, live device capture and feedback history remain
-open.
+open. The catalogue `pc.audio_window` also remains open: its pinned source emits nested arrays per channel,
+clamps Step with `max(1, step)`, and clamps its exclusive end to `packet - 1`. Its Bit/Second/Progress location
+unit is an input attribute absent from the current catalogue extraction. The scalar mono slice does not prove
+those source behaviors. Audio Volume has a separate unresolved numeric discrepancy: the archived pre-1.18 docs
+show `10*log10(mean(sample²))`, while the pinned source takes the square root before `log10`. Native execution
+follows the pinned source; a licensed executable is needed to resolve the discrepancy.
 
 ### M4: VFX, simulation and live engine bindings
 
