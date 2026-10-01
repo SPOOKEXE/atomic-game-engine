@@ -250,10 +250,12 @@ namespace engine::ecs {
 
 		SystemScheduleIssue BuildSchedule(Schedule &schedule) const;
 		void EnsureSchedule();
-		void RecordTiming(const Registered &system, float milliseconds);
+		void RebindTimingNames();
+		void RecordTiming(size_t systemIndex, float milliseconds);
 
 		std::vector<Registered> Systems;
 		std::vector<Timing> LastTimings;
+		std::vector<size_t> TimingSystems;
 		Schedule Compiled;
 		bool ScheduleDirty = true;
 	};
