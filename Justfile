@@ -439,6 +439,18 @@ datastore-sqlite-bench samples="5":
     cmake --build --preset bench --target bench_datastore
     ./.cache/build/bench/bench/bench_datastore --suite engine.datastore.bench.sqlite-snapshot --samples {{samples}}
 
+# Each scheduler fixture gets a fresh heap-profile tree. Keep raw timings on stdout.
+scheduler-timing-bench samples="5":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{samples}}" in [1-5]) ;; *) echo "samples must be 1 through 5" >&2; exit 2 ;; esac
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_ecs
+    for scheduler_case in $(seq 0 79); do
+        ATOMIC_SCHEDULER_TIMING_PROFILE=1 ATOMIC_SCHEDULER_TIMING_CASE="$scheduler_case" \
+            ./.cache/build/bench/bench/bench_ecs --suite engine.ecs.bench.scheduler --samples {{samples}}
+    done
+
 # Evaluate a fixed 256x256 three-octave imagegraph output on the CPU.
 imagegraph-evaluation-bench samples="5":
     cmake --preset bench > /dev/null
