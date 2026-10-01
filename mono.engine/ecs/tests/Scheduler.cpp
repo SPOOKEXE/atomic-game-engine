@@ -287,6 +287,61 @@ TEST_CASE("timings accumulate across the calls that make up one frame", "[schedu
 	REQUIRE(scheduler.Timings()[0].Name == "stepped");
 }
 
+TEST_CASE("timing names survive registration growth for serial and parallel systems", "[scheduler]") {
+	for (const bool parallel : {false, true}) {
+		Store store("test");
+		Scheduler scheduler;
+		if (parallel) {
+			scheduler.AddParallel("first", Phase::Input, [](const Store &) {});
+		} else {
+			scheduler.Add("first", Phase::Input, [](Store &) {});
+		}
+
+		scheduler.RunPhases(store, Phase::Input, Phase::Input);
+		REQUIRE(scheduler.Timings().size() == 1);
+		REQUIRE(scheduler.Timings()[0].Name == "first");
+		const float firstMillisecondsBeforeGrowth = scheduler.Timings()[0].Milliseconds;
+
+		for (size_t index = 0; index < 64; index++) {
+			const std::string name = "render-" + std::to_string(index);
+			if (parallel) {
+				scheduler.AddParallel(name, Phase::Render, [](const Store &) {});
+			} else {
+				scheduler.Add(name, Phase::Render, [](Store &) {});
+			}
+		}
+
+		for (int run = 0; run < 2; run++) {
+			scheduler.RunPhases(store, Phase::Input, Phase::Input);
+			REQUIRE(scheduler.Timings().size() == 1);
+			CHECK(scheduler.Timings()[0].Name == "first");
+			CHECK(scheduler.Timings()[0].RunPhase == Phase::Input);
+			CHECK(scheduler.Timings()[0].Milliseconds >= firstMillisecondsBeforeGrowth);
+		}
+
+		if (parallel) {
+			scheduler.AddParallel("shared", Phase::Input, [](const Store &) {});
+			scheduler.AddParallel("shared", Phase::Render, [](const Store &) {});
+		} else {
+			scheduler.Add("shared", Phase::Input, [](Store &) {});
+			scheduler.Add("shared", Phase::Render, [](Store &) {});
+		}
+		scheduler.RunPhases(store, Phase::Input, Phase::Input);
+		REQUIRE(scheduler.Timings().size() == 2);
+		CHECK(scheduler.Timings()[0].Name == "first");
+		CHECK(scheduler.Timings()[1].Name == "shared");
+		CHECK(scheduler.Timings()[1].RunPhase == Phase::Input);
+		const float sharedMillisecondsBeforeRender = scheduler.Timings()[1].Milliseconds;
+		scheduler.RunPhases(store, Phase::Render, Phase::Render);
+		CHECK(scheduler.Timings()[1].Milliseconds >= sharedMillisecondsBeforeRender);
+
+		scheduler.ClearTimings();
+		scheduler.RunPhases(store, Phase::Render, Phase::Render);
+		REQUIRE(scheduler.Timings().size() == 65);
+		CHECK(scheduler.Timings()[0].Name == "render-0");
+	}
+}
+
 TEST_CASE("a system mutates the store it is handed", "[scheduler]") {
 	Store store("test");
 	Scheduler scheduler;

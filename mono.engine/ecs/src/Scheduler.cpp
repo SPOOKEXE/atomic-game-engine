@@ -32,6 +32,9 @@ namespace engine::ecs {
 	}
 
 	void Scheduler::Add(std::string_view name, Phase phase, System system, SystemOrder order) {
+		// Reserve while registering so RecordTiming never allocates in Run.
+		LastTimings.reserve(Systems.size() + 1);
+		TimingSystems.reserve(Systems.size() + 1);
 		Systems.push_back(
 			Registered{
 				.Name = std::string(name),
@@ -41,16 +44,15 @@ namespace engine::ecs {
 				.Order = std::move(order),
 			}
 		);
+		RebindTimingNames();
 		ScheduleDirty = true;
-
-		// Registered systems are stable for the life of the scheduler, so the
-		// timing list is sized once and reused. Reallocating it inside Run
-		// would show up in the numbers it is reporting.
-		LastTimings.reserve(Systems.size());
 	}
 
 	void
 	Scheduler::AddParallel(std::string_view name, Phase phase, ParallelSystem system, SystemOrder order) {
+		// Reserve while registering so RecordTiming never allocates in Run.
+		LastTimings.reserve(Systems.size() + 1);
+		TimingSystems.reserve(Systems.size() + 1);
 		Systems.push_back(
 			Registered{
 				.Name = std::string(name),
@@ -61,8 +63,8 @@ namespace engine::ecs {
 				.Mode = Execution::ParallelReadOnly,
 			}
 		);
+		RebindTimingNames();
 		ScheduleDirty = true;
-		LastTimings.reserve(Systems.size());
 	}
 
 	bool Scheduler::Replace(std::string_view name, uint64_t revision, System system) {
@@ -274,19 +276,30 @@ namespace engine::ecs {
 		ScheduleDirty = false;
 	}
 
-	void Scheduler::RecordTiming(const Registered &system, float milliseconds) {
-		auto existing = std::find_if(LastTimings.begin(), LastTimings.end(), [&system](const Timing &timing) {
-			return timing.Name == system.Name;
-		});
-		if (existing != LastTimings.end()) {
-			existing->Milliseconds += milliseconds;
+	// Short names move with Systems; retained rows use indices to refresh their borrowed views.
+	void Scheduler::RebindTimingNames() {
+		for (size_t row = 0; row < LastTimings.size(); row++) {
+			LastTimings[row].Name = Systems[TimingSystems[row]].Name;
+		}
+	}
+
+	void Scheduler::RecordTiming(size_t systemIndex, float milliseconds) {
+		const Registered &system = Systems[systemIndex];
+		auto existing =
+			std::find_if(TimingSystems.begin(), TimingSystems.end(), [this, &system](size_t index) {
+				return Systems[index].Name == system.Name;
+			});
+		if (existing != TimingSystems.end()) {
+			LastTimings[static_cast<size_t>(existing - TimingSystems.begin())].Milliseconds += milliseconds;
 		} else {
 			LastTimings.push_back(Timing{system.Name, system.RunPhase, milliseconds});
+			TimingSystems.push_back(systemIndex);
 		}
 	}
 
 	void Scheduler::ClearTimings() {
 		LastTimings.clear();
+		TimingSystems.clear();
 	}
 
 	void Scheduler::Tick(Store &store, float deltaSeconds) {
@@ -350,7 +363,7 @@ namespace engine::ecs {
 					);
 					for (size_t task = 0; task < wave.Systems.size(); task++) {
 						const Registered &system = Systems[wave.Systems[task]];
-						RecordTiming(system, milliseconds[task]);
+						RecordTiming(wave.Systems[task], milliseconds[task]);
 						core::FrameGraph::ReportNamed(
 							"parallel system", system.Name, core::ProfileCategory::ECS, milliseconds[task]
 						);
@@ -373,7 +386,7 @@ namespace engine::ecs {
 					const uint64_t finished = core::Clock::Nanoseconds();
 					const auto milliseconds =
 						static_cast<float>(static_cast<double>(finished - started) / 1'000'000.0);
-					RecordTiming(system, milliseconds);
+					RecordTiming(systemIndex, milliseconds);
 				}
 			}
 		}
