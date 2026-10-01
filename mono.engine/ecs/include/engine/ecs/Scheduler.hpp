@@ -246,17 +246,31 @@ namespace engine::ecs {
 			bool Parallel = false;
 		};
 
+		static constexpr size_t NO_TIMING_ROW = static_cast<size_t>(-1);
+
+		struct TimingGroup {
+			size_t RepresentativeSystem = 0;
+			size_t ActiveRow = NO_TIMING_ROW;
+		};
+
+		struct TimingRegistration {
+			size_t Group = 0;
+			bool NewGroup = false;
+		};
+
 		using Schedule = std::array<std::vector<Wave>, static_cast<size_t>(Phase::Count)>;
 
 		SystemScheduleIssue BuildSchedule(Schedule &schedule) const;
 		void EnsureSchedule();
+		TimingRegistration PrepareTimingRegistration(std::string_view name);
 		void RebindTimingNames();
 		void RecordTiming(size_t systemIndex, float milliseconds);
 
 		std::vector<Registered> Systems;
 		std::vector<Timing> LastTimings;
-		std::vector<size_t> TimingSystems;
+		std::vector<size_t> SystemTimingGroups;
+		std::vector<TimingGroup> TimingGroups;
 		Schedule Compiled;
 		bool ScheduleDirty = true;
 	};
-}
+} // namespace engine::ecs
