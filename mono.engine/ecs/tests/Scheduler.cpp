@@ -10,9 +10,13 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <functional>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.scheduler")
@@ -29,6 +33,23 @@ using engine::ecs::SystemOrder;
 using engine::ecs::SystemScheduleStatus;
 
 namespace scheduler_test {
+	struct ThrowOnCopy {
+		bool *ThrowCopies;
+		int *Runs;
+
+		ThrowOnCopy(bool &throwCopies, int &runs) : ThrowCopies(&throwCopies), Runs(&runs) {}
+		ThrowOnCopy(const ThrowOnCopy &other) : ThrowCopies(other.ThrowCopies), Runs(other.Runs) {
+			if (*ThrowCopies) {
+				throw std::runtime_error("system target copy rejected");
+			}
+		}
+		ThrowOnCopy(ThrowOnCopy &&) noexcept = default;
+
+		void operator()(Store &) const {
+			++*Runs;
+		}
+	};
+
 	struct Health {
 		int Value = 0;
 	};
@@ -481,6 +502,115 @@ TEST_CASE("timing groups survive Add, AddParallel, replacement, and reset", "[sc
 	REQUIRE(scheduler.Timings().size() == 2);
 	CHECK(scheduler.Timings()[0].Name == "parallel");
 	CHECK(scheduler.Timings()[1].Name == "late");
+}
+
+TEST_CASE("scheduler copies rebind accumulated timing names to their own systems", "[scheduler]") {
+	static_assert(std::is_nothrow_move_constructible_v<Scheduler>);
+	static_assert(std::is_nothrow_move_assignable_v<Scheduler>);
+	Store store("test");
+	const std::string shortName = "shared-short";
+	const std::string longName = "shared-long-system-name-with-more-than-forty-characters-total";
+	REQUIRE(longName.size() >= 40);
+	std::optional<Scheduler> copyConstructed;
+	Scheduler copyAssigned;
+	copyAssigned.Add("discarded", Phase::Input, [](Store &) {});
+	copyAssigned.RunPhases(store, Phase::Input, Phase::Input);
+
+	{
+		Scheduler source;
+		source.Add(shortName, Phase::Input, [](Store &) {});
+		source.Add(shortName, Phase::Render, [](Store &) {});
+		source.AddParallel(longName, Phase::Input, [](const Store &) {});
+		source.AddParallel(longName, Phase::Render, [](const Store &) {});
+		source.RunPhases(store, Phase::Render, Phase::Render);
+		source.RunPhases(store, Phase::Input, Phase::Input);
+		REQUIRE(source.Timings().size() == 2);
+		CHECK(source.Timings()[0].RunPhase == Phase::Render);
+		CHECK(source.Timings()[1].RunPhase == Phase::Render);
+		copyConstructed.emplace(source);
+		copyAssigned = source;
+		REQUIRE(copyConstructed->Timings().size() == source.Timings().size());
+		REQUIRE(copyAssigned.Timings().size() == source.Timings().size());
+		for (size_t index = 0; index < source.Timings().size(); ++index) {
+			CHECK(copyConstructed->Timings()[index].Name.data() != source.Timings()[index].Name.data());
+			CHECK(copyAssigned.Timings()[index].Name.data() != source.Timings()[index].Name.data());
+		}
+	}
+
+	const auto checkSourceRows = [&](const Scheduler &scheduler) {
+		REQUIRE(scheduler.Timings().size() == 2);
+		CHECK(scheduler.Timings()[0].Name == shortName);
+		CHECK(scheduler.Timings()[0].RunPhase == Phase::Render);
+		CHECK(scheduler.Timings()[1].Name == longName);
+		CHECK(scheduler.Timings()[1].RunPhase == Phase::Render);
+	};
+	REQUIRE(copyConstructed.has_value());
+	checkSourceRows(*copyConstructed);
+	checkSourceRows(copyAssigned);
+
+	copyConstructed->RunPhases(store, Phase::Input, Phase::Input);
+	checkSourceRows(*copyConstructed);
+	const Scheduler &sameScheduler = copyAssigned;
+	copyAssigned = sameScheduler;
+	checkSourceRows(copyAssigned);
+
+	copyConstructed->Add("copy-only", Phase::Input, [](Store &) {});
+	CHECK(copyConstructed->SystemCount() == 5);
+	CHECK(copyAssigned.SystemCount() == 4);
+	copyConstructed->ClearTimings();
+	copyConstructed->RunPhases(store, Phase::Input, Phase::Input);
+	REQUIRE(copyConstructed->Timings().size() == 3);
+	CHECK(copyConstructed->Timings()[0].Name == shortName);
+	CHECK(copyConstructed->Timings()[0].RunPhase == Phase::Input);
+	CHECK(copyConstructed->Timings()[1].Name == longName);
+	CHECK(copyConstructed->Timings()[1].RunPhase == Phase::Input);
+	CHECK(copyConstructed->Timings()[2].Name == "copy-only");
+	checkSourceRows(copyAssigned);
+
+	Scheduler moved(std::move(copyAssigned));
+	checkSourceRows(moved);
+	Scheduler moveAssigned;
+	moveAssigned = std::move(moved);
+	checkSourceRows(moveAssigned);
+}
+
+TEST_CASE("failed scheduler copy assignment preserves destination state", "[scheduler]") {
+	Store store("test");
+	bool throwCopies = false;
+	int sourceRuns = 0;
+	int destinationRuns = 0;
+
+	Scheduler source;
+	source.Add("source", Phase::Input, Scheduler::System{ThrowOnCopy{throwCopies, sourceRuns}});
+	source.RunPhases(store, Phase::Input, Phase::Input);
+
+	Scheduler destination;
+	destination.Add("destination", Phase::Render, [&](Store &) { ++destinationRuns; });
+	destination.RunPhases(store, Phase::Render, Phase::Render);
+	REQUIRE(destination.Timings().size() == 1);
+	const double retainedMilliseconds = destination.Timings()[0].Milliseconds;
+
+	throwCopies = true;
+	CHECK_THROWS_AS(destination = source, std::runtime_error);
+	throwCopies = false;
+
+	REQUIRE(destination.SystemCount() == 1);
+	REQUIRE(destination.Timings().size() == 1);
+	CHECK(destination.Timings()[0].Name == "destination");
+	CHECK(destination.Timings()[0].RunPhase == Phase::Render);
+	CHECK(destination.Timings()[0].Milliseconds == retainedMilliseconds);
+	CHECK(destinationRuns == 1);
+	destination.RunPhases(store, Phase::Render, Phase::Render);
+	CHECK(destinationRuns == 2);
+	REQUIRE(destination.Timings().size() == 1);
+	CHECK(destination.Timings()[0].Name == "destination");
+	CHECK(destination.Timings()[0].RunPhase == Phase::Render);
+
+	CHECK(source.SystemCount() == 1);
+	REQUIRE(source.Timings().size() == 1);
+	CHECK(source.Timings()[0].Name == "source");
+	source.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(sourceRuns == 2);
 }
 
 TEST_CASE("a system mutates the store it is handed", "[scheduler]") {

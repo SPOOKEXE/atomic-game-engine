@@ -121,6 +121,15 @@ namespace engine::ecs {
 		// A read-only system eligible to share a dependency wave.
 		using ParallelSystem = std::function<void(const Store &)>;
 
+		Scheduler() = default;
+		// Rebinds accumulated timing-name views to the copied registrations.
+		Scheduler(const Scheduler &other);
+		// Strong exception guarantee: a failed copy leaves this scheduler intact.
+		Scheduler &operator=(const Scheduler &other);
+		// Moving the system storage also moves the strings behind the timing views.
+		Scheduler(Scheduler &&other) noexcept = default;
+		Scheduler &operator=(Scheduler &&other) noexcept = default;
+
 		// `name` is copied, so a caller may build one. It becomes the span
 		// label in the overlay and in Tracy.
 		//
