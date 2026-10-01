@@ -39,6 +39,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.25
 
+- [x] revalidate the full world suite with process-host and socket access restored. The freshly rebuilt dev suite passed all 291 cases and 34,103 assertions, including the previously failing process-host boundaries. Earlier failed attempts remain preserved; this passing run does not establish their original causes. Fresh TCP and UDP loopback binds also succeeded, and scoped Git commits now succeed. The matched 200-client profiling rerun remains open. Evidence: `.cache/build/dev/evidence/scheduler-lifetime-fix-2026-10-01-v2/world-result.json` and `world.stdout`.
+
 - [x] repair scheduler timing-name lifetime across registration growth. Retained rows now keep source system indices and refresh borrowed names after `Systems` moves, preserving accumulated costs, first-completion order and cross-phase name aggregation. The fresh production ECS gate passed 134,227 assertions across 450 cases; the focused scheduler gate passed 110 assertions across 19. A fresh ASan/UBSan scheduler unity and caller repro passed without diagnostics; remaining libraries were unchanged and leak detection was disabled. The first validation compile missed the frozen header fallback and remains preserved. Formatting passed with clang-format-21. Commit: `5bdd8a14`. Evidence: `.cache/build/dev/evidence/scheduler-lifetime-fix-2026-10-01-v2/root-acceptance.json`. Timing lookup optimization and matched profiling remain open.
 
 - [x] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
