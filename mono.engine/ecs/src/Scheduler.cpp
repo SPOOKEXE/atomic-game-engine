@@ -6,8 +6,31 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 namespace engine::ecs {
+
+	Scheduler::Scheduler(const Scheduler &other)
+		: Systems(other.Systems), LastTimings(other.LastTimings),
+		  SystemTimingGroups(other.SystemTimingGroups), TimingGroups(other.TimingGroups),
+		  Compiled(other.Compiled), ScheduleDirty(other.ScheduleDirty) {
+		RebindTimingNames();
+	}
+
+	Scheduler &Scheduler::operator=(const Scheduler &other) {
+		if (this == &other) return *this;
+		// Finish every allocating copy before this scheduler's state is replaced.
+		Scheduler copy(other);
+		using std::swap;
+		swap(Systems, copy.Systems);
+		swap(LastTimings, copy.LastTimings);
+		swap(SystemTimingGroups, copy.SystemTimingGroups);
+		swap(TimingGroups, copy.TimingGroups);
+		swap(Compiled, copy.Compiled);
+		swap(ScheduleDirty, copy.ScheduleDirty);
+		RebindTimingNames();
+		return *this;
+	}
 
 	std::string_view GetPhaseName(Phase phase) {
 		switch (phase) {
