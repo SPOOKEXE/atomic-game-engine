@@ -39,6 +39,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.25
 
+- [x] repair scheduler timing-name lifetime across registration growth. Retained rows now keep source system indices and refresh borrowed names after `Systems` moves, preserving accumulated costs, first-completion order and cross-phase name aggregation. The fresh production ECS gate passed 134,227 assertions across 450 cases; the focused scheduler gate passed 110 assertions across 19. A fresh ASan/UBSan scheduler unity and caller repro passed without diagnostics; remaining libraries were unchanged and leak detection was disabled. The first validation compile missed the frozen header fallback and remains preserved. Formatting passed with clang-format-21. Commit: `5bdd8a14`. Evidence: `.cache/build/dev/evidence/scheduler-lifetime-fix-2026-10-01-v2/root-acceptance.json`. Timing lookup optimization and matched profiling remain open.
+
 - [x] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
 - [x] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
 - [x] improve `schema.toml` and `schema-data.toml` so its better laid out (schema is the general layout, schema-data is the actual useful information that we would grep and search specific classes, components and functions in). Like Roblox Studio Class API Reference.
