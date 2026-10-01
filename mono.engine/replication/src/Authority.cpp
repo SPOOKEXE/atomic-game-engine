@@ -1944,6 +1944,8 @@ namespace engine::replication {
 			// Ids rather than an iterator, because `offer` inserts into
 			// `unconfirmed` and would invalidate one.
 			{
+				const std::string_view recoverRowsName = "Authority::RecoverRows";
+				ENGINE_PROFILE_PRODUCER_DYNAMIC_STABLE("Authority::RecoverRows", recoverRowsName);
 				const Lane::Timed timed(lane, Lane::Phase::RecoverRows);
 				unconfirmed.SelectRecovering(tick, Settings_.RecoveryRowsPerTick, lane.Recovering);
 
@@ -2253,14 +2255,12 @@ namespace engine::replication {
 		// the folded output, which is the number a reader wants anyway - what one
 		// client costs is this over the client count.
 		//
-		// **And the per-client phases have no `ENGINE_PROFILE` any more**,
-		// because they run on a worker and `core::FrameGraph` drops a span it
-		// did not open on the recording thread - so keeping them would have
-		// quietly turned the whole replication breakdown into a number in the
-		// drop counter. Each lane counts nanoseconds into `Lane::Spent` instead
-		// and `ReportPhases` folds the totals back into the graph under the
-		// names the spans used, and into `core::Metrics` as histograms because
-		// that is the sink a headless server can drain.
+		// **Recovery has a producer scope for Tracy and heap attribution; the other
+		// per-client phases have no `ENGINE_PROFILE` scope**, because they run on a
+		// worker and `core::FrameGraph` drops a span it did not open on the recording
+		// thread. Each lane retains its nanoseconds in `Lane::Spent`, and
+		// `ReportPhases` reports those totals on the owner thread to the graph and
+		// `core::Metrics` as histograms for a headless server to drain.
 		ENGINE_PROFILE_CAT("Authority::Publish", core::ProfileCategory::Network);
 		ResetPublishStatistics();
 		if (Count() == 0) {
