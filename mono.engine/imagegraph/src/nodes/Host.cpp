@@ -355,6 +355,7 @@ namespace engine::imagegraph::detail {
 		static constexpr ExecutorEntry entries[]{
 			{"pc.image", RecordedHost, true},
 			{"pc.image_sequence", RecordedHost, true},
+			{"pc.image_animated", RecordedHost, true},
 			{"pc.datetime_get", RecordedHost, true},	  {"pc.export", ExportPreview, true},
 			{"pc.wav_file_write", RecordedHost, true},	  {"pc.byte_file_read", RecordedHost, true},
 			{"pc.byte_file_write", RecordedHost, true},	  {"pc.text_file_read", RecordedHost, true},

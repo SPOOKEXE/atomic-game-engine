@@ -37,3 +37,29 @@ fails. Failed rendering leaves every destination unchanged. Failed batches
 remove newly created empty parent directories and preserve the caller's retained
 frame list. Sequence exports evaluate each planned frame; single exports retain
 the live request's exact clock.
+
+Still, image-array and animated-image reads admit actual PNG, BMP and baseline
+JPEG dimensions before invoking the decoder. Each array pathname requires its
+own exact named resource grant, including repeated paths in the ordered inputs.
+The source `IPadding` getter rounds every component to even after unit conversion,
+matching the [documented GameMaker round function](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Maths_And_Numbers/Number_Functions/round.htm).
+The CPU adapter does not depend on the process floating-point rounding mode.
+
+The pinned image-array implementation uses plain sprite draws without setting
+shader interpolation. The native CPU profile samples destination pixel centres
+with nearest texels, supports scale-to-fit and fractional centered placement,
+and leaves uncovered pixels transparent. This is not a recorded comparison
+against GameMaker GPU edge coverage or texture-page sampling.
+
+Animated-image selection follows the pinned `node_image_animated` update: the
+exact request clock, `floor(clock / period) - (start - 1)`, project frame count
+plus one for stretch, source signed remainder for Loop/Ping pong, and the Hold
+and Hide bounds. Single-frame Ping pong uses source `safe_mod`'s zero-divisor
+result. Negative source remainders do not wrap to the last frame. Its CPU sprite
+profile is nearest sampling; GameMaker shader/GPU parity remains unverified.
+Zero un-stretched speed is refused pending a division-by-zero source observation.
+Missing or malformed granted images fail without replacing the prior capture.
+File watcher refresh, embedded sprite-cache restoration and the timeline match
+button remain host workflow parity gates. The source audit uses commit
+`b69eca232217360cf1502ef0223523d818606652`, scripts `node_value_padding`,
+`node_image_sequence`, `node_image_animated`, `safe_operation` and `shader_functions`.

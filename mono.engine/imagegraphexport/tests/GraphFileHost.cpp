@@ -8,6 +8,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 TEST_SUITE_ID("engine.imagegraphexport.graph_file_host")
 TEST_DEPENDS("engine.imagegraph.host_capture")
@@ -407,13 +408,166 @@ TEST_CASE("Image file host admits headers and preserves exact padded pixels", "[
 		CHECK(capture.ImageArrays[0].Frames.size() == 2);
 		grants[0].Resource.clear();
 		CHECK_FALSE(host.Capture(sequence, capture, failure));
-		return;
 	}
-	const auto old = capture.Images[0].Data;
-	word(18, 100000, 4);
-	write();
-	CHECK_FALSE(host.Capture(invocation, capture, failure));
-	CHECK(capture.Images[0].Data == old);
-	grants[0].Write = true;
-	CHECK_FALSE(host.Capture(invocation, capture, failure));
+	SECTION("source integer padding rounds finite fractional controls to even") {
+		inputs[1].Data = Vector4{.5, 1.5, 2.5, -.5};
+		REQUIRE(host.Capture(invocation, capture, failure));
+		CHECK(capture.Images[0].Data.Width == 4);
+		CHECK(capture.Images[0].Data.Height == 3);
+		REQUIRE(LoadSurfacePixel(capture.Images[0].Data, 2, 2, pixel));
+		CHECK(pixel == SurfacePixel{10. / 255, 20. / 255, 30. / 255, 1});
+		inputs[1].Data = Vector4{0, 0, std::numeric_limits<double>::infinity(), 0};
+		const auto old = capture.Images[0].Data;
+		CHECK_FALSE(host.Capture(invocation, capture, failure));
+		CHECK(capture.Images[0].Data == old);
+	}
+	SECTION("scaled and half-pixel centered arrays use plain sprite nearest sampling") {
+		const auto narrow = file.parent_path() / "atomic-graph-raster-host-narrow.bmp";
+		Cleanup narrowCleanup{narrow};
+		word(18, 1, 4);
+		{
+			std::ofstream stream(narrow, std::ios::binary);
+			stream.write(reinterpret_cast<const char *>(bmp.data()), std::streamsize(bmp.size()));
+		}
+		node.Type = "pc.image_sequence";
+		ArrayValue paths;
+		paths.ElementType = ValueType::Text;
+		paths.Elements = {file.string(), narrow.string()};
+		std::vector<AuthoredValue> controls{
+			{"paths", paths},
+			{"padding", Vector4{}},
+			{"canvas_size", EnumValue{1}},
+			{"sizing_method", EnumValue{1}}
+		};
+		std::array<GraphFileGrant, 2> resourceGrants{
+			{{node.Id, file, false, file.string()}, {node.Id, narrow, false, narrow.string()}}
+		};
+		GraphFileHost sequenceHost(resourceGrants, {});
+		HostNodeInvocation sequence{node, request, controls, {}, 1024 * 1024};
+		for (int64_t interpolation : {1, 2, 3, 4, 5, 6}) {
+			sequence.Interpolation = interpolation;
+			REQUIRE(sequenceHost.Capture(sequence, capture, failure));
+			const auto &scaled = capture.ImageArrays[0].Frames[0];
+			CHECK(scaled.Width == 1);
+			CHECK(scaled.Height == 1);
+			REQUIRE(LoadSurfacePixel(scaled, 0, 0, pixel));
+			CHECK(pixel == SurfacePixel{40. / 255, 50. / 255, 60. / 255, 1});
+		}
+		controls[2].Data = EnumValue{2};
+		controls[3].Data = EnumValue{0};
+		REQUIRE(sequenceHost.Capture(sequence, capture, failure));
+		const auto &centered = capture.ImageArrays[0].Frames[1];
+		CHECK(centered.Width == 2);
+		REQUIRE(LoadSurfacePixel(centered, 0, 0, pixel));
+		CHECK(pixel == SurfacePixel{10. / 255, 20. / 255, 30. / 255, 1});
+		REQUIRE(LoadSurfacePixel(centered, 1, 0, pixel));
+		CHECK(pixel == SurfacePixel{});
+		SECTION("animated source selection retains exact clock and signed loop behavior") {
+			node.Type = "pc.image_animated";
+			std::vector<AuthoredValue> animatedControls{
+				{"path", paths},
+				{"padding", Vector4{}},
+				{"canvas_size", EnumValue{2}},
+				{"loop_modes", EnumValue{0}},
+				{"stretch_frame", false},
+				{"start_frame", int64_t{1}},
+				{"animation_speed", 1.},
+				{"draw_before_start", true},
+				{"custom_frame_order", false},
+				{"frame", int64_t{0}},
+				{"edit_in_timeline", true},
+				{"set_animation_length_to_match", false}
+			};
+			TimelineSettings timeline;
+			timeline.Frames = 3;
+			timeline.Last = 2;
+			HostNodeInvocation animated{node, request, animatedControls, {}, 1024 * 1024, &timeline};
+			const auto check = [&](uint64_t tick, double fraction, bool negative, bool second, bool visible) {
+				request.Tick = tick;
+				request.Subframe = fraction;
+				request.NegativeFrame = negative;
+				INFO(tick << " " << fraction << " " << negative << " " << failure);
+				REQUIRE(sequenceHost.Capture(animated, capture, failure));
+				CHECK(capture.Tick == tick);
+				CHECK(capture.Subframe == fraction);
+				CHECK(capture.NegativeFrame == negative);
+				const auto &frame = capture.Images[0].Data;
+				CHECK(frame.Width == 2);
+				CHECK(frame.Height == 1);
+				REQUIRE(LoadSurfacePixel(frame, 1, 0, pixel));
+				CHECK(
+					pixel ==
+					(!visible || second ? SurfacePixel{} : SurfacePixel{40. / 255, 50. / 255, 60. / 255, 1})
+				);
+				REQUIRE(LoadSurfacePixel(frame, 0, 0, pixel));
+				CHECK(pixel == (visible ? SurfacePixel{10. / 255, 20. / 255, 30. / 255, 1} : SurfacePixel{}));
+			};
+			check(0, .75, false, false, true);
+			check(1, .25, false, true, true);
+			check(2, 0, false, false, true);
+			check(0, .25, true, false, false);
+			animatedControls[3].Data = EnumValue{1};
+			check(3, .5, false, true, true);
+			animatedControls[3].Data = EnumValue{2};
+			check(5, 0, false, true, true);
+			animatedControls[3].Data = EnumValue{3};
+			check(2, 0, false, false, false);
+			animatedControls[3].Data = EnumValue{0};
+			animatedControls[4].Data = true;
+			check(1, .75, false, false, true);
+			check(2, .25, false, true, true);
+			animatedControls[8].Data = true;
+			animatedControls[9].Data = int64_t{1};
+			check(0, 0, false, true, true);
+			animatedControls[8].Data = false;
+			animatedControls[4].Data = false;
+			animatedControls[6].Data = 2.;
+			check(0, .75, false, true, true);
+			animatedControls[6].Data = -1.;
+			check(1, 0, false, false, false);
+			animatedControls[6].Data = 1.;
+			node.Values = animatedControls;
+			Document animatedDocument;
+			animatedDocument.FormatVersion = 9;
+			animatedDocument.Timeline = timeline;
+			animatedDocument.Nodes = {node};
+			animatedDocument.Outputs = {{"animation", node.Id, "surface_out"}};
+			Plan animatedPlan;
+			Diagnostic diagnostic;
+			INFO(diagnostic.Message);
+			REQUIRE(Compile(animatedDocument, animatedPlan, diagnostic) == Status::Ok);
+			request.Tick = 1;
+			request.Subframe = .25;
+			request.NegativeFrame = false;
+			request.HostProvider = &sequenceHost;
+			Image evaluated;
+			REQUIRE(
+				Evaluate(animatedDocument, animatedPlan, "animation", request, evaluated, diagnostic) ==
+				Status::Ok
+			);
+			REQUIRE(LoadSurfacePixel(evaluated, 1, 0, pixel));
+			CHECK(pixel == SurfacePixel{});
+			REQUIRE(ExecuteGraphHostNode(animatedDocument, animatedPlan, request, node.Id, capture, failure));
+			CHECK(capture.Subframe == .25);
+			animatedControls[6].Data = 0.;
+			const auto old = capture.Images[0].Data;
+			CHECK_FALSE(sequenceHost.Capture(animated, capture, failure));
+			CHECK(capture.Images[0].Data == old);
+		}
+		node.Type = "pc.image_sequence";
+		REQUIRE(sequenceHost.Capture(sequence, capture, failure));
+		const auto old = capture.ImageArrays[0].Frames;
+		sequence.MaximumOperationBytes = 32;
+		CHECK_FALSE(sequenceHost.Capture(sequence, capture, failure));
+		CHECK(capture.ImageArrays[0].Frames == old);
+	}
+	SECTION("oversized headers and write grants preserve the prior capture") {
+		const auto old = capture.Images[0].Data;
+		word(18, 100000, 4);
+		write();
+		CHECK_FALSE(host.Capture(invocation, capture, failure));
+		CHECK(capture.Images[0].Data == old);
+		grants[0].Write = true;
+		CHECK_FALSE(host.Capture(invocation, capture, failure));
+	}
 }

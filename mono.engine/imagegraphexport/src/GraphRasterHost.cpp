@@ -14,6 +14,24 @@ namespace engine::imagegraphexport {
 				if (v.Port == port) return &v.Data;
 			return nullptr;
 		}
+		// Source IPadding applies round-to-even after its unit conversion.
+		std::optional<Vector4> RoundedPadding(const Vector4 &value) {
+			Vector4 result;
+			std::array<double *, 4> destination{&result.X, &result.Y, &result.Z, &result.W};
+			const std::array source{value.X, value.Y, value.Z, value.W};
+			for (size_t i = 0; i < source.size(); ++i) {
+				const double n = source[i];
+				if (!std::isfinite(n) || std::abs(n) > Limits::MaximumDimension) return std::nullopt;
+				const double base = std::floor(n), fraction = n - base;
+				if (fraction < .5)
+					*destination[i] = base;
+				else if (fraction > .5)
+					*destination[i] = base + 1;
+				else
+					*destination[i] = std::fmod(base, 2) == 0 ? base : base + 1;
+			}
+			return result;
+		}
 		uint32_t Word(std::span<const std::byte> bytes, size_t at, size_t count, bool big) {
 			uint32_t out = 0;
 			for (size_t i = 0; i < count; ++i)
@@ -80,7 +98,8 @@ namespace engine::imagegraphexport {
 		};
 		const auto *raw = Input(in, "paths"), *padRaw = Input(in, "padding");
 		const auto *paths = raw ? std::get_if<ArrayValue>(raw) : nullptr;
-		const auto *padding = padRaw ? std::get_if<Vector4>(padRaw) : nullptr;
+		const auto *paddingValue = padRaw ? std::get_if<Vector4>(padRaw) : nullptr;
+		const auto padding = paddingValue ? RoundedPadding(*paddingValue) : std::nullopt;
 		const auto number = [&](std::string_view port) -> std::optional<int64_t> {
 			const auto *value = Input(in, port);
 			if (!value) return std::nullopt;
@@ -180,13 +199,7 @@ namespace engine::imagegraphexport {
 				*canvas && *sizing ? std::min(baseWidth / original.Width, baseHeight / original.Height) : 1;
 			const double left = *canvas ? (width - original.Width * scale) / 2 : padding->Z;
 			const double top = *canvas ? (height - original.Height * scale) / 2 : padding->Y;
-			// Integer aligned copies are source exact. Scaled raster sampling needs the source filter
-			// observation.
-			if (scale != 1 || left != std::floor(left) || top != std::floor(top))
-				return fail(
-					"fractional or scaled image-array source sampling requires an explicit filter parity "
-					"observation"
-				);
+			// Plain source sprites leave device filtering disabled. Sample destination pixel centres.
 			Image result;
 			result.Width = uint32_t(width);
 			result.Height = uint32_t(height);
@@ -194,10 +207,12 @@ namespace engine::imagegraphexport {
 			result.Pixels.resize(size_t(layout->Bytes));
 			for (uint32_t y = 0; y < result.Height; ++y)
 				for (uint32_t x = 0; x < result.Width; ++x) {
-					const int64_t sx = int64_t(x) - int64_t(left), sy = int64_t(y) - int64_t(top);
+					const double sx = (x + .5 - left) / scale, sy = (y + .5 - top) / scale;
 					SurfacePixel pixel{};
 					if (sx >= 0 && sy >= 0 && sx < original.Width && sy < original.Height)
-						if (!LoadSurfacePixel(original, uint32_t(sx), uint32_t(sy), pixel))
+						if (!LoadSurfacePixel(
+								original, uint32_t(std::floor(sx)), uint32_t(std::floor(sy)), pixel
+							))
 							return fail("image array source samples are invalid");
 					if (!StoreSurfacePixel(result, x, y, pixel))
 						return fail("image array output sample cannot be represented");
@@ -213,6 +228,159 @@ namespace engine::imagegraphexport {
 		return true;
 	}
 
+	static bool CaptureAnimated(
+		const engine::imagegraph::HostNodeInvocation &in,
+		std::span<const GraphFileGrant> grants,
+		const engine::assets::ContentPolicy &policy,
+		engine::imagegraph::HostNodeCapture &out,
+		std::string &failure
+	) {
+		using namespace engine::imagegraph;
+		const auto fail = [&](const char *message) {
+			failure = message;
+			return false;
+		};
+		const auto integer = [&](std::string_view port) -> std::optional<int64_t> {
+			const auto *value = Input(in, port);
+			if (!value) return {};
+			if (const auto *v = std::get_if<int64_t>(value)) return *v;
+			if (const auto *v = std::get_if<EnumValue>(value)) return v->Value;
+			return {};
+		};
+		const auto boolean = [&](std::string_view port) -> const bool * {
+			const auto *value = Input(in, port);
+			return value ? std::get_if<bool>(value) : nullptr;
+		};
+		const auto canvas = integer("canvas_size"), loop = integer("loop_modes"),
+				   start = integer("start_frame"), customFrame = integer("frame");
+		const auto *stretch = boolean("stretch_frame"), *drawBefore = boolean("draw_before_start"),
+				   *custom = boolean("custom_frame_order");
+		const auto *rawSpeed = Input(in, "animation_speed"), *paths = Input(in, "path"),
+				   *rawPadding = Input(in, "padding");
+		const auto *paddingValue = rawPadding ? std::get_if<Vector4>(rawPadding) : nullptr;
+		const auto padding = paddingValue ? RoundedPadding(*paddingValue) : std::nullopt;
+		const auto *speedReal = rawSpeed ? std::get_if<double>(rawSpeed) : nullptr;
+		const auto *speedInteger = rawSpeed ? std::get_if<int64_t>(rawSpeed) : nullptr;
+		if (!paths || !padding || !canvas || *canvas < 0 || *canvas > 2 || !loop || *loop < 0 || *loop > 3 ||
+			!start || !customFrame || !stretch || !drawBefore || !custom || (!speedReal && !speedInteger))
+			return fail("animated image requires resolved source controls");
+		const double raw = speedReal ? *speedReal : double(*speedInteger);
+		if (!std::isfinite(raw)) return fail("animated image speed must be finite");
+		if (!*stretch && raw == 0)
+			return fail("zero animated image speed requires a source division-by-zero observation");
+		if (std::abs(double(*start)) > (uint64_t{1} << 52) ||
+			std::abs(double(*customFrame)) > (uint64_t{1} << 52))
+			return fail("animated image frame controls exceed exact CPU frame domain");
+		const auto authoredBytes = NodeClonePayloadBytes(in.Authored);
+		if (!authoredBytes || *authoredBytes > in.MaximumOperationBytes / 8)
+			return fail("animated image authored capture exceeds byte budget");
+		uint64_t captured = *authoredBytes;
+		for (const auto &input : in.Inputs) {
+			const auto bytes = ValueClonePayloadBytes(input.Data);
+			const uint64_t overhead = sizeof(AuthoredValue) + input.Port.size() + 1;
+			if (!bytes || overhead > in.MaximumOperationBytes / 8 - captured ||
+				*bytes > in.MaximumOperationBytes / 8 - captured - overhead)
+				return fail("animated image resolved capture exceeds byte budget");
+			captured += overhead + *bytes;
+		}
+		Node node;
+		node.Id = in.Authored.Id;
+		node.Type = "pc.image_sequence";
+		std::array<AuthoredValue, 4> controls{
+			{{"paths", *paths},
+			 {"padding", Vector4{}},
+			 {"canvas_size", EnumValue{0}},
+			 {"sizing_method", EnumValue{0}}}
+		};
+		HostNodeCapture decoded;
+		if (!CaptureSequence(
+				{node, in.Request, controls, {}, in.MaximumOperationBytes / 2, in.Timeline, in.OutputFormat},
+				grants,
+				policy,
+				decoded,
+				failure
+			))
+			return false;
+		const auto &frames = decoded.ImageArrays[0].Frames;
+		if (frames.empty()) return fail("animated image has no admitted source frames");
+		uint32_t baseWidth = frames[0].Width, baseHeight = frames[0].Height;
+		for (const auto &frame : frames) {
+			if (*canvas == 1) {
+				baseWidth = std::min(baseWidth, frame.Width);
+				baseHeight = std::min(baseHeight, frame.Height);
+			}
+			if (*canvas == 2) {
+				baseWidth = std::max(baseWidth, frame.Width);
+				baseHeight = std::max(baseHeight, frame.Height);
+			}
+		}
+		const double width = baseWidth + padding->X + padding->Z,
+					 height = baseHeight + padding->Y + padding->W;
+		if (width < 1 || height < 1 || width > Limits::MaximumDimension || height > Limits::MaximumDimension)
+			return fail("animated image padded dimensions exceed source surface bounds");
+		const auto format = in.OutputFormat.value_or(SurfaceFormat::RGBA8Unorm);
+		const auto layout =
+			CheckedSurfaceLayout(uint32_t(width), uint32_t(height), format, in.MaximumOperationBytes / 4);
+		if (!layout) return fail("animated image output exceeds byte budget");
+		if (*stretch && (!in.Timeline || in.Timeline->Frames > Limits::MaximumTick))
+			return fail("animated image stretch requires the authored timeline frame count");
+		const double period = *stretch	 ? (double(in.Timeline->Frames) + 1) / frames.size()
+							  : raw == 0 ? std::numeric_limits<double>::infinity()
+										 : 1 / raw;
+		const double clock =
+			(double(in.Request.Tick) + in.Request.Subframe) * (in.Request.NegativeFrame ? -1 : 1);
+		if (in.Request.Tick > (uint64_t{1} << 52) || !std::isfinite(in.Request.Subframe) ||
+			in.Request.Subframe < 0 || in.Request.Subframe >= 1)
+			return fail("animated image clock exceeds exact CPU frame domain");
+		double selected = *custom ? double(*customFrame)
+								  : std::floor(clock / (period == 0 ? 1 : period)) - (double(*start) - 1);
+		if (!std::isfinite(selected)) return fail("animated image selected frame is not finite");
+		bool draw = *drawBefore || selected >= 0;
+		const double count = double(frames.size());
+		// Source safe_mod preserves a negative remainder and returns zero for a zero divisor.
+		if (*loop == 0) selected = std::fmod(selected, count);
+		if (*loop == 1) {
+			const double divisor = count * 2 - 2;
+			selected = divisor == 0 ? 0 : std::fmod(selected, divisor);
+			if (selected >= count) selected = divisor - selected;
+		}
+		if (*loop == 2) selected = std::min(selected, count - 1);
+		if (selected < 0 || selected >= count) draw = false;
+		Image image;
+		image.Width = uint32_t(width);
+		image.Height = uint32_t(height);
+		image.Format = format;
+		image.Pixels.resize(size_t(layout->Bytes));
+		if (draw) {
+			const auto &frame = frames[size_t(selected)];
+			const double left = padding->Z + (double(baseWidth) - frame.Width) / 2,
+						 top = padding->Y + (double(baseHeight) - frame.Height) / 2;
+			for (uint32_t y = 0; y < image.Height; ++y)
+				for (uint32_t x = 0; x < image.Width; ++x) {
+					const double sx = x + .5 - left, sy = y + .5 - top;
+					SurfacePixel pixel{};
+					if (sx >= 0 && sy >= 0 && sx < frame.Width && sy < frame.Height)
+						if (!LoadSurfacePixel(
+								frame, uint32_t(std::floor(sx)), uint32_t(std::floor(sy)), pixel
+							))
+							return fail("animated image source sample is invalid");
+					if (!StoreSurfacePixel(image, x, y, pixel))
+						return fail("animated image output sample cannot be represented");
+				}
+		}
+		image.Hash = SurfaceHash(image);
+		HostNodeCapture candidate;
+		candidate.Authored = in.Authored;
+		candidate.Tick = in.Request.Tick;
+		candidate.Subframe = in.Request.Subframe;
+		candidate.NegativeFrame = in.Request.NegativeFrame;
+		candidate.Inputs.assign(in.Inputs.begin(), in.Inputs.end());
+		candidate.Outputs = {{"dimension", Vector2{width, height}}};
+		candidate.Images.push_back({"surface_out", std::move(image)});
+		out = std::move(candidate);
+		return true;
+	}
+
 	bool CaptureGraphRaster(
 		const engine::imagegraph::HostNodeInvocation &in,
 		std::span<const GraphFileGrant> grants,
@@ -221,6 +389,7 @@ namespace engine::imagegraphexport {
 		std::string &failure
 	) {
 		using namespace engine::imagegraph;
+		if (in.Authored.Type == "pc.image_animated") return CaptureAnimated(in, grants, policy, out, failure);
 		if (in.Authored.Type == "pc.image_sequence") return CaptureSequence(in, grants, policy, out, failure);
 		const auto fail = [&](const char *message) {
 			failure = message;
@@ -228,7 +397,8 @@ namespace engine::imagegraphexport {
 		};
 		const auto *raw = Input(in, "path"), *padValue = Input(in, "padding");
 		const auto *path = raw ? std::get_if<std::string>(raw) : nullptr;
-		const auto *padding = padValue ? std::get_if<Vector4>(padValue) : nullptr;
+		const auto *paddingValue = padValue ? std::get_if<Vector4>(padValue) : nullptr;
+		const auto padding = paddingValue ? RoundedPadding(*paddingValue) : std::nullopt;
 		if (!path || !padding) return fail("image requires resolved path and Vector4 source padding");
 		const GraphFileGrant *grant = nullptr;
 		for (const auto &g : grants)
@@ -268,9 +438,6 @@ namespace engine::imagegraphexport {
 			!CheckedSurfaceLayout(width, height, SurfaceFormat::RGBA8Unorm, budget / 16))
 			return fail("image header is unsupported or exceeds predecode dimensions/workspace budget");
 		const std::array pad{padding->X, padding->Y, padding->Z, padding->W};
-		for (double n : pad)
-			if (!std::isfinite(n) || n != std::floor(n) || std::abs(n) > Limits::MaximumDimension)
-				return fail("fractional image padding source rasterization is unverified");
 		const double w = width + pad[0] + pad[2], h = height + pad[1] + pad[3];
 		const auto format = in.OutputFormat.value_or(SurfaceFormat::RGBA8Unorm);
 		if (w < 1 || h < 1 || w > Limits::MaximumDimension || h > Limits::MaximumDimension)

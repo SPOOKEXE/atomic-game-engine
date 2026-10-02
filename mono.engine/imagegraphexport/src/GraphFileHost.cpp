@@ -125,7 +125,8 @@ namespace engine::imagegraphexport {
 	bool GraphFileHost::Capture(
 		const HostNodeInvocation &invocation, HostNodeCapture &output, std::string &failure
 	) {
-		if (invocation.Authored.Type == "pc.image" || invocation.Authored.Type == "pc.image_sequence")
+		if (invocation.Authored.Type == "pc.image" || invocation.Authored.Type == "pc.image_sequence" ||
+			invocation.Authored.Type == "pc.image_animated")
 			return CaptureGraphRaster(invocation, Grants, Policy, output, failure);
 		if (invocation.Authored.Type == "pc.3_d_mesh_obj" || invocation.Authored.Type == "pc.3_d_mesh_json" ||
 			invocation.Authored.Type == "pc.3_d_mesh_export")
