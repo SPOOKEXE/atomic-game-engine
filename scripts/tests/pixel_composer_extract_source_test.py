@@ -164,6 +164,9 @@ function Node_Comment_Fixture(_x, _y) : Node(_x, _y) constructor {
 """,
             "scripts/node_points_remap/node_points_remap.gml": """
 function Node_Points_Remap(_x, _y) : Node(_x, _y) constructor {
+    attributes.filter = [1, 1, 0,
+                         1, 0, 0,
+                         0, 0, 0];
     newInput(0, nodeValue_Vec2("Points", [[0,0]])).setArrayDepth(1);
 }
 """,
@@ -374,6 +377,16 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
         self.assertEqual(attribute["array_element_type"], "integer")
         self.assertEqual(attribute["array_allowed_values"], [0, 1, 2, 3])
         self.assertIn("scripts/node_fn_wave_table/node_fn_wave_table.gml", snapshot["source_constructor_evidence"])
+
+    def test_multiline_literal_attribute_preserves_all_filter_switches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+        node = snapshot["nodes"]["Node_Points_Remap"]
+        attribute = next(item for item in node["inputs"] if item["name"] == "attribute filter")
+        self.assertEqual("AttributeArray", attribute["kind"])
+        self.assertEqual([1, 1, 0, 1, 0, 0, 0, 0, 0], json.loads(attribute["default"]))
+        self.assertEqual("-1", attribute["index"])
+        self.assertEqual("filter", attribute["attribute"])
 
     def test_nested_vec2_constructor_default_stays_vector_array_and_flat_vec2_stays_scalar(self):
         with tempfile.TemporaryDirectory() as temporary:

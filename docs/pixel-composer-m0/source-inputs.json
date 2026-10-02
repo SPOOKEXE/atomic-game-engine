@@ -36611,6 +36611,16 @@
      "name": "attribute color_depth",
      "source_array_classification": null,
      "source_depth_input_enabled": true
+    },
+    {
+     "array_depth": null,
+     "attribute": "filter",
+     "default": "[ 1, 1, 0, 1, 0, 0, 0, 0, 0 ]",
+     "extra": [],
+     "index": "-1",
+     "kind": "AttributeArray",
+     "name": "attribute filter",
+     "source_array_classification": null
     }
    ],
    "outputs": [

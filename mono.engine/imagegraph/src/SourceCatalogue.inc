@@ -7307,6 +7307,9 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
 S	I	attribute_color_depth	?
+I	attribute_filter	attribute filter	-1	AttributeArray	array	a scalar 9 d 1 d 1 d 0 d 1 d 0 d 0 d 0 d 0 d 0	
+S	I	attribute_filter	?
+A	I	attribute_filter	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 O	surface_out	Surface Out	0	image

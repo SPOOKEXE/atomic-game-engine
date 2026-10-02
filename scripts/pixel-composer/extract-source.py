@@ -23,6 +23,7 @@ from array_depth import SourceIndex, apply_runtime_depth_mutations, declaration_
 from source_selection import verified_source_nodes
 from source_array_classification import SourceArrayClassification, apply_input_classification_mutations, _result
 from source_behavior import (
+    _matching_end,
     choice_count,
     choice_source_evidence,
     enum_behavior,
@@ -676,6 +677,12 @@ def parse(name, seen):
         if prefix.count("{") - prefix.count("}") != 1:
             continue
         key, raw = match.group(1), match.group(2).strip().rstrip(";").strip()
+        if raw.startswith("["):
+            opening = body.index("[", match.start(2))
+            end = _matching_end(body, opening)
+            if end is None:
+                continue
+            raw = " ".join(body[opening:end].split())
         if key in EDITOR_ATTRIBUTES or any(item["name"] == f"attribute {key}" for item in inputs):
             continue
         created = re.fullmatch(r"array_create\(\s*(\d+)\s*,\s*([^)]+)\)", raw)
