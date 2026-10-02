@@ -1,6 +1,8 @@
 #include <engine/core/Arguments.hpp>
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/WavClip.hpp>
 
 #include <algorithm>
 #include <array>
@@ -109,6 +111,14 @@ namespace imagegraph_runner {
 				std::from_chars(text.data(), text.data() + text.size(), value, std::chars_format::general);
 			return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() &&
 				   std::isfinite(value);
+		}
+
+		std::string FrameText(engine::imagegraph::FrameTime frame) {
+			std::ostringstream text;
+			text.imbue(std::locale::classic());
+			text << std::setprecision(std::numeric_limits<long double>::max_digits10)
+				 << engine::imagegraph::FrameTimeToReal(frame);
+			return text.str();
 		}
 
 		bool ParseTick(std::string_view text, uint64_t &tick) {
@@ -695,7 +705,8 @@ namespace imagegraph_runner {
 			const std::filesystem::path &manifestPath,
 			const std::filesystem::path &inputPath,
 			ArrayFrame &frame,
-			Diagnostic &diagnostic
+			Diagnostic &diagnostic,
+			const engine::imagegraph::FrameTime *authoredFrame = nullptr
 		) {
 			if (images.Images.size() > Limits::MaximumArrayElements) {
 				diagnostic = {
@@ -747,7 +758,9 @@ namespace imagegraph_runner {
 			size_t shapeItems = 0;
 			frame.Manifest = "{\"format\":\"atomic.imagegraph.array.v1\",\"output_id\":";
 			AppendJsonString(frame.Manifest, outputId);
-			frame.Manifest += ",\"tick\":" + std::to_string(tick) + ",\"items\":[";
+			frame.Manifest += authoredFrame ? ",\"frame\":" + FrameText(*authoredFrame)
+											: ",\"tick\":" + std::to_string(tick);
+			frame.Manifest += ",\"items\":[";
 			while (!stack.empty()) {
 				ShapeCursor &cursor = stack.back();
 				if (cursor.Next == cursor.Items->size()) {
@@ -849,14 +862,16 @@ namespace imagegraph_runner {
 	int Run(int argc, char **argv, std::ostream &output, std::ostream &errors) {
 		engine::core::Arguments arguments(
 			"imagegraph",
-			"Evaluates an imagegraph output at one tick or a streamed tick range, writing deterministic "
-			"RGBA8 PNGs or typed scalar previews."
+			"Evaluates an imagegraph output at one authored frame or a streamed tick range, writing "
+			"deterministic "
+			"RGBA8 PNGs or numeric scalar and array previews."
 		);
 		arguments.Value("input", "PATH", "Authored imagegraph text document");
 		arguments.Value("output-id", "ID", "Durable output ID to evaluate");
 		arguments.Value("output", "PATH", "PNG path, or JSON manifest path for an image-array output");
-		arguments.Flag("value", "Evaluate a typed scalar output and print its deterministic value record");
-		arguments.Value("audio-capture", "PATH", "Bounded recorded mono audio input frames");
+		arguments.Flag("value", "Evaluate a numeric scalar or array output and print its value record");
+		arguments.Value("audio-capture", "PATH", "Bounded recorded audio input frames");
+		arguments.Value("audio-source", "SOURCE=PATH", "Explicit source PCM WAV whole clip; may be repeated");
 		arguments.Value(
 			"bundle", "DIR", "Publish a complete PNG frame range and manifest into a new directory"
 		);
@@ -864,6 +879,9 @@ namespace imagegraph_runner {
 			"set", "NODE_ID.PROPERTY=TYPE:VALUE", "Override a typed node property; may be repeated"
 		);
 		arguments.Value("tick", "N", "Timeline tick to evaluate; defaults to 0");
+		arguments.Value(
+			"frame", "REAL", "Single signed or fractional authored frame; exclusive with --tick and --frames"
+		);
 		arguments.Value(
 			"frames", "FIRST:LAST[:STEP]", "Inclusive timeline tick range streamed to numbered PNG files"
 		);
@@ -909,12 +927,18 @@ namespace imagegraph_runner {
 			errors << "error status=Arguments message=\"--bundle requires --frames\"\n";
 			return 2;
 		}
-		if (arguments.Has("frames") && arguments.Has("tick")) {
-			PrintDiagnostic(errors, {Status::InvalidValue, {}, {}, "--tick and --frames cannot be combined"});
+		const unsigned clockModes = static_cast<unsigned>(arguments.Has("tick")) +
+									static_cast<unsigned>(arguments.Has("frame")) +
+									static_cast<unsigned>(arguments.Has("frames"));
+		if (clockModes > 1) {
+			PrintDiagnostic(
+				errors, {Status::InvalidValue, {}, {}, "--tick, --frame and --frames are mutually exclusive"}
+			);
 			return 1;
 		}
 		const bool renderRange = arguments.Has("frames");
 		engine::imagegraph::TickRange tickRange;
+		std::optional<engine::imagegraph::FrameTime> authoredFrame;
 		size_t frameCount = 1;
 		if (renderRange) {
 			const auto range = arguments.Get("frames");
@@ -925,6 +949,21 @@ namespace imagegraph_runner {
 				);
 				return 1;
 			}
+		} else if (const auto frame = arguments.Get("frame")) {
+			double real = 0;
+			engine::imagegraph::FrameTime time;
+			if (!ParseScalar(*frame, real) || !engine::imagegraph::SplitFrameTime(real, time)) {
+				PrintDiagnostic(
+					errors,
+					{Status::InvalidValue,
+					 {},
+					 {},
+					 "--frame must be a finite authored time within the timeline limit"}
+				);
+				return 1;
+			}
+			authoredFrame = time;
+			tickRange.First = tickRange.Last = time.Tick;
 		} else if (const auto tick = arguments.Get("tick")) {
 			if (!ParseTick(*tick, tickRange.First)) {
 				PrintDiagnostic(errors, {Status::InvalidValue, {}, {}, "--tick must be an unsigned integer"});
@@ -1006,6 +1045,75 @@ namespace imagegraph_runner {
 				return 1;
 			}
 		}
+		std::vector<engine::imagegraph::AudioClipSource> audioClips;
+		uint64_t clipBytes = 0;
+		for (const std::string_view assignment : arguments.GetAll("audio-source")) {
+			const size_t separator = assignment.find('=');
+			if (separator == std::string_view::npos || separator == 0 || separator + 1 == assignment.size() ||
+				assignment.size() > MAXIMUM_OVERRIDE_BYTES || audioClips.size() >= Limits::MaximumNodes) {
+				errors << "error status=Arguments message=\"--audio-source must be bounded SOURCE=PATH\"\n";
+				return 2;
+			}
+			std::string source(assignment.substr(0, separator));
+			if (std::any_of(audioClips.begin(), audioClips.end(), [&](const auto &clip) {
+					return clip.SourceId == source;
+				})) {
+				PrintDiagnostic(errors, {Status::DuplicateId, {}, "path", "duplicate WAV source name"});
+				return 1;
+			}
+			const std::filesystem::path sourceFile(assignment.substr(separator + 1));
+			if (SamePath(inputFile, sourceFile) || (pngOutput && SamePath(outputFile, sourceFile)) ||
+				(bundleOutput && SamePath(bundleDirectory, sourceFile))) {
+				errors
+					<< "error status=Arguments message=\"WAV source, graph and output paths must differ\"\n";
+				return 2;
+			}
+			std::string waveBytes;
+			if (!ReadBounded(
+					sourceFile,
+					waveBytes,
+					inputLimitExceeded,
+					fileFailure,
+					std::min(MAXIMUM_INPUT_BYTES, Limits::MaximumEvaluationBytes - clipBytes)
+				)) {
+				if (inputLimitExceeded)
+					PrintDiagnostic(errors, {Status::LimitExceeded, {}, {}, fileFailure});
+				else
+					errors << "error status=InputError message=" << std::quoted(fileFailure) << '\n';
+				return 1;
+			}
+			const uint64_t assetOverhead = sizeof(engine::imagegraph::AudioClipSource) + source.size();
+			if (assetOverhead > Limits::MaximumEvaluationBytes - clipBytes - waveBytes.size()) {
+				PrintDiagnostic(
+					errors, {Status::LimitExceeded, {}, {}, "WAV asset metadata exceeds its byte budget"}
+				);
+				return 1;
+			}
+			engine::imagegraph::AudioBit data;
+			status = engine::imagegraph::DecodeWavClip(
+				std::as_bytes(std::span(waveBytes.data(), waveBytes.size())),
+				engine::imagegraph::WavClipPolicy::PixelComposer,
+				Limits::MaximumEvaluationBytes - clipBytes - waveBytes.size() - assetOverhead,
+				data,
+				diagnostic
+			);
+			if (status != Status::Ok) {
+				PrintDiagnostic(errors, diagnostic);
+				return 1;
+			}
+			uint64_t bytes = sizeof(engine::imagegraph::AudioClipSource) + source.size() +
+							 data.Channels.size() * sizeof(std::vector<double>);
+			for (const auto &channel : data.Channels)
+				bytes += channel.size() * sizeof(double);
+			if (bytes > Limits::MaximumEvaluationBytes - clipBytes) {
+				PrintDiagnostic(
+					errors, {Status::LimitExceeded, {}, {}, "WAV assets exceed their aggregate byte budget"}
+				);
+				return 1;
+			}
+			clipBytes += bytes;
+			audioClips.push_back({std::move(source), std::move(data)});
+		}
 		for (const std::string_view assignment : arguments.GetAll("set")) {
 			status = ApplyOverride(document, assignment, diagnostic);
 			if (status != Status::Ok) {
@@ -1033,8 +1141,13 @@ namespace imagegraph_runner {
 				bundleOutput ? FramePath(bundleStage.Directory / "frame.png", tick)
 							 : (renderRange ? FramePath(outputFile, tick) : outputFile);
 			engine::imagegraph::EvaluationRequest request;
-			request.Tick = tick;
+			(void)engine::imagegraph::SetFrameTime(
+				request, authoredFrame.value_or(engine::imagegraph::FrameTime{tick})
+			);
+			const std::string clockRecord =
+				authoredFrame ? " frame=" + FrameText(*authoredFrame) : " tick=" + std::to_string(tick);
 			request.AudioFrames = std::span<const AudioCaptureFrame>(audioFrames);
+			request.AudioClips = audioClips;
 			if (scalarOutput) {
 				engine::imagegraph::EvaluatedValue value;
 				status = engine::imagegraph::EvaluateValue(
@@ -1044,22 +1157,55 @@ namespace imagegraph_runner {
 					PrintDiagnostic(errors, diagnostic);
 					return 1;
 				}
-				const auto *scalar = std::get_if<double>(&value.Data);
-				if (scalar == nullptr) {
+				std::ostringstream preview;
+				preview.imbue(std::locale::classic());
+				preview << std::setprecision(std::numeric_limits<double>::max_digits10);
+				std::string_view format = "scalar";
+				bool supported = true;
+				if (const auto *scalar = std::get_if<double>(&value.Data))
+					preview << *scalar;
+				else if (const auto *array = std::get_if<engine::imagegraph::ArrayValue>(&value.Data)) {
+					format = "array";
+					const auto row = [&](const auto &elements) {
+						preview << '[';
+						for (size_t index = 0; index < elements.size(); index++) {
+							const auto *number = std::get_if<double>(&elements[index]);
+							if (!number || !std::isfinite(*number)) {
+								supported = false;
+								return;
+							}
+							if (index) preview << ',';
+							preview << *number;
+						}
+						preview << ']';
+					};
+					if (array->ElementType != engine::imagegraph::ValueType::Scalar)
+						supported = false;
+					else if (array->Nested.empty())
+						row(array->Elements);
+					else {
+						preview << '[';
+						for (size_t index = 0; index < array->Nested.size(); index++) {
+							if (index) preview << ',';
+							row(array->Nested[index]);
+						}
+						preview << ']';
+					}
+				} else
+					supported = false;
+				if (!supported) {
 					PrintDiagnostic(
 						errors,
 						{Status::UnsupportedExecution,
 						 {},
 						 value.Port,
-						 "--value currently previews scalar outputs only"}
+						 "--value previews scalar and finite numeric array outputs"}
 					);
 					return 1;
 				}
-				output.imbue(std::locale::classic());
-				output << "ok output_id=" << std::quoted(std::string(*outputId))
-					   << " format=scalar tick=" << tick
-					   << " value=" << std::setprecision(std::numeric_limits<double>::max_digits10) << *scalar
-					   << '\n';
+				output << "ok output_id=" << std::quoted(std::string(*outputId)) << " format=" << format
+					   << clockRecord << " value=" << preview.str() << '\n';
+
 			} else if (arrayOutput) {
 				ImageArray images;
 				status = engine::imagegraph::EvaluateArray(
@@ -1071,7 +1217,14 @@ namespace imagegraph_runner {
 				}
 				ArrayFrame arrayFrame;
 				status = BuildArrayFrame(
-					images, std::string(*outputId), tick, framePath, inputFile, arrayFrame, diagnostic
+					images,
+					std::string(*outputId),
+					tick,
+					framePath,
+					inputFile,
+					arrayFrame,
+					diagnostic,
+					authoredFrame ? &*authoredFrame : nullptr
 				);
 				if (status != Status::Ok) {
 					PrintDiagnostic(errors, diagnostic);
@@ -1091,12 +1244,12 @@ namespace imagegraph_runner {
 				}
 				rangeOutputBytes += arrayFrame.EncodedBytes;
 				output << "ok output_id=" << std::quoted(std::string(*outputId))
-					   << " format=image-array images=" << images.Images.size() << " tick=" << tick
+					   << " format=image-array images=" << images.Images.size() << clockRecord
 					   << " manifest=" << std::quoted(framePath.generic_string()) << '\n';
 			} else {
 				Image image;
 				status = engine::imagegraph::Evaluate(
-					document, plan, std::string(*outputId), tick, image, diagnostic
+					document, plan, std::string(*outputId), request, image, diagnostic
 				);
 				if (status != Status::Ok) {
 					PrintDiagnostic(errors, diagnostic);
@@ -1127,7 +1280,7 @@ namespace imagegraph_runner {
 					output << "ok output_id=" << std::quoted(std::string(*outputId))
 						   << " width=" << image.Width << " height=" << image.Height
 						   << " format=rgba8 hash=0x" << std::hex << std::setfill('0') << std::setw(16)
-						   << image.Hash << std::dec << " tick=" << tick
+						   << image.Hash << std::dec << clockRecord
 						   << " file=" << std::quoted(framePath.generic_string()) << '\n';
 				}
 			}

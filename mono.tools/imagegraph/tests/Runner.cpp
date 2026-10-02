@@ -1,5 +1,6 @@
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/FrameTime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -15,11 +16,14 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("tools.imagegraph.runner")
 TEST_DEPENDS("engine.imagegraph.document")
+TEST_DEPENDS("engine.imagegraph.frame_time")
 TEST_DEPENDS("engine.imagegraph.audio_capture")
+TEST_DEPENDS("engine.imagegraph.wav_clip")
 
 namespace {
 	struct Scratch {
@@ -474,6 +478,7 @@ TEST_CASE("runner rolls back a bundle when a later tick cannot evaluate", "[imag
 	};
 	CHECK(RunArgs(args, out, err) == 1);
 	CHECK(out.str().empty());
+	INFO(err.str());
 	CHECK(err.str().find("status=LimitExceeded node=\"solid\"") != std::string::npos);
 	CHECK_FALSE(std::filesystem::exists(destination));
 	for (const auto &entry : std::filesystem::directory_iterator(scratch.Root))
@@ -721,4 +726,288 @@ TEST_CASE("runner reports missing and nonempty-silent recorded audio explicitly"
 	std::ostringstream silentErr;
 	CHECK(RunArgs(silentArgs, silentOut, silentErr) == 1);
 	CHECK(silentErr.str().find("nonempty silent audio") != std::string::npos);
+}
+
+namespace {
+	void WriteWavRoute(const Scratch &scratch, const std::filesystem::path &wave) {
+		using namespace engine::imagegraph;
+		Document document;
+		document.FormatVersion = 6;
+		document.Nodes.push_back({"file", "pc.wav_file_read", "", {}, {{"path", std::string("tone")}}, {}});
+		document.Nodes.push_back(
+			{"window",
+			 "pc.audio_window",
+			 "",
+			 {},
+			 {{"width", int64_t(4)},
+			  {"step", int64_t(1)},
+			  {"cursor_location", EnumValue{0}},
+			  {"match_timeline", false}},
+			 {}}
+		);
+		document.Nodes.push_back({"fft", "pc.fft", "", {}, {{"preprocess_function", EnumValue{0}}}, {}});
+		document.Links.push_back({"file", "data", "window", "audio_data"});
+		document.Links.push_back({"window", "bit_array", "fft", "data"});
+		document.Outputs.push_back({"spectrum", "fft", "array"});
+		std::ofstream graph(scratch.AudioInput, std::ios::binary);
+		graph << Write(document);
+		// PCM8 mono at 8Hz, with a fifth packet because the source window excludes packet-1.
+		const std::array<uint8_t, 50> bytes{'R', 'I', 'F', 'F', 42, 0, 0,	0, 'W', 'A', 'V', 'E', 'f',
+											'm', 't', ' ', 16,	0,	0, 0,	1, 0,	1,	 0,	  8,   0,
+											0,	 0,	  8,   0,	0,	0, 1,	0, 8,	0,	 'd', 'a', 't',
+											'a', 5,	  0,   0,	0,	0, 128, 0, 128, 0,	 0};
+		std::ofstream audio(wave, std::ios::binary);
+		audio.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+	}
+}
+
+TEST_CASE("Runner loads explicit source WAV assets through Window and FFT", "[imagegraph_runner][wav_clip]") {
+	Scratch scratch;
+	const auto wave = scratch.Root / "tone.wav";
+	WriteWavRoute(scratch, wave);
+	std::ostringstream output, errors;
+	const int runStatus = RunArgs(
+		{"imagegraph",
+		 "--input",
+		 scratch.AudioInput.string(),
+		 "--output-id",
+		 "spectrum",
+		 "--value",
+		 "--tick",
+		 "123",
+		 "--audio-source",
+		 "tone=" + wave.string()},
+		output,
+		errors
+	);
+	INFO(errors.str());
+	REQUIRE(runStatus == 0);
+	REQUIRE(errors.str().empty());
+	REQUIRE(output.str() == "ok output_id=\"spectrum\" format=array tick=123 value=[2,0,2]\n");
+}
+
+TEST_CASE("Runner WAV asset input errors do not publish results", "[imagegraph_runner][wav_clip]") {
+	Scratch scratch;
+	const auto wave = scratch.Root / "tone.wav";
+	WriteWavRoute(scratch, wave);
+	std::ostringstream output, errors;
+	const std::vector<std::string> base{
+		"imagegraph", "--input", scratch.AudioInput.string(), "--output-id", "spectrum", "--value"
+	};
+	for (const std::string &assignment : std::array<std::string, 2>{"tone=", "=" + wave.string()}) {
+		auto arguments = base;
+		arguments.insert(arguments.end(), {"--audio-source", assignment});
+		const int runStatus = RunArgs(arguments, output, errors);
+		INFO(errors.str());
+		REQUIRE(runStatus == 2);
+		REQUIRE(output.str().empty());
+		errors.str("");
+	}
+	auto duplicate = base;
+	duplicate.insert(
+		duplicate.end(),
+		{"--audio-source", "tone=" + wave.string(), "--audio-source", "tone=" + wave.string()}
+	);
+	REQUIRE(RunArgs(duplicate, output, errors) == 1);
+	REQUIRE(errors.str().find("DuplicateId") != std::string::npos);
+	REQUIRE(output.str().empty());
+	errors.str("");
+	{
+		std::ofstream malformed(wave, std::ios::binary | std::ios::trunc);
+		malformed << "RIFF";
+	}
+	auto malformed = base;
+	malformed.insert(malformed.end(), {"--audio-source", "tone=" + wave.string()});
+	REQUIRE(RunArgs(malformed, output, errors) == 1);
+	REQUIRE(errors.str().find("InvalidValue") != std::string::npos);
+	REQUIRE(output.str().empty());
+	REQUIRE_FALSE(std::filesystem::exists(scratch.Output));
+}
+
+TEST_CASE("runner seeks signed fractional native keys in numeric and PNG outputs", "[imagegraph][runner]") {
+	using namespace engine::imagegraph;
+	Scratch scratch;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"point", "pc.vector2", "", {}, {{"x", 0.0}, {"y", 0.0}}}};
+	document.Outputs = {{"number", "point", "x"}};
+	document.Keyframes = {{"point", "x", 1, 3.0, "linear"}, {"point", "x", 1, 7.0, "linear"}};
+	REQUIRE(SetFrameTime(document.Keyframes[0], {1, .25, true}));
+	REQUIRE(SetFrameTime(document.Keyframes[1], {1, .25, false}));
+	{
+		std::ofstream file(scratch.Input);
+		file << Write(document);
+	}
+	for (const auto &[frame, expected] :
+		 std::array<std::pair<std::string, std::string>, 2>{{{"-1.25", "3"}, {"1.25", "7"}}}) {
+		std::ostringstream out, err;
+		REQUIRE(
+			RunArgs(
+				{"imagegraph",
+				 "--input",
+				 scratch.Input.string(),
+				 "--output-id",
+				 "number",
+				 "--value",
+				 "--frame",
+				 frame},
+				out,
+				err
+			) == 0
+		);
+		CHECK(err.str().empty());
+		CHECK(
+			out.str() == "ok output_id=\"number\" format=scalar frame=" + frame + " value=" + expected + "\n"
+		);
+	}
+	document = {};
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"solid",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t{2}}, {"height", int64_t{1}}, {"colour", Colour{12, 34, 56, 255}}}}
+	};
+	document.Outputs = {{"final", "solid", "image"}};
+	document.Keyframes = {
+		{"solid", "colour", 1, Colour{1, 2, 3, 255}, "step"},
+		{"solid", "colour", 0, Colour{4, 5, 6, 255}, "step"}
+	};
+	REQUIRE(SetFrameTime(document.Keyframes[0], {1, .25, true}));
+	{
+		std::ofstream file(scratch.Input);
+		file << Write(document);
+	}
+	std::ostringstream out, err;
+	REQUIRE(
+		RunArgs(
+			{"imagegraph",
+			 "--input",
+			 scratch.Input.string(),
+			 "--output-id",
+			 "final",
+			 "--output",
+			 scratch.Output.string(),
+			 "--frame",
+			 "-1.25"},
+			out,
+			err
+		) == 0
+	);
+	CHECK(err.str().empty());
+	CHECK(out.str().find("hash=0x77096ba2893f9e11 frame=-1.25") != std::string::npos);
+	CHECK(std::filesystem::exists(scratch.Output));
+}
+
+TEST_CASE("runner image-array manifests retain the selected signed authored time", "[imagegraph][runner]") {
+	using namespace engine::imagegraph;
+	Scratch scratch;
+	scratch.WriteNestedArrayGraph();
+	Document document;
+	Diagnostic diagnostic;
+	REQUIRE(Read(ReadText(scratch.ArrayInput), document, diagnostic) == Status::Ok);
+	document.FormatVersion = 9;
+	document.Keyframes = {
+		{"red", "colour", 1, Colour{1, 2, 3, 255}, "step"},
+		{"red", "colour", 0, Colour{255, 0, 0, 255}, "step"}
+	};
+	REQUIRE(SetFrameTime(document.Keyframes[0], {1, .25, true}));
+	{
+		std::ofstream file(scratch.ArrayInput);
+		file << Write(document);
+	}
+	const auto manifest = scratch.Root / "signed.json";
+	std::ostringstream out, err;
+	REQUIRE(
+		RunArgs(
+			{"imagegraph",
+			 "--input",
+			 scratch.ArrayInput.string(),
+			 "--output-id",
+			 "all",
+			 "--output",
+			 manifest.string(),
+			 "--frame",
+			 "-1.25"},
+			out,
+			err
+		) == 0
+	);
+	CHECK(err.str().empty());
+	CHECK(out.str().find("images=1 frame=-1.25") != std::string::npos);
+	const auto signedManifest = ReadText(manifest);
+	CHECK(signedManifest.find("\"frame\":-1.25") != std::string::npos);
+	CHECK(signedManifest.find("\"tick\":") == std::string::npos);
+	const auto signedPng = ReadText(scratch.Root / "signed.image-000000.png");
+	REQUIRE_FALSE(signedPng.empty());
+	out.str("");
+	err.str("");
+	REQUIRE(
+		RunArgs(
+			{"imagegraph",
+			 "--input",
+			 scratch.ArrayInput.string(),
+			 "--output-id",
+			 "all",
+			 "--output",
+			 manifest.string(),
+			 "--tick",
+			 "1"},
+			out,
+			err
+		) == 0
+	);
+	CHECK(ReadText(manifest).find("\"tick\":1") != std::string::npos);
+	CHECK(ReadText(scratch.Root / "signed.image-000000.png") != signedPng);
+}
+
+TEST_CASE(
+	"runner rejects invalid or conflicting single authored frame requests before writing",
+	"[imagegraph][runner]"
+) {
+	Scratch scratch;
+	for (const std::string frame : {"nan", "inf", "-inf", "10000000.25", "-10000001", "1.25junk"}) {
+		std::ostringstream out, err;
+		CHECK(
+			RunArgs(
+				{"imagegraph",
+				 "--input",
+				 scratch.Input.string(),
+				 "--output-id",
+				 "final",
+				 "--output",
+				 scratch.Output.string(),
+				 "--frame",
+				 frame},
+				out,
+				err
+			) == 1
+		);
+		CHECK(err.str().find("--frame must be a finite authored time") != std::string::npos);
+		CHECK(out.str().empty());
+		CHECK_FALSE(std::filesystem::exists(scratch.Output));
+	}
+	for (const std::string clock : {"--tick", "--frames"}) {
+		std::ostringstream out, err;
+		CHECK(
+			RunArgs(
+				{"imagegraph",
+				 "--input",
+				 scratch.Input.string(),
+				 "--output-id",
+				 "final",
+				 "--output",
+				 scratch.Output.string(),
+				 "--frame",
+				 "-1.25",
+				 clock,
+				 clock == "--tick" ? "1" : "0:1"},
+				out,
+				err
+			) == 1
+		);
+		CHECK(err.str().find("mutually exclusive") != std::string::npos);
+		CHECK_FALSE(std::filesystem::exists(scratch.Output));
+	}
 }
