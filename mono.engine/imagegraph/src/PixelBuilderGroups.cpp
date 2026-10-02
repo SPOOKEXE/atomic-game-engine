@@ -7,6 +7,26 @@ namespace engine::imagegraph::detail {
 	uint64_t PixelBuilderGroupCloneBytes(const GroupReplayState &source) {
 		return std::max(source.RetainedBytes(), uint64_t(sizeof(GroupReplayAccess::Owner)));
 	}
+	Status OverridePixelBuilderGroups(
+		const GroupReplayState &source,
+		std::string_view nodeId,
+		PixelBuilderGroupState &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		auto owner = CloneGroupReplay(source, 0, source.AuthoringRevision(), maximumBytes, 0, diagnostic);
+		if (!owner) return diagnostic.Code;
+		std::erase_if(owner->Bindings, [&](const auto &binding) {
+			return binding.NodeId == nodeId &&
+				   (binding.Port == "dimension" || binding.Port == "dimension_unit");
+		});
+		std::erase_if(owner->SharedSubtypes, [&](const auto &overlay) {
+			return overlay.NodeId == nodeId &&
+				   (overlay.Port == "dimension" || overlay.Port == "dimension_unit");
+		});
+		GroupReplayAccess::Install(result.Replay, std::move(owner));
+		return Status::Ok;
+	}
 	Status FreezePixelBuilderGroups(
 		const GroupReplayState &source,
 		PixelBuilderGroupState &result,

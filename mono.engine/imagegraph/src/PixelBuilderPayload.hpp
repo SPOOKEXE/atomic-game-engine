@@ -64,6 +64,13 @@ namespace engine::imagegraph::detail {
 	bool PixelBuilderRecordingsEqual(const HostNodeCapture &left, const HostNodeCapture &right);
 	bool ValidPixelBuilderRecordingValue(const Value &value);
 	uint64_t PixelBuilderGroupCloneBytes(const GroupReplayState &source);
+	Status OverridePixelBuilderGroups(
+		const GroupReplayState &source,
+		std::string_view nodeId,
+		PixelBuilderGroupState &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	);
 	Status FreezePixelBuilderGroups(
 		const GroupReplayState &source,
 		PixelBuilderGroupState &result,

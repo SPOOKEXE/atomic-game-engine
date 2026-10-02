@@ -8146,8 +8146,9 @@ namespace engine::imagegraph {
 				);
 				return false;
 			}
-			if (!std::isfinite(pixels.X) || !std::isfinite(pixels.Y) || pixels.X <= 0 || pixels.Y <= 0 ||
-				pixels.X > Limits::MaximumDimension || pixels.Y > Limits::MaximumDimension) {
+			if (!std::isfinite(pixels.X) || !std::isfinite(pixels.Y) ||
+				std::abs(pixels.X) > Limits::MaximumDimension ||
+				std::abs(pixels.Y) > Limits::MaximumDimension) {
 				SetDiagnostic(
 					diagnostic,
 					Status::InvalidValue,

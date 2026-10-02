@@ -1,4 +1,5 @@
 #include "../PixelBoxMath.hpp"
+#include "../SourceSafeDraw.hpp"
 #include "PixelBuilderEffects.hpp"
 #include "PixelBuilderPrimitives.hpp"
 #include "Processor.hpp"
@@ -85,7 +86,9 @@ namespace engine::imagegraph::detail {
 				const double sourceX = x + bounds[0], sourceY = y + bounds[1];
 				if (sourceX < 0 || sourceY < 0 || sourceX >= surface->Width || sourceY >= surface->Height)
 					continue;
-				if (!WritePixel(*output, x, y, ReadPixel(*surface, uint32_t(sourceX), uint32_t(sourceY))))
+				if (!WritePixel(
+						*output, x, y, SourceSafeDrawPixel(*surface, uint32_t(sourceX), uint32_t(sourceY))
+					))
 					return context.Fail(Status::InvalidValue, "PBbox crop sample is nonfinite", "surface");
 			}
 		return context.FailureCode == Status::Ok;
@@ -114,7 +117,7 @@ namespace engine::imagegraph::detail {
 					const double sourceY = layer & 2 ? twiceY - 1 - y : y;
 					if (sourceX < 0 || sourceY < 0 || sourceX >= surface->Width || sourceY >= surface->Height)
 						continue;
-					const Rgba source = ReadPixel(*surface, uint32_t(sourceX), uint32_t(sourceY));
+					const Rgba source = SourceSafeDrawPixel(*surface, uint32_t(sourceX), uint32_t(sourceY));
 					Rgba result = ReadPixel(*output, x, y);
 					for (size_t channel = 0; channel < 3; ++channel)
 						result[channel] = source[channel] + result[channel] * (1 - source[3]);
@@ -152,7 +155,7 @@ namespace engine::imagegraph::detail {
 					const double sourceY = center.Y + sine * dx + cosine * dy;
 					if (sourceX < 0 || sourceY < 0 || sourceX >= surface->Width || sourceY >= surface->Height)
 						continue;
-					const auto source = ReadPixel(*surface, uint32_t(sourceX), uint32_t(sourceY));
+					const auto source = SourceSafeDrawPixel(*surface, uint32_t(sourceX), uint32_t(sourceY));
 					auto result = ReadPixel(*output, x, y);
 					for (size_t channel = 0; channel < 3; ++channel)
 						result[channel] = source[channel] + result[channel] * (1 - source[3]);
@@ -239,7 +242,9 @@ namespace engine::imagegraph::detail {
 				const double sourceX = x - bounds[0], sourceY = y - bounds[1];
 				if (sourceX < 0 || sourceY < 0 || sourceX >= surface->Width || sourceY >= surface->Height)
 					continue;
-				if (!WritePixel(*output, x, y, ReadPixel(*surface, uint32_t(sourceX), uint32_t(sourceY))))
+				if (!WritePixel(
+						*output, x, y, SourceSafeDrawPixel(*surface, uint32_t(sourceX), uint32_t(sourceY))
+					))
 					return context.Fail(Status::InvalidValue, "PB surface sample is nonfinite", "surface");
 			}
 		return context.FailureCode == Status::Ok;

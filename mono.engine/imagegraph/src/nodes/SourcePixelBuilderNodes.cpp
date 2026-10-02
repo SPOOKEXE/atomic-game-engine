@@ -1,4 +1,5 @@
 #include "../PixelBuilderPayload.hpp"
+#include "../SourceSafeDraw.hpp"
 #include "Processor.hpp"
 
 #include <algorithm>
@@ -321,7 +322,7 @@ namespace engine::imagegraph::detail {
 				return context.Fail(Status::InvalidValue, "Builder layer controls are invalid");
 			for (uint32_t y = 0; y < std::min(height, layer.Surface->Height); ++y)
 				for (uint32_t x = 0; x < std::min(width, layer.Surface->Width); ++x) {
-					const Rgba source = ReadPixel(*layer.Surface, x, y);
+					const Rgba source = SourceSafeDrawPixel(*layer.Surface, x, y);
 					Rgba colour = ReadPixel(layers, x, y);
 					for (size_t channel = 0; channel < 4; ++channel)
 						colour[channel] = layer.BlendMode == 0 ? source[channel] * source[3] +

@@ -16,6 +16,10 @@ namespace engine::imagegraph::detail {
 	bool PixelShine(NodeContext &context);
 	bool MatrixColorApply(NodeContext &context);
 	bool BlendEdge(NodeContext &context);
+	bool AnisotropicNoise(NodeContext &context);
+	bool DeStray(NodeContext &context);
+	bool ColorSelect(NodeContext &context);
+	bool RoundCorner(NodeContext &context);
 	bool PixelBoxCrop(NodeContext &context);
 	bool PixelBoxSurfaceMirror(NodeContext &context);
 	bool PixelBox(NodeContext &context);
@@ -296,6 +300,10 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.pb_fx_shine", PixelShine, true},
 			ExecutorEntry{"pc.matrix_color_apply", MatrixColorApply, true},
 			ExecutorEntry{"pc.blend_edge", BlendEdge, true},
+			ExecutorEntry{"pc.noise_aniso", AnisotropicNoise, true},
+			ExecutorEntry{"pc.de_stray", DeStray, true},
+			ExecutorEntry{"pc.color_select", ColorSelect, true},
+			ExecutorEntry{"pc.corner", RoundCorner, true},
 			ExecutorEntry{"pc.pb_crop_pbbox", PixelBoxCrop, true},
 			ExecutorEntry{"pc.pb_filter_mirror", PixelBoxSurfaceMirror, true},
 			ExecutorEntry{"pc.pb_filter_polar", PixelBoxPolar, true},

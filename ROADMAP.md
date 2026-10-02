@@ -53,6 +53,7 @@ Milestone labels describe development scope, not release versions.
   11. Support PCX tuples, typed numeric values and source integer random ranges.
   12. Share bounded file and export hosts; publish authored export batches with rollback.
   13. Save and evaluate nested point arrays, source Any keys and recursive 3D paths.
+  14. Add four 2D kernels and preserve Pixel Builder signed dimensions, grayscale draws and instance resizing.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

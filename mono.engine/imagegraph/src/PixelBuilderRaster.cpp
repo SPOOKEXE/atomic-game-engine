@@ -101,6 +101,14 @@ namespace engine::imagegraph::detail {
 		cacheActions.reserve(data.SimulationCacheCaptures.size());
 		for (const auto &node : data.SimulationCacheCaptures)
 			cacheActions.emplace_back(node);
+		std::optional<PixelBuilderGroupState> replayGroups;
+		if (data.Groups) {
+			replayGroups.emplace();
+			const Status overridden = OverridePixelBuilderGroups(
+				data.Groups->Replay, data.OwnerNodeId, *replayGroups, diagnostic, maximumBytes - retained
+			);
+			if (overridden != Status::Ok) return overridden;
+		}
 		EvaluationRequest request;
 		request.Tick = data.Tick;
 		request.Seed = data.Seed;
@@ -109,7 +117,7 @@ namespace engine::imagegraph::detail {
 		request.DataReplay = data.DataHistory ? &*data.DataHistory : nullptr;
 		request.SliceStackReplay = data.SliceStack ? &*data.SliceStack : nullptr;
 		request.SimulationAuthoringRevision = data.SimulationAuthoringRevision;
-		request.GroupReplay = data.Groups ? &data.Groups->Replay : nullptr;
+		request.GroupReplay = replayGroups ? &replayGroups->Replay : nullptr;
 		request.GroupAuthoringRevision = data.GroupAuthoringRevision;
 		request.MaximumImageDimension = data.MaximumImageDimension;
 		request.PixelBuilderCirclePrecision = data.CirclePrecision;
