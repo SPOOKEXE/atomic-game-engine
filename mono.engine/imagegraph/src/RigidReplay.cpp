@@ -64,10 +64,13 @@ namespace engine::imagegraph {
 				[](const auto &command) {
 					using T = std::decay_t<decltype(command)>;
 					if constexpr (std::is_same_v<T, SourceRigidBody>) {
-						if (!Name(command.Id, 256) || command.Shape > SourceRigidShape::Segment ||
+						if (!Name(command.Id, 256) || command.Shape > SourceRigidShape::Empty ||
 							!Finite(command.Position) || !Finite(command.Size) ||
 							!Finite(command.InitialVelocity) || command.Points.size() > 8 ||
 							(command.Density && !std::isfinite(*command.Density)))
+							return false;
+						if (command.Shape == SourceRigidShape::Empty &&
+							(command.Dynamic || command.Sensor || !command.Points.empty()))
 							return false;
 						for (const auto &point : command.Points)
 							if (!Finite(point)) return false;

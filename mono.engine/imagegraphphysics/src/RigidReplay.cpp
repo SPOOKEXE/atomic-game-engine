@@ -51,8 +51,9 @@ namespace engine::imagegraphphysics {
 			b2BodyId Id;
 			b2ShapeId Shape;
 			bool Sensor = false;
+			double Friction = .2, Restitution = .2;
 		};
-	}
+	} // namespace
 
 	imagegraph::Status ReplayRigid(
 		const imagegraph::SourceRigidHistory &history,
@@ -77,7 +78,8 @@ namespace engine::imagegraphphysics {
 			!Number(world.Scale) || world.Scale < .001 || world.Walls > 15 || !Number(world.WallFriction) ||
 			world.WallFriction < 0 || !Number(world.WallRestitution, 1) || world.WallRestitution < 0)
 			return Fail(diagnostic, Status::InvalidValue, "Invalid bounded rigid world controls");
-		// Box2D 3.1.0 rejects segment lengths at or below its 0.005 metre linear slop.
+		// Box2D 3.1.0 rejects segment lengths at or below its 0.005 metre linear
+		// slop.
 		const double initialScale = history.Frames.front().SimulationScale.value_or(world.Scale);
 		const Vector2 initialCanvas = history.Frames.front().CanvasDimension.value_or(world.Dimension);
 		const double sourceWidth = initialCanvas.X / initialScale;
@@ -96,7 +98,8 @@ namespace engine::imagegraphphysics {
 		std::set<std::string_view> names, jointNames;
 		size_t commands = 0;
 		std::optional<size_t> stop;
-		// Validate the full recording before vendor allocation, including future seek frames.
+		// Validate the full recording before vendor allocation, including future seek
+		// frames.
 		for (size_t frameIndex = 0; frameIndex < history.Frames.size(); ++frameIndex) {
 			const auto &frame = history.Frames[frameIndex];
 			if (!Vector(frame.Gravity) ||
@@ -130,7 +133,7 @@ namespace engine::imagegraphphysics {
 						return Fail(
 							diagnostic, Status::DuplicateId, "Rigid body requires a unique stable name"
 						);
-					if (body->Shape > SourceRigidShape::Segment || !Vector(body->Position) ||
+					if (body->Shape > SourceRigidShape::Empty || !Vector(body->Position) ||
 						!Vector(body->Size) || body->Size.X <= 0 || body->Size.Y <= 0 ||
 						static_cast<float>(
 							body->Size.X / (2 * frame.SimulationScale.value_or(world.Scale))
@@ -145,6 +148,13 @@ namespace engine::imagegraphphysics {
 						!Number(body->GravityScale) || !Number(body->AuthoredMass) ||
 						(body->Density && (!Number(*body->Density) || *body->Density < 0)))
 						return Fail(diagnostic, Status::InvalidValue, "Invalid bounded rigid spawn controls");
+					if (body->Shape == SourceRigidShape::Empty &&
+						(body->Dynamic || body->Sensor || !body->Points.empty()))
+						return Fail(
+							diagnostic,
+							Status::InvalidValue,
+							"Empty rigid identity must be static and have no collider"
+						);
 					if (body->Shape == SourceRigidShape::Polygon ||
 						body->Shape == SourceRigidShape::Segment) {
 						const bool segment = body->Shape == SourceRigidShape::Segment;
@@ -286,14 +296,15 @@ namespace engine::imagegraphphysics {
 				if (const auto *spawn = std::get_if<SourceRigidBody>(&event.Command)) {
 					const auto &source = *spawn;
 					auto bodyDef = b2DefaultBodyDef();
-					// The pinned wrapper creates a dynamic body and default fixture before source setters.
+					// The pinned wrapper creates a dynamic body and default fixture before
+					// source setters.
 					bodyDef.type = source.Sensor ? b2_kinematicBody : b2_dynamicBody;
 					bodyDef.position = Vec(source.Position, scale);
 					const auto body = b2CreateBody(owner.Id, &bodyDef);
 					auto shapeDef = b2DefaultShapeDef();
 					shapeDef.enableSensorEvents = true;
 					shapeDef.isSensor = source.Sensor;
-					b2ShapeId shape;
+					b2ShapeId shape{};
 					const float halfWidth = static_cast<float>(source.Size.X / (2 * scale));
 					const float halfHeight = static_cast<float>(source.Size.Y / (2 * scale));
 					if (source.Shape == SourceRigidShape::Box) {
@@ -302,7 +313,7 @@ namespace engine::imagegraphphysics {
 					} else if (source.Shape == SourceRigidShape::Circle) {
 						const b2Circle circle{{0, 0}, std::min(halfWidth, halfHeight)};
 						shape = b2CreateCircleShape(body, &shapeDef, &circle);
-					} else {
+					} else if (source.Shape != SourceRigidShape::Empty) {
 						b2Vec2 points[8]{};
 						for (size_t i = 0; i < source.Points.size(); ++i)
 							points[i] = Vec(source.Points[i], scale);
@@ -335,12 +346,17 @@ namespace engine::imagegraphphysics {
 					b2Body_SetBullet(body, source.Bullet);
 					b2Body_SetFixedRotation(body, source.FixedRotation);
 					b2Body_EnableSleep(body, source.Sleepable);
-					if (source.Density) b2Shape_SetDensity(shape, static_cast<float>(*source.Density), true);
-					b2Shape_SetFriction(shape, static_cast<float>(source.Friction));
-					b2Shape_SetRestitution(shape, static_cast<float>(source.Restitution));
+					if (source.Density && B2_IS_NON_NULL(shape))
+						b2Shape_SetDensity(shape, static_cast<float>(*source.Density), true);
+					if (B2_IS_NON_NULL(shape))
+						b2Shape_SetFriction(shape, static_cast<float>(source.Friction));
+					if (B2_IS_NON_NULL(shape))
+						b2Shape_SetRestitution(shape, static_cast<float>(source.Restitution));
 					if (source.UseInitialVelocity)
 						b2Body_SetLinearVelocity(body, Vec(source.InitialVelocity));
-					bodies.push_back({source.Id, body, shape, source.Sensor});
+					bodies.push_back(
+						{source.Id, body, shape, source.Sensor, source.Friction, source.Restitution}
+					);
 				} else if (const auto *force = std::get_if<SourceRigidForce>(&event.Command)) {
 					const auto body = std::find_if(bodies.begin(), bodies.end(), [&](const auto &item) {
 						return item.Name == force->BodyId;
@@ -457,24 +473,34 @@ namespace engine::imagegraphphysics {
 								"Rigid mass change must remain positive and bounded"
 							);
 						mass.mass = static_cast<float>(value);
-						// The source wrapper leaves centre/inertia uninitialized. This native profile
-						// preserves them.
+						// The source wrapper leaves centre/inertia uninitialized. This native
+						// profile preserves them.
 						b2Body_SetMassData(body->Id, mass);
 					}
 					if (change->Friction) {
-						const double value = Changed(b2Shape_GetFriction(body->Shape), *change->Friction);
+						const double value = Changed(
+							B2_IS_NON_NULL(body->Shape) ? b2Shape_GetFriction(body->Shape) : body->Friction,
+							*change->Friction
+						);
 						if (!Number(value) || value < 0)
 							return Fail(diagnostic, Status::InvalidValue, "Invalid resulting rigid friction");
-						b2Shape_SetFriction(body->Shape, static_cast<float>(value));
+						body->Friction = value;
+						if (B2_IS_NON_NULL(body->Shape))
+							b2Shape_SetFriction(body->Shape, static_cast<float>(value));
 					}
 					if (change->Restitution) {
-						const double value =
-							Changed(b2Shape_GetRestitution(body->Shape), *change->Restitution);
+						const double value = Changed(
+							B2_IS_NON_NULL(body->Shape) ? b2Shape_GetRestitution(body->Shape)
+														: body->Restitution,
+							*change->Restitution
+						);
 						if (!Number(value, 1) || value < 0)
 							return Fail(
 								diagnostic, Status::InvalidValue, "Invalid resulting rigid restitution"
 							);
-						b2Shape_SetRestitution(body->Shape, static_cast<float>(value));
+						body->Restitution = value;
+						if (B2_IS_NON_NULL(body->Shape))
+							b2Shape_SetRestitution(body->Shape, static_cast<float>(value));
 					}
 					if (change->GravityScale) {
 						const double value = Changed(b2Body_GetGravityScale(body->Id), *change->GravityScale);
@@ -549,8 +575,8 @@ namespace engine::imagegraphphysics {
 					 {b2Body_GetWorldCenterOfMass(body.Id).x * snapshotScale,
 					  b2Body_GetWorldCenterOfMass(body.Id).y * snapshotScale},
 					 b2Body_GetMass(body.Id),
-					 b2Shape_GetFriction(body.Shape),
-					 b2Shape_GetRestitution(body.Shape),
+					 B2_IS_NON_NULL(body.Shape) ? b2Shape_GetFriction(body.Shape) : body.Friction,
+					 B2_IS_NON_NULL(body.Shape) ? b2Shape_GetRestitution(body.Shape) : body.Restitution,
 					 b2Body_GetGravityScale(body.Id),
 					 b2Body_IsEnabled(body.Id),
 					 body.Sensor}
@@ -652,4 +678,4 @@ namespace engine::imagegraphphysics {
 		return ReplayRigid(history, tick, output, diagnostic, std::move(captureAt), maximumSnapshotBytes);
 	}
 
-}
+} // namespace engine::imagegraphphysics

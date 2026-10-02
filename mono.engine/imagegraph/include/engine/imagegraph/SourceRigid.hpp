@@ -4,7 +4,7 @@
 
 namespace engine::imagegraph {
 	// Copied source controls. Pixel coordinates become Box2D metres only in the host.
-	enum class SourceRigidShape : uint8_t { Box, Circle, Polygon, Segment };
+	enum class SourceRigidShape : uint8_t { Box, Circle, Polygon, Segment, Empty };
 	struct SourceRigidBody {
 		std::string Id;
 		SourceRigidShape Shape = SourceRigidShape::Box;

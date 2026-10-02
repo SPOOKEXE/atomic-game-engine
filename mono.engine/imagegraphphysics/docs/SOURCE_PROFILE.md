@@ -53,3 +53,11 @@ The remaining fifteen actors, fracture mesh-generation actions, source spawner
 and collision history, source executable scheduler parity, and the exact bundled
 Box2D version remain acceptance work. The braced Verlet example exercises native
 constraints and does not demonstrate this rigid backend.
+
+The CPU rigid Render and Render ID profiles admit at most 64 million
+body-pixel visits across one processor batch. Texture lists admit at most
+256 entries before cloning. Refusal preserves the caller's previously published
+output and replay journal. Stream spawns require typed captured seed observations
+and ordered random draws; these request captures currently have no durable file
+codec. Active Burst remains unsupported because the pinned source compares the
+current frame against a junction reference after rebinding its frame variable.

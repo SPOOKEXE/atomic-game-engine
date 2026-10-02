@@ -42,7 +42,7 @@ Milestone labels describe development scope, not release versions.
 
   1. Retain the source licence, pinned metadata and generated enum choices; save instance ports and reflected graph selectors.
   2. Evaluate bounded image/data kernels, palettes, atlases, path blur, Tilesets, typed arrays and Pixel Builder recipes; inherit instance input routes.
-  3. Replay animation, FLIP/Verlet and rigid worlds once per frame; rasterize fluid trails and base VFX particles from retained state.
+  3. Replay animation, FLIP/Verlet, rigid actors and recorded random/history state; rasterize trails and VFX without extra simulation steps.
   4. Edit native and PXC graphs, groups, keys and tile properties with atomic undo/redo; retain source metadata across key moves and copies.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
   6. Run bounded Lua and export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.

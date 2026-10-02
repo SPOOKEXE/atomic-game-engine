@@ -66,3 +66,30 @@ TEST_CASE("Rigid journal rejects invalid event aliases and source controls", "[i
 	state.Owners.push_back(state.Owners[0]);
 	CHECK(ValidateRigidReplay(state, Limits::MaximumEvaluationBytes, diagnostic) == Status::DuplicateId);
 }
+
+TEST_CASE(
+	"Empty rigid collider preserves identity while refusing physical shape controls", "[imagegraph][rigid]"
+) {
+	auto state = RecordedOwner();
+	auto &body = std::get<SourceRigidBody>(state.Owners[0].History.Frames[0].Events[0].Command);
+	body.Shape = SourceRigidShape::Empty;
+	body.Dynamic = false;
+	body.Sensor = false;
+	body.Points.clear();
+	Diagnostic diagnostic;
+	REQUIRE(ValidateRigidReplay(state, Limits::MaximumEvaluationBytes, diagnostic) == Status::Ok);
+	const auto valid = state;
+	body.Dynamic = true;
+	CHECK(ValidateRigidReplay(state, Limits::MaximumEvaluationBytes, diagnostic) == Status::InvalidValue);
+	state = valid;
+	std::get<SourceRigidBody>(state.Owners[0].History.Frames[0].Events[0].Command).Sensor = true;
+	CHECK(ValidateRigidReplay(state, Limits::MaximumEvaluationBytes, diagnostic) == Status::InvalidValue);
+	state = valid;
+	std::get<SourceRigidBody>(state.Owners[0].History.Frames[0].Events[0].Command).Points = {{0, 0}};
+	CHECK(ValidateRigidReplay(state, Limits::MaximumEvaluationBytes, diagnostic) == Status::InvalidValue);
+	state = valid;
+	std::get<SourceRigidBody>(state.Owners[0].History.Frames[0].Events[0].Command).Shape =
+		static_cast<SourceRigidShape>(255);
+	CHECK(ValidateRigidReplay(state, Limits::MaximumEvaluationBytes, diagnostic) == Status::InvalidValue);
+	CHECK(valid.Owners[0].History.Frames[0].Events[0].Position.ConsumerId == "body");
+}

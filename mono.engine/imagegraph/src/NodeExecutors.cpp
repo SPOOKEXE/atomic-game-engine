@@ -76,6 +76,17 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if (type == "pc.rigid_object" && (port == "attribute_mesh" || port == "texture"))
+					return true;
+				if (type == "pc.rigid_override" &&
+					(port == "surfaces" || port == "positions" || port == "rotations" || port == "scales" ||
+					 port == "blends" || port == "alpha" || port == "mass" || port == "friction" ||
+					 port == "bounciness" || port == "gravity_scale"))
+					return true;
+				if (type.starts_with("pc.rigid_") &&
+					(port == "object" || port == "objects" || port.starts_with("object_") ||
+					 port == "filter_object" || port == "detect_objects"))
+					return true;
 				if (type == "pc.vfx_renderer" && port.starts_with("input_1_")) return true;
 				if (type == "pc.edge_detect" && port == "attribute_filter") return true;
 				if ((type == "pc.palette" && port == "palette") ||

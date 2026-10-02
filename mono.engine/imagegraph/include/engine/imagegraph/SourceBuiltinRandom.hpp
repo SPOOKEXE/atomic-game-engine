@@ -6,7 +6,14 @@
 #include <vector>
 
 namespace engine::imagegraph {
-	enum class SourceBuiltinRandomOperation : uint8_t { Random, IRandom, IRandomRange, CRand };
+	enum class SourceBuiltinRandomOperation : uint8_t {
+		Random,
+		IRandom,
+		IRandomRange,
+		CRand,
+		SeedObservation,
+		RandomRange
+	};
 	struct SourceBuiltinRandomDraw {
 		SourceBuiltinRandomOperation Operation = SourceBuiltinRandomOperation::Random;
 		double Lower = 0, Upper = 0, Result = 0;

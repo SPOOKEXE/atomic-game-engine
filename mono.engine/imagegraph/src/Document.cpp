@@ -5518,10 +5518,12 @@ namespace engine::imagegraph {
 			if (to != nodeIndices.end() && sourceType == ValueType::Array && targetType == ValueType::Image) {
 				if (const CatalogueEntry *entry = FindCatalogueEntry(document.Nodes[to->second].Type)) {
 					const CatalogueInput *input = FindCatalogueInput(*entry, link.ToPort);
-					catalogueArrayInput = input && input->SourceIndex >= 0 && input->ArrayDepthKnown &&
-										  input->Type == ValueType::Image &&
-										  (FindCatalogueInput(*entry, "attribute_process") ||
-										   (entry->Type == "pc.flip_render" && input->Id == "fluid_particle"));
+					catalogueArrayInput =
+						input && input->SourceIndex >= 0 && input->ArrayDepthKnown &&
+						input->Type == ValueType::Image &&
+						(FindCatalogueInput(*entry, "attribute_process") ||
+						 (entry->Type == "pc.flip_render" && input->Id == "fluid_particle") ||
+						 (entry->Type == "pc.rigid_object" && input->Id == "texture"));
 				}
 			}
 			bool catalogueAtlasArrayInput = false;

@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <limits>
 TEST_SUITE_ID("engine.imagegraph.source_builtin_random")
@@ -229,4 +230,49 @@ TEST_CASE(
 	CHECK(Evaluate(document, plan, "image", request, output, diagnostic) == Status::InvalidValue);
 	CHECK(diagnostic.NodeId == "unselected");
 	CHECK(output.Pixels == previous.Pixels);
+}
+
+TEST_CASE(
+	"Captured seed observations and inclusive real ranges preserve typed source calls",
+	"[source_builtin_random]"
+) {
+	SourceBuiltinRandomCapture capture;
+	capture.Authored.Id = "stream";
+	capture.Authored.Type = "pc.rigid_object_spawner";
+	capture.Draws = {
+		{SourceBuiltinRandomOperation::SeedObservation, 0, 0, -.25},
+		{SourceBuiltinRandomOperation::RandomRange, -2, 3, -2},
+		{SourceBuiltinRandomOperation::RandomRange, -2, 3, 3},
+		{SourceBuiltinRandomOperation::RandomRange, 4, 4, 4},
+		{SourceBuiltinRandomOperation::RandomRange, 3, -2, .125}
+	};
+	Diagnostic diagnostic;
+	uint64_t bytes = 0;
+	REQUIRE(
+		ValidateBuiltinRandomCaptures({&capture, 1}, Limits::MaximumEvaluationBytes, bytes, diagnostic) ==
+		Status::Ok
+	);
+	const auto retained = capture;
+	REQUIRE(bytes > 0);
+	const auto admitted = bytes;
+	CHECK(
+		ValidateBuiltinRandomCaptures({&capture, 1}, admitted - 1, bytes, diagnostic) == Status::LimitExceeded
+	);
+	CHECK(capture == retained);
+	for (const auto invalid : std::array<SourceBuiltinRandomDraw, 6>{
+			 {{SourceBuiltinRandomOperation::SeedObservation, 1, 0, 7},
+			  {SourceBuiltinRandomOperation::SeedObservation, 0, 1, 7},
+			  {SourceBuiltinRandomOperation::SeedObservation, 0, 0, std::numeric_limits<double>::infinity()},
+			  {SourceBuiltinRandomOperation::RandomRange, -2, 3, -2.001},
+			  {SourceBuiltinRandomOperation::RandomRange, 4, 4, 4.001},
+			  {static_cast<SourceBuiltinRandomOperation>(255), 0, 0, 0}}
+		 }) {
+		capture.Draws = {invalid};
+		CHECK(
+			ValidateBuiltinRandomCaptures({&capture, 1}, Limits::MaximumEvaluationBytes, bytes, diagnostic) ==
+			Status::InvalidValue
+		);
+		CHECK(diagnostic.NodeId == "stream");
+		CHECK_FALSE(diagnostic.Message.empty());
+	}
 }

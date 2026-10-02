@@ -212,6 +212,13 @@ namespace engine::imagegraph {
 							draw.Result <= std::floor(std::max(draw.Lower, draw.Upper)) &&
 							std::trunc(draw.Result) == draw.Result;
 					break;
+				case SourceBuiltinRandomOperation::SeedObservation:
+					valid = draw.Lower == 0 && draw.Upper == 0;
+					break;
+				case SourceBuiltinRandomOperation::RandomRange:
+					valid = draw.Result >= std::min(draw.Lower, draw.Upper) &&
+							draw.Result <= std::max(draw.Lower, draw.Upper);
+					break;
 				case SourceBuiltinRandomOperation::CRand:
 					valid = draw.Lower == 0 && draw.Upper == 0 && draw.Result >= 0 &&
 							draw.Result <= INT_MAX && std::trunc(draw.Result) == draw.Result;
