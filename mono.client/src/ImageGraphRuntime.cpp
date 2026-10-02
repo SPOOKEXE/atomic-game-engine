@@ -1,19 +1,27 @@
+#include "ImageGraphCameraAdapter.hpp"
+#include "ImageGraphSdfAdapter.hpp"
 #include "ImageGraphSurfaceFormat.hpp"
 #include "ImageGraphTransform3DAdapter.hpp"
 
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/imagegraph/FeedbackReplay.hpp>
 #include <engine/render/ImageGraphTransform3D.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scripthost/ComposerLua.hpp>
 
 #include <algorithm>
 #include <client/ContentDemand.hpp>
 #include <client/ImageGraphRuntime.hpp>
+#include <cmath>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <new>
 #include <system_error>
@@ -73,15 +81,163 @@ namespace client {
 			return engine::imagegraph::Compile(document, plan, diagnostic);
 		}
 
+		bool PackArrayOutput(
+			const engine::imagegraph::ImageArray &array, double framesPerSecond, ImageGraphFrameResult &result
+		) try {
+			using namespace engine::imagegraph;
+			std::vector<size_t> frames;
+			std::function<bool(const ImageArrayItem &, size_t)> flatten = [&](const ImageArrayItem &item,
+																			  size_t depth) {
+				if (depth > 64) return false;
+				if (const auto *index = std::get_if<size_t>(&item.Data)) {
+					if (*index >= array.Images.size() || frames.size() >= 4096) return false;
+					frames.push_back(*index);
+					return true;
+				}
+				for (const auto &child : std::get<std::vector<ImageArrayItem>>(item.Data))
+					if (!flatten(child, depth + 1)) return false;
+				return true;
+			};
+			for (const auto &item : array.Items)
+				if (!flatten(item, 0)) return false;
+			if (frames.empty() || !std::isfinite(framesPerSecond) || framesPerSecond <= 0) return false;
+			const float duration = static_cast<float>(1.0 / framesPerSecond);
+			if (!std::isfinite(duration) || duration <= 0) return false;
+			const auto &first = array.Images[frames.front()];
+			uint32_t side = 1;
+			while (side * side < frames.size())
+				side *= 2;
+			const uint64_t width = uint64_t(first.Width) * side, height = uint64_t(first.Height) * side;
+			if (width > engine::render::LiveImagePublisher::MAXIMUM_SIDE ||
+				height > engine::render::LiveImagePublisher::MAXIMUM_SIDE)
+				return false;
+			const auto layout = CheckedSurfaceLayout(
+				static_cast<uint32_t>(width),
+				static_cast<uint32_t>(height),
+				first.Format,
+				engine::render::LiveImagePublisher::MAXIMUM_IMAGE_BYTES
+			);
+			if (!layout) return false;
+			for (size_t index : frames) {
+				const auto &frame = array.Images[index];
+				if (frame.Width != first.Width || frame.Height != first.Height ||
+					frame.Format != first.Format ||
+					!ValidSurfaceLayout(frame, Limits::MaximumDimension, Limits::MaximumOutputBytes) ||
+					!FiniteSurfaceSamples(frame))
+					return false;
+			}
+			result.Image.Width = static_cast<uint32_t>(width);
+			result.Image.Height = static_cast<uint32_t>(height);
+			result.Image.Format = first.Format;
+			result.Image.Pixels.resize(static_cast<size_t>(layout->Bytes));
+			const size_t rowBytes = first.Pixels.size() / first.Height;
+			for (size_t index = 0; index < frames.size(); ++index) {
+				const auto &frame = array.Images[frames[index]];
+				for (size_t row = 0; row < first.Height; ++row) {
+					const size_t destination =
+						((index / side * first.Height + row) * side + index % side) * rowBytes;
+					std::copy_n(
+						frame.Pixels.begin() + row * rowBytes,
+						rowBytes,
+						result.Image.Pixels.begin() + destination
+					);
+				}
+			}
+			result.FlipbookSide = static_cast<uint8_t>(side);
+			result.FrameDurations.assign(frames.size(), duration);
+			result.Image.Hash = SurfaceHash(result.Image);
+			return true;
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+
+		bool HasLuaNodes(const engine::imagegraph::Document &document) {
+			return std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+				return node.Type.starts_with("pc.lua_");
+			});
+		}
+
+		std::unique_ptr<engine::imagegraph::ComposerLuaHost>
+		LuaHostFor(const engine::imagegraph::Document &document) {
+			return HasLuaNodes(document) ? engine::script::MakeComposerLuaHost() : nullptr;
+		}
+
+		struct LuaMessageDrain {
+			engine::imagegraph::ComposerLuaHost *Host = nullptr;
+			~LuaMessageDrain() {
+				if (Host)
+					for (const auto &message : Host->TakeMessages())
+						ENGINE_INFO("image graph Lua {}: {}", message.NodeId, message.Text);
+			}
+		};
+
+		bool NeedsFrameSamples(const engine::imagegraph::Document &document) {
+			if (!document.Keyframes.empty()) return true;
+			return std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+				return !node.SourceAnimatedInputs.empty() || node.Type == "image.audio_window" ||
+					   node.Type == "image.audio_recording" || node.Type == "image.captured" ||
+					   node.Type == "pc.audio_window" || node.Type == "pc.audio_loudness" ||
+					   node.Type == "pc.interlaced" || node.Type.starts_with("pc.verlet_sim_") ||
+					   node.Type.starts_with("pc.flip_") || node.Type.starts_with("pc.lua_") ||
+					   node.Type.starts_with("pc.pcx_");
+			});
+		}
 		ImageGraphFrameResult EvaluateCompiled(
 			const engine::imagegraph::Document &document,
 			const engine::imagegraph::Plan &plan,
 			engine::core::Name output,
 			uint64_t tick,
-			uint64_t seed
+			uint64_t seed,
+			engine::imagegraph::CapturedFeedbackHost *feedbackOwner = nullptr,
+			engine::imagegraph::HostNodeProvider *hostProvider = nullptr
 		) {
 			ImageGraphFrameResult result;
-			result.Animated = !document.Keyframes.empty();
+			result.Animated = NeedsFrameSamples(document);
+			engine::imagegraph::CapturedFeedbackHost localFeedback;
+			auto &feedback = feedbackOwner ? *feedbackOwner : localFeedback;
+			auto localLua = hostProvider ? nullptr : LuaHostFor(document);
+			LuaMessageDrain drain{localLua.get()};
+			engine::imagegraph::EvaluationRequest clock{
+				.Tick = tick, .Seed = seed, .HostProvider = hostProvider ? hostProvider : localLua.get()
+			};
+			if (!feedback.Prepare(
+					document,
+					plan,
+					1,
+					seed,
+					clock,
+					result.Diagnostic,
+					engine::imagegraph::Limits::MaximumEvaluationBytes,
+					output.Text()
+				)) {
+				result.Status = result.Diagnostic.Code;
+				return result;
+			}
+			if (feedback.Active()) {
+				result.Animated = true;
+				if (const auto *image = feedback.Output(output.Text())) {
+					result.Image = *image;
+					result.Status = engine::imagegraph::Status::Ok;
+					return result;
+				}
+				if (const auto *value = feedback.Value(output.Text())) {
+					if (const auto *array = std::get_if<engine::imagegraph::ImageArray>(&value->Output)) {
+						const double fps = document.Timeline ? document.Timeline->FramesPerSecond : 30;
+						result.Status = PackArrayOutput(*array, fps, result)
+											? engine::imagegraph::Status::Ok
+											: engine::imagegraph::Status::LimitExceeded;
+						if (result.Status != engine::imagegraph::Status::Ok)
+							result.Diagnostic = {
+								result.Status, {}, {}, "stateful image array exceeds atlas bounds"
+							};
+						return result;
+					}
+					result.Status = engine::imagegraph::Status::InvalidOutput;
+					result.Diagnostic = {result.Status, {}, {}, "image consumer requires an image output"};
+					return result;
+				}
+			}
+
 			const auto selected =
 				std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const auto &item) {
 					return item.Id == output.Text();
@@ -102,14 +258,29 @@ namespace client {
 					return result;
 				}
 			}
-			result.Status = engine::imagegraph::Evaluate(
-				document,
-				plan,
-				std::string(output.Text()),
-				engine::imagegraph::EvaluationRequest{.Tick = tick, .Seed = seed},
-				result.Image,
-				result.Diagnostic
+			// Inspect the owned result after one execution, because live host nodes can have side effects.
+			engine::imagegraph::StatefulEvaluationResult evaluated;
+			result.Status = engine::imagegraph::EvaluateStateful(
+				document, plan, std::string(output.Text()), clock, evaluated, result.Diagnostic
 			);
+			if (result.Status != engine::imagegraph::Status::Ok) return result;
+			if (auto *image = std::get_if<engine::imagegraph::Image>(&evaluated.Output)) {
+				result.Image = std::move(*image);
+			} else if (const auto *array = std::get_if<engine::imagegraph::ImageArray>(&evaluated.Output)) {
+				const double fps = document.Timeline ? document.Timeline->FramesPerSecond : 30.0;
+				if (!PackArrayOutput(*array, fps, result)) {
+					result.Status = engine::imagegraph::Status::LimitExceeded;
+					result.Diagnostic = {
+						result.Status,
+						{},
+						{},
+						"image array cannot fit the native atlas size, format or frame limits"
+					};
+				}
+			} else {
+				result.Status = engine::imagegraph::Status::InvalidOutput;
+				result.Diagnostic = {result.Status, {}, {}, "image consumer requires an image output"};
+			}
 			return result;
 		}
 
@@ -129,45 +300,6 @@ namespace client {
 			return node == document.Nodes.end() ? nullptr : &*node;
 		}
 
-		bool EvaluateTransformInput(
-			const engine::imagegraph::Document &document,
-			const engine::imagegraph::Plan &plan,
-			const engine::imagegraph::Node &transform,
-			std::string_view port,
-			uint64_t tick,
-			uint64_t seed,
-			engine::imagegraph::Image &image,
-			engine::imagegraph::Diagnostic &diagnostic
-		) {
-			const auto link =
-				std::find_if(plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const auto &item) {
-					return item.ToNode == transform.Id && item.ToPort == port;
-				});
-			if (link == plan.EffectiveLinks.end()) {
-				if (port == "back_surface") return true;
-				diagnostic = {
-					engine::imagegraph::Status::InvalidValue,
-					transform.Id,
-					std::string(port),
-					"Transform Image 3D requires a surface input"
-				};
-				return false;
-			}
-			engine::imagegraph::Document source = document;
-			source.Outputs = {{"__render_transform_input", link->FromNode, link->FromPort}};
-			engine::imagegraph::Plan sourcePlan;
-			if (engine::imagegraph::Compile(source, sourcePlan, diagnostic) != engine::imagegraph::Status::Ok)
-				return false;
-			return engine::imagegraph::Evaluate(
-					   source,
-					   sourcePlan,
-					   "__render_transform_input",
-					   engine::imagegraph::EvaluationRequest{.Tick = tick, .Seed = seed},
-					   image,
-					   diagnostic
-				   ) == engine::imagegraph::Status::Ok;
-		}
-
 		ImageGraphFrameResult EvaluateTransform(
 			const engine::imagegraph::Document &document,
 			const engine::imagegraph::Plan &plan,
@@ -179,18 +311,7 @@ namespace client {
 		) {
 			using namespace engine;
 			ImageGraphFrameResult result;
-			result.Animated = !document.Keyframes.empty();
-			for (const imagegraph::Keyframe &keyframe : document.Keyframes) {
-				if (keyframe.NodeId != transform.Id) continue;
-				result.Status = imagegraph::Status::UnsupportedExecution;
-				result.Diagnostic = {
-					result.Status,
-					transform.Id,
-					keyframe.Port,
-					"animated Transform Image 3D controls require render scheduling"
-				};
-				return result;
-			}
+			result.Animated = NeedsFrameSamples(document);
 			if (outputPort != "rendered" && outputPort != "depth" && outputPort != "mesh") {
 				result.Status = imagegraph::Status::InvalidOutput;
 				result.Diagnostic = {
@@ -198,75 +319,15 @@ namespace client {
 				};
 				return result;
 			}
-			imagegraph::Image front, back;
-			if (!EvaluateTransformInput(
-					document, plan, transform, "surface", tick, seed, front, result.Diagnostic
-				) ||
-				!EvaluateTransformInput(
-					document, plan, transform, "back_surface", tick, seed, back, result.Diagnostic
+			auto lua = LuaHostFor(document);
+			LuaMessageDrain drain{lua.get()};
+			render::imagegraph::TransformImage3DRequest request;
+			if (!detail::BuildTransformRequest(
+					document, plan, transform, tick, seed, false, request, result.Diagnostic, lua.get()
 				)) {
 				result.Status = result.Diagnostic.Code;
 				return result;
 			}
-			const auto property = [&](std::string_view name) -> const imagegraph::Value * {
-				const auto found =
-					std::find_if(transform.Values.begin(), transform.Values.end(), [&](const auto &value) {
-						return value.Port == name;
-					});
-				return found == transform.Values.end() ? nullptr : &found->Data;
-			};
-			const auto *position = std::get_if<imagegraph::Vector3>(property("position"));
-			const auto *anchor = std::get_if<imagegraph::Vector3>(property("anchor"));
-			const auto *rotation = std::get_if<imagegraph::Quaternion>(property("rotation"));
-			const auto *scale = std::get_if<imagegraph::Vector3>(property("scale"));
-			const auto *tiling = std::get_if<imagegraph::Vector2>(property("texture_tiling"));
-			const auto *projection = std::get_if<imagegraph::EnumValue>(property("projection"));
-			const auto *fov = std::get_if<double>(property("fov"));
-			const auto *viewRange = std::get_if<imagegraph::Vector2>(property("view_range"));
-			const auto *depthRange = std::get_if<imagegraph::Vector2>(property("depth_range"));
-			if (!position || !anchor || !rotation || !scale || !tiling || !projection || !fov || !viewRange ||
-				!depthRange || (projection->Value != 0 && projection->Value != 1)) {
-				result.Status = imagegraph::Status::InvalidValue;
-				result.Diagnostic = {
-					result.Status, transform.Id, {}, "Transform Image 3D controls are invalid"
-				};
-				return result;
-			}
-			render::imagegraph::TransformImage3DRequest request;
-			const auto frontFormat = detail::TextureFormatForSurface(front.Format);
-			const auto backFormat = detail::TextureFormatForSurface(back.Format);
-			if (!frontFormat || (!back.Pixels.empty() && !backFormat)) {
-				result.Status = imagegraph::Status::UnsupportedExecution;
-				result.Diagnostic = {
-					result.Status, transform.Id, "surface", "Transform Image 3D surface format is unsupported"
-				};
-				return result;
-			}
-			request.Front = {front.Width, front.Height, *frontFormat, {}};
-			request.Front.Pixels.assign(
-				reinterpret_cast<const std::byte *>(front.Pixels.data()),
-				reinterpret_cast<const std::byte *>(front.Pixels.data() + front.Pixels.size())
-			);
-			if (!back.Pixels.empty()) {
-				request.Back = {back.Width, back.Height, *backFormat, {}};
-				request.Back.Pixels.assign(
-					reinterpret_cast<const std::byte *>(back.Pixels.data()),
-					reinterpret_cast<const std::byte *>(back.Pixels.data() + back.Pixels.size())
-				);
-			}
-			request.Position = {float(position->X), float(position->Y), float(position->Z)};
-			request.Anchor = {float(anchor->X), float(anchor->Y), float(anchor->Z)};
-			request.Rotation = {
-				float(rotation->X), float(rotation->Y), float(rotation->Z), float(rotation->W)
-			};
-			request.Scale = {float(scale->X), float(scale->Y), float(scale->Z)};
-			request.TextureTiling = {float(tiling->X), float(tiling->Y)};
-			request.Projection = projection->Value == 0
-									 ? render::imagegraph::TransformImage3DProjection::Perspective
-									 : render::imagegraph::TransformImage3DProjection::Orthographic;
-			request.FieldOfViewDegrees = float(*fov);
-			request.ViewRange = {float(viewRange->X), float(viewRange->Y)};
-			request.DepthRange = {float(depthRange->X), float(depthRange->Y)};
 			render::imagegraph::TransformImage3DResult gpu;
 			const auto status = render::imagegraph::ExecuteTransformImage3D(renderer, request, gpu);
 			if (status != render::imagegraph::TransformImage3DStatus::Ok) {
@@ -312,6 +373,100 @@ namespace client {
 			return result;
 		}
 
+		ImageGraphFrameResult EvaluateCamera(
+			const engine::imagegraph::Document &document,
+			const engine::imagegraph::Plan &plan,
+			const engine::imagegraph::Node &node,
+			std::string_view port,
+			engine::render::Renderer &renderer,
+			uint64_t tick,
+			uint64_t seed
+		) {
+			ImageGraphFrameResult result;
+			result.Animated = NeedsFrameSamples(document);
+			auto lua = LuaHostFor(document);
+			LuaMessageDrain drain{lua.get()};
+			engine::render::imagegraph::SourceCamera3DRequest request;
+			if (!detail::BuildCameraRequest(
+					document, plan, node, port, tick, seed, false, request, result.Diagnostic, lua.get()
+				)) {
+				result.Status = result.Diagnostic.Code;
+				return result;
+			}
+			engine::render::imagegraph::SourceCamera3DResult gpu;
+			const auto status = engine::render::imagegraph::ExecuteSourceCamera3D(renderer, request, gpu);
+			if (status != engine::render::imagegraph::SourceCamera3DStatus::Ok) {
+				result.Status = engine::imagegraph::Status::UnsupportedExecution;
+				result.Diagnostic = {
+					result.Status, node.Id, std::string(port), "source camera GPU pass failed"
+				};
+				return result;
+			}
+			const auto format = detail::SurfaceFormatForTexture(gpu.Format);
+			if (!format) {
+				result.Status = engine::imagegraph::Status::UnsupportedExecution;
+				result.Diagnostic = {
+					result.Status, node.Id, std::string(port), "source camera output format is unsupported"
+				};
+				return result;
+			}
+			result.Image.Width = gpu.Width;
+			result.Image.Height = gpu.Height;
+			result.Image.Format = *format;
+			result.Image.Pixels.assign(
+				reinterpret_cast<const uint8_t *>(gpu.Pixels.data()),
+				reinterpret_cast<const uint8_t *>(gpu.Pixels.data() + gpu.Pixels.size())
+			);
+			result.Image.Hash = engine::imagegraph::SurfaceHash(result.Image);
+			result.Status = engine::imagegraph::Status::Ok;
+			return result;
+		}
+		ImageGraphFrameResult EvaluateSdf(
+			const engine::imagegraph::Document &document,
+			const engine::imagegraph::Plan &plan,
+			const engine::imagegraph::Node &node,
+			std::string_view port,
+			engine::render::Renderer &renderer,
+			uint64_t tick,
+			uint64_t seed
+		) {
+			ImageGraphFrameResult result;
+			result.Animated = NeedsFrameSamples(document);
+			auto lua = LuaHostFor(document);
+			LuaMessageDrain drain{lua.get()};
+			engine::render::imagegraph::SourceSdfRequest request;
+			if (!detail::BuildSdfRequest(
+					document, plan, node, port, tick, seed, false, request, result.Diagnostic, lua.get()
+				)) {
+				result.Status = result.Diagnostic.Code;
+				return result;
+			}
+			engine::render::imagegraph::SourceSdfResult gpu;
+			const auto status = engine::render::imagegraph::ExecuteSourceSdf(renderer, request, gpu);
+			if (status != engine::render::imagegraph::SourceSdfStatus::Ok) {
+				result.Status = engine::imagegraph::Status::UnsupportedExecution;
+				result.Diagnostic = {result.Status, node.Id, std::string(port), "source sdf GPU pass failed"};
+				return result;
+			}
+			const auto format = detail::SurfaceFormatForTexture(gpu.Format);
+			if (!format) {
+				result.Status = engine::imagegraph::Status::UnsupportedExecution;
+				result.Diagnostic = {
+					result.Status, node.Id, std::string(port), "source sdf output format is unsupported"
+				};
+				return result;
+			}
+			result.Image.Width = gpu.Width;
+			result.Image.Height = gpu.Height;
+			result.Image.Format = *format;
+			result.Image.Pixels.assign(
+				reinterpret_cast<const uint8_t *>(gpu.Pixels.data()),
+				reinterpret_cast<const uint8_t *>(gpu.Pixels.data() + gpu.Pixels.size())
+			);
+			result.Image.Hash = engine::imagegraph::SurfaceHash(result.Image);
+			result.Status = engine::imagegraph::Status::Ok;
+			return result;
+		}
 		ImageGraphFrameResult EvaluateForRenderer(
 			const engine::imagegraph::Document &document,
 			const engine::imagegraph::Plan &plan,
@@ -324,6 +479,12 @@ namespace client {
 			const auto *node = OutputNode(document, output, port);
 			if (node != nullptr && node->Type == "image.transform_3d")
 				return EvaluateTransform(document, plan, *node, port, renderer, tick, seed);
+			if (node && (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set"))
+				return EvaluateCamera(document, plan, *node, port, renderer, tick, seed);
+			if (node && (node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
+						 node->Type == "pc.rm_cloud" || node->Type == "pc.rm_terrain" ||
+						 node->Type == "pc.rm_primitive" || node->Type == "pc.rm_combine"))
+				return EvaluateSdf(document, plan, *node, port, renderer, tick, seed);
 			return EvaluateCompiled(document, plan, output, tick, seed);
 		}
 	}
@@ -406,6 +567,7 @@ namespace client {
 		size_t updated = 0;
 		size_t ordinal = 0;
 		size_t &nextBinding = NextBindingByOwner[owner.Id()];
+		std::optional<size_t> retryBinding;
 		const uint64_t usageRevision = WantedContentRevision(store);
 		auto [usagePosition, usageInserted] = SinkUsages.try_emplace(store.Identity());
 		SinkUsage &usage = usagePosition->second;
@@ -649,12 +811,24 @@ namespace client {
 							valid = false;
 							break;
 						}
+						Entry &feedbackEntry = Entries[Key(owner, skyNames[index])];
+						if (feedbackEntry.StoreIdentity != store.Identity() ||
+							feedbackEntry.Modified != modified[index] ||
+							feedbackEntry.FileBytes != fileBytes[index] ||
+							!SameSelector(feedbackEntry.Selector, skyFaces[index].Selector)) {
+							feedbackEntry.Feedback.Clear();
+							if (feedbackEntry.LuaHost) feedbackEntry.LuaHost->Reset();
+						}
+						if (!feedbackEntry.LuaHost) feedbackEntry.LuaHost = LuaHostFor(document->Authored);
+						LuaMessageDrain drain{feedbackEntry.LuaHost.get()};
 						frames[index] = EvaluateCompiled(
 							document->Authored,
 							document->Compiled,
 							skyFaces[index].Selector.Output,
 							ticks[index],
-							skyFaces[index].Selector.Seed
+							skyFaces[index].Selector.Seed,
+							&feedbackEntry.Feedback,
+							feedbackEntry.LuaHost.get()
 						);
 						const auto uploadFormat = detail::TextureFormatForSurface(frames[index].Image.Format);
 						const uint32_t uploadBytesPerPixel =
@@ -665,7 +839,8 @@ namespace client {
 							!uploadFormat || uploadBytesPerPixel == 0 ||
 							pixels > std::numeric_limits<uint64_t>::max() / uploadBytesPerPixel ||
 							pixels * uploadBytesPerPixel > 96u * 1024u * 1024u - totalUploadBytes;
-						if (frames[index].Status != engine::imagegraph::Status::Ok || exceedsUploadLimit) {
+						if (frames[index].Status != engine::imagegraph::Status::Ok ||
+							frames[index].FlipbookSide != 0 || exceedsUploadLimit) {
 							Error = frames[index].Status == engine::imagegraph::Status::Ok
 										? "image graph skybox exceeds group byte limit"
 										: frames[index].Diagnostic.Message;
@@ -788,13 +963,44 @@ namespace client {
 			Entry &entry = position->second;
 			const bool changed = inserted || entry.StoreIdentity != store.Identity() ||
 								 entry.Entity != entity || !SameSelector(entry.Selector, selector);
+			const bool sourceChanged = changed || entry.Modified != modified || entry.FileBytes != fileBytes;
+			if (sourceChanged) {
+				entry.Feedback.Clear();
+				if (entry.LuaHost) entry.LuaHost->Reset();
+			}
+			if (!HasLuaNodes(cached->Authored))
+				entry.LuaHost.reset();
+			else if (!entry.LuaHost)
+				entry.LuaHost = LuaHostFor(cached->Authored);
+			LuaMessageDrain drain{entry.LuaHost.get()};
 			const bool sampleChanged = changed || entry.Modified != modified ||
 									   entry.FileBytes != fileBytes || (entry.Animated && entry.Tick != tick);
 			std::string_view outputPort;
 			const auto *outputNode = OutputNode(cached->Authored, selector.Output, outputPort);
-			if (outputNode != nullptr && outputNode->Type == "image.transform_3d") {
-				if (outputPort != "rendered") {
-					Error = "live Transform Image 3D bindings require the rendered output";
+			const bool sourceCamera = outputNode && (outputNode->Type == "pc.3_d_camera" ||
+													 outputNode->Type == "pc.3_d_camera_set");
+			const bool sourceSdf =
+				outputNode &&
+				(outputNode->Type == "pc.rm_render" || outputNode->Type == "pc.rm_render_scatter" ||
+				 outputNode->Type == "pc.rm_cloud" || outputNode->Type == "pc.rm_terrain" ||
+				 outputNode->Type == "pc.rm_primitive" || outputNode->Type == "pc.rm_combine");
+			if (outputNode != nullptr &&
+				(outputNode->Type == "image.transform_3d" || sourceCamera || sourceSdf)) {
+				if ((!sourceCamera && !sourceSdf && outputPort != "rendered" && outputPort != "depth") ||
+					(sourceSdf && outputPort != "surface_out")) {
+					Error = "live Transform Image 3D texture bindings require rendered or depth output";
+					if (entry.TransformAdmitted) {
+						(void)renderer.CancelTransformImage3D(
+							owner, selector.Texture, entry.TransformGeneration
+						);
+						entry.TransformAdmitted = false;
+					}
+					return;
+				}
+				if ((outputPort == "depth" ||
+					 (sourceCamera && outputPort != "rendered" && outputPort != "diffuse")) &&
+					selector.ColorSpace != engine::scene::ImageGraphColorSpace::Linear) {
+					Error = "Transform Image 3D depth output requires linear colour space";
 					if (entry.TransformAdmitted) {
 						(void)renderer.CancelTransformImage3D(
 							owner, selector.Texture, entry.TransformGeneration
@@ -813,18 +1019,63 @@ namespace client {
 					return;
 				}
 				engine::render::imagegraph::TransformImage3DRequest request;
+				engine::render::imagegraph::SourceCamera3DRequest cameraRequest;
+				engine::render::imagegraph::SourceSdfRequest sdfRequest;
 				engine::imagegraph::Diagnostic diagnostic;
-				if (!detail::BuildTransformRequest(
-						cached->Authored,
-						cached->Compiled,
-						*outputNode,
-						tick,
-						selector.Seed,
-						selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
-						request,
-						diagnostic
-					)) {
+				const bool built =
+					sourceSdf ? detail::BuildSdfRequest(
+									cached->Authored,
+									cached->Compiled,
+									*outputNode,
+									outputPort,
+									tick,
+									selector.Seed,
+									selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
+									sdfRequest,
+									diagnostic,
+									entry.LuaHost.get(),
+									&entry.Feedback,
+									1
+								)
+					: sourceCamera ? detail::BuildCameraRequest(
+										 cached->Authored,
+										 cached->Compiled,
+										 *outputNode,
+										 outputPort,
+										 tick,
+										 selector.Seed,
+										 selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
+										 cameraRequest,
+										 diagnostic,
+										 entry.LuaHost.get(),
+										 &entry.Feedback,
+										 1
+									 )
+								   : detail::BuildTransformRequest(
+										 cached->Authored,
+										 cached->Compiled,
+										 *outputNode,
+										 tick,
+										 selector.Seed,
+										 selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
+										 request,
+										 diagnostic,
+										 entry.LuaHost.get(),
+										 &entry.Feedback,
+										 1
+									 );
+				if (!built) {
 					Error = diagnostic.Message;
+					return;
+				}
+
+				if (sourceSdf && !sdfRequest.Render && !changed && entry.TransformGeneration != 0) {
+					// Source preview render switches retain the last completed surface.
+					entry.Tick = tick;
+					entry.Modified = modified;
+					entry.FileBytes = fileBytes;
+					entry.Animated = NeedsFrameSamples(cached->Authored);
+					entry.TransformAdmitted = true;
 					return;
 				}
 				if (!TransformOwners.contains(owner.Id()) &&
@@ -840,15 +1091,35 @@ namespace client {
 					return;
 				}
 				const uint64_t generation = NextTransformGeneration;
-				const auto queueStatus = renderer.QueueTransformImage3D({
-					.Owner = owner,
-					.Name = selector.Texture,
-					.Generation = generation,
-					.Request = std::move(request),
-				});
+				const auto queueStatus =
+					sourceSdf ? renderer.QueueSourceSdf(
+									{.Owner = owner,
+									 .Name = selector.Texture,
+									 .Generation = generation,
+									 .Request = std::move(sdfRequest)}
+								)
+					: sourceCamera
+						? renderer.QueueSourceCamera3D(
+							  {.Owner = owner,
+							   .Name = selector.Texture,
+							   .Generation = generation,
+							   .Request = std::move(cameraRequest)}
+						  )
+						: renderer.QueueTransformImage3D({
+							  .Owner = owner,
+							  .Name = selector.Texture,
+							  .Generation = generation,
+							  .Output = outputPort == "depth"
+											? engine::render::imagegraph::TransformImage3DOutput::Depth
+											: engine::render::imagegraph::TransformImage3DOutput::Rendered,
+							  .Request = std::move(request),
+						  });
 				if (queueStatus != engine::render::imagegraph::TransformImage3DQueueResult::Queued &&
 					queueStatus != engine::render::imagegraph::TransformImage3DQueueResult::Replaced) {
 					if (ownerInserted) TransformOwners.erase(owner.Id());
+					if (queueStatus == engine::render::imagegraph::TransformImage3DQueueResult::Full &&
+						!retryBinding)
+						retryBinding = current;
 					Error = queueStatus == engine::render::imagegraph::TransformImage3DQueueResult::Full
 								? "live Transform Image 3D queue is full"
 								: "live Transform Image 3D request was refused";
@@ -883,7 +1154,7 @@ namespace client {
 				entry.Modified = modified;
 				entry.FileBytes = fileBytes;
 				entry.Published = false;
-				entry.Animated = !cached->Authored.Keyframes.empty();
+				entry.Animated = NeedsFrameSamples(cached->Authored);
 				entry.TransformAdmitted = true;
 				entry.TransformGeneration = generation;
 				++updated;
@@ -920,8 +1191,15 @@ namespace client {
 				entry.Selector = selector;
 				entry.Published = false;
 			}
-			ImageGraphFrameResult frame =
-				EvaluateCompiled(cached->Authored, cached->Compiled, selector.Output, tick, selector.Seed);
+			ImageGraphFrameResult frame = EvaluateCompiled(
+				cached->Authored,
+				cached->Compiled,
+				selector.Output,
+				tick,
+				selector.Seed,
+				&entry.Feedback,
+				entry.LuaHost.get()
+			);
 			if (frame.Status != engine::imagegraph::Status::Ok) {
 				Error = frame.Diagnostic.Message;
 				return;
@@ -943,11 +1221,20 @@ namespace client {
 				selector.ColorSpace == engine::scene::ImageGraphColorSpace::Linear
 					? engine::render::LiveImageColorSpace::Linear
 					: engine::render::LiveImageColorSpace::Display,
-				*textureFormat
+				*textureFormat,
+				frame.FlipbookSide,
+				frame.FrameDurations
 			);
 			if (status != engine::render::LiveImagePublishStatus::Published) {
 				Error = "image graph texture upload failed";
 				return;
+			}
+			{
+				engine::scene::FlipbookFacts facts;
+				facts.Side = frame.FlipbookSide;
+				facts.Frames = static_cast<uint16_t>(frame.FrameDurations.size());
+				facts.FrameDurations = frame.FrameDurations;
+				(void)engine::scene::RecordTexture(store, selector.Texture, facts);
 			}
 			entry.Tick = tick;
 			entry.Modified = modified;
@@ -958,7 +1245,10 @@ namespace client {
 			entry.TransformGeneration = 0;
 			++updated;
 		});
-		if (nextBinding >= ordinal) nextBinding = 0;
+		if (retryBinding)
+			nextBinding = *retryBinding;
+		else if (nextBinding >= ordinal)
+			nextBinding = 0;
 		for (auto entry = Entries.begin(); entry != Entries.end();) {
 			if (entry->second.Owner == owner && !seen.contains(entry->first)) {
 				if (entry->second.TransformAdmitted)

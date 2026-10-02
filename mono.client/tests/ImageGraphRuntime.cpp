@@ -261,3 +261,134 @@ TEST_CASE("binding budget defers work and eventually publishes every name", "[cl
 	renderer.Shutdown();
 	SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
+
+TEST_CASE(
+	"Persisted native feedback evaluates prior generations through client load adapter",
+	"[client][imagegraph][feedback]"
+) {
+	GraphFile file;
+	engine::imagegraph::Document document;
+	document.Nodes = {
+		{"prior", "image.captured", "", {}, {{"source_id", std::string{"feedback:final"}}}},
+		{"invert", "image.invert", "", {}, {{"include_alpha", false}}}
+	};
+	document.Links = {{"prior", "image", "invert", "image"}};
+	document.Outputs = {{"final", "invert", "image"}};
+	{
+		std::ofstream out(client::ImageGraphDocumentPath(file.Assets, GRAPH));
+		out << engine::imagegraph::Write(document);
+	}
+	for (uint64_t tick : {0, 1, 3, 0}) {
+		const auto frame = client::LoadImageGraphFrame(file.Assets, GRAPH, OUTPUT, tick);
+		INFO(frame.Diagnostic.Message);
+		REQUIRE(frame.Status == engine::imagegraph::Status::Ok);
+		CHECK(frame.Animated);
+		CHECK(frame.Image.Pixels.front() == (tick % 2 ? 0 : 255));
+	}
+	const auto refused = client::LoadImageGraphFrame(file.Assets, GRAPH, OUTPUT, 4097);
+	CHECK(refused.Status == engine::imagegraph::Status::LimitExceeded);
+}
+
+TEST_CASE(
+	"Living feedback study retains accumulated output and repeats reset", "[client][imagegraph][feedback]"
+) {
+	GraphFile file;
+	const auto source = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
+						"mono.engine/examples/assets/imagegraphs/Composer-Feedback-And-Fluid.graph";
+	REQUIRE(std::filesystem::exists(source));
+	std::filesystem::copy_file(
+		source,
+		client::ImageGraphDocumentPath(file.Assets, GRAPH),
+		std::filesystem::copy_options::overwrite_existing
+	);
+	const engine::core::Name output("accumulated");
+	const auto initial = client::LoadImageGraphFrame(file.Assets, GRAPH, output, 0);
+	INFO(initial.Diagnostic.Message);
+	REQUIRE(initial.Status == engine::imagegraph::Status::Ok);
+	const auto middle = client::LoadImageGraphFrame(file.Assets, GRAPH, output, 30);
+	INFO(middle.Diagnostic.Message);
+	REQUIRE(middle.Status == engine::imagegraph::Status::Ok);
+	const auto late = client::LoadImageGraphFrame(file.Assets, GRAPH, output, 60);
+	INFO(late.Diagnostic.Message);
+	REQUIRE(late.Status == engine::imagegraph::Status::Ok);
+	CHECK(initial.Image.Hash != middle.Image.Hash);
+	CHECK(middle.Image.Hash != late.Image.Hash);
+	const auto reset = client::LoadImageGraphFrame(file.Assets, GRAPH, output, 0);
+	REQUIRE(reset.Status == engine::imagegraph::Status::Ok);
+	CHECK(reset.Image == initial.Image);
+}
+
+TEST_CASE("saved Lua surface graphs use the native client host", "[client][imagegraph]") {
+	GraphFile file;
+	{
+		std::ofstream output(client::ImageGraphDocumentPath(file.Assets, GRAPH));
+		output << "imagegraph 1\n"
+				  "node \"pixels\" \"pc.lua_surface\" \"\" 0 0\n"
+				  "value 0 \"pixels\" \"output_dimension\" v 3 2\n"
+				  "value 0 \"pixels\" \"lua_code\" s \"clear() setColor(colorCreateRGB(255,0,0)) "
+				  "drawPixel(1,0)\"\n"
+				  "output \"final\" \"pixels\" \"surface_out\"\n";
+	}
+	const auto frame = client::LoadImageGraphFrame(file.Assets, GRAPH, OUTPUT, 0);
+	INFO(frame.Diagnostic.Message);
+	REQUIRE(frame.Status == engine::imagegraph::Status::Ok);
+	CHECK(frame.Animated);
+	CHECK(frame.Image.Width == 3);
+	CHECK(frame.Image.Height == 2);
+	engine::imagegraph::SurfacePixel sample{};
+	REQUIRE(engine::imagegraph::LoadSurfacePixel(frame.Image, 1, 0, sample));
+	CHECK(sample[0] == 1);
+	CHECK(sample[1] == 0);
+	CHECK(sample[3] == 1);
+}
+
+TEST_CASE(
+	"live Lua globals persist across ticks and reset with graph replacement", "[client][imagegraph][gpu][.]"
+) {
+	GraphFile file;
+	const auto path = client::ImageGraphDocumentPath(file.Assets, GRAPH);
+	{
+		std::ofstream output(path);
+		output << "imagegraph 1\n"
+				  "node \"pixels\" \"pc.lua_surface\" \"\" 0 0\n"
+				  "value 0 \"pixels\" \"output_dimension\" v 1 1\n"
+				  "value 0 \"pixels\" \"lua_code\" s \"count=(count or 0)+1 clear() "
+				  "setColor(colorCreateRGB(count,0,0)) drawPixel(0,0)\"\n"
+				  "output \"final\" \"pixels\" \"surface_out\"\n";
+	}
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("imagegraph-lua-world");
+	engine::scene::ImageGraphBinding selector;
+	selector.Graph = GRAPH;
+	selector.Output = OUTPUT;
+	selector.Texture = TEXTURE;
+	selector.ColorSpace = engine::scene::ImageGraphColorSpace::Linear;
+	selector.TickPolicy = engine::scene::ImageGraphTickPolicy::World;
+	REQUIRE(engine::scene::SetImageGraphBinding(store, store.Create(), selector));
+	REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+	engine::render::Renderer renderer;
+	REQUIRE(renderer.Initialise(nullptr, 1, true));
+	client::ImageGraphRuntime runtime;
+	auto red = [&] {
+		engine::assets::TextureData texture;
+		REQUIRE(
+			renderer.CopyTexture(TEXTURE, texture, 1024, OWNER) == engine::render::TextureCopyStatus::Copied
+		);
+		REQUIRE(texture.Pixels.size() == 4);
+		return std::to_integer<unsigned>(texture.Pixels[0]);
+	};
+	runtime.BeginFrame();
+	REQUIRE(runtime.Refresh(store, renderer, OWNER, file.Assets) == 1);
+	CHECK(red() == 1);
+	store.AdvanceTick(1.0f / 60.0f);
+	runtime.BeginFrame();
+	REQUIRE(runtime.Refresh(store, renderer, OWNER, file.Assets) == 1);
+	CHECK(red() == 2);
+	std::filesystem::last_write_time(path, std::filesystem::last_write_time(path) + std::chrono::seconds(1));
+	runtime.BeginFrame();
+	REQUIRE(runtime.Refresh(store, renderer, OWNER, file.Assets) == 1);
+	CHECK(red() == 1);
+	runtime.Clear(renderer);
+	renderer.Shutdown();
+	SDL_QuitSubSystem(SDL_INIT_VIDEO);
+}

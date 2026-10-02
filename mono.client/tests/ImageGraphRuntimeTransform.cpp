@@ -51,14 +51,16 @@ namespace {
 		std::filesystem::path Assets =
 			std::filesystem::temp_directory_path() / "atomic-imagegraph-live-transform";
 		const engine::core::Name Graph{"live-transform-test"};
-		GraphFile() {
+		GraphFile(bool depth = false) {
 			std::filesystem::remove_all(Assets);
 			std::filesystem::create_directories(Assets / "imagegraphs");
 			Document document;
 			document.FormatVersion = 6;
 			document.Nodes = {Solid(), Transform("left"), Transform("right")};
 			document.Links = {{"solid", "image", "left", "surface"}, {"solid", "image", "right", "surface"}};
-			document.Outputs = {{"left-output", "left", "rendered"}, {"right-output", "right", "rendered"}};
+			document.Outputs = {
+				{"left-output", "left", depth ? "depth" : "rendered"}, {"right-output", "right", "rendered"}
+			};
 			std::ofstream file(client::ImageGraphDocumentPath(Assets, Graph));
 			file << Write(document);
 		}
@@ -101,5 +103,30 @@ TEST_CASE(
 	const bool keptGenerationOne = renderer.CancelTransformImage3D(owner, keptTexture, 1);
 	const bool keptGenerationTwo = renderer.CancelTransformImage3D(owner, keptTexture, 2);
 	CHECK(keptGenerationOne != keptGenerationTwo);
+	runtime.Clear(renderer);
+}
+
+TEST_CASE("a live transform depth output enters the render scheduler", "[client][imagegraph]") {
+	GraphFile file(true);
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("imagegraph-live-depth-test");
+	const auto entity = store.Create();
+	const engine::core::Name owner("live-depth-owner"), texture("live-depth-texture");
+	engine::scene::ImageGraphBinding binding;
+	binding.Graph = file.Graph;
+	binding.Output = engine::core::Name("left-output");
+	binding.Texture = texture;
+	binding.ColorSpace = engine::scene::ImageGraphColorSpace::Linear;
+	REQUIRE(engine::scene::SetImageGraphBinding(store, entity, binding));
+	engine::render::Renderer renderer;
+	client::ImageGraphRuntime runtime;
+	CHECK(runtime.Refresh(store, renderer, owner, file.Assets) == 1);
+	CHECK(runtime.LastError().empty());
+	binding.ColorSpace = engine::scene::ImageGraphColorSpace::Display;
+	REQUIRE(engine::scene::SetImageGraphBinding(store, entity, binding));
+	runtime.BeginFrame();
+	CHECK(runtime.Refresh(store, renderer, owner, file.Assets) == 0);
+	CHECK(runtime.LastError() == "Transform Image 3D depth output requires linear colour space");
+	CHECK_FALSE(renderer.CancelTransformImage3D(owner, texture, 1));
 	runtime.Clear(renderer);
 }

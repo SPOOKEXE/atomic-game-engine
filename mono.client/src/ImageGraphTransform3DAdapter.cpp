@@ -71,21 +71,34 @@ namespace client::detail {
 		uint64_t seed,
 		bool displayColorSpace,
 		engine::render::imagegraph::TransformImage3DRequest &outputRequest,
-		engine::imagegraph::Diagnostic &diagnostic
+		engine::imagegraph::Diagnostic &diagnostic,
+		engine::imagegraph::HostNodeProvider *hostProvider,
+		engine::imagegraph::CapturedFeedbackHost *replayOwner,
+		uint64_t authoringRevision
 	) {
 		using namespace engine;
 		engine::render::imagegraph::TransformImage3DRequest request;
-		imagegraph::EvaluationSnapshot snapshot;
-		const imagegraph::Status captured = imagegraph::EvaluateNodeInputs(
-			document,
-			plan,
-			node.Id,
-			imagegraph::EvaluationRequest{.Tick = tick, .Seed = seed},
-			snapshot,
-			diagnostic,
-			MAXIMUM_TRANSFORM_HOST_BYTES
-		);
-		if (captured != imagegraph::Status::Ok) return false;
+		imagegraph::EvaluationSnapshot localSnapshot;
+		imagegraph::CapturedFeedbackHost localReplay;
+		auto &owner = replayOwner ? *replayOwner : localReplay;
+		imagegraph::EvaluationRequest clock{.Tick = tick, .Seed = seed, .HostProvider = hostProvider};
+		if (!owner.PrepareNodeInputs(
+				document,
+				plan,
+				authoringRevision,
+				seed,
+				node.Id,
+				clock,
+				diagnostic,
+				MAXIMUM_TRANSFORM_HOST_BYTES
+			))
+			return false;
+		if (!owner.Active() &&
+			imagegraph::EvaluateNodeInputs(
+				document, plan, node.Id, clock, localSnapshot, diagnostic, MAXIMUM_TRANSFORM_HOST_BYTES
+			) != imagegraph::Status::Ok)
+			return false;
+		const auto &snapshot = owner.Active() ? owner.Snapshot() : localSnapshot;
 
 		const auto *front = InputImage(snapshot, "surface");
 		const auto *back = InputImage(snapshot, "back_surface");

@@ -66,6 +66,7 @@ Milestone labels describe development scope, not release versions.
   24. Play bounded 4096-frame texture atlases with per-frame timing through native sequence and particle paths; GPU verification remains open.
   25. Read granted animated images with source frame selection, even padding and bounded nearest sampling.
   26. Queue source camera and SDF outputs through bounded renderer jobs; GPU verification remains open.
+  27. Bind live 3D outputs and timed arrays through one evaluation per client update.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

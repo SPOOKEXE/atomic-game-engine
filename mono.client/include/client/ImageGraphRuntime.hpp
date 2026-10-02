@@ -4,7 +4,9 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/imagegraph/ComposerLuaHost.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/render/ImageGraphTransform3D.hpp>
 #include <engine/render/LiveImagePublisher.hpp>
 #include <engine/scene/ImageGraphBinding.hpp>
@@ -33,6 +35,8 @@ namespace client {
 		engine::imagegraph::Diagnostic Diagnostic;
 		// Owned numeric image on success, with its surface format preserved.
 		engine::imagegraph::Image Image;
+		uint8_t FlipbookSide = 0;
+		std::vector<float> FrameDurations;
 		// Present only when a headless Transform Image 3D export selects its mesh output.
 		std::optional<engine::render::imagegraph::TransformImage3DMesh> Mesh;
 		// Whether authored keyframes require evaluation at each selected tick.
@@ -114,6 +118,8 @@ namespace client {
 
 	  private:
 		struct Entry {
+			engine::imagegraph::CapturedFeedbackHost Feedback;
+			std::unique_ptr<engine::imagegraph::ComposerLuaHost> LuaHost;
 			engine::render::LiveImageBinding Publication;
 			engine::core::Name Owner;
 			engine::ecs::Entity Entity;

@@ -90,3 +90,41 @@ TEST_CASE(
 	CHECK(request.FieldOfViewDegrees == 67.5f);
 	CHECK(request.ColorSpace == TransformImage3DColorSpace::Display);
 }
+
+TEST_CASE("Source Transform adapter resolves a linked animated scalar FOV", "[client][imagegraph]") {
+	Document document;
+	document.FormatVersion = 9;
+	Node transform = Transform();
+	transform.Type = "pc.3_d_transform_image";
+	for (auto &value : transform.Values)
+		if (value.Port == "projection") value.Data = EnumValue{0};
+	document.Nodes = {
+		Solid("surface", {12, 34, 56, 255}), {"driver", "value.number", "", {}, {{"value", 60.0}}}, transform
+	};
+	document.Links = {{"surface", "image", "transform", "surface"}, {"driver", "number", "transform", "fov"}};
+	document.Outputs = {{"out", "transform", "rendered"}};
+	document.Keyframes = {{"driver", "value", 0, 60.0, "linear"}, {"driver", "value", 10, 80.0, "linear"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compiled = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	engine::render::imagegraph::TransformImage3DRequest request;
+	const auto captured = client::detail::BuildTransformRequest(
+		document, plan, document.Nodes.back(), 5, 0, false, request, diagnostic
+	);
+	INFO(diagnostic.Message);
+	REQUIRE(captured);
+	CHECK(request.FieldOfViewDegrees == 70.0f);
+	const auto previousPixels = request.Front.Pixels;
+	document.Keyframes.clear();
+	document.Nodes[1].Values[0].Data = -1.0;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CHECK_FALSE(
+		client::detail::BuildTransformRequest(
+			document, plan, document.Nodes.back(), 0, 0, false, request, diagnostic
+		)
+	);
+	CHECK(request.FieldOfViewDegrees == 70.0f);
+	CHECK(request.Front.Pixels == previousPixels);
+}
