@@ -6,14 +6,22 @@
 // one measures the *per-world* overhead, which is the cost that a hundred
 // worlds multiply.
 
+#include "BusRoutingProfile.hpp"
+
+#include <engine/core/HeapProfile.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Bench.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <cinttypes>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.world.bench.barrier")
@@ -49,6 +57,68 @@ namespace barrier_bench {
 		}
 	};
 	const Pool Workers;
+
+	// Read the lane-refresh tag under Tick, excluding construction and presentation.
+	engine::core::HeapNodeView LaneHeap() {
+		using engine::core::HeapProfile;
+		for (uint32_t index = 1; index < HeapProfile::NodeCount(); index++) {
+			const auto node = HeapProfile::Node(index);
+			if (node.Name == "Universe::RefreshLanes" &&
+				HeapProfile::Node(node.Parent).Name == "schedule worlds") {
+				return node;
+			}
+		}
+		return {};
+	}
+
+	// Opt-in counter reads bracket the existing ticks. Reporting follows their join;
+	// it belongs to the broader BENCH cost, not to the lane-refresh profile scope.
+	void TickMany(Universe &universe, int ticks, const char *workload) {
+		using engine::core::HeapProfile;
+		static const bool diagnostic = [] {
+			const char *value = std::getenv("ATOMIC_WORLD_LANE_HEAP");
+			return value != nullptr && std::string_view(value) == "1";
+		}();
+		static unsigned records = 0;
+		if (diagnostic && (!HeapProfile::IsCompiledIn() || records >= 1024)) {
+			throw std::runtime_error("world lane heap diagnostic requires heap hooks and at most 1024 calls");
+		}
+		const auto before = diagnostic ? LaneHeap() : engine::core::HeapNodeView{};
+		const auto totalsBefore = diagnostic ? HeapProfile::Totals() : engine::core::HeapTotals{};
+		for (int pass = 0; pass < ticks; pass++) {
+			universe.Tick(1.0f / 60.0f);
+		}
+		if (!diagnostic) {
+			return;
+		}
+		const auto after = LaneHeap();
+		const auto totalsAfter = HeapProfile::Totals();
+		if (after.Name.empty() || totalsAfter.DroppedScopes != totalsBefore.DroppedScopes) {
+			throw std::runtime_error("world lane heap diagnostic lost scope attribution");
+		}
+		++records;
+		std::printf(
+			"# world-lane-heap call=%u workload=\"%s\" ticks=%d pinned_workers=%u "
+			"allocated_bytes=%" PRIu64 " allocated_blocks=%" PRIu64 " "
+			"live_bytes_before=%" PRId64 " live_bytes_after=%" PRId64 " "
+			"live_blocks_before=%" PRId64 " live_blocks_after=%" PRId64 " "
+			"scope_peak_bytes=%" PRId64 " process_profiler_overhead_bytes=%" PRId64 " "
+			"dropped_scopes=%" PRIu64 "\n",
+			records,
+			workload,
+			ticks,
+			engine::parallel::Jobs::PinnedWorkerCount(),
+			after.TotalBytes - before.TotalBytes,
+			after.TotalBlocks - before.TotalBlocks,
+			before.LiveBytes,
+			after.LiveBytes,
+			before.LiveBlocks,
+			after.LiveBlocks,
+			after.PeakBytes,
+			totalsAfter.OverheadBytes,
+			totalsAfter.DroppedScopes
+		);
+	}
 
 	// Adds one world of `entities` moving entities with the integrate system.
 	void AddIntegratingWorld(Universe &universe, size_t index, size_t entities) {
@@ -177,16 +247,12 @@ using namespace barrier_bench;
 
 BENCH("Tick · 1 world of 100k", 20) {
 	Universe &universe = UniverseOf(1, 100'000, ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 20; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 20, "Tick · 1 world of 100k");
 }
 
 BENCH("Tick · 2 worlds of 100k, parallel", 20) {
 	Universe &universe = UniverseOf(2, 100'000, ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 20; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 20, "Tick · 2 worlds of 100k, parallel");
 }
 
 BENCH("Tick · 2 worlds of 100k, serial", 20) {
@@ -194,9 +260,7 @@ BENCH("Tick · 2 worlds of 100k, serial", 20) {
 	// it costs is the number that says whether `WorldSerial` is a sensible
 	// default for a dedicated host.
 	Universe &universe = UniverseOf(2, 100'000, ExecutionMode::WorldSerial);
-	for (int pass = 0; pass < 20; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 20, "Tick · 2 worlds of 100k, serial");
 }
 
 // --- the small shape: many little worlds -------------------------------------
@@ -210,77 +274,57 @@ BENCH("Tick · 4 worlds of 100k, parallel", 20) {
 	// blanket "not worth dispatching below N" rule would quietly ruin: four
 	// world ticks are four expensive things, not four cheap ones.
 	Universe &universe = UniverseOf(4, 100'000, ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 20; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 20, "Tick · 4 worlds of 100k, parallel");
 }
 
 BENCH("Tick · 4 worlds of 100k, serial", 20) {
 	Universe &universe = UniverseOf(4, 100'000, ExecutionMode::WorldSerial);
-	for (int pass = 0; pass < 20; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 20, "Tick · 4 worlds of 100k, serial");
 }
 
 BENCH("Tick · 8 worlds of 100k, parallel", 10) {
 	// Past the 2- and 4-world crossover, where every lane has a large world.
 	Universe &universe = UniverseOf(8, 100'000, ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 10; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 10, "Tick · 8 worlds of 100k, parallel");
 }
 
 BENCH("Tick · 8 worlds of 100k, serial", 10) {
 	Universe &universe = UniverseOf(8, 100'000, ExecutionMode::WorldSerial);
-	for (int pass = 0; pass < 10; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 10, "Tick · 8 worlds of 100k, serial");
 }
 
 BENCH("Tick · 1 world of 100k and 7 of 1k, parallel", 20) {
 	// Read against the serial row below and `1 world of 100k`: the gap to the
 	// single world is what the light worlds cost when they share lanes.
 	Universe &universe = LopsidedUniverse(ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 20; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 20, "Tick · 1 world of 100k and 7 of 1k, parallel");
 }
 
 BENCH("Tick · 1 world of 100k and 7 of 1k, serial", 20) {
 	Universe &universe = LopsidedUniverse(ExecutionMode::WorldSerial);
-	for (int pass = 0; pass < 20; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 20, "Tick · 1 world of 100k and 7 of 1k, serial");
 }
 
 BENCH("Tick · 10 worlds of 2k", 50) {
 	Universe &universe = UniverseOf(10, 2'000, ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 50; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 50, "Tick · 10 worlds of 2k");
 }
 
 BENCH("Tick · 100 worlds of 200", 50) {
 	Universe &universe = UniverseOf(100, 200, ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 50; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 50, "Tick · 100 worlds of 200");
 }
 
 BENCH("Tick · 200 worlds of 100", 20) {
 	Universe &universe = UniverseOf(200, 100, ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 20; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 20, "Tick · 200 worlds of 100");
 }
 
 // --- the barrier itself ------------------------------------------------------
 
 BENCH("Tick · 50 quiet worlds, no entities", 200) {
 	Universe &universe = UniverseOf(50, 0, ExecutionMode::WorldParallel);
-	for (int pass = 0; pass < 200; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 200, "Tick · 50 quiet worlds, no entities");
 }
 
 BENCH("Tick · 50 quiet worlds, serial", 200) {
@@ -294,9 +338,7 @@ BENCH("Tick · 50 quiet worlds, serial", 200) {
 	// cost of a barrier and nothing else - which is the number the storage and
 	// resource paths are actually judged on.
 	Universe &universe = UniverseOf(50, 0, ExecutionMode::WorldSerial);
-	for (int pass = 0; pass < 200; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 200, "Tick · 50 quiet worlds, serial");
 }
 
 BENCH("Tick · 200 suspended worlds, serial", 50) {
@@ -316,9 +358,7 @@ BENCH("Tick · 200 suspended worlds, serial", 50) {
 			suspended->SetState(id, engine::world::WorldState::Suspended);
 		}
 	}
-	for (int pass = 0; pass < 50; pass++) {
-		suspended->Tick(1.0f / 60.0f);
-	}
+	TickMany(*suspended, 50, "Tick · 200 suspended worlds, serial");
 }
 
 BENCH("Tick · 200 quiet worlds, serial", 50) {
@@ -326,9 +366,7 @@ BENCH("Tick · 200 quiet worlds, serial", 50) {
 	// the per-world term on its own, with every fixed cost of a barrier
 	// divided out.
 	Universe &universe = UniverseOf(200, 0, ExecutionMode::WorldSerial);
-	for (int pass = 0; pass < 50; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 50, "Tick · 200 quiet worlds, serial");
 }
 
 BENCH("Tick · 50 worlds all publishing, serial", 50) {
@@ -337,9 +375,12 @@ BENCH("Tick · 50 worlds all publishing, serial", 50) {
 	// fanned to forty-nine subscribers each is 2450 deliveries a tick, so the
 	// per-world inbox handover is the measurement rather than a rounding error
 	// beside thread wake-up.
+	bus_routing_bench::PreflightOnce();
 	Universe &universe = ChattyUniverse(50, ExecutionMode::WorldSerial);
-	for (int pass = 0; pass < 50; pass++) {
-		universe.Tick(1.0f / 60.0f);
+	if (bus_routing_bench::ProfileEnabled() || bus_routing_bench::CanonicalEnabled()) {
+		bus_routing_bench::DiagnosticBatch(universe);
+	} else {
+		TickMany(universe, 50, "Tick · 50 worlds all publishing, serial");
 	}
 }
 
@@ -348,7 +389,5 @@ BENCH("Tick · 50 worlds all publishing to each other", 50) {
 	// `(From, Sequence)`. This is the barrier doing the work it exists for, and
 	// the number to watch if the routing ever changes shape.
 	Universe &universe = ChattyUniverse(50);
-	for (int pass = 0; pass < 50; pass++) {
-		universe.Tick(1.0f / 60.0f);
-	}
+	TickMany(universe, 50, "Tick · 50 worlds all publishing to each other");
 }

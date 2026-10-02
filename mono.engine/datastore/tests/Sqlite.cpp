@@ -123,3 +123,79 @@ TEST_CASE("SQLite datastore preserves the prior image when replacement fails", "
 	std::error_code ignored;
 	std::filesystem::remove_all(root, ignored);
 }
+
+TEST_CASE("SQLite datastore observes external file and schema changes", "[datastore][sqlite]") {
+	const auto root = Scratch();
+	const auto environment = engine::world::SharedStoreEnvironment::Live;
+	auto adapter = engine::datastore::MakeSqliteDataStoreAdapter(root, environment);
+	const Name store("players");
+	const std::vector<SharedStoreEntry> original{
+		{BusKind::DataStore, Name("score"), {std::byte{1}}, 3},
+	};
+	const std::vector<SharedStoreEntry> replacement{
+		{BusKind::DataStore, Name("score"), {std::byte{9}, std::byte{2}}, 11},
+	};
+	std::string error;
+	std::vector<SharedStoreEntry> loaded;
+	REQUIRE(adapter->Save(store, original, error) == DataStoreStatus::Ok);
+	REQUIRE(adapter->Load(store, loaded, error) == DataStoreStatus::Ok);
+	REQUIRE(loaded == original);
+	const auto path = engine::datastore::SqliteDataStorePath(root, environment);
+
+	SECTION("replacement and removal are visible to the same adapter") {
+		const auto replacementRoot = root / "replacement";
+		{
+			auto writer = engine::datastore::MakeSqliteDataStoreAdapter(replacementRoot, environment);
+			REQUIRE(writer->Save(store, replacement, error) == DataStoreStatus::Ok);
+		}
+		// Retain the old inode so a cached handle cannot accidentally pass by
+		// continuing to read the previous image after the path is replaced.
+		std::filesystem::rename(path, root / "previous.sqlite3");
+		std::filesystem::rename(engine::datastore::SqliteDataStorePath(replacementRoot, environment), path);
+		REQUIRE(adapter->Load(store, loaded, error) == DataStoreStatus::Ok);
+		CHECK(loaded == replacement);
+		REQUIRE(std::filesystem::remove(path));
+		loaded = original;
+		CHECK(adapter->Load(store, loaded, error) == DataStoreStatus::NotFound);
+		CHECK(loaded == original);
+		REQUIRE(adapter->Save(store, replacement, error) == DataStoreStatus::Ok);
+		REQUIRE(adapter->Load(store, loaded, error) == DataStoreStatus::Ok);
+		CHECK(loaded == replacement);
+	}
+
+	SECTION("missing schema refuses a load and a later save recreates it") {
+		{
+			SqliteHandle external;
+			REQUIRE(sqlite3_open(path.string().c_str(), &external.Handle) == SQLITE_OK);
+			REQUIRE(
+				sqlite3_exec(
+					external.Handle, "ALTER TABLE datastores RENAME TO archived", nullptr, nullptr, nullptr
+				) == SQLITE_OK
+			);
+		}
+		loaded = replacement;
+		CHECK(adapter->Load(store, loaded, error) != DataStoreStatus::Ok);
+		CHECK_FALSE(error.empty());
+		CHECK(loaded == replacement);
+		REQUIRE(adapter->Save(store, replacement, error) == DataStoreStatus::Ok);
+		REQUIRE(adapter->Load(store, loaded, error) == DataStoreStatus::Ok);
+		CHECK(loaded == replacement);
+		{
+			SqliteHandle external;
+			REQUIRE(sqlite3_open(path.string().c_str(), &external.Handle) == SQLITE_OK);
+			REQUIRE(
+				sqlite3_exec(
+					external.Handle,
+					"DROP TABLE datastores; ALTER TABLE archived RENAME TO datastores",
+					nullptr,
+					nullptr,
+					nullptr
+				) == SQLITE_OK
+			);
+		}
+		REQUIRE(adapter->Load(store, loaded, error) == DataStoreStatus::Ok);
+		CHECK(loaded == original);
+	}
+	adapter.reset();
+	std::filesystem::remove_all(root);
+}

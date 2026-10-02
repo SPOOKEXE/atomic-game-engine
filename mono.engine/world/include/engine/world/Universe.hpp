@@ -931,6 +931,8 @@ namespace engine::world {
 		// on one lane are serial and therefore never contend for its processor.
 		static constexpr unsigned INVALID_LANE = static_cast<unsigned>(-1);
 		std::vector<unsigned> LaneByWorld;
+		// Driver-only scratch, rebuilt from current local worlds on every refresh.
+		std::vector<size_t> LaneLoads;
 		unsigned LaneCount = 0;
 
 		std::vector<Control> Pending;

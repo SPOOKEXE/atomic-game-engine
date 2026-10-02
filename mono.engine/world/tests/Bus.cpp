@@ -1,3 +1,5 @@
+#include "fixtures/BusRoutingParity.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -8,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -1308,4 +1311,276 @@ TEST_CASE("staged deliveries cannot reach a world recreated under the same name"
 	CHECK(arrivals == 0);
 	delivered.Payload.resize(16 * 1024 * 1024);
 	CHECK_FALSE(worlds.Deliver(Name("target"), delivered));
+}
+
+TEST_CASE(
+	"routing preserves every patterned payload, sender string and recorded sequence", "[world][bus-routing]"
+) {
+	const auto checked = bus_routing_fixture::Preflight();
+	CHECK(checked.Requests == 16);
+	CHECK(checked.Deliveries == 48);
+	CHECK(checked.PayloadBytes == 1184);
+}
+
+TEST_CASE(
+	"retiring a world removes its bus ownership without removing shared values", "[world][bus-lifetime]"
+) {
+	UniverseSettings settings;
+	settings.Mode = engine::world::ExecutionMode::WorldSerial;
+	settings.ChannelsPerWorld = 1;
+	Universe universe(settings);
+	const auto sender = universe.Create(Named("lifetime.sender"));
+	const auto doomed = universe.Create(Named("lifetime.doomed"));
+	const auto survivor = universe.Create(Named("lifetime.survivor"));
+	const auto driver = universe.Create(Named("lifetime.driver"));
+	const auto value = Bytes("shared value survives its writer");
+	const auto queued = Bytes("shared queue survives its writer");
+	universe.Enter(doomed, [&](Store &store) {
+		Postbox box(store);
+		REQUIRE(box.Subscribe("lifetime.topic"));
+		REQUIRE(box.Subscribe("lifetime.private"));
+		REQUIRE(box.OpenChannel("lifetime.old").Expected());
+		REQUIRE(box.Set(BusKind::MemoryStore, "lifetime.value", value).Expected());
+		REQUIRE(box.Set(BusKind::DataStore, "lifetime.data", value).Expected());
+		REQUIRE(box.Push("lifetime.queue", queued).Expected());
+	});
+	universe.Enter(survivor, [](Store &store) {
+		REQUIRE(Postbox(store).Subscribe("lifetime.topic"));
+		REQUIRE(Postbox(store).OpenChannel("lifetime.old").Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
+	REQUIRE(universe.SubscriberCount(Name("lifetime.topic")) == 2);
+	REQUIRE(universe.SubscriberCount(Name("lifetime.private")) == 1);
+	Delivery pending;
+	pending.Key = Name("lifetime.staged");
+	pending.From = Name("lifetime.sender");
+	pending.Payload = Bytes("only the live recipient keeps this");
+	SECTION("direct removal") {
+		REQUIRE(universe.Deliver(Name("lifetime.doomed"), pending));
+		REQUIRE(universe.Deliver(Name("lifetime.survivor"), pending));
+		const auto previousTraffic = universe.LastTraffic().size();
+		REQUIRE(universe.Destroy(doomed) == engine::world::WorldStatus::Ok);
+		CHECK(universe.LastTraffic().size() == previousTraffic);
+		universe.Tick(1.0f / 60.0f);
+	}
+	SECTION("deferred removal at the next barrier") {
+		universe.Enter(driver, [&](Store &, Scheduler &systems) {
+			systems.Add("retire world", Phase::Simulation, [&universe, doomed, pending](Store &store) {
+				if (store.Time().Tick != 2) return;
+				REQUIRE(universe.Deliver(Name("lifetime.doomed"), pending));
+				REQUIRE(universe.Deliver(Name("lifetime.survivor"), pending));
+				REQUIRE(universe.Destroy(doomed) == engine::world::WorldStatus::Ok);
+			});
+		});
+		// Tick drains deferred controls after the worlds have joined, too. The
+		// staged live arrival remains queued until the following routing barrier.
+		universe.Tick(1.0f / 60.0f);
+		REQUIRE(universe.Count() == 3);
+		universe.Tick(1.0f / 60.0f);
+	}
+	REQUIRE(universe.Count() == 3);
+	CHECK(universe.SubscriberCount(Name("lifetime.topic")) == 1);
+	CHECK(universe.SubscriberCount(Name("lifetime.private")) == 0);
+	const auto liveStaged = Received(universe, survivor);
+	REQUIRE(liveStaged.size() == 1);
+	CHECK(liveStaged.front().Key == pending.Key);
+	CHECK(liveStaged.front().From == pending.From);
+	CHECK(liveStaged.front().Payload == pending.Payload);
+	const auto replacement = universe.Create(Named("lifetime.doomed"));
+	REQUIRE(replacement.Index == doomed.Index);
+	REQUIRE(Received(universe, replacement).empty());
+	std::array<Ticket, 5> requests{};
+	universe.Enter(sender, [&](Store &store) {
+		Postbox box(store);
+		REQUIRE(box.Publish("lifetime.topic", Bytes("fresh broadcast")));
+		requests[0] = box.SendTo("lifetime.doomed", "lifetime.old", Bytes("stale channel"));
+		requests[1] = box.SendTo("lifetime.survivor", "lifetime.old", Bytes("live channel"));
+		requests[2] = box.Get(BusKind::MemoryStore, "lifetime.value");
+		requests[3] = box.Get(BusKind::DataStore, "lifetime.data");
+		requests[4] = box.Pop("lifetime.queue");
+		for (Ticket request : requests)
+			REQUIRE(request.Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
+	REQUIRE(Received(universe, replacement).empty());
+	const auto live = Received(universe, survivor);
+	REQUIRE(live.size() == 2);
+	CHECK(live[0].Bus == BusKind::Messaging);
+	CHECK(live[0].Key == Name("lifetime.topic"));
+	CHECK(live[0].From == Name("lifetime.sender"));
+	CHECK(live[0].Payload == Bytes("fresh broadcast"));
+	CHECK(live[1].Bus == BusKind::Channel);
+	CHECK(live[1].Key == Name("lifetime.old"));
+	CHECK(live[1].From == Name("lifetime.sender"));
+	CHECK(live[1].Payload == Bytes("live channel"));
+	const auto replies = Received(universe, sender);
+	REQUIRE(replies.size() == requests.size());
+	for (size_t index = 0; index < replies.size(); ++index)
+		CHECK(replies[index].Reply == requests[index]);
+	CHECK(replies[0].Status == BusStatus::NoSuchChannel);
+	CHECK(replies[1].Status == BusStatus::Ok);
+	CHECK(replies[2].Status == BusStatus::Ok);
+	CHECK(replies[2].Payload == value);
+	CHECK(replies[3].Status == BusStatus::Ok);
+	CHECK(replies[3].Payload == value);
+	CHECK(replies[3].Version == 1);
+	CHECK(replies[4].Status == BusStatus::Ok);
+	CHECK(replies[4].Payload == queued);
+	universe.Enter(replacement, [](Store &store) {
+		REQUIRE(Postbox(store).OpenChannel("lifetime.fresh").Expected());
+	});
+	universe.Tick(1.0f / 60.0f);
+	const auto opened = Received(universe, replacement);
+	REQUIRE(opened.size() == 1);
+	CHECK(opened.front().Status == BusStatus::Ok);
+	CHECK(opened.front().Key == Name("lifetime.fresh"));
+}
+
+TEST_CASE(
+	"retiring a sender discards accepted requests but preserves other senders", "[world][bus-lifetime]"
+) {
+	UniverseSettings settings;
+	settings.Mode = engine::world::ExecutionMode::WorldSerial;
+	Universe universe(settings);
+	const auto host = Name("lifetime.host");
+	const auto retired = universe.CreateRemote(Named("accepted.retired"), host);
+	const auto live = universe.CreateRemote(Named("accepted.live"), host);
+	engine::world::Envelope stale;
+	stale.From = Name("accepted.retired");
+	stale.Bus = BusKind::MemoryStore;
+	stale.Operation = engine::world::BusOperation::Set;
+	stale.Key = Name("accepted.stale");
+	stale.Sequence = 1;
+	stale.Payload = Bytes("must not transfer to the replacement");
+	auto valid = stale;
+	valid.From = Name("accepted.live");
+	valid.Key = Name("accepted.valid");
+	const std::array traffic = {stale, valid};
+	SECTION("accepted host traffic") {
+		REQUIRE(universe.IngestTraffic(host, traffic) == 2);
+	}
+	SECTION("recorded traffic") {
+		universe.InjectTraffic({stale, valid});
+	}
+	REQUIRE(universe.Destroy(retired) == engine::world::WorldStatus::Ok);
+	const auto replacement = universe.CreateRemote(Named("accepted.retired"), host);
+	REQUIRE(replacement.Index == retired.Index);
+	universe.Tick(1.0f / 60.0f);
+	std::vector<std::byte> loaded;
+	CHECK(universe.Peek(BusKind::MemoryStore, stale.Key, &loaded) == BusStatus::NotFound);
+	CHECK(universe.Peek(BusKind::MemoryStore, valid.Key, &loaded) == BusStatus::Ok);
+	CHECK(loaded == valid.Payload);
+	const auto applied = universe.LastTraffic();
+	REQUIRE(applied.size() == 1);
+	CHECK(applied.front().From == valid.From);
+	CHECK(applied.front().Key == valid.Key);
+	CHECK(applied.front().Payload == valid.Payload);
+	CHECK(universe.NameOf(live) == valid.From);
+}
+
+TEST_CASE(
+	"retiring a remote destination discards only its queued outbound deliveries", "[world][bus-lifetime]"
+) {
+	UniverseSettings settings;
+	settings.Mode = engine::world::ExecutionMode::WorldSerial;
+	Universe universe(settings);
+	const auto host = Name("outbound.host");
+	const auto sender = universe.Create(Named("outbound.sender"));
+	const auto retired = universe.CreateRemote(Named("outbound.retired"), host);
+	const auto live = universe.CreateRemote(Named("outbound.live"), host);
+	engine::world::Envelope subscribe;
+	subscribe.Bus = BusKind::Messaging;
+	subscribe.Operation = engine::world::BusOperation::Subscribe;
+	subscribe.Key = Name("outbound.topic");
+	subscribe.Sequence = 1;
+	subscribe.From = Name("outbound.retired");
+	auto other = subscribe;
+	other.From = Name("outbound.live");
+	const std::array traffic = {subscribe, other};
+	REQUIRE(universe.IngestTraffic(host, traffic) == 2);
+	universe.Tick(1.0f / 60.0f);
+	universe.Enter(sender, [](Store &store) {
+		REQUIRE(Postbox(store).Publish("outbound.topic", Bytes("already applied")));
+	});
+	universe.Tick(1.0f / 60.0f);
+	REQUIRE(universe.Outbound().size() == 2);
+	REQUIRE(universe.Destroy(retired) == engine::world::WorldStatus::Ok);
+	const auto replacement = universe.CreateRemote(Named("outbound.retired"), host);
+	REQUIRE(replacement.Index == retired.Index);
+	const auto outgoing = universe.TakeOutbound();
+	REQUIRE(outgoing.size() == 1);
+	CHECK(outgoing.front().World == universe.NameOf(live));
+	CHECK(outgoing.front().Host == host);
+	CHECK(outgoing.front().Message.Key == Name("outbound.topic"));
+	CHECK(outgoing.front().Message.From == Name("outbound.sender"));
+	CHECK(outgoing.front().Message.Payload == Bytes("already applied"));
+	CHECK(universe.SubscriberCount(Name("outbound.topic")) == 1);
+}
+
+TEST_CASE("serial chatty oracle preserves cumulative ticks across captures", "[world][bus-oracle]") {
+	UniverseSettings settings;
+	settings.Mode = engine::world::ExecutionMode::WorldSerial;
+	Universe universe(settings);
+	for (size_t index = 0; index < 50; ++index) {
+		WorldSettings world;
+		world.Name = Name("bench.chat." + std::to_string(index));
+		world.TickRate = 60.0;
+		const auto id = universe.Create(world);
+		REQUIRE(universe.Enter(id, [](Store &, Scheduler &systems) {
+			systems.Add("chat", Phase::PreSimulation, [](Store &store) {
+				Postbox box(store);
+				if (store.Time().Tick <= 1) {
+					box.Subscribe("bench.topic");
+					return;
+				}
+				box.Publish("bench.topic");
+			});
+		}) == engine::world::WorldStatus::Ok);
+	}
+	universe.Tick(1.0f / 60.0f);
+	universe.Tick(1.0f / 60.0f);
+	REQUIRE(universe.Statistics().SimulationTicks == 100);
+	bus_routing_fixture::ChattyOracle oracle(universe);
+	for (uint64_t capture = 0; capture < 4; ++capture) {
+		universe.Tick(1.0f / 60.0f);
+		const auto actual = oracle.Verify(universe, 2 + capture, true);
+		bus_routing_fixture::Canonical expected;
+		expected.Export = true;
+		// Reconstruct every field independently, including cumulative world ticks.
+		for (uint64_t value : std::array<uint64_t, 8>{50, 2450, 50 * (3 + capture), 50, 0, 0, 0, 50})
+			expected.Number(value);
+		std::vector<std::string> names;
+		for (size_t index = 0; index < 50; ++index)
+			names.push_back("bench.chat." + std::to_string(index));
+		std::sort(names.begin(), names.end());
+		for (const auto &sender : names) {
+			expected.Number(0);
+			expected.Number(0);
+			expected.Text("bench.topic");
+			expected.Text(sender);
+			expected.Text("");
+			expected.Number(2 + capture);
+			expected.Number(0);
+			expected.Number(0);
+			expected.Number(0);
+		}
+		for (const auto &receiver : names) {
+			expected.Text(receiver);
+			expected.Number(49);
+			for (const auto &sender : names) {
+				if (sender == receiver) continue;
+				expected.Number(0);
+				expected.Text("bench.topic");
+				expected.Text(sender);
+				expected.Number(0);
+				expected.Number(0);
+				expected.Number(0);
+				expected.Number(0);
+			}
+		}
+		CHECK(actual.Words == expected.Words);
+		CHECK(actual.Hash == expected.Hash);
+		CHECK(actual.Bytes == expected.Bytes);
+		CHECK(actual.PayloadBytes == 0);
+	}
 }
