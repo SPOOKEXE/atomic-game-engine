@@ -51,6 +51,7 @@ namespace engine::imagegraph::detail {
 					  SourceNormalMapExecutors(),
 					  SourceAtlasExecutors(),
 					  SourceAtlasPixelExecutors(),
+					  SourcePaletteExecutors(),
 					  HostExecutors(),
 					  TriggerExecutors(),
 					  TemporalExecutors(),
@@ -74,6 +75,11 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if ((type == "pc.palette" && port == "palette") ||
+					((type == "pc.palette_sort" || type == "pc.palette_shrink") && port == "palette_in") ||
+					(type == "pc.palette_replace" &&
+					 (port == "palette_in" || port == "palette_from" || port == "palette_to")))
+					return true;
 				if (((type == "pc.atlas_get" || type == "pc.atlas_set" || type == "pc.atlas_struct") &&
 					 port == "input_0") ||
 					(type == "pc.atlas_draw" && port == "input_1") ||
