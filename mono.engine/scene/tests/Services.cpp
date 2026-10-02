@@ -10,6 +10,7 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -683,4 +684,56 @@ TEST_CASE("a world read out of a file is protected too", "[scene][services][fixt
 	REQUIRE(InstallServices(store) != NULL_ENTITY);
 	CHECK(store.Protected(lighting));
 	CHECK_FALSE(store.DestroyAuthored(lighting));
+}
+
+TEST_CASE(
+	"service lookup follows root identity through authored mutations", "[scene][services][service-lookup]"
+) {
+	services_test::Ready();
+	Store store("services.lookup.transitions");
+	const auto lighting = Classes::Find(Name("Lighting"));
+	const auto workspace = Classes::Find(Name("Workspace"));
+	CHECK(engine::scene::ServiceOf(store, engine::ecs::ClassId{}) == NULL_ENTITY);
+	CHECK(engine::scene::ServiceOf(store, lighting) == NULL_ENTITY);
+	const Entity first = store.CreateInstance(lighting, "Z duplicate");
+	const Entity other = store.CreateInstance(workspace, "Unrelated");
+	const Entity second = store.CreateInstance(lighting, "A duplicate");
+	REQUIRE(first != NULL_ENTITY);
+	REQUIRE(second != NULL_ENTITY);
+	REQUIRE(other != NULL_ENTITY);
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	CHECK(engine::scene::ServiceOf(store, engine::scene::ServiceClass()) == first);
+	REQUIRE(store.SetInstanceName(first, "Renamed"));
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	// Move the earlier instance into a different archetype; table iteration
+	// order must not choose the later duplicate which remains in its old table.
+	store.Set(first, engine::scene::Motion{});
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	REQUIRE(store.SetParent(first, other));
+	CHECK(engine::scene::ServiceOf(store, lighting) == second);
+	REQUIRE(store.SetParent(first, NULL_ENTITY));
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	store.Remove<engine::scene::Motion>(first);
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	store.Destroy(first);
+	CHECK(engine::scene::ServiceOf(store, lighting) == second);
+	// Reusing the freed slot gives it a newer generation. Root order follows
+	// the complete handle, so the surviving duplicate stays ahead of it.
+	const Entity replacement = store.CreateInstance(lighting, "Replacement");
+	REQUIRE(replacement != NULL_ENTITY);
+	REQUIRE(second.Id < replacement.Id);
+	CHECK_FALSE(store.Alive(first));
+	std::vector<Entity> matchingRoots;
+	store.EachRoot([&](Entity root) {
+		if (store.IsA(root, lighting)) matchingRoots.push_back(root);
+	});
+	REQUIRE(matchingRoots.size() == 2);
+	CHECK(matchingRoots[0] == second);
+	CHECK(matchingRoots[1] == replacement);
+	CHECK(engine::scene::ServiceOf(store, lighting) == matchingRoots.front());
+	store.Destroy(second);
+	CHECK(engine::scene::ServiceOf(store, lighting) == replacement);
+	store.Destroy(replacement);
+	CHECK(engine::scene::ServiceOf(store, lighting) == NULL_ENTITY);
+	CHECK(engine::scene::ServiceOf(store, workspace) == other);
 }
