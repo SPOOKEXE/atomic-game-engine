@@ -1,6 +1,10 @@
+#include "../src/GroupInstances.hpp"
+#include "../src/InlineCollections.hpp"
+
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
+#include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -87,13 +91,18 @@ namespace {
 		node["attri"] = Json::object();
 		return node;
 	}
-	void DiagnoseInvert(const engine::imagegraph::Document &document,
-		const engine::imagegraph::Plan &plan, const engine::imagegraph::Image &originalImage,
-		std::string_view label) {
-		const auto printImage = [](std::string_view name, int status, std::string_view message,
-			const engine::imagegraph::Image &image) {
+	void DiagnoseInvert(
+		const engine::imagegraph::Document &document,
+		const engine::imagegraph::Plan &plan,
+		const engine::imagegraph::Image &originalImage,
+		std::string_view label
+	) {
+		const auto printImage = [](std::string_view name,
+								   int status,
+								   std::string_view message,
+								   const engine::imagegraph::Image &image) {
 			std::cerr << name << " status=" << status << " message=" << message << " width=" << image.Width
-				<< " height=" << image.Height << " pixels=";
+					  << " height=" << image.Height << " pixels=";
 			for (size_t index = 0; index < image.Pixels.size(); index++)
 				std::cerr << (index == 0 ? "" : ",") << unsigned(image.Pixels[index]);
 			std::cerr << "\n";
@@ -103,20 +112,32 @@ namespace {
 		engine::imagegraph::Diagnostic overloadDiagnostic;
 		engine::imagegraph::Image explicitRequestImage;
 		const auto explicitRequestStatus = engine::imagegraph::Evaluate(
-			document, plan, "sink", engine::imagegraph::EvaluationRequest{}, explicitRequestImage,
-			explicitRequestDiagnostic);
+			document,
+			plan,
+			"sink",
+			engine::imagegraph::EvaluationRequest{},
+			explicitRequestImage,
+			explicitRequestDiagnostic
+		);
 		engine::imagegraph::Image overloadImage;
-		const auto overloadStatus = engine::imagegraph::Evaluate(
-			document, plan, "sink", overloadImage, overloadDiagnostic);
-		printImage("REPEAT_SINK_EXPLICIT_REQUEST", int(explicitRequestStatus), explicitRequestDiagnostic.Message,
-			explicitRequestImage);
-		printImage("REPEAT_SINK_DEFAULT_OVERLOAD", int(overloadStatus), overloadDiagnostic.Message, overloadImage);
+		const auto overloadStatus =
+			engine::imagegraph::Evaluate(document, plan, "sink", overloadImage, overloadDiagnostic);
+		printImage(
+			"REPEAT_SINK_EXPLICIT_REQUEST",
+			int(explicitRequestStatus),
+			explicitRequestDiagnostic.Message,
+			explicitRequestImage
+		);
+		printImage(
+			"REPEAT_SINK_DEFAULT_OVERLOAD", int(overloadStatus), overloadDiagnostic.Message, overloadImage
+		);
 		engine::imagegraph::EvaluationSnapshot snapshot;
 		engine::imagegraph::Diagnostic diagnostic;
 		const auto status = engine::imagegraph::EvaluateNodeInputs(
-			document, plan, "filter", engine::imagegraph::EvaluationRequest{}, snapshot, diagnostic);
+			document, plan, "filter", engine::imagegraph::EvaluationRequest{}, snapshot, diagnostic
+		);
 		std::cerr << "INVERT_DIAGNOSTIC_BEGIN " << label << " status=" << int(status)
-			<< " message=" << diagnostic.Message << "\n";
+				  << " message=" << diagnostic.Message << "\n";
 		for (const auto &value : snapshot.Values()) {
 			std::cerr << value.Port << " variant=" << value.Data.index();
 			if (const auto *v = std::get_if<bool>(&value.Data)) std::cerr << " bool=" << *v;
@@ -125,8 +146,8 @@ namespace {
 			std::cerr << "\n";
 		}
 		for (const auto &link : plan.EffectiveLinks)
-			std::cerr << "EFFECTIVE_LINK " << link.FromNode << ":" << link.FromPort
-				<< " -> " << link.ToNode << ":" << link.ToPort << "\n";
+			std::cerr << "EFFECTIVE_LINK " << link.FromNode << ":" << link.FromPort << " -> " << link.ToNode
+					  << ":" << link.ToPort << "\n";
 		for (const size_t index : plan.NodeOrder)
 			std::cerr << "ORDER " << document.Nodes[index].Id << "\n";
 		auto direct = document;
@@ -135,7 +156,9 @@ namespace {
 		auto directStatus = engine::imagegraph::Compile(direct, directPlan, diagnostic);
 		engine::imagegraph::Image directImage;
 		if (directStatus == engine::imagegraph::Status::Ok)
-			directStatus = engine::imagegraph::Evaluate(direct, directPlan, "filter-diagnostic", directImage, diagnostic);
+			directStatus = engine::imagegraph::Evaluate(
+				direct, directPlan, "filter-diagnostic", directImage, diagnostic
+			);
 		std::cerr << "DIRECT_FILTER status=" << int(directStatus) << " message=" << diagnostic.Message;
 		for (size_t index = 0; index < std::min(size_t{4}, directImage.Pixels.size()); ++index)
 			std::cerr << " channel" << index << "=" << unsigned(directImage.Pixels[index]);
@@ -143,9 +166,10 @@ namespace {
 		for (const std::string_view nodeId : {"output", "sink"}) {
 			engine::imagegraph::EvaluationSnapshot incoming;
 			const auto incomingStatus = engine::imagegraph::EvaluateNodeInputs(
-				document, plan, nodeId, engine::imagegraph::EvaluationRequest{}, incoming, diagnostic);
+				document, plan, nodeId, engine::imagegraph::EvaluationRequest{}, incoming, diagnostic
+			);
 			std::cerr << "HANDOFF_INPUT node=" << nodeId << " status=" << int(incomingStatus)
-				<< " message=" << diagnostic.Message << "\n";
+					  << " message=" << diagnostic.Message << "\n";
 			for (const auto &inputImage : incoming.Images()) {
 				std::cerr << "HANDOFF_IMAGE node=" << nodeId << " port=" << inputImage.Port;
 				for (size_t index = 0; index < std::min(size_t{4}, inputImage.Data.Pixels.size()); ++index)
@@ -153,18 +177,20 @@ namespace {
 				std::cerr << "\n";
 			}
 		}
-		for (const auto &selected : {engine::imagegraph::Output{"input-diagnostic", "input", "value"},
-			engine::imagegraph::Output{"output-diagnostic", "output", "value"}}) {
+		for (const auto &selected :
+			 {engine::imagegraph::Output{"input-diagnostic", "input", "value"},
+			  engine::imagegraph::Output{"output-diagnostic", "output", "value"}}) {
 			auto selectedDocument = document;
 			selectedDocument.Outputs.push_back(selected);
 			engine::imagegraph::Plan selectedPlan;
 			auto selectedStatus = engine::imagegraph::Compile(selectedDocument, selectedPlan, diagnostic);
 			engine::imagegraph::Image selectedImage;
 			if (selectedStatus == engine::imagegraph::Status::Ok)
-				selectedStatus = engine::imagegraph::Evaluate(selectedDocument, selectedPlan, selected.Id,
-					selectedImage, diagnostic);
+				selectedStatus = engine::imagegraph::Evaluate(
+					selectedDocument, selectedPlan, selected.Id, selectedImage, diagnostic
+				);
 			std::cerr << "HANDOFF_OUTPUT node=" << selected.NodeId << " status=" << int(selectedStatus)
-				<< " message=" << diagnostic.Message;
+					  << " message=" << diagnostic.Message;
 			for (size_t index = 0; index < std::min(size_t{4}, selectedImage.Pixels.size()); ++index)
 				std::cerr << " channel" << index << "=" << unsigned(selectedImage.Pixels[index]);
 			std::cerr << "\n";
@@ -2248,4 +2274,331 @@ TEST_CASE("Linked source quaternion metadata survives import and native save", "
 		REQUIRE(input != snapshot.Values().end());
 		CHECK(input->Data == engine::imagegraph::Value{expected});
 	}
+}
+
+TEST_CASE(
+	"Inline Verlet collection retains wrapper controls and nested group topology",
+	"[imagegraphio][groups][inline]"
+) {
+	auto graph = Graph();
+	auto owner = Node(
+		"simulation",
+		"Node_VerletSim_Inline",
+		Json::array(
+			{Value(3),
+			 Value(Json::array({0.25, 0.75})),
+			 Json{{"r", {{"d", {2, 2}}}}, {"attri", {{"use_project_dimension", 0}}}},
+			 Value(5)}
+		)
+	);
+	owner["attri"] = {{"members", Json::array({"root", "group"})}, {"shape", 1}};
+	graph["nodes"].push_back(owner);
+	for (auto &node : graph["nodes"])
+		if (node["id"] == "root") node["ictx"] = "simulation";
+	const auto archive = Archive(graph);
+	PxcxImport imported;
+	std::string failure;
+	const bool accepted = ImportPxcxImageGraph(archive, imported, failure);
+	INFO(failure);
+	REQUIRE(accepted);
+	CHECK(imported.Source.OriginalBytes == archive.OriginalBytes);
+	const auto wrapper =
+		std::find_if(imported.Graph.Nodes.begin(), imported.Graph.Nodes.end(), [](const auto &node) {
+			return node.Id == "simulation";
+		});
+	REQUIRE(wrapper != imported.Graph.Nodes.end());
+	CHECK(wrapper->Type == "pc.verlet_sim_inline");
+	CHECK(wrapper->GroupId.empty());
+	const auto substep = std::find_if(wrapper->Values.begin(), wrapper->Values.end(), [](const auto &value) {
+		return value.Port == "substep";
+	});
+	REQUIRE(substep != wrapper->Values.end());
+	CHECK(std::get<int64_t>(substep->Data) == 3);
+	const auto gravity = std::find_if(wrapper->Values.begin(), wrapper->Values.end(), [](const auto &value) {
+		return value.Port == "gravity";
+	});
+	REQUIRE(gravity != wrapper->Values.end());
+	CHECK((std::get<engine::imagegraph::Vector2>(gravity->Data) == engine::imagegraph::Vector2{0.25, 0.75}));
+
+	const auto collection =
+		std::find_if(imported.Graph.Groups.begin(), imported.Graph.Groups.end(), [](const auto &group) {
+			return group.OwnerNodeId == "simulation";
+		});
+	REQUIRE(collection != imported.Graph.Groups.end());
+	CHECK(collection->Id == "simulation/inline");
+	CHECK(collection->Ports.empty());
+	const auto nested =
+		std::find_if(imported.Graph.Groups.begin(), imported.Graph.Groups.end(), [](const auto &group) {
+			return group.Id == "group";
+		});
+	REQUIRE(nested != imported.Graph.Groups.end());
+	CHECK(nested->ParentId == collection->Id);
+	CHECK(nested->Ports.size() == 2);
+	const auto root =
+		std::find_if(imported.Graph.Nodes.begin(), imported.Graph.Nodes.end(), [](const auto &node) {
+			return node.Id == "root";
+		});
+	REQUIRE(root != imported.Graph.Nodes.end());
+	CHECK(root->GroupId == collection->Id);
+	engine::imagegraph::Document restored;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(
+		engine::imagegraph::Read(engine::imagegraph::Write(imported.Graph), restored, diagnostic) ==
+		engine::imagegraph::Status::Ok
+	);
+	CHECK(restored.Groups == imported.Graph.Groups);
+	CHECK(restored.Links == imported.Graph.Links);
+	engine::imagegraph::Plan plan;
+	REQUIRE(engine::imagegraph::Compile(restored, plan, diagnostic) == engine::imagegraph::Status::Ok);
+}
+
+TEST_CASE(
+	"Conflicting inline member owners refuse an ambiguous source projection", "[imagegraphio][groups][inline]"
+) {
+	auto graph = Graph();
+	for (const std::string ownerId : {"a", "b"}) {
+		auto owner = Node(ownerId, "Node_VerletSim_Inline");
+		owner["attri"] = {{"members", Json::array({"root"})}};
+		graph["nodes"].push_back(owner);
+	}
+	PxcxImport sentinel;
+	sentinel.Graph.Nodes.push_back({"sentinel", "image.solid", "", {}, {}});
+	std::string failure;
+	CHECK_FALSE(ImportPxcxImageGraph(Archive(graph), sentinel, failure));
+	CHECK(failure.find("conflicting") != std::string::npos);
+	REQUIRE(sentinel.Graph.Nodes.size() == 1);
+	CHECK(sentinel.Graph.Nodes.front().Id == "sentinel");
+}
+
+TEST_CASE(
+	"Inline collection owner relation follows renamed source group instance children",
+	"[imagegraphio][groups][inline]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Groups = {{"base", "base"}, {"copy", "copy"}};
+	document.Nodes = {
+		{"owner", "pc.verlet_sim_inline", "base", {}, {}},
+		{"member", "pc.vector2", "base", {}, {}},
+		{"copy-owner", "pc.verlet_sim_inline", "copy", {}, {}},
+		{"copy-member", "pc.vector2", "copy", {}, {}}
+	};
+	document.Nodes[2].InstanceBase = "owner";
+	document.Nodes[3].InstanceBase = "member";
+	document.Outputs = {{"vector", "copy-member", "vector"}};
+	auto owner = ::Node("owner", "Node_VerletSim_Inline");
+	owner["attri"] = {{"members", Json::array({"member"})}};
+	Json root = {{"nodes", Json::array({owner, ::Node("member", "Node_Vector2")})}};
+	engine::imagegraphio::detail::ImportBudget budget(Limits::MaximumEvaluationBytes);
+	std::string failure;
+	REQUIRE(engine::imagegraphio::detail::ProjectInlineCollections(root, document, budget, failure));
+	CHECK(document.Nodes[1].GroupId == "owner/inline");
+	CHECK(document.Nodes[3].GroupId == "copy-owner/inline");
+	const auto copy = std::find_if(document.Groups.begin(), document.Groups.end(), [](const Group &group) {
+		return group.OwnerNodeId == "copy-owner";
+	});
+	REQUIRE(copy != document.Groups.end());
+	CHECK(copy->ParentId == "copy");
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	const auto route = std::find_if(
+		plan.InlineOwnerDependencies.begin(), plan.InlineOwnerDependencies.end(), [](const auto &dependency) {
+			return dependency.Consumer == 3;
+		}
+	);
+	REQUIRE(route != plan.InlineOwnerDependencies.end());
+	CHECK(route->Owner == 2);
+}
+
+TEST_CASE(
+	"Pixel Builder collection preserves fixed controls and offset custom sockets",
+	"[imagegraphio][groups][pixel_builder]"
+) {
+	using namespace engine::imagegraph;
+	auto graph = Graph();
+	auto &builder = graph["nodes"][1];
+	builder["type"] = "Node_Pixel_Builder";
+	builder["inputs"] = Json::array(
+		{Json{{"r", {{"d", {2, 2}}}}, {"attri", {{"use_project_dimension", 0}}}},
+		 ::Value(false),
+		 ::Value(0),
+		 ::Value(0xFFFFFFFFu),
+		 Wire("root")}
+	);
+	builder["attri"]["always_topo"] = true;
+	graph["nodes"][4]["inputs"][0] = Wire("group", 2);
+	PxcxImport imported;
+	std::string failure;
+	const bool accepted = ImportPxcxImageGraph(Archive(graph), imported, failure);
+	INFO(failure);
+	REQUIRE(accepted);
+	const auto wrapper =
+		std::find_if(imported.Graph.Nodes.begin(), imported.Graph.Nodes.end(), [](const auto &node) {
+			return node.Id == "group";
+		});
+	REQUIRE(wrapper != imported.Graph.Nodes.end());
+	CHECK(wrapper->Type == "pc.pixel_builder");
+	CHECK(wrapper->GroupId.empty());
+	REQUIRE(imported.Graph.Groups.size() == 1);
+	CHECK(imported.Graph.Groups.front().OwnerNodeId == wrapper->Id);
+	CHECK(imported.Graph.Groups.front().Ports.size() == 2);
+	Document restored;
+	Diagnostic diagnostic;
+	REQUIRE(Read(Write(imported.Graph), restored, diagnostic) == Status::Ok);
+	CHECK(restored == imported.Graph);
+	Plan plan;
+	const auto compiled = Compile(restored, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	Image image;
+	const auto status = Evaluate(restored, plan, "sink", image, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(status == Status::Ok);
+	CheckPixels(image, {239, 223, 191, 255});
+	SECTION("A canonical collection rename retains fixed controls and custom socket offsets") {
+		auto authored = imported.Graph;
+		authored.Groups.front().Name = "Renamed builder";
+		for (auto &node : authored.Nodes)
+			if (node.Id == "group") node.SourceDisplayName = "Renamed builder";
+		std::vector<std::byte> bytes;
+		const bool saved = WritePxcxProjection(imported, authored, {}, bytes, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(saved);
+		engine::bake::PxcxArchive archive;
+		REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+		PxcxImport reimported;
+		REQUIRE(ImportPxcxImageGraph(archive, reimported, failure));
+		CHECK(reimported.Graph == authored);
+		std::string json = archive.GraphJson;
+		if (!json.empty() && json.back() == '\0') json.pop_back();
+		const Json savedGraph = Json::parse(json);
+		const auto savedBuilder =
+			std::find_if(savedGraph.at("nodes").begin(), savedGraph.at("nodes").end(), [](const Json &node) {
+				return node.at("id") == "group";
+			});
+		REQUIRE(savedBuilder != savedGraph.at("nodes").end());
+		REQUIRE(savedBuilder->at("inputs").size() == 5);
+		for (size_t index = 0; index < 4; ++index)
+			CHECK(savedBuilder->at("inputs")[index] == builder.at("inputs")[index]);
+		CHECK(savedBuilder->at("inputs")[4].at("from_node") == "root");
+		const auto savedSink =
+			std::find_if(savedGraph.at("nodes").begin(), savedGraph.at("nodes").end(), [](const Json &node) {
+				return node.at("id") == "sink";
+			});
+		REQUIRE(savedSink != savedGraph.at("nodes").end());
+		CHECK(savedSink->at("inputs")[0].at("from_index") == 2);
+	}
+}
+
+TEST_CASE(
+	"Group instances preserve each Pixel Builder's local child ownership",
+	"[imagegraphio][groups][pixel_builder]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"builder",
+		 "pc.pixel_builder",
+		 "base",
+		 {},
+		 {{"dimension", Vector2{2, 3}}, {"dimension_unit", EnumValue{0}}}},
+		{"base-child", "pc.pb_dimension", "builder", {}, {}},
+		{"copy-builder",
+		 "pc.pixel_builder",
+		 "copy",
+		 {},
+		 {{"dimension", Vector2{9, 9}}, {"dimension_unit", EnumValue{0}}}},
+		{"copy-child", "pc.pb_dimension", "copy-builder", {}, {}}
+	};
+	Group base{"base", "base"}, copy{"copy", "copy"};
+	copy.InstanceBase = "base";
+	Group builder{"builder", "builder"}, local{"copy-builder", "local"};
+	builder.ParentId = "base";
+	builder.OwnerNodeId = "builder";
+	local.ParentId = "copy";
+	local.OwnerNodeId = "copy-builder";
+	document.Groups = {base, copy, builder, local};
+	document.Outputs = {{"dimension", "copy-child", "dimension"}};
+	Json root{
+		{"nodes",
+		 Json::array(
+			 {::Node("base", "Node_Group"),
+			  ::Node("copy", "Node_Group"),
+			  ::Node("builder", "Node_Pixel_Builder"),
+			  ::Node("copy-builder", "Node_Pixel_Builder"),
+			  ::Node("base-child", "Node_PB_Dimension"),
+			  ::Node("copy-child", "Node_PB_Dimension")}
+		 )}
+	};
+	std::string failure;
+	const bool accepted =
+		engine::imagegraphio::detail::ResolveImportedGroupInstances(root, document, failure);
+	INFO(failure);
+	REQUIRE(accepted);
+	const auto matched = std::find_if(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+		return node.Id == "copy-builder";
+	});
+	REQUIRE(matched != document.Nodes.end());
+	CHECK(matched->InstanceBase == "builder");
+	const auto child = std::find_if(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+		return node.Id == "copy-child";
+	});
+	REQUIRE(child != document.Nodes.end());
+	CHECK(child->GroupId == "copy-builder");
+	CHECK(child->InstanceBase.empty());
+	const auto owned = std::find_if(document.Groups.begin(), document.Groups.end(), [](const auto &group) {
+		return group.Id == "copy-builder";
+	});
+	REQUIRE(owned != document.Groups.end());
+	CHECK(owned->OwnerNodeId == "copy-builder");
+	CHECK(owned->InstanceBase.empty());
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compiled = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	EvaluatedValue value;
+	REQUIRE(EvaluateValue(document, plan, "dimension", {}, value, diagnostic) == Status::Ok);
+	CHECK(std::get<Vector2>(value.Data) == Vector2{2, 3});
+}
+
+TEST_CASE(
+	"Missing Pixel Builder instance clones get a separate empty collection",
+	"[imagegraphio][groups][pixel_builder]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"builder", "pc.pixel_builder", "base", {}, {}}};
+	Group base{"base", "base"}, copy{"copy", "copy"}, builder{"builder", "builder"};
+	copy.InstanceBase = "base";
+	builder.ParentId = "base";
+	builder.OwnerNodeId = "builder";
+	document.Groups = {base, copy, builder};
+	Json root{
+		{"nodes",
+		 Json::array(
+			 {::Node("base", "Node_Group"),
+			  ::Node("copy", "Node_Group"),
+			  ::Node("builder", "Node_Pixel_Builder")}
+		 )}
+	};
+	std::string failure;
+	REQUIRE(engine::imagegraphio::detail::ResolveImportedGroupInstances(root, document, failure));
+	const auto cloned = std::find_if(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+		return node.InstanceBase == "builder";
+	});
+	REQUIRE(cloned != document.Nodes.end());
+	CHECK(cloned->GroupId == "copy");
+	const auto scope = std::find_if(document.Groups.begin(), document.Groups.end(), [&](const auto &group) {
+		return group.OwnerNodeId == cloned->Id;
+	});
+	REQUIRE(scope != document.Groups.end());
+	CHECK(scope->Id == cloned->Id);
+	CHECK(scope->ParentId == "copy");
+	CHECK(scope->Ports.empty());
+	CHECK(scope->InstanceBase.empty());
 }

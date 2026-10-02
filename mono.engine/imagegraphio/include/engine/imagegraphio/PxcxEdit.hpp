@@ -42,7 +42,7 @@ namespace engine::imagegraphio {
 		PxcxKeyframeInsertEdit,
 		PxcxKeyframeDeleteEdit>;
 
-	// Applies existing-node XY, fixed catalogue values and source key edits atomically.
+	// Applies existing-node XY, catalogue values and source key edits atomically.
 	// expectedSource must match the retained original bytes; untracked Graph changes are rejected.
 	// No-op edits emit identical bytes. Modified JSON retains unknown values and order, not spelling.
 	// Payloads share the native 4 MiB array budget. Key moves must retain source record order.

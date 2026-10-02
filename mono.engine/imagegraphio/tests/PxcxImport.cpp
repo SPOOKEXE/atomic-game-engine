@@ -2134,10 +2134,10 @@ namespace {
 		PxcxArchive initial;
 		initial.MetadataNumber = 121092;
 		initial.MetadataText = "1.22.10.201";
-		initial.GraphJson = "{\"animator\":{\"frames_total\":12,\"playback\":0,\"framerate\":30" +
-							std::string(bounds) +
-							"},\"aRegion\":[{\"frameStart\":4,\"frameEnd\":5}],\"nodes\":[" +
-							Node("number", "Node_Number", NumberInputs(false)) + "]}" + '\0';
+		initial.GraphJson =
+			"{\"animator\":{\"frames_total\":12,\"playback\":0,\"framerate\":30" + std::string(bounds) +
+			"},\"aRegion\":[{\"l\":\"Region\",\"c\":16777215,\"fs\":4,\"fe\":5}],\"nodes\":[" +
+			Node("number", "Node_Number", NumberInputs(false)) + "]}" + '\0';
 		std::vector<std::byte> bytes;
 		std::string failure;
 		REQUIRE(WritePxcx(initial, bytes, failure));

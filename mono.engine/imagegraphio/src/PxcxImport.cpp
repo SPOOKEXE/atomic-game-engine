@@ -1,4 +1,5 @@
 #include "GroupInstances.hpp"
+#include "InlineCollections.hpp"
 
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
@@ -1205,6 +1206,12 @@ namespace engine::imagegraphio {
 						Colour color;
 						if (!PackedColour(item, color)) return false;
 						array.Elements.emplace_back(color);
+					} else if (element == ValueType::Boolean) {
+						if (!item.is_boolean()) return false;
+						array.Elements.emplace_back(item.get<bool>());
+					} else if (element == ValueType::Integer) {
+						if (!WholeNumber(item, whole)) return false;
+						array.Elements.emplace_back(whole);
 					} else if (element == ValueType::Text) {
 						if (!item.is_string() ||
 							!AdmitNativeText(item.get_ref<const std::string &>(), budget))
@@ -1600,6 +1607,27 @@ namespace engine::imagegraphio {
 				reason = "source generated port storage exceeds native animator operation bounds";
 				return false;
 			};
+			if (record.contains("global_key") || record.contains("global_use")) {
+				if ((record.contains("global_key") && !record["global_key"].is_string()) ||
+					(record.contains("global_use") && !record["global_use"].is_boolean())) {
+					reason = "source expression metadata is malformed";
+					return false;
+				}
+				std::string code = record.value("global_key", std::string{});
+				if (node.SourceInputExpressions.size() >=
+						imagegraph::Limits::MaximumSourceInputExpressionsPerNode ||
+					!AdmitNativeText(code, budget) || !AdmitNativeText(id, budget) ||
+					!AdmitNativeSlots(
+						node.SourceInputExpressions, node.SourceInputExpressions.size() + 1, budget
+					)) {
+					reason = "source expression metadata exceeds native budget";
+					return false;
+				}
+				node.SourceInputExpressions.push_back(
+					{id, std::move(code), record.value("global_use", false)}
+				);
+				animation.FormatVersion = 9;
+			}
 			std::optional<int64_t> quaternionMode;
 			if (input.Type == imagegraph::ValueType::Quaternion) {
 				const auto attributes = record.find("attri");
@@ -1614,6 +1642,15 @@ namespace engine::imagegraphio {
 					return false;
 				}
 				quaternionMode = mode;
+			}
+			if (entry.Type == "pc.export" && input.Id == "framerate") {
+				int64_t mode = 1;
+				if (const auto *unit = Attribute(record, "unit");
+					unit && (!WholeNumber(*unit, mode) || mode < 0 || mode > 1)) {
+					reason = "Export framerate unit must be FPS or Relative";
+					return false;
+				}
+				if (!appendValue("framerate_unit", imagegraph::EnumValue{mode})) return false;
 			}
 			// Node_Audio_Window stores Bit/Second/Progress on Location.attributes.unit, serialized as attri.
 			if (entry.Type == "pc.audio_window" && input.Id == "location") {
@@ -1636,7 +1673,8 @@ namespace engine::imagegraphio {
 				std::string unitId;
 				if (!makePort("unit", unitId)) return false;
 				const imagegraph::CatalogueInput *toggle = imagegraph::FindCatalogueInput(entry, unitId);
-				if (toggle && toggle->SourceKind == "ValueUnit" && WholeNumber(*unit, mode) &&
+				if (!(entry.Type == "pc.export" && input.Id == "framerate") && toggle &&
+					toggle->SourceKind == "ValueUnit" && WholeNumber(*unit, mode) &&
 					(mode == 0 || mode == 1)) {
 					if (!appendValue(unitId, imagegraph::EnumValue{mode})) return false;
 				}
@@ -1717,10 +1755,6 @@ namespace engine::imagegraphio {
 				(!imagegraph::IsAuthoredValueType(input.Type) &&
 				 !(entry.Type == "pc.group_input" && input.Id == "parent_value")))
 				return true;
-			if (record.contains("global_key") || record.contains("global_use")) {
-				reason = "global variable binding has no native mapping";
-				return false;
-			}
 			const bool opaqueGradientRange =
 				entry.Type == "pc.gradient" && input.Id == "gradient_map_range" && input.SourceIndex == 16 &&
 				input.SourceKind == "Vec4" && input.Type == imagegraph::ValueType::Vector4;
@@ -1881,6 +1915,132 @@ namespace engine::imagegraphio {
 			return true;
 		}
 
+		bool ProjectGlobals(
+			const Json &root, imagegraph::Document &graph, detail::ImportBudget &budget, std::string &failure
+		) {
+			auto saved = root.find("global");
+			if (saved == root.end()) saved = root.find("global_node");
+			if (saved == root.end()) return true;
+			if (!saved->is_object() || !saved->contains("inputs") || !(*saved)["inputs"].is_array()) {
+				failure = "PXC global inputs are malformed";
+				return false;
+			}
+			const auto &inputs = (*saved)["inputs"];
+			if (inputs.empty()) return true;
+			if (inputs.size() > imagegraph::MaximumDynamicInputsForType("pc.global_scope")) {
+				failure = "PXC global input count exceeds bounds";
+				return false;
+			}
+			Node node;
+			node.Id = "$project-global";
+			node.Type = "pc.global_scope";
+			while (std::any_of(graph.Nodes.begin(), graph.Nodes.end(), [&](const Node &existing) {
+				return existing.Id == node.Id;
+			}))
+				node.Id += "_";
+			if (!AdmitNativeText(node.Id, &budget) ||
+				!AdmitNativeSlots(graph.Nodes, graph.Nodes.size() + 1, &budget)) {
+				failure = "PXC global node exceeds import budget";
+				return false;
+			}
+			imagegraph::CatalogueEntry entry{};
+			entry.Type = "pc.global_scope";
+			for (const auto &record : inputs) {
+				if (!record.is_object() || !record.contains("global_name") ||
+					!record["global_name"].is_string()) {
+					failure = "PXC global name is missing";
+					return false;
+				}
+				std::string name = record["global_name"].get<std::string>();
+				int64_t type = 0, display = 0;
+				if (name.empty() || !AdmitNativeText(name, &budget) ||
+					std::any_of(
+						node.DynamicInputs.begin(),
+						node.DynamicInputs.end(),
+						[&](const auto &v) { return v.Id == name; }
+					) ||
+					(record.contains("global_type") && !WholeNumber(record["global_type"], type)) ||
+					(record.contains("global_disp") && !WholeNumber(record["global_disp"], display)) ||
+					type < 0 || type > 7 || display < 0 || display > 12) {
+					failure = "PXC global type, display or name is invalid";
+					return false;
+				}
+				static constexpr imagegraph::ValueType types[]{
+					imagegraph::ValueType::Integer,
+					imagegraph::ValueType::Scalar,
+					imagegraph::ValueType::Boolean,
+					imagegraph::ValueType::Colour,
+					imagegraph::ValueType::Gradient,
+					imagegraph::ValueType::Text,
+					imagegraph::ValueType::Curve,
+					imagegraph::ValueType::Text
+				};
+				imagegraph::CatalogueInput input{};
+				input.Id = name;
+				input.Type = types[type];
+				input.SourceKind = "Global";
+				if (type <= 1) {
+					if (display == 7) {
+						input.Type = imagegraph::ValueType::Vector2;
+						input.SourceKind = "Vec2";
+					} else if (display == 8) {
+						input.Type = imagegraph::ValueType::Vector3;
+						input.SourceKind = "Vec3";
+					} else if (display == 9) {
+						input.Type = imagegraph::ValueType::Vector4;
+						input.SourceKind = "Vec4";
+					} else if (display == 1 || display == 3 || display == 5 || display == 10) {
+						input.Type = imagegraph::ValueType::Vector2;
+						input.SourceKind = "Range";
+					} else if (display == 6 || display == 11) {
+						input.Type = imagegraph::ValueType::Vector4;
+						input.SourceKind = "Vec4";
+					} else if (display == 12)
+						input.Type = imagegraph::ValueType::Array;
+				}
+				if (type == 3 && display == 1) {
+					input.Type = imagegraph::ValueType::Array;
+					input.SourceKind = "Palette";
+				}
+				if (((type == 2 || type == 4 || type == 6 || type == 7) && display != 0) ||
+					((type == 3 || type == 5) && display > 1)) {
+					failure = "PXC global display index is invalid for its type";
+					return false;
+				}
+				if (record.contains("anim") && !record["anim"].is_boolean()) {
+					failure = "PXC global animator flag is malformed";
+					return false;
+				}
+				auto &modes =
+					record.value("anim", false) ? node.SourceAnimatedInputs : node.SourceStaticInputs;
+				if (!AdmitNativeSlots(modes, modes.size() + 1, &budget) || !AdmitNativeText(name, &budget)) {
+					failure = "PXC global animator modes exceed budget";
+					return false;
+				}
+				modes.push_back(name);
+				const size_t before = node.Values.size();
+				if (!CatalogueInputValue(record, entry, input, node.Id, node, graph, failure, false, &budget))
+					return false;
+				imagegraph::DynamicInput dynamic{name, input.Type, std::nullopt};
+				for (size_t v = before; v < node.Values.size(); ++v) {
+					if (node.Values[v].Port != name) {
+						failure = "PXC global attributes have no exact mapping";
+						return false;
+					}
+					dynamic.Default = std::move(node.Values[v].Data);
+				}
+				node.Values.resize(before);
+				if (!AdmitNativeSlots(node.DynamicInputs, node.DynamicInputs.size() + 1, &budget)) {
+					failure = "PXC global inputs exceed budget";
+					return false;
+				}
+				node.DynamicInputs.push_back(std::move(dynamic));
+			}
+			graph.ProjectGlobalNodeId = node.Id;
+			graph.FormatVersion = 9;
+			graph.Nodes.push_back(std::move(node));
+			return true;
+		}
 		// Projects a node with a source catalogue entry, keeping every source input index and value.
 		bool CatalogueNode(
 			const Json &source,
@@ -1910,6 +2070,17 @@ namespace engine::imagegraphio {
 						return false;
 					continue;
 				}
+				// Collection custom sockets are projected into child boundary junctions below.
+				if (entry.SourceNode == "Node_Pixel_Builder" && sourceIndex >= 4) {
+					const auto attributes = source.find("attri");
+					if (attributes != source.end() && attributes->is_object() &&
+						attributes->contains("custom_input_list")) {
+						const auto &sockets = attributes->at("custom_input_list");
+						if (sockets.is_array() && sockets.size() <= imagegraph::Limits::MaximumGroupPorts &&
+							index - 4 < sockets.size())
+							continue;
+					}
+				}
 				if (entry.DynamicGroupLength <= 0 || sourceIndex < entry.DynamicFixedLength) {
 					reason =
 						"input index " + std::to_string(index) + " is not in the pinned source catalogue";
@@ -1927,7 +2098,7 @@ namespace engine::imagegraphio {
 						"dynamic input offset " + std::to_string(offset) + " is not in the source template";
 					return false;
 				}
-				if (node.DynamicInputs.size() >= imagegraph::Limits::MaximumDynamicInputsPerNode) {
+				if (node.DynamicInputs.size() >= imagegraph::MaximumDynamicInputsForType(entry.Type)) {
 					reason = "dynamic inputs exceed the native limit";
 					return false;
 				}
@@ -1943,10 +2114,41 @@ namespace engine::imagegraphio {
 				dynamicId[templateInput->Id.size()] = '_';
 				std::copy(suffix.begin(), suffix.end(), dynamicId.begin() + templateInput->Id.size() + 1);
 				imagegraph::DynamicInput dynamic{std::move(dynamicId), templateInput->Type, std::nullopt};
-				if (imagegraph::IsAuthoredValueType(templateInput->Type))
-					dynamic.Default = imagegraph::CatalogueDefault(*templateInput);
+				if ((entry.Type == "pc.lua_compute" || entry.Type == "pc.lua_surface") &&
+					templateInput->Id == "argument_value") {
+					int64_t selection = 0;
+					const auto selector = std::find_if(
+						node.DynamicInputs.begin(), node.DynamicInputs.end(), [&](const auto &socket) {
+							return socket.Id == "argument_type_" + suffix;
+						}
+					);
+					if (selector != node.DynamicInputs.end() && selector->Default) {
+						const auto *choice = std::get_if<imagegraph::EnumValue>(&*selector->Default);
+						if (!choice || choice->Value < 0 || choice->Value > 3) {
+							reason = "Lua argument type is invalid";
+							return false;
+						}
+						selection = choice->Value;
+					}
+					static constexpr imagegraph::ValueType types[]{
+						imagegraph::ValueType::Scalar,
+						imagegraph::ValueType::Text,
+						imagegraph::ValueType::Image,
+						imagegraph::ValueType::Struct
+					};
+					dynamic.Type = types[selection];
+				}
+				if (imagegraph::IsAuthoredValueType(dynamic.Type)) {
+					if (dynamic.Type == templateInput->Type)
+						dynamic.Default = imagegraph::CatalogueDefault(*templateInput);
+					else if (dynamic.Type == imagegraph::ValueType::Text)
+						dynamic.Default = std::string{};
+				}
 				auto represented = *templateInput;
 				represented.Id = dynamic.Id;
+				represented.Type = dynamic.Type;
+				if (entry.Type == "pc.mesh_warp" && templateInput->SourceKind == "Puppet")
+					represented.Type = imagegraph::ValueType::Array;
 				const size_t valuesBefore = node.Values.size();
 				if (!CatalogueInputValue(
 						record, entry, represented, nodeId, node, animation, reason, false, budget
@@ -1959,10 +2161,85 @@ namespace engine::imagegraphio {
 					}
 					dynamic.Default = std::move(node.Values[value].Data);
 				}
+				if (entry.Type == "pc.mesh_warp" && templateInput->SourceKind == "Puppet") {
+					const auto valid = [](const imagegraph::Value &value) {
+						const auto *array = std::get_if<imagegraph::ArrayValue>(&value);
+						return array && array->ElementType == imagegraph::ValueType::Scalar &&
+							   array->Elements.size() == 7 && array->Nested.empty() && array->Items.empty() &&
+							   std::all_of(
+								   array->Elements.begin(), array->Elements.end(), [](const auto &item) {
+									   const auto *number = std::get_if<double>(&item);
+									   return number && std::isfinite(*number);
+								   }
+							   );
+					};
+					if ((dynamic.Default && !valid(*dynamic.Default)) ||
+						std::any_of(
+							animation.Keyframes.begin(), animation.Keyframes.end(), [&](const auto &key) {
+								return key.NodeId == nodeId && key.Port == dynamic.Id && !valid(key.Data);
+							}
+						)) {
+						reason = "Puppet controls require seven finite scalar values";
+						return false;
+					}
+				}
+				const auto attributes = record.find("attri");
+				if (attributes != record.end() && attributes->is_object() &&
+					attributes->contains("layerName")) {
+					const auto &name = (*attributes)["layerName"];
+					if (!name.is_string() || !AdmitNativeText(name.get_ref<const std::string &>(), budget)) {
+						reason = "source room layer binding exceeds native text bounds";
+						return false;
+					}
+					dynamic.SourceLayerName = name.get<std::string>();
+					if (!dynamic.SourceLayerName.empty()) animation.FormatVersion = 9;
+				}
 				node.Values.resize(valuesBefore);
 				node.DynamicInputs.push_back(std::move(dynamic));
 			}
+			if (entry.Type == "pc.mesh_warp") {
+				for (std::string_view port : {"pin", "mesh_bound"})
+					if (auto raw = Attribute(source, port)) {
+						imagegraph::Value value;
+						if (!CatalogueValue(
+								*raw,
+								imagegraph::ValueType::Array,
+								0,
+								value,
+								port == "pin" ? imagegraph::ValueType::Integer
+											  : imagegraph::ValueType::Vector2,
+								budget
+							) ||
+							!AdmitNativeSlots(
+								node.SourceProperties, node.SourceProperties.size() + 1, budget
+							) ||
+							!AdmitNativeText(port, budget)) {
+							reason = "Mesh Warp source properties exceed native mapping or budget";
+							return false;
+						}
+						node.SourceProperties.push_back({std::string(port), std::move(value)});
+						animation.FormatVersion = 9;
+					}
+			}
 			const auto attributes = source.find("attri");
+			if (entry.SourceNode == "Node_Array_Split" && attributes != source.end() &&
+				attributes->is_object() && attributes->contains("output_amount")) {
+				int64_t count = 0;
+				if (!WholeNumber((*attributes)["output_amount"], count) || count < 0 ||
+					count > int64_t(imagegraph::Limits::MaximumDynamicOutputsPerNode) + 1) {
+					reason = "Array Split output_amount exceeds native output bounds";
+					return false;
+				}
+				for (int64_t index = 1; index < count; ++index) {
+					std::string id = "val_" + std::to_string(index);
+					if (!AdmitNativeSlots(node.DynamicOutputs, node.DynamicOutputs.size() + 1, budget) ||
+						!AdmitNativeTextSize(id.size(), budget)) {
+						reason = "Array Split outputs exceed operation bounds";
+						return false;
+					}
+					node.DynamicOutputs.push_back({std::move(id), imagegraph::ValueType::Any});
+				}
+			}
 			if (attributes != source.end() && attributes->is_object()) {
 				for (const std::string_view key : {"interpolate", "oversample"}) {
 					const auto found = attributes->find(key);
@@ -1983,14 +2260,47 @@ namespace engine::imagegraphio {
 				if (!attributes->contains("color_depth") &&
 					imagegraph::FindCatalogueInput(entry, "attribute_color_depth"))
 					node.Values.push_back({"attribute_color_depth", imagegraph::EnumValue{3}});
+				if (entry.Type == "pc.ase_file_read") {
+					if (const auto visible = attributes->find("layer_visible");
+						visible != attributes->end()) {
+						imagegraph::Value value;
+						if (!CatalogueValue(
+								*visible,
+								imagegraph::ValueType::Array,
+								0,
+								value,
+								imagegraph::ValueType::Boolean,
+								budget
+							) ||
+							!AdmitNativeSlots(
+								node.SourceProperties, node.SourceProperties.size() + 1, budget
+							) ||
+							!AdmitNativeTextSize(13, budget)) {
+							reason = "Aseprite visibility metadata exceeds native boolean array bounds";
+							return false;
+						}
+						node.SourceProperties.push_back({"layer_visible", std::move(value)});
+						animation.FormatVersion = 9;
+					}
+				}
 				for (const auto &[key, stored] : attributes->items()) {
+					if (entry.Type == "pc.mesh_warp" && (key == "pin" || key == "mesh_bound")) continue;
 					const std::string id = "attribute_" + key;
 					const imagegraph::CatalogueInput *input = imagegraph::FindCatalogueInput(entry, id);
 					if (!input) continue;
 					imagegraph::Value converted;
-					if (!CatalogueValue(
-							stored, input->Type, imagegraph::CatalogueChoiceCount(*input), converted
-						) &&
+					if (!(entry.Type == "pc.ase_file_read" && key == "layer_loop"
+							  ? CatalogueValue(
+									stored,
+									imagegraph::ValueType::Array,
+									0,
+									converted,
+									imagegraph::ValueType::Boolean,
+									budget
+								)
+							  : CatalogueValue(
+									stored, input->Type, imagegraph::CatalogueChoiceCount(*input), converted
+								)) &&
 						!AttributeList(stored, input->Type, converted)) {
 						reason = "node attribute " + key + " has no exact native meaning";
 						return false;
@@ -2127,12 +2437,14 @@ namespace engine::imagegraphio {
 						continue;
 					}
 					const auto &type = current->at("type").get_ref<const std::string &>();
-					if (output && type == "Node_Group") {
+					if (output &&
+						(type == "Node_Group" || (type == "Node_Pixel_Builder" && outputIndex >= 2))) {
 						const auto attributes = current->find("attri");
 						if (attributes == current->end() || !attributes->is_object() ||
 							!attributes->contains("custom_output_list"))
 							break;
 						const auto &list = attributes->at("custom_output_list");
+						if (type == "Node_Pixel_Builder") outputIndex -= 2;
 						if (!list.is_array() || outputIndex >= list.size()) break;
 						current = Find(list[outputIndex]);
 						outputIndex = 0;
@@ -2153,7 +2465,11 @@ namespace engine::imagegraphio {
 						if (!list.is_array()) break;
 						const auto found = std::find(list.begin(), list.end(), current->at("id"));
 						if (found == list.end() ||
-							!followInput(*parent, static_cast<size_t>(found - list.begin())))
+							!followInput(
+								*parent,
+								static_cast<size_t>(found - list.begin()) +
+									(parent->at("type") == "Node_Pixel_Builder" ? 4 : 0)
+							))
 							break;
 						continue;
 					}
@@ -2299,7 +2615,16 @@ namespace engine::imagegraphio {
 					return true;
 				};
 				for (const Json &source : sourceNodes) {
-					if (source.at("type") != "Node_Group") continue;
+					const bool builder = source.at("type") == "Node_Pixel_Builder";
+					if (source.at("type") != "Node_Group" && !builder) continue;
+					if (builder &&
+						std::none_of(
+							result.Graph.Nodes.begin(), result.Graph.Nodes.end(), [&](const Node &node) {
+								return node.Id == source.at("id").get_ref<const std::string &>() &&
+									   node.Type == "pc.pixel_builder";
+							}
+						))
+						return Fail(failure, "source Pixel Builder controls are not exactly projected");
 					if (result.Graph.Groups.size() == imagegraph::Limits::MaximumGroups)
 						return Fail(failure, "source group count exceeds the native limit");
 
@@ -2308,7 +2633,11 @@ namespace engine::imagegraphio {
 
 					Group group;
 					group.Id = source.at("id").get<std::string>();
-					if (source.contains("instanceBase")) {
+					if (builder) {
+						group.OwnerNodeId = group.Id;
+						result.Graph.FormatVersion = 9;
+					}
+					if (!builder && source.contains("instanceBase")) {
 						if (!source.at("instanceBase").is_string() ||
 							source.at("instanceBase").get_ref<const std::string &>().size() >
 								imagegraph::Limits::MaximumTextBytes)
@@ -2370,13 +2699,30 @@ namespace engine::imagegraphio {
 								continue;
 							}
 							const auto expected = defaults.find(key);
+							if (builder && key == "always_topo" && stored == true) continue;
 							if (expected == defaults.end() || stored != *expected)
 								return Fail(failure, "source group attribute " + key + " is not represented");
 						}
 					}
 					if (source.contains("tool")) {
 						int64_t tool;
-						if (!WholeNumber(source.at("tool"), tool) || tool != -4)
+						if (builder && source.at("tool").is_string()) {
+							const auto &toolId = source.at("tool").get_ref<const std::string &>();
+							const auto selected = sources.find(toolId);
+							std::string parent;
+							if (toolId.size() > imagegraph::Limits::MaximumTextBytes ||
+								selected == sources.end() || !parentOf(*selected->second, parent) ||
+								parent != group.Id)
+								return Fail(
+									failure, "Pixel Builder tool must identify a bounded local child"
+								);
+							result.Diagnostics.push_back(
+								{imagegraph::Status::UnsupportedExecution,
+								 group.Id,
+								 "tool",
+								 "source preview tool selection remains in the archive"}
+							);
+						} else if (!WholeNumber(source.at("tool"), tool) || tool != -4)
 							return Fail(failure, "source group tool node is not represented");
 					}
 					for (std::string_view key : {"interpolate", "oversample"}) {
@@ -2402,8 +2748,11 @@ namespace engine::imagegraphio {
 					result.Graph.Groups.push_back(std::move(group));
 				}
 				if (groups.empty()) {
-					for (Node &node : result.Graph.Nodes)
+					for (Node &node : result.Graph.Nodes) {
+						if (node.Id == result.Graph.ProjectGlobalNodeId && node.Type == "pc.global_scope")
+							continue;
 						if (!membership(node)) return false;
+					}
 					return true;
 				}
 				for (const Group &group : result.Graph.Groups) {
@@ -2532,7 +2881,8 @@ namespace engine::imagegraphio {
 							if (child->second->contains("instanceBase"))
 								control->InstanceBase = child->second->at("instanceBase").get<std::string>();
 							if (direction == PortDirection::Input) {
-								const Json *record = Input(source, index);
+								const Json *record =
+									Input(source, index + (group.OwnerNodeId.empty() ? 0 : 4));
 								if (record) {
 									if (record->contains("anim") && !record->at("anim").is_boolean())
 										return Fail(failure, "group parent animator mode is malformed");
@@ -2622,6 +2972,11 @@ namespace engine::imagegraphio {
 					const auto group = groups.find(nodeId);
 					if (group != groups.end()) {
 						const auto direction = output ? PortDirection::Output : PortDirection::Input;
+						if (!result.Graph.Groups[group->second].OwnerNodeId.empty()) {
+							const uint32_t fixed = output ? 2 : 4;
+							if (index < fixed) return true;
+							index -= fixed;
+						}
 						for (const auto &[id, boundary] : boundaries)
 							if (boundary.GroupId == nodeId && boundary.Direction == direction &&
 								boundary.Index == index) {
@@ -2722,23 +3077,37 @@ namespace engine::imagegraphio {
 					}
 				}
 				for (Node &node : result.Graph.Nodes) {
-					if (groups.contains(node.Id)) continue;
+					if (node.Id == result.Graph.ProjectGlobalNodeId && node.Type == "pc.global_scope")
+						continue;
+					if (const auto group = groups.find(node.Id);
+						group != groups.end() && result.Graph.Groups[group->second].OwnerNodeId.empty())
+						continue;
 					if (!node.Type.starts_with("pxcx.opaque/") &&
 						sources.at(node.Id)->contains("instanceBase"))
 						node.InstanceBase = sources.at(node.Id)->at("instanceBase").get<std::string>();
 					if (!membership(node)) return false;
 				}
 				const auto ownerOf = [&](std::string_view id) -> std::string_view {
+					std::string_view boundaryScope;
 					if (const auto found = boundaries.find(std::string(id)); found != boundaries.end())
-						return found->second.GroupId;
+						boundaryScope = found->second.GroupId;
 					for (const auto &[child, boundary] : boundaries)
-						if (boundary.JunctionId == id) return boundary.GroupId;
+						if (boundary.JunctionId == id) boundaryScope = boundary.GroupId;
 					const auto node = std::find_if(
 						result.Graph.Nodes.begin(), result.Graph.Nodes.end(), [&](const Node &value) {
 							return value.Id == id;
 						}
 					);
-					return node == result.Graph.Nodes.end() ? std::string_view{} : node->GroupId;
+					std::string_view scope = !boundaryScope.empty()				? boundaryScope
+											 : node == result.Graph.Nodes.end() ? std::string_view{}
+																				: node->GroupId;
+					for (size_t depth = 0; !scope.empty() && depth < groups.size(); ++depth) {
+						const auto group = groups.find(scope);
+						if (group == groups.end() || result.Graph.Groups[group->second].OwnerNodeId.empty())
+							break;
+						scope = result.Graph.Groups[group->second].ParentId;
+					}
+					return scope;
 				};
 				for (const auto &link : result.Graph.Links) {
 					const auto from = ownerOf(link.FromNode), to = ownerOf(link.ToNode);
@@ -2761,13 +3130,16 @@ namespace engine::imagegraphio {
 
 				// Only represented boundary nodes disappear; their complete source remains in the archive.
 				std::erase_if(result.Graph.Nodes, [&](const Node &node) {
-					if (!groups.contains(node.Id)) return false;
+					const auto group = groups.find(node.Id);
+					if (group == groups.end() || !result.Graph.Groups[group->second].OwnerNodeId.empty())
+						return false;
 					if (node.Type.starts_with("pc.")) --result.CatalogueNodes;
 					return true;
 				});
 				std::erase_if(result.Diagnostics, [&](const auto &diagnostic) {
 					return (groups.contains(diagnostic.NodeId) || boundaries.contains(diagnostic.NodeId)) &&
-						   diagnostic.Message != "source group display ordering remains in the archive";
+						   diagnostic.Message != "source group display ordering remains in the archive" &&
+						   diagnostic.Message != "source preview tool selection remains in the archive";
 				});
 				if (std::any_of(
 						result.Graph.Groups.begin(), result.Graph.Groups.end(), [](const Group &group) {
@@ -2806,6 +3178,12 @@ namespace engine::imagegraphio {
 
 		// Output and input ports for a link end on a catalogue node.
 		std::string CatalogueOutputPort(const imagegraph::CatalogueEntry &entry, uint32_t index) {
+			if (entry.SourceNode == "Node_Pixel_Builder" && index >= 2 &&
+				index - 2 < imagegraph::Limits::MaximumGroupPorts)
+				return "collection_output_" + std::to_string(index - 2);
+			if (entry.SourceNode == "Node_Array_Split" && index > 0 &&
+				index <= imagegraph::Limits::MaximumDynamicOutputsPerNode)
+				return "val_" + std::to_string(index);
 			for (const imagegraph::CatalogueOutput &output : entry.Outputs)
 				if (output.SourceIndex == static_cast<int32_t>(index)) return std::string(output.Id);
 			// node_data.gml getOutputIndex: 1000 + n connects the bypass junction of input n.
@@ -2817,6 +3195,9 @@ namespace engine::imagegraphio {
 			return {};
 		}
 		std::string CatalogueInputPort(const imagegraph::CatalogueEntry &entry, uint32_t index) {
+			if (entry.SourceNode == "Node_Pixel_Builder" && index >= 4 &&
+				index - 4 < imagegraph::Limits::MaximumGroupPorts)
+				return "collection_input_" + std::to_string(index - 4);
 			if (const auto *input = imagegraph::FindCatalogueInputIndex(entry, static_cast<int32_t>(index)))
 				return std::string(input->Id);
 			if (entry.DynamicGroupLength <= 0 || static_cast<int32_t>(index) < entry.DynamicFixedLength)
@@ -2851,21 +3232,30 @@ namespace engine::imagegraphio {
 			return true;
 		}
 
-		// Project attributes: surface size, inherited sampling attributes and palette.
+		// Project attributes: surface size, sampling, palette, surface format and 3D shading.
 		void ProjectSettings(const Json &root, PxcxImport &result) {
 			const auto attributes = root.find("attributes");
 			if (attributes == root.end() || !attributes->is_object()) return;
 			imagegraph::ProjectSettings project;
 			const auto dimension = attributes->find("surface_dimension");
 			std::array<double, 4> size{};
-			if (dimension == attributes->end() || !Numbers(*dimension, 2, size) || size[0] < 1 ||
-				size[1] < 1 || size[0] > imagegraph::Limits::MaximumDimension ||
-				size[1] > imagegraph::Limits::MaximumDimension || std::trunc(size[0]) != size[0] ||
-				std::trunc(size[1]) != size[1])
-				return;
-			project.SurfaceWidth = static_cast<uint32_t>(size[0]);
-			project.SurfaceHeight = static_cast<uint32_t>(size[1]);
+			if (dimension != attributes->end()) {
+				if (!Numbers(*dimension, 2, size) || size[0] < 1 || size[1] < 1 ||
+					size[0] > imagegraph::Limits::MaximumDimension ||
+					size[1] > imagegraph::Limits::MaximumDimension || std::trunc(size[0]) != size[0] ||
+					std::trunc(size[1]) != size[1])
+					return;
+				project.SurfaceWidth = static_cast<uint32_t>(size[0]);
+				project.SurfaceHeight = static_cast<uint32_t>(size[1]);
+			}
 			int64_t mode = 0;
+			if (attributes->contains("shader") && WholeNumber((*attributes)["shader"], mode) && mode >= 0 &&
+				mode <= 1)
+				project.Shader3D = mode;
+			if (attributes->contains("color_depth") && WholeNumber((*attributes)["color_depth"], mode) &&
+				mode >= 0 && mode <= 6)
+				project.ColorDepth = mode;
+			if (project.Shader3D != 0 || project.ColorDepth != 1) result.Graph.FormatVersion = 9;
 			if (attributes->contains("interpolate") && WholeNumber((*attributes)["interpolate"], mode) &&
 				mode >= 0 && mode <= 6)
 				project.Interpolation = mode;
@@ -2884,6 +3274,38 @@ namespace engine::imagegraphio {
 				project.Palette = std::move(colours);
 			}
 			result.Graph.Project = std::move(project);
+		}
+
+		bool ProjectRegions(
+			const Json &root, PxcxImport &result, detail::ImportBudget &budget, std::string &failure
+		) {
+			const auto records = root.find("aRegion");
+			if (records == root.end()) return true;
+			if (!records->is_array() || records->size() > imagegraph::Limits::MaximumAnimationRegions)
+				return Fail(failure, "source animation region count exceeds bounds");
+			imagegraph::ProjectSettings project =
+				result.Graph.Project.value_or(imagegraph::ProjectSettings{});
+			if (!AdmitNativeSlots(project.AnimationRegions, records->size(), &budget))
+				return Fail(failure, "source animation regions exceed operation bounds");
+			for (const auto &record : *records) {
+				imagegraph::AnimationRegion region;
+				if (!record.is_object() || !record.contains("l") || !record["l"].is_string() ||
+					!record.contains("c") || !PackedColour(record["c"], region.Color) ||
+					!record.contains("fs") || !record["fs"].is_number() || !record.contains("fe") ||
+					!record["fe"].is_number() ||
+					!imagegraph::SplitFrameTime(record["fs"].get<double>(), region.Start) ||
+					!imagegraph::SplitFrameTime(record["fe"].get<double>(), region.End) ||
+					!AdmitNativeText(record["l"].get_ref<const std::string &>(), &budget))
+					return Fail(failure, "source animation region has invalid bounded fields");
+				region.Label = record["l"].get<std::string>();
+				region.Color.Alpha = 255;
+				project.AnimationRegions.push_back(std::move(region));
+			}
+			if (!imagegraph::ValidProjectAnimationRegions(project))
+				return Fail(failure, "source animation regions are invalid");
+			result.Graph.Project = std::move(project);
+			result.Graph.FormatVersion = 9;
+			return true;
 		}
 
 		// Source previewGrid restores conditionally; ordered previewRuler restores independently.
@@ -3106,6 +3528,9 @@ namespace engine::imagegraphio {
 		detail::ImportBudget operationBudget(options.MaximumOperationBytes);
 		if (!operationBudget.Hold(*previousDocumentBytes))
 			return Fail(failure, "existing import document exceeds native projection operation bounds");
+		if (archive.MetadataNumber == SUPPORTED_VERSION &&
+			!ProjectRegions(root, result, operationBudget, failure))
+			return false;
 		GroupSourceSet canonicalGroups(
 			std::less<>{}, detail::ImportAllocator<std::string_view>{operationBudget}
 		);
@@ -3129,8 +3554,9 @@ namespace engine::imagegraphio {
 			const Json &source = sourceNodes[index];
 			if (archive.MetadataNumber == SUPPORTED_VERSION && fact.Type == "Node_Gradient") {
 				const auto *sourceEntry = imagegraph::FindCatalogueSource(fact.Type);
-				const auto *range =
-					sourceEntry ? imagegraph::FindCatalogueInput(*sourceEntry, "gradient_map_range") : nullptr;
+				const auto *range = sourceEntry
+										? imagegraph::FindCatalogueInput(*sourceEntry, "gradient_map_range")
+										: nullptr;
 				if (range && range->SourceIndex == 16 && range->SourceKind == "Vec4" &&
 					range->Type == imagegraph::ValueType::Vector4) {
 					const auto *record = Input(source, static_cast<size_t>(range->SourceIndex));
@@ -3139,6 +3565,22 @@ namespace engine::imagegraphio {
 				}
 			}
 			Node node{fact.Id, Opaque(fact.Type), {}, {fact.X, fact.Y}, {}};
+			const auto displayName = source.find("name");
+			if (displayName != source.end() && displayName->is_string()) {
+				const auto &name = displayName->get_ref<const std::string &>();
+				if (!AdmitNativeText(name, &operationBudget))
+					return Fail(failure, "source display name exceeds native projection bounds");
+				node.SourceDisplayName = name;
+				if (!name.empty()) result.Graph.FormatVersion = 9;
+			}
+			const auto internalName = source.find("iname");
+			if (internalName != source.end() && internalName->is_string()) {
+				const auto &name = internalName->get_ref<const std::string &>();
+				if (!AdmitNativeText(name, &operationBudget))
+					return Fail(failure, "source internal name exceeds native projection bounds");
+				node.SourceInternalName = name;
+				if (!name.empty()) result.Graph.FormatVersion = 9;
+			}
 			bool mapped = false;
 			if (archive.MetadataNumber == SUPPORTED_VERSION && LinksRepresentable(archive, fact)) {
 				if (fact.Type == "Node_Solid")
@@ -3215,7 +3657,19 @@ namespace engine::imagegraphio {
 			if (entry) {
 				imagegraph::Document animation;
 				if (CatalogueNode(source, *entry, fact.Id, node, animation, reason, &operationBudget) &&
-					CatalogueLinksRepresentable(archive, fact, *entry, reason)) {
+					CatalogueLinksRepresentable(archive, fact, *entry, reason) &&
+					(entry->SourceNode != "Node_Array_Split" ||
+					 std::all_of(archive.Links.begin(), archive.Links.end(), [&](const auto &link) {
+						 return link.FromNode != fact.Id || link.FromIndex <= node.DynamicOutputs.size();
+					 }))) {
+					if (!node.SourceProperties.empty() || !node.SourceInputExpressions.empty() ||
+						!node.DynamicOutputs.empty() ||
+						std::any_of(
+							node.DynamicInputs.begin(), node.DynamicInputs.end(), [](const auto &input) {
+								return !input.SourceLayerName.empty();
+							}
+						))
+						result.Graph.FormatVersion = 9;
 					catalogued[index] = entry;
 					result.CatalogueNodes++;
 					if (animation.Keyframes.size() >
@@ -3250,6 +3704,9 @@ namespace engine::imagegraphio {
 						);
 					entry = nullptr;
 					node.DynamicInputs.clear();
+					node.DynamicOutputs.clear();
+					node.SourceInputExpressions.clear();
+					node.SourceProperties.clear();
 				}
 			}
 			if (!mapped && !entry) {
@@ -3386,8 +3843,17 @@ namespace engine::imagegraphio {
 			}
 		}
 		if (archive.MetadataNumber == SUPPORTED_VERSION &&
+			!ProjectGlobals(root, result.Graph, operationBudget, failure))
+			return false;
+		if (archive.MetadataNumber == SUPPORTED_VERSION &&
 			!ProjectOrdinaryGroups(root, result, failure, *previousDocumentBytes, operationBudget))
 			return false;
+		if (archive.MetadataNumber == SUPPORTED_VERSION) {
+			if (!detail::ProjectInlineCollections(root, result.Graph, operationBudget, failure)) return false;
+			if (result.GroupPrebinding &&
+				!detail::ProjectInlineCollections(root, *result.GroupPrebinding, operationBudget, failure))
+				return false;
+		}
 		const auto &bootstrapGraph = result.GroupPrebinding ? *result.GroupPrebinding : result.Graph;
 		const size_t bootstrapCount =
 			std::count_if(bootstrapGraph.Nodes.begin(), bootstrapGraph.Nodes.end(), [](const Node &node) {

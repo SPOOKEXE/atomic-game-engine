@@ -144,7 +144,9 @@ namespace engine::imagegraphio::detail {
 				for (const Node &node : document.Nodes)
 					if (node.GroupId == owner) members.push_back(node.Id);
 				for (const Group &group : document.Groups)
-					if (group.ParentId == owner) members.push_back(group.Id);
+					if (group.ParentId == owner &&
+						!(group.OwnerNodeId == group.Id && nodeById(group.Id) != document.Nodes.end()))
+						members.push_back(group.Id);
 				using Edge = std::pair<std::string_view, std::string_view>;
 				ImportVector<Edge> edges{ImportAllocator<Edge>{budget}};
 				const auto producer = [&](std::string_view id) {
@@ -424,6 +426,60 @@ namespace engine::imagegraphio::detail {
 					copied->Position = nodeById(id)->Position;
 					if (!mapId(id, copiedId) || !useId(copiedId))
 						return fail("instance mapping exceeds operation bounds");
+					// Generic Node.clone is shallow for Pixel Builder: its collection has no
+					// onClone callback. Matched builders retain their local children and sockets.
+					const auto sourceScope = groupById(id);
+					if (sourceScope != document.Groups.end() && sourceScope->OwnerNodeId == id) {
+						if (nodeById(copiedId)->Type != "pc.pixel_builder")
+							return fail("owned source collection class is not represented by shallow clone");
+						auto targetScope = groupById(copiedId);
+						if (targetScope == document.Groups.end()) {
+							if (!sourceScope->Ports.empty())
+								return fail(
+									"shallow Pixel Builder clone has no source callback to construct custom "
+									"sockets"
+								);
+							if (document.Groups.size() == Limits::MaximumGroups || !admit(sizeof(Group)) ||
+								!holdText(copiedId) || !holdText(copiedId) || !holdText(sourceScope->Name) ||
+								!holdText(nodeById(copiedId)->GroupId) ||
+								!reserve(document.Groups, document.Groups.size() + 1))
+								return fail("shallow owned collection storage exceeds operation bounds");
+							const auto originalScope = groupById(id);
+							Group scope{copiedId, originalScope->Name};
+							scope.ParentId = nodeById(copiedId)->GroupId;
+							scope.OwnerNodeId = copiedId;
+							scope.ColorDepth = originalScope->ColorDepth;
+							scope.Interpolation = originalScope->Interpolation;
+							scope.Oversample = originalScope->Oversample;
+							document.Groups.push_back(std::move(scope));
+							targetScope = groupById(copiedId);
+						}
+						if (targetScope->OwnerNodeId != copiedId ||
+							targetScope->ParentId != nodeById(copiedId)->GroupId)
+							return fail("matched collection has a foreign local owner");
+						for (PortDirection direction : {PortDirection::Input, PortDirection::Output}) {
+							const auto &sourcePorts = groupById(id)->Ports;
+							const auto &targetPorts = groupById(copiedId)->Ports;
+							auto from = sourcePorts.begin(), to = targetPorts.begin();
+							while (true) {
+								from = std::find_if(from, sourcePorts.end(), [&](const GroupPort &port) {
+									return port.Direction == direction;
+								});
+								to = std::find_if(to, targetPorts.end(), [&](const GroupPort &port) {
+									return port.Direction == direction;
+								});
+								if (from == sourcePorts.end() || to == targetPorts.end()) {
+									if (from != sourcePorts.end() || to != targetPorts.end())
+										return fail("matched Pixel Builder custom socket counts differ");
+									break;
+								}
+								if (!mapId(from->JunctionId, to->JunctionId))
+									return fail("owned collection socket remap exceeds bounds");
+								++from;
+								++to;
+							}
+						}
+					}
 				}
 				for (PortDirection direction : {PortDirection::Input, PortDirection::Output}) {
 					ImportVector<GroupPort> basePorts{ImportAllocator<GroupPort>{budget}};
