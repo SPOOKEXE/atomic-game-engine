@@ -62,6 +62,7 @@ Milestone labels describe development scope, not release versions.
   20. Add animation kernels and owned delay history; preserve mixed processor rows and compile source kernels in release unity builds.
   21. Record bounded builtin random draws for Sparkle and add source image normalization.
   22. Save particle objects; convert and render FLIP readback with bounded replay.
+  23. Expose authored graph selectors as reflected instance properties and preserve them in standard saves.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

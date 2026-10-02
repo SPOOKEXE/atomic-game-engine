@@ -1,3 +1,5 @@
+#include "ImageGraphBindingProperties.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -2589,6 +2591,7 @@ namespace engine::scene {
 			// already live. Same correction `ecs.Hierarchy`'s registration went
 			// through, and the `ParentProperty` this file used to hold is gone with it.
 			const ecs::ClassId instance = ecs::Classes::RegisterInstanceRoot();
+			RegisterImageGraphBindingProperties(instance);
 
 			// PVInstance is everything with a place in the world. Roblox's
 			// split, kept because v0.6 binds `Instance.new` to this same table

@@ -3,6 +3,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ImageGraphBinding.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -228,4 +229,33 @@ TEST_CASE(
 	const Entity retired = store.Create();
 	store.Destroy(retired);
 	CHECK_FALSE(SetImageGraphBinding(store, retired, binding));
+}
+
+TEST_CASE(
+	"reflected graph selectors create only authored rows and reject invalid controls",
+	"[scene][imagegraphbinding]"
+) {
+	Store store("reflected-imagegraph");
+	const Entity sink = store.CreateInstance(engine::scene::PartClass(), "Sink");
+	REQUIRE_FALSE(store.Has<ImageGraphBinding>(sink));
+	Name selector;
+	REQUIRE(store.GetProperty(sink, Name("ImageGraph"), &selector, sizeof(selector)));
+	CHECK_FALSE(selector.IsValid());
+	CHECK_FALSE(store.Has<ImageGraphBinding>(sink));
+	for (const auto &[property, value] :
+		 {std::pair{Name("ImageGraph"), Name("Composer")},
+		  std::pair{Name("ImageGraphOutput"), Name("main")},
+		  std::pair{Name("ImageGraphTexture"), Name("live-texture")}})
+		REQUIRE(store.SetProperty(sink, property, &value, sizeof(value)));
+	REQUIRE(IsValidImageGraphBinding(*store.Get<ImageGraphBinding>(sink)));
+	const int64_t negative = -1;
+	CHECK_FALSE(store.SetProperty(sink, Name("ImageGraphFixedTick"), &negative, sizeof(negative)));
+	const Name invalid("wall-clock");
+	CHECK_FALSE(store.SetProperty(sink, Name("ImageGraphTickPolicy"), &invalid, sizeof(invalid)));
+	const Name world("world");
+	REQUIRE(store.SetProperty(sink, Name("ImageGraphTickPolicy"), &world, sizeof(world)));
+	CHECK(store.Get<ImageGraphBinding>(sink)->TickPolicy == ImageGraphTickPolicy::World);
+	const Name linear("linear");
+	REQUIRE(store.SetProperty(sink, Name("ImageGraphColorSpace"), &linear, sizeof(linear)));
+	CHECK(store.Get<ImageGraphBinding>(sink)->ColorSpace == engine::scene::ImageGraphColorSpace::Linear);
 }
