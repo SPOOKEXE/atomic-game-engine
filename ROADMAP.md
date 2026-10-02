@@ -42,6 +42,7 @@ Milestone labels describe development scope, not release versions.
 
   1. Retain the pinned source licence in release notices.
   2. Save, clone and hash per-instance output ports; prune invalid links.
+  3. Launch export helpers in a child working directory without changing the parent.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
