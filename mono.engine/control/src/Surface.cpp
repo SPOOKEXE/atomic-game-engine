@@ -22,6 +22,7 @@
 
 #include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/core/Profiling.hpp>
 
 #include <nlohmann/json.hpp>
 #include <utility>
@@ -55,6 +56,12 @@ namespace engine::control {
 				{"isError", failed},
 			};
 		}
+
+		json InputSchema(const Tool &tool) {
+			ENGINE_PROFILE("control tool schema");
+			return tool.Schema ? tool.Schema() : json{{"type", "object"}};
+		}
+
 	}
 
 	Surface::Surface(std::string name, std::string purpose)
@@ -230,6 +237,7 @@ namespace engine::control {
 	}
 
 	json Surface::ToolList() const {
+		ENGINE_PROFILE("control tools list");
 		json out = json::array();
 		for (const Tool &tool : Tools) {
 			if (!HookRegistry_.VisibleTool(tool.Name)) continue;
@@ -237,7 +245,7 @@ namespace engine::control {
 				json{
 					{"name", tool.Name},
 					{"description", tool.Description},
-					{"inputSchema", tool.Schema ? tool.Schema() : json{{"type", "object"}}},
+					{"inputSchema", InputSchema(tool)},
 				}
 			);
 		}
@@ -245,6 +253,7 @@ namespace engine::control {
 	}
 
 	json Surface::ResourceList() const {
+		ENGINE_PROFILE("control resources list");
 		json out = json::array();
 		for (const Resource &resource : Resources) {
 			if (!HookRegistry_.VisibleResource(resource.Uri)) continue;
@@ -261,6 +270,7 @@ namespace engine::control {
 	}
 
 	json Surface::PromptList() const {
+		ENGINE_PROFILE("control prompts list");
 		json out = json::array();
 		for (const Prompt &prompt : Prompts) {
 			if (!HookRegistry_.VisiblePrompt(prompt.Name)) continue;
@@ -287,6 +297,7 @@ namespace engine::control {
 	}
 
 	std::string Surface::Answer(const std::string &line) {
+		ENGINE_PROFILE("control answer");
 		HookRegistry_.Reap();
 		json request;
 		try {

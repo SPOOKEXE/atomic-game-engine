@@ -110,7 +110,7 @@ A hook stages its tools, resources, and prompts as one registration. A name or
 URI collision rejects the activation, leaving the existing surface unchanged.
 Closing a hook first blocks new submissions. A provider may name cleanup tools
 that remain listed and callable while it drains retained work. The client capture
-hook keeps `poll_capture`, `get_resource`, `cancel_capture`, `release_capture`,
+hook keeps `poll_capture`, `get_resource`, `save_resource`, `cancel_capture`, `release_capture`,
 `poll_view_camera_mutation`, and `cancel_view_camera_mutation` available until
 their tickets are released or terminal mutation results are polled. Existing
 calls retain their activation guard until they return; rows disappear after the
@@ -213,7 +213,7 @@ release rows automatically where appropriate.
 | Scene exports | `export_gltf_scene`, `get_gltf_scene_chunk`, `release_gltf_scene` | Export one fenced GLB inline or through a retained ranged resource. |
 | Raw exports | `begin_raw_scene_extract`, `get_raw_scene_chunk`, `release_raw_scene_extract` | Read the raw geometry and source-texture manifest plus its retained bytes. |
 | Capture discovery | `get_capture_channels`, `get_resources` | Discover capture and durable-resource capabilities without guessing a schema. |
-| Capture jobs | `capture_bundle`, `poll_capture`, `get_resource`, `cancel_capture`, `release_capture` | Queue capture, poll terminal state, read planes, cancel pending work, and release retained data. |
+| Capture jobs | `capture_bundle`, `poll_capture`, `get_resource`, `save_resource`, `cancel_capture`, `release_capture` | Queue capture, poll terminal state, read planes as base64 ranges or as one engine-written file per plane, cancel pending work, and release retained data and files. |
 | Scene observations | `get_temporal_sample`, `get_event_narratives`, `get_authored_affordances`, `raycast`, `overlap_aabb`, `overlap_obb`, `get_collider_occupancy`, `get_collider_bev`, `get_filled_occupancy`, `get_signed_distance_field`, `get_authored_navmesh_path`, `get_rig_export` | Read bounded temporal, authored, spatial, navigation, occupancy, and rig observations. |
 
 `get_resources` can explicitly report that a durable-resource owner is
