@@ -1357,7 +1357,7 @@ namespace engine::physics {
 			const auto setUpManifolds = [&](size_t begin, size_t end) {
 				for (size_t at = begin; at < end; at++) {
 					const ContactManifold &manifold = manifolds[at];
-					if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD || manifold.PointCount == 0) {
 						continue;
 					}
 
@@ -1373,6 +1373,14 @@ namespace engine::physics {
 					const float friction = std::sqrt(first.Friction * second.Friction);
 					const float restitution =
 						first.Restitution > second.Restitution ? first.Restitution : second.Restitution;
+
+					// The normal and both bodies are fixed throughout this manifold's setup.
+					core::Vector3 firstTangent{}, secondTangent{};
+					ContactTangentBasis(manifold.Normal, firstTangent, secondTangent);
+					const float shared = first.InverseMass + second.InverseMass;
+					const float correctionMass = shared > 0.0f ? 1.0f / shared : 0.0f;
+					float cachedClosingSpeed = 0.0f;
+					bool cachedClosingReady = false;
 
 					for (size_t point = 0; point < manifold.PointCount; point++) {
 						const ContactPoint &contact = manifold.Points[point];
@@ -1394,17 +1402,13 @@ namespace engine::physics {
 						row.Speculative = speculative;
 
 						row.Along[ContactRow::NORMAL].Direction = manifold.Normal;
-						ContactTangentBasis(
-							manifold.Normal,
-							row.Along[ContactRow::TANGENT].Direction,
-							row.Along[ContactRow::TANGENT + 1].Direction
-						);
+						row.Along[ContactRow::TANGENT].Direction = firstTangent;
+						row.Along[ContactRow::TANGENT + 1].Direction = secondTangent;
 						for (ContactAxis &axis : row.Along) {
 							PrepareAxis(first, second, firstLever, secondLever, axis);
 						}
 
-						const float shared = first.InverseMass + second.InverseMass;
-						row.CorrectionMass = shared > 0.0f ? 1.0f / shared : 0.0f;
+						row.CorrectionMass = correctionMass;
 
 						const float excess = contact.Penetration - PENETRATION_SLOP;
 						const float unwind =
@@ -1417,11 +1421,14 @@ namespace engine::physics {
 						// would keep finding a smaller closing speed and add energy
 						// chasing it.
 						const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
-						row.SpeculativeClosingSpeed =
-							speculative ? closing
-										: FindSpeculativeClosingSpeed(
-											  PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B
-										  );
+						// Setup only reads the cache. All-speculative manifolds never need its pair history.
+						if (!speculative && !cachedClosingReady) {
+							cachedClosingSpeed = FindSpeculativeClosingSpeed(
+								PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B
+							);
+							cachedClosingReady = true;
+						}
+						row.SpeculativeClosingSpeed = speculative ? closing : cachedClosingSpeed;
 						// A speculative row permits exactly the speed needed to reach
 						// the surface next tick. One slop of bite avoids a float-rounded
 						// gap that would otherwise hold the body just outside forever.

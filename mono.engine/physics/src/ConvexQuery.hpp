@@ -205,7 +205,9 @@ namespace engine::physics {
 
 	// The first moment a translating convex shape touches another.
 	//
-	// **Conservative advancement.** Ask how far apart the two shapes are, work
+	// Fixed-orientation box pairs intersect the overlap intervals of their fifteen
+	// separating axes. Other convex pairs use conservative advancement: ask how far
+	// apart the two shapes are, work
 	// out the soonest that gap could possibly close given the motion, jump the
 	// shape forward by exactly that much, and ask again. Every step is a lower
 	// bound on the time of impact, so the walk never steps past a contact - and

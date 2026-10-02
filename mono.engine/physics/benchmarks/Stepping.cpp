@@ -55,14 +55,14 @@
 // the resting list has settled, and then measured. A first tick is the one tick
 // a game never spends most of its time in.
 
+#include "../tests/fixtures/SteppingScene.hpp"
+
 #include <engine/core/Random.hpp>
-#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
-#include <engine/physics/Continuous.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -70,10 +70,8 @@
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Solver.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Enums.hpp>
 #include <engine/testing/Bench.hpp>
 
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -88,7 +86,6 @@
 
 TEST_SUITE_ID("engine.physics.bench.stepping")
 
-using engine::core::CFrame;
 using engine::core::Random;
 using engine::core::Ray;
 using engine::core::Vector3;
@@ -99,122 +96,21 @@ using engine::physics::IntegrateMotion;
 using engine::physics::NarrowPhase;
 using engine::physics::PhysicsWorld;
 using engine::physics::PipelineInternals;
-using engine::physics::PreparePhysicsWorld;
 using engine::physics::Publish;
 using engine::physics::Raycast;
 using engine::physics::Solve;
-using engine::physics::SweepFastBodies;
 using engine::physics::SyncBroadphase;
-using engine::scene::Collider;
 using engine::scene::Motion;
-using engine::scene::RigidBody;
-using engine::scene::Simulated;
 using engine::scene::Transform;
 using engine::testing::Consume;
 
 namespace stepping_bench {
-	// Bodies per scene. A thousand is a busy room, four thousand a level, and
-	// sixteen thousand is past what a game should ship and exactly where a
-	// growth curve stops being a straight line if it is going to.
-	constexpr size_t SMALL = 1000;
-	constexpr size_t MEDIUM = 4000;
-	constexpr size_t LARGE = 16'000;
-
-	// How the bodies are arranged, which is what these rows actually vary.
-	enum class Layout {
-		// Stacks on a wide floor, spread across it. The ordinary case.
-		Stacks,
-
-		// Every body inside one broad-phase cell. The pathological case.
-		Pile,
-
-		// Far enough apart that nothing touches anything. The floor cost of a
-		// tick with no contacts in it at all.
-		Scattered,
-
-		// Stacks, but every body given a velocity large enough that
-		// `SweepFastBodies` has to sweep it.
-		Fast,
-	};
-
-	// The tick the scheduler registers, in `Pipeline.cpp`'s order.
-	//
-	// **Written out rather than driven through `ecs::Scheduler`.** A scheduler
-	// run would put phase dispatch and every other registered system into the
-	// figure, and this file is about physics. The order is the load-bearing part
-	// and it is the order that file composes: integrate, sweep, sync, then the
-	// four contact steps.
-	void Tick(Store &store) {
-		store.AdvanceTick(1.0f / 60.0f);
-		IntegrateMotion(store);
-		SweepFastBodies(store);
-		SyncBroadphase(store);
-		BroadPhase(store);
-		NarrowPhase(store);
-		Solve(store);
-		Publish(store);
-	}
-
-	// Where body `index` of `count` goes, under a layout.
-	Vector3 PlaceOf(Layout layout, size_t index, size_t count) {
-		const auto seed = static_cast<uint32_t>(index);
-		switch (layout) {
-		case Layout::Pile:
-			// A four-metre cell, and every body inside one of them. The
-			// grid cannot separate anything, so the pair list is what a
-			// grid exists to avoid.
-			return Vector3{
-				Random::Range(seed, 3, -1.5f, 1.5f),
-				0.5f + Random::Range(seed, 5, 0.0f, 3.0f),
-				Random::Range(seed, 7, -1.5f, 1.5f),
-			};
-
-		case Layout::Scattered: {
-			// Eight metres apart on a grid - two broad-phase cells and a
-			// half-metre body, so nothing can reach anything - and already
-			// at rest height on the floor.
-			//
-			// **On the floor rather than dropped from above**, which was the
-			// first version and was wrong: bodies falling from four metres
-			// take the better part of a second to land, so every sample ran
-			// against a scene in free fall with no contacts at all. That is
-			// a real zero-contact tick, but it is not a *steady* one - a run
-			// with more samples would have watched it turn into a different
-			// measurement halfway through.
-			const auto side = static_cast<size_t>(1 + std::sqrt(static_cast<double>(count)));
-			return Vector3{
-				static_cast<float>(index % side) * 8.0f,
-				0.5f,
-				static_cast<float>(index / side) * 8.0f,
-			};
-		}
-
-		case Layout::Stacks:
-		case Layout::Fast:
-		default: {
-			// Four to a stack, spread over a floor whose area grows with the
-			// body count.
-			//
-			// **A fixed floor would make the scale rows a lie.** Four times
-			// the stacks in the same square is four times the density, so
-			// columns start overlapping and each body gains contacts it did
-			// not have at the smaller size - the curve would then be the
-			// scene getting denser rather than the pipeline getting slower,
-			// and those two are fixed completely differently. Scaling the
-			// side by the square root of the count holds contacts per body
-			// roughly constant, which is what makes the growth attributable.
-			const size_t column = index / 4;
-			const size_t level = index % 4;
-			const auto columnSeed = static_cast<uint32_t>(column);
-			const float half = 3.0f * std::sqrt(static_cast<float>(count) / 4.0f);
-			return Vector3{
-				Random::Range(columnSeed, 3, -half, half),
-				0.5f + static_cast<float>(level) * 0.999f,
-				Random::Range(columnSeed, 5, -half, half),
-			};
-		}
-		}
-	}
+	using engine::physics::testing::BuildScene;
+	using engine::physics::testing::LARGE;
+	using engine::physics::testing::Layout;
+	using engine::physics::testing::MEDIUM;
+	using engine::physics::testing::SMALL;
+	using engine::physics::testing::Tick;
 
 	// A scene, built once per shape and kept.
 	//
@@ -229,43 +125,7 @@ namespace stepping_bench {
 			}
 		}
 
-		auto store = std::make_unique<Store>("physics.bench.stepping");
-		PreparePhysicsWorld(*store, 4.0f);
-
-		// A floor, anchored, so a stack has something to press on. `Scattered`
-		// gets one too: a scene with no floor is a scene in free fall, which is
-		// a different measurement wearing the same name.
-		const Entity floor = store->Create();
-		store->Set<Transform>(floor, Transform{CFrame{Vector3{0.0f, -1.0f, 0.0f}}});
-		Collider ground;
-		ground.Extent = Vector3{4096.0f, 1.0f, 4096.0f};
-		store->Set<Collider>(floor, ground);
-
-		for (size_t index = 0; index < count; index++) {
-			const Entity entity = store->Create();
-			store->Set<Transform>(entity, Transform{CFrame{PlaceOf(layout, index, count)}});
-
-			Collider collider;
-			collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
-			store->Set<Collider>(entity, collider);
-
-			Motion motion;
-			if (layout == Layout::Fast) {
-				// Far enough per step that a body would pass through its own
-				// depth, which is what `SweepFastBodies` exists for.
-				motion.Linear = Vector3{0.0f, -60.0f, 0.0f};
-			}
-			store->Set<Motion>(entity, motion);
-			store->Set<RigidBody>(entity, RigidBody{});
-
-			// **`Simulated` is what decides whether the solver visits the row**,
-			// and without it every body here would be an anchored one with
-			// infinite mass - a scene that cannot fall, cannot settle and can
-			// therefore never go to sleep, which would make the two rows this
-			// file cares about most measure nothing at all. The floor above
-			// deliberately does not get one.
-			store->Set<Simulated>(entity, Simulated{});
-		}
+		auto store = BuildScene(layout, count, 4.0f);
 
 		// Settle. Ten ticks is enough that the warm start is warm; for the
 		// stacked layouts it is also enough that most of the scene has stopped
