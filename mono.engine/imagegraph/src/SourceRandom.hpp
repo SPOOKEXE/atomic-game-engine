@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 
 namespace engine::imagegraph::detail {
@@ -39,6 +40,18 @@ namespace engine::imagegraph::detail {
 			const double result = lower + Unit() * (higher - lower);
 			Unit();
 			return result;
+		}
+		// irandom_range consumes one draw even for equal bounds; its final ~~ cast is signed.
+		int64_t IntRange(double from, double to) {
+			auto int32 = [](double value) {
+				if (!std::isfinite(value) || value == 0) return int32_t(0);
+				double wrapped = std::fmod(std::trunc(value), 4294967296.0);
+				if (wrapped < 0) wrapped += 4294967296.0;
+				return std::bit_cast<int32_t>(uint32_t(wrapped));
+			};
+			const int32_t first = int32(from), second = int32(to);
+			const int64_t lower = std::min(first, second), higher = std::max(first, second);
+			return lower + int32(Unit() * double(higher - lower + 1));
 		}
 		uint32_t Index(uint32_t count) {
 			if (!count) return 0;
