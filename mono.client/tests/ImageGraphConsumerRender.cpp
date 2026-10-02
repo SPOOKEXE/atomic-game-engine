@@ -267,7 +267,7 @@ TEST_CASE(
 	std::filesystem::remove_all(assets);
 }
 
-TEST_CASE("ImageLabel publishes an authored Transform Image 3D GPU result", "[client][imagegraph][gpu][.]") {
+TEST_CASE("ImageLabel admits an authored Transform Image 3D render request", "[client][imagegraph][gpu][.]") {
 	const std::filesystem::path assets =
 		std::filesystem::temp_directory_path() / "atomic-imagegraph-transform-3d-render-test";
 	std::filesystem::remove_all(assets);
@@ -311,6 +311,7 @@ TEST_CASE("ImageLabel publishes an authored Transform Image 3D GPU result", "[cl
 	selector.Output = OUTPUT;
 	selector.Texture = TEXTURE;
 	selector.TickPolicy = scene::ImageGraphTickPolicy::Fixed;
+	selector.Texture = core::Name("live-transform-request");
 	REQUIRE(scene::SetImageGraphBinding(store, binding, selector));
 	gui::CompileRequest request;
 	request.Display.Width = SIDE;
@@ -340,12 +341,11 @@ TEST_CASE("ImageLabel publishes an authored Transform Image 3D GPU result", "[cl
 		CHECK(exported.Image.Pixels[index + 2] == 33);
 		CHECK(exported.Image.Pixels[index + 3] == 255);
 	}
-	selector.Texture = core::Name("live-transform-rejected");
 	REQUIRE(scene::SetImageGraphBinding(store, binding, selector));
 	client::ImageGraphRuntime runtime;
 	runtime.BeginFrame();
-	CHECK(runtime.Refresh(store, device.Renderer, OWNER, assets) == 0);
-	CHECK(runtime.LastError() == "Transform Image 3D requires the headless export scheduler");
+	CHECK(runtime.Refresh(store, device.Renderer, OWNER, assets) == 1);
+	CHECK(runtime.LastError().empty());
 	runtime.Clear(device.Renderer);
 	render::LiveImagePublisher publisher;
 	const auto publication = publisher.BeginBinding(OWNER, TEXTURE);
@@ -365,6 +365,79 @@ TEST_CASE("ImageLabel publishes an authored Transform Image 3D GPU result", "[cl
 	CHECK(height == 2);
 	CHECK(publisher.Retire(device.Renderer, *publication));
 	interface.Shutdown();
+	std::filesystem::remove_all(assets);
+}
+
+TEST_CASE(
+	"live image bindings retain CPU output through Transform Image 3D admission",
+	"[client][imagegraph][gpu][.]"
+) {
+	const std::filesystem::path assets =
+		std::filesystem::temp_directory_path() / "atomic-imagegraph-transform-handoff-test";
+	std::filesystem::remove_all(assets);
+	std::filesystem::create_directories(assets / "imagegraphs");
+	const auto path = client::ImageGraphDocumentPath(assets, GRAPH);
+	const auto write = [&](std::string_view source) {
+		std::ofstream file(path);
+		file << source;
+		file.close();
+		std::error_code error;
+		std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now(), error);
+		REQUIRE_FALSE(error);
+	};
+	const std::string_view cpuFirst =
+		"imagegraph 1\nnode \"solid\" \"image.solid\" \"\" 0 0\n"
+		"value 0 \"solid\" \"width\" i 2\nvalue 0 \"solid\" \"height\" i 1\n"
+		"value 0 \"solid\" \"colour\" c 11 22 33 255\noutput \"final\" \"solid\" \"image\"\n";
+	const std::string_view transform =
+		"imagegraph 6\nnode \"solid\" \"image.solid\" \"\" 0 0\n"
+		"value 0 \"solid\" \"width\" i 1\nvalue 0 \"solid\" \"height\" i 1\n"
+		"node \"transform\" \"image.transform_3d\" \"\" 0 0\n"
+		"value 1 \"transform\" \"position\" 3 0 0 0\nvalue 1 \"transform\" \"anchor\" 3 0 0 0\n"
+		"value 1 \"transform\" \"rotation\" h 0 0 0 1\nvalue 1 \"transform\" \"scale\" 3 1 1 1\n"
+		"value 1 \"transform\" \"texture_tiling\" v 1 1\nvalue 1 \"transform\" \"projection\" e 1\n"
+		"value 1 \"transform\" \"fov\" d 45\nvalue 1 \"transform\" \"view_range\" v 0.001 10\n"
+		"value 1 \"transform\" \"depth_range\" v 0 1\n"
+		"link \"solid\" \"image\" \"transform\" \"surface\"\n"
+		"output \"final\" \"transform\" \"rendered\"\n";
+	const std::string_view cpuSecond =
+		"imagegraph 1\nnode \"solid\" \"image.solid\" \"\" 0 0\n"
+		"value 0 \"solid\" \"width\" i 3\nvalue 0 \"solid\" \"height\" i 1\n"
+		"value 0 \"solid\" \"colour\" c 44 55 66 255\noutput \"final\" \"solid\" \"image\"\n";
+	write(cpuFirst);
+	scene::RegisterSceneComponents();
+	ecs::Store store("imagegraph-transform-handoff-world");
+	const auto binding = store.Create();
+	scene::ImageGraphBinding selector;
+	selector.Graph = GRAPH;
+	selector.Output = OUTPUT;
+	selector.Texture = TEXTURE;
+	REQUIRE(scene::SetImageGraphBinding(store, binding, selector));
+	Device device;
+	REQUIRE(device.VideoReady);
+	REQUIRE(device.Renderer.Initialise(nullptr));
+	client::ImageGraphRuntime runtime;
+	CHECK(runtime.Refresh(store, device.Renderer, OWNER, assets) == 1);
+	const void *const oldTexture = device.Renderer.TextureHandle(TEXTURE, OWNER);
+	REQUIRE(oldTexture != nullptr);
+	uint32_t width = 0, height = 0;
+	REQUIRE(device.Renderer.TextureSize(TEXTURE, width, height, OWNER));
+	CHECK(width == 2);
+	CHECK(height == 1);
+	write(transform);
+	runtime.BeginFrame();
+	CHECK(runtime.Refresh(store, device.Renderer, OWNER, assets) == 1);
+	CHECK(runtime.LastError().empty());
+	CHECK(device.Renderer.TextureHandle(TEXTURE, OWNER) == oldTexture);
+	write(cpuSecond);
+	runtime.BeginFrame();
+	CHECK(runtime.Refresh(store, device.Renderer, OWNER, assets) == 1);
+	CHECK_FALSE(device.Renderer.CancelTransformImage3D(OWNER, TEXTURE, 1));
+	REQUIRE(device.Renderer.TextureSize(TEXTURE, width, height, OWNER));
+	CHECK(width == 3);
+	CHECK(height == 1);
+	runtime.Clear(device.Renderer);
+	CHECK(device.Renderer.TextureHandle(TEXTURE, OWNER) == nullptr);
 	std::filesystem::remove_all(assets);
 }
 

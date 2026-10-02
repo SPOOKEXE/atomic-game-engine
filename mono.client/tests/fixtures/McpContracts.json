@@ -203,6 +203,7 @@
             "cancel_view_camera_mutation",
             "poll_view_camera_mutation",
             "get_resource",
+            "save_resource",
             "release_capture",
             "cancel_capture"
           ]
@@ -2609,6 +2610,27 @@
             "type": "object"
           },
           "name": "get_resource"
+        },
+        {
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "options": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "id",
+              "options"
+            ],
+            "type": "object"
+          },
+          "name": "save_resource"
         },
         {
           "input_schema": {
@@ -7194,6 +7216,28 @@
           "type": "object"
         },
         "name": "visibility_observations"
+      },
+      "save_resource": {
+        "description": "Writes one whole retained capture plane to a file on this machine and returns the file's path. Takes the same id and options as get_resource, without offset or max_bytes. Use it instead of repeated get_resource calls when the caller can read this machine's files: it skips base64 and the one MiB range limit. The engine chooses the path, and release_capture deletes the ticket's files.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "id",
+            "options"
+          ],
+          "type": "object"
+        },
+        "name": "save_resource"
       }
     }
   },

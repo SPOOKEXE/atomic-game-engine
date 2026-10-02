@@ -31,7 +31,7 @@ namespace client {
 		engine::imagegraph::Status Status = engine::imagegraph::Status::Malformed;
 		// Durable graph location and explanation on failure.
 		engine::imagegraph::Diagnostic Diagnostic;
-		// Straight RGBA8 image on success.
+		// Owned numeric image on success, with its surface format preserved.
 		engine::imagegraph::Image Image;
 		// Present only when a headless Transform Image 3D export selects its mesh output.
 		std::optional<engine::render::imagegraph::TransformImage3DMesh> Mesh;
@@ -77,10 +77,11 @@ namespace client {
 		// Starts a presentation budget shared by every world's binding scan.
 		void BeginFrame();
 
-		// Runs on the renderer thread after simulation. Published names resolve
-		// through the normal owner-scoped renderer texture table. Visual work
-		// deferred by the frame budget samples the current world tick when retried;
-		// it does not replay omitted ticks into the renderer.
+		// Runs on the renderer thread after simulation. Successful synchronous
+		// publications and admitted Transform Image 3D jobs count toward the return
+		// value. Transform outputs become visible only after renderer fence adoption.
+		// Visual work deferred by the frame budget samples the current world tick
+		// when retried; it does not replay omitted ticks into the renderer.
 		size_t Refresh(
 			engine::ecs::Store &store,
 			engine::render::Renderer &renderer,
@@ -114,6 +115,7 @@ namespace client {
 	  private:
 		struct Entry {
 			engine::render::LiveImageBinding Publication;
+			engine::core::Name Owner;
 			engine::ecs::Entity Entity;
 			uint64_t StoreIdentity = 0;
 			engine::scene::ImageGraphBinding Selector;
@@ -122,6 +124,8 @@ namespace client {
 			uintmax_t FileBytes = 0;
 			bool Published = false;
 			bool Animated = false;
+			bool TransformAdmitted = false;
+			uint64_t TransformGeneration = 0;
 		};
 		struct CachedDocument {
 			engine::imagegraph::Document Authored;
@@ -146,6 +150,7 @@ namespace client {
 		std::unordered_map<std::string, CachedDocument> Documents;
 		std::unordered_map<uint64_t, SinkUsage> SinkUsages;
 		std::unordered_map<uint32_t, SkyboxGroup> SkyboxGroups;
+		std::unordered_map<uint32_t, engine::core::Name> TransformOwners;
 		std::vector<engine::core::Name> SkyboxOwners;
 		std::vector<engine::core::Name> NextSkyboxOwners;
 		engine::core::Name PrioritySkyboxOwner;
@@ -155,6 +160,7 @@ namespace client {
 		size_t CachedDocumentBytes = 0;
 		uint64_t CacheClock = 0;
 		uint64_t Parses = 0;
+		uint64_t NextTransformGeneration = 1;
 		size_t ChecksRemaining = MAXIMUM_CHECKS_PER_FRAME;
 		std::string Error;
 	};

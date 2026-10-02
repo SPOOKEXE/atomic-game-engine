@@ -1,3 +1,6 @@
+#include "ImageGraphSurfaceFormat.hpp"
+#include "ImageGraphTransform3DAdapter.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
@@ -11,6 +14,8 @@
 #include <client/ContentDemand.hpp>
 #include <client/ImageGraphRuntime.hpp>
 #include <fstream>
+#include <limits>
+#include <new>
 #include <system_error>
 #include <unordered_set>
 
@@ -92,7 +97,7 @@ namespace client {
 						result.Status,
 						node->Id,
 						selected->Port,
-						"Transform Image 3D requires the headless export scheduler"
+						"Transform Image 3D requires a render-backed evaluation API"
 					};
 					return result;
 				}
@@ -228,14 +233,23 @@ namespace client {
 				return result;
 			}
 			render::imagegraph::TransformImage3DRequest request;
-			request.Front = {front.Width, front.Height, {}};
-			request.Front.Rgba8.assign(
+			const auto frontFormat = detail::TextureFormatForSurface(front.Format);
+			const auto backFormat = detail::TextureFormatForSurface(back.Format);
+			if (!frontFormat || (!back.Pixels.empty() && !backFormat)) {
+				result.Status = imagegraph::Status::UnsupportedExecution;
+				result.Diagnostic = {
+					result.Status, transform.Id, "surface", "Transform Image 3D surface format is unsupported"
+				};
+				return result;
+			}
+			request.Front = {front.Width, front.Height, *frontFormat, {}};
+			request.Front.Pixels.assign(
 				reinterpret_cast<const std::byte *>(front.Pixels.data()),
 				reinterpret_cast<const std::byte *>(front.Pixels.data() + front.Pixels.size())
 			);
 			if (!back.Pixels.empty()) {
-				request.Back = {back.Width, back.Height, {}};
-				request.Back.Rgba8.assign(
+				request.Back = {back.Width, back.Height, *backFormat, {}};
+				request.Back.Pixels.assign(
 					reinterpret_cast<const std::byte *>(back.Pixels.data()),
 					reinterpret_cast<const std::byte *>(back.Pixels.data() + back.Pixels.size())
 				);
@@ -267,13 +281,33 @@ namespace client {
 				result.Status = imagegraph::Status::Ok;
 				return result;
 			}
-			const std::vector<std::byte> &pixels = outputPort == "depth" ? gpu.DepthRgba8 : gpu.RenderedRgba8;
 			result.Image.Width = gpu.Width;
 			result.Image.Height = gpu.Height;
-			result.Image.Pixels.assign(
-				reinterpret_cast<const uint8_t *>(pixels.data()),
-				reinterpret_cast<const uint8_t *>(pixels.data() + pixels.size())
-			);
+			if (outputPort == "depth") {
+				result.Image.Format = imagegraph::SurfaceFormat::RGBA8Unorm;
+				result.Image.Pixels.assign(
+					reinterpret_cast<const uint8_t *>(gpu.DepthRgba8.data()),
+					reinterpret_cast<const uint8_t *>(gpu.DepthRgba8.data() + gpu.DepthRgba8.size())
+				);
+			} else {
+				const auto format = detail::SurfaceFormatForTexture(gpu.RenderedFormat);
+				if (!format) {
+					result.Status = imagegraph::Status::UnsupportedExecution;
+					result.Diagnostic = {
+						result.Status,
+						transform.Id,
+						std::string(outputPort),
+						"Transform Image 3D output format is unsupported"
+					};
+					return result;
+				}
+				result.Image.Format = *format;
+				result.Image.Pixels.assign(
+					reinterpret_cast<const uint8_t *>(gpu.RenderedPixels.data()),
+					reinterpret_cast<const uint8_t *>(gpu.RenderedPixels.data() + gpu.RenderedPixels.size())
+				);
+			}
+			result.Image.Hash = imagegraph::SurfaceHash(result.Image);
 			result.Status = imagegraph::Status::Ok;
 			return result;
 		}
@@ -369,7 +403,7 @@ namespace client {
 	) {
 		if (!owner.IsValid()) return 0;
 		std::unordered_set<uint64_t> seen;
-		size_t published = 0;
+		size_t updated = 0;
 		size_t ordinal = 0;
 		size_t &nextBinding = NextBindingByOwner[owner.Id()];
 		const uint64_t usageRevision = WantedContentRevision(store);
@@ -607,7 +641,7 @@ namespace client {
 				if (!usage.Valid) Error = "image graph sink reference limit exceeded";
 				if (valid && changed) {
 					std::array<ImageGraphFrameResult, 6> frames;
-					size_t totalPixels = 0;
+					size_t totalUploadBytes = 0;
 					for (size_t index = 0; index < skyFaces.size(); ++index) {
 						CachedDocument *document =
 							compiledDocument(paths[index], modified[index], fileBytes[index]);
@@ -622,19 +656,34 @@ namespace client {
 							ticks[index],
 							skyFaces[index].Selector.Seed
 						);
-						if (frames[index].Status != engine::imagegraph::Status::Ok ||
-							frames[index].Image.Pixels.size() > 96u * 1024u * 1024u - totalPixels) {
+						const auto uploadFormat = detail::TextureFormatForSurface(frames[index].Image.Format);
+						const uint32_t uploadBytesPerPixel =
+							detail::TextureUploadBytesPerPixel(frames[index].Image.Format);
+						const uint64_t pixels =
+							uint64_t(frames[index].Image.Width) * frames[index].Image.Height;
+						const bool exceedsUploadLimit =
+							!uploadFormat || uploadBytesPerPixel == 0 ||
+							pixels > std::numeric_limits<uint64_t>::max() / uploadBytesPerPixel ||
+							pixels * uploadBytesPerPixel > 96u * 1024u * 1024u - totalUploadBytes;
+						if (frames[index].Status != engine::imagegraph::Status::Ok || exceedsUploadLimit) {
 							Error = frames[index].Status == engine::imagegraph::Status::Ok
 										? "image graph skybox exceeds group byte limit"
 										: frames[index].Diagnostic.Message;
 							valid = false;
 							break;
 						}
-						totalPixels += frames[index].Image.Pixels.size();
+						totalUploadBytes += static_cast<size_t>(pixels * uploadBytesPerPixel);
 					}
 					if (valid) {
 						std::array<engine::render::LiveImageUpload, 6> uploads;
 						for (size_t index = 0; index < skyFaces.size(); ++index) {
+							const auto textureFormat =
+								detail::TextureFormatForSurface(frames[index].Image.Format);
+							if (!textureFormat) {
+								Error = "image graph skybox surface format is unsupported";
+								valid = false;
+								break;
+							}
 							const auto binding = Publisher.BeginBinding(owner, skyNames[index]);
 							if (!binding) {
 								Error = "live image publisher has no skybox binding capacity";
@@ -651,7 +700,11 @@ namespace client {
 									reinterpret_cast<const std::byte *>(frames[index].Image.Pixels.data()),
 									frames[index].Image.Pixels.size()
 								),
-								engine::render::LiveImageColorSpace::Display
+								skyFaces[index].Selector.ColorSpace ==
+										engine::scene::ImageGraphColorSpace::Linear
+									? engine::render::LiveImageColorSpace::Linear
+									: engine::render::LiveImageColorSpace::Display,
+								*textureFormat
 							};
 						}
 						if (valid && Publisher.PublishBatch(renderer, uploads) !=
@@ -662,6 +715,7 @@ namespace client {
 						if (valid) {
 							for (size_t index = 0; index < skyFaces.size(); ++index) {
 								auto &entry = Entries[Key(owner, skyNames[index])];
+								entry.Owner = owner;
 								entry.Entity = skyFaces[index].Entity;
 								entry.StoreIdentity = store.Identity();
 								entry.Selector = skyFaces[index].Selector;
@@ -672,139 +726,280 @@ namespace client {
 								entry.Animated = frames[index].Animated;
 							}
 							SkyboxGroups[owner.Id()] = {skyNames, store.Identity()};
-							published += skyFaces.size();
+							updated += skyFaces.size();
 						}
 					}
 				}
 			}
 		}
 		if (PrioritySkyboxOwner == owner) PrioritySkyboxVisited = true;
-		store.Each<const engine::scene::ImageGraphBinding>(
-			[&](engine::ecs::Entity entity, const engine::scene::ImageGraphBinding &selector) {
-				if (groupedNames.contains(selector.Texture.Id())) return;
-				if (!engine::scene::IsValidImageGraphBinding(selector)) return;
-				const size_t current = ordinal++;
-				const uint64_t key = Key(owner, selector.Texture);
-				if (!seen.insert(key).second) {
-					Error = "duplicate image graph texture binding";
+		store.Each<const engine::scene::ImageGraphBinding>([&](engine::ecs::Entity entity,
+															   const engine::scene::ImageGraphBinding
+																   &selector) {
+			if (groupedNames.contains(selector.Texture.Id())) return;
+			if (!engine::scene::IsValidImageGraphBinding(selector)) return;
+			const size_t current = ordinal++;
+			const uint64_t key = Key(owner, selector.Texture);
+			if (!seen.insert(key).second) {
+				Error = "duplicate image graph texture binding";
+				return;
+			}
+			if (!usage.Valid) {
+				Error = "image graph sink reference limit exceeded";
+				return;
+			}
+			const uint8_t sinkFlags = usage.Flags[selector.Texture.Id()];
+			const uint8_t incompatible =
+				selector.ColorSpace == engine::scene::ImageGraphColorSpace::Linear ? 1 : 2;
+			if ((sinkFlags & incompatible) != 0) {
+				Error = "image graph output colour space conflicts with a texture sink";
+				return;
+			}
+			// Scan every row for retirement, but only touch a bounded number of
+			// files and evaluations on this presentation. The cursor rotates.
+			if (current < nextBinding || ChecksRemaining == 0 ||
+				(PrioritySkyboxOwner.IsValid() && !PrioritySkyboxVisited && PrioritySkyboxOwner != owner &&
+				 ChecksRemaining <= 6))
+				return;
+			--ChecksRemaining;
+			nextBinding = current + 1;
+			const std::filesystem::path path = ImageGraphDocumentPath(directory, selector.Graph);
+			if (path.empty()) {
+				Error = "unsafe image graph document name";
+				return;
+			}
+			std::error_code error;
+			const auto modified = std::filesystem::last_write_time(path, error);
+			if (error) {
+				Error = "image graph document is unavailable";
+				return;
+			}
+			const uintmax_t fileBytes = std::filesystem::file_size(path, error);
+			if (error || fileBytes > MAXIMUM_DOCUMENT_BYTES) {
+				Error = "image graph document exceeds host byte limit or is unavailable";
+				return;
+			}
+			const uint64_t tick = selector.TickPolicy == engine::scene::ImageGraphTickPolicy::World
+									  ? store.Time().Tick
+									  : selector.FixedTick;
+			CachedDocument *cached = compiledDocument(path, modified, fileBytes);
+			if (cached == nullptr) return;
+			auto [position, inserted] = Entries.try_emplace(key);
+			Entry &entry = position->second;
+			const bool changed = inserted || entry.StoreIdentity != store.Identity() ||
+								 entry.Entity != entity || !SameSelector(entry.Selector, selector);
+			const bool sampleChanged = changed || entry.Modified != modified ||
+									   entry.FileBytes != fileBytes || (entry.Animated && entry.Tick != tick);
+			std::string_view outputPort;
+			const auto *outputNode = OutputNode(cached->Authored, selector.Output, outputPort);
+			if (outputNode != nullptr && outputNode->Type == "image.transform_3d") {
+				if (outputPort != "rendered") {
+					Error = "live Transform Image 3D bindings require the rendered output";
+					if (entry.TransformAdmitted) {
+						(void)renderer.CancelTransformImage3D(
+							owner, selector.Texture, entry.TransformGeneration
+						);
+						entry.TransformAdmitted = false;
+					}
 					return;
 				}
-				if (!usage.Valid) {
-					Error = "image graph sink reference limit exceeded";
+				if (!sampleChanged && entry.TransformAdmitted) return;
+				if (entry.TransformAdmitted) {
+					(void)renderer.CancelTransformImage3D(owner, selector.Texture, entry.TransformGeneration);
+					entry.TransformAdmitted = false;
+				}
+				if (NextTransformGeneration == 0) {
+					Error = "Transform Image 3D generation limit exhausted";
 					return;
 				}
-				const uint8_t sinkFlags = usage.Flags[selector.Texture.Id()];
-				const uint8_t incompatible =
-					selector.ColorSpace == engine::scene::ImageGraphColorSpace::Linear ? 1 : 2;
-				if ((sinkFlags & incompatible) != 0) {
-					Error = "image graph output colour space conflicts with a texture sink";
+				engine::render::imagegraph::TransformImage3DRequest request;
+				engine::imagegraph::Diagnostic diagnostic;
+				if (!detail::BuildTransformRequest(
+						cached->Authored,
+						cached->Compiled,
+						*outputNode,
+						tick,
+						selector.Seed,
+						selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
+						request,
+						diagnostic
+					)) {
+					Error = diagnostic.Message;
 					return;
 				}
-				// Scan every row for retirement, but only touch a bounded number of
-				// files and evaluations on this presentation. The cursor rotates.
-				if (current < nextBinding || ChecksRemaining == 0 ||
-					(PrioritySkyboxOwner.IsValid() && !PrioritySkyboxVisited &&
-					 PrioritySkyboxOwner != owner && ChecksRemaining <= 6))
-					return;
-				--ChecksRemaining;
-				nextBinding = current + 1;
-				const std::filesystem::path path = ImageGraphDocumentPath(directory, selector.Graph);
-				if (path.empty()) {
-					Error = "unsafe image graph document name";
+				if (!TransformOwners.contains(owner.Id()) &&
+					TransformOwners.size() >= engine::render::LiveImagePublisher::MAXIMUM_BINDINGS) {
+					Error = "live Transform Image 3D owner limit exceeded";
 					return;
 				}
-				auto [position, inserted] = Entries.try_emplace(key);
-				Entry &entry = position->second;
-				const bool changed = inserted || entry.StoreIdentity != store.Identity() ||
-									 entry.Entity != entity || !SameSelector(entry.Selector, selector);
-				if (changed) {
-					if (!inserted && entry.StoreIdentity != store.Identity())
-						(void)Publisher.Retire(renderer, entry.Publication);
-					const auto binding = Publisher.BeginBinding(owner, selector.Texture);
-					if (!binding) {
-						Error = "live image publisher has no binding capacity";
-						if (inserted) Entries.erase(position);
+				bool ownerInserted = false;
+				try {
+					ownerInserted = TransformOwners.try_emplace(owner.Id(), owner).second;
+				} catch (const std::bad_alloc &) {
+					Error = "Transform Image 3D owner tracking allocation failed";
+					return;
+				}
+				const uint64_t generation = NextTransformGeneration;
+				const auto queueStatus = renderer.QueueTransformImage3D({
+					.Owner = owner,
+					.Name = selector.Texture,
+					.Generation = generation,
+					.Request = std::move(request),
+				});
+				if (queueStatus != engine::render::imagegraph::TransformImage3DQueueResult::Queued &&
+					queueStatus != engine::render::imagegraph::TransformImage3DQueueResult::Replaced) {
+					if (ownerInserted) TransformOwners.erase(owner.Id());
+					Error = queueStatus == engine::render::imagegraph::TransformImage3DQueueResult::Full
+								? "live Transform Image 3D queue is full"
+								: "live Transform Image 3D request was refused";
+					return;
+				}
+				const engine::core::Name previousTexture = entry.Selector.Texture;
+				if (entry.Publication.Owner.IsValid()) {
+					if (!Publisher.ReleaseBinding(entry.Publication)) {
+						(void)renderer.CancelTransformImage3D(owner, selector.Texture, generation);
+						if (ownerInserted) TransformOwners.erase(owner.Id());
+						Error = "live image publisher binding became stale during transform handoff";
 						return;
 					}
-					entry.Publication = *binding;
-					entry.Entity = entity;
-					entry.StoreIdentity = store.Identity();
-					entry.Selector = selector;
-					entry.Published = false;
+					entry.Publication = {};
 				}
-				std::error_code error;
-				const auto modified = std::filesystem::last_write_time(path, error);
-				if (error) {
-					Error = "image graph document is unavailable";
-					return;
+				if (entry.Owner == owner && previousTexture.IsValid() &&
+					previousTexture != selector.Texture) {
+					const bool sharedByAnotherBinding =
+						std::any_of(Entries.begin(), Entries.end(), [&](const auto &candidate) {
+							return candidate.first != key && candidate.second.Owner == owner &&
+								   candidate.second.Selector.Texture == previousTexture;
+						});
+					if (!sharedByAnotherBinding) (void)renderer.DropTexture(previousTexture, owner);
 				}
-				const uintmax_t fileBytes = std::filesystem::file_size(path, error);
-				if (error || fileBytes > MAXIMUM_DOCUMENT_BYTES) {
-					Error = "image graph document exceeds host byte limit or is unavailable";
-					return;
-				}
-				const uint64_t tick = selector.TickPolicy == engine::scene::ImageGraphTickPolicy::World
-										  ? store.Time().Tick
-										  : selector.FixedTick;
-				if (!changed && entry.Published && entry.Modified == modified &&
-					entry.FileBytes == fileBytes && (!entry.Animated || entry.Tick == tick))
-					return;
-				CachedDocument *cached = compiledDocument(path, modified, fileBytes);
-				if (cached == nullptr) return;
-				ImageGraphFrameResult frame = EvaluateCompiled(
-					cached->Authored, cached->Compiled, selector.Output, tick, selector.Seed
-				);
-				if (frame.Status != engine::imagegraph::Status::Ok) {
-					Error = frame.Diagnostic.Message;
-					return;
-				}
-				const std::span<const std::byte> pixels(
-					reinterpret_cast<const std::byte *>(frame.Image.Pixels.data()), frame.Image.Pixels.size()
-				);
-				const auto status = Publisher.Publish(
-					renderer,
-					entry.Publication,
-					frame.Image.Width,
-					frame.Image.Height,
-					pixels,
-					selector.ColorSpace == engine::scene::ImageGraphColorSpace::Linear
-						? engine::render::LiveImageColorSpace::Linear
-						: engine::render::LiveImageColorSpace::Display
-				);
-				if (status != engine::render::LiveImagePublishStatus::Published) {
-					Error = "image graph texture upload failed";
-					return;
-				}
+				NextTransformGeneration =
+					generation == std::numeric_limits<uint64_t>::max() ? 0 : generation + 1;
+				entry.Owner = owner;
+				entry.Entity = entity;
+				entry.StoreIdentity = store.Identity();
+				entry.Selector = selector;
 				entry.Tick = tick;
 				entry.Modified = modified;
 				entry.FileBytes = fileBytes;
-				entry.Published = true;
-				entry.Animated = frame.Animated;
-				++published;
+				entry.Published = false;
+				entry.Animated = !cached->Authored.Keyframes.empty();
+				entry.TransformAdmitted = true;
+				entry.TransformGeneration = generation;
+				++updated;
+				return;
 			}
-		);
+			if (entry.TransformAdmitted) {
+				(void)renderer.CancelTransformImage3D(owner, selector.Texture, entry.TransformGeneration);
+				entry.TransformAdmitted = false;
+			}
+			if (entry.TransformGeneration != 0 && entry.Selector.Texture != selector.Texture) {
+				const bool sharedByAnotherBinding =
+					std::any_of(Entries.begin(), Entries.end(), [&](const auto &candidate) {
+						return candidate.first != key && candidate.second.Owner == owner &&
+							   candidate.second.Selector.Texture == entry.Selector.Texture;
+					});
+				if (!sharedByAnotherBinding) (void)renderer.DropTexture(entry.Selector.Texture, owner);
+				entry.TransformGeneration = 0;
+			}
+			if (!sampleChanged && entry.Published) return;
+			const bool needsBinding = changed || !entry.Publication.Owner.IsValid();
+			if (needsBinding) {
+				if (!inserted && entry.StoreIdentity != store.Identity())
+					(void)Publisher.Retire(renderer, entry.Publication);
+				const auto binding = Publisher.BeginBinding(owner, selector.Texture);
+				if (!binding) {
+					Error = "live image publisher has no binding capacity";
+					if (inserted) Entries.erase(position);
+					return;
+				}
+				entry.Publication = *binding;
+				entry.Owner = owner;
+				entry.Entity = entity;
+				entry.StoreIdentity = store.Identity();
+				entry.Selector = selector;
+				entry.Published = false;
+			}
+			ImageGraphFrameResult frame =
+				EvaluateCompiled(cached->Authored, cached->Compiled, selector.Output, tick, selector.Seed);
+			if (frame.Status != engine::imagegraph::Status::Ok) {
+				Error = frame.Diagnostic.Message;
+				return;
+			}
+			const std::span<const std::byte> pixels(
+				reinterpret_cast<const std::byte *>(frame.Image.Pixels.data()), frame.Image.Pixels.size()
+			);
+			const auto textureFormat = detail::TextureFormatForSurface(frame.Image.Format);
+			if (!textureFormat) {
+				Error = "image graph surface format is unsupported";
+				return;
+			}
+			const auto status = Publisher.Publish(
+				renderer,
+				entry.Publication,
+				frame.Image.Width,
+				frame.Image.Height,
+				pixels,
+				selector.ColorSpace == engine::scene::ImageGraphColorSpace::Linear
+					? engine::render::LiveImageColorSpace::Linear
+					: engine::render::LiveImageColorSpace::Display,
+				*textureFormat
+			);
+			if (status != engine::render::LiveImagePublishStatus::Published) {
+				Error = "image graph texture upload failed";
+				return;
+			}
+			entry.Tick = tick;
+			entry.Modified = modified;
+			entry.FileBytes = fileBytes;
+			entry.Published = true;
+			entry.Animated = frame.Animated;
+			entry.TransformAdmitted = false;
+			entry.TransformGeneration = 0;
+			++updated;
+		});
 		if (nextBinding >= ordinal) nextBinding = 0;
 		for (auto entry = Entries.begin(); entry != Entries.end();) {
-			if (entry->second.Publication.Owner == owner && !seen.contains(entry->first)) {
+			if (entry->second.Owner == owner && !seen.contains(entry->first)) {
+				if (entry->second.TransformAdmitted)
+					(void)renderer.CancelTransformImage3D(
+						owner, entry->second.Selector.Texture, entry->second.TransformGeneration
+					);
+				if (entry->second.TransformGeneration != 0)
+					(void)renderer.DropTexture(entry->second.Selector.Texture, owner);
 				(void)Publisher.Retire(renderer, entry->second.Publication);
 				entry = Entries.erase(entry);
 			} else {
 				++entry;
 			}
 		}
-		return published;
+		return updated;
 	}
 
 	void ImageGraphRuntime::RetireInactiveOwners(
 		engine::render::Renderer &renderer, std::span<const engine::core::Name> owners
 	) {
 		for (auto entry = Entries.begin(); entry != Entries.end();) {
-			if (std::find(owners.begin(), owners.end(), entry->second.Publication.Owner) != owners.end()) {
+			if (std::find(owners.begin(), owners.end(), entry->second.Owner) != owners.end()) {
 				++entry;
 				continue;
 			}
+			if (entry->second.TransformAdmitted)
+				(void)renderer.CancelTransformImage3D(
+					entry->second.Owner, entry->second.Selector.Texture, entry->second.TransformGeneration
+				);
+			if (entry->second.TransformGeneration != 0)
+				(void)renderer.DropTexture(entry->second.Selector.Texture, entry->second.Owner);
 			(void)Publisher.Retire(renderer, entry->second.Publication);
 			entry = Entries.erase(entry);
+		}
+		for (auto transformOwner = TransformOwners.begin(); transformOwner != TransformOwners.end();) {
+			if (std::find(owners.begin(), owners.end(), transformOwner->second) != owners.end()) {
+				++transformOwner;
+				continue;
+			}
+			renderer.DropTransformImage3DOwner(transformOwner->second);
+			transformOwner = TransformOwners.erase(transformOwner);
 		}
 		for (auto cursor = NextBindingByOwner.begin(); cursor != NextBindingByOwner.end();) {
 			if (std::find_if(owners.begin(), owners.end(), [&](engine::core::Name owner) {
@@ -825,6 +1020,10 @@ namespace client {
 	}
 
 	void ImageGraphRuntime::Clear(engine::render::Renderer &renderer) {
+		for (const auto &[_, owner] : TransformOwners)
+			renderer.DropTransformImage3DOwner(owner);
+		TransformOwners.clear();
+		NextTransformGeneration = 1;
 		for (const auto &[key, entry] : Entries)
 			(void)Publisher.Retire(renderer, entry.Publication);
 		Entries.clear();
