@@ -40,41 +40,14 @@ Milestone labels describe development scope, not release versions.
 
 - [x] Pixel Composer foundations:
 
-  1. Retain the pinned source licence in release notices.
-  2. Save, clone and hash per-instance output ports; prune invalid links.
-  3. Launch export helpers in a child working directory without changing the parent.
-  4. Implement Boolean, RGB, HSV, colour data, blend and OKLCH source kernels.
-  5. Encode native GIFs with bounded memory, deterministic palettes and explicit frame delays.
-  6. Read bounded layered images, models, XML and GameMaker rooms from bytes.
-  7. Decode Aseprite frames, tags, palettes, tiles and inspection data from bounded bytes.
-  8. Evaluate bounded source kernels, typed payloads, Pixel Builder recipes and deterministic stateful replay.
-  9. Edit PXC nodes, links, dynamic groups and animation regions with bounded structural round trips.
-  10. Run bounded Composer Lua sessions, drawing and notifications through an explicit host adapter.
-  11. Support PCX tuples, typed numeric values and source integer random ranges.
-  12. Share bounded file and export hosts; publish authored export batches with rollback.
-  13. Save and evaluate nested point arrays, source Any keys and recursive 3D paths.
-  14. Add four 2D kernels and preserve Pixel Builder signed dimensions, grayscale draws and instance resizing.
-  15. Preserve source FLIP readback buffers and bounded step history for replay.
-  16. Edit source groups and keys atomically; preserve undo/redo, instance writers and PXC saves.
-  17. Generate source WaveTable and Condition choices and typed Points Remap defaults without handwritten fallbacks.
-  18. Read explicitly granted files in Studio with bounded immutable observations and shared Lua delegation.
-  19. Read granted still images and integer-aligned sequences; publish bounded PCM WAV through exact grants and shared policy-checked Studio publication.
-  20. Add animation kernels and owned delay history; preserve mixed processor rows and compile source kernels in release unity builds.
-  21. Record bounded builtin random draws for Sparkle and add source image normalization.
-  22. Save particle objects; convert and render FLIP readback with bounded replay.
-  23. Expose authored graph selectors as reflected instance properties and preserve them in standard saves.
-  24. Play bounded 4096-frame texture atlases with per-frame timing through native sequence and particle paths; GPU verification remains open.
-  25. Read granted animated images with source frame selection, even padding and bounded nearest sampling.
-  26. Queue source camera and SDF outputs through bounded renderer jobs; GPU verification remains open.
-  27. Bind live 3D outputs and timed arrays through one evaluation per client update.
-  28. Package authored Composer scenes, supplied source projects and a reproducible CPU fluid study; visual acceptance remains open.
-  29. Add Grid, routing/cache, spatial points and FLIP spawn/destroy kernels with per-port diagnostics and bounded replay.
-  30. Add source Grain and Contrast Blur kernels with bounded curves, sampling and failure atomicity.
-  31. Reject fractional FLIP advances while preserving zero-step rendering.
-  32. Round-trip group values and nested Any arrays in PXC; refuse ambiguous moves of opaque source keys.
-  33. Edit mixed and nested arrays in Studio; preserve source group history, combined workflows and animated file observations.
-  34. Read bounded GIF first frames with complete validation and format-aware content policy.
-  35. Apply Camera Set key/fill lights and sample terrain atlas texel centres in live adapters.
+  1. Retain the source licence and pinned metadata; save instance ports and reflected graph selectors.
+  2. Evaluate supported source kernels, typed values, nested arrays, paths and Pixel Builder recipes with bounded diagnostics.
+  3. Preserve animation, particles, FLIP buffers, random draws and delay history through deterministic replay.
+  4. Edit native and PXC graphs, groups and keys with atomic undo/redo; preserve opaque data or refuse ambiguous edits.
+  5. Read granted images, animation, audio and structured assets through bounded shared hosts and Studio observations.
+  6. Run bounded Lua and export helpers; publish image, sequence and WAV batches with rollback.
+  7. Bind live 3D outputs and timed 4096-frame atlases; queue camera and SDF jobs. GPU verification remains open.
+  8. Package source projects, authored scenes and a reproducible CPU fluid study. Visual acceptance remains open.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
