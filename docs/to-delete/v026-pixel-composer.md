@@ -312,7 +312,8 @@ follows the pinned source; a licensed executable is needed to resolve the discre
 4. Reuse cooked shaders and declared sampler/resource inputs. Add a validated named-sampler binding extension before
    arbitrary composer output may bind a cooked shader sampler. It enumerates allowed sampler names, expected
    dimensions, format, colour space and owner lifetime. HLSL and shader-language composer nodes compile during
-   authoring or cook into validated binaries; shipped clients consume those binaries and carry no runtime compiler.
+   authoring or cook into validated binaries; shipped Composer graphs consume those binaries. Retain live
+   `ShaderScript` compilation for runtime source edits.
 5. Compare controlled captures, output structures and diagnostics at fixed backend and resolution.
 
 #### First bounded node: Transform Image 3D
@@ -364,7 +365,7 @@ required for executable parity, including exact rasterization, culling, filterin
 2. Implement file, network and shell rows as explicit capability nodes with permissions, recorded input or runtime
    refusal. They are never ambient evaluator power.
 3. Implement Lua/expression execution with bounded APIs and replayable inputs. Implement HLSL and shader-language
-   nodes through authoring/cook compilation into validated binaries, with no shipped runtime compiler.
+   Composer nodes through authoring/cook compilation into validated binaries. Retain live `ShaderScript` compilation.
 4. Finish native PXC read/write through the required format gate.
 
 The native headless runner now has a bounded PNG frame-bundle export path. `imagegraph --input source.graph
@@ -416,7 +417,7 @@ The `.aseq` payload is not yet a particle or other render consumer; sequence res
 | Beam and trail | Existing effects texture fields | Live name resolves through ordinary texture demand. |
 | Material maps | scene MaterialMaps PBR names | Colour and linear map semantics validate and draw through normal material resolution. |
 | GUI images | ImageLabel Image and ImageButton normal/hover/pressed picture properties | Every GUI state uses normal interface texture resolution. |
-| Shader inputs | Existing material, interface and declared render sampler contracts | A cooked shader samples generated data only after validated named-sampler binding admission, with no runtime shader compilation. |
+| Shader inputs | Existing material, interface and declared render sampler contracts | Composer output samples generated data through validated named-sampler admission and cooked binaries. Live `ShaderScript` compilation remains available. |
 | Skybox | scene SkyboxTextures Front, Back, Left, Right, Up and Down | Six coherent names update or the prior sky remains. |
 | Static content | TextureData and normal asset cook/content | Export/reload preserves pixels, colour-space, mip and flipbook facts. |
 
