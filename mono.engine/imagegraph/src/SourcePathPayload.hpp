@@ -25,6 +25,22 @@ namespace engine::imagegraph::detail {
 		if (path.Loop || path.Segmented || !path.Anchors.empty() || !path.Weights.empty()) return false;
 		const auto &op = *path.SourceOperation;
 		if (op.Shape && op.Kind != SourcePathOperationKind::Shape) return false;
+		if (op.Kind == SourcePathOperationKind::Redistribute) {
+			if (!op.RedistributeMap || op.Inputs.size() != 1 || 33 > Limits::MaximumArrayElements - *count)
+				return false;
+			*count += 33;
+			for (double value : *op.RedistributeMap)
+				if (!std::isfinite(value)) return false;
+		} else if (op.RedistributeMap)
+			return false;
+		if (!std::isfinite(op.SkewCenter.X) || !std::isfinite(op.SkewCenter.Y) ||
+			!std::isfinite(op.SkewStrength))
+			return false;
+		if (op.Kind == SourcePathOperationKind::Skew) {
+			if (op.SkewAxis > 1 || op.Inputs.size() != 1) return false;
+		} else if (op.SkewAxis != 0 || op.SkewStrength != 0 || op.SkewCenter != Vector2{})
+			return false;
+
 		if (!std::isfinite(op.Offset) || !std::isfinite(op.BlendAmount)) return false;
 		if (op.Kind != SourcePathOperationKind::Offset && (op.Offset != 0 || op.ClampOffset)) return false;
 		if (op.Kind != SourcePathOperationKind::Blend &&
@@ -63,7 +79,8 @@ namespace engine::imagegraph::detail {
 				   ValidSourcePathShape(*op.Shape);
 		if (op.Kind != SourcePathOperationKind::Reverse && op.Kind != SourcePathOperationKind::Combine &&
 			op.Kind != SourcePathOperationKind::Trim && op.Kind != SourcePathOperationKind::Offset &&
-			op.Kind != SourcePathOperationKind::Blend && op.Kind != SourcePathOperationKind::Join)
+			op.Kind != SourcePathOperationKind::Blend && op.Kind != SourcePathOperationKind::Join &&
+			op.Kind != SourcePathOperationKind::Redistribute && op.Kind != SourcePathOperationKind::Skew)
 			return false;
 		if (op.Kind != SourcePathOperationKind::Combine && op.Kind != SourcePathOperationKind::Join &&
 			op.Kind != SourcePathOperationKind::Blend && op.Inputs.size() > 1)

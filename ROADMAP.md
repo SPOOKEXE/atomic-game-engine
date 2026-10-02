@@ -41,7 +41,7 @@ Milestone labels describe development scope, not release versions.
 - [x] Pixel Composer foundations:
 
   1. Retain the source licence, pinned metadata and generated enum choices; save instance ports and reflected graph selectors.
-  2. Evaluate bounded image/data, palette, atlas, point/path, blur/blend and bevel kernels; inherit instance routes.
+  2. Evaluate bounded image/data kernels, path modifiers, palettes, atlases and image filters; inherit instance routes.
   3. Replay animation, Time Remap, FLIP/Verlet collections and rigid actors with bounded history; retain recorded random state and rasterize trails/VFX.
   4. Edit graphs, groups, keys and tiles with atomic undo/redo; publish Dopesheet selection after history accepts the edit; preserve saved rigid meshes and metadata.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.

@@ -1195,12 +1195,14 @@ namespace engine::imagegraph {
 					detail::WriteSourceVerletPath(stream, operation);
 					return;
 				}
-				stream << (operation.Kind == SourcePathOperationKind::Reverse  ? "reverse"
-						   : operation.Kind == SourcePathOperationKind::Trim   ? "trim"
-						   : operation.Kind == SourcePathOperationKind::Offset ? "offset"
-						   : operation.Kind == SourcePathOperationKind::Blend  ? "blend"
-						   : operation.Kind == SourcePathOperationKind::Join   ? "join"
-																			   : "combine")
+				stream << (operation.Kind == SourcePathOperationKind::Reverse		 ? "reverse"
+						   : operation.Kind == SourcePathOperationKind::Trim		 ? "trim"
+						   : operation.Kind == SourcePathOperationKind::Offset		 ? "offset"
+						   : operation.Kind == SourcePathOperationKind::Blend		 ? "blend"
+						   : operation.Kind == SourcePathOperationKind::Join		 ? "join"
+						   : operation.Kind == SourcePathOperationKind::Redistribute ? "redistribute"
+						   : operation.Kind == SourcePathOperationKind::Skew		 ? "skew"
+																					 : "combine")
 					   << ' ' << operation.Inputs.size();
 				if (operation.Kind == SourcePathOperationKind::Trim)
 					stream << ' ' << operation.TrimRange.X << ' ' << operation.TrimRange.Y;
@@ -1221,6 +1223,13 @@ namespace engine::imagegraph {
 					}
 				}
 
+				if (operation.Kind == SourcePathOperationKind::Redistribute)
+					for (double value : *operation.RedistributeMap)
+						stream << ' ' << std::setprecision(17) << value;
+				if (operation.Kind == SourcePathOperationKind::Skew)
+					stream << ' ' << unsigned(operation.SkewAxis) << ' ' << std::setprecision(17)
+						   << operation.SkewStrength << ' ' << operation.SkewCenter.X << ' '
+						   << operation.SkewCenter.Y;
 				if (operation.Kind == SourcePathOperationKind::Join)
 					for (uint8_t reverse : operation.Reversed)
 						stream << ' ' << unsigned(reverse);
@@ -1954,18 +1963,23 @@ namespace engine::imagegraph {
 				}
 				if (!(stream >> count) || count > Limits::MaximumArrayElements ||
 					(kind != "reverse" && kind != "combine" && kind != "trim" && kind != "offset" &&
-					 kind != "blend" && kind != "join") ||
-					(kind == "blend" ? count != 2 : (kind != "combine" && kind != "join" && count > 1)))
+					 kind != "blend" && kind != "join" && kind != "redistribute" && kind != "skew") ||
+					(kind == "blend" ? count != 2
+					 : (kind == "skew" || kind == "redistribute")
+						 ? count != 1
+						 : (kind != "combine" && kind != "join" && count > 1)))
 					return false;
 				if (!admit(sizeof(SourcePathData2D) + count * sizeof(Path2D))) return false;
 				Path2D path;
 				auto &operation = path.SourceOperation.emplace();
-				operation.Kind = kind == "reverse"	? SourcePathOperationKind::Reverse
-								 : kind == "trim"	? SourcePathOperationKind::Trim
-								 : kind == "offset" ? SourcePathOperationKind::Offset
-								 : kind == "blend"	? SourcePathOperationKind::Blend
-								 : kind == "join"	? SourcePathOperationKind::Join
-													: SourcePathOperationKind::Combine;
+				operation.Kind = kind == "reverse"		  ? SourcePathOperationKind::Reverse
+								 : kind == "trim"		  ? SourcePathOperationKind::Trim
+								 : kind == "offset"		  ? SourcePathOperationKind::Offset
+								 : kind == "blend"		  ? SourcePathOperationKind::Blend
+								 : kind == "join"		  ? SourcePathOperationKind::Join
+								 : kind == "redistribute" ? SourcePathOperationKind::Redistribute
+								 : kind == "skew"		  ? SourcePathOperationKind::Skew
+														  : SourcePathOperationKind::Combine;
 				if (kind == "trim" &&
 					(!(stream >> operation.TrimRange.X >> operation.TrimRange.Y) ||
 					 !std::isfinite(operation.TrimRange.X) || !std::isfinite(operation.TrimRange.Y)))
@@ -2004,6 +2018,21 @@ namespace engine::imagegraph {
 							row.push_back(value);
 						}
 					}
+				}
+
+				if (kind == "redistribute") {
+					operation.RedistributeMap.emplace();
+					for (double &value : *operation.RedistributeMap)
+						if (!(stream >> value) || !std::isfinite(value)) return false;
+				}
+				if (kind == "skew") {
+					unsigned axis = 0;
+					if (!(stream >> axis >> operation.SkewStrength >> operation.SkewCenter.X >>
+						  operation.SkewCenter.Y) ||
+						axis > 1 || !std::isfinite(operation.SkewStrength) ||
+						!std::isfinite(operation.SkewCenter.X) || !std::isfinite(operation.SkewCenter.Y))
+						return false;
+					operation.SkewAxis = uint8_t(axis);
 				}
 				if (kind == "join") {
 					if (!admit(count * sizeof(uint8_t))) return false;

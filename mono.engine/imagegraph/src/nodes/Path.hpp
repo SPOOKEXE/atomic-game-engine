@@ -309,6 +309,9 @@ namespace engine::imagegraph::detail {
 			if (Shape) return LengthTotal;
 			if (SourceMesh) return LengthSourceVerletPath(*SourceMesh, line);
 			if (!Operation) return LengthTotal;
+			if (*Operation == SourcePathOperationKind::Redistribute ||
+				*Operation == SourcePathOperationKind::Skew)
+				return Inputs[0].Length();
 			if (*Operation == SourcePathOperationKind::Join) {
 				double total = 0;
 				for (const auto &child : Inputs)
@@ -515,6 +518,17 @@ namespace engine::imagegraph::detail {
 			if (SourceMesh) return MeshPoint(DistanceSourceVerletPath(*SourceMesh, distance, line));
 			if (Operation) {
 				if (*Operation == SourcePathOperationKind::Join) return JoinedDistance(distance, line);
+				if (*Operation == SourcePathOperationKind::Skew) {
+					auto p = Inputs[0].PointDistance(distance, 0);
+					if (SourceData->SkewAxis == 0)
+						p.X += (p.Y - SourceData->SkewCenter.Y) * SourceData->SkewStrength;
+					else
+						p.Y += (p.X - SourceData->SkewCenter.X) * SourceData->SkewStrength;
+					return p;
+				}
+				if (*Operation == SourcePathOperationKind::Redistribute)
+					return PointRatio(distance / Length(), line);
+
 				if (*Operation == SourcePathOperationKind::Reverse ||
 					*Operation == SourcePathOperationKind::Offset ||
 					*Operation == SourcePathOperationKind::Blend ||
@@ -554,6 +568,15 @@ namespace engine::imagegraph::detail {
 				if (*Operation == SourcePathOperationKind::Join)
 					return JoinedDistance(ratio * Length(), line);
 				if (*Operation == SourcePathOperationKind::Blend) return BlendRatio(ratio, line);
+				if (*Operation == SourcePathOperationKind::Skew) return PointDistance(ratio * Length(), line);
+				if (*Operation == SourcePathOperationKind::Redistribute) {
+					if (std::isnan(ratio)) return Inputs[0].PointRatio(0, line);
+					const double position = std::clamp(ratio, 0., 1.) * 32;
+					const size_t lo = size_t(std::floor(position)), hi = size_t(std::ceil(position));
+					const auto &table = *SourceData->RedistributeMap;
+					return Inputs[0].PointRatio(table[lo] + (table[hi] - table[lo]) * (position - lo), line);
+				}
+
 				if (*Operation == SourcePathOperationKind::Offset) {
 					const double sum = ratio + SourceData->Offset;
 					ratio = SourceData->ClampOffset ? std::clamp(sum, 0., 1.) : sum - std::floor(sum);

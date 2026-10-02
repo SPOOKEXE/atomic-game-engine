@@ -252,7 +252,9 @@ namespace engine::imagegraph {
 		Shape,
 		Offset,
 		Blend,
-		Join
+		Join,
+		Redistribute,
+		Skew
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
@@ -296,6 +298,10 @@ namespace engine::imagegraph {
 		uint8_t BlendMode = 0;
 		std::array<bool, 2> BlendInputsValid{false, false};
 		std::vector<uint8_t> Reversed;
+		std::optional<std::array<double, 33>> RedistributeMap;
+		Vector2 SkewCenter{};
+		double SkewStrength = 0;
+		uint8_t SkewAxis = 0;
 		std::vector<double> BlendLengths;
 		std::vector<std::vector<double>> BlendAccumulated;
 		bool operator==(const SourcePathData2D &) const = default;

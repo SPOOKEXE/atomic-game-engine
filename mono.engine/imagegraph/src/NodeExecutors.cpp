@@ -45,6 +45,7 @@ namespace engine::imagegraph::detail {
 					  SourceMatrixExecutors(),
 					  SourcePathExecutors(),
 					  SourcePathComposeExecutors(),
+					  SourcePathModifierExecutors(),
 					  SourcePointsExecutors(),
 					  SourcePointDataExecutors(),
 					  SourceSpatialPointsExecutors(),

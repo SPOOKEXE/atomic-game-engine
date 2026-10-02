@@ -80,7 +80,9 @@ namespace engine::imagegraph {
 			cone.DataProcessors += node.Type == "pc.trigger_bool" || node.Type == "pc.differential" ||
 								   node.Type == "pc.counter" || node.Type == "pc.delay_value" ||
 								   node.Type == "pc.cache_value_array" || node.Type == "pc.3_d_affector" ||
-								   node.Type == "pc.segment_filter" || node.Type == "pc.path_blend";
+								   node.Type == "pc.segment_filter" || node.Type == "pc.path_blend" ||
+								   node.Type == "pc.path_to_curve" || node.Type == "pc.path_redistribute" ||
+								   node.Type == "pc.path_skew";
 			cone.FirstFrameData |= node.Type == "pc.3_d_affector";
 			cone.Simulation |= node.Type == "image.verlet_simple" ||
 							   (node.Type.starts_with("pc.verlet_") || node.Type.starts_with("pc.flip_"));
