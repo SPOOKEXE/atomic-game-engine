@@ -73,7 +73,7 @@ Milestone labels describe development scope, not release versions.
 
   1. Graph and Studio: pass combined Group, Range, Any and Trigger tests; finish atomic undo/redo, Dopesheet gestures and host compatibility.
   2. Nodes: finish 2D, data, array, VFX and simulation coverage; verify defaults, controls, errors and animation; update the parity matrices.
-  3. Animation and audio: finish audio-driven keys, feedback, seek/reset and audio controls; resolve fractional-key semantics.
+  3. Animation and audio: finish audio workflows and feedback; verify seek/reset and fractional-key semantics.
   4. 3D and outputs: finish live Transform Image 3D, mesh consumers, remaining 3D nodes, material/shader/skybox bindings and large-sequence playback.
   5. PXC and exports: finish node, link and dynamic-input edits and remaining formats; validate modified PXC compatibility.
   6. Acceptance: run C++ and GPU tests, live Studio workflows and release profiling. Exact executable parity requires a licensed reference build and matched captures.
