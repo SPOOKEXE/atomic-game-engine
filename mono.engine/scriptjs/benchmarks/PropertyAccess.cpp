@@ -1,5 +1,7 @@
 // Measures QuickJS execution through the real ECS property binding surface.
 
+#include <engine/core/Name.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
@@ -20,8 +22,11 @@ namespace {
 	struct RuntimeFixture {
 		engine::ecs::Store World{"scriptjs.property-access.bench"};
 		std::unique_ptr<engine::script::Runtime> Runtime;
+		engine::ecs::Entity Instance = engine::ecs::NULL_ENTITY;
+		engine::core::Vector3 Expected;
+		size_t Operations = 0;
 
-		explicit RuntimeFixture(const size_t operations) {
+		explicit RuntimeFixture(const size_t operations) : Operations(operations) {
 			engine::scene::EnsureClassTree();
 			engine::scene::RegisterSceneComponents();
 			engine::physics::RegisterPhysicsClasses();
@@ -33,7 +38,7 @@ namespace {
 					"for (let i = 0; i < " +
 						std::to_string(operations) +
 						"; ++i) { "
-						"p = Vector3.new(p.X + 0.01, p.Y, p.Z); benchPart.Position = p; "
+						"p = Vector3.new(p.X + 0.015625, p.Y, p.Z); benchPart.Position = p; "
 						"p = benchPart.Position; } };",
 					"property-access-setup.js"
 				)) {
@@ -41,11 +46,34 @@ namespace {
 					"could not prepare JavaScript property benchmark: " + Runtime->LastError()
 				);
 			}
+			unsigned matches = 0;
+			World.Each<const engine::scene::Transform, const engine::scene::Bounds>(
+				[&](engine::ecs::Entity entity, const auto &, const auto &) {
+					if (World.ClassOf(entity) == engine::scene::PartClass()) {
+						Instance = entity;
+						++matches;
+					}
+				}
+			);
+			if (matches != 1 ||
+				!World.GetProperty(Instance, engine::core::Name("Position"), &Expected, sizeof(Expected))) {
+				throw std::runtime_error(
+					"JavaScript property fixture did not create exactly one readable Part"
+				);
+			}
 		}
 
 		void Run() {
 			if (!Runtime->Run("benchStep();", "property-access-bench.js")) {
 				throw std::runtime_error("JavaScript property benchmark failed: " + Runtime->LastError());
+			}
+			// Dyadic inputs give an exact native oracle over all warmups and samples.
+			// Verification is inside the same broader BENCH boundary in both builds.
+			Expected.X += static_cast<float>(Operations) / 64.0f;
+			engine::core::Vector3 actual;
+			if (!World.GetProperty(Instance, engine::core::Name("Position"), &actual, sizeof(actual)) ||
+				actual.X != Expected.X || actual.Y != Expected.Y || actual.Z != Expected.Z) {
+				throw std::runtime_error("JavaScript property benchmark Position diverged from exact oracle");
 			}
 		}
 	};
