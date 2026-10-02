@@ -9,6 +9,8 @@
 // object models over one store, and the thing worth pinning is that they agree:
 // a component one declares is the same component the other queries.
 
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Property.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
@@ -19,6 +21,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <string>
 
 TEST_SUITE_ID("engine.scripthost.ecs")
@@ -35,6 +38,12 @@ using engine::script::MakeRuntime;
 using engine::script::Runtime;
 
 namespace {
+	struct AccessorSchemaProbe {
+		float Base = 1.0f;
+		float Derived = 2.0f;
+		float Replacement = 3.0f;
+		std::string Text = "initial";
+	};
 
 	void MustRun(Runtime &runtime, const std::string &source) {
 		INFO(source);
@@ -720,4 +729,107 @@ TEST_CASE("the JavaScript surface reaches the same storage", "[script-ecs]") {
 			"if (World.Count('" +
 			name + "') !== 2) { throw new Error('the query missed the other VM\\'s row'); }\n"
 	);
+}
+
+// Both VMs must resolve current receiver metadata after late schema changes;
+// JavaScript additionally exposes native getter/setter borrowing through Object.
+TEST_CASE("property access follows live schema and receiver identity", "[script-ecs][property-access]") {
+	using engine::core::Name;
+	using engine::ecs::Classes;
+	engine::scene::EnsureClassTree();
+	const auto component = Components::Register<AccessorSchemaProbe>("scripthost.AccessorSchemaProbe");
+	const std::array additions{component};
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		const std::string baseName = Unique("accessor.base");
+		const std::string derivedName = Unique("accessor.derived");
+		const std::string otherName = Unique("accessor.other");
+		const auto base = Classes::Register(baseName, Classes::Find(Name("Instance")), additions);
+		const auto derived = Classes::Register(derivedName, base, {});
+		const auto other = Classes::Register(otherName, Classes::Find(Name("Instance")), additions);
+		Classes::Property<&AccessorSchemaProbe::Base>(base, "Value");
+		Classes::Property<&AccessorSchemaProbe::Derived>(derived, "Value");
+		Classes::Property<&AccessorSchemaProbe::Text>(derived, "Text");
+		Classes::Property<&AccessorSchemaProbe::Base>(derived, "Café");
+		Classes::Property<&AccessorSchemaProbe::Base>(other, "Value");
+		Store store("accessor_schema");
+		const auto runtime = MakeRuntime(store, language);
+		// Each Luau Run owns a fresh sandboxed thread. Persist instances in the
+		// world, then reacquire them in each chunk rather than assuming globals leak.
+		const std::string luauReceivers = "local probe = workspace:FindFirstChild('accessor-probe'); "
+										  "local receiver = workspace:FindFirstChild('accessor-receiver'); ";
+		const auto run = [&](const std::string &luau, const std::string &javascript) {
+			MustRun(*runtime, language == Language::Luau ? luauReceivers + luau : javascript);
+		};
+		const auto fail = [&](const std::string &luau, const std::string &javascript) {
+			MustFail(*runtime, language == Language::Luau ? luauReceivers + luau : javascript);
+		};
+		run("probe = Instance.new('" + derivedName +
+				"'); probe.Name = 'accessor-probe'; probe.Parent = workspace; "
+				"receiver = Instance.new('" +
+				otherName + "'); receiver.Name = 'accessor-receiver'; receiver.Parent = workspace",
+			"globalThis.probe = Instance.new('" + derivedName + "'); globalThis.receiver = Instance.new('" +
+				otherName + "')");
+		run("assert(probe.Value == 2); probe.Value = 7; assert(probe.Value == 7)",
+			"if (probe.Value !== 2) throw Error('derived shadow'); probe.Value = 7; if (probe.Value !== 7) "
+			"throw Error('write')");
+		run("probe.Text = 'héllo'; assert(probe.Text == 'héllo')",
+			"probe.Text = 'héllo'; if (probe.Text !== 'héllo') throw Error('string round-trip')");
+		run("assert(probe['Café'] == 1); probe['Café'] = 4; assert(probe['Café'] == 4)",
+			"if (probe['Café'] !== 1) throw Error('unicode name'); probe['Café'] = 4; if (probe['Café'] !== "
+			"4) throw Error('unicode write')");
+		fail(
+			"probe.Value = 'wrong'",
+			"probe.Value = { valueOf() { throw new TypeError('numeric conversion refused'); } }"
+		);
+		run("assert(probe.Value == 7)",
+			"if (probe.Value !== 7) throw Error('failed conversion changed value')");
+		if (language == Language::JavaScript) {
+			MustRun(
+				*runtime,
+				"globalThis.accessor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(probe), "
+				"'Value'); "
+				"if (accessor.get.call(receiver) !== 1) throw Error('borrowed getter'); "
+				"accessor.set.call(receiver, 9); if (receiver.Value !== 9) throw Error('borrowed setter'); "
+				"globalThis.absent = Instance.new('Folder');"
+			);
+			MustFail(*runtime, "accessor.get.call(absent)");
+			MustFail(*runtime, "accessor.set.call(absent, 1)");
+			MustFail(*runtime, "accessor.get.call({})");
+		}
+		// A new ancestor property shifts the derived-only property's ordinal.
+		Classes::Property<&AccessorSchemaProbe::Replacement>(base, "Inserted");
+		run("assert(probe.Text == 'héllo')", "if (probe.Text !== 'héllo') throw Error('shifted ordinal')");
+		Classes::Property<&AccessorSchemaProbe::Replacement>(derived, "Value");
+		run("assert(probe.Value == 3); probe.Value = 12; assert(probe.Value == 12)",
+			"if (probe.Value !== 3) throw Error('replaced getter'); probe.Value = 12; if (probe.Value !== "
+			"12) throw Error('replaced setter')");
+		Classes::Property<&AccessorSchemaProbe::Text>(derived, "Value");
+		run("assert(probe.Value == 'héllo'); probe.Value = 'schema'; assert(probe.Value == 'schema')",
+			"if (probe.Value !== 'héllo') throw Error('changed type'); probe.Value = 'schema'; if "
+			"(probe.Value !== 'schema') throw Error('string setter')");
+		Classes::Property<&AccessorSchemaProbe::Replacement>(derived, "Value");
+		run("assert(probe.Value == 12)", "if (probe.Value !== 12) throw Error('restored type')");
+		engine::ecs::PropertyDescriptor descriptor;
+		// Resolve by class rather than relying on where the script parented it.
+		for (const auto &property : Classes::Describe(derived).Properties) {
+			if (property.Name == Name("Value")) descriptor = property;
+		}
+		REQUIRE(descriptor.Name == Name("Value"));
+		descriptor.Writable = false;
+		Classes::Computed(derived, descriptor);
+		fail("probe.Value = 4", "probe.Value = 4");
+		run("assert(probe.Value == 12)", "if (probe.Value !== 12) throw Error('read-only read')");
+		descriptor.Scriptable = false;
+		Classes::Computed(derived, descriptor);
+		fail("return probe.Value", "probe.Value");
+		descriptor.Scriptable = true;
+		descriptor.Writable = true;
+		Classes::Computed(derived, descriptor);
+		// Keep the same local handle across destruction inside this one chunk.
+		run("assert(probe.Value == 12); probe:Destroy(); "
+			"local ok = pcall(function() return probe.Value end); assert(not ok, 'destroyed receiver read')",
+			"if (probe.Value !== 12) throw Error('restored metadata'); probe.Destroy(); "
+			"let refused = false; try { let value = probe.Value; } catch (error) { refused = true; } "
+			"if (!refused) throw Error('destroyed receiver read');");
+	}
 }
