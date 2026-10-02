@@ -167,6 +167,11 @@ namespace engine::imagegraph::detail {
 			return context.Fail(
 				Status::LimitExceeded, "FLIP render steps exceed native bound", "update_step"
 			);
+		// Native physics replay uses integer samples; zero-step rendering remains continuous.
+		if (steps > 0 && context.Request.Subframe != 0)
+			return context.Fail(
+				Status::InvalidValue, "FLIP render advance requires an integer frame", "update_step"
+			);
 		if (context.Input("fluid_particle"))
 			return context.Fail(
 				Status::UnsupportedExecution,

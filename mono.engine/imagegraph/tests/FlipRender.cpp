@@ -1,3 +1,4 @@
+#include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/SimulationReplay.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -97,4 +98,111 @@ TEST_CASE("FLIP Fill cannot refresh source readback mirrors without Step", "[ima
 	REQUIRE(result.Replay.Entries.size() == 1);
 	CHECK(result.Replay.Entries[0].Fluid.Data->ParticleCount == 4);
 	CHECK(result.Replay.Entries[0].Fluid.Data->ReadbackPositions.empty());
+}
+
+TEST_CASE(
+	"FLIP Render host seek matches sequential fixed ticks and refuses fractional advance",
+	"[imagegraph][feedback][flip_render]"
+) {
+	auto document = FlipRenderScene();
+	// Exercise the pinned source default.
+	auto &controls = document.Nodes.back().Values;
+	controls.erase(
+		std::remove_if(
+			controls.begin(),
+			controls.end(),
+			[](const AuthoredValue &value) { return value.Port == "update_step"; }
+		),
+		controls.end()
+	);
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CapturedFeedbackHost sequential, seek;
+	EvaluationRequest sequentialRequest, seekRequest;
+	sequentialRequest.Seed = seekRequest.Seed = 12345;
+	for (uint64_t tick = 0; tick <= 3; ++tick) {
+		sequentialRequest.Tick = tick;
+		INFO(diagnostic.Message);
+		REQUIRE(sequential.Prepare(
+			document, plan, 4, 1, sequentialRequest, diagnostic, Limits::MaximumEvaluationBytes, "image"
+		));
+	}
+	seekRequest.Tick = 3;
+	REQUIRE(
+		seek.Prepare(document, plan, 4, 1, seekRequest, diagnostic, Limits::MaximumEvaluationBytes, "image")
+	);
+	REQUIRE(sequential.Output("image"));
+	REQUIRE(seek.Output("image"));
+	CHECK(*seek.Output("image") == *sequential.Output("image"));
+	REQUIRE(seekRequest.SimulationReplay);
+	REQUIRE(sequentialRequest.SimulationReplay);
+	CHECK(*seekRequest.SimulationReplay == *sequentialRequest.SimulationReplay);
+	const auto priorImage = *seek.Output("image");
+	const auto priorReplay = *seekRequest.SimulationReplay;
+	seekRequest.Subframe = .5;
+	CHECK_FALSE(
+		seek.Prepare(document, plan, 4, 1, seekRequest, diagnostic, Limits::MaximumEvaluationBytes, "image")
+	);
+	CHECK(diagnostic.Code == Status::InvalidValue);
+	CHECK(*seek.Output("image") == priorImage);
+	CHECK(*seekRequest.SimulationReplay == priorReplay);
+}
+TEST_CASE(
+	"FLIP Render zero-step remains a nonadvancing fractional host sample",
+	"[imagegraph][feedback][flip_render]"
+) {
+	const auto document = FlipRenderScene(0);
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CapturedFeedbackHost host;
+	EvaluationRequest request;
+	request.Tick = 2;
+	request.Subframe = .5;
+	request.Seed = 12345;
+	INFO(diagnostic.Message);
+	REQUIRE(host.Prepare(document, plan, 4, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "image"));
+	REQUIRE(host.Output("image"));
+	CHECK(
+		std::all_of(
+			host.Output("image")->Pixels.begin(), host.Output("image")->Pixels.end(), [](uint8_t byte) {
+				return byte == 0;
+			}
+		)
+	);
+	REQUIRE(request.SimulationReplay);
+	REQUIRE(request.SimulationReplay->Entries.size() == 1);
+	CHECK(request.SimulationReplay->Entries.front().Fluid.Data->ReadbackPositions.empty());
+}
+
+TEST_CASE(
+	"FLIP Render linked zero-step preserves nonadvancing fractional sampling",
+	"[imagegraph][feedback][flip_render]"
+) {
+	auto document = FlipRenderScene(1);
+	document.Nodes.push_back({"zero", "value.number", "", {}, {{"value", 0.0}}});
+	document.Links.push_back({"zero", "number", "render", "update_step"});
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compiled = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	CapturedFeedbackHost host;
+	EvaluationRequest request;
+	request.Tick = 2;
+	request.Subframe = .5;
+	request.Seed = 12345;
+	REQUIRE(host.Prepare(document, plan, 4, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "image"));
+	REQUIRE(host.Output("image"));
+	CHECK(
+		std::all_of(
+			host.Output("image")->Pixels.begin(), host.Output("image")->Pixels.end(), [](uint8_t byte) {
+				return byte == 0;
+			}
+		)
+	);
+	REQUIRE(request.SimulationReplay);
+	REQUIRE(request.SimulationReplay->Entries.size() == 1);
+	CHECK(request.SimulationReplay->Entries.front().Fluid.Data->ReadbackPositions.empty());
 }

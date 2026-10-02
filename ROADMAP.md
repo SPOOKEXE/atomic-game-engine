@@ -70,6 +70,7 @@ Milestone labels describe development scope, not release versions.
   28. Package authored Composer scenes, supplied source projects and a reproducible CPU fluid study; visual acceptance remains open.
   29. Add Grid, routing/cache, spatial points and FLIP spawn/destroy kernels with per-port diagnostics and bounded replay.
   30. Add source Grain and Contrast Blur kernels with bounded curves, sampling and failure atomicity.
+  31. Reject fractional FLIP advances while preserving zero-step rendering.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
