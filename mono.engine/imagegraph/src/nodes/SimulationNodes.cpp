@@ -321,6 +321,7 @@ namespace engine::imagegraph::detail {
 		static constexpr std::array entries{
 			ExecutorEntry{"pc.vfx_group_inline", VfxInlineScope},
 			ExecutorEntry{"pc.vfx_renderer", VfxRenderer},
+			ExecutorEntry{"pc.flip_group_inline", Inline},
 			ExecutorEntry{"pc.flip_domain", FlipDomain},
 			ExecutorEntry{"pc.flip_update", FlipUpdate},
 			ExecutorEntry{"pc.flip_fill", FlipFill},

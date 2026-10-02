@@ -5,6 +5,11 @@
 #include <set>
 
 namespace engine::imagegraphio::detail {
+	namespace {
+		bool SupportedInlineCollection(std::string_view type) {
+			return type == "pc.verlet_sim_inline" || type == "pc.flip_group_inline";
+		}
+	}
 	bool ProjectInlineCollections(
 		const nlohmann::json &root, imagegraph::Document &document, ImportBudget &budget, std::string &failure
 	) {
@@ -52,10 +57,12 @@ namespace engine::imagegraphio::detail {
 		};
 		try {
 			for (const auto &source : sources) {
-				if (source.at("type") != "Node_VerletSim_Inline") continue;
+				if (source.at("type") != "Node_VerletSim_Inline" &&
+					source.at("type") != "Node_FLIP_Group_Inline")
+					continue;
 				const auto &id = source.at("id").get_ref<const std::string &>();
 				const auto *node = nativeNode(id);
-				if (!node || node->Type != "pc.verlet_sim_inline") continue;
+				if (!node || !SupportedInlineCollection(node->Type)) continue;
 				const auto attributes = source.find("attri");
 				if (attributes == source.end() || !attributes->contains("members")) continue;
 				const auto &members = attributes->at("members");
@@ -76,7 +83,7 @@ namespace engine::imagegraphio::detail {
 					context->get_ref<const std::string &>().size() > Limits::MaximumTextBytes)
 					return fail("inline context is not a bounded durable ID");
 				const auto *owner = nativeNode(context->get_ref<const std::string &>());
-				if (owner && owner->Type == "pc.verlet_sim_inline" &&
+				if (owner && SupportedInlineCollection(owner->Type) &&
 					!assign(
 						source.at("id").get_ref<const std::string &>(),
 						context->get_ref<const std::string &>()
@@ -85,7 +92,7 @@ namespace engine::imagegraphio::detail {
 			}
 			// Source group instances rename local child IDs while retaining their InstanceBase relation.
 			for (const Node &owner : document.Nodes) {
-				if (owner.Type != "pc.verlet_sim_inline") continue;
+				if (!SupportedInlineCollection(owner.Type)) continue;
 				const auto *source = sourceOwner(owner);
 				if (!source) return fail("inline collection clone has no source owner record");
 				const auto &originalId = source->at("id").get_ref<const std::string &>();
@@ -114,7 +121,7 @@ namespace engine::imagegraphio::detail {
 			}
 			const size_t collectionCount =
 				std::count_if(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
-					return node.Type == "pc.verlet_sim_inline";
+					return SupportedInlineCollection(node.Type);
 				});
 			if (collectionCount > Limits::MaximumGroups - document.Groups.size())
 				return fail("inline collection count exceeds native limits");
@@ -122,7 +129,7 @@ namespace engine::imagegraphio::detail {
 				return fail("inline collection group storage exceeds import budget");
 			if (collectionCount) document.Groups.reserve(document.Groups.size() + collectionCount);
 			for (const Node &ownerNode : document.Nodes) {
-				if (ownerNode.Type != "pc.verlet_sim_inline") continue;
+				if (!SupportedInlineCollection(ownerNode.Type)) continue;
 				const auto *stored = sourceOwner(ownerNode);
 				if (!stored) return fail("inline collection has no source record");
 				const auto &source = *stored;
@@ -145,9 +152,11 @@ namespace engine::imagegraphio::detail {
 					(!name->is_string() ||
 					 name->get_ref<const std::string &>().size() > Limits::MaximumTextBytes))
 					return fail("inline collection name is not bounded text");
-				const std::string_view title = name == source.end()
-												   ? std::string_view("VerletSim")
-												   : std::string_view(name->get_ref<const std::string &>());
+				const std::string_view title =
+					name == source.end()
+						? (ownerNode.Type == "pc.flip_group_inline" ? std::string_view("FLIP Fluid")
+																	: std::string_view("VerletSim"))
+						: std::string_view(name->get_ref<const std::string &>());
 				if (!budget.Hold(title.size() + 16))
 					return fail("inline collection name exceeds import budget");
 				group.Name = title;
