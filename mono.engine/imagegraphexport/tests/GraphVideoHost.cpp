@@ -1,0 +1,168 @@
+// MP4 fixture was encoded by independent FFmpeg: three 4x4 frames, black/white/white at 75 ms.
+#include <engine/imagegraphexport/GraphVideoHost.hpp>
+#include <engine/testing/Suite.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <string>
+TEST_SUITE_ID("engine.imagegraphexport.graph_video_host")
+TEST_DEPENDS("engine.imagegraph.host_capture")
+TEST_DEPENDS("engine.parallel.process")
+namespace {
+	constexpr std::array<unsigned char, 1620> VIDEO{
+		0,	 0,	  0,   32,	102, 116, 121, 112, 105, 115, 111, 109, 0,	 0,	  2,   0,	105, 115, 111, 109,
+		105, 115, 111, 50,	97,	 118, 99,  49,	109, 112, 52,  49,	0,	 0,	  0,   8,	102, 114, 101, 101,
+		0,	 0,	  2,   239, 109, 100, 97,  116, 0,	 0,	  2,   174, 6,	 5,	  255, 255, 170, 220, 69,  233,
+		189, 230, 217, 72,	183, 150, 44,  216, 32,	 217, 35,  238, 239, 120, 50,  54,	52,	 32,  45,  32,
+		99,	 111, 114, 101, 32,	 49,  54,  52,	32,	 114, 51,  49,	48,	 56,  32,  51,	49,	 101, 49,  57,
+		102, 57,  32,  45,	32,	 72,  46,  50,	54,	 52,  47,  77,	80,	 69,  71,  45,	52,	 32,  65,  86,
+		67,	 32,  99,  111, 100, 101, 99,  32,	45,	 32,  67,  111, 112, 121, 108, 101, 102, 116, 32,  50,
+		48,	 48,  51,  45,	50,	 48,  50,  51,	32,	 45,  32,  104, 116, 116, 112, 58,	47,	 47,  119, 119,
+		119, 46,  118, 105, 100, 101, 111, 108, 97,	 110, 46,  111, 114, 103, 47,  120, 50,	 54,  52,  46,
+		104, 116, 109, 108, 32,	 45,  32,  111, 112, 116, 105, 111, 110, 115, 58,  32,	99,	 97,  98,  97,
+		99,	 61,  49,  32,	114, 101, 102, 61,	51,	 32,  100, 101, 98,	 108, 111, 99,	107, 61,  49,  58,
+		48,	 58,  48,  32,	97,	 110, 97,  108, 121, 115, 101, 61,	48,	 120, 51,  58,	48,	 120, 49,  49,
+		51,	 32,  109, 101, 61,	 104, 101, 120, 32,	 115, 117, 98,	109, 101, 61,  55,	32,	 112, 115, 121,
+		61,	 49,  32,  112, 115, 121, 95,  114, 100, 61,  49,  46,	48,	 48,  58,  48,	46,	 48,  48,  32,
+		109, 105, 120, 101, 100, 95,  114, 101, 102, 61,  49,  32,	109, 101, 95,  114, 97,	 110, 103, 101,
+		61,	 49,  54,  32,	99,	 104, 114, 111, 109, 97,  95,  109, 101, 61,  49,  32,	116, 114, 101, 108,
+		108, 105, 115, 61,	49,	 32,  56,  120, 56,	 100, 99,  116, 61,	 49,  32,  99,	113, 109, 61,  48,
+		32,	 100, 101, 97,	100, 122, 111, 110, 101, 61,  50,  49,	44,	 49,  49,  32,	102, 97,  115, 116,
+		95,	 112, 115, 107, 105, 112, 61,  49,	32,	 99,  104, 114, 111, 109, 97,  95,	113, 112, 95,  111,
+		102, 102, 115, 101, 116, 61,  45,  50,	32,	 116, 104, 114, 101, 97,  100, 115, 61,	 49,  32,  108,
+		111, 111, 107, 97,	104, 101, 97,  100, 95,	 116, 104, 114, 101, 97,  100, 115, 61,	 49,  32,  115,
+		108, 105, 99,  101, 100, 95,  116, 104, 114, 101, 97,  100, 115, 61,  48,  32,	110, 114, 61,  48,
+		32,	 100, 101, 99,	105, 109, 97,  116, 101, 61,  49,  32,	105, 110, 116, 101, 114, 108, 97,  99,
+		101, 100, 61,  48,	32,	 98,  108, 117, 114, 97,  121, 95,	99,	 111, 109, 112, 97,	 116, 61,  48,
+		32,	 99,  111, 110, 115, 116, 114, 97,	105, 110, 101, 100, 95,	 105, 110, 116, 114, 97,  61,  48,
+		32,	 98,  102, 114, 97,	 109, 101, 115, 61,	 51,  32,  98,	95,	 112, 121, 114, 97,	 109, 105, 100,
+		61,	 50,  32,  98,	95,	 97,  100, 97,	112, 116, 61,  49,	32,	 98,  95,  98,	105, 97,  115, 61,
+		48,	 32,  100, 105, 114, 101, 99,  116, 61,	 49,  32,  119, 101, 105, 103, 104, 116, 98,  61,  49,
+		32,	 111, 112, 101, 110, 95,  103, 111, 112, 61,  48,  32,	119, 101, 105, 103, 104, 116, 112, 61,
+		50,	 32,  107, 101, 121, 105, 110, 116, 61,	 50,  53,  48,	32,	 107, 101, 121, 105, 110, 116, 95,
+		109, 105, 110, 61,	49,	 51,  32,  115, 99,	 101, 110, 101, 99,	 117, 116, 61,	52,	 48,  32,  105,
+		110, 116, 114, 97,	95,	 114, 101, 102, 114, 101, 115, 104, 61,	 48,  32,  114, 99,	 95,  108, 111,
+		111, 107, 97,  104, 101, 97,  100, 61,	52,	 48,  32,  114, 99,	 61,  99,  114, 102, 32,  109, 98,
+		116, 114, 101, 101, 61,	 49,  32,  99,	114, 102, 61,  50,	51,	 46,  48,  32,	113, 99,  111, 109,
+		112, 61,  48,  46,	54,	 48,  32,  113, 112, 109, 105, 110, 61,	 48,  32,  113, 112, 109, 97,  120,
+		61,	 54,  57,  32,	113, 112, 115, 116, 101, 112, 61,  52,	32,	 105, 112, 95,	114, 97,  116, 105,
+		111, 61,  49,  46,	52,	 48,  32,  97,	113, 61,  49,  58,	49,	 46,  48,  48,	0,	 128, 0,   0,
+		0,	 15,  101, 136, 132, 0,	  51,  255, 254, 246, 236, 190, 5,	 54,  20,  200, 193, 0,	  0,   0,
+		14,	 65,  136, 136, 64,	 223, 254, 246, 240, 254, 5,   54,	59,	 153, 64,  0,	0,	 0,	  12,  65,
+		154, 66,  60,  33,	147, 41,  132, 51,	255, 254, 225, 0,	0,	 3,	  61,  109, 111, 111, 118, 0,
+		0,	 0,	  108, 109, 118, 104, 100, 0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,
+		0,	 3,	  232, 0,	0,	 0,	  225, 0,	1,	 0,	  0,   1,	0,	 0,	  0,   0,	0,	 0,	  0,   0,
+		0,	 0,	  0,   0,	1,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,
+		1,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   64,	0,	 0,	  0,   0,
+		0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,
+		0,	 0,	  0,   0,	0,	 0,	  2,   0,	0,	 2,	  103, 116, 114, 97,  107, 0,	0,	 0,	  92,  116,
+		107, 104, 100, 0,	0,	 0,	  3,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  1,   0,
+		0,	 0,	  0,   0,	0,	 0,	  225, 0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,
+		0,	 0,	  0,   0,	1,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,
+		1,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   64,	0,	 0,	  0,   0,
+		4,	 0,	  0,   0,	4,	 0,	  0,   0,	0,	 0,	  36,  101, 100, 116, 115, 0,	0,	 0,	  28,  101,
+		108, 115, 116, 0,	0,	 0,	  0,   0,	0,	 0,	  1,   0,	0,	 0,	  225, 0,	0,	 6,	  0,   0,
+		1,	 0,	  0,   0,	0,	 1,	  223, 109, 100, 105, 97,  0,	0,	 0,	  32,  109, 100, 104, 100, 0,
+		0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 40,  0,   0,	0,	 9,	  0,   85,
+		196, 0,	  0,   0,	0,	 0,	  45,  104, 100, 108, 114, 0,	0,	 0,	  0,   0,	0,	 0,	  0,   118,
+		105, 100, 101, 0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   86,	105, 100, 101, 111,
+		72,	 97,  110, 100, 108, 101, 114, 0,	0,	 0,	  1,   138, 109, 105, 110, 102, 0,	 0,	  0,   20,
+		118, 109, 104, 100, 0,	 0,	  0,   1,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   36,
+		100, 105, 110, 102, 0,	 0,	  0,   28,	100, 114, 101, 102, 0,	 0,	  0,   0,	0,	 0,	  0,   1,
+		0,	 0,	  0,   12,	117, 114, 108, 32,	0,	 0,	  0,   1,	0,	 0,	  1,   74,	115, 116, 98,  108,
+		0,	 0,	  0,   174, 115, 116, 115, 100, 0,	 0,	  0,   0,	0,	 0,	  0,   1,	0,	 0,	  0,   158,
+		97,	 118, 99,  49,	0,	 0,	  0,   0,	0,	 0,	  0,   1,	0,	 0,	  0,   0,	0,	 0,	  0,   0,
+		0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 4,	  0,   4,	0,	 72,  0,   0,	0,	 72,  0,   0,
+		0,	 0,	  0,   0,	0,	 1,	  21,  76,	97,	 118, 99,  54,	48,	 46,  51,  49,	46,	 49,  48,  50,
+		32,	 108, 105, 98,	120, 50,  54,  52,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   24,
+		255, 255, 0,   0,	0,	 52,  97,  118, 99,	 67,  1,   100, 0,	 10,  255, 225, 0,	 23,  103, 100,
+		0,	 10,  172, 217, 95,	 158, 120, 64,	0,	 0,	  3,   0,	192, 0,	  0,   20,	3,	 196, 137, 101,
+		128, 1,	  0,   6,	104, 235, 227, 203, 34,	 192, 253, 248, 248, 0,	  0,   0,	0,	 20,  98,  116,
+		114, 116, 0,   0,	0,	 0,	  0,   0,	103, 49,  0,   0,	103, 49,  0,   0,	0,	 24,  115, 116,
+		116, 115, 0,   0,	0,	 0,	  0,   0,	0,	 1,	  0,   0,	0,	 3,	  0,   0,	3,	 0,	  0,   0,
+		0,	 20,  115, 116, 115, 115, 0,   0,	0,	 0,	  0,   0,	0,	 1,	  0,   0,	0,	 1,	  0,   0,
+		0,	 24,  99,  116, 116, 115, 0,   0,	0,	 0,	  0,   0,	0,	 1,	  0,   0,	0,	 3,	  0,   0,
+		6,	 0,	  0,   0,	0,	 28,  115, 116, 115, 99,  0,   0,	0,	 0,	  0,   0,	0,	 1,	  0,   0,
+		0,	 1,	  0,   0,	0,	 3,	  0,   0,	0,	 1,	  0,   0,	0,	 32,  115, 116, 115, 122, 0,   0,
+		0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 3,	  0,   0,	2,	 197, 0,   0,	0,	 18,  0,   0,
+		0,	 16,  0,   0,	0,	 20,  115, 116, 99,	 111, 0,   0,	0,	 0,	  0,   0,	0,	 1,	  0,   0,
+		0,	 48,  0,   0,	0,	 98,  117, 100, 116, 97,  0,   0,	0,	 90,  109, 101, 116, 97,  0,   0,
+		0,	 0,	  0,   0,	0,	 33,  104, 100, 108, 114, 0,   0,	0,	 0,	  0,   0,	0,	 0,	  109, 100,
+		105, 114, 97,  112, 112, 108, 0,   0,	0,	 0,	  0,   0,	0,	 0,	  0,   0,	0,	 0,	  45,  105,
+		108, 115, 116, 0,	0,	 0,	  37,  169, 116, 111, 111, 0,	0,	 0,	  29,  100, 97,	 116, 97,  0,
+		0,	 0,	  1,   0,	0,	 0,	  0,   76,	97,	 118, 102, 54,	48,	 46,  49,  54,	46,	 49,  48,  48
+	};
+}
+TEST_CASE(
+	"Explicit FFmpeg video input obeys frame, loop, hide and array controls",
+	"[assetc][imagegraph][external-codec]"
+) {
+	using namespace engine::imagegraph;
+	const std::filesystem::path decoder = "/usr/bin/ffmpeg";
+	if (!std::filesystem::is_regular_file(decoder))
+		SKIP("independent FFmpeg decoder not installed at explicit integration path");
+	const auto directory = std::filesystem::temp_directory_path() / "atomic-graph-video-host-test";
+	std::error_code error;
+	std::filesystem::remove_all(directory, error);
+	std::filesystem::create_directories(directory);
+	struct Cleanup {
+		std::filesystem::path Path;
+		~Cleanup() {
+			std::error_code error;
+			std::filesystem::remove_all(Path, error);
+		}
+	} cleanup{directory};
+	const auto file = directory / "three frames.mp4";
+	{
+		std::ofstream stream(file, std::ios::binary);
+		stream.write(reinterpret_cast<const char *>(VIDEO.data()), VIDEO.size());
+	}
+	std::array<engine::imagegraphexport::GraphVideoGrant, 1> grants{{{"video", file}}};
+	engine::imagegraphexport::GraphVideoSettings settings;
+	settings.Grants = grants;
+	settings.Decoder = decoder;
+	settings.Timeout = std::chrono::seconds(10);
+	engine::imagegraphexport::GraphVideoHost host(settings);
+	Node node;
+	node.Id = "video";
+	node.Type = "pc.image_mp4";
+	std::array<AuthoredValue, 8> inputs{
+		{{"path", file.string()},
+		 {"output_as_array", false},
+		 {"custom_frame_order", false},
+		 {"draw_before_start", true},
+		 {"start_frame", int64_t{1}},
+		 {"frame", int64_t{0}},
+		 {"animation_speed", 1.0},
+		 {"loop_mode", EnumValue{0}}}
+	};
+	EvaluationRequest request;
+	HostNodeCapture capture;
+	std::string failure;
+	REQUIRE(host.Capture({node, request, inputs, {}, Limits::MaximumEvaluationBytes}, capture, failure));
+	REQUIRE(capture.Images.size() == 1);
+	REQUIRE(capture.Images[0].Data.Width == 4);
+	REQUIRE(capture.Images[0].Data.Height == 4);
+	CHECK(capture.Images[0].Data.Pixels[0] <= 2);
+	request.Tick = 1;
+	REQUIRE(host.Capture({node, request, inputs, {}, Limits::MaximumEvaluationBytes}, capture, failure));
+	CHECK(capture.Images[0].Data.Pixels[0] >= 253);
+	request.Tick = 3;
+	REQUIRE(host.Capture({node, request, inputs, {}, Limits::MaximumEvaluationBytes}, capture, failure));
+	CHECK(capture.Images[0].Data.Pixels[0] <= 2);
+	inputs[7].Data = EnumValue{2};
+	REQUIRE(host.Capture({node, request, inputs, {}, Limits::MaximumEvaluationBytes}, capture, failure));
+	CHECK(capture.Images[0].Data.Pixels[0] >= 253);
+	inputs[7].Data = EnumValue{3};
+	REQUIRE(host.Capture({node, request, inputs, {}, Limits::MaximumEvaluationBytes}, capture, failure));
+	CHECK(capture.Images[0].Data.Pixels[3] == 0);
+	inputs[1].Data = true;
+	REQUIRE(host.Capture({node, request, inputs, {}, Limits::MaximumEvaluationBytes}, capture, failure));
+	REQUIRE(capture.ImageArrays.size() == 1);
+	CHECK(capture.ImageArrays[0].Frames.size() == 3);
+	inputs[0].Data = std::string{"not granted"};
+	CHECK_FALSE(host.Capture({node, request, inputs, {}, Limits::MaximumEvaluationBytes}, capture, failure));
+}

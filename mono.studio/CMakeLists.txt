@@ -51,6 +51,7 @@ mono_add_library(studio
 		# L10, `shared`. Source-backed PXCX projection into a native image graph,
 		# retaining the checked archive as the lossless source.
 		Engine::imagegraphio
+		Engine::imagegraphexport
 
 		# L6, `shared`. The simulation. **Named here rather than reached
 		# through `Engine::script`**, which is where it was arriving from: since

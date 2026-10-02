@@ -1011,3 +1011,250 @@ TEST_CASE(
 		CHECK_FALSE(std::filesystem::exists(scratch.Output));
 	}
 }
+
+TEST_CASE("runner exports source BMP and floating EXR containers", "[imagegraph][runner]") {
+	Scratch scratch;
+	std::ostringstream out, err;
+	for (const std::string extension : {".bmp", ".exr"}) {
+		const auto target = scratch.Root / ("export" + extension);
+		REQUIRE(
+			RunArgs(
+				{"imagegraph",
+				 "--input",
+				 scratch.Input.string(),
+				 "--output-id",
+				 "final",
+				 "--output",
+				 target.string()},
+				out,
+				err
+			) == 0
+		);
+		const std::string bytes = ReadText(target);
+		if (extension == ".bmp") {
+			REQUIRE(bytes.size() == 62);
+			CHECK(bytes.substr(0, 2) == "BM");
+			CHECK(static_cast<uint8_t>(bytes[28]) == 24);
+			CHECK(static_cast<uint8_t>(bytes[54]) == 56);
+			CHECK(static_cast<uint8_t>(bytes[55]) == 34);
+			CHECK(static_cast<uint8_t>(bytes[56]) == 12);
+			CHECK(bytes.substr(60) == std::string(2, '\0'));
+		} else {
+			REQUIRE(bytes.size() > 100);
+			CHECK(static_cast<uint8_t>(bytes[0]) == 0x76);
+			CHECK(static_cast<uint8_t>(bytes[1]) == 0x2f);
+			CHECK(static_cast<uint8_t>(bytes[2]) == 0x31);
+			CHECK(static_cast<uint8_t>(bytes[3]) == 0x01);
+			CHECK(bytes.find("chlist") != std::string::npos);
+			CHECK(bytes.find("dataWindow") != std::string::npos);
+		}
+	}
+}
+
+TEST_CASE(
+	"runner streams timed APNG frames with ordered controls and source replacement", "[imagegraph][runner]"
+) {
+	Scratch scratch;
+	scratch.AddKeyframe();
+	const auto target = scratch.Root / "animated.apng";
+	std::ostringstream out, err;
+	REQUIRE(
+		RunArgs(
+			{"imagegraph",
+			 "--input",
+			 scratch.Input.string(),
+			 "--output-id",
+			 "final",
+			 "--output",
+			 target.string(),
+			 "--frames",
+			 "0:2",
+			 "--frame-duration-ms",
+			 "75",
+			 "--plays",
+			 "2"},
+			out,
+			err
+		) == 0
+	);
+	const std::string bytes = ReadText(target);
+	const auto big = [&](size_t offset) {
+		REQUIRE(offset + 4 <= bytes.size());
+		uint32_t value = 0;
+		for (size_t index = 0; index < 4; index++)
+			value = (value << 8) | static_cast<uint8_t>(bytes[offset + index]);
+		return value;
+	};
+	size_t offset = 8;
+	std::vector<std::string> chunks;
+	uint32_t sequence = 0;
+	while (offset < bytes.size()) {
+		REQUIRE(offset + 12 <= bytes.size());
+		const size_t length = big(offset);
+		REQUIRE(length <= bytes.size() - offset - 12);
+		const std::string kind = bytes.substr(offset + 4, 4);
+		chunks.push_back(kind);
+		const size_t data = offset + 8;
+		if (kind == "acTL") {
+			CHECK(big(data) == 3);
+			CHECK(big(data + 4) == 2);
+		}
+		if (kind == "fcTL") {
+			CHECK(big(data) == sequence++);
+			CHECK(big(data + 4) == 2);
+			CHECK(big(data + 8) == 1);
+			CHECK(static_cast<uint8_t>(bytes[data + 20]) == 0);
+			CHECK(static_cast<uint8_t>(bytes[data + 21]) == 75);
+			CHECK(static_cast<uint8_t>(bytes[data + 22]) == 3);
+			CHECK(static_cast<uint8_t>(bytes[data + 23]) == 232);
+			CHECK(static_cast<uint8_t>(bytes[data + 25]) == 0);
+		}
+		if (kind == "fdAT") CHECK(big(data) == sequence++);
+		offset += length + 12;
+	}
+	CHECK(
+		chunks ==
+		std::vector<std::string>{"IHDR", "acTL", "fcTL", "IDAT", "fcTL", "fdAT", "fcTL", "fdAT", "IEND"}
+	);
+	CHECK(out.str().find("format=apng frames=3 frame_duration_ms=75 plays=2") != std::string::npos);
+
+	scratch.AddInvalidWidthKeyframe();
+	out.str("");
+	err.str("");
+	CHECK(
+		RunArgs(
+			{"imagegraph",
+			 "--input",
+			 scratch.Input.string(),
+			 "--output-id",
+			 "final",
+			 "--output",
+			 target.string(),
+			 "--frames",
+			 "0:2"},
+			out,
+			err
+		) == 1
+	);
+	CHECK(ReadText(target) == bytes);
+	for (const auto &entry : std::filesystem::directory_iterator(scratch.Root))
+		CHECK(entry.path().filename().string().find(".partial-") == std::string::npos);
+}
+
+TEST_CASE(
+	"Runner scales encoded point samples without changing authored image output", "[imagegraph-runner]"
+) {
+	Scratch scratch;
+	std::ostringstream output, errors;
+	REQUIRE(
+		RunArgs(
+			{"imagegraph",
+			 "--input",
+			 scratch.Input.string(),
+			 "--output-id",
+			 "final",
+			 "--output",
+			 scratch.Output.string(),
+			 "--export-scale",
+			 "2",
+			 "--export-filter",
+			 "point"},
+			output,
+			errors
+		) == 0
+	);
+	const auto png = ReadText(scratch.Output);
+	REQUIRE(png.size() > 24);
+	const auto dimension = [&](size_t offset) {
+		uint32_t value = 0;
+		for (size_t index = 0; index < 4; index++)
+			value = (value << 8) | static_cast<unsigned char>(png[offset + index]);
+		return value;
+	};
+	CHECK(dimension(16) == 4);
+	CHECK(dimension(20) == 2);
+	output.str({});
+	errors.str({});
+	REQUIRE(
+		RunArgs(
+			{"imagegraph",
+			 "--input",
+			 scratch.Input.string(),
+			 "--output-id",
+			 "final",
+			 "--output",
+			 scratch.Output.string(),
+			 "--export-scale",
+			 "0"},
+			output,
+			errors
+		) == 2
+	);
+	CHECK(ReadText(scratch.Output) == png);
+}
+
+TEST_CASE(
+	"Numeric surfaces normalize through source sample conversion for PNG export", "[imagegraph-runner]"
+) {
+	using namespace engine::imagegraph;
+	Scratch scratch;
+	Image numeric;
+	numeric.Width = 1;
+	numeric.Height = 1;
+	numeric.Format = SurfaceFormat::RGBA32Float;
+	const auto layout = CheckedSurfaceLayout(1, 1, numeric.Format, 1024);
+	REQUIRE(layout);
+	numeric.Pixels.resize(static_cast<size_t>(layout->Bytes));
+	REQUIRE(StoreSurfacePixel(numeric, 0, 0, SurfacePixel{1, 0.5, 0, 1}));
+	std::string failure;
+	REQUIRE(imagegraph_runner::WriteStillImage(scratch.Output, numeric, failure));
+	const auto png = ReadText(scratch.Output);
+	CHECK(png.size() > 24);
+	CHECK(static_cast<unsigned char>(png[0]) == 137);
+}
+
+TEST_CASE(
+	"runner range retains feedback generations across output frames", "[imagegraph][runner][feedback]"
+) {
+	using namespace engine::imagegraph;
+	Scratch scratch;
+	Document document;
+	document.FormatVersion = 9;
+	document.Project = ProjectSettings{};
+	document.Project->SurfaceWidth = document.Project->SurfaceHeight = 1;
+	document.Nodes = {
+		{"prior", "image.captured", "", {}, {{"source_id", std::string{"feedback:out"}}}},
+		{"invert", "image.invert", "", {}, {{"include_alpha", false}}}
+	};
+	document.Links = {{"prior", "image", "invert", "image"}};
+	document.Outputs = {{"out", "invert", "image"}};
+	{
+		std::ofstream graph(scratch.Input);
+		graph << Write(document);
+	}
+	std::ostringstream output, errors;
+	const std::vector<std::string> args = {
+		"imagegraph",
+		"--input",
+		scratch.Input.string(),
+		"--output-id",
+		"out",
+		"--output",
+		scratch.Output.string(),
+		"--frames",
+		"0:2"
+	};
+	INFO(errors.str());
+	REQUIRE(RunArgs(args, output, errors) == 0);
+	const auto readFrame = [&](uint64_t tick) {
+		const auto path =
+			scratch.Root / ("solid.tick-" + std::string(19, '0') + std::to_string(tick) + ".png");
+		std::ifstream file(path, std::ios::binary);
+		return std::vector<uint8_t>(std::istreambuf_iterator<char>(file), {});
+	};
+	const auto first = readFrame(0), second = readFrame(1), third = readFrame(2);
+	REQUIRE_FALSE(first.empty());
+	REQUIRE_FALSE(second.empty());
+	CHECK(first != second);
+	CHECK(first == third);
+}

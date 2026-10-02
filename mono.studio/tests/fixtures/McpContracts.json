@@ -1114,6 +1114,12 @@
         "name": "AGENTS.md (engine/imagegraph)",
         "uri": "atomic://agents/engine/imagegraph"
       },
+      "atomic://agents/engine/imagegraphexport": {
+        "description": "The invariants specific to engine/imagegraphexport. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphexport)",
+        "uri": "atomic://agents/engine/imagegraphexport"
+      },
       "atomic://agents/engine/imagegraphio": {
         "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -4388,6 +4394,12 @@
         "mimeType": "text/markdown",
         "name": "AGENTS.md (engine/imagegraph)",
         "uri": "atomic://agents/engine/imagegraph"
+      },
+      "atomic://agents/engine/imagegraphexport": {
+        "description": "The invariants specific to engine/imagegraphexport. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphexport)",
+        "uri": "atomic://agents/engine/imagegraphexport"
       },
       "atomic://agents/engine/imagegraphio": {
         "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",

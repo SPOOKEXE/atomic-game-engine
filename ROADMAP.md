@@ -51,6 +51,7 @@ Milestone labels describe development scope, not release versions.
   9. Edit PXC nodes, links, dynamic groups and animation regions with bounded structural round trips.
   10. Run bounded Composer Lua sessions, drawing and notifications through an explicit host adapter.
   11. Support PCX tuple operations and preserve Boolean, integer, enum and packed-colour values.
+  12. Share bounded file and export hosts; publish authored export batches with rollback.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

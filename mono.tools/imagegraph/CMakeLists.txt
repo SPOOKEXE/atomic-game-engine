@@ -5,6 +5,7 @@ mono_add_library(imagegraph_runner
 	DEPS
 		Engine::core
 		Engine::imagegraph
+		Engine::imagegraphexport
 )
 
 add_executable(imagegraph app/main.cpp)

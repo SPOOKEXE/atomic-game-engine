@@ -70,7 +70,10 @@
         "bake",
         "bakegraph",
         "core",
-        "imagegraph"
+        "imagegraph",
+        "imagegraphexport",
+        "imagegraphio",
+        "parallel"
       ]
     },
     "assets": {
@@ -344,9 +347,15 @@
     "imagegraph_runner": {
       "tier": "shared",
       "links": [
+        "assets",
         "audiocodec",
+        "bake",
+        "bakegraph",
         "core",
-        "imagegraph"
+        "imagegraph",
+        "imagegraphexport",
+        "imagegraphio",
+        "parallel"
       ]
     },
     "input": {
@@ -686,6 +695,7 @@
         "graph",
         "gui",
         "imagegraph",
+        "imagegraphexport",
         "imagegraphio",
         "input",
         "msl",
@@ -791,6 +801,20 @@
       "links": [
         "core",
         "ecs",
+        "parallel"
+      ]
+    },
+    "imagegraphexport": {
+      "tier": "shared",
+      "layer": 11,
+      "links": [
+        "assets",
+        "audiocodec",
+        "bake",
+        "bakegraph",
+        "core",
+        "imagegraph",
+        "imagegraphio",
         "parallel"
       ]
     }
@@ -942,6 +966,7 @@
         "graph",
         "gui",
         "imagegraph",
+        "imagegraphexport",
         "imagegraphio",
         "input",
         "msl",
