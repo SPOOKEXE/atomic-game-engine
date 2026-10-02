@@ -1,5 +1,7 @@
+#include "LayoutScratch.hpp"
 #include "Utf8.hpp"
 
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -306,61 +308,74 @@ namespace engine::gui {
 			Scan found;
 			found.ChildFirst = arena.size();
 
-			store.EachChild(instance, [&](Entity child) {
-				if (store.Get<Element>(child) != nullptr) {
-					arena.push_back(child);
-					return;
-				}
+			// One reference fits the callable wrapper without allocating per node.
+			struct ChildScanContext {
+				const Store &Host;
+				std::vector<Entity> &Children;
+				Scan &Result;
+			} context{store, arena, found};
 
-				if (found.Mods.Inset == nullptr) {
-					found.Mods.Inset = store.Get<Padding>(child);
-				}
-				if (found.Mods.List == nullptr) {
-					found.Mods.List = store.Get<ListLayout>(child);
-				}
-				if (found.Mods.Grid == nullptr) {
-					found.Mods.Grid = store.Get<GridLayout>(child);
-				}
-				if (found.Mods.Table == nullptr) {
-					found.Mods.Table = store.Get<TableLayout>(child);
-				}
-				if (found.Mods.Page == nullptr) {
-					found.Mods.Page = store.Get<PageLayout>(child);
-					if (found.Mods.Page != nullptr) {
-						found.Mods.PageOn = child;
+			{
+				ENGINE_HEAP_SCOPE("gui child scan");
+				store.EachChild(instance, [&context](Entity child) {
+					const Store &childStore = context.Host;
+					std::vector<Entity> &children = context.Children;
+					Scan &scan = context.Result;
+					if (childStore.Get<Element>(child) != nullptr) {
+						children.push_back(child);
+						return;
 					}
-				}
-				if (found.Mods.Aspect == nullptr) {
-					found.Mods.Aspect = store.Get<AspectRatio>(child);
-				}
-				if (found.Mods.Limits == nullptr) {
-					found.Mods.Limits = store.Get<SizeLimits>(child);
-				}
-				if (found.Mods.TextLimits == nullptr) {
-					found.Mods.TextLimits = store.Get<TextSizeLimits>(child);
-				}
-				if (found.Mods.Factor == nullptr) {
-					found.Mods.Factor = store.Get<Scale>(child);
-				}
-				if (found.Mods.Presentation == nullptr) {
-					found.Mods.Presentation = store.Get<PresentationState>(child);
-				}
-				if (found.Mods.Flex == nullptr) {
-					found.Mods.Flex = store.Get<FlexItem>(child);
-				}
-				if (found.Mods.Collection == nullptr) {
-					found.Mods.Collection = store.Get<VirtualCollection>(child);
-					if (found.Mods.Collection != nullptr) {
-						found.Mods.CollectionOn = child;
-						store.EachChild(child, [&](Entity candidate) {
-							if (found.Mods.CollectionTemplate == ecs::NULL_ENTITY &&
-								store.Get<Element>(candidate) != nullptr) {
-								found.Mods.CollectionTemplate = candidate;
-							}
-						});
+
+					if (scan.Mods.Inset == nullptr) {
+						scan.Mods.Inset = childStore.Get<Padding>(child);
 					}
-				}
-			});
+					if (scan.Mods.List == nullptr) {
+						scan.Mods.List = childStore.Get<ListLayout>(child);
+					}
+					if (scan.Mods.Grid == nullptr) {
+						scan.Mods.Grid = childStore.Get<GridLayout>(child);
+					}
+					if (scan.Mods.Table == nullptr) {
+						scan.Mods.Table = childStore.Get<TableLayout>(child);
+					}
+					if (scan.Mods.Page == nullptr) {
+						scan.Mods.Page = childStore.Get<PageLayout>(child);
+						if (scan.Mods.Page != nullptr) {
+							scan.Mods.PageOn = child;
+						}
+					}
+					if (scan.Mods.Aspect == nullptr) {
+						scan.Mods.Aspect = childStore.Get<AspectRatio>(child);
+					}
+					if (scan.Mods.Limits == nullptr) {
+						scan.Mods.Limits = childStore.Get<SizeLimits>(child);
+					}
+					if (scan.Mods.TextLimits == nullptr) {
+						scan.Mods.TextLimits = childStore.Get<TextSizeLimits>(child);
+					}
+					if (scan.Mods.Factor == nullptr) {
+						scan.Mods.Factor = childStore.Get<Scale>(child);
+					}
+					if (scan.Mods.Presentation == nullptr) {
+						scan.Mods.Presentation = childStore.Get<PresentationState>(child);
+					}
+					if (scan.Mods.Flex == nullptr) {
+						scan.Mods.Flex = childStore.Get<FlexItem>(child);
+					}
+					if (scan.Mods.Collection == nullptr) {
+						scan.Mods.Collection = childStore.Get<VirtualCollection>(child);
+						if (scan.Mods.Collection != nullptr) {
+							scan.Mods.CollectionOn = child;
+							childStore.EachChild(child, [&](Entity candidate) {
+								if (scan.Mods.CollectionTemplate == ecs::NULL_ENTITY &&
+									childStore.Get<Element>(candidate) != nullptr) {
+									scan.Mods.CollectionTemplate = candidate;
+								}
+							});
+						}
+					}
+				});
+			}
 
 			found.ChildCount = static_cast<uint32_t>(arena.size() - found.ChildFirst);
 			return found;
@@ -2385,6 +2400,18 @@ namespace engine::gui {
 			const CanvasTransform &transform,
 			const TextResolutionRequest &text
 		) {
+			// Snapshot into the existing scratch arena before component writes can
+			// move archetypes. A mark keeps this collector's roots alive while
+			// descendant runs grow, then releases all handles on return or throw.
+			std::vector<Entity> &arena = ChildArena();
+			const ArenaScope rootsScope(arena);
+			const size_t firstRoot = arena.size();
+			{
+				ENGINE_HEAP_SCOPE("gui collector root snapshot");
+				store.EachChild(collector, [&](Entity child) { arena.push_back(child); });
+			}
+			const size_t rootCount = arena.size() - firstRoot;
+
 			store.Set(collector, Canvas{canvas});
 			store.Set(collector, transform);
 
@@ -2395,19 +2422,18 @@ namespace engine::gui {
 			collectorResolved.Rendered = true;
 			store.Set(collector, collectorResolved);
 
-			std::vector<Entity> roots;
-			store.EachChild(collector, [&](Entity child) { roots.push_back(child); });
-
 			size_t placed = 0;
-			for (const Entity root : roots) {
+			for (size_t index = 0; index < rootCount; ++index) {
+				// Read by index and copy the handle: measuring descendants can
+				// reallocate the arena, so an iterator or span would not survive.
+				const Entity root = arena[firstRoot + index];
 				const Element *element = store.Get<Element>(root);
 				if (element == nullptr) {
 					continue;
 				}
 
-				// The root owns one arena scope. Every recursive placement releases
-				// its own run, so this mark prevents roots accumulating between passes.
-				std::vector<Entity> &arena = ChildArena();
+				// Release this root's descendant runs without discarding the
+				// collector snapshot still needed by later roots.
 				const ArenaScope scope(arena);
 
 				Scan scan;
@@ -2428,6 +2454,13 @@ namespace engine::gui {
 			}
 			core::Metrics::Count("gui.layout.placed", static_cast<double>(placed));
 			ENGINE_TRACE("laid out {} element(s)", placed);
+		}
+	}
+
+	namespace detail {
+		ChildArenaScratch ReadChildArenaScratch() {
+			const auto &arena = ChildArena();
+			return {arena.size(), arena.capacity(), arena.capacity() * sizeof(Entity)};
 		}
 	}
 
@@ -2545,16 +2578,18 @@ namespace engine::gui {
 		// costs one allocation per frame against a class of bug that only
 		// appears once a UI is big enough to span two archetypes.
 		std::vector<Entity> collectors;
-		store.Each<const Layer>([&](Entity entity, const Layer &) { collectors.push_back(entity); });
-
-		// Draw order, and stable so two collectors sharing a `DisplayOrder`
-		// keep the order the store held them in rather than swapping between
-		// frames as archetypes reshuffle.
-		std::stable_sort(collectors.begin(), collectors.end(), [&](Entity left, Entity right) {
-			const Layer *a = store.Get<Layer>(left);
-			const Layer *b = store.Get<Layer>(right);
-			return (a != nullptr ? a->DisplayOrder : 0) < (b != nullptr ? b->DisplayOrder : 0);
-		});
+		{
+			ENGINE_HEAP_SCOPE("gui collector handle snapshot");
+			store.Each<const Layer>([&](Entity entity, const Layer &) { collectors.push_back(entity); });
+			// Draw order, and stable so two collectors sharing a `DisplayOrder`
+			// keep the order the store held them in rather than swapping between
+			// frames as archetypes reshuffle.
+			std::stable_sort(collectors.begin(), collectors.end(), [&](Entity left, Entity right) {
+				const Layer *a = store.Get<Layer>(left);
+				const Layer *b = store.Get<Layer>(right);
+				return (a != nullptr ? a->DisplayOrder : 0) < (b != nullptr ? b->DisplayOrder : 0);
+			});
+		}
 
 		size_t placed = 0;
 
