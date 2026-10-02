@@ -262,11 +262,37 @@ namespace studio {
 		engine::imagegraph::Diagnostic &error
 	);
 
+	// Resizes complete pinned source input groups and removes all authored state for deleted sockets.
+	bool SetSourceImageGraphDynamicGroupCount(
+		engine::imagegraph::Document &document,
+		std::string_view nodeId,
+		size_t groups,
+		engine::imagegraph::Diagnostic &error
+	);
+
 	// Removes a dynamic input and its incoming links.
 	bool RemoveImageGraphDynamicInput(
 		engine::imagegraph::Document &document,
 		std::string_view nodeId,
 		std::string_view inputId,
+		engine::imagegraph::Diagnostic &error
+	);
+
+	// Authors Array Split's complete output count and prunes removed routes and selectors atomically.
+	bool SetImageGraphSplitOutputCount(
+		engine::imagegraph::Document &document,
+		std::string_view nodeId,
+		size_t count,
+		engine::imagegraph::Diagnostic &error,
+		bool authorMinimum = true
+	);
+
+	// Adds the source constructor projection of a PXC boundary, including its control and routes.
+	bool AddSourceImageGraphGroupPort(
+		engine::imagegraph::Document &document,
+		std::string_view groupId,
+		std::string_view controlId,
+		engine::imagegraph::PortDirection direction,
 		engine::imagegraph::Diagnostic &error
 	);
 
@@ -597,6 +623,8 @@ namespace studio {
 		// @param before Document before the edit.
 		// @param after  Document after the edit.
 		void Record(const engine::imagegraph::Document &before, const engine::imagegraph::Document &after);
+		// Refuses an edit that cannot retain both undo and redo, preserving existing history.
+		bool TryRecord(const engine::imagegraph::Document &before, const engine::imagegraph::Document &after);
 		// Replaces the current document with its previous state when budget allows.
 		// @param document Document to replace.
 		// @return Whether a previous state was restored.

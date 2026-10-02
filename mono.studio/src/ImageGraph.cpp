@@ -1,7 +1,11 @@
 #include "ImageGraphChoices.hpp"
+#include "ImageGraphInputs.hpp"
+#include "ImageGraphPorts.hpp"
+#include "ImageGraphPreview.hpp"
 
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraph/WavClip.hpp>
 
@@ -233,6 +237,8 @@ namespace studio {
 			uint32_t required = 1;
 			for (const Node &node : document.Nodes) {
 				if (!node.DynamicInputs.empty()) required = std::max(required, 2u);
+				if (!node.DynamicOutputs.empty() || !node.SourceProperties.empty())
+					required = std::max(required, 9u);
 				for (const AuthoredValue &value : node.Values) {
 					if (const auto type = TypeOf(value.Data); type && *type >= ValueType::Gradient)
 						required = std::max(required, *type >= ValueType::Vector3 ? 6u : 3u);
@@ -749,7 +755,7 @@ namespace studio {
 		RegisterDataType(engine::imagegraph::ValueType::Mesh, "Mesh");
 		RegisterDataType(engine::imagegraph::ValueType::AudioBit, "Audio");
 		for (auto index = static_cast<size_t>(engine::imagegraph::ValueType::Mesh2D);
-			 index <= static_cast<size_t>(engine::imagegraph::ValueType::DynamicSurface);
+			 index <= static_cast<size_t>(engine::imagegraph::ValueType::Path3D);
 			 index++) {
 			const auto type = static_cast<engine::imagegraph::ValueType>(index);
 			RegisterDataType(type, std::string(engine::imagegraph::ValueTypeName(type)).c_str());
@@ -951,7 +957,9 @@ namespace studio {
 		nodesById.reserve(document.Nodes.size());
 		for (size_t index = 0; index < document.Nodes.size(); index++) {
 			const Node &authored = document.Nodes[index];
-			if (authored.DynamicInputs.size() > engine::imagegraph::Limits::MaximumDynamicInputsPerNode) {
+			if (authored.DynamicInputs.size() >
+					engine::imagegraph::MaximumDynamicInputsForType(authored.Type) ||
+				authored.DynamicOutputs.size() > engine::imagegraph::Limits::MaximumDynamicOutputsPerNode) {
 				error = "image graph node exceeds the dynamic input limit";
 				graph.Clear();
 				ids = {};
@@ -981,6 +989,12 @@ namespace studio {
 			canvasNode.DynamicInputs.reserve(authored.DynamicInputs.size());
 			for (const engine::imagegraph::DynamicInput &input : authored.DynamicInputs) {
 				canvasNode.DynamicInputs.push_back({input.Id, CanvasType(input.Type)});
+			}
+			if (authored.Type == "pc.array_split" || !authored.DynamicOutputs.empty() ||
+				authored.Type == "pc.color_to_rgb" || authored.Type == "pc.color_to_hsv") {
+				canvasNode.OutputPorts.emplace();
+				for (const auto &port : detail::ImageGraphOutputPorts(authored))
+					canvasNode.OutputPorts->push_back({std::string(port.Id), CanvasType(port.Type)});
 			}
 			if (const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(authored.Type)) {
 				for (const nodegraph::WidgetSpec &widget : type->Widgets) {
@@ -1094,7 +1108,8 @@ namespace studio {
 		std::unordered_set<std::string> liveDocumentIds;
 		liveDocumentIds.reserve(graph.Nodes().size());
 		for (const nodegraph::Node &canvasNode : graph.Nodes()) {
-			if (canvasNode.DynamicInputs.size() > engine::imagegraph::Limits::MaximumDynamicInputsPerNode) {
+			if (canvasNode.DynamicInputs.size() >
+				engine::imagegraph::MaximumDynamicInputsForType(canvasNode.Type)) {
 				error = "canvas node exceeds the dynamic input limit";
 				return false;
 			}
@@ -1119,7 +1134,7 @@ namespace studio {
 					error = "canvas dynamic inputs do not match the node schema";
 					return false;
 				}
-				std::optional<engine::imagegraph::Value> defaultValue;
+				engine::imagegraph::DynamicInput authoredInput{input.Name, *valueType, std::nullopt};
 				if (const Node *old = FindAuthoredNode(basis, documentId)) {
 					const auto oldInput = std::find_if(
 						old->DynamicInputs.begin(), old->DynamicInputs.end(), [&](const auto &candidate) {
@@ -1127,9 +1142,32 @@ namespace studio {
 						}
 					);
 					if (oldInput != old->DynamicInputs.end() && oldInput->Type == *valueType)
-						defaultValue = oldInput->Default;
+						authoredInput = *oldInput;
 				}
-				authored.DynamicInputs.push_back({input.Name, *valueType, std::move(defaultValue)});
+				authored.DynamicInputs.push_back(std::move(authoredInput));
+			}
+
+			if (canvasNode.OutputPorts) {
+				const auto *schema = engine::imagegraph::FindSchema(authored.Type);
+				if (!schema ||
+					canvasNode.OutputPorts->size() > engine::imagegraph::Limits::MaximumArrayElements) {
+					error = "canvas output interface exceeds schema bounds";
+					return false;
+				}
+				authored.DynamicOutputs.clear();
+				for (const auto &port : *canvasNode.OutputPorts) {
+					if (std::any_of(schema->Ports.begin(), schema->Ports.end(), [&](const auto &fixed) {
+							return fixed.Direction == engine::imagegraph::PortDirection::Output &&
+								   fixed.Id == port.Name;
+						}))
+						continue;
+					const auto type = ValueTypeFromCanvas(port.Type);
+					if (!schema->DynamicOutputs || !type) {
+						error = "canvas dynamic output is not supported by its schema";
+						return false;
+					}
+					authored.DynamicOutputs.push_back({port.Name, *type});
+				}
 			}
 
 			const auto oldPosition = ids.OriginalPositions.find(documentId);
@@ -1294,11 +1332,12 @@ namespace studio {
 			};
 			return diagnostic.Code;
 		}
+		const auto outputPorts = detail::ImageGraphOutputPorts(*node);
 		const auto port =
-			std::find_if(schema->Ports.begin(), schema->Ports.end(), [&](const PortSchema &candidate) {
+			std::find_if(outputPorts.begin(), outputPorts.end(), [&](const PortSchema &candidate) {
 				return candidate.Direction == PortDirection::Output && candidate.Id == output->Port;
 			});
-		if (port == schema->Ports.end()) {
+		if (port == outputPorts.end()) {
 			diagnostic = {Status::InvalidOutput, output->NodeId, output->Port, "output port is not declared"};
 			return diagnostic.Code;
 		}
@@ -1312,19 +1351,41 @@ namespace studio {
 			if (status == Status::Ok) preview = std::move(image);
 			return status;
 		}
-		if (port->Type != ValueType::Scalar && port->Type != ValueType::Array &&
-			port->Type != ValueType::Vector2) {
+		if (!detail::ImageGraphValuePreviewSupported(port->Type)) {
 			diagnostic = {
 				Status::UnsupportedExecution,
 				output->NodeId,
 				output->Port,
-				"Studio preview supports images, scalars, vectors and numeric arrays"
+				"selected resource requires its dedicated preview panel"
 			};
 			return diagnostic.Code;
 		}
 		EvaluatedValue value;
-		const Status status =
-			EvaluateValue(document, plan, std::string(outputId), boundedRequest, value, diagnostic);
+		Status status;
+		if (port->Type == ValueType::Any) {
+			StatefulEvaluationResult result;
+			status =
+				EvaluateStateful(document, plan, std::string(outputId), boundedRequest, result, diagnostic);
+			if (status == Status::Ok) {
+				if (auto *image = std::get_if<Image>(&result.Output)) {
+					preview = std::move(*image);
+					return Status::Ok;
+				}
+				if (auto *typed = std::get_if<EvaluatedValue>(&result.Output))
+					value = std::move(*typed);
+				else {
+					diagnostic = {
+						Status::InvalidOutput,
+						output->NodeId,
+						output->Port,
+						"selected output is an image array; select one element for preview"
+					};
+					return diagnostic.Code;
+				}
+			}
+		} else {
+			status = EvaluateValue(document, plan, std::string(outputId), boundedRequest, value, diagnostic);
+		}
 		if (status == Status::Ok) {
 			if (const auto *vector = std::get_if<Vector2>(&value.Data);
 				vector && (!std::isfinite(vector->X) || !std::isfinite(vector->Y))) {
@@ -1337,7 +1398,9 @@ namespace studio {
 				return diagnostic.Code;
 			}
 			if (const auto *array = std::get_if<ArrayValue>(&value.Data);
-				array && !CheckImageGraphArrayPreview(*array, diagnostic)) {
+				array &&
+				(array->ElementType == ValueType::Scalar || array->ElementType == ValueType::Integer) &&
+				!CheckImageGraphArrayPreview(*array, diagnostic)) {
 				diagnostic.NodeId = output->NodeId;
 				diagnostic.Port = output->Port;
 				return diagnostic.Code;
@@ -1513,6 +1576,8 @@ namespace studio {
 			return fail(engine::imagegraph::Status::UnknownPort, "node type has no dynamic inputs");
 		if (input.Id.empty() || input.Id.size() > engine::imagegraph::Limits::MaximumTextBytes)
 			return fail(engine::imagegraph::Status::InvalidValue, "dynamic input name is empty or too long");
+		if (input.SourceLayerName.size() > engine::imagegraph::Limits::MaximumTextBytes)
+			return fail(engine::imagegraph::Status::LimitExceeded, "source layer binding exceeds text limit");
 		if (CanvasType(input.Type) == "imagegraph.unknown")
 			return fail(engine::imagegraph::Status::InvalidValue, "dynamic input type is invalid");
 		if (std::any_of(schema->Ports.begin(), schema->Ports.end(), [&](const auto &port) {
@@ -1524,11 +1589,29 @@ namespace studio {
 				return held.Id == input.Id;
 			});
 		if (existing == node->DynamicInputs.end() &&
-			node->DynamicInputs.size() >= engine::imagegraph::Limits::MaximumDynamicInputsPerNode)
+			node->DynamicInputs.size() >= engine::imagegraph::MaximumDynamicInputsForType(node->Type))
 			return fail(engine::imagegraph::Status::LimitExceeded, "dynamic input limit reached");
+		const auto *sourceEntry = engine::imagegraph::FindCatalogueEntry(node->Type);
+		size_t sourceGroup = 0;
+		const auto *sourceInput =
+			sourceEntry ? engine::imagegraph::FindDynamicTemplate(*sourceEntry, input.Id, sourceGroup)
+						: nullptr;
+		if (sourceInput &&
+			input.Type != detail::SourceLuaArgumentType(*node, input.Id).value_or(sourceInput->Type))
+			return fail(
+				engine::imagegraph::Status::TypeMismatch, "source input type is fixed by its template"
+			);
 		if (input.Default) {
 			const auto valueType = TypeOf(*input.Default);
-			if (!valueType || *valueType != input.Type)
+			if (input.Type != engine::imagegraph::ValueType::Any &&
+				!detail::SourceLuaArgumentType(*node, input.Id) && (!valueType || *valueType != input.Type) &&
+				!(sourceInput &&
+				  (engine::imagegraph::CatalogueSourceRawValue(*sourceInput, *input.Default) ||
+				   engine::imagegraph::CatalogueSourceEnumValue(*sourceInput, *input.Default) ||
+				   (std::holds_alternative<engine::imagegraph::ArrayValue>(*input.Default) &&
+					engine::imagegraph::CatalogueAuthoredArray(
+						*sourceEntry, *sourceInput, std::get<engine::imagegraph::ArrayValue>(*input.Default)
+					)))))
 				return fail(
 					engine::imagegraph::Status::TypeMismatch, "dynamic input default has the wrong type"
 				);
@@ -1537,6 +1620,32 @@ namespace studio {
 			if (const auto *vector = std::get_if<engine::imagegraph::Vector2>(&*input.Default);
 				vector && (!std::isfinite(vector->X) || !std::isfinite(vector->Y)))
 				return fail(engine::imagegraph::Status::InvalidValue, "dynamic input default must be finite");
+		}
+		if (sourceInput && sourceInput->SourceIndex >= 0 && input.Default && node->InstanceBase.empty() &&
+			std::find(node->SourceStaticInputs.begin(), node->SourceStaticInputs.end(), input.Id) !=
+				node->SourceStaticInputs.end()) {
+			auto key =
+				std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &frame) {
+					return frame.NodeId == nodeId && frame.Port == input.Id;
+				});
+			if (key == document.Keyframes.end()) {
+				const bool haveTrack =
+					std::any_of(document.Tracks.begin(), document.Tracks.end(), [&](const auto &track) {
+						return track.NodeId == nodeId && track.Port == input.Id;
+					});
+				if (document.Keyframes.size() >= engine::imagegraph::Limits::MaximumKeyframes ||
+					(!haveTrack && document.Tracks.size() >= engine::imagegraph::Limits::MaximumTracks))
+					return fail(
+						engine::imagegraph::Status::LimitExceeded, "source animator storage exceeds its limit"
+					);
+				document.Keyframes.push_back(
+					{node->Id, input.Id, 0, *input.Default, "source", engine::imagegraph::KeyframeEase{}}
+				);
+				if (!haveTrack) document.Tracks.push_back({node->Id, input.Id, "wrap", -1});
+			} else {
+				// Static source getters read the first original animator key, including raw Lua literals.
+				key->Data = *input.Default;
+			}
 		}
 		if (existing == node->DynamicInputs.end()) {
 			node->DynamicInputs.push_back(std::move(input));
@@ -1547,6 +1656,16 @@ namespace studio {
 				});
 			}
 			*existing = std::move(input);
+		}
+		if (node->Type.starts_with("pc.lua_")) {
+			for (auto &argument : node->DynamicInputs) {
+				const auto type = detail::SourceLuaArgumentType(*node, argument.Id);
+				if (!type || argument.Type == *type) continue;
+				argument.Type = *type;
+				std::erase_if(document.Links, [&](const auto &link) {
+					return link.ToNode == nodeId && link.ToPort == argument.Id;
+				});
+			}
 		}
 		PromoteFormatVersion(document);
 		return true;
@@ -1585,6 +1704,71 @@ namespace studio {
 			return link.ToNode == nodeId && link.ToPort == inputId;
 		});
 		return true;
+	}
+
+	bool SetImageGraphSplitOutputCount(
+		Document &document,
+		std::string_view nodeId,
+		size_t count,
+		engine::imagegraph::Diagnostic &error,
+		bool authorMinimum
+	) try {
+		using namespace engine::imagegraph;
+		error = {};
+		const auto *node = FindAuthoredNode(document, nodeId);
+		if (!node || node->Type != "pc.array_split") {
+			SetDiagnostic(error, Status::UnknownNode, nodeId, {}, "output count requires Array Split");
+			return false;
+		}
+		if (count > Limits::MaximumArrayElements) {
+			SetDiagnostic(error, Status::LimitExceeded, nodeId, {}, "output count must be 0 through 4096");
+			return false;
+		}
+		const auto bytes = DocumentRetainedPayloadBytes(document);
+		if (!bytes || *bytes > Limits::MaximumEvaluationBytes / 2) {
+			SetDiagnostic(
+				error,
+				Status::LimitExceeded,
+				nodeId,
+				{},
+				"output edit document copy exceeds live payload budget"
+			);
+			return false;
+		}
+		Document staged = document;
+		auto *target = FindAuthoredNode(staged, nodeId);
+		target->DynamicOutputs.clear();
+		target->DynamicOutputs.reserve(count ? count - 1 : 0);
+		for (size_t index = 1; index < count; ++index)
+			target->DynamicOutputs.push_back({"val_" + std::to_string(index), ValueType::Any});
+		if ((authorMinimum &&
+			 !SetImageGraphValue(staged, nodeId, "minimum_outputs", int64_t(count), error)) ||
+			!SetImageGraphValue(staged, nodeId, "attribute_output_amount", double(count), error))
+			return false;
+		const auto valid = [&](std::string_view port) {
+			return (count && port == "val_0") || std::any_of(
+													 target->DynamicOutputs.begin(),
+													 target->DynamicOutputs.end(),
+													 [&](const auto &output) { return output.Id == port; }
+												 );
+		};
+		std::erase_if(staged.Links, [&](const auto &link) {
+			return link.FromNode == nodeId && !valid(link.FromPort);
+		});
+		std::erase_if(staged.Outputs, [&](const auto &output) {
+			return output.NodeId == nodeId && !valid(output.Port);
+		});
+		staged.FormatVersion = std::max(staged.FormatVersion, 9u);
+		document = std::move(staged);
+		return true;
+	} catch (const std::bad_alloc &) {
+		error = {
+			engine::imagegraph::Status::LimitExceeded,
+			std::string(nodeId),
+			{},
+			"output interface allocation failed"
+		};
+		return false;
 	}
 
 	bool AddImageGraphGroup(
@@ -1809,15 +1993,24 @@ namespace studio {
 			std::find_if(schema->Properties.begin(), schema->Properties.end(), [&](const auto &entry) {
 				return entry.Id == property;
 			});
-		if (declared == schema->Properties.end())
+		const auto dynamic =
+			std::find_if(node->DynamicInputs.begin(), node->DynamicInputs.end(), [&](const auto &input) {
+				return input.Id == property;
+			});
+		if (declared == schema->Properties.end() && dynamic == node->DynamicInputs.end())
 			return fail(engine::imagegraph::Status::UnknownPort, "property is not declared");
 		const auto value = std::find_if(node->Values.begin(), node->Values.end(), [&](const auto &entry) {
 			return entry.Port == property;
 		});
-		if (value == node->Values.end())
+		const engine::imagegraph::Value *data =
+			value != node->Values.end()
+				? &value->Data
+				: (dynamic != node->DynamicInputs.end() && dynamic->Default ? &*dynamic->Default : nullptr);
+		if (!data)
 			return fail(engine::imagegraph::Status::InvalidValue, "initialize the property before keying it");
-		const auto valueType = TypeOf(value->Data);
-		if (!valueType || *valueType != declared->Type)
+		const auto declaredType = dynamic != node->DynamicInputs.end() ? dynamic->Type : declared->Type;
+		const auto valueType = TypeOf(*data);
+		if (declaredType != engine::imagegraph::ValueType::Any && (!valueType || *valueType != declaredType))
 			return fail(engine::imagegraph::Status::TypeMismatch, "authored value does not match the schema");
 		auto frame =
 			std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &entry) {
@@ -1835,13 +2028,13 @@ namespace studio {
 				{std::string(nodeId),
 				 std::string(property),
 				 tick,
-				 value->Data,
+				 *data,
 				 std::string(interpolation),
 				 std::nullopt}
 			);
 			(void)engine::imagegraph::SetFrameTime(document.Keyframes.back(), time);
 		} else {
-			frame->Data = value->Data;
+			frame->Data = *data;
 		}
 		if (subframe != 0 || negativeFrame)
 			document.FormatVersion = std::max(document.FormatVersion, uint32_t{9});
@@ -2632,14 +2825,8 @@ namespace studio {
 		if (node == nullptr) return fail(engine::imagegraph::Status::UnknownNode, "node does not exist");
 		const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(node->Type);
 		if (schema == nullptr) return fail(engine::imagegraph::Status::UnknownNode, "node type is unknown");
-		const auto declared =
-			std::find_if(schema->Ports.begin(), schema->Ports.end(), [&](const auto &entry) {
-				return entry.Id == port && entry.Direction == engine::imagegraph::PortDirection::Output &&
-					   (entry.Type == engine::imagegraph::ValueType::Image ||
-						entry.Type == engine::imagegraph::ValueType::Scalar ||
-						entry.Type == engine::imagegraph::ValueType::Array);
-			});
-		if (declared == schema->Ports.end())
+		const auto ports = detail::ImageGraphOutputPorts(*node);
+		if (std::none_of(ports.begin(), ports.end(), [&](const auto &entry) { return entry.Id == port; }))
 			return fail(engine::imagegraph::Status::UnknownPort, "preview output port is not declared");
 		output->NodeId = nodeId;
 		output->Port = port;
@@ -2987,7 +3174,31 @@ namespace studio {
 		}
 	}
 
-	bool ImageGraphHistory::Undo(engine::imagegraph::Document &document) {
+	bool ImageGraphHistory::TryRecord(const Document &before, const Document &after) try {
+		if (before == after) return true;
+		if (!Capacity || !ByteCapacity) return false;
+		std::string snapshot = engine::imagegraph::Write(before);
+		if (snapshot.size() > ByteCapacity) return false;
+		const size_t afterBytes = engine::imagegraph::Write(after).size();
+		if (afterBytes > ByteCapacity) return false;
+		UndoText.reserve(UndoText.size() + 1);
+		for (const auto &entry : RedoText)
+			RetainedBytes -= entry.size();
+		RedoText.clear();
+		const size_t transitionBytes = std::max(snapshot.size(), afterBytes);
+		while (!UndoText.empty() &&
+			   (UndoText.size() >= Capacity || RetainedBytes > ByteCapacity - transitionBytes)) {
+			RetainedBytes -= UndoText.front().size();
+			UndoText.erase(UndoText.begin());
+		}
+		RetainedBytes += snapshot.size();
+		UndoText.push_back(std::move(snapshot));
+		return true;
+	} catch (const std::bad_alloc &) {
+		return false;
+	}
+
+	bool ImageGraphHistory::Undo(engine::imagegraph::Document &document) try {
 		if (UndoText.empty()) return false;
 		std::string currentText = engine::imagegraph::Write(document);
 		const size_t replacedBytes = UndoText.back().size();
@@ -2996,15 +3207,18 @@ namespace studio {
 		engine::imagegraph::Diagnostic diagnostic;
 		if (engine::imagegraph::Read(UndoText.back(), restored, diagnostic) != engine::imagegraph::Status::Ok)
 			return false;
+		RedoText.reserve(RedoText.size() + 1);
 		RetainedBytes -= replacedBytes;
 		RetainedBytes += currentText.size();
 		RedoText.push_back(std::move(currentText));
 		document = std::move(restored);
 		UndoText.pop_back();
 		return true;
+	} catch (const std::bad_alloc &) {
+		return false;
 	}
 
-	bool ImageGraphHistory::Redo(engine::imagegraph::Document &document) {
+	bool ImageGraphHistory::Redo(engine::imagegraph::Document &document) try {
 		if (RedoText.empty()) return false;
 		std::string currentText = engine::imagegraph::Write(document);
 		const size_t replacedBytes = RedoText.back().size();
@@ -3013,12 +3227,15 @@ namespace studio {
 		engine::imagegraph::Diagnostic diagnostic;
 		if (engine::imagegraph::Read(RedoText.back(), restored, diagnostic) != engine::imagegraph::Status::Ok)
 			return false;
+		UndoText.reserve(UndoText.size() + 1);
 		RetainedBytes -= replacedBytes;
 		RetainedBytes += currentText.size();
 		UndoText.push_back(std::move(currentText));
 		document = std::move(restored);
 		RedoText.pop_back();
 		return true;
+	} catch (const std::bad_alloc &) {
+		return false;
 	}
 
 	void ImageGraphHistory::Clear() {

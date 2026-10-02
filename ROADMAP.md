@@ -55,6 +55,7 @@ Milestone labels describe development scope, not release versions.
   13. Save and evaluate nested point arrays, source Any keys and recursive 3D paths.
   14. Add four 2D kernels and preserve Pixel Builder signed dimensions, grayscale draws and instance resizing.
   15. Preserve source FLIP readback buffers and bounded step history for replay.
+  16. Edit source groups and keys atomically; preserve undo/redo, instance writers and PXC saves.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

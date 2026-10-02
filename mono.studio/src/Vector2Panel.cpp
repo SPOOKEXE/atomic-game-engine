@@ -71,7 +71,16 @@ namespace studio {
 		}
 	}
 	void Vector2Panel::End() {
-		if (Before && Document && History) History->Record(*Before, *Document);
+		if (Before && Document && History && !History->TryRecord(*Before, *Document)) {
+			*Document = std::move(*Before);
+			Error = {
+				engine::imagegraph::Status::LimitExceeded,
+				GestureNode,
+				{},
+				"vector gesture cannot retain its undo snapshot"
+			};
+			if (Changed) Changed();
+		}
 		Before.reset();
 		GestureNode.clear();
 		Panning = false;
@@ -85,7 +94,16 @@ namespace studio {
 		};
 	}
 	void Vector2Panel::FinishSettings() {
-		if (SettingsBefore && Document && History) History->Record(*SettingsBefore, *Document);
+		if (SettingsBefore && Document && History && !History->TryRecord(*SettingsBefore, *Document)) {
+			*Document = std::move(*SettingsBefore);
+			Error = {
+				engine::imagegraph::Status::LimitExceeded,
+				{},
+				{},
+				"preview settings cannot retain their undo snapshot"
+			};
+			if (Changed) Changed();
+		}
 		SettingsBefore.reset();
 		SettingsId = 0;
 	}

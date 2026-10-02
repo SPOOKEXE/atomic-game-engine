@@ -2,7 +2,13 @@
 #include "ImageComposerInternal.hpp"
 #include "ImageGraphChoices.hpp"
 #include "ImageGraphDocumentEdit.hpp"
+#include "ImageGraphExportTriggers.hpp"
+#include "ImageGraphGroupHost.hpp"
+#include "ImageGraphInputs.hpp"
+#include "ImageGraphObservations.hpp"
+#include "ImageGraphPorts.hpp"
 #include "ImageGraphPreview.hpp"
+#include "ImageGraphSourceEdit.hpp"
 #include "KeyframeKindEditor.hpp"
 #include "TimelineDopesheet.hpp"
 #include "TimelineKeyEditor.hpp"
@@ -17,16 +23,21 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/WavPreview.hpp>
+#include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scripthost/ComposerLua.hpp>
 #include <engine/ui/Metrics.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
@@ -39,6 +50,7 @@
 #include <string>
 #include <string_view>
 #include <studio/ImageGraph.hpp>
+#include <studio/PxcxSave.hpp>
 #include <studio/WavPreview.hpp>
 #include <type_traits>
 #include <unordered_set>
@@ -62,13 +74,32 @@ namespace studio {
 		constexpr size_t PREVIEW_MAXIMUM_BYTES = IMAGE_COMPOSER_PREVIEW_DISPLAY_MAXIMUM_BYTES;
 		constexpr size_t MAXIMUM_HISTORY = 128;
 
+		struct ExportGrant {
+			std::string NodeId;
+			std::array<char, 4096> Directory{}, ImageEncoder{}, VideoEncoder{};
+			std::filesystem::path Root;
+			std::string Message;
+			bool Failed = false;
+			std::vector<std::filesystem::path> RetainedFrames;
+		};
+
 		struct State {
 			bool Initialized = false;
+			std::vector<ExportGrant> ExportGrants;
+			detail::ImageGraphExportUpdate ExportUpdate;
+			detail::ImageGraphObservations PcxObservations;
+			std::chrono::steady_clock::time_point SessionStart = std::chrono::steady_clock::now();
+			std::vector<engine::imagegraph::ComposerLuaMessage> LuaMessages;
+			std::unique_ptr<engine::imagegraph::ComposerLuaHost> LuaHost =
+				engine::script::MakeComposerLuaHost();
 			bool LivePreview = true;
 			bool PreviewDirty = true;
+			bool CanvasNeedsReload = false;
 			bool PreviewRequested = true;
 			bool HaveGoodPreview = false;
 			bool HaveScalarPreview = false;
+			bool HaveValuePreview = false;
+			engine::imagegraph::Value ValuePreview = false;
 			bool HaveVector2Preview = false;
 			engine::imagegraph::Vector2 Vector2Preview;
 			Vector2Panel VectorControls;
@@ -107,6 +138,7 @@ namespace studio {
 			char WavSourceId[4096] = {};
 			char WavFilePath[4096] = {};
 			std::string SelectedOutput;
+			std::string BindingOutputPort;
 			std::string SinkMessage;
 			std::string AdapterError;
 			std::string PxcxPathDisplay;
@@ -135,6 +167,8 @@ namespace studio {
 			ImageGraphPreviewCache PreviewCache;
 			Diagnostic LastDiagnostic;
 			ImageGraphHistory History{MAXIMUM_HISTORY};
+			ImageGraphGroupHost GroupHost;
+			engine::imagegraph::CapturedFeedbackHost FeedbackHost;
 			ImageGraphCanvasIds Ids;
 			nodegraph::Graph Graph;
 			nodegraph::Canvas Canvas;
@@ -157,6 +191,15 @@ namespace studio {
 		}
 
 		void AuthoredDocumentChanged(State &state) {
+			std::erase_if(state.ExportGrants, [&](const auto &grant) {
+				return std::none_of(
+					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
+						return node.Id == grant.NodeId && node.Type == "pc.export";
+					}
+				);
+			});
+			if (state.LuaHost) state.LuaHost->Reset();
+			state.LuaMessages.clear();
 			if (state.DocumentRevision == std::numeric_limits<uint64_t>::max()) {
 				state.DocumentRevision = 1;
 				state.PreviewCache.Clear();
@@ -203,6 +246,85 @@ namespace studio {
 			canvas.Look.WidgetFill = 0xFF858585;
 		}
 
+		void BindObservations(State &state, engine::imagegraph::EvaluationRequest &request) {
+			const auto frame = GetImageGraphFrame(state.Playback);
+			const std::string project =
+				std::filesystem::path(state.PxcxPathDisplay.empty() ? state.GraphName : state.PxcxPathDisplay)
+					.stem()
+					.string();
+			if (!state.PcxObservations.Matches(state.DocumentRevision, frame, project)) {
+				const auto now = std::time(nullptr);
+				std::tm calendar{};
+#ifdef _WIN32
+				localtime_s(&calendar, &now);
+#else
+				localtime_r(&now, &calendar);
+#endif
+				const double elapsed =
+					std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SessionStart)
+						.count();
+				state.PcxObservations.Capture(state.DocumentRevision, frame, project, elapsed, calendar);
+			}
+			state.PcxObservations.Bind(request);
+		}
+
+		void ReloadCanvas(State &state);
+		bool ReconcileSplitOutputs(
+			State &state, Document &document, const engine::imagegraph::GroupReplayState *replay = nullptr
+		) {
+			std::vector<std::string> splitIds;
+			for (const auto &node : document.Nodes)
+				if (node.Type == "pc.array_split") splitIds.push_back(node.Id);
+			if (splitIds.empty()) return true;
+			engine::imagegraph::Plan plan;
+			engine::imagegraph::Diagnostic error;
+			if (engine::imagegraph::Compile(document, plan, error) != engine::imagegraph::Status::Ok)
+				return true;
+			engine::imagegraph::EvaluationRequest request;
+			request.HostProvider = state.LuaHost.get();
+			request.GroupReplay = replay;
+			request.GroupAuthoringRevision = replay ? replay->AuthoringRevision() : 0;
+			BindObservations(state, request);
+			request.AudioFrames = state.AudioFrames;
+			request.AudioClips = state.AudioClips;
+			(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+			std::vector<std::pair<std::string, size_t>> resized;
+			for (const auto &id : splitIds) {
+				engine::imagegraph::EvaluationSnapshot snapshot;
+				if (engine::imagegraph::EvaluateNodeInputs(document, plan, id, request, snapshot, error) !=
+					engine::imagegraph::Status::Ok)
+					continue;
+				size_t count = 0, minimum = 0;
+				for (const auto &input : snapshot.Values()) {
+					if (input.Port == "minimum_outputs") {
+						if (const auto *value = std::get_if<int64_t>(&input.Data); value && *value > 0)
+							minimum = size_t(*value);
+					}
+					if (input.Port == "array") {
+						if (const auto *array = std::get_if<engine::imagegraph::ArrayValue>(&input.Data))
+							count = !array->Items.empty()	 ? array->Items.size()
+									: !array->Nested.empty() ? array->Nested.size()
+															 : array->Elements.size();
+						else
+							count = 1;
+					}
+				}
+				for (const auto &image : snapshot.Images())
+					if (image.Port == "array") ++count;
+				for (const auto &array : snapshot.ImageArrays())
+					if (array.Port == "array") count = array.Data.Items.size();
+				count = std::max(count, minimum);
+				const auto *node = FindNode(document, id);
+				const auto current = node ? detail::ImageGraphOutputPorts(*node).size() : 0;
+				if (count != current) resized.emplace_back(id, count);
+			}
+			for (const auto &[id, count] : resized)
+				if (!SetImageGraphSplitOutputCount(document, id, count, state.LastDiagnostic, false))
+					return false;
+			if (!resized.empty()) state.CanvasNeedsReload = true;
+			return true;
+		}
+
 		void SyncCanvas(State &state) {
 			for (const nodegraph::Node &canvasNode : state.Graph.Nodes()) {
 				if (state.Ids.ToDocument.contains(canvasNode.Id) || !canvasNode.DynamicInputs.empty())
@@ -220,6 +342,7 @@ namespace studio {
 				RequestPreview(state);
 				return;
 			}
+			if (!ReconcileSplitOutputs(state, updated)) return;
 			std::unordered_set<std::string> liveNodeIds;
 			liveNodeIds.reserve(updated.Nodes.size());
 			for (const Node &node : updated.Nodes)
@@ -230,7 +353,13 @@ namespace studio {
 			std::erase_if(updated.Keyframes, [&](const Keyframe &frame) {
 				return !liveNodeIds.contains(frame.NodeId);
 			});
-			state.History.Record(state.Authored, updated);
+			if (!state.History.TryRecord(state.Authored, updated)) {
+				state.LastDiagnostic = {
+					Status::LimitExceeded, {}, {}, "Canvas undo transition exceeds its history budget"
+				};
+				state.CanvasNeedsReload = true;
+				return;
+			}
 			if (state.Authored != updated) {
 				state.Authored = std::move(updated);
 				AuthoredDocumentChanged(state);
@@ -246,6 +375,7 @@ namespace studio {
 		}
 
 		void ReloadCanvas(State &state) {
+			state.CanvasNeedsReload = false;
 			const auto issuedNodeIds = state.Ids.IssuedNodeIds;
 			const auto issuedGroupIds = state.Ids.IssuedGroupIds;
 			const uint64_t nextNodeId = state.Ids.NextNodeId;
@@ -339,6 +469,106 @@ namespace studio {
 			return true;
 		}
 
+		ExportGrant &GrantFor(State &state, std::string_view nodeId) {
+			const auto found =
+				std::find_if(state.ExportGrants.begin(), state.ExportGrants.end(), [&](const auto &grant) {
+					return grant.NodeId == nodeId;
+				});
+			if (found != state.ExportGrants.end()) return *found;
+			ExportGrant grant;
+			grant.NodeId = std::string(nodeId);
+			state.ExportGrants.push_back(std::move(grant));
+			return state.ExportGrants.back();
+		}
+
+		void RunAuthoredExports(
+			State &state, detail::ImageGraphExportEvent event, std::string_view explicitNode = {}
+		) {
+			std::vector<std::string> nodes;
+			for (const auto &node : state.Authored.Nodes)
+				if (node.Type == "pc.export" && (explicitNode.empty() || node.Id == explicitNode))
+					nodes.push_back(node.Id);
+			if (nodes.empty()) return;
+			ENGINE_PROFILE_CAT("image composer exports", engine::core::ProfileCategory::Engine);
+			engine::imagegraph::Plan plan;
+			Diagnostic error;
+			if (engine::imagegraph::Compile(state.Authored, plan, error) != Status::Ok) {
+				for (const auto &id : nodes) {
+					auto &grant = GrantFor(state, id);
+					grant.Message = error.Message;
+					grant.Failed = true;
+				}
+				return;
+			}
+			for (const auto &id : nodes) {
+				auto &grant = GrantFor(state, id);
+				engine::imagegraph::EvaluationRequest request;
+				request.HostProvider = state.LuaHost.get();
+				BindObservations(state, request);
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				request.AudioFrames = state.AudioFrames;
+				request.AudioClips = state.AudioClips;
+				if (!state.GroupHost.Prepare(state.Authored, plan, state.DocumentRevision, request, error) ||
+					!state.FeedbackHost.Prepare(
+						state.Authored,
+						plan,
+						state.DocumentRevision,
+						state.AudioInputRevision,
+						request,
+						error,
+						engine::imagegraph::Limits::MaximumEvaluationBytes,
+						state.SelectedOutput,
+						id
+					)) {
+					grant.Message = error.Message;
+					grant.Failed = true;
+					continue;
+				}
+				engine::imagegraph::EvaluationSnapshot captured;
+				const auto *snapshot = &state.FeedbackHost.Snapshot();
+				if (snapshot->Values().empty()) {
+					if (engine::imagegraph::EvaluateNodeInputs(
+							state.Authored, plan, id, request, captured, error
+						) != Status::Ok) {
+						grant.Message = error.Message;
+						grant.Failed = true;
+						continue;
+					}
+					snapshot = &captured;
+				}
+				if (explicitNode.empty() && !detail::SourceExportTriggered(snapshot->Values(), event)) {
+					grant.Failed = false;
+					grant.Message.clear();
+					continue;
+				}
+				if (grant.Root.empty()) {
+					grant.Message = "Grant an export directory before running this node.";
+					grant.Failed = true;
+					continue;
+				}
+				engine::imagegraphexport::GraphExportSettings settings;
+				settings.Input = state.PxcxPathDisplay.empty()
+									 ? std::filesystem::path(state.GraphName).replace_extension(".graph")
+									 : std::filesystem::path(state.PxcxPathDisplay);
+				settings.Output = grant.Root;
+				settings.ImageEncoder = std::filesystem::path(grant.ImageEncoder.data());
+				settings.VideoEncoder = std::filesystem::path(grant.VideoEncoder.data());
+				settings.NativeGif = true;
+				std::string failure;
+				std::vector<std::filesystem::path> retained;
+				if (engine::imagegraphexport::ExportAuthoredGraphNode(
+						state.Authored, plan, request, settings, id, failure, &retained
+					)) {
+					grant.Message = "Export complete.";
+					grant.Failed = false;
+				} else {
+					grant.Message = std::move(failure);
+					grant.Failed = true;
+				}
+				grant.RetainedFrames = std::move(retained);
+			}
+		}
+
 		bool SaveNativeGraph(State &state) {
 			const std::string_view graphName(state.GraphName);
 			const std::filesystem::path path =
@@ -377,6 +607,7 @@ namespace studio {
 				return false;
 			}
 			state.GraphIoMessage = "saved " + path.filename().string();
+			RunAuthoredExports(state, detail::ImageGraphExportEvent::Save);
 			return true;
 		}
 
@@ -401,9 +632,12 @@ namespace studio {
 				return false;
 			}
 			state.Authored = std::move(candidate);
+			state.ExportGrants.clear();
+			state.ExportUpdate = {};
 			state.Playback.CurrentTick = 0;
 			ApplyImageGraphTimeline(state.Authored, state.Playback);
 			state.History.Clear();
+			state.GroupHost.Clear();
 			AuthoredDocumentChanged(state);
 			state.ImportedPxcx.reset();
 			state.PxcxProjection = {};
@@ -493,6 +727,8 @@ namespace studio {
 			state.PxcxDiagnostics = std::move(imported.Diagnostics);
 			state.PxcxProjection = imported.Graph;
 			state.Authored = std::move(imported.Graph);
+			state.ExportGrants.clear();
+			state.ExportUpdate = {};
 			state.Playback.CurrentTick = 0;
 			ApplyImageGraphTimeline(state.Authored, state.Playback);
 			AuthoredDocumentChanged(state);
@@ -500,6 +736,7 @@ namespace studio {
 				state.Authored.Outputs.empty() ? std::string{} : state.Authored.Outputs.front().Id;
 			state.NextOutputId = 1;
 			state.History.Clear();
+			state.GroupHost.Clear();
 			state.RetiredTexture = state.CurrentTexture;
 			state.CurrentTexture = engine::core::Name{};
 			state.HaveGoodPreview = false;
@@ -610,6 +847,7 @@ namespace studio {
 			state.PreviewDirty = false;
 			state.PreviewRequested = false;
 			state.HaveVector2Preview = false;
+			state.HaveValuePreview = false;
 			state.SinkMessage.clear();
 			if (state.SelectedOutput.empty()) {
 				state.HaveScalarPreview = false;
@@ -646,18 +884,14 @@ namespace studio {
 			const size_t outputIndex = static_cast<size_t>(selectedOutput - state.Authored.Outputs.begin());
 			const Document &previewDocument = state.Authored;
 			const Node *outputNode = FindNode(previewDocument, selectedOutput->NodeId);
-			const engine::imagegraph::NodeSchema *outputSchema =
-				outputNode == nullptr ? nullptr : engine::imagegraph::FindSchema(outputNode->Type);
+			const auto outputPorts = outputNode ? detail::ImageGraphOutputPorts(*outputNode)
+												: std::vector<engine::imagegraph::PortSchema>{};
 			const engine::imagegraph::PortSchema *outputPort = nullptr;
-			if (outputSchema != nullptr) {
-				const auto found = std::find_if(
-					outputSchema->Ports.begin(), outputSchema->Ports.end(), [&](const auto &port) {
-						return port.Direction == engine::imagegraph::PortDirection::Output &&
-							   port.Id == selectedOutput->Port;
-					}
-				);
-				if (found != outputSchema->Ports.end()) outputPort = &*found;
-			}
+			const auto foundOutput =
+				std::find_if(outputPorts.begin(), outputPorts.end(), [&](const auto &port) {
+					return port.Id == selectedOutput->Port;
+				});
+			if (foundOutput != outputPorts.end()) outputPort = &*foundOutput;
 			if (outputPort == nullptr) {
 				state.HaveScalarPreview = false;
 				state.HaveArrayPreview = false;
@@ -670,16 +904,14 @@ namespace studio {
 				return;
 			}
 			const bool imageOutput = outputPort->Type == engine::imagegraph::ValueType::Image;
-			if (!imageOutput && outputPort->Type != engine::imagegraph::ValueType::Scalar &&
-				outputPort->Type != engine::imagegraph::ValueType::Array &&
-				outputPort->Type != engine::imagegraph::ValueType::Vector2) {
+			if (!imageOutput && !detail::ImageGraphValuePreviewSupported(outputPort->Type)) {
 				state.HaveScalarPreview = false;
 				state.HaveArrayPreview = false;
 				state.LastDiagnostic = {
 					Status::UnsupportedExecution,
 					selectedOutput->NodeId,
 					selectedOutput->Port,
-					"Studio preview supports images, scalars, vectors and numeric arrays"
+					"selected resource requires its dedicated preview panel"
 				};
 				return;
 			}
@@ -711,28 +943,75 @@ namespace studio {
 			{
 				ENGINE_PROFILE_CAT("image composer preview", engine::core::ProfileCategory::Render);
 				if (engine::imagegraph::Compile(previewDocument, plan, diagnostic) != Status::Ok) {
+					if (state.LuaHost) state.LuaHost->Reset();
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
 				}
 				engine::imagegraph::EvaluationRequest request;
+				request.HostProvider = state.LuaHost.get();
+				BindObservations(state, request);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames =
 					std::span<const engine::imagegraph::AudioCaptureFrame>(state.AudioFrames);
 				request.AudioClips = state.AudioClips;
+				if (!state.GroupHost.Prepare(
+						previewDocument, plan, state.DocumentRevision, request, diagnostic
+					)) {
+					state.LastDiagnostic = std::move(diagnostic);
+					return;
+				}
+				if (!state.FeedbackHost.Prepare(
+						previewDocument,
+						plan,
+						state.DocumentRevision,
+						state.AudioInputRevision,
+						request,
+						diagnostic,
+						engine::imagegraph::Limits::MaximumEvaluationBytes,
+						state.SelectedOutput
+					)) {
+					state.LastDiagnostic = std::move(diagnostic);
+					return;
+				}
 				studio::ImageGraphPreviewValue preview;
-				if (studio::EvaluateImageGraphPreview(
-						previewDocument, plan, state.SelectedOutput, request, preview, diagnostic
-					) != Status::Ok) {
+				const auto *feedbackOutput = state.FeedbackHost.Value(state.SelectedOutput);
+				if (feedbackOutput) {
+					if (const auto *image = state.FeedbackHost.Output(state.SelectedOutput))
+						preview = *image;
+					else if (const auto *value =
+								 std::get_if<engine::imagegraph::EvaluatedValue>(&feedbackOutput->Output))
+						preview = *value;
+					else {
+						state.LastDiagnostic = {
+							Status::InvalidOutput, {}, {}, "preview requires a single image"
+						};
+						return;
+					}
+				}
+				const auto status =
+					feedbackOutput
+						? Status::Ok
+						: studio::EvaluateImageGraphPreview(
+							  previewDocument, plan, state.SelectedOutput, request, preview, diagnostic
+						  );
+				if (state.LuaHost) {
+					auto messages = state.LuaHost->TakeMessages();
+					if (!messages.empty()) state.LuaMessages = std::move(messages);
+				}
+				if (status != Status::Ok) {
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
 				}
 				if (auto *value = std::get_if<engine::imagegraph::EvaluatedValue>(&preview)) {
 					if (auto *array = std::get_if<engine::imagegraph::ArrayValue>(&value->Data)) {
-						state.ArrayPreview = std::move(*array);
-						state.ValuePreviewPort = value->Port;
-						state.HaveArrayPreview = true;
-						state.LastDiagnostic = {};
-						return;
+						if (array->ElementType == engine::imagegraph::ValueType::Scalar ||
+							array->ElementType == engine::imagegraph::ValueType::Integer) {
+							state.ArrayPreview = std::move(*array);
+							state.ValuePreviewPort = value->Port;
+							state.HaveArrayPreview = true;
+							state.LastDiagnostic = {};
+							return;
+						}
 					}
 					if (const auto *vector = std::get_if<engine::imagegraph::Vector2>(&value->Data)) {
 						state.Vector2Preview = *vector;
@@ -743,12 +1022,10 @@ namespace studio {
 					}
 					const auto *scalar = std::get_if<double>(&value->Data);
 					if (scalar == nullptr) {
-						state.LastDiagnostic = {
-							Status::InvalidOutput,
-							selectedOutput->NodeId,
-							selectedOutput->Port,
-							"scalar output did not evaluate to a finite numeric value"
-						};
+						state.ValuePreview = std::move(value->Data);
+						state.ValuePreviewPort = value->Port;
+						state.HaveValuePreview = true;
+						state.LastDiagnostic = {};
 						return;
 					}
 					state.ScalarPreviewValue = *scalar;
@@ -784,6 +1061,7 @@ namespace studio {
 			const bool changed =
 				redo ? state.History.Redo(state.Authored) : state.History.Undo(state.Authored);
 			if (changed) {
+				state.GroupHost.Clear();
 				const auto frame = GetImageGraphFrame(state.Playback);
 				ApplyImageGraphTimeline(state.Authored, state.Playback);
 				(void)SetImageGraphAuthorFrame(state.Playback, frame);
@@ -793,8 +1071,17 @@ namespace studio {
 		}
 
 		void ApplyDocumentEdit(State &state, const auto &edit) {
-			if (ApplyImageGraphDocumentEdit(state.Authored, state.History, edit))
+			if (ApplyImageGraphDocumentEdit(state.Authored, state.History, [&](Document &document) {
+					if constexpr (std::is_same_v<std::invoke_result_t<decltype(edit), Document &>, bool>) {
+						if (!edit(document)) return false;
+					} else
+						edit(document);
+					return ReconcileSplitOutputs(state, document);
+				}))
 				AuthoredDocumentChanged(state);
+			else if (state.GroupHost.Revision != state.DocumentRevision)
+				// A refused staged transaction must rebuild previews from the retained document.
+				state.GroupHost.Clear();
 		}
 
 		engine::imagegraph::TimelineSettings PlaybackTimeline(const ImageGraphPlayback &playback) {
@@ -867,15 +1154,21 @@ namespace studio {
 					 {}}
 				);
 				fresh.Outputs.push_back({"output-main", "solid-1", "image"});
-				state.Authored = std::move(fresh);
-				state.History.Record(before, state.Authored);
-				AuthoredDocumentChanged(state);
-				state.SelectedOutput = "output-main";
-				state.NextOutputId = 1;
-				state.Playback = {};
-				ApplyImageGraphTimeline(state.Authored, state.Playback);
-				state.Canvas.Select(nodegraph::NO_NODE);
-				ReloadCanvas(state);
+				if (state.History.TryRecord(before, fresh)) {
+					state.Authored = std::move(fresh);
+					state.ExportGrants.clear();
+					state.ExportUpdate = {};
+					AuthoredDocumentChanged(state);
+					state.SelectedOutput = "output-main";
+					state.NextOutputId = 1;
+					state.Playback = {};
+					ApplyImageGraphTimeline(state.Authored, state.Playback);
+					state.Canvas.Select(nodegraph::NO_NODE);
+					ReloadCanvas(state);
+				} else
+					state.LastDiagnostic = {
+						Status::LimitExceeded, {}, {}, "new graph cannot retain its undo snapshot"
+					};
 			}
 			ImGui::SameLine();
 			ImGui::Checkbox("Live preview", &state.LivePreview);
@@ -924,6 +1217,17 @@ namespace studio {
 			}
 		}
 
+		void RecordPropertyEdit(State &state) {
+			if (state.History.TryRecord(state.EditBefore, state.Authored)) return;
+			state.Authored = std::move(state.EditBefore);
+			state.GroupHost.Clear();
+			AuthoredDocumentChanged(state);
+			state.CanvasNeedsReload = true;
+			state.LastDiagnostic = {
+				Status::LimitExceeded, {}, {}, "Property undo transition exceeds its history budget"
+			};
+		}
+
 		void EndPropertyEdit(State &state, ImGuiID id, bool changed) {
 			if (changed) {
 				AuthoredDocumentChanged(state);
@@ -935,7 +1239,7 @@ namespace studio {
 				state.ActiveEditId = id;
 			}
 			if (ImGui::IsItemDeactivatedAfterEdit() && state.HaveActiveEdit && state.ActiveEditId == id) {
-				state.History.Record(state.EditBefore, state.Authored);
+				RecordPropertyEdit(state);
 				state.HaveActiveEdit = false;
 				state.ActiveEditId = 0;
 			}
@@ -943,7 +1247,7 @@ namespace studio {
 
 		void FinishInactiveEdit(State &state) {
 			if (!state.HaveActiveEdit || GImGui->ActiveId == state.ActiveEditId) return;
-			state.History.Record(state.EditBefore, state.Authored);
+			RecordPropertyEdit(state);
 			state.HaveActiveEdit = false;
 			state.ActiveEditId = 0;
 		}
@@ -1431,14 +1735,25 @@ namespace studio {
 			return changed;
 		}
 
-		bool DrawValueWidget(State &state, std::string_view nodeId, AuthoredValue &property) {
+		bool DrawValueWidget(State &state, std::string nodeId, AuthoredValue &property) {
 			bool changed = false;
 			Value replacement = property.Data;
 			const Node *authored = FindNode(state.Authored, nodeId);
+			const std::string editedPort = property.Port;
+			const bool conditionalChannels =
+				authored && (authored->Type == "pc.color_to_rgb" || authored->Type == "pc.color_to_hsv");
 			const auto *choiceInput =
 				authored ? imagegraph_choices::Input(authored->Type, property.Port) : nullptr;
-			if (choiceInput && choiceInput->Type == engine::imagegraph::ValueType::Enum &&
-				imagegraph_choices::Number(replacement)) {
+			const auto *boundaryDeclaration = state.GroupHost.Replay.Find(nodeId);
+			const bool triggerButton =
+				(property.Port == "parent_value" && boundaryDeclaration &&
+				 boundaryDeclaration->Domain.Kind == engine::imagegraph::SourceSocketKind::Trigger) ||
+				(choiceInput && choiceInput->SourceKind == "Trigger");
+			if (triggerButton) {
+				changed = ImGui::Button("Trigger##value");
+				if (changed) replacement = true;
+			} else if (choiceInput && choiceInput->Type == engine::imagegraph::ValueType::Enum &&
+					   imagegraph_choices::Number(replacement)) {
 				changed = DrawSourceChoiceValue(*choiceInput, replacement);
 			} else if (const auto *value = std::get_if<bool>(&property.Data)) {
 				bool edit = *value;
@@ -1529,17 +1844,64 @@ namespace studio {
 			const ImGuiID itemId = ImGui::GetID("##value");
 			BeginPropertyEdit(state, itemId);
 			// A combo selection finishes before the numeric field becomes the last ImGui item.
-			if (changed && choiceInput && choiceInput->Type == engine::imagegraph::ValueType::Enum &&
-				!state.HaveActiveEdit) {
+			if (changed && !state.HaveActiveEdit) {
 				state.EditBefore = state.Authored;
 				state.HaveActiveEdit = true;
 				state.ActiveEditId = itemId;
 			}
-			if (changed &&
-				SetImageGraphValue(
-					state.Authored, nodeId, property.Port, std::move(replacement), state.LastDiagnostic
-				)) {
-				state.LastDiagnostic = {};
+			if (changed) {
+				const Node *node = FindNode(state.Authored, nodeId);
+				const bool boundary = node && node->Type == "pc.group_input";
+				const bool sourceInput = node && choiceInput && choiceInput->SourceIndex >= 0;
+				if (boundary || sourceInput || triggerButton) {
+					engine::imagegraph::GroupRefreshEvent event;
+					event.At.HostProvider = state.LuaHost.get();
+					event.At.AudioFrames = state.AudioFrames;
+					event.At.AudioClips = state.AudioClips;
+					BindObservations(state, event.At);
+					event.NodeId = std::string(nodeId);
+					event.EditedPort = property.Port;
+					event.LocalValue = &replacement;
+					event.LocalAnimated =
+						triggerButton || ImageGraphGroupHost::Mode(state.Authored, *node, property.Port) ==
+											 engine::imagegraph::GroupSubtypeAnimator::Animated;
+					event.SubtypeAnimator = ImageGraphGroupHost::Mode(state.Authored, *node, "subtype");
+					event.Reason = property.Port == "parent_value"
+									   ? engine::imagegraph::GroupRefreshReason::ParentEdit
+									   : engine::imagegraph::GroupRefreshReason::Edit;
+					(void)engine::imagegraph::SetFrameTime(event.At, GetImageGraphFrame(state.Playback));
+					changed = state.GroupHost.Edit(
+						state.Authored,
+						state.History,
+						state.DocumentRevision,
+						event,
+						state.LastDiagnostic,
+						false
+					);
+				} else {
+					changed = SetImageGraphValue(
+						state.Authored, nodeId, property.Port, std::move(replacement), state.LastDiagnostic
+					);
+				}
+			}
+			if (changed && (editedPort == "minimum_outputs" || editedPort == "array")) {
+				(void)ReconcileSplitOutputs(state, state.Authored);
+				ReloadCanvas(state);
+			}
+			if (changed && editedPort == "output_array" && conditionalChannels) {
+				const auto ports = detail::ImageGraphOutputPorts(*FindNode(state.Authored, nodeId));
+				const auto valid = [&](std::string_view id) {
+					return std::any_of(ports.begin(), ports.end(), [&](const auto &port) {
+						return port.Id == id;
+					});
+				};
+				std::erase_if(state.Authored.Links, [&](const auto &link) {
+					return link.FromNode == nodeId && !valid(link.FromPort);
+				});
+				std::erase_if(state.Authored.Outputs, [&](const auto &output) {
+					return output.NodeId == nodeId && !valid(output.Port);
+				});
+				ReloadCanvas(state);
 			}
 			EndPropertyEdit(state, itemId, changed);
 			return changed;
@@ -1574,6 +1936,10 @@ namespace studio {
 				return "Vector4";
 			case ValueType::Path2D:
 				return "Path2D";
+			case ValueType::Path3D:
+				return "Path3D";
+			case ValueType::PixelBox:
+				return "PixelBox";
 			case ValueType::Vector3:
 				return "Vector3";
 			case ValueType::Quaternion:
@@ -1692,13 +2058,166 @@ namespace studio {
 			return changed;
 		}
 
+		void DrawReadOnlyValue(State &state, Value &value, size_t depth, size_t &remaining);
+		void DrawReadOnlyElement(
+			State &state, engine::imagegraph::ElementValue &element, size_t depth, size_t &remaining
+		) {
+			std::visit(
+				[&](auto &leaf) {
+					using T = std::decay_t<decltype(leaf)>;
+					if constexpr (std::is_same_v<T, std::string>) {
+						if (!remaining) return;
+						--remaining;
+						ImGui::TextUnformatted(leaf.data(), leaf.data() + leaf.size());
+					} else if constexpr (std::is_same_v<T, engine::imagegraph::StructValue>) {
+						if (!remaining || depth > 32) return;
+						--remaining;
+						if (leaf.Data)
+							for (auto &[name, field] : leaf.Data->Fields) {
+								if (!remaining) break;
+								ImGui::PushID(name.c_str());
+								ImGui::TextUnformatted(name.c_str());
+								DrawReadOnlyValue(state, field, depth + 1, remaining);
+								ImGui::PopID();
+							}
+					} else if constexpr (std::is_same_v<T, engine::imagegraph::MatrixValue>) {
+						ImGui::Text("Matrix %u x %u", leaf.Rows, leaf.Columns);
+						for (const double entry : leaf.Values) {
+							if (!remaining) break;
+							--remaining;
+							ImGui::Text("%.9g", entry);
+						}
+					} else if constexpr (requires { leaf.Data; } ||
+										 std::is_same_v<T, engine::imagegraph::AudioBit>) {
+						if (remaining) --remaining;
+						ImGui::TextUnformatted("Owned resource payload");
+					} else {
+						Value value = leaf;
+						DrawReadOnlyValue(state, value, depth, remaining);
+					}
+				},
+				element
+			);
+		}
+		void DrawReadOnlyArrayItem(
+			State &state, engine::imagegraph::SourceArrayItem &item, size_t depth, size_t &remaining
+		) {
+			if (!remaining || depth > 32) return;
+			if (auto *leaf = std::get_if<engine::imagegraph::ElementValue>(&item.Data)) {
+				DrawReadOnlyElement(state, *leaf, depth, remaining);
+			} else if (auto *children =
+						   std::get_if<std::vector<engine::imagegraph::SourceArrayItem>>(&item.Data)) {
+				--remaining;
+				if (ImGui::TreeNode("##array", "Array (%zu)", children->size())) {
+					for (size_t i = 0; i < children->size() && remaining; ++i) {
+						ImGui::PushID(static_cast<int>(i));
+						DrawReadOnlyArrayItem(state, (*children)[i], depth + 1, remaining);
+						ImGui::PopID();
+					}
+					ImGui::TreePop();
+				}
+			} else if (const auto *image = std::get_if<engine::imagegraph::Image>(&item.Data)) {
+				--remaining;
+				ImGui::Text("Surface %u x %u", image->Width, image->Height);
+			}
+		}
+		void DrawReadOnlyValue(State &state, Value &value, size_t depth, size_t &remaining) {
+			if (!remaining || depth > 32) return;
+			--remaining;
+			if (auto *array = std::get_if<engine::imagegraph::ArrayValue>(&value)) {
+				ImGui::Text("Array %s", engine::imagegraph::ValueTypeName(array->ElementType).data());
+				for (size_t i = 0; i < array->Elements.size() && remaining; ++i) {
+					ImGui::PushID(static_cast<int>(i));
+					DrawReadOnlyElement(state, array->Elements[i], depth + 1, remaining);
+					ImGui::PopID();
+				}
+				for (size_t row = 0; row < array->Nested.size() && remaining; ++row) {
+					ImGui::PushID(static_cast<int>(row));
+					if (ImGui::TreeNode("row", "Row %zu", row)) {
+						for (size_t i = 0; i < array->Nested[row].size() && remaining; ++i) {
+							ImGui::PushID(static_cast<int>(i));
+							DrawReadOnlyElement(state, array->Nested[row][i], depth + 1, remaining);
+							ImGui::PopID();
+						}
+						ImGui::TreePop();
+					}
+					ImGui::PopID();
+				}
+				for (size_t i = 0; i < array->Items.size() && remaining; ++i) {
+					ImGui::PushID(static_cast<int>(i));
+					DrawReadOnlyArrayItem(state, array->Items[i], depth + 1, remaining);
+					ImGui::PopID();
+				}
+			} else if (auto *matrix = std::get_if<engine::imagegraph::MatrixValue>(&value)) {
+				ImGui::Text("Matrix %u x %u", matrix->Rows, matrix->Columns);
+				for (const double entry : matrix->Values) {
+					if (!remaining) break;
+					--remaining;
+					ImGui::Text("%.9g", entry);
+				}
+			} else if (auto *structure = std::get_if<engine::imagegraph::StructValue>(&value)) {
+				if (structure->Data)
+					for (auto &[name, field] : structure->Data->Fields) {
+						if (!remaining) break;
+						ImGui::PushID(name.c_str());
+						ImGui::TextUnformatted(name.c_str());
+						DrawReadOnlyValue(state, field, depth + 1, remaining);
+						ImGui::PopID();
+					}
+			} else if (const auto *path = std::get_if<engine::imagegraph::PathValue3D>(&value)) {
+				ImGui::Text("Path3D: %zu anchors", path->Data ? path->Data->Anchors.size() : 0);
+			} else if (const auto *box = std::get_if<engine::imagegraph::PixelBoxValue>(&value)) {
+				if (box->Data) {
+					const auto &bounds =
+						box->Data->FixedBounds ? *box->Data->FixedBounds : box->Data->BaseBounds;
+					ImGui::Text(
+						"PixelBox: %.9g, %.9g to %.9g, %.9g", bounds[0], bounds[1], bounds[2], bounds[3]
+					);
+				} else
+					ImGui::TextUnformatted("PixelBox: empty");
+			} else if (std::holds_alternative<engine::imagegraph::AudioBit>(value) ||
+					   std::holds_alternative<engine::imagegraph::MeshValue3D>(value) ||
+					   std::holds_alternative<engine::imagegraph::MeshValue2D>(value) ||
+					   std::holds_alternative<engine::imagegraph::SceneValue3D>(value) ||
+					   std::holds_alternative<engine::imagegraph::MaterialValue3D>(value) ||
+					   std::holds_alternative<engine::imagegraph::LightValue3D>(value)) {
+				ImGui::TextUnformatted("Owned resource payload");
+			} else {
+				ImGui::BeginDisabled();
+				(void)DrawDynamicDefault(state, value);
+				ImGui::EndDisabled();
+			}
+		}
+
 		void DrawDynamicInputs(State &state, Node &node, const engine::imagegraph::NodeSchema &schema) {
 			if (!schema.DynamicInputs) return;
 			ImGui::Separator();
 			ImGui::TextUnformatted("Instance inputs");
+			const auto *catalogue = engine::imagegraph::FindCatalogueEntry(node.Type);
+			const bool grouped =
+				catalogue && catalogue->DynamicGroupLength > 0 && !catalogue->DynamicTemplate.empty();
+			if (grouped) {
+				int count = 0;
+				for (const auto &input : node.DynamicInputs) {
+					size_t group = 0;
+					if (engine::imagegraph::FindDynamicTemplate(*catalogue, input.Id, group))
+						count = std::max(count, int(group + 1));
+				}
+				if (ImGui::InputInt("Input groups", &count)) {
+					const std::string nodeId = node.Id;
+					ApplyDocumentEdit(state, [&](Document &document) {
+						return count >= 0 && SetSourceImageGraphDynamicGroupCount(
+												 document, nodeId, size_t(count), state.LastDiagnostic
+											 );
+					});
+					ReloadCanvas(state);
+					return;
+				}
+			}
 			const std::vector<engine::imagegraph::DynamicInput> inputs = node.DynamicInputs;
 			for (const auto &source : inputs) {
 				auto input = source;
+				const auto *sourceTemplate = imagegraph_choices::Input(node.Type, input.Id);
 				ImGui::PushID(input.Id.c_str());
 				ImGui::TextUnformatted(input.Id.c_str());
 				ImGui::SameLine(92.0f);
@@ -1721,6 +2240,21 @@ namespace studio {
 					engine::imagegraph::ValueType::Enum
 				};
 				bool changed = false;
+				if (node.Type == "pc.gmroom") {
+					std::string layer = input.SourceLayerName;
+					if (ImGui::InputText(
+							"Room layer",
+							layer.data(),
+							layer.capacity() + 1,
+							ImGuiInputTextFlags_CallbackResize,
+							ResizeTextInput,
+							&layer
+						)) {
+						input.SourceLayerName = std::move(layer);
+						changed = true;
+					}
+				}
+				ImGui::BeginDisabled(grouped);
 				if (ImGui::BeginCombo("##type", ValueTypeLabel(input.Type))) {
 					for (const auto type : types) {
 						const bool selected = input.Type == type;
@@ -1733,25 +2267,125 @@ namespace studio {
 					}
 					ImGui::EndCombo();
 				}
+				ImGui::EndDisabled();
+				if (grouped && (input.Type == engine::imagegraph::ValueType::Any ||
+								detail::SourceLuaArgumentType(node, input.Id))) {
+					std::optional<engine::imagegraph::ValueType> literalType;
+					if (input.Default)
+						for (const auto type : types) {
+							const auto candidate = DefaultForType(type);
+							if (candidate && candidate->index() == input.Default->index()) {
+								literalType = type;
+								break;
+							}
+						}
+					if (ImGui::BeginCombo(
+							"Literal type", literalType ? ValueTypeLabel(*literalType) : "None"
+						)) {
+						for (const auto type : types) {
+							if (type == engine::imagegraph::ValueType::Image) continue;
+							if (ImGui::Selectable(ValueTypeLabel(type), literalType == type)) {
+								input.Default = DefaultForType(type);
+								changed = true;
+							}
+						}
+						ImGui::EndCombo();
+					}
+				}
 				if (input.Type != engine::imagegraph::ValueType::Image) {
 					bool hasDefault = input.Default.has_value();
+					// Physical source controls retain an animator value even while linked.
+					ImGui::BeginDisabled(sourceTemplate && sourceTemplate->SourceIndex >= 0 && hasDefault);
 					if (ImGui::Checkbox("Default", &hasDefault)) {
-						input.Default = hasDefault ? DefaultForType(input.Type) : std::nullopt;
+						input.Default = hasDefault ? DefaultForType(
+														 input.Type == engine::imagegraph::ValueType::Any
+															 ? engine::imagegraph::ValueType::Scalar
+															 : input.Type
+													 )
+												   : std::nullopt;
 						changed = true;
 					}
-					if (input.Default) changed = DrawDynamicDefault(state, *input.Default) || changed;
+					ImGui::EndDisabled();
+					if (input.Default) {
+						const auto choices = sourceTemplate ? std::optional<imagegraph_choices::View>(
+																  imagegraph_choices::View{*sourceTemplate}
+															  )
+															: std::nullopt;
+						if (choices && choices->Count()) {
+							const auto selected = choices->Selected(*input.Default);
+							const std::string label = selected ? std::string(selected->Label) : "Unknown";
+							if (ImGui::BeginCombo("Value", label.c_str())) {
+								for (size_t row = 0; row < choices->Count(); ++row) {
+									const auto choice = choices->At(row);
+									if (choice->Separator) {
+										ImGui::Separator();
+										continue;
+									}
+									const std::string name(choice->Label);
+									if (ImGui::Selectable(
+											name.c_str(),
+											selected && selected->SourceIndex == choice->SourceIndex
+										)) {
+										input.Default = choices->Select(row);
+										changed = true;
+									}
+								}
+								ImGui::EndCombo();
+							}
+						} else
+							changed = DrawDynamicDefault(state, *input.Default) || changed;
+					}
+				}
+				if (grouped && sourceTemplate && sourceTemplate->SourceIndex >= 0 && input.Default &&
+					ImGui::SmallButton("Key current frame")) {
+					engine::imagegraph::GroupRefreshEvent event;
+					event.NodeId = node.Id;
+					event.EditedPort = input.Id;
+					event.LocalValue = &*input.Default;
+					event.LocalAnimated = true;
+					event.At.HostProvider = state.LuaHost.get();
+					event.At.AudioFrames = state.AudioFrames;
+					event.At.AudioClips = state.AudioClips;
+					BindObservations(state, event.At);
+					(void)engine::imagegraph::SetFrameTime(event.At, GetImageGraphFrame(state.Playback));
+					if (state.GroupHost.Edit(
+							state.Authored, state.History, state.DocumentRevision, event, state.LastDiagnostic
+						)) {
+						AuthoredDocumentChanged(state);
+						ReloadCanvas(state);
+					}
+					ImGui::PopID();
+					return;
 				}
 				ImGui::SameLine();
-				ImGui::BeginDisabled(node.DynamicInputs.size() <= 1);
+				ImGui::BeginDisabled(grouped || node.DynamicInputs.size() <= 1);
 				const bool remove = ImGui::SmallButton("Remove");
 				ImGui::EndDisabled();
 				if (changed) {
 					const std::string nodeId = node.Id;
-					ApplyDocumentEdit(state, [&](Document &document) {
-						if (SetImageGraphDynamicInput(document, nodeId, input, state.LastDiagnostic))
-							state.LastDiagnostic = {};
-					});
+					engine::imagegraph::EvaluationRequest request;
+					request.HostProvider = state.LuaHost.get();
+					request.AudioFrames = state.AudioFrames;
+					request.AudioClips = state.AudioClips;
+					BindObservations(state, request);
+					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+					if (ApplyImageGraphSourceDynamicInput(
+							state.Authored,
+							state.History,
+							state.GroupHost,
+							state.DocumentRevision,
+							nodeId,
+							input,
+							request,
+							state.LastDiagnostic,
+							[&](Document &document, ImageGraphGroupHost &host) {
+								return ReconcileSplitOutputs(state, document, &host.Replay);
+							}
+						))
+						AuthoredDocumentChanged(state);
 					ReloadCanvas(state);
+					ImGui::PopID();
+					return;
 				}
 				if (remove) {
 					const std::string nodeId = node.Id;
@@ -1761,15 +2395,16 @@ namespace studio {
 					});
 					ReloadCanvas(state);
 					ImGui::PopID();
-					break;
+					return;
 				}
 				ImGui::PopID();
 			}
+			if (grouped) return;
 			ImGui::BeginDisabled(
-				node.DynamicInputs.size() >= engine::imagegraph::Limits::MaximumDynamicInputsPerNode
+				node.DynamicInputs.size() >= engine::imagegraph::MaximumDynamicInputsForType(node.Type)
 			);
 			if (ImGui::SmallButton("Add input") &&
-				node.DynamicInputs.size() < engine::imagegraph::Limits::MaximumDynamicInputsPerNode) {
+				node.DynamicInputs.size() < engine::imagegraph::MaximumDynamicInputsForType(node.Type)) {
 				std::string id;
 				for (size_t index = 1;; index++) {
 					id = "item-" + std::to_string(index);
@@ -1882,6 +2517,61 @@ namespace studio {
 			ImGui::TreePop();
 		}
 
+		void DrawExportGrant(State &state, std::string_view nodeId) {
+			auto &grant = GrantFor(state, nodeId);
+			ImGui::InputTextWithHint(
+				"##export-directory-grant",
+				"Export directory grant",
+				grant.Directory.data(),
+				grant.Directory.size()
+			);
+			if (ImGui::Button("Grant directory")) {
+				std::error_code error;
+				const std::filesystem::path entered(grant.Directory.data());
+				if (entered.empty())
+					grant.Message = "Enter an export directory.";
+				else {
+					const auto absolute = std::filesystem::absolute(entered, error);
+					const auto root =
+						error ? std::filesystem::path{} : std::filesystem::weakly_canonical(absolute, error);
+					if (!error) std::filesystem::create_directories(root, error);
+					if (error)
+						grant.Message = error.message();
+					else {
+						grant.Root = root;
+						grant.Message.clear();
+					}
+				}
+			}
+			if (!grant.Root.empty()) {
+				ImGui::SameLine();
+				if (ImGui::Button("Revoke")) {
+					grant.Root.clear();
+					grant.Message.clear();
+				}
+				ImGui::TextWrapped("Granted: %s", grant.Root.string().c_str());
+			}
+			ImGui::InputTextWithHint(
+				"##export-image-encoder",
+				"Image encoder executable (optional)",
+				grant.ImageEncoder.data(),
+				grant.ImageEncoder.size()
+			);
+			ImGui::InputTextWithHint(
+				"##export-video-encoder",
+				"Video encoder executable (optional)",
+				grant.VideoEncoder.data(),
+				grant.VideoEncoder.size()
+			);
+			ImGui::BeginDisabled(grant.Root.empty());
+			if (ImGui::Button("Export"))
+				RunAuthoredExports(state, detail::ImageGraphExportEvent::Update, nodeId);
+			ImGui::EndDisabled();
+			if (!grant.Message.empty()) ImGui::TextWrapped("%s", grant.Message.c_str());
+			for (const auto &path : grant.RetainedFrames)
+				ImGui::TextWrapped("Retained frames: %s", path.string().c_str());
+		}
+
 		void DrawInspector(State &state) {
 			const std::string nodeId = SelectedNodeId(state);
 			Node *node = FindNode(state.Authored, nodeId);
@@ -1897,6 +2587,35 @@ namespace studio {
 				ImGui::TextDisabled("This node type is not registered in this build.");
 				return;
 			}
+			if (node->Type == "pc.verlet_sim_mesh_cache" && ImGui::Button("Cache Mesh")) {
+				engine::imagegraph::EvaluationRequest request;
+				request.HostProvider = state.LuaHost.get();
+				BindObservations(state, request);
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				request.AudioFrames = state.AudioFrames;
+				request.AudioClips = state.AudioClips;
+				const std::string_view capture(nodeId);
+				request.SimulationCacheCaptures = std::span<const std::string_view>(&capture, 1);
+				engine::imagegraph::Plan plan;
+				if (engine::imagegraph::Compile(state.Authored, plan, state.LastDiagnostic) == Status::Ok &&
+					state.GroupHost.Prepare(
+						state.Authored, plan, state.DocumentRevision, request, state.LastDiagnostic
+					) &&
+					state.FeedbackHost.Prepare(
+						state.Authored,
+						plan,
+						state.DocumentRevision,
+						state.AudioInputRevision,
+						request,
+						state.LastDiagnostic,
+						engine::imagegraph::Limits::MaximumEvaluationBytes,
+						state.SelectedOutput
+					)) {
+					state.LastDiagnostic = {};
+					RequestPreview(state, true);
+				}
+			}
+			if (node->Type == "pc.export") DrawExportGrant(state, nodeId);
 			if (schema->Properties.empty() && !schema->DynamicInputs) {
 				ImGui::TextDisabled("No authored properties.");
 				return;
@@ -1904,6 +2623,8 @@ namespace studio {
 			ImGui::Separator();
 			if (node->Type == "pc.audio_window") {
 				engine::imagegraph::EvaluationRequest request;
+				request.HostProvider = state.LuaHost.get();
+				BindObservations(state, request);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
@@ -1924,6 +2645,8 @@ namespace studio {
 			if (node->Type == "pc.wav_file_read") {
 				if (ImGui::Button("Sync length")) {
 					engine::imagegraph::EvaluationRequest request;
+					request.HostProvider = state.LuaHost.get();
+					BindObservations(state, request);
 					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 					request.AudioFrames = state.AudioFrames;
 					request.AudioClips = state.AudioClips;
@@ -1934,9 +2657,13 @@ namespace studio {
 						);
 					});
 					ApplyImageGraphTimeline(state.Authored, state.Playback);
+					node = FindNode(state.Authored, nodeId);
+					if (!node) return;
 				}
 				ImGui::TextWrapped("File watching is unavailable.");
 				engine::imagegraph::EvaluationRequest waveformRequest;
+				waveformRequest.HostProvider = state.LuaHost.get();
+				BindObservations(state, waveformRequest);
 				(void)engine::imagegraph::SetFrameTime(waveformRequest, GetImageGraphFrame(state.Playback));
 				waveformRequest.AudioClips = state.AudioClips;
 				waveformRequest.AudioFrames = state.AudioFrames;
@@ -1957,6 +2684,8 @@ namespace studio {
 			}
 			if (node->Type == "pc.wav_file_write") {
 				engine::imagegraph::EvaluationRequest request;
+				request.HostProvider = state.LuaHost.get();
+				BindObservations(state, request);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
@@ -1983,10 +2712,16 @@ namespace studio {
 				ImGui::TextUnformatted(property.Port.c_str());
 				ImGui::SameLine(92.0f);
 				ImGui::SetNextItemWidth(-1.0f);
-				DrawValueWidget(state, node->Id, property);
+				const auto revision = state.DocumentRevision;
+				if (DrawValueWidget(state, node->Id, property) || state.DocumentRevision != revision) {
+					ImGui::PopID();
+					ImGui::PopID();
+					return;
+				}
 				DrawAnimationTrackControls(state, *node, property.Port);
 				ImGui::PopID();
 				ImGui::PopID();
+				if (state.DocumentRevision != revision) return;
 			}
 			for (const engine::imagegraph::PropertySchema &property : schema->Properties) {
 				if (!visibleVectorProperty(property.Id)) continue;
@@ -2000,7 +2735,8 @@ namespace studio {
 				ImGui::TextDisabled("%s: value missing", propertyId.c_str());
 				ImGui::SameLine(92.0f);
 				ImGui::BeginDisabled(!initial.has_value());
-				if (ImGui::SmallButton("Initialize") && initial.has_value()) {
+				const bool initialize = ImGui::SmallButton("Initialize") && initial.has_value();
+				if (initialize) {
 					const std::string nodeId = node->Id;
 					ApplyDocumentEdit(state, [&](Document &document) {
 						if (Node *target = FindNode(document, nodeId);
@@ -2012,11 +2748,64 @@ namespace studio {
 				ImGui::EndDisabled();
 				ImGui::PopID();
 				ImGui::PopID();
+				if (initialize) return;
+			}
+			if (schema->DynamicOutputs && node->Type == "pc.array_split") {
+				int outputs = static_cast<int>(detail::ImageGraphOutputPorts(*node).size());
+				if (ImGui::InputInt("Outputs", &outputs) && outputs >= 0 && outputs <= 4096) {
+					const std::string id = node->Id;
+					ApplyDocumentEdit(state, [&](Document &document) {
+						(void)SetImageGraphSplitOutputCount(
+							document, id, size_t(outputs), state.LastDiagnostic
+						);
+					});
+					ReloadCanvas(state);
+					return;
+				}
 			}
 			DrawDynamicInputs(state, *node, *schema);
 		}
 
 		void DrawOutputs(State &state) {
+			const auto *selected = FindNode(state.Authored, SelectedNodeId(state));
+			const auto available = selected ? detail::ImageGraphOutputPorts(*selected)
+											: std::vector<engine::imagegraph::PortSchema>{};
+			if (!available.empty()) {
+				if (std::none_of(available.begin(), available.end(), [&](const auto &port) {
+						return port.Id == state.BindingOutputPort;
+					}))
+					state.BindingOutputPort = available.front().Id;
+				if (ImGui::BeginCombo("Output port", state.BindingOutputPort.c_str())) {
+					for (const auto &port : available) {
+						const std::string id(port.Id);
+						if (ImGui::Selectable(id.c_str(), state.BindingOutputPort == id))
+							state.BindingOutputPort = id;
+					}
+					ImGui::EndCombo();
+				}
+			}
+
+			const std::string capturedId = SelectedNodeId(state);
+			const Node *captured = FindNode(state.Authored, capturedId);
+			if (captured && captured->Type == "image.captured" && !state.SelectedOutput.empty()) {
+				if (ImGui::Button("Use selected output as feedback"))
+					ApplyDocumentEdit(state, [&](Document &document) {
+						SetImageGraphValue(
+							document,
+							capturedId,
+							"source_id",
+							std::string("feedback:") + state.SelectedOutput,
+							state.LastDiagnostic
+						);
+					});
+				ImGui::TextUnformatted("Feedback starts with a transparent image at project size.");
+			}
+			if (state.FeedbackHost.Active() && ImGui::Button("Reset feedback preview")) {
+				state.FeedbackHost.Clear();
+				state.PreviewCache.Clear();
+				RequestPreview(state, true);
+			}
+
 			if (state.Authored.Outputs.empty()) {
 				ImGui::TextDisabled("No outputs are bound.");
 			} else {
@@ -2040,14 +2829,12 @@ namespace studio {
 					node == nullptr ? nullptr : engine::imagegraph::FindSchema(node->Type);
 				if (schema != nullptr) {
 					const auto port =
-						std::find_if(schema->Ports.begin(), schema->Ports.end(), [](const auto &entry) {
-							return entry.Direction == engine::imagegraph::PortDirection::Output &&
+						std::find_if(available.begin(), available.end(), [&](const auto &entry) {
+							return entry.Id == state.BindingOutputPort &&
 								   (entry.Type == engine::imagegraph::ValueType::Image ||
-									entry.Type == engine::imagegraph::ValueType::Scalar ||
-									entry.Type == engine::imagegraph::ValueType::Array ||
-									entry.Type == engine::imagegraph::ValueType::Vector2);
+									detail::ImageGraphValuePreviewSupported(entry.Type));
 						});
-					if (port != schema->Ports.end()) {
+					if (port != available.end()) {
 						std::string outputId;
 						for (;;) {
 							outputId = "output-" + std::to_string(state.NextOutputId++);
@@ -2068,20 +2855,14 @@ namespace studio {
 			}
 			const std::string bindingNodeId = SelectedNodeId(state);
 			const Node *bindingNode = FindNode(state.Authored, bindingNodeId);
-			const engine::imagegraph::NodeSchema *bindingSchema =
-				bindingNode == nullptr ? nullptr : engine::imagegraph::FindSchema(bindingNode->Type);
+			const auto bindingPorts = bindingNode ? detail::ImageGraphOutputPorts(*bindingNode)
+												  : std::vector<engine::imagegraph::PortSchema>{};
 			const engine::imagegraph::PortSchema *bindingPort = nullptr;
-			if (bindingSchema != nullptr) {
-				const auto found = std::find_if(
-					bindingSchema->Ports.begin(), bindingSchema->Ports.end(), [](const auto &entry) {
-						return entry.Direction == engine::imagegraph::PortDirection::Output &&
-							   (entry.Type == engine::imagegraph::ValueType::Image ||
-								entry.Type == engine::imagegraph::ValueType::Scalar ||
-								entry.Type == engine::imagegraph::ValueType::Array);
-					}
-				);
-				if (found != bindingSchema->Ports.end()) bindingPort = &*found;
-			}
+			const auto foundBinding =
+				std::find_if(bindingPorts.begin(), bindingPorts.end(), [&](const auto &entry) {
+					return entry.Id == state.BindingOutputPort;
+				});
+			if (foundBinding != bindingPorts.end()) bindingPort = &*foundBinding;
 			const bool canBind = !state.SelectedOutput.empty() && bindingPort != nullptr;
 			ImGui::SameLine();
 			ImGui::BeginDisabled(!canBind);
@@ -2197,6 +2978,11 @@ namespace studio {
 												  : engine::imagegraph::PortDirection::Input;
 					for (const auto &port : schema->Ports)
 						if (port.Direction == direction) ports.emplace_back(port.Id);
+					if (output) {
+						ports.clear();
+						for (const auto &port : detail::ImageGraphOutputPorts(*node))
+							ports.emplace_back(port.Id);
+					}
 					if (!output)
 						for (const auto &port : node->DynamicInputs)
 							ports.push_back(port.Id);
@@ -2326,6 +3112,7 @@ namespace studio {
 						if (found != document.Groups.end()) found->Name = name;
 					});
 					ReloadCanvas(state);
+					return;
 				}
 				const std::string selectedNode = SelectedNodeId(state);
 				ImGui::SameLine();
@@ -2336,6 +3123,8 @@ namespace studio {
 						if (Node *node = FindNode(document, selectedNode)) node->GroupId = groupId;
 					});
 					ReloadCanvas(state);
+					ImGui::EndDisabled();
+					return;
 				}
 				ImGui::EndDisabled();
 
@@ -2357,7 +3146,7 @@ namespace studio {
 					ImGui::EndCombo();
 				}
 				ImGui::SameLine();
-				if (ImGui::BeginCombo("Type", ValueTypeLabel(state.GroupPortType))) {
+				if (!state.ImportedPxcx && ImGui::BeginCombo("Type", ValueTypeLabel(state.GroupPortType))) {
 					for (const auto type :
 						 {engine::imagegraph::ValueType::Boolean,
 						  engine::imagegraph::ValueType::Integer,
@@ -2389,10 +3178,18 @@ namespace studio {
 						junctionId, groupId, state.GroupPortType, std::nullopt
 					};
 					ApplyDocumentEdit(state, [&](Document &document) {
-						if (AddImageGraphGroupPort(document, groupId, port, junction, state.LastDiagnostic))
+						if (state.ImportedPxcx
+								? AddSourceImageGraphGroupPort(
+									  document, groupId, portId, port.Direction, state.LastDiagnostic
+								  )
+								: AddImageGraphGroupPort(
+									  document, groupId, port, junction, state.LastDiagnostic
+								  ))
 							state.LastDiagnostic = {};
 					});
 					ReloadCanvas(state);
+					ImGui::EndDisabled();
+					return;
 				}
 				ImGui::EndDisabled();
 				for (const auto &port : groupNow->Ports) {
@@ -2413,6 +3210,7 @@ namespace studio {
 					if (ImGui::SmallButton("Remove socket")) {
 						const std::string groupId = groupNow->Id;
 						const std::string junctionId = port.JunctionId;
+						const std::string controlId = port.ControlNodeId;
 						ApplyDocumentEdit(state, [&](Document &document) {
 							auto group = std::find_if(
 								document.Groups.begin(), document.Groups.end(), [&](const auto &item) {
@@ -2426,8 +3224,24 @@ namespace studio {
 							std::erase_if(document.Junctions, [&](const auto &item) {
 								return item.Id == junctionId;
 							});
+							if (!controlId.empty()) {
+								std::erase_if(document.Nodes, [&](const auto &node) {
+									return node.Id == controlId;
+								});
+								std::erase_if(document.Outputs, [&](const auto &output) {
+									return output.NodeId == controlId;
+								});
+								std::erase_if(document.Keyframes, [&](const auto &key) {
+									return key.NodeId == controlId;
+								});
+								std::erase_if(document.Tracks, [&](const auto &track) {
+									return track.NodeId == controlId;
+								});
+							}
 							std::erase_if(document.Links, [&](const auto &item) {
-								return item.FromNode == junctionId || item.ToNode == junctionId;
+								return item.FromNode == junctionId || item.ToNode == junctionId ||
+									   (!controlId.empty() &&
+										(item.FromNode == controlId || item.ToNode == controlId));
 							});
 						});
 						ReloadCanvas(state);
@@ -2550,8 +3364,9 @@ namespace studio {
 				ImGui::TextUnformatted("Scalar only");
 				return;
 			}
-			if (ImGui::SmallButton(frame.SineDriver ? "Sine..." : "Add sine")) {
-				if (!frame.SineDriver) {
+			const auto sine = frame.SineDriver;
+			if (ImGui::SmallButton(sine ? "Sine..." : "Add sine")) {
+				if (!sine) {
 					ApplyDocumentEdit(state, [&](Document &document) {
 						if (SetImageGraphKeyframeSineDriver(
 								document,
@@ -2566,7 +3381,7 @@ namespace studio {
 			}
 			if (!ImGui::BeginPopup("##sine-driver")) return;
 
-			auto driver = frame.SineDriver.value_or(engine::imagegraph::KeyframeSineDriver{});
+			auto driver = sine.value_or(engine::imagegraph::KeyframeSineDriver{});
 			bool changed = false;
 			ImGui::SetNextItemWidth(120.0f);
 			changed |= ImGui::InputDouble("Frequency", &driver.Frequency, 0.1, 1.0, "%.6g");
@@ -2599,7 +3414,7 @@ namespace studio {
 				return;
 			}
 			static constexpr const char *names[]{
-				"None", "Linear", "Snap", "Bounce", "Elastic", "Curve", "Sine"
+				"None", "Linear", "Snap", "Bounce", "Elastic", "Curve", "Sine", "Captured audio"
 			};
 			const auto &authored = state.Authored.Keyframes[index].SourceDriver;
 			const size_t choice = authored ? authored->index() + 1 : 0;
@@ -2628,6 +3443,9 @@ namespace studio {
 					case 6:
 						driver = KeyframeSineDriver{};
 						break;
+					case 7:
+						driver = KeyframeAudioDriver{};
+						break;
 					default:
 						break;
 					}
@@ -2652,6 +3470,28 @@ namespace studio {
 							bool edited = ImGui::InputScalar("Amount", ImGuiDataType_S64, &control.Amount);
 							edited |= ImGui::InputDouble("Spacing", &control.Spacing);
 							edited |= ImGui::InputDouble("Curve", &control.Curve);
+							return edited;
+						} else if constexpr (std::is_same_v<Control, KeyframeAudioDriver>) {
+							std::array<char, 256> source{};
+							std::copy_n(
+								control.SourceId.data(),
+								std::min(control.SourceId.size(), source.size() - 1),
+								source.data()
+							);
+							bool edited = ImGui::InputText("Capture source", source.data(), source.size());
+							if (edited) control.SourceId = source.data();
+							if (ImGui::BeginCombo("Metric", control.Metric.c_str())) {
+								for (const char *metric : {"rms", "peak", "mean"})
+									if (ImGui::Selectable(metric, control.Metric == metric)) {
+										control.Metric = metric;
+										edited = true;
+									}
+								ImGui::EndCombo();
+							}
+							ImGui::TextUnformatted("Native captured-audio offset at exact tick");
+							edited |= ImGui::InputScalar("Channel", ImGuiDataType_U32, &control.Channel);
+							edited |= ImGui::InputDouble("Gain", &control.Gain);
+							edited |= ImGui::InputDouble("Bias", &control.Bias);
 							return edited;
 						} else if constexpr (std::is_same_v<Control, KeyframeCurveDriver>) {
 							return DrawCurveValue(control.Data);
@@ -2934,6 +3774,7 @@ namespace studio {
 				ImGui::TableHeadersRow();
 				for (size_t index = 0; index < state.Authored.Keyframes.size(); index++) {
 					const Keyframe &frame = state.Authored.Keyframes[index];
+					const std::string interpolation = frame.Interpolation;
 					ImGui::TableNextRow();
 					ImGui::TableSetColumnIndex(0);
 					if (state.Keys.DrawRow(frame)) {
@@ -2951,9 +3792,9 @@ namespace studio {
 					);
 					ImGui::TableSetColumnIndex(2);
 					ImGui::PushID(static_cast<int>(index));
-					if (ImGui::BeginCombo("##interpolation", frame.Interpolation.c_str())) {
+					if (ImGui::BeginCombo("##interpolation", interpolation.c_str())) {
 						for (const char *choice : {"step", "linear", "cubic", "source"}) {
-							const bool selected = frame.Interpolation == choice;
+							const bool selected = interpolation == choice;
 							if (ImGui::Selectable(choice, selected)) {
 								ApplyDocumentEdit(state, [&](Document &document) {
 									if (SetImageGraphKeyframeInterpolation(
@@ -2970,13 +3811,13 @@ namespace studio {
 					ImGui::TableSetColumnIndex(3);
 					ImGui::PushID(static_cast<int>(index));
 					ImGui::PushID("ease-in");
-					DrawKeyframeEaseSide(state, index, frame, true);
+					DrawKeyframeEaseSide(state, index, state.Authored.Keyframes[index], true);
 					ImGui::PopID();
 					ImGui::PopID();
 					ImGui::TableSetColumnIndex(4);
 					ImGui::PushID(static_cast<int>(index));
 					ImGui::PushID("ease-out");
-					DrawKeyframeEaseSide(state, index, frame, false);
+					DrawKeyframeEaseSide(state, index, state.Authored.Keyframes[index], false);
 					ImGui::PopID();
 					ImGui::PopID();
 					ImGui::TableSetColumnIndex(5);
@@ -3105,6 +3946,24 @@ namespace studio {
 				"##image-pxcx-path", "Path to .pxcx archive", state.PxcxPath, sizeof(state.PxcxPath)
 			);
 			if (ImGui::Button("Open PXCX")) OpenPxcx(state);
+			if (state.ImportedPxcx) {
+				ImGui::SameLine();
+				if (ImGui::Button("Save PXCX")) {
+					Diagnostic diagnostic;
+					if (!SavePxcxProjection(
+							std::filesystem::path(state.PxcxPath),
+							*state.ImportedPxcx,
+							state.Authored,
+							GetImageGraphFrame(state.Playback),
+							diagnostic
+						))
+						state.PxcxOpenError = diagnostic.Message;
+					else {
+						state.PxcxOpenError.clear();
+						RunAuthoredExports(state, detail::ImageGraphExportEvent::Save);
+					}
+				}
+			}
 			if (!state.PxcxOpenError.empty()) ImGui::TextWrapped("PXCX: %s", state.PxcxOpenError.c_str());
 			if (state.ImportedPxcx.has_value()) {
 				const engine::bake::PxcxArchive &archive = *state.ImportedPxcx;
@@ -3191,6 +4050,20 @@ namespace studio {
 		}
 
 		void DrawDiagnostics(State &state) {
+			for (const auto &message : state.LuaMessages) {
+				ImGui::Text("%s %s", message.Warning ? "Script warning" : "Script", message.NodeId.c_str());
+				ImGui::TextUnformatted(message.Text.c_str());
+			}
+			for (const auto &grant : state.ExportGrants) {
+				if (!grant.Failed) continue;
+				ImGui::PushID(grant.NodeId.c_str());
+				ImGui::TextWrapped("Export %s: %s", grant.NodeId.c_str(), grant.Message.c_str());
+				if (ImGui::SmallButton("Select export node")) {
+					const auto node = state.Ids.ToCanvas.find(grant.NodeId);
+					if (node != state.Ids.ToCanvas.end()) state.Canvas.Select(node->second);
+				}
+				ImGui::PopID();
+			}
 			if (!state.AdapterError.empty()) ImGui::TextWrapped("Canvas: %s", state.AdapterError.c_str());
 			if (state.LastDiagnostic.Code == Status::Ok) {
 				ImGui::TextUnformatted("No current compile or evaluation error.");
@@ -3313,6 +4186,13 @@ namespace studio {
 				return;
 			}
 
+			if (state.HaveValuePreview) {
+				ImGui::Text("Output %s", state.ValuePreviewPort.c_str());
+				size_t remaining = engine::imagegraph::Limits::MaximumArrayElements;
+				DrawReadOnlyValue(state, state.ValuePreview, 0, remaining);
+				if (!remaining) ImGui::TextUnformatted("Display limit reached");
+				return;
+			}
 			if (state.HaveScalarPreview) {
 				ImGui::Text(
 					"Scalar output %s  frame %.20Lg  value %.17g",
@@ -3400,6 +4280,8 @@ namespace studio {
 			ImGui::End();
 			ImGui::PopStyleColor(2);
 			if (!open) {
+				if (state.LuaHost) state.LuaHost->Reset();
+				state.ExportUpdate = {};
 				CloseImageComposerAudioPreview();
 				state.VectorControls.Close(renderer);
 			} else {
@@ -3422,6 +4304,8 @@ namespace studio {
 		FinishInactiveEdit(state);
 		DrawToolbar(state);
 		engine::imagegraph::EvaluationRequest vectorRequest;
+		vectorRequest.HostProvider = state.LuaHost.get();
+		BindObservations(state, vectorRequest);
 		(void)engine::imagegraph::SetFrameTime(vectorRequest, GetImageGraphFrame(state.Playback));
 		vectorRequest.AudioFrames = state.AudioFrames;
 		vectorRequest.AudioClips = state.AudioClips;
@@ -3437,7 +4321,9 @@ namespace studio {
 		if (ImGui::BeginChild(
 				"##image-graph-canvas", ImVec2(room.x - rightWidth, room.y - toolbarHeight), false
 			)) {
+			if (state.CanvasNeedsReload) ReloadCanvas(state);
 			state.Canvas.Draw(state.Graph);
+			if (state.CanvasNeedsReload) ReloadCanvas(state);
 		}
 		ImGui::EndChild();
 		ImGui::SameLine();
@@ -3484,6 +4370,10 @@ namespace studio {
 		}
 		ImGui::EndChild();
 		RefreshPreview(state, renderer);
+		if (state.ExportUpdate.Accept(
+				state.DocumentRevision, state.AudioInputRevision, GetImageGraphFrame(state.Playback)
+			))
+			RunAuthoredExports(state, detail::ImageGraphExportEvent::Update);
 		Diagnostic audioDiagnostic;
 		if (!state.WavAudio.Update(
 				state.Authored,
@@ -3503,6 +4393,8 @@ namespace studio {
 		);
 		ImGui::End();
 		if (!open) {
+			if (state.LuaHost) state.LuaHost->Reset();
+			state.ExportUpdate = {};
 			CloseImageComposerAudioPreview();
 			state.VectorControls.Close(renderer);
 		}
