@@ -51,6 +51,10 @@ mono_add_library(bake
 		Vendor::zstd
 )
 
+if(TARGET test_bake)
+	target_link_libraries(test_bake PRIVATE Vendor::json)
+endif()
+
 option(MONO_FUZZ_BAKE "Build hostile bake importers with libFuzzer and sanitizers" OFF)
 if(MONO_FUZZ_BAKE)
 	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
