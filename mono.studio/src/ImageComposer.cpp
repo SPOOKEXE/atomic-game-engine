@@ -1,4 +1,14 @@
+#include "AudioWindowPanel.hpp"
 #include "ImageComposerInternal.hpp"
+#include "ImageGraphChoices.hpp"
+#include "ImageGraphDocumentEdit.hpp"
+#include "ImageGraphPreview.hpp"
+#include "KeyframeKindEditor.hpp"
+#include "TimelineDopesheet.hpp"
+#include "TimelineKeyEditor.hpp"
+#include "Vector2Panel.hpp"
+#include "WavExport.hpp"
+#include "WavTimelinePanel.hpp"
 
 #include <engine/assets/Texture.hpp>
 #include <engine/bake/Pxcx.hpp>
@@ -7,6 +17,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/WavPreview.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -28,6 +39,8 @@
 #include <string>
 #include <string_view>
 #include <studio/ImageGraph.hpp>
+#include <studio/WavPreview.hpp>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -46,8 +59,7 @@ namespace studio {
 		using engine::imagegraph::Value;
 
 		constexpr uint32_t PREVIEW_MAXIMUM_DIMENSION = IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION;
-		constexpr size_t PREVIEW_MAXIMUM_BYTES =
-			static_cast<size_t>(PREVIEW_MAXIMUM_DIMENSION) * PREVIEW_MAXIMUM_DIMENSION * 4;
+		constexpr size_t PREVIEW_MAXIMUM_BYTES = IMAGE_COMPOSER_PREVIEW_DISPLAY_MAXIMUM_BYTES;
 		constexpr size_t MAXIMUM_HISTORY = 128;
 
 		struct State {
@@ -57,11 +69,26 @@ namespace studio {
 			bool PreviewRequested = true;
 			bool HaveGoodPreview = false;
 			bool HaveScalarPreview = false;
+			bool HaveVector2Preview = false;
+			engine::imagegraph::Vector2 Vector2Preview;
+			Vector2Panel VectorControls;
+			bool HaveArrayPreview = false;
+			engine::imagegraph::ArrayValue ArrayPreview;
 			bool HaveActiveEdit = false;
 			bool ShowAdvancedDiagnostics = false;
 			uint64_t DocumentRevision = 1;
+			uint64_t AudioInputRevision = 1;
+			ImageGraphWavPreview WavAudio;
+			std::string WavAudioMessage;
+			engine::imagegraph::WavExport WavExportArtifact;
+			std::string WavExportMessage;
+			WavTimelinePanel WavTimeline;
+			AudioWindowPanel AudioWindow;
 			uint64_t NextOutputId = 1;
 			ImageGraphPlayback Playback;
+			KeyframeKindEditor KeyKind;
+			TimelineKeyEditor Keys;
+			TimelineDopesheet Dopesheet;
 			uint8_t TextureSlot = 1;
 			engine::imagegraph::PortDirection GroupPortDirection = engine::imagegraph::PortDirection::Input;
 			engine::imagegraph::ValueType GroupPortType = engine::imagegraph::ValueType::Image;
@@ -69,11 +96,16 @@ namespace studio {
 			uint64_t PxcxThumbnailTextureHash = 0;
 			uint32_t PreviewWidth = 0;
 			uint32_t PreviewHeight = 0;
+			size_t PreviewPixelBytes = 0;
+			engine::imagegraph::SurfaceFormat PreviewSourceFormat =
+				engine::imagegraph::SurfaceFormat::RGBA8Unorm;
 			ImGuiID ActiveEditId = 0;
 			char Search[96] = {};
 			char GraphName[256] = {};
 			char PxcxPath[4096] = {};
 			char AudioCapturePath[4096] = {};
+			char WavSourceId[4096] = {};
+			char WavFilePath[4096] = {};
 			std::string SelectedOutput;
 			std::string SinkMessage;
 			std::string AdapterError;
@@ -83,7 +115,8 @@ namespace studio {
 			std::string PxcxThumbnailMessage;
 			std::string AudioCapturePathDisplay;
 			std::string AudioCaptureMessage;
-			std::string ScalarPreviewPort;
+			std::string WavSourceMessage;
+			std::string ValuePreviewPort;
 			std::string SelectedGroup;
 			std::string RouteFromEndpoint;
 			std::string RouteFromPort;
@@ -95,9 +128,9 @@ namespace studio {
 			Document PxcxProjection;
 			std::optional<engine::bake::PxcxArchive> ImportedPxcx;
 			std::vector<Diagnostic> PxcxDiagnostics;
-			Image Preview;
 			double ScalarPreviewValue = 0.0;
 			std::vector<engine::imagegraph::AudioCaptureFrame> AudioFrames;
+			std::vector<engine::imagegraph::AudioClipSource> AudioClips;
 			Image PxcxReferenceThumbnail;
 			ImageGraphPreviewCache PreviewCache;
 			Diagnostic LastDiagnostic;
@@ -239,6 +272,9 @@ namespace studio {
 			SetCanvasStyle(state.Canvas);
 			state.Canvas.Signals.Changed = [&state] { SyncCanvas(state); };
 			state.Canvas.Signals.Rerun = [&state](nodegraph::NodeId) { RequestPreview(state, true); };
+			state.VectorControls.Attach(state.Canvas, state.Authored, state.Ids, state.History, [&state] {
+				AuthoredDocumentChanged(state);
+			});
 			if (!selectedDocumentId.empty()) {
 				if (const auto selected = state.Ids.ToCanvas.find(selectedDocumentId);
 					selected != state.Ids.ToCanvas.end()) {
@@ -387,42 +423,15 @@ namespace studio {
 
 		bool OpenAudioCapture(State &state) {
 			const std::filesystem::path path(state.AudioCapturePath);
-			if (path.empty()) {
-				state.AudioCaptureMessage = "enter a recorded audio capture path";
-				return false;
-			}
-			std::ifstream file(path, std::ios::binary);
-			if (!file) {
-				state.AudioCaptureMessage = "could not open recorded audio capture";
-				return false;
-			}
-			file.seekg(0, std::ios::end);
-			const std::streamoff size = file.tellg();
-			if (size < 0 ||
-				static_cast<uint64_t>(size) > engine::imagegraph::Limits::MaximumAudioCaptureDocumentBytes) {
-				state.AudioCaptureMessage = "recorded audio capture exceeds the 8 MiB read limit";
-				return false;
-			}
-			std::string text(static_cast<size_t>(size), '\0');
-			file.seekg(0, std::ios::beg);
-			if (!text.empty()) {
-				file.read(text.data(), static_cast<std::streamsize>(text.size()));
-				if (file.gcount() != static_cast<std::streamsize>(text.size())) {
-					state.AudioCaptureMessage = "could not read the complete recorded audio capture";
-					return false;
-				}
-			}
-			std::vector<engine::imagegraph::AudioCaptureFrame> candidate;
 			Diagnostic diagnostic;
-			if (engine::imagegraph::ReadAudioCapture(text, candidate, diagnostic) != Status::Ok) {
+			if (!LoadImageGraphAudioCapture(state.AudioFrames, state.PreviewCache, path, diagnostic)) {
 				state.AudioCaptureMessage = diagnostic.Message;
-				state.LastDiagnostic = std::move(diagnostic);
 				return false;
 			}
-			state.AudioFrames = std::move(candidate);
 			state.AudioCapturePathDisplay = path.string();
-			state.AudioCaptureMessage = "loaded " + std::to_string(state.AudioFrames.size()) +
-										" recorded mono frames; preview selects exact source ID and tick";
+			++state.AudioInputRevision;
+			state.AudioCaptureMessage =
+				"loaded " + std::to_string(state.AudioFrames.size()) + " recorded frames";
 			state.LastDiagnostic = {};
 			RequestPreview(state, true);
 			return true;
@@ -518,22 +527,31 @@ namespace studio {
 
 		bool UploadPreview(State &state, engine::render::Renderer &renderer, const Image &image) {
 			if (image.Width == 0 || image.Height == 0 || image.Width > PREVIEW_MAXIMUM_DIMENSION ||
-				image.Height > PREVIEW_MAXIMUM_DIMENSION || image.Pixels.size() > PREVIEW_MAXIMUM_BYTES ||
-				image.Pixels.size() != static_cast<size_t>(image.Width) * image.Height * 4) {
+				image.Height > PREVIEW_MAXIMUM_DIMENSION ||
+				!engine::imagegraph::ValidSurfaceLayout(
+					image, PREVIEW_MAXIMUM_DIMENSION, IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES
+				) ||
+				!engine::imagegraph::FiniteSurfaceSamples(image)) {
 				state.SinkMessage = "preview exceeds the 128 by 128 texture budget";
 				return false;
 			}
 			if (state.HaveGoodPreview && state.PreviewHash == image.Hash &&
-				state.PreviewWidth == image.Width && state.PreviewHeight == image.Height) {
+				state.PreviewWidth == image.Width && state.PreviewHeight == image.Height &&
+				state.PreviewSourceFormat == image.Format && state.PreviewPixelBytes == image.Pixels.size()) {
 				return true;
 			}
 
+			std::vector<std::byte> displayPixels;
+			if (!studio::detail::PrepareImageGraphPreviewRgba8(image, displayPixels) ||
+				displayPixels.size() > PREVIEW_MAXIMUM_BYTES) {
+				state.SinkMessage = "image cannot be represented within the RGBA8 display preview budget";
+				return false;
+			}
 			engine::assets::TextureData texture;
 			texture.Width = image.Width;
 			texture.Height = image.Height;
 			texture.Format = engine::assets::TextureFormat::RGBA8;
-			texture.Pixels.resize(image.Pixels.size());
-			std::memcpy(texture.Pixels.data(), image.Pixels.data(), image.Pixels.size());
+			texture.Pixels = std::move(displayPixels);
 
 			const engine::core::Name name(
 				"studio.imagecomposer.preview/" + std::to_string(state.TextureSlot)
@@ -549,6 +567,8 @@ namespace studio {
 			state.PreviewHash = image.Hash;
 			state.PreviewWidth = image.Width;
 			state.PreviewHeight = image.Height;
+			state.PreviewPixelBytes = image.Pixels.size();
+			state.PreviewSourceFormat = image.Format;
 			state.HaveGoodPreview = true;
 			state.SinkMessage.clear();
 			return true;
@@ -589,9 +609,11 @@ namespace studio {
 			if (!state.PreviewDirty || (!state.LivePreview && !state.PreviewRequested)) return;
 			state.PreviewDirty = false;
 			state.PreviewRequested = false;
+			state.HaveVector2Preview = false;
 			state.SinkMessage.clear();
 			if (state.SelectedOutput.empty()) {
 				state.HaveScalarPreview = false;
+				state.HaveArrayPreview = false;
 				if (state.ImportedPxcx.has_value() && state.Authored == state.PxcxProjection) {
 					const std::string nodeId =
 						state.PxcxDiagnostics.empty() ? std::string{} : state.PxcxDiagnostics.front().NodeId;
@@ -615,6 +637,7 @@ namespace studio {
 			);
 			if (selectedOutput == state.Authored.Outputs.end()) {
 				state.HaveScalarPreview = false;
+				state.HaveArrayPreview = false;
 				state.LastDiagnostic = {
 					Status::InvalidOutput, {}, {}, "selected output is missing from the authored document"
 				};
@@ -637,6 +660,7 @@ namespace studio {
 			}
 			if (outputPort == nullptr) {
 				state.HaveScalarPreview = false;
+				state.HaveArrayPreview = false;
 				state.LastDiagnostic = {
 					Status::InvalidOutput,
 					selectedOutput->NodeId,
@@ -646,32 +670,37 @@ namespace studio {
 				return;
 			}
 			const bool imageOutput = outputPort->Type == engine::imagegraph::ValueType::Image;
-			if (!imageOutput && outputPort->Type != engine::imagegraph::ValueType::Scalar) {
+			if (!imageOutput && outputPort->Type != engine::imagegraph::ValueType::Scalar &&
+				outputPort->Type != engine::imagegraph::ValueType::Array &&
+				outputPort->Type != engine::imagegraph::ValueType::Vector2) {
 				state.HaveScalarPreview = false;
+				state.HaveArrayPreview = false;
 				state.LastDiagnostic = {
 					Status::UnsupportedExecution,
 					selectedOutput->NodeId,
 					selectedOutput->Port,
-					"Studio preview supports image and scalar outputs"
+					"Studio preview supports images, scalars, vectors and numeric arrays"
 				};
 				return;
 			}
 			if (imageOutput) {
 				state.HaveScalarPreview = false;
+				state.HaveArrayPreview = false;
 				if (const Image *cached = state.PreviewCache.Find(
 						state.DocumentRevision,
 						outputIndex,
 						state.Playback.CurrentTick,
-						state.Playback.Subframe
+						state.Playback.Subframe,
+						state.Playback.NegativeFrame
 					)) {
 					if (!UploadPreview(state, renderer, *cached)) return;
-					state.Preview = *cached;
 					state.LastDiagnostic = {};
 					return;
 				}
 			} else {
 				state.HaveGoodPreview = false;
 				state.HaveScalarPreview = false;
+				state.HaveArrayPreview = false;
 			}
 			engine::imagegraph::Plan plan;
 			Diagnostic diagnostic;
@@ -686,10 +715,10 @@ namespace studio {
 					return;
 				}
 				engine::imagegraph::EvaluationRequest request;
-				request.Tick = state.Playback.CurrentTick;
-				request.Subframe = state.Playback.Subframe;
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames =
 					std::span<const engine::imagegraph::AudioCaptureFrame>(state.AudioFrames);
+				request.AudioClips = state.AudioClips;
 				studio::ImageGraphPreviewValue preview;
 				if (studio::EvaluateImageGraphPreview(
 						previewDocument, plan, state.SelectedOutput, request, preview, diagnostic
@@ -697,7 +726,21 @@ namespace studio {
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
 				}
-				if (const auto *value = std::get_if<engine::imagegraph::EvaluatedValue>(&preview)) {
+				if (auto *value = std::get_if<engine::imagegraph::EvaluatedValue>(&preview)) {
+					if (auto *array = std::get_if<engine::imagegraph::ArrayValue>(&value->Data)) {
+						state.ArrayPreview = std::move(*array);
+						state.ValuePreviewPort = value->Port;
+						state.HaveArrayPreview = true;
+						state.LastDiagnostic = {};
+						return;
+					}
+					if (const auto *vector = std::get_if<engine::imagegraph::Vector2>(&value->Data)) {
+						state.Vector2Preview = *vector;
+						state.ValuePreviewPort = value->Port;
+						state.HaveVector2Preview = true;
+						state.LastDiagnostic = {};
+						return;
+					}
 					const auto *scalar = std::get_if<double>(&value->Data);
 					if (scalar == nullptr) {
 						state.LastDiagnostic = {
@@ -709,7 +752,7 @@ namespace studio {
 						return;
 					}
 					state.ScalarPreviewValue = *scalar;
-					state.ScalarPreviewPort = value->Port;
+					state.ValuePreviewPort = value->Port;
 					state.HaveScalarPreview = true;
 					state.LastDiagnostic = {};
 					return;
@@ -730,9 +773,9 @@ namespace studio {
 					outputIndex,
 					state.Playback.CurrentTick,
 					*image,
-					state.Playback.Subframe
+					state.Playback.Subframe,
+					state.Playback.NegativeFrame
 				);
-				state.Preview = *image;
 				state.LastDiagnostic = {};
 			}
 		}
@@ -741,18 +784,17 @@ namespace studio {
 			const bool changed =
 				redo ? state.History.Redo(state.Authored) : state.History.Undo(state.Authored);
 			if (changed) {
+				const auto frame = GetImageGraphFrame(state.Playback);
 				ApplyImageGraphTimeline(state.Authored, state.Playback);
+				(void)SetImageGraphAuthorFrame(state.Playback, frame);
 				AuthoredDocumentChanged(state);
 				ReloadCanvas(state);
 			}
 		}
 
 		void ApplyDocumentEdit(State &state, const auto &edit) {
-			const Document before = state.Authored;
-			edit(state.Authored);
-			if (state.Authored == before) return;
-			state.History.Record(before, state.Authored);
-			AuthoredDocumentChanged(state);
+			if (ApplyImageGraphDocumentEdit(state.Authored, state.History, edit))
+				AuthoredDocumentChanged(state);
 		}
 
 		engine::imagegraph::TimelineSettings PlaybackTimeline(const ImageGraphPlayback &playback) {
@@ -842,7 +884,9 @@ namespace studio {
 				RequestPreview(state, true);
 			}
 			ImGui::SameLine();
-			ImGui::Text("tick %llu", static_cast<unsigned long long>(state.Playback.CurrentTick));
+			ImGui::Text(
+				"frame %.20Lg", engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))
+			);
 		}
 
 		void DrawPalette(State &state) {
@@ -932,6 +976,73 @@ namespace studio {
 			if (!ImGui::InputInt(label, &edit, 1, 1)) return false;
 			value = static_cast<uint8_t>(std::clamp(edit, 0, maximum));
 			return true;
+		}
+
+		void DrawProjectSettings(State &state) {
+			if (!state.Authored.Project) {
+				ImGui::TextUnformatted("Fresh-project defaults");
+				ImGui::TextUnformatted("Surface 32 x 32");
+				if (ImGui::Button("Author project settings")) {
+					ApplyDocumentEdit(state, [&](Document &document) {
+						SetImageGraphProjectSettings(document, {}, state.LastDiagnostic);
+					});
+				}
+				return;
+			}
+			const engine::imagegraph::ProjectSettings &authored = *state.Authored.Project;
+			std::optional<engine::imagegraph::ProjectSettings> edited;
+			// Clone the palette only when a control edits it, not on every idle panel frame.
+			const auto draft = [&]() -> engine::imagegraph::ProjectSettings & {
+				if (!edited) edited = authored;
+				return *edited;
+			};
+			std::array<uint32_t, 2> dimensions{authored.SurfaceWidth, authored.SurfaceHeight};
+			if (ImGui::InputScalarN("Surface size", ImGuiDataType_U32, dimensions.data(), 2)) {
+				draft().SurfaceWidth = dimensions[0];
+				draft().SurfaceHeight = dimensions[1];
+			}
+			int64_t interpolation = authored.Interpolation;
+			if (ImGui::InputScalar("Interpolation (0..6)", ImGuiDataType_S64, &interpolation))
+				draft().Interpolation = interpolation;
+			int64_t oversample = authored.Oversample;
+			if (ImGui::InputScalar("Oversample (0..12)", ImGuiDataType_S64, &oversample))
+				draft().Oversample = oversample;
+			ImGui::Separator();
+			ImGui::Text("Palette (%zu)", authored.Palette.size());
+			for (size_t index = 0; index < authored.Palette.size(); index++) {
+				ImGui::PushID(static_cast<int>(index));
+				Colour colour = authored.Palette[index];
+				if (DrawColourField("Colour", colour)) draft().Palette[index] = colour;
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Remove")) {
+					auto &palette = draft().Palette;
+					palette.erase(palette.begin() + static_cast<std::ptrdiff_t>(index));
+					ImGui::PopID();
+					break;
+				}
+				ImGui::PopID();
+			}
+			const bool paletteFull =
+				authored.Palette.size() >= engine::imagegraph::Limits::MaximumProjectPaletteEntries;
+			ImGui::BeginDisabled(paletteFull);
+			if (ImGui::SmallButton("Add colour") && !paletteFull) {
+				draft().Palette.push_back(Colour{});
+			}
+			ImGui::EndDisabled();
+			if (ImGui::Button("Reset defaults")) {
+				edited = engine::imagegraph::ProjectSettings{};
+			}
+			if (edited) {
+				ApplyDocumentEdit(state, [&](Document &document) {
+					SetImageGraphProjectSettings(document, *edited, state.LastDiagnostic);
+				});
+			}
+			if (ImGui::Button("Remove project override")) {
+				ApplyDocumentEdit(state, RemoveImageGraphProjectSettings);
+				state.LastDiagnostic = {};
+			}
+			if (state.LastDiagnostic.Code != Status::Ok)
+				ImGui::TextWrapped("%s", state.LastDiagnostic.Message.c_str());
 		}
 
 		bool DrawGradientValue(engine::imagegraph::Gradient &gradient) {
@@ -1193,9 +1304,7 @@ namespace studio {
 				case ValueType::Path2D:
 				case ValueType::Vector3:
 				case ValueType::Quaternion:
-				case ValueType::Enum:
-				case ValueType::Mesh:
-				case ValueType::AudioBit:
+				default:
 					break;
 				}
 				changed = true;
@@ -1275,10 +1384,63 @@ namespace studio {
 			return changed;
 		}
 
+		bool DrawSourceChoiceValue(const engine::imagegraph::CatalogueInput &input, Value &replacement) {
+			const imagegraph_choices::View choices{input};
+			bool changed = false;
+			if (choices.Count() != 0) {
+				const auto selected = choices.Selected(replacement);
+				const std::string preview = selected ? std::string(selected->Label) : "Custom value";
+				if (ImGui::BeginCombo("##choice", preview.c_str())) {
+					for (size_t row = 0; row < choices.Count(); ++row) {
+						const auto entry = choices.At(row);
+						if (entry->Separator) {
+							ImGui::Separator();
+							continue;
+						}
+						ImGui::PushID(entry->SourceIndex);
+						const bool active = selected && selected->SourceIndex == entry->SourceIndex;
+						if (ImGui::Selectable(std::string(entry->Label).c_str(), active)) {
+							replacement = *choices.Select(row);
+							changed = true;
+						}
+						if (active) ImGui::SetItemDefaultFocus();
+						ImGui::PopID();
+					}
+					ImGui::EndCombo();
+				}
+			}
+			if (input.SourceBehavior && input.SourceBehavior->FractionalInterpolation == true) {
+				double value = imagegraph_choices::Number(replacement).value_or(0);
+				if (ImGui::InputDouble("##value", &value, 0, 0, "%.17g")) {
+					if (const auto edit = choices.Fraction(value)) {
+						replacement = *edit;
+						changed = true;
+					}
+				}
+			} else {
+				int64_t value = 0;
+				if (const auto *choice = std::get_if<engine::imagegraph::EnumValue>(&replacement))
+					value = choice->Value;
+				else if (const auto *integer = std::get_if<int64_t>(&replacement))
+					value = *integer;
+				if (ImGui::InputScalar("##value", ImGuiDataType_S64, &value)) {
+					replacement = engine::imagegraph::EnumValue{value};
+					changed = true;
+				}
+			}
+			return changed;
+		}
+
 		bool DrawValueWidget(State &state, std::string_view nodeId, AuthoredValue &property) {
 			bool changed = false;
 			Value replacement = property.Data;
-			if (const auto *value = std::get_if<bool>(&property.Data)) {
+			const Node *authored = FindNode(state.Authored, nodeId);
+			const auto *choiceInput =
+				authored ? imagegraph_choices::Input(authored->Type, property.Port) : nullptr;
+			if (choiceInput && choiceInput->Type == engine::imagegraph::ValueType::Enum &&
+				imagegraph_choices::Number(replacement)) {
+				changed = DrawSourceChoiceValue(*choiceInput, replacement);
+			} else if (const auto *value = std::get_if<bool>(&property.Data)) {
 				bool edit = *value;
 				changed = ImGui::Checkbox("##value", &edit);
 				if (changed) replacement = edit;
@@ -1366,6 +1528,13 @@ namespace studio {
 
 			const ImGuiID itemId = ImGui::GetID("##value");
 			BeginPropertyEdit(state, itemId);
+			// A combo selection finishes before the numeric field becomes the last ImGui item.
+			if (changed && choiceInput && choiceInput->Type == engine::imagegraph::ValueType::Enum &&
+				!state.HaveActiveEdit) {
+				state.EditBefore = state.Authored;
+				state.HaveActiveEdit = true;
+				state.ActiveEditId = itemId;
+			}
 			if (changed &&
 				SetImageGraphValue(
 					state.Authored, nodeId, property.Port, std::move(replacement), state.LastDiagnostic
@@ -1376,7 +1545,7 @@ namespace studio {
 			return changed;
 		}
 
-		const char *ValueTypeName(engine::imagegraph::ValueType type) {
+		const char *ValueTypeLabel(engine::imagegraph::ValueType type) {
 			using engine::imagegraph::ValueType;
 			switch (type) {
 			case ValueType::Boolean:
@@ -1415,8 +1584,10 @@ namespace studio {
 				return "Mesh";
 			case ValueType::AudioBit:
 				return "AudioBit";
+			default:
+				// Runtime-only sockets use their durable type name.
+				return engine::imagegraph::ValueTypeName(type).data();
 			}
-			return "Unknown";
 		}
 
 		std::optional<Value> DefaultForType(engine::imagegraph::ValueType type) {
@@ -1454,12 +1625,10 @@ namespace studio {
 				return Value{engine::imagegraph::Quaternion{}};
 			case ValueType::Enum:
 				return Value{engine::imagegraph::EnumValue{}};
-			case ValueType::Image:
-			case ValueType::Mesh:
-			case ValueType::AudioBit:
+			default:
+				// Images, meshes, audio and runtime-only sockets have no authored default.
 				return std::nullopt;
 			}
-			return std::nullopt;
 		}
 
 		bool DrawDynamicDefault(State &state, Value &value) {
@@ -1552,10 +1721,10 @@ namespace studio {
 					engine::imagegraph::ValueType::Enum
 				};
 				bool changed = false;
-				if (ImGui::BeginCombo("##type", ValueTypeName(input.Type))) {
+				if (ImGui::BeginCombo("##type", ValueTypeLabel(input.Type))) {
 					for (const auto type : types) {
 						const bool selected = input.Type == type;
-						if (ImGui::Selectable(ValueTypeName(type), selected)) {
+						if (ImGui::Selectable(ValueTypeLabel(type), selected)) {
 							input.Type = type;
 							input.Default = DefaultForType(type);
 							changed = true;
@@ -1640,6 +1809,7 @@ namespace studio {
 				}
 			);
 			const bool hasTrack = track != state.Authored.Tracks.end();
+			const auto quaternionMode = hasTrack ? track->QuaternionMode : std::optional<int64_t>{};
 			std::string end = hasTrack ? track->End : "hold";
 			int64_t loopRange = hasTrack ? track->LoopRange : -1;
 			const std::string section = "Animation (" + std::to_string(keyCount) + " keys)";
@@ -1665,6 +1835,32 @@ namespace studio {
 
 			const std::string nodeId = node.Id;
 			const std::string propertyId(property);
+			const bool quaternionKeys = std::any_of(
+				state.Authored.Keyframes.begin(), state.Authored.Keyframes.end(), [&](const auto &key) {
+					return key.NodeId == nodeId && key.Port == propertyId &&
+						   std::holds_alternative<engine::imagegraph::Quaternion>(key.Data);
+				}
+			);
+			if (quaternionKeys) {
+				static constexpr const char *modes[]{"Unspecified", "Raw", "Euler degrees"};
+				const int selected = quaternionMode ? static_cast<int>(*quaternionMode) + 1 : 0;
+				if (ImGui::BeginCombo("Quaternion", modes[std::clamp(selected, 0, 2)])) {
+					for (int choice = 0; choice < 3; choice++) {
+						if (ImGui::Selectable(modes[choice], choice == selected)) {
+							ApplyDocumentEdit(state, [&](Document &document) {
+								SetImageGraphTrackQuaternionMode(
+									document,
+									nodeId,
+									propertyId,
+									choice == 0 ? std::nullopt : std::optional<int64_t>{choice - 1},
+									state.LastDiagnostic
+								);
+							});
+						}
+					}
+					ImGui::EndCombo();
+				}
+			}
 			const auto savePolicy = [&] {
 				ApplyDocumentEdit(state, [&](Document &document) {
 					if (SetImageGraphAnimationTrack(
@@ -1706,7 +1902,81 @@ namespace studio {
 				return;
 			}
 			ImGui::Separator();
+			if (node->Type == "pc.audio_window") {
+				engine::imagegraph::EvaluationRequest request;
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				request.AudioFrames = state.AudioFrames;
+				request.AudioClips = state.AudioClips;
+				request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				engine::imagegraph::Diagnostic error;
+				if (state.AudioWindow.Update(
+						state.Authored,
+						nodeId,
+						request,
+						state.DocumentRevision,
+						state.AudioInputRevision,
+						error
+					))
+					state.AudioWindow.Draw();
+				else
+					ImGui::TextWrapped("%s", error.Message.c_str());
+			}
+			if (node->Type == "pc.wav_file_read") {
+				if (ImGui::Button("Sync length")) {
+					engine::imagegraph::EvaluationRequest request;
+					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+					request.AudioFrames = state.AudioFrames;
+					request.AudioClips = state.AudioClips;
+					request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+					ApplyDocumentEdit(state, [&](Document &document) {
+						return SyncImageGraphWavTimeline(
+							document, nodeId, request, state.Playback, state.LastDiagnostic
+						);
+					});
+					ApplyImageGraphTimeline(state.Authored, state.Playback);
+				}
+				ImGui::TextWrapped("File watching is unavailable.");
+				engine::imagegraph::EvaluationRequest waveformRequest;
+				(void)engine::imagegraph::SetFrameTime(waveformRequest, GetImageGraphFrame(state.Playback));
+				waveformRequest.AudioClips = state.AudioClips;
+				waveformRequest.AudioFrames = state.AudioFrames;
+				waveformRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				engine::imagegraph::Diagnostic waveformError;
+				if (state.WavTimeline.Update(
+						state.Authored,
+						nodeId,
+						waveformRequest,
+						state.Playback.FramesPerSecond,
+						state.DocumentRevision,
+						state.AudioInputRevision,
+						waveformError
+					))
+					state.WavTimeline.Draw();
+				else
+					ImGui::TextWrapped("%s", waveformError.Message.c_str());
+			}
+			if (node->Type == "pc.wav_file_write") {
+				engine::imagegraph::EvaluationRequest request;
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				request.AudioFrames = state.AudioFrames;
+				request.AudioClips = state.AudioClips;
+				request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				DrawImageGraphWavExport(
+					state.Authored, nodeId, request, state.WavExportArtifact, state.WavExportMessage
+				);
+			}
+			const auto *vectorPresentation =
+				node->Type == "pc.vector2" ? state.VectorControls.Presentation(nodeId) : nullptr;
+			const auto visibleVectorProperty = [&](std::string_view property) {
+				if (!vectorPresentation) return true;
+				if (property == "gizmo_shape") return vectorPresentation->Style == 1;
+				if (property == "gizmo_sprite") return vectorPresentation->Style == 2;
+				if (property == "gizmo_size") return vectorPresentation->Style != 0;
+				return true;
+			};
 			for (AuthoredValue &property : node->Values) {
+				if (!visibleVectorProperty(property.Port)) continue;
+				if (node->Type == "pc.wav_file_read" && property.Port == "sync_length") continue;
 				ImGui::PushID(node->Id.c_str());
 				ImGui::PushID(property.Port.c_str());
 				ImGui::AlignTextToFramePadding();
@@ -1719,8 +1989,11 @@ namespace studio {
 				ImGui::PopID();
 			}
 			for (const engine::imagegraph::PropertySchema &property : schema->Properties) {
+				if (!visibleVectorProperty(property.Id)) continue;
+				if (node->Type == "pc.wav_file_read" && property.Id == "sync_length") continue;
 				if (FindValue(*node, property.Id) != nullptr) continue;
-				const std::optional<Value> initial = ImageGraphPropertyDefault(node->Type, property.Id);
+				const std::optional<Value> initial =
+					ImageGraphPropertyDefault(state.Authored, node->Type, property.Id);
 				const std::string propertyId(property.Id);
 				ImGui::PushID(node->Id.c_str());
 				ImGui::PushID(propertyId.c_str());
@@ -1770,7 +2043,9 @@ namespace studio {
 						std::find_if(schema->Ports.begin(), schema->Ports.end(), [](const auto &entry) {
 							return entry.Direction == engine::imagegraph::PortDirection::Output &&
 								   (entry.Type == engine::imagegraph::ValueType::Image ||
-									entry.Type == engine::imagegraph::ValueType::Scalar);
+									entry.Type == engine::imagegraph::ValueType::Scalar ||
+									entry.Type == engine::imagegraph::ValueType::Array ||
+									entry.Type == engine::imagegraph::ValueType::Vector2);
 						});
 					if (port != schema->Ports.end()) {
 						std::string outputId;
@@ -1800,7 +2075,9 @@ namespace studio {
 				const auto found = std::find_if(
 					bindingSchema->Ports.begin(), bindingSchema->Ports.end(), [](const auto &entry) {
 						return entry.Direction == engine::imagegraph::PortDirection::Output &&
-							   entry.Type == engine::imagegraph::ValueType::Image;
+							   (entry.Type == engine::imagegraph::ValueType::Image ||
+								entry.Type == engine::imagegraph::ValueType::Scalar ||
+								entry.Type == engine::imagegraph::ValueType::Array);
 					}
 				);
 				if (found != bindingSchema->Ports.end()) bindingPort = &*found;
@@ -2080,7 +2357,7 @@ namespace studio {
 					ImGui::EndCombo();
 				}
 				ImGui::SameLine();
-				if (ImGui::BeginCombo("Type", ValueTypeName(state.GroupPortType))) {
+				if (ImGui::BeginCombo("Type", ValueTypeLabel(state.GroupPortType))) {
 					for (const auto type :
 						 {engine::imagegraph::ValueType::Boolean,
 						  engine::imagegraph::ValueType::Integer,
@@ -2096,7 +2373,7 @@ namespace studio {
 						  engine::imagegraph::ValueType::Vector4,
 						  engine::imagegraph::ValueType::Path2D}) {
 						const bool active = state.GroupPortType == type;
-						if (ImGui::Selectable(ValueTypeName(type), active)) state.GroupPortType = type;
+						if (ImGui::Selectable(ValueTypeLabel(type), active)) state.GroupPortType = type;
 					}
 					ImGui::EndCombo();
 				}
@@ -2129,7 +2406,8 @@ namespace studio {
 						"%s %s %s",
 						port.Id.c_str(),
 						port.Direction == engine::imagegraph::PortDirection::Input ? "in" : "out",
-						junction == state.Authored.Junctions.end() ? "unknown" : ValueTypeName(junction->Type)
+						junction == state.Authored.Junctions.end() ? "unknown"
+																   : ValueTypeLabel(junction->Type)
 					);
 					ImGui::SameLine();
 					if (ImGui::SmallButton("Remove socket")) {
@@ -2218,7 +2496,14 @@ namespace studio {
 		void AddKeyframe(State &state, const std::string &nodeId, const std::string &port) {
 			ApplyDocumentEdit(state, [&](Document &document) {
 				if (!SetImageGraphKeyframe(
-						document, nodeId, port, state.Playback.CurrentTick, "step", state.LastDiagnostic
+						document,
+						nodeId,
+						port,
+						state.Playback.CurrentTick,
+						"step",
+						state.LastDiagnostic,
+						state.Playback.Subframe,
+						state.Playback.NegativeFrame
 					))
 					return;
 				state.LastDiagnostic = {};
@@ -2307,10 +2592,110 @@ namespace studio {
 			ImGui::EndPopup();
 		}
 
+		void DrawKeyframeSourceDriver(State &state, size_t index) {
+			using namespace engine::imagegraph;
+			if (state.Authored.Keyframes[index].SineDriver) {
+				DrawKeyframeSineDriver(state, index, state.Authored.Keyframes[index]);
+				return;
+			}
+			static constexpr const char *names[]{
+				"None", "Linear", "Snap", "Bounce", "Elastic", "Curve", "Sine"
+			};
+			const auto &authored = state.Authored.Keyframes[index].SourceDriver;
+			const size_t choice = authored ? authored->index() + 1 : 0;
+			if (ImGui::SmallButton(names[choice])) ImGui::OpenPopup("##source-driver");
+			if (!ImGui::BeginPopup("##source-driver")) return;
+			if (ImGui::BeginCombo("Driver", names[choice])) {
+				for (size_t kind = 0; kind < std::size(names); kind++) {
+					if (!ImGui::Selectable(names[kind], kind == choice)) continue;
+					std::optional<KeyframeSourceDriver> driver;
+					switch (kind) {
+					case 1:
+						driver = KeyframeLinearDriver{};
+						break;
+					case 2:
+						driver = KeyframeSnapDriver{};
+						break;
+					case 3:
+						driver = KeyframeBounceDriver{};
+						break;
+					case 4:
+						driver = KeyframeElasticDriver{};
+						break;
+					case 5:
+						driver = KeyframeCurveDriver{};
+						break;
+					case 6:
+						driver = KeyframeSineDriver{};
+						break;
+					default:
+						break;
+					}
+					ApplyDocumentEdit(state, [&](Document &document) {
+						SetImageGraphKeyframeSourceDriver(document, index, driver, state.LastDiagnostic);
+					});
+				}
+				ImGui::EndCombo();
+			}
+			// Curve data is copied only while its controls are open, never for an idle timeline row.
+			auto driver = state.Authored.Keyframes[index].SourceDriver;
+			if (driver) {
+				const bool changed = std::visit(
+					[&](auto &control) {
+						using Control = std::decay_t<decltype(control)>;
+						if constexpr (std::is_same_v<Control, KeyframeLinearDriver>) {
+							return ImGui::InputDouble("Speed", &control.Speed);
+						} else if constexpr (std::is_same_v<Control, KeyframeSnapDriver>) {
+							return ImGui::InputDouble("Size", &control.Size);
+						} else if constexpr (std::is_same_v<Control, KeyframeBounceDriver> ||
+											 std::is_same_v<Control, KeyframeElasticDriver>) {
+							bool edited = ImGui::InputScalar("Amount", ImGuiDataType_S64, &control.Amount);
+							edited |= ImGui::InputDouble("Spacing", &control.Spacing);
+							edited |= ImGui::InputDouble("Curve", &control.Curve);
+							return edited;
+						} else if constexpr (std::is_same_v<Control, KeyframeCurveDriver>) {
+							return DrawCurveValue(control.Data);
+						} else {
+							bool edited = ImGui::InputDouble("Frequency", &control.Frequency);
+							edited |= ImGui::InputDouble("Amplitude", &control.Amplitude);
+							edited |= ImGui::InputDouble("Phase", &control.Phase);
+							edited |= ImGui::InputDouble("Smooth", &control.Smooth);
+							return edited;
+						}
+					},
+					*driver
+				);
+				if (changed)
+					ApplyDocumentEdit(state, [&](Document &document) {
+						SetImageGraphKeyframeSourceDriver(document, index, driver, state.LastDiagnostic);
+					});
+				if (ImGui::SmallButton("Remove driver")) {
+					ApplyDocumentEdit(state, [&](Document &document) {
+						SetImageGraphKeyframeSourceDriver(
+							document, index, std::nullopt, state.LastDiagnostic
+						);
+					});
+					ImGui::CloseCurrentPopup();
+				}
+			}
+			ImGui::EndPopup();
+		}
+
+		void DrawKeyframeKind(State &state, size_t index) {
+			state.KeyKind.Draw(state.Authored, index, [&] {
+				bool accepted = false;
+				ApplyDocumentEdit(state, [&](Document &document) {
+					accepted = state.KeyKind.Commit(document, state.LastDiagnostic);
+				});
+				return accepted;
+			});
+		}
+
 		void DrawTimeline(State &state) {
 			if (ImGui::Button(state.Playback.Playing ? "Pause" : "Play")) {
-				if (!state.Playback.Playing && (state.Playback.CurrentTick < state.Playback.StartTick ||
-												state.Playback.CurrentTick > state.Playback.EndTick)) {
+				if (!state.Playback.Playing &&
+					(state.Playback.NegativeFrame || state.Playback.CurrentTick < state.Playback.StartTick ||
+					 state.Playback.CurrentTick > state.Playback.EndTick)) {
 					if (SetImageGraphPlaybackFrame(
 							state.Playback, static_cast<double>(state.Playback.StartTick)
 						))
@@ -2321,6 +2706,18 @@ namespace studio {
 					!state.Playback.PingPong &&
 					SetImageGraphPlaybackFrame(state.Playback, static_cast<double>(state.Playback.StartTick)))
 					RequestPreview(state);
+				if (!state.Playback.Playing &&
+					std::any_of(
+						state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [](const Node &node) {
+							return node.Type == "pc.wav_file_read";
+						}
+					)) {
+					Diagnostic diagnostic;
+					if (!state.WavAudio.Enable(diagnostic))
+						state.WavAudioMessage = diagnostic.Message;
+					else
+						state.WavAudioMessage.clear();
+				}
 				state.Playback.Playing = !state.Playback.Playing;
 				state.Playback.Accumulator = 0.0;
 			}
@@ -2329,7 +2726,9 @@ namespace studio {
 				(state.Playback.CurrentTick > state.Playback.StartTick || state.Playback.Subframe > 0.0)) {
 				(void)SetImageGraphPlaybackFrame(
 					state.Playback,
-					static_cast<double>(state.Playback.CurrentTick) + state.Playback.Subframe - 1.0
+					static_cast<double>(
+						engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))
+					) - 1.0
 				);
 				state.Playback.Direction = -1;
 				RequestPreview(state);
@@ -2338,7 +2737,9 @@ namespace studio {
 			if (ImGui::Button("Step +1") && state.Playback.CurrentTick < state.Playback.EndTick) {
 				(void)SetImageGraphPlaybackFrame(
 					state.Playback,
-					static_cast<double>(state.Playback.CurrentTick) + state.Playback.Subframe + 1.0
+					static_cast<double>(
+						engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))
+					) + 1.0
 				);
 				state.Playback.Direction = 1;
 				RequestPreview(state);
@@ -2391,7 +2792,7 @@ namespace studio {
 				ImGui::InputScalar("##range-end", ImGuiDataType_U64, &state.Playback.EndTick);
 			rangeChanged = rangeChanged || startChanged || endChanged;
 			const double previousFrame =
-				static_cast<double>(state.Playback.CurrentTick) + state.Playback.Subframe;
+				static_cast<double>(engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback)));
 			const uint64_t maximumFrames = engine::imagegraph::Limits::MaximumTick + 1;
 			if (framesChanged) {
 				state.Playback.TotalFrames =
@@ -2413,7 +2814,8 @@ namespace studio {
 			state.Playback.StartTick = std::min(state.Playback.StartTick, state.Playback.TotalFrames - 1);
 			state.Playback.EndTick =
 				std::clamp(state.Playback.EndTick, state.Playback.StartTick, state.Playback.TotalFrames - 1);
-			const bool cursorChanged = SetImageGraphPlaybackFrame(state.Playback, previousFrame);
+			const bool cursorChanged =
+				rangeChanged && SetImageGraphPlaybackFrame(state.Playback, previousFrame);
 			if (rangeChanged || modeChanged || fpsChanged) {
 				if (cursorChanged) RequestPreview(state);
 				SavePlaybackIfAuthored(state);
@@ -2434,22 +2836,26 @@ namespace studio {
 			ImGui::TextUnformatted("Frame");
 			ImGui::SameLine(96.0f);
 			ImGui::SetNextItemWidth(140.0f);
-			double frame = static_cast<double>(state.Playback.CurrentTick) + state.Playback.Subframe;
+			double frame =
+				static_cast<double>(engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback)));
 			if (ImGui::InputDouble("##timeline-frame", &frame, 0.01, 1.0, "%.6f")) {
-				if (SetImageGraphPlaybackFrame(state.Playback, frame)) RequestPreview(state);
+				if (SeekImageGraphAuthorFrame(
+						state.Playback, frame, ImGui::GetIO().KeyCtrl, ImGui::GetIO().KeyAlt
+					))
+					RequestPreview(state);
 			}
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ctrl: outside range. Alt: fractional frame.");
 			ImGui::SameLine();
 			if (ImGui::Button("Previous key")) {
-				const uint64_t key =
-					PreviousImageGraphKey(state.Authored, state.Playback.CurrentTick).value_or(0);
-				if (SetImageGraphPlaybackFrame(state.Playback, static_cast<double>(key)))
+				if (const auto key =
+						PreviousImageGraphKey(state.Authored, GetImageGraphFrame(state.Playback));
+					key && SetImageGraphAuthorFrame(state.Playback, *key))
 					RequestPreview(state);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Next key")) {
-				if (const auto next = NextImageGraphKey(state.Authored, state.Playback.CurrentTick);
-					next.has_value() &&
-					SetImageGraphPlaybackFrame(state.Playback, static_cast<double>(*next)))
+				if (const auto key = NextImageGraphKey(state.Authored, GetImageGraphFrame(state.Playback));
+					key && SetImageGraphAuthorFrame(state.Playback, *key))
 					RequestPreview(state);
 			}
 			const std::string selectedNode = SelectedNodeId(state);
@@ -2461,14 +2867,16 @@ namespace studio {
 					ImGui::SameLine(96.0f);
 					if (ImGui::Button("Set key")) AddKeyframe(state, node->Id, value.Port);
 					ImGui::SameLine();
-					if (ImGui::Button("Remove at tick")) {
+					if (ImGui::Button("Remove at frame")) {
 						ApplyDocumentEdit(state, [&](Document &document) {
 							if (!RemoveImageGraphKeyframe(
 									document,
 									node->Id,
 									value.Port,
 									state.Playback.CurrentTick,
-									state.LastDiagnostic
+									state.LastDiagnostic,
+									state.Playback.Subframe,
+									state.Playback.NegativeFrame
 								))
 								return;
 							state.LastDiagnostic = {};
@@ -2493,26 +2901,43 @@ namespace studio {
 					"Source easing supports linear, Bezier and cut sides with incoming and outgoing handles."
 				);
 			}
-			if (ImGui::BeginTable("##keyframes", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
+			state.Dopesheet.Draw(
+				state.Authored,
+				state.DocumentRevision,
+				state.Keys,
+				GetImageGraphFrame(state.Playback),
+				state.LastDiagnostic,
+				[&] {
+					bool accepted = false;
+					ApplyDocumentEdit(state, [&](Document &document) {
+						accepted = state.Dopesheet.Commit(document, state.Keys, state.LastDiagnostic);
+					});
+					return accepted;
+				}
+			);
+			state.Keys.Draw(state.Authored, GetImageGraphFrame(state.Playback), state.LastDiagnostic, [&] {
+				bool accepted = false;
+				ApplyDocumentEdit(state, [&](Document &document) {
+					accepted = state.Keys.Commit(document, state.LastDiagnostic);
+				});
+				return accepted;
+			});
+			if (ImGui::BeginTable("##keyframes", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
 				ImGui::TableSetupColumn("Property");
-				ImGui::TableSetupColumn("Tick");
+				ImGui::TableSetupColumn("Frame");
 				ImGui::TableSetupColumn("Interpolation");
 				ImGui::TableSetupColumn("Ease in");
 				ImGui::TableSetupColumn("Ease out");
 				ImGui::TableSetupColumn("Driver");
+				ImGui::TableSetupColumn("Kind");
 				ImGui::TableSetupColumn("Action");
 				ImGui::TableHeadersRow();
 				for (size_t index = 0; index < state.Authored.Keyframes.size(); index++) {
-					const Keyframe frame = state.Authored.Keyframes[index];
+					const Keyframe &frame = state.Authored.Keyframes[index];
 					ImGui::TableNextRow();
 					ImGui::TableSetColumnIndex(0);
-					const std::string label = frame.NodeId + "." + frame.Port;
-					if (ImGui::Selectable(
-							label.c_str(),
-							state.Playback.CurrentTick == frame.Tick && state.Playback.Subframe == 0.0,
-							ImGuiSelectableFlags_SpanAllColumns
-						)) {
-						if (SetImageGraphPlaybackFrame(state.Playback, static_cast<double>(frame.Tick)))
+					if (state.Keys.DrawRow(frame)) {
+						if (SetImageGraphAuthorFrame(state.Playback, engine::imagegraph::GetFrameTime(frame)))
 							RequestPreview(state);
 						if (const auto found = state.Ids.ToCanvas.find(frame.NodeId);
 							found != state.Ids.ToCanvas.end()) {
@@ -2521,7 +2946,9 @@ namespace studio {
 						}
 					}
 					ImGui::TableSetColumnIndex(1);
-					ImGui::Text("%llu", static_cast<unsigned long long>(frame.Tick));
+					ImGui::Text(
+						"%.20Lg", engine::imagegraph::FrameTimeToReal(engine::imagegraph::GetFrameTime(frame))
+					);
 					ImGui::TableSetColumnIndex(2);
 					ImGui::PushID(static_cast<int>(index));
 					if (ImGui::BeginCombo("##interpolation", frame.Interpolation.c_str())) {
@@ -2554,9 +2981,13 @@ namespace studio {
 					ImGui::PopID();
 					ImGui::TableSetColumnIndex(5);
 					ImGui::PushID(static_cast<int>(index));
-					DrawKeyframeSineDriver(state, index, frame);
+					DrawKeyframeSourceDriver(state, index);
 					ImGui::PopID();
 					ImGui::TableSetColumnIndex(6);
+					ImGui::PushID(static_cast<int>(index));
+					DrawKeyframeKind(state, index);
+					ImGui::PopID();
+					ImGui::TableSetColumnIndex(7);
 					ImGui::PushID(static_cast<int>(index));
 					if (ImGui::SmallButton("Delete")) {
 						ApplyDocumentEdit(state, [&](Document &document) {
@@ -2589,7 +3020,62 @@ namespace studio {
 			ImGui::TextUnformatted("Image assets");
 			ImGui::TextDisabled("No external image inputs are declared by the available node schemas.");
 			ImGui::Separator();
-			ImGui::TextUnformatted("Recorded mono audio");
+			ImGui::TextUnformatted("WAV sources");
+			ImGui::InputTextWithHint(
+				"##wav-source-name",
+				"Source name matching the node path",
+				state.WavSourceId,
+				sizeof(state.WavSourceId)
+			);
+			ImGui::InputTextWithHint(
+				"##wav-file-path", "WAV file path", state.WavFilePath, sizeof(state.WavFilePath)
+			);
+			if (ImGui::Button("Load or replace WAV")) {
+				Diagnostic diagnostic;
+				if (state.WavAudio.LoadSource(
+						state.AudioClips, state.PreviewCache, state.WavSourceId, state.WavFilePath, diagnostic
+					)) {
+					state.WavSourceMessage = "loaded " + std::string(state.WavSourceId);
+					++state.AudioInputRevision;
+					state.LastDiagnostic = {};
+					RequestPreview(state, true);
+				} else {
+					state.WavSourceMessage = diagnostic.Message;
+				}
+			}
+			if (!state.WavSourceMessage.empty()) ImGui::TextWrapped("%s", state.WavSourceMessage.c_str());
+			for (size_t index = 0; index < state.AudioClips.size();) {
+				const auto &source = state.AudioClips[index];
+				const auto &data = source.Data;
+				const size_t channels = data.Channels.empty() ? 1 : data.Channels.size();
+				const size_t samples =
+					data.Channels.empty() ? data.Samples.size() : data.Channels.front().size();
+				ImGui::PushID(source.SourceId.c_str());
+				ImGui::TextWrapped(
+					"%s | %.0f Hz | %zu channels | %.3f s",
+					source.SourceId.c_str(),
+					data.SampleRate,
+					channels,
+					data.SampleRate > 0 ? samples / data.SampleRate : 0
+				);
+				const bool remove = ImGui::Button("Remove WAV");
+				ImGui::PopID();
+				if (remove) {
+					Diagnostic diagnostic;
+					if (state.WavAudio.RemoveSource(
+							state.AudioClips, state.PreviewCache, source.SourceId, diagnostic
+						)) {
+						++state.AudioInputRevision;
+						RequestPreview(state, true);
+					} else {
+						state.WavSourceMessage = diagnostic.Message;
+						++index;
+					}
+				} else
+					index++;
+			}
+			ImGui::Separator();
+			ImGui::TextUnformatted("Recorded audio");
 			ImGui::InputTextWithHint(
 				"##image-audio-capture-path",
 				"Path to audio-capture 1 document",
@@ -2599,7 +3085,8 @@ namespace studio {
 			if (ImGui::Button("Load audio capture")) OpenAudioCapture(state);
 			ImGui::SameLine();
 			if (ImGui::Button("Clear audio capture")) {
-				state.AudioFrames.clear();
+				ClearImageGraphAudioCapture(state.AudioFrames, state.PreviewCache);
+				++state.AudioInputRevision;
 				state.AudioCapturePathDisplay.clear();
 				state.AudioCaptureMessage = "no recorded audio loaded";
 				RequestPreview(state, true);
@@ -2732,7 +3219,7 @@ namespace studio {
 			ImGui::Text(
 				"Evaluation: deterministic CPU, preview cache %zu / %zu bytes",
 				state.PreviewCache.HeldBytes(),
-				IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES * PREVIEW_MAXIMUM_BYTES
+				IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES
 			);
 			ImGui::TextUnformatted("Profiling: image composer preview appears in the F5 frame graph.");
 			if (!state.SinkMessage.empty()) ImGui::TextWrapped("Texture sink: %s", state.SinkMessage.c_str());
@@ -2742,12 +3229,95 @@ namespace studio {
 			}
 		}
 
+		void DrawArraySamples(const std::vector<engine::imagegraph::ElementValue> &samples) {
+			if (samples.empty()) {
+				ImGui::TextUnformatted("Empty");
+				return;
+			}
+			if (!ImGui::BeginTable("##samples", 2, ImGuiTableFlags_BordersInnerV)) return;
+			ImGui::TableSetupColumn("Index", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(48.0f));
+			ImGui::TableSetupColumn("Value");
+			ImGui::TableHeadersRow();
+			ImGuiListClipper clipper;
+			clipper.Begin(static_cast<int>(samples.size()));
+			while (clipper.Step()) {
+				for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; index++) {
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					ImGui::Text("%d", index);
+					ImGui::TableNextColumn();
+					const auto &sample = samples[static_cast<size_t>(index)];
+					if (const auto *integer = std::get_if<int64_t>(&sample))
+						ImGui::Text("%lld", static_cast<long long>(*integer));
+					else if (const auto *number = std::get_if<double>(&sample))
+						ImGui::Text("%.17g", *number);
+				}
+			}
+			ImGui::EndTable();
+		}
+
 		void DrawPreview(State &state, engine::render::Renderer &renderer) {
+			state.VectorControls.DrawSnapControls();
+			if (!state.VectorControls.Diagnostic().Message.empty())
+				ImGui::TextWrapped("%s", state.VectorControls.Diagnostic().Message.c_str());
+			if (state.HaveVector2Preview) {
+				ImGui::Text(
+					"Vector output %s  [%.17g, %.17g]",
+					state.ValuePreviewPort.c_str(),
+					state.Vector2Preview.X,
+					state.Vector2Preview.Y
+				);
+				const engine::imagegraph::ProjectSettings defaults;
+				const auto &project = state.Authored.Project ? *state.Authored.Project : defaults;
+				const auto room = ImGui::GetContentRegionAvail();
+				const double scale = std::min(
+					{1., double(room.x) / project.SurfaceWidth, double(room.y) / project.SurfaceHeight}
+				);
+				if (scale > 0) {
+					const auto origin = ImGui::GetCursorScreenPos();
+					ImGui::Dummy({float(project.SurfaceWidth * scale), float(project.SurfaceHeight * scale)});
+					state.VectorControls.DrawOverlay(
+						renderer,
+						{origin.x, origin.y, project.SurfaceWidth * scale, project.SurfaceHeight * scale},
+						scale,
+						SelectedNodeId(state)
+					);
+				}
+				return;
+			}
+
+			if (state.HaveArrayPreview) {
+				ImGui::Text(
+					"Array output %s  frame %.20Lg",
+					state.ValuePreviewPort.c_str(),
+					engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))
+				);
+				if (state.ArrayPreview.Nested.empty())
+					DrawArraySamples(state.ArrayPreview.Elements);
+				else {
+					for (size_t channel = 0; channel < state.ArrayPreview.Nested.size(); channel++) {
+						ImGui::PushID(static_cast<int>(channel));
+						if (ImGui::TreeNodeEx(
+								"##channel",
+								ImGuiTreeNodeFlags_DefaultOpen,
+								"Channel %zu (%zu samples)",
+								channel,
+								state.ArrayPreview.Nested[channel].size()
+							)) {
+							DrawArraySamples(state.ArrayPreview.Nested[channel]);
+							ImGui::TreePop();
+						}
+						ImGui::PopID();
+					}
+				}
+				return;
+			}
+
 			if (state.HaveScalarPreview) {
 				ImGui::Text(
-					"Scalar output %s  tick %llu  value %.17g",
-					state.ScalarPreviewPort.c_str(),
-					static_cast<unsigned long long>(state.Playback.CurrentTick),
+					"Scalar output %s  frame %.20Lg  value %.17g",
+					state.ValuePreviewPort.c_str(),
+					engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback)),
 					state.ScalarPreviewValue
 				);
 				if (state.LastDiagnostic.Code != Status::Ok) {
@@ -2763,11 +3333,15 @@ namespace studio {
 				return;
 			}
 			ImGui::Text(
-				"%u x %u  RGBA8  %zu bytes  hash %016llx",
-				state.Preview.Width,
-				state.Preview.Height,
-				state.Preview.Pixels.size(),
-				static_cast<unsigned long long>(state.Preview.Hash)
+				"%u x %u  source %.*s (%zu bytes)  display RGBA8  hash %016llx",
+				state.PreviewWidth,
+				state.PreviewHeight,
+				static_cast<int>(
+					engine::imagegraph::DescribeSurfaceFormat(state.PreviewSourceFormat)->Name.size()
+				),
+				engine::imagegraph::DescribeSurfaceFormat(state.PreviewSourceFormat)->Name.data(),
+				state.PreviewPixelBytes,
+				static_cast<unsigned long long>(state.PreviewHash)
 			);
 			if (state.LastDiagnostic.Code != Status::Ok) {
 				ImGui::TextWrapped("Current graph: %s", state.LastDiagnostic.Message.c_str());
@@ -2778,12 +3352,12 @@ namespace studio {
 			const float fit = std::min(
 				1.0f,
 				std::min(
-					room.x / static_cast<float>(state.Preview.Width),
-					room.y / static_cast<float>(state.Preview.Height)
+					room.x / static_cast<float>(state.PreviewWidth),
+					room.y / static_cast<float>(state.PreviewHeight)
 				)
 			);
 			const ImVec2 size(
-				std::max(1.0f, state.Preview.Width * fit), std::max(1.0f, state.Preview.Height * fit)
+				std::max(1.0f, state.PreviewWidth * fit), std::max(1.0f, state.PreviewHeight * fit)
 			);
 			void *handle = renderer.TextureHandle(state.CurrentTexture);
 			if (handle == nullptr) {
@@ -2791,25 +3365,70 @@ namespace studio {
 				return;
 			}
 			ImGui::Image(reinterpret_cast<ImTextureID>(handle), size);
+			const auto origin = ImGui::GetItemRectMin();
+			state.VectorControls.DrawOverlay(
+				renderer, {origin.x, origin.y, size.x, size.y}, fit, SelectedNodeId(state)
+			);
 		}
 
+	}
+
+	void CloseImageComposerVector2Preview(engine::render::Renderer &renderer) {
+		Composer().VectorControls.Close(renderer);
+	}
+
+	void CloseImageComposerAudioPreview() {
+		State &state = Composer();
+		state.Playback.Playing = false;
+		state.WavAudio.Close();
+		state.WavAudioMessage.clear();
 	}
 
 	void DrawImageComposer(engine::render::Renderer &renderer, bool &open) {
 		State &state = Composer();
 		Initialize(state);
 		PumpRetiredTexture(state, renderer);
+		state.VectorControls.PumpRetired(renderer);
 
+		if (AdvanceImageGraphPlayback(state.Playback, ImGui::GetIO().DeltaTime)) RequestPreview(state);
 		ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 255));
 		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
 		if (!ImGui::Begin("Image Composer", &open, ImGuiWindowFlags_MenuBar)) {
+			state.VectorControls.FinishPointer(
+				ImGui::IsMouseDown(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Middle)
+			);
 			ImGui::End();
 			ImGui::PopStyleColor(2);
+			if (!open) {
+				CloseImageComposerAudioPreview();
+				state.VectorControls.Close(renderer);
+			} else {
+				Diagnostic diagnostic;
+				if (!state.WavAudio.Update(
+						state.Authored,
+						state.AudioClips,
+						state.AudioFrames,
+						state.Playback,
+						state.DocumentRevision,
+						state.AudioInputRevision,
+						diagnostic
+					))
+					state.WavAudioMessage = diagnostic.Message;
+				else if (state.WavAudio.Enabled())
+					state.WavAudioMessage.clear();
+			}
 			return;
 		}
-		if (AdvanceImageGraphPlayback(state.Playback, ImGui::GetIO().DeltaTime)) RequestPreview(state);
 		FinishInactiveEdit(state);
 		DrawToolbar(state);
+		engine::imagegraph::EvaluationRequest vectorRequest;
+		(void)engine::imagegraph::SetFrameTime(vectorRequest, GetImageGraphFrame(state.Playback));
+		vectorRequest.AudioFrames = state.AudioFrames;
+		vectorRequest.AudioClips = state.AudioClips;
+		vectorRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+		state.VectorControls.Refresh(
+			state.Authored, vectorRequest, state.DocumentRevision, state.AudioInputRevision
+		);
 		ImGui::Separator();
 
 		const ImVec2 room = ImGui::GetContentRegionAvail();
@@ -2830,6 +3449,10 @@ namespace studio {
 				}
 				if (ImGui::BeginTabItem("Inspector")) {
 					DrawInspector(state);
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Project")) {
+					DrawProjectSettings(state);
 					ImGui::EndTabItem();
 				}
 				if (ImGui::BeginTabItem("Groups")) {
@@ -2861,7 +3484,28 @@ namespace studio {
 		}
 		ImGui::EndChild();
 		RefreshPreview(state, renderer);
+		Diagnostic audioDiagnostic;
+		if (!state.WavAudio.Update(
+				state.Authored,
+				state.AudioClips,
+				state.AudioFrames,
+				state.Playback,
+				state.DocumentRevision,
+				state.AudioInputRevision,
+				audioDiagnostic
+			))
+			state.WavAudioMessage = audioDiagnostic.Message;
+		else if (state.WavAudio.Enabled())
+			state.WavAudioMessage.clear();
+		if (!state.WavAudioMessage.empty()) ImGui::TextWrapped("%s", state.WavAudioMessage.c_str());
+		state.VectorControls.FinishPointer(
+			ImGui::IsMouseDown(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Middle)
+		);
 		ImGui::End();
+		if (!open) {
+			CloseImageComposerAudioPreview();
+			state.VectorControls.Close(renderer);
+		}
 		ImGui::PopStyleColor(2);
 	}
 }

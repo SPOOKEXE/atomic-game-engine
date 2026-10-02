@@ -1,10 +1,19 @@
+#include "ImageGraphChoices.hpp"
+
+#include <engine/imagegraph/AudioCapture.hpp>
+#include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/Surface.hpp>
+#include <engine/imagegraph/WavClip.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <map>
+#include <new>
 #include <nodegraph/Registry.hpp>
+#include <stdexcept>
 #include <string_view>
 #include <studio/ImageGraph.hpp>
 #include <unordered_map>
@@ -46,73 +55,15 @@ namespace studio {
 		}
 
 		std::string CanvasType(engine::imagegraph::ValueType type) {
-			using engine::imagegraph::ValueType;
-			switch (type) {
-			case ValueType::Boolean:
-				return "imagegraph.boolean";
-			case ValueType::Integer:
-				return "imagegraph.integer";
-			case ValueType::Scalar:
-				return "imagegraph.scalar";
-			case ValueType::Text:
-				return "imagegraph.text";
-			case ValueType::Colour:
-				return "imagegraph.colour";
-			case ValueType::Vector2:
-				return "imagegraph.vector2";
-			case ValueType::Image:
-				return std::string(IMAGE_PORT_TYPE);
-			case ValueType::Array:
-				return "imagegraph.array";
-			case ValueType::Gradient:
-				return "imagegraph.gradient";
-			case ValueType::Area:
-				return "imagegraph.area";
-			case ValueType::Curve:
-				return "imagegraph.curve";
-			case ValueType::Vector4:
-				return "imagegraph.vector4";
-			case ValueType::Path2D:
-				return "imagegraph.path2d";
-			case ValueType::Vector3:
-				return "imagegraph.vector3";
-			case ValueType::Quaternion:
-				return "imagegraph.quaternion";
-			case ValueType::Enum:
-				return "imagegraph.enum";
-			case ValueType::Mesh:
-				return "imagegraph.mesh";
-			case ValueType::AudioBit:
-				return "imagegraph.audiobit";
-			}
-			return "imagegraph.unknown";
+			if (type == engine::imagegraph::ValueType::Image) return std::string(IMAGE_PORT_TYPE);
+			return "imagegraph." + std::string(engine::imagegraph::ValueTypeName(type));
 		}
 
 		std::optional<engine::imagegraph::ValueType> ValueTypeFromCanvas(std::string_view type) {
-			using engine::imagegraph::ValueType;
-			for (const ValueType candidate : {
-					 ValueType::Boolean,
-					 ValueType::Integer,
-					 ValueType::Scalar,
-					 ValueType::Text,
-					 ValueType::Colour,
-					 ValueType::Vector2,
-					 ValueType::Image,
-					 ValueType::Array,
-					 ValueType::Gradient,
-					 ValueType::Area,
-					 ValueType::Curve,
-					 ValueType::Vector4,
-					 ValueType::Path2D,
-					 ValueType::Vector3,
-					 ValueType::Quaternion,
-					 ValueType::Enum,
-					 ValueType::Mesh,
-					 ValueType::AudioBit,
-				 }) {
-				if (CanvasType(candidate) == type) return candidate;
-			}
-			return std::nullopt;
+			if (type == IMAGE_PORT_TYPE) return engine::imagegraph::ValueType::Image;
+			constexpr std::string_view PREFIX = "imagegraph.";
+			if (!type.starts_with(PREFIX)) return std::nullopt;
+			return engine::imagegraph::ParseValueTypeName(type.substr(PREFIX.size()));
 		}
 
 		nodegraph::Colour PortTint(engine::imagegraph::ValueType type) {
@@ -154,8 +105,10 @@ namespace studio {
 				return nodegraph::Colour::Hex(0x79706E);
 			case ValueType::AudioBit:
 				return nodegraph::Colour::Hex(0xE4D96F);
+			default:
+				// Runtime-only simulation, 3D and structure sockets share one neutral tint.
+				return nodegraph::Colour::Hex(0xA0A0A0);
 			}
-			return nodegraph::Colour::Hex(0xFFFFFF);
 		}
 
 		std::string NodeTitle(std::string_view type) {
@@ -202,14 +155,14 @@ namespace studio {
 			}
 		}
 
-		std::vector<AuthoredValue> StarterValues(std::string_view type) {
+		std::vector<AuthoredValue> StarterValues(const Document &document, std::string_view type) {
 			const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(type);
 			if (schema == nullptr) return {};
 
 			std::vector<AuthoredValue> values;
 			values.reserve(schema->Properties.size());
 			for (const engine::imagegraph::PropertySchema &property : schema->Properties) {
-				if (auto value = ImageGraphPropertyDefault(type, property.Id)) {
+				if (auto value = ImageGraphPropertyDefault(document, type, property.Id)) {
 					values.push_back({std::string(property.Id), std::move(*value)});
 				}
 			}
@@ -302,11 +255,24 @@ namespace studio {
 			for (const engine::imagegraph::Keyframe &keyframe : document.Keyframes) {
 				if (const auto type = TypeOf(keyframe.Data); type && *type >= ValueType::Gradient)
 					required = std::max(required, *type >= ValueType::Vector3 ? 6u : 3u);
-				if (keyframe.Ease || keyframe.Interpolation == "source") required = 4;
+				if (keyframe.Ease || keyframe.Interpolation == "source") required = std::max(required, 4u);
 				if (keyframe.SineDriver) required = std::max(required, 6u);
+				if (keyframe.SourceDriver) required = std::max(required, 8u);
+				if (keyframe.Subframe != 0 || keyframe.NegativeFrame ||
+					keyframe.Kind == engine::imagegraph::KeyframeKind::Adder)
+					required = std::max(required, 9u);
 			}
 			if (!document.Tracks.empty()) required = std::max(required, 4u);
+			for (const auto &track : document.Tracks)
+				if (track.QuaternionMode) required = std::max(required, 8u);
 			if (document.Timeline) required = std::max(required, 5u);
+			if (document.Project) {
+				required = std::max(required, 7u);
+				const auto &project = *document.Project;
+				if (project.PreviewGrid != engine::imagegraph::PreviewGridSettings{} ||
+					!project.PreviewRulers.empty() || project.ShowPreviewRulers)
+					required = std::max(required, 9u);
+			}
 			document.FormatVersion = std::max(document.FormatVersion, required);
 		}
 
@@ -378,12 +344,170 @@ namespace studio {
 		}
 	}
 
-	const engine::imagegraph::Image *
-	ImageGraphPreviewCache::Find(uint64_t revision, size_t outputIndex, uint64_t tick, double subframe) {
-		if (!std::isfinite(subframe) || subframe < 0.0 || subframe >= 1.0) return nullptr;
+	namespace {
+		bool ReadPreviewAudioFile(
+			const std::filesystem::path &path,
+			uint64_t maximumBytes,
+			std::vector<std::byte> &bytes,
+			engine::imagegraph::Diagnostic &diagnostic
+		) {
+			using engine::imagegraph::Status;
+			const auto fail = [&](Status code, const char *message) {
+				diagnostic = {code, {}, {}, message};
+				return false;
+			};
+			if (path.empty()) return fail(Status::InvalidValue, "enter an audio file path");
+			std::ifstream file(path, std::ios::binary | std::ios::ate);
+			if (!file) return fail(Status::InvalidValue, "could not open audio file");
+			const std::streamoff length = file.tellg();
+			if (length < 0 || static_cast<uint64_t>(length) > maximumBytes)
+				return fail(Status::LimitExceeded, "audio file exceeds the preview read budget");
+			bytes.resize(static_cast<size_t>(length));
+			file.seekg(0, std::ios::beg);
+			if (!bytes.empty()) {
+				file.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+				if (file.gcount() != static_cast<std::streamsize>(bytes.size()))
+					return fail(Status::InvalidValue, "could not read the complete audio file");
+			}
+			return true;
+		}
+	}
+
+	bool LoadImageGraphAudioCapture(
+		std::vector<engine::imagegraph::AudioCaptureFrame> &frames,
+		ImageGraphPreviewCache &cache,
+		const std::filesystem::path &filePath,
+		engine::imagegraph::Diagnostic &diagnostic
+	) {
+		using namespace engine::imagegraph;
+		diagnostic = {};
+		std::vector<std::byte> bytes;
+		if (!ReadPreviewAudioFile(filePath, Limits::MaximumAudioCaptureDocumentBytes, bytes, diagnostic))
+			return false;
+		std::vector<AudioCaptureFrame> candidate;
+		const std::string_view text(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+		if (ReadAudioCapture(text, candidate, diagnostic) != Status::Ok) return false;
+		frames = std::move(candidate);
+		cache.Clear();
+		return true;
+	}
+
+	void ClearImageGraphAudioCapture(
+		std::vector<engine::imagegraph::AudioCaptureFrame> &frames, ImageGraphPreviewCache &cache
+	) {
+		frames.clear();
+		cache.Clear();
+	}
+
+	bool ReadImageGraphWavSource(
+		std::span<const engine::imagegraph::AudioClipSource> sources,
+		std::string_view sourceId,
+		const std::filesystem::path &filePath,
+		engine::imagegraph::AudioClipSource &loaded,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t byteBudget
+	) {
+		using namespace engine::imagegraph;
+		diagnostic = {};
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return false;
+		};
+		if (sourceId.empty() || sourceId.size() > Limits::MaximumTextBytes || filePath.empty())
+			return fail(Status::InvalidValue, "enter a source name and WAV file path");
+		if (sources.size() > Limits::MaximumNodes || byteBudget > Limits::MaximumEvaluationBytes)
+			return fail(Status::LimitExceeded, "WAV sources exceed the preview input budget");
+		size_t replacement = sources.size();
+		uint64_t retainedBytes = 0;
+		const auto retain = [&](uint64_t bytes) {
+			if (bytes > byteBudget - retainedBytes) return false;
+			retainedBytes += bytes;
+			return true;
+		};
+		for (size_t index = 0; index < sources.size(); index++) {
+			const auto &source = sources[index];
+			if (source.SourceId == sourceId) {
+				if (replacement != sources.size())
+					return fail(Status::DuplicateId, "WAV source names must be unique");
+				replacement = index;
+			}
+			if (source.Data.Channels.size() > Limits::MaximumAudioChannels ||
+				!retain(sizeof(AudioClipSource)) || !retain(source.SourceId.size()) ||
+				!retain(source.Data.Channels.size() * sizeof(std::vector<double>)))
+				return fail(Status::LimitExceeded, "WAV sources exceed the preview input budget");
+			size_t samples = source.Data.Samples.size();
+			if (samples > Limits::MaximumAudioClipSamples || !retain(samples * sizeof(double)))
+				return fail(Status::LimitExceeded, "WAV source exceeds the sample budget");
+			for (const auto &plane : source.Data.Channels) {
+				if (plane.size() > Limits::MaximumAudioClipSamples - samples ||
+					!retain(plane.size() * sizeof(double)))
+					return fail(Status::LimitExceeded, "WAV source exceeds the sample budget");
+				samples += plane.size();
+			}
+		}
+		if (replacement == sources.size() && sources.size() == Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "too many WAV sources");
+		const uint64_t assetOverhead = sizeof(AudioClipSource) + sourceId.size();
+		if (assetOverhead > byteBudget - retainedBytes)
+			return fail(Status::LimitExceeded, "WAV sources exceed the preview input budget");
+		constexpr uint64_t maximumFileBytes = 16 * 1024 * 1024;
+		const uint64_t remainingBytes = byteBudget - retainedBytes - assetOverhead;
+		std::vector<std::byte> bytes;
+		if (!ReadPreviewAudioFile(filePath, std::min(maximumFileBytes, remainingBytes), bytes, diagnostic))
+			return false;
+		AudioBit candidate;
+		// The old clip stays resident until conversion succeeds, so replacement has a peak budget too.
+		if (DecodeWavClip(
+				bytes, WavClipPolicy::PixelComposer, remainingBytes - bytes.size(), candidate, diagnostic
+			) != Status::Ok)
+			return false;
+		loaded = {std::string(sourceId), std::move(candidate)};
+		return true;
+	}
+
+	bool LoadImageGraphWavSource(
+		std::vector<engine::imagegraph::AudioClipSource> &sources,
+		ImageGraphPreviewCache &cache,
+		std::string_view sourceId,
+		const std::filesystem::path &filePath,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t byteBudget
+	) {
+		engine::imagegraph::AudioClipSource candidate;
+		if (!ReadImageGraphWavSource(sources, sourceId, filePath, candidate, diagnostic, byteBudget))
+			return false;
+		const auto old = std::find_if(sources.begin(), sources.end(), [&](const auto &source) {
+			return source.SourceId == sourceId;
+		});
+		if (old == sources.end())
+			sources.push_back(std::move(candidate));
+		else
+			*old = std::move(candidate);
+		cache.Clear();
+		return true;
+	}
+
+	bool RemoveImageGraphWavSource(
+		std::vector<engine::imagegraph::AudioClipSource> &sources,
+		ImageGraphPreviewCache &cache,
+		std::string_view sourceId
+	) {
+		const auto found = std::find_if(sources.begin(), sources.end(), [&](const auto &source) {
+			return source.SourceId == sourceId;
+		});
+		if (found == sources.end()) return false;
+		sources.erase(found);
+		cache.Clear();
+		return true;
+	}
+
+	const engine::imagegraph::Image *ImageGraphPreviewCache::Find(
+		uint64_t revision, size_t outputIndex, uint64_t tick, double subframe, bool negativeFrame
+	) {
+		if (!engine::imagegraph::ValidFrameTime({tick, subframe, negativeFrame})) return nullptr;
 		const auto found = std::find_if(Entries.begin(), Entries.end(), [&](const Entry &entry) {
 			return entry.Revision == revision && entry.OutputIndex == outputIndex && entry.Tick == tick &&
-				   entry.Subframe == subframe;
+				   entry.Subframe == subframe && entry.NegativeFrame == negativeFrame;
 		});
 		if (found == Entries.end()) return nullptr;
 		found->LastUsed = ++UseSerial;
@@ -395,39 +519,86 @@ namespace studio {
 		size_t outputIndex,
 		uint64_t tick,
 		const engine::imagegraph::Image &image,
-		double subframe
+		double subframe,
+		bool negativeFrame
 	) {
-		if (!std::isfinite(subframe) || subframe < 0.0 || subframe >= 1.0) return false;
-		const size_t byteLimit = static_cast<size_t>(IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION) *
-								 IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION * 4;
-		if (image.Width == 0 || image.Height == 0 || image.Width > IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION ||
-			image.Height > IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION || image.Pixels.size() > byteLimit ||
-			image.Pixels.size() != static_cast<size_t>(image.Width) * image.Height * 4)
+		if (!engine::imagegraph::ValidFrameTime({tick, subframe, negativeFrame}) ||
+			!engine::imagegraph::ValidSurfaceLayout(
+				image, IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION, IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES
+			) ||
+			!engine::imagegraph::FiniteSurfaceSamples(image))
 			return false;
 
 		auto found = std::find_if(Entries.begin(), Entries.end(), [&](const Entry &entry) {
 			return entry.Revision == revision && entry.OutputIndex == outputIndex && entry.Tick == tick &&
-				   entry.Subframe == subframe;
+				   entry.Subframe == subframe && entry.NegativeFrame == negativeFrame;
 		});
-		if (found == Entries.end()) {
-			if (Entries.size() == IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES) {
-				found = std::min_element(
-					Entries.begin(), Entries.end(), [](const Entry &left, const Entry &right) {
-						return left.LastUsed < right.LastUsed;
+		size_t heldBytes = HeldBytes();
+		size_t oldCapacity = found == Entries.end() ? 0 : found->Image.Pixels.capacity();
+		if (heldBytes > IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES ||
+			heldBytes > IMAGE_COMPOSER_PREVIEW_CACHE_PEAK_BYTES)
+			return false;
+
+		try {
+			engine::imagegraph::Image candidate;
+			candidate.Width = image.Width;
+			candidate.Height = image.Height;
+			candidate.Hash = image.Hash;
+			candidate.Format = image.Format;
+			candidate.Pixels.reserve(image.Pixels.size());
+			const size_t candidateCapacity = candidate.Pixels.capacity();
+			if (candidateCapacity > IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES ||
+				candidateCapacity > IMAGE_COMPOSER_PREVIEW_CACHE_PEAK_BYTES - heldBytes)
+				return false;
+			candidate.Pixels.assign(image.Pixels.begin(), image.Pixels.end());
+
+			if (found != Entries.end()) {
+				size_t projectedBytes = heldBytes - oldCapacity + candidateCapacity;
+				while (projectedBytes > IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES) {
+					auto victim = Entries.end();
+					for (auto entry = Entries.begin(); entry != Entries.end(); ++entry) {
+						if (entry == found) continue;
+						if (victim == Entries.end() || entry->LastUsed < victim->LastUsed) victim = entry;
 					}
-				);
+					if (victim == Entries.end()) return false;
+					projectedBytes -= victim->Image.Pixels.capacity();
+					Entries.erase(victim);
+					found = std::find_if(Entries.begin(), Entries.end(), [&](const Entry &entry) {
+						return entry.Revision == revision && entry.OutputIndex == outputIndex &&
+							   entry.Tick == tick && entry.Subframe == subframe &&
+							   entry.NegativeFrame == negativeFrame;
+					});
+				}
 			} else {
+				size_t projectedBytes = heldBytes + candidateCapacity;
+				while (Entries.size() >= IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES ||
+					   projectedBytes > IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES) {
+					const auto victim = std::min_element(
+						Entries.begin(), Entries.end(), [](const Entry &left, const Entry &right) {
+							return left.LastUsed < right.LastUsed;
+						}
+					);
+					if (victim == Entries.end()) return false;
+					projectedBytes -= victim->Image.Pixels.capacity();
+					Entries.erase(victim);
+				}
 				Entries.emplace_back();
 				found = Entries.end() - 1;
 			}
+			found->Revision = revision;
+			found->OutputIndex = outputIndex;
+			found->Tick = tick;
+			found->Subframe = subframe;
+			found->NegativeFrame = negativeFrame;
+			found->LastUsed = ++UseSerial;
+			found->Image = std::move(candidate);
+			// The preflight projection includes the candidate's actual capacity.
+			return true;
+		} catch (const std::bad_alloc &) {
+			return false;
+		} catch (const std::length_error &) {
+			return false;
 		}
-		found->Revision = revision;
-		found->OutputIndex = outputIndex;
-		found->Tick = tick;
-		found->Subframe = subframe;
-		found->LastUsed = ++UseSerial;
-		found->Image = image;
-		return true;
 	}
 
 	void ImageGraphPreviewCache::Clear() {
@@ -438,8 +609,29 @@ namespace studio {
 	size_t ImageGraphPreviewCache::HeldBytes() const {
 		size_t bytes = 0;
 		for (const Entry &entry : Entries)
-			bytes += entry.Image.Pixels.size();
+			bytes += entry.Image.Pixels.capacity();
 		return bytes;
+	}
+
+	engine::imagegraph::FrameTime GetImageGraphFrame(const ImageGraphPlayback &playback) {
+		return {playback.CurrentTick, playback.Subframe, playback.NegativeFrame};
+	}
+	bool SetImageGraphAuthorFrame(ImageGraphPlayback &playback, engine::imagegraph::FrameTime frame) {
+		if (!engine::imagegraph::ValidFrameTime(frame) || GetImageGraphFrame(playback) == frame) return false;
+		playback.CurrentTick = frame.Tick;
+		playback.Subframe = frame.Subframe;
+		playback.NegativeFrame = frame.NegativeFrame;
+		playback.Accumulator = 0;
+		return true;
+	}
+	bool SeekImageGraphAuthorFrame(ImageGraphPlayback &playback, double frame, bool control, bool alt) {
+		engine::imagegraph::FrameTime selected;
+		if (!std::isfinite(frame) || playback.TotalFrames == 0 ||
+			playback.TotalFrames > engine::imagegraph::Limits::MaximumTick + 1)
+			return false;
+		if (!control) frame = std::clamp(frame, 0.0, static_cast<double>(playback.TotalFrames - 1));
+		if (!engine::imagegraph::SplitFrameTime(frame, selected, !alt)) return false;
+		return SetImageGraphAuthorFrame(playback, selected);
 	}
 
 	void ApplyImageGraphTimeline(const Document &document, ImageGraphPlayback &playback) {
@@ -447,6 +639,7 @@ namespace studio {
 		playback.Accumulator = 0.0;
 		playback.Direction = 1;
 		playback.Subframe = 0.0;
+		playback.NegativeFrame = false;
 		if (document.Timeline) {
 			const engine::imagegraph::TimelineSettings &timeline = *document.Timeline;
 			playback.TotalFrames = timeline.Frames;
@@ -479,22 +672,19 @@ namespace studio {
 		playback.EndTick = std::clamp(playback.EndTick, playback.StartTick, playback.TotalFrames - 1);
 		frame =
 			std::clamp(frame, static_cast<double>(playback.StartTick), static_cast<double>(playback.EndTick));
-		double wholeFrame = 0.0;
-		const double subframe = std::modf(frame, &wholeFrame);
-		const uint64_t tick = static_cast<uint64_t>(wholeFrame);
-		const double boundedSubframe = tick == playback.EndTick ? 0.0 : subframe;
-		const bool changed = playback.CurrentTick != tick || playback.Subframe != boundedSubframe;
-		playback.CurrentTick = tick;
-		playback.Subframe = boundedSubframe;
-		if (changed) playback.Accumulator = 0.0;
-		return changed;
+		engine::imagegraph::FrameTime selected;
+		if (!engine::imagegraph::SplitFrameTime(frame, selected)) return false;
+		return SetImageGraphAuthorFrame(playback, selected);
 	}
 
 	bool AdvanceImageGraphPlayback(ImageGraphPlayback &playback, double elapsedSeconds) {
-		const uint64_t beforeTick = playback.CurrentTick;
-		const double beforeSubframe = playback.Subframe;
-		if (!ValidFramesPerSecond(playback.FramesPerSecond)) {
-			playback.FramesPerSecond = 30.0;
+		if (!ValidFramesPerSecond(playback.FramesPerSecond)) playback.FramesPerSecond = 30.0;
+		if (!playback.Playing) return false;
+		const auto before = GetImageGraphFrame(playback);
+		if (playback.NegativeFrame) {
+			playback.CurrentTick = playback.StartTick;
+			playback.Subframe = 0;
+			playback.NegativeFrame = false;
 		}
 		const uint64_t maximumFrames = engine::imagegraph::Limits::MaximumTick + 1;
 		playback.TotalFrames = std::clamp(playback.TotalFrames, uint64_t{1}, maximumFrames);
@@ -536,7 +726,7 @@ namespace studio {
 			}
 		}
 		if (playback.CurrentTick == playback.EndTick) playback.Subframe = 0.0;
-		return playback.CurrentTick != beforeTick || playback.Subframe != beforeSubframe;
+		return GetImageGraphFrame(playback) != before;
 	}
 
 	void RegisterImageGraphNodeTypes() {
@@ -557,26 +747,42 @@ namespace studio {
 		RegisterDataType(engine::imagegraph::ValueType::Quaternion, "Quaternion");
 		RegisterDataType(engine::imagegraph::ValueType::Enum, "Enum");
 		RegisterDataType(engine::imagegraph::ValueType::Mesh, "Mesh");
-
-		for (const std::string_view id : IMAGE_NODE_TYPES) {
-			const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(id);
-			if (schema == nullptr) continue;
-
-			nodegraph::NodeType type;
-			type.Id = std::string(schema->Type);
-			type.Title = NodeTitle(schema->Type);
-			type.Category = "Image";
-			type.Accent = nodegraph::Colour::Hex(0x262626);
-			for (const engine::imagegraph::PortSchema &port : schema->Ports) {
-				nodegraph::PortSpec socket{std::string(port.Id), CanvasType(port.Type)};
-				if (port.Direction == engine::imagegraph::PortDirection::Input) {
-					type.Inputs.push_back(std::move(socket));
-				} else {
-					type.Outputs.push_back(std::move(socket));
-				}
-			}
-			nodegraph::NodeTypes::Register(type);
+		RegisterDataType(engine::imagegraph::ValueType::AudioBit, "Audio");
+		for (auto index = static_cast<size_t>(engine::imagegraph::ValueType::Mesh2D);
+			 index <= static_cast<size_t>(engine::imagegraph::ValueType::DynamicSurface);
+			 index++) {
+			const auto type = static_cast<engine::imagegraph::ValueType>(index);
+			RegisterDataType(type, std::string(engine::imagegraph::ValueTypeName(type)).c_str());
 		}
+
+		const auto registerSchema =
+			[](const engine::imagegraph::NodeSchema &schema, std::string title, std::string category) {
+				nodegraph::NodeType type;
+				type.Id = std::string(schema.Type);
+				type.Title = std::move(title);
+				type.Category = std::move(category);
+				type.Accent = nodegraph::Colour::Hex(0x262626);
+				for (const engine::imagegraph::PortSchema &port : schema.Ports) {
+					nodegraph::PortSpec socket{std::string(port.Id), CanvasType(port.Type)};
+					if (port.Direction == engine::imagegraph::PortDirection::Input) {
+						socket.Suggest =
+							imagegraph_choices::Suggested(imagegraph_choices::Input(schema.Type, port.Id));
+						type.Inputs.push_back(std::move(socket));
+					} else {
+						type.Outputs.push_back(std::move(socket));
+					}
+				}
+				nodegraph::NodeTypes::Register(type);
+			};
+		for (const std::string_view id : IMAGE_NODE_TYPES) {
+			if (const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(id))
+				registerSchema(*schema, NodeTitle(schema->Type), "Image");
+		}
+		// Every source catalogue node is searchable under its documentation family, native executor or not.
+		for (const engine::imagegraph::CatalogueEntry &entry : engine::imagegraph::Catalogue())
+			registerSchema(
+				entry.Schema, std::string(entry.Title), "Pixel Composer/" + std::string(entry.Family)
+			);
 	}
 
 	std::optional<engine::imagegraph::Value>
@@ -590,6 +796,12 @@ namespace studio {
 		if (property == schema->Properties.end()) return std::nullopt;
 
 		using engine::imagegraph::ValueType;
+		if (const auto *entry = engine::imagegraph::FindCatalogueEntry(nodeType)) {
+			const auto *input = engine::imagegraph::FindCatalogueInput(*entry, propertyId);
+			if (input != nullptr) {
+				if (auto value = engine::imagegraph::CatalogueDefault(*input)) return value;
+			}
+		}
 		if (nodeType == "image.transform_3d") {
 			if (propertyId == "position" || propertyId == "anchor")
 				return engine::imagegraph::Value{engine::imagegraph::Vector3{}};
@@ -683,11 +895,34 @@ namespace studio {
 			return engine::imagegraph::Value{engine::imagegraph::Quaternion{}};
 		case ValueType::Enum:
 			return engine::imagegraph::Value{engine::imagegraph::EnumValue{}};
-		case ValueType::Mesh:
-		case ValueType::AudioBit:
+		default:
+			// Meshes, audio and runtime-only sockets have no authored default.
 			return std::nullopt;
 		}
-		return std::nullopt;
+	}
+
+	std::optional<engine::imagegraph::Value> ImageGraphPropertyDefault(
+		const Document &document, std::string_view nodeType, std::string_view property
+	) {
+		// nodeValue_Palette clones PROJ_PALETTE for these source inputs at creation.
+		const bool projectPalette =
+			(nodeType == "pc.gradient_palette" && property == "palette") ||
+			(nodeType == "pc.gradient_replace_color" && (property == "color_from" || property == "color_to"));
+		if (projectPalette) {
+			engine::imagegraph::ArrayValue palette;
+			palette.ElementType = engine::imagegraph::ValueType::Colour;
+			const engine::imagegraph::ProjectSettings defaults;
+			const engine::imagegraph::ProjectSettings &project =
+				document.Project ? *document.Project : defaults;
+			const auto &colours = project.Palette;
+			if (colours.size() > engine::imagegraph::Limits::MaximumProjectPaletteEntries)
+				return std::nullopt;
+			palette.Elements.reserve(colours.size());
+			for (const auto &colour : colours)
+				palette.Elements.push_back(colour);
+			return engine::imagegraph::Value{std::move(palette)};
+		}
+		return ImageGraphPropertyDefault(nodeType, property);
 	}
 
 	bool LoadImageGraphCanvas(
@@ -870,7 +1105,7 @@ namespace studio {
 				authored = *old->second;
 			} else {
 				authored.Id = documentId;
-				authored.Values = StarterValues(canvasNode.Type);
+				authored.Values = StarterValues(basis, canvasNode.Type);
 			}
 			authored.Id = documentId;
 			authored.Type = canvasNode.Type;
@@ -1030,6 +1265,16 @@ namespace studio {
 		engine::imagegraph::Diagnostic &diagnostic
 	) {
 		using namespace engine::imagegraph;
+		if (request.MaximumImageDimension == 0 || request.MaximumImageDimension > Limits::MaximumDimension) {
+			diagnostic = {
+				Status::InvalidValue,
+				{},
+				"image_limit",
+				"request image dimension budget is outside the supported range"
+			};
+			return diagnostic.Code;
+		}
+
 		const auto output =
 			std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const Output &candidate) {
 				return candidate.Id == outputId;
@@ -1057,26 +1302,89 @@ namespace studio {
 			diagnostic = {Status::InvalidOutput, output->NodeId, output->Port, "output port is not declared"};
 			return diagnostic.Code;
 		}
+		EvaluationRequest boundedRequest = request;
+		boundedRequest.MaximumImageDimension =
+			std::min(request.MaximumImageDimension, IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION);
 		if (port->Type == ValueType::Image) {
 			Image image;
-			const Status status = Evaluate(document, plan, std::string(outputId), request, image, diagnostic);
+			const Status status =
+				Evaluate(document, plan, std::string(outputId), boundedRequest, image, diagnostic);
 			if (status == Status::Ok) preview = std::move(image);
 			return status;
 		}
-		if (port->Type != ValueType::Scalar) {
+		if (port->Type != ValueType::Scalar && port->Type != ValueType::Array &&
+			port->Type != ValueType::Vector2) {
 			diagnostic = {
 				Status::UnsupportedExecution,
 				output->NodeId,
 				output->Port,
-				"Studio preview supports image and scalar outputs"
+				"Studio preview supports images, scalars, vectors and numeric arrays"
 			};
 			return diagnostic.Code;
 		}
 		EvaluatedValue value;
 		const Status status =
-			EvaluateValue(document, plan, std::string(outputId), request, value, diagnostic);
-		if (status == Status::Ok) preview = std::move(value);
+			EvaluateValue(document, plan, std::string(outputId), boundedRequest, value, diagnostic);
+		if (status == Status::Ok) {
+			if (const auto *vector = std::get_if<Vector2>(&value.Data);
+				vector && (!std::isfinite(vector->X) || !std::isfinite(vector->Y))) {
+				diagnostic = {
+					Status::InvalidValue,
+					output->NodeId,
+					output->Port,
+					"vector preview requires finite coordinates"
+				};
+				return diagnostic.Code;
+			}
+			if (const auto *array = std::get_if<ArrayValue>(&value.Data);
+				array && !CheckImageGraphArrayPreview(*array, diagnostic)) {
+				diagnostic.NodeId = output->NodeId;
+				diagnostic.Port = output->Port;
+				return diagnostic.Code;
+			}
+			preview = std::move(value);
+		}
+
 		return status;
+	}
+
+	bool CheckImageGraphArrayPreview(
+		const engine::imagegraph::ArrayValue &array, engine::imagegraph::Diagnostic &diagnostic
+	) {
+		using namespace engine::imagegraph;
+		diagnostic = {};
+		const auto fail = [&](Status code, std::string message) {
+			diagnostic = {code, {}, {}, std::move(message)};
+			return false;
+		};
+		if (array.ElementType != ValueType::Scalar && array.ElementType != ValueType::Integer)
+			return fail(Status::UnsupportedExecution, "array preview requires numeric elements");
+		if (!array.Elements.empty() && !array.Nested.empty())
+			return fail(Status::InvalidValue, "array preview cannot combine flat samples and channels");
+		if (array.Nested.size() > Limits::MaximumAudioChannels)
+			return fail(Status::LimitExceeded, "array preview exceeds the channel limit");
+		size_t samples = 0;
+		const auto checkRow = [&](const std::vector<ElementValue> &row) {
+			if (row.size() > Limits::MaximumArrayElements - samples)
+				return fail(Status::LimitExceeded, "array preview exceeds the sample limit");
+			samples += row.size();
+			for (const ElementValue &sample : row) {
+				if (array.ElementType == ValueType::Integer && std::holds_alternative<int64_t>(sample))
+					continue;
+				const double *number = std::get_if<double>(&sample);
+				if (array.ElementType != ValueType::Scalar || !number || !std::isfinite(*number))
+					return fail(
+						Status::InvalidValue,
+						"array preview sample is not a finite number of its declared type"
+					);
+			}
+			return true;
+		};
+		if (!checkRow(array.Elements)) return false;
+		for (const auto &channel : array.Nested) {
+			if (!checkRow(channel)) return false;
+		}
+		return true;
 	}
 
 	bool SetImageGraphValue(
@@ -1102,7 +1410,17 @@ namespace studio {
 		if (declared == schema->Properties.end())
 			return fail(engine::imagegraph::Status::UnknownPort, "property is not declared");
 		const auto valueType = TypeOf(value);
-		if (!valueType || *valueType != declared->Type)
+		const auto *sourceInput = imagegraph_choices::Input(node->Type, property);
+		const bool sourceChoice =
+			sourceInput && engine::imagegraph::CatalogueSourceEnumValue(*sourceInput, value);
+		const auto *sourceEntry = engine::imagegraph::FindCatalogueEntry(node->Type);
+		const auto *array = std::get_if<engine::imagegraph::ArrayValue>(&value);
+		const bool sourceArray =
+			sourceEntry && sourceInput && array &&
+			engine::imagegraph::CatalogueAuthoredArray(*sourceEntry, *sourceInput, *array);
+		if (!sourceChoice && !sourceArray &&
+			!(sourceInput && engine::imagegraph::CatalogueSourceRawValue(*sourceInput, value)) &&
+			(!valueType || *valueType != declared->Type))
 			return fail(engine::imagegraph::Status::TypeMismatch, "value type does not match the schema");
 		if (const auto *text = std::get_if<std::string>(&value);
 			text != nullptr && text->size() > engine::imagegraph::Limits::MaximumTextBytes) {
@@ -1126,6 +1444,55 @@ namespace studio {
 		}
 		PromoteFormatVersion(document);
 		return true;
+	}
+
+	bool SetImageGraphProjectSettings(
+		Document &document,
+		const engine::imagegraph::ProjectSettings &settings,
+		engine::imagegraph::Diagnostic &error
+	) {
+		error = {};
+		using engine::imagegraph::Limits;
+		if (settings.SurfaceWidth < 1 || settings.SurfaceHeight < 1 ||
+			settings.SurfaceWidth > Limits::MaximumDimension ||
+			settings.SurfaceHeight > Limits::MaximumDimension || settings.Interpolation < 0 ||
+			settings.Interpolation > 6 || settings.Oversample < 0 || settings.Oversample > 12) {
+			SetDiagnostic(
+				error,
+				engine::imagegraph::Status::InvalidValue,
+				{},
+				{},
+				"project settings are outside their ranges"
+			);
+			return false;
+		}
+		if (settings.Palette.size() > Limits::MaximumProjectPaletteEntries) {
+			SetDiagnostic(
+				error,
+				engine::imagegraph::Status::LimitExceeded,
+				{},
+				{},
+				"project palette exceeds the document limit"
+			);
+			return false;
+		}
+		if (!engine::imagegraph::ValidProjectPreviewSettings(settings)) {
+			SetDiagnostic(
+				error,
+				engine::imagegraph::Status::InvalidValue,
+				{},
+				"preview_grid",
+				"preview grid and guides are invalid or exceed their limits"
+			);
+			return false;
+		}
+		document.Project = settings;
+		PromoteFormatVersion(document);
+		return true;
+	}
+
+	void RemoveImageGraphProjectSettings(Document &document) {
+		document.Project.reset();
 	}
 
 	bool SetImageGraphDynamicInput(
@@ -1419,7 +1786,9 @@ namespace studio {
 		std::string_view property,
 		uint64_t tick,
 		std::string_view interpolation,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		double subframe,
+		bool negativeFrame
 	) {
 		error = {};
 		const auto fail = [&](engine::imagegraph::Status code, std::string message) {
@@ -1429,6 +1798,9 @@ namespace studio {
 		if (interpolation != "step" && interpolation != "linear" && interpolation != "cubic" &&
 			interpolation != "source")
 			return fail(engine::imagegraph::Status::InvalidValue, "unsupported interpolation rule");
+		const engine::imagegraph::FrameTime time{tick, subframe, negativeFrame};
+		if (!engine::imagegraph::ValidFrameTime(time))
+			return fail(engine::imagegraph::Status::InvalidValue, "key time is invalid");
 		const Node *node = FindAuthoredNode(document, nodeId);
 		if (node == nullptr) return fail(engine::imagegraph::Status::UnknownNode, "node does not exist");
 		const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(node->Type);
@@ -1449,7 +1821,8 @@ namespace studio {
 			return fail(engine::imagegraph::Status::TypeMismatch, "authored value does not match the schema");
 		auto frame =
 			std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &entry) {
-				return entry.NodeId == nodeId && entry.Port == property && entry.Tick == tick;
+				return entry.NodeId == nodeId && entry.Port == property &&
+					   engine::imagegraph::GetFrameTime(entry) == time;
 			});
 		if (frame == document.Keyframes.end()) {
 			if (document.Keyframes.size() >= engine::imagegraph::Limits::MaximumKeyframes)
@@ -1466,9 +1839,12 @@ namespace studio {
 				 std::string(interpolation),
 				 std::nullopt}
 			);
+			(void)engine::imagegraph::SetFrameTime(document.Keyframes.back(), time);
 		} else {
 			frame->Data = value->Data;
 		}
+		if (subframe != 0 || negativeFrame)
+			document.FormatVersion = std::max(document.FormatVersion, uint32_t{9});
 		SetTrackInterpolation(document, nodeId, property, interpolation);
 		return true;
 	}
@@ -1478,13 +1854,18 @@ namespace studio {
 		std::string_view nodeId,
 		std::string_view property,
 		uint64_t tick,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		double subframe,
+		bool negativeFrame
 	) {
 		error = {};
 		const auto fail = [&](engine::imagegraph::Status code, std::string message) {
 			SetDiagnostic(error, code, nodeId, property, std::move(message));
 			return false;
 		};
+		const engine::imagegraph::FrameTime time{tick, subframe, negativeFrame};
+		if (!engine::imagegraph::ValidFrameTime(time))
+			return fail(engine::imagegraph::Status::InvalidValue, "key time is invalid");
 		const Node *node = FindAuthoredNode(document, nodeId);
 		if (node == nullptr) return fail(engine::imagegraph::Status::UnknownNode, "node does not exist");
 		const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(node->Type);
@@ -1496,7 +1877,8 @@ namespace studio {
 		}
 		const size_t before = document.Keyframes.size();
 		std::erase_if(document.Keyframes, [&](const auto &entry) {
-			return entry.NodeId == nodeId && entry.Port == property && entry.Tick == tick;
+			return entry.NodeId == nodeId && entry.Port == property &&
+				   engine::imagegraph::GetFrameTime(entry) == time;
 		});
 		if (document.Keyframes.size() == before) return false;
 		const bool stillKeyed =
@@ -1508,6 +1890,351 @@ namespace studio {
 				return track.NodeId == nodeId && track.Port == property;
 			});
 		}
+		return true;
+	}
+
+	bool CaptureImageGraphKeyframes(
+		const Document &document,
+		std::span<const ImageGraphKeyframeIdentity> selection,
+		std::vector<engine::imagegraph::Keyframe> &result,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
+	) {
+		using namespace engine::imagegraph;
+		error = {};
+		const auto fail = [&](Status status, const char *message) {
+			SetDiagnostic(error, status, {}, {}, message);
+			return false;
+		};
+		if (selection.empty() || selection.size() > Limits::MaximumKeyframes ||
+			document.Keyframes.size() > Limits::MaximumKeyframes)
+			return fail(Status::LimitExceeded, "key selection is empty or exceeds the limit");
+		uint64_t remaining = std::min(availableBytes, Limits::MaximumEvaluationBytes);
+		for (const auto &key : result) {
+			const auto bytes = KeyframePayloadBytes(key);
+			if (!bytes || *bytes > remaining)
+				return fail(Status::LimitExceeded, "retained key snapshot exceeds the payload budget");
+			remaining -= *bytes;
+		}
+		for (size_t index = 0; index < selection.size(); ++index) {
+			const auto &identity = selection[index];
+			if (!ValidFrameTime(identity.Time) ||
+				std::find(selection.begin(), selection.begin() + index, identity) !=
+					selection.begin() + index)
+				return fail(Status::InvalidValue, "key selection contains an invalid or repeated identity");
+			const auto found =
+				std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
+					return key.NodeId == identity.NodeId && key.Port == identity.Port &&
+						   GetFrameTime(key) == identity.Time;
+				});
+			if (found == document.Keyframes.end())
+				return fail(Status::InvalidValue, "selected key no longer exists");
+			const auto bytes = KeyframePayloadBytes(*found);
+			if (!bytes || *bytes > remaining)
+				return fail(Status::LimitExceeded, "key snapshot exceeds the payload budget");
+			remaining -= *bytes;
+		}
+		std::vector<Keyframe> candidate;
+		candidate.reserve(selection.size());
+		for (const auto &identity : selection) {
+			const auto found =
+				std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
+					return key.NodeId == identity.NodeId && key.Port == identity.Port &&
+						   GetFrameTime(key) == identity.Time;
+				});
+			candidate.push_back(*found);
+		}
+		result = std::move(candidate);
+		return true;
+	}
+
+	bool TransferImageGraphKeyframes(
+		Document &document,
+		std::span<const engine::imagegraph::Keyframe> originals,
+		const engine::imagegraph::FrameTime &oldAnchor,
+		const engine::imagegraph::FrameTime &newAnchor,
+		bool copy,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
+	) {
+		using namespace engine::imagegraph;
+		if (!ValidFrameTime(oldAnchor) || !ValidFrameTime(newAnchor) ||
+			originals.size() > Limits::MaximumKeyframes) {
+			SetDiagnostic(
+				error, Status::InvalidValue, {}, {}, "key transfer has an invalid count or authored frame"
+			);
+			return false;
+		}
+		if (originals.size() * sizeof(FrameTime) > availableBytes) {
+			SetDiagnostic(error, Status::LimitExceeded, {}, {}, "key destinations exceed the payload budget");
+			return false;
+		}
+		std::vector<FrameTime> destinations;
+		destinations.reserve(originals.size());
+		for (const auto &key : originals) {
+			FrameTime time;
+			if (!ValidFrameTime(GetFrameTime(key)) ||
+				!ShiftFrameTime(GetFrameTime(key), oldAnchor, newAnchor, time)) {
+				SetDiagnostic(
+					error, Status::InvalidValue, {}, {}, "shifted key frame exceeds the authored range"
+				);
+				return false;
+			}
+			destinations.push_back(time);
+		}
+		return RetimeImageGraphKeyframes(
+			document,
+			originals,
+			destinations,
+			copy,
+			error,
+			availableBytes - destinations.size() * sizeof(FrameTime)
+		);
+	}
+
+	bool RetimeImageGraphKeyframes(
+		Document &document,
+		std::span<const engine::imagegraph::Keyframe> originals,
+		std::span<const engine::imagegraph::FrameTime> destinations,
+		bool copy,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
+	) {
+		using namespace engine::imagegraph;
+		error = {};
+		const auto fail = [&](Status status, const char *message) {
+			SetDiagnostic(error, status, {}, {}, message);
+			return false;
+		};
+		if (originals.empty() || originals.size() > Limits::MaximumKeyframes ||
+			document.Keyframes.size() > Limits::MaximumKeyframes || destinations.size() != originals.size())
+			return fail(Status::InvalidValue, "key transfer has an invalid count or authored frame");
+		uint64_t remaining = std::min(availableBytes, Limits::MaximumEvaluationBytes);
+		for (const auto &key : document.Keyframes) {
+			const auto bytes = KeyframePayloadBytes(key);
+			if (!bytes || *bytes > remaining)
+				return fail(Status::LimitExceeded, "key transfer exceeds the payload budget");
+			remaining -= *bytes;
+		}
+		for (size_t index = 0; index < originals.size(); ++index) {
+			const auto &key = originals[index];
+			const auto bytes = KeyframePayloadBytes(key);
+			if (!bytes || *bytes > remaining)
+				return fail(Status::LimitExceeded, "key transfer exceeds the payload budget");
+			remaining -= *bytes;
+			if (!ValidFrameTime(GetFrameTime(key)) || !ValidFrameTime(destinations[index]))
+				return fail(Status::InvalidValue, "shifted key frame exceeds the authored range");
+			for (size_t prior = 0; prior < index; ++prior)
+				if (key.NodeId == originals[prior].NodeId && key.Port == originals[prior].Port &&
+					GetFrameTime(key) == GetFrameTime(originals[prior]))
+					return fail(Status::InvalidValue, "key transfer repeats an original");
+			if (!copy && std::find(document.Keyframes.begin(), document.Keyframes.end(), key) ==
+							 document.Keyframes.end())
+				return fail(Status::InvalidValue, "key changed while its move editor was open");
+		}
+		// Remove the whole move selection before replacement so one moved key cannot erase
+		// another pinned original merely because its destination equals that original's old time.
+		Document candidate = document;
+		if (!copy)
+			std::erase_if(candidate.Keyframes, [&](const auto &key) {
+				return std::find(originals.begin(), originals.end(), key) != originals.end();
+			});
+		for (size_t index = 0; index < originals.size(); ++index) {
+			const auto &original = originals[index];
+			const FrameTime destination =
+				destinations[index].NegativeFrame ? FrameTime{} : destinations[index];
+			bool alreadyMoved = false;
+			if (!copy)
+				for (size_t prior = 0; prior < index; ++prior) {
+					const FrameTime previous =
+						destinations[prior].NegativeFrame ? FrameTime{} : destinations[prior];
+					if (original.NodeId == originals[prior].NodeId &&
+						original.Port == originals[prior].Port && destination == previous)
+						alreadyMoved = true;
+				}
+			// Source release replaces the collision with the first selected moved object;
+			// later selected objects removed by that replacement cannot be moved again.
+			if (alreadyMoved) continue;
+			Keyframe key = original;
+			(void)SetFrameTime(key, destination);
+			if (copy) {
+				key.SourceDriver.reset();
+				// The native legacy driver also starts absent on a clone.
+				key.SineDriver.reset();
+			}
+			std::erase_if(candidate.Keyframes, [&](const auto &existing) {
+				return existing.NodeId == key.NodeId && existing.Port == key.Port &&
+					   GetFrameTime(existing) == destination;
+			});
+			if (candidate.Keyframes.size() >= Limits::MaximumKeyframes)
+				return fail(Status::LimitExceeded, "keyframe limit reached");
+			if (key.Interpolation == "source" &&
+				!EnsureSourceAnimationTrack(candidate, key.NodeId, key.Port, error))
+				return false;
+			candidate.Keyframes.push_back(std::move(key));
+		}
+		std::stable_sort(
+			candidate.Keyframes.begin(), candidate.Keyframes.end(), [](const auto &left, const auto &right) {
+				return CompareFrameTime(GetFrameTime(left), GetFrameTime(right)) < 0;
+			}
+		);
+		PromoteFormatVersion(candidate);
+		Plan plan;
+		if (Compile(candidate, plan, error) != Status::Ok) return false;
+		document = std::move(candidate);
+		return true;
+	}
+
+	bool PasteImageGraphKeyframesToProperty(
+		Document &document,
+		std::span<const engine::imagegraph::Keyframe> clipboard,
+		const engine::imagegraph::FrameTime &cursor,
+		std::string_view nodeId,
+		std::string_view property,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
+	) {
+		using namespace engine::imagegraph;
+		error = {};
+		const auto fail = [&](Status status, const char *message) {
+			SetDiagnostic(error, status, nodeId, property, message);
+			return false;
+		};
+		if (clipboard.empty() || clipboard.size() > Limits::MaximumKeyframes || !ValidFrameTime(cursor))
+			return fail(Status::InvalidValue, "clipboard or paste frame is invalid");
+		const auto *target = FindAuthoredNode(document, nodeId);
+		if (!target) return fail(Status::UnknownNode, "paste target no longer exists");
+		const auto *targetSchema = FindSchema(target->Type);
+		if (!targetSchema) return fail(Status::UnknownNode, "paste target type is unknown");
+		const bool staticTarget = std::any_of(
+			targetSchema->Properties.begin(), targetSchema->Properties.end(), [&](const auto &entry) {
+				return entry.Id == property;
+			}
+		);
+		const bool dynamicTarget =
+			std::any_of(target->DynamicInputs.begin(), target->DynamicInputs.end(), [&](const auto &entry) {
+				return entry.Id == property && IsAuthoredValueType(entry.Type);
+			});
+		if (!staticTarget && !dynamicTarget)
+			return fail(Status::UnknownPort, "paste target property no longer exists");
+		bool multiple = false;
+		FrameTime anchor = GetFrameTime(clipboard.front());
+		uint64_t remaining = std::min(availableBytes, Limits::MaximumEvaluationBytes);
+		size_t longestPort = property.size();
+		for (const auto &entry : targetSchema->Properties)
+			longestPort = std::max(longestPort, entry.Id.size());
+		for (const auto &entry : target->DynamicInputs)
+			longestPort = std::max(longestPort, entry.Id.size());
+		for (const auto &key : clipboard) {
+			multiple =
+				multiple || key.NodeId != clipboard.front().NodeId || key.Port != clipboard.front().Port;
+			if (CompareFrameTime(GetFrameTime(key), anchor) < 0) anchor = GetFrameTime(key);
+			const auto bytes = KeyframePayloadBytes(key);
+			const uint64_t names = target->Id.size() + longestPort;
+			if (!bytes || *bytes > remaining || names > remaining - *bytes)
+				return fail(Status::LimitExceeded, "mapped clipboard exceeds the key payload budget");
+			remaining -= *bytes + names;
+		}
+		std::vector<Keyframe> mapped;
+		mapped.reserve(clipboard.size());
+		Diagnostic skipped;
+		for (const auto &key : clipboard) {
+			std::string_view destination = property;
+			if (multiple) {
+				const auto *source = FindAuthoredNode(document, key.NodeId);
+				if (!source) return fail(Status::UnknownNode, "copied source property no longer exists");
+				const auto *sourceEntry = FindCatalogueEntry(source->Type),
+						   *targetEntry = FindCatalogueEntry(target->Type);
+				std::string_view name = key.Port;
+				if (sourceEntry) {
+					const auto input = std::find_if(
+						sourceEntry->Inputs.begin(), sourceEntry->Inputs.end(), [&](const auto &entry) {
+							return entry.Id == key.Port;
+						}
+					);
+					if (input == sourceEntry->Inputs.end())
+						return fail(
+							Status::UnsupportedExecution, "source property display name is not represented"
+						);
+					name = input->Name;
+				}
+				destination = {};
+				if (targetEntry) {
+					const auto input = std::find_if(
+						targetEntry->Inputs.begin(), targetEntry->Inputs.end(), [&](const auto &entry) {
+							return entry.Name == name;
+						}
+					);
+					if (input != targetEntry->Inputs.end()) destination = input->Id;
+				} else {
+					// Native-only schemas have durable property names rather than source display names.
+					const auto input = std::find_if(
+						targetSchema->Properties.begin(),
+						targetSchema->Properties.end(),
+						[&](const auto &entry) { return entry.Id == name; }
+					);
+					if (input != targetSchema->Properties.end()) destination = input->Id;
+				}
+				if (destination.empty()) {
+					skipped = {
+						Status::UnknownPort,
+						std::string(nodeId),
+						key.Port,
+						"some copied properties have no matching target name"
+					};
+					continue;
+				}
+			}
+			Keyframe clone;
+			Diagnostic diagnostic;
+			const auto status =
+				PrepareKeyframeCloneForProperty(document, key, nodeId, destination, clone, diagnostic);
+			if (status == Status::TypeMismatch) {
+				skipped = std::move(diagnostic);
+				continue;
+			}
+			if (status != Status::Ok) {
+				error = std::move(diagnostic);
+				return false;
+			}
+			clone.SourceDriver.reset();
+			clone.SineDriver.reset();
+			mapped.push_back(std::move(clone));
+		}
+		if (mapped.empty()) {
+			error = std::move(skipped);
+			return true;
+		}
+		if (!TransferImageGraphKeyframes(document, mapped, anchor, cursor, true, error, remaining))
+			return false;
+		error = std::move(skipped);
+		return true;
+	}
+
+	bool SetImageGraphKeyframeKind(
+		Document &document,
+		size_t index,
+		engine::imagegraph::KeyframeKind kind,
+		engine::imagegraph::Diagnostic &error
+	) {
+		using engine::imagegraph::KeyframeKind;
+		error = {};
+		if (document.Keyframes.size() > engine::imagegraph::Limits::MaximumKeyframes) {
+			SetDiagnostic(
+				error, engine::imagegraph::Status::LimitExceeded, {}, {}, "keyframe limit exceeded"
+			);
+			return false;
+		}
+		if (index >= document.Keyframes.size() ||
+			(kind != KeyframeKind::Normal && kind != KeyframeKind::Adder)) {
+			SetDiagnostic(
+				error, engine::imagegraph::Status::InvalidValue, {}, {}, "keyframe index or kind is invalid"
+			);
+			return false;
+		}
+		document.Keyframes[index].Kind = kind;
+		if (kind == KeyframeKind::Adder)
+			document.FormatVersion = std::max(document.FormatVersion, uint32_t{9});
 		return true;
 	}
 
@@ -1533,6 +2260,29 @@ namespace studio {
 			return false;
 		}
 		const engine::imagegraph::Keyframe &frame = document.Keyframes[index];
+		if (rule != "source") {
+			const bool sourceControls =
+				std::any_of(
+					document.Keyframes.begin(),
+					document.Keyframes.end(),
+					[&](const auto &key) {
+						return key.NodeId == frame.NodeId && key.Port == frame.Port && key.SourceDriver;
+					}
+				) ||
+				std::any_of(document.Tracks.begin(), document.Tracks.end(), [&](const auto &track) {
+					return track.NodeId == frame.NodeId && track.Port == frame.Port && track.QuaternionMode;
+				});
+			if (sourceControls) {
+				SetDiagnostic(
+					error,
+					engine::imagegraph::Status::InvalidValue,
+					frame.NodeId,
+					frame.Port,
+					"remove source drivers and quaternion mode before changing interpolation"
+				);
+				return false;
+			}
+		}
 		if (rule == "source" && !EnsureSourceAnimationTrack(document, frame.NodeId, frame.Port, error))
 			return false;
 		SetTrackInterpolation(document, frame.NodeId, frame.Port, rule);
@@ -1575,6 +2325,74 @@ namespace studio {
 		return true;
 	}
 
+	bool SetImageGraphKeyframeSourceDriver(
+		Document &document,
+		size_t index,
+		const std::optional<engine::imagegraph::KeyframeSourceDriver> &driver,
+		engine::imagegraph::Diagnostic &error
+	) {
+		using namespace engine::imagegraph;
+		error = {};
+		if (index >= document.Keyframes.size()) {
+			SetDiagnostic(error, Status::InvalidValue, {}, {}, "keyframe index is out of range");
+			return false;
+		}
+		const auto &frame = document.Keyframes[index];
+		if (driver && (frame.SineDriver || !ValidKeyframeSourceDriver(*driver))) {
+			SetDiagnostic(
+				error,
+				Status::InvalidValue,
+				frame.NodeId,
+				frame.Port,
+				"source driver needs valid controls and no legacy sine driver"
+			);
+			return false;
+		}
+		Document candidate = document;
+		if (driver) {
+			if (!EnsureSourceAnimationTrack(candidate, frame.NodeId, frame.Port, error)) return false;
+			SetTrackInterpolation(candidate, frame.NodeId, frame.Port, "source");
+		}
+		candidate.Keyframes[index].SourceDriver = driver;
+		PromoteFormatVersion(candidate);
+		Plan plan;
+		if (Compile(candidate, plan, error) != Status::Ok) return false;
+		document.Keyframes = std::move(candidate.Keyframes);
+		document.Tracks = std::move(candidate.Tracks);
+		document.FormatVersion = candidate.FormatVersion;
+		return true;
+	}
+
+	bool SetImageGraphTrackQuaternionMode(
+		Document &document,
+		std::string_view nodeId,
+		std::string_view property,
+		std::optional<int64_t> mode,
+		engine::imagegraph::Diagnostic &error
+	) {
+		using namespace engine::imagegraph;
+		error = {};
+		if (mode && (*mode < 0 || *mode > 1)) {
+			SetDiagnostic(error, Status::InvalidValue, nodeId, property, "quaternion mode is raw or Euler");
+			return false;
+		}
+		Document candidate = document;
+		if (!EnsureSourceAnimationTrack(candidate, nodeId, property, error)) return false;
+		if (mode) SetTrackInterpolation(candidate, nodeId, property, "source");
+		const auto track =
+			std::find_if(candidate.Tracks.begin(), candidate.Tracks.end(), [&](const auto &entry) {
+				return entry.NodeId == nodeId && entry.Port == property;
+			});
+		track->QuaternionMode = mode;
+		PromoteFormatVersion(candidate);
+		Plan plan;
+		if (Compile(candidate, plan, error) != Status::Ok) return false;
+		document.Keyframes = std::move(candidate.Keyframes);
+		document.Tracks = std::move(candidate.Tracks);
+		document.FormatVersion = candidate.FormatVersion;
+		return true;
+	}
+
 	bool SetImageGraphKeyframeSineDriver(
 		Document &document,
 		size_t index,
@@ -1585,6 +2403,17 @@ namespace studio {
 		if (index >= document.Keyframes.size()) {
 			SetDiagnostic(
 				error, engine::imagegraph::Status::InvalidValue, {}, {}, "keyframe index is out of range"
+			);
+			return false;
+		}
+		if (driver && document.Keyframes[index].SourceDriver) {
+			const auto &frame = document.Keyframes[index];
+			SetDiagnostic(
+				error,
+				engine::imagegraph::Status::InvalidValue,
+				frame.NodeId,
+				frame.Port,
+				"remove the source driver before adding a legacy sine driver"
 			);
 			return false;
 		}
@@ -1806,19 +2635,45 @@ namespace studio {
 		const auto declared =
 			std::find_if(schema->Ports.begin(), schema->Ports.end(), [&](const auto &entry) {
 				return entry.Id == port && entry.Direction == engine::imagegraph::PortDirection::Output &&
-					   entry.Type == engine::imagegraph::ValueType::Image;
+					   (entry.Type == engine::imagegraph::ValueType::Image ||
+						entry.Type == engine::imagegraph::ValueType::Scalar ||
+						entry.Type == engine::imagegraph::ValueType::Array);
 			});
 		if (declared == schema->Ports.end())
-			return fail(engine::imagegraph::Status::UnknownPort, "image output port is not declared");
+			return fail(engine::imagegraph::Status::UnknownPort, "preview output port is not declared");
 		output->NodeId = nodeId;
 		output->Port = port;
 		return true;
 	}
 
+	std::optional<engine::imagegraph::FrameTime>
+	PreviousImageGraphKey(const Document &document, engine::imagegraph::FrameTime frame) {
+		std::optional<engine::imagegraph::FrameTime> result;
+		for (const auto &key : document.Keyframes) {
+			const auto time = engine::imagegraph::GetFrameTime(key);
+			if (engine::imagegraph::CompareFrameTime(time, frame) < 0 &&
+				(!result || engine::imagegraph::CompareFrameTime(time, *result) > 0))
+				result = time;
+		}
+		return result;
+	}
+	std::optional<engine::imagegraph::FrameTime>
+	NextImageGraphKey(const Document &document, engine::imagegraph::FrameTime frame) {
+		std::optional<engine::imagegraph::FrameTime> result;
+		for (const auto &key : document.Keyframes) {
+			const auto time = engine::imagegraph::GetFrameTime(key);
+			if (engine::imagegraph::CompareFrameTime(time, frame) > 0 &&
+				(!result || engine::imagegraph::CompareFrameTime(time, *result) < 0))
+				result = time;
+		}
+		return result;
+	}
 	std::optional<uint64_t> PreviousImageGraphKey(const Document &document, uint64_t tick) {
 		std::optional<uint64_t> previous;
 		for (const engine::imagegraph::Keyframe &frame : document.Keyframes) {
-			if (frame.Tick < tick && (!previous || frame.Tick > *previous)) previous = frame.Tick;
+			if (!frame.NegativeFrame && frame.Subframe == 0 && frame.Tick < tick &&
+				(!previous || frame.Tick > *previous))
+				previous = frame.Tick;
 		}
 		return previous;
 	}
@@ -1826,7 +2681,9 @@ namespace studio {
 	std::optional<uint64_t> NextImageGraphKey(const Document &document, uint64_t tick) {
 		std::optional<uint64_t> next;
 		for (const engine::imagegraph::Keyframe &frame : document.Keyframes) {
-			if (frame.Tick > tick && (!next || frame.Tick < *next)) next = frame.Tick;
+			if (!frame.NegativeFrame && frame.Subframe == 0 && frame.Tick > tick &&
+				(!next || frame.Tick < *next))
+				next = frame.Tick;
 		}
 		return next;
 	}

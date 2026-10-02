@@ -1,3 +1,4 @@
+#include "ImageComposerInternal.hpp"
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
@@ -955,6 +956,8 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		CloseImageComposerAudioPreview();
+		CloseImageComposerVector2Preview(Renderer);
 		// A prepared import owns no universe state, but its result fields belong
 		// to this editor and must outlive the worker writing them.
 		if (WorldImportWorker.joinable()) {

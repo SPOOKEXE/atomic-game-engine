@@ -5,6 +5,7 @@
 
 #include <engine/bake/Pxcx.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/FrameTime.hpp>
 #include <engine/scene/ImageGraphBinding.hpp>
 
 #include <cstddef>
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <nodegraph/Graph.hpp>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -22,8 +24,23 @@
 namespace studio {
 
 	inline constexpr uint32_t IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION = 128;
+	// Maximum input bytes for one cached image at RGBA32 float precision.
+	inline constexpr size_t IMAGE_COMPOSER_PREVIEW_SURFACE_BYTES_PER_PIXEL = 16;
+	inline constexpr size_t IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES =
+		static_cast<size_t>(IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION) *
+		IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION * IMAGE_COMPOSER_PREVIEW_SURFACE_BYTES_PER_PIXEL;
+	// Maximum bytes for the RGBA8 texture uploaded for display.
+	inline constexpr size_t IMAGE_COMPOSER_PREVIEW_DISPLAY_MAXIMUM_BYTES =
+		static_cast<size_t>(IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION) *
+		IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION * 4;
 	inline constexpr size_t IMAGE_GRAPH_FILE_MAXIMUM_BYTES = 8 * 1024 * 1024;
 	inline constexpr size_t IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES = 8;
+	// Retained image capacity is bounded by eight maximum typed surfaces.
+	inline constexpr size_t IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES =
+		IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES * IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES;
+	// One typed candidate may overlap the retained cache during replacement.
+	inline constexpr size_t IMAGE_COMPOSER_PREVIEW_CACHE_PEAK_BYTES =
+		(IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES + 1) * IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES;
 
 	// Editor playback advances a bounded fixed-tick interval and can seek within a
 	// frame for preview evaluation.
@@ -39,9 +56,15 @@ namespace studio {
 		double FramesPerSecond = 30.0;
 		double Accumulator = 0.0;
 		int8_t Direction = 1;
+		bool NegativeFrame = false;
 	};
 
-	// Loads durable v5 timeline fields into the editor playback cursor.
+	engine::imagegraph::FrameTime GetImageGraphFrame(const ImageGraphPlayback &playback);
+	// Seeks an authoring clock, independently of the bounded playback range.
+	bool SetImageGraphAuthorFrame(ImageGraphPlayback &playback, engine::imagegraph::FrameTime frame);
+	bool SeekImageGraphAuthorFrame(ImageGraphPlayback &playback, double frame, bool control, bool alt);
+
+	// Loads durable timeline fields into the editor playback cursor.
 	void ApplyImageGraphTimeline(const engine::imagegraph::Document &document, ImageGraphPlayback &playback);
 
 	// Sets an unrounded frame position inside the current playback range.
@@ -55,14 +78,20 @@ namespace studio {
 	// selected output, tick and fractional frame. Failed evaluations never replace a good frame.
 	class ImageGraphPreviewCache {
 	  public:
-		const engine::imagegraph::Image *
-		Find(uint64_t revision, size_t outputIndex, uint64_t tick, double subframe = 0.0);
+		const engine::imagegraph::Image *Find(
+			uint64_t revision,
+			size_t outputIndex,
+			uint64_t tick,
+			double subframe = 0.0,
+			bool negativeFrame = false
+		);
 		bool Store(
 			uint64_t revision,
 			size_t outputIndex,
 			uint64_t tick,
 			const engine::imagegraph::Image &image,
-			double subframe = 0.0
+			double subframe = 0.0,
+			bool negativeFrame = false
 		);
 		void Clear();
 		size_t HeldBytes() const;
@@ -73,12 +102,50 @@ namespace studio {
 			size_t OutputIndex = 0;
 			uint64_t Tick = 0;
 			double Subframe = 0.0;
+			bool NegativeFrame = false;
 			uint64_t LastUsed = 0;
 			engine::imagegraph::Image Image;
 		};
 		std::vector<Entry> Entries;
 		uint64_t UseSerial = 0;
 	};
+
+	// Recorded capture loading shares the successful-input cache invalidation used by WAV sources.
+	bool LoadImageGraphAudioCapture(
+		std::vector<engine::imagegraph::AudioCaptureFrame> &frames,
+		ImageGraphPreviewCache &cache,
+		const std::filesystem::path &filePath,
+		engine::imagegraph::Diagnostic &diagnostic
+	);
+	void ClearImageGraphAudioCapture(
+		std::vector<engine::imagegraph::AudioCaptureFrame> &frames, ImageGraphPreviewCache &cache
+	);
+
+	// Explicit host inputs remain outside the authored document and its undo history.
+	// Successful replacement clears cached images; failure preserves both clips and cache.
+	// Stages a replacement while the old source remains resident; committing is the host's decision.
+	bool ReadImageGraphWavSource(
+		std::span<const engine::imagegraph::AudioClipSource> sources,
+		std::string_view sourceId,
+		const std::filesystem::path &filePath,
+		engine::imagegraph::AudioClipSource &loaded,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t byteBudget = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
+
+	bool LoadImageGraphWavSource(
+		std::vector<engine::imagegraph::AudioClipSource> &sources,
+		ImageGraphPreviewCache &cache,
+		std::string_view sourceId,
+		const std::filesystem::path &filePath,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t byteBudget = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
+	bool RemoveImageGraphWavSource(
+		std::vector<engine::imagegraph::AudioClipSource> &sources,
+		ImageGraphPreviewCache &cache,
+		std::string_view sourceId
+	);
 
 	// Keeps durable document names separate from nodegraph's numeric handles.
 	struct ImageGraphCanvasIds {
@@ -104,6 +171,11 @@ namespace studio {
 	// @return An explicit default when the schema property has an editable value.
 	std::optional<engine::imagegraph::Value>
 	ImageGraphPropertyDefault(std::string_view nodeType, std::string_view property);
+
+	// Materializes source defaults that clone project values when a node is created.
+	std::optional<engine::imagegraph::Value> ImageGraphPropertyDefault(
+		const engine::imagegraph::Document &document, std::string_view nodeType, std::string_view property
+	);
 
 	// Rebuilds the canvas with an explicit durable-text to local-id map.
 	// @param document Authored graph to load without changing its durable ids.
@@ -143,7 +215,7 @@ namespace studio {
 	using ImageGraphPreviewValue =
 		std::variant<engine::imagegraph::Image, engine::imagegraph::EvaluatedValue>;
 
-	// Evaluates a selected image or scalar output with one explicit fixed request.
+	// Evaluates a selected image, scalar or bounded numeric array with one explicit fixed request.
 	engine::imagegraph::Status EvaluateImageGraphPreview(
 		const engine::imagegraph::Document &document,
 		const engine::imagegraph::Plan &plan,
@@ -151,6 +223,11 @@ namespace studio {
 		const engine::imagegraph::EvaluationRequest &request,
 		ImageGraphPreviewValue &preview,
 		engine::imagegraph::Diagnostic &diagnostic
+	);
+
+	// Checks finite numeric samples and bounds before a flat or per-channel array enters the UI.
+	bool CheckImageGraphArrayPreview(
+		const engine::imagegraph::ArrayValue &array, engine::imagegraph::Diagnostic &diagnostic
 	);
 
 	// Writes a schema-typed inspector value into one durable node property.
@@ -166,6 +243,16 @@ namespace studio {
 		engine::imagegraph::Value value,
 		engine::imagegraph::Diagnostic &error
 	);
+
+	// Applies a complete validated project override without changing the graph on refusal.
+	bool SetImageGraphProjectSettings(
+		engine::imagegraph::Document &document,
+		const engine::imagegraph::ProjectSettings &settings,
+		engine::imagegraph::Diagnostic &error
+	);
+
+	// Restores fresh-project inheritance without downgrading the document format.
+	void RemoveImageGraphProjectSettings(engine::imagegraph::Document &document);
 
 	// Adds or replaces one instance input on a schema that exposes dynamic inputs.
 	bool SetImageGraphDynamicInput(
@@ -226,7 +313,9 @@ namespace studio {
 		std::string_view property,
 		uint64_t tick,
 		std::string_view interpolation,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		double subframe = 0,
+		bool negativeFrame = false
 	);
 
 	// Removes one key at the given tick.
@@ -241,7 +330,66 @@ namespace studio {
 		std::string_view nodeId,
 		std::string_view property,
 		uint64_t tick,
+		engine::imagegraph::Diagnostic &error,
+		double subframe = 0,
+		bool negativeFrame = false
+	);
+
+	// Authors the retained source marker without changing interpolation or arithmetic.
+	bool SetImageGraphKeyframeKind(
+		engine::imagegraph::Document &document,
+		size_t index,
+		engine::imagegraph::KeyframeKind kind,
 		engine::imagegraph::Diagnostic &error
+	);
+
+	struct ImageGraphKeyframeIdentity {
+		std::string NodeId, Port;
+		engine::imagegraph::FrameTime Time;
+		bool operator==(const ImageGraphKeyframeIdentity &) const = default;
+	};
+
+	// Captures bounded key payloads by durable property and exact authored time.
+	bool CaptureImageGraphKeyframes(
+		const engine::imagegraph::Document &document,
+		std::span<const ImageGraphKeyframeIdentity> selection,
+		std::vector<engine::imagegraph::Keyframe> &result,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
+
+	// Moves pinned originals, or pastes driverless clones, with source nonnegative collision policy.
+	// A move refuses changed originals; the clipboard is an independent bounded snapshot.
+	bool TransferImageGraphKeyframes(
+		engine::imagegraph::Document &document,
+		std::span<const engine::imagegraph::Keyframe> originals,
+		const engine::imagegraph::FrameTime &oldAnchor,
+		const engine::imagegraph::FrameTime &newAnchor,
+		bool copy,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
+
+	// Applies exact per-key destination clocks with the same collision and pinned-original policy.
+	// Budget covers logical key payloads, separately from non-key document data and host history.
+	bool RetimeImageGraphKeyframes(
+		engine::imagegraph::Document &document,
+		std::span<const engine::imagegraph::Keyframe> originals,
+		std::span<const engine::imagegraph::FrameTime> destinations,
+		bool copy,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
+
+	// Targeted source paste maps one property directly, or multiple properties by source display name.
+	bool PasteImageGraphKeyframesToProperty(
+		engine::imagegraph::Document &document,
+		std::span<const engine::imagegraph::Keyframe> clipboard,
+		const engine::imagegraph::FrameTime &cursor,
+		std::string_view nodeId,
+		std::string_view property,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Changes one saved interpolation rule.
@@ -265,6 +413,22 @@ namespace studio {
 		engine::imagegraph::Document &document,
 		size_t index,
 		engine::imagegraph::KeyframeEase ease,
+		engine::imagegraph::Diagnostic &error
+	);
+
+	// Source controls are checked by the core validator before a transactional document edit.
+	bool SetImageGraphKeyframeSourceDriver(
+		engine::imagegraph::Document &document,
+		size_t index,
+		const std::optional<engine::imagegraph::KeyframeSourceDriver> &driver,
+		engine::imagegraph::Diagnostic &error
+	);
+	// Authors an explicit source quaternion interpretation without converting the stored tuples.
+	bool SetImageGraphTrackQuaternionMode(
+		engine::imagegraph::Document &document,
+		std::string_view nodeId,
+		std::string_view property,
+		std::optional<int64_t> mode,
 		engine::imagegraph::Diagnostic &error
 	);
 
@@ -309,11 +473,11 @@ namespace studio {
 		engine::imagegraph::Diagnostic &error
 	);
 
-	// Selects an existing output's source by durable node and image port ids.
+	// Selects an existing preview output's source by durable node and port ids.
 	// @param document Authored graph to update.
 	// @param outputId Durable output selector.
 	// @param nodeId   Durable source node identifier.
-	// @param port     Durable image output port identifier.
+	// @param port     Durable image, scalar or array output port identifier.
 	// @param error    Receives a diagnostic when the binding is invalid.
 	bool SetImageGraphOutput(
 		engine::imagegraph::Document &document,
@@ -323,6 +487,10 @@ namespace studio {
 		engine::imagegraph::Diagnostic &error
 	);
 
+	std::optional<engine::imagegraph::FrameTime>
+	PreviousImageGraphKey(const engine::imagegraph::Document &document, engine::imagegraph::FrameTime frame);
+	std::optional<engine::imagegraph::FrameTime>
+	NextImageGraphKey(const engine::imagegraph::Document &document, engine::imagegraph::FrameTime frame);
 	std::optional<uint64_t>
 	PreviousImageGraphKey(const engine::imagegraph::Document &document, uint64_t tick);
 	std::optional<uint64_t> NextImageGraphKey(const engine::imagegraph::Document &document, uint64_t tick);

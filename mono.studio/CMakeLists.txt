@@ -45,6 +45,9 @@ mono_add_library(studio
 		# deterministic CPU evaluator used by the Image Composer adapter.
 		Engine::imagegraph
 
+		# L12, client. The Image Composer owns an independent preview audio device.
+		Engine::audio
+
 		# L10, `shared`. Source-backed PXCX projection into a native image graph,
 		# retaining the checked archive as the lossless source.
 		Engine::imagegraphio

@@ -1,5 +1,11 @@
+#include "../src/ImageGraphPreview.hpp"
+#include "../src/KeyframeKindEditor.hpp"
+
 #include <engine/bake/Pxcx.hpp>
+#include <engine/imagegraph/AudioCapture.hpp>
+#include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/scene/ImageGraphBinding.hpp>
 #include <engine/testing/Suite.hpp>
@@ -8,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -24,7 +31,10 @@
 
 TEST_SUITE_ID("studio.imagegraph")
 TEST_DEPENDS("engine.imagegraph.document")
+TEST_DEPENDS("engine.imagegraph.catalogue")
 TEST_DEPENDS("engine.imagegraph.audio_capture")
+TEST_DEPENDS("engine.imagegraph.wav_clip")
+TEST_DEPENDS("engine.imagegraph.timeline.v8")
 TEST_DEPENDS("engine.imagegraphio.pxcximport")
 TEST_DEPENDS("engine.bake.pxcx")
 TEST_DEPENDS("engine.scene.imagegraphbinding")
@@ -296,7 +306,7 @@ TEST_CASE("Studio sine driver authoring promotes and round trips scalar keys", "
 	CHECK_FALSE(source.Keyframes[0].SineDriver.has_value());
 }
 
-TEST_CASE("Studio native graph open migrates legacy documents to v6", "[studio][imagegraph]") {
+TEST_CASE("Studio native graph open migrates legacy documents to v9", "[studio][imagegraph]") {
 	const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
 	TemporaryDirectory temporary{
 		std::filesystem::temp_directory_path() / ("atomic-imagegraph-studio-" + std::to_string(nonce))
@@ -327,7 +337,7 @@ TEST_CASE("Studio native graph open migrates legacy documents to v6", "[studio][
 	std::string error;
 	REQUIRE(studio::ReadImageGraphDocument(assets, "legacy_graph", opened, error));
 	CHECK(error.empty());
-	CHECK(opened.FormatVersion == 6);
+	CHECK(opened.FormatVersion == 9);
 	CHECK(opened.Nodes == legacy.Nodes);
 	CHECK(opened.Keyframes == legacy.Keyframes);
 	studio::ImageGraphPlayback playback;
@@ -339,9 +349,9 @@ TEST_CASE("Studio native graph open migrates legacy documents to v6", "[studio][
 	REQUIRE(studio::LoadImageGraphCanvas(opened, canvas, ids, error));
 	Document saved;
 	REQUIRE(studio::SaveImageGraphCanvas(canvas, opened, ids, saved, error));
-	CHECK(saved.FormatVersion == 6);
+	CHECK(saved.FormatVersion == 9);
 	CHECK(saved == opened);
-	CHECK(engine::imagegraph::Write(saved).starts_with("imagegraph 6\n"));
+	CHECK(engine::imagegraph::Write(saved).starts_with("imagegraph 9\n"));
 }
 
 TEST_CASE(
@@ -486,12 +496,12 @@ TEST_CASE("Studio authors nested image group interfaces and junction routes", "[
 	CHECK(document.Links.size() == 2);
 }
 
-TEST_CASE("preview frame cache stays within eight bounded RGBA images", "[studio][imagegraph]") {
+TEST_CASE("preview frame cache stays within eight bounded typed images", "[studio][imagegraph]") {
 	studio::ImageGraphPreviewCache cache;
 	for (uint64_t tick = 0; tick < studio::IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES + 1; tick++) {
 		engine::imagegraph::Image image{1, 1, {static_cast<uint8_t>(tick), 0, 0, 255}, tick + 1};
 		REQUIRE(cache.Store(7, 0, tick, image));
-		CHECK(cache.HeldBytes() <= studio::IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES * 4);
+		CHECK(cache.HeldBytes() <= studio::IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES);
 	}
 	CHECK(cache.Find(7, 0, 0) == nullptr);
 	const engine::imagegraph::Image *latest = cache.Find(7, 0, studio::IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES);
@@ -518,6 +528,31 @@ TEST_CASE("preview frame cache stays within eight bounded RGBA images", "[studio
 	CHECK_FALSE(cache.Store(7, 0, 99, oversized));
 	cache.Clear();
 	CHECK(cache.HeldBytes() == 0);
+}
+
+TEST_CASE("preview cache retains float pixels and refuses nonfinite replacement", "[studio][imagegraph]") {
+	studio::ImageGraphPreviewCache cache;
+	engine::imagegraph::Image hdr{
+		1, 1, std::vector<uint8_t>(16), 0, engine::imagegraph::SurfaceFormat::RGBA32Float
+	};
+	REQUIRE(engine::imagegraph::StoreSurfacePixel(hdr, 0, 0, {-2, 4, .5, 1}));
+	hdr.Hash = engine::imagegraph::SurfaceHash(hdr);
+	REQUIRE(cache.Store(9, 2, 7, hdr));
+	CHECK(cache.HeldBytes() >= hdr.Pixels.size());
+	CHECK(cache.HeldBytes() <= studio::IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES);
+	const auto *held = cache.Find(9, 2, 7);
+	REQUIRE(held != nullptr);
+	engine::imagegraph::SurfacePixel value{};
+	REQUIRE(engine::imagegraph::LoadSurfacePixel(*held, 0, 0, value));
+	CHECK((value == engine::imagegraph::SurfacePixel{-2, 4, .5, 1}));
+
+	engine::imagegraph::Image invalid = hdr;
+	invalid.Pixels[0] = 0;
+	invalid.Pixels[1] = 0;
+	invalid.Pixels[2] = 0xc0;
+	invalid.Pixels[3] = 0x7f;
+	CHECK_FALSE(cache.Store(9, 2, 7, invalid));
+	CHECK(cache.Find(9, 2, 7) != nullptr);
 }
 
 TEST_CASE("fixed tick playback bounds catchup and keeps authored FPS", "[studio][imagegraph]") {
@@ -614,7 +649,7 @@ TEST_CASE("v4 saved timeline drives bounded pingpong playback", "[studio][imageg
 	document.Timeline = engine::imagegraph::TimelineSettings{8, 2, 5, "pingpong"};
 	engine::imagegraph::Diagnostic diagnostic;
 	REQUIRE(engine::imagegraph::Migrate(document, diagnostic) == engine::imagegraph::Status::Ok);
-	CHECK(document.FormatVersion == 6);
+	CHECK(document.FormatVersion == 9);
 	REQUIRE(document.Timeline.has_value());
 	CHECK(document.Timeline->FramesPerSecond == 30.0);
 
@@ -780,6 +815,51 @@ TEST_CASE("canvas edits keep durable IDs and give new Solid nodes explicit value
 	REQUIRE(document.Nodes.size() == 2);
 	CHECK(document.Nodes[0].Id == "node-2");
 	CHECK(document.Nodes[1].Id == "node-3");
+}
+
+TEST_CASE("every source catalogue node is searchable and placed with source defaults", "[studio][imagegraph]") {
+	Document document;
+	nodegraph::Graph canvas;
+	studio::ImageGraphCanvasIds ids;
+	std::string error;
+	REQUIRE(studio::LoadImageGraphCanvas(document, canvas, ids, error));
+	size_t registered = 0;
+	for (const engine::imagegraph::CatalogueEntry &entry : engine::imagegraph::Catalogue()) {
+		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(std::string(entry.Type));
+		if (!type) continue;
+		const size_t inputs = static_cast<size_t>(std::count_if(
+			entry.Schema.Ports.begin(), entry.Schema.Ports.end(), [](const auto &port) {
+				return port.Direction == engine::imagegraph::PortDirection::Input;
+			}
+		));
+		if (type->Title == entry.Title && type->Category == "Pixel Composer/" + std::string(entry.Family) &&
+			type->Inputs.size() == inputs && type->Outputs.size() == entry.Schema.Ports.size() - inputs)
+			registered++;
+	}
+	CHECK(registered == engine::imagegraph::Catalogue().size());
+
+	REQUIRE(canvas.Add("pc.bw", 20.0f, 30.0f) != nodegraph::NO_NODE);
+	Document added;
+	REQUIRE(studio::SaveImageGraphCanvas(canvas, document, ids, added, error));
+	REQUIRE(added.Nodes.size() == 1);
+	const auto value = [&](std::string_view property) -> const engine::imagegraph::Value * {
+		for (const auto &entry : added.Nodes[0].Values)
+			if (entry.Port == property) return &entry.Data;
+		return nullptr;
+	};
+	REQUIRE(value("contrast"));
+	CHECK(*value("contrast") == engine::imagegraph::Value{1.0});
+	REQUIRE(value("channel"));
+	CHECK(*value("channel") == engine::imagegraph::Value{int64_t{15}});
+	REQUIRE(value("contrast_map_range"));
+	CHECK(*value("contrast_map_range") == engine::imagegraph::Value{engine::imagegraph::Vector2{0.0, 1.0}});
+	Document parsed;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(
+		engine::imagegraph::Read(engine::imagegraph::Write(added), parsed, diagnostic) ==
+		engine::imagegraph::Status::Ok
+	);
+	CHECK(parsed == added);
 }
 
 TEST_CASE("palette image nodes use the evaluator's working control defaults", "[studio][imagegraph]") {
@@ -1235,7 +1315,8 @@ TEST_CASE("Studio PXCX Open adapter maps supported nodes and retains source byte
 	REQUIRE(
 		engine::imagegraph::Migrate(imported.Graph, migrationDiagnostic) == engine::imagegraph::Status::Ok
 	);
-	CHECK(imported.Graph.FormatVersion == 6);
+	// Migration retains imported project settings in the current native grammar.
+	CHECK(imported.Graph.FormatVersion == 9);
 
 	studio::RegisterPxcxCanvasNodeTypes(imported.Source);
 	nodegraph::Graph canvas;
@@ -1353,4 +1434,1373 @@ TEST_CASE(
 	CHECK_FALSE(history.Undo(current));
 	CHECK(current == after);
 	CHECK(history.CanUndo());
+}
+
+TEST_CASE(
+	"project settings edits are atomic and preserve format and history", "[studio][imagegraph][project]"
+) {
+	using engine::imagegraph::Diagnostic;
+	using engine::imagegraph::Limits;
+	using engine::imagegraph::ProjectSettings;
+	using engine::imagegraph::Status;
+	Document document;
+	const Document original = document;
+	Diagnostic diagnostic;
+	ProjectSettings settings{7, 9, 6, 12, {{1, 2, 3, 4}, {5, 6, 7, 8}}};
+	REQUIRE(studio::SetImageGraphProjectSettings(document, settings, diagnostic));
+	CHECK(document.FormatVersion == 7);
+	CHECK(document.Project == settings);
+	Document restored;
+	REQUIRE(
+		engine::imagegraph::Read(engine::imagegraph::Write(document), restored, diagnostic) == Status::Ok
+	);
+	CHECK(restored == document);
+	studio::ImageGraphHistory history;
+	history.Record(original, document);
+	const Document authored = document;
+	for (int invalidField = 0; invalidField < 9; invalidField++) {
+		ProjectSettings invalid = settings;
+		switch (invalidField) {
+		case 0:
+			invalid.SurfaceWidth = 0;
+			break;
+		case 1:
+			invalid.SurfaceHeight = 0;
+			break;
+		case 2:
+			invalid.SurfaceWidth = std::numeric_limits<uint32_t>::max();
+			break;
+		case 3:
+			invalid.SurfaceHeight = Limits::MaximumDimension + 1;
+			break;
+		case 4:
+			invalid.Interpolation = -1;
+			break;
+		case 5:
+			invalid.Interpolation = std::numeric_limits<int64_t>::max();
+			break;
+		case 6:
+			invalid.Oversample = -1;
+			break;
+		case 7:
+			invalid.Oversample = 13;
+			break;
+		case 8:
+			invalid.Palette.resize(Limits::MaximumProjectPaletteEntries + 1);
+			break;
+		}
+		CHECK_FALSE(studio::SetImageGraphProjectSettings(document, invalid, diagnostic));
+		CHECK(diagnostic.Code != Status::Ok);
+		CHECK(document == authored);
+	}
+	REQUIRE(history.Undo(document));
+	CHECK(document == original);
+	REQUIRE(history.Redo(document));
+	CHECK(document == authored);
+	studio::RemoveImageGraphProjectSettings(document);
+	CHECK_FALSE(document.Project.has_value());
+	CHECK(document.FormatVersion == 7);
+	history.Record(authored, document);
+	const Document removed = document;
+	REQUIRE(history.Undo(document));
+	CHECK(document == authored);
+	REQUIRE(history.Redo(document));
+	CHECK(document == removed);
+	settings = {1, Limits::MaximumDimension, 0, 0, {}};
+	REQUIRE(studio::SetImageGraphProjectSettings(document, settings, diagnostic));
+	CHECK(diagnostic.Code == Status::Ok);
+	REQUIRE(
+		engine::imagegraph::Read(engine::imagegraph::Write(document), restored, diagnostic) == Status::Ok
+	);
+	CHECK(restored == document);
+	settings.Palette.resize(Limits::MaximumProjectPaletteEntries);
+	REQUIRE(studio::SetImageGraphProjectSettings(document, settings, diagnostic));
+	CHECK(document.Project->Palette.size() == Limits::MaximumProjectPaletteEntries);
+}
+
+TEST_CASE(
+	"project edits change real catalogue inherited dimensions and restore defaults",
+	"[studio][imagegraph][project]"
+) {
+	using engine::imagegraph::Diagnostic;
+	using engine::imagegraph::Status;
+	Document document;
+	document.FormatVersion = 7;
+	document.Nodes.push_back(
+		{"fill",
+		 "pc.solid",
+		 "",
+		 {},
+		 {{"dimension", Vector2{0.5, 1}},
+		  {"dimension_unit", engine::imagegraph::EnumValue{1}},
+		  {"color", Colour{23, 45, 67, 89}}}}
+	);
+	document.Outputs.push_back({"image", "fill", "surface_out"});
+	Diagnostic diagnostic;
+	const auto image = [&] {
+		engine::imagegraph::Plan plan;
+		REQUIRE(engine::imagegraph::Compile(document, plan, diagnostic) == Status::Ok);
+		engine::imagegraph::Image rendered;
+		REQUIRE(engine::imagegraph::Evaluate(document, plan, "image", rendered, diagnostic) == Status::Ok);
+		return rendered;
+	};
+	CHECK(image().Width == 16);
+	CHECK(image().Height == 32);
+	engine::imagegraph::ProjectSettings settings;
+	settings.SurfaceWidth = 8;
+	settings.SurfaceHeight = 3;
+	REQUIRE(studio::SetImageGraphProjectSettings(document, settings, diagnostic));
+	const auto rendered = image();
+	CHECK(rendered.Width == 4);
+	CHECK(rendered.Height == 3);
+	REQUIRE(rendered.Pixels.size() == 4 * 3 * 4);
+	CHECK(rendered.Pixels[0] == 23);
+	CHECK(rendered.Pixels[3] == 89);
+	Document reloaded;
+	REQUIRE(
+		engine::imagegraph::Read(engine::imagegraph::Write(document), reloaded, diagnostic) == Status::Ok
+	);
+	document = std::move(reloaded);
+	const auto reloadedImage = image();
+	CHECK(reloadedImage.Width == rendered.Width);
+	CHECK(reloadedImage.Height == rendered.Height);
+	CHECK(reloadedImage.Pixels == rendered.Pixels);
+	CHECK(reloadedImage.Hash == rendered.Hash);
+	studio::RemoveImageGraphProjectSettings(document);
+	CHECK(image().Width == 16);
+	CHECK(image().Height == 32);
+}
+
+TEST_CASE("new source palette nodes clone project palette once", "[studio][imagegraph][project]") {
+	studio::RegisterImageGraphNodeTypes();
+	Document document;
+	engine::imagegraph::Diagnostic diagnostic;
+	engine::imagegraph::ProjectSettings settings;
+	settings.Palette = {{12, 34, 56, 78}, {90, 87, 65, 43}};
+	REQUIRE(studio::SetImageGraphProjectSettings(document, settings, diagnostic));
+	nodegraph::Graph canvas;
+	studio::ImageGraphCanvasIds ids;
+	std::string error;
+	REQUIRE(studio::LoadImageGraphCanvas(document, canvas, ids, error));
+	const auto nodeId = canvas.Add("pc.gradient_palette", 0, 0);
+	REQUIRE(nodeId != nodegraph::NO_NODE);
+	Document added;
+	REQUIRE(studio::SaveImageGraphCanvas(canvas, document, ids, added, error));
+	REQUIRE(added.Nodes.size() == 1);
+	const auto paletteOf = [](const Node &node) -> const engine::imagegraph::ArrayValue & {
+		const auto property = std::find_if(node.Values.begin(), node.Values.end(), [](const auto &entry) {
+			return entry.Port == "palette";
+		});
+		REQUIRE(property != node.Values.end());
+		return std::get<engine::imagegraph::ArrayValue>(property->Data);
+	};
+	const engine::imagegraph::ArrayValue cloned{
+		engine::imagegraph::ValueType::Colour, {settings.Palette[0], settings.Palette[1]}
+	};
+	CHECK(paletteOf(added.Nodes[0]) == cloned);
+	settings.Palette = {{255, 0, 0, 255}};
+	REQUIRE(studio::SetImageGraphProjectSettings(added, settings, diagnostic));
+	Document saved;
+	REQUIRE(studio::SaveImageGraphCanvas(canvas, added, ids, saved, error));
+	CHECK(paletteOf(saved.Nodes[0]) == cloned);
+	const engine::imagegraph::ArrayValue explicitPalette{
+		engine::imagegraph::ValueType::Colour, {Colour{1, 1, 1, 1}}
+	};
+	REQUIRE(studio::SetImageGraphValue(saved, saved.Nodes[0].Id, "palette", explicitPalette, diagnostic));
+	REQUIRE(studio::SaveImageGraphCanvas(canvas, saved, ids, added, error));
+	CHECK(paletteOf(added.Nodes[0]) == explicitPalette);
+	Document reloaded;
+	REQUIRE(
+		engine::imagegraph::Read(engine::imagegraph::Write(added), reloaded, diagnostic) ==
+		engine::imagegraph::Status::Ok
+	);
+	CHECK(reloaded == added);
+	for (const std::string_view port : {"color_from", "color_to"}) {
+		const auto palette = studio::ImageGraphPropertyDefault(saved, "pc.gradient_replace_color", port);
+		REQUIRE(palette.has_value());
+		CHECK(
+			std::get<engine::imagegraph::ArrayValue>(*palette).Elements ==
+			std::vector<engine::imagegraph::ElementValue>{settings.Palette[0]}
+		);
+	}
+	saved.Project->Palette.resize(engine::imagegraph::Limits::MaximumProjectPaletteEntries + 1);
+	CHECK_FALSE(studio::ImageGraphPropertyDefault(saved, "pc.gradient_palette", "palette").has_value());
+}
+
+TEST_CASE(
+	"Studio array preview retains captured Audio Window channel shape", "[studio][imagegraph][array_preview]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 6;
+	document.Nodes = {
+		{"capture", "image.audio_recording", "", {}, {{"source_id", std::string{"audio"}}}, {}},
+		{"window",
+		 "pc.audio_window",
+		 "",
+		 {},
+		 {{"width", int64_t{4}},
+		  {"cursor_location", EnumValue{0}},
+		  {"step", int64_t{1}},
+		  {"match_timeline", false}},
+		 {}}
+	};
+	document.Links = {{"capture", "audio", "window", "audio_data"}};
+	document.Outputs = {{"samples", "capture", "audio"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(studio::SetImageGraphOutput(document, "samples", "window", "bit_array", diagnostic));
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	for (const AudioCaptureFrame &frame :
+		 {AudioCaptureFrame{"audio", 0, {1, 2, 3, 4, 5, 6}, 10},
+		  AudioCaptureFrame{"audio", 0, {}, 10, {{1, 2, 3, 4, 5, 6}, {10, 20, 30, 40, 50, 60}}},
+		  AudioCaptureFrame{"audio", 0, {}, 10, {{}, {}}}}) {
+		EvaluationRequest request;
+		request.AudioFrames = std::span<const AudioCaptureFrame>(&frame, 1);
+		studio::ImageGraphPreviewValue preview;
+		REQUIRE(
+			studio::EvaluateImageGraphPreview(document, plan, "samples", request, preview, diagnostic) ==
+			Status::Ok
+		);
+		const auto *value = std::get_if<EvaluatedValue>(&preview);
+		REQUIRE(value != nullptr);
+		const auto *array = std::get_if<ArrayValue>(&value->Data);
+		REQUIRE(array != nullptr);
+		CHECK(array->Elements.empty());
+		CHECK(array->Nested.size() == (frame.Channels.empty() ? 1 : frame.Channels.size()));
+		for (size_t channel = 0; channel < array->Nested.size(); channel++) {
+			const auto &samples = frame.Channels.empty() ? frame.Samples : frame.Channels[channel];
+			const size_t expected = std::min(size_t{4}, samples.empty() ? 0 : samples.size() - 1);
+			REQUIRE(array->Nested[channel].size() == expected);
+			for (size_t index = 0; index < expected; index++)
+				CHECK(std::get<double>(array->Nested[channel][index]) == samples[index]);
+		}
+	}
+}
+
+TEST_CASE(
+	"numeric array preview validates finite samples and total display budget",
+	"[studio][imagegraph][array_preview]"
+) {
+	using namespace engine::imagegraph;
+	Diagnostic diagnostic;
+	ArrayValue array{ValueType::Scalar, {1.0, -0.5}};
+	CHECK(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	array.Elements.resize(Limits::MaximumArrayElements, 0.0);
+	CHECK(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	array.Elements.push_back(0.0);
+	CHECK_FALSE(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	array = {ValueType::Scalar, {}, std::vector<std::vector<ElementValue>>(Limits::MaximumAudioChannels)};
+	CHECK(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	array.Nested[0].resize(Limits::MaximumArrayElements, 0.0);
+	CHECK(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	array.Nested[1].push_back(1.0);
+	CHECK_FALSE(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	array = {ValueType::Scalar, {}, std::vector<std::vector<ElementValue>>(Limits::MaximumAudioChannels + 1)};
+	CHECK_FALSE(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	for (double invalid :
+		 {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+		array = {ValueType::Scalar, {}, {{invalid}}};
+		CHECK_FALSE(studio::CheckImageGraphArrayPreview(array, diagnostic));
+		CHECK(diagnostic.Code == Status::InvalidValue);
+	}
+	array = {ValueType::Scalar, {1.0}, {{2.0}}};
+	CHECK_FALSE(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	array = {ValueType::Scalar, {int64_t{1}}};
+	CHECK_FALSE(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	array = {ValueType::Integer, {int64_t{1}, int64_t{-2}}};
+	CHECK(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	array = {ValueType::Colour, {Colour{}}};
+	CHECK_FALSE(studio::CheckImageGraphArrayPreview(array, diagnostic));
+	CHECK(diagnostic.Code == Status::UnsupportedExecution);
+}
+
+TEST_CASE("Studio numeric array preview preserves flat FFT order", "[studio][imagegraph][array_preview]") {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 7;
+	document.Nodes = {
+		{"fft", "pc.fft", "", {}, {{"data", ArrayValue{ValueType::Scalar, {1.0, 1.0, 1.0, 1.0}}}}, {}}
+	};
+	document.Outputs = {{"spectrum", "fft", "array"}};
+	Diagnostic diagnostic;
+	Plan plan;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	studio::ImageGraphPreviewValue preview;
+	REQUIRE(
+		studio::EvaluateImageGraphPreview(document, plan, "spectrum", {}, preview, diagnostic) == Status::Ok
+	);
+	const auto &array = std::get<ArrayValue>(std::get<EvaluatedValue>(preview).Data);
+	CHECK(array.Nested.empty());
+	CHECK(array.Elements == std::vector<ElementValue>{0.0, 0.0, 4.0});
+}
+
+TEST_CASE(
+	"Studio preview limits resolved native surfaces before replacing pixels",
+	"[studio][imagegraph][preview_budget]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 7;
+	document.Nodes = {
+		{"fill", "pc.solid", "", {}, {{"dimension", Vector2{1, 1}}, {"dimension_unit", EnumValue{1}}}, {}}
+	};
+	document.Outputs = {{"image", "fill", "surface_out"}};
+	Diagnostic diagnostic;
+	const auto evaluate = [&](const EvaluationRequest &request, studio::ImageGraphPreviewValue &preview) {
+		Plan plan;
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		return studio::EvaluateImageGraphPreview(document, plan, "image", request, preview, diagnostic);
+	};
+	ProjectSettings settings;
+	settings.SurfaceWidth = 128;
+	settings.SurfaceHeight = 1;
+	REQUIRE(studio::SetImageGraphProjectSettings(document, settings, diagnostic));
+	studio::ImageGraphPreviewValue preview;
+	REQUIRE(evaluate({}, preview) == Status::Ok);
+	const Image accepted = std::get<Image>(preview);
+	CHECK(accepted.Width == 128);
+	settings.SurfaceWidth = 129;
+	REQUIRE(studio::SetImageGraphProjectSettings(document, settings, diagnostic));
+	CHECK(evaluate({}, preview) == Status::LimitExceeded);
+	CHECK(diagnostic.NodeId == "fill");
+	CHECK(std::get<Image>(preview).Pixels == accepted.Pixels);
+	REQUIRE(studio::SetImageGraphValue(document, "fill", "dimension_unit", EnumValue{0}, diagnostic));
+	REQUIRE(studio::SetImageGraphValue(document, "fill", "dimension", Vector2{129, 1}, diagnostic));
+	CHECK(evaluate({}, preview) == Status::LimitExceeded);
+	CHECK(std::get<Image>(preview).Width == accepted.Width);
+	REQUIRE(studio::SetImageGraphValue(document, "fill", "dimension", Vector2{128, 1}, diagnostic));
+	EvaluationRequest request;
+	request.MaximumImageDimension = 127;
+	CHECK(evaluate(request, preview) == Status::LimitExceeded);
+	request.MaximumImageDimension = 128;
+	CHECK(evaluate(request, preview) == Status::Ok);
+	for (uint32_t invalid : {uint32_t{0}, Limits::MaximumDimension + 1}) {
+		request.MaximumImageDimension = invalid;
+		CHECK(evaluate(request, preview) == Status::InvalidValue);
+	}
+	// A linked dimension bypasses authored Project units, but must retain the host allocation cap.
+	document.Nodes.push_back(
+		{"size",
+		 "pc.vector_polar_to_cart",
+		 "",
+		 {},
+		 {{"polar_coord", Vector2{129, 0}}, {"cartesian_origin", Vector2{0, -1}}},
+		 {}}
+	);
+	document.Links.push_back({"size", "cartesian_coord", "fill", "dimension"});
+	CHECK(evaluate({}, preview) == Status::LimitExceeded);
+	CHECK(diagnostic.NodeId == "fill");
+	document.Links.clear();
+	document.Nodes.back() = {
+		"mask", "pc.solid", "", {}, {{"dimension", Vector2{129, 1}}, {"dimension_unit", EnumValue{0}}}, {}
+	};
+	document.Links.push_back({"mask", "surface_out", "fill", "mask"});
+	CHECK(evaluate({}, preview) == Status::LimitExceeded);
+	CHECK(diagnostic.NodeId == "mask");
+	CHECK(std::get<Image>(preview).Width == accepted.Width);
+}
+
+TEST_CASE("numeric preview caps upstream native images", "[studio][imagegraph][preview_budget]") {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 7;
+	document.Nodes = {
+		{"fill", "pc.solid", "", {}, {{"dimension", Vector2{128, 1}}, {"dimension_unit", EnumValue{0}}}, {}},
+		{"data", "pc.surface_data", "", {}, {}, {}},
+		{"number", "pc.to_number", "", {}, {}, {}}
+	};
+	document.Links = {
+		{"fill", "surface_out", "data", "surface"}, {"data", "format_string", "number", "text"}
+	};
+	document.Outputs = {{"numeric", "number", "number"}};
+	Diagnostic diagnostic;
+	Plan plan;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	studio::ImageGraphPreviewValue preview;
+	REQUIRE(
+		studio::EvaluateImageGraphPreview(document, plan, "numeric", {}, preview, diagnostic) == Status::Ok
+	);
+	const auto accepted = std::get<EvaluatedValue>(preview);
+	CHECK(std::get<double>(accepted.Data) == 8.0);
+	REQUIRE(studio::SetImageGraphValue(document, "fill", "dimension", Vector2{129, 1}, diagnostic));
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CHECK(
+		studio::EvaluateImageGraphPreview(document, plan, "numeric", {}, preview, diagnostic) ==
+		Status::LimitExceeded
+	);
+	CHECK(diagnostic.NodeId == "fill");
+	CHECK(std::get<EvaluatedValue>(preview).Data == accepted.Data);
+}
+
+namespace {
+	TemporaryDirectory AudioTemporaryDirectory() {
+		const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+		const auto path =
+			std::filesystem::temp_directory_path() / ("atomic-studio-audio-" + std::to_string(nonce));
+		std::filesystem::create_directories(path);
+		return TemporaryDirectory{path};
+	}
+
+	void WriteAudioTestFile(const std::filesystem::path &path, std::string_view bytes) {
+		std::ofstream file(path, std::ios::binary);
+		file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+		REQUIRE(file.good());
+	}
+
+	std::string PreviewWave(uint16_t channels, const std::vector<uint8_t> &samples) {
+		std::string bytes;
+		const auto word = [&](uint32_t value, size_t count) {
+			for (size_t index = 0; index < count; index++)
+				bytes.push_back(char((value >> (index * 8)) & 255));
+		};
+		bytes += "RIFF";
+		word(36 + samples.size() + samples.size() % 2, 4);
+		bytes += "WAVEfmt ";
+		word(16, 4);
+		word(1, 2);
+		word(channels, 2);
+		word(8, 4);
+		word(8 * channels, 4);
+		word(channels, 2);
+		word(8, 2);
+		bytes += "data";
+		word(samples.size(), 4);
+		for (uint8_t sample : samples)
+			bytes.push_back(char(sample));
+		if (samples.size() % 2) bytes.push_back(0);
+		return bytes;
+	}
+}
+
+TEST_CASE("capture host operations invalidate a cached real image", "[studio][imagegraph][audio_sources]") {
+	using namespace engine::imagegraph;
+	const auto temporary = AudioTemporaryDirectory();
+	const auto capturePath = temporary.Path / "frames.capture";
+	Document document;
+	document.FormatVersion = 8;
+	document.Nodes = {
+		{"capture", "image.audio_recording", "", {}, {{"source_id", std::string{"audio"}}}, {}},
+		{"volume", "image.audio_volume", "", {}, {}, {}},
+		{"gradient",
+		 "image.gradient",
+		 "",
+		 {},
+		 {{"width", int64_t{4}},
+		  {"height", int64_t{4}},
+		  {"gradient", Gradient{0, {{0, Colour{0, 0, 0, 255}}, {1, Colour{255, 255, 255, 255}}}}}},
+		 {}}
+	};
+	document.Links = {
+		{"capture", "samples", "volume", "samples"}, {"volume", "loudness", "gradient", "angle_value"}
+	};
+	document.Outputs = {{"image", "gradient", "image"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	const Status compileStatus = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compileStatus == Status::Ok);
+	studio::ImageGraphPreviewCache cache;
+	std::vector<AudioCaptureFrame> loaded;
+	std::vector<AudioCaptureFrame> frames{{"audio", 0, {1.0}}};
+	std::string encoded;
+	REQUIRE(WriteAudioCapture(frames, encoded, diagnostic) == Status::Ok);
+	WriteAudioTestFile(capturePath, encoded);
+	REQUIRE(studio::LoadImageGraphAudioCapture(loaded, cache, capturePath, diagnostic));
+	EvaluationRequest request;
+	request.AudioFrames = loaded;
+	studio::ImageGraphPreviewValue preview;
+	REQUIRE(
+		studio::EvaluateImageGraphPreview(document, plan, "image", request, preview, diagnostic) == Status::Ok
+	);
+	const Image first = std::get<Image>(preview);
+	REQUIRE(cache.Store(1, 0, 0, first));
+	CHECK_FALSE(studio::LoadImageGraphAudioCapture(loaded, cache, temporary.Path / "missing", diagnostic));
+	REQUIRE(cache.Find(1, 0, 0) != nullptr);
+	CHECK(cache.Find(1, 0, 0)->Pixels == first.Pixels);
+	CHECK(loaded == frames);
+	frames[0].Samples = {0.000001};
+	REQUIRE(WriteAudioCapture(frames, encoded, diagnostic) == Status::Ok);
+	WriteAudioTestFile(capturePath, encoded);
+	REQUIRE(studio::LoadImageGraphAudioCapture(loaded, cache, capturePath, diagnostic));
+	CHECK(cache.Find(1, 0, 0) == nullptr);
+	request.AudioFrames = loaded;
+	REQUIRE(
+		studio::EvaluateImageGraphPreview(document, plan, "image", request, preview, diagnostic) == Status::Ok
+	);
+	const Image second = std::get<Image>(preview);
+	REQUIRE(first.Pixels != second.Pixels);
+	REQUIRE(cache.Store(1, 0, 0, second));
+	studio::ClearImageGraphAudioCapture(loaded, cache);
+	CHECK(cache.Find(1, 0, 0) == nullptr);
+	CHECK(loaded.empty());
+	request.AudioFrames = loaded;
+	CHECK(
+		studio::EvaluateImageGraphPreview(document, plan, "image", request, preview, diagnostic) ==
+		Status::InvalidValue
+	);
+}
+
+TEST_CASE("named WAV host sources retain exact planar preview data", "[studio][imagegraph][audio_sources]") {
+	using namespace engine::imagegraph;
+	const auto temporary = AudioTemporaryDirectory();
+	const auto wavePath = temporary.Path / "physical.wav";
+	WriteAudioTestFile(wavePath, PreviewWave(2, {0, 128, 64, 192, 128, 255}));
+	std::vector<AudioClipSource> sources;
+	studio::ImageGraphPreviewCache cache;
+	Diagnostic diagnostic;
+	std::string sourceId = "../Tone.WAV";
+	REQUIRE(studio::LoadImageGraphWavSource(sources, cache, sourceId, wavePath, diagnostic));
+	sourceId = "temporary name changed";
+	REQUIRE(sources.size() == 1);
+	CHECK(sources[0].SourceId == "../Tone.WAV");
+	CHECK((sources[0].Data.Channels == std::vector<std::vector<double>>{{0, 0.5, 1}, {1, 1.5, 255.0 / 128}}));
+	Document document;
+	document.FormatVersion = 6;
+	document.Nodes = {
+		{"file", "pc.wav_file_read", "", {}, {{"path", std::string{"../Tone.WAV"}}}, {}},
+		{"window",
+		 "pc.audio_window",
+		 "",
+		 {},
+		 {{"width", int64_t{2}},
+		  {"step", int64_t{1}},
+		  {"cursor_location", EnumValue{0}},
+		  {"match_timeline", false}},
+		 {}}
+	};
+	document.Links = {{"file", "data", "window", "audio_data"}};
+	document.Outputs = {{"samples", "window", "bit_array"}};
+	Plan plan;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	for (const uint64_t tick : {uint64_t{0}, uint64_t{20}}) {
+		EvaluationRequest request;
+		request.Tick = tick;
+		request.AudioClips = sources;
+		studio::ImageGraphPreviewValue preview;
+		REQUIRE(
+			studio::EvaluateImageGraphPreview(document, plan, "samples", request, preview, diagnostic) ==
+			Status::Ok
+		);
+		const auto &array = std::get<ArrayValue>(std::get<EvaluatedValue>(preview).Data);
+		CHECK((array.Nested == std::vector<std::vector<ElementValue>>{{0.0, 0.5}, {1.0, 1.5}}));
+	}
+	document.Nodes[0].Values.push_back({"mono", true});
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	EvaluationRequest request;
+	request.AudioClips = sources;
+	studio::ImageGraphPreviewValue preview;
+	REQUIRE(
+		studio::EvaluateImageGraphPreview(document, plan, "samples", request, preview, diagnostic) ==
+		Status::Ok
+	);
+	CHECK(
+		(std::get<ArrayValue>(std::get<EvaluatedValue>(preview).Data).Nested ==
+		 std::vector<std::vector<ElementValue>>{{0.5, 1.0}})
+	);
+	Document restored;
+	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
+	CHECK(restored == document);
+	CHECK(std::get<std::string>(restored.Nodes[0].Values[0].Data) == "../Tone.WAV");
+
+	document.Nodes[0].Values[0].Data = std::string{"../tone.wav"};
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CHECK(
+		studio::EvaluateImageGraphPreview(document, plan, "samples", request, preview, diagnostic) ==
+		Status::InvalidValue
+	);
+	REQUIRE(cache.Store(1, 0, 0, Image{1, 1, {5, 6, 7, 255}}));
+	WriteAudioTestFile(wavePath, PreviewWave(1, {128, 64, 0}));
+	REQUIRE(studio::LoadImageGraphWavSource(sources, cache, "../Tone.WAV", wavePath, diagnostic));
+	REQUIRE(sources.size() == 1);
+	CHECK((sources[0].Data.Channels == std::vector<std::vector<double>>{{1, 0.5, 0}}));
+	CHECK(cache.Find(1, 0, 0) == nullptr);
+	CHECK_FALSE(studio::RemoveImageGraphWavSource(sources, cache, "../tone.wav"));
+	REQUIRE(cache.Store(1, 0, 0, Image{1, 1, {5, 6, 7, 255}}));
+	CHECK(studio::RemoveImageGraphWavSource(sources, cache, "../Tone.WAV"));
+	CHECK(sources.empty());
+	CHECK(cache.Find(1, 0, 0) == nullptr);
+}
+
+TEST_CASE("WAV host preflights replacement peak and malformed files", "[studio][imagegraph][audio_sources]") {
+	using namespace engine::imagegraph;
+	const auto temporary = AudioTemporaryDirectory();
+	const auto path = temporary.Path / "tone.wav";
+	const std::string wave = PreviewWave(1, {0, 128, 255});
+	WriteAudioTestFile(path, wave);
+	std::vector<AudioClipSource> sources;
+	studio::ImageGraphPreviewCache cache;
+	Diagnostic diagnostic;
+	REQUIRE(studio::LoadImageGraphWavSource(sources, cache, "tone", path, diagnostic));
+	const AudioBit original = sources[0].Data;
+	const uint64_t retained = sizeof(AudioClipSource) + 4 + sizeof(std::vector<double>) + 3 * sizeof(double);
+	const uint64_t conversion =
+		sizeof(AudioBit) + Limits::MaximumAudioChannels * sizeof(std::vector<double>) + 6 * sizeof(double);
+	const uint64_t peak = retained + sizeof(AudioClipSource) + 4 + wave.size() + conversion;
+	REQUIRE(cache.Store(1, 0, 0, Image{1, 1, {5, 6, 7, 255}}));
+	CHECK_FALSE(studio::LoadImageGraphWavSource(sources, cache, "next", path, diagnostic, peak - 1));
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	CHECK(sources.size() == 1);
+	CHECK(sources[0].Data == original);
+	CHECK(cache.Find(1, 0, 0) != nullptr);
+	REQUIRE(studio::LoadImageGraphWavSource(sources, cache, "next", path, diagnostic, peak));
+	CHECK(sources.size() == 2);
+	REQUIRE(cache.Store(1, 0, 0, Image{1, 1, {5, 6, 7, 255}}));
+	for (const std::string &malformed :
+		 {std::string{}, std::string{"RIFFbroken"}, wave.substr(0, wave.size() - 2)}) {
+		WriteAudioTestFile(path, malformed);
+		CHECK_FALSE(studio::LoadImageGraphWavSource(sources, cache, "tone", path, diagnostic));
+		CHECK(sources[0].Data == original);
+		CHECK(cache.Find(1, 0, 0) != nullptr);
+	}
+	std::filesystem::resize_file(path, 16 * 1024 * 1024 + 1);
+	CHECK_FALSE(studio::LoadImageGraphWavSource(sources, cache, "tone", path, diagnostic));
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	WriteAudioTestFile(path, PreviewWave(1, std::vector<uint8_t>(Limits::MaximumAudioClipSamples + 1)));
+	CHECK_FALSE(studio::LoadImageGraphWavSource(sources, cache, "tone", path, diagnostic));
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	CHECK(sources[0].Data == original);
+	CHECK(cache.Find(1, 0, 0) != nullptr);
+	CHECK_FALSE(studio::LoadImageGraphWavSource(sources, cache, "", path, diagnostic));
+	CHECK_FALSE(
+		studio::LoadImageGraphWavSource(
+			sources, cache, "tone", path, diagnostic, Limits::MaximumEvaluationBytes + 1
+		)
+	);
+}
+
+TEST_CASE(
+	"Studio source driver controls persist, undo and replay seeks", "[studio][imagegraph][source_drivers]"
+) {
+	using namespace engine::imagegraph;
+	const std::array<KeyframeSourceDriver, 6> drivers{
+		KeyframeLinearDriver{2},
+		KeyframeSnapDriver{3},
+		KeyframeBounceDriver{},
+		KeyframeElasticDriver{},
+		KeyframeCurveDriver{},
+		KeyframeSineDriver{1, 2, 0, 0}
+	};
+	const std::array<double, 6> expected{22, 6, 6, 14, 6, 6};
+	for (size_t kind = 0; kind < drivers.size(); kind++) {
+		Document document;
+		document.FormatVersion = 5;
+		document.Nodes = {{"number", "value.number", "", {}, {{"value", 0.0}}, {}}};
+		document.Outputs = {{"out", "number", "number"}};
+		document.Keyframes = {{"number", "value", 2, 0.0, "linear"}, {"number", "value", 12, 10.0, "linear"}};
+		document.Timeline = TimelineSettings{16, 0, 15, "loop", 30};
+		const Document before = document;
+		Diagnostic diagnostic;
+		REQUIRE(studio::SetImageGraphKeyframeSourceDriver(document, 0, drivers[kind], diagnostic));
+		CHECK(document.FormatVersion == 8);
+		CHECK(document.Keyframes[1].Interpolation == "source");
+		CHECK(document.Tracks.size() == 1);
+		Document parsed;
+		REQUIRE(Read(Write(document), parsed, diagnostic) == Status::Ok);
+		CHECK(parsed == document);
+		studio::ImageGraphHistory history;
+		history.Record(before, document);
+		REQUIRE(history.Undo(document));
+		CHECK(document == before);
+		REQUIRE(history.Redo(document));
+		CHECK(document == parsed);
+		Plan plan;
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		for (const uint64_t tick : {uint64_t{8}, uint64_t{3}, uint64_t{8}}) {
+			EvaluationRequest request;
+			request.Tick = tick;
+			studio::ImageGraphPreviewValue preview;
+			REQUIRE(
+				studio::EvaluateImageGraphPreview(document, plan, "out", request, preview, diagnostic) ==
+				Status::Ok
+			);
+			if (tick == 8)
+				CHECK(
+					std::get<double>(std::get<EvaluatedValue>(preview).Data) == Catch::Approx(expected[kind])
+				);
+		}
+		const Document authored = document;
+		CHECK_FALSE(studio::SetImageGraphKeyframeInterpolation(document, 0, "linear", diagnostic));
+		CHECK(document == authored);
+		CHECK_FALSE(studio::SetImageGraphKeyframeSineDriver(document, 0, KeyframeSineDriver{}, diagnostic));
+		CHECK(document == authored);
+		REQUIRE(studio::SetImageGraphKeyframeSourceDriver(document, 0, std::nullopt, diagnostic));
+		CHECK_FALSE(document.Keyframes[0].SourceDriver.has_value());
+		CHECK(document.FormatVersion == 8);
+	}
+}
+
+TEST_CASE(
+	"Studio source driver validation preserves invalid edit targets", "[studio][imagegraph][source_drivers]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.Nodes = {{"number", "value.number", "", {}, {{"value", 0.0}}, {}}};
+	document.Outputs = {{"out", "number", "number"}};
+	document.Keyframes = {{"number", "value", 0, 0.0, "linear"}, {"number", "value", 10, 10.0, "linear"}};
+	const Document original = document;
+	Diagnostic diagnostic;
+	KeyframeCurveDriver oversized;
+	oversized.Data.Anchors.resize(Limits::MaximumCurveAnchors + 1);
+	for (const KeyframeSourceDriver &driver : std::array<KeyframeSourceDriver, 4>{
+			 KeyframeLinearDriver{std::numeric_limits<double>::infinity()},
+			 KeyframeBounceDriver{1025, .5, 2},
+			 KeyframeSineDriver{1, 1, std::numeric_limits<double>::quiet_NaN(), 0},
+			 oversized
+		 }) {
+		CHECK_FALSE(studio::SetImageGraphKeyframeSourceDriver(document, 0, driver, diagnostic));
+		CHECK(document == original);
+	}
+	CHECK_FALSE(studio::SetImageGraphKeyframeSourceDriver(document, 2, KeyframeSnapDriver{}, diagnostic));
+	CHECK(document == original);
+	REQUIRE(studio::SetImageGraphKeyframeSineDriver(document, 0, KeyframeSineDriver{}, diagnostic));
+	const Document legacy = document;
+	CHECK_FALSE(studio::SetImageGraphKeyframeSourceDriver(document, 0, KeyframeLinearDriver{}, diagnostic));
+	CHECK(document == legacy);
+	REQUIRE(studio::SetImageGraphKeyframeSineDriver(document, 0, std::nullopt, diagnostic));
+	REQUIRE(
+		studio::SetImageGraphKeyframeSourceDriver(document, 0, KeyframeSineDriver{1, 1, 0, 2}, diagnostic)
+	);
+	CHECK(document.Keyframes[0].SourceDriver.has_value());
+	CHECK_FALSE(document.Keyframes[0].SineDriver.has_value());
+	const Document source = document;
+	CHECK_FALSE(studio::SetImageGraphTrackQuaternionMode(document, "number", "value", 1, diagnostic));
+	CHECK(document == source);
+}
+
+TEST_CASE(
+	"Studio quaternion mode controls survive history and actual Euler seeks",
+	"[studio][imagegraph][source_drivers]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 6;
+	document.Nodes = {{"angles", "pc.quarternion_to_euler", "", {}, {{"rotation", Quaternion{}}}, {}}};
+	document.Outputs = {{"angles", "angles", "euler_angles"}};
+	document.Keyframes = {
+		{"angles", "rotation", 0, Quaternion{0, 0, 0, 0}, "linear"},
+		{"angles", "rotation", 4, Quaternion{90, 0, 0, 0}, "linear"}
+	};
+	const Document before = document;
+	Diagnostic diagnostic;
+	REQUIRE(studio::SetImageGraphTrackQuaternionMode(document, "angles", "rotation", 1, diagnostic));
+	CHECK(document.FormatVersion == 8);
+	CHECK(document.Tracks[0].QuaternionMode == 1);
+	Document parsed;
+	REQUIRE(Read(Write(document), parsed, diagnostic) == Status::Ok);
+	CHECK(parsed == document);
+	studio::ImageGraphHistory history;
+	history.Record(before, document);
+	REQUIRE(history.Undo(document));
+	CHECK(document == before);
+	REQUIRE(history.Redo(document));
+	Plan plan;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	for (const uint64_t tick : {uint64_t{2}, uint64_t{4}, uint64_t{0}, uint64_t{2}}) {
+		EvaluatedValue value;
+		EvaluationRequest request;
+		request.Tick = tick;
+		REQUIRE(EvaluateValue(document, plan, "angles", request, value, diagnostic) == Status::Ok);
+		CHECK((std::get<Vector3>(value.Data) == Vector3{-double(tick) * 22.5, 0, 0}));
+	}
+	const Document authored = document;
+	CHECK_FALSE(studio::SetImageGraphTrackQuaternionMode(document, "angles", "rotation", 2, diagnostic));
+	CHECK(document == authored);
+	CHECK_FALSE(studio::SetImageGraphKeyframeInterpolation(document, 0, "linear", diagnostic));
+	CHECK(document == authored);
+	REQUIRE(studio::SetImageGraphTrackQuaternionMode(document, "angles", "rotation", 0, diagnostic));
+	CHECK(document.Tracks[0].QuaternionMode == 0);
+	REQUIRE(
+		studio::SetImageGraphTrackQuaternionMode(document, "angles", "rotation", std::nullopt, diagnostic)
+	);
+	CHECK_FALSE(document.Tracks[0].QuaternionMode.has_value());
+	CHECK(document.FormatVersion == 8);
+}
+
+TEST_CASE("signed author clocks seek keys and cache distinct preview frames", "[studio][imagegraph]") {
+	using namespace engine::imagegraph;
+	studio::ImageGraphPlayback playback;
+	REQUIRE(studio::SeekImageGraphAuthorFrame(playback, -2.5, true, true));
+	CHECK(studio::GetImageGraphFrame(playback) == FrameTime{2, .5, true});
+	CHECK_FALSE(studio::AdvanceImageGraphPlayback(playback, 1));
+	CHECK(studio::GetImageGraphFrame(playback) == FrameTime{2, .5, true});
+	REQUIRE(studio::SeekImageGraphAuthorFrame(playback, -2.5, true, false));
+	CHECK(studio::GetImageGraphFrame(playback) == FrameTime{2, 0, true});
+	REQUIRE(studio::SeekImageGraphAuthorFrame(playback, -2.5, false, true));
+	CHECK(studio::GetImageGraphFrame(playback) == FrameTime{});
+	REQUIRE(studio::SeekImageGraphAuthorFrame(playback, 2.5, true, true));
+	const auto saved = studio::GetImageGraphFrame(playback);
+	CHECK_FALSE(
+		studio::SeekImageGraphAuthorFrame(playback, std::numeric_limits<double>::infinity(), true, true)
+	);
+	CHECK(studio::GetImageGraphFrame(playback) == saved);
+	Document document;
+	document.Nodes = {{"value", "pc.vector2", "", {}, {{"x", 1.0}, {"y", 0.0}}}};
+	Diagnostic error;
+	REQUIRE(studio::SetImageGraphKeyframe(document, "value", "x", 2, "linear", error, .5, true));
+	REQUIRE(studio::SetImageGraphKeyframe(document, "value", "x", 2, "linear", error, .5));
+	REQUIRE(studio::SetImageGraphKeyframe(document, "value", "x", 2, "linear", error));
+	CHECK(document.Keyframes.size() == 3);
+	CHECK(studio::PreviousImageGraphKey(document, FrameTime{2, .5, false}) == FrameTime{2, 0, false});
+	CHECK(studio::NextImageGraphKey(document, FrameTime{2, .5, true}) == FrameTime{2, 0, false});
+	REQUIRE(studio::RemoveImageGraphKeyframe(document, "value", "x", 2, error, .5, true));
+	CHECK(document.Keyframes.size() == 2);
+	CHECK_FALSE(studio::RemoveImageGraphKeyframe(document, "value", "x", 2, error, .5, true));
+	studio::ImageGraphPreviewCache cache;
+	Image positive{1, 1, {1, 2, 3, 255}}, negative{1, 1, {4, 5, 6, 255}};
+	REQUIRE(cache.Store(1, 0, 2, positive, .5));
+	REQUIRE(cache.Store(1, 0, 2, negative, .5, true));
+	REQUIRE(cache.Find(1, 0, 2, .5));
+	CHECK(cache.Find(1, 0, 2, .5)->Pixels == positive.Pixels);
+	REQUIRE(cache.Find(1, 0, 2, .5, true));
+	CHECK(cache.Find(1, 0, 2, .5, true)->Pixels == negative.Pixels);
+}
+
+TEST_CASE(
+	"native key-kind staging cancels commits undoes and survives exact-time edits", "[studio][imagegraph]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 8;
+	document.Nodes = {{"point", "pc.vector2", "", {}, {{"x", 1.0}, {"y", 0.0}}}};
+	document.Outputs = {{"number", "point", "x"}};
+	Diagnostic error;
+	REQUIRE(studio::SetImageGraphKeyframe(document, "point", "x", 2, "linear", error, .5, true));
+	REQUIRE(studio::SetImageGraphKeyframe(document, "point", "x", 2, "linear", error, .5));
+	const auto before = document;
+	studio::KeyframeKindEditor editor;
+	studio::ImageGraphHistory history;
+	REQUIRE(editor.Begin(document, 0));
+	REQUIRE(editor.Select(KeyframeKind::Adder));
+	CHECK(document == before);
+	editor.Cancel();
+	CHECK_FALSE(editor.Commit(document, error));
+	CHECK(document == before);
+	CHECK_FALSE(history.CanUndo());
+	REQUIRE(editor.Begin(document, 0));
+	REQUIRE(editor.Select(KeyframeKind::Adder));
+	REQUIRE(editor.Commit(document, error));
+	CHECK(document.Keyframes[0].Kind == KeyframeKind::Adder);
+	CHECK(document.Keyframes[1].Kind == KeyframeKind::Normal);
+	const auto after = document;
+	history.Record(before, after);
+	REQUIRE(history.Undo(document));
+	CHECK(document == before);
+	REQUIRE(history.Redo(document));
+	CHECK(document == after);
+	Plan plan;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	EvaluationRequest request;
+	REQUIRE(SetFrameTime(request, {2, .5, true}));
+	EvaluatedValue value;
+	REQUIRE(EvaluateValue(document, plan, "number", request, value, error) == Status::Ok);
+	CHECK(std::get<double>(value.Data) == 1);
+	REQUIRE(studio::SetImageGraphValue(document, "point", "x", 4.0, error));
+	REQUIRE(studio::SetImageGraphKeyframe(document, "point", "x", 2, "linear", error, .5, true));
+	CHECK(document.Keyframes.size() == 2);
+	CHECK(document.Keyframes[0].Kind == KeyframeKind::Adder);
+	CHECK(std::get<double>(document.Keyframes[0].Data) == 4);
+	REQUIRE(studio::SetImageGraphKeyframe(document, "point", "x", 3, "linear", error));
+	CHECK(document.Keyframes.back().Kind == KeyframeKind::Normal);
+	nodegraph::Graph canvas;
+	studio::ImageGraphCanvasIds ids;
+	std::string canvasError;
+	REQUIRE(studio::LoadImageGraphCanvas(document, canvas, ids, canvasError));
+	canvas.Find(ids.ToCanvas.at("point"))->X += 20;
+	Document copied;
+	REQUIRE(studio::SaveImageGraphCanvas(canvas, document, ids, copied, canvasError));
+	CHECK(copied.Keyframes == document.Keyframes);
+	Document loaded;
+	REQUIRE(Read(Write(copied), loaded, error) == Status::Ok);
+	CHECK(loaded == copied);
+	const auto preserved = loaded;
+	CHECK_FALSE(
+		studio::SetImageGraphKeyframeKind(loaded, loaded.Keyframes.size(), KeyframeKind::Normal, error)
+	);
+	CHECK_FALSE(studio::SetImageGraphKeyframeKind(loaded, 0, static_cast<KeyframeKind>(99), error));
+	CHECK(loaded == preserved);
+	Document legacy;
+	legacy.FormatVersion = 8;
+	legacy.Keyframes = {{"point", "x", 0, 1.0, "linear"}};
+	REQUIRE(studio::SetImageGraphKeyframeKind(legacy, 0, KeyframeKind::Adder, error));
+	CHECK(legacy.FormatVersion == 9);
+}
+
+TEST_CASE("key-kind drafts retain signed identity and reject stale metadata", "[studio][imagegraph]") {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Keyframes = {{"point", "x", 2, 1.0, "linear"}, {"point", "x", 2, 2.0, "linear"}};
+	REQUIRE(SetFrameTime(document.Keyframes[0], {2, .5, true}));
+	REQUIRE(SetFrameTime(document.Keyframes[1], {2, .5, false}));
+	studio::KeyframeKindEditor editor;
+	Diagnostic error;
+	REQUIRE(editor.Begin(document, 0));
+	REQUIRE(editor.Select(KeyframeKind::Adder));
+	std::swap(document.Keyframes[0], document.Keyframes[1]);
+	REQUIRE(editor.Commit(document, error));
+	CHECK(document.Keyframes[0].Kind == KeyframeKind::Normal);
+	CHECK(document.Keyframes[1].Kind == KeyframeKind::Adder);
+	REQUIRE(editor.Begin(document, 1));
+	REQUIRE(editor.Select(KeyframeKind::Normal));
+	document.Keyframes.erase(document.Keyframes.begin() + 1);
+	const auto erased = document;
+	CHECK_FALSE(editor.Commit(document, error));
+	CHECK(document == erased);
+	editor.Cancel();
+	REQUIRE(editor.Begin(document, 0));
+	REQUIRE(editor.Select(KeyframeKind::Normal));
+	REQUIRE(studio::SetImageGraphKeyframeKind(document, 0, KeyframeKind::Adder, error));
+	const auto replaced = document;
+	CHECK_FALSE(editor.Commit(document, error));
+	CHECK(document == replaced);
+	CHECK_FALSE(editor.Select(static_cast<KeyframeKind>(99)));
+	CHECK(editor.Draft == KeyframeKind::Normal);
+}
+
+TEST_CASE(
+	"key transfer keeps move drivers and pastes driverless metadata clones",
+	"[studio][imagegraph][timeline_keys]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"number", "value.number", "", {}, {{"value", 0.0}}}};
+	document.Outputs = {{"out", "number", "number"}};
+	document.Keyframes = {{"number", "value", 2, 2.0, "linear"}, {"number", "value", 8, 8.0, "linear"}};
+	Diagnostic error;
+	REQUIRE(studio::SetImageGraphKeyframeSourceDriver(document, 0, KeyframeLinearDriver{2}, error));
+	REQUIRE(studio::SetImageGraphKeyframeKind(document, 0, KeyframeKind::Adder, error));
+	REQUIRE(SetFrameTime(document.Keyframes[0], {2, .125, true}));
+	const auto original = document.Keyframes[0];
+	std::vector<Keyframe> captured;
+	const std::array selection{studio::ImageGraphKeyframeIdentity{"number", "value", GetFrameTime(original)}};
+	REQUIRE(studio::CaptureImageGraphKeyframes(document, selection, captured, error));
+	REQUIRE(
+		studio::TransferImageGraphKeyframes(
+			document, captured, GetFrameTime(original), {4, .25, false}, false, error
+		)
+	);
+	const auto moved =
+		*std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [](const auto &key) {
+			return key.Kind == KeyframeKind::Adder;
+		});
+	CHECK(GetFrameTime(moved) == FrameTime{4, .25, false});
+	CHECK(moved.SourceDriver == original.SourceDriver);
+	CHECK(moved.Ease == original.Ease);
+	CHECK(original == captured[0]);
+	REQUIRE(
+		studio::TransferImageGraphKeyframes(
+			document, captured, GetFrameTime(original), {6, .75, false}, true, error
+		)
+	);
+	const auto clone =
+		std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [](const auto &key) {
+			return GetFrameTime(key) == FrameTime{6, .75, false};
+		});
+	REQUIRE(clone != document.Keyframes.end());
+	CHECK(clone->Kind == original.Kind);
+	CHECK(clone->Ease == original.Ease);
+	CHECK(clone->Data == original.Data);
+	CHECK_FALSE(clone->SourceDriver);
+	CHECK_FALSE(clone->SineDriver);
+	Document parsed;
+	REQUIRE(Read(Write(document), parsed, error) == Status::Ok);
+	CHECK(parsed == document);
+	const auto before = document;
+	CHECK_FALSE(
+		studio::TransferImageGraphKeyframes(
+			document, captured, GetFrameTime(original), {1, 0, false}, false, error
+		)
+	);
+	CHECK(document == before);
+	Keyframe legacy = original;
+	legacy.SourceDriver.reset();
+	legacy.SineDriver = KeyframeSineDriver{};
+	REQUIRE(
+		studio::TransferImageGraphKeyframes(
+			document, std::span(&legacy, 1), GetFrameTime(legacy), {10, 0, false}, true, error
+		)
+	);
+	CHECK_FALSE(document.Keyframes.back().SineDriver);
+}
+
+TEST_CASE(
+	"key transfer preserves tiny fractions clamps negative targets and refuses overflow atomically",
+	"[studio][imagegraph][timeline_keys]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"number", "value.number", "", {}, {{"value", 0.0}}}};
+	document.Outputs = {{"out", "number", "number"}};
+	document.Keyframes = {{"number", "value", 1000000, 1.0, "linear"}};
+	REQUIRE(SetFrameTime(document.Keyframes[0], {1000000, 1e-20, false}));
+	const auto originals = document.Keyframes;
+	Diagnostic error;
+	REQUIRE(
+		studio::TransferImageGraphKeyframes(
+			document, originals, {1000000, 0, false}, {1, 0, false}, false, error
+		)
+	);
+	CHECK(GetFrameTime(document.Keyframes[0]) == FrameTime{1, 1e-20, false});
+	const auto before = document;
+	CHECK_FALSE(
+		studio::TransferImageGraphKeyframes(
+			document, originals, {0, 0, false}, {Limits::MaximumTick, 0, false}, true, error
+		)
+	);
+	CHECK(document == before);
+	REQUIRE(
+		studio::TransferImageGraphKeyframes(
+			document, originals, GetFrameTime(originals[0]), {1, .5, true}, true, error
+		)
+	);
+	CHECK(GetFrameTime(document.Keyframes[0]) == FrameTime{});
+	CHECK(GetFrameTime(document.Keyframes[1]) == FrameTime{1, 1e-20, false});
+	const auto retained = document;
+	std::vector<Keyframe> result = originals;
+	const std::array missing{studio::ImageGraphKeyframeIdentity{"number", "value", {2, 0, false}}};
+	CHECK_FALSE(studio::CaptureImageGraphKeyframes(document, missing, result, error));
+	CHECK(result == originals);
+	Keyframe oversized = originals[0];
+	oversized.Data = std::string(Limits::MaximumTextBytes + 1, 'x');
+	CHECK_FALSE(
+		studio::TransferImageGraphKeyframes(
+			document, std::span(&oversized, 1), GetFrameTime(oversized), {3, 0, false}, true, error
+		)
+	);
+	CHECK(document == retained);
+}
+
+TEST_CASE(
+	"clamped move collisions retain first selected key while paste replaces with last clone",
+	"[studio][imagegraph][timeline_keys]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"number", "value.number", "", {}, {{"value", 0.0}}}};
+	document.Outputs = {{"out", "number", "number"}};
+	document.Keyframes = {{"number", "value", 1, 1.0, "linear"}, {"number", "value", 2, 2.0, "linear"}};
+	const auto originals = document.Keyframes;
+	Diagnostic error;
+	REQUIRE(
+		studio::TransferImageGraphKeyframes(document, originals, {1, 0, false}, {4, 0, true}, false, error)
+	);
+	REQUIRE(document.Keyframes.size() == 1);
+	CHECK(GetFrameTime(document.Keyframes[0]) == FrameTime{});
+	CHECK(std::get<double>(document.Keyframes[0].Data) == 1);
+	REQUIRE(
+		studio::TransferImageGraphKeyframes(document, originals, {1, 0, false}, {4, 0, true}, true, error)
+	);
+	REQUIRE(document.Keyframes.size() == 1);
+	CHECK(std::get<double>(document.Keyframes[0].Data) == 2);
+}
+
+TEST_CASE(
+	"key snapshot and transfer reject exhausted aggregate payload budgets before replacement",
+	"[studio][imagegraph][timeline_keys]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"number", "value.number", "", {}, {{"value", 0.0}}}};
+	document.Outputs = {{"out", "number", "number"}};
+	document.Keyframes = {{"number", "value", 1, 1.0, "linear"}};
+	const auto before = document;
+	std::vector<Keyframe> captured = before.Keyframes;
+	const std::array selected{studio::ImageGraphKeyframeIdentity{"number", "value", {1, 0, false}}};
+	Diagnostic error;
+	CHECK_FALSE(studio::CaptureImageGraphKeyframes(document, selected, captured, error, 1));
+	CHECK(captured == before.Keyframes);
+	CHECK_FALSE(
+		studio::TransferImageGraphKeyframes(document, captured, {1, 0, false}, {2, 0, false}, false, error, 1)
+	);
+	CHECK(error.Code == Status::LimitExceeded);
+	CHECK(document == before);
+}
+
+TEST_CASE(
+	"targeted paste maps source display names skips missing inputs and retains copied metadata",
+	"[studio][imagegraph][target_paste]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"source", "pc.vector3", "", {}, {{"x", 1.0}, {"y", 2.0}, {"z", 3.0}}},
+		{"target", "pc.vector2", "", {}, {{"x", 0.0}, {"y", 0.0}}}
+	};
+	document.Outputs = {{"out", "target", "x"}};
+	document.Keyframes = {
+		{"source", "x", 1, 10.0, "linear"},
+		{"source", "y", 3, 20.0, "linear"},
+		{"source", "z", 4, 30.0, "linear"}
+	};
+	Diagnostic error;
+	REQUIRE(studio::SetImageGraphKeyframeKind(document, 0, KeyframeKind::Adder, error));
+	REQUIRE(studio::SetImageGraphKeyframeSourceDriver(document, 0, KeyframeLinearDriver{2}, error));
+	const auto clipboard = document.Keyframes;
+	const bool pasted = studio::PasteImageGraphKeyframesToProperty(
+		document, clipboard, {5, .25, false}, "target", "y", error
+	);
+	INFO(error.Message);
+	CAPTURE(error.Code, error.NodeId, error.Port);
+	REQUIRE(pasted);
+	CHECK(error.Code == Status::UnknownPort);
+	REQUIRE(document.Keyframes.size() == 5);
+	const auto x = std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [](const auto &key) {
+		return key.NodeId == "target" && key.Port == "x";
+	});
+	const auto y = std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [](const auto &key) {
+		return key.NodeId == "target" && key.Port == "y";
+	});
+	REQUIRE(x != document.Keyframes.end());
+	REQUIRE(y != document.Keyframes.end());
+	CHECK(GetFrameTime(*x) == FrameTime{5, .25, false});
+	CHECK(GetFrameTime(*y) == FrameTime{7, .25, false});
+	CHECK(x->Kind == KeyframeKind::Adder);
+	CHECK(x->Ease == clipboard[0].Ease);
+	CHECK_FALSE(x->SourceDriver);
+	const auto track = std::find_if(document.Tracks.begin(), document.Tracks.end(), [](const auto &entry) {
+		return entry.NodeId == "target" && entry.Port == "x";
+	});
+	REQUIRE(track != document.Tracks.end());
+	CHECK(track->End == "hold");
+	CHECK(document.Keyframes[0] == clipboard[0]);
+	Document parsed;
+	REQUIRE(Read(Write(document), parsed, error) == Status::Ok);
+	CHECK(parsed == document);
+}
+
+TEST_CASE(
+	"targeted paste refuses unrepresented numeric crossings and preserves the authored document",
+	"[studio][imagegraph][target_paste]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"source", "pc.vector2", "", {}, {{"x", 1.0}, {"y", 2.0}}},
+		{"target", "pc.vector2", "", {}, {{"x", 0.0}, {"y", 0.0}}}
+	};
+	document.Outputs = {{"out", "target", "x"}};
+	document.Keyframes = {{"source", "x", 1, 10.0, "linear"}};
+	const auto clipboard = document.Keyframes;
+	Diagnostic error;
+	const auto before = document;
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, clipboard, {5, 0, false}, "target", "integer", error
+		)
+	);
+	CHECK(error.Code == Status::UnsupportedExecution);
+	CHECK(document == before);
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, clipboard, {5, 0, false}, "target", "removed", error
+		)
+	);
+	CHECK(error.Code == Status::UnknownPort);
+	CHECK(document == before);
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, clipboard, {5, 0, false}, "target", "x", error, 1
+		)
+	);
+	CHECK(error.Code == Status::LimitExceeded);
+	CHECK(document == before);
+}
+
+TEST_CASE(
+	"target paste reaches typed dynamic inputs and renders the authored fractional key",
+	"[studio][imagegraph][target_paste]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"source",
+		 "pc.string_merge",
+		 "",
+		 {},
+		 {},
+		 {{"text_0", ValueType::Text, Value{std::string{"initial"}}}}},
+		{"target",
+		 "pc.string_merge",
+		 "",
+		 {},
+		 {},
+		 {{"text_0", ValueType::Text, Value{std::string{"initial"}}}}}
+	};
+	document.Keyframes = {
+		{"source", "text_0", 1, std::string{"first"}, "step"},
+		{"source", "text_0", 3, std::string{"last"}, "step"}
+	};
+	document.Outputs = {{"out", "target", "text"}};
+	const auto clipboard = document.Keyframes;
+	Diagnostic error;
+	REQUIRE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, clipboard, {5, .25, false}, "target", "text_0", error
+		)
+	);
+	Plan plan;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	EvaluationRequest request;
+	REQUIRE(SetFrameTime(request, {5, .25, false}));
+	EvaluatedValue result;
+	REQUIRE(EvaluateValue(document, plan, "out", request, result, error) == Status::Ok);
+	CHECK(std::get<std::string>(result.Data) == "first");
+	REQUIRE(SetFrameTime(request, {7, .25, false}));
+	REQUIRE(EvaluateValue(document, plan, "out", request, result, error) == Status::Ok);
+	CHECK(std::get<std::string>(result.Data) == "last");
+}
+
+TEST_CASE(
+	"typed Studio image previews convert every surface format atomically", "[studio][imagegraph][preview]"
+) {
+	using engine::imagegraph::Image;
+	using engine::imagegraph::SurfaceFormat;
+	using engine::imagegraph::SurfacePixel;
+	Image rgba8Exact{1, 1, {12, 34, 56, 78}};
+	std::vector<std::byte> exactDisplay;
+	REQUIRE(studio::detail::PrepareImageGraphPreviewRgba8(rgba8Exact, exactDisplay));
+	CHECK(
+		(exactDisplay == std::vector<std::byte>{std::byte{12}, std::byte{34}, std::byte{56}, std::byte{78}})
+	);
+	const std::array<SurfaceFormat, 7> formats{
+		SurfaceFormat::RGBA8Unorm,
+		SurfaceFormat::RGBA4Unorm,
+		SurfaceFormat::RGBA16Float,
+		SurfaceFormat::RGBA32Float,
+		SurfaceFormat::R8Unorm,
+		SurfaceFormat::R16Float,
+		SurfaceFormat::R32Float
+	};
+	for (const SurfaceFormat format : formats) {
+		Image image;
+		image.Width = 1;
+		image.Height = 1;
+		image.Format = format;
+		const auto layout = engine::imagegraph::CheckedSurfaceLayout(1, 1, format, 16);
+		REQUIRE(layout);
+		image.Pixels.resize(static_cast<size_t>(layout->Bytes));
+		const SurfacePixel pixel = format == SurfaceFormat::R8Unorm || format == SurfaceFormat::R16Float ||
+										   format == SurfaceFormat::R32Float
+									   ? SurfacePixel{.25, 0, 0, 1}
+								   : format == SurfaceFormat::RGBA4Unorm ? SurfacePixel{0, .5, 1, 1}
+																		 : SurfacePixel{-1, .5, 2, 1};
+		REQUIRE(engine::imagegraph::StoreSurfacePixel(image, 0, 0, pixel));
+		std::vector<std::byte> display{std::byte{0x12}};
+		REQUIRE(studio::detail::PrepareImageGraphPreviewRgba8(image, display));
+		REQUIRE(display.size() == 4);
+		if (format == SurfaceFormat::RGBA8Unorm) {
+			CHECK(
+				(display ==
+				 std::vector<std::byte>{std::byte{0}, std::byte{128}, std::byte{255}, std::byte{255}})
+			);
+		} else if (format == SurfaceFormat::RGBA4Unorm) {
+			CHECK(
+				(display ==
+				 std::vector<std::byte>{std::byte{0}, std::byte{136}, std::byte{255}, std::byte{255}})
+			);
+		} else if (format == SurfaceFormat::R8Unorm || format == SurfaceFormat::R16Float ||
+				   format == SurfaceFormat::R32Float) {
+			CHECK((
+				display == std::vector<std::byte>{std::byte{64}, std::byte{64}, std::byte{64}, std::byte{255}}
+			));
+		} else {
+			CHECK(
+				(display ==
+				 std::vector<std::byte>{std::byte{0}, std::byte{128}, std::byte{255}, std::byte{255}})
+			);
+		}
+	}
+
+	Image malformed{1, 1, {1}};
+	malformed.Format = SurfaceFormat::R32Float;
+	std::vector<std::byte> prior{std::byte{9}, std::byte{8}};
+	CHECK_FALSE(studio::detail::PrepareImageGraphPreviewRgba8(malformed, prior));
+	CHECK((prior == std::vector<std::byte>{std::byte{9}, std::byte{8}}));
+	Image nonfinite;
+	nonfinite.Width = 1;
+	nonfinite.Height = 1;
+	nonfinite.Format = SurfaceFormat::RGBA32Float;
+	nonfinite.Pixels.resize(16);
+	nonfinite.Pixels[0] = 0x00;
+	nonfinite.Pixels[1] = 0x00;
+	nonfinite.Pixels[2] = 0xc0;
+	nonfinite.Pixels[3] = 0x7f;
+	CHECK_FALSE(studio::detail::PrepareImageGraphPreviewRgba8(nonfinite, prior));
+	CHECK((prior == std::vector<std::byte>{std::byte{9}, std::byte{8}}));
+	Image unknown = malformed;
+	unknown.Format = static_cast<SurfaceFormat>(255);
+	CHECK_FALSE(studio::detail::PrepareImageGraphPreviewRgba8(unknown, prior));
+	CHECK((prior == std::vector<std::byte>{std::byte{9}, std::byte{8}}));
+
+	Image maximum;
+	maximum.Width = studio::IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION;
+	maximum.Height = studio::IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION;
+	maximum.Format = SurfaceFormat::RGBA32Float;
+	maximum.Pixels.resize(studio::IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES);
+	for (uint32_t y = 0; y < maximum.Height; y++)
+		for (uint32_t x = 0; x < maximum.Width; x++)
+			REQUIRE(engine::imagegraph::StoreSurfacePixel(maximum, x, y, {2, -1, .5, 1}));
+	REQUIRE(studio::detail::PrepareImageGraphPreviewRgba8(maximum, prior));
+	CHECK(prior.size() == studio::IMAGE_COMPOSER_PREVIEW_DISPLAY_MAXIMUM_BYTES);
+	CHECK(prior.front() == std::byte{255});
+	CHECK(prior[1] == std::byte{0});
+}
+
+TEST_CASE(
+	"typed preview cache enforces image and retained caps with LRU replacement",
+	"[studio][imagegraph][preview]"
+) {
+	using engine::imagegraph::Image;
+	using engine::imagegraph::SurfaceFormat;
+	studio::ImageGraphPreviewCache cache;
+	Image rgba8;
+	rgba8.Width = studio::IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION;
+	rgba8.Height = studio::IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION;
+	rgba8.Format = SurfaceFormat::RGBA8Unorm;
+	rgba8.Pixels.resize(studio::IMAGE_COMPOSER_PREVIEW_DISPLAY_MAXIMUM_BYTES);
+	Image rgba32;
+	rgba32.Width = studio::IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION;
+	rgba32.Height = studio::IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION;
+	rgba32.Format = SurfaceFormat::RGBA32Float;
+	rgba32.Pixels.resize(studio::IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES);
+	REQUIRE(cache.Store(1, 0, 0, rgba8));
+	CHECK(cache.HeldBytes() == studio::IMAGE_COMPOSER_PREVIEW_DISPLAY_MAXIMUM_BYTES);
+	cache.Clear();
+	for (size_t index = 0; index < studio::IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES; index++)
+		REQUIRE(cache.Store(1, index, 0, rgba32));
+	CHECK(cache.HeldBytes() == studio::IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES);
+	Image tiny{1, 1, {1, 2, 3, 4}};
+	REQUIRE(cache.Store(1, studio::IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES, 0, tiny));
+	CHECK(cache.Find(1, 0, 0) == nullptr);
+	CHECK(cache.Find(1, 1, 0) != nullptr);
+	CHECK(cache.HeldBytes() <= studio::IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES);
+
+	cache.Clear();
+	for (size_t index = 0; index < studio::IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES; index++)
+		REQUIRE(cache.Store(2, index, 0, tiny));
+	CHECK(cache.HeldBytes() == studio::IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES * tiny.Pixels.size());
+	CHECK(cache.Find(2, 0, 0) != nullptr);
+	REQUIRE(cache.Store(2, studio::IMAGE_COMPOSER_PREVIEW_CACHE_ENTRIES, 0, tiny));
+	CHECK(cache.Find(2, 0, 0) != nullptr);
+	CHECK(cache.Find(2, 1, 0) == nullptr);
+	CHECK(cache.HeldBytes() <= studio::IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES);
+	Image replacement{1, 1, {9, 8, 7, 6}};
+	REQUIRE(cache.Store(2, 0, 0, replacement));
+	CHECK(cache.Find(2, 0, 0)->Pixels == replacement.Pixels);
+	const size_t before = cache.HeldBytes();
+	Image malformed{1, 1, {1}};
+	malformed.Format = SurfaceFormat::RGBA32Float;
+	CHECK_FALSE(cache.Store(2, 0, 0, malformed));
+	CHECK(cache.HeldBytes() == before);
+	CHECK(cache.Find(2, 0, 0)->Pixels == replacement.Pixels);
 }

@@ -26,19 +26,6 @@ namespace studio {
 			return text.find(wanted) != std::string::npos;
 		}
 
-		template <typename Timings>
-		double PassTiming(const Timings &timings, const engine::graph::ProfilePass &pass) {
-			if (const auto named = timings.find(pass.Name.Id()); named != timings.end()) {
-				return named->second;
-			}
-			// The renderer records the display name, but the node kind is the
-			// stable fallback for an older installed pipeline whose names differ.
-			if (const auto kind = timings.find(pass.Kind.Id()); kind != timings.end()) {
-				return kind->second;
-			}
-			return 0.0;
-		}
-
 		std::string RequirementsText(const engine::graph::NodeRequirements &needs) {
 			std::string text;
 			const auto append = [&text](std::string_view name) {
