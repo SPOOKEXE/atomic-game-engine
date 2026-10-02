@@ -1,7 +1,7 @@
 {
   "recorded_date": "2026-10-03",
   "recorded_timezone": "Australia/Darwin, UTC+09:30",
-  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs. Build51 release and focused native gates, the server-headless recipe, and a fresh finalcore51 capability inventory are appended below. Two server-headless build attempts failed from temporary disk exhaustion before a RAM-object retry completed 114/114 steps; the earlier failures remain listed. A prepared CLI run failed because CTest used an old assetc binary, then the assetc rebuild and scoped 14-test rerun passed. The prepared export and Studio suites passed after export fixes. These completed scopes remain separate from any later integrated build, and licensed executable parity remains unavailable. Build52 dev and release gates executed October 3 in Darwin are appended as separate scopes. The release52 executor inventory is a capability snapshot of the archive hash recorded with its captured HEAD d3474640 and SourceCatalogue hash; later source commits do not change that snapshot. Server build, server Composer CTest, and headless runtime are separate gates. Initial Edge Detect/Bokeh Blur fixture and Atlas/Palette runs failed or were interrupted before repairs; those records remain below.",
+  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs. Build51 release and focused native gates, the server-headless recipe, and a fresh finalcore51 capability inventory are appended below. Two server-headless build attempts failed from temporary disk exhaustion before a RAM-object retry completed 114/114 steps; the earlier failures remain listed. A prepared CLI run failed because CTest used an old assetc binary, then the assetc rebuild and scoped 14-test rerun passed. The prepared export and Studio suites passed after export fixes. These completed scopes remain separate from any later integrated build, and licensed executable parity remains unavailable. Build52 dev and release gates executed October 3 in Darwin are appended as separate scopes. The release52 executor inventory is a capability snapshot of the archive hash recorded with its captured HEAD d3474640 and SourceCatalogue hash; later source commits do not change that snapshot. Server build, server Composer CTest, and headless runtime are separate gates. Initial Edge Detect/Bokeh Blur fixture and Atlas/Palette runs failed or were interrupted before repairs; those records remain below. Finalized build53 release checks are appended below. Initial joined release, core, physics, and Studio failures remain in excluded_or_failed_runs; logs containing \u201cfinal\u201d in the initial-run name are not accepted results. The finalized build53 inventory was captured with archive, HEAD, catalogue, and source-scope status verified before and after the query. The finalized build53 release snapshot is tied to imagegraph archive SHA-256 12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717, SourceCatalogue SHA-256 57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c, and HEAD d0611f3282e4a1358e181af621234d2ba641e1f4. Archive, HEAD, catalogue hash, and compiled-source-scope status were captured before and after the query and remained unchanged. The build53 release suites passed after repair; earlier failures remain listed. No passing build53 dev or server gates are included; the two failed dev build attempts are retained below.",
   "runtime_gates": [
     {
       "name": "imagegraph IO",
@@ -1329,6 +1329,133 @@
       "layered": 32,
       "fixtures": 6,
       "scope_note": "Architecture: 43 modules, 1 program, 32 layered, 6 fixtures."
+    },
+    {
+      "name": "I/O release suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-release-53-repaired-final2.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 167,
+      "assertions_passed": 6026,
+      "scope_note": ""
+    },
+    {
+      "name": "imagegraph export release suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-release-53-repaired-final2.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 48,
+      "assertions_passed": 1924,
+      "scope_note": ""
+    },
+    {
+      "name": "client CPU adapter suite build53 release",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-cpu-release-53-repaired-final2.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 49,
+      "assertions_passed": 1889,
+      "scope_note": "Rebuilt build53 client binary; the prebuild run using build52 is excluded."
+    },
+    {
+      "name": "renderer CPU filtered suite build53 release",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/render-cpu-release-53-repaired-final2.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 52,
+      "assertions_passed": 1503,
+      "scope_note": "CPU-filtered tests only; GPU acceptance remains open."
+    },
+    {
+      "name": "CLI release suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/cli-release-53-repaired-final2.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "tests_passed": 14,
+      "tests_failed": 0,
+      "scope_note": ""
+    },
+    {
+      "name": "WAV checker focused suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/wav-checker-release-53.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 4,
+      "assertions_passed": 4186,
+      "scope_note": ""
+    },
+    {
+      "name": "mesh availability focused suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/mesh-availability-release-53.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 11,
+      "assertions_passed": 130,
+      "scope_note": ""
+    },
+    {
+      "name": "scene affector focused suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/affector-release-53.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 2,
+      "assertions_passed": 56,
+      "scope_note": ""
+    },
+    {
+      "name": "pixel kernel workloads focused suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/pixel-kernel-workloads-release-53.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 1,
+      "assertions_passed": 8,
+      "scope_note": "Test exited successfully, but it ran concurrently with a build and is not performance acceptance."
+    },
+    {
+      "name": "architecture check build53 release",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/architecture-release-53.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "modules": 54,
+      "programs": 6,
+      "layered": 38,
+      "fixtures": 6,
+      "scope_note": "Architecture reports 54 modules, 6 programs, 38 layered modules, and 6 fixtures."
+    },
+    {
+      "name": "imagegraph core suite release build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-release-53-repaired-final2.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 1395,
+      "assertions_passed": 1812864,
+      "scope_note": ""
+    },
+    {
+      "name": "imagegraph physics release suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/physics-release-53-repaired-final2.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 40,
+      "assertions_passed": 652,
+      "scope_note": "Includes the fixed nested DynamicSurface admission path. Root separately reports a focused 5-case/183-assertion check; no standalone log path is included here."
+    },
+    {
+      "name": "Studio release suite build53",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-release-53-repaired-final2.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 74,
+      "assertions_passed": 6041,
+      "scope_note": ""
+    },
+    {
+      "name": "joined release build53 repaired compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-joined-release-53-repair3.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "build_steps_completed": 15,
+      "scope_note": "Coherent release rebuild completed all reported steps after the include and source repairs."
     }
   ],
   "excluded_or_failed_runs": [
@@ -1482,6 +1609,110 @@
         "bd72d275",
         "e2b862fa"
       ]
+    },
+    {
+      "name": "joined release build53 initial compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-joined-release-53.log",
+      "result": "failed",
+      "failed_target": "mono.engine/imagegraphphysics/tests/SourceRigidActors.cpp",
+      "observed_failure": "RigidActorHarness.hpp includes private NodeExecutors.hpp, which is unavailable on the imagegraphphysics test include path.",
+      "build_steps_completed": 220,
+      "build_steps_total": 517,
+      "scope_note": "The command stopped at 220/517. A later repaired joined release build completed 15/15 steps; this initial failure remains as history."
+    },
+    {
+      "name": "imagegraph core release build53 initial suite",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-release-53-final.log",
+      "result": "failed; filename says final but this is the initial run",
+      "test_cases_passed": 1378,
+      "test_cases_failed": 12,
+      "assertions_passed": 1812756,
+      "assertions_failed": 15,
+      "failed_test_sources": [
+        "mono.engine/imagegraph/tests/Source2DPathBlurNodes.cpp",
+        "mono.engine/imagegraph/tests/FlipRenderExtended.cpp",
+        "mono.engine/imagegraph/tests/VfxRenderer.cpp",
+        "mono.engine/imagegraph/tests/SourceSurfaceDataNodes.cpp"
+      ],
+      "observed_failure": "The initial run failed across path blur compilation and missing surface input routes, a flip render expectation, VFX renderer graph compilation, and surface-data compilation. The failure set included genuine inherited image-link gaps, invalid fixtures, and other defects, not only fixture mistakes. Repaired final2 release suite later passed."
+    },
+    {
+      "name": "imagegraph physics release build53 initial suite",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/physics-release-53-final.log",
+      "result": "failed; filename says final but this is the initial run",
+      "test_cases_passed": 36,
+      "test_cases_failed": 4,
+      "assertions_passed": 547,
+      "assertions_failed": 4,
+      "failed_test_sources": [
+        "mono.engine/imagegraphphysics/tests/PixelBuilderRigid.cpp",
+        "mono.engine/imagegraphphysics/tests/RigidMeshAction.cpp"
+      ],
+      "observed_failure": "Initial failures included absent RigidReplay and history owners, RigidMeshAction compile rejection, and an expression execution expectation mismatch. The repaired final2 physics suite later passed."
+    },
+    {
+      "name": "Studio release build53 initial suite",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-release-53-initial.log",
+      "result": "failed; initial run",
+      "test_cases_passed": 71,
+      "test_cases_failed": 3,
+      "assertions_passed": 5930,
+      "assertions_failed": 5,
+      "failed_test_sources": [
+        "mono.studio/tests/ImageGraphRigidMeshAction.cpp",
+        "mono.studio/tests/ComposerWorkflow.cpp"
+      ],
+      "observed_failure": "Rigid mesh action graph compilation failed in three assertions and ComposerWorkflow expected one commit but observed zero. These are not classified as fixture-only failures."
+    },
+    {
+      "name": "client CPU adapter prebuild run using old build52 binary",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-cpu-prebuild-53-old52-binary.log",
+      "result": "excluded from build53 accepted checks",
+      "test_cases_passed": 47,
+      "assertions_passed": 1772,
+      "scope_note": "This was an old build52 binary. The new build53 binary result is recorded separately."
+    },
+    {
+      "name": "build53 pixel kernel exploratory benchmark",
+      "result": "excluded from performance acceptance",
+      "scope_note": "Eight variants, three samples, exit 0 while a build ran concurrently. Output was stdout-only. No timing file was saved and no M7 performance claim is made.",
+      "test_preflight_log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/pixel-kernel-workloads-release-53.log",
+      "benchmark_output": "stdout only; no raw timing file"
+    },
+    {
+      "name": "Document header standalone build53 initial compiler probe",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/document-standalone-53-initial.log",
+      "header_snapshot": ".cache/build/dev/evidence/pixel-composer-2026-10-02/Document-before-incomplete-type-repair-53.hpp",
+      "result": "failed; incomplete-type diagnostic reproduced before header repair",
+      "observed_failure": "Path2D::SourceOperation default construction instantiated OwnedPayload3D<SourcePathData2D> unique_ptr cleanup while SourcePathData2D was incomplete.",
+      "scope_note": "The header repair is included in commit d04854f1. Root reports strict GCC and Clang checks pass after the explicit null Storage constructor; this initial failure remains history and is not a full milestone gate."
+    },
+    {
+      "name": "build53 physics repair2 nested surface run",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/physics-release-53-repaired-final.log",
+      "result": "failed; superseded by final passing physics suite",
+      "test_cases_passed": 38,
+      "test_cases_failed": 2,
+      "assertions_passed": 571,
+      "assertions_failed": 2,
+      "observed_failure": "The diagnostic said \"outer-draw:surface image input received an array,\" but the actual missing value was a scalar DynamicSurfaceValue produced by the nested builder. Image-input admission lacked support for that scalar carrier. This was a genuine nested DynamicSurface admission gap, not an image array supplied by the recipe. The later admission repair is covered by the passing final2 physics suite.",
+      "scope_note": "Repair2 exposed the actual scalar-carrier admission gap despite the misleading array diagnostic; the later nested DynamicSurface admission repair is included in the passing final2 suite."
+    },
+    {
+      "name": "native dev build53 initial attempt",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-native-dev-53.log",
+      "result": "failed from disk exhaustion",
+      "build_steps_completed": 167,
+      "build_steps_total": 405,
+      "observed_failure": "Ninja stopped with \"Error writing to deps log: No space left on device.\" The dev imagegraph archive was absent after this failed attempt."
+    },
+    {
+      "name": "native dev build53 retry",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-native-dev-53-retry.log",
+      "result": "failed from disk exhaustion",
+      "build_steps_completed": 6,
+      "build_steps_total": 239,
+      "observed_failure": "The retry failed linking libengine_imagegraph.a because ar could not copy the archive: No space left on device. Ninja then stopped."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -1568,7 +1799,16 @@
     "Build52 release executor inventory reports 443 registered names, 442 overlaps with the 886-entry catalogue, and 444 catalogue entries without registered executors. This is registration-only capability evidence tied to captured archive and SourceCatalogue hashes; later commits are not in the snapshot.",
     "Build52 server preset build completed 89/89 steps, server Composer CTest passed 19/19, and headless runtime completed 10 ticks with 16 entities. These scopes do not establish Pixel Composer parity.",
     "Build52 CPU-filtered client and renderer checks exclude GPU acceptance. No new profiling or GPU evidence was recorded; licensed reference comparison and manual scene acceptance remain open.",
-    "All six M0-M7 completion gates remain open. Build52 native tests and architecture checks do not promote node or workflow matrix statuses."
+    "All six M0-M7 completion gates remain open. Build52 native tests and architecture checks do not promote node or workflow matrix statuses.",
+    "The initial build53 joined release, core, physics, and Studio runs failed and remain as history. Repaired release suites later passed the listed core, physics, Studio, I/O, export, client CPU, CPU-renderer, and CLI gates. Build53 dev and server validation, and whole M0-M7 acceptance, remain open.",
+    "Build53 focused WAV, mesh availability, and scene affector checks also passed. These bounded checks do not replace the full suite outcomes or establish product parity.",
+    "The old build52 client binary run is excluded from build53 evidence. The initial pixel-kernel benchmark ran during a build and is excluded from performance acceptance.",
+    "Build53 is the latest executor inventory: 466 registered names, 465 overlaps, and 421 missing of 886 catalogue entries. Registration remains capability evidence only, not parity.",
+    "The build53 Document.hpp standalone probe failed before its header repair. The repair is included in d04854f1; it does not close the failed full core, physics, or Studio gates.",
+    "The repaired build53 release suites passed core 1,395/1,812,864, physics 40/652, Studio 74/6,041, I/O 167/6,026, export 48/1,924, client CPU 49/1,889, CPU-filtered renderer 52/1,503, and CLI 14/14. Dev and server gates are not recorded and full M0-M7 acceptance remains open.",
+    "The build53 release inventory is registration-only capability evidence: 466 registered names, 465 overlaps with the 886-entry source catalogue, and 421 catalogue entries without a registered executor. Product adapter routes are excluded and no parity claim follows.",
+    "The build53 archive inventory used a temporary helper with no compiled-source-scope modifications before or after capture. Exact archive, catalogue, HEAD, and raw inventory provenance is recorded in the linked artifact.",
+    "Build53 dev acceptance remains open. The initial dev build failed after 167/405 steps while writing the Ninja deps log; the retry failed at archive creation with No space left on device after 6/239 reported steps. No dev pass is claimed. Server validation remains unrecorded."
   ],
   "scene_files": {
     "result": "all seven named .aworld files are present",
@@ -1584,20 +1824,31 @@
     "acceptance_status": "All seven named scene files are present; manual and GPU acceptance remain pending. File presence and CPU filtered tests do not establish scene acceptance."
   },
   "executor_inventory": {
-    "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory52/registered-vs-catalogue-release52.json",
-    "archive_sha256": "1449aace11118a7b6fbd10bba2123f31eec3a88e7539d24ef2828cf557ca19fb",
-    "archive_mtime_local": "2026-10-03T05:29:11+09:30",
-    "archive_size_bytes": 541669018,
-    "repo_head": "d347464098dbbaf3cfe9b6e3a01cd59ea4930d0b",
+    "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory53/registered-vs-catalogue-release53.json",
+    "archive_sha256": "12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717",
+    "archive_size_bytes": 550359324,
+    "archive_mtime_local": "2026-10-03T06:46:24.899397+09:30",
+    "repo_head": "d0611f3282e4a1358e181af621234d2ba641e1f4",
     "catalogue_source_sha256": "57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c",
-    "registered_pc_count": 443,
-    "registered_catalogue_overlap_count": 442,
+    "registered_pc_count": 466,
+    "registered_catalogue_overlap_count": 465,
     "catalogue_pc_count": 886,
-    "catalogue_missing_executor_count": 444,
+    "catalogue_missing_executor_count": 421,
     "registered_only_pc": [
       "pc.global_scope"
     ],
-    "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive SHA matched before and after query. Snapshot was captured at HEAD d3474640 before later Atlas, Palette, Edge/Bokeh, and whitespace commits; source catalogue hash is recorded above."
+    "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue hash, and source-scope status matched before and after the query.",
+    "previous_build52_snapshot": {
+      "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory52/registered-vs-catalogue-release52.json",
+      "archive_sha256": "1449aace11118a7b6fbd10bba2123f31eec3a88e7539d24ef2828cf557ca19fb",
+      "archive_size_bytes": 541669018,
+      "repo_head": "d347464098dbbaf3cfe9b6e3a01cd59ea4930d0b",
+      "registered_pc_count": 443,
+      "registered_catalogue_overlap_count": 442,
+      "catalogue_pc_count": 886,
+      "catalogue_missing_executor_count": 444,
+      "scope_limit": "Historical build52 capability snapshot. It is superseded by the finalized build53 archive inventory above."
+    }
   },
   "metadata_generation": {
     "source_snapshot": "docs/pixel-composer-m0/source-inputs.json",
@@ -1794,6 +2045,46 @@
       "hash": "4d51cc45",
       "subject": "Trim trailing whitespace in Composer HLSL template",
       "scope": "Build52 inventory remains tied to captured HEAD d3474640."
+    },
+    {
+      "hash": "10e874b6",
+      "subject": "add bounded pixel kernel benchmark variants",
+      "scope": "Eight bounded pixel-kernel benchmark workloads; analytical checks passed, concurrent exploratory timings are excluded from performance acceptance."
+    },
+    {
+      "hash": "90c1e477",
+      "subject": "reload granted WAV files on the host frame clock",
+      "scope": "Granted WAV reloads and PXC watcher persistence; focused Studio and joined release checks passed."
+    },
+    {
+      "hash": "d04854f1",
+      "subject": "preserve source CPU and drawable mesh availability",
+      "scope": "CPU/drawable mesh availability and standalone public-header repair; focused and joined release checks passed."
+    },
+    {
+      "hash": "dc8e4bbe",
+      "subject": "stage six-face source skyboxes and replay scene affectors",
+      "scope": "Six-face skybox staging and first-frame scene affector replay; CPU client/render and core checks passed, GPU remains open."
+    },
+    {
+      "hash": "904e4476",
+      "subject": "evaluate path blur and surface data with inherited input routes",
+      "scope": "Path Blur, surface data and bounded inherited input routes; full release core passed."
+    },
+    {
+      "hash": "18ed9b03",
+      "subject": "rasterize retained FLIP trails and base VFX particles",
+      "scope": "Retained FLIP trail and base VFX CPU raster profiles; full release core passed."
+    },
+    {
+      "hash": "142ecaaa",
+      "subject": "implement bounded source rigid actors and mesh generation",
+      "scope": "Bounded rigid actor routes, captured random operations and mesh generation; full release core and native physics passed."
+    },
+    {
+      "hash": "d0611f32",
+      "subject": "checkpoint frame-start replay and add undoable rigid mesh authoring",
+      "scope": "Immutable frame-start checkpoints, nested rigid recipes and undoable Studio mesh authoring; joined release checks passed."
     }
   ],
   "temporary_build_storage": {
@@ -1815,19 +2106,36 @@
   },
   "acceptance_status": {
     "m0_m7": "incomplete",
+    "latest_dev_core": "build52 dev passed 1,343 cases / 1,812,127 assertions",
+    "latest_release_core": "build53 release passed 1,395 cases / 1,812,864 assertions",
+    "build53_release": "selected coherent release gates passed after repair; build53 dev and server gates remain pending",
+    "latest_inventory": "build53 release snapshot: 466 registered / 465 overlap / 886 catalogue / 421 missing",
     "licensed_executable_parity": "open and unavailable",
     "gpu_acceptance": "open",
     "manual_scene_acceptance": "open",
-    "server_headless_build52": "passed compile and link only",
-    "server_composer_ctest52": "passed",
-    "server_runtime52": "passed 10 ticks, 16 entities",
-    "native_profiling": "no new build52 profile evidence"
+    "profiling": "no accepted build53 performance profile",
+    "build53_overall": "selected coherent release gates passed after repair; dev and server gates and full M0-M7 acceptance remain open"
   },
   "pending_gates": [
     {
       "name": "GPU acceptance, manual scene acceptance, licensed executable parity, and full M0-M7 completion",
       "status": "open",
       "scope_note": "Build52 native CPU and server evidence do not satisfy these gates."
+    },
+    {
+      "name": "build53 dev validation",
+      "status": "pending",
+      "scope_note": "Two retained dev-preset build attempts failed from disk exhaustion. A RAM-library retry and fresh dev suites remain pending."
+    },
+    {
+      "name": "build53 server validation",
+      "status": "pending",
+      "scope_note": "No accepted build53 server build, CTest, or runtime results are included in this update."
+    },
+    {
+      "name": "GPU, manual scene, licensed executable parity, and full M0-M7 completion",
+      "status": "open",
+      "scope_note": "Selected release53 native checks do not satisfy these product acceptance gates."
     }
   ]
 }
