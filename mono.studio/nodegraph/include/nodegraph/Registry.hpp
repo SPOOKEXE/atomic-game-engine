@@ -214,7 +214,7 @@ namespace nodegraph {
 		// @return The categories, each once.
 		static std::vector<std::string> Categories();
 
-		// Types with an input that would take this type id.
+		// Suggested types with an enabled input that would take this type id.
 		static std::vector<const NodeType *> AcceptingInput(const std::string &type);
 	};
 }

@@ -86,6 +86,11 @@ namespace nodegraph {
 		//@}
 	};
 
+	struct BodySize {
+		float Width = 0;
+		float Height = 0;
+	};
+
 	// One node's geometry, and the one answer to "where is that slider".
 	struct NodeLayout {
 		// The node's box, in canvas units. The width is its type's; the height
@@ -105,6 +110,11 @@ namespace nodegraph {
 		// Where the knobs start, so a collapsed node can clip below it without
 		// re-deriving the header and port block.
 		float WidgetsTop = 0.0f;
+
+		// Host content sits below ports, inside the same geometry used for hit testing.
+		float BodyTop = 0;
+		float BodyWidth = 0;
+		float BodyHeight = 0;
 
 		// The thumbnail's square, for a type that has a `Preview`. Zero-sided
 		// when it has none, which is what a node carrying a number gets: an
@@ -203,7 +213,7 @@ namespace nodegraph {
 	// Lays out one node. A node of an unregistered type still gets a body, so it
 	// can be seen, moved and deleted. A collapsed one gets its header and its
 	// ports and nothing else.
-	NodeLayout LayoutOf(const Node &node, const Metrics &metrics = Metrics{});
+	NodeLayout LayoutOf(const Node &node, const Metrics &metrics = Metrics{}, BodySize body = {});
 
 	// The port by name, or nullptr.
 	const PlacedPort *PortIn(const NodeLayout &layout, const std::string &name, bool input);

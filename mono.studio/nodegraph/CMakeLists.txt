@@ -43,3 +43,8 @@ mono_add_library(nodegraph
 	NAMESPACE Mono
 	VENDOR Vendor::imgui
 )
+
+# Headless canvas tests exercise the private toolkit without exposing it to consumers.
+if(TARGET test_nodegraph)
+	target_link_libraries(test_nodegraph PRIVATE Vendor::imgui)
+endif()

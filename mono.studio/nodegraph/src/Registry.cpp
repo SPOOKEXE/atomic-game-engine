@@ -68,7 +68,7 @@ namespace nodegraph {
 		std::vector<const NodeType *> found;
 		for (const NodeType &candidate : Registered().Order) {
 			for (const PortSpec &port : candidate.Inputs) {
-				if (DataTypes::CanConnect(type, port.Type)) {
+				if (port.Suggest && DataTypes::CanConnect(type, port.Type)) {
 					found.push_back(&candidate);
 					break;
 				}

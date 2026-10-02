@@ -221,11 +221,14 @@ namespace nodegraph {
 		return false;
 	}
 
-	NodeLayout LayoutOf(const Node &node, const Metrics &metrics) {
+	NodeLayout LayoutOf(const Node &node, const Metrics &metrics, BodySize body) {
 		NodeLayout layout;
 
 		const NodeType *type = NodeTypes::Find(node.Type);
 		layout.Width = type != nullptr ? type->Width : 160.0f;
+
+		if (!node.Collapsed && std::isfinite(body.Width) && body.Width > 0 && body.Width <= 4096)
+			layout.Width = std::max(layout.Width, body.Width + metrics.Padding * 2);
 
 		float y = metrics.HeaderHeight;
 		if (type == nullptr) {
@@ -319,6 +322,16 @@ namespace nodegraph {
 				);
 			}
 			y += metrics.RowHeight;
+		}
+
+		if (std::isfinite(body.Height) && body.Height > 0 && body.Height <= 4096) {
+			y += metrics.Padding * .5f;
+			layout.BodyTop = y;
+			layout.BodyWidth = std::isfinite(body.Width) && body.Width > 0 && body.Width <= 4096
+								   ? body.Width
+								   : layout.Width - metrics.Padding * 2;
+			layout.BodyHeight = body.Height;
+			y += body.Height;
 		}
 
 		// **The thumbnail above the widgets and below the ports.** A picture is

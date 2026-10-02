@@ -243,6 +243,8 @@ namespace nodegraph {
 
 		// Which `DataType::Id` may be connected here, or `ANY_TYPE`.
 		std::string Type;
+		// Include this input in automatic node suggestions. Manual connection rules use Type only.
+		bool Suggest = true;
 	};
 
 	// Registration helpers, so a node type reads as a declaration.

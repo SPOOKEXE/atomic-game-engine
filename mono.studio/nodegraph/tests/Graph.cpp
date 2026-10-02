@@ -234,3 +234,30 @@ TEST_CASE("compression moves no link and no hash", "[nodegraph]") {
 	CHECK(!graph.Alive(terrace));
 	CHECK(graph.Alive(source));
 }
+
+TEST_CASE("suggestion exclusions leave manual port connections available", "[nodegraph][suggestions]") {
+	RegisterFixtureNodes();
+	NodeType hidden;
+	hidden.Id = "suggestion.hidden";
+	hidden.Inputs = {{"In", "data.NUMBER", false}};
+	NodeTypes::Register(hidden);
+	NodeType shown;
+	shown.Id = "suggestion.shown";
+	shown.Inputs = {{"In", "data.NUMBER"}};
+	NodeTypes::Register(shown);
+	const auto suggestions = NodeTypes::AcceptingInput("data.NUMBER");
+	bool includesHidden = false, includesShown = false;
+	for (const auto *candidate : suggestions) {
+		includesHidden = includesHidden || candidate->Id == hidden.Id;
+		includesShown = includesShown || candidate->Id == shown.Id;
+	}
+	CHECK_FALSE(includesHidden);
+	CHECK(includesShown);
+	Graph graph;
+	const auto source = graph.Add("number.constant", 0, 0);
+	const auto target = graph.Add(hidden.Id, 100, 0);
+	REQUIRE(source != NO_NODE);
+	REQUIRE(target != NO_NODE);
+	CHECK(graph.CanConnect(source, "Out", target, "In") == LinkResult::Made);
+	CHECK(graph.Connect(source, "Out", target, "In") == LinkResult::Made);
+}

@@ -69,12 +69,16 @@ namespace nodegraph {
 		Metrics Sizes;
 	};
 
-	// What a canvas asks its host to do, for the two things it cannot decide.
-	//
-	// **Callbacks rather than a queue of enums**, because there are two and each
-	// has one caller. A canvas that owned an undo stack would be a canvas
-	// deciding what a document is, and a second canvas over the same graph would
-	// then own a second one.
+	// Host content receives screen geometry and pointer state without a public toolkit dependency.
+	struct BodyFrame {
+		float X = 0, Y = 0, Width = 0, Height = 0, Scale = 1;
+		float MouseX = 0, MouseY = 0, DeltaX = 0, DeltaY = 0, Wheel = 0;
+		bool Hovered = false, Control = false;
+		bool LeftPressed = false, LeftDown = false, LeftReleased = false;
+		bool MiddlePressed = false, MiddleDown = false, RightPressed = false;
+	};
+
+	// The host owns undo, reruns and custom node content.
 	struct Hooks {
 		// A mutation landed and the host should record it. Called once per
 		// gesture, at the end: a slider drag is one undo step and not sixty.
@@ -82,6 +86,12 @@ namespace nodegraph {
 
 		// Somebody asked for one node to be computed again from scratch.
 		std::function<void(NodeId)> Rerun;
+
+		// Host drawing uses the current canvas draw list, without making toolkit types public.
+		std::function<BodySize(const Node &)> MeasureBody;
+		std::function<void(const Node &, const BodyFrame &)> DrawBody;
+		// Returns true while pointer input belongs to the body, including release outside it.
+		std::function<bool(const Node &, const BodyFrame &)> InputBody;
 	};
 
 	// A view over one graph. Holds the camera and the drag, and nothing about
@@ -276,6 +286,9 @@ namespace nodegraph {
 		void ToScreen(float x, float y, float &outX, float &outY) const;
 		void ToGraph(float x, float y, float &outX, float &outY) const;
 		//@}
+
+		NodeLayout Layout(const Node &node) const;
+		BodyFrame Body(const Node &node, const NodeLayout &layout, bool hovered) const;
 
 		void DrawGrid(float x, float y, float width, float height) const;
 		void DrawGroups(const Graph &graph) const;

@@ -93,6 +93,7 @@ namespace nodegraph {
 			const Graph &graph,
 			const Link &link,
 			const Metrics &metrics,
+			const std::function<BodySize(const Node &)> &measure,
 			NodeId depth,
 			float &fromX,
 			float &fromY,
@@ -122,8 +123,8 @@ namespace nodegraph {
 				return false;
 			}
 
-			const NodeLayout fromLayout = LayoutOf(*from, metrics);
-			const NodeLayout toLayout = LayoutOf(*to, metrics);
+			const NodeLayout fromLayout = LayoutOf(*from, metrics, measure ? measure(*from) : BodySize{});
+			const NodeLayout toLayout = LayoutOf(*to, metrics, measure ? measure(*to) : BodySize{});
 			const PlacedPort *out = PortIn(fromLayout, fromPort, false);
 			const PlacedPort *in = PortIn(toLayout, toPort, true);
 			if (out == nullptr || in == nullptr) {
@@ -137,6 +138,34 @@ namespace nodegraph {
 			carried = out->Type;
 			return true;
 		}
+	}
+
+	NodeLayout Canvas::Layout(const Node &node) const {
+		return LayoutOf(node, Look.Sizes, Signals.MeasureBody ? Signals.MeasureBody(node) : BodySize{});
+	}
+
+	BodyFrame Canvas::Body(const Node &node, const NodeLayout &layout, bool hovered) const {
+		BodyFrame frame;
+		ToScreen(node.X + (layout.Width - layout.BodyWidth) * .5f, node.Y + layout.BodyTop, frame.X, frame.Y);
+		frame.Width = layout.BodyWidth * Scale;
+		frame.Height = layout.BodyHeight * Scale;
+		frame.Scale = Scale;
+		const auto &io = ImGui::GetIO();
+		frame.MouseX = io.MousePos.x;
+		frame.MouseY = io.MousePos.y;
+		frame.DeltaX = io.MouseDelta.x;
+		frame.DeltaY = io.MouseDelta.y;
+		frame.Wheel = io.MouseWheel;
+		frame.Hovered = hovered && frame.MouseX >= frame.X && frame.MouseX <= frame.X + frame.Width &&
+						frame.MouseY >= frame.Y && frame.MouseY <= frame.Y + frame.Height;
+		frame.Control = io.KeyCtrl;
+		frame.LeftPressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+		frame.LeftDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+		frame.LeftReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+		frame.MiddlePressed = ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
+		frame.MiddleDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+		frame.RightPressed = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+		return frame;
 	}
 
 	void Canvas::ToScreen(float x, float y, float &outX, float &outY) const {
@@ -202,7 +231,7 @@ namespace nodegraph {
 			if (some && std::find(Chosen.begin(), Chosen.end(), node.Id) == Chosen.end()) {
 				continue;
 			}
-			const NodeLayout layout = LayoutOf(node, Look.Sizes);
+			const NodeLayout layout = Layout(node);
 			if (!any) {
 				left = node.X;
 				top = node.Y;
@@ -235,7 +264,7 @@ namespace nodegraph {
 		if (node == nullptr) {
 			return;
 		}
-		const NodeLayout layout = LayoutOf(*node, Look.Sizes);
+		const NodeLayout layout = Layout(*node);
 
 		// **The zoom is left alone.** Somebody clicking a row in the Types panel
 		// asked where a node is, not to be moved to a different magnification.
@@ -571,7 +600,18 @@ namespace nodegraph {
 			// **Drawn where the ends appear at this depth**, which is the whole
 			// visual effect of a fold: a wire into it stops at its proxy port,
 			// and one wholly inside it is not drawn out here at all.
-			if (!Ends(graph, graph.Links()[index], Look.Sizes, Inside(), fromX, fromY, toX, toY, carried)) {
+			if (!Ends(
+					graph,
+					graph.Links()[index],
+					Look.Sizes,
+					Signals.MeasureBody,
+					Inside(),
+					fromX,
+					fromY,
+					toX,
+					toY,
+					carried
+				)) {
 				continue;
 			}
 
@@ -954,7 +994,7 @@ namespace nodegraph {
 			if (!Visible(*node)) {
 				continue;
 			}
-			const NodeLayout layout = LayoutOf(*node, Look.Sizes);
+			const NodeLayout layout = Layout(*node);
 			if (graphX >= node->X && graphX <= node->X + layout.Width && graphY >= node->Y &&
 				graphY <= node->Y + layout.Height) {
 				return node->Id;
@@ -975,7 +1015,7 @@ namespace nodegraph {
 			if (!Visible(*walk)) {
 				continue;
 			}
-			const NodeLayout layout = LayoutOf(*walk, Look.Sizes);
+			const NodeLayout layout = Layout(*walk);
 			for (const PlacedPort &placed : layout.Ports) {
 				const float dx = graphX - (walk->X + placed.X);
 				const float dy = graphY - (walk->Y + placed.Y);
@@ -1005,7 +1045,18 @@ namespace nodegraph {
 			float toX = 0.0f;
 			float toY = 0.0f;
 			std::string carried;
-			if (!Ends(graph, graph.Links()[index], Look.Sizes, Inside(), fromX, fromY, toX, toY, carried)) {
+			if (!Ends(
+					graph,
+					graph.Links()[index],
+					Look.Sizes,
+					Signals.MeasureBody,
+					Inside(),
+					fromX,
+					fromY,
+					toX,
+					toY,
+					carried
+				)) {
 				continue;
 			}
 
@@ -1035,7 +1086,18 @@ namespace nodegraph {
 		float toX = 0.0f;
 		float toY = 0.0f;
 		std::string carried;
-		if (!Ends(graph, graph.Links()[index], Look.Sizes, Inside(), fromX, fromY, toX, toY, carried)) {
+		if (!Ends(
+				graph,
+				graph.Links()[index],
+				Look.Sizes,
+				Signals.MeasureBody,
+				Inside(),
+				fromX,
+				fromY,
+				toX,
+				toY,
+				carried
+			)) {
 			return false;
 		}
 		Along(fromX, fromY, toX, toY, 0.5f, outX, outY);
@@ -1056,7 +1118,7 @@ namespace nodegraph {
 			if (node == nullptr) {
 				continue;
 			}
-			const NodeLayout layout = LayoutOf(*node, Look.Sizes);
+			const NodeLayout layout = Layout(*node);
 			if (!any) {
 				left = node->X;
 				top = node->Y;
@@ -1132,6 +1194,7 @@ namespace nodegraph {
 		// node that takes it but produces nothing compatible still gets wired on
 		// its input, which is the useful half of what was asked for.
 		for (const PortSpec &port : added->Inputs) {
+			if (!port.Suggest) continue;
 			if (graph.Connect(link.From, link.FromPort, made, port.Name) == LinkResult::Made) {
 				break;
 			}
@@ -1250,7 +1313,7 @@ namespace nodegraph {
 			ImGuiInputTextFlags_EnterReturnsTrue
 		);
 
-		// **Filtered to what could actually be connected**, which is the whole
+		// **Filtered to eligible suggestions that could be connected**, which is the whole
 		// reason dropping a wire in empty space is a shortcut rather than a
 		// second way to add a node: the list is already the answer.
 		const auto fits = [this](const NodeType &type) {
@@ -1259,6 +1322,7 @@ namespace nodegraph {
 			}
 			const auto takes = [this](const std::vector<PortSpec> &ports, bool into) {
 				for (const PortSpec &port : ports) {
+					if (into && !port.Suggest) continue;
 					if (into ? DataTypes::CanConnect(PaletteType, port.Type)
 							 : DataTypes::CanConnect(port.Type, PaletteType)) {
 						return true;
@@ -1357,6 +1421,7 @@ namespace nodegraph {
 					if (Actual(graph, DragNode, DragPort, DragFromInput, anchor, anchorPort)) {
 						const NodeType *added = NodeTypes::Find(picked);
 						for (const PortSpec &port : DragFromInput ? added->Outputs : added->Inputs) {
+							if (!DragFromInput && !port.Suggest) continue;
 							const LinkResult result =
 								DragFromInput ? graph.Connect(made, port.Name, anchor, anchorPort)
 											  : graph.Connect(anchor, anchorPort, made, port.Name);
@@ -1558,7 +1623,7 @@ namespace nodegraph {
 			ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
 				ImGuiButtonFlags_MouseButtonMiddle
 		);
-		const bool hovered = ImGui::IsItemHovered();
+		bool hovered = ImGui::IsItemHovered();
 
 		draw->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
 		DrawGrid(origin.x, origin.y, size.x, size.y);
@@ -1567,6 +1632,18 @@ namespace nodegraph {
 		float mouseX = 0.0f;
 		float mouseY = 0.0f;
 		ToGraph(io.MousePos.x, io.MousePos.y, mouseX, mouseY);
+
+		bool bodyCaptured = false;
+		if (Signals.InputBody && Drag == Dragging::None) {
+			for (auto walk = graph.Nodes().rbegin(); walk != graph.Nodes().rend(); ++walk) {
+				if (!Visible(*walk)) continue;
+				const auto layout = Layout(*walk);
+				if (layout.BodyHeight <= 0) continue;
+				const auto frame = Body(*walk, layout, hovered && !bodyCaptured);
+				bodyCaptured = Signals.InputBody(*walk, frame) || bodyCaptured;
+			}
+		}
+		if (bodyCaptured) hovered = false;
 
 		// **Only when nothing else is under the pointer.** A link passing behind
 		// a node must not steal the hover from it, or the insert button appears
@@ -1676,7 +1753,7 @@ namespace nodegraph {
 				Drag = Dragging::Link;
 			} else if (const NodeId hit = HitNode(graph, mouseX, mouseY); hit != NO_NODE) {
 				const Node *node_ = graph.Find(hit);
-				const NodeLayout layout = LayoutOf(*node_, Look.Sizes);
+				const NodeLayout layout = Layout(*node_);
 
 				// A widget under the cursor takes the drag; the body moves the
 				// node. Widgets first, because they are inside the body.
@@ -1832,7 +1909,7 @@ namespace nodegraph {
 
 		if (Drag == Dragging::Widget && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
 			if (const Node *node = graph.Find(DragNode); node != nullptr) {
-				const NodeLayout layout = LayoutOf(*node, Look.Sizes);
+				const NodeLayout layout = Layout(*node);
 				for (const PlacedWidget &placed : layout.Widgets) {
 					if (placed.Key == DragWidget) {
 						HandleWidget(graph, DragNode, placed, mouseX);
@@ -1930,7 +2007,7 @@ namespace nodegraph {
 					if (!Visible(node)) {
 						continue;
 					}
-					const NodeLayout layout = LayoutOf(node, Look.Sizes);
+					const NodeLayout layout = Layout(node);
 					const float left = std::min(MarqueeX, mouseX);
 					const float right = std::max(MarqueeX, mouseX);
 					const float top = std::min(MarqueeY, mouseY);
@@ -1957,7 +2034,7 @@ namespace nodegraph {
 
 		if (Drag == Dragging::Link && DragNode != NO_NODE) {
 			if (const Node *node = graph.Find(DragNode); node != nullptr) {
-				const NodeLayout layout = LayoutOf(*node, Look.Sizes);
+				const NodeLayout layout = Layout(*node);
 				if (const PlacedPort *port = PortIn(layout, DragPort, DragFromInput); port != nullptr) {
 					ImVec2 from;
 					ToScreen(node->X + port->X, node->Y + port->Y, from.x, from.y);
@@ -1968,7 +2045,15 @@ namespace nodegraph {
 
 		for (const Node &node : graph.Nodes()) {
 			if (Visible(node)) {
-				DrawNode(graph, node, LayoutOf(node, Look.Sizes));
+				DrawNode(graph, node, Layout(node));
+			}
+		}
+
+		if (Signals.DrawBody) {
+			for (const Node &node : graph.Nodes()) {
+				if (!Visible(node)) continue;
+				const auto layout = Layout(node);
+				if (layout.BodyHeight > 0) Signals.DrawBody(node, Body(node, layout, hovered));
 			}
 		}
 
@@ -1979,7 +2064,8 @@ namespace nodegraph {
 		// **Guarded on the window rather than on the canvas being hovered**, so a
 		// shortcut still lands while the pointer is over the panel's own toolbar,
 		// and never while somebody is typing into the palette's search box.
-		const bool listening = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+		const bool listening = !bodyCaptured &&
+							   ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
 							   !ImGui::IsAnyItemActive() && !PaletteOpen && !MenuOpen;
 
 		if (listening) {
