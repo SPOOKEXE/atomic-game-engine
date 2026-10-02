@@ -1,7 +1,7 @@
 {
-  "recorded_date": "2026-10-02",
+  "recorded_date": "2026-10-03",
   "recorded_timezone": "Australia/Darwin, UTC+09:30",
-  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate.",
+  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim.",
   "runtime_gates": [
     {
       "name": "imagegraph IO",
@@ -600,6 +600,86 @@
       "test_cases_passed": 1175,
       "assertions_passed": 1808028,
       "scope_note": "Core suite green. This does not establish whole-repository acceptance or parity."
+    },
+    {
+      "name": "imagegraph core build49 dev",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-all-49.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 1187,
+      "assertions_passed": 1808130,
+      "build_steps_completed": 9,
+      "scope_note": "Full imagegraph core suite."
+    },
+    {
+      "name": "imagegraph core build49 release",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-release-all-49.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 1187,
+      "assertions_passed": 1808130,
+      "build_steps_completed": 98,
+      "scope_note": "Release-configured imagegraph core suite."
+    },
+    {
+      "name": "imagegraph I/O build49",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all-49.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 162,
+      "assertions_passed": 5926,
+      "scope_note": "Imagegraph I/O suite."
+    },
+    {
+      "name": "imagegraph export build49",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-all-49.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 36,
+      "assertions_passed": 732,
+      "scope_note": "Imagegraph export suite; retained output includes a curl max-file-size warning before the passing test summary."
+    },
+    {
+      "name": "Studio focused build49",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-source-49.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 39,
+      "assertions_passed": 894,
+      "scope_note": "Filters: [dynamic_outputs], [source_group_ports], [group_host], [lua], [source_inputs], [pcx_observations], [export_triggers], [source_transaction], [file_host], [wav_export], [array_editor], [composer_workflow]."
+    },
+    {
+      "name": "Studio Composer workflow focused build49",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-composer-workflow-49.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 2,
+      "assertions_passed": 122,
+      "scope_note": "Two cases cover Group Range Any Trigger with Dopesheet, undo, PXC and Lua dependencies, and reproduce opaque existing-key drag refusal with atomic PXC refusal and native history retention."
+    },
+    {
+      "name": "client CPU adapters build49",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-adapters-49.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 16,
+      "assertions_passed": 1478,
+      "scope_note": "CPU adapter suite only."
+    },
+    {
+      "name": "adapter build49 compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-adapters-49.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "build_steps_completed": 208,
+      "scope_note": "Requested adapter build targets linked."
+    },
+    {
+      "name": "imagegraph core capability inventory build49",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build49.json",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "406 registered pc.* names; 405 overlap the 886-entry catalogue; 481 catalogue entries lack a registered executor; registered-only name is pc.global_scope. Registration does not prove behavior or parity."
     }
   ],
   "excluded_or_failed_runs": [
@@ -706,7 +786,9 @@
     "Noise Aniso and captured MK Sparkle native kernels are present; full supplied-project acceptance and matched reference behavior remain open. Grid and Path Shape native work remains incomplete.",
     "No accepted full GPU gate is recorded; the focused filtered run included unintended camera GPU cases and failed.",
     "No full source tree or tested binary hash snapshot ties these outputs to every current source edit.",
-    "The build48 archive inventory is recorded below. Later unbuilt source additions are excluded from its capability counts."
+    "The build48 archive inventory is recorded below. Later unbuilt source additions are excluded from its capability counts.",
+    "Build49 executor inventory is registration-only capability evidence: 406 registered names, 405 catalogue overlaps, 481 catalogue entries without registered executors. Some product adapter routes, including 3D outputs, are outside this registry. This is not a parity count.",
+    "The Composer workflow focused suite passed 2 cases and 122 assertions. It covers bounded group editing dependencies and preserves atomic refusal for an ambiguous opaque PXC key move; source compatibility for ambiguous moved opaque keys remains open."
   ],
   "scene_files": {
     "result": "all seven named .aworld files are present",
@@ -722,22 +804,56 @@
     "acceptance_status": "Manual and GPU acceptance pending; file presence is not acceptance."
   },
   "executor_inventory": {
-    "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build48.json",
-    "archive_sha256": "14483fae7296bd8943f14fdaf0f69334dc1dc04bf26c92966c0c71ac1363313f",
-    "archive_mtime_utc": "2026-10-02T14:02:40.023805Z",
-    "archive_size_bytes": 4231848224,
-    "repo_head": "1b0188aa3b8789025fa87b122a1938d64d20fcc3",
-    "helper_sha256": "d564a47f505136dbb56a932c4ff4da7590926262e5b16add6a52737ba76c0340",
-    "registered_pc_count": 404,
-    "registered_catalogue_overlap_count": 403,
+    "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build49.json",
+    "archive_sha256": "fac9455259b5c09c0b2f2824e5b49a39cb64c8943029f56ceaffd1919a775cb4",
+    "archive_mtime_utc": "2026-10-02T14:22:13.099183Z",
+    "archive_size_bytes": 4268407886,
+    "repo_head": "ef769cea",
+    "helper_sha256": "ae2cfebc677137db9939f19ae8e1986658d7f0d15da89601bffd881e52059d1c",
+    "registered_pc_count": 406,
+    "registered_catalogue_overlap_count": 405,
     "registered_only_count": 1,
     "registered_only_pc": [
       "pc.global_scope"
     ],
     "catalogue_pc_count": 886,
-    "catalogue_missing_executor_count": 483,
-    "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. The archive predates later unbuilt source edits.",
-    "archive_build": "build48 archive present during helper link",
+    "catalogue_missing_executor_count": 481,
+    "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. Archive was linked at build49 against repository HEAD ef769cea; the inventory does not establish behavioral parity.",
+    "archive_build": "build49 archive present during helper link",
+    "previous_build48_snapshot": {
+      "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build48.json",
+      "archive_sha256": "14483fae7296bd8943f14fdaf0f69334dc1dc04bf26c92966c0c71ac1363313f",
+      "archive_mtime_utc": "2026-10-02T14:02:40.023805Z",
+      "archive_size_bytes": 4231848224,
+      "repo_head": "1b0188aa3b8789025fa87b122a1938d64d20fcc3",
+      "helper_sha256": "d564a47f505136dbb56a932c4ff4da7590926262e5b16add6a52737ba76c0340",
+      "registered_pc_count": 404,
+      "registered_catalogue_overlap_count": 403,
+      "registered_only_count": 1,
+      "registered_only_pc": [
+        "pc.global_scope"
+      ],
+      "catalogue_pc_count": 886,
+      "catalogue_missing_executor_count": 483,
+      "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. The archive predates later unbuilt source edits.",
+      "archive_build": "build48 archive present during helper link",
+      "previous_build45_snapshot": {
+        "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build45.json",
+        "archive_sha256": "35e65ad10766a236b3d832c92d977da9a3de565fd60e05b259d0ad52ea5d42a7",
+        "archive_mtime_utc": "2026-10-02T12:33:39.898034Z",
+        "repo_head": "1e7bb7b4995141d944f33652348a986dccd773be",
+        "registered_pc_count": 394,
+        "catalogue_pc_count": 886,
+        "catalogue_missing_executor_count": 493
+      },
+      "previous_build36_snapshot": {
+        "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build36.json",
+        "archive_sha256": "4348a0eeb8e2e688e665f89f28f5abaede4a4751f0cff3ebc8cf03eff2af48d3",
+        "registered_pc_count": 369,
+        "catalogue_pc_count": 886,
+        "catalogue_missing_executor_count": 518
+      }
+    },
     "previous_build45_snapshot": {
       "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build45.json",
       "archive_sha256": "35e65ad10766a236b3d832c92d977da9a3de565fd60e05b259d0ad52ea5d42a7",
@@ -890,6 +1006,36 @@
       "hash": "1b0188aa",
       "subject": "Repair core imagegraph replay and diagnostics gates",
       "scope": "Core build48 repairs; the imagegraph core suite passed 1,175 cases and 1,808,028 assertions."
+    },
+    {
+      "hash": "b307cc14",
+      "subject": "Add bounded source Grain and Contrast Blur kernels",
+      "scope": "Adds native source kernels; commit included in build49 core evidence."
+    },
+    {
+      "hash": "a3cd1af5",
+      "subject": "Refuse fractional FLIP advances after resolving step controls",
+      "scope": "Adds FLIP advance guard; commit included in build49 core evidence."
+    },
+    {
+      "hash": "f7309522",
+      "subject": "Round-trip bounded group values and preserve opaque PXC key metadata",
+      "scope": "Bounded group values and opaque key refusal/preservation paths; PXC source compatibility gate remains open."
+    },
+    {
+      "hash": "e9b07cbb",
+      "subject": "Complete headless source group editing and animated Studio observations",
+      "scope": "Composer workflow tests cover bounded group editing, Dopesheet, undo, PXC and Lua dependencies; does not establish complete interactive workflow."
+    },
+    {
+      "hash": "d39a540c",
+      "subject": "Read bounded GIF still frames through format-aware grants",
+      "scope": "Bounded GIF still-frame host route; full video and sequence acceptance remain open."
+    },
+    {
+      "hash": "ef769cea",
+      "subject": "Apply source camera set lights and terrain atlas pixel centres",
+      "scope": "Adds camera-set, light and terrain atlas slices; GPU and full source behavior gates remain open."
     }
   ]
 }
