@@ -395,7 +395,17 @@ namespace client {
 						placed.LookVector().Dot(eye.LookVector()) > .9999f &&
 						placed.UpVector().Dot(eye.UpVector()) > .9999f) {
 						carriedArm = pane;
-						armInput = orbit;
+						// **The mapped arm, and the reason is the guard above.** The
+						// comparison only passes when `PlaceCamera` already produced
+						// exactly this pose, so the authored input for the route has to
+						// be the pose that carries, not the raw orbit behind it. The raw
+						// orbit is the *pre-crossing* position: handing it to a route
+						// whose own map is still identity returns it unchanged, and the
+						// caller then holds an eye in the room the subject left while its
+						// camera row says otherwise. Culling reads that eye and keeps the
+						// wrong half of the world - the whole picture went black the
+						// moment a same-world seam mapped the arm.
+						armInput = placed;
 					}
 				}
 			}
