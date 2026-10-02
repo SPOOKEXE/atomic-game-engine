@@ -778,7 +778,8 @@ namespace engine::imagegraphexport {
 			 images,
 			 Limits::MaximumEvaluationBytes - snapshot.RetainedBytes() * 2,
 			 document.Timeline ? &*document.Timeline : nullptr,
-			 snapshot.InheritedSurfaceFormat()},
+			 snapshot.InheritedSurfaceFormat(),
+			 snapshot.InheritedInterpolation()},
 			capture,
 			failure
 		);

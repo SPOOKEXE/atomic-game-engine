@@ -12,6 +12,8 @@
 namespace studio::detail {
 	inline bool ImageGraphFileReadType(std::string_view type) {
 		constexpr std::string_view types[] = {
+			"pc.image",
+			"pc.image_sequence",
 			"pc.csv_file_read",
 			"pc.json_file_read",
 			"pc.xml_file_read",
@@ -30,8 +32,11 @@ namespace studio::detail {
 		return std::find(std::begin(types), std::end(types), type) != std::end(types);
 	}
 
+	inline bool ImageGraphFileUsesOwnedContent(std::string_view type) {
+		return type == "pc.ase_layer" || type == "pc.ase_tag" || type == "pc.ase_tileset";
+	}
 	inline bool ImageGraphFileNeedsPrimary(std::string_view type) {
-		return type != "pc.ase_layer" && type != "pc.ase_tag" && type != "pc.ase_tileset";
+		return !ImageGraphFileUsesOwnedContent(type) && type != "pc.image_sequence";
 	}
 
 	inline std::optional<uint64_t>
@@ -74,6 +79,8 @@ namespace studio::detail {
 			CaptureRecord Capture;
 			std::vector<engine::imagegraphexport::GraphFileGrant> Grants;
 			uint64_t Bytes = 0;
+			std::optional<engine::imagegraph::SurfaceFormat> OutputFormat;
+			int64_t Interpolation = 1;
 		};
 		engine::imagegraph::ComposerLuaHost *Lua = nullptr;
 		std::span<const engine::imagegraphexport::GraphFileGrant> Grants;
@@ -126,7 +133,7 @@ namespace studio::detail {
 				return false;
 			}
 			ENGINE_PROFILE_CAT("image composer file host", engine::core::ProfileCategory::Engine);
-			if (!ImageGraphFileNeedsPrimary(invocation.Authored.Type)) {
+			if (ImageGraphFileUsesOwnedContent(invocation.Authored.Type)) {
 				if (RetainedBytes >= invocation.MaximumOperationBytes) {
 					failure = "Studio file observations leave no derived sprite budget";
 					return false;
@@ -138,7 +145,8 @@ namespace studio::detail {
 				);
 				return reader.Capture(bounded, output, failure);
 			}
-			if (std::none_of(Grants.begin(), Grants.end(), [&](const auto &grant) {
+			if (ImageGraphFileNeedsPrimary(invocation.Authored.Type) &&
+				std::none_of(Grants.begin(), Grants.end(), [&](const auto &grant) {
 					return grant.NodeId == invocation.Authored.Id && !grant.Write && grant.Resource.empty();
 				})) {
 				failure = "Grant the node's exact primary file before reading it";
@@ -174,7 +182,8 @@ namespace studio::detail {
 				return true;
 			};
 			for (const auto &file : Files)
-				if (file && sameGrants(*file) &&
+				if (file && sameGrants(*file) && file->OutputFormat == invocation.OutputFormat &&
+					file->Interpolation == invocation.Interpolation &&
 					(!invocation.Authored.Type.starts_with("pc.ase_") ||
 					 (file->Capture.Tick == invocation.Request.Tick &&
 					  file->Capture.Subframe == invocation.Request.Subframe &&
@@ -239,7 +248,9 @@ namespace studio::detail {
 				return false;
 			}
 			*bytes += grantBytes;
-			CachedFile retained{captured, std::move(selectedGrants), *bytes};
+			CachedFile retained{
+				captured, std::move(selectedGrants), *bytes, invocation.OutputFormat, invocation.Interpolation
+			};
 			*slot = std::move(retained);
 			RetainedBytes += *bytes;
 			output = std::move(captured);

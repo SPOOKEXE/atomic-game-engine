@@ -58,6 +58,8 @@ namespace engine::imagegraph {
 		uint64_t MaximumOperationBytes = 0;
 		const TimelineSettings *Timeline = nullptr;
 		std::optional<SurfaceFormat> OutputFormat = SurfaceFormat::RGBA8Unorm;
+		// Resolved source interpolation policy; 1 Pixel disables device filtering.
+		int64_t Interpolation = 1;
 	};
 	// Process-local host capability. Durable graphs and copied recordings contain no provider pointer.
 	struct PcxMessage;

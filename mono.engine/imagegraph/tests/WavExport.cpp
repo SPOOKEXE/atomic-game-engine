@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <limits>
 
 TEST_SUITE_ID("engine.imagegraph.wav_export")
@@ -68,6 +69,11 @@ TEST_CASE("WAV remap and replacement admission are atomic", "[imagegraph][wav_ex
 	);
 	CHECK(Word(bytes, 45, 1) == 128);
 	const auto original = bytes;
+	auto mixedContainers = channels;
+	mixedContainers.Items = {{ElementValue{1.0}}};
+	CHECK(EncodeWavExport(mixedContainers, {8}, 1000, bytes, error) == Status::InvalidValue);
+	CHECK(error.Port == "audio_data");
+	CHECK(bytes == original);
 	const auto exact = bytes.capacity() + 48;
 	CHECK(EncodeWavExport(channels, {8}, exact - 1, bytes, error) == Status::LimitExceeded);
 	CHECK(bytes == original);
@@ -224,4 +230,80 @@ TEST_CASE("WAV defaults and hostile channel geometry remain bounded", "[imagegra
 	);
 	excessive.Elements.emplace_back(0.);
 	CHECK(EncodeWavExport(excessive, {8}, 100000, bytes, error) == Status::InvalidValue);
+}
+
+TEST_CASE(
+	"Authored WAV channels survive graph resolution and export interleaved samples",
+	"[imagegraph][wav_export]"
+) {
+	ArrayValue channels;
+	SECTION("scalar samples") {
+		channels = Channels({{0, 127, 255}, {255, 64, 0}});
+	}
+	SECTION("integer samples") {
+		channels.ElementType = ValueType::Integer;
+		channels.Nested = {{int64_t{0}, int64_t{127}, int64_t{255}}, {int64_t{255}, int64_t{64}, int64_t{0}}};
+	}
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"sink",
+		 "pc.wav_file_write",
+		 "",
+		 {},
+		 {{"path", std::string{"authored.wav"}}, {"audio_data", channels}, {"sample", int64_t{8000}}}},
+		{"observed", "value.number", "", {}, {{"value", 0.0}}}
+	};
+	document.Outputs = {{"observed", "observed", "number"}};
+	Diagnostic diagnostic;
+	Document restored;
+	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
+	CHECK(restored == document);
+	Plan plan;
+	const auto compiled = Compile(restored, plan, diagnostic);
+	INFO(diagnostic.Message << " port=" << diagnostic.Port);
+	REQUIRE(compiled == Status::Ok);
+	EvaluationSnapshot snapshot;
+	const auto evaluated = EvaluateNodeInputs(restored, plan, "sink", {}, snapshot, diagnostic, 100000);
+	INFO(diagnostic.Message << " port=" << diagnostic.Port);
+	REQUIRE(evaluated == Status::Ok);
+	std::vector<AuthoredValue> resolved;
+	bool foundChannels = false;
+	for (const auto &input : snapshot.Values()) {
+		resolved.push_back({input.Port, input.Data});
+		if (input.Port == "audio_data") {
+			foundChannels = true;
+			CHECK_FALSE(input.Linked);
+			CHECK(std::get<ArrayValue>(input.Data) == channels);
+		}
+	}
+	REQUIRE(foundChannels);
+	WavExport direct, throughGraph;
+	REQUIRE(PrepareResolvedWavExport(resolved, 100000, direct, diagnostic) == Status::Ok);
+	REQUIRE(PrepareWavExport(restored, plan, "sink", {}, 100000, throughGraph, diagnostic) == Status::Ok);
+	CHECK(direct.Path == "authored.wav");
+	CHECK(direct.Bytes == throughGraph.Bytes);
+	REQUIRE(direct.Bytes.size() == 50);
+	CHECK(Word(direct.Bytes, 22, 2) == 2);
+	CHECK(Word(direct.Bytes, 24, 4) == 8000);
+	CHECK(Word(direct.Bytes, 40, 4) == 6);
+	const std::array<uint8_t, 6> expected{0, 255, 127, 64, 255, 0};
+	for (size_t index = 0; index < expected.size(); ++index)
+		CHECK(Word(direct.Bytes, 44 + index, 1) == expected[index]);
+	const auto decoded = engine::audio::DecodeWav(direct.Bytes);
+	REQUIRE(decoded);
+	CHECK(decoded->Format().Channels == 2);
+
+	ArrayValue wrongType{ValueType::Text, {}, {{std::string{"sample"}}}};
+	restored.Nodes.front().Values[1].Data = wrongType;
+	CHECK(Compile(restored, plan, diagnostic) == Status::TypeMismatch);
+	CHECK(diagnostic.NodeId == "sink");
+	CHECK(diagnostic.Port == "audio_data");
+	for (auto &input : resolved)
+		if (input.Port == "audio_data") input.Data = wrongType;
+	const auto retained = direct;
+	CHECK(PrepareResolvedWavExport(resolved, 100000, direct, diagnostic) == Status::InvalidValue);
+	CHECK(diagnostic.Port == "audio_data");
+	CHECK(direct.Path == retained.Path);
+	CHECK(direct.Bytes == retained.Bytes);
 }

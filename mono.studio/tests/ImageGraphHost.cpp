@@ -261,3 +261,80 @@ TEST_CASE(
 	CHECK(capture.Images[0].Data.Pixels == std::vector<uint8_t>{0, 0, 0, 0});
 	CHECK(host.RetainedBytes == retained);
 }
+
+TEST_CASE(
+	"Studio raster observations respect output precision at unchanged controls", "[studio][file_host]"
+) {
+	Temporary temp;
+	const auto path = temp.Path / "red.png";
+	constexpr std::array<unsigned char, 70> red{137, 80, 78, 71, 13, 10,  26,  10,	0,	 0,	  0,   13,
+												73,	 72, 68, 82, 0,	 0,	  0,   1,	0,	 0,	  0,   1,
+												8,	 6,	 0,	 0,	 0,	 31,  21,  196, 137, 0,	  0,   0,
+												13,	 73, 68, 65, 84, 120, 156, 99,	248, 207, 192, 240,
+												31,	 0,	 5,	 0,	 1,	 255, 137, 153, 61,	 29,  0,   0,
+												0,	 0,	 73, 69, 78, 68,  174, 66,	96,	 130};
+	{
+		std::ofstream file(path, std::ios::binary);
+		file.write(reinterpret_cast<const char *>(red.data()), red.size());
+	}
+	Node node;
+	node.Id = "image";
+	node.Type = "pc.image";
+	std::array<AuthoredValue, 2> inputs{{{"path", path.string()}, {"padding", Vector4{}}}};
+	std::array<engine::imagegraphexport::GraphFileGrant, 1> grants{{{"image", path, false}}};
+	studio::detail::ImageGraphHost host;
+	host.Grants = grants;
+	EvaluationRequest request;
+	HostNodeCapture capture;
+	std::string failure;
+	HostNodeInvocation invocation{node, request, inputs, {}, 1024 * 1024};
+	invocation.OutputFormat = SurfaceFormat::RGBA8Unorm;
+	REQUIRE(host.Capture(invocation, capture, failure));
+	REQUIRE(capture.Images.size() == 1);
+	CHECK(capture.Images[0].Data.Format == SurfaceFormat::RGBA8Unorm);
+	CHECK(capture.Images[0].Data.Pixels.size() == 4);
+	invocation.OutputFormat = SurfaceFormat::RGBA32Float;
+	REQUIRE(host.Capture(invocation, capture, failure));
+	CHECK(capture.Images[0].Data.Format == SurfaceFormat::RGBA32Float);
+	CHECK(capture.Images[0].Data.Pixels.size() == 16);
+	SurfacePixel pixel{};
+	REQUIRE(LoadSurfacePixel(capture.Images[0].Data, 0, 0, pixel));
+	CHECK(pixel == SurfacePixel{1, 0, 0, 1});
+	invocation.OutputFormat = SurfaceFormat::RGBA8Unorm;
+	REQUIRE(host.Capture(invocation, capture, failure));
+	CHECK(capture.Images[0].Data.Format == SurfaceFormat::RGBA8Unorm);
+	CHECK(capture.Images[0].Data.Pixels.size() == 4);
+
+	Node sequence;
+	sequence.Id = "sequence";
+	sequence.Type = "pc.image_sequence";
+	ArrayValue paths;
+	paths.ElementType = ValueType::Text;
+	paths.Elements = {path.string()};
+	std::array<AuthoredValue, 4> sequenceInputs{
+		{{"paths", paths},
+		 {"padding", Vector4{}},
+		 {"canvas_size", EnumValue{0}},
+		 {"sizing_method", EnumValue{0}}}
+	};
+	std::array<engine::imagegraphexport::GraphFileGrant, 1> resources{
+		{{"sequence", path, false, path.string()}}
+	};
+	host.Grants = resources;
+	REQUIRE(host.Capture(
+		{sequence, request, sequenceInputs, {}, 1024 * 1024, nullptr, SurfaceFormat::RGBA32Float},
+		capture,
+		failure
+	));
+	REQUIRE(capture.ImageArrays.size() == 1);
+	REQUIRE(capture.ImageArrays[0].Frames.size() == 1);
+	CHECK(capture.ImageArrays[0].Frames[0].Format == SurfaceFormat::RGBA32Float);
+	CHECK(capture.ImageArrays[0].Frames[0].Pixels.size() == 16);
+	resources[0].Resource = "wrong-source-path";
+	CHECK_FALSE(host.Capture(
+		{sequence, request, sequenceInputs, {}, 1024 * 1024, nullptr, SurfaceFormat::RGBA32Float},
+		capture,
+		failure
+	));
+	CHECK(capture.ImageArrays[0].Frames[0].Pixels.size() == 16);
+}

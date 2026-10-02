@@ -325,6 +325,13 @@ namespace engine::imagegraph {
 	bool CatalogueAuthoredArray(
 		const CatalogueEntry &entry, const CatalogueInput &input, const ArrayValue &array
 	) {
+		// The source WAV sink consumes [channel][sample] itself and starts with [[]].
+		if (entry.Type == "pc.wav_file_write" && input.Id == "audio_data" && input.SourceIndex == 1 &&
+			input.SourceKind == "Float" && input.Type == ValueType::Scalar && input.ArrayDepthKnown &&
+			input.ArrayDepth == 1)
+			return (array.ElementType == ValueType::Scalar || array.ElementType == ValueType::Integer) &&
+				   array.Elements.empty() && array.Items.empty() && !array.Nested.empty() &&
+				   detail::ValidPayload(array, true);
 		// This Node-derived update consumes the full list of coordinate rows itself.
 		if (entry.Type == "pc.points_remap" && input.Id == "points" && input.SourceIndex == 0 &&
 			input.SourceKind == "Vec2" && input.Type == ValueType::Vector2 && input.ArrayDepthKnown &&

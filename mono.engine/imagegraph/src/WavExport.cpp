@@ -30,13 +30,13 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic
 	) {
 		diagnostic = {};
-		if (channels.ElementType != ValueType::Scalar || !channels.Elements.empty() ||
-			channels.Nested.empty())
+		if ((channels.ElementType != ValueType::Scalar && channels.ElementType != ValueType::Integer) ||
+			!channels.Elements.empty() || !channels.Items.empty() || channels.Nested.empty())
 			return Fail(
 				diagnostic,
 				Status::InvalidValue,
 				"audio_data",
-				"WAV export requires nested scalar channel rows"
+				"WAV export requires nested numeric channel rows"
 			);
 		if (channels.Nested.size() > Limits::MaximumAudioChannels)
 			return Fail(
@@ -70,13 +70,20 @@ namespace engine::imagegraph {
 		const auto mapped = [&](double value) {
 			return settings.Remap ? (value - settings.DataRange.X) / range * (high - low) + low : value;
 		};
+		const auto sampleValue = [&](const ElementValue &element) -> std::optional<double> {
+			if (channels.ElementType == ValueType::Scalar) {
+				if (const auto *sample = std::get_if<double>(&element)) return *sample;
+			} else if (const auto *sample = std::get_if<int64_t>(&element))
+				return double(*sample);
+			return std::nullopt;
+		};
 		for (const auto &channel : channels.Nested) {
 			if (channel.size() != samples)
 				return Fail(
 					diagnostic, Status::InvalidValue, "audio_data", "WAV channels have unequal sample counts"
 				);
 			for (const auto &element : channel) {
-				const auto *sample = std::get_if<double>(&element);
+				const auto sample = sampleValue(element);
 				if (!sample || !std::isfinite(*sample) || !std::isfinite(mapped(*sample)))
 					return Fail(
 						diagnostic,
@@ -128,38 +135,27 @@ namespace engine::imagegraph {
 		integer(uint32_t(dataBytes), 4);
 		for (size_t frame = 0; frame < samples; ++frame)
 			for (const auto &channel : channels.Nested) {
-				const auto sample = int32_t(Quantize(mapped(std::get<double>(channel[frame])), low, high));
+				const auto sample = int32_t(Quantize(mapped(*sampleValue(channel[frame])), low, high));
 				integer(uint32_t(sample), width);
 			}
 		if (dataBytes & 1) integer(0, 1);
 		bytes = std::move(candidate);
 		return Status::Ok;
 	}
-	static Status PrepareWavExportImpl(
-		const Document &document,
-		const Plan &plan,
-		std::string_view nodeId,
-		const EvaluationRequest &request,
+	template <typename Inputs>
+	static Status PrepareResolvedWavExportImpl(
+		const Inputs &inputs,
+		uint64_t inputBytes,
 		uint64_t maximumBytes,
 		WavExport &output,
 		Diagnostic &diagnostic
 	) {
-		const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &value) {
-			return value.Id == nodeId;
-		});
-		if (node == document.Nodes.end() || node->Type != "pc.wav_file_write")
-			return Fail(diagnostic, Status::InvalidValue, {}, "WAV export requires a WAV File Out target");
 		const uint64_t cap = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
 		const uint64_t oldBytes = output.Bytes.capacity() + output.Path.capacity() + 1;
 		if (oldBytes > cap)
 			return Fail(diagnostic, Status::LimitExceeded, {}, "existing WAV export exceeds cap");
-		EvaluationSnapshot snapshot;
-		if (const auto status =
-				EvaluateNodeInputs(document, plan, nodeId, request, snapshot, diagnostic, cap - oldBytes);
-			status != Status::Ok)
-			return status;
 		const auto find = [&](std::string_view port) -> const Value * {
-			for (const auto &value : snapshot.Values())
+			for (const auto &value : inputs)
 				if (value.Port == port) return &value.Data;
 			return nullptr;
 		};
@@ -169,7 +165,7 @@ namespace engine::imagegraph {
 		const auto *path = pathValue ? std::get_if<std::string>(pathValue) : nullptr;
 		// The pinned unconnected Float control starts as one empty channel.
 		detail::EvaluationBudget scratchBudget(cap);
-		auto retained = scratchBudget.Reserve(oldBytes + snapshot.RetainedBytes());
+		auto retained = scratchBudget.Reserve(oldBytes + inputBytes);
 		if (!retained) return Fail(diagnostic, Status::LimitExceeded, {}, "WAV snapshot exceeds live cap");
 		std::optional<detail::AllocationReservation> defaultCharge;
 		ArrayValue defaultChannels;
@@ -209,7 +205,7 @@ namespace engine::imagegraph {
 				{},
 				"WAV export controls require resolved scalar getters"
 			);
-		const auto *entry = FindCatalogueEntry(node->Type);
+		const auto *entry = FindCatalogueEntry("pc.wav_file_write");
 		const auto *input = entry ? FindCatalogueInput(*entry, "bit_depth") : nullptr;
 		const auto raw = detail::SourceChoiceNumber(*choiceValue);
 		const auto choice = input && raw ? detail::NormalizeSourceChoice(*input, *raw, false) : std::nullopt;
@@ -225,14 +221,13 @@ namespace engine::imagegraph {
 		const bool suffix = !path->ends_with(".wav");
 		const uint64_t pathLength = path->size() + (suffix ? 4 : 0);
 		const uint64_t pathBytes = std::max<uint64_t>(pathLength, std::string{}.capacity()) + 1;
-		if (snapshot.RetainedBytes() > cap - oldBytes ||
-			defaultBytes > cap - oldBytes - snapshot.RetainedBytes() ||
-			pathBytes > cap - oldBytes - snapshot.RetainedBytes() - defaultBytes)
+		if (inputBytes > cap - oldBytes || defaultBytes > cap - oldBytes - inputBytes ||
+			pathBytes > cap - oldBytes - inputBytes - defaultBytes)
 			return Fail(diagnostic, Status::LimitExceeded, "path", "WAV destination exceeds live export cap");
 		WavExport candidate;
 		candidate.Path.reserve(size_t(pathLength));
 		const uint64_t actualPathBytes = candidate.Path.capacity() + 1;
-		if (actualPathBytes > cap - oldBytes - snapshot.RetainedBytes() - defaultBytes)
+		if (actualPathBytes > cap - oldBytes - inputBytes - defaultBytes)
 			return Fail(
 				diagnostic, Status::LimitExceeded, "path", "WAV path capacity exceeds live export cap"
 			);
@@ -242,7 +237,7 @@ namespace engine::imagegraph {
 			 *choice == 0 ? WavExportFormat::Unsigned8 : WavExportFormat::Signed16,
 			 *remap,
 			 *range},
-			cap - oldBytes - snapshot.RetainedBytes() - defaultBytes - actualPathBytes,
+			cap - oldBytes - inputBytes - defaultBytes - actualPathBytes,
 			candidate.Bytes,
 			diagnostic
 		);
@@ -252,6 +247,34 @@ namespace engine::imagegraph {
 		output = std::move(candidate);
 		diagnostic = {};
 		return Status::Ok;
+	}
+
+	static Status PrepareWavExportImpl(
+		const Document &document,
+		const Plan &plan,
+		std::string_view nodeId,
+		const EvaluationRequest &request,
+		uint64_t maximumBytes,
+		WavExport &output,
+		Diagnostic &diagnostic
+	) {
+		const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &value) {
+			return value.Id == nodeId;
+		});
+		if (node == document.Nodes.end() || node->Type != "pc.wav_file_write")
+			return Fail(diagnostic, Status::InvalidValue, {}, "WAV export requires a WAV File Out target");
+		const uint64_t cap = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
+		const uint64_t oldBytes = output.Bytes.capacity() + output.Path.capacity() + 1;
+		if (oldBytes > cap)
+			return Fail(diagnostic, Status::LimitExceeded, {}, "existing WAV export exceeds cap");
+		EvaluationSnapshot snapshot;
+		if (const auto status =
+				EvaluateNodeInputs(document, plan, nodeId, request, snapshot, diagnostic, cap - oldBytes);
+			status != Status::Ok)
+			return status;
+		return PrepareResolvedWavExportImpl(
+			snapshot.Values(), snapshot.RetainedBytes(), cap, output, diagnostic
+		);
 	}
 
 	Status EncodeWavExport(
@@ -269,6 +292,21 @@ namespace engine::imagegraph {
 			return Fail(diagnostic, Status::LimitExceeded, {}, "WAV allocation length exceeded");
 		}
 	}
+	Status PrepareResolvedWavExport(
+		std::span<const AuthoredValue> inputs,
+		uint64_t maximumBytes,
+		WavExport &output,
+		Diagnostic &diagnostic
+	) {
+		try {
+			return PrepareResolvedWavExportImpl(inputs, 0, maximumBytes, output, diagnostic);
+		} catch (const std::bad_alloc &) {
+			return Fail(diagnostic, Status::LimitExceeded, {}, "WAV allocation failed");
+		} catch (const std::length_error &) {
+			return Fail(diagnostic, Status::LimitExceeded, {}, "WAV allocation length exceeded");
+		}
+	}
+
 	Status PrepareWavExport(
 		const Document &document,
 		const Plan &plan,

@@ -78,7 +78,8 @@ namespace engine::imagegraph::detail {
 						 images,
 						 context.AvailableBytes(),
 						 context.Timeline,
-						 outputFormat},
+						 outputFormat,
+						 context.InheritedInterpolation},
 						live,
 						failure
 					))
@@ -352,24 +353,26 @@ namespace engine::imagegraph::detail {
 	}
 	std::span<const ExecutorEntry> HostExecutors() {
 		static constexpr ExecutorEntry entries[]{
-			{"pc.datetime_get", RecordedHost, true},	{"pc.export", ExportPreview, true},
-			{"pc.byte_file_read", RecordedHost, true},	{"pc.byte_file_write", RecordedHost, true},
-			{"pc.text_file_read", RecordedHost, true},	{"pc.text_file_write", RecordedHost, true},
-			{"pc.csv_file_read", RecordedHost, true},	{"pc.csv_file_write", RecordedHost, true},
-			{"pc.json_file_read", RecordedHost, true},	{"pc.json_file_write", RecordedHost, true},
-			{"pc.xml_file_read", RecordedHost, true},	{"pc.xml_file_write", RecordedHost, true},
-			{"pc.http_request", RecordedHost, true},	{"pc.http_request_file", RecordedHost, true},
-			{"pc.shell", RecordedHost, true},			{"pc.midi_in", RecordedHost, true},
-			{"pc.spout_send", RecordedHost, true},		{"pc.spout_receive", RecordedHost, true},
-			{"pc.ase_file_read", RecordedHost, true},	{"pc.ase_layer", RecordedHost, true},
-			{"pc.ase_tag", RecordedHost, true},			{"pc.ase_tileset", RecordedHost, true},
-			{"pc.ora_file_read", RecordedHost, true},	{"pc.ora_layer", LayerSurface, true},
-			{"pc.krita_file_read", RecordedHost, true}, {"pc.krita_layer", LayerSurface, true},
-			{"pc.gmroom", RecordedHost, true},			{"pc.lua_compute", RecordedHost, true},
-			{"pc.lua_global", RecordedHost, true},		{"pc.lua_surface", RecordedHost, true},
-			{"pc.image_mp4", RecordedHost, true},		{"pc.image_gif", RecordedHost, true},
-			{"pc.3_d_mesh_obj", RecordedHost, true},	{"pc.3_d_mesh_json", RecordedHost, true},
-			{"pc.3_d_mesh_export", RecordedHost, true}
+			{"pc.image", RecordedHost, true},
+			{"pc.image_sequence", RecordedHost, true},
+			{"pc.datetime_get", RecordedHost, true},	  {"pc.export", ExportPreview, true},
+			{"pc.wav_file_write", RecordedHost, true},	  {"pc.byte_file_read", RecordedHost, true},
+			{"pc.byte_file_write", RecordedHost, true},	  {"pc.text_file_read", RecordedHost, true},
+			{"pc.text_file_write", RecordedHost, true},	  {"pc.csv_file_read", RecordedHost, true},
+			{"pc.csv_file_write", RecordedHost, true},	  {"pc.json_file_read", RecordedHost, true},
+			{"pc.json_file_write", RecordedHost, true},	  {"pc.xml_file_read", RecordedHost, true},
+			{"pc.xml_file_write", RecordedHost, true},	  {"pc.http_request", RecordedHost, true},
+			{"pc.http_request_file", RecordedHost, true}, {"pc.shell", RecordedHost, true},
+			{"pc.midi_in", RecordedHost, true},			  {"pc.spout_send", RecordedHost, true},
+			{"pc.spout_receive", RecordedHost, true},	  {"pc.ase_file_read", RecordedHost, true},
+			{"pc.ase_layer", RecordedHost, true},		  {"pc.ase_tag", RecordedHost, true},
+			{"pc.ase_tileset", RecordedHost, true},		  {"pc.ora_file_read", RecordedHost, true},
+			{"pc.ora_layer", LayerSurface, true},		  {"pc.krita_file_read", RecordedHost, true},
+			{"pc.krita_layer", LayerSurface, true},		  {"pc.gmroom", RecordedHost, true},
+			{"pc.lua_compute", RecordedHost, true},		  {"pc.lua_global", RecordedHost, true},
+			{"pc.lua_surface", RecordedHost, true},		  {"pc.image_mp4", RecordedHost, true},
+			{"pc.image_gif", RecordedHost, true},		  {"pc.3_d_mesh_obj", RecordedHost, true},
+			{"pc.3_d_mesh_json", RecordedHost, true},	  {"pc.3_d_mesh_export", RecordedHost, true}
 		};
 		return entries;
 	}

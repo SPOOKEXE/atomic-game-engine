@@ -1,8 +1,10 @@
 #include "GraphFileHostIO.hpp"
+#include "GraphRasterHost.hpp"
 #include "GraphSpriteHost.hpp"
 #include "GraphTextFileHost.hpp"
 
 #include <engine/bake/LayeredImage.hpp>
+#include <engine/imagegraph/WavExport.hpp>
 #include <engine/imagegraphexport/GraphFileHost.hpp>
 #include <engine/imagegraphexport/GraphMeshHost.hpp>
 
@@ -96,11 +98,35 @@ namespace engine::imagegraphexport {
 	) {
 		return WriteFile(path, bytes, failure);
 	}
+	bool PublishGraphHostFile(
+		const GraphFileGrant &grant,
+		const engine::assets::ContentPolicy &policy,
+		std::span<const std::byte> bytes,
+		uint64_t maximumBytes,
+		std::string &failure
+	) {
+		if (!grant.Write || !grant.Resource.empty() || !policy.AllowsName(grant.File.string()) ||
+			bytes.size() > maximumBytes ||
+			maximumBytes > engine::imagegraph::Limits::MaximumEvaluationBytes) {
+			failure = "host publication requires an exact write grant and bounded bytes";
+			return false;
+		}
+		try {
+			return WriteFile(
+				grant.File, {reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()}, failure
+			);
+		} catch (const std::filesystem::filesystem_error &) {
+			failure = "host publication filesystem operation failed";
+			return false;
+		}
+	}
 	GraphFileHost::GraphFileHost(std::span<const GraphFileGrant> grants, engine::assets::ContentPolicy policy)
 		: Grants(grants), Policy(policy) {}
 	bool GraphFileHost::Capture(
 		const HostNodeInvocation &invocation, HostNodeCapture &output, std::string &failure
 	) {
+		if (invocation.Authored.Type == "pc.image" || invocation.Authored.Type == "pc.image_sequence")
+			return CaptureGraphRaster(invocation, Grants, Policy, output, failure);
 		if (invocation.Authored.Type == "pc.3_d_mesh_obj" || invocation.Authored.Type == "pc.3_d_mesh_json" ||
 			invocation.Authored.Type == "pc.3_d_mesh_export")
 			return CaptureGraphMeshFile(Grants, Policy, invocation, output, failure);
@@ -120,6 +146,46 @@ namespace engine::imagegraphexport {
 		if (!grant) {
 			failure = "file host capability was not granted for node " + invocation.Authored.Id;
 			return false;
+		}
+		if (invocation.Authored.Type == "pc.wav_file_write") {
+			const auto authoredBytes = NodeClonePayloadBytes(invocation.Authored);
+			if (!authoredBytes || *authoredBytes > invocation.MaximumOperationBytes) {
+				failure = "WAV capture authored payload exceeds byte budget";
+				return false;
+			}
+			uint64_t captureBytes = *authoredBytes;
+			for (const auto &input : invocation.Inputs) {
+				const auto valueBytes = ValueClonePayloadBytes(input.Data);
+				const uint64_t overhead = sizeof(AuthoredValue) + input.Port.size() + 1;
+				if (!valueBytes || overhead > invocation.MaximumOperationBytes - captureBytes ||
+					*valueBytes > invocation.MaximumOperationBytes - captureBytes - overhead) {
+					failure = "WAV capture resolved controls exceed byte budget";
+					return false;
+				}
+				captureBytes += overhead + *valueBytes;
+			}
+			WavExport wav;
+			Diagnostic diagnostic;
+			if (PrepareResolvedWavExport(
+					invocation.Inputs, invocation.MaximumOperationBytes - captureBytes, wav, diagnostic
+				) != Status::Ok) {
+				failure = diagnostic.Message;
+				return false;
+			}
+			if (wav.Path != grant->File.string()) {
+				failure = "resolved WAV destination differs from its exact write grant";
+				return false;
+			}
+			HostNodeCapture capture;
+			capture.Authored = invocation.Authored;
+			capture.Tick = invocation.Request.Tick;
+			capture.Subframe = invocation.Request.Subframe;
+			capture.NegativeFrame = invocation.Request.NegativeFrame;
+			capture.Inputs.assign(invocation.Inputs.begin(), invocation.Inputs.end());
+			if (!PublishGraphHostFile(*grant, Policy, wav.Bytes, invocation.MaximumOperationBytes, failure))
+				return false;
+			output = std::move(capture);
+			return true;
 		}
 		const Value *pathValue = Input(invocation, "path");
 		const auto *path = pathValue ? std::get_if<std::string>(pathValue) : nullptr;

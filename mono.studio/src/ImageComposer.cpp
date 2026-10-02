@@ -2585,7 +2585,9 @@ namespace studio {
 			};
 			if (ImGui::Button("Grant read")) {
 				const std::filesystem::path file(controls.File.data());
-				const std::string resource(controls.Resource.data());
+				std::string resource(controls.Resource.data());
+				const auto *node = FindNode(state.Authored, nodeId);
+				if (node && node->Type == "pc.image_sequence" && resource.empty()) resource = file.string();
 				if (file.empty())
 					controls.Message = "Enter an exact file path.";
 				else if (!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)
@@ -2759,7 +2761,8 @@ namespace studio {
 				}
 			}
 			if (node->Type == "pc.export") DrawExportGrant(state, nodeId);
-			if (detail::ImageGraphFileReadType(node->Type) && detail::ImageGraphFileNeedsPrimary(node->Type))
+			if (detail::ImageGraphFileReadType(node->Type) &&
+				!detail::ImageGraphFileUsesOwnedContent(node->Type))
 				DrawFileGrants(state, nodeId);
 			if (schema->Properties.empty() && !schema->DynamicInputs) {
 				ImGui::TextDisabled("No authored properties.");

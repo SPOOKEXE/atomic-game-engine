@@ -36,6 +36,14 @@ namespace engine::imagegraph {
 		std::vector<std::byte> &bytes,
 		Diagnostic &diagnostic
 	);
+	// Encodes borrowed, already-resolved source controls. The cap covers encoder-owned storage;
+	// callers account for the borrowed controls. Failure preserves the previous export.
+	Status PrepareResolvedWavExport(
+		std::span<const AuthoredValue> inputs,
+		uint64_t maximumBytes,
+		WavExport &output,
+		Diagnostic &diagnostic
+	);
 	// Captures linked and animated controls once through the central input snapshot. Failure preserves
 	// export.
 	Status PrepareWavExport(
