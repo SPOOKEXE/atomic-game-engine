@@ -1363,6 +1363,8 @@ namespace engine::imagegraph::detail {
 			auto &data = output.Data.emplace();
 			data.Parts = source.Parts;
 			data.Edges = source.Edges;
+			data.CpuVerticesPresent = source.CpuVerticesPresent;
+			data.CpuEdgesPresent = source.CpuEdgesPresent;
 			data.Materials = source.Materials;
 			data.LocalTransforms.reserve(source.LocalTransforms.size() + 1);
 			data.LocalTransforms.push_back(transform);

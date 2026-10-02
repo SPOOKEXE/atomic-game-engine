@@ -185,7 +185,7 @@ namespace engine::imagegraph {
 		std::unique_ptr<T> Storage;
 
 	  public:
-		OwnedPayload3D() = default;
+		OwnedPayload3D() noexcept : Storage(nullptr) {}
 		OwnedPayload3D(const OwnedPayload3D &other)
 			: Storage(other.Storage ? std::make_unique<T>(*other.Storage) : nullptr) {}
 		OwnedPayload3D(OwnedPayload3D &&) noexcept = default;
@@ -240,7 +240,7 @@ namespace engine::imagegraph {
 		// Source segment objects count their points as segments, unlike authored Bézier paths.
 		bool Segmented = false;
 		// Empty backing denotes an authored anchor path; owned operations preserve lazy source sampling.
-		OwnedPayload3D<SourcePathData2D> SourceOperation;
+		OwnedPayload3D<SourcePathData2D> SourceOperation{};
 		bool operator==(const Path2D &) const = default;
 	};
 
@@ -368,6 +368,8 @@ namespace engine::imagegraph {
 		bool Instanced = false;
 		MeshTransform3D InstanceObjectTransform;
 		std::vector<MeshInstance3D> Instances;
+		// CPU arrays may be cleared while source drawable buffers remain retained.
+		bool CpuVerticesPresent = true, CpuEdgesPresent = true;
 		bool operator==(const MeshData3D &) const = default;
 	};
 	// Absent Data retains the source no-mesh result without fabricating empty geometry.

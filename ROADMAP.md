@@ -46,7 +46,7 @@ Milestone labels describe development scope, not release versions.
   4. Edit native and PXC graphs, groups, keys and tile properties with atomic undo/redo; retain source metadata across key moves and copies.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
   6. Run bounded Lua and export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
-  7. Bind live rigid and 3D outputs, cooked materials and 4096-frame atlases; cook Composer HLSL and queue camera/SDF jobs. GPU verification remains open.
+  7. Bind rigid and 3D outputs with source mesh availability; cook materials and HLSL, play large atlases and queue camera/SDF jobs. GPU verification remains open.
   8. Package source projects and authored scenes; profile scene, simulation, atlas, palette and filter CPU workloads. Visual acceptance remains open.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):

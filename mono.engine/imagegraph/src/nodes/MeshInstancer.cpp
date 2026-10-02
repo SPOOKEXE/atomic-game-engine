@@ -310,6 +310,7 @@ namespace engine::imagegraph::detail {
 		MeshValue3D result;
 		auto &data = result.Data.emplace();
 		data.Instanced = true;
+		data.CpuVerticesPresent = data.CpuEdgesPresent = false;
 		data.InstanceObjectTransform = mesh ? mesh->Data->LocalTransforms.front() : scene->Data->Transform;
 		data.LocalTransforms.emplace_back();
 		data.Parts.reserve(cost.Parts);

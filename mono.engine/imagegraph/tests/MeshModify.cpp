@@ -18,7 +18,8 @@ namespace {
 			{{{{.25, 0, 0}, {0, 0, 1}, {0, 0}, {10, 20, 30, 40}},
 			  {{.75, 0, 0}, {0, 1, 0}, {1, 0}, {50, 60, 70, 80}},
 			  {{0, 1, 0}, {1, 0, 0}, {0, 1}, {90, 100, 110, 120}}},
-			 0}
+			 0,
+			 std::nullopt}
 		);
 		return mesh;
 	}
@@ -42,7 +43,10 @@ TEST_CASE(
 	CHECK(input.Data->Parts[0].Vertices[0].Position.X == .25);
 	const auto zero = RunNode("pc.3_d_round_vertex", {}, {{"mesh", input}, {"step", 0.0}});
 	REQUIRE(zero.Ok);
-	CHECK(std::get<MeshValue3D>(*zero.OutputValue("mesh")) == input);
+	const auto &zeroMesh = std::get<MeshValue3D>(*zero.OutputValue("mesh"));
+	CHECK(zeroMesh.Data->Parts == input.Data->Parts);
+	CHECK(zeroMesh.Data->CpuVerticesPresent);
+	CHECK_FALSE(zeroMesh.Data->CpuEdgesPresent);
 }
 
 TEST_CASE(

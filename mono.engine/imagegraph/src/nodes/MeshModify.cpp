@@ -1,3 +1,4 @@
+#include "../SourceMeshAvailability.hpp"
 #include "../SourceMeshTransform.hpp"
 #include "../SourceRandom.hpp"
 #include "Families.hpp"
@@ -33,13 +34,15 @@ namespace engine::imagegraph::detail {
 			ENGINE_PROFILE("imagegraph.mesh.round_vertex");
 			const MeshValue3D *mesh = nullptr;
 			if (!ReadSourceMesh(context, mesh)) return false;
-			if (!mesh || !mesh->Data || mesh->Data->LocalTransforms.size() != 1) return Publish(context, {});
+			if (!mesh || !mesh->Data || mesh->Data->Instanced || mesh->Data->LocalTransforms.size() != 1)
+				return Publish(context, {});
 			const double step = context.Scalar("step", .1);
 			if (context.FailureCode != Status::Ok) return false;
 			if (!std::isfinite(step))
 				return context.Fail(Status::InvalidValue, "snap step must be finite", "step");
 			if (!context.ReserveOutput(MeshStorageBytes<true>(*mesh) + 32, "mesh")) return false;
-			MeshValue3D output = *mesh;
+			MeshValue3D output = CloneSourceObjectMesh(*mesh, true);
+			RebuildSourceObjectMesh(*output.Data);
 			for (auto &part : output.Data->Parts)
 				for (auto &vertex : part.Vertices) {
 					if (step == 0) continue;
@@ -64,7 +67,8 @@ namespace engine::imagegraph::detail {
 			ENGINE_PROFILE("imagegraph.mesh.subdivide");
 			const MeshValue3D *mesh = nullptr;
 			if (!ReadSourceMesh(context, mesh)) return false;
-			if (!mesh || !mesh->Data || mesh->Data->LocalTransforms.size() != 1) return Publish(context, {});
+			if (!mesh || !mesh->Data || mesh->Data->Instanced || mesh->Data->LocalTransforms.size() != 1)
+				return Publish(context, {});
 			const double target = context.Scalar("subobjects", -1);
 			const int64_t level = context.Integer("level", 1);
 			if (context.FailureCode != Status::Ok) return false;
@@ -72,7 +76,9 @@ namespace engine::imagegraph::detail {
 				return context.Fail(Status::InvalidValue, "subobject index must be an integer", "subobjects");
 			const auto &source = *mesh->Data;
 			const size_t selected =
-				source.Parts.empty() ? 0 : size_t(std::clamp(target, 0.0, double(source.Parts.size() - 1)));
+				SourceCpuMeshParts(source).empty()
+					? 0
+					: size_t(std::clamp(target, 0.0, double(SourceCpuMeshParts(source).size() - 1)));
 			uint64_t multiplier = 1;
 			for (int64_t i = 0; i < level; ++i) {
 				if (multiplier > Limits::MaximumArrayElements / 4)
@@ -80,8 +86,8 @@ namespace engine::imagegraph::detail {
 				multiplier *= 4;
 			}
 			uint64_t total = 0, growth = 0, largest = 0;
-			for (size_t i = 0; i < source.Parts.size(); ++i) {
-				const uint64_t count = source.Parts[i].Vertices.size();
+			for (size_t i = 0; i < SourceCpuMeshParts(source).size(); ++i) {
+				const uint64_t count = SourceCpuMeshParts(source)[i].Vertices.size();
 				const uint64_t next = count * (target == -1 || selected == i ? multiplier : 1);
 				if (next > Limits::MaximumArrayElements - total)
 					return context.Fail(Status::LimitExceeded, "subdivision exceeds geometry caps", "level");
@@ -95,8 +101,9 @@ namespace engine::imagegraph::detail {
 			if (!context.ReserveOutput(bytes + 32, "mesh")) return false;
 			auto scratch = context.ReserveWorkspace(largest * sizeof(MeshVertex3D), "mesh");
 			if (!scratch) return false;
-			MeshValue3D output = *mesh;
-			for (size_t i = 0; i < source.Parts.size(); ++i) {
+			MeshValue3D output = CloneSourceObjectMesh(*mesh, true);
+			RebuildSourceObjectMesh(*output.Data);
+			for (size_t i = 0; i < SourceCpuMeshParts(source).size(); ++i) {
 				if (target != -1 && selected != i) continue;
 				auto &vertices = output.Data->Parts[i].Vertices;
 				for (int64_t iteration = 0; iteration < level; ++iteration) {
@@ -178,6 +185,15 @@ namespace engine::imagegraph::detail {
 						"source nested groups and lights have no material getter",
 						"mesh"
 					);
+			for (const auto &object : scene.Data->Objects) {
+				const auto &mesh = std::get<MeshValue3D>(object.Data);
+				if (mesh.Data && mesh.Data->Instanced)
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"source instancer clone has no defined material object",
+						"mesh"
+					);
+			}
 			const Value *value = context.Find("materials");
 			const auto *single = value ? std::get_if<MaterialValue3D>(value) : nullptr;
 			const auto *array = value ? std::get_if<ArrayValue>(value) : nullptr;
@@ -297,6 +313,10 @@ namespace engine::imagegraph::detail {
 			if (context.FailureCode != Status::Ok) return false;
 			random = SourceRandom(seed);
 			SceneValue3D output = scene;
+			for (auto &object : output.Data->Objects) {
+				auto &mesh = std::get<MeshValue3D>(object.Data);
+				if (mesh.Data) ApplySourceObjectCloneMetadata(*mesh.Data, false);
+			}
 			for (size_t i = 0; i < output.Data->Objects.size(); ++i) {
 				auto &mesh = std::get<MeshValue3D>(output.Data->Objects[i].Data);
 				if (!mesh.Data || mesh.Data->Materials.empty()) continue;
@@ -318,6 +338,13 @@ namespace engine::imagegraph::detail {
 			const MeshValue3D *mesh = nullptr;
 			if (!ReadSourceMesh(context, mesh)) return false;
 			if (!mesh || !mesh->Data) return Publish(context, {});
+			if (mesh->Data->Instanced)
+				return context.Fail(
+					Status::UnsupportedExecution,
+					"source instancer clone has no defined material object",
+					"mesh"
+				);
+
 			const double selection = context.SourceChoice("select"),
 						 overflow = context.SourceChoice("overflow");
 			if (context.FailureCode != Status::Ok) return false;
@@ -382,7 +409,7 @@ namespace engine::imagegraph::detail {
 			if (!context.ReserveOutput(bytes + 32, "mesh")) return false;
 			if (context.FailureCode != Status::Ok) return false;
 			random = SourceRandom(seed);
-			MeshValue3D output = *mesh;
+			MeshValue3D output = CloneSourceObjectMesh(*mesh, true);
 			for (size_t i = 0; i < output.Data->Materials.size(); ++i)
 				if (const auto *material = selected(i)) output.Data->Materials[i] = *material;
 			return Publish(context, std::move(output));
@@ -407,6 +434,10 @@ namespace engine::imagegraph::detail {
 			const auto *mesh = source ? std::get_if<MeshValue3D>(source) : nullptr;
 			const auto *scene = source ? std::get_if<SceneValue3D>(source) : nullptr;
 			if ((!mesh || !mesh->Data) && (!scene || !scene->Data)) return Publish(context, {});
+			if (mesh && mesh->Data && mesh->Data->Instanced)
+				return context.Fail(
+					Status::UnsupportedExecution, "source instancer clone has no defined UV object", "mesh"
+				);
 			if ((mesh && !ValidMeshPayload(*mesh)) || (scene && !ValidScenePayload(*scene)))
 				return context.Fail(Status::InvalidValue, "UV source payload is invalid", "mesh");
 			Vector3 position{}, scale{1, 1, 1};
@@ -448,6 +479,10 @@ namespace engine::imagegraph::detail {
 					output = {};
 					return;
 				}
+				output.Data->CpuVerticesPresent = false;
+				output.Data->CpuEdgesPresent = false;
+				for (auto &part : output.Data->Parts)
+					part.LocalMatrix.reset();
 				for (size_t i = 0; i < output.Data->Parts.size(); ++i) {
 					if (!matches(i)) continue;
 					for (auto &vertex : output.Data->Parts[i].Vertices) {
@@ -521,7 +556,8 @@ namespace engine::imagegraph::detail {
 			ENGINE_PROFILE("imagegraph.mesh.displace");
 			const MeshValue3D *mesh = nullptr;
 			if (!ReadSourceMesh(context, mesh)) return false;
-			if (!mesh || !mesh->Data || mesh->Data->LocalTransforms.size() != 1) return Publish(context, {});
+			if (!mesh || !mesh->Data || mesh->Data->Instanced || mesh->Data->LocalTransforms.size() != 1)
+				return Publish(context, {});
 			const MaterialData3D *material = nullptr;
 			const Image *surface = context.Input("displace_texture");
 			if (const Value *value = context.Find("displace_texture")) {
@@ -554,7 +590,8 @@ namespace engine::imagegraph::detail {
 				);
 			const Vector2 scale = material ? material->TextureScale : Vector2{1, 1},
 						  shift = material ? material->TextureShift : Vector2{};
-			MeshValue3D output = *mesh;
+			MeshValue3D output = CloneSourceObjectMesh(*mesh, true);
+			RebuildSourceObjectMesh(*output.Data);
 			const auto coordinate = [&](double uv, double tiling, double offset, uint32_t extent) {
 				double value = std::fmod(std::clamp(uv, 0.0, .9999) * tiling + offset, 1);
 				if (value < 0) value += 1;
@@ -598,7 +635,7 @@ namespace engine::imagegraph::detail {
 			if (!ReadSourceMesh(context, mesh)) return false;
 			ArrayValue positions, normals;
 			positions.ElementType = normals.ElementType = ValueType::Scalar;
-			if (!mesh || !mesh->Data || mesh->Data->LocalTransforms.size() != 1) {
+			if (!mesh || !mesh->Data || mesh->Data->Instanced || mesh->Data->LocalTransforms.size() != 1) {
 				context.SetValue("positions", std::move(positions));
 				context.SetValue("normals", std::move(normals));
 				return context.FailureCode == Status::Ok;
@@ -618,7 +655,10 @@ namespace engine::imagegraph::detail {
 			std::set<std::array<double, 6>> seen;
 			for (const auto &part : mesh->Data->Parts)
 				for (const auto &vertex : part.Vertices) {
-					const Vector3 p = vertex.Position, n = vertex.Normal;
+					const Vector3 p = mesh->Data->CpuVerticesPresent ? vertex.Position
+						: Vector3{float(vertex.Position.X), float(vertex.Position.Y), float(vertex.Position.Z)},
+						n = mesh->Data->CpuVerticesPresent ? vertex.Normal
+						: Vector3{float(vertex.Normal.X), float(vertex.Normal.Y), float(vertex.Normal.Z)};
 					const std::array<double, 6> key{
 						p.X, p.Y, p.Z, remove ? 0 : n.X, remove ? 0 : n.Y, remove ? 0 : n.Z
 					};
