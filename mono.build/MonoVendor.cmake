@@ -648,12 +648,10 @@ if(MONO_BUILD_CLIENT)
 	set(SHADERC_SKIP_EXECUTABLES      OFF CACHE BOOL "" FORCE)
 	set(SHADERC_SKIP_COPYRIGHT_CHECK  ON  CACHE BOOL "" FORCE)
 	set(SHADERC_SKIP_INSTALL          ON  CACHE BOOL "" FORCE)
-	# The engine authors GLSL. glslang has deprecated its HLSL front end and
-	# will remove it (KhronosGroup/glslang#4210), so leaving it on buys a
-	# deprecation warning now and a broken bump later, for a language nothing
-	# here writes.
-	set(SHADERC_ENABLE_HLSL           OFF CACHE BOOL "" FORCE)
-	set(ENABLE_HLSL                   OFF CACHE BOOL "" FORCE)
+	# Composer source shaders require the pinned HLSL front end in the cooker.
+	# Keep this dependency explicit when upgrading glslang, whose front end is deprecated.
+	set(SHADERC_ENABLE_HLSL           ON CACHE BOOL "" FORCE)
+	set(ENABLE_HLSL                   ON CACHE BOOL "" FORCE)
 	# Their code, built by whatever compiler we happen to have. MONO_WERROR
 	# governs first-party targets and should not be extended to a vendored one:
 	# a new warning in a future GCC must not turn into a failed engine build.
