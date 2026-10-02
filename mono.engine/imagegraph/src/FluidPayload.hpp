@@ -63,10 +63,21 @@ namespace engine::imagegraph::detail {
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.Obstacles));
 		for (const auto &buffer : data.Buffers)
 			bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(buffer));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.ReadbackPositions));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.ReadbackVelocities));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.ReadbackLife));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.History));
+		for (const auto &frame : data.History)
+			bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(frame.Positions));
 		return bytes;
 	}
 	template <bool Retained> uint64_t FluidStorageBytes(const FluidDomainValue &value) {
 		return value.Data ? FluidDataStorageBytes<Retained>(*value.Data) : 0;
+	}
+	inline uint64_t FlipStepGrowthBytes(const FluidDomainData &data) {
+		return sizeof(FluidDomainData::HistoryFrame) * (data.History.size() + 1) +
+			   data.ReadbackPositions.size() * sizeof(double) +
+			   uint64_t(data.ParticleCount) * 5 * sizeof(double);
 	}
 	inline bool ValidFluidDomainData(const FluidDomainData &data) {
 		const auto layout = FluidDomainLayout(data.Settings);
@@ -92,6 +103,23 @@ namespace engine::imagegraph::detail {
 				  obstacle.Radius,
 				  obstacle.Width,
 				  obstacle.Height})
+				if (!std::isfinite(value)) return false;
+		}
+		if (data.ReadbackPositions.size() != data.ReadbackVelocities.size() ||
+			data.ReadbackPositions.size() != data.ReadbackLife.size() * 2 ||
+			data.ReadbackLife.size() > data.Settings.MaximumParticles ||
+			data.History.size() > Limits::MaximumRangeFrames)
+			return false;
+		for (const auto *buffer : {&data.ReadbackPositions, &data.ReadbackVelocities, &data.ReadbackLife})
+			for (const double value : *buffer)
+				if (!std::isfinite(value)) return false;
+		for (size_t index = 0; index < data.History.size(); ++index) {
+			const auto &frame = data.History[index];
+			if (frame.Tick > Limits::MaximumTick || frame.Positions.size() % 2 ||
+				frame.Positions.size() > size_t(data.Settings.MaximumParticles) * 2 ||
+				(index && data.History[index - 1].Tick >= frame.Tick))
+				return false;
+			for (const double value : frame.Positions)
 				if (!std::isfinite(value)) return false;
 		}
 		return true;

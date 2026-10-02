@@ -48,10 +48,19 @@ namespace engine::imagegraph {
 		Count
 	};
 	struct FluidDomainData {
+		struct HistoryFrame {
+			uint64_t Tick = 0;
+			std::vector<double> Positions;
+			bool operator==(const HistoryFrame &) const = default;
+		};
 		FluidDomainSettings Settings;
 		std::array<std::vector<double>, size_t(FluidBuffer::Count)> Buffers;
 		std::vector<FluidObstacle> Obstacles;
 		uint32_t ParticleCount = 0;
+		// Object readback remains unchanged by native spawn/force calls until a source Step.
+		std::vector<double> ReadbackPositions, ReadbackVelocities, ReadbackLife;
+		// Missing slots in these sparse rows are the source's zero-initialized array entries.
+		std::vector<HistoryFrame> History;
 		double ParticleRestDensity = 0;
 		std::string OriginNodeId;
 		size_t OriginProcessorRow = 0;

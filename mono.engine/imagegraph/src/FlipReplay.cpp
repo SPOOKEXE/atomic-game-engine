@@ -257,6 +257,14 @@ namespace engine::imagegraph {
 		if (!previous.Data || !detail::ValidFluidPayload(previous))
 			return Refuse(diagnostic, Status::InvalidValue, "FLIP step needs initialized valid caller state");
 		const auto &old = *previous.Data;
+		const auto historical = std::find_if(old.History.begin(), old.History.end(), [&](const auto &frame) {
+			return frame.Tick == tick;
+		});
+		if (historical == old.History.end() && old.History.size() >= Limits::MaximumRangeFrames)
+			return Refuse(
+				diagnostic, Status::LimitExceeded, "FLIP object history exceeds bounded frame count"
+			);
+		const uint64_t historyGrowth = detail::FlipStepGrowthBytes(old);
 		if (old.Tick >= Limits::MaximumTick || tick != old.Tick + 1 || revision != old.AuthoringRevision)
 			return Refuse(
 				diagnostic,
@@ -270,8 +278,11 @@ namespace engine::imagegraph {
 				"source FLIP pressure division at zero time step needs a reference capture"
 			);
 		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
-			Overlap(previous, result, old.Obstacles.size() * sizeof(detail::source_flip::SourceObstacle)) >
-				maximumBytes)
+			Overlap(
+				previous,
+				result,
+				historyGrowth + old.Obstacles.size() * sizeof(detail::source_flip::SourceObstacle)
+			) > maximumBytes)
 			return Refuse(
 				diagnostic, Status::LimitExceeded, "FLIP step replacement overlap exceeds byte budget"
 			);
@@ -333,6 +344,24 @@ namespace engine::imagegraph {
 					);
 			}
 		}
+		const auto previousFrame =
+			std::find_if(data.History.begin(), data.History.end(), [&](const auto &frame) {
+				return frame.Tick == tick;
+			});
+		if (previousFrame != data.History.end())
+			previousFrame->Positions = data.ReadbackPositions;
+		else {
+			data.History.reserve(data.History.size() + 1);
+			data.History.push_back({tick, data.ReadbackPositions});
+		}
+		const auto &positions = data.Buffers[size_t(FluidBuffer::ParticlePosition)];
+		const auto &velocities = data.Buffers[size_t(FluidBuffer::ParticleVelocity)];
+		const auto &life = data.Buffers[size_t(FluidBuffer::ParticleLife)];
+		data.ReadbackPositions.assign(positions.begin(), positions.begin() + size_t(data.ParticleCount) * 2);
+		data.ReadbackVelocities.assign(
+			velocities.begin(), velocities.begin() + size_t(data.ParticleCount) * 2
+		);
+		data.ReadbackLife.assign(life.begin(), life.begin() + data.ParticleCount);
 		data.Tick = tick;
 		result = std::move(candidate);
 		diagnostic = {};

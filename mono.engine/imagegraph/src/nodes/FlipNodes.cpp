@@ -125,7 +125,7 @@ namespace engine::imagegraph::detail {
 				settings.ParticleIterations
 			))
 			return false;
-		output.Data->Tick = context.Request.Tick;
+		NormalizeFlipFrameTick(*output.Data, context.Request.Tick);
 		return PublishFlipDomain(context, std::move(output));
 	}
 	bool FlipUpdate(NodeContext &context) {
@@ -142,7 +142,9 @@ namespace engine::imagegraph::detail {
 		if (context.Boolean("override")) output.Data->Settings.TimeStep = context.Scalar("timestep", .01);
 		if (context.Boolean("update", true)) {
 			auto temporary = context.ReserveWorkspace(
-				bytes + input->Data->Obstacles.size() * sizeof(source_flip::SourceObstacle), "domain"
+				bytes + FlipStepGrowthBytes(*input->Data) +
+					input->Data->Obstacles.size() * sizeof(source_flip::SourceObstacle),
+				"domain"
 			);
 			if (!temporary) return false;
 			const auto target = context.Request.Tick == 0 ? 1 : context.Request.Tick;
@@ -159,7 +161,7 @@ namespace engine::imagegraph::detail {
 			);
 			if (status != Status::Ok) return context.Fail(status, diagnostic.Message, "domain");
 		}
-		output.Data->Tick = context.Request.Tick;
+		NormalizeFlipFrameTick(*output.Data, context.Request.Tick);
 		return PublishFlipDomain(context, std::move(output));
 	}
 	bool FlipFill(NodeContext &context) {

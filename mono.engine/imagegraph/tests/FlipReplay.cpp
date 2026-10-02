@@ -320,3 +320,33 @@ TEST_CASE("FLIP zero timestep skips pressure safely and still ages source partic
 	CHECK(Step(state, 2, diagnostic) == Status::UnsupportedExecution);
 	CHECK(*state.Data == *previous.Data);
 }
+
+TEST_CASE("FLIP object mirrors stay stale through spawn and store pre-step history", "[imagegraph]") {
+	FluidDomainSettings settings;
+	settings.SkipIncompressible = true;
+	settings.GlobalIterations = 1;
+	settings.TimeStep = .1;
+	settings.Gravity = 1;
+	auto state = Reset(settings);
+	Diagnostic diagnostic;
+	const std::array particles{FluidSpawnParticle{{8, 8}, {}}};
+	REQUIRE(
+		SpawnFlipReplay(state, particles, Limits::MaximumEvaluationBytes, state, diagnostic) == Status::Ok
+	);
+	CHECK(state.Data->ReadbackPositions.empty());
+	REQUIRE(Step(state, 1, diagnostic) == Status::Ok);
+	REQUIRE(state.Data->History.size() == 1);
+	CHECK(state.Data->History[0].Tick == 1);
+	CHECK(state.Data->History[0].Positions.empty());
+	CHECK(state.Data->ReadbackPositions[1] == Catch::Approx(8.01));
+	const auto previousPose = state.Data->ReadbackPositions;
+	REQUIRE(
+		SpawnFlipReplay(state, particles, Limits::MaximumEvaluationBytes, state, diagnostic) == Status::Ok
+	);
+	CHECK(state.Data->ReadbackPositions == previousPose);
+	REQUIRE(Step(state, 2, diagnostic) == Status::Ok);
+	REQUIRE(state.Data->History.size() == 2);
+	CHECK(state.Data->History[1].Positions == previousPose);
+	CHECK(state.Data->ReadbackPositions.size() == 4);
+	CHECK(detail::ValidFluidPayload(state));
+}
