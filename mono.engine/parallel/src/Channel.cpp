@@ -1,3 +1,4 @@
+#include <engine/core/HeapProfile.hpp>
 #include <engine/parallel/Channel.hpp>
 
 #include <atomic>
@@ -30,6 +31,9 @@ namespace engine::parallel {
 		struct Direction {
 			mutable std::mutex Guard;
 			std::deque<std::vector<std::byte>> Frames;
+			// One consumed payload, bounded by both configured byte limits.
+			// Queue residency is separate; closing either endpoint releases this spare.
+			std::vector<std::byte> Spare;
 			size_t Bytes = 0;
 		};
 
@@ -62,6 +66,7 @@ namespace engine::parallel {
 			}
 
 			ChannelStatus Send(std::span<const std::byte> frame) override {
+				ENGINE_HEAP_SCOPE("local channel send");
 				if (!Open()) {
 					return ChannelStatus::Closed;
 				}
@@ -80,12 +85,21 @@ namespace engine::parallel {
 					return ChannelStatus::Full;
 				}
 
-				outbound.Frames.emplace_back(frame.begin(), frame.end());
+				if (outbound.Spare.capacity() >= frame.size()) {
+					// Acquire the queue slot before consuming the spare, so a deque
+					// allocation failure leaves both the spare and queued frames intact.
+					outbound.Frames.emplace_back();
+					outbound.Frames.back().swap(outbound.Spare);
+					outbound.Frames.back().assign(frame.begin(), frame.end());
+				} else {
+					outbound.Frames.emplace_back(frame.begin(), frame.end());
+				}
 				outbound.Bytes += frame.size();
 				return ChannelStatus::Ok;
 			}
 
 			ChannelStatus Receive(std::vector<std::byte> &frame) override {
+				ENGINE_HEAP_SCOPE("local channel receive");
 				Direction &inbound = First ? Shared->SecondToFirst : Shared->FirstToSecond;
 				std::lock_guard lock(inbound.Guard);
 
@@ -102,6 +116,14 @@ namespace engine::parallel {
 				frame.assign(front.begin(), front.end());
 
 				inbound.Bytes -= front.size();
+				// Assignment above must succeed before the FIFO or spare changes.
+				// Keep only a fitting larger payload; clear size without growing capacity.
+				if (Open() && front.capacity() > inbound.Spare.capacity() &&
+					front.capacity() <= Shared->Settings.Capacity &&
+					front.capacity() <= Shared->Settings.MaximumFrame) {
+					front.swap(inbound.Spare);
+					inbound.Spare.clear();
+				}
 				inbound.Frames.pop_front();
 				return ChannelStatus::Ok;
 			}
@@ -125,6 +147,10 @@ namespace engine::parallel {
 
 			void Close() override {
 				(First ? Shared->FirstOpen : Shared->SecondOpen).store(false, std::memory_order_relaxed);
+				// Closed queues remain drainable, but free payloads have no next send.
+				std::scoped_lock lock(Shared->FirstToSecond.Guard, Shared->SecondToFirst.Guard);
+				std::vector<std::byte>().swap(Shared->FirstToSecond.Spare);
+				std::vector<std::byte>().swap(Shared->SecondToFirst.Spare);
 			}
 
 		  private:

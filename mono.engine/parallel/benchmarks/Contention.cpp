@@ -39,7 +39,9 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <atomic>
 #include <cstddef>
+#include <stdexcept>
 #include <vector>
 
 TEST_SUITE_ID("engine.parallel.bench.contention")
@@ -96,6 +98,50 @@ namespace contention_bench {
 				value = value * 1.000001f + 0.5f;
 			}
 			rows[index] = value;
+		}
+	}
+
+	// Verify complete pinned output against a separately evaluated serial recurrence.
+	// Scratch is local to the first benchmark warmup and never changes the measured row state.
+	void VerifyPinnedRows(const std::vector<unsigned> &assignment) {
+		if (Jobs::PinnedWorkerCount() == 0)
+			throw std::runtime_error("pinned real-work oracle unavailable: no pinned workers");
+		constexpr size_t TASKS = 64;
+		constexpr size_t BLOCK = ROWS / TASKS;
+		if (assignment.size() != TASKS) throw std::runtime_error("pinned oracle task shape differs");
+		std::vector<float> actual(ROWS);
+		for (size_t index = 0; index < ROWS; ++index) {
+			actual[index] = static_cast<float>(index % 97) + 1.0f;
+		}
+		std::vector<std::atomic<unsigned>> visits(TASKS);
+		for (auto &visit : visits)
+			visit.store(0, std::memory_order_relaxed);
+		std::atomic<bool> invalid{false};
+		Jobs::ForWorkers(assignment, [&](size_t begin, size_t end) {
+			if (begin > end || end > TASKS) {
+				invalid.store(true, std::memory_order_relaxed);
+				return;
+			}
+			for (size_t task = begin; task < end; ++task) {
+				// Refuse duplicate blocks before touching their rows, so a bad dispatch cannot race writes.
+				if (visits[task].fetch_add(1, std::memory_order_relaxed) != 0) {
+					invalid.store(true, std::memory_order_relaxed);
+					continue;
+				}
+				Work(actual, task * BLOCK, (task + 1) * BLOCK);
+			}
+		});
+		if (invalid.load(std::memory_order_relaxed))
+			throw std::runtime_error("pinned oracle invalid or repeated block");
+		for (const auto &visit : visits) {
+			if (visit.load(std::memory_order_relaxed) != 1)
+				throw std::runtime_error("pinned oracle missing block");
+		}
+		for (size_t index = 0; index < ROWS; ++index) {
+			float expected = static_cast<float>(index % 97) + 1.0f;
+			for (int step = 0; step < STEPS; ++step)
+				expected = expected * 1.000001f + 0.5f;
+			if (actual[index] != expected) throw std::runtime_error("pinned oracle row output differs");
 		}
 	}
 
@@ -301,6 +347,19 @@ BENCH("ForWorkers · 1M rows as 64 tasks over the pinned prefix", 1) {
 	assignment.resize(64);
 	for (size_t task = 0; task < assignment.size(); task++) {
 		assignment[task] = pinned == 0 ? 0 : static_cast<unsigned>(task % pinned);
+	}
+
+	static bool verified = false;
+	if (!verified) {
+		VerifyPinnedRows(assignment);
+		std::vector<unsigned> skewed(64, 0);
+		VerifyPinnedRows(skewed);
+		std::vector<unsigned> irregular(64);
+		for (size_t index = 0; index < irregular.size(); ++index) {
+			irregular[index] = static_cast<unsigned>((index * index + 3 * index + 7) % pinned);
+		}
+		VerifyPinnedRows(irregular);
+		verified = true;
 	}
 
 	constexpr size_t BLOCK = ROWS / 64;
