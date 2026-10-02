@@ -1,0 +1,38 @@
+# Pixel Composer reference gate
+
+The historical snapshot retrieval began on 2026-09-23 at 20:39:59 UTC. Its original manifest is preserved byte for byte in `source-manifest-2026-09-23.json`, including the missing archive's SHA-256. The original archive has not been recovered. A fresh retrieval on 2026-09-30 is pinned in `source-manifest.json` and the identical dated `source-manifest-2026-09-30.json`. The archive path is relative to this directory and points into the adjacent supplied-fixture repository. Each record names its exact byte count, HTML SHA-256, response status, last-modified header, retrieval time, and archive member path. The documentation does not expose one product version for the site. Individual node badges do not establish the running product version.
+
+The current executable comparison candidate is official Pixel Composer 1.22.0.0 stable. Its [official release page](https://makham.itch.io/pixel-composer/devlog/1680206/122-stable) lists `Pixel_Composer_1.22.0.0-x86_64 Itch.zip` for Linux, uploaded on September 28, 2026 at 00:43 UTC. The [official devlog index](https://makham.itch.io/pixel-composer/devlog) dates the release announcement September 28, 2026. The September 23 snapshot's candidate was [1.21.10.0 beta](https://makham.itch.io/pixel-composer/devlog/1662052/12110-beta); preserve that historical distinction. The [official product page](https://makham.itch.io/pixel-composer) requires a purchase for full downloads. The user confirmed that no licensed reference executable is available, so an executable hash, runtime version check, and reference capture remain unavailable.
+
+The five PXC projects and five image or GIF captures named in `docs/to-delete/v026-pixel-composer.md` are in the adjacent `atomic-game-engine-hidden-docs/files/pixel-composer-com` directory. `supplied-fixture-manifest.json` records file hashes and sizes, observed PXC prefixes and version strings, and capture dimensions, frame durations, and RGBA hashes for all 77 media frames. All five PXC files start with `PXCX`. The little-endian offset at byte 4 points to a zlib graph stream; a `THMB` block at byte 8 contains a zlib stream that inflates to 262,144 bytes; and the following `META` block contains integer 121092 and ASCII `1.22.10.201`. The graph streams inflate to UTF-8 JSON plus a trailing NUL byte. Their node counts are 67, 32, 40, 27, and 44, and every observed input `from_node` link resolves within its file. This layout is verified only for the five samples. The string's meaning and compatibility with other PXC versions remain unverified. The images are two 1920 by 1080 PNGs and three GIFs with 15, 30, and 30 frames. The captures show graph, timeline, VFX, simulation, and 3D interfaces, but their mapping to individual PXC files is unverified. The two PNG title bars visibly read `v. 1.16.6.0`; this identifies the captured UI, not the PXC file version.
+
+The user confirmed no licensed reference executable is available and directed implementation to use the supplied media and official documentation. Development can proceed from those sources. M0 remains open and no node or workflow row has a passing executable comparison. The media can support reviewed visual studies, but cannot establish exact graph parameters, defaults, error behavior, or hidden state. Preserve every current documentation row and mark behavior that cannot be checked as unresolved. If an official executable becomes available, record its hash and runtime version, run `capture-reference.sh` on controlled fixtures, and reconcile every matrix row against that build.
+
+## Capture record required per fixture
+
+Record fixture id, official build version and executable SHA-256, platform, backend, source documentation page and SHA-256, project file SHA-256, graph nodes and links, input assets and SHA-256, all parameters, seed, dimensions, tick or frame range, output type, exact output hash or comparison tolerance, diagnostics, and capture provenance. Record the same fields for the native runner. A fixture is passing only after both sides run and the declared comparison succeeds.
+
+## Current checkout evidence, 2026-09-30
+
+A broader search under `/home/declan`, including hidden and ignored files, did not recover the September 23 archive. One Trash/docker subtree was inaccessible. The fresh archive is `../../../atomic-game-engine-hidden-docs/files/pixel-composer-com/official-docs-2026-09-30.tar.gz`, relative to this directory. It is 49,222,213 bytes with SHA-256 `9091bc95e7599211dc9ede5028999875b54382f66a4297d6f796c0569bcc3013`.
+
+Retrieval requested all 1,343 historical URLs, then recursively followed same-host HTML links with backslashes normalized to slashes. The final inventory has 3,014 URLs: 2,244 successful responses and 770 HTTP 404 responses. The 907 newly successful URLs are `/nodes/_index/` meta-refresh aliases whose targets are also archived. No new node content page was discovered. Malformed relative links and other missing pages are retained as explicit HTTP 404 evidence. Override Channel initially returned HTTP 503; its retry returned HTTP 200 and both response bodies are archived.
+
+Every historical response hash matches the fresh response hash. The fresh archive therefore reconstructs the page bytes described by all 1,343 historical records, while its tar/gzip container has a different hash and retrieval provenance. It is not the recovered original archive. All 990 node matrix rows retain their requested page and matching source hash. Five existing Armature Build rows have empty node ids and HTTP 404 pages: Armature, Armature Bone, Armature IK, Armature Mirror, and Armature Subdivide. These rows remain unresolved and were not removed. The adjacent Armature Build index is also HTTP 404. This archive recovery closes the missing-byte evidence gap, while these documentation gaps remain.
+
+The [1.22 release notes](https://makham.itch.io/pixel-composer/devlog/1680206/122-stable) name Array Cumulative, Path Redistribute, and Channel Swizzle. These nodes are absent from the retrieved documentation navigation and existing matrix. The current documentation inventory therefore does not prove a complete catalogue for 1.22. Reconcile the release catalogue separately rather than declaring the 990 rows release-complete. `mono.engine/imagegraph/src/SourceCatalogue.inc:8264` already lists Path Redistribute as `undocumented`. Array Cumulative and Channel Swizzle have no title entry in that pinned catalogue; their internal ids are unverified. The native source pin in `source-inputs.json` was not changed.
+
+Archive verification read all 3,015 response members, including the initial HTTP 503 attempt, and checked every byte count and SHA-256. It also checked the embedded retrieval manifest against the external page records, the archive SHA-256, the preserved original manifest hash, and agreement between the active and dated fresh manifests.
+
+Native development and native fixture acceptance do not require a licensed
+executable. Executable comparison is a separate unavailable gate. A test that
+mentions a node type establishes neither complete control coverage nor exact
+output parity. Matrix acceptance must name the exercised controls and edge
+cases, the expected output source, and a successful current test run.
+
+The 2026-09-30 dev headless adapter run passed
+`test_studio '[studio][imagegraph]' --reporter compact` with 520 assertions
+in 27 cases and `test_imagegraph_runner '[imagegraph][runner]' --reporter compact`
+with 121 assertions in 19 cases. The product matrix records these native
+slices separately from executable comparison. These suites do not exercise
+the interactive Studio canvas or establish whole-workflow acceptance.

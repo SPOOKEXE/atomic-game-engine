@@ -235,11 +235,36 @@ defaults to frequency 4, amplitude 1, phase 0 and smooth 0. It adds
 value fades the offset at the ends of the active key interval with the source's smoothstep envelope. The native
 four-frame fixture sets frequency 1 and amplitude 0.25, so frame 1 yields exactly a +0.25 scalar offset; a separate
 fractional test covers the source defaults. v1-v5 documents migrate to v6 without adding drivers or changing key
-values. This behavior is source-derived and native-tested, not executable-reference verified. Additive keys,
-audio-driven animation and feedback history remain open M3 work. Legacy cubic keys are retained but report
+values. This behavior is source-derived and native-tested, not executable-reference verified. Audio-driven animation and feedback history remain open M3 work. Native9 retains the source Normal/Adder
+key-kind marker through import, native persistence and authoring. In the pinned source, both kinds use ordinary
+key evaluation; no additive arithmetic is evidenced. The native popup extension has headless Apply, Cancel,
+Escape, stale-target atomicity and undo coverage, without a claim that the source provides this authoring UI.
+Licensed executable parity remains unavailable. Legacy cubic keys are retained but report
 `UnsupportedExecution`; source-side easing is the supported editable path. The pinned source's range-start pingpong
 behavior and dropped-update stepping are recorded in focused native and Studio fixtures; executable reference
 comparison remains unavailable.
+
+The signed-time native9 slice adds bounded negative and fractional key authoring, the Control-Alt gesture,
+undo/redo history, preview cache invalidation, source key-time preservation and Runner `--frame REAL` requests.
+Native9 uses a continuous signed clock with the authored interpolation schedule. v1-v8 preserve existing
+fractional sampling, including the native hold within a key's integer tick; other fractional intervals still
+interpolate. Source authoring serializes raw key times, and native Write/Read preserves them; modified PXC writer
+parity is not claimed. Nonpositive hold and wrap extrapolation are source-backed, including the single-key wrap
+fast path. Interior sampling with fractional source keys remains `UnsupportedExecution` pending proof of GML
+`key_map` read, write and size coercion. Exact fractional endpoints and fractional requests on integer-key tracks
+are native behavior, not verified source-map parity: coerced writes can collide and select another interval.
+[The focused evidence record](../pixel-composer-m0/fractional-key-map-evidence-2026-09-30.json) retains the pinned
+source and official manual findings. Native interpolation is not claimed as executable source parity. The repaired joined gates pass
+core, IO, Runner and the affected Studio slice. Full unfiltered Studio was not rerun in this phase. Live GUI,
+GPU/audio checks and licensed executable comparison remain unverified, and M3 remains open.
+
+The verified Studio key-edit slice selects distinct full property/time identities and stages move, copy and paste
+through one undo transaction. Moves preserve drivers; copied keys start without drivers. Headless ImGui fixtures
+exercise selection, collisions, cancellation and stale originals. Shared frame shifts retain integer components
+and use ordinary floating-point rounding for fractions. Dopesheet drag, box and scale selection, targeted property
+paste and live GUI verification remain open. Key-copy admission covers logical key payloads, not the whole document
+or undo history. The verified snapshot and failed-gate repairs are recorded in the
+[native validation ledger](../pixel-composer-m0/native-validation-2026-09-30.json).
 
 The limited audio path is now `image.audio_recording` to `image.audio_volume`. A bounded `audio-capture 1` file
 stores recorded mono sample arrays by source ID and exact tick. Each line is `frame "mono" 0 2 1 -1`; IDs are
@@ -257,10 +282,14 @@ it returns the sampled array in deterministic order. `image.audio_recording` als
 capture. With that input and declared timeline FPS, Match Timeline uses the source formula
 `tick / frames_per_second * sample_rate`; it otherwise returns a named diagnostic. Static seconds and progress
 locations, multichannel audio, WAV import, audio-driven keyframes, live device capture and feedback history remain
-open. The catalogue `pc.audio_window` also remains open: its pinned source emits nested arrays per channel,
-clamps Step with `max(1, step)`, and clamps its exclusive end to `packet - 1`. Its Bit/Second/Progress location
-unit is an input attribute absent from the current catalogue extraction. The scalar mono slice does not prove
-those source behaviors. Audio Volume has a separate unresolved numeric discrepancy: the archived pre-1.18 docs
+open. The scalar `image.audio_window` slice remains static and mono; that evidence does not establish the
+separate catalogue `pc.audio_window` behavior. Native `pc.audio_window` evaluation and a Studio
+`AudioWindowPanel::Update` observation path are now implemented. The headless observer resolves the selected
+node's linked or animated inputs and retains at most 320 evenly sampled channel-zero waveform points plus
+cursor, interval and source metadata. This establishes native CPU observation behavior only. Licensed
+executable sample or raster parity, source extraction output parity, draw cost, device audio and continuous
+source-control changes remain unverified; M3 remains open. Audio Volume has a separate unresolved numeric
+discrepancy: the archived pre-1.18 docs
 show `10*log10(mean(sample²))`, while the pinned source takes the square root before `log10`. Native execution
 follows the pinned source; a licensed executable is needed to resolve the discrepancy.
 
@@ -319,9 +348,12 @@ image publisher, and checks the typed mesh result. The live `ImageGraphRuntime` 
 headless-scheduler diagnostic, so it never performs a synchronous GPU wait or readback in a frame and preserves its
 last good published generation.
 
-Remaining work is a render-frame scheduler that keeps Transform Image 3D outputs resident and supports animated
-controls without synchronous readback. The current imagegraph host-output model selects images only, so an authored
-mesh consumer still needs a typed graph result route. Controlled reference Pixel Composer captures are also still
+The renderer provides a bounded resident Transform Image 3D queue with owner/name/generation identity, queued
+replacement, cancellation and fenced publication. Its queue and GPU lifecycle fixtures are in
+`mono.engine/render/tests/ImageGraphTransform3DGpu.cpp`; this API does not complete live graph integration.
+Remaining work is wiring that queue into the client and Studio graph host with animated controls, stale-binding
+cancellation and no synchronous readback. The current imagegraph host-output model selects images only, so an
+authored mesh consumer still needs a typed graph result route. Controlled reference Pixel Composer captures remain
 required for executable parity, including exact rasterization, culling, filtering and depth behavior across backends.
 
 ### M6: I/O, scripting, PXC and export parity
@@ -340,6 +372,13 @@ pixel hash. A failed later frame removes the staging directory; an existing dest
 keeps the 4,096-frame and 512 MiB range bounds. Focused runner tests passed 105 assertions in 17 cases, and the
 bundle, frame-range and repeat CLI tests passed. This completes a native PNG sequence export slice. Pixel Composer's
 `Node_Export`, other formats, animation export behavior and executable comparison remain open.
+
+The verified source-backed PXC edit transaction writes existing node positions, reversible fixed catalogue values
+and source key replacements. It checks retained source identity, preserves unknown metadata where the inverse
+codec is proved, emits exact original bytes for no-op edits and validates modified projections by reimporting them.
+Lossy representations, stale edits and ambiguous key changes refuse atomically. Creation, deletion, groups, links,
+dynamic inputs, project settings, key insertion/reordering and regenerated previews remain open. Native replay
+fixtures do not establish compatibility with the licensed executable or complete the PXC writer parity gate.
 
 ### M7: parity release gate
 

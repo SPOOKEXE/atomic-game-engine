@@ -1,0 +1,160 @@
+{
+  "date": "2026-09-30",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "decision": "Keep named UnsupportedExecution for source fractional key-map coercion; public array specification does not define required coercion. No production mutations or compiler/runtime tests.",
+  "source_files": {
+    "keyframe": {
+      "path": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652/scripts/node_keyframe/node_keyframe.gml",
+      "sha256": "73a7fe4c85562db01192ae88c7ab35ebd16684f9d3831641e53a572b1480a49b",
+      "excerpts": [
+        {
+          "first_line": 151,
+          "last_line": 280,
+          "text": "\tstatic getValue = function(_time = NODE_CURRENT_FRAME) {\n\t\t//if(!prop.is_anim) return staticValue;\n\t\tlength = array_length(values);\n\t\t\n\t\t/////////////////////////////////////////////////// TRIGGER TYPE ///////////////////////////////////////////////////\n\t\t\n\t\tif(prop.type == VALUE_TYPE.trigger) {\n\t\t\tif(length == 0 || !prop.is_anim) return false;\n\t\t\t\n\t\t\tif(array_length(key_map) < NODE_TOTAL_FRAMES) \n\t\t\t\tupdateKeyMap();\n\t\t\t\n\t\t\treturn array_safe_get_fast(key_map, _time);\n\t\t}\n\t\t\n\t\t/////////////////////////////////////////////////// OPTIMIZATION ///////////////////////////////////////////////////\n\t\t\n\t\tif(length == 0) return !sep_axis && typeArray(prop)? [] : 0;\n\t\tif(length == 1) {\n\t\t\tvar _key = values[0];\n\t\t\t\n\t\t\tif(_key.driverObject && _time >= _key.time)\n\t\t\t\treturn _key.driverObject.apply(_time, _key);\n\t\t\t\t\n\t\t\treturn _key.value;\n\t\t}\n\t\t\n\t\tif(prop.type == VALUE_TYPE.path) return values[0].value;\n\t\tif(!prop.is_anim)\t\t\t\t return values[0].value;\n\t\tvar _len = max(NODE_TOTAL_FRAMES, values[length - 1].time);\n\t\tif(array_length(key_map) != _len) updateKeyMap();\n\t\t\n\t\tvar _time_first = prop.loop_range == -1? values[0].time : values[length - 1 - prop.loop_range].time;\n\t\tvar _time_last  = values[length - 1].time;\n\t\tvar _time_dura  = _time_last - _time_first;\n\t\t\t\n\t\t///////////////////////////////////////////////////// LOOP TIME //////////////////////////////////////////////////////\n\t\t\n\t\tif(_time > _time_last) {\n\t\t\tswitch(prop.on_end) {\n\t\t\t\tcase KEYFRAME_END.loop : \n\t\t\t\t\t_time = _time_first + safe_mod(_time - _time_last, _time_dura + 1);\n\t\t\t\t\tbreak;\n\t\t\t\t\t\n\t\t\t\tcase KEYFRAME_END.ping :\n\t\t\t\t\tvar time_in_loop = safe_mod(_time - _time_first, _time_dura * 2);\n\t\t\t\t\tif(time_in_loop < _time_dura) \n\t\t\t\t\t\t_time = _time_first + time_in_loop;\n\t\t\t\t\telse\n\t\t\t\t\t\t_time = _time_first + _time_dura * 2 - time_in_loop;\n\t\t\t\t\tbreak;\n\t\t\t}\n\t\t}\n\t\t\n\t\tvar _keyIndex;\n\t\t     if(_time >= _len) _keyIndex = infinity;\n\t\telse if(_time <= 0)\t   _keyIndex = -1;\n\t\telse                   _keyIndex = array_safe_get_fast(key_map, _time);\n\t\t\n\t\t/////////////////////////////////////////////////// BEFORE FIRST /////////////////////////////////////////////////////\n\t\t\n\t\tif(_keyIndex < 0) {\n\t\t\tif(is(prop, __NodeValue_Active)) return false;\n\t\t\t\n\t\t\tif(prop.on_end == KEYFRAME_END.wrap) {\n\t\t\t\tvar from = values[length - 1];\n\t\t\t\tvar to   = values[0];\n\t\t\t\t\n\t\t\t\tvar fTime = from.time;\n\t\t\t\tvar tTime = to.time;\n\t\t\t\t\n\t\t\t\tvar prog = NODE_TOTAL_FRAMES - fTime + _time;\n\t\t\t\tvar totl = NODE_TOTAL_FRAMES - fTime + tTime;\n\t\t\t\tvar rat  = prog / totl;\n\t\t\t\t\n\t\t\t\tif(to.ease_in_type    == CURVE_TYPE.cut) return from.value;\n\t\t\t\tif(from.ease_out_type == CURVE_TYPE.cut) return to.value;\n\t\t\t\t\n\t\t\t\tif(from.driverObject) \n\t\t\t\t\treturn from.driverObject.apply(_time, from, to, prop.lerpAnimKeys(from, to, rat), rat, self);\n\t\t\t\treturn prop.lerpAnimKeys(from, to, rat);\n\t\t\t}\n\t\t\t\n\t\t\treturn values[0].value; // First Frame\n\t\t}\n\t\t\n\t\t//////////////////////////////////////////////////// AFTER LAST //////////////////////////////////////////////////////\n\t\t\n\t\tif(_keyIndex >= length - 1) {\n\t\t\tvar _lstKey = values[length - 1];\n\t\t\t\n\t\t\tif(prop.on_end == KEYFRAME_END.wrap) {\n\t\t\t\tvar from = _lstKey;\n\t\t\t\tvar to   = values[0];\n\t\t\t\tvar prog = _time - from.time;\n\t\t\t\tvar totl = NODE_TOTAL_FRAMES - from.time + to.time;\n\t\t\t\tvar rat  = prog / totl;\n\t\t\t\t\n\t\t\t\tif(to.ease_in_type    == CURVE_TYPE.cut) return from.value;\n\t\t\t\tif(from.ease_out_type == CURVE_TYPE.cut) return to.value;\n\t\t\t\t\n\t\t\t\tif(from.driverObject)\n\t\t\t\t\treturn from.driverObject.apply(_time, from, to, prop.lerpAnimKeys(from, to, rat), rat, self);\n\t\t\t\treturn prop.lerpAnimKeys(from, to, rat);\n\t\t\t}\n\t\t\t\n\t\t\tif(_lstKey.driverObject)\n\t\t\t\treturn _lstKey.driverObject.apply(_time, _lstKey);\n\t\t\t\n\t\t\treturn _lstKey.value //Last frame\n\t\t}\n\t\t\n\t\t//////////////////////////////////////////////////// INBETWEEN ///////////////////////////////////////////////////////\n\t\t\n\t\tvar from = values[_keyIndex];\n\t\tvar to   = values[_keyIndex + 1];\n\t\tvar rat  = (_time - from.time) / (to.time - from.time);\n\t\t\n\t\tif(to.ease_in_type    == CURVE_TYPE.cut) return from.value;\n\t\tif(from.ease_out_type == CURVE_TYPE.cut) return to.value;\n\t\t\n\t\tif(from.driverObject)\n\t\t\treturn from.driverObject.apply(_time, from, to, prop.lerpAnimKeys(from, to, rat), rat, self);\n\t\t\t\n\t\treturn prop.lerpAnimKeys(from, to, rat);\n\t}\n\t\n\tstatic getInterpolateKeys = function(_time = NODE_CURRENT_FRAME, _arr = [ undefined, undefined, 0 ]) {\n\t\tlength = array_length(values);\n\t\t"
+        },
+        {
+          "first_line": 280,
+          "last_line": 393,
+          "text": "\t\t\n\t\t_arr[0] = undefined; \n\t\t_arr[1] = undefined; \n\t\t_arr[2] = 0; \n\t\t\n\t\t/////////////////////////////////////////////////// OPTIMIZATION ///////////////////////////////////////////////////\n\t\t\n\t\tif(length == 0) return _arr;\n\t\t\n\t\t_arr[0] = values[0]; \n\t\tif(length == 1) return _arr;\n\t\t\n\t\tif(prop.type == VALUE_TYPE.path) return _arr;\n\t\tif(!prop.is_anim)\t\t\t\t return _arr;\n\t\tvar _len = max(NODE_TOTAL_FRAMES, values[length - 1].time);\n\t\tif(array_length(key_map) != _len) updateKeyMap();\n\t\t\n\t\tvar _time_first = prop.loop_range == -1? values[0].time : values[length - 1 - prop.loop_range].time;\n\t\tvar _time_last  = values[length - 1].time;\n\t\tvar _time_dura  = _time_last - _time_first;\n\t\t\t\n\t\t///////////////////////////////////////////////////// LOOP TIME //////////////////////////////////////////////////////\n\t\t\n\t\tif(_time > _time_last) {\n\t\t\tswitch(prop.on_end) {\n\t\t\t\tcase KEYFRAME_END.loop : \n\t\t\t\t\t_time = _time_first + safe_mod(_time - _time_last, _time_dura + 1);\n\t\t\t\t\tbreak;\n\t\t\t\t\t\n\t\t\t\tcase KEYFRAME_END.ping :\n\t\t\t\t\tvar time_in_loop = safe_mod(_time - _time_first, _time_dura * 2);\n\t\t\t\t\tif(time_in_loop < _time_dura) \n\t\t\t\t\t\t_time = _time_first + time_in_loop;\n\t\t\t\t\telse\n\t\t\t\t\t\t_time = _time_first + _time_dura * 2 - time_in_loop;\n\t\t\t\t\tbreak;\n\t\t\t}\n\t\t}\n\t\t\n\t\tvar _keyIndex;\n\t\t     if(_time >= _len) _keyIndex = infinity;\n\t\telse if(_time <= 0)\t   _keyIndex = -1;\n\t\telse                   _keyIndex = array_safe_get_fast(key_map, _time);\n\t\t\n\t\t/////////////////////////////////////////////////// BEFORE FIRST /////////////////////////////////////////////////////\n\t\t\n\t\tif(_keyIndex < 0) {\n\t\t\tif(is(prop, __NodeValue_Active)) return _arr;\n\t\t\t\n\t\t\tif(prop.on_end == KEYFRAME_END.wrap) {\n\t\t\t\tvar from = values[length - 1];\n\t\t\t\tvar to   = values[0];\n\t\t\t\t\n\t\t\t\tvar fTime = from.time;\n\t\t\t\tvar tTime = to.time;\n\t\t\t\t\n\t\t\t\tvar prog = NODE_TOTAL_FRAMES - fTime + _time;\n\t\t\t\tvar totl = NODE_TOTAL_FRAMES - fTime + tTime;\n\t\t\t\t\n\t\t\t\t_arr[0] = from;\n\t\t\t\t_arr[1] = to;\n\t\t\t\t_arr[2] = prog / totl;\n\t\t\t\t\n\t\t\t\treturn _arr;\n\t\t\t}\n\t\t\t\n\t\t\treturn _arr; // First Frame\n\t\t}\n\t\t\n\t\t//////////////////////////////////////////////////// AFTER LAST //////////////////////////////////////////////////////\n\t\t\n\t\tif(_keyIndex >= length - 1) {\n\t\t\tvar _lstKey = values[length - 1];\n\t\t\t_arr[0] = _lstKey;\n\t\t\t_arr[2] = 0;\n\t\t\t\n\t\t\tif(prop.on_end == KEYFRAME_END.wrap) {\n\t\t\t\tvar from = _lstKey;\n\t\t\t\tvar to   = values[0];\n\t\t\t\tvar prog = _time - from.time;\n\t\t\t\tvar totl = NODE_TOTAL_FRAMES - from.time + to.time;\n\t\t\t\t\n\t\t\t\t_arr[0] = from;\n\t\t\t\t_arr[1] = to;\n\t\t\t\t_arr[2] = prog / totl;\n\t\t\t\t\n\t\t\t\treturn _arr;\n\t\t\t}\n\t\t\t\n\t\t\treturn _arr; //Last frame\n\t\t}\n\t\t\n\t\t//////////////////////////////////////////////////// INBETWEEN ///////////////////////////////////////////////////////\n\t\t\n\t\tvar from = values[_keyIndex];\n\t\tvar to   = values[_keyIndex + 1];\n\t\tvar rat  = (_time - from.time) / (to.time - from.time);\n\t\t\n\t\t_arr[0] = from;\n\t\t_arr[1] = to;\n\t\t_arr[2] = KeyframeInterpolate(from, to, rat);\n\t\t\n\t\treturn _arr;\n\t\t\n\t}\n\t\n\tstatic onUndo = function() /*=>*/ { updateKeyMap(); prop.triggerSetFrom(); };\n\t\n\t////- Setters\n\t\n\tstatic setIndex = function(i) /*=>*/ { index = i; return self; }\n\t\n\tstatic setKeyTime = function(_key, _time, _replace = true, record = false) {\n\t\tif(!array_exists(values, _key))\t    return 0;"
+        },
+        {
+          "first_line": 563,
+          "last_line": 608,
+          "text": "\tstatic updateKeyMap = function() {\n\t\tlength = array_length(values);\n\t\t\n\t\tif(!prop.is_anim && !LOADING && !APPENDING) return;\n\t\tif(array_empty(values)) { array_resize(key_map, NODE_TOTAL_FRAMES); return; }\n\t\t\n\t\tcheckFreeze();\n\t\t\n\t\tvar _len = max(NODE_TOTAL_FRAMES, array_last(values).time);\n\t\tkey_map_mode = prop.on_end;\n\t\tkey_map      = array_verify(key_map, _len);\n\t\t\n\t\tif(prop.type == VALUE_TYPE.trigger) {\n\t\t\tfor( var i = 0; i < _len; i++ ) \n\t\t\t\tkey_map[i] = 0;\n\t\t\t\t\n\t\t\tfor( var i = 0, n = length; i < n; i++ )\n\t\t\t\tkey_map[values[i].time] = true;\n\t\t\treturn;\n\t\t} \n\t\t\n\t\tif(length < 2) {\n\t\t\tfor( var i = 0; i < _len; i++ ) \n\t\t\t\tkey_map[i] = 0;\n\t\t\treturn;\n\t\t}\n\t\t\n\t\tvar _firstKey = values[0].time;\n\t\tfor( var i = 0; i < _firstKey; i++ ) \n\t\t\tkey_map[i] = -1;\n\t\t\n\t\tvar _keyIndex = _firstKey;\n\t\t\n\t\tfor( var i = 1, n = length; i < n; i++ ) {\n\t\t\tvar _k1 = values[i].time;\n\t\t\t\n\t\t\tfor( var j = max(0, _keyIndex); j < _k1; j++ ) \n\t\t\t\tkey_map[j] = i - 1;\n\t\t\t\n\t\t\t_keyIndex = _k1;\n\t\t}\n\t\t\n\t\tfor( var i = max(0, _keyIndex); i < _len; i++ ) \n\t\t\tkey_map[i] = infinity;\n\t\t\t\n\t\tnode.animation_range_update = true;"
+        }
+      ]
+    },
+    "arrays": {
+      "path": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652/scripts/array_functions/array_functions.gml",
+      "sha256": "02b928bd2c3e0c94192aec6e0ccd3fcac0734e0a5bb1ad588117fde674018581",
+      "excerpts": [
+        {
+          "first_line": 88,
+          "last_line": 94,
+          "text": "\tfunction  array_verify(arr, length) { INLINE\n\t\tif(!is_array(arr)) return array_create(length);\n\t\tif(array_length(arr) == length) return arr;\n\t\t\n\t\tarray_resize(arr, length);\n\t\treturn arr;\n\t}"
+        },
+        {
+          "first_line": 142,
+          "last_line": 145,
+          "text": "\tfunction array_safe_get_fast(arr, index=0, def=0) {\n\t\tif(is(arr, ArrayObject)) return arr.getElementByIndex(index);\n\t\treturn is_array(arr) && index >= 0 && index < array_length(arr)? arr[index] : def;\n\t}"
+        }
+      ]
+    }
+  },
+  "project": {
+    "PixelComposer.yyp": {
+      "sha256": "bcc6fbcbc0a5428f6315a0a250b8002450e7bb600ee6be6932862e5c9b46742d",
+      "relevant_lines": [
+        "\"IDEVersion\":\"2024.14.2.213\","
+      ]
+    },
+    "options/main/options_main.yy": {
+      "sha256": "e3aae7c047e4efb23f1f7678b8948efbfff03f9ebca3272241a05127ee042c07",
+      "relevant_lines": [
+        "\"option_copy_on_write_enabled\":false,",
+        "\"option_legacy_number_conversion\":true,"
+      ]
+    },
+    "options/windows/options_windows.yy": {
+      "sha256": "65eb9a96ad7d50dcc2d8545aed4cbb7f17e08c988ff58a20007688942b0ff6c7",
+      "relevant_lines": [
+        "\"option_windows_version\":\"1.21.10.203\","
+      ]
+    },
+    "conclusion": "IDEVersion 2024.14.2.213 is saved authoring metadata. These inspected project/main/windows records do not pin an executed runner/runtime version or VM versus YYC. Windows product version 1.21.10.203 is application metadata, not GameMaker runtime version."
+  },
+  "manual_evidence": [
+    {
+      "url": "https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Overview/Arrays.htm",
+      "observed": "Bracket access described with integer starting zero; negative indices disallowed. No fractional coercion rule.",
+      "retrieved": "2026-09-30"
+    },
+    {
+      "url": "https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Variable_Functions/array_resize.htm",
+      "observed": "Real argument described as integer size starting zero; new slots zero. No fractional size rule.",
+      "retrieved": "2026-09-30"
+    },
+    {
+      "url": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Variable_Functions/array_create.htm",
+      "observed": "Real size argument and default zero entries; no fractional size conversion rule.",
+      "retrieved": "2026-09-30"
+    },
+    {
+      "url": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Variable_Functions/array_get.htm",
+      "observed": "Real index argument; no fractional conversion rule.",
+      "retrieved": "2026-09-30"
+    },
+    {
+      "url": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Variable_Functions/array_set.htm",
+      "observed": "Real index argument; no fractional conversion rule.",
+      "retrieved": "2026-09-30"
+    },
+    {
+      "url": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Data_Structures/DS_Lists/DS_Lists.htm",
+      "observed": "DS List flooring rule is specific to that data structure; cannot establish bracket array conversion.",
+      "retrieved": "2026-09-30"
+    }
+  ],
+  "runtime_evidence": {
+    "urls": [
+      "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/develop/scripts/yyTypes.js",
+      "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/develop/scripts/yyVariable.js"
+    ],
+    "observed": "Current develop yyGetInt32 numeric path uses ~~_v; array_get and array_set invoke it. array_set_pre/post do not invoke it in their bodies. This is public HTML5 runtime evidence only, not pinned Windows direct-bracket lowering.",
+    "limitations": "Mutable develop URL, no inspected compiler output, no matching pinned runtime identity, no licensed executable run. Do not infer all bracket access follows array_get/set, or transfer 32-bit wrapping to Windows."
+  },
+  "cases": [
+    {
+      "case": "fractional construction",
+      "proof": "updateKeyMap seeds interval j from prior raw key time and tail i from last raw key time, then increments by one; raw writes use key_map[j]/key_map[i]. Later iterations win if coercion collides.",
+      "uncertainty": "write-index conversion and direct-assignment compiler lowering"
+    },
+    {
+      "case": "illustrative collision, not executable result",
+      "keys": [
+        2.25,
+        2.75,
+        4
+      ],
+      "hypothesis": "If every nonnegative direct bracket index floors, first segment writes slot2=0, next segment overwrites slot2=1 and slot3=1. Request2.5 would select keys2.75->4, giving negative ratio; direct neighboring-time lookup would select2.25->2.75. Exact2.25 can also select the later segment.",
+      "status": "Conditional deduction only; not a proposed implementation or parity claim."
+    },
+    {
+      "case": "fractional request with integer keys",
+      "proof": "array_safe_get_fast compares raw index >=0 and <array_length then performs arr[index] without explicit coercion.",
+      "uncertainty": "Real read conversion remains unproved even if all map writes are integer. Current continuous native route must not be described as verified GML fractional-map execution."
+    },
+    {
+      "case": "negative keys and nonpositive request",
+      "proof": "updateKeyMap starts interval/tail loops at max(0,raw key time); getValue time<=0 forces -1 before reading map, after loop/ping remapping. Nonwrap returns first; wrap uses last->first ratio.",
+      "uncertainty": "Positive sampling after negative fractional keys can still require fractional map construction; trigger path directly reads map and lacks nonpositive shortcut."
+    },
+    {
+      "case": "before first positive key",
+      "proof": "integer i=0..i<first writes -1, then subsequent fractional interval loops may overwrite same coerced boundary slot.",
+      "uncertainty": "Cannot universally replace this with raw time<first comparison."
+    },
+    {
+      "case": "end/length",
+      "proof": "_len=max(totalFrames,last.rawTime); array_verify may resize to fractional _len. getValue compares actual array_length against raw _len and time>=raw _len before lookup. Tail writes infinity from max(0,last.rawTime).",
+      "uncertainty": "Size conversion, length mismatch rebuilds, direct write growth, last bucket collision."
+    },
+    {
+      "case": "single key and path/nonanim",
+      "proof": "getValue returns through early paths before key-map read; single key driver applies at/after raw key time.",
+      "uncertainty": "No map conversion needed for these early branches."
+    },
+    {
+      "case": "large indices",
+      "proof": "No explicit 32-bit coercion exists in pinned GML helper. Native author time cap is 10000000; helper ordering can represent larger uint64 values but that is not source map execution.",
+      "uncertainty": "Beyond signed32 limits, public HTML5 ~~ helper wraps; no evidence that pinned Windows direct indexing shares this. Source allocation/work limits and >2^53 real precision are distinct constraints."
+    }
+  ],
+  "required_proof": [
+    "Primary documented fractional bracket read/write and array size semantics applicable to pinned runtime, or matching GameMaker compiler output plus runtime access implementation.",
+    "Pin executed runtime version and VM/YYC/backend; IDEVersion alone is insufficient.",
+    "Run a source GML fixture with keys2.25,2.75,4 and record full map, fractional/endpoint reads, beforefirst, negative keys, tail/len, repeated rebuild behavior.",
+    "Compare bracket read/write expression forms and array_get/set across relevant backend; inspect actual lowering.",
+    "Only after proof implement bounded sparse analytical equivalent preserving write order/collisions; do not allocate source map per author tick or infer ideal continuous interpolation."
+  ]
+}

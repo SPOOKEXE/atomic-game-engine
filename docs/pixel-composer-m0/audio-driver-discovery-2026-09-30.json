@@ -1,0 +1,93 @@
+{
+  "recorded_date": "2026-09-30",
+  "evidence_kind": "source-discovery-and-native-helper-checks",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "executable_reference_verified": false,
+  "source_files": [
+    {
+      "path": "scripts/node_keyframe_driver/node_keyframe_driver.gml",
+      "sha256": "9804e411fcf55724d07b6b2c035db1b73f07857c5ed85973a49c5e58eaffb2d2"
+    },
+    {
+      "path": "scripts/node_keyframe/node_keyframe.gml",
+      "sha256": "73a7fe4c85562db01192ae88c7ab35ebd16684f9d3831641e53a572b1480a49b"
+    },
+    {
+      "path": "scripts/random_function/random_function.gml",
+      "sha256": "a0ba588c5e89a7a87b5657eccd63345a733c831e3eb86e5a2c2332a457be4e0a"
+    },
+    {
+      "path": "scripts/curve_bezier_function/curve_bezier_function.gml",
+      "sha256": "8fcccafa408be91d95a1bc61be75ce21058b798a943ebb0ee3658760b35f2ae1"
+    },
+    {
+      "path": "scripts/value_snap/value_snap.gml",
+      "sha256": "67f28eb454550727855c7c39a8f00f16505e5b5b9f446aca5e0e4143e437c243"
+    },
+    {
+      "path": "scripts/panel_keyframe_driver/panel_keyframe_driver.gml",
+      "sha256": "a8b8ea9955b42376787c3b355f9673217824878ba0c589211222862d9c1c47c1"
+    }
+  ],
+  "verified_driver_types": [
+    "None",
+    "Linear",
+    "Wiggle",
+    "Sine",
+    "Snap",
+    "Bounce",
+    "Elastic",
+    "Curve"
+  ],
+  "audio_keyframe_driver": {
+    "found": false,
+    "scope": "All 1830 pinned GML scripts searched for audio/keydriver, audio/driver and loudness/driver combinations; named driver source and panel read.",
+    "policy": "No audio driver type or controls are invented. Captured audio can drive linked graph numeric inputs."
+  },
+  "wiggle": {
+    "controls": [
+      "seed",
+      "frequency",
+      "amplitude",
+      "octave",
+      "sep_axis",
+      "smooth"
+    ],
+    "source_noise": "perlin1D -> __noise -> random_set_seed(floor(x)), then two GameMaker random(1) calls and smoothstep interpolation.",
+    "unknown": "Pinned GML and official manuals do not identify enough of the target-specific built-in RNG to reproduce numeric samples.",
+    "proposed_native_alternative": null
+  },
+  "adder_keys": {
+    "declared_marker": "KEY_TYPE.adder = 1",
+    "serialization": "Type 1 writes time tuple [1, frame, 0]; deserialize retains the type.",
+    "unknown": "No separate adder evaluation branch or KEY_TYPE.adder reference was found in pinned scripts. Arithmetic summation is not inferred."
+  },
+  "official_docs_checked": [
+    {
+      "url": "https://docs.pixel-composer.com/animations/driver.html",
+      "observed": "Documents Linear, Wiggle and Sine. Wiggle has seed, frequency, amplitude and octave; axis synchronization is described. No audio driver or additive key semantics present."
+    },
+    {
+      "url": "https://docs.pixel-composer.com/animations/",
+      "observed": "Documents linear/smooth/hold interpolation and separate-axis animation, without additive key arithmetic."
+    },
+    {
+      "url": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Maths_And_Numbers/Number_Functions/random_set_seed.htm",
+      "observed": "Seeded sequences are repeatable per target but may differ between platforms. An optional alternative seed implementation is documented for a legacy state-range bug; the pinned source calls the one-argument legacy form."
+    }
+  ],
+  "native_helper_checks": {
+    "files": [
+      "mono.engine/imagegraph/src/TimelineDrivers.hpp",
+      "mono.engine/imagegraph/tests/TimelineDrivers.cpp"
+    ],
+    "checks": [
+      "Linear absolute time: base 2, time 12, speed 1 produces 14.",
+      "Snap ties: 0.5 -> 0, 1.5 -> 2, -1.5 -> -2.",
+      "Bounce/Elastic default ratio 0.6 yields 0.6/1.4 respectively.",
+      "Quadratic curve x(t)=t,y(t)=t^2 verifies all 33 source map samples and discrete interpolation."
+    ],
+    "status": "Private TimelineDrivers and ValuePayload suites passed together in an isolated headless executable: 279 assertions in 8 cases, using normal dev compiler flags and existing test runner/Catch2 libraries, without linking engine_imagegraph. Standalone driver math also ran with undefined and float-cast-overflow sanitizers. Integrated graph suites, persistence and Studio driver integration pending.",
+    "native_limit": "Bounce/Elastic helper rejects positive iteration counts above 1024; this is an explicit native work bound absent from source controls."
+  }
+}

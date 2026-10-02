@@ -1,0 +1,276 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/Ttanasart-pt/Pixel-Composer",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "recorded_utc": "2026-09-30T00:12:27.537109+00:00",
+  "archive": {
+    "path": "../../../atomic-game-engine-hidden-docs/files/pixel-composer-com/official-source-b69eca232217360cf1502ef0223523d818606652.tar.gz",
+    "requested_url": "https://github.com/Ttanasart-pt/Pixel-Composer/archive/b69eca232217360cf1502ef0223523d818606652.tar.gz",
+    "final_url": "https://codeload.github.com/Ttanasart-pt/Pixel-Composer/tar.gz/b69eca232217360cf1502ef0223523d818606652",
+    "http_status": 200,
+    "bytes": 380678849,
+    "sha256": "94de459ef48588f1c61b8f002c17b14f84525c139685e75dd1f10db632c21598",
+    "retrieved_utc": "2026-09-30T00:09:09.843523+00:00",
+    "last_modified": null,
+    "etag": "W/\"1f794ec46df40c6dd9fee5a96214d68d4a76eac27768beeba822dac465365f52\""
+  },
+  "official_commit_verification": {
+    "api_url": "https://api.github.com/repos/Ttanasart-pt/Pixel-Composer/commits/b69eca232217360cf1502ef0223523d818606652",
+    "returned_commit": "b69eca232217360cf1502ef0223523d818606652",
+    "committed_utc": "2026-09-23T03:47:08Z",
+    "tree_sha1": "bb1c1e2c8419723ac9bdcf3cda8b6752b32563f6",
+    "commit_url": "https://github.com/Ttanasart-pt/Pixel-Composer/commit/b69eca232217360cf1502ef0223523d818606652",
+    "api_status": 200,
+    "tree_api_url": "https://api.github.com/repos/Ttanasart-pt/Pixel-Composer/git/trees/bb1c1e2c8419723ac9bdcf3cda8b6752b32563f6?recursive=1",
+    "tree_response_truncated": false,
+    "preserved_responses": {
+      "commit": {
+        "path": "../../../atomic-game-engine-hidden-docs/files/pixel-composer-com/official-source-b69eca232217360cf1502ef0223523d818606652-commit.json",
+        "bytes": 231734,
+        "sha256": "ef4c791879f598d5abf6e6529883be0bf0c942df147d610e565e326bcfe65713"
+      },
+      "tree": {
+        "path": "../../../atomic-game-engine-hidden-docs/files/pixel-composer-com/official-source-b69eca232217360cf1502ef0223523d818606652-tree.json",
+        "bytes": 10642462,
+        "sha256": "c05396120c7f8bec04e0e2ad273b53855fd2ca4d65d5cf22349821130399b5be"
+      }
+    }
+  },
+  "verification": {
+    "archive_members": 40163,
+    "gml_files_verified": 1830,
+    "gml_bytes_verified": 10232380,
+    "gml_method": "Every scripts/**/*.gml archive member matched its official commit tree Git blob SHA-1: SHA1(ASCII 'blob ' + ASCII byte length + NUL + exact bytes). Expected and observed GML path sets matched.",
+    "gml_file_records": {
+      "path": "../../../atomic-game-engine-hidden-docs/files/pixel-composer-com/official-source-b69eca232217360cf1502ef0223523d818606652-gml.json",
+      "bytes": 457359,
+      "sha256": "b7899c77e445b7ae0b35577f4c89b0c769e81a58da985572d72d6f8bb756a57d"
+    },
+    "consumer_extracts": [
+      {
+        "local_extract": "/tmp/gradient-source-pin/out.gml",
+        "source_path": "scripts/node_gradient_out/node_gradient_out.gml",
+        "bytes": 1236,
+        "sha256": "69948d71afc6e66ebc46699907c6e80b4d68273ec7f5b000e276d31ef6372fb6",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/gradient-source-pin/palette.gml",
+        "source_path": "scripts/node_gradient_palette/node_gradient_palette.gml",
+        "bytes": 1993,
+        "sha256": "de541aa112d658942d7a0e9656a8161e7109a636a1c2a5724ef4c49a1e1c4432",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/gradient-source-pin/extract.gml",
+        "source_path": "scripts/node_gradient_extract/node_gradient_extract.gml",
+        "bytes": 1298,
+        "sha256": "96ce57d4f11b93a5ca84e508260672e5d8fd13f9826b438affb3db86dac2f3de",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/gradient-source-pin/sample.gml",
+        "source_path": "scripts/node_gradient_sample/node_gradient_sample.gml",
+        "bytes": 2080,
+        "sha256": "436fcaebfdc85b380d54570a578634feabad6b66e97df5409690cf19c6792d93",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/gradient-source-pin/replace_color.gml",
+        "source_path": "scripts/node_gradient_replace_color/node_gradient_replace_color.gml",
+        "bytes": 1775,
+        "sha256": "8c9bb666799c33aad308d1b292c1661d0edfd1ff665931a1a47f962f025bfae2",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/gradient-source-pin/shift.gml",
+        "source_path": "scripts/node_gradient_shift/node_gradient_shift.gml",
+        "bytes": 1678,
+        "sha256": "98bdebec1a22cee97af3a3ab75305ef25f480519fc66ab43f6f263f792bfffc1",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/gradient-source-pin/gradients_function.gml",
+        "source_path": "scripts/gradients_function/gradients_function.gml",
+        "bytes": 11663,
+        "sha256": "a8206594b6d99c31776d4332b5cf48658666f6de7b2c2823d6901e89cef661fa",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/gradient-source-pin/color_function.gml",
+        "source_path": "scripts/color_function/color_function.gml",
+        "bytes": 14911,
+        "sha256": "cbe9a62a8b56257756bd3fecf1c7eb9797eda9695d34b0b7b390d0bda0120177",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/pixel-fft.gml",
+        "source_path": "scripts/node_FFT/node_FFT.gml",
+        "bytes": 5661,
+        "sha256": "2f1003b1427e5a8f674a34337ecfc4e4720a9a8e2bb8a4ec0e88279a741b7089",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/pixel-audio-loudness.gml",
+        "source_path": "scripts/node_audio_loudness/node_audio_loudness.gml",
+        "bytes": 630,
+        "sha256": "68e55cde317616b451ca0091e9514863e105a6b1d638a7855f0c54d0f7247700",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/pixel-audio-window.gml",
+        "source_path": "scripts/node_audio_window/node_audio_window.gml",
+        "bytes": 3609,
+        "sha256": "6de89eb41e320b448cd89d6ad3eeebf8ecd6e429b9725168cc9afc6a2a14b3af",
+        "exact_match": true
+      },
+      {
+        "local_extract": "/tmp/pixel-node-processor.gml",
+        "source_path": "scripts/node_processor/node_processor.gml",
+        "bytes": 11806,
+        "sha256": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc",
+        "exact_match": true
+      }
+    ],
+    "consumer_extracts_exact_match": true,
+    "baseline_extraction": {
+      "baseline_extractor": {
+        "path": "../../../atomic-game-engine-hidden-docs/files/pixel-composer-com/official-source-b69eca232217360cf1502ef0223523d818606652-extractor-before-enum.py",
+        "bytes": 18603,
+        "sha256": "f1a12962e7cd842110328abb9a969e863e64ecdf800f22dc84385d649688880b"
+      },
+      "baseline_snapshot": {
+        "path": "../../../atomic-game-engine-hidden-docs/files/pixel-composer-com/official-source-b69eca232217360cf1502ef0223523d818606652-inputs-before-enum.json",
+        "bytes": 1798734,
+        "sha256": "b50da87652278ba5e723931b47513112cd23a018c32ed3c3dbb248c09b9f7978"
+      },
+      "output_byte_for_byte_match": true,
+      "output_sha256": "b50da87652278ba5e723931b47513112cd23a018c32ed3c3dbb248c09b9f7978",
+      "node_records": 878,
+      "node_matrix_rows": 990,
+      "supplied_pxc_files": 5,
+      "provenance_handling": "The official commit tarball has no .git metadata. For this read-only extraction check, only the extractor subprocess query git -C <extracted-root> rev-parse HEAD was replaced with the exact source_commit already verified through the official GitHub commit API. All GML parsing and matrix/PXC reads ran unchanged. No Git checkout was fabricated.",
+      "semantic_limit": "Byte-for-byte reproduction proves the previous extraction is reproducible. It does not prove its enum values or default resolution are correct. Explicit reordered enum values were omitted by the baseline extractor, including GRADIENT_INTER. The later corrected-extractor check below records that separate repair."
+    },
+    "corrected_enum_extraction": {
+      "output_path_during_verification": "/tmp/pxc-source-inputs-regenerated-after-enum.json",
+      "output_sha256": "20db9b24d398e95f5221a0c90f4a4686100f8e87874b4ffa4be17530d90d24c2",
+      "extractor_sha256": "9d2e87a2423b6c19f6ff8c354a3bdfaca94e231ab2b3a559a9a4593c0e8c59c8",
+      "enum_parser_sha256": "4d224377fa80e23bb018e0a46eb4479db6a9bbf66a78962c3dcc22e7175adaa3",
+      "completed_successfully": true,
+      "parse_failures": 0,
+      "node_records": 878,
+      "enum_value_maps": 123,
+      "gradient_inter": {
+        "cmyk": 6,
+        "hue": 2,
+        "hueInv": 5,
+        "none": 1,
+        "oklab": 3,
+        "smooth": 0,
+        "srgb": 4
+      },
+      "changed_baseline_label_lists": [
+        "BLEND_MODE",
+        "MATH_OPERATOR",
+        "VALUE_DISPLAY",
+        "VMATH_OPERATOR"
+      ],
+      "baseline_fields_unchanged": [
+        "nodes",
+        "macros",
+        "source_commit"
+      ],
+      "new_field": "enum_values",
+      "label_change_reason": "The old extractor skipped members with inline comments. The corrected parser preserves their declaration names and explicit integer values.",
+      "active_snapshot_overwritten": false,
+      "catalogue_overwritten": false,
+      "single_run_limit": "This is one successful extraction against the same verified source archive. It is not a second byte-for-byte reproducibility run or a full catalogue behavior acceptance test.",
+      "active_snapshot_sha256_after_enum_repair": "2a01697c52a6c7754e1bc9a2c9322ffe99671414782ff5c18f6c43c186e8a08b",
+      "active_snapshot_semantically_matches": true,
+      "active_snapshot_bytes_match_extraction": false
+    },
+    "active_current_extraction": {
+      "recorded_date": "2026-09-30",
+      "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+      "source_snapshot": {
+        "path": "source-inputs.json",
+        "bytes": 2560039,
+        "sha256": "67d1a412b566b23ca41c85b689b0e45adfb573df8ba129c1def35c01cb656080",
+        "node_records": 884
+      },
+      "catalogue": {
+        "path": "../../mono.engine/imagegraph/src/SourceCatalogue.inc",
+        "bytes": 935211,
+        "sha256": "aaa60fabfa577b5bd08607a5c4828bc0effe6c16ff36e4435845d552ba4a43ee"
+      },
+      "matrix": {
+        "path": "node-parity-matrix.csv",
+        "rows": 993,
+        "sha256": "a1a8babb5e349a604dc641e9870c5235f038a09a7cb9f08de0b87805f3544f04"
+      },
+      "reconciliation": "source-selection-reconciliation-2026-09-30.json",
+      "evidence_input": "current-node-evidence-2026-09-30.json",
+      "metadata_changes": "Per-input array_depth and inherited array_process metadata; six reviewed source declarations added, Path Redistribute provenance attached. Per-input source_behavior and constructor evidence record source enum behavior: EButton clamps real values to [0, choicesAmount - 1]; EScroll defaults to that clamp, but a verified static .setUnclamp() chain disables it. Conditional or later runtime unclamp mutations remain unknown. Enum interpolation may remain fractional; strict suggestion and actual connectability are recorded separately. Exact source choice maps preserve array positions and verified -1 separator slots. source_choices is the sole source-index authority; legacy choices remains a display-label field and must not be used to derive source IDs. Unknown dynamic choice arrays remain unresolved. The current extraction corrects 35 missing exact choice counts and marks four dynamically changed Node_Export counts unknown. Node_Math Type choices are verified from the literal 22-label global.node_math_names array and the pinned global.node_math_scroll array_create_ext mapping that copies each label at the same index; source indices are 0 through 21, while MATH_OPERATOR.length at 22 is an enum sentinel and is not a menu choice. Other computed or unresolved choice arrays remain unknown. Catalogue generation and native behavior acceptance are separate from this metadata snapshot update. Global array choice counts use exact raw source arrays with comments stripped, correcting BLEND_TYPES from 32 to 31 and GROUP_IO_TYPE_NAME from 33 to 32. Node_Vector_Math Type choices resolve from the eight literal global.node_vmath_names entries and verified global.node_vmath_scroll array_create_ext index-preserving builder.",
+      "source_pin_unchanged": true,
+      "current_product_equivalence_verified": false,
+      "licensed_executable_comparison_performed": false
+    },
+    "source_behavior_extraction_before_global_array_count_correction": {
+      "source_snapshot": {
+        "path": "source-inputs.json",
+        "bytes": 2304500,
+        "sha256": "a1504aa12de0942171c6e53fa805c012e47e1a701bc62994cf8105792271f297",
+        "node_records": 884
+      },
+      "scope": "Per-input source_behavior metadata before exact raw global array counting corrected two choice counts; not the active snapshot.",
+      "catalogue_updated": false
+    },
+    "source_choice_extraction_before_source_indices": {
+      "source_snapshot": {
+        "path": "source-inputs.json",
+        "bytes": 2304500,
+        "sha256": "bcb6ac8fd4ec89f5964720b1401e7efc36e32417c4fb4b884c45546035db09ea",
+        "node_records": 884
+      },
+      "scope": "Per-input array depth and process metadata plus prior source behavior metadata, before exact source choice indices and current clamp-count corrections.",
+      "catalogue_updated": false
+    },
+    "source_choice_extraction_before_node_math_generated_array": {
+      "source_snapshot": {
+        "path": "source-inputs.json",
+        "bytes": 2556850,
+        "sha256": "a4b6132bb602e5c08c6c1c9f34c59fc302fe06c191c9920924ad26eac19bc8aa",
+        "node_records": 884
+      },
+      "scope": "Source choice metadata before the allowlisted Node_Math generated scroll array was resolved.",
+      "catalogue_updated": false
+    }
+  },
+  "extraction_instructions": {
+    "archive_root": "Pixel-Composer-b69eca232217360cf1502ef0223523d818606652",
+    "command": "mkdir -p /tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652\ntar -xzf ../atomic-game-engine-hidden-docs/files/pixel-composer-com/official-source-b69eca232217360cf1502ef0223523d818606652.tar.gz -C /tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652 --strip-components=1",
+    "relative_path_origin": "Archive and metadata paths in this manifest are relative to docs/pixel-composer-m0/. The shell command assumes the engine repository root as its working directory.",
+    "source_examples": [
+      "scripts/node_audio_window/node_audio_window.gml",
+      "scripts/node_audio_loudness/node_audio_loudness.gml",
+      "scripts/node_FFT/node_FFT.gml",
+      "scripts/node_processor/node_processor.gml",
+      "scripts/node_gradient_sample/node_gradient_sample.gml",
+      "scripts/gradients_function/gradients_function.gml",
+      "scripts/color_function/color_function.gml",
+      "scripts/__matrix3/__matrix3.gml",
+      "scripts/node_value_palette/node_value_palette.gml"
+    ]
+  },
+  "scope": {
+    "documentation_snapshot": "source-manifest-2026-09-30.json",
+    "current_product_comparison_candidate": "1.22.0.0 stable, released 2026-09-28",
+    "source_pin_date": "2026-09-23",
+    "source_pin_note": "The pinned September 23 source commit is separate from the September 28 product comparison candidate. No exact source/binary equivalence is claimed.",
+    "licensed_executable_available": false,
+    "exact_executable_parity_verified": false,
+    "old_missing_documentation_archive_recovered": false,
+    "source_pin_current_product_equivalence_verified": false
+  }
+}

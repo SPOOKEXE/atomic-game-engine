@@ -1,0 +1,310 @@
+{
+  "recorded_date": "2026-09-30",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "evidence_input": "docs/pixel-composer-m0/current-node-evidence-2026-09-30.json",
+  "candidate_artifacts": {
+    "matrix": {
+      "path": "/tmp/pxc-node-parity-matrix-selection.csv",
+      "bytes": 1508963,
+      "sha256": "de7ed135fbf6b77552c13f41fc299b5a43bb45eea0da8ad9ea7c95e4069ef4b4"
+    },
+    "source_inputs": {
+      "path": "/tmp/pxc-source-inputs-selection.json",
+      "bytes": 1820708,
+      "sha256": "cc7ec5d4dd68be5eb38aa96707fd645b5d168ec4194638f84885dffd103d0d0d"
+    },
+    "catalogue": {
+      "path": "/tmp/pxc-SourceCatalogue-selection.inc",
+      "bytes": 724311,
+      "sha256": "a2314285b452cce9d8cd05d3cb699baf93b6d6e5984f24d23b699d46674cb1af"
+    },
+    "owned_extractor_patch": {
+      "path": "/tmp/pxc-source-selection-owned-extractor.patch",
+      "bytes": 1991,
+      "sha256": "be5ab812d2656955b4cec77d0dd90dd7a23a03fcc76907034ff6a06217775db3"
+    }
+  },
+  "preedit_bases": {
+    "extract-source.py": {
+      "path": "/tmp/pxc-selection-before/extract-source.py",
+      "sha256": "9d2e87a2423b6c19f6ff8c354a3bdfaca94e231ab2b3a559a9a4593c0e8c59c8"
+    },
+    "node-parity-matrix.csv": {
+      "path": "/tmp/pxc-selection-before/node-parity-matrix.csv",
+      "sha256": "9a161ec9c77b53db7dda86815b4d13f4500036a492507e341a64d953e8ead51b"
+    },
+    "source-inputs.json": {
+      "path": "/tmp/pxc-selection-before/source-inputs.json",
+      "sha256": "2a01697c52a6c7754e1bc9a2c9322ffe99671414782ff5c18f6c43c186e8a08b"
+    },
+    "SourceCatalogue.inc": {
+      "path": "/tmp/pxc-selection-before/SourceCatalogue.inc",
+      "sha256": "3b2213c84e9b2ac18deaf151a3bdc02a7fedf2d54c7fabfdd30c48055a97ff1c"
+    }
+  },
+  "matrix": {
+    "original_rows_retained": 990,
+    "candidate_rows": 993,
+    "new_rows": [
+      "Array Cumulative",
+      "Path Redistribute",
+      "Channel Swizzle"
+    ],
+    "mapped_missing_page_rows": [
+      "Armature Create",
+      "Armature Bone",
+      "Armature IK",
+      "Armature Mirror",
+      "Armature Subdivide"
+    ],
+    "original_row_statuses_preserved": true,
+    "source_origin_columns_added": [
+      "source_origin",
+      "source_evidence"
+    ],
+    "status_counts": {
+      "documented and blocked by named prerequisite": 979,
+      "documented and implemented": 2,
+      "unknown": 12
+    },
+    "unknown_channel_swizzle": true
+  },
+  "source_snapshot": {
+    "old_records": 878,
+    "new_records": 884,
+    "new_node_ids": [
+      "Node_Armature",
+      "Node_Armature_Bone",
+      "Node_Armature_IK",
+      "Node_Armature_Mirror",
+      "Node_Armature_Subdivide",
+      "Node_Array_Cumulative"
+    ],
+    "existing_node_changes": [
+      "Node_Path_Redistribute"
+    ],
+    "existing_node_change_reason": "Only reviewed source provenance and missing-publication metadata attached to Path Redistribute. Its parsed inputs and outputs are unchanged.",
+    "other_top_level_fields_unchanged": true
+  },
+  "catalogue": {
+    "node_entries": 884,
+    "inputs": 10995,
+    "resolved_authored_defaults": 9339,
+    "authored_inputs": 9619,
+    "semantic_unknowns": [
+      "Armature Create declares no ordinary ports for its bone editor state; graph bone data and Studio tools require separate acceptance.",
+      "Armature and Bone socket defaults are runtime data, not authored literals.",
+      "Channel Swizzle remains without schema, internal id, or native catalogue entry.",
+      "No new node is claimed executed or accepted by these extraction checks."
+    ]
+  },
+  "checks": {
+    "source_selection_unittest_cases_passed": 4,
+    "source_file_byte_hash_guard_passed_for_reviewed_entries": true,
+    "matrix_policy_second_refresh_identical": true,
+    "ninja_or_native_tests_run": false,
+    "generated_active_files_overwritten": true,
+    "focused_python_test_cases_passed_after_merged_freeze": 20
+  },
+  "scope": "Only seven reviewed source declarations are selected through explicit evidence. The other recognized source-only functions are not blanket added as product nodes.",
+  "merged_depth_and_selection": {
+    "depth_only": {
+      "records": 878,
+      "changed_records": 870,
+      "input_depth_counts": {
+        "0": 7266,
+        "1": 2227,
+        "2": 29,
+        "None": 73,
+        "3": 1
+      },
+      "array_processor_nodes": 506,
+      "only_array_depth_and_array_process_changed": true,
+      "snapshot": {
+        "path": "/tmp/pxc-source-inputs-depth-only.json",
+        "bytes": 2104783,
+        "sha256": "2aef62fa435fe42c39a3a701468b81d4faef17abc37c66db08b362c7c366b6c4"
+      },
+      "catalogue": {
+        "path": "/tmp/pxc-SourceCatalogue-depth-only.inc",
+        "bytes": 811544,
+        "sha256": "0917ae4670030ad5b032e809aacf6757a98c989a2079a777d5dde838c9468a58"
+      },
+      "catalogue_inputs": 11474,
+      "resolved_authored_defaults": 9828,
+      "authored_inputs": 10108
+    },
+    "merged": {
+      "records": 884,
+      "added_node_ids": [
+        "Node_Armature",
+        "Node_Armature_Bone",
+        "Node_Armature_IK",
+        "Node_Armature_Mirror",
+        "Node_Armature_Subdivide",
+        "Node_Array_Cumulative"
+      ],
+      "existing_record_changes": [
+        "Node_Path_Redistribute"
+      ],
+      "existing_change_only_provenance": true,
+      "snapshot": {
+        "path": "/tmp/pxc-source-inputs-merged.json",
+        "bytes": 2113763,
+        "sha256": "149aa8c15a3c0227c5de4190b810e9b2f9f6aa3eeb1d0b19b60a5f9c6fc2393e"
+      },
+      "catalogue": {
+        "path": "/tmp/pxc-SourceCatalogue-merged.inc",
+        "bytes": 813531,
+        "sha256": "7ff9e33ae4b02522fbc70967abb7fe0bd292c142cb87127a828b01424900ecd1"
+      },
+      "matrix": {
+        "path": "/tmp/pxc-node-parity-matrix-selection.csv",
+        "bytes": 1526621,
+        "sha256": "23af20aa43d5a2bf904e896e67c0c45fbd99018a60d543206b0ddea0ca44314d"
+      },
+      "catalogue_inputs": 11501,
+      "resolved_authored_defaults": 9845,
+      "authored_inputs": 10125
+    },
+    "frozen_inputs": {
+      "scripts/pixel-composer/extract-source.py": {
+        "path": "/home/declan/Documents/GitHub/atomic-game-engine/scripts/pixel-composer/extract-source.py",
+        "bytes": 21578,
+        "sha256": "127229a9145628255cdb5afd95bb6fc9ee637fe07f72df873751927f3352c7ca"
+      },
+      "scripts/pixel-composer/array_depth.py": {
+        "path": "/home/declan/Documents/GitHub/atomic-game-engine/scripts/pixel-composer/array_depth.py",
+        "bytes": 9137,
+        "sha256": "1d8a533e986c8a8346c97bf4b5fd0312bd49f38fc0cd3e57be9710282a1fd593"
+      },
+      "scripts/pixel-composer/generate-catalogue.py": {
+        "path": "/home/declan/Documents/GitHub/atomic-game-engine/scripts/pixel-composer/generate-catalogue.py",
+        "bytes": 22516,
+        "sha256": "2cf98959b30b5951a63aa439f6d10fac47fd3f55b49ad7f0ac66c59a93cc977a"
+      },
+      "scripts/pixel-composer/source_selection.py": {
+        "path": "/home/declan/Documents/GitHub/atomic-game-engine/scripts/pixel-composer/source_selection.py",
+        "bytes": 2137,
+        "sha256": "650b1087c8bfa326e2a1e12d8afe6bfe65fb0bcfc840cb0ca199efb7f91c71df"
+      }
+    },
+    "original_990_source_urls_hashes_statuses_preserved": true,
+    "matrix_refresh_reproducible": true,
+    "active_artifacts_applied": true,
+    "generated_delta_patch": {
+      "path": "/tmp/pxc-merged-generation-owned-base.patch",
+      "bytes": 5364569,
+      "sha256": "c4ca37e04bbd19434f7e3298ced78564db5b4a0c94ea83f89ba7fb4a6a6e1356",
+      "scope": "Coordinated array metadata and reviewed source selection against preserved pre-edit bases; selection-only extractor patch is recorded separately."
+    },
+    "checks": {
+      "focused_python_test_cases_passed": 20,
+      "ninja_or_native_tests_run": false,
+      "committed_or_staged": false,
+      "applied_snapshot_matrix_regenerate_identical_catalogue": true
+    }
+  },
+  "candidate_artifacts_stage": "Historical selection-only candidate before array metadata merge; final applied artifacts are in merged_depth_and_selection.",
+  "final_discovery_refresh": {
+    "changes": [
+      {
+        "node_id": "Node_Solid",
+        "title": "Solid",
+        "changes": {
+          "native_evidence_candidate": {
+            "before": "executor registry: pc.solid; test reference: mono.engine/imagegraph/tests/NodeGenerate.cpp; test reference: mono.engine/imagegraph/tests/NodeProcessor.cpp",
+            "after": "executor registry: pc.solid; test reference: mono.engine/imagegraph/tests/NodeGenerate.cpp; test reference: mono.engine/imagegraph/tests/NodeProcessor.cpp; test reference: mono.engine/imagegraph/tests/VectorNodes.cpp"
+          }
+        }
+      },
+      {
+        "node_id": "Node_Number",
+        "title": "Number",
+        "changes": {
+          "native_evidence_candidate": {
+            "before": "executor registry: pc.number; test reference: mono.engine/imagegraph/tests/CurveNodes.cpp; test reference: mono.engine/imagegraph/tests/NodeAudio.cpp; test reference: mono.engine/imagegraph/tests/NodeGenerate.cpp; test reference: mono.engine/imagegraph/tests/NodeValues.cpp; test reference: mono.engine/imagegraph/tests/TimelineV8.cpp; test reference: mono.engine/imagegraph/tests/WavPreview.cpp",
+            "after": "executor registry: pc.number; test reference: mono.engine/imagegraph/tests/CurveNodes.cpp; test reference: mono.engine/imagegraph/tests/NodeAudio.cpp; test reference: mono.engine/imagegraph/tests/NodeGenerate.cpp; test reference: mono.engine/imagegraph/tests/NodeValues.cpp; test reference: mono.engine/imagegraph/tests/TimelineV8.cpp; test reference: mono.engine/imagegraph/tests/VectorNodes.cpp; test reference: mono.engine/imagegraph/tests/WavPreview.cpp"
+          }
+        }
+      },
+      {
+        "node_id": "Node_Number",
+        "title": "Number",
+        "changes": {
+          "native_evidence_candidate": {
+            "before": "executor registry: pc.number; test reference: mono.engine/imagegraph/tests/CurveNodes.cpp; test reference: mono.engine/imagegraph/tests/NodeAudio.cpp; test reference: mono.engine/imagegraph/tests/NodeGenerate.cpp; test reference: mono.engine/imagegraph/tests/NodeValues.cpp; test reference: mono.engine/imagegraph/tests/TimelineV8.cpp; test reference: mono.engine/imagegraph/tests/WavPreview.cpp",
+            "after": "executor registry: pc.number; test reference: mono.engine/imagegraph/tests/CurveNodes.cpp; test reference: mono.engine/imagegraph/tests/NodeAudio.cpp; test reference: mono.engine/imagegraph/tests/NodeGenerate.cpp; test reference: mono.engine/imagegraph/tests/NodeValues.cpp; test reference: mono.engine/imagegraph/tests/TimelineV8.cpp; test reference: mono.engine/imagegraph/tests/VectorNodes.cpp; test reference: mono.engine/imagegraph/tests/WavPreview.cpp"
+          }
+        }
+      },
+      {
+        "node_id": "Node_Vector2",
+        "title": "Vector2",
+        "changes": {
+          "prerequisite": {
+            "before": "native executor and named test validation evidence pending",
+            "after": "native executor and test references found; full controls/edge-case fixture review pending"
+          },
+          "native_evidence_candidate": {
+            "before": "",
+            "after": "executor registry: pc.vector2; test reference: mono.engine/imagegraph/tests/VectorNodes.cpp"
+          }
+        }
+      },
+      {
+        "node_id": "Node_Vector3",
+        "title": "Vector3",
+        "changes": {
+          "native_evidence_candidate": {
+            "before": "executor registry: pc.vector3; test reference: mono.engine/imagegraph/tests/NodeValues.cpp",
+            "after": "executor registry: pc.vector3; test reference: mono.engine/imagegraph/tests/NodeValues.cpp; test reference: mono.engine/imagegraph/tests/VectorNodes.cpp"
+          }
+        }
+      },
+      {
+        "node_id": "Node_Vector4",
+        "title": "Vector4",
+        "changes": {
+          "prerequisite": {
+            "before": "native executor and named test validation evidence pending",
+            "after": "native executor and test references found; full controls/edge-case fixture review pending"
+          },
+          "fixture": {
+            "before": "no matched native executor and named test references",
+            "after": "native executor and test references found; full controls/edge-case fixture review pending"
+          },
+          "native_evidence_candidate": {
+            "before": "",
+            "after": "executor registry: pc.vector4; test reference: mono.engine/imagegraph/tests/VectorNodes.cpp"
+          }
+        }
+      },
+      {
+        "node_id": "Node_Vector_Math",
+        "title": "Vector Math",
+        "changes": {
+          "prerequisite": {
+            "before": "native executor and named test validation evidence pending",
+            "after": "native executor and test references found; full controls/edge-case fixture review pending"
+          },
+          "fixture": {
+            "before": "no matched native executor and named test references",
+            "after": "native executor and test references found; full controls/edge-case fixture review pending"
+          },
+          "native_evidence_candidate": {
+            "before": "",
+            "after": "executor registry: pc.vector_math; test reference: mono.engine/imagegraph/tests/Catalogue.cpp; test reference: mono.engine/imagegraph/tests/VectorNodes.cpp"
+          }
+        }
+      }
+    ],
+    "previous_matrix_sha256": "2f518fc050fb6a6b94c6e082d233d8d234ccce70d50882fe18652d77f1e77f20",
+    "matrix_sha256": "a1a8babb5e349a604dc641e9870c5235f038a09a7cb9f08de0b87805f3544f04",
+    "matrix_bytes": 1531443,
+    "rows": 993,
+    "original_and_new_statuses_preserved": true,
+    "source_fields_preserved": true,
+    "idempotent": true
+  }
+}
