@@ -45,6 +45,9 @@ mono_add_library(studio
 		# deterministic CPU evaluator used by the Image Composer adapter.
 		Engine::imagegraph
 
+		# L10, shared. Synchronous source rigid replay for Composer evaluation.
+		Engine::imagegraphphysics
+
 		# L12, client. The Image Composer owns an independent preview audio device.
 		Engine::audio
 

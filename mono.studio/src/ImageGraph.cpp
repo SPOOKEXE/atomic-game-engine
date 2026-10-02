@@ -508,12 +508,19 @@ namespace studio {
 	}
 
 	const engine::imagegraph::Image *ImageGraphPreviewCache::Find(
-		uint64_t revision, size_t outputIndex, uint64_t tick, double subframe, bool negativeFrame
+		uint64_t revision,
+		size_t outputIndex,
+		uint64_t tick,
+		double subframe,
+		bool negativeFrame,
+		uint8_t rigidObservation
 	) {
-		if (!engine::imagegraph::ValidFrameTime({tick, subframe, negativeFrame})) return nullptr;
+		if (rigidObservation > 3 || !engine::imagegraph::ValidFrameTime({tick, subframe, negativeFrame}))
+			return nullptr;
 		const auto found = std::find_if(Entries.begin(), Entries.end(), [&](const Entry &entry) {
 			return entry.Revision == revision && entry.OutputIndex == outputIndex && entry.Tick == tick &&
-				   entry.Subframe == subframe && entry.NegativeFrame == negativeFrame;
+				   entry.Subframe == subframe && entry.NegativeFrame == negativeFrame &&
+				   entry.RigidObservation == rigidObservation;
 		});
 		if (found == Entries.end()) return nullptr;
 		found->LastUsed = ++UseSerial;
@@ -526,9 +533,10 @@ namespace studio {
 		uint64_t tick,
 		const engine::imagegraph::Image &image,
 		double subframe,
-		bool negativeFrame
+		bool negativeFrame,
+		uint8_t rigidObservation
 	) {
-		if (!engine::imagegraph::ValidFrameTime({tick, subframe, negativeFrame}) ||
+		if (rigidObservation > 3 || !engine::imagegraph::ValidFrameTime({tick, subframe, negativeFrame}) ||
 			!engine::imagegraph::ValidSurfaceLayout(
 				image, IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION, IMAGE_COMPOSER_PREVIEW_SURFACE_MAXIMUM_BYTES
 			) ||
@@ -537,7 +545,8 @@ namespace studio {
 
 		auto found = std::find_if(Entries.begin(), Entries.end(), [&](const Entry &entry) {
 			return entry.Revision == revision && entry.OutputIndex == outputIndex && entry.Tick == tick &&
-				   entry.Subframe == subframe && entry.NegativeFrame == negativeFrame;
+				   entry.Subframe == subframe && entry.NegativeFrame == negativeFrame &&
+				   entry.RigidObservation == rigidObservation;
 		});
 		size_t heldBytes = HeldBytes();
 		size_t oldCapacity = found == Entries.end() ? 0 : found->Image.Pixels.capacity();
@@ -572,7 +581,8 @@ namespace studio {
 					found = std::find_if(Entries.begin(), Entries.end(), [&](const Entry &entry) {
 						return entry.Revision == revision && entry.OutputIndex == outputIndex &&
 							   entry.Tick == tick && entry.Subframe == subframe &&
-							   entry.NegativeFrame == negativeFrame;
+							   entry.NegativeFrame == negativeFrame &&
+							   entry.RigidObservation == rigidObservation;
 					});
 				}
 			} else {
@@ -596,6 +606,7 @@ namespace studio {
 			found->Tick = tick;
 			found->Subframe = subframe;
 			found->NegativeFrame = negativeFrame;
+			found->RigidObservation = rigidObservation;
 			found->LastUsed = ++UseSerial;
 			found->Image = std::move(candidate);
 			// The preflight projection includes the candidate's actual capacity.
@@ -627,6 +638,9 @@ namespace studio {
 		playback.CurrentTick = frame.Tick;
 		playback.Subframe = frame.Subframe;
 		playback.NegativeFrame = frame.NegativeFrame;
+		playback.RealFrame = double(engine::imagegraph::FrameTimeToReal(frame));
+		playback.FrameProgress = true;
+		playback.LastTime = 0;
 		playback.Accumulator = 0;
 		return true;
 	}
@@ -642,6 +656,9 @@ namespace studio {
 
 	void ApplyImageGraphTimeline(const Document &document, ImageGraphPlayback &playback) {
 		playback.Playing = false;
+		playback.Rendering = false;
+		playback.FrameProgress = false;
+		playback.LastTime = playback.RealTime = 0;
 		playback.Accumulator = 0.0;
 		playback.Direction = 1;
 		playback.Subframe = 0.0;
@@ -668,6 +685,7 @@ namespace studio {
 		playback.StartTick = std::min(playback.StartTick, playback.TotalFrames - 1);
 		playback.EndTick = std::clamp(playback.EndTick, playback.StartTick, playback.TotalFrames - 1);
 		playback.CurrentTick = std::clamp(playback.CurrentTick, playback.StartTick, playback.EndTick);
+		playback.RealFrame = double(playback.CurrentTick);
 	}
 
 	bool SetImageGraphPlaybackFrame(ImageGraphPlayback &playback, double frame) {

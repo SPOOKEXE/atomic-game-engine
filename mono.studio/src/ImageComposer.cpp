@@ -1,5 +1,6 @@
 #include "AudioWindowPanel.hpp"
 #include "ImageComposerInternal.hpp"
+#include "ImageGraphAnimationControl.hpp"
 #include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphChoices.hpp"
 #include "ImageGraphDocumentEdit.hpp"
@@ -10,6 +11,7 @@
 #include "ImageGraphObservations.hpp"
 #include "ImageGraphPorts.hpp"
 #include "ImageGraphPreview.hpp"
+#include "ImageGraphRigid.hpp"
 #include "ImageGraphSourceEdit.hpp"
 #include "KeyframeKindEditor.hpp"
 #include "TimelineDopesheet.hpp"
@@ -88,7 +90,7 @@ namespace studio {
 
 		struct FileReadControls {
 			std::string NodeId;
-			std::array<char, 4096> File{}, Resource{}, Directory{};
+			std::array<char, 4096> File{}, Resource{}, Directory{}, Template{};
 			std::string Message;
 		};
 
@@ -214,14 +216,16 @@ namespace studio {
 			std::erase_if(state.FileGrants, [&](const auto &grant) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
-						return node.Id == grant.NodeId && detail::ImageGraphFileReadType(node.Type);
+						return node.Id == grant.NodeId && (detail::ImageGraphFileReadType(node.Type) ||
+														   detail::ImageGraphFileWriteType(node.Type));
 					}
 				);
 			});
 			std::erase_if(state.FileControls, [&](const auto &control) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
-						return node.Id == control.NodeId && detail::ImageGraphFileReadType(node.Type);
+						return node.Id == control.NodeId && (detail::ImageGraphFileReadType(node.Type) ||
+															 detail::ImageGraphFileWriteType(node.Type));
 					}
 				);
 			});
@@ -322,11 +326,13 @@ namespace studio {
 			engine::imagegraph::Diagnostic error;
 			if (engine::imagegraph::Compile(document, plan, error) != engine::imagegraph::Status::Ok)
 				return true;
+			engine::imagegraphphysics::RigidProvider requestRigidProvider;
 			engine::imagegraph::EvaluationRequest request;
 			request.HostProvider = &HostFor(state);
 			request.GroupReplay = replay;
 			request.GroupAuthoringRevision = replay ? replay->AuthoringRevision() : 0;
 			BindObservations(state, request);
+			detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 			request.AudioFrames = state.AudioFrames;
 			request.AudioClips = state.AudioClips;
 			(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
@@ -544,9 +550,11 @@ namespace studio {
 			}
 			for (const auto &id : nodes) {
 				auto &grant = GrantFor(state, id);
+				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
@@ -568,7 +576,7 @@ namespace studio {
 				}
 				engine::imagegraph::EvaluationSnapshot captured;
 				const auto *snapshot = &state.FeedbackHost.Snapshot();
-				if (snapshot->Values().empty()) {
+				if (!state.FeedbackHost.Active()) {
 					if (engine::imagegraph::EvaluateNodeInputs(
 							state.Authored, plan, id, request, captured, error
 						) != Status::Ok) {
@@ -599,7 +607,7 @@ namespace studio {
 				std::string failure;
 				std::vector<std::filesystem::path> retained;
 				if (engine::imagegraphexport::ExportAuthoredGraphNode(
-						state.Authored, plan, request, settings, id, failure, &retained
+						state.Authored, plan, request, settings, id, *snapshot, failure, &retained
 					)) {
 					grant.Message = "Export complete.";
 					grant.Failed = false;
@@ -971,7 +979,8 @@ namespace studio {
 						outputIndex,
 						state.Playback.CurrentTick,
 						state.Playback.Subframe,
-						state.Playback.NegativeFrame
+						state.Playback.NegativeFrame,
+						detail::ImageGraphRigidObservation(previewDocument, state.Playback)
 					)) {
 					if (!UploadPreview(state, renderer, *cached)) return;
 					state.LastDiagnostic = {};
@@ -996,9 +1005,11 @@ namespace studio {
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
 				}
+				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames =
 					std::span<const engine::imagegraph::AudioCaptureFrame>(state.AudioFrames);
@@ -1100,9 +1111,94 @@ namespace studio {
 					state.Playback.CurrentTick,
 					*image,
 					state.Playback.Subframe,
-					state.Playback.NegativeFrame
+					state.Playback.NegativeFrame,
+					detail::ImageGraphRigidObservation(previewDocument, state.Playback)
 				);
 				state.LastDiagnostic = {};
+			}
+		}
+
+		void RunAnimationControls(State &state, engine::render::Renderer &renderer) {
+			if (state.Playback.Rendering ||
+				std::none_of(state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [](const auto &node) {
+					return node.Type == "pc.animation_control";
+				}))
+				return;
+			engine::imagegraph::Plan plan;
+			Diagnostic error;
+			if (engine::imagegraph::Compile(state.Authored, plan, error) != Status::Ok) {
+				state.LastDiagnostic = std::move(error);
+				return;
+			}
+			// Source controls step in authored order, independently of the selected
+			// preview output.
+			for (const auto &node : state.Authored.Nodes) {
+				if (state.Playback.Rendering) break;
+				if (node.Type != "pc.animation_control") continue;
+				engine::imagegraphphysics::RigidProvider requestRigidProvider;
+				engine::imagegraph::EvaluationRequest request;
+				request.HostProvider = &HostFor(state);
+				BindObservations(state, request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				request.AudioFrames = state.AudioFrames;
+				request.AudioClips = state.AudioClips;
+				request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				if (!state.GroupHost.Prepare(state.Authored, plan, state.DocumentRevision, request, error) ||
+					!state.FeedbackHost.PrepareNodeInputs(
+						state.Authored,
+						plan,
+						state.DocumentRevision,
+						state.EvaluationInputRevision,
+						node.Id,
+						request,
+						error
+					)) {
+					state.LastDiagnostic = std::move(error);
+					continue;
+				}
+				engine::imagegraph::AnimationControlResult result;
+				const auto &snapshot = state.FeedbackHost.Snapshot();
+				const auto resolved = snapshot.Values().empty()
+										  ? engine::imagegraph::ResolveAnimationControl(
+												state.Authored,
+												plan,
+												node.Id,
+												request,
+												detail::AnimationPlayback(state.Playback),
+												engine::imagegraph::Limits::MaximumEvaluationBytes,
+												result,
+												error
+											)
+										  : engine::imagegraph::ResolveAnimationControl(
+												snapshot,
+												node.Id,
+												detail::AnimationPlayback(state.Playback),
+												engine::imagegraph::Limits::MaximumEvaluationBytes,
+												result,
+												error
+											);
+				if (resolved != Status::Ok) {
+					state.LastDiagnostic = std::move(error);
+					continue;
+				}
+				if (!detail::ApplyAnimationControl(
+						state.Playback,
+						result,
+						[&](auto effect) {
+							using Kind = engine::imagegraph::AnimationControlEffectKind;
+							if (effect == Kind::AnimationStart)
+								detail::RestartAnimationReplay(state.FeedbackHost, state.PreviewCache);
+							if (effect == Kind::RenderAll) {
+								state.PreviewCache.Clear();
+								RequestPreview(state, true);
+								RefreshPreview(state, renderer);
+							}
+						},
+						error
+					))
+					state.LastDiagnostic = std::move(error);
+				if (state.Playback.Rendering && state.Playback.FrameProgress) RequestPreview(state, true);
 			}
 		}
 
@@ -2418,11 +2514,13 @@ namespace studio {
 				ImGui::EndDisabled();
 				if (changed) {
 					const std::string nodeId = node.Id;
+					engine::imagegraphphysics::RigidProvider requestRigidProvider;
 					engine::imagegraph::EvaluationRequest request;
 					request.HostProvider = &HostFor(state);
 					request.AudioFrames = state.AudioFrames;
 					request.AudioClips = state.AudioClips;
 					BindObservations(state, request);
+					detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 					if (ApplyImageGraphSourceDynamicInput(
 							state.Authored,
@@ -2584,22 +2682,27 @@ namespace studio {
 				found = std::prev(state.FileControls.end());
 			}
 			auto &controls = *found;
+			const auto *selectedNode = FindNode(state.Authored, nodeId);
+			const bool writing = selectedNode && detail::ImageGraphFileWriteType(selectedNode->Type);
 			ImGui::InputTextWithHint(
-				"##read-file", "Exact file path", controls.File.data(), controls.File.size()
+				"##read-file",
+				writing ? "Exact final output path" : "Exact file path",
+				controls.File.data(),
+				controls.File.size()
 			);
-			ImGui::InputTextWithHint(
-				"##read-resource",
-				"Resource key (blank for primary)",
-				controls.Resource.data(),
-				controls.Resource.size()
-			);
+			if (!writing)
+				ImGui::InputTextWithHint(
+					"##read-resource",
+					"Resource key (blank for primary)",
+					controls.Resource.data(),
+					controls.Resource.size()
+				);
 			const auto changed = [&] {
 				state.Host.RefreshFile(nodeId);
 				state.PreviewCache.Clear();
 				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
 				RequestPreview(state, true);
 			};
-			const auto *selectedNode = FindNode(state.Authored, nodeId);
 			if (selectedNode && selectedNode->Type == "pc.directory_search") {
 				ImGui::InputTextWithHint(
 					"##directory-root",
@@ -2631,7 +2734,72 @@ namespace studio {
 					}
 				}
 			}
-			if (ImGui::Button("Grant read")) {
+			if (writing && ImGui::Button("Grant write")) {
+				const std::filesystem::path file(controls.File.data());
+				if (!file.is_absolute() || file.lexically_normal() != file)
+					controls.Message = "Enter the exact absolute output path with its final extension.";
+				else if (!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Publish)
+							  .AllowsName(file.string()) ||
+						 !engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)
+							  .AllowsName(file.string()))
+					controls.Message = "File type is disabled by content policy.";
+				else {
+					auto grant =
+						std::find_if(state.FileGrants.begin(), state.FileGrants.end(), [&](const auto &item) {
+							return item.NodeId == nodeId && item.Resource.empty();
+						});
+					if (grant != state.FileGrants.end()) {
+						grant->File = file;
+						grant->Write = true;
+						controls.Message.clear();
+						changed();
+					} else if (state.FileGrants.size() >= 256)
+						controls.Message = "File grants exceed the session limit.";
+					else {
+						state.FileGrants.push_back({std::string(nodeId), file, true});
+						controls.Message.clear();
+						changed();
+					}
+				}
+			}
+			if (writing && selectedNode->Type == "pc.tile_tilemap_export") {
+				ImGui::InputTextWithHint(
+					"##room-template",
+					"GameMaker room template path",
+					controls.Template.data(),
+					controls.Template.size()
+				);
+				if (ImGui::Button("Grant template")) {
+					const std::filesystem::path file(controls.Template.data());
+					if (!file.is_absolute() || file.lexically_normal() != file)
+						controls.Message = "Enter an exact absolute template path.";
+					else if (!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)
+								  .AllowsName(file.string()))
+						controls.Message = "Template type is disabled by content policy.";
+					else {
+						auto grant = std::find_if(
+							state.FileGrants.begin(), state.FileGrants.end(), [&](const auto &item) {
+								return item.NodeId == nodeId && item.Resource == "tileset_gamemaker2_room.yy";
+							}
+						);
+						if (grant != state.FileGrants.end()) {
+							grant->File = file;
+							grant->Write = false;
+							controls.Message.clear();
+							changed();
+						} else if (state.FileGrants.size() >= 256)
+							controls.Message = "File grants exceed the session limit.";
+						else {
+							state.FileGrants.push_back(
+								{std::string(nodeId), file, false, "tileset_gamemaker2_room.yy"}
+							);
+							controls.Message.clear();
+							changed();
+						}
+					}
+				}
+			}
+			if (!writing && ImGui::Button("Grant read")) {
 				const std::filesystem::path file(controls.File.data());
 				std::string resource(controls.Resource.data());
 				const auto *node = FindNode(state.Authored, nodeId);
@@ -2652,6 +2820,7 @@ namespace studio {
 						});
 					if (grant != state.FileGrants.end()) {
 						grant->File = file;
+						grant->Write = false;
 						controls.Message.clear();
 						changed();
 					} else if (state.FileGrants.size() >= 256 ||
@@ -2669,13 +2838,15 @@ namespace studio {
 				}
 			}
 			ImGui::SameLine();
-			if (ImGui::Button("Read / refresh")) {
+			if (ImGui::Button(writing ? "Export" : "Read / refresh")) {
 				changed();
 				engine::imagegraph::Plan plan;
 				Diagnostic error;
+				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
@@ -2691,15 +2862,29 @@ namespace studio {
 						request,
 						error,
 						engine::imagegraph::Limits::MaximumEvaluationBytes,
-						state.SelectedOutput
+						state.SelectedOutput,
+						nodeId
 					))
 					controls.Message = error.Message;
-				else if (engine::imagegraphexport::ExecuteGraphHostNode(
-							 state.Authored, plan, request, nodeId, capture, controls.Message
-						 ))
-					controls.Message = "Read captured.";
+				else {
+					engine::imagegraph::EvaluationSnapshot directInputs;
+					const auto *snapshot = &state.FeedbackHost.Snapshot();
+					if (!state.FeedbackHost.Active()) {
+						if (engine::imagegraph::EvaluateNodeInputs(
+								state.Authored, plan, nodeId, request, directInputs, error
+							) != Status::Ok) {
+							controls.Message = error.Message;
+							snapshot = nullptr;
+						} else
+							snapshot = &directInputs;
+					}
+					if (snapshot && engine::imagegraphexport::ExecuteGraphHostNode(
+										state.Authored, request, nodeId, *snapshot, capture, controls.Message
+									))
+						controls.Message = writing ? "Export complete." : "Read captured.";
+				}
 			}
-			if (ImGui::Button("Revoke reads")) {
+			if (ImGui::Button(writing ? "Revoke files" : "Revoke reads")) {
 				std::erase_if(state.FileGrants, [&](const auto &grant) { return grant.NodeId == nodeId; });
 				std::erase_if(state.DirectoryGrants, [&](const auto &grant) {
 					return grant.NodeId == nodeId;
@@ -2713,7 +2898,8 @@ namespace studio {
 				if (grant.NodeId == nodeId)
 					ImGui::TextWrapped(
 						"%s: %s",
-						grant.Resource.empty() ? "Primary" : grant.Resource.c_str(),
+						grant.Resource.empty() ? (grant.Write ? "Output" : "Primary")
+											   : grant.Resource.c_str(),
 						grant.File.string().c_str()
 					);
 			if (!controls.Message.empty()) ImGui::TextWrapped("%s", controls.Message.c_str());
@@ -2790,9 +2976,11 @@ namespace studio {
 				return;
 			}
 			if (node->Type == "pc.verlet_sim_mesh_cache" && ImGui::Button("Cache Mesh")) {
+				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
@@ -2818,7 +3006,7 @@ namespace studio {
 				}
 			}
 			if (node->Type == "pc.export") DrawExportGrant(state, nodeId);
-			if (detail::ImageGraphFileReadType(node->Type) &&
+			if ((detail::ImageGraphFileReadType(node->Type) || detail::ImageGraphFileWriteType(node->Type)) &&
 				!detail::ImageGraphFileUsesOwnedContent(node->Type))
 				DrawFileGrants(state, nodeId);
 			if (schema->Properties.empty() && !schema->DynamicInputs) {
@@ -2827,9 +3015,11 @@ namespace studio {
 			}
 			ImGui::Separator();
 			if (node->Type == "pc.audio_window") {
+				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
@@ -2849,9 +3039,11 @@ namespace studio {
 			}
 			if (node->Type == "pc.wav_file_read") {
 				if (ImGui::Button("Sync length")) {
+					engine::imagegraphphysics::RigidProvider requestRigidProvider;
 					engine::imagegraph::EvaluationRequest request;
 					request.HostProvider = &HostFor(state);
 					BindObservations(state, request);
+					detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 					request.AudioFrames = state.AudioFrames;
 					request.AudioClips = state.AudioClips;
@@ -2866,9 +3058,11 @@ namespace studio {
 					if (!node) return;
 				}
 				ImGui::TextWrapped("File watching is unavailable.");
+				engine::imagegraphphysics::RigidProvider waveformRequestRigidProvider;
 				engine::imagegraph::EvaluationRequest waveformRequest;
 				waveformRequest.HostProvider = &HostFor(state);
 				BindObservations(state, waveformRequest);
+				detail::BindImageGraphRigid(waveformRequest, waveformRequestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(waveformRequest, GetImageGraphFrame(state.Playback));
 				waveformRequest.AudioClips = state.AudioClips;
 				waveformRequest.AudioFrames = state.AudioFrames;
@@ -2888,9 +3082,11 @@ namespace studio {
 					ImGui::TextWrapped("%s", waveformError.Message.c_str());
 			}
 			if (node->Type == "pc.wav_file_write") {
+				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
@@ -3765,7 +3961,10 @@ namespace studio {
 				}
 				state.Playback.Playing = !state.Playback.Playing;
 				state.Playback.Accumulator = 0.0;
+				RequestPreview(state, true);
 			}
+			ImGui::SameLine();
+			ImGui::Checkbox("Simulation", &state.Playback.Simulating);
 			ImGui::SameLine();
 			if (ImGui::Button("Step -1") &&
 				(state.Playback.CurrentTick > state.Playback.StartTick || state.Playback.Subframe > 0.0)) {
@@ -4464,7 +4663,9 @@ namespace studio {
 
 	void CloseImageComposerAudioPreview() {
 		State &state = Composer();
-		state.Playback.Playing = false;
+		state.Playback.Playing = state.Playback.Rendering = false;
+		state.Playback.FrameProgress = false;
+		state.Playback.LastTime = 0;
 		state.WavAudio.Close();
 		state.WavAudioMessage.clear();
 	}
@@ -4475,7 +4676,8 @@ namespace studio {
 		PumpRetiredTexture(state, renderer);
 		state.VectorControls.PumpRetired(renderer);
 
-		if (AdvanceImageGraphPlayback(state.Playback, ImGui::GetIO().DeltaTime)) RequestPreview(state);
+		if (detail::AdvanceAnimationPlayback(state.Playback, ImGui::GetIO().DeltaTime)) RequestPreview(state);
+		RunAnimationControls(state, renderer);
 		ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 255));
 		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
 		if (!ImGui::Begin("Image Composer", &open, ImGuiWindowFlags_MenuBar)) {
@@ -4509,9 +4711,11 @@ namespace studio {
 		}
 		FinishInactiveEdit(state);
 		DrawToolbar(state);
+		engine::imagegraphphysics::RigidProvider vectorRequestRigidProvider;
 		engine::imagegraph::EvaluationRequest vectorRequest;
 		vectorRequest.HostProvider = &HostFor(state);
 		BindObservations(state, vectorRequest);
+		detail::BindImageGraphRigid(vectorRequest, vectorRequestRigidProvider, state.Playback);
 		(void)engine::imagegraph::SetFrameTime(vectorRequest, GetImageGraphFrame(state.Playback));
 		vectorRequest.AudioFrames = state.AudioFrames;
 		vectorRequest.AudioClips = state.AudioClips;
@@ -4576,7 +4780,8 @@ namespace studio {
 		}
 		ImGui::EndChild();
 		RefreshPreview(state, renderer);
-		if (state.ExportUpdate.Accept(
+		if (!state.Playback.Rendering &&
+			state.ExportUpdate.Accept(
 				state.DocumentRevision, state.EvaluationInputRevision, GetImageGraphFrame(state.Playback)
 			))
 			RunAuthoredExports(state, detail::ImageGraphExportEvent::Update);

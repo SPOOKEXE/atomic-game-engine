@@ -35,6 +35,10 @@ namespace studio::detail {
 		return std::find(std::begin(types), std::end(types), type) != std::end(types);
 	}
 
+	inline bool ImageGraphFileWriteType(std::string_view type) {
+		return type == "pc.csv_file_write" || type == "pc.tile_tilemap_export";
+	}
+
 	inline bool ImageGraphFileUsesOwnedContent(std::string_view type) {
 		return type == "pc.ase_layer" || type == "pc.ase_tag" || type == "pc.ase_tileset";
 	}
@@ -133,6 +137,26 @@ namespace studio::detail {
 				}
 				failure = "Studio Lua host is unavailable";
 				return false;
+			}
+			if (ImageGraphFileWriteType(invocation.Authored.Type)) {
+				if (RetainedBytes >= invocation.MaximumOperationBytes) {
+					failure = "Studio observations leave no manual file export budget";
+					return false;
+				}
+				const auto &publish =
+					engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Publish);
+				for (const auto &grant : Grants)
+					if (grant.NodeId == invocation.Authored.Id && grant.Write &&
+						!publish.AllowsName(grant.File.string())) {
+						failure = "Studio file export violates publication policy";
+						return false;
+					}
+				HostNodeInvocation bounded = invocation;
+				bounded.MaximumOperationBytes -= RetainedBytes;
+				engine::imagegraphexport::GraphFileHost writer(
+					Grants, engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)
+				);
+				return writer.Capture(bounded, output, failure);
 			}
 			if (!ImageGraphFileReadType(invocation.Authored.Type)) {
 				failure = "Studio has no granted provider for this host node";

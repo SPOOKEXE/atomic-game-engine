@@ -57,6 +57,12 @@ namespace studio {
 		double Accumulator = 0.0;
 		int8_t Direction = 1;
 		bool NegativeFrame = false;
+		bool Rendering = false;
+		bool Simulating = false;
+		bool FrameProgress = false;
+		double RealFrame = 0.0;
+		double LastTime = 0.0;
+		double RealTime = 0.0;
 	};
 
 	engine::imagegraph::FrameTime GetImageGraphFrame(const ImageGraphPlayback &playback);
@@ -75,7 +81,8 @@ namespace studio {
 	bool AdvanceImageGraphPlayback(ImageGraphPlayback &playback, double elapsedSeconds);
 
 	// A small LRU of successful, bounded preview images keyed by authored revision,
-	// selected output, tick and fractional frame. Failed evaluations never replace a good frame.
+	// selected output, signed fractional frame and rigid playback observations. Failed evaluations
+	// never replace a good frame. Rigid observation bits are Playing=1 and FrameProgress=2.
 	class ImageGraphPreviewCache {
 	  public:
 		const engine::imagegraph::Image *Find(
@@ -83,7 +90,8 @@ namespace studio {
 			size_t outputIndex,
 			uint64_t tick,
 			double subframe = 0.0,
-			bool negativeFrame = false
+			bool negativeFrame = false,
+			uint8_t rigidObservation = 0
 		);
 		bool Store(
 			uint64_t revision,
@@ -91,7 +99,8 @@ namespace studio {
 			uint64_t tick,
 			const engine::imagegraph::Image &image,
 			double subframe = 0.0,
-			bool negativeFrame = false
+			bool negativeFrame = false,
+			uint8_t rigidObservation = 0
 		);
 		void Clear();
 		size_t HeldBytes() const;
@@ -103,6 +112,7 @@ namespace studio {
 			uint64_t Tick = 0;
 			double Subframe = 0.0;
 			bool NegativeFrame = false;
+			uint8_t RigidObservation = 0;
 			uint64_t LastUsed = 0;
 			engine::imagegraph::Image Image;
 		};

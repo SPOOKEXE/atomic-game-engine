@@ -500,3 +500,103 @@ TEST_CASE(
 	CHECK_FALSE(host.Capture(invocation, captured, failure));
 	CHECK(captured.ImageArrays.empty());
 }
+
+TEST_CASE(
+	"Studio manual file exports use explicit grants without replaying a cached write",
+	"[studio][imagegraph][file_export]"
+) {
+	using namespace engine::imagegraphexport;
+	Temporary temp;
+	studio::detail::ImageGraphHost host;
+	CHECK(studio::detail::ImageGraphFileWriteType("pc.csv_file_write"));
+	CHECK(studio::detail::ImageGraphFileWriteType("pc.tile_tilemap_export"));
+	CHECK_FALSE(studio::detail::ImageGraphFileReadType("pc.tile_tilemap_export"));
+	const auto file = temp.Path / "output.csv";
+	std::array<GraphFileGrant, 1> grants{{{"writer", file, true}}};
+	host.Grants = grants;
+	Node node;
+	node.Id = "writer";
+	node.Type = "pc.csv_file_write";
+	std::array<AuthoredValue, 2> inputs{{{"path", file.string()}, {"content", std::string("first")}}};
+	EvaluationRequest request;
+	HostNodeInvocation invocation{node, request, inputs, {}, 16 * 1024 * 1024};
+	HostNodeCapture capture;
+	std::string failure;
+	const auto retained = host.RetainedBytes;
+	REQUIRE(host.Capture(invocation, capture, failure));
+	const auto read = [&] {
+		std::ifstream stream(file, std::ios::binary);
+		return std::string((std::istreambuf_iterator<char>(stream)), {});
+	};
+	CHECK(read() == "first");
+	CHECK(host.RetainedBytes == retained);
+	inputs[1].Data = std::string("second");
+	REQUIRE(host.Capture(invocation, capture, failure));
+	CHECK(read() == "second");
+	CHECK(host.RetainedBytes == retained);
+	host.Grants = {};
+	CHECK_FALSE(host.Capture(invocation, capture, failure));
+	CHECK(read() == "second");
+	host.Grants = grants;
+	grants[0].Write = false;
+	CHECK_FALSE(host.Capture(invocation, capture, failure));
+	CHECK(read() == "second");
+	grants[0].Write = true;
+	invocation.MaximumOperationBytes = host.RetainedBytes;
+	CHECK_FALSE(host.Capture(invocation, capture, failure));
+	CHECK(read() == "second");
+}
+
+TEST_CASE(
+	"Studio tile export composite resolves a live graph and revokes its exact write grant",
+	"[studio][imagegraph][file_export]"
+) {
+	using namespace engine::imagegraphexport;
+	Temporary temp;
+	const auto file = temp.Path / "map.csv";
+	TilesetValue set;
+	auto &data = set.Data.emplace();
+	data.Texture = {1, 1, {255, 0, 0, 255}, 0};
+	data.TileSize = {16, 16};
+	data.DisplayName = "Native";
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"export", "pc.tile_tilemap_export", "", {}, {{"path", file.string()}}},
+		{"map",
+		 "pc.solid",
+		 "",
+		 {},
+		 {{"dimension", Vector2{2, 2}},
+		  {"dimension_unit", EnumValue{0}},
+		  {"color", Colour{255, 0, 0, 255}},
+		  {"attribute_color_depth", EnumValue{4}}}}
+	};
+	document.Junctions = {{"tileset", "", ValueType::Tileset, set}};
+	document.Links = {{"map", "surface_out", "export", "tilemap"}, {"tileset", "value", "export", "input_7"}};
+	document.Outputs = {{"map", "map", "surface_out"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto status = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(status == Status::Ok);
+	std::array<GraphFileGrant, 1> grants{{{"export", file, true}}};
+	studio::detail::ImageGraphHost host;
+	host.Grants = grants;
+	EvaluationRequest request;
+	request.HostProvider = &host;
+	Image preview;
+	REQUIRE(Evaluate(document, plan, "map", request, preview, diagnostic) == Status::Ok);
+	CHECK_FALSE(std::filesystem::exists(file));
+	HostNodeCapture capture;
+	std::string failure;
+	REQUIRE(ExecuteGraphHostNode(document, plan, request, "export", capture, failure));
+	const auto read = [&] {
+		std::ifstream stream(file, std::ios::binary);
+		return std::string((std::istreambuf_iterator<char>(stream)), {});
+	};
+	CHECK(read() == "1,1\n1,1\n");
+	host.Grants = {};
+	CHECK_FALSE(ExecuteGraphHostNode(document, plan, request, "export", capture, failure));
+	CHECK(read() == "1,1\n1,1\n");
+}
