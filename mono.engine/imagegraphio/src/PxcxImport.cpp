@@ -1,3 +1,7 @@
+#include "GroupInstances.hpp"
+
+#include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 
 #include <algorithm>
@@ -6,7 +10,9 @@
 #include <initializer_list>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <set>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -921,14 +927,2152 @@ namespace engine::imagegraphio {
 		void OpaqueDiagnostic(PxcxImport &result, const bake::PxcxNodeFact &node, std::string reason) {
 			result.Diagnostics.push_back({imagegraph::Status::UnknownNode, node.Id, {}, std::move(reason)});
 		}
+
+		bool WholeNumber(const Json &value, int64_t &out) {
+			if (!value.is_number()) return false;
+			const double number = value.get<double>();
+			if (!std::isfinite(number) || std::trunc(number) != number || std::abs(number) > 9.0e15)
+				return false;
+			out = static_cast<int64_t>(number);
+			return true;
+		}
+
+		bool Numbers(const Json &value, size_t count, std::array<double, 4> &out) {
+			if (!value.is_array() || value.size() != count) return false;
+			for (size_t index = 0; index < count; index++) {
+				if (!value[index].is_number()) return false;
+				out[index] = value[index].get<double>();
+				if (!std::isfinite(out[index])) return false;
+			}
+			return true;
+		}
+
+		template <class T>
+		bool AdmitNativeSlots(std::vector<T> &items, size_t count, detail::ImportBudget *budget) {
+			if (count <= items.capacity()) return true;
+			if (count > UINT64_MAX / sizeof(T) || (budget && !budget->Hold(count * sizeof(T)))) return false;
+			items.reserve(count);
+			return true;
+		}
+		bool AdmitNativeTextSize(size_t size, detail::ImportBudget *budget) {
+			return size <= imagegraph::Limits::MaximumTextBytes &&
+				   (!budget || budget->Hold(std::max(size, std::string{}.capacity()) + 1));
+		}
+		bool AdmitNativeText(std::string_view text, detail::ImportBudget *budget) {
+			return AdmitNativeTextSize(text.size(), budget);
+		}
+
+		bool NativePortName(
+			std::string_view prefix,
+			std::string_view separator,
+			std::string_view suffix,
+			detail::ImportBudget *budget,
+			std::string &out
+		) {
+			if (prefix.size() > imagegraph::Limits::MaximumTextBytes ||
+				separator.size() > imagegraph::Limits::MaximumTextBytes - prefix.size() ||
+				suffix.size() > imagegraph::Limits::MaximumTextBytes - prefix.size() - separator.size())
+				return false;
+			const size_t size = prefix.size() + separator.size() + suffix.size();
+			if (!AdmitNativeTextSize(size, budget)) return false;
+			std::string result(size, '\0');
+			auto tail = std::copy(prefix.begin(), prefix.end(), result.begin());
+			tail = std::copy(separator.begin(), separator.end(), tail);
+			std::copy(suffix.begin(), suffix.end(), tail);
+			out = std::move(result);
+			return true;
+		}
+
+		bool GradientText(
+			const Json &value, imagegraph::Gradient &gradient, detail::ImportBudget *budget = nullptr
+		) {
+			if (!value.is_string() ||
+				value.get_ref<const std::string &>().size() > imagegraph::Limits::MaximumTextBytes)
+				return false;
+			Json keys;
+			try {
+				keys = Json::parse(value.get_ref<const std::string &>());
+			} catch (const Json::exception &) {
+				return false;
+			}
+			if (!keys.is_object() || !keys.contains("type") || !keys.contains("keys") ||
+				!keys["keys"].is_array() || keys["keys"].empty() ||
+				keys["keys"].size() > imagegraph::Limits::MaximumGradientKeys)
+				return false;
+			int64_t mode = 0;
+			if (!WholeNumber(keys["type"], mode) || mode < 0 || mode > 6) return false;
+			gradient = {static_cast<uint8_t>(mode), {}};
+			if (!AdmitNativeSlots(gradient.Keys, keys["keys"].size(), budget)) return false;
+			for (const Json &entry : keys["keys"]) {
+				if (!entry.is_object() || !entry.contains("time") || !entry["time"].is_number() ||
+					!entry.contains("value"))
+					return false;
+				const double time = entry["time"].get<double>();
+				Colour color;
+				if (!std::isfinite(time) || !PackedColour(entry["value"], color)) return false;
+				gradient.Keys.push_back({time, color});
+			}
+			return true;
+		}
+
+		// Converts one serialized source value to a catalogue input type. False means the value has no exact
+		// native meaning, and the node stays opaque.
+		bool CatalogueValue(
+			const Json &value,
+			imagegraph::ValueType type,
+			size_t choices,
+			imagegraph::Value &out,
+			imagegraph::ValueType element = imagegraph::ValueType::Scalar,
+			detail::ImportBudget *budget = nullptr
+		) {
+			using imagegraph::ValueType;
+			std::array<double, 4> parts{};
+			int64_t whole = 0;
+			switch (type) {
+			case ValueType::Any:
+				if (value.is_boolean()) {
+					out = value.get<bool>();
+					return true;
+				}
+				if (value.is_number_integer()) {
+					out = value.get<int64_t>();
+					return true;
+				}
+				if (value.is_number_unsigned()) {
+					if (value.get<uint64_t>() > uint64_t(INT64_MAX)) return false;
+					out = static_cast<int64_t>(value.get<uint64_t>());
+					return true;
+				}
+				if (value.is_number_float()) {
+					if (!std::isfinite(value.get<double>())) return false;
+					out = value.get<double>();
+					return true;
+				}
+				if (value.is_string()) {
+					if (value.get_ref<const std::string &>().size() > imagegraph::Limits::MaximumTextBytes)
+						return false;
+					if (!AdmitNativeText(value.get_ref<const std::string &>(), budget)) return false;
+					out = value.get<std::string>();
+					return true;
+				}
+				if (value.is_array())
+					return CatalogueValue(value, ValueType::Array, 0, out, ValueType::Scalar, budget);
+				return false;
+			case ValueType::Boolean:
+				if (value.is_boolean()) {
+					out = value.get<bool>();
+					return true;
+				}
+				if (!WholeNumber(value, whole) || (whole != 0 && whole != 1)) return false;
+				out = whole == 1;
+				return true;
+			// GML booleans are the numbers 0 and 1.
+			case ValueType::Integer:
+				if (value.is_boolean())
+					whole = value.get<bool>() ? 1 : 0;
+				else if (!WholeNumber(value, whole))
+					return false;
+				out = whole;
+				return true;
+			case ValueType::Scalar:
+				if (value.is_boolean()) {
+					out = value.get<bool>() ? 1.0 : 0.0;
+					return true;
+				}
+				if (!value.is_number() || !std::isfinite(value.get<double>())) return false;
+				out = value.get<double>();
+				return true;
+			case ValueType::Enum:
+				if (value.is_boolean())
+					whole = value.get<bool>() ? 1 : 0;
+				else if (!WholeNumber(value, whole))
+					return false;
+				if (whole < 0 || (choices > 0 && static_cast<size_t>(whole) >= choices)) return false;
+				out = imagegraph::EnumValue{whole};
+				return true;
+			case ValueType::Colour: {
+				Colour color;
+				if (!PackedColour(value, color)) return false;
+				out = color;
+				return true;
+			}
+			case ValueType::Vector2:
+				if (!Numbers(value, 2, parts)) return false;
+				out = Vector2{parts[0], parts[1]};
+				return true;
+			case ValueType::Vector3:
+				if (!Numbers(value, 3, parts)) return false;
+				out = imagegraph::Vector3{parts[0], parts[1], parts[2]};
+				return true;
+			case ValueType::Vector4:
+				if (!Numbers(value, 4, parts)) return false;
+				out = imagegraph::Vector4{parts[0], parts[1], parts[2], parts[3]};
+				return true;
+			case ValueType::Quaternion:
+				if (!Numbers(value, 4, parts)) return false;
+				out = imagegraph::Quaternion{parts[0], parts[1], parts[2], parts[3]};
+				return true;
+			case ValueType::Text:
+				if (!value.is_string() ||
+					value.get_ref<const std::string &>().size() > imagegraph::Limits::MaximumTextBytes)
+					return false;
+				if (!AdmitNativeText(value.get_ref<const std::string &>(), budget)) return false;
+				out = value.get<std::string>();
+				return true;
+			case ValueType::Gradient: {
+				imagegraph::Gradient gradient;
+				if (!GradientText(value, gradient, budget)) return false;
+				out = std::move(gradient);
+				return true;
+			}
+			case ValueType::Curve: {
+				if (!value.is_array() || value.size() < 18 || (value.size() - 6) % 6 != 0 ||
+					(value.size() - 6) / 6 > imagegraph::Limits::MaximumCurveAnchors)
+					return false;
+				imagegraph::Curve curve;
+				if (!AdmitNativeSlots(curve.Anchors, (value.size() - 6) / 6, budget)) return false;
+				for (size_t offset = 0; offset < value.size(); ++offset) {
+					if (!value[offset].is_number() || !std::isfinite(value[offset].get<double>()))
+						return false;
+					if (offset < 6)
+						curve.Header[offset] = value[offset].get<double>();
+					else {
+						if ((offset - 6) % 6 == 0) curve.Anchors.emplace_back();
+						curve.Anchors.back()[(offset - 6) % 6] = value[offset].get<double>();
+					}
+				}
+				out = std::move(curve);
+				return true;
+			}
+			case ValueType::Matrix: {
+				// Matrix.serialize is { size: [columns, rows], isize, raw }; a bare list is a square matrix.
+				imagegraph::MatrixValue matrix;
+				const Json *raw = &value;
+				if (value.is_object()) {
+					const auto size = value.find("size"), stored = value.find("raw");
+					if (size == value.end() || stored == value.end() || !Numbers(*size, 2, parts) ||
+						parts[0] < 1 || parts[1] < 1 || std::trunc(parts[0]) != parts[0] ||
+						std::trunc(parts[1]) != parts[1] || parts[0] > UINT32_MAX || parts[1] > UINT32_MAX)
+						return false;
+					matrix.Columns = uint32_t(parts[0]);
+					matrix.Rows = uint32_t(parts[1]);
+					raw = &*stored;
+				} else if (value.is_array()) {
+					matrix.Columns = matrix.Rows = uint32_t(std::floor(std::sqrt(double(value.size()))));
+				} else {
+					return false;
+				}
+				if (!raw->is_array() ||
+					uint64_t(matrix.Columns) * matrix.Rows > imagegraph::Limits::MaximumArrayElements ||
+					matrix.Columns == 0)
+					return false;
+				if (!AdmitNativeSlots(matrix.Values, size_t(matrix.Columns) * matrix.Rows, budget))
+					return false;
+				matrix.Values.assign(size_t(matrix.Columns) * matrix.Rows, 0.0);
+				for (size_t index = 0; index < std::min(raw->size(), matrix.Values.size()); index++) {
+					if (!(*raw)[index].is_number()) return false;
+					matrix.Values[index] = (*raw)[index].get<double>();
+				}
+				out = std::move(matrix);
+				return true;
+			}
+			case ValueType::Area: {
+				if (!value.is_array() || value.size() != 6) return false;
+				std::array<double, 6> area{};
+				for (size_t index = 0; index < 6; index++) {
+					if (!value[index].is_number() || !std::isfinite(value[index].get<double>())) return false;
+					area[index] = value[index].get<double>();
+				}
+				if (area[4] != 0 && area[4] != 1) return false;
+				if (area[5] != 0 && area[5] != 1 && area[5] != 2) return false;
+				out = imagegraph::Area{
+					area[0],
+					area[1],
+					area[2],
+					area[3],
+					static_cast<uint8_t>(area[4]),
+					static_cast<uint8_t>(area[5])
+				};
+				return true;
+			}
+			case ValueType::Array: {
+				if (!value.is_array() || value.size() > imagegraph::Limits::MaximumArrayElements)
+					return false;
+				ArrayValue array{element, {}};
+				if (!AdmitNativeSlots(array.Elements, value.size(), budget)) return false;
+				for (const Json &item : value) {
+					if (element == ValueType::Colour) {
+						Colour color;
+						if (!PackedColour(item, color)) return false;
+						array.Elements.emplace_back(color);
+					} else if (element == ValueType::Text) {
+						if (!item.is_string() ||
+							!AdmitNativeText(item.get_ref<const std::string &>(), budget))
+							return false;
+						array.Elements.emplace_back(item.get<std::string>());
+					} else if (element == ValueType::Vector2) {
+						if (!Numbers(item, 2, parts)) return false;
+						array.Elements.emplace_back(Vector2{parts[0], parts[1]});
+					} else {
+						if (!item.is_number() || !std::isfinite(item.get<double>())) return false;
+						array.Elements.emplace_back(item.get<double>());
+					}
+				}
+				out = std::move(array);
+				return true;
+			}
+			default:
+				return false;
+			}
+		}
+
+		// Node attribute lists that are not numbers: node ids become text, nested lists keep their JSON text.
+		bool AttributeList(const Json &value, imagegraph::ValueType type, imagegraph::Value &out) {
+			if (type != imagegraph::ValueType::Array || !value.is_array() ||
+				value.size() > imagegraph::Limits::MaximumArrayElements)
+				return false;
+			// Lists of number pairs, such as Path weights, flatten to numbers.
+			const bool numberRows = std::all_of(value.begin(), value.end(), [](const Json &item) {
+				return item.is_array() && std::all_of(item.begin(), item.end(), [](const Json &part) {
+						   return part.is_number() && std::isfinite(part.get<double>());
+					   });
+			});
+			if (numberRows && !value.empty()) {
+				ArrayValue numbers{imagegraph::ValueType::Scalar, {}};
+				for (const Json &item : value)
+					for (const Json &part : item)
+						numbers.Elements.emplace_back(part.get<double>());
+				if (numbers.Elements.size() > imagegraph::Limits::MaximumArrayElements) return false;
+				out = std::move(numbers);
+				return true;
+			}
+			ArrayValue array{imagegraph::ValueType::Text, {}};
+			for (const Json &item : value) {
+				std::string text = item.is_string() ? item.get<std::string>() : item.dump();
+				if (text.size() > imagegraph::Limits::MaximumTextBytes) return false;
+				array.Elements.emplace_back(std::move(text));
+			}
+			out = std::move(array);
+			return true;
+		}
+
+		// Palettes hold packed colours, point lists hold 2D vectors, and other source arrays hold numbers.
+		imagegraph::ValueType ArrayElement(const imagegraph::CatalogueInput &input) {
+			if (input.SourceKind == "Palette") return imagegraph::ValueType::Colour;
+			if (input.SourceKind == "Vec2" || input.SourceKind == "IVec2" || input.SourceKind == "Vector" ||
+				input.SourceKind == "Vec2Arr")
+				return imagegraph::ValueType::Vector2;
+			if (input.SourceKind == "Text") return imagegraph::ValueType::Text;
+			return imagegraph::ValueType::Scalar;
+		}
+
+		bool CatalogueLiteralArray(
+			const Json &,
+			const imagegraph::CatalogueEntry &,
+			const imagegraph::CatalogueInput &,
+			imagegraph::Value &,
+			detail::ImportBudget *budget = nullptr
+		);
+		bool CatalogueDriver(
+			const Json &record, imagegraph::Keyframe &key, detail::ImportBudget *budget = nullptr
+		) {
+			if (record.is_number() && record.get<double>() == 0) return true;
+			if (!record.is_object()) return false;
+			const auto type = record.find("typ");
+			if (type == record.end() || !type->is_string()) return false;
+			const auto number = [&](std::string_view name, double &value) {
+				const auto item = record.find(name);
+				if (item == record.end() || !item->is_number()) return false;
+				value = item->get<double>();
+				return std::isfinite(value);
+			};
+			const auto &name = type->get_ref<const std::string &>();
+			if (name == "linear") {
+				imagegraph::KeyframeLinearDriver control;
+				if (!number("spd", control.Speed)) return false;
+				key.SourceDriver = control;
+			} else if (name == "sine") {
+				imagegraph::KeyframeSineDriver control;
+				if (!number("fre", control.Frequency) || !number("amp", control.Amplitude) ||
+					!number("phs", control.Phase))
+					return false;
+				control.Smooth = 0;
+				if (record.contains("smt") && !number("smt", control.Smooth)) return false;
+				key.SourceDriver = control;
+			} else if (name == "snap") {
+				imagegraph::KeyframeSnapDriver control;
+				if (!number("snp", control.Size)) return false;
+				key.SourceDriver = control;
+			} else if (name == "bounce" || name == "elastic") {
+				int64_t amount;
+				double spacing, curve = 2;
+				const auto value = record.find("amo");
+				if (value == record.end() || !WholeNumber(*value, amount) || amount > 1024 ||
+					!number("amp", spacing))
+					return false;
+				if (record.contains("stp") && !number("stp", curve)) return false;
+				if (name == "bounce")
+					key.SourceDriver = imagegraph::KeyframeBounceDriver{amount, spacing, curve};
+				else
+					key.SourceDriver = imagegraph::KeyframeElasticDriver{amount, spacing, curve};
+			} else if (name == "curve") {
+				const auto raw = record.find("crv");
+				imagegraph::Curve curve;
+				if (raw == record.end() || !raw->is_array() || raw->size() < 6 || (raw->size() - 6) % 6 ||
+					(raw->size() - 6) / 6 > imagegraph::Limits::MaximumCurveAnchors)
+					return false;
+				if (!AdmitNativeSlots(curve.Anchors, (raw->size() - 6) / 6, budget)) return false;
+				curve.Anchors.resize((raw->size() - 6) / 6);
+				for (size_t i = 0; i < raw->size(); i++) {
+					if (!(*raw)[i].is_number() || !std::isfinite((*raw)[i].get<double>())) return false;
+					if (i < 6)
+						curve.Header[i] = (*raw)[i].get<double>();
+					else
+						curve.Anchors[(i - 6) / 6][(i - 6) % 6] = (*raw)[i].get<double>();
+				}
+				key.SourceDriver = imagegraph::KeyframeCurveDriver{std::move(curve)};
+			} else
+				return false;
+			return imagegraph::ValidKeyframeSourceDriver(*key.SourceDriver);
+		}
+
+		bool CatalogueSourceChoice(
+			const Json &value, const imagegraph::CatalogueInput *input, imagegraph::Value &out
+		) {
+			if (!input || !value.is_number() || !std::isfinite(value.get<double>())) return false;
+			imagegraph::Value choice = value.get<double>();
+			if (!imagegraph::CatalogueSourceEnumValue(*input, choice)) return false;
+			out = std::move(choice);
+			return true;
+		}
+
+		bool CatalogueRawValue(
+			const Json &value,
+			const imagegraph::CatalogueInput *input,
+			imagegraph::Value &out,
+			bool explicitReal = false
+		) {
+			// Explicit JSON reals retain raw source getter storage, including integral-valued reals.
+			// Integer and Boolean tokens keep their established typed projection.
+			if (!input || !value.is_number() || (explicitReal && !value.is_number_float())) return false;
+			imagegraph::Value raw = value.get<double>();
+			if (!imagegraph::CatalogueSourceRawValue(*input, raw)) return false;
+			out = std::move(raw);
+			return true;
+		}
+
+		bool CatalogueEmptyGroupVector(
+			const Json &value,
+			const imagegraph::CatalogueEntry *entry,
+			const imagegraph::CatalogueInput *input,
+			imagegraph::Value &out
+		) {
+			if (!entry || !input || (entry->Type != "pc.group_input" && entry->Type != "pc.group_output") ||
+				input->Type != imagegraph::ValueType::Vector2 ||
+				(input->SourceKind != "Range" && input->SourceKind != "Vec2") || !value.is_array() ||
+				!value.empty())
+				return false;
+			out = imagegraph::ArrayValue{imagegraph::ValueType::Scalar, {}};
+			return true;
+		}
+
+		// Maps source-eased keys and the verified deterministic source drivers. Unknown drivers stay opaque.
+		bool CatalogueKeyframes(
+			const Json &records,
+			const std::string &nodeId,
+			std::string_view port,
+			imagegraph::ValueType type,
+			size_t choices,
+			imagegraph::ValueType element,
+			std::vector<imagegraph::Keyframe> &out,
+			const imagegraph::CatalogueEntry *entry = nullptr,
+			const imagegraph::CatalogueInput *input = nullptr,
+			detail::ImportBudget *budget = nullptr
+		) {
+			// A compressed animated record reloads as a normal frame-zero key with source defaults.
+			if (records.is_object()) {
+				const auto stored = records.find("d");
+				if (stored == records.end() || out.size() >= imagegraph::Limits::MaximumKeyframes)
+					return false;
+				if (!AdmitNativeSlots(out, out.size() + 1, budget) || !AdmitNativeText(nodeId, budget) ||
+					!AdmitNativeText(port, budget))
+					return false;
+				imagegraph::Value data;
+				if (!CatalogueRawValue(*stored, input, data, true) &&
+					!CatalogueValue(*stored, type, choices, data, element, budget) &&
+					!CatalogueSourceChoice(*stored, input, data) &&
+					!CatalogueRawValue(*stored, input, data) &&
+					!CatalogueEmptyGroupVector(*stored, entry, input, data) &&
+					!(entry && input && CatalogueLiteralArray(*stored, *entry, *input, data, budget)))
+					return false;
+				imagegraph::Keyframe keyframe;
+				keyframe.NodeId = std::string(nodeId);
+				keyframe.Port = std::string(port);
+				keyframe.Data = std::move(data);
+				keyframe.Interpolation = "source";
+				keyframe.Ease = imagegraph::KeyframeEase{"linear", "linear", {0, 1}, {0, 0}};
+				out.push_back(std::move(keyframe));
+				return true;
+			}
+			if (!records.is_array() || records.empty() || out.size() > imagegraph::Limits::MaximumKeyframes ||
+				records.size() > imagegraph::Limits::MaximumKeyframes - out.size())
+				return false;
+			if (!AdmitNativeSlots(out, out.size() + records.size(), budget)) return false;
+			static constexpr std::array<std::string_view, 3> SIDES = {"linear", "bezier", "cut"};
+			for (const Json &record : records) {
+				if (!record.is_array() || record.size() < 8 || !record[0].is_array() || record[0].size() < 2)
+					return false;
+				int64_t kind = 0, inType = 0, outType = 0;
+				imagegraph::FrameTime frame;
+				if (!WholeNumber(record[0][0], kind) || (kind != 0 && kind != 1) ||
+					!record[0][1].is_number() ||
+					!imagegraph::SplitFrameTime(record[0][1].get<double>(), frame))
+					return false;
+				if (!AdmitNativeText(nodeId, budget) || !AdmitNativeText(port, budget)) return false;
+				imagegraph::Value data;
+				if (!CatalogueRawValue(record[1], input, data, true) &&
+					!CatalogueValue(record[1], type, choices, data, element, budget) &&
+					!CatalogueSourceChoice(record[1], input, data) &&
+					!CatalogueRawValue(record[1], input, data) &&
+					!(records.size() == 1 && kind == 0 && record[7].is_number() &&
+					  record[7].get<double>() == 0 &&
+					  CatalogueEmptyGroupVector(record[1], entry, input, data)) &&
+					!(entry && input && CatalogueLiteralArray(record[1], *entry, *input, data, budget)))
+					return false;
+				std::array<double, 4> ease{};
+				if (!Numbers(record[2], 2, ease) || !WholeNumber(record[4], inType) ||
+					!WholeNumber(record[5], outType) || inType < 0 || inType > 2 || outType < 0 ||
+					outType > 2)
+					return false;
+				std::array<double, 4> easeOut{};
+				if (!Numbers(record[3], 2, easeOut)) return false;
+				imagegraph::Keyframe keyframe;
+				keyframe.NodeId = std::string(nodeId);
+				keyframe.Port = std::string(port);
+				// Source kind1 is retained metadata; raw time-data tails stay in the archive.
+				keyframe.Kind =
+					kind == 0 ? imagegraph::KeyframeKind::Normal : imagegraph::KeyframeKind::Adder;
+				if (!imagegraph::SetFrameTime(keyframe, frame)) return false;
+				keyframe.Data = std::move(data);
+				keyframe.Interpolation = "source";
+				keyframe.Ease = imagegraph::KeyframeEase{
+					std::string(SIDES[static_cast<size_t>(inType)]),
+					std::string(SIDES[static_cast<size_t>(outType)]),
+					{ease[0], ease[1]},
+					{easeOut[0], easeOut[1]}
+				};
+				if (!CatalogueDriver(record[7], keyframe, budget)) return false;
+				out.push_back(std::move(keyframe));
+			}
+			return true;
+		}
+
+		// KEYFRAME_END order is hold, loop, ping, wrap; loop_range -1 loops every key. Separate-axis curves
+		// have no native form.
+		bool CatalogueTrack(
+			const Json &record,
+			const std::string &nodeId,
+			std::string_view port,
+			imagegraph::Document &animation,
+			detail::ImportBudget *budget = nullptr
+		) {
+			if (record.value("sep_axis", false) ||
+				animation.Tracks.size() >= imagegraph::Limits::MaximumTracks)
+				return false;
+			int64_t end = 0, range = -1;
+			if (record.contains("on_end") && (!WholeNumber(record["on_end"], end) || end < 0 || end > 3))
+				return false;
+			if (record.contains("loop_range") && !WholeNumber(record["loop_range"], range)) return false;
+			if (!AdmitNativeSlots(animation.Tracks, animation.Tracks.size() + 1, budget) ||
+				!AdmitNativeText(nodeId, budget) || !AdmitNativeText(port, budget))
+				return false;
+			// Native source-eased keys always name their track, including the default hold end.
+			static constexpr std::array<std::string_view, 4> ENDS = {"hold", "loop", "ping", "wrap"};
+			animation.Tracks.push_back(
+				{nodeId, std::string(port), std::string(ENDS[static_cast<size_t>(end)]), range}
+			);
+			return true;
+		}
+
+		const Json *Attribute(const Json &input, std::string_view key) {
+			const auto attributes = input.find("attri");
+			if (attributes == input.end() || !attributes->is_object()) return nullptr;
+			const auto found = attributes->find(key);
+			return found == attributes->end() ? nullptr : &*found;
+		}
+
+		// Projects one source record onto its catalogue input. Linked inputs keep their default; the link
+		// itself is added with the graph links.
+		bool CatalogueLiteralArray(
+			const Json &value,
+			const imagegraph::CatalogueEntry &entry,
+			const imagegraph::CatalogueInput &input,
+			imagegraph::Value &out,
+			detail::ImportBudget *budget
+		) {
+			using imagegraph::ValueType;
+			const ValueType leafType = input.Type == ValueType::Enum && input.SourceBehavior &&
+											   input.SourceBehavior->FractionalInterpolation == true
+										   ? ValueType::Scalar
+										   : input.Type;
+			// These source updates broadcast numeric arrays themselves. The shared authored-array
+			// predicate retains the exact verified input indices, depths, leaf kinds and payload caps.
+			const bool manualNumeric =
+				(entry.Type == "pc.number_simple" || entry.Type == "pc.math" || entry.Type == "pc.compare") &&
+				imagegraph::CatalogueAuthoredArray(entry, input, ArrayValue{ValueType::Scalar, {}});
+			if (!value.is_array() || value.size() > imagegraph::Limits::MaximumArrayElements ||
+				leafType > ValueType::Vector2 || input.SourceIndex < 0 || !input.ArrayDepthKnown ||
+				(!manualNumeric && !imagegraph::FindCatalogueInput(entry, "attribute_process") &&
+				 !(entry.Type == "pc.number" && input.Id == "value" && input.SourceIndex == 0)))
+				return false;
+			uint64_t bytes = value.size() * sizeof(imagegraph::ElementValue);
+			for (const Json &item : value) {
+				if (input.Type == ValueType::Text) {
+					if (!item.is_string()) return false;
+					const size_t size = item.get_ref<const std::string &>().size();
+					if (size > imagegraph::Limits::MaximumTextBytes ||
+						size > imagegraph::Limits::MaximumArrayBytes - bytes)
+						return false;
+					bytes += size;
+				}
+			}
+			if (bytes > imagegraph::Limits::MaximumArrayBytes) return false;
+			ArrayValue array{leafType, {}};
+			if (!AdmitNativeSlots(array.Elements, value.size(), budget)) return false;
+			for (const Json &item : value) {
+				imagegraph::Value leaf;
+				if (!CatalogueValue(
+						item,
+						leafType,
+						imagegraph::CatalogueChoiceCount(input),
+						leaf,
+						imagegraph::ValueType::Scalar,
+						budget
+					))
+					return false;
+				const bool represented = std::visit(
+					[&](auto &&element) {
+						using T = std::decay_t<decltype(element)>;
+						if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, int64_t> ||
+									  std::is_same_v<T, double> || std::is_same_v<T, std::string> ||
+									  std::is_same_v<T, Colour> || std::is_same_v<T, Vector2>) {
+							array.Elements.emplace_back(std::move(element));
+							return true;
+						} else
+							return false;
+					},
+					std::move(leaf)
+				);
+				if (!represented) return false;
+			}
+			if (!imagegraph::CatalogueAuthoredArray(entry, input, array)) return false;
+			out = std::move(array);
+			return true;
+		}
+
+		bool CatalogueInputValue(
+			const Json &record,
+			const imagegraph::CatalogueEntry &entry,
+			const imagegraph::CatalogueInput &input,
+			const std::string &nodeId,
+			Node &node,
+			imagegraph::Document &animation,
+			std::string &reason,
+			bool parseLinkedLocalAnimator = false,
+			detail::ImportBudget *budget = nullptr
+		) {
+			if (!AdmitNativeText(input.Id, budget)) {
+				reason = "source input storage exceeds native animator operation bounds";
+				return false;
+			}
+			const std::string id(input.Id);
+			const auto appendValue = [&](std::string_view port, imagegraph::Value data) {
+				if (!AdmitNativeSlots(node.Values, node.Values.size() + 1, budget) ||
+					!AdmitNativeText(port, budget)) {
+					reason = "source authored storage exceeds native animator operation bounds";
+					return false;
+				}
+				node.Values.push_back({std::string(port), std::move(data)});
+				return true;
+			};
+			const auto makePort = [&](std::string_view suffix, std::string &out) {
+				if (NativePortName(id, "_", suffix, budget, out)) return true;
+				reason = "source generated port storage exceeds native animator operation bounds";
+				return false;
+			};
+			std::optional<int64_t> quaternionMode;
+			if (input.Type == imagegraph::ValueType::Quaternion) {
+				const auto attributes = record.find("attri");
+				if (attributes != record.end() && !attributes->is_object()) {
+					reason = "Quaternion attributes must be an object";
+					return false;
+				}
+				int64_t mode = 1;
+				if (const auto *angle = Attribute(record, "angle_display");
+					angle && (!WholeNumber(*angle, mode) || mode < 0 || mode > 1)) {
+					reason = "Quaternion angle_display must be raw or Euler";
+					return false;
+				}
+				quaternionMode = mode;
+			}
+			// Node_Audio_Window stores Bit/Second/Progress on Location.attributes.unit, serialized as attri.
+			if (entry.Type == "pc.audio_window" && input.Id == "location") {
+				const auto attributes = record.find("attri");
+				if (attributes != record.end() && !attributes->is_object()) {
+					reason = "Audio Window Location attributes must be an object";
+					return false;
+				}
+				if (const Json *unit = Attribute(record, "unit")) {
+					int64_t mode = 0;
+					if (!WholeNumber(*unit, mode) || mode < 0 || mode > 2) {
+						reason = "Audio Window Location unit must be Bit, Second or Progress";
+						return false;
+					}
+					if (!appendValue("location_unit", imagegraph::EnumValue{mode})) return false;
+				}
+			}
+			if (const Json *unit = record.find("unit") != record.end() ? &record["unit"] : nullptr) {
+				int64_t mode = 0;
+				std::string unitId;
+				if (!makePort("unit", unitId)) return false;
+				const imagegraph::CatalogueInput *toggle = imagegraph::FindCatalogueInput(entry, unitId);
+				if (toggle && toggle->SourceKind == "ValueUnit" && WholeNumber(*unit, mode) &&
+					(mode == 0 || mode == 1)) {
+					if (!appendValue(unitId, imagegraph::EnumValue{mode})) return false;
+				}
+			}
+			if (const Json *project = Attribute(record, "use_project_dimension")) {
+				int64_t mode = 0;
+				if (!WholeNumber(*project, mode) || mode < 0 || mode > 2) {
+					reason = "dimension unit is not recognised";
+					return false;
+				}
+				std::string unitId;
+				if (!makePort("unit", unitId)) return false;
+				if (imagegraph::FindCatalogueInput(entry, unitId)) {
+					if (!appendValue(unitId, imagegraph::EnumValue{mode})) return false;
+				}
+			}
+			if (const Json *flag = Attribute(record, "override_instance")) {
+				if (!flag->is_boolean()) {
+					reason = "instance override must be a Boolean";
+					return false;
+				}
+				if (flag->get<bool>()) {
+					if (!AdmitNativeSlots(
+							node.InstanceOverrides, node.InstanceOverrides.size() + 1, budget
+						) ||
+						!AdmitNativeText(id, budget))
+						return false;
+					node.InstanceOverrides.push_back(id);
+				}
+			}
+			bool mapped = false;
+			if (const Json *flag = Attribute(record, "mapped");
+				flag && flag->is_boolean() && flag->get<bool>()) {
+				std::string mappedId;
+				if (!makePort("mapped", mappedId)) return false;
+				if (!imagegraph::FindCatalogueInput(entry, mappedId)) {
+					reason = "input is mapped but the catalogue has no map toggle";
+					return false;
+				}
+				if (!appendValue(mappedId, true)) return false;
+				mapped = true;
+			}
+			const auto attributes = record.find("attri");
+			if (attributes != record.end() && attributes->is_object()) {
+				for (const auto &[key, flag] : attributes->items()) {
+					if (!flag.is_boolean() || key == "mapped" || key == "override_instance") continue;
+					if (key == "mask_alpha_only") {
+						if (imagegraph::FindCatalogueInput(entry, "mask_alpha_only")) {
+							if (!appendValue("mask_alpha_only", flag.get<bool>())) return false;
+						}
+						continue;
+					}
+					std::string toggleId;
+					if (!makePort(key, toggleId)) return false;
+					const imagegraph::CatalogueInput *toggle =
+						imagegraph::FindCatalogueInput(entry, toggleId);
+					if (toggle && toggle->SourceKind == "CurveToggle") {
+						if (!appendValue(toggleId, flag.get<bool>())) return false;
+					}
+				}
+			}
+			// A linked quaternion still processes the incoming tuple with its own display metadata.
+			if (record.contains("from_node") && !parseLinkedLocalAnimator && quaternionMode) {
+				if (animation.Tracks.size() >= imagegraph::Limits::MaximumTracks) {
+					if (budget) budget->Reject();
+					reason = "linked Quaternion metadata exceeds native track count bounds";
+					return false;
+				}
+				if (!CatalogueTrack(record, nodeId, id, animation, budget)) {
+					reason = "linked Quaternion getter metadata is not representable";
+					return false;
+				}
+				animation.Tracks.back().QuaternionMode = quaternionMode;
+				return true;
+			}
+			if ((record.contains("from_node") && !parseLinkedLocalAnimator) ||
+				input.Type == imagegraph::ValueType::Image ||
+				(!imagegraph::IsAuthoredValueType(input.Type) &&
+				 !(entry.Type == "pc.group_input" && input.Id == "parent_value")))
+				return true;
+			if (record.contains("global_key") || record.contains("global_use")) {
+				reason = "global variable binding has no native mapping";
+				return false;
+			}
+			const bool opaqueGradientRange =
+				entry.Type == "pc.gradient" && input.Id == "gradient_map_range" && input.SourceIndex == 16 &&
+				input.SourceKind == "Vec4" && input.Type == imagegraph::ValueType::Vector4;
+			if (opaqueGradientRange && record.contains("anim") && !record.at("anim").is_boolean()) {
+				reason = "opaque gradient range animator mode is malformed";
+				return false;
+			}
+			const auto stored = record.find("r");
+			if (stored == record.end()) return true;
+			const size_t choices = imagegraph::CatalogueChoiceCount(input);
+			if (record.value("anim", false) || (stored->is_array() && !stored->empty())) {
+				if ((entry.Type == "pc.group_input" || entry.Type == "pc.group_output") &&
+					stored->is_array() && stored->empty()) {
+					if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget)) {
+						reason = "empty group animator settings are not representable";
+						return false;
+					}
+					if (quaternionMode) animation.Tracks.back().QuaternionMode = quaternionMode;
+					// Source typeArray returns [] for Range and Vec2; scalar controls return zero.
+					imagegraph::Value emptyValue = 0.0;
+					if (input.SourceKind == "Range" || input.SourceKind == "Vec2")
+						emptyValue = imagegraph::ArrayValue{imagegraph::ValueType::Scalar, {}};
+					if (!appendValue(id, std::move(emptyValue))) return false;
+					return true;
+				}
+				if (mapped ||
+					!CatalogueKeyframes(
+						*stored,
+						nodeId,
+						id,
+						input.Type,
+						choices,
+						ArrayElement(input),
+						animation.Keyframes,
+						&entry,
+						&input,
+						budget
+					) ||
+					!CatalogueTrack(record, nodeId, id, animation, budget)) {
+					reason = "animated input " + id + " has no exact native keyframe mapping";
+					return false;
+				}
+				if (quaternionMode) animation.Tracks.back().QuaternionMode = quaternionMode;
+				return true;
+			}
+			if ((entry.Type == "pc.group_input" || entry.Type == "pc.group_output") && stored->is_array() &&
+				stored->empty()) {
+				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget)) {
+					reason = "static empty group animator settings are not representable";
+					return false;
+				}
+				if (quaternionMode) animation.Tracks.back().QuaternionMode = quaternionMode;
+				imagegraph::Value emptyValue;
+				if (input.Type == imagegraph::ValueType::Vector2 &&
+					(input.SourceKind == "Range" || input.SourceKind == "Vec2"))
+					emptyValue = 0.0;
+				else if (!CatalogueValue(
+							 Json(0), input.Type, choices, emptyValue, ArrayElement(input), budget
+						 ) &&
+						 !CatalogueRawValue(Json(0), &input, emptyValue)) {
+					reason = "static empty group animator zero has no exact native meaning";
+					return false;
+				}
+				if (!appendValue(id, std::move(emptyValue))) return false;
+				return true;
+			}
+			// Triggers and driven keys serialize an unanimated value as a one-key list.
+			const bool singleKey = stored->is_array() && stored->size() == 1 && (*stored)[0].is_array() &&
+								   (*stored)[0].size() >= 2;
+			if (!singleKey && (!stored->is_object() || !stored->contains("d"))) {
+				reason = "input value record is not a static value";
+				return false;
+			}
+			const Json &value = singleKey ? (*stored)[0][1] : (*stored)["d"];
+			if ((record.contains("on_end") || record.contains("loop_range")) &&
+				!CatalogueTrack(record, nodeId, id, animation, budget)) {
+				reason = "static compressed animator settings are not representable";
+				return false;
+			}
+			// An unlinked path junction stores the empty surface marker -4; the path stays empty.
+			if (input.Type == imagegraph::ValueType::Path2D && value.is_number() && value.get<double>() == -4)
+				return true;
+			imagegraph::Value converted;
+			if (mapped) {
+				std::string rangeId;
+				if (!makePort("map_range", rangeId)) return false;
+				const imagegraph::CatalogueInput *range = imagegraph::FindCatalogueInput(entry, rangeId);
+				if (range &&
+					CatalogueValue(value, range->Type, 0, converted, imagegraph::ValueType::Scalar, budget)) {
+					if (!appendValue(rangeId, std::move(converted))) return false;
+					return true;
+				}
+			}
+			if (!CatalogueRawValue(value, &input, converted, true) &&
+				!CatalogueValue(value, input.Type, choices, converted, ArrayElement(input), budget) &&
+				!CatalogueSourceChoice(value, &input, converted) &&
+				!CatalogueRawValue(value, &input, converted) &&
+				!CatalogueEmptyGroupVector(value, &entry, &input, converted) &&
+				!CatalogueLiteralArray(value, entry, input, converted, budget)) {
+				reason = "input " + id + " value has no exact native meaning";
+				return false;
+			}
+			// A compact source record reloads as one normal frame-zero key even when its getter is static.
+			// Keep the fixed projection for authored controls; the key retains the source animator storage.
+			const bool gradientStorage = entry.Type == "pc.gradient" && input.Id == "gradient" &&
+										 input.SourceIndex == 1 && input.SourceKind == "Gradient" &&
+										 input.Type == imagegraph::ValueType::Gradient;
+			const bool staticGradientRangeStorage =
+				entry.Type == "pc.gradient" && input.Id == "gradient_map_range" && input.SourceIndex == 16 &&
+				input.SourceKind == "Vec4" && input.Type == imagegraph::ValueType::Vector4 &&
+				record.contains("anim") && record.at("anim").is_boolean() &&
+				!record.at("anim").template get<bool>();
+			if (!mapped && stored->is_object() && stored->contains("d") &&
+				(imagegraph::HasNativeExecutor(entry.Type) || entry.Type == "pc.group_input" ||
+				 entry.Type == "pc.group_output" || gradientStorage || staticGradientRangeStorage)) {
+				if (animation.Keyframes.size() >= imagegraph::Limits::MaximumKeyframes) {
+					if (budget) budget->Reject();
+					reason = "static compact source keyframe count exceeds the native limit";
+					return false;
+				}
+				const size_t before = animation.Keyframes.size();
+				if (CatalogueKeyframes(
+						*stored,
+						nodeId,
+						id,
+						input.Type,
+						choices,
+						ArrayElement(input),
+						animation.Keyframes,
+						&entry,
+						&input,
+						budget
+					)) {
+					if (!record.contains("on_end") && !record.contains("loop_range") &&
+						!CatalogueTrack(record, nodeId, id, animation, budget)) {
+						reason = "static compact animator settings are not representable";
+						return false;
+					}
+					if (quaternionMode) animation.Tracks.back().QuaternionMode = quaternionMode;
+				} else {
+					animation.Keyframes.resize(before);
+					if (budget && budget->Exceeded()) {
+						reason = "static compact animator storage exceeds operation bounds";
+						return false;
+					}
+				}
+			}
+			if (quaternionMode) {
+				imagegraph::Quaternion result;
+				const auto *tuple = std::get_if<imagegraph::Quaternion>(&converted);
+				if (!tuple || !imagegraph::ConvertSourceQuaternion(*tuple, *quaternionMode, result)) {
+					reason = "Quaternion source control cannot be converted";
+					return false;
+				}
+				converted = result;
+			}
+			if (!appendValue(id, std::move(converted))) return false;
+			return true;
+		}
+
+		// Projects a node with a source catalogue entry, keeping every source input index and value.
+		bool CatalogueNode(
+			const Json &source,
+			const imagegraph::CatalogueEntry &entry,
+			const std::string &nodeId,
+			Node &node,
+			imagegraph::Document &animation,
+			std::string &reason,
+			detail::ImportBudget *budget = nullptr
+		) {
+			node.Type = std::string(entry.Type);
+			node.Values.clear();
+			const auto inputs = source.find("inputs");
+			if (inputs == source.end() || !inputs->is_array() || inputs->size() > size_t(INT32_MAX)) {
+				reason = "node has no input records";
+				return false;
+			}
+			for (size_t index = 0; index < inputs->size(); index++) {
+				const Json &record = (*inputs)[index];
+				if (!record.is_object()) continue;
+				const int32_t sourceIndex = static_cast<int32_t>(index);
+				if (const imagegraph::CatalogueInput *input =
+						imagegraph::FindCatalogueInputIndex(entry, sourceIndex)) {
+					if (!CatalogueInputValue(
+							record, entry, *input, nodeId, node, animation, reason, false, budget
+						))
+						return false;
+					continue;
+				}
+				if (entry.DynamicGroupLength <= 0 || sourceIndex < entry.DynamicFixedLength) {
+					reason =
+						"input index " + std::to_string(index) + " is not in the pinned source catalogue";
+					return false;
+				}
+				const int32_t offset = (sourceIndex - entry.DynamicFixedLength) % entry.DynamicGroupLength;
+				const int32_t group = (sourceIndex - entry.DynamicFixedLength) / entry.DynamicGroupLength;
+				const auto templateInput = std::find_if(
+					entry.DynamicTemplate.begin(), entry.DynamicTemplate.end(), [&](const auto &candidate) {
+						return candidate.SourceIndex == offset;
+					}
+				);
+				if (templateInput == entry.DynamicTemplate.end()) {
+					reason =
+						"dynamic input offset " + std::to_string(offset) + " is not in the source template";
+					return false;
+				}
+				if (node.DynamicInputs.size() >= imagegraph::Limits::MaximumDynamicInputsPerNode) {
+					reason = "dynamic inputs exceed the native limit";
+					return false;
+				}
+				const std::string suffix = std::to_string(group);
+				const size_t idSize = templateInput->Id.size() + 1 + suffix.size();
+				if (!AdmitNativeSlots(node.DynamicInputs, node.DynamicInputs.size() + 1, budget) ||
+					!AdmitNativeTextSize(idSize, budget)) {
+					reason = "dynamic input storage exceeds native animator operation bounds";
+					return false;
+				}
+				std::string dynamicId(idSize, '\0');
+				std::copy(templateInput->Id.begin(), templateInput->Id.end(), dynamicId.begin());
+				dynamicId[templateInput->Id.size()] = '_';
+				std::copy(suffix.begin(), suffix.end(), dynamicId.begin() + templateInput->Id.size() + 1);
+				imagegraph::DynamicInput dynamic{std::move(dynamicId), templateInput->Type, std::nullopt};
+				if (imagegraph::IsAuthoredValueType(templateInput->Type))
+					dynamic.Default = imagegraph::CatalogueDefault(*templateInput);
+				auto represented = *templateInput;
+				represented.Id = dynamic.Id;
+				const size_t valuesBefore = node.Values.size();
+				if (!CatalogueInputValue(
+						record, entry, represented, nodeId, node, animation, reason, false, budget
+					))
+					return false;
+				for (size_t value = valuesBefore; value < node.Values.size(); ++value) {
+					if (node.Values[value].Port != dynamic.Id) {
+						reason = "dynamic input attributes have no exact native meaning";
+						return false;
+					}
+					dynamic.Default = std::move(node.Values[value].Data);
+				}
+				node.Values.resize(valuesBefore);
+				node.DynamicInputs.push_back(std::move(dynamic));
+			}
+			const auto attributes = source.find("attri");
+			if (attributes != source.end() && attributes->is_object()) {
+				for (const std::string_view key : {"interpolate", "oversample"}) {
+					const auto found = attributes->find(key);
+					const imagegraph::CatalogueInput *input = imagegraph::FindCatalogueInput(entry, key);
+					if (found == attributes->end() || !input) continue;
+					imagegraph::Value converted;
+					if (!CatalogueValue(
+							*found,
+							imagegraph::ValueType::Enum,
+							imagegraph::CatalogueChoiceCount(*input),
+							converted
+						)) {
+						reason = std::string(key) + " attribute is out of range";
+						return false;
+					}
+					node.Values.push_back({std::string(key), std::move(converted)});
+				}
+				if (!attributes->contains("color_depth") &&
+					imagegraph::FindCatalogueInput(entry, "attribute_color_depth"))
+					node.Values.push_back({"attribute_color_depth", imagegraph::EnumValue{3}});
+				for (const auto &[key, stored] : attributes->items()) {
+					const std::string id = "attribute_" + key;
+					const imagegraph::CatalogueInput *input = imagegraph::FindCatalogueInput(entry, id);
+					if (!input) continue;
+					imagegraph::Value converted;
+					if (!CatalogueValue(
+							stored, input->Type, imagegraph::CatalogueChoiceCount(*input), converted
+						) &&
+						!AttributeList(stored, input->Type, converted)) {
+						reason = "node attribute " + key + " has no exact native meaning";
+						return false;
+					}
+					node.Values.push_back({id, std::move(converted)});
+				}
+			}
+			return true;
+		}
+
+		// Constructor defaults and stripped saved attributes are different source states.
+		std::optional<int64_t> SourceDepthChoice(const Json &source) {
+			const auto attributes = source.find("attri");
+			if (attributes != source.end()) {
+				if (!attributes->is_object()) return std::nullopt;
+				const auto depth = attributes->find("color_depth");
+				int64_t choice = 3;
+				if (depth != attributes->end() && !WholeNumber(*depth, choice)) return std::nullopt;
+				return choice >= 0 && choice <= 8 ? std::optional{choice} : std::nullopt;
+			}
+			if (source.at("type") == "Node_Group") return 1;
+			const auto *entry =
+				imagegraph::FindCatalogueSource(source.at("type").get_ref<const std::string &>());
+			const auto *depth =
+				entry ? imagegraph::FindCatalogueInput(*entry, "attribute_color_depth") : nullptr;
+			const auto value = depth ? imagegraph::CatalogueDefault(*depth) : std::nullopt;
+			const auto *choice = value ? std::get_if<imagegraph::EnumValue>(&*value) : nullptr;
+			return choice ? std::optional{choice->Value} : std::nullopt;
+		}
+
+		struct SourceDepthResolver {
+			const Json &Root;
+			std::unordered_map<std::string_view, const Json *> Sources;
+			std::unordered_map<const Json *, std::optional<int64_t>> Cache;
+			std::vector<const Json *> Path;
+
+			explicit SourceDepthResolver(const Json &root) : Root(root) {
+				const auto &nodes = Root.at("nodes");
+				Sources.reserve(nodes.size());
+				Cache.reserve(nodes.size());
+				Path.reserve(nodes.size() * 3 + 1);
+				for (const Json &source : nodes)
+					Sources.emplace(source.at("id").get_ref<const std::string &>(), &source);
+			}
+			const Json *Find(const Json &id) const {
+				if (!id.is_string()) return nullptr;
+				const auto found = Sources.find(id.get_ref<const std::string &>());
+				return found == Sources.end() ? nullptr : found->second;
+			}
+			std::optional<int64_t> Project() const {
+				int64_t depth = 1;
+				const auto attributes = Root.find("attributes");
+				if (attributes != Root.end() && attributes->is_object() &&
+					attributes->contains("color_depth") && !WholeNumber(attributes->at("color_depth"), depth))
+					return std::nullopt;
+				return depth >= 0 && depth <= 6 ? std::optional{depth + 2} : std::nullopt;
+			}
+			const Json *Parent(const Json &source) const {
+				const auto parent = source.find("group");
+				return parent == source.end() ? nullptr : Find(*parent);
+			}
+			bool HasParent(const Json &source) const {
+				const auto parent = source.find("group");
+				return parent != source.end() && !(*parent == -1) && !(*parent == "");
+			}
+			// Legacy RGBA8 executors also require the represented inherited allocation context.
+			bool LegacyContextRgba8(const Json &source) const {
+				const Json *current = &source;
+				for (size_t steps = 0; steps <= Sources.size(); ++steps) {
+					if (!HasParent(*current)) return Project() == 3;
+					current = Parent(*current);
+					if (!current || current->at("type") != "Node_Group" || current->contains("instanceBase"))
+						return false;
+					const auto choice = SourceDepthChoice(*current);
+					if (!choice || *choice == 0) return false;
+					if (*choice != 1) return *choice == 3;
+				}
+				return false;
+			}
+			bool LegacyInputsRgba8(const Json &source, const imagegraph::CatalogueEntry &entry) {
+				for (const auto &input : entry.Inputs) {
+					if (input.Type != imagegraph::ValueType::Image || input.SourceIndex < 0) continue;
+					const Json *record = Input(source, static_cast<size_t>(input.SourceIndex));
+					if (!record || !record->contains("from_node")) continue;
+					const Json *producer = Find(record->at("from_node"));
+					if (!producer) return false;
+					// Opaque producers cannot execute. Explicit subgraph cuts retain optional-input
+					// replacement.
+					if (!imagegraph::FindCatalogueSource(producer->at("type").get_ref<const std::string &>()))
+						continue;
+
+					int64_t index = 0, tag = 0;
+					if (!producer ||
+						(record->contains("from_index") && !WholeNumber(record->at("from_index"), index)) ||
+						(record->contains("from_tag") && !WholeNumber(record->at("from_tag"), tag)) ||
+						index < 0 || index > UINT32_MAX || tag != 0 ||
+						Resolve(*producer, true, static_cast<uint32_t>(index)) != 3)
+						return false;
+				}
+				return true;
+			}
+			std::optional<int64_t>
+			Resolve(const Json &source, bool output = false, uint32_t outputIndex = 0) {
+				Path.clear();
+				const Json *current = &source;
+				std::optional<int64_t> result;
+				const auto followInput = [&](const Json &node, size_t index) {
+					const Json *record = Input(node, index);
+					if (!record || record->contains("anim") || record->contains("global_key") ||
+						record->contains("global_use"))
+						return false;
+					const auto from = record->find("from_node");
+					if (from == record->end()) {
+						const Json *value = Current(node, index);
+						while (value && value->is_array() && !value->empty())
+							value = &(*value)[0];
+						if (value && ((value->is_array() && value->empty()) || (*value == -4))) result = 3;
+						return false;
+					}
+					int64_t indexValue = 0, tag = 0;
+					if ((record->contains("from_index") &&
+						 !WholeNumber(record->at("from_index"), indexValue)) ||
+						(record->contains("from_tag") && !WholeNumber(record->at("from_tag"), tag)) ||
+						indexValue < 0 || indexValue > UINT32_MAX || tag != 0)
+						return false;
+					current = Find(*from);
+					outputIndex = static_cast<uint32_t>(indexValue);
+					output = true;
+					return current != nullptr;
+				};
+				for (size_t steps = 0; current && steps <= Sources.size() * 3; ++steps) {
+					if (current->contains("instanceBase")) {
+						current = Find(current->at("instanceBase"));
+						continue;
+					}
+					const auto &type = current->at("type").get_ref<const std::string &>();
+					if (output && type == "Node_Group") {
+						const auto attributes = current->find("attri");
+						if (attributes == current->end() || !attributes->is_object() ||
+							!attributes->contains("custom_output_list"))
+							break;
+						const auto &list = attributes->at("custom_output_list");
+						if (!list.is_array() || outputIndex >= list.size()) break;
+						current = Find(list[outputIndex]);
+						outputIndex = 0;
+						continue;
+					}
+					if (output && type == "Node_Group_Output") {
+						if (outputIndex != 0 || !followInput(*current, 0)) break;
+						continue;
+					}
+					if (output && type == "Node_Group_Input") {
+						const Json *parent = Parent(*current);
+						if (!parent || outputIndex != 0) break;
+						const auto attributes = parent->find("attri");
+						if (attributes == parent->end() || !attributes->is_object() ||
+							!attributes->contains("custom_input_list"))
+							break;
+						const auto &list = attributes->at("custom_input_list");
+						if (!list.is_array()) break;
+						const auto found = std::find(list.begin(), list.end(), current->at("id"));
+						if (found == list.end() ||
+							!followInput(*parent, static_cast<size_t>(found - list.begin())))
+							break;
+						continue;
+					}
+					const auto *entry = imagegraph::FindCatalogueSource(type);
+					const auto *depth =
+						entry ? imagegraph::FindCatalogueInput(*entry, "attribute_color_depth") : nullptr;
+					if (output) {
+						if (!entry || !depth || outputIndex != 0 ||
+							std::none_of(entry->Outputs.begin(), entry->Outputs.end(), [](const auto &port) {
+								return port.SourceIndex == 0 && port.Type == imagegraph::ValueType::Image;
+							}))
+							break;
+						output = false;
+					}
+					if (!depth && type != "Node_Group") break;
+					if (const auto cached = Cache.find(current); cached != Cache.end()) {
+						result = cached->second;
+						break;
+					}
+					Path.push_back(current);
+					const auto choice = SourceDepthChoice(*current);
+					if (!choice) break;
+					if (*choice >= 2) {
+						result = choice;
+						break;
+					}
+					if (*choice == 0) {
+						if (!followInput(*current, 0)) break;
+						continue;
+					}
+					if (!HasParent(*current)) {
+						result = Project();
+						break;
+					}
+					current = Parent(*current);
+					if (!current || current->at("type") != "Node_Group") break;
+				}
+				for (const Json *node : Path)
+					Cache.emplace(node, result);
+				return result;
+			}
+		};
+
+		// Instance children retain their original source socket order and class. A legacy image.*
+		// shortcut is local to one saved node and cannot supply a different instance's interface.
+		using GroupSourceSet =
+			std::set<std::string_view, std::less<>, detail::ImportAllocator<std::string_view>>;
+		bool CanonicalInstanceGroups(const Json &root, GroupSourceSet &groups, std::string &failure) {
+			const auto &nodes = root.at("nodes");
+			for (const auto &node : nodes) {
+				if (node.at("type") != "Node_Group") continue;
+				const auto instance = node.find("instanceBase");
+				if (instance == node.end() ||
+					(instance->is_string() && instance->get_ref<const std::string &>().empty()))
+					continue;
+				if (!instance->is_string())
+					return Fail(failure, "source group instance base is not a durable name");
+				groups.insert(node.at("id").get_ref<const std::string &>());
+				groups.insert(instance->get_ref<const std::string &>());
+			}
+			for (size_t pass = 0; pass <= nodes.size(); ++pass) {
+				const size_t count = groups.size();
+				for (const auto &node : nodes) {
+					if (node.at("type") != "Node_Group") continue;
+					const auto &id = node.at("id").get_ref<const std::string &>();
+					const auto parent = node.find("group");
+					if (parent != node.end() && parent->is_string() &&
+						groups.contains(parent->get_ref<const std::string &>()))
+						groups.insert(id);
+					if (!groups.contains(id)) continue;
+					const auto instance = node.find("instanceBase");
+					if (instance != node.end() && instance->is_string() &&
+						!instance->get_ref<const std::string &>().empty())
+						groups.insert(instance->get_ref<const std::string &>());
+				}
+				if (groups.size() == count) return true;
+			}
+			return Fail(failure, "source group instance closure exceeds its bounded membership count");
+		}
+
+		// Group sockets are ordered by saved child IDs, independently of their display ordering.
+		bool ProjectOrdinaryGroups(
+			const Json &root,
+			PxcxImport &result,
+			std::string &failure,
+			uint64_t previousDocumentBytes,
+			detail::ImportBudget &operationBudget
+		) {
+			using imagegraph::Group;
+			using imagegraph::Junction;
+			using imagegraph::PortDirection;
+			using imagegraph::ValueType;
+			struct Boundary {
+				std::string GroupId;
+				PortDirection Direction;
+				size_t Index;
+				std::string JunctionId;
+			};
+			const auto &sourceNodes = root.at("nodes");
+			const auto holdText = [&](std::string_view text) {
+				return operationBudget.Hold(std::max<size_t>(text.size(), 15) + 1);
+			};
+			using SourcePair = std::pair<const std::string_view, const Json *>;
+			using GroupPair = std::pair<const std::string_view, size_t>;
+			using BoundaryPair = std::pair<const std::string_view, Boundary>;
+			// Keys borrow the immutable archive JSON. Actual tree nodes and Boundary names are charged.
+			std::map<std::string_view, const Json *, std::less<>, detail::ImportAllocator<SourcePair>>
+				sources(std::less<>{}, detail::ImportAllocator<SourcePair>{operationBudget});
+			std::map<std::string_view, size_t, std::less<>, detail::ImportAllocator<GroupPair>> groups(
+				std::less<>{}, detail::ImportAllocator<GroupPair>{operationBudget}
+			);
+			std::map<std::string_view, Boundary, std::less<>, detail::ImportAllocator<BoundaryPair>>
+				boundaries(std::less<>{}, detail::ImportAllocator<BoundaryPair>{operationBudget});
+			try {
+				for (const Json &source : sourceNodes)
+					sources.emplace(source.at("id").get_ref<const std::string &>(), &source);
+				const auto parentOf = [&](const Json &source, std::string &parent) {
+					const auto stored = source.find("group");
+					if (stored == source.end() || (stored->is_number_integer() && *stored == -1)) return true;
+					if (!stored->is_string()) return false;
+					const auto &text = stored->get_ref<const std::string &>();
+					if (text.size() > imagegraph::Limits::MaximumTextBytes) return false;
+					if (!holdText(text)) return false;
+					parent = text;
+					return true;
+				};
+				const auto membership = [&](Node &node) {
+					std::string parent;
+					if (!parentOf(*sources.at(node.Id), parent) ||
+						(!parent.empty() && !groups.contains(parent))) {
+						if (!node.Type.starts_with("pxcx.opaque/"))
+							return Fail(failure, "source child has an unknown or non-group parent");
+						node.GroupId.clear();
+						result.Diagnostics.push_back(
+							{imagegraph::Status::UnsupportedExecution,
+							 node.Id,
+							 "group",
+							 "opaque source group membership remains in the archive"}
+						);
+						return true;
+					}
+					node.GroupId = std::move(parent);
+					return true;
+				};
+				for (const Json &source : sourceNodes) {
+					if (source.at("type") != "Node_Group") continue;
+					if (result.Graph.Groups.size() == imagegraph::Limits::MaximumGroups)
+						return Fail(failure, "source group count exceeds the native limit");
+
+					if (source.contains("render") && source.at("render") != true)
+						return Fail(failure, "source disabled group rendering is not represented");
+
+					Group group;
+					group.Id = source.at("id").get<std::string>();
+					if (source.contains("instanceBase")) {
+						if (!source.at("instanceBase").is_string() ||
+							source.at("instanceBase").get_ref<const std::string &>().size() >
+								imagegraph::Limits::MaximumTextBytes)
+							return Fail(failure, "group instance base is not a bounded durable ID");
+						group.InstanceBase = source.at("instanceBase").get<std::string>();
+					}
+					if (const auto name = source.find("name"); name != source.end()) {
+						if (!name->is_string()) return Fail(failure, "source group name is not text");
+						const auto &text = name->get_ref<const std::string &>();
+						if (text.size() > imagegraph::Limits::MaximumTextBytes)
+							return Fail(failure, "source group name exceeds the native limit");
+						group.Name = text;
+					} else
+						group.Name = "Group";
+					if (group.Name.size() > imagegraph::Limits::MaximumTextBytes ||
+						!parentOf(source, group.ParentId))
+						return Fail(failure, "source group identity exceeds the native limits");
+					const auto attributes = source.find("attri");
+					if (attributes != source.end()) {
+						if (!attributes->is_object())
+							return Fail(failure, "source group attributes are not an object");
+						group.ColorDepth = 3;
+						if (const auto depth = attributes->find("color_depth"); depth != attributes->end()) {
+							if (!WholeNumber(*depth, group.ColorDepth) || group.ColorDepth < 0 ||
+								group.ColorDepth > 8)
+								return Fail(
+									failure, "source group color_depth is outside its verified range"
+								);
+						}
+					}
+					if (attributes != source.end()) {
+						const Json defaults = {
+							{"pure_function", true},
+							{"lock_input", false},
+							{"always_topo", false},
+							{"node_width", 0},
+							{"node_height", 0},
+							{"node_param_width", 192},
+							{"outp_meta", false},
+							{"color", -1},
+							{"update_graph", true},
+							{"show_update_trigger", false},
+							{"array_process", 0},
+							{"path", ""}
+						};
+						for (const auto &[key, stored] : attributes->items()) {
+							if (key == "color_depth" || key == "interpolate" || key == "oversample" ||
+								key == "custom_input_list" || key == "custom_output_list")
+								continue;
+							if (key == "input_display_list" || key == "output_display_list") {
+								if (!stored.is_array())
+									return Fail(failure, "source group display list is not an array");
+								result.Diagnostics.push_back(
+									{imagegraph::Status::UnsupportedExecution,
+									 group.Id,
+									 key,
+									 "source group display ordering remains in the archive"}
+								);
+								continue;
+							}
+							const auto expected = defaults.find(key);
+							if (expected == defaults.end() || stored != *expected)
+								return Fail(failure, "source group attribute " + key + " is not represented");
+						}
+					}
+					if (source.contains("tool")) {
+						int64_t tool;
+						if (!WholeNumber(source.at("tool"), tool) || tool != -4)
+							return Fail(failure, "source group tool node is not represented");
+					}
+					for (std::string_view key : {"interpolate", "oversample"}) {
+						// Source constructors inherit (0); saved stripped attributes restore Pixel/Empty (1).
+						int64_t choice = attributes == source.end() ? 0 : 1;
+						if (attributes != source.end() && attributes->contains(key)) {
+							if (!WholeNumber(attributes->at(key), choice))
+								return Fail(failure, "source group sampling attribute is not integral");
+						}
+						if (choice < 0 || choice > (key == "interpolate" ? 7 : 13))
+							return Fail(
+								failure, "source group sampling attribute is outside its source range"
+							);
+						if (key == "interpolate")
+							group.Interpolation = choice;
+						else
+							group.Oversample = choice;
+					}
+					groups.emplace(
+						sources.at(group.Id)->at("id").get_ref<const std::string &>(),
+						result.Graph.Groups.size()
+					);
+					result.Graph.Groups.push_back(std::move(group));
+				}
+				if (groups.empty()) {
+					for (Node &node : result.Graph.Nodes)
+						if (!membership(node)) return false;
+					return true;
+				}
+				for (const Group &group : result.Graph.Groups) {
+					std::string_view parent = group.ParentId;
+					for (size_t depth = 0; !parent.empty(); ++depth) {
+						const auto found = groups.find(std::string(parent));
+						if (depth >= groups.size() || found == groups.end())
+							return Fail(failure, "source group hierarchy has an unknown parent or cycle");
+						parent = result.Graph.Groups[found->second].ParentId;
+					}
+				}
+				for (Group &group : result.Graph.Groups) {
+					const Json &source = *sources.at(group.Id);
+					const auto attributes = source.find("attri");
+					for (const auto &[key, direction, kind] :
+						 {std::tuple{"custom_input_list", PortDirection::Input, "Node_Group_Input"},
+						  std::tuple{"custom_output_list", PortDirection::Output, "Node_Group_Output"}}) {
+						if (attributes == source.end() || !attributes->contains(key)) continue;
+						const Json &list = attributes->at(key);
+						if (!list.is_array() ||
+							list.size() > imagegraph::Limits::MaximumGroupPorts - group.Ports.size())
+							return Fail(failure, "source group socket list exceeds the native limit");
+						for (size_t index = 0; index < list.size(); ++index) {
+							if (!list[index].is_string())
+								return Fail(failure, "source group socket ID is not text");
+							const auto &storedId = list[index].get_ref<const std::string &>();
+							if (storedId.empty() ||
+								storedId.size() > imagegraph::Limits::MaximumTextBytes -
+													  std::string_view("/parent-value").size())
+								return Fail(failure, "source group socket ID exceeds the native limit");
+							const std::string &id = storedId;
+							const auto child = sources.find(id);
+							std::string parent;
+							if (!holdText(group.Id) || !operationBudget.Hold(id.size() + 13 + 16))
+								return Fail(failure, "source boundary names exceed the operation budget");
+							std::string junctionId;
+							junctionId.reserve(id.size() + 13);
+							junctionId.append(id);
+							junctionId.append("/parent-value");
+							if (child == sources.end() || child->second->at("type") != kind ||
+								!parentOf(*child->second, parent) || parent != group.Id ||
+								!boundaries
+									 .emplace(id, Boundary{group.Id, direction, index, std::move(junctionId)})
+									 .second)
+								return Fail(
+									failure,
+									"source group socket has a missing, duplicated or unrelated child ID"
+								);
+
+							if (result.Graph.Junctions.size() == imagegraph::Limits::MaximumJunctions)
+								return Fail(failure, "source group junction count exceeds the native limit");
+							result.Graph.Junctions.push_back(
+								Junction{
+									boundaries.at(id).JunctionId,
+									group.Id,
+									ValueType::Any,
+									direction == PortDirection::Input ? std::optional<imagegraph::Value>{-1.0}
+																	  : std::nullopt
+								}
+							);
+							if (boundaries.at(id).JunctionId.size() > imagegraph::Limits::MaximumTextBytes ||
+								sources.contains(boundaries.at(id).JunctionId))
+								return Fail(
+									failure, "derived boundary junction ID conflicts or exceeds text bounds"
+								);
+							group.Ports.push_back({id, boundaries.at(id).JunctionId, direction, id});
+							auto control = std::find_if(
+								result.Graph.Nodes.begin(), result.Graph.Nodes.end(), [&](const Node &n) {
+									return n.Id == id;
+								}
+							);
+							if (control == result.Graph.Nodes.end())
+								return Fail(failure, "group boundary control node is absent");
+							const auto *entry = imagegraph::FindCatalogueSource(kind);
+							if (!entry) return Fail(failure, "group boundary has no source-backed schema");
+							if (control->Type != entry->Type) {
+
+								const auto replacementBytes = imagegraph::NodeClonePayloadBytes(*control);
+								if (!replacementBytes || !operationBudget.Hold(*replacementBytes))
+									return Fail(
+										failure,
+										"boundary control replacement exceeds native projection operation "
+										"bounds"
+									);
+								imagegraph::Document animation;
+								Node replacement = *control;
+								replacement.Type = entry->Type;
+								replacement.Values.clear();
+								std::string reason;
+								if (!CatalogueNode(
+										*child->second,
+										*entry,
+										id,
+										replacement,
+										animation,
+										reason,
+										&operationBudget
+									))
+									return Fail(failure, "group boundary controls: " + reason);
+								*control = std::move(replacement);
+								if (!AdmitNativeSlots(
+										result.Graph.Keyframes,
+										result.Graph.Keyframes.size() + animation.Keyframes.size(),
+										&operationBudget
+									) ||
+									!AdmitNativeSlots(
+										result.Graph.Tracks,
+										result.Graph.Tracks.size() + animation.Tracks.size(),
+										&operationBudget
+									))
+									return Fail(
+										failure, "native animator publication exceeds operation bounds"
+									);
+								result.Graph.Keyframes.insert(
+									result.Graph.Keyframes.end(),
+									std::make_move_iterator(animation.Keyframes.begin()),
+									std::make_move_iterator(animation.Keyframes.end())
+								);
+								result.Graph.Tracks.insert(
+									result.Graph.Tracks.end(),
+									std::make_move_iterator(animation.Tracks.begin()),
+									std::make_move_iterator(animation.Tracks.end())
+								);
+							}
+							control->GroupId = group.Id;
+							if (child->second->contains("instanceBase"))
+								control->InstanceBase = child->second->at("instanceBase").get<std::string>();
+							if (direction == PortDirection::Input) {
+								const Json *record = Input(source, index);
+								if (record) {
+									if (record->contains("anim") && !record->at("anim").is_boolean())
+										return Fail(failure, "group parent animator mode is malformed");
+									const bool animated = record->value("anim", false);
+									auto &modes = animated ? control->SourceAnimatedInputs
+														   : control->SourceStaticInputs;
+									const size_t count = modes.size() + 1;
+									if (count > imagegraph::Limits::MaximumArrayElements ||
+										!holdText("parent_value") ||
+										(count > modes.capacity() &&
+										 !operationBudget.Hold(count * sizeof(std::string))))
+										return Fail(
+											failure, "group parent animator mode exceeds the operation budget"
+										);
+									modes.reserve(count);
+									modes.emplace_back("parent_value");
+								}
+								if (record) {
+									imagegraph::Document animation;
+									const auto *parent =
+										imagegraph::FindCatalogueInput(*entry, "parent_value");
+									std::erase_if(control->Values, [](const auto &v) {
+										return v.Port == "parent_value";
+									});
+									std::string reason;
+									if (!parent || !CatalogueInputValue(
+													   *record,
+													   *entry,
+													   *parent,
+													   id,
+													   *control,
+													   animation,
+													   reason,
+													   true,
+													   &operationBudget
+												   ))
+										return Fail(failure, "group parent value: " + reason);
+									if (const auto authored = std::find_if(
+											control->Values.begin(),
+											control->Values.end(),
+											[](const auto &v) { return v.Port == "parent_value"; }
+										);
+										authored != control->Values.end()) {
+										const auto bytes = imagegraph::ValueClonePayloadBytes(authored->Data);
+										if (!bytes || !operationBudget.Hold(*bytes))
+											return Fail(
+												failure, "parent junction value copy exceeds operation bounds"
+											);
+										result.Graph.Junctions.back().Default =
+											imagegraph::Value(authored->Data);
+									}
+									if (!AdmitNativeSlots(
+											result.Graph.Keyframes,
+											result.Graph.Keyframes.size() + animation.Keyframes.size(),
+											&operationBudget
+										) ||
+										!AdmitNativeSlots(
+											result.Graph.Tracks,
+											result.Graph.Tracks.size() + animation.Tracks.size(),
+											&operationBudget
+										))
+										return Fail(
+											failure, "native animator publication exceeds operation bounds"
+										);
+									result.Graph.Keyframes.insert(
+										result.Graph.Keyframes.end(),
+										std::make_move_iterator(animation.Keyframes.begin()),
+										std::make_move_iterator(animation.Keyframes.end())
+									);
+									result.Graph.Tracks.insert(
+										result.Graph.Tracks.end(),
+										std::make_move_iterator(animation.Tracks.begin()),
+										std::make_move_iterator(animation.Tracks.end())
+									);
+								}
+							}
+						}
+					}
+				}
+				for (const Json &source : sourceNodes) {
+					const std::string type = source.at("type").get<std::string>();
+					if ((type == "Node_Group_Input" || type == "Node_Group_Output") &&
+						!boundaries.contains(source.at("id").get<std::string>()))
+						return Fail(failure, "source group IO is absent from its saved socket list");
+				}
+				const auto route = [&](std::string &nodeId, std::string &port, uint32_t index, bool output) {
+					const auto group = groups.find(nodeId);
+					if (group != groups.end()) {
+						const auto direction = output ? PortDirection::Output : PortDirection::Input;
+						for (const auto &[id, boundary] : boundaries)
+							if (boundary.GroupId == nodeId && boundary.Direction == direction &&
+								boundary.Index == index) {
+								nodeId = boundary.JunctionId;
+								port = "value";
+								return true;
+							}
+						return false;
+					}
+					return true;
+				};
+				for (size_t index = 0; index < result.Source.Links.size(); ++index) {
+					const auto &stored = result.Source.Links[index];
+					auto &link = result.Graph.Links[index];
+					const Json *record = Input(*sources.at(stored.ToNode), stored.ToInputIndex);
+					int64_t tag = 0;
+					const bool boundaryLink =
+						groups.contains(stored.FromNode) || groups.contains(stored.ToNode) ||
+						boundaries.contains(stored.FromNode) || boundaries.contains(stored.ToNode);
+					if (boundaryLink && record && record->contains("from_tag") &&
+						(!WholeNumber(record->at("from_tag"), tag) || tag != 0))
+						return Fail(failure, "source group boundary tag interpretation is not represented");
+					if (const auto boundary = boundaries.find(stored.FromNode); boundary != boundaries.end())
+						link.FromPort = "value";
+					if (const auto boundary = boundaries.find(stored.ToNode); boundary != boundaries.end()) {
+						const auto *entry = imagegraph::FindCatalogueSource(
+							boundary->second.Direction == PortDirection::Input ? "Node_Group_Input"
+																			   : "Node_Group_Output"
+						);
+						const auto *input = entry ? imagegraph::FindCatalogueInputIndex(
+														*entry, static_cast<int32_t>(stored.ToInputIndex)
+													)
+												  : nullptr;
+						if (!input)
+							return Fail(failure, "group control input index has no declared source mapping");
+						link.ToPort = input->Id;
+					}
+					if (!route(link.FromNode, link.FromPort, stored.FromIndex, true) ||
+						!route(link.ToNode, link.ToPort, stored.ToInputIndex, false))
+						return Fail(failure, "source group socket connection index is not in its saved list");
+				}
+				if (boundaries.size() > (imagegraph::Limits::MaximumLinks - result.Graph.Links.size()) / 1)
+					return Fail(failure, "group boundary routes exceed link limits");
+				for (const auto &[id, boundary] : boundaries) {
+					if (boundary.Direction == PortDirection::Input) {
+						const bool animated = std::any_of(
+							result.Graph.Keyframes.begin(),
+							result.Graph.Keyframes.end(),
+							[&](const auto &key) { return key.NodeId == id && key.Port == "parent_value"; }
+						);
+						const bool linked = std::any_of(
+							result.Graph.Links.begin(), result.Graph.Links.end(), [&](const auto &link) {
+								return link.ToNode == boundary.JunctionId;
+							}
+						);
+						if (linked || !animated) {
+							if (!holdText(boundary.JunctionId) || !holdText(id) || !holdText("value") ||
+								!holdText("parent_value"))
+								return Fail(
+									failure, "source boundary route names exceed the operation budget"
+								);
+							result.Graph.Links.push_back(
+								{boundary.JunctionId, "value", std::string(id), "parent_value"}
+							);
+						}
+					} else {
+						if (!holdText(id) || !holdText(boundary.JunctionId) || !holdText("value") ||
+							!holdText("value"))
+							return Fail(failure, "source boundary route names exceed the operation budget");
+						result.Graph.Links.push_back(
+							{std::string(id), "value", boundary.JunctionId, "value"}
+						);
+					}
+				}
+
+				for (auto &output : result.Graph.Outputs) {
+					for (const auto &stored : result.Source.Links)
+						if (stored.ToNode == output.Id && stored.ToInputIndex == 0 &&
+							!route(output.NodeId, output.Port, stored.FromIndex, true))
+							return Fail(failure, "source project output uses an unknown group socket");
+				}
+				for (auto &output : result.Graph.Outputs) {
+					for (size_t hops = 0; hops < boundaries.size(); ++hops) {
+						const auto boundary =
+							std::find_if(boundaries.begin(), boundaries.end(), [&](const auto &entry) {
+								return entry.second.JunctionId == output.NodeId;
+							});
+						if (boundary == boundaries.end()) break;
+						const auto incoming = std::find_if(
+							result.Graph.Links.begin(), result.Graph.Links.end(), [&](const auto &link) {
+								return link.ToNode == output.NodeId && link.ToPort == "value";
+							}
+						);
+						if (incoming == result.Graph.Links.end())
+							return Fail(failure, "source group output route has no producer");
+						output.NodeId = incoming->FromNode;
+						output.Port = incoming->FromPort;
+					}
+				}
+				for (Node &node : result.Graph.Nodes) {
+					if (groups.contains(node.Id)) continue;
+					if (!node.Type.starts_with("pxcx.opaque/") &&
+						sources.at(node.Id)->contains("instanceBase"))
+						node.InstanceBase = sources.at(node.Id)->at("instanceBase").get<std::string>();
+					if (!membership(node)) return false;
+				}
+				const auto ownerOf = [&](std::string_view id) -> std::string_view {
+					if (const auto found = boundaries.find(std::string(id)); found != boundaries.end())
+						return found->second.GroupId;
+					for (const auto &[child, boundary] : boundaries)
+						if (boundary.JunctionId == id) return boundary.GroupId;
+					const auto node = std::find_if(
+						result.Graph.Nodes.begin(), result.Graph.Nodes.end(), [&](const Node &value) {
+							return value.Id == id;
+						}
+					);
+					return node == result.Graph.Nodes.end() ? std::string_view{} : node->GroupId;
+				};
+				for (const auto &link : result.Graph.Links) {
+					const auto from = ownerOf(link.FromNode), to = ownerOf(link.ToNode);
+					if (from == to) continue;
+					const auto boundaryFor = [&](std::string_view id) {
+						return std::find_if(boundaries.begin(), boundaries.end(), [&](const auto &entry) {
+							return entry.second.JunctionId == id;
+						});
+					};
+					const auto source = boundaryFor(link.FromNode), target = boundaryFor(link.ToNode);
+					const bool leavesChild = source != boundaries.end() &&
+											 source->second.Direction == PortDirection::Output &&
+											 result.Graph.Groups[groups.at(from)].ParentId == to;
+					const bool entersChild = target != boundaries.end() &&
+											 target->second.Direction == PortDirection::Input &&
+											 result.Graph.Groups[groups.at(to)].ParentId == from;
+					if (!leavesChild && !entersChild)
+						return Fail(failure, "source group link crosses an undeclared native boundary");
+				}
+
+				// Only represented boundary nodes disappear; their complete source remains in the archive.
+				std::erase_if(result.Graph.Nodes, [&](const Node &node) {
+					if (!groups.contains(node.Id)) return false;
+					if (node.Type.starts_with("pc.")) --result.CatalogueNodes;
+					return true;
+				});
+				std::erase_if(result.Diagnostics, [&](const auto &diagnostic) {
+					return (groups.contains(diagnostic.NodeId) || boundaries.contains(diagnostic.NodeId)) &&
+						   diagnostic.Message != "source group display ordering remains in the archive";
+				});
+				if (std::any_of(
+						result.Graph.Groups.begin(), result.Graph.Groups.end(), [](const Group &group) {
+							return group.ColorDepth != 1;
+						}
+					))
+					result.Graph.FormatVersion = 9;
+				if (!boundaries.empty()) result.Graph.FormatVersion = 9;
+
+				if (!detail::CaptureGroupPrebinding(
+						result.Graph, result.GroupPrebinding, previousDocumentBytes, operationBudget, failure
+					))
+					return false;
+				if (!detail::ResolveImportedGroupInstances(
+						root,
+						result.Graph,
+						failure,
+						previousDocumentBytes,
+						imagegraph::Limits::MaximumEvaluationBytes,
+						&operationBudget
+					))
+					return false;
+				return true;
+			} catch (const std::bad_alloc &) {
+				return Fail(failure, "source group projection exceeds the operation allocation budget");
+			}
+		}
+
+		// Every link touching a catalogue node must land on a declared source index.
+		bool CatalogueLinksRepresentable(
+			const bake::PxcxArchive &archive,
+			const bake::PxcxNodeFact &node,
+			const imagegraph::CatalogueEntry &entry,
+			std::string &reason
+		);
+
+		// Output and input ports for a link end on a catalogue node.
+		std::string CatalogueOutputPort(const imagegraph::CatalogueEntry &entry, uint32_t index) {
+			for (const imagegraph::CatalogueOutput &output : entry.Outputs)
+				if (output.SourceIndex == static_cast<int32_t>(index)) return std::string(output.Id);
+			// node_data.gml getOutputIndex: 1000 + n connects the bypass junction of input n.
+			if (index >= 1000) {
+				if (const auto *input =
+						imagegraph::FindCatalogueInputIndex(entry, static_cast<int32_t>(index - 1000)))
+					return std::string(input->Id) + ".bypass";
+			}
+			return {};
+		}
+		std::string CatalogueInputPort(const imagegraph::CatalogueEntry &entry, uint32_t index) {
+			if (const auto *input = imagegraph::FindCatalogueInputIndex(entry, static_cast<int32_t>(index)))
+				return std::string(input->Id);
+			if (entry.DynamicGroupLength <= 0 || static_cast<int32_t>(index) < entry.DynamicFixedLength)
+				return {};
+			const int32_t relative = static_cast<int32_t>(index) - entry.DynamicFixedLength;
+			for (const imagegraph::CatalogueInput &input : entry.DynamicTemplate)
+				if (input.SourceIndex == relative % entry.DynamicGroupLength)
+					return std::string(input.Id) + "_" + std::to_string(relative / entry.DynamicGroupLength);
+			return {};
+		}
+	}
+
+	namespace {
+		bool CatalogueLinksRepresentable(
+			const bake::PxcxArchive &archive,
+			const bake::PxcxNodeFact &node,
+			const imagegraph::CatalogueEntry &entry,
+			std::string &reason
+		) {
+			for (const bake::PxcxLinkFact &link : archive.Links) {
+				if (link.FromNode == node.Id && CatalogueOutputPort(entry, link.FromIndex).empty()) {
+					reason =
+						"output index " + std::to_string(link.FromIndex) + " is not in the source catalogue";
+					return false;
+				}
+				if (link.ToNode == node.Id && CatalogueInputPort(entry, link.ToInputIndex).empty()) {
+					reason = "linked input index " + std::to_string(link.ToInputIndex) +
+							 " is not in the source catalogue";
+					return false;
+				}
+			}
+			return true;
+		}
+
+		// Project attributes: surface size, inherited sampling attributes and palette.
+		void ProjectSettings(const Json &root, PxcxImport &result) {
+			const auto attributes = root.find("attributes");
+			if (attributes == root.end() || !attributes->is_object()) return;
+			imagegraph::ProjectSettings project;
+			const auto dimension = attributes->find("surface_dimension");
+			std::array<double, 4> size{};
+			if (dimension == attributes->end() || !Numbers(*dimension, 2, size) || size[0] < 1 ||
+				size[1] < 1 || size[0] > imagegraph::Limits::MaximumDimension ||
+				size[1] > imagegraph::Limits::MaximumDimension || std::trunc(size[0]) != size[0] ||
+				std::trunc(size[1]) != size[1])
+				return;
+			project.SurfaceWidth = static_cast<uint32_t>(size[0]);
+			project.SurfaceHeight = static_cast<uint32_t>(size[1]);
+			int64_t mode = 0;
+			if (attributes->contains("interpolate") && WholeNumber((*attributes)["interpolate"], mode) &&
+				mode >= 0 && mode <= 6)
+				project.Interpolation = mode;
+			if (attributes->contains("oversample") && WholeNumber((*attributes)["oversample"], mode) &&
+				mode >= 0 && mode <= 12)
+				project.Oversample = mode;
+			const auto palette = attributes->find("palette");
+			if (palette != attributes->end() && palette->is_array() &&
+				palette->size() <= imagegraph::Limits::MaximumProjectPaletteEntries) {
+				std::vector<Colour> colours;
+				for (const Json &entry : *palette) {
+					Colour color;
+					if (!PackedColour(entry, color)) return;
+					colours.push_back(color);
+				}
+				project.Palette = std::move(colours);
+			}
+			result.Graph.Project = std::move(project);
+		}
+
+		// Source previewGrid restores conditionally; ordered previewRuler restores independently.
+		void PreviewSettings(const Json &root, PxcxImport &result, const PxcxImportOptions &options) {
+			const auto opaque = [&](std::string_view port, imagegraph::Status status, std::string reason) {
+				result.Diagnostics.push_back(
+					{status,
+					 "",
+					 std::string(port),
+					 "PXCX preview settings stay opaque: " + std::move(reason) + "; source bytes retained"}
+				);
+			};
+			if (const auto grid = root.find("previewGrid");
+				options.SavePreviewSettings && grid != root.end()) {
+				imagegraph::ProjectSettings project =
+					result.Graph.Project.value_or(imagegraph::ProjectSettings{});
+				bool valid = grid->is_object();
+				if (valid) {
+					for (const auto &[name, destination] :
+						 {std::pair{"show", &project.PreviewGrid.Show},
+						  std::pair{"snap", &project.PreviewGrid.Snap}}) {
+						if (const auto value = grid->find(name); value != grid->end()) {
+							if (!value->is_boolean())
+								valid = false;
+							else
+								*destination = value->get<bool>();
+						}
+					}
+					if (const auto value = grid->find("size"); value != grid->end()) {
+						std::array<double, 4> size{};
+						if (!Numbers(*value, 2, size) || size[0] < 0 || size[1] < 0)
+							valid = false;
+						else
+							project.PreviewGrid.Size = {size[0], size[1]};
+					}
+				}
+				if (!valid || !imagegraph::ValidProjectPreviewSettings(project))
+					opaque("previewGrid", imagegraph::Status::InvalidValue, "grid show/snap/size is invalid");
+				else {
+					result.Graph.Project = std::move(project);
+					result.Graph.FormatVersion = 9;
+				}
+			}
+			if (const auto rulers = root.find("previewRuler"); rulers != root.end()) {
+				if (!rulers->is_array()) {
+					opaque(
+						"previewRuler", imagegraph::Status::InvalidValue, "rulers must be an ordered array"
+					);
+					return;
+				}
+				if (rulers->size() > imagegraph::Limits::MaximumArrayElements) {
+					opaque(
+						"previewRuler", imagegraph::Status::LimitExceeded, "ruler count exceeds native limit"
+					);
+					return;
+				}
+				std::vector<imagegraph::PreviewRulerGuide> guides;
+				guides.reserve(rulers->size());
+				for (const Json &ruler : *rulers) {
+					std::array<double, 4> pair{};
+					if (!Numbers(ruler, 2, pair) || (pair[0] != 0 && pair[0] != 1)) {
+						opaque(
+							"previewRuler",
+							imagegraph::Status::InvalidValue,
+							"ruler axis/position pair is invalid"
+						);
+						return;
+					}
+					guides.push_back(
+						{pair[0] == 0 ? imagegraph::PreviewRulerAxis::Horizontal
+									  : imagegraph::PreviewRulerAxis::Vertical,
+						 pair[1]}
+					);
+				}
+				imagegraph::ProjectSettings project =
+					result.Graph.Project.value_or(imagegraph::ProjectSettings{});
+				project.PreviewRulers = std::move(guides);
+				result.Graph.Project = std::move(project);
+				result.Graph.FormatVersion = 9;
+			}
+		}
+
+		// The project animator: total frames, frame rate and end behavior (loop, stop, pingpong).
+		void Timeline(const Json &root, PxcxImport &result) {
+			const auto animator = root.find("animator");
+			if (animator == root.end() || !animator->is_object()) return;
+			int64_t frames = 0, playback = 0;
+			if (!animator->contains("frames_total") || !WholeNumber((*animator)["frames_total"], frames) ||
+				frames < 1 || static_cast<uint64_t>(frames) > imagegraph::Limits::MaximumTick)
+				return;
+			if (!animator->contains("playback") || !WholeNumber((*animator)["playback"], playback) ||
+				playback < 0 || playback > 2)
+				return;
+			const auto rate = animator->find("framerate");
+			if (rate == animator->end() || !rate->is_number() || !(rate->get<double>() > 0) ||
+				!std::isfinite(rate->get<double>()))
+				return;
+			static constexpr std::array<std::string_view, 3> ENDS = {"loop", "stop", "pingpong"};
+			imagegraph::TimelineSettings timeline;
+			timeline.Frames = static_cast<uint64_t>(frames);
+			timeline.First = 0;
+			timeline.Last = static_cast<uint64_t>(frames) - 1;
+			const auto unsupportedRange = [&](std::string_view port, std::string message) {
+				result.Diagnostics.push_back(
+					{imagegraph::Status::UnsupportedExecution,
+					 "",
+					 std::string(port),
+					 "PXCX timeline stays opaque: " + std::move(message) + "; source bytes retained"}
+				);
+			};
+			// The saved authoring bounds are one-based; source getters subtract one. Region selection
+			// is transient and cannot be inferred from the saved list of available regions.
+			std::optional<int64_t> start, end;
+			for (const auto &[key, sourceBound, bound] :
+				 {std::tuple{"frame_range_start", &start, &timeline.First},
+				  std::tuple{"frame_range_end", &end, &timeline.Last}}) {
+				const auto found = animator->find(key);
+				if (found == animator->end() || found->is_null()) continue;
+				int64_t frame = 0;
+				if (!WholeNumber(*found, frame) || frame < 1 || frame > frames) {
+					unsupportedRange(key, "saved frame bound must be an integer from 1 through frames_total");
+					return;
+				}
+				*sourceBound = frame;
+				*bound = static_cast<uint64_t>(frame - 1);
+			}
+			if (timeline.First > timeline.Last) {
+				unsupportedRange("frame_range", "saved frame bounds are reversed");
+				return;
+			}
+			// Source step clears equal selected bounds, while getters initially expose one frame.
+			// Neither a persistent one-frame range nor silent clearing preserves both behaviors.
+			if ((start || end) && start.value_or(0) == end.value_or(frames)) {
+				unsupportedRange("frame_range", "equal saved bounds are cleared by source playback step");
+				return;
+			}
+			timeline.Playback = std::string(ENDS[static_cast<size_t>(playback)]);
+			timeline.FramesPerSecond = rate->get<double>();
+			result.Graph.Timeline = std::move(timeline);
+		}
 	}
 
 	bool ImportPxcxImageGraph(const bake::PxcxArchive &archive, PxcxImport &out, std::string &failure) {
+		return ImportPxcxImageGraph(archive, out, failure, {});
+	}
+
+	bool ImportPxcxImageGraph(
+		const bake::PxcxArchive &archive,
+		PxcxImport &out,
+		std::string &failure,
+		const PxcxImportOptions &options
+	) try {
 		failure.clear();
+		if (!options.MaximumOperationBytes ||
+			options.MaximumOperationBytes > imagegraph::Limits::MaximumEvaluationBytes)
+			return Fail(failure, "pxcx import operation byte limit is invalid");
+		auto previousDocumentBytes = imagegraph::DocumentRetainedPayloadBytes(out.Graph);
+		if (!previousDocumentBytes)
+			return Fail(failure, "previous native projection has invalid retained payload");
+		if (out.GroupPrebinding) {
+			const auto priorSnapshotBytes = imagegraph::DocumentRetainedPayloadBytes(*out.GroupPrebinding);
+			if (!priorSnapshotBytes || *priorSnapshotBytes > UINT64_MAX - *previousDocumentBytes)
+				return Fail(failure, "previous local Group projection has invalid retained payload");
+			*previousDocumentBytes += *priorSnapshotBytes;
+		}
+		const auto priorAdd = [&](uint64_t bytes) {
+			if (bytes > UINT64_MAX - *previousDocumentBytes) return false;
+			*previousDocumentBytes += bytes;
+			return true;
+		};
+		if (out.GroupBootstrap.capacity() > UINT64_MAX / sizeof(PxcxGroupBootstrapRecord) ||
+			out.GroupBindings.capacity() > UINT64_MAX / sizeof(imagegraph::GroupSubtypeBinding) ||
+			!priorAdd(out.GroupBootstrap.capacity() * sizeof(PxcxGroupBootstrapRecord)) ||
+			!priorAdd(out.GroupBindings.capacity() * sizeof(imagegraph::GroupSubtypeBinding)))
+			return Fail(failure, "previous Group callback storage overflows");
+		for (const auto &record : out.GroupBootstrap)
+			if (!priorAdd(record.NodeId.capacity() + 1))
+				return Fail(failure, "previous Group callback names overflow");
+		for (const auto &binding : out.GroupBindings)
+			if (!priorAdd(binding.NodeId.capacity() + 1) || !priorAdd(binding.OwnerId.capacity() + 1) ||
+				!priorAdd(binding.Port.capacity() + 1))
+				return Fail(failure, "previous Group binding names overflow");
+		if (*previousDocumentBytes > options.MaximumOperationBytes)
+			return Fail(failure, "previous native Group state exceeds import operation bounds");
 		if (archive.OriginalBytes.empty())
 			return Fail(failure, "pxcx import requires original archive bytes");
 		PxcxImport result;
-		result.Graph.FormatVersion = 3;
+		result.Options = options;
+		result.Graph.FormatVersion = 8;
 		if (!bake::ReadPxcx(archive.OriginalBytes, result.Source, failure)) return false;
 		if (result.Source.GraphJson != archive.GraphJson || result.Source.Nodes != archive.Nodes ||
 			result.Source.Links != archive.Links || result.Source.MetadataNumber != archive.MetadataNumber ||
@@ -944,15 +3088,56 @@ namespace engine::imagegraphio {
 			return Fail(failure, "pxcx import JSON parse failed: " + std::string(error.what()));
 		}
 		const Json &sourceNodes = root.at("nodes");
+		if (archive.MetadataNumber == SUPPORTED_VERSION) {
+			ProjectSettings(root, result);
+			const auto attributes = root.find("attributes");
+			if (attributes != root.end() && attributes->is_object() && attributes->contains("color_depth")) {
+				int64_t depth;
+				if (!WholeNumber((*attributes)["color_depth"], depth) || depth < 0 || depth > 6)
+					return Fail(failure, "source project color_depth is outside its verified range");
+				if (!result.Graph.Project)
+					return Fail(failure, "source project color_depth needs represented project dimensions");
+				result.Graph.Project->ColorDepth = depth;
+				if (depth != 1) result.Graph.FormatVersion = 9;
+			}
+			PreviewSettings(root, result, options);
+			Timeline(root, result);
+		}
+		detail::ImportBudget operationBudget(options.MaximumOperationBytes);
+		if (!operationBudget.Hold(*previousDocumentBytes))
+			return Fail(failure, "existing import document exceeds native projection operation bounds");
+		GroupSourceSet canonicalGroups(
+			std::less<>{}, detail::ImportAllocator<std::string_view>{operationBudget}
+		);
+		try {
+			if (archive.MetadataNumber == SUPPORTED_VERSION &&
+				!CanonicalInstanceGroups(root, canonicalGroups, failure))
+				return false;
+		} catch (const std::bad_alloc &) {
+			return Fail(failure, "source instance class bookkeeping exceeds the operation allocation budget");
+		}
 		result.Graph.Nodes.reserve(archive.Nodes.size());
 		result.Graph.Links.reserve(archive.Links.size());
 		result.Diagnostics.reserve(archive.Nodes.size());
 		std::unordered_map<std::string, size_t> indexById;
 		indexById.reserve(archive.Nodes.size());
 		std::vector<bool> native(archive.Nodes.size(), false);
+		std::vector<const imagegraph::CatalogueEntry *> catalogued(archive.Nodes.size(), nullptr);
+		SourceDepthResolver sourceDepth(root);
 		for (size_t index = 0; index < archive.Nodes.size(); index++) {
 			const bake::PxcxNodeFact &fact = archive.Nodes[index];
 			const Json &source = sourceNodes[index];
+			if (archive.MetadataNumber == SUPPORTED_VERSION && fact.Type == "Node_Gradient") {
+				const auto *sourceEntry = imagegraph::FindCatalogueSource(fact.Type);
+				const auto *range =
+					sourceEntry ? imagegraph::FindCatalogueInput(*sourceEntry, "gradient_map_range") : nullptr;
+				if (range && range->SourceIndex == 16 && range->SourceKind == "Vec4" &&
+					range->Type == imagegraph::ValueType::Vector4) {
+					const auto *record = Input(source, static_cast<size_t>(range->SourceIndex));
+					if (record && record->contains("anim") && !record->at("anim").is_boolean())
+						return Fail(failure, "opaque gradient range animator mode is malformed");
+				}
+			}
 			Node node{fact.Id, Opaque(fact.Type), {}, {fact.X, fact.Y}, {}};
 			bool mapped = false;
 			if (archive.MetadataNumber == SUPPORTED_VERSION && LinksRepresentable(archive, fact)) {
@@ -996,17 +3181,89 @@ namespace engine::imagegraphio {
 				else if (fact.Type == "Node_Colorize")
 					mapped = Colorize(source, node);
 			}
-			if (!mapped) {
+			const auto sourceGroup = source.find("group");
+			if (sourceGroup != source.end() && sourceGroup->is_string() &&
+				canonicalGroups.contains(sourceGroup->get_ref<const std::string &>()))
+				mapped = false;
+			if (mapped) {
+				const auto *sourceEntry = imagegraph::FindCatalogueSource(fact.Type);
+				if (sourceEntry && imagegraph::HasNativeExecutor(sourceEntry->Type))
+					for (const auto &input : sourceEntry->Inputs) {
+						if (input.SourceIndex < 0) continue;
+						const auto *record = Input(source, uint32_t(input.SourceIndex));
+						if (!record) continue;
+						const auto raw = record->find("r");
+						// Legacy fixed controls cannot retain an independently stored inactive animator.
+						if ((raw != record->end() && raw->is_array() && !raw->empty()) ||
+							record->contains("on_end") || record->contains("loop_range")) {
+							mapped = false;
+							break;
+						}
+					}
+				const auto *depth =
+					sourceEntry ? imagegraph::FindCatalogueInput(*sourceEntry, "attribute_color_depth")
+								: nullptr;
+				if (mapped && depth)
+					mapped = !source.contains("instanceBase") && sourceDepth.Resolve(source) == 3 &&
+							 sourceDepth.LegacyContextRgba8(source) &&
+							 sourceDepth.LegacyInputsRgba8(source, *sourceEntry);
+			}
+			const imagegraph::CatalogueEntry *entry = nullptr;
+			std::string reason;
+			if (!mapped && archive.MetadataNumber == SUPPORTED_VERSION)
+				entry = imagegraph::FindCatalogueSource(fact.Type);
+			if (entry) {
+				imagegraph::Document animation;
+				if (CatalogueNode(source, *entry, fact.Id, node, animation, reason, &operationBudget) &&
+					CatalogueLinksRepresentable(archive, fact, *entry, reason)) {
+					catalogued[index] = entry;
+					result.CatalogueNodes++;
+					if (animation.Keyframes.size() >
+						imagegraph::Limits::MaximumKeyframes - result.Graph.Keyframes.size())
+						return Fail(failure, "pxcx import exceeds native keyframe limit");
+					if (animation.Tracks.size() >
+						imagegraph::Limits::MaximumTracks - result.Graph.Tracks.size())
+						return Fail(failure, "pxcx import exceeds native track limit");
+					if (!AdmitNativeSlots(
+							result.Graph.Keyframes,
+							result.Graph.Keyframes.size() + animation.Keyframes.size(),
+							&operationBudget
+						) ||
+						!AdmitNativeSlots(
+							result.Graph.Tracks,
+							result.Graph.Tracks.size() + animation.Tracks.size(),
+							&operationBudget
+						))
+						return Fail(failure, "native animator publication exceeds operation bounds");
+					for (imagegraph::Keyframe &keyframe : animation.Keyframes) {
+						if (keyframe.Subframe != 0 || keyframe.NegativeFrame ||
+							keyframe.Kind != imagegraph::KeyframeKind::Normal)
+							result.Graph.FormatVersion = 9;
+						result.Graph.Keyframes.push_back(std::move(keyframe));
+					}
+					for (imagegraph::AnimationTrack &track : animation.Tracks)
+						result.Graph.Tracks.push_back(std::move(track));
+				} else {
+					if (operationBudget.Exceeded())
+						return Fail(
+							failure, "native animator construction exceeds operation bounds: " + reason
+						);
+					entry = nullptr;
+					node.DynamicInputs.clear();
+				}
+			}
+			if (!mapped && !entry) {
 				node.Type = Opaque(fact.Type);
 				node.Values.clear();
 				OpaqueDiagnostic(
 					result,
 					fact,
-					archive.MetadataNumber == SUPPORTED_VERSION
-						? "PXCX node or control has no supported native mapping; source bytes retained"
-						: "PXCX save version has no semantic mapping; source bytes retained"
+					archive.MetadataNumber != SUPPORTED_VERSION
+						? "PXCX save version has no semantic mapping; source bytes retained"
+					: reason.empty() ? "PXCX node has no source catalogue entry; source bytes retained"
+									 : "PXCX node stays opaque: " + reason + "; source bytes retained"
 				);
-			} else {
+			} else if (mapped) {
 				native[index] = true;
 				result.NativeNodes++;
 			}
@@ -1017,12 +3274,14 @@ namespace engine::imagegraphio {
 			const size_t from = indexById.at(link.FromNode);
 			const size_t to = indexById.at(link.ToNode);
 			const std::string fromPort =
-				native[from] ? std::string(NativeOutput(archive.Nodes[from].Type, link.FromIndex))
-							 : OutputPort(link.FromIndex);
-			const std::string_view mappedInput =
-				native[to] ? NativeInput(archive.Nodes[to].Type, link.ToInputIndex) : std::string_view{};
-			const std::string toPort =
-				mappedInput.empty() ? InputPort(link.ToInputIndex) : std::string(mappedInput);
+				native[from]	   ? std::string(NativeOutput(archive.Nodes[from].Type, link.FromIndex))
+				: catalogued[from] ? CatalogueOutputPort(*catalogued[from], link.FromIndex)
+								   : OutputPort(link.FromIndex);
+			std::string toPort = native[to]
+									 ? std::string(NativeInput(archive.Nodes[to].Type, link.ToInputIndex))
+								 : catalogued[to] ? CatalogueInputPort(*catalogued[to], link.ToInputIndex)
+												  : std::string{};
+			if (toPort.empty()) toPort = InputPort(link.ToInputIndex);
 			result.Graph.Links.push_back({link.FromNode, fromPort, link.ToNode, toPort});
 		}
 		for (const bake::PxcxNodeFact &node : archive.Nodes) {
@@ -1035,8 +3294,9 @@ namespace engine::imagegraphio {
 				result.Graph.Outputs.push_back(
 					{node.Id,
 					 link.FromNode,
-					 native[from] ? std::string(NativeOutput(archive.Nodes[from].Type, link.FromIndex))
-								  : OutputPort(link.FromIndex)}
+					 native[from]		? std::string(NativeOutput(archive.Nodes[from].Type, link.FromIndex))
+					 : catalogued[from] ? CatalogueOutputPort(*catalogued[from], link.FromIndex)
+										: OutputPort(link.FromIndex)}
 				);
 				result.Diagnostics.push_back(
 					{imagegraph::Status::InvalidOutput,
@@ -1047,8 +3307,205 @@ namespace engine::imagegraphio {
 				break;
 			}
 		}
+		if (archive.MetadataNumber == SUPPORTED_VERSION) {
+			for (auto &node : result.Graph.Nodes) {
+				const auto *entry = imagegraph::FindCatalogueEntry(node.Type);
+				if (!entry) continue;
+				const auto saved =
+					std::find_if(root.at("nodes").begin(), root.at("nodes").end(), [&](const auto &record) {
+						return record.at("id").template get_ref<const std::string &>() == node.Id;
+					});
+				if (saved == root.at("nodes").end()) continue;
+				if (!imagegraph::HasNativeExecutor(node.Type)) {
+					if (node.Type != "pc.gradient") continue;
+					const auto *range = imagegraph::FindCatalogueInput(*entry, "gradient_map_range");
+					if (!range || range->SourceIndex != 16 || range->SourceKind != "Vec4" ||
+						range->Type != imagegraph::ValueType::Vector4)
+						return Fail(failure, "opaque gradient range source schema is not represented");
+					const auto *record = Input(*saved, range->SourceIndex);
+					if (!record || !record->contains("anim")) continue;
+					if (!record->at("anim").is_boolean())
+						return Fail(failure, "opaque gradient range animator mode is malformed");
+					const std::string_view port = range->Id;
+					const bool animated = record->at("anim").template get<bool>();
+					if (!operationBudget.Hold(
+							sizeof(std::string) + std::max(port.size(), std::string{}.capacity()) + 1
+						))
+						return Fail(failure, "opaque gradient range mode exceeds operation bounds");
+					auto &modes = animated ? node.SourceAnimatedInputs : node.SourceStaticInputs;
+					modes.reserve(1);
+					modes.emplace_back(port);
+					result.Graph.FormatVersion = 9;
+					continue;
+				}
+				const auto eachSource = [&](const auto &visit) {
+					for (const auto &input : entry->Inputs)
+						if (input.SourceIndex >= 0 && !visit(input.Id, input.SourceIndex)) return false;
+					for (const auto &input : node.DynamicInputs) {
+						size_t group;
+						const auto *source = imagegraph::FindDynamicTemplate(*entry, input.Id, group);
+						if (source && !visit(
+										  input.Id,
+										  entry->DynamicFixedLength + group * entry->DynamicGroupLength +
+											  source->SourceIndex
+									  ))
+							return false;
+					}
+					return true;
+				};
+				size_t animatedCount = 0, staticCount = 0;
+				if (!eachSource([&](std::string_view, int32_t sourceIndex) {
+						const auto *record = Input(*saved, sourceIndex);
+						if (!record || !record->contains("anim")) {
+							++staticCount;
+							return true;
+						}
+						if (!record->at("anim").is_boolean())
+							return Fail(failure, "source input animator mode is malformed");
+						const bool animated = record->at("anim").template get<bool>();
+						animatedCount += animated;
+						staticCount += !animated;
+						return true;
+					}))
+					return false;
+				if (!operationBudget.Hold((animatedCount + staticCount) * sizeof(std::string)))
+					return Fail(failure, "source input animator slots exceed operation bounds");
+				node.SourceAnimatedInputs.reserve(animatedCount);
+				node.SourceStaticInputs.reserve(staticCount);
+				if (!eachSource([&](std::string_view port, int32_t sourceIndex) {
+						const auto *record = Input(*saved, sourceIndex);
+						const bool animated =
+							record && record->contains("anim") && record->at("anim").template get<bool>();
+						if (!operationBudget.Hold(std::max(port.size(), std::string{}.capacity()) + 1))
+							return Fail(failure, "source input animator modes exceed operation bounds");
+						(animated ? node.SourceAnimatedInputs : node.SourceStaticInputs).emplace_back(port);
+						result.Graph.FormatVersion = 9;
+						return true;
+					}))
+					return false;
+			}
+		}
+		if (archive.MetadataNumber == SUPPORTED_VERSION &&
+			!ProjectOrdinaryGroups(root, result, failure, *previousDocumentBytes, operationBudget))
+			return false;
+		const auto &bootstrapGraph = result.GroupPrebinding ? *result.GroupPrebinding : result.Graph;
+		const size_t bootstrapCount =
+			std::count_if(bootstrapGraph.Nodes.begin(), bootstrapGraph.Nodes.end(), [](const Node &node) {
+				return node.Type == "pc.group_input";
+			});
+		uint64_t bootstrapBytes = bootstrapCount * sizeof(PxcxGroupBootstrapRecord);
+		for (const auto &node : bootstrapGraph.Nodes) {
+			if (node.Type != "pc.group_input") continue;
+			const uint64_t nameBytes = std::max(node.Id.size(), std::string{}.capacity()) + 1;
+			if (nameBytes > UINT64_MAX - bootstrapBytes) {
+				failure = "group bootstrap identity storage overflows";
+				return false;
+			}
+			bootstrapBytes += nameBytes;
+		}
+		if (!operationBudget.Hold(bootstrapBytes)) {
+			failure = "group bootstrap records exceed import operation bounds";
+			return false;
+		}
+		result.GroupBootstrap.reserve(bootstrapCount);
+		for (const auto &node : bootstrapGraph.Nodes) {
+			if (node.Type != "pc.group_input") continue;
+			const bool animated =
+				std::find(node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), "subtype") !=
+				node.SourceAnimatedInputs.end();
+			result.GroupBootstrap.push_back(
+				{std::string(node.Id),
+				 animated ? imagegraph::GroupSubtypeAnimator::Animated
+						  : imagegraph::GroupSubtypeAnimator::Static}
+			);
+		}
+		const auto nodeById = [&](std::string_view id) -> const Node * {
+			for (const auto &node : result.Graph.Nodes)
+				if (node.Id == id) return &node;
+			return nullptr;
+		};
+		const auto eachInput = [&](const Node &node, const auto &visit) {
+			const auto *entry = imagegraph::FindCatalogueEntry(node.Type);
+			if (!entry || !imagegraph::HasNativeExecutor(node.Type)) return true;
+			for (const auto &input : entry->Inputs)
+				if (input.SourceIndex >= 0 &&
+					!(node.Type == "pc.group_input" && input.Id == "parent_value") && !visit(input.Id))
+					return false;
+			for (const auto &input : node.DynamicInputs) {
+				size_t group;
+				const auto *source = imagegraph::FindDynamicTemplate(*entry, input.Id, group);
+				if (source && source->SourceIndex >= 0 && !visit(input.Id)) return false;
+			}
+			return true;
+		};
+		const auto ownerFor = [&](const Node &node) -> const Node * {
+			const Node *owner = &node;
+			for (size_t hop = 0; owner && !owner->InstanceBase.empty() && hop < result.Graph.Nodes.size();
+				 ++hop)
+				owner = nodeById(owner->InstanceBase);
+			return owner && owner->InstanceBase.empty() ? owner : nullptr;
+		};
+		const auto animatedMode = [](const Node &node, std::string_view port) {
+			return std::find(node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), port) !=
+						   node.SourceAnimatedInputs.end()
+					   ? imagegraph::GroupSubtypeAnimator::Animated
+					   : imagegraph::GroupSubtypeAnimator::Static;
+		};
+		size_t bindingCount = 0;
+		uint64_t bindingBytes = 0;
+		for (const auto &node : result.Graph.Nodes) {
+			if (node.InstanceBase.empty()) continue;
+			const Node *owner = ownerFor(node);
+			if (!owner || owner->Type != node.Type)
+				return Fail(failure, "source input animator owner chain is invalid");
+			if (!eachInput(node, [&](std::string_view port) {
+					uint64_t bytes = sizeof(imagegraph::GroupSubtypeBinding);
+					for (const auto name : {std::string_view(node.Id), std::string_view(owner->Id), port}) {
+						const auto text = std::max(name.size(), std::string{}.capacity()) + 1;
+						if (text > UINT64_MAX - bytes) return false;
+						bytes += text;
+					}
+					if (bytes > UINT64_MAX - bindingBytes) return false;
+					bindingBytes += bytes;
+					++bindingCount;
+					return true;
+				}))
+				return Fail(failure, "source animator binding bytes overflow");
+		}
+		if (!operationBudget.Hold(bindingBytes))
+			return Fail(failure, "source animator bindings exceed import operation bounds");
+		result.GroupBindings.reserve(bindingCount);
+		for (const auto &node : result.Graph.Nodes) {
+			if (node.InstanceBase.empty()) continue;
+			const Node *owner = ownerFor(node);
+			if (!eachInput(node, [&](std::string_view port) {
+					const Node *getter = &node;
+					for (size_t hop = 0;
+						 getter && !getter->InstanceBase.empty() && hop < result.Graph.Nodes.size();
+						 ++hop) {
+						if (std::find(
+								getter->InstanceOverrides.begin(), getter->InstanceOverrides.end(), port
+							) != getter->InstanceOverrides.end())
+							break;
+						getter = nodeById(getter->InstanceBase);
+					}
+					if (!getter) return false;
+					result.GroupBindings.push_back(
+						{node.Id,
+						 owner->Id,
+						 animatedMode(*getter, port),
+						 animatedMode(*owner, port),
+						 std::string(port)}
+					);
+					return true;
+				}))
+				return Fail(failure, "source animator getter provenance is absent");
+		}
+
 		out = std::move(result);
 		return true;
+	} catch (const std::bad_alloc &) {
+		return Fail(failure, "pxcx import allocation failed before installation");
 	}
 
 	PxcxSubgraph ExtractPxcxNativeSubgraph(const PxcxImport &imported, std::string_view nodeId) {

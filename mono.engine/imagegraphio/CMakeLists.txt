@@ -8,3 +8,7 @@ mono_add_library(imagegraphio
 	VENDOR
 		Vendor::json
 )
+
+if(TARGET test_imagegraphio)
+	target_link_libraries(test_imagegraphio PRIVATE Vendor::json)
+endif()
