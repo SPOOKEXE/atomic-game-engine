@@ -75,6 +75,7 @@ namespace client {
 		store.Each<const engine::scene::MaterialRef>(
 			[&out, &seen](engine::ecs::Entity, const engine::scene::MaterialRef &material) {
 				Want(out, seen, material.Asset);
+				if (material.Shader.Text().ends_with(".ashader")) Want(out, seen, material.Shader);
 			}
 		);
 

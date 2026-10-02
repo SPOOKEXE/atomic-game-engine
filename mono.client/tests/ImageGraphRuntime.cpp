@@ -3,13 +3,16 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/TextureTable.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <client/ImageGraphRuntime.hpp>
 #include <filesystem>
@@ -391,4 +394,103 @@ TEST_CASE(
 	runtime.Clear(renderer);
 	renderer.Shutdown();
 	SDL_QuitSubSystem(SDL_INIT_VIDEO);
+}
+
+TEST_CASE(
+	"material map colour space conflicts reject before graph evaluation",
+	"[client][imagegraph][sink-admission]"
+) {
+	engine::scene::RegisterSceneComponents();
+	using Appearance = engine::scene::SurfaceAppearance;
+	const std::array<engine::core::Name Appearance::*, 8> maps{
+		&Appearance::ColourMap,
+		&Appearance::EmissiveMap,
+		&Appearance::NormalMap,
+		&Appearance::RoughnessMap,
+		&Appearance::OcclusionMap,
+		&Appearance::HeightMap,
+		&Appearance::MetalnessMap,
+		&Appearance::PackedPbrMap
+	};
+	for (size_t index = 0; index < maps.size(); ++index) {
+		CAPTURE(index);
+		engine::ecs::Store store("headless-material-sink");
+		const auto part = store.Create();
+		Appearance appearance;
+		appearance.*maps[index] = TEXTURE;
+		store.Set(part, appearance);
+		const auto binding = store.Create();
+		engine::scene::ImageGraphBinding selector;
+		selector.Graph = GRAPH;
+		selector.Output = OUTPUT;
+		selector.Texture = TEXTURE;
+		selector.ColorSpace = index < 2 ? engine::scene::ImageGraphColorSpace::Linear
+										: engine::scene::ImageGraphColorSpace::Display;
+		REQUIRE(engine::scene::SetImageGraphBinding(store, binding, selector));
+		engine::render::Renderer renderer;
+		client::ImageGraphRuntime runtime;
+		CHECK(runtime.Refresh(store, renderer, OWNER, "absent-assets") == 0);
+		CHECK(runtime.LastError().find("colour space") != std::string::npos);
+		CHECK(runtime.DocumentParses() == 0);
+		// A selector cannot satisfy a display map and a numeric map sharing its name.
+		appearance.ColourMap = TEXTURE;
+		appearance.NormalMap = TEXTURE;
+		store.Set(part, appearance);
+		selector.ColorSpace = engine::scene::ImageGraphColorSpace::Display;
+		REQUIRE(engine::scene::SetImageGraphBinding(store, binding, selector));
+		runtime.BeginFrame();
+		CHECK(runtime.Refresh(store, renderer, OWNER, "absent-assets") == 0);
+		CHECK(runtime.LastError().find("colour space") != std::string::npos);
+		CHECK(runtime.DocumentParses() == 0);
+	}
+}
+
+TEST_CASE(
+	"incomplete skybox groups reject atomically before graph evaluation",
+	"[client][imagegraph][sink-admission]"
+) {
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+	for (int failure = 0; failure != 3; ++failure) {
+		CAPTURE(failure);
+		engine::ecs::Store store("headless-skybox-sink");
+		engine::scene::InstallServices(store);
+		const auto sky = store.CreateInstance(
+			engine::ecs::Classes::Find(engine::core::Name("SkyboxTextures")), "GraphSky"
+		);
+		REQUIRE(sky != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(sky, store.FindFirstRoot("Lighting")));
+		const std::array<engine::core::Name, 6> names{
+			engine::core::Name("front"),
+			engine::core::Name("back"),
+			engine::core::Name("left"),
+			engine::core::Name("right"),
+			engine::core::Name("up"),
+			engine::core::Name("down")
+		};
+		auto *textures = store.GetMutable<engine::scene::SkyboxTextures>(sky);
+		REQUIRE(textures);
+		textures->Front = names[0];
+		textures->Back = names[1];
+		textures->Left = names[2];
+		textures->Right = names[3];
+		textures->Up = names[4];
+		textures->Down = names[5];
+		for (size_t i = 0; i < names.size(); ++i) {
+			if (failure == 0 && i == 5) continue;
+			engine::scene::ImageGraphBinding selector;
+			selector.Graph = GRAPH;
+			selector.Output = OUTPUT;
+			selector.Texture = names[i];
+			if (failure == 1 && i == 5) selector.ColorSpace = engine::scene::ImageGraphColorSpace::Linear;
+			REQUIRE(engine::scene::SetImageGraphBinding(store, store.Create(), selector));
+			if (failure == 2 && i == 5)
+				REQUIRE(engine::scene::SetImageGraphBinding(store, store.Create(), selector));
+		}
+		engine::render::Renderer renderer;
+		client::ImageGraphRuntime runtime;
+		CHECK(runtime.Refresh(store, renderer, OWNER, "absent-assets") == 0);
+		CHECK(runtime.LastError().find("six distinct valid display") != std::string::npos);
+		CHECK(runtime.DocumentParses() == 0);
+	}
 }

@@ -4,6 +4,7 @@
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
+#include <engine/assets/Shader.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
@@ -599,6 +600,17 @@ namespace client {
 					});
 				}
 				ContentMaterials++;
+			} else if (asset->Kind == engine::assets::AssetKind::Shader) {
+				engine::assets::ShaderData shader;
+				if (!engine::assets::Shader::Read(reader, shader) || reader.Remaining() != 0) {
+					ENGINE_WARN("content: {} is not a cooked shader this engine reads", asset->Name);
+					continue;
+				}
+				// Material names select the declared material variant, never collection order.
+				for (const auto owner : content.Owners) {
+					if (const auto error = Shaders.InstallCooked(name, shader, "material", owner))
+						ENGINE_WARN("content: shader {} refused: {}", asset->Name, *error);
+				}
 			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
 				if (engine::assets::FormOfName(asset->Name) == engine::assets::ContentForm::ASeq) {
 					engine::assets::TextureSequenceData sequence;

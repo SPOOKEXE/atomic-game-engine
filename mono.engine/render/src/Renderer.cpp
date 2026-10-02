@@ -1693,7 +1693,7 @@ namespace engine::render {
 
 	bool
 	Renderer::AddMaterialShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner) {
-		if (const auto failure = AdmitMaterialSamplers(InspectShaderCapabilities(spirv))) {
+		if (const auto failure = AdmitMaterialSamplers(spirv)) {
 			ENGINE_ERROR("material shader '{}': {}", name.Text(), *failure);
 			return false;
 		}

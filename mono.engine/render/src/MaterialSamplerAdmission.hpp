@@ -4,6 +4,7 @@
 
 #include <array>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -44,4 +45,8 @@ namespace engine::render {
 		}
 		return std::nullopt;
 	}
+	// Checks cooked resource types without compiling source at load time.
+	std::optional<std::string> AdmitMaterialSamplers(std::span<const uint32_t> spirv);
+	// Matches the fixed opaque vertex outputs and the material colour attachment.
+	std::optional<std::string> AdmitCookedMaterialInterface(std::span<const uint32_t> spirv);
 }

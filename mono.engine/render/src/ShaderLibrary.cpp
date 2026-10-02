@@ -1,4 +1,10 @@
+#include "MaterialSamplerAdmission.hpp"
+
+#include <engine/assets/Shader.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/render/ShaderCompiler.hpp>
@@ -127,6 +133,7 @@ namespace engine::render {
 
 		// Both ids are process-local. Names remain the serialized identity.
 		std::unordered_map<uint64_t, ShaderModule> Modules;
+		std::unordered_map<uint64_t, ShaderModule> Cooked;
 
 		// What moved on the last `Refresh`, including what was dropped.
 		std::vector<core::Name> Changed;
@@ -153,6 +160,53 @@ namespace engine::render {
 	ShaderLibrary::ShaderLibrary() : State(std::make_unique<Impl>()) {}
 
 	ShaderLibrary::~ShaderLibrary() = default;
+
+	std::optional<std::string> ShaderLibrary::InstallCooked(
+		core::Name name, const assets::ShaderData &data, std::string_view variant, core::Name owner
+	) {
+		ENGINE_PROFILE_CAT("cooked material shader admission", core::ProfileCategory::Assets);
+		if (!name.IsValid() || !owner.IsValid()) return "cooked shader requires a name and owner";
+		if (!data.IsValid() || data.ShaderAbi != "atomic.material.v1")
+			return "cooked material shader requires a valid atomic.material.v1 container";
+		const auto selected =
+			std::find_if(data.Variants.begin(), data.Variants.end(), [&](const auto &entry) {
+				return entry.Name == variant;
+			});
+		if (selected == data.Variants.end()) return "cooked material variant is not declared";
+		if (selected->Stage != "fragment" || !selected->Features.empty() ||
+			!selected->Specializations.empty())
+			return "cooked material variant requires an unspecialized fragment for the fixed material vertex "
+				   "stage";
+		const auto payload =
+			std::find_if(selected->Payloads.begin(), selected->Payloads.end(), [](const auto &entry) {
+				return entry.Backend == "spirv";
+			});
+		if (payload == selected->Payloads.end() || payload->EntryPoint != "main" ||
+			payload->Bytes.size() % 4 != 0)
+			return "cooked material variant requires a main SPIR-V payload";
+		const uint64_t key = ModuleKey(name, owner);
+		size_t bytes = payload->Bytes.size();
+		size_t count = 1;
+		for (const auto &[heldKey, held] : State->Cooked) {
+			if (heldKey == key || static_cast<uint32_t>(heldKey >> 32) != owner.Id()) continue;
+			bytes += held.SpirV.size() * sizeof(uint32_t);
+			++count;
+		}
+		if (count > 256 || bytes > 64 * 1024 * 1024) return "cooked material shader owner budget exceeded";
+		ShaderModule candidate;
+		core::ByteReader reader(payload->Bytes);
+		candidate.SpirV.reserve(payload->Bytes.size() / 4);
+		while (reader.Remaining() != 0)
+			candidate.SpirV.push_back(reader.ReadUInt32());
+		if (const auto error = AdmitCookedMaterialInterface(candidate.SpirV)) return error;
+		candidate.Capabilities = InspectShaderCapabilities(candidate.SpirV);
+		candidate.CodeHash = assets::Hasher::Of(std::as_bytes(std::span(candidate.SpirV)));
+		State->Cooked[key] = std::move(candidate);
+		// Logical accepted payload copies, separate from allocator residency.
+		core::Metrics::Count("shader.cooked.installed_spirv_bytes", payload->Bytes.size());
+		core::Metrics::Count("shader.cooked.installations", 1);
+		return std::nullopt;
+	}
 
 	size_t ShaderLibrary::Refresh(ecs::Store &store, core::Name owner) {
 		State->Changed.clear();
@@ -215,6 +269,16 @@ namespace engine::render {
 					)) {
 					State->Changed.push_back(name);
 				}
+				continue;
+			}
+
+			const auto cooked = State->Cooked.find(ModuleKey(name, owner));
+			if (cooked != State->Cooked.end()) {
+				if (!held || found->second.Authored || found->second.CodeHash != cooked->second.CodeHash) {
+					State->Modules[ModuleKey(name, owner)] = cooked->second;
+					State->Changed.push_back(name);
+				}
+				State->Modules[ModuleKey(name, owner)].StoreIdentity = store.Identity();
 				continue;
 			}
 
@@ -366,6 +430,9 @@ namespace engine::render {
 			return changed.size();
 		};
 		const size_t materials = drop(State->Modules, State->Changed);
+		std::erase_if(State->Cooked, [owner](const auto &entry) {
+			return static_cast<uint32_t>(entry.first >> 32) == owner.Id();
+		});
 		return materials + drop(State->LensModules, State->LensChanged);
 	}
 

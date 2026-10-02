@@ -12,6 +12,9 @@
 // that is what makes a default shader file reachable by name rather than a file
 // nothing loads.
 
+#include "RenderTypes.hpp"
+
+#include <engine/assets/Shader.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
@@ -127,6 +130,176 @@ void main() { outColour = vec4(1.0); }
 		REQUIRE(SetShaderSource(store, script, code));
 		return script;
 	}
+
+	engine::assets::ShaderData CookedMaterial(const char *source = VALID) {
+		engine::render::ShaderCompiler compiler;
+		const auto compiled = compiler.Compile(source, engine::render::ShaderStage::Fragment, "material");
+		REQUIRE_FALSE(compiled.Failed);
+		engine::assets::ShaderData data;
+		data.CompilerVersion = "shaderc.test";
+		data.OptimizerVersion = "none";
+		data.TranslatorVersion = "none";
+		data.ShaderAbi = "atomic.material.v1";
+		data.TargetEnvironment = "vulkan1.0";
+		engine::assets::ShaderVariant variant;
+		variant.Name = "material";
+		variant.Stage = "fragment";
+		engine::core::ByteWriter bytes;
+		for (const auto word : compiled.SpirV)
+			bytes.WriteUInt32(word);
+		variant.Payloads.push_back({"spirv", "main", "spirv1.0", bytes.TakeBytes()});
+		data.Variants.push_back(std::move(variant));
+		REQUIRE(data.IsValid());
+		return data;
+	}
+}
+
+TEST_CASE("cooked material variants retain owner scoped last good modules", "[render][shaderlibrary]") {
+	ShaderLibrary library;
+	Store first = Fresh("shaderlibrary.cooked.first");
+	Store second = Fresh("shaderlibrary.cooked.second");
+	const Name name("graph-material.ashader"), owner("cooked-first"), other("cooked-second");
+	Select(first, name.Text().data());
+	Select(second, name.Text().data());
+	auto data = CookedMaterial();
+	engine::core::ByteWriter encoded;
+	REQUIRE(engine::assets::Shader::Write(encoded, data));
+	engine::core::ByteReader encodedReader(encoded.Bytes());
+	engine::assets::ShaderData decoded;
+	REQUIRE(engine::assets::Shader::Read(encodedReader, decoded));
+	REQUIRE(encodedReader.Remaining() == 0);
+	data = std::move(decoded);
+	REQUIRE_FALSE(library.InstallCooked(name, data, "material", owner));
+	CHECK(library.Refresh(first, owner) == 1);
+	REQUIRE(library.Find(name, owner));
+	const auto accepted = library.Find(name, owner)->CodeHash;
+	CHECK(library.Find(name, owner)->Error.empty());
+	CHECK(library.Refresh(first, owner) == 0);
+	CHECK(library.Refresh(second, other) == 1);
+	CHECK_FALSE(library.Find(name, other)->Error.empty());
+	CHECK_FALSE(library.Find(name));
+	CHECK(library.InstallCooked(name, data, "not-declared", owner));
+	data.ShaderAbi = "another.vertex.v1";
+	CHECK(library.InstallCooked(name, data, "material", owner));
+	CHECK(library.Find(name, owner)->CodeHash == accepted);
+	CHECK(library.Refresh(first, owner) == 0);
+	const auto replacement =
+		CookedMaterial("#version 450\nlayout(location=0)out vec4 c;void main(){c=vec4(0.25);}");
+	REQUIRE_FALSE(library.InstallCooked(name, replacement, "material", owner));
+	CHECK(library.Refresh(first, owner) == 1);
+	CHECK(library.Find(name, owner)->CodeHash != accepted);
+	CHECK(library.DropOwner(owner) == 1);
+	CHECK_FALSE(library.Find(name, owner));
+	CHECK(library.Refresh(first, owner) == 1);
+	CHECK_FALSE(library.Find(name, owner)->Error.empty());
+}
+
+TEST_CASE(
+	"cooked material resolution preserves authored precedence and recovers after removal",
+	"[render][shaderlibrary]"
+) {
+	ShaderLibrary library;
+	Store store = Fresh("shaderlibrary.cooked.override");
+	const Name name("override.ashader"), owner("override-owner");
+	Select(store, "override.ashader");
+	const auto data = CookedMaterial();
+	REQUIRE_FALSE(library.InstallCooked(name, data, "material", owner));
+	REQUIRE(library.Refresh(store, owner) == 1);
+	const auto cookedHash = library.Find(name, owner)->CodeHash;
+	const Entity script = Author(
+		store, "override.ashader", "#version 450\nlayout(location=0)out vec4 c;void main(){c=vec4(0.0);}"
+	);
+	REQUIRE(library.Refresh(store, owner) == 1);
+	const auto authoredHash = library.Find(name, owner)->CodeHash;
+	CHECK(authoredHash != cookedHash);
+	REQUIRE_FALSE(library.InstallCooked(name, data, "material", owner));
+	CHECK(library.Refresh(store, owner) == 0);
+	CHECK(library.Find(name, owner)->CodeHash == authoredHash);
+	store.Destroy(script);
+	REQUIRE(library.Refresh(store, owner) == 1);
+	CHECK(library.Find(name, owner)->CodeHash == cookedHash);
+	CHECK_FALSE(library.Find(name, owner)->Authored);
+}
+
+TEST_CASE(
+	"cooked material rejects fragment inputs incompatible with its fixed vertex stage",
+	"[render][shaderlibrary]"
+) {
+	ShaderLibrary library;
+	const auto wrongInput = CookedMaterial(
+		"#version 450\nlayout(location=4)in vec3 uv;layout(location=0)out vec4 c;void main(){c=vec4(uv,1.0);}"
+	);
+	const auto error =
+		library.InstallCooked(Name("wrong-input.ashader"), wrongInput, "material", Name("owner"));
+	REQUIRE(error);
+	CHECK(error->find("location 4") != std::string::npos);
+	CHECK(library.Size() == 0);
+}
+
+TEST_CASE("cooked material owner retirement releases bounded installed modules", "[render][shaderlibrary]") {
+	ShaderLibrary library;
+	const Name owner("bounded-cooked-owner");
+	const auto data = CookedMaterial();
+	for (size_t index = 0; index != 256; ++index) {
+		REQUIRE_FALSE(
+			library.InstallCooked(Name("bounded-" + std::to_string(index)), data, "material", owner)
+		);
+	}
+	const auto refused = library.InstallCooked(Name("one-too-many"), data, "material", owner);
+	REQUIRE(refused);
+	CHECK(refused->find("budget") != std::string::npos);
+	// A full owner rejects before cloning words or reflecting an incompatible block.
+	const auto incompatible = CookedMaterial(
+		"#version 450\nlayout(set=3,binding=0)uniform Lighting{vec2 Direction;}lighting;"
+		"layout(location=0)out vec4 c;void main(){c=vec4(lighting.Direction,0,1);}"
+	);
+	const auto preflight = library.InstallCooked(Name("bad-after-budget"), incompatible, "material", owner);
+	REQUIRE(preflight);
+	CHECK(preflight->find("budget") != std::string::npos);
+	CHECK(library.DropOwner(owner) == 0);
+	CHECK_FALSE(library.InstallCooked(Name("after-retirement"), data, "material", owner));
+}
+
+TEST_CASE("cooked material rejects incompatible uniform block layouts", "[render][shaderlibrary]") {
+	ShaderLibrary library;
+	const auto bad = CookedMaterial(
+		"#version 450\nlayout(set=3,binding=0)uniform Lighting{vec2 Direction;}lighting;"
+		"layout(location=0)out vec4 c;void main(){c=vec4(lighting.Direction,0,1);}"
+	);
+	const auto error = library.InstallCooked(Name("wrong-layout.ashader"), bad, "material", Name("owner"));
+	REQUIRE(error);
+	CHECK(error->find("uniform") != std::string::npos);
+}
+
+TEST_CASE(
+	"cooked material uniform blocks match host prefix array and matrix packing", "[render][shaderlibrary]"
+) {
+	ShaderLibrary library;
+	const std::string source =
+		"#version 450\nlayout(set=3,binding=0)uniform Lighting{vec4 Direction;}lighting;"
+		"layout(set=3,binding=1)uniform Lights{vec4 Position[" +
+		std::to_string(engine::render::MAX_SCENE_LIGHTS) + "];vec4 Colour[" +
+		std::to_string(engine::render::MAX_SCENE_LIGHTS) + "];vec4 Direction[" +
+		std::to_string(engine::render::MAX_SCENE_LIGHTS) +
+		"];vec4 Count;}lights;"
+		"layout(set=3,binding=2)uniform Beams{mat4 Light[" +
+		std::to_string(engine::render::MAX_PORTAL_BEAMS) + "];mat4 Back[" +
+		std::to_string(engine::render::MAX_PORTAL_BEAMS) + "];vec4 Plane[" +
+		std::to_string(engine::render::MAX_PORTAL_BEAMS) + "];vec4 Region[" +
+		std::to_string(engine::render::MAX_PORTAL_BEAMS) +
+		"];vec4 Count;}beams;"
+		"layout(location=0)out vec4 c;void "
+		"main(){c=lighting.Direction+lights.Position[0]+beams.Light[0]*vec4(1);}";
+	const auto valid = CookedMaterial(source.c_str());
+	CHECK_FALSE(library.InstallCooked(Name("packed.ashader"), valid, "material", Name("owner")));
+	std::string changed = source;
+	const auto matrix = changed.find("uniform Beams");
+	const auto layout = changed.rfind("layout(set=3,binding=2)", matrix);
+	changed.replace(
+		layout, std::string("layout(set=3,binding=2)").size(), "layout(set=3,binding=2,row_major)"
+	);
+	const auto wrongMatrix = CookedMaterial(changed.c_str());
+	CHECK(library.InstallCooked(Name("packed.ashader"), wrongMatrix, "material", Name("owner")));
 }
 
 TEST_CASE("a shader script in the world is compiled by name", "[render][shaders]") {
