@@ -1507,6 +1507,79 @@ namespace {
 			hole("FarHole", far, near, 1);
 		}
 	}
+
+	// **Two panes that face each other across a gap, in one world.** `MakePortalPair`
+	// lays its pair along X with both faces the same way, which is a window; this
+	// is the arrangement a short tunnel has, where a walker passes through one
+	// mouth and the corridor's far mouth is a second hole in the same space.
+	// `subjectZ` is how far past the second pane's face the body stands, and the
+	// return is the world, the body root and the camera.
+	struct FacingPair {
+		WorldId World;
+		Entity Root;
+		Entity Camera;
+
+		FacingPair(Universe &universe, float subjectZ) {
+			World = AddWorld(universe, "facing");
+			universe.Enter(World, [&](Store &store) {
+				const Entity services = engine::scene::InstallServices(store);
+				// A pane's face is its part centre plus the normal times the
+				// half-extent, so these two faces are 0.125 out from 0 and 11.75.
+				const auto pane = [&](std::string_view name, const Vector3 &at, float yaw) {
+					const Entity part = store.CreateInstance(engine::scene::PartClass(), name);
+					store.SetParent(part, services);
+					store.Set(
+						part,
+						engine::scene::Transform{
+							engine::core::CFrame{at} * engine::core::CFrame::Angles(0.0f, yaw, 0.0f)
+						}
+					);
+					store.Set(part, engine::scene::Bounds{Vector3{3.0f, 4.0f, 0.125f}});
+					return part;
+				};
+				// The near mouth faces north out of the plain, the corridor's own
+				// mouth faces south down the corridor: each is the far side of the
+				// other, which is what makes the pair a hole rather than a mirror.
+				const Entity mouth = pane("Mouth", Vector3{0.0f, 4.0f, 0.0f}, 3.14159265f);
+				const Entity corridor = pane("Corridor", Vector3{34.0f, 4.0f, 11.75f}, 0.0f);
+				const auto hole = [&](std::string_view name, Entity on, Entity to) {
+					const Entity camera =
+						store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), name);
+					engine::scene::SurfaceCamera target;
+					target.Surface = 0;
+					store.Set(camera, target);
+					engine::scene::Portal portal;
+					portal.Destination = to;
+					store.Set(camera, portal);
+					store.SetParent(camera, on);
+				};
+				hole("MouthHole", mouth, corridor);
+				hole("CorridorHole", corridor, mouth);
+
+				Root = store.Create();
+				// A hundredth past the corridor mouth's face, so the follow arm
+				// behind the body leaves the corridor through it.
+				store.Set(
+					Root, engine::scene::Transform{engine::core::CFrame{Vector3{34.0f, 3.0f, subjectZ}}}
+				);
+				const Entity humanoid =
+					store.CreateInstance(engine::ecs::Classes::Find(Name("Humanoid")), "Subject");
+				engine::scene::Humanoid rig;
+				rig.RootPart = Root;
+				store.Set(humanoid, rig);
+
+				Camera = store.CreateInstance(engine::scene::CameraClass(), "Eye");
+				store.Set(Camera, engine::scene::CameraSubject{humanoid, false});
+				store.SetResource(engine::scene::ActiveCamera{Camera});
+				engine::scene::CameraController controller;
+				controller.Mode = engine::scene::CameraMode::Classic;
+				controller.Distance = 12.0f;
+				controller.HeadHeight = 1.5f;
+				store.SetResource(controller);
+				(void)engine::scene::AimSurfaceCameras(store);
+			});
+		}
+	};
 }
 
 TEST_CASE("new portals claim no render slot before the local aim pass", "[client][presentation]") {
@@ -1928,4 +2001,49 @@ TEST_CASE("foreground portal bodies come from the viewer's replica", "[client][p
 	REQUIRE(drawn.size() == own + 1);
 	CHECK(drawn.back().SourceWorld == universe.NameOf(thereSeen));
 	CHECK(drawn.back().Tint.R == Catch::Approx(.4f));
+}
+
+TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client][camera-portal-world]") {
+	// **The arm and the eye are one decision, and this is where they came apart.**
+	// A follow camera whose subject has just walked through a same-world mouth
+	// swings its arm back out through the mouth it came in by, and `PlaceCamera`
+	// maps that arm through the seam - the eye lands in the room the body left,
+	// looking back through the hole. The route pass then re-derives the eye from
+	// the *arm* rather than from the pose, and with no cross-world route of its
+	// own its map is still identity, so it handed back the pre-crossing arm.
+	//
+	// The two answers then disagree: the camera row says one place and the
+	// visibility frame says another, and every camera-dependent decision reads
+	// the second. Culling kept the far room and dropped the near one, so the
+	// frame was the empty plain with the tunnel missing from it - a hole showing
+	// nothing, found by a body that had walked through one.
+	Universe universe;
+	const FacingPair pair(universe, 11.625f - 0.01f);
+
+	engine::core::CFrame placed;
+	universe.Enter(pair.World, [&](Store &store) {
+		std::vector<engine::scene::PortalSeam> seams;
+		REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 2);
+		REQUIRE(engine::scene::PlaceCamera(store));
+		placed = store.Get<engine::scene::Transform>(pair.Camera)->Frame;
+	});
+
+	// The arm really did cross, and the map is what carried it: the eye is in
+	// the plain's chart, twelve studs out from the mouth, rather than up the
+	// corridor where the orbit was. A case that stopped here would prove nothing.
+	const engine::core::CFrame orbit = placed * engine::core::CFrame{}.Inverse();
+	(void)orbit;
+	CHECK(placed.Position.X == Catch::Approx(0.0f).margin(0.5f));
+	CHECK(placed.Position.Z == Catch::Approx(12.0f).margin(0.5f));
+
+	engine::core::CFrame eye = placed;
+	engine::scene::Camera lens;
+	engine::world::WorldId resolved;
+	universe.Enter(pair.World, [&](Store &store) { (void)store; });
+	resolved = client::ResolveCameraPortalWorld(universe, pair.World, pair.World, eye, lens);
+
+	// The world is unchanged - one world holds both charts - and the pose is
+	// untouched, because the route has no map of its own to compose onto it.
+	CHECK(resolved == pair.World);
+	CHECK(eye.FuzzyEq(placed, .0001f));
 }

@@ -27,7 +27,7 @@ namespace {
 
 	constexpr int WIDTH = 160;
 	constexpr int HEIGHT = 120;
-	constexpr int FRAMES = 22;
+	constexpr int FRAMES = 64;
 
 	std::string ReadText(const std::filesystem::path &path) {
 		std::ifstream input(path);
@@ -49,6 +49,17 @@ namespace {
 
 -- Test capture: use the actual local player and its default follow camera.
 -- That is the Studio path, unlike an authored fixed camera or an extra player.
+--
+-- **The walk goes deep enough for the eye to end up in the corridor, and that is
+-- the whole reason it is not twenty-two frames of tenths.** A follow camera
+-- twelve studs behind a body that has just come through the mouth is still
+-- outside it: the arm reaches back out through the mouth the body came in by,
+-- and `PlaceCamera` maps that arm through the seam, so the eye stands on the
+-- plain twelve studs from the tunnel looking in through the pane. That is the
+-- seamless answer and it is what the first eleven frames photograph. The eye
+-- only joins the body in the corridor's own chart once the body is more than
+-- twelve studs past the mouth, and a walk that stops one stud in never gets
+-- there - which is what this case asserted before, and it could not pass.
 local captureStep = 0
 local capturePlayer = assert(Players.LocalPlayer, "local player must exist before the capture script")
 local captureCharacter = assert(capturePlayer:LoadCharacter(), "local player must load a character")
@@ -58,8 +69,17 @@ local captureHumanoid = assert(captureCharacter:FindFirstChild("Humanoid") :: Hu
 	captureTorso.Color = Color3.new(1, 0, 1)
 RunService.Heartbeat:Connect(function(_deltaTime: number)
 	captureTorso.Color = Color3.new(1, 0, 1)
-	local phase = captureStep % 22
-	local z = if phase <= 10 then 1.5 - phase * 0.1 else 0.5 + (phase - 10) * 0.1
+	local step = captureStep % 64
+	-- Tenths at both mouths, where the seam is, and six-tenths between them,
+	-- where the only thing being measured is how far the eye has walked.
+	local z = if step <= 10 then
+		1.5 - step * 0.1
+	elseif step <= 30 then
+		0.5 - (step - 10) * 0.6
+	elseif step <= 50 then
+		-11.5 + (step - 30) * 0.6
+	else
+		-0.5 + math.min(step - 50, 11) * 0.1
 	-- Continue the same authored walk in the far chart after it crosses. Writing
 	-- the near coordinate every frame would teleport the real body through the
 	-- pane repeatedly, which is not a player walking through it.
@@ -68,9 +88,9 @@ RunService.Heartbeat:Connect(function(_deltaTime: number)
 	local physicalX = if far then 54 else SHORT_X
 	captureRoot.CFrame = CFrame.lookAt(
 		Vector3.new(physicalX, 3, physicalZ),
-		Vector3.new(physicalX, 3, physicalZ - (if phase <= 10 then 1 else -1))
+		Vector3.new(physicalX, 3, physicalZ - (if step <= 30 then 1 else -1))
 	)
-	captureHumanoid.MoveDirection = Vector3.new(0, 0, if phase <= 10 then -1 else 1)
+	captureHumanoid.MoveDirection = Vector3.new(0, 0, if step <= 30 then -1 else 1)
 	captureStep += 1
 end)
 )";
