@@ -31,7 +31,7 @@ namespace engine::scene {
 		if (recorded.Side == 0 && recorded.Frames != 0 && !sequence) return false;
 		if (!recorded.FrameDurations.empty()) {
 			if (recorded.FrameDurations.size() != recorded.Frames || recorded.FrameRate != 0.0f ||
-				(!sequence && (recorded.Frames > 256 || recorded.Side == 0 ||
+				(!sequence && (recorded.Frames > 4096 || recorded.Side == 0 ||
 							   recorded.Frames > static_cast<uint32_t>(recorded.Side) * recorded.Side))) {
 				return false;
 			}

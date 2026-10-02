@@ -200,9 +200,9 @@ namespace engine::effects {
 				}
 
 				// Zero is "the whole grid" and is the default, so the low bound is
-				// zero rather than one. Two hundred and fifty-six is the widest grid drawn.
+				// zero rather than one. Four thousand and ninety-six is the widest grid drawn.
 				const int32_t wanted = *static_cast<const int32_t *>(value);
-				emitter->FlipbookFrames = static_cast<uint16_t>(std::clamp(wanted, 0, 256));
+				emitter->FlipbookFrames = static_cast<uint16_t>(std::clamp(wanted, 0, 4096));
 				return true;
 			};
 
@@ -238,7 +238,9 @@ namespace engine::effects {
 			);
 			ecs::EnumTable::Register(
 				FlipbookLayoutEnum().Text(),
-				std::array<std::string_view, 5>{"None", "Grid2x2", "Grid4x4", "Grid8x8", "Grid16x16"}
+				std::array<std::string_view, 7>{
+					"None", "Grid2x2", "Grid4x4", "Grid8x8", "Grid16x16", "Grid32x32", "Grid64x64"
+				}
 			);
 			ecs::EnumTable::Register(
 				FlipbookModeEnum().Text(),

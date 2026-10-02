@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -91,7 +92,7 @@ TEST_CASE("bounded upload work defers and eventually publishes each owner", "[re
 }
 
 TEST_CASE("failed replacement keeps last published sequence and memory is bounded", "[render][sequence]") {
-	engine::render::SequencePlayback player(7 * 1024);
+	engine::render::SequencePlayback player(12 * 1024);
 	const engine::core::Name name("frames.aseq");
 	const engine::core::Name owner("world-a");
 	REQUIRE(player.Admit(name, owner, Sequence(1)));
@@ -105,5 +106,34 @@ TEST_CASE("failed replacement keeps last published sequence and memory is bounde
 	CHECK(player.Advance(0.05, 4, [](auto, auto, const auto &, uint32_t) { return true; }) == 1);
 	CHECK(player.PublishedSignature() != previous);
 	CHECK(player.Drop(name, owner));
+	CHECK(player.RetainedBytes() == 0);
+}
+
+TEST_CASE("large sequence playback stays inside frame storage at a wrap boundary", "[render][sequence]") {
+	engine::render::SequencePlayback player;
+	const engine::core::Name name("boundary.aseq"), owner("sequence-boundary-owner");
+	auto sequence = Sequence(4);
+	float total = 0;
+	for (float duration : sequence.FrameDurations)
+		total += duration;
+	REQUIRE(player.Admit(name, owner, std::move(sequence)));
+	CHECK(
+		player.Advance(
+			std::nextafter(double(total), 0.0), 4, [](auto, auto, const auto &source, uint32_t frame) {
+				CHECK(frame == source.FrameDurations.size() - 1);
+				CHECK(source.FramePixels(frame).size() == 4);
+				return true;
+			}
+		) == 1
+	);
+}
+
+TEST_CASE("large sequence admission charges retained source capacity", "[render][sequence]") {
+	engine::render::SequencePlayback player(8 * 1024);
+	auto sequence = Sequence(1);
+	sequence.Pixels.reserve(64 * 1024);
+	CHECK_FALSE(
+		player.Admit(engine::core::Name("oversized.aseq"), engine::core::Name("owner"), std::move(sequence))
+	);
 	CHECK(player.RetainedBytes() == 0);
 }

@@ -63,6 +63,7 @@ Milestone labels describe development scope, not release versions.
   21. Record bounded builtin random draws for Sparkle and add source image normalization.
   22. Save particle objects; convert and render FLIP readback with bounded replay.
   23. Expose authored graph selectors as reflected instance properties and preserve them in standard saves.
+  24. Play bounded 4096-frame texture atlases with per-frame timing through native sequence and particle paths; GPU verification remains open.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

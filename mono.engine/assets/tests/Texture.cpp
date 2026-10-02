@@ -712,3 +712,19 @@ TEST_CASE("a version 2 file reads as a single level", "[assets][texture]") {
 	CHECK(read.FlipbookFrames == 3);
 	CHECK(reader.AtEnd());
 }
+
+TEST_CASE("version 5 preserves a 4096-cell variable-duration atlas", "[assets][texture]") {
+	TextureData large = Made(64, 64);
+	large.FlipbookSide = 64;
+	large.FlipbookFrames = 4096;
+	large.FlipbookFrameDurations.assign(4096, .125f);
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, large));
+	TextureData restored;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, restored));
+	CHECK(restored.FlipbookSide == 64);
+	CHECK(restored.FlipbookFrames == 4096);
+	CHECK(restored.FlipbookFrameDurations == large.FlipbookFrameDurations);
+	CHECK(reader.AtEnd());
+}

@@ -32,7 +32,7 @@ TEST_CASE(
 	CHECK_FALSE(client::ReadSequenceContent("joint.aanim", writer.Bytes(), decoded, facts));
 	CHECK_FALSE(client::ReadSequenceContent("frames.aseq", writer.Bytes().first(20), decoded, facts));
 	REQUIRE(client::ReadSequenceContent("frames.aseq", writer.Bytes(), decoded, facts));
-	CHECK(facts.Side == 0);
+	CHECK(facts.Side == 32);
 	CHECK(facts.Frames == 257);
 	CHECK(facts.FrameDurations == authored.FrameDurations);
 	CHECK(std::ranges::equal(decoded.FramePixels(256), authored.FramePixels(256)));

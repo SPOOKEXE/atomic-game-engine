@@ -1,3 +1,5 @@
+#include "ContentSequence.hpp"
+
 #include <engine/assets/Animation.hpp>
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
@@ -598,6 +600,30 @@ namespace client {
 				}
 				ContentMaterials++;
 			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
+				if (engine::assets::FormOfName(asset->Name) == engine::assets::ContentForm::ASeq) {
+					engine::assets::TextureSequenceData sequence;
+					engine::scene::FlipbookFacts facts;
+					if (!ReadSequenceContent(asset->Name, asset->Bytes, sequence, facts)) {
+						ENGINE_WARN("content: {} is not a supported texture sequence", asset->Name);
+						continue;
+					}
+					bool admitted = false;
+					for (const auto owner : content.Owners)
+						admitted = Renderer.AddTextureSequence(name, sequence, owner) || admitted;
+					VisualResourcesChanged = admitted || VisualResourcesChanged;
+					if (!admitted && Renderer.Backend().Device != nullptr)
+						ENGINE_WARN(
+							"content: {} texture sequence exceeds native atlas limits or upload failed",
+							asset->Name
+						);
+					for (const engine::world::WorldId id : worlds) {
+						Universe_->Enter(id, [&name, &facts](engine::ecs::Store &store) {
+							engine::scene::RecordTexture(store, name, facts);
+						});
+					}
+					ContentTextures++;
+					continue;
+				}
 				engine::assets::AnimationData animation;
 				if (!engine::assets::Animation::Read(reader, animation)) {
 					ENGINE_WARN("content: {} is not an animation this engine reads", asset->Name);

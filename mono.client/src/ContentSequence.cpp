@@ -18,6 +18,8 @@ namespace client {
 		if (!engine::assets::TextureSequence::Read(reader, decoded) || decoded.FrameDurations.size() <= 256)
 			return false;
 		engine::scene::FlipbookFacts recorded;
+		recorded.Side = 32;
+		if (decoded.FrameDurations.size() > 1024) recorded.Side = 64;
 		recorded.Frames = static_cast<uint16_t>(decoded.FrameDurations.size());
 		recorded.FrameDurations = decoded.FrameDurations;
 		sequence = std::move(decoded);

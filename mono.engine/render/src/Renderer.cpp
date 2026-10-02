@@ -12,6 +12,7 @@
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/EntityFlow.hpp>
@@ -1408,6 +1409,45 @@ namespace engine::render {
 
 	bool Renderer::ExpectingTexture(const core::Name &name, core::Name owner) const {
 		return State != nullptr && State->Textures.Expecting(name, owner);
+	}
+
+	bool Renderer::AddTextureSequence(
+		core::Name name, assets::TextureSequenceData sequence, core::Name owner
+	) try {
+		RequireOwningThread("AddTextureSequence");
+		if (!State || !State->Device || !sequence.IsValid() || sequence.FrameDurations.size() <= 256)
+			return false;
+		const uint32_t side = sequence.FrameDurations.size() <= 1024 ? 32 : 64;
+		const uint64_t width = uint64_t(sequence.Width) * side, height = uint64_t(sequence.Height) * side;
+		const uint64_t bytes = width * height * 4;
+		if (width > assets::Texture::MAXIMUM_DIMENSION || height > assets::Texture::MAXIMUM_DIMENSION ||
+			bytes > assets::TextureSequence::MAXIMUM_PIXEL_BYTES)
+			return false;
+		ENGINE_PROFILE_CAT("sequence atlas upload", core::ProfileCategory::Assets);
+		assets::TextureData image;
+		image.Width = static_cast<uint32_t>(width);
+		image.Height = static_cast<uint32_t>(height);
+		image.Format = sequence.Format;
+		image.FlipbookSide = static_cast<uint8_t>(side);
+		image.FlipbookFrames = static_cast<uint16_t>(sequence.FrameDurations.size());
+		image.FlipbookFrameDurations = std::move(sequence.FrameDurations);
+		image.Pixels.resize(static_cast<size_t>(bytes));
+		for (size_t frame = 0; frame < image.FlipbookFrames; ++frame) {
+			const size_t rowBytes = size_t(sequence.Width) * 4;
+			for (size_t row = 0; row < sequence.Height; ++row) {
+				const size_t source = (frame * sequence.Height + row) * rowBytes;
+				const size_t destination =
+					((frame / side * sequence.Height + row) * image.Width + frame % side * sequence.Width) *
+					4;
+				std::copy_n(sequence.Pixels.begin() + source, rowBytes, image.Pixels.begin() + destination);
+			}
+		}
+		if (!State->Textures.Add(name, image, owner)) return false;
+		++State->ResourceEpoch;
+		core::Metrics::Count("render.sequence.upload_bytes", bytes);
+		return true;
+	} catch (const std::bad_alloc &) {
+		return false;
 	}
 
 	void Renderer::SetAnimationTime(double seconds) {

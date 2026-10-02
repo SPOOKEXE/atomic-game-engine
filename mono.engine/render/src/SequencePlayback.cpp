@@ -12,8 +12,8 @@ namespace engine::render {
 	}
 
 	size_t SequencePlayback::BytesOf(const Sequence &sequence) {
-		return sequence.Data.Pixels.size() + sequence.Data.FrameDurations.size() * sizeof(float) +
-			   sequence.CumulativeEnds.size() * sizeof(float);
+		return sequence.Data.Pixels.capacity() + sequence.Data.FrameDurations.capacity() * sizeof(float) +
+			   sequence.CumulativeEnds.capacity() * sizeof(float);
 	}
 
 	bool SequencePlayback::Admit(core::Name name, core::Name owner, assets::TextureSequenceData sequence) {
