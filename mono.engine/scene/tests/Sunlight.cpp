@@ -4,6 +4,8 @@
 // property can round-trip through the ECS while changing no rendered state,
 // which is the regression this suite exists to prevent.
 
+#include "fixtures/SunlightParity.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -131,4 +133,10 @@ TEST_CASE("the legacy Sun resource remains an explicit override", "[scene][sunli
 	CHECK(resolved.Direction == Vector3{0.0f, -1.0f, 0.0f});
 	CheckColour(resolved.Ambient, override.Ambient);
 	CHECK(resolved.FogStart == Approx(12.0f));
+}
+
+TEST_CASE(
+	"lighting resolves fresh authored state in root creation order", "[scene][sunlight][sunlight-parity]"
+) {
+	REQUIRE_NOTHROW(sunlight_fixture::Verify());
 }

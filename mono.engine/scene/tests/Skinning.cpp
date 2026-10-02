@@ -5,6 +5,8 @@
 // a chain into a forward pass, and a rig that breaks it has to degrade to
 // something an author can see rather than to a body at the origin.
 
+#include "fixtures/SkinningParity.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
@@ -15,6 +17,9 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <array>
+#include <vector>
 
 TEST_SUITE_ID("engine.scene.skinning")
 
@@ -230,4 +235,133 @@ TEST_CASE("a bone is a class and it is not an attachment", "[scene][skinning]") 
 	REQUIRE(BoneClass().IsValid());
 	CHECK(Classes::IsA(BoneClass(), Classes::Find(Name("Instance"))));
 	CHECK_FALSE(Classes::IsA(BoneClass(), Classes::Find(Name("Attachment"))));
+}
+
+TEST_CASE("skinning verifies every authored pose and only advances changed rows", "[scene][skinning]") {
+	skinning_fixture::World first(3, 32, true);
+	skinning_fixture::World second(1, 256, false);
+	for (size_t tick = 0; tick < 8; ++tick) {
+		++first.Clock;
+		first.Prepare();
+		const uint64_t authored = first.InputHash();
+		CHECK(ResolveBones(first.Storage) == first.ExpectedWrites);
+		CHECK_NOTHROW(first.Verify());
+		CHECK(first.InputHash() == authored);
+		const uint64_t version = first.Storage.ChangeVersion();
+		CHECK(ResolveBones(first.Storage) == 0);
+		CHECK(first.Storage.ChangeVersion() == version);
+		const uint64_t secondVersion = second.Storage.ChangeVersion();
+		CHECK(ResolveBones(second.Storage) == 0);
+		CHECK(second.Storage.ChangeVersion() == secondVersion);
+		CHECK_NOTHROW(second.Verify());
+	}
+}
+
+TEST_CASE(
+	"duplicate palette slots follow tree order through reparent and component moves", "[scene][skinning]"
+) {
+	RegisterSceneClasses();
+	Store store("skinning_test.duplicates");
+	const Entity rig = store.CreateInstance(Classes::Find(Name("Folder")), "Rig");
+	store.Set(rig, Skeleton{Name("skinning_test.Duplicate"), 4, {}});
+	const Entity first = store.CreateInstance(BoneClass(), "First");
+	const Entity second = store.CreateInstance(BoneClass(), "Second");
+	const Entity child = store.CreateInstance(BoneClass(), "Child");
+	for (Entity entity : {first, second, child})
+		store.SetParent(entity, rig);
+	Bone a;
+	a.Rest = CFrame(Vector3(1, 0, 0));
+	a.Joint = 1;
+	Bone b;
+	b.Rest = CFrame(Vector3(2, 0, 0));
+	b.Joint = 1;
+	b.WorldFrame = CFrame(Vector3(99, 98, 97));
+	Bone c;
+	c.Rest = CFrame(Vector3(0, 3, 0));
+	c.Joint = 3;
+	c.ParentJoint = 1;
+	store.Set(first, a);
+	store.Set(second, b);
+	store.Set(child, c);
+	CHECK(ResolveBones(store) == 2);
+	CHECK_NOTHROW(skinning_fixture::VerifyFrame(store.Get<Bone>(first)->WorldFrame, {{1, 0, 0}}));
+	CHECK_NOTHROW(skinning_fixture::VerifyFrame(store.Get<Bone>(child)->WorldFrame, {{1, 3, 0}}));
+	CHECK(
+		skinning_fixture::Words(store.Get<Bone>(second)->WorldFrame) == skinning_fixture::Words(b.WorldFrame)
+	);
+	// Removing and appending the first sibling changes the duplicate winner.
+	store.SetParent(first, engine::ecs::NULL_ENTITY);
+	store.SetParent(first, rig);
+	store.Set(second, Transform{});
+	CHECK(ResolveBones(store) == 2);
+	CHECK_NOTHROW(skinning_fixture::VerifyFrame(store.Get<Bone>(second)->WorldFrame, {{2, 0, 0}}));
+	CHECK_NOTHROW(skinning_fixture::VerifyFrame(store.Get<Bone>(child)->WorldFrame, {{2, 3, 0}}));
+	store.Remove<Bone>(second);
+	CHECK(ResolveBones(store) == 1);
+	CHECK_NOTHROW(skinning_fixture::VerifyFrame(store.Get<Bone>(child)->WorldFrame, {{1, 3, 0}}));
+	c.ParentJoint = 2;
+	store.Set(child, c);
+	CHECK(ResolveBones(store) == 1);
+	CHECK_NOTHROW(skinning_fixture::VerifyFrame(store.Get<Bone>(child)->WorldFrame, {{0, 3, 0}}));
+}
+
+TEST_CASE("one bone resolve isolates dense sparse and empty rigs of changing sizes", "[scene][skinning]") {
+	RegisterSceneClasses();
+	Store store("skinning_test.mixed");
+	struct ExpectedBone {
+		Entity Instance;
+		skinning_fixture::Affine World;
+	};
+	std::vector<ExpectedBone> expected;
+	std::vector<Entity> rigs;
+	const std::array<size_t, 7> counts{256, 3, 0, 129, 2, 256, 1};
+	for (size_t index = 0; index < counts.size(); ++index) {
+		engine::scene::PartDesc description;
+		description.Frame = CFrame(Vector3(static_cast<float>(index) * 1024 + 8, 2, -4));
+		const Entity rig = engine::scene::MakePart(store, description);
+		store.Set(rig, Skeleton{Name("skinning_test.Mixed"), static_cast<uint16_t>(counts[index]), {}});
+		rigs.push_back(rig);
+		const bool sparse = index == 3;
+		for (size_t slot = 0; slot < counts[index]; ++slot) {
+			if (sparse && slot != 0 && slot != 128) continue;
+			const Entity instance = store.CreateInstance(BoneClass(), "Joint");
+			store.SetParent(instance, rig);
+			Bone bone;
+			bone.Rest = CFrame(Vector3(.5f, .25f, -.125f));
+			bone.Joint = static_cast<uint16_t>(slot);
+			bone.ParentJoint = slot == 0 ? NO_JOINT : static_cast<uint16_t>(sparse ? 1 : slot - 1);
+			store.Set(instance, bone);
+			const float steps = sparse ? 1 : static_cast<float>(slot + 1);
+			expected.push_back(
+				{instance,
+				 {{description.Frame.Position.X + .5f * steps, 2 + .25f * steps, -4 - .125f * steps}}}
+			);
+		}
+	}
+	// Ensure this call actually exercises a descending, empty and sparse run.
+	std::vector<Entity> visited;
+	store.Each<const Skeleton>([&](Entity rig, const Skeleton &) { visited.push_back(rig); });
+	REQUIRE(visited == rigs);
+	CHECK(ResolveBones(store) == expected.size());
+	for (const auto &bone : expected)
+		CHECK_NOTHROW(skinning_fixture::VerifyFrame(store.Get<Bone>(bone.Instance)->WorldFrame, bone.World));
+	const uint64_t version = store.ChangeVersion();
+	CHECK(ResolveBones(store) == 0);
+	CHECK(store.ChangeVersion() == version);
+	// Delete a parent in the final large rig, so a later call must not retain
+	// that slot's filled state and accidentally use its previous world pose.
+	Entity removed;
+	Entity child;
+	store.EachDescendant(rigs[5], [&](Entity entity) {
+		const Bone *bone = store.Get<Bone>(entity);
+		if (bone && bone->Joint == 1) removed = entity;
+		if (bone && bone->Joint == 2) child = entity;
+	});
+	REQUIRE(removed != engine::ecs::NULL_ENTITY);
+	REQUIRE(child != engine::ecs::NULL_ENTITY);
+	store.Remove<Bone>(removed);
+	CHECK(ResolveBones(store) == 254);
+	CHECK_NOTHROW(
+		skinning_fixture::VerifyFrame(store.Get<Bone>(child)->WorldFrame, {{5128.5f, 2.25f, -4.125f}})
+	);
 }

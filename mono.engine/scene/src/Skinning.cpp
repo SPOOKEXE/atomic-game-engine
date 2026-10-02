@@ -1,3 +1,4 @@
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
@@ -57,31 +58,50 @@ namespace engine::scene {
 		// **A slot claimed twice keeps the first bone that claimed it.** A rig
 		// cannot have two joint sevens, and taking the last one seen would make
 		// the palette depend on the order the tree happened to be built in.
-		size_t Compose(ecs::Store &store, ecs::Entity rig, std::vector<Joint> &joints) {
+		size_t Compose(
+			ecs::Store &store,
+			ecs::Entity rig,
+			std::vector<Joint> &joints,
+			std::vector<core::CFrame> &resolved,
+			std::vector<bool> &filled
+		) {
+			ENGINE_PROFILE("scene skinning rig");
 			joints.clear();
 
-			store.EachDescendant(rig, [&](ecs::Entity descendant) {
-				if (const Bone *bone = store.Get<Bone>(descendant)) {
-					joints.push_back(Joint{descendant, bone->Joint, bone->ParentJoint});
-				}
-			});
+			{
+				ENGINE_PROFILE("scene skinning joint gather");
+				store.EachDescendant(rig, [&](ecs::Entity descendant) {
+					if (const Bone *bone = store.Get<Bone>(descendant)) {
+						joints.push_back(Joint{descendant, bone->Joint, bone->ParentJoint});
+					}
+				});
+			}
 			if (joints.empty()) {
 				return 0;
 			}
 
 			// Stable, so two bones claiming one slot resolve in tree order rather
 			// than in whatever order the sort felt like.
-			std::stable_sort(joints.begin(), joints.end(), [](const Joint &left, const Joint &right) {
-				return left.Slot < right.Slot;
-			});
+			{
+				ENGINE_PROFILE("scene skinning slot sort");
+				std::stable_sort(joints.begin(), joints.end(), [](const Joint &left, const Joint &right) {
+					return left.Slot < right.Slot;
+				});
+			}
 
 			const core::CFrame base = RigFrame(store, rig);
 
 			// Resolved frames by slot, so a child reads its parent's answer with
-			// no second search. Sized to the highest slot present rather than to
-			// `MAX_JOINTS`, because a rig of four bones should cost four entries.
-			std::vector<core::CFrame> resolved(static_cast<size_t>(joints.back().Slot) + 1, base);
-			std::vector<bool> filled(resolved.size(), false);
+			// no second search. The used range ends at this rig's highest slot;
+			// earlier rigs may have grown the capacity reused within this call.
+			ENGINE_PROFILE("scene skinning pose compose");
+			{
+				ENGINE_HEAP_SCOPE("scene skinning pose scratch");
+				// Reset every used slot for this rig; capacity is shared only
+				// within this update, so earlier rigs leave no pose or flags.
+				resolved.assign(static_cast<size_t>(joints.back().Slot) + 1, base);
+				filled.assign(resolved.size(), false);
+			}
 
 			size_t written = 0;
 			for (const Joint &joint : joints) {
@@ -124,16 +144,24 @@ namespace engine::scene {
 	}
 
 	size_t ResolveBones(ecs::Store &store) {
+		ENGINE_PROFILE("scene resolve bones");
 		// The rigs are gathered before any of them is composed, because
 		// `Compose` walks descendants and reads rows outside the query's own
 		// archetype. That is the shape `UpdateRespawns` uses for the same reason.
 		std::vector<ecs::Entity> rigs;
-		store.Each<const Skeleton>([&rigs](ecs::Entity entity, const Skeleton &) { rigs.push_back(entity); });
+		{
+			ENGINE_PROFILE("scene skinning rig gather");
+			store.Each<const Skeleton>([&rigs](ecs::Entity entity, const Skeleton &) {
+				rigs.push_back(entity);
+			});
+		}
 
 		std::vector<Joint> joints;
+		std::vector<core::CFrame> frames;
+		std::vector<bool> filled;
 		size_t resolved = 0;
 		for (const ecs::Entity rig : rigs) {
-			resolved += Compose(store, rig, joints);
+			resolved += Compose(store, rig, joints, frames, filled);
 		}
 		return resolved;
 	}

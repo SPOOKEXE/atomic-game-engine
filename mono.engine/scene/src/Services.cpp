@@ -1,3 +1,4 @@
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -1035,18 +1036,19 @@ namespace engine::scene {
 	}
 
 	Entity ServiceOf(const Store &store, ecs::ClassId klass) {
+		ENGINE_HEAP_SCOPE("scene service lookup");
 		if (!klass.IsValid()) {
 			return NULL_ENTITY;
 		}
 
 		Entity found = NULL_ENTITY;
-		store.EachRoot([&](Entity root) {
-			// **The first in `EachRoot`'s order**, which is creation order - the
-			// same tie-break `FindFirstRoot` made, kept so a world that somehow
-			// holds two of one service resolves to the same one it always did.
-			if (found == NULL_ENTITY && store.IsA(root, klass)) {
+		// This lookup has no mutating callback. Scan the hierarchy directly and
+		// retain EachRoot's smallest-id tie-break without collecting its snapshot.
+		auto &mutableStore = const_cast<Store &>(store);
+		mutableStore.Each<const ecs::Hierarchy>([&](Entity root, const ecs::Hierarchy &node) {
+			if (node.Parent == NULL_ENTITY && store.IsA(root, klass) &&
+				(found == NULL_ENTITY || root.Id < found.Id))
 				found = root;
-			}
 		});
 		return found;
 	}
