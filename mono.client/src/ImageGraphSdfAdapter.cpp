@@ -289,8 +289,8 @@ namespace client::detail {
 									std::array<double, 4> pixel{};
 									imagegraph::LoadSurfacePixel(
 										image.Data,
-										uint32_t(uint64_t(x) * image.Data.Width / 1024),
-										uint32_t(uint64_t(y) * image.Data.Height / 1024),
+										uint32_t((uint64_t(x) * 2 + 1) * image.Data.Width / 2048),
+										uint32_t((uint64_t(y) * 2 + 1) * image.Data.Height / 2048),
 										pixel
 									);
 									imagegraph::StoreSurfacePixel(atlas, uint32_t(cell) * 1024 + x, y, pixel);

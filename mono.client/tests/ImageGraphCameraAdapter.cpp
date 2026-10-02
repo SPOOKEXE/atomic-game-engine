@@ -126,3 +126,89 @@ TEST_CASE(
 	CHECK(diagnostic.Code == Status::InvalidValue);
 	CHECK(request.Output == expected);
 }
+
+TEST_CASE(
+	"Camera Set adds source key and fill lights outside the authored scene", "[client][imagegraph][camera]"
+) {
+	auto document = CameraScene();
+	document.Nodes.back().Type = "pc.3_d_camera_set";
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	engine::render::imagegraph::SourceCamera3DRequest request;
+	REQUIRE(
+		client::detail::BuildCameraRequest(
+			document, plan, document.Nodes.back(), "rendered", 0, 77, false, request, diagnostic
+		)
+	);
+	REQUIRE(request.Scene.Data);
+	REQUIRE(request.Scene.Data->Objects.size() == 3);
+	const auto *authored = std::get_if<OwnedPayload3D<SceneData3D>>(&request.Scene.Data->Objects[0].Data);
+	REQUIRE(authored);
+	REQUIRE(*authored);
+	CHECK((*authored)->Objects.size() == 2);
+	for (size_t i = 1; i <= 2; ++i) {
+		const auto *light = std::get_if<LightValue3D>(&request.Scene.Data->Objects[i].Data);
+		REQUIRE(light);
+		REQUIRE(light->Data);
+		const auto &data = *light->Data;
+		CHECK(data.Kind == LightKind3D::Directional);
+		CHECK(data.Color == Colour{255, 255, 255, 255});
+		CHECK(data.Intensity == (i == 1 ? 1 : .25));
+		CHECK_FALSE(data.CastShadow);
+		CHECK(data.ShadowBias == .001);
+		CHECK(data.ShadowMapScale == 4);
+		CHECK(data.Transform.Scale == Vector3{.6, .6, .6});
+		CHECK(std::abs(data.Transform.Position.X - (i == 1 ? std::sqrt(2.0) : -2.0)) < 1e-12);
+		CHECK(std::abs(data.Transform.Position.Y - (i == 1 ? std::sqrt(6.0) : 2.0)) < 1e-12);
+		CHECK(std::abs(data.Transform.Position.Z - 2 * std::sqrt(2.0)) < 1e-12);
+		const auto &q = data.Transform.Rotation;
+		// The source polar light's local +X axis looks toward the origin after its +Z-up roll.
+		const Vector3 forward{
+			1 - 2 * (q.Y * q.Y + q.Z * q.Z), 2 * (q.X * q.Y + q.W * q.Z), 2 * (q.X * q.Z - q.W * q.Y)
+		};
+		CHECK(std::abs(forward.X + data.Transform.Position.X / 4) < 1e-12);
+		CHECK(std::abs(forward.Y + data.Transform.Position.Y / 4) < 1e-12);
+		CHECK(std::abs(forward.Z + data.Transform.Position.Z / 4) < 1e-12);
+	}
+}
+
+TEST_CASE(
+	"Camera Set resolves animated light controls and source polar singularity nudges",
+	"[client][imagegraph][camera]"
+) {
+	auto document = CameraScene();
+	auto &camera = document.Nodes.back();
+	camera.Type = "pc.3_d_camera_set";
+	camera.Values.insert(
+		camera.Values.end(),
+		{{"l1_h_angle", 0.0},
+		 {"l1_v_angle", 0.0},
+		 {"l1_color", Colour{12, 34, 56, 78}},
+		 {"l2_intensity", .75}}
+	);
+	document.Keyframes.push_back({"camera", "l1_intensity", 0, 1.0, "linear"});
+	document.Keyframes.push_back({"camera", "l1_intensity", 10, 3.0, "linear"});
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	engine::render::imagegraph::SourceCamera3DRequest request;
+	REQUIRE(
+		client::detail::BuildCameraRequest(
+			document, plan, camera, "rendered", 5, 77, false, request, diagnostic
+		)
+	);
+	const auto &key = *std::get<LightValue3D>(request.Scene.Data->Objects[1].Data).Data;
+	const auto &fill = *std::get<LightValue3D>(request.Scene.Data->Objects[2].Data).Data;
+	CHECK(key.Color == Colour{12, 34, 56, 78});
+	CHECK(key.Intensity == 2);
+	CHECK(fill.Intensity == .75);
+	CHECK(key.Transform.Position.X > 0);
+	CHECK(key.Transform.Position.Z > 0);
+	CHECK(key.Transform.Position.Y < 4);
+	CHECK(
+		std::abs(
+			std::hypot(key.Transform.Position.X, key.Transform.Position.Y, key.Transform.Position.Z) - 4
+		) < 1e-12
+	);
+}

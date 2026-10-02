@@ -1,5 +1,7 @@
 #include "../src/ImageGraphSdfAdapter.hpp"
 
+#include <engine/imagegraph/HostCapture.hpp>
+#include <engine/imagegraph/Surface.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -213,4 +215,54 @@ TEST_CASE(
 	CHECK(atlas.Pixels[1024 * 4 + 1] == 255);
 	CHECK(atlas.Pixels[2048 * 4 + 3] == 0);
 	CHECK(atlas.Pixels.size() < 32ull * 1024 * 1024);
+}
+
+TEST_CASE(
+	"terrain atlas samples stretched source texels at pixel centers", "[client][imagegraph][sdf_adapter]"
+) {
+	class Host final : public engine::imagegraph::HostNodeProvider {
+	  public:
+		bool Capture(
+			const engine::imagegraph::HostNodeInvocation &i,
+			engine::imagegraph::HostNodeCapture &output,
+			std::string &
+		) override {
+			output.Authored = i.Authored;
+			output.Tick = i.Request.Tick;
+			output.Inputs.assign(i.Inputs.begin(), i.Inputs.end());
+			StructValue content;
+			content.Data.emplace();
+			output.Outputs = {{"content", content}, {"path", std::string{"fixture"}}};
+			Image image{2048, 1, std::vector<uint8_t>(8192)};
+			for (size_t x = 0; x < 2048; ++x) {
+				image.Pixels[x * 4] = x % 2 ? 255 : 0;
+				image.Pixels[x * 4 + 3] = 255;
+			}
+			image.Hash = SurfaceHash(image);
+			output.Images = {{"merged_image", std::move(image)}};
+			return true;
+		}
+	} host;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"read", "pc.ora_file_read", "", {}, {{"path", std::string{"fixture"}}}},
+		{"terrain", "pc.rm_terrain", "", {}, {{"dimension", Vector2{8, 8}}, {"dimension_unit", EnumValue{0}}}}
+	};
+	document.Links = {{"read", "merged_image", "terrain", "surface"}};
+	document.Outputs = {{"out", "terrain", "surface_out"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	engine::render::imagegraph::SourceSdfRequest request;
+	REQUIRE(
+		client::detail::BuildSdfRequest(
+			document, plan, document.Nodes.back(), "surface_out", 0, 1, false, request, diagnostic, &host
+		)
+	);
+	const auto &atlas = *request.Terrain.Textures[0];
+	// A 2048-wide alternating source shrunk to 1024 picks each odd source texel.
+	for (size_t x = 0; x < 1024; ++x)
+		CHECK(atlas.Pixels[x * 4] == 255);
+	CHECK(atlas.Pixels[1024 * 4] == 0);
 }

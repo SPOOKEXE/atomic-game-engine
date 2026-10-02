@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <new>
+#include <numbers>
 #include <type_traits>
 
 namespace client::detail {
@@ -88,6 +89,59 @@ namespace client::detail {
 				return true;
 			}
 		};
+		bool CameraSetLight(Controls &controls, uint32_t index, LightValue3D &light) {
+			const std::string prefix = "l" + std::to_string(index) + "_";
+			double horizontal = index == 1 ? 30 : -45, vertical = 45, intensity = index == 1 ? 1 : .25;
+			if (!controls.Number(prefix + "h_angle", horizontal) ||
+				!controls.Number(prefix + "v_angle", vertical) ||
+				!controls.Number(prefix + "intensity", intensity))
+				return false;
+			if (std::abs(intensity) > std::numeric_limits<float>::max())
+				return controls.Fail(
+					prefix + "intensity", "light intensity exceeds renderer precision range"
+				);
+			Colour color{255, 255, 255, 255};
+			if (const auto *value = controls.Find(prefix + "color")) {
+				const auto *typed = std::get_if<Colour>(value);
+				if (!typed)
+					return controls.Fail(
+						prefix + "color", "light color requires a colour", Status::TypeMismatch
+					);
+				color = *typed;
+			}
+			if (std::fmod(horizontal, 90) == 0) horizontal += .1;
+			if (std::fmod(vertical, 90) == 0) vertical += .1;
+			const double h = horizontal / 180 * std::numbers::pi, v = vertical / 180 * std::numbers::pi;
+			auto &data = light.Data.emplace();
+			data.Kind = LightKind3D::Directional;
+			data.Color = color;
+			data.Intensity = intensity;
+			data.CastShadow = false;
+			data.ShadowBias = .001;
+			data.ShadowMapScale = 4;
+			data.Transform.Scale = {.6, .6, .6};
+			data.Transform.Position = {
+				4 * std::cos(v) * std::sin(h), 4 * std::cos(v) * std::cos(h), 4 * std::sin(v)
+			};
+			// Source __rot3.lookAt uses +Z up, then BBMOD's negative half-angle Euler conversion.
+			const auto &p = data.Transform.Position;
+			const double length = std::hypot(p.X, p.Y, p.Z);
+			const double dx = -p.X / length, dy = -p.Y / length, dz = -p.Z / length;
+			const double horizontalLength = std::hypot(dx, dy);
+			double roll = std::atan2(0.0 / horizontalLength, -(dx * dx + dy * dy) / horizontalLength);
+			if (std::isnan(roll)) roll = 0;
+			const double x = -roll / 2, y = std::asin(std::clamp(dz, -1.0, 1.0)) / 2,
+						 z = std::atan2(dy, dx) / 2;
+			const double qx = std::cos(z) * std::sin(x), qy = std::sin(z) * std::sin(x),
+						 qz = std::sin(z) * std::cos(x), qw = std::cos(z) * std::cos(x);
+			data.Transform.Rotation = {
+				qx * std::cos(y) - qz * std::sin(y),
+				qw * std::sin(y) + qy * std::cos(y),
+				qz * std::cos(y) + qx * std::sin(y),
+				qw * std::cos(y) - qy * std::sin(y)
+			};
+			return true;
+		}
 		std::optional<engine::render::imagegraph::SourceCamera3DOutput> CameraOutput(std::string_view port) {
 			using Output = engine::render::imagegraph::SourceCamera3DOutput;
 			if (port == "rendered") return Output::Rendered;
@@ -142,8 +196,13 @@ namespace client::detail {
 			return controls.Fail(
 				"scene", "camera requires a resolved scene", imagegraph::Status::TypeMismatch
 			);
+		const uint64_t cameraSetBytes = node.Type == "pc.3_d_camera_set"
+											? sizeof(imagegraph::SceneData3D) +
+												  3 * sizeof(imagegraph::SceneObject3D) +
+												  2 * sizeof(imagegraph::LightData3D)
+											: 0;
 		if (snapshot.RetainedBytes() >
-			(CAMERA_HOST_BYTES - sizeof(render::imagegraph::SourceCamera3DRequest)) / 2)
+			(CAMERA_HOST_BYTES - sizeof(render::imagegraph::SourceCamera3DRequest) - cameraSetBytes) / 2)
 			return controls.Fail(
 				"scene",
 				"camera snapshot and owned request exceed the host byte limit",
@@ -213,6 +272,13 @@ namespace client::detail {
 			return false;
 		try {
 			request.Scene = *scene;
+			if (node.Type == "pc.3_d_camera_set") {
+				LightValue3D key, fill;
+				if (!CameraSetLight(controls, 1, key) || !CameraSetLight(controls, 2, fill)) return false;
+				auto authored = std::move(request.Scene.Data);
+				auto &combined = request.Scene.Data.emplace();
+				combined.Objects = {{std::move(authored)}, {std::move(key)}, {std::move(fill)}};
+			}
 			for (const auto &image : snapshot.Images())
 				if (image.Port == "environment_texture") request.Environment = image.Data;
 		} catch (const std::bad_alloc &) {

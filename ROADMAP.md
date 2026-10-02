@@ -74,6 +74,7 @@ Milestone labels describe development scope, not release versions.
   32. Round-trip group values and nested Any arrays in PXC; refuse ambiguous moves of opaque source keys.
   33. Edit mixed and nested arrays in Studio; preserve source group history, combined workflows and animated file observations.
   34. Read bounded GIF first frames with complete validation and format-aware content policy.
+  35. Apply Camera Set key/fill lights and sample terrain atlas texel centres in live adapters.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
