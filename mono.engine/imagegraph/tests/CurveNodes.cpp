@@ -6,8 +6,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -229,10 +229,12 @@ TEST_CASE(
 	EvaluationRequest request;
 	const auto *entry = FindCatalogueEntry(node.Type);
 	REQUIRE(entry);
-	const uint64_t outputSlots = entry->Outputs.size() *
-			(sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-			 sizeof(std::pair<std::string, ImageArray>));
-	const uint64_t outputName = std::max<uint64_t>(std::string_view("curve").size(), std::string{}.capacity());
+	const uint64_t outputSlots =
+		entry->Outputs.size() * (sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
+								 (sizeof(std::pair<std::string, ImageArray>) +
+								  sizeof(std::pair<std::string_view, SourceSocketDomain>)));
+	const uint64_t outputName =
+		std::max<uint64_t>(std::string_view("curve").size(), std::string{}.capacity());
 	const uint64_t curveBytes = outputSlots + outputName + 2 * sizeof(std::array<double, 6>);
 	detail::NodeContext context(node, *entry, request);
 	context.ByteBudget = curveBytes - 1;
@@ -252,9 +254,10 @@ TEST_CASE(
 	Node sampleNode{"sample", "pc.anim_curve", "", {}, {}};
 	const auto *sampleEntry = FindCatalogueEntry(sampleNode.Type);
 	REQUIRE(sampleEntry);
-	const uint64_t sampleSlots = sampleEntry->Outputs.size() *
-			(sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-			 sizeof(std::pair<std::string, ImageArray>));
+	const uint64_t sampleSlots =
+		sampleEntry->Outputs.size() * (sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
+									   (sizeof(std::pair<std::string, ImageArray>) +
+										sizeof(std::pair<std::string_view, SourceSocketDomain>)));
 	const uint64_t sampleBytes = sampleSlots + outputName;
 	detail::NodeContext shortSample(sampleNode, *sampleEntry, request);
 	for (const auto &input : sampleEntry->Inputs)

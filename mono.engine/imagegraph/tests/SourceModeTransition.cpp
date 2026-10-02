@@ -300,25 +300,55 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"Source Trigger mode transition rejects unsupported event semantics without changing output",
+	"Source Trigger mode transitions preserve map pulses and reject unproved clocks",
 	"[imagegraph][source_mode]"
 ) {
-	auto document = Source();
-	document.Nodes.front().Type = "pc.trigger";
-	document.Nodes.front().Values = {{"trigger", false}};
-	document.Nodes.front().SourceStaticInputs = {"trigger"};
-	document.Keyframes.clear();
-	document.Tracks.clear();
-	GroupReplayState replay;
-	Bound(document, replay);
-	auto output = Source(true);
-	const auto before = output;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"owner", "pc.trigger", "", {}, {{"trigger", false}}}};
+	document.Nodes[0].SourceStaticInputs = {"trigger"};
+	document.Outputs = {{"result", "owner", "trigger"}};
+	GroupReplayState empty, replay;
 	Diagnostic diagnostic;
-	CHECK(
-		ToggleSourceInputMode(document, replay, 1, {"owner", "trigger", true, {}}, output, diagnostic) ==
-		Status::UnsupportedExecution
+	REQUIRE(RebindGroupReplay(document, empty, 1, replay, diagnostic) == Status::Ok);
+	Document output;
+	REQUIRE(
+		ToggleSourceInputMode(
+			document, replay, 1, {"owner", "trigger", true, {5, 0, false}}, output, diagnostic
+		) == Status::Ok
 	);
-	CHECK(diagnostic.Message == "source Trigger mode transitions require represented event semantics");
+	REQUIRE(output.Keyframes.size() == 1);
+	CHECK(output.Keyframes[0].Tick == 5);
+	CHECK(output.Keyframes[0].Data == Value{false});
+	Plan plan;
+	REQUIRE(Compile(output, plan, diagnostic) == Status::Ok);
+	for (const uint64_t tick : {0, 4, 5, 6}) {
+		EvaluatedValue pulse;
+		REQUIRE(EvaluateValue(output, plan, "result", {.Tick = tick}, pulse, diagnostic) == Status::Ok);
+		CHECK(std::get<bool>(pulse.Data) == (tick == 5));
+	}
+	Saved(output);
+	GroupReplayState animatedReplay;
+	REQUIRE(RebindGroupReplay(output, empty, 2, animatedReplay, diagnostic) == Status::Ok);
+	Document disabled;
+	REQUIRE(
+		ToggleSourceInputMode(
+			output, animatedReplay, 2, {"owner", "trigger", false, {7, 0, false}}, disabled, diagnostic
+		) == Status::Ok
+	);
+	REQUIRE(disabled.Keyframes.size() == 1);
+	CHECK(disabled.Keyframes[0].Tick == 0);
+	CHECK(disabled.Keyframes[0].Data == Value{false});
+	REQUIRE(Compile(disabled, plan, diagnostic) == Status::Ok);
+	EvaluatedValue staticPulse;
+	REQUIRE(EvaluateValue(disabled, plan, "result", {}, staticPulse, diagnostic) == Status::Ok);
+	CHECK_FALSE(std::get<bool>(staticPulse.Data));
+	const auto before = output;
+	CHECK(
+		ToggleSourceInputMode(
+			document, replay, 1, {"owner", "trigger", true, {5, .5, false}}, output, diagnostic
+		) == Status::UnsupportedExecution
+	);
 	CHECK(output == before);
 }
 TEST_CASE(
@@ -595,5 +625,47 @@ TEST_CASE(
 		Quaternion processed;
 		REQUIRE(ConvertSourceQuaternion(raw, 1, processed));
 		CHECK(rotation->Data == Value{processed});
+	}
+}
+
+TEST_CASE("Source global modes require declared controls and disjoint names", "[imagegraph][source_mode]") {
+	Document document;
+	document.FormatVersion = 9;
+	Node globals{"globals", "pc.global_scope", "", {}, {}};
+	globals.DynamicInputs = {{"speed", ValueType::Scalar, Value{3.0}}};
+	globals.SourceStaticInputs = {"speed"};
+	Node consumer{"consumer", "pc.equation", "", {}, {{"equation", std::string{"speed"}}}};
+	document.Nodes = {globals, consumer};
+	document.ProjectGlobalNodeId = "globals";
+	document.Outputs = {{"value", "consumer", "result"}};
+	Diagnostic diagnostic;
+	Plan plan;
+
+	SECTION("declared static and animated controls survive migration and compilation") {
+		REQUIRE(Migrate(document, diagnostic) == Status::Ok);
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		document.Nodes.front().SourceStaticInputs.clear();
+		document.Nodes.front().SourceAnimatedInputs = {"speed"};
+		REQUIRE(Migrate(document, diagnostic) == Status::Ok);
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		Saved(document);
+	}
+	SECTION("an undeclared control is rejected") {
+		document.Nodes.front().SourceStaticInputs = {"missing"};
+		CHECK(Compile(document, plan, diagnostic) == Status::InvalidValue);
+		CHECK(Migrate(document, diagnostic) == Status::InvalidValue);
+		CHECK(diagnostic.Port == "missing");
+	}
+	SECTION("one control cannot be both static and animated") {
+		document.Nodes.front().SourceAnimatedInputs = {"speed"};
+		CHECK(Compile(document, plan, diagnostic) == Status::InvalidValue);
+		CHECK(Migrate(document, diagnostic) == Status::InvalidValue);
+		CHECK(diagnostic.Port == "speed");
+	}
+	SECTION("one mode cannot repeat a control") {
+		document.Nodes.front().SourceStaticInputs.push_back("speed");
+		CHECK(Compile(document, plan, diagnostic) == Status::InvalidValue);
+		CHECK(Migrate(document, diagnostic) == Status::InvalidValue);
+		CHECK(diagnostic.Port == "speed");
 	}
 }

@@ -1,7 +1,7 @@
 // Fixtures for value and project-level catalogue executors.
 
-#include "NodeHarness.hpp"
 #include "../src/ValueNodeEval.hpp"
+#include "NodeHarness.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
@@ -725,7 +725,8 @@ TEST_CASE(
 	};
 	const ArrayValue values{ValueType::Scalar, {1.0, 2.0}};
 	const uint64_t outputStorage = sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-								   sizeof(std::pair<std::string, ImageArray>);
+								   (sizeof(std::pair<std::string, ImageArray>) +
+									sizeof(std::pair<std::string_view, SourceSocketDomain>));
 	const uint64_t resultName =
 		std::max<uint64_t>(std::string{}.capacity(), std::string_view("result").size());
 	const uint64_t arrayBytes = outputStorage + resultName + 2 * sizeof(ElementValue);
@@ -777,7 +778,8 @@ TEST_CASE(
 		return std::tuple{ok, context.FailureCode, context.OutputValues.size()};
 	};
 	const uint64_t outputStorage = sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-								   sizeof(std::pair<std::string, ImageArray>);
+								   (sizeof(std::pair<std::string, ImageArray>) +
+									sizeof(std::pair<std::string_view, SourceSocketDomain>));
 	const uint64_t nameBytes = std::string{}.capacity();
 	const auto textOk = attempt(
 		"pc.string_delete",
@@ -858,7 +860,8 @@ TEST_CASE("Multi-value nodes reserve every output before publishing", "[imagegra
 		REQUIRE(entry);
 		uint64_t bytes =
 			entry->Outputs.size() * (sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-									 sizeof(std::pair<std::string, ImageArray>));
+									 (sizeof(std::pair<std::string, ImageArray>) +
+									  sizeof(std::pair<std::string_view, SourceSocketDomain>)));
 		for (const auto &output : entry->Outputs) {
 			bytes += std::max<uint64_t>(std::string{}.capacity(), output.Id.size());
 			if (type == "pc.surface_data" && output.Id == "format_string")
@@ -934,7 +937,8 @@ TEST_CASE(
 	REQUIRE(entry);
 	const uint64_t outputStorage =
 		entry->Outputs.size() * (sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-								 sizeof(std::pair<std::string, ImageArray>));
+								 (sizeof(std::pair<std::string, ImageArray>) +
+								  sizeof(std::pair<std::string_view, SourceSocketDomain>)));
 	const uint64_t nameBytes =
 		std::max<uint64_t>(std::string{}.capacity(), std::string_view("results").size());
 	const auto attempt = [&](const std::string &replacement, uint64_t totalBytes) {
@@ -1002,14 +1006,11 @@ TEST_CASE(
 	document.FormatVersion = 9;
 	document.Timeline = TimelineSettings{5, 0, 4, "loop", 30};
 	document.Nodes = {
-		{"simple", "pc.number_simple", "", {}, {}},
-		{"consumer", "pc.math", "", {}, {{"b", 10.0}}}
+		{"simple", "pc.number_simple", "", {}, {}}, {"consumer", "pc.math", "", {}, {{"b", 10.0}}}
 	};
 	document.Links = {{"simple", "number", "consumer", "a"}};
 	document.Outputs = {{"out", "consumer", "result"}, {"value", "simple", "number"}};
-	document.Keyframes = {
-		{"simple", "value", 0, 2.0, "source"}, {"simple", "value", 4, 6.0, "source"}
-	};
+	document.Keyframes = {{"simple", "value", 0, 2.0, "source"}, {"simple", "value", 4, 6.0, "source"}};
 	for (auto &key : document.Keyframes)
 		key.Ease = KeyframeEase{};
 	document.Tracks = {{"simple", "value", "hold", -1}};
@@ -1047,9 +1048,7 @@ TEST_CASE(
 	document.FormatVersion = 9;
 	document.Nodes = {{"simple", "pc.number_simple", "", {}, {}}};
 	document.Outputs = {{"out", "simple", "number"}};
-	document.Keyframes = {
-		{"simple", "value", 0, 2.0, "linear"}, {"simple", "value", 0, 6.0, "linear"}
-	};
+	document.Keyframes = {{"simple", "value", 0, 2.0, "linear"}, {"simple", "value", 0, 6.0, "linear"}};
 	FrameTime first, last;
 	REQUIRE(SplitFrameTime(-.5, first));
 	REQUIRE(SplitFrameTime(.5, last));
@@ -1061,8 +1060,7 @@ TEST_CASE(
 	CHECK(parsed == document);
 	Plan plan;
 	REQUIRE(Compile(parsed, plan, diagnostic) == Status::Ok);
-	for (const auto &[frame, expected] :
-		 {std::pair{-.5, 2.0}, {0.0, 4.0}, {.25, 5.0}, {.5, 6.0}}) {
+	for (const auto &[frame, expected] : {std::pair{-.5, 2.0}, {0.0, 4.0}, {.25, 5.0}, {.5, 6.0}}) {
 		FrameTime clock;
 		EvaluationRequest request;
 		REQUIRE(SplitFrameTime(frame, clock));
@@ -1160,10 +1158,14 @@ TEST_CASE(
 	"Compiled Compare applies all six source relations after unequal array zero padding",
 	"[imagegraph][math_compare_acceptance]"
 ) {
-	const std::array<std::array<bool, 3>, 6> expected{{
-		{true, true, false}, {false, false, true}, {false, false, true},
-		{true, true, true}, {false, false, false}, {true, true, false}
-	}};
+	const std::array<std::array<bool, 3>, 6> expected{
+		{{true, true, false},
+		 {false, false, true},
+		 {false, false, true},
+		 {true, true, true},
+		 {false, false, false},
+		 {true, true, false}}
+	};
 	Document document;
 	document.FormatVersion = 9;
 	for (int64_t mode = 0; mode < 6; ++mode) {
@@ -1187,9 +1189,15 @@ TEST_CASE(
 	REQUIRE(Compile(parsed, plan, diagnostic) == Status::Ok);
 	for (size_t mode = 0; mode < expected.size(); ++mode) {
 		EvaluatedValue output;
-		REQUIRE(EvaluateValue(parsed, plan, "compare_" + std::to_string(mode), {}, output, diagnostic) == Status::Ok);
+		REQUIRE(
+			EvaluateValue(parsed, plan, "compare_" + std::to_string(mode), {}, output, diagnostic) ==
+			Status::Ok
+		);
 		const auto &array = std::get<ArrayValue>(output.Data);
 		CHECK(array.ElementType == ValueType::Boolean);
-		CHECK(array.Elements == std::vector<ElementValue>{expected[mode][0], expected[mode][1], expected[mode][2]});
+		CHECK(
+			array.Elements ==
+			std::vector<ElementValue>{expected[mode][0], expected[mode][1], expected[mode][2]}
+		);
 	}
 }

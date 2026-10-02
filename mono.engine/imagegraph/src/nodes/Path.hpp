@@ -2,9 +2,11 @@
 
 // Runtime path evaluation from node_path.gml _pathObject. Paths travel between nodes as Path2D values:
 // each anchor is (x, y, in-handle x, in-handle y, out-handle x, out-handle y) with its mirror flag as Index,
-// and weights are (position 0..100, weight) pairs.
+// and weights are (position 0..100, weight) pairs. owned source wrappers preserve independent lines
+// and delegate samples to their inputs instead of flattening operations into anchors.
 
 #include "../NodeExecutors.hpp"
+#include "../SourcePathPayload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -36,6 +38,11 @@ namespace engine::imagegraph::detail {
 	class PathRuntime {
 		// Storage is freed before its lease, including the old buffers displaced by Init.
 		AllocationReservation StorageCharge;
+		std::optional<SourcePathOperationKind> Operation;
+		Vector2 TrimRange{0, 1};
+		std::vector<PathRuntime> Inputs;
+		const SourcePathData2D *SourceMesh = nullptr;
+		NodeContext *EvaluationContext = nullptr;
 
 	  public:
 		PathRuntime() = default;
@@ -56,11 +63,44 @@ namespace engine::imagegraph::detail {
 			const auto bytes = StorageBytes(path);
 			if (!bytes)
 				return context.Fail(Status::LimitExceeded, "path exceeds the anchor or weight limit", "path");
+			if (!ValidSourcePath2D(path))
+				return context.Fail(Status::InvalidValue, "source path operation is invalid", "path");
+			if (path.SourceOperation) {
+				const auto &operation = *path.SourceOperation;
+				auto charge = context.ReserveWorkspace(operation.Inputs.size() * sizeof(PathRuntime), "path");
+				if (!charge) return false;
+				PathRuntime replacement;
+				replacement.StorageCharge = std::move(*charge);
+				replacement.Operation = operation.Kind;
+				replacement.TrimRange = operation.TrimRange;
+				replacement.EvaluationContext = &context;
+				if (operation.Kind == SourcePathOperationKind::VerletMesh)
+					replacement.SourceMesh = &operation;
+				replacement.Inputs.reserve(operation.Inputs.size());
+				for (const auto &child : operation.Inputs) {
+					PathRuntime runtime;
+					if (!runtime.Init(context, child)) return false;
+					replacement.Inputs.push_back(std::move(runtime));
+				}
+				replacement.LengthTotal = replacement.Length();
+				if (!replacement.Inputs.empty()) {
+					const auto &first = replacement.Inputs[0];
+					replacement.MinX = first.MinX;
+					replacement.MinY = first.MinY;
+					replacement.MaxX = first.MaxX;
+					replacement.MaxY = first.MaxY;
+					replacement.HasBoundary = first.HasBoundary;
+				}
+				Swap(replacement);
+				return true;
+			}
+
 			auto charge = context.ReserveWorkspace(*bytes, "path");
 			if (!charge) return false;
 			PathRuntime replacement;
 			replacement.StorageCharge = std::move(*charge);
 			replacement.Loop = path.Loop;
+			replacement.Segmented = path.Segmented;
 			replacement.Anchors.reserve(path.Anchors.size());
 			replacement.Weights.reserve(path.Weights.size());
 			if (path.Anchors.size() >= 2) {
@@ -82,7 +122,13 @@ namespace engine::imagegraph::detail {
 		void Swap(PathRuntime &other) {
 			using std::swap;
 			swap(StorageCharge, other.StorageCharge);
+			swap(Operation, other.Operation);
+			swap(TrimRange, other.TrimRange);
+			Inputs.swap(other.Inputs);
+			swap(SourceMesh, other.SourceMesh);
+			swap(EvaluationContext, other.EvaluationContext);
 			swap(Loop, other.Loop);
+			swap(Segmented, other.Segmented);
 			Anchors.swap(other.Anchors);
 			Weights.swap(other.Weights);
 			Lengths.swap(other.Lengths);
@@ -98,6 +144,7 @@ namespace engine::imagegraph::detail {
 		}
 
 		bool Loop = false;
+		bool Segmented = false;
 		std::vector<std::array<double, 6>> Anchors;
 		std::vector<std::array<double, 2>> Weights;
 		std::vector<double> Lengths, LengthAccumulated, LengthRatio, WeightRatio;
@@ -105,8 +152,47 @@ namespace engine::imagegraph::detail {
 		double MinX = 0, MinY = 0, MaxX = 0, MaxY = 0;
 		bool HasBoundary = false;
 
-		size_t SegmentCount() const {
-			return Lengths.size();
+		PathPoint MeshPoint(const std::optional<std::array<double, 3>> &point) const {
+			if (point) return {(*point)[0], (*point)[1], (*point)[2]};
+			if (EvaluationContext)
+				EvaluationContext->Fail(
+					Status::InvalidValue, "source mesh path geometry has an undefined cached edge", "path"
+				);
+			return {NAN, NAN, NAN};
+		}
+		const PathRuntime *SelectLine(size_t &line) const {
+			for (const auto &child : Inputs) {
+				const size_t count = child.LineCount();
+				if (line < count) return &child;
+				line -= count;
+			}
+			return nullptr;
+		}
+		size_t LineCount() const {
+			if (SourceMesh) return LineCountSourceVerletPath(*SourceMesh);
+			if (!Operation) return 1;
+			if (*Operation != SourcePathOperationKind::Combine)
+				return Inputs.empty() ? 1 : Inputs[0].LineCount();
+			size_t count = 0;
+			for (const auto &child : Inputs)
+				count += child.LineCount();
+			return count;
+		}
+		double Length(size_t line = 0) const {
+			if (SourceMesh) return LengthSourceVerletPath(*SourceMesh, line);
+			if (!Operation) return LengthTotal;
+			const auto *child = SelectLine(line);
+			return child ? child->Length(line) *
+							   (*Operation == SourcePathOperationKind::Trim ? TrimRange.Y - TrimRange.X : 1)
+						 : 0;
+		}
+		size_t SegmentCount(size_t line = 0) const {
+			if (SourceMesh) return SourceMesh->CachedLengths.size();
+			if (Operation) {
+				const auto *child = SelectLine(line);
+				return child ? child->SegmentCount(line) : 0;
+			}
+			return line == 0 ? (Segmented ? Anchors.size() : Lengths.size()) : 0;
 		}
 
 		PathPoint SegmentPoint(size_t index, double t) const {
@@ -185,7 +271,15 @@ namespace engine::imagegraph::detail {
 			return at(whole) + (at(whole + 1) - at(whole)) * (index - whole);
 		}
 
-		PathPoint PointDistance(double distance) const {
+		PathPoint PointDistance(double distance, size_t line = 0) const {
+			if (SourceMesh) return MeshPoint(DistanceSourceVerletPath(*SourceMesh, distance, line));
+			if (Operation) {
+				if (*Operation == SourcePathOperationKind::Reverse ||
+					*Operation == SourcePathOperationKind::Trim)
+					return PointRatio(distance / Length(), line);
+				const auto *child = SelectLine(line);
+				return child ? child->PointDistance(distance, line) : PathPoint{};
+			}
 			PathPoint out{0.0, 0.0, 1.0};
 			if (Lengths.empty()) return out;
 			if (distance < 0) distance = LengthTotal + GmlMod(distance, LengthTotal);
@@ -210,13 +304,27 @@ namespace engine::imagegraph::detail {
 			return out;
 		}
 
-		PathPoint PointRatio(double ratio) const {
+		PathPoint PointRatio(double ratio, size_t line = 0) const {
+			if (SourceMesh) return MeshPoint(SampleSourceVerletPath(*SourceMesh, ratio, line));
+			if (Operation) {
+				const auto *child = SelectLine(line);
+				return child ? child->PointRatio(
+								   *Operation == SourcePathOperationKind::Reverse ? 1 - ratio
+								   : *Operation == SourcePathOperationKind::Trim
+									   ? TrimRange.X + (TrimRange.Y - TrimRange.X) * ratio
+									   : ratio,
+								   line
+							   )
+							 : PathPoint{};
+			}
 			if (ratio < 0) ratio = 1 + (ratio - std::trunc(ratio));
-			const double position = Loop ? ratio - std::trunc(ratio) : std::clamp(ratio, 0.0, 0.9999);
+			const double position =
+				(Loop || Segmented) ? ratio - std::trunc(ratio) : std::clamp(ratio, 0.0, 0.9999);
 			return PointDistance(position * LengthTotal);
 		}
 
 		PathPoint PointSegment(double ratio) const {
+			if (Operation) return {NAN, NAN, NAN};
 			if (Lengths.empty()) return {};
 			const size_t count = Anchors.size();
 			if (ratio < 0) return {Anchors[0][0], Anchors[0][1], 1.0};

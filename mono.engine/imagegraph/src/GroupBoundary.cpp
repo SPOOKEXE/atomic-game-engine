@@ -177,7 +177,7 @@ namespace engine::imagegraph::detail {
 		if (!raw) return context.Fail(Status::InvalidValue, "group parent value is absent", "parent_value");
 		// Generic NodeValue does not acquire subclass Bool/Int casts when setType changes metadata.
 		// Concrete consuming nodes retain their own centralized source getter conversion.
-		if (type <= 2) return Forward(context, "parent_value");
+		if (type <= 2 || domain.Kind == SourceSocketKind::Trigger) return Forward(context, "parent_value");
 		const auto incoming = context.InputDomain("parent_value");
 		if (type == 3 && incoming &&
 			(incoming->Kind == SourceSocketKind::Float || incoming->Kind == SourceSocketKind::Integer ||

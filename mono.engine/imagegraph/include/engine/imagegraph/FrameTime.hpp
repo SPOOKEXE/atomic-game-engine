@@ -8,17 +8,6 @@
 #include <limits>
 
 namespace engine::imagegraph {
-	// A signed magnitude view of stored key, evaluation or editor clock fields.
-	struct FrameTime {
-		// Whole magnitude, retained as an integer without floating conversion.
-		uint64_t Tick = 0;
-		// Fractional magnitude in [0, 1).
-		double Subframe = 0;
-		// True means -(Tick + Subframe); negative zero is not canonical.
-		bool NegativeFrame = false;
-		// Compares the stored canonical components.
-		bool operator==(const FrameTime &) const = default;
-	};
 	// Checks canonical fields and the caller's magnitude bound without converting Tick to a real.
 	inline bool ValidFrameTime(const FrameTime &time, uint64_t maximum = Limits::MaximumTick) {
 		return time.Tick <= maximum && (time.Tick != maximum || time.Subframe == 0) &&

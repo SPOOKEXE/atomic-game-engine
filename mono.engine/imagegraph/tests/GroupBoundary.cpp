@@ -148,7 +148,7 @@ TEST_CASE(
 	auto document = Boundary(.500001, 2);
 	EvaluatedValue previous = Sample(document);
 	const EvaluatedValue before = previous;
-	document.Nodes.front().Values.front().Data = EnumValue{19};
+	document.Nodes.front().Values.front().Data = EnumValue{8};
 	Plan plan;
 	Diagnostic diagnostic;
 	{
@@ -401,6 +401,47 @@ TEST_CASE(
 	const auto retained = DocumentRetainedPayloadBytes(document);
 	REQUIRE(retained);
 	CHECK(*retained >= sizeof(Document) + sizeof(Node) + 2 * sizeof(std::string) + 16384);
+}
+
+TEST_CASE("source expression clone accounting includes code and vector storage", "[imagegraph][groups]") {
+	Node node{"expression", "pc.number_simple", {}, {}, {}};
+	node.SourceInputExpressions.push_back({"value", "answer", true});
+	node.SourceInputExpressions.back().Port.reserve(128);
+	node.SourceInputExpressions.back().Code.reserve(512);
+	const auto clone = NodeClonePayloadBytes(node);
+	REQUIRE(clone);
+	const Node copied = node;
+	CHECK(
+		*clone >= sizeof(Node) + sizeof(SourceInputExpression) +
+					  copied.SourceInputExpressions[0].Port.capacity() +
+					  copied.SourceInputExpressions[0].Code.capacity()
+	);
+
+	Document document;
+	document.Nodes.push_back(node);
+	document.Nodes.front().SourceInputExpressions.front().Port.reserve(128);
+	document.Nodes.front().SourceInputExpressions.front().Code.reserve(512);
+	const auto retained = DocumentRetainedPayloadBytes(document);
+	REQUIRE(retained);
+	CHECK(*retained >= sizeof(Document) + sizeof(Node) + sizeof(SourceInputExpression) + 128 + 512);
+}
+
+TEST_CASE(
+	"Dynamic output clone accounting includes durable socket storage", "[imagegraph][groups][group_boundary]"
+) {
+	Node node{"split", "pc.array_split", {}, {}, {}};
+	node.DynamicOutputs = {{std::string(4096, 'p'), ValueType::Any}};
+	const auto clone = NodeClonePayloadBytes(node);
+	REQUIRE(clone);
+	CHECK(*clone >= sizeof(Node) + sizeof(DynamicOutput) + 4096);
+	Document document;
+	document.Nodes.push_back(node);
+	document.Nodes[0].DynamicOutputs[0].Id.reserve(8192);
+	const auto retained = DocumentRetainedPayloadBytes(document);
+	REQUIRE(retained);
+	CHECK(*retained >= sizeof(Document) + sizeof(Node) + sizeof(DynamicOutput) + 8192);
+	node.DynamicOutputs.resize(Limits::MaximumDynamicOutputsPerNode + 1);
+	CHECK_FALSE(NodeClonePayloadBytes(node));
 }
 
 TEST_CASE(

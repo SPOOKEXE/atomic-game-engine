@@ -38,6 +38,13 @@ class PixelComposerSourceSelectionTest(unittest.TestCase):
         self.assertEqual(result["Node_Example"]["source_origin"], "official pinned source")
         self.assertEqual(result["Node_Example"]["source_evidence"]["source_url"], "pinned-url")
         self.assertTrue(result["Node_Example"]["undocumented"])
+        self.assertTrue(result["Node_Example"]["source_only"])
+
+    def test_documented_verified_source_is_not_marked_source_only(self):
+        self.node["published_documentation"] = {"status": 200}
+        result = SOURCE_SELECTION.verified_source_nodes(self.evidence, "commit", self.root, self.source_files)
+        self.assertFalse(result["Node_Example"]["undocumented"])
+        self.assertFalse(result["Node_Example"]["source_only"])
 
     def test_skips_unknown_and_unverified_ids(self):
         self.node["source_node_id_verified"] = False

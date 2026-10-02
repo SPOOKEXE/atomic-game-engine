@@ -1,4 +1,5 @@
 #include "ValuePayload.hpp"
+#include "PuppetControl.hpp"
 
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
@@ -24,6 +25,9 @@ namespace engine::imagegraph {
 		if (key.Ease && (!add(key.Ease->InType.size()) || !add(key.Ease->OutType.size())))
 			return std::nullopt;
 		if (key.SourceDriver) {
+			if (const auto *audio = std::get_if<KeyframeAudioDriver>(&*key.SourceDriver);
+				audio && (!add(audio->SourceId.size()) || !add(audio->Metric.size())))
+				return std::nullopt;
 			const auto *curve = std::get_if<KeyframeCurveDriver>(&*key.SourceDriver);
 			if (curve && !add(detail::PayloadOwnedBytes(curve->Data))) return std::nullopt;
 		}
@@ -55,7 +59,10 @@ namespace engine::imagegraph {
 				for (const auto &candidate : schema->Properties)
 					if (candidate.Id == port) return candidate.Type;
 			for (const auto &input : owner.DynamicInputs)
-				if (input.Id == port && IsAuthoredValueType(input.Type)) return input.Type;
+				if (input.Id == port) {
+					if (IsAuthoredValueType(input.Type)) return input.Type;
+					if (detail::PuppetControlPort(owner, port, input.Type)) return ValueType::Array;
+				}
 			return std::nullopt;
 		};
 		const auto sourceType = type(*source, key.Port), targetType = type(*target, property);

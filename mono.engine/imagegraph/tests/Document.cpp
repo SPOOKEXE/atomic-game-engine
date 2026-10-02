@@ -1,6 +1,7 @@
 #include "../src/PixelOps.hpp"
 #include "../src/PixelOpsGenerate.hpp"
 #include "../src/Timeline.hpp"
+#include "../src/ValueText.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 #include <engine/testing/Suite.hpp>
@@ -15,6 +16,7 @@
 TEST_SUITE_ID("engine.imagegraph.document")
 
 using engine::imagegraph::ArrayValue;
+using engine::imagegraph::AnimationRegion;
 using engine::imagegraph::Colour;
 using engine::imagegraph::Compile;
 using engine::imagegraph::Diagnostic;
@@ -23,6 +25,7 @@ using engine::imagegraph::DynamicInput;
 using engine::imagegraph::Evaluate;
 using engine::imagegraph::EvaluateArray;
 using engine::imagegraph::EvaluationRequest;
+using engine::imagegraph::FrameTime;
 using engine::imagegraph::FindSchema;
 using engine::imagegraph::Group;
 using engine::imagegraph::ImageArray;
@@ -33,12 +36,14 @@ using engine::imagegraph::Link;
 using engine::imagegraph::Migrate;
 using engine::imagegraph::Node;
 using engine::imagegraph::Output;
+using engine::imagegraph::PixelBoxValue;
 using engine::imagegraph::Plan;
 using engine::imagegraph::PortDirection;
 using engine::imagegraph::Read;
 using engine::imagegraph::Status;
 using engine::imagegraph::TickRange;
 using engine::imagegraph::ValidateTickRange;
+using engine::imagegraph::ValidProjectAnimationRegions;
 using engine::imagegraph::ValueType;
 using engine::imagegraph::Vector2;
 using engine::imagegraph::Write;
@@ -82,6 +87,86 @@ TEST_CASE("authored imagegraph fields round trip with stable text", "[imagegraph
 	REQUIRE(Read(text, parsed, diagnostic) == Status::Ok);
 	CHECK(parsed == document);
 	CHECK(Write(parsed) == text);
+}
+
+TEST_CASE("source input expressions round trip without discarding disabled code", "[imagegraph][pcx]") {
+	Document document;
+	document.FormatVersion = 9;
+	Node node{"node-a", "pc.number_simple", "", {}, {}};
+	node.SourceInputExpressions = {{"value", "answer", true}, {"show_label", "invalid(", false}};
+	document.Nodes.push_back(std::move(node));
+
+	const std::string text = Write(document);
+	CHECK(text.find("node_expression 0 \"node-a\" \"value\" 1 \"answer\"") != std::string::npos);
+	CHECK(text.find("node_expression 0 \"node-a\" \"show_label\" 0 \"invalid(\"") != std::string::npos);
+	Document parsed;
+	Diagnostic diagnostic;
+	REQUIRE(Read(text, parsed, diagnostic) == Status::Ok);
+	CHECK(parsed == document);
+	CHECK(Write(parsed) == text);
+
+	const std::string duplicate = text + "node_expression 0 \"node-a\" \"value\" 0 \"ignored\"\n";
+	CHECK(Read(duplicate, parsed, diagnostic) == Status::Malformed);
+	const std::string oversized =
+		"imagegraph 9\nnode \"node-a\" \"pc.number_simple\" \"\" 0 0\nnode_expression 0 \"node-a\" "
+		"\"value\" 0 \"" +
+		std::string(Limits::MaximumTextBytes + 1, 'x') + "\"\n";
+	CHECK(Read(oversized, parsed, diagnostic) == Status::Malformed);
+}
+
+TEST_CASE(
+	"pixel box payload text round trips source metadata and rejects invalid fields", "[imagegraph][pixel_box]"
+) {
+	PixelBoxValue pixelBox;
+	auto &box = pixelBox.Data.emplace();
+	box.BaseBounds = {-4, 3, 84, 67};
+	box.FixedBounds = std::array<double, 4>{-2, 4, 21, 33};
+	box.AnchorModes = {3, 1};
+	box.PreviousAnchorModes = {2, 0};
+	box.Anchors = {0.125, -3, 4.5, 5, 0.75, -0.5};
+	box.Fractional = {true, false, true, false, false, true};
+	box.DimensionBounds = {1, 50, 2, 60};
+	PixelBoxValue empty;
+
+	Document document = SolidDocument();
+	document.FormatVersion = 9;
+	document.Nodes[0].Values = {{"pbbox", pixelBox}, {"empty_pbbox", empty}};
+	const std::string text = Write(document);
+	Document parsed;
+	Diagnostic diagnostic;
+	const Status readStatus = Read(text, parsed, diagnostic);
+	INFO(
+		"PixelBox document read status=" << static_cast<int>(readStatus) << ", message=" << diagnostic.Message
+	);
+	REQUIRE(readStatus == Status::Ok);
+	CHECK(parsed == document);
+	CHECK(Write(parsed) == text);
+
+	const std::string valid = "pb 1 0 0 32 32 0 2 2 2 2 0 0 0 0 1 1 0 0 0 0 1 1 0 0 0 0 0 0";
+	engine::imagegraph::Value value;
+	CHECK(engine::imagegraph::detail::ReadValueText(valid, value));
+	CHECK(std::holds_alternative<PixelBoxValue>(value));
+	CHECK_FALSE(
+		engine::imagegraph::detail::ReadValueText(
+			"pb 1 0 0 32 32 0 4 2 2 2 0 0 0 0 1 1 0 0 0 0 1 1 0 0 0 0 0 0 0 0", value
+		)
+	);
+	CHECK_FALSE(
+		engine::imagegraph::detail::ReadValueText(
+			"pb 1 0 0 32 32 0 2 2 2 2 0 0 0 0 1 1 0 0 0 0 2 1 0 0 0 0 0 0 0 0", value
+		)
+	);
+	CHECK_FALSE(
+		engine::imagegraph::detail::ReadValueText(
+			"pb 1 0 0 32 32 0 2 2 2 2 0 0 0 0 1 1 0 0 0 0 1 1 1 0 0 0 0 0 0 0", value
+		)
+	);
+	CHECK_FALSE(engine::imagegraph::detail::ReadValueText("pb 1 0 0", value));
+
+	Document oldFormat = SolidDocument();
+	oldFormat.FormatVersion = 8;
+	oldFormat.Nodes[0].Values = {{"pbbox", pixelBox}};
+	CHECK(Read(Write(oldFormat), parsed, diagnostic) == Status::Malformed);
 }
 
 TEST_CASE("legacy imagegraph document migrates without losing authored fields", "[imagegraph]") {
@@ -1052,4 +1137,84 @@ TEST_CASE("source-era mask feather is bounded", "[imagegraph]") {
 	Diagnostic diagnostic;
 	CHECK(Compile(document, plan, diagnostic) == Status::InvalidValue);
 	CHECK(diagnostic.Port == "mask_feather");
+}
+
+TEST_CASE("source non-socket properties survive v9 storage and have independent validation", "[imagegraph]") {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes.push_back(Solid("solid"));
+	document.Outputs.push_back({"result", "solid", "image"});
+	document.Nodes[0].SourceProperties = {{"pin", ArrayValue{ValueType::Integer, {int64_t{0}, int64_t{2}}}}};
+	Document restored;
+	Diagnostic diagnostic;
+	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
+	CHECK(restored == document);
+	Plan plan;
+	REQUIRE(Compile(restored, plan, diagnostic) == Status::Ok);
+	restored.Nodes[0].SourceProperties.push_back(restored.Nodes[0].SourceProperties.front());
+	CHECK(Compile(restored, plan, diagnostic) == Status::DuplicateId);
+	restored.Nodes[0].SourceProperties.pop_back();
+	restored.Nodes[0].SourceProperties[0].Port.clear();
+	CHECK(Compile(restored, plan, diagnostic) == Status::InvalidValue);
+	restored = document;
+	restored.FormatVersion = 8;
+	CHECK(Compile(restored, plan, diagnostic) == Status::UnsupportedVersion);
+	restored = document;
+	restored.Nodes[0].SourceProperties.resize(Limits::MaximumPropertiesPerNode + 1);
+	CHECK(Compile(restored, plan, diagnostic) == Status::LimitExceeded);
+}
+
+TEST_CASE(
+	"project animation regions round trip ordered duplicate labels and fractional frames", "[imagegraph]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Project = engine::imagegraph::ProjectSettings{};
+	document.Project->AnimationRegions = {
+		AnimationRegion{"Loop", {24, 80, 160, 255}, FrameTime{3, 0.25, false}, FrameTime{9, 0.5, false}},
+		AnimationRegion{"Loop", {200, 40, 16, 255}, FrameTime{12, 0.75, true}, FrameTime{18, 0, false}}
+	};
+	const std::string text = Write(document);
+	CHECK(text.find("project_regions 2") != std::string::npos);
+	Document restored;
+	Diagnostic diagnostic;
+	REQUIRE(Read(text, restored, diagnostic) == Status::Ok);
+	REQUIRE(restored.Project);
+	CHECK(restored.Project->AnimationRegions == document.Project->AnimationRegions);
+	CHECK(ValidProjectAnimationRegions(*restored.Project));
+
+	std::string incomplete = text;
+	const size_t count = incomplete.find("project_regions 2");
+	REQUIRE(count != std::string::npos);
+	incomplete.replace(count, std::string("project_regions 2").size(), "project_regions 3");
+	CHECK(Read(incomplete, restored, diagnostic) == Status::Malformed);
+
+	std::string negativeZero = text;
+	const size_t firstTime = negativeZero.find("3 positive 0.25");
+	REQUIRE(firstTime != std::string::npos);
+	negativeZero.replace(firstTime, std::string("3 positive 0.25").size(), "0 negative 0");
+	CHECK(Read(negativeZero, restored, diagnostic) == Status::Malformed);
+
+	std::string excessive = text;
+	const size_t boundedCount = excessive.find("project_regions 2");
+	REQUIRE(boundedCount != std::string::npos);
+	excessive.replace(
+		boundedCount,
+		std::string("project_regions 2").size(),
+		"project_regions " + std::to_string(Limits::MaximumAnimationRegions + 1)
+	);
+	CHECK(Read(excessive, restored, diagnostic) == Status::LimitExceeded);
+
+	Document excessiveWrite = document;
+	excessiveWrite.Project->AnimationRegions.resize(Limits::MaximumAnimationRegions + 1);
+	CHECK(Write(excessiveWrite).empty());
+	Document longLabel = document;
+	longLabel.Project->AnimationRegions.front().Label.resize(Limits::MaximumTextBytes + 1, 'x');
+	CHECK(Write(longLabel).empty());
+
+	Document downgraded = document;
+	downgraded.FormatVersion = 8;
+	Plan plan;
+	CHECK(Compile(downgraded, plan, diagnostic) == Status::UnsupportedVersion);
+	CHECK(Write(downgraded).empty());
 }

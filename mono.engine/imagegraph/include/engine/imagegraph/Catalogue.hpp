@@ -87,6 +87,8 @@ namespace engine::imagegraph {
 		// Source index of the first dynamic group, and inputs per group. Both are 0 without dynamic inputs.
 		int32_t DynamicFixedLength = 0;
 		int32_t DynamicGroupLength = 0;
+		// Maximum number of dynamic groups, zero when source has no bounded family recipe.
+		int32_t DynamicGroupLimit = 0;
 		// One dynamic group. SourceIndex is the offset inside the group. A node instance declares
 		// "<template id>_<group>" dynamic inputs, with group counted from 0.
 		std::span<const CatalogueInput> DynamicTemplate;

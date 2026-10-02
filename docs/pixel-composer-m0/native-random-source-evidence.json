@@ -1,0 +1,27 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_script_sha256": {
+    "scripts/node_random/node_random.gml": "cc4594520699468589a574d5c3377c8965e8b165bcca813db1311184114c42cd",
+    "scripts/random_function/random_function.gml": "a0ba588c5e89a7a87b5657eccd63345a733c831e3eb86e5a2c2332a457be4e0a",
+    "scripts/curve_bezier_function/curve_bezier_function.gml": "8fcccafa408be91d95a1bc61be75ce21058b798a943ebb0ee3658760b35f2ae1",
+    "scripts/node_array_randomizer/node_array_randomizer.gml": "8ac4e276d197b769cb9cd2b120964fb51592ff4f22b063824147e6be53ce5f09",
+    "scripts/array_functions/array_functions.gml": "02b928bd2c3e0c94192aec6e0ccd3fcac0734e0a5bb1ad588117fde674018581"
+  },
+  "inspected_runtime_commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+  "inspected_runtime_source_url": "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/functions/Function_Maths.js",
+  "inspected_runtime_file_sha256": "673b03e5f2cab870d145141911c1ec2dc767dbb59252d41d01fd8ef3f6eee005",
+  "oracle_method": "Executed official random_set_seed/random/random_range functions from Function_Maths.js in Node vm, supplying numeric yyGetInt32/yyGetReal conversions. Gaussian and binomial compose the inspected GML draws.",
+  "seed12345_vectors": {
+    "uniform_0_1": 0.7990098701785364,
+    "gaussian_mean0_variance1": -0.006797350629150205,
+    "binomial_trials10_p_half": 5
+  },
+  "native_entropy_contract": "current_time modulo100000 and source randomize/seed_random entropy come from exact caller-recorded node,row,tick,subframe captures. No wall clock or global RNG is read in core evaluation.",
+  "source_quirks_preserved": [
+    "Random moving average resets accumulated mean whenever shuffle is false.",
+    "Convolution history includes zero future frames.",
+    "Custom CMF stores cumulative sum before each sample and normalizes by all128 samples.",
+    "Weighted selector binary search returns index0 whenever selector length is at most2."
+  ],
+  "parity_limit": "Official HTML5 generator sequences are verified for the inspected runtime. Matching the Pixel Composer desktop runner generator remains unverified."
+}

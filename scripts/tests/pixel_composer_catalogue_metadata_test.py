@@ -13,7 +13,7 @@ ENUM_VALUES = REPOSITORY / "scripts/pixel-composer/enum_values.py"
 
 
 class PixelComposerCatalogueMetadataTest(unittest.TestCase):
-    def run_generator(self, root: Path) -> list[str]:
+    def run_generator(self, root: Path, extra_nodes: dict | None = None) -> list[str]:
         script = root / "scripts/pixel-composer/generate-catalogue.py"
         script.parent.mkdir(parents=True)
         shutil.copy2(GENERATOR, script)
@@ -105,11 +105,14 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
             "enums": {},
             "enum_values": {},
         }
+        snapshot["nodes"].update(extra_nodes or {})
         (docs / "source-inputs.json").write_text(json.dumps(snapshot), encoding="utf-8")
-        (docs / "node-parity-matrix.csv").write_text(
-            "node_id,display_name,family\nNode_Test,Fixture node,fixture\n",
-            encoding="utf-8",
+        matrix_rows = ["node_id,display_name,family", "Node_Test,Fixture node,fixture"]
+        matrix_rows.extend(
+            f"{node_id},{metadata['display_name']},{metadata['family']}"
+            for node_id, metadata in (extra_nodes or {}).items()
         )
+        (docs / "node-parity-matrix.csv").write_text("\n".join(matrix_rows) + "\n", encoding="utf-8")
         (root / "mono.engine/imagegraph/src").mkdir(parents=True)
         subprocess.run([sys.executable, str(script)], cwd=root, check=True)
         output = root / "mono.engine/imagegraph/src/SourceCatalogue.inc"
@@ -148,6 +151,75 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
         self.assertIn("S\tI\tattribute_array_process\t?", lines)
         self.assertEqual(sum(line.startswith(("I\t", "T\t")) for line in lines),
                          sum(line.startswith("S\t") for line in lines))
+
+    def test_source_only_constructor_records_preserve_values_and_dynamic_templates(self):
+        extra_nodes = {
+            "Node_3D_Light_Point": {
+                "display_name": "Point Light", "family": "3d",
+                "file": "scripts/node_3d_light_point/node_3d_light_point.gml", "base": "Node_3D_Light",
+                "inputs": [{
+                    "index": "0", "kind": "Vec3", "name": "Position", "default": "[0,0,1]",
+                    "extra": [], "array_depth": 1, "source_array_classification": True,
+                }],
+                "outputs": [],
+            },
+            "Node_Struct": {
+                "display_name": "Struct", "family": "values",
+                "file": "scripts/node_struct/node_struct.gml", "base": "Node",
+                "inputs": [], "outputs": [],
+                "dynamic": {
+                    "fixed_length": 0, "data_length": 2,
+                    "template": [
+                        {"index": "0", "kind": "Text", "name": "Key", "default": "", "extra": [],
+                         "array_depth": 0, "source_array_classification": False},
+                        {"index": "1", "kind": "Generic_any", "name": "value", "default": "0", "extra": [],
+                         "array_depth": 0, "source_array_classification": False},
+                    ],
+                },
+            },
+            "Node_String_Insert": {
+                "display_name": "Insert Text", "family": "undocumented",
+                "file": "scripts/node_string_insert/node_string_insert.gml", "base": "Node_Processor",
+                "source_only": True,
+                "inputs": [
+                    {"index": "0", "kind": "Text", "name": "Text", "default": "", "extra": [],
+                     "array_depth": 0, "source_array_classification": False},
+                    {"index": "1", "kind": "Text", "name": "Insert Text", "default": "", "extra": [],
+                     "array_depth": 0, "source_array_classification": False},
+                    {"index": "2", "kind": "Int", "name": "Position", "default": "0", "extra": [],
+                     "array_depth": 0, "source_array_classification": False},
+                ],
+                "outputs": [{"index": "0", "name": "Text", "type": "VALUE_TYPE.text", "default": '""'}],
+            },
+            "Node_Spout_Receive": {
+                "display_name": "Spout Receive", "family": "undocumented",
+                "file": "scripts/node_spout_receive/node_spout_receive.gml", "base": "Node",
+                "source_only": True,
+                "inputs": [
+                    {"index": "0", "kind": "Text", "name": "Receiver name", "default": '"PixelComposer"',
+                     "extra": [], "array_depth": 0, "source_array_classification": False},
+                    {"index": "1", "kind": "Bool", "name": "Animated", "default": "true",
+                     "extra": [], "array_depth": 0, "source_array_classification": False},
+                ],
+                "outputs": [{"index": "0", "name": "Surface", "type": "VALUE_TYPE.surface", "default": "noone"}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            lines = self.run_generator(Path(temporary), extra_nodes)
+
+        self.assertIn("N\tpc.string_insert\tNode_String_Insert\tInsert Text\tundocumented\tscripts/node_string_insert/node_string_insert.gml", lines)
+        self.assertIn('I\ttext\tText\t0\tText\ttext\ts ""\t', lines)
+        self.assertIn("I\tposition\tPosition\t2\tInt\tinteger\ti 0\t", lines)
+        self.assertIn("O\ttext\tText\t0\ttext", lines)
+        self.assertIn("N\tpc.spout_receive\tNode_Spout_Receive\tSpout Receive\tundocumented\tscripts/node_spout_receive/node_spout_receive.gml", lines)
+        self.assertIn('I\treceiver_name\tReceiver name\t0\tText\ttext\ts "PixelComposer"\t', lines)
+        self.assertIn("I\tanimated\tAnimated\t1\tBool\tboolean\tb 1\t", lines)
+        self.assertIn("O\tsurface\tSurface\t0\timage", lines)
+        self.assertIn("D\t0\t2", lines)
+        self.assertIn('T\tkey\tKey\t0\tText\ttext\ts ""\t', lines)
+        self.assertIn("T\tvalue\tvalue\t1\tGeneric_any\tany\t\t", lines)
+        self.assertIn("I\tposition\tPosition\t0\tVec3\tvector3\t3 0 0 1\t", lines)
+        self.assertFalse(any("Node_VerletSim_Simple" in line for line in lines))
 
 
 if __name__ == "__main__":

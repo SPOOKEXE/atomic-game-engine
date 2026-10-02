@@ -1,5 +1,6 @@
 // Source: Pixel Composer b69eca232217360cf1502ef0223523d818606652 node_array_*
 // and array_functions.gml.
+#include "../SourceRandom.hpp"
 #include "../TimelineDrivers.hpp"
 #include "ArraySource.hpp"
 
@@ -25,6 +26,15 @@ namespace engine::imagegraph::detail {
 				if (id == port) images = candidate;
 			TreeCost cost;
 			const ArrayValue *array = value ? std::get_if<ArrayValue>(value) : nullptr;
+			if (const auto *selector = value ? std::get_if<ArraySelectorValue>(value) : nullptr) {
+				if (context.Authored.Type != "pc.array_get" && context.Authored.Type != "pc.array_randomizer")
+					return context.Fail(
+						Status::UnsupportedExecution, "source node requires an ordinary array", port
+					);
+				if (!selector->Data)
+					return context.Fail(Status::InvalidValue, "array selector payload is missing", port);
+				array = &selector->Data->Values;
+			}
 			if (value && !ValidRuntimeValue(*value))
 				return context.Fail(Status::InvalidValue, "source input is invalid", port);
 			if (array) {
@@ -121,12 +131,15 @@ namespace engine::imagegraph::detail {
 			return true;
 		}
 		bool Get(NodeContext &context, const Items &input, const Input &indices, ValueType emptyType) {
-			if (context.Integer("mode") != 0)
-				return context.Fail(
-					Status::UnsupportedExecution, "source random selection PRNG is unverified", "mode"
-				);
+			const double mode = context.SourceChoice("mode");
+			if (mode != 0 && mode != 1) {
+				context.SetValue("value", 0.0);
+				return context.FailureCode == Status::Ok;
+			}
+			const bool randomMode = mode == 1;
+			SourceRandom random(uint32_t(context.Integer("seed")));
 			const int64_t overflow = context.Integer("overflow");
-			if (overflow < 0 || overflow > 2)
+			if (!randomMode && (overflow < 0 || overflow > 2))
 				return context.Fail(Status::InvalidValue, "get overflow is invalid", "overflow");
 			const auto select = [&](const SourceArrayItem &index) -> const SourceArrayItem * {
 				int64_t at;
@@ -151,13 +164,56 @@ namespace engine::imagegraph::detail {
 			);
 			if (!planCharge) return false;
 			PlanItems plan;
-			if (const auto *array = indices.Array()) {
+			if (const auto *array = indices.Array(); array && !randomMode) {
 				plan.reserve(array->size());
 				for (const auto &index : *array)
 					plan.push_back(select(index));
 				return Finish(context, plan, "value", emptyType);
 			}
-			const SourceArrayItem &selected = *select(indices.Root);
+			size_t randomIndex = randomMode && !input.empty() ? random.Index(uint32_t(input.size())) : 0;
+			if (randomMode) {
+				const Value *raw = context.Find("array");
+				if (const auto *selector = raw ? std::get_if<ArraySelectorValue>(raw) : nullptr;
+					selector && selector->Data) {
+					if (input.empty()) {
+						context.SetValue("value", UndefinedValue{});
+						return context.FailureCode == Status::Ok;
+					}
+					SourceRandom weighted(uint32_t(context.Integer("seed")));
+					const double target = weighted.Unit() * selector->Data->TotalWeight;
+					const auto &weights = selector->Data->CumulativeWeights;
+					randomIndex = 0;
+					if (weights.size() > 2) {
+						// Source permits signed weights and checks the first endpoint before the last.
+						if (target <= weights.front())
+							randomIndex = 0;
+						else if (target >= weights.back())
+							randomIndex = weights.size() - 1;
+						else if (target > weights.front()) {
+							int64_t low = 0, high = int64_t(weights.size()) - 1;
+							while (low <= high) {
+								const size_t mid = size_t((low + high) / 2);
+								if (mid + 1 >= weights.size()) break;
+								if (weights[mid] < target && weights[mid + 1] >= target) {
+									randomIndex = mid;
+									break;
+								}
+								if (weights[mid] < target)
+									low = int64_t(mid) + 1;
+								else
+									high = int64_t(mid) - 1;
+							}
+						}
+					}
+				}
+			}
+
+			if (randomMode && !input.empty() && randomIndex >= input.size())
+				return context.Fail(
+					Status::InvalidValue, "source random selection index exceeds input", "array"
+				);
+			const SourceArrayItem &selected =
+				randomMode ? input.empty() ? Zero : input[randomIndex] : *select(indices.Root);
 			if (const auto *array = std::get_if<Items>(&selected.Data)) {
 				plan.reserve(array->size());
 				for (const auto &item : *array)
@@ -766,6 +822,289 @@ namespace engine::imagegraph::detail {
 			return Publish(context, std::move(output), "array", emptyType, images, true);
 		}
 
+		bool Split(NodeContext &context) {
+			Input source;
+			if (!Read(context, "array", source)) return false;
+			const Items *input = source.Array();
+			const int64_t minimum = context.Integer("minimum_outputs");
+			if (minimum < 0 || uint64_t(minimum) > Limits::MaximumDynamicOutputsPerNode)
+				return context.Fail(
+					Status::LimitExceeded, "split minimum output count exceeds bounds", "minimum_outputs"
+				);
+			const size_t count = std::max(size_t(minimum), input ? input->size() : size_t{0});
+			context.RuntimeOutputCount = count;
+			for (size_t index = 0; index < count; ++index) {
+				const std::string port = "val_" + std::to_string(index);
+				const SourceArrayItem &item = input && index < input->size() ? (*input)[index] : Zero;
+				TreeCost cost;
+				if (!MeasureItem(item, cost))
+					return context.Fail(Status::LimitExceeded, "split output exceeds bounds", port);
+				if (const auto *row = std::get_if<Items>(&item.Data)) {
+					auto scratch = context.ReserveWorkspace(cost.Bytes, port);
+					if (!scratch) return false;
+					Items output = *row;
+					if (!Publish(context, std::move(output), port, source.EmptyType)) return false;
+				} else if (const auto *leaf = std::get_if<ElementValue>(&item.Data)) {
+					if (!context.ReserveOutput(cost.Bytes, port)) return false;
+					context.SetValue(
+						port, std::visit([](const auto &value) -> Value { return value; }, *leaf)
+					);
+				} else {
+					const auto &image = std::get<Image>(item.Data);
+					if (!context.ReserveOutput(image.Pixels.size() + std::string{}.capacity(), port))
+						return false;
+					context.OutputImages.emplace_back(port, image);
+				}
+				if (context.FailureCode != Status::Ok) return false;
+			}
+			return true;
+		}
+
+		bool Pin(NodeContext &context) {
+			auto inputsCharge =
+				context.ReserveWorkspace(context.Authored.DynamicInputs.size() * sizeof(Input), "array");
+			if (!inputsCharge) return false;
+			std::vector<Input> inputs;
+			inputs.reserve(context.Authored.DynamicInputs.size());
+			TreeCost cost;
+			ValueType emptyType = ValueType::Any;
+			for (const auto &port : context.Authored.DynamicInputs) {
+				if (!context.IsLinked(port.Id)) continue;
+				inputs.emplace_back();
+				if (!Read(context, port.Id, inputs.back())) return false;
+				emptyType = inputs.back().EmptyType;
+				if (!MeasureItem(inputs.back().Root, cost))
+					return context.Fail(Status::LimitExceeded, "pin output exceeds bounds", "array");
+			}
+			auto charge = context.ReserveWorkspace(cost.Bytes, "array");
+			if (!charge) return false;
+			Items output;
+			output.reserve(inputs.size());
+			for (auto &input : inputs)
+				output.push_back(std::move(input.Root));
+			return Publish(context, std::move(output), "array", emptyType);
+		}
+
+		bool BooleanOperation(NodeContext &context) {
+			Input first, second;
+			if (!Read(context, "array_1", first) || !Read(context, "array_2", second)) return false;
+			const Items *a = first.Array(), *b = second.Array();
+			if (!a || !b)
+				return context.Fail(Status::InvalidValue, "boolean array inputs must be arrays", "array_1");
+			const double operation = context.SourceChoice("operation");
+			if (operation != 0 && operation != 1 && operation != 2 && operation != 3)
+				return context.Fail(Status::InvalidValue, "boolean array operation is invalid", "operation");
+			for (const Items *row : {a, b})
+				for (const auto &item : *row) {
+					const auto *leaf = std::get_if<ElementValue>(&item.Data);
+					if (!leaf ||
+						(!std::holds_alternative<double>(*leaf) && !std::holds_alternative<int64_t>(*leaf) &&
+						 !std::holds_alternative<std::string>(*leaf) && !std::holds_alternative<bool>(*leaf)))
+						return context.Fail(
+							Status::UnsupportedExecution,
+							"boolean array opaque identity or key conversion is unrepresented",
+							"array_1"
+						);
+				}
+			auto charge = context.ReserveWorkspace(
+				(a->size() + b->size()) * (sizeof(const SourceArrayItem *) + sizeof(bool)), "array_out"
+			);
+			if (!charge) return false;
+			PlanItems plan;
+			plan.reserve(a->size() + b->size());
+			const auto contains = [&](const PlanItems &row, const SourceArrayItem &item) {
+				return std::any_of(row.begin(), row.end(), [&](const auto *other) {
+					return Equal(*other, item).value_or(false);
+				});
+			};
+			const auto appendUnique = [&](const SourceArrayItem &item) {
+				if (!contains(plan, item)) plan.push_back(&item);
+			};
+			const auto subtract = [&](const Items &left, const Items &right, bool unique) {
+				std::vector<bool> consumed(right.size(), false);
+				for (const auto &item : left) {
+					bool removed = false;
+					for (size_t index = 0; index < right.size(); ++index)
+						if (!consumed[index] && Equal(item, right[index]).value_or(false)) {
+							consumed[index] = true;
+							removed = true;
+							break;
+						}
+					if (!removed) {
+						if (unique)
+							appendUnique(item);
+						else
+							plan.push_back(&item);
+					}
+				}
+			};
+			if (operation == 0) {
+				for (const auto &item : *a)
+					appendUnique(item);
+				for (const auto &item : *b)
+					appendUnique(item);
+			} else if (operation == 1)
+				subtract(*a, *b, false);
+			else if (operation == 2) {
+				for (const auto &item : *a)
+					if (std::any_of(b->begin(), b->end(), [&](const auto &other) {
+							return Equal(item, other).value_or(false);
+						}))
+						appendUnique(item);
+			} else {
+				subtract(*a, *b, true);
+				subtract(*b, *a, true);
+			}
+			return Finish(context, plan, "array_out", first.EmptyType);
+		}
+
+		bool WeightedSelector(NodeContext &context) {
+			Input source;
+			if (!Read(context, "array_in", source)) return false;
+			const auto *input = source.Array();
+			if (!input)
+				return context.Fail(Status::InvalidValue, "selector input is not an array", "array_in");
+			TreeCost cost;
+			if (!MeasureSource(*input, cost))
+				return context.Fail(Status::LimitExceeded, "selector contents exceed bounds", "array_in");
+			const uint64_t bytes = sizeof(ArraySelectorData) + input->size() * sizeof(double) + cost.Bytes;
+			if (!context.ReserveOutput(bytes, "array_selector")) return false;
+			ArraySelectorValue result;
+			result.Data.emplace();
+			result.Data->Values.ElementType = ValueType::Any;
+			result.Data->Values.Items = *input;
+			result.Data->CumulativeWeights.reserve(input->size());
+			for (size_t index = 0; index < input->size(); ++index) {
+				result.Data->CumulativeWeights.push_back(result.Data->TotalWeight);
+				const auto port = index < context.Authored.DynamicInputs.size()
+									  ? context.Authored.DynamicInputs[index].Id
+									  : std::string{};
+				result.Data->TotalWeight += port.empty() ? 1 : context.Scalar(port, 1);
+				if (!std::isfinite(result.Data->TotalWeight))
+					return context.Fail(Status::InvalidValue, "selector weight total is nonfinite", port);
+			}
+			context.SetValue("array_selector", std::move(result));
+			return context.FailureCode == Status::Ok;
+		}
+
+		bool Shuffle(NodeContext &context) {
+			Input source;
+			if (!Read(context, "array_in", source)) return false;
+			const Items *input = source.Array();
+			if (!input)
+				return context.Fail(Status::InvalidValue, "shuffle input is not an array", "array_in");
+			auto charge =
+				context.ReserveWorkspace(input->size() * sizeof(const SourceArrayItem *), "array_in");
+			if (!charge) return false;
+			PlanItems plan;
+			plan.reserve(input->size());
+			for (const auto &item : *input)
+				plan.push_back(&item);
+			// Native seed policy uses the shared generator. HTML5 source shuffle uses Math.random().
+			SourceRandom random(uint32_t(context.Integer("seed")));
+			for (size_t count = plan.size(); count > 1; --count) {
+				const size_t index = std::min<size_t>(random.Index(uint32_t(count)), count - 1);
+				std::swap(plan[count - 1], plan[index]);
+			}
+			return Finish(context, plan, "shuffled_array", source.EmptyType);
+		}
+
+		bool Sample(NodeContext &context) {
+			Input source;
+			if (!Read(context, "array", source)) return false;
+			const Items *input = source.Array();
+			if (!input) return context.Fail(Status::InvalidValue, "sample input is not an array", "array");
+			const double mode = context.SourceChoice("mode"),
+						 amountType = context.SourceChoice("amount_type");
+			if (context.FailureCode != Status::Ok) return false;
+			if ((mode != 0 && mode != 1) || (mode == 0 && amountType != 0 && amountType != 1))
+				return Publish(context, Items{}, "array", source.EmptyType);
+			const double step = context.Scalar("step", 2);
+			const int64_t dimension = std::max<int64_t>(0, context.Integer("dimension"));
+			const int64_t amount = std::max<int64_t>(0, context.Integer("amount", 4));
+			if (mode == 0 && (!(step > 0) || !std::isfinite(step)))
+				return context.Fail(Status::InvalidValue, "sample step must be finite and positive", "step");
+			if (uint64_t(dimension) > Limits::MaximumArrayDepth ||
+				uint64_t(amount) > Limits::MaximumArrayElements)
+				return context.Fail(
+					Status::LimitExceeded, "sample dimensions or amount exceed bounds", "amount"
+				);
+			const double shift = double(context.Integer("shift"));
+			const double first = mode == 0 ? std::fmod(shift, step) : 0;
+			const uint32_t seed = uint32_t(context.Integer("seed"));
+			if (first < 0)
+				return context.Fail(
+					Status::InvalidValue, "source sample shift produces a negative index", "shift"
+				);
+			const auto walk =
+				[&](
+					auto &&self, const Items &row, int64_t dim, size_t depth, TreeCost *cost, Items *output
+				) -> bool {
+				if (dim > 0) {
+					if (output) output->reserve(row.size());
+					for (const auto &item : row) {
+						const auto *child = std::get_if<Items>(&item.Data);
+						if (!child)
+							return context.Fail(
+								Status::InvalidValue, "sample dimension exceeds input shape", "dimension"
+							);
+						if (cost && !MeasureWrapper(*cost))
+							return context.Fail(
+								Status::LimitExceeded, "sample output exceeds bounds", "array"
+							);
+						Items clone;
+						if (!self(self, *child, dim - 1, depth + 1, cost, output ? &clone : nullptr))
+							return false;
+						if (output) output->push_back({std::move(clone)});
+					}
+					return true;
+				}
+				if (row.empty()) {
+					if (amountType == 1 && amount != 0)
+						return context.Fail(
+							Status::InvalidValue, "custom sampling requires nonempty input", "array"
+						);
+					return true;
+				}
+				const double countValue = amountType == 1 ? double(amount)
+										  : mode == 1	  ? double(row.size())
+										  : first < row.size()
+											  ? std::ceil((double(row.size()) - first) / step)
+											  : 0;
+				if (!std::isfinite(countValue) || countValue > Limits::MaximumArrayElements)
+					return context.Fail(Status::LimitExceeded, "sample output exceeds bounds", "array");
+				const size_t count = size_t(countValue);
+				if (output) output->reserve(count);
+				double at = first;
+				SourceRandom random(seed);
+				for (size_t index = 0; index < count; ++index) {
+					if (mode == 1) at = random.Index(uint32_t(row.size()));
+					if (at >= row.size()) {
+						if (amountType == 0) break;
+						return context.Fail(
+							Status::InvalidValue, "sample first index is outside input", "shift"
+						);
+					}
+					const auto &selected = row[size_t(at)];
+					if (cost && !MeasureItem(selected, *cost, depth))
+						return context.Fail(Status::LimitExceeded, "sample output exceeds bounds", "array");
+					if (output) output->push_back(selected);
+					if (mode == 0) {
+						at += step;
+						if (amountType == 1) at = std::fmod(at, double(row.size()));
+					}
+				}
+				return true;
+			};
+			TreeCost cost;
+			if (!walk(walk, *input, dimension, 1, &cost, nullptr)) return false;
+			auto charge = context.ReserveWorkspace(cost.Bytes, "array");
+			if (!charge) return false;
+			Items output;
+			if (!walk(walk, *input, dimension, 1, nullptr, &output)) return false;
+			return Publish(context, std::move(output), "array", source.EmptyType);
+		}
+
 		bool Unique(NodeContext &context) {
 			Input source;
 			if (!Read(context, "array_in", source)) return false;
@@ -1042,7 +1381,13 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.array_zip", Zip, true},
 			ExecutorEntry{"pc.array_unique", Unique, true},
 			ExecutorEntry{"pc.array_uniform", Uniform, true},
-			ExecutorEntry{"pc.array_rearrange", Rearrange, true}
+			ExecutorEntry{"pc.array_rearrange", Rearrange, true},
+			ExecutorEntry{"pc.array_sample", Sample, true},
+			ExecutorEntry{"pc.array_shuffle", Shuffle, true},
+			ExecutorEntry{"pc.array_randomizer", WeightedSelector, true},
+			ExecutorEntry{"pc.array_boolean_opr", BooleanOperation, true},
+			ExecutorEntry{"pc.array_pin", Pin, true},
+			ExecutorEntry{"pc.array_split", Split, true}
 		};
 		return entries;
 	}

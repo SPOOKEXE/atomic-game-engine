@@ -10,6 +10,7 @@ inventory are extracted too and marked "undocumented".
 """
 
 import csv
+import hashlib
 import json
 import re
 import subprocess
@@ -38,6 +39,7 @@ FUNCTION = re.compile(r"^\s*function\s+(Node_[A-Za-z0-9_]+)\s*\(([^)]*)\)\s*(?::
 INPUT = re.compile(r"newInput\(\s*([^,]+?)\s*,\s*nodeValue_([A-Za-z0-9_]+)\s*\(")
 GENERIC_INPUT = re.compile(r"newInput\(\s*([^,]+?)\s*,\s*nodeValue\s*\(")
 OUTPUT = re.compile(r"newOutput\(\s*([^,]+?)\s*,\s*nodeValue_Output\s*\(")
+SURFACE_OUTPUT = re.compile(r"newOutput\(\s*([^,]+?)\s*,\s*nodeValue_Surface\s*\(")
 ACTIVE = re.compile(r"newActiveInput\(\s*([^)]+)\)")
 # Constructors whose name argument has a default.
 DEFAULT_NAMES = {"Dimension": "Dimension", "Anchor": "Anchor", "Pbbox": "PBbox"}
@@ -52,6 +54,21 @@ CHAIN = re.compile(r"\.(setMappableConst|setMappableRange|setMappable|setCurvabl
 INPUT_START = re.compile(r"newInput\(|newActiveInput\(|newOutput\(|__init_mask_modifier\(")
 SEED_INPUT = re.compile(r"newInput\(\s*([^,]+?)\s*,\s*nodeValueSeed(Float|Int)?\s*\(")
 MASK_MODIFIER = re.compile(r"__init_mask_modifier\(\s*([^,)]+)\s*,\s*([^,)]+)\s*\)")
+DYNAMIC_ASSIGNED_INPUT = re.compile(
+    r"\binputs\s*\[\s*([^\]]+?)\s*\]\s*=\s*(nodeValue(?:_([A-Za-z0-9_]+))?)\s*\("
+)
+CONSTRUCTOR_DEFAULT_OVERRIDE = re.compile(
+    r"if\s*\(\s*!LOADING\s*&&\s*!APPENDING\s*\)\s*inputs\s*\[\s*(\d+)\s*\]\.setValue\s*\("
+)
+# Only this inherited default has reviewed source evidence in the current pin.
+CONSTRUCTOR_DEFAULT_OVERRIDE_NODES = {"Node_3D_Light"}
+# Dynamic assignments have only been schema-checked for Struct's key/value pair.
+DYNAMIC_ASSIGNED_INPUT_NODES = {"Node_Struct"}
+SCALAR_DEPTH_SOURCE_FILES = (
+    "scripts/node_value/node_value.gml",
+    "scripts/node_value_float/node_value_float.gml",
+    "scripts/__node_value_number/__node_value_number.gml",
+)
 GLOBAL_ARRAY = re.compile(r"(?:^|;)\s*(?:global\.)?([A-Z_][A-Z0-9_]*)\s*=\s*\[", re.M)
 STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 MACRO = re.compile(r"^\s*#macro\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$", re.M)
@@ -60,16 +77,85 @@ ENUM = re.compile(r"\benum\s+([A-Z_][A-Z0-9_]*)\s*\{([^}]*)\}")
 files, bases, bodies = {}, {}, {}
 arrays, choice_arrays, macros, enums, enum_values = {}, {}, {}, {}, {}
 source_behavior_evidence = {}
+source_constructor_evidence = {}
+
+
+def strip_comments(text):
+    """Blank line and block comments without shifting source offsets or editing strings."""
+    output = list(text)
+    state = "code"
+    quote = ""
+    index = 0
+    while index < len(text):
+        character = text[index]
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if state == "code":
+            if character in ('"', "'"):
+                state = "string"
+                quote = character
+            elif character == "/" and following == "/":
+                output[index] = output[index + 1] = " "
+                state = "line_comment"
+                index += 1
+            elif character == "/" and following == "*":
+                output[index] = output[index + 1] = " "
+                state = "block_comment"
+                index += 1
+        elif state == "string":
+            if character == "\\":
+                index += 1
+            elif character == quote:
+                state = "code"
+        elif state == "line_comment":
+            if character in "\r\n":
+                state = "code"
+            else:
+                output[index] = " "
+        elif state == "block_comment":
+            if character == "*" and following == "/":
+                output[index] = output[index + 1] = " "
+                state = "code"
+                index += 1
+            elif character not in "\r\n":
+                output[index] = " "
+        index += 1
+    return "".join(output)
+
+
+def record_constructor_source(name):
+    """Keep hashes for source files that define recovered constructor metadata."""
+    record_constructor_source_file(files[name])
+
+
+def record_constructor_source_file(path):
+    """Keep a hash for a pinned source file used to derive constructor metadata."""
+    content = (root / path).read_bytes()
+    source_constructor_evidence[path] = {
+        "bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
+def unquote(text):
+    """Remove one matching string delimiter pair without trimming escaped quotes."""
+    text = text.strip()
+    if len(text) >= 2 and text[0] in ('"', "'") and text[-1] == text[0]:
+        return text[1:-1]
+    return text
 
 
 def call_args(text, start):
     """Return the top-level argument strings of the call whose '(' is at `start`."""
-    depth, args, current, quote = 0, [], [], None
+    depth, args, current, quote, escaped = 0, [], [], None, False
     for index in range(start, len(text)):
         character = text[index]
         if quote:
             current.append(character)
-            if character == quote and text[index - 1] != "\\":
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
                 quote = None
         elif character in "\"'":
             quote = character
@@ -95,11 +181,15 @@ def call_args(text, start):
 def _matching_call_end(text, opening):
     if opening < 0:
         return None
-    depth, quote = 0, None
+    depth, quote, escaped = 0, None, False
     for index in range(opening, len(text)):
         character = text[index]
         if quote:
-            if character == quote and text[index - 1] != "\\":
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
                 quote = None
         elif character in "\"'":
             quote = character
@@ -124,9 +214,9 @@ def _enum_chain_span(text, match):
 
 
 for path in sorted(root.glob("scripts/**/*.gml")):
-    text = path.read_text(errors="replace")
+    text = strip_comments(path.read_text(errors="replace"))
     for match in MACRO.finditer(text):
-        macros.setdefault(match.group(1), match.group(2).split("//")[0].strip())
+        macros.setdefault(match.group(1), match.group(2).strip())
     for match in ENUM.finditer(text):
         name = match.group(1)
         if name not in enums:
@@ -154,8 +244,8 @@ surface_attribute_file = root / "scripts/node_attributes/node_attributes.gml"
 surface_preference_file = root / "scripts/preferences/preferences.gml"
 depth_preference = None
 if surface_attribute_file.exists() and surface_preference_file.exists():
-    surface_attributes = surface_attribute_file.read_text()
-    surface_preferences = surface_preference_file.read_text()
+    surface_attributes = strip_comments(surface_attribute_file.read_text())
+    surface_preferences = strip_comments(surface_preference_file.read_text())
     if not re.search(r"_useInput\s*=\s*!array_empty\(inputs\)\s*&&\s*inputs\[0\]\.type\s*==\s*VALUE_TYPE\.surface", surface_attributes) or not re.search(r"attributes\.color_depth\s*=\s*_useInput\?\s*0\s*:\s*PREFERENCES\.node_def_depth", surface_attributes):
         raise ValueError("source Color Depth default semantics are unrepresented")
     if any(not re.search(r'scrollItem\("' + re.escape(label) + r'"\s*\)', surface_attributes) for label in DEPTH_LABELS):
@@ -265,7 +355,7 @@ def parse(name, seen):
         entry = {
             "index": match.group(1).strip(),
             "kind": match.group(2),
-            "name": args[0].lstrip("$").strip('"') if args and args[0] else DEFAULT_NAMES.get(match.group(2), ""),
+            "name": unquote(args[0].lstrip("$")) if args and args[0] else DEFAULT_NAMES.get(match.group(2), ""),
             "default": args[1] if len(args) > 1 else "",
             "extra": args[2:],
         }
@@ -337,6 +427,8 @@ def parse(name, seen):
             if evidence is not None:
                 source_behavior_evidence[entry["kind"]] = evidence
         entry["array_depth"] = declaration_depth(source_index.type_array(entry["kind"]), statement)
+        if ".setArrayDepth" in statement:
+            record_constructor_source(name)
         unit = UNIT_SIMPLE.search(statement)
         if unit:
             entry["unit"] = "constant" if unit.group(1).strip().startswith("false") else "reference"
@@ -379,13 +471,18 @@ def parse(name, seen):
         declared.append((match.start(), {
             "index": match.group(1).strip(),
             "kind": args[3].replace("VALUE_TYPE.", "Generic_") if len(args) > 3 else "Generic",
-            "name": args[0].strip('"') if args else "",
+            "name": unquote(args[0]) if args else "",
             "default": args[4] if len(args) > 4 else "",
             "extra": args[5:],
         }))
-        declared[-1][1]["array_depth"] = source_index.type_array(declared[-1][1]["kind"])
-        span = _enum_chain_span(body, match)
         following = INPUT_START.search(body, match.end())
+        statement = body[match.end():following.start() if following else len(body)][:1200]
+        declared[-1][1]["array_depth"] = declaration_depth(
+            source_index.type_array(declared[-1][1]["kind"]), statement
+        )
+        if ".setArrayDepth" in statement:
+            record_constructor_source(name)
+        span = _enum_chain_span(body, match)
         end = min(span[1], following.start()) if span and following else (span[1] if span else match.end())
         entry = declared[-1][1]
         entry["_source_classification_state"] = source_classification.state(entry["kind"], body[match.start():end])
@@ -409,6 +506,41 @@ def parse(name, seen):
                 break
             cursor += 1
         template_span = (creator.start(), cursor)
+        assigned_inputs = [
+            match for match in DYNAMIC_ASSIGNED_INPUT.finditer(body)
+            if template_span[0] <= match.start() <= template_span[1]
+        ] if name in DYNAMIC_ASSIGNED_INPUT_NODES else []
+        for match in assigned_inputs:
+            args = call_args(body, match.end() - 1)
+            if not args:
+                continue
+            kind = match.group(3)
+            if kind:
+                input_name = unquote(args[0].lstrip("$"))
+                default = args[1] if len(args) > 1 else ""
+                extra = args[2:]
+            else:
+                input_name = unquote(args[0])
+                kind = args[3].replace("VALUE_TYPE.", "Generic_") if len(args) > 3 else "Generic"
+                default = args[4] if len(args) > 4 else ""
+                extra = args[5:]
+            statement_end = body.find("\n", match.start())
+            statement = body[match.start():statement_end if statement_end >= 0 else len(body)]
+            state = source_classification.state(kind, statement)
+            entry = {
+                "index": match.group(1).strip(),
+                "kind": kind,
+                "name": input_name,
+                "default": default,
+                "extra": extra,
+                "array_depth": source_index.type_array(kind),
+                "_source_classification_state": state,
+                "source_array_classification": _result(state),
+            }
+            template_entry = (match.start(), entry)
+            declared.append(template_entry)
+        if assigned_inputs:
+            record_constructor_source(name)
     # Resolve symbolic indices such as "i+4" where `x = array_length(inputs)` recorded the input count
     # and `var i = x;` aliased it. Symbols from the base constructor carry over.
     symbols = dict(symbols_of.get(base, {}))
@@ -441,6 +573,24 @@ def parse(name, seen):
         else:
             fixed.append(entry)
     inputs += fixed
+    overrides = CONSTRUCTOR_DEFAULT_OVERRIDE.finditer(body) if name in CONSTRUCTOR_DEFAULT_OVERRIDE_NODES else ()
+    for match in overrides:
+        prefix = body[:match.start()]
+        if prefix.count("{") - prefix.count("}") != 1:
+            continue
+        args = call_args(body, match.end() - 1)
+        if not args:
+            continue
+        targets = [item for item in inputs if str(item.get("index")) == match.group(1)]
+        if len(targets) != 1:
+            continue
+        targets[0]["default"] = args[0]
+        targets[0]["constructor_default_override"] = {
+            "source_node": name,
+            "method": "setValue",
+            "guard": "!LOADING && !APPENDING",
+        }
+        record_constructor_source(name)
     dynamic = DYNAMIC_INPUT.search(body)
     if dynamic:
         numbers = [int(item["index"]) for item in inputs if item["index"].isdigit()]
@@ -487,16 +637,29 @@ def parse(name, seen):
         args = call_args(body, match.end() - 1)
         outputs.append({
             "index": match.group(1).strip(),
-            "name": args[0].strip('"') if args else "",
+            "name": unquote(args[0]) if args else "",
             "type": args[1] if len(args) > 1 else "",
             "default": args[2] if len(args) > 2 else "",
+        })
+    for match in SURFACE_OUTPUT.finditer(body):
+        record_constructor_source(name)
+        args = call_args(body, match.end() - 1)
+        outputs.append({
+            "index": match.group(1).strip(),
+            "name": unquote(args[0]) if args else "",
+            "type": "surface",
+            "default": "",
         })
     for entry in inputs + template:
         if "_source_classification_state" not in entry:
             entry["_source_classification_state"] = source_classification.state(entry["kind"])
             entry["source_array_classification"] = _result(entry["_source_classification_state"])
     apply_input_classification_mutations(inputs, body)
-    apply_runtime_depth_mutations(inputs, body)
+    if apply_runtime_depth_mutations(inputs, body):
+        record_constructor_source(name)
+        for path in SCALAR_DEPTH_SOURCE_FILES:
+            if (root / path).is_file():
+                record_constructor_source_file(path)
     return inputs, outputs
 
 
@@ -564,6 +727,7 @@ json.dump(
         "enums": enums,
         "enum_values": enum_values,
         "source_behavior_evidence": source_behavior_evidence,
+        "source_constructor_evidence": source_constructor_evidence,
         "source_array_classification_evidence": source_classification.evidence,
         "source_choice_evidence": source_choice_evidence,
         "source_choice_generated_evidence": source_choice_generated_evidence,

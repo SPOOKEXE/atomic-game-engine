@@ -3,6 +3,7 @@
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/GroupReplay.hpp>
+#include <engine/imagegraph/SourceModeTransition.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -82,6 +83,72 @@ namespace {
 		return result;
 	}
 } // namespace
+TEST_CASE(
+	"Group Trigger button records exact frame pulses without a reset seed key",
+	"[imagegraph][groups][group_replay][trigger]"
+) {
+	auto document = Boundary(false);
+	document.Links.erase(document.Links.begin());
+	document.Nodes.front().Values[0].Data = EnumValue{19};
+	document.Nodes.front().SourceAnimatedInputs = {"parent_value"};
+	Diagnostic diagnostic;
+	GroupReplayState empty, loaded, edited;
+	const GroupBootstrapTarget order[] = {{"input"}};
+	EvaluationRequest clock;
+	REQUIRE(
+		ReplayGroupBootstrap(document, Checked(document), order, clock, empty, 1, loaded, diagnostic) ==
+		Status::Ok
+	);
+	Value pressed = true;
+	auto event = Event("input", GroupRefreshReason::ParentEdit);
+	event.EditedPort = "parent_value";
+	event.LocalValue = &pressed;
+	event.LocalAnimated = true;
+	event.At.Tick = 5;
+	REQUIRE(
+		ReplayGroupRefresh(document, Checked(document), {&event, 1}, loaded, 1, edited, diagnostic) ==
+		Status::Ok
+	);
+	REQUIRE(edited.Find("input")->ParentKeys.size() == 1);
+	CHECK(edited.Find("input")->ParentKeys[0].Tick == 5);
+	for (const uint64_t tick : {0, 4, 5, 6, 5}) {
+		const auto result = Sample(document, Checked(document), edited, tick);
+		CHECK(std::get<bool>(result.Data) == (tick == 5));
+	}
+	Document projected;
+	REQUIRE(ProjectGroupReplay(document, edited, 1, projected, diagnostic) == Status::Ok);
+	projected.Keyframes[0].Data = false;
+	GroupReplayState restored;
+	REQUIRE(
+		RestoreGroupDeclarations(
+			projected, Checked(projected), order, clock, empty, 2, restored, diagnostic
+		) == Status::Ok
+	);
+	CHECK(std::get<bool>(Sample(projected, Checked(projected), restored, 5, 2).Data));
+	Document disabled, enabled;
+	REQUIRE(
+		ToggleSourceInputMode(
+			projected, restored, 2, {"input", "parent_value", false, {5, 0, false}}, disabled, diagnostic
+		) == Status::Ok
+	);
+	REQUIRE(disabled.Keyframes.size() == 1);
+	CHECK(GetFrameTime(disabled.Keyframes[0]) == FrameTime{});
+	CHECK(disabled.Keyframes[0].Data == Value{false});
+	GroupReplayState disabledState;
+	REQUIRE(
+		RestoreGroupDeclarations(
+			disabled, Checked(disabled), order, clock, empty, 3, disabledState, diagnostic
+		) == Status::Ok
+	);
+	CHECK_FALSE(std::get<bool>(Sample(disabled, Checked(disabled), disabledState, 0, 3).Data));
+	REQUIRE(
+		ToggleSourceInputMode(
+			disabled, disabledState, 3, {"input", "parent_value", true, {7, 0, false}}, enabled, diagnostic
+		) == Status::Ok
+	);
+	REQUIRE(enabled.Keyframes.size() == 1);
+	CHECK(GetFrameTime(enabled.Keyframes[0]) == FrameTime{7, 0, false});
+}
 TEST_CASE(
 	"Ordered group callbacks change declarations while timeline sampling "
 	"does not",
@@ -538,6 +605,22 @@ TEST_CASE(
 	CHECK(bound.InstancesBound());
 	CHECK(bound.Find("alpha")->Subtype == 4);
 	CHECK(bound.Find("beta")->Subtype == 6);
+	GroupReplayState reboundBindings;
+	auto replacementBindings = std::to_array(bindings);
+	replacementBindings[0].Getter = GroupSubtypeAnimator::Static;
+	REQUIRE(
+		BindGroupReplay(authored, replacementBindings, bound, 1, reboundBindings, diagnostic) == Status::Ok
+	);
+	CHECK(reboundBindings.Binding("alpha")->Getter == GroupSubtypeAnimator::Static);
+	CHECK(reboundBindings.Find("alpha")->Domain == bound.Find("alpha")->Domain);
+	CHECK(reboundBindings.Find("alpha")->Subtype == 4);
+	CHECK(bound.Binding("alpha")->Getter == GroupSubtypeAnimator::Animated);
+	const auto retainedBindings = reboundBindings.RetainedBytes();
+	CHECK(
+		BindGroupReplay(authored, bindings, bound, 1, reboundBindings, diagnostic, 1) == Status::LimitExceeded
+	);
+	CHECK(reboundBindings.RetainedBytes() == retainedBindings);
+	CHECK(reboundBindings.Binding("alpha")->Getter == GroupSubtypeAnimator::Static);
 	CHECK(ResolvedSubtype(authored, plan, "alpha", bound) == 2);
 	CHECK(ResolvedSubtype(authored, plan, "beta", bound) == 2);
 	Value integerType = EnumValue{0};
@@ -1451,9 +1534,7 @@ TEST_CASE(
 			{"middle", "surface_out", "child", "surface_in"}
 		};
 		document.Outputs = {{"result", "child", "surface_out"}};
-		document.Keyframes = {
-			{"middle", "mix", 0, .25, "linear"}, {"middle", "mix", 10, .75, "linear"}
-		};
+		document.Keyframes = {{"middle", "mix", 0, .25, "linear"}, {"middle", "mix", 10, .75, "linear"}};
 		Plan plan;
 		Diagnostic diagnostic;
 		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
@@ -1468,20 +1549,18 @@ TEST_CASE(
 		REQUIRE(value != authored.end());
 		CHECK(value->Data == Value{childOverrides ? .9 : .35});
 		EvaluationSnapshot snapshot;
-		REQUIRE(
-			EvaluateNodeInputs(document, plan, "child", {.Tick = 2}, snapshot, diagnostic) == Status::Ok
-		);
-		const auto input = std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &entry) {
-			return entry.Port == "mix";
-		});
+		REQUIRE(EvaluateNodeInputs(document, plan, "child", {.Tick = 2}, snapshot, diagnostic) == Status::Ok);
+		const auto input =
+			std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &entry) {
+				return entry.Port == "mix";
+			});
 		REQUIRE(input != snapshot.Values().end());
 		CHECK(input->Data == value->Data);
 	}
 }
 
 TEST_CASE(
-	"Inherited source static keys follow their nearest instance owner",
-	"[imagegraph][groups][group_replay]"
+	"Inherited source static keys follow their nearest instance owner", "[imagegraph][groups][group_replay]"
 ) {
 	auto document = AliasedBoundaries();
 	document.Nodes[2].InstanceBase = "input";
@@ -1496,9 +1575,10 @@ TEST_CASE(
 	EvaluationSnapshot snapshot;
 	Diagnostic diagnostic;
 	REQUIRE(EvaluateNodeInputs(document, plan, "beta", BindingClock(), snapshot, diagnostic) == Status::Ok);
-	const auto subtype = std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &value) {
-		return value.Port == "subtype";
-	});
+	const auto subtype =
+		std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &value) {
+			return value.Port == "subtype";
+		});
 	REQUIRE(subtype != snapshot.Values().end());
 	CHECK(subtype->Data == Value{EnumValue{3}});
 }
@@ -1636,9 +1716,7 @@ TEST_CASE(
 	REQUIRE(ProjectGroupReplay(authored, edited, 1, admitted, diagnostic, low) == Status::Ok);
 	CHECK(admitted == projected);
 	Document prior = Boundary(.125);
-	CHECK(
-		ProjectGroupReplay(authored, edited, 1, prior, diagnostic, low - 1) == Status::LimitExceeded
-	);
+	CHECK(ProjectGroupReplay(authored, edited, 1, prior, diagnostic, low - 1) == Status::LimitExceeded);
 	CHECK(prior == Boundary(.125));
 }
 
@@ -1812,7 +1890,7 @@ TEST_CASE(
 				restored, Checked(restored), {&press, 1}, nativeRestored, 2, unchanged, diagnostic
 			) == Status::UnsupportedExecution
 		);
-		CHECK(diagnostic.Message == "Group Trigger parent button/tick editing is not represented");
+		CHECK(diagnostic.Message == "source Trigger map requires a nonnegative integer frame");
 	}
 }
 

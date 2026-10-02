@@ -11,25 +11,18 @@ namespace engine::imagegraph::detail {
 			static const std::unordered_map<std::string_view, ExecutorEntry> executors = [] {
 				std::unordered_map<std::string_view, ExecutorEntry> merged;
 				for (const auto family :
-					 {AudioExecutors(),
-					  AudioFileExecutors(),
-					  ArrayExecutors(),
-					  ArrayStructureExecutors(),
-					  ArrayEditExecutors(),
-					  FilterExecutors(),
-					  GenerateExecutors(),
-					  GradientExecutors(),
-					  MatrixExecutors(),
-					  CurveExecutors(),
-					  ValueExecutors(),
-					  VectorExecutors(),
-					  OutlineExecutors(),
-					  BlurExecutors(),
-					  TransformExecutors(),
-					  PathExecutors(),
-					  PointExecutors(),
-					  MeshExecutors(),
-				  SourceValueExecutors()})
+					 {AudioExecutors(),			 AudioFileExecutors(),	 ArrayExecutors(),
+					  ArrayStructureExecutors(), ArrayEditExecutors(),	 ArrayNumericExecutors(),
+					  RandomExecutors(),		 FilterExecutors(),		 GenerateExecutors(),
+					  GradientExecutors(),		 MatrixExecutors(),		 CurveExecutors(),
+					  ValueExecutors(),			 VectorExecutors(),		 OutlineExecutors(),
+					  BlurExecutors(),			 TransformExecutors(),	 PathExecutors(),
+					  PointExecutors(),			 MeshExecutors(),		 MeshModifyExecutors(),
+					  SourceMesh2DExecutors(),	 Source2DExecutors(),	 SourceTextExecutors(),
+					  SourcePcxExecutors(),		 SceneExecutors(),		 SourceSdfExecutors(),
+					  SimulationExecutors(),	 SourceValueExecutors(), SourceDataExecutors(),
+					  SourceMatrixExecutors(),	 SourcePathExecutors(),	 HostExecutors(),
+					  TriggerExecutors(),		 TemporalExecutors()})
 					for (const ExecutorEntry &entry : family)
 						merged.emplace(entry.Type, entry);
 				merged.emplace("pc.group_input", ExecutorEntry{"pc.group_input", ExecuteGroupBoundary, true});
@@ -51,7 +44,17 @@ namespace engine::imagegraph::detail {
 					   type == "pc.array_uniform" || type == "pc.array" || type == "pc.array_reverse" ||
 					   type == "pc.array_copy" || type == "pc.array_trim" || type == "pc.array_shift" ||
 					   type == "pc.array_partition" || type == "pc.array_flattern" ||
-					   type == "pc.array_transpose" || type == "pc.array_length";
+					   type == "pc.array_cumulative" || type == "pc.array_sort" ||
+					   type == "pc.array_composite" || type == "pc.array_convolute" ||
+					   type == "pc.array_sample" || type == "pc.array_shuffle" ||
+					   type == "pc.array_randomizer" || type == "pc.array_boolean_opr" ||
+					   type == "pc.array_pin" || type == "pc.array_split" || type == "pc.struct" ||
+					   type == "pc.struct_set" || type == "pc.struct_get" || type == "pc.string_join" ||
+					   type == "pc.array_transpose" || type == "pc.array_length" || type == "pc.logic" ||
+					   type == "pc.path_array" || type == "pc.statistic" || type == "pc.global_scope" ||
+					   type == "pc.globalvar" || type == "pc.equation" || type == "pc.pcx_equation" ||
+					   type == "pc.pcx_var" || type == "pc.pcx_fn_var" || type == "pc.pcx_array_get" ||
+					   type == "pc.pcx_array_set" || type == "pc.pcx_condition";
 			};
 			const auto validateValue = [&](const Value &value, std::string_view port) {
 				const auto *array = std::get_if<ArrayValue>(&value);
@@ -68,9 +71,9 @@ namespace engine::imagegraph::detail {
 				return true;
 			};
 			for (const auto &[port, value] : context.Values)
-				if (!validateValue(value, port)) return false;
+				if (context.Find(port) == &value && !validateValue(value, port)) return false;
 			for (const auto &[port, value] : context.ValueViews)
-				if (value && !validateValue(*value, port)) return false;
+				if (value && context.Find(port) == value && !validateValue(*value, port)) return false;
 			const auto validate = [&](const Image &image, std::string_view port) {
 				if (!ValidSurfaceLayout(image, Limits::MaximumDimension, Limits::MaximumOutputBytes))
 					return context.Fail(Status::InvalidValue, "input surface layout is invalid", port);

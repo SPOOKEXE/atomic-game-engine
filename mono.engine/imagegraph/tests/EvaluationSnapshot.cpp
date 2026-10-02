@@ -70,6 +70,8 @@ TEST_CASE(
 	});
 	REQUIRE(fov != snapshot.Values().end());
 	CHECK(std::get<double>(fov->Data) == 67.5);
+	CHECK_FALSE(fov->Linked);
+	CHECK_FALSE(fov->Domain);
 	const uint64_t retained = snapshot.RetainedBytes();
 	const double previousFov = std::get<double>(fov->Data);
 	const auto previousPixels = snapshot.Images()[0].Data.Pixels;
@@ -390,4 +392,158 @@ TEST_CASE(
 	REQUIRE(low > 1);
 	CHECK(tryCap(low) == Status::Ok);
 	CHECK(tryCap(low - 1) == Status::LimitExceeded);
+}
+
+TEST_CASE(
+	"node snapshots clone nested ordered image arrays and retain replacement on byte failure",
+	"[imagegraph][snapshot_arrays]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	Node inner{"inner", "value.array", "", {}, {}};
+	inner.DynamicInputs = {
+		{"first", ValueType::Image, std::nullopt}, {"repeated", ValueType::Image, std::nullopt}
+	};
+	Node outer{"outer", "value.array", "", {}, {}};
+	outer.DynamicInputs = {
+		{"nested", ValueType::Array, std::nullopt}, {"tail", ValueType::Image, std::nullopt}
+	};
+	document.Nodes = {Solid("surface"), inner, outer, {"capture", "pc.array_copy", "", {}, {}}};
+	document.Links = {
+		{"surface", "image", "inner", "first"},
+		{"surface", "image", "inner", "repeated"},
+		{"inner", "array", "outer", "nested"},
+		{"surface", "image", "outer", "tail"},
+		{"outer", "array", "capture", "array"}
+	};
+	document.Outputs = {{"source", "outer", "array"}};
+	Plan plan;
+	Diagnostic error;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	ImageArray expected;
+	REQUIRE(EvaluateArray(document, plan, "source", {}, expected, error) == Status::Ok);
+	EvaluationSnapshot snapshot;
+	REQUIRE(EvaluateNodeInputs(document, plan, "capture", {}, snapshot, error) == Status::Ok);
+	REQUIRE(snapshot.ImageArrays().size() == 1);
+	CHECK(snapshot.ImageArrays()[0].Port == "array");
+	const auto &actual = snapshot.ImageArrays()[0].Data;
+	CHECK(actual.Items == expected.Items);
+	REQUIRE(actual.Images.size() == expected.Images.size());
+	for (size_t i = 0; i < actual.Images.size(); i++)
+		CHECK(actual.Images[i].Pixels == expected.Images[i].Pixels);
+	REQUIRE(actual.Items.size() == 2);
+	REQUIRE(std::holds_alternative<std::vector<ImageArrayItem>>(actual.Items[0].Data));
+	CHECK(std::get<std::vector<ImageArrayItem>>(actual.Items[0].Data).size() == 2);
+	CHECK(snapshot.Images().empty());
+	const auto retained = snapshot.RetainedBytes();
+	CHECK(retained >= actual.Images.capacity() * sizeof(Image));
+	uint64_t low = 1, high = Limits::MaximumEvaluationBytes;
+	while (low < high) {
+		const auto cap = low + (high - low) / 2;
+		EvaluationSnapshot probe;
+		const auto status = EvaluateNodeInputs(document, plan, "capture", {}, probe, error, cap);
+		if (status == Status::Ok)
+			high = cap;
+		else {
+			REQUIRE(status == Status::LimitExceeded);
+			low = cap + 1;
+		}
+	}
+	REQUIRE(low + retained <= Limits::MaximumEvaluationBytes);
+	CHECK(
+		EvaluateNodeInputs(document, plan, "capture", {}, snapshot, error, low + retained - 1) ==
+		Status::LimitExceeded
+	);
+	CHECK(snapshot.RetainedBytes() == retained);
+	REQUIRE(snapshot.ImageArrays().size() == 1);
+	CHECK(snapshot.ImageArrays()[0].Data.Items == expected.Items);
+	CHECK(snapshot.ImageArrays()[0].Data.Images[0].Pixels == expected.Images[0].Pixels);
+	REQUIRE(EvaluateNodeInputs(document, plan, "capture", {}, snapshot, error, low + retained) == Status::Ok);
+	CHECK(snapshot.ImageArrays()[0].Data.Items == expected.Items);
+	auto *colour = std::get_if<Colour>(&document.Nodes[0].Values.back().Data);
+	REQUIRE(colour);
+	colour->Red = 250;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	EvaluationSnapshot replacement;
+	REQUIRE(EvaluateNodeInputs(document, plan, "capture", {}, replacement, error) == Status::Ok);
+	CHECK(replacement.ImageArrays()[0].Data.Images[0].Pixels[0] == 250);
+	CHECK(snapshot.ImageArrays()[0].Data.Images[0].Pixels[0] == 12);
+}
+
+TEST_CASE(
+	"Native snapshots resolve linked typed controls and preserve prior captures on refusal",
+	"[imagegraph][evaluation_snapshot]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"source", "pc.number", "", {}, {{"value", 72.0}}},
+		{"target", "value.math", "", {}, {{"b", 3.0}, {"mode", int64_t{0}}}}
+	};
+	document.Links = {{"source", "number", "target", "a"}};
+	document.Outputs = {{"out", "target", "result"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compiled = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	EvaluationSnapshot snapshot;
+	REQUIRE(EvaluateNodeInputs(document, plan, "target", {}, snapshot, diagnostic) == Status::Ok);
+	const auto find = [&](std::string_view port) {
+		return std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [&](const auto &value) {
+			return value.Port == port;
+		});
+	};
+	const auto linked = find("a");
+	REQUIRE(linked != snapshot.Values().end());
+	CHECK(std::get<double>(linked->Data) == 72);
+	CHECK(linked->Linked);
+	REQUIRE(linked->Domain);
+	CHECK(linked->Domain->Type == ValueType::Scalar);
+	REQUIRE(find("b") != snapshot.Values().end());
+	CHECK_FALSE(find("b")->Linked);
+	CHECK(std::get<double>(find("b")->Data) == 3);
+	const auto bytes = snapshot.RetainedBytes();
+	CHECK(EvaluateNodeInputs(document, plan, "target", {}, snapshot, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(snapshot.RetainedBytes() == bytes);
+	CHECK(std::get<double>(find("a")->Data) == 72);
+}
+
+TEST_CASE(
+	"Source Transform snapshot captures linked FOV without executing the renderer",
+	"[imagegraph][evaluation_snapshot]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	Node transform = Transform();
+	transform.Type = "pc.3_d_transform_image";
+	document.Nodes = {Solid("surface"), {"driver", "value.number", "", {}, {{"value", 60.0}}}, transform};
+	document.Links = {{"surface", "image", "transform", "surface"}, {"driver", "number", "transform", "fov"}};
+	document.Outputs = {{"out", "transform", "rendered"}};
+	document.Keyframes = {{"driver", "value", 0, 60.0, "linear"}, {"driver", "value", 10, 80.0, "linear"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compiled = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	EvaluationSnapshot snapshot;
+	REQUIRE(EvaluateNodeInputs(document, plan, "transform", {.Tick = 5}, snapshot, diagnostic) == Status::Ok);
+	const auto find = [&] {
+		return std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &value) {
+			return value.Port == "fov";
+		});
+	};
+	REQUIRE(find() != snapshot.Values().end());
+	CHECK(find()->Linked);
+	CHECK(std::get<double>(find()->Data) == 70.0);
+	REQUIRE(snapshot.Images().size() == 1);
+	const auto pixels = snapshot.Images()[0].Data.Pixels;
+	const auto bytes = snapshot.RetainedBytes();
+	CHECK(
+		EvaluateNodeInputs(document, plan, "transform", {.Tick = 10}, snapshot, diagnostic, 1) ==
+		Status::LimitExceeded
+	);
+	CHECK(snapshot.RetainedBytes() == bytes);
+	CHECK(std::get<double>(find()->Data) == 70.0);
+	CHECK(snapshot.Images()[0].Data.Pixels == pixels);
 }

@@ -1,6 +1,7 @@
 #include "ProcessorBatch.hpp"
 
 #include "ArrayOps.hpp"
+#include "SimulationAliases.hpp"
 #include "SourceGetterProjection.hpp"
 #include "SourceMaterialInputs.hpp"
 #include "ValuePayload.hpp"
@@ -53,6 +54,16 @@ namespace engine::imagegraph::detail {
 			}
 		}
 
+		size_t GeneralDepth(const SourceArrayItem &item) {
+			if (const auto *leaf = std::get_if<ElementValue>(&item.Data))
+				return std::visit(
+					[](const auto &data) { return size_t(LeafDepth(PayloadType(data))); }, *leaf
+				);
+			if (const auto *children = std::get_if<std::vector<SourceArrayItem>>(&item.Data))
+				return children->empty() ? 0 : 1 + GeneralDepth(children->front());
+			return 0;
+		}
+
 		bool AddRows(
 			NodeContext &context,
 			const CatalogueInput &input,
@@ -69,13 +80,6 @@ namespace engine::imagegraph::detail {
 				if (id == port) selected.Images = array;
 			const Value *value = mapped ? SourceMaterialRange(context, port) : context.Find(port);
 			selected.Values = value ? std::get_if<ArrayValue>(value) : nullptr;
-			if (selected.Values && !selected.Values->Items.empty() &&
-				input.ArrayDepth < Limits::MaximumArrayDepth)
-				return context.Fail(
-					Status::UnsupportedExecution,
-					"processor batch requires homogeneous source array normalization",
-					input.Id
-				);
 			if (!selected.Images && !selected.Values) return true;
 			// Source Array Shift declares its array input depth 99 and consumes the entire shape.
 			if (input.ArrayDepth >= Limits::MaximumArrayDepth) return true;
@@ -95,6 +99,13 @@ namespace engine::imagegraph::detail {
 							Status::UnsupportedExecution, "surface processor needs flat image rows", port
 						);
 				}
+			} else if (!selected.Values->Items.empty()) {
+				if (!ValidRuntimeValue(*value))
+					return context.Fail(Status::InvalidValue, "processor array payload is invalid", port);
+				const auto &items = selected.Values->Items;
+				const size_t depth = 1 + GeneralDepth(items.front());
+				selected.Batch = depth > selected.Depth;
+				selected.Count = items.size();
 			} else {
 				const auto leaf = selected.Values->ElementType;
 				const bool numeric = leaf == ValueType::Scalar || leaf == ValueType::Integer;
@@ -198,6 +209,47 @@ namespace engine::imagegraph::detail {
 			return 0;
 		}
 
+		Value GeneralArray(const std::vector<SourceArrayItem> &children, ValueType target) {
+			const bool vectorTarget = target == ValueType::Vector2 || target == ValueType::Vector3 ||
+									  target == ValueType::Vector4 || target == ValueType::Quaternion;
+			std::optional<ValueType> common;
+			bool homogeneous = true, numeric = true;
+			for (const auto &child : children) {
+				const auto *leaf = std::get_if<ElementValue>(&child.Data);
+				if (!leaf) {
+					homogeneous = false;
+					numeric = false;
+					break;
+				}
+				const auto type = std::visit([](const auto &data) { return PayloadType(data); }, *leaf);
+				if (common && *common != type) homogeneous = false;
+				common = type;
+				numeric = numeric && (type == ValueType::Scalar || type == ValueType::Integer);
+			}
+			ArrayValue value{ValueType::Any, {}};
+			if (homogeneous || ((vectorTarget || target == ValueType::Array) && numeric)) {
+				value.ElementType = (vectorTarget || !homogeneous) && numeric
+										? ValueType::Scalar
+										: common.value_or(ValueType::Scalar);
+				value.Elements.reserve(children.size());
+				for (const auto &child : children) {
+					const auto &leaf = std::get<ElementValue>(child.Data);
+					if ((vectorTarget || !homogeneous) && numeric)
+						value.Elements.emplace_back(Number(leaf));
+					else
+						value.Elements.push_back(leaf);
+				}
+			} else
+				value.Items = children;
+			return value;
+		}
+
+		Value GeneralValue(const SourceArrayItem &item, ValueType target) {
+			if (const auto *leaf = std::get_if<ElementValue>(&item.Data))
+				return std::visit([](const auto &data) -> Value { return data; }, *leaf);
+			return GeneralArray(std::get<std::vector<SourceArrayItem>>(item.Data), target);
+		}
+
 		Value NormalizeVector(Value value, ValueType target) {
 			const auto *array = std::get_if<ArrayValue>(&value);
 			if (!array || !array->Nested.empty() ||
@@ -291,7 +343,17 @@ namespace engine::imagegraph::detail {
 			std::vector<std::pair<std::string_view, const Image *>> Images;
 			std::vector<std::pair<std::string_view, const Value *>> Values;
 			std::span<const std::pair<std::string_view, const Value *>> OriginalValues;
+			size_t Row = Context.ProcessorRow, Count = Context.ProcessorCount;
+			std::span<const SimulationReplayEntry> SimulationRows = Context.PendingSimulationRows;
+			AllocationReservation AliasCharge = std::move(Context.SimulationAliasCharge);
+			std::vector<std::pair<std::string_view, Value>> Aliases =
+				std::move(Context.SimulationAliasValues);
 			~RestoreInputs() {
+				Context.SimulationAliasValues = std::move(Aliases);
+				Context.SimulationAliasCharge = std::move(AliasCharge);
+				Context.PendingSimulationRows = SimulationRows;
+				Context.ProcessorRow = Row;
+				Context.ProcessorCount = Count;
 				Context.ProcessorOriginalValues = OriginalValues;
 				Context.Images = std::move(Images);
 				Context.ValueViews = std::move(Values);
@@ -437,6 +499,23 @@ namespace engine::imagegraph::detail {
 			images.reserve(context.Entry.Outputs.size());
 			values.reserve(context.Entry.Outputs.size());
 		}
+		auto replayRowsCharge = context.ReserveWorkspace(0, "attribute_array_process");
+		if (!replayRowsCharge) return false;
+		std::vector<SimulationReplayEntry> simulationRows;
+		std::vector<SurfaceFrameReplayEntry> surfaceRows;
+		std::vector<RandomReplayEntry> randomRows;
+		std::vector<DataReplayEntry> dataRows;
+		const auto admitReplayRows = [&](auto &target, const auto &updates, size_t capacity) {
+			if (updates.empty() || target.capacity()) return true;
+			using Entry = typename std::decay_t<decltype(target)>::value_type;
+			auto charge = context.ReserveWorkspace(capacity * sizeof(Entry), "attribute_array_process");
+			if (!charge) return false;
+			if (!replayRowsCharge->Merge(std::move(*charge))) std::terminate();
+			target.reserve(capacity);
+			return true;
+		};
+
+		context.ProcessorCount = count;
 		uint64_t accumulated = workspaceBytes + (count > 1 ? shapeBytes : 0);
 		for (size_t row = 0; row < count; row++) {
 			selected.clear();
@@ -445,6 +524,7 @@ namespace engine::imagegraph::detail {
 			context.ValueViews = restore.Values;
 			context.Images = restore.Images;
 			context.ClearOutputs();
+			context.ProcessorRow = row;
 			context.ByteBudget = budget;
 			size_t slot = 0;
 			uint64_t scratchOwned = 0;
@@ -455,13 +535,26 @@ namespace engine::imagegraph::detail {
 					const size_t imageIndex = std::get<size_t>(input.Images->Items[index].Data);
 					context.Images.emplace_back(input.Port, &input.Images->Images[imageIndex]);
 				} else {
-					if (!input.Batch && input.Type != ValueType::Vector2 &&
+					const ArrayValue &array = *input.Values;
+					if (!input.Batch && array.Items.empty() && input.Type != ValueType::Vector2 &&
 						input.Type != ValueType::Vector3 && input.Type != ValueType::Vector4 &&
 						input.Type != ValueType::Quaternion)
 						continue;
-					const ArrayValue &array = *input.Values;
 					uint64_t scratchBytes = 0;
-					if (input.Batch && !array.Nested.empty()) {
+					if (input.Batch && !array.Items.empty()) {
+						const auto &general = array.Items[index];
+						if (const auto *image = std::get_if<Image>(&general.Data)) {
+							if (input.Type != ValueType::Image && input.Type != ValueType::Any)
+								return context.Fail(
+									Status::UnsupportedExecution,
+									"selected surface requires an unsupported source conversion",
+									input.Port
+								);
+							context.Images.emplace_back(input.Port, image);
+							continue;
+						}
+						scratchBytes = RetainedPayloadBytes(general);
+					} else if (input.Batch && !array.Nested.empty()) {
 						for (const auto &element : array.Nested[index])
 							scratchBytes +=
 								sizeof(ElementValue) +
@@ -482,7 +575,9 @@ namespace engine::imagegraph::detail {
 					auto charge = context.ReserveWorkspace(scratchBytes, input.Port);
 					if (!charge || !selectedCharge->Merge(std::move(*charge))) return false;
 					Value item =
-						input.Batch
+						!input.Batch && !array.Items.empty()  ? GeneralArray(array.Items, input.Type)
+						: input.Batch && !array.Items.empty() ? GeneralValue(array.Items[index], input.Type)
+						: input.Batch
 							? (!array.Nested.empty()
 								   ? Value{ArrayValue{array.ElementType, array.Nested[index]}}
 								   : std::visit(
@@ -507,6 +602,10 @@ namespace engine::imagegraph::detail {
 					context.ValueViews.emplace_back(input.Port, &selected.back());
 				}
 			}
+			if (!simulationRows.empty()) {
+				context.PendingSimulationRows = simulationRows;
+				if (!ResolveSimulationInputAliases(context)) return false;
+			}
 			if (!Execute(context, executor) || context.FailureCode != Status::Ok || !observe() ||
 				context.FailureCode != Status::Ok ||
 				!CheckOutputs(context, budget - accumulated - scratchOwned))
@@ -520,6 +619,53 @@ namespace engine::imagegraph::detail {
 				pending.Committed = true;
 				return true;
 			}
+			if (context.PixelBuilderUpdate)
+				return context.Fail(
+					Status::UnsupportedExecution, "Pixel Builder layer commands cannot be processor arrays"
+				);
+			if (context.SimulationUpdates.size() > 2 || context.SurfaceUpdates.size() > 1 ||
+				context.RandomUpdates.size() > 1 || context.DataUpdates.size() > 1)
+				return context.Fail(Status::LimitExceeded, "processor row exceeds its replay entry bound");
+			if (!admitReplayRows(simulationRows, context.SimulationUpdates, count * 2) ||
+				!admitReplayRows(surfaceRows, context.SurfaceUpdates, count) ||
+				!admitReplayRows(randomRows, context.RandomUpdates, count) ||
+				!admitReplayRows(dataRows, context.DataUpdates, count))
+				return false;
+			for (auto &update : context.SimulationUpdates) {
+				const uint64_t retained = RetainedSimulationEntryBytes(update);
+				if (retained > budget - accumulated)
+					return context.Fail(
+						Status::LimitExceeded, "processor simulation snapshots exceed byte budget"
+					);
+				accumulated += retained;
+				simulationRows.push_back(std::move(update));
+			}
+			for (auto &update : context.SurfaceUpdates) {
+				const uint64_t retained = RetainedSurfaceFrameEntryBytes(update);
+				if (retained > budget - accumulated)
+					return context.Fail(
+						Status::LimitExceeded, "processor surface snapshots exceed byte budget"
+					);
+				accumulated += retained;
+				surfaceRows.push_back(std::move(update));
+			}
+			for (auto &update : context.RandomUpdates) {
+				const uint64_t retained = RetainedRandomEntryBytes(update);
+				if (retained > budget - accumulated)
+					return context.Fail(
+						Status::LimitExceeded, "processor random snapshots exceed byte budget"
+					);
+				accumulated += retained;
+				randomRows.push_back(std::move(update));
+			}
+			for (auto &update : context.DataUpdates) {
+				const uint64_t retained = RetainedDataReplayEntryBytes(update);
+				if (retained > budget - accumulated)
+					return context.Fail(Status::LimitExceeded, "processor data snapshots exceed byte budget");
+				accumulated += retained;
+				dataRows.push_back(std::move(update));
+			}
+
 			for (auto &[port, image] : context.OutputImages) {
 				auto target = std::find_if(images.begin(), images.end(), [&](const auto &item) {
 					return item.first == port;
@@ -634,6 +780,10 @@ namespace engine::imagegraph::detail {
 		}
 		context.ClearOutputs();
 		std::vector<std::pair<std::string, Image>>{}.swap(context.OutputImages);
+		context.SimulationUpdates = std::move(simulationRows);
+		context.SurfaceUpdates = std::move(surfaceRows);
+		context.RandomUpdates = std::move(randomRows);
+		context.DataUpdates = std::move(dataRows);
 		context.OutputValues = std::move(values);
 		context.OutputImageArrays = std::move(images);
 		context.ReplaceOutputReservation(std::move(*aggregateCharge));

@@ -32,6 +32,7 @@ namespace engine::imagegraph::detail {
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(data.Edges));
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(data.Materials));
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(data.LocalTransforms));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(data.Instances));
 		for (const auto &part : data.Parts)
 			bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(part.Vertices));
 		for (const auto &material : data.Materials)
@@ -81,8 +82,23 @@ namespace engine::imagegraph::detail {
 			if (!MeshFinite(transform.Position) || !MeshFinite(transform.Anchor) ||
 				!MeshFinite(transform.Rotation) || !MeshFinite(transform.Scale))
 				return false;
+		if (data.Instances.size() > Limits::MaximumArrayElements ||
+			(!data.Instanced && !data.Instances.empty()) ||
+			!MeshFinite(data.InstanceObjectTransform.Position) ||
+			!MeshFinite(data.InstanceObjectTransform.Anchor) ||
+			!MeshFinite(data.InstanceObjectTransform.Rotation) ||
+			!MeshFinite(data.InstanceObjectTransform.Scale))
+			return false;
+		for (const auto &instance : data.Instances)
+			for (float value : instance.Fields)
+				if (!std::isfinite(value)) return false;
 		size_t vertices = 0;
 		for (const auto &part : data.Parts) {
+			if (part.LocalMatrix &&
+				std::any_of(part.LocalMatrix->begin(), part.LocalMatrix->end(), [](double value) {
+					return !std::isfinite(value);
+				}))
+				return false;
 			if (part.MaterialIndex >= data.Materials.size() || part.Vertices.size() % 3 != 0 ||
 				part.Vertices.size() > Limits::MaximumArrayElements - vertices)
 				return false;

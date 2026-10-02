@@ -14,8 +14,14 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/DataReplay.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/GroupReplay.hpp>
+#include <engine/imagegraph/HostCapture.hpp>
+#include <engine/imagegraph/PcxExpression.hpp>
+#include <engine/imagegraph/RandomReplay.hpp>
+#include <engine/imagegraph/SimulationReplay.hpp>
+#include <engine/imagegraph/SurfaceFrameReplay.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -25,12 +31,16 @@
 #include <vector>
 
 namespace engine::imagegraph::detail {
+	struct HostCaptureReceiptSink;
 	// Evaluation attributes borrow the palette; authored guide storage stays in the document.
 	struct EvaluationProjectSettings {
 		inline static constexpr Colour DefaultPalette[]{{255, 255, 255, 255}, {0, 0, 0, 255}};
 		uint32_t SurfaceWidth = 32, SurfaceHeight = 32;
 		int64_t Interpolation = 0, Oversample = 3, ColorDepth = 1;
 		std::span<const Colour> Palette = DefaultPalette;
+	};
+	struct PixelBuilderDrawState {
+		uint32_t CirclePrecision = 24;
 	};
 	class NodeContext {
 	  private:
@@ -73,6 +83,20 @@ namespace engine::imagegraph::detail {
 		std::vector<std::pair<std::string_view, Value>> Values;
 		// Temporary processor selections, borrowing bounded row values for one invocation.
 		std::vector<std::pair<std::string_view, const Value *>> ValueViews;
+		// The executor may copy a bounded recipe; published values never retain this borrowed pointer.
+		const Document *EvaluationDocument = nullptr;
+		const PcxNameResolver *PcxNames = nullptr;
+		AllocationReservation PcxControlCharge;
+		std::vector<PcxMessage> PcxControlMessages;
+		HostCaptureReceiptSink *HostReceipts = nullptr;
+		std::span<const HostNodeCapture> ObservedHostCaptures;
+		// Borrowed nearest inline owner's fully resolved inputs, retained by the evaluation.
+		std::string_view InlineOwnerId;
+		std::string_view InlineOwnerType;
+		std::span<const std::string_view> InlineOwnerLinkedValues;
+		std::span<const std::pair<std::string_view, const Value *>> InlineOwnerValues;
+		std::span<const std::pair<std::string_view, const Image *>> InlineOwnerImages;
+		std::span<const std::pair<std::string_view, const ImageArray *>> InlineOwnerImageArrays;
 		// Source Dimension inputs distinguish resolved links from authored values when applying units.
 		std::vector<std::string_view> LinkedValues;
 		// Input domains borrow current producer metadata; payload storage remains in its normal owner.
@@ -98,11 +122,31 @@ namespace engine::imagegraph::detail {
 		}
 		// Bytes this node may still allocate for outputs.
 		uint64_t ByteBudget = 0;
+		// Source split determines the bounded output shape before publishing.
+		size_t RuntimeOutputCount = 0;
 
 		// Charges precede their buffers so unwinding destroys storage before releasing its admission.
 		AllocationReservation OutputCharge;
 		std::vector<std::pair<std::string, Image>> OutputImages;
 		std::vector<AuthoredValue> OutputValues;
+		std::optional<PixelBuilderLayer> PixelBuilderUpdate;
+		std::span<const PixelBuilderLayer> PixelBuilderLayers;
+		std::optional<Vector2> PixelBuilderCanvas;
+		PixelBuilderDrawState *PixelBuilderDrawing = nullptr;
+		std::vector<SimulationReplayEntry> SimulationUpdates;
+		const SimulationReplayState *CurrentSimulation = nullptr;
+		std::span<const SimulationReplayEntry> PendingSimulationRows;
+		const SurfaceFrameReplayState *CurrentSurfaces = nullptr;
+		const RandomReplayState *CurrentRandom = nullptr;
+		const DataReplayState *CurrentData = nullptr;
+		std::vector<DataReplayEntry> DataUpdates;
+		std::vector<RandomReplayEntry> RandomUpdates;
+		std::vector<SurfaceFrameReplayEntry> SurfaceUpdates;
+		size_t ProcessorRow = 0;
+		size_t ProcessorCount = 1;
+		AllocationReservation SimulationAliasCharge;
+		std::vector<std::pair<std::string_view, Value>> SimulationAliasValues;
+
 		std::vector<std::pair<std::string, ImageArray>> OutputImageArrays;
 		mutable Status FailureCode = Status::Ok;
 		mutable std::string FailureMessage;
@@ -135,6 +179,11 @@ namespace engine::imagegraph::detail {
 		void ClearOutputs() {
 			OutputImages.clear();
 			OutputValues.clear();
+			PixelBuilderUpdate.reset();
+			SimulationUpdates.clear();
+			SurfaceUpdates.clear();
+			RandomUpdates.clear();
+			DataUpdates.clear();
 			OutputImageArrays.clear();
 			OutputDomains.clear();
 			PublishedPayloadBytes = 0;
@@ -155,17 +204,26 @@ namespace engine::imagegraph::detail {
 		bool PrepareOutputStorage(std::string_view port) {
 			if (OutputStorageReady) return true;
 			const uint64_t bytes =
-				Entry.Outputs.size() * (sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-										sizeof(std::pair<std::string, ImageArray>) +
-										sizeof(std::pair<std::string_view, SourceSocketDomain>));
+				std::max(Entry.Outputs.size() + Authored.DynamicOutputs.size(), RuntimeOutputCount) *
+				(sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
+				 sizeof(std::pair<std::string, ImageArray>) +
+				 sizeof(std::pair<std::string_view, SourceSocketDomain>));
 			auto charge = ReserveWorkspace(bytes, port);
 			if (!charge) return false;
 			OutputStorageCharge = std::move(*charge);
 			// NewImage hands out pointers; reserve all declared output slots before publishing any.
-			OutputImages.reserve(Entry.Outputs.size());
-			OutputValues.reserve(Entry.Outputs.size());
-			OutputImageArrays.reserve(Entry.Outputs.size());
-			OutputDomains.reserve(Entry.Outputs.size());
+			OutputImages.reserve(
+				std::max(Entry.Outputs.size() + Authored.DynamicOutputs.size(), RuntimeOutputCount)
+			);
+			OutputValues.reserve(
+				std::max(Entry.Outputs.size() + Authored.DynamicOutputs.size(), RuntimeOutputCount)
+			);
+			OutputImageArrays.reserve(
+				std::max(Entry.Outputs.size() + Authored.DynamicOutputs.size(), RuntimeOutputCount)
+			);
+			OutputDomains.reserve(
+				std::max(Entry.Outputs.size() + Authored.DynamicOutputs.size(), RuntimeOutputCount)
+			);
 			OutputStorageReady = true;
 			return true;
 		}

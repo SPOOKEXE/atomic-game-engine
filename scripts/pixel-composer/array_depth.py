@@ -146,8 +146,8 @@ def declaration_depth(base_depth: int | None, statement: str) -> int | None:
     return base_depth + array_depth
 
 
-def apply_runtime_depth_mutations(inputs: list[dict], body: str) -> None:
-    """Mark post-declaration depth changes unknown; their branch conditions are not static metadata."""
+def apply_runtime_depth_mutations(inputs: list[dict], body: str) -> set[str]:
+    """Resolve literal scalar display changes and leave unproven mutations unknown."""
     patterns = (
         re.compile(r"inputs\s*\[\s*([^\]]+)\s*\]\.setArrayDepth\s*\(([^)]*)\)"),
         re.compile(r"inputs\s*\[\s*([^\]]+)\s*\]\.array_depth\s*=\s*([^;\n]+)"),
@@ -162,15 +162,28 @@ def apply_runtime_depth_mutations(inputs: list[dict], body: str) -> None:
             for item in targets:
                 item["array_depth"] = None
 
+    resolved_displays: set[str] = set()
     display_pattern = re.compile(r"inputs\s*\[\s*([^\]]+)\s*\]\.setDisplay\s*\(([^)]*)\)")
     for match in display_pattern.finditer(body):
         index = match.group(1).strip()
+        expression = match.group(2).strip()
         if index.isdigit():
             targets = [item for item in inputs if str(item.get("index", "")) == index]
         else:
             targets = inputs
+        if index.isdigit() and _known_scalar_display_mutation(targets, expression):
+            resolved_displays.add(index)
+            continue
         for item in targets:
             item["array_depth"] = None
+    return resolved_displays
+
+
+def _known_scalar_display_mutation(inputs: list[dict], expression: str) -> bool:
+    """Preserve numeric scalar depth when source only switches between scalar displays."""
+    if not inputs or any(item.get("kind") not in {"Slider", "Float"} for item in inputs):
+        return False
+    return re.fullmatch(r"VALUE_DISPLAY\.(?:slider|_default)(?:\s*,[\s\S]*)?", expression) is not None
 
 
 def _block(source: str, opening: int) -> str | None:

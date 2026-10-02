@@ -47,6 +47,7 @@ Milestone labels describe development scope, not release versions.
   5. Encode native GIFs with bounded memory, deterministic palettes and explicit frame delays.
   6. Read bounded layered images, models, XML and GameMaker rooms from bytes.
   7. Decode Aseprite frames, tags, palettes, tiles and inspection data from bounded bytes.
+  8. Evaluate bounded source kernels, typed payloads, Pixel Builder recipes and deterministic stateful replay.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

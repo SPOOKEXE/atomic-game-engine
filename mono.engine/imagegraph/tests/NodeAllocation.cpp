@@ -17,7 +17,8 @@ TEST_CASE(
 	REQUIRE(entry);
 	const uint64_t storage =
 		entry->Outputs.size() * (sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-								 sizeof(std::pair<std::string, ImageArray>));
+								 (sizeof(std::pair<std::string, ImageArray>) +
+								  sizeof(std::pair<std::string_view, SourceSocketDomain>)));
 	const Value borrowed = std::string(512, 'x');
 	const Node node{"publish", "pc.number", "", {}, {}};
 	const EvaluationRequest request;

@@ -95,14 +95,22 @@ C	T	light_shape	unknown
 T	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
 A	T	position	1
+T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	position_unit	?
 T	radius	Radius	2	Float	scalar	d 0.5	
 S	T	radius	0
+T	radius_unit	Radius Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	radius_unit	?
 T	start	Start	5	Vec2	vector2	v 0.25 0.5	
 S	T	start	1
 A	T	start	1
+T	start_unit	Start Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	start_unit	?
 T	finish	Finish	6	Vec2	vector2	v 0.75 0.5	
 S	T	finish	1
 A	T	finish	1
+T	finish_unit	Finish Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	finish_unit	?
 T	sweep	Sweep	7	ISlider	integer	i 15	
 S	T	sweep	0
 T	sweep_end	Sweep End	8	ISlider	integer	i 0	
@@ -113,8 +121,12 @@ T	sweep_spread	Sweep Spread	23	Float	scalar	d 1
 S	T	sweep_spread	0
 T	radius_x	Radius x	15	Float	scalar	d 0.5	
 S	T	radius_x	0
+T	radius_x_unit	Radius x Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	radius_x_unit	?
 T	radius_y	Radius y	16	Float	scalar	d 0.5	
 S	T	radius_y	0
+T	radius_y_unit	Radius y Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	radius_y_unit	?
 T	rotation	Rotation	17	Rotation	scalar	d 0	
 S	T	rotation	0
 T	two_sides	Two Sides	20	Bool	boolean	b 0	
@@ -567,6 +579,8 @@ S	I	scale_uniform	0
 I	colors_per_index	Colors Per Index	12	Palette	array	a colour 1 c 255 255 255 255	
 S	I	colors_per_index	1
 A	I	colors_per_index	1
+I	colors_per_index_select	Colors Per Index Array Select	-1	SourceArraySelect	enum	e 0	Index Loop;Index Ping-pong;Random
+S	I	colors_per_index_select	?
 I	random_colors	Random Colors	11	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	random_colors	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
@@ -575,7 +589,7 @@ O	mesh	Mesh	0	mesh
 N	pc.3_d_light_directional	Node_3D_Light_Directional	Directional Light	3d	scripts/node_3d_light_directional/node_3d_light_directional.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
-I	position	Position	0	Vec3	vector3	3 0 0 0	
+I	position	Position	0	Vec3	vector3	3 0 0 1	
 S	I	position	1
 A	I	position	1
 I	anchor	Anchor	3	Vec3	vector3	3 0 0 0	
@@ -607,7 +621,7 @@ O	light	Light	0	light3d
 N	pc.3_d_light_point	Node_3D_Light_Point	Point Light	3d	scripts/node_3d_light_point/node_3d_light_point.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
-I	position	Position	0	Vec3	vector3	3 0 0 0	
+I	position	Position	0	Vec3	vector3	3 0 0 1	
 S	I	position	1
 A	I	position	1
 I	anchor	Anchor	3	Vec3	vector3	3 0 0 0	
@@ -4715,6 +4729,8 @@ Q	T	positioning_s	1	0	s "Camera"
 T	position_s	Position {_s}	2	Vec2	vector2	v 0 0	
 S	T	position_s	1
 A	T	position_s	1
+T	position_s_unit	Position {_s} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	position_s_unit	?
 T	oversample_s	Oversample {_s}	3	EScroll	enum	e 0	Empty;Repeat;Repeat X;Repeat Y
 S	T	oversample_s	0
 B	T	oversample_s	0	general	1	default	4
@@ -5253,12 +5269,6 @@ I	color	Color	0	Color	colour	c 255 255 255 255
 S	I	color	0
 I	normalize	Normalize	1	Bool	boolean	b 1	
 S	I	normalize	0
-I	brightness_eq	Brightness Eq	2	EScroll	enum	e 0	Perceived;
-S	I	brightness_eq	0
-B	I	brightness_eq	0	general	1	default	2
-C	I	brightness_eq	resolved
-Q	I	brightness_eq	0	0	s "Perceived"
-Q	I	brightness_eq	1	0	s ""
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 O	red	Red	0	scalar
@@ -5276,16 +5286,12 @@ I	normalized	Normalized	3	Bool	boolean	b 1
 S	I	normalized	0
 I	hue	Hue	0	Slider	scalar	d 1	
 S	I	hue	0
-A	I	hue	?
 I	saturation	Saturation	1	Slider	scalar	d 1	
 S	I	saturation	0
-A	I	saturation	?
 I	value	Value	2	Slider	scalar	d 1	
 S	I	value	0
-A	I	value	?
 I	alpha	Alpha	4	Slider	scalar	d 1	
 S	I	alpha	0
-A	I	alpha	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 O	color	Color	0	colour
@@ -5385,16 +5391,12 @@ I	normalized	Normalized	3	Bool	boolean	b 1
 S	I	normalized	0
 I	red	Red	0	Slider	scalar	d 1	
 S	I	red	0
-A	I	red	?
 I	green	Green	1	Slider	scalar	d 1	
 S	I	green	0
-A	I	green	?
 I	blue	Blue	2	Slider	scalar	d 1	
 S	I	blue	0
-A	I	blue	?
 I	alpha	Alpha	4	Slider	scalar	d 1	
 S	I	alpha	0
-A	I	alpha	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 O	color	Color	0	colour
@@ -5916,6 +5918,8 @@ S	T	texture	0
 T	offset	Offset	2	Vec2	vector2	v 0 0	
 S	T	offset	1
 A	T	offset	1
+T	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	offset_unit	?
 T	rotation	Rotation	3	Rotation	scalar	d 0	
 S	T	rotation	0
 T	scale	Scale	4	Vec2	vector2	v 1 1	
@@ -5998,6 +6002,8 @@ S	T	order	0
 T	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
 A	T	position	1
+T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	position_unit	?
 T	anchor	Anchor	6	Anchor	vector2	v 0.5 0.5	
 S	T	anchor	1
 A	T	anchor	1
@@ -7463,6 +7469,8 @@ B	I	frame_timing	0	general	1	always	?
 C	I	frame_timing	unknown
 I	framerate	Framerate	8	Float	scalar	d 1	
 S	I	framerate	0
+I	framerate_unit	Framerate Unit	-1	ExportFramerateUnit	enum	e 1	FPS;Relative to Preview
+S	I	framerate_unit	?
 I	frame_time_ms	Frame time (ms)	27	Float	scalar	d 33	
 S	I	frame_time_ms	0
 I	loop	Loop	5	Bool	boolean	b 1	
@@ -8601,6 +8609,7 @@ N	pc.gmroom	Node_GMRoom	GMRoom	io	scripts/node_gm_room/node_gm_room.gml
 D	0	1
 T	data	Data	0	Generic_any	any		
 S	T	data	0
+O	room_preview	Room Preview	0	image
 N	pc.gabor_noise	Node_Gabor_Noise	Gabor Noise	generate	scripts/node_gabor_noise/node_gabor_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9077,6 +9086,8 @@ D	5	2
 T	anchor_i	Anchor {i}	0	Vec2	vector2	v 0 0	
 S	T	anchor_i	1
 A	T	anchor_i	1
+T	anchor_i_unit	Anchor {i} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	anchor_i_unit	?
 T	color_i	Color {i}	1	Color	colour	c 255 255 255 255	
 S	T	color_i	0
 O	surface_out	Surface Out	0	image
@@ -9267,6 +9278,8 @@ D	2	3
 T	point_i	Point {i}	0	Vec2	vector2	v 0 0	
 S	T	point_i	1
 A	T	point_i	1
+T	point_i_unit	Point {i} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	point_i_unit	?
 T	color_i	Color {i}	1	Color	colour	c 255 255 255 255	
 S	T	color_i	0
 T	influence_i	Influence {i}	2	Float	scalar	d 6	
@@ -10030,6 +10043,8 @@ D	6	1
 T	anchor_i	Anchor {i}	0	Grid_Anchor	vector2		
 S	T	anchor_i	1
 A	T	anchor_i	1
+T	anchor_i_unit	Anchor {i} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	anchor_i_unit	?
 O	surface_out	Surface Out	0	image
 N	pc.group	Node_Group	Group	misc	scripts/node_group/node_group.gml
 I	attribute_input_display_list	attribute input_display_list	-1	AttributeArray	array	a scalar 0	
@@ -11911,9 +11926,13 @@ C	T	type	unknown
 T	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
 A	T	position	1
+T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	position_unit	?
 T	position_2	Position 2	2	Vec2	vector2	v 1 0	
 S	T	position_2	1
 A	T	position_2	1
+T	position_2_unit	Position 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	position_2_unit	?
 T	push_path	Push path	8	Path	path2d	p 0 0 0	
 S	T	push_path	0
 T	push_resolution	Push resolution	9	Int	integer	i 16	
@@ -14525,6 +14544,8 @@ S	T	surface_s	0
 T	position_s	Position {_s}	1	Vec2	vector2	v 0 0	
 S	T	position_s	1
 A	T	position_s	1
+T	position_s_unit	Position {_s} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	position_s_unit	?
 T	parallax_s	Parallax {_s}	2	Vec2	vector2	v 0 0	
 S	T	parallax_s	1
 A	T	parallax_s	1
@@ -18065,11 +18086,15 @@ C	T	type	unknown
 T	position	Position	1	Vec2	vector2	v 0 0	
 S	T	position	1
 A	T	position	1
+T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	position_unit	?
 T	distance	Distance	7	Float	scalar	d 0	
 S	T	distance	0
 T	end_position	End Position	5	Vec2	vector2	v 0 0	
 S	T	end_position	1
 A	T	end_position	1
+T	end_position_unit	End Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	end_position_unit	?
 T	end_distance	End Distance	8	Float	scalar	d 0	
 S	T	end_distance	0
 T	range	Range	2	Float	scalar	d 16	
@@ -18551,7 +18576,125 @@ I	segments	Segments	12	Int	integer	i 8
 S	I	segments	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	13	1
+D	13	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_diamond	Node_PB_Draw_Diamond	Diamond	pixel_builder	scripts/node_pb_draw_diamond/node_pb_draw_diamond.gml
@@ -18581,7 +18724,125 @@ Q	I	corner	0	0	s "Scale"
 Q	I	corner	1	0	s "Minimum"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	9	1
+D	9	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_ellipse	Node_PB_Draw_Ellipse	Ellipse	pixel_builder	scripts/node_pb_draw_ellipse/node_pb_draw_ellipse.gml
@@ -18605,7 +18866,125 @@ I	pbbox_height	PBbox Height	7	Float	scalar	d 0
 S	I	pbbox_height	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	8	1
+D	8	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_line	Node_PB_Draw_Line	Line	pixel_builder	scripts/node_pb_draw_line/node_pb_draw_line.gml
@@ -18637,7 +19016,125 @@ I	corner	Corner	11	Toggle	integer	i 0
 S	I	corner	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	12	1
+D	12	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_pie	Node_PB_Draw_Pie	Pie	pixel_builder	scripts/node_pb_draw_pie/node_pb_draw_pie.gml
@@ -18665,7 +19162,125 @@ B	I	corner	0	general	1	always	4
 C	I	corner	unknown
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	9	1
+D	9	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_polygon	Node_PB_Draw_Polygon	Polygon	pixel_builder	scripts/node_pb_draw_polygon/node_pb_draw_polygon.gml
@@ -18693,7 +19308,125 @@ I	angle	Angle	9	Rotation	scalar	d 0
 S	I	angle	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	10	1
+D	10	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_quadrilateral	Node_PB_Draw_Quadrilateral	Quadrilateral	pixel_builder	scripts/node_pb_draw_quadri/node_pb_draw_quadri.gml
@@ -18729,7 +19462,125 @@ S	I	bottom_right	1
 A	I	bottom_right	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	12	1
+D	12	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_rectangle	Node_PB_Draw_Rectangle	Rectangle	pixel_builder	scripts/node_pb_draw_rectangle/node_pb_draw_rectangle.gml
@@ -18753,7 +19604,125 @@ I	pbbox_height	PBbox Height	7	Float	scalar	d 0
 S	I	pbbox_height	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	8	1
+D	8	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_round_rectangle	Node_PB_Draw_Round_Rectangle	Round Rectangle	pixel_builder	scripts/node_pb_draw_round_rectangle/node_pb_draw_round_rectangle.gml
@@ -18788,7 +19757,125 @@ I	clamp	Clamp	10	Bool	boolean	b 0
 S	I	clamp	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	11	1
+D	11	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_star	Node_PB_Draw_Star	Star	pixel_builder	scripts/node_pb_draw_star/node_pb_draw_star.gml
@@ -18826,7 +19913,125 @@ I	thickness	Thickness	12	Float	scalar	d 1
 S	I	thickness	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	13	1
+D	13	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_surface	Node_PB_Draw_Surface	PB Draw Surface	pixel_builder	scripts/node_pb_draw_surface/node_pb_draw_surface.gml
@@ -18886,7 +20091,125 @@ I	side	Side	9	Slider	scalar	d 0.5
 S	I	side	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	10	1
+D	10	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_draw_triangle	Node_PB_Draw_Triangle	Triangle	pixel_builder	scripts/node_pb_draw_triangle/node_pb_draw_triangle.gml
@@ -18924,7 +20247,125 @@ B	I	apex_corner	0	general	1	always	4
 C	I	apex_corner	unknown
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-D	12	1
+D	12	26	64
+T	effect_type	Effect Type	0	EScroll	enum	e 0	
+S	T	effect_type	?
+C	T	effect_type	resolved
+Q	T	effect_type	0	0	s "Fill"
+Q	T	effect_type	1	0	s "Stroke"
+Q	T	effect_type	2	0	s "Corner"
+Q	T	effect_type	3	0	s "Highlight"
+Q	T	effect_type	4	0	s "Extrude"
+Q	T	effect_type	5	0	s "Shine"
+T	color	Color	1	Color	colour	c 255 255 255 255	
+S	T	color	?
+T	intensity	Intensity	2	Slider	scalar	d 1	
+S	T	intensity	?
+T	pattern	Pattern	3	EScroll	enum	e 0	
+S	T	pattern	?
+C	T	pattern	resolved
+Q	T	pattern	0	0	s "Solid"
+Q	T	pattern	1	1	s ""
+Q	T	pattern	2	0	s "Stripe X"
+Q	T	pattern	3	0	s "Stripe Y"
+Q	T	pattern	4	0	s "Stripe D0"
+Q	T	pattern	5	0	s "Stripe D1"
+Q	T	pattern	6	1	s ""
+Q	T	pattern	7	0	s "Checker"
+Q	T	pattern	8	0	s "Checker Diag"
+Q	T	pattern	9	1	s ""
+Q	T	pattern	10	0	s "Grid"
+Q	T	pattern	11	0	s "Grid Diag"
+Q	T	pattern	12	1	s ""
+Q	T	pattern	13	0	s "Half X"
+Q	T	pattern	14	0	s "Half Y"
+Q	T	pattern	15	0	s "Half D0"
+Q	T	pattern	16	0	s "Half D1"
+Q	T	pattern	17	1	s ""
+Q	T	pattern	18	0	s "Grad X"
+Q	T	pattern	19	0	s "Grad Y"
+Q	T	pattern	20	0	s "Grad D0"
+Q	T	pattern	21	0	s "Grad D1"
+Q	T	pattern	22	1	s ""
+Q	T	pattern	23	0	s "Grad Both X"
+Q	T	pattern	24	0	s "Grad Both Y"
+Q	T	pattern	25	0	s "Grad Both D0"
+Q	T	pattern	26	0	s "Grad Both D1"
+Q	T	pattern	27	1	s ""
+Q	T	pattern	28	0	s "Grad Circular"
+Q	T	pattern	29	0	s "Grad Radial"
+Q	T	pattern	30	1	s ""
+Q	T	pattern	31	0	s "Brick X"
+Q	T	pattern	32	0	s "Brick Y"
+Q	T	pattern	33	1	s ""
+Q	T	pattern	34	0	s "Zigzag X"
+Q	T	pattern	35	0	s "Zigzag Y"
+Q	T	pattern	36	0	s "Half Zigzag X"
+Q	T	pattern	37	0	s "Half Zigzag Y"
+Q	T	pattern	38	1	s ""
+Q	T	pattern	39	0	s "Half Wave X"
+Q	T	pattern	40	0	s "Half Wave Y"
+Q	T	pattern	41	1	s ""
+Q	T	pattern	42	0	s "Noise"
+T	pattern_color	Pattern Color	4	Color	colour	c 255 255 255 255	
+S	T	pattern_color	?
+T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1	
+S	T	pattern_intensity	?
+T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
+S	T	pattern_scale	?
+T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_scale_unit	?
+T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
+S	T	pattern_position	?
+T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	pattern_position_unit	?
+T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
+S	T	pattern_map	?
+T	thickness	Thickness	9	Int	integer	i 1	
+S	T	thickness	?
+T	stroke_position	Position	10	EButton	enum	e 1	Center;Inside;Outside
+S	T	stroke_position	?
+C	T	stroke_position	resolved
+Q	T	stroke_position	0	0	s "Center"
+Q	T	stroke_position	1	0	s "Inside"
+Q	T	stroke_position	2	0	s "Outside"
+T	stroke_corner	Corner	11	EButton	enum	e 0	Round;Square
+S	T	stroke_corner	?
+C	T	stroke_corner	resolved
+Q	T	stroke_corner	0	0	s "Round"
+Q	T	stroke_corner	1	0	s "Square"
+T	corner_radius	Radius	12	Int	integer	i 1	
+S	T	corner_radius	?
+T	highlight_widths	Widths	13	Padding	vector4	w 0 0 0 0	
+S	T	highlight_widths	?
+T	highlight_left	Color Left	14	Color	colour	c 255 255 255 255	
+S	T	highlight_left	?
+T	highlight_right	Color Right	15	Color	colour	c 255 255 255 255	
+S	T	highlight_right	?
+T	highlight_top	Color Top	16	Color	colour	c 255 255 255 255	
+S	T	highlight_top	?
+T	highlight_bottom	Color Bottom	17	Color	colour	c 255 255 255 255	
+S	T	highlight_bottom	?
+T	modify	Modify	18	Float	scalar	d 4	
+S	T	modify	?
+T	subtract	Subtract	19	Bool	boolean	b 0	
+S	T	subtract	?
+T	direction	Direction	20	Rotation	scalar	d -90	
+S	T	direction	?
+T	shines	Shines	21	Float	array	a scalar 3 d 2 d 1 d 1	
+S	T	shines	?
+A	T	shines	1
+T	progress	Progress	22	Slider	scalar	d 0.5	
+S	T	progress	?
+T	slope	Slope	23	Slider	scalar	d 1	
+S	T	slope	?
+T	axis	Axis	24	EButton	enum	e 0	X;Y
+S	T	axis	?
+C	T	axis	resolved
+Q	T	axis	0	0	s "X"
+Q	T	axis	1	0	s "Y"
+T	seed	Seed	25	Float	scalar		
+S	T	seed	?
 O	pbbox	PBbox	0	pixel_box
 O	surface_out	Surface Out	1	image
 N	pc.pb_fx_bevel	Node_PB_FX_Bevel	Pixel Bevel	3d	scripts/node_pb_filter_bevel/node_pb_filter_bevel.gml
@@ -19030,7 +20471,7 @@ Q	I	axis	0	0	s "X"
 Q	I	axis	1	0	s "Y"
 I	progress	Progress	5	Slider	scalar	d 0.5	
 S	I	progress	0
-I	shines	Shines	4	Float	vector3	3 2 1 1	
+I	shines	Shines	4	Float	array	a scalar 3 d 2 d 1 d 1	
 S	I	shines	1
 A	I	shines	1
 I	scale	Scale	9	Float	scalar	d 1	
@@ -19764,6 +21205,8 @@ D	4	1
 T	anchor	Anchor	0	Path_Anchor	array		
 S	T	anchor	1
 A	T	anchor	?
+T	anchor_unit	Anchor Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	anchor_unit	?
 O	position_out	Position out	0	vector2
 O	path_data	Path data	1	path2d
 O	anchors	Anchors	2	array
@@ -19775,7 +21218,6 @@ I	round_anchor	Round Anchor	3	Bool	boolean	b 0
 S	I	round_anchor	0
 I	sample_path	Sample Path	0	Slider	scalar	d 0	
 S	I	sample_path	0
-A	I	sample_path	?
 I	sample_mode	Sample Mode	2	EScroll	enum	e 0	Entire line;Segment
 S	I	sample_mode	0
 B	I	sample_mode	0	general	1	default	2
@@ -19790,8 +21232,8 @@ D	4	1
 T	anchor	Anchor	0	Path_Anchor_3D	array		
 S	T	anchor	1
 A	T	anchor	1
-O	position_out	Position out	0	vector2
-O	path_data	Path data	1	path2d
+O	position_out	Position out	0	vector3
+O	path_data	Path data	1	path3d
 O	anchors	Anchors	2	array
 N	pc.path_3_d_camera	Node_Path_3D_Camera	3D Path Camera	values	scripts/node_path_3d_camera/node_path_3d_camera.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
@@ -19850,7 +21292,7 @@ S	I	depth_range	1
 A	I	depth_range	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rendered	Rendered	0	path2d
+O	rendered	Rendered	0	path3d
 N	pc.path_3_d_transform	Node_Path_3D_Transform	Transform Path 3D	values	scripts/node_path_3d_transform/node_path_3d_transform.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -19870,7 +21312,7 @@ S	I	anchor	1
 A	I	anchor	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path3d
 N	pc.path_anchor	Node_Path_Anchor	Path Anchor	values	scripts/node_path_anchor/node_path_anchor.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23474,6 +24916,8 @@ C	T	select_mode	unknown
 T	select_area	Select Area	9	Area	area	r 0.5 0.5 0.5 0.5 0 0	
 S	T	select_area	1
 A	T	select_area	1
+T	select_area_unit	Select Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	select_area_unit	?
 T	select_index	Select Index	10	Float	scalar	d 0	
 S	T	select_index	0
 T	select_range	Select Range	11	Float	scalar	d 2	
@@ -23483,6 +24927,8 @@ S	T	select_surface	0
 T	select_position	Select Position	16	Vec2	vector2	v 0 0	
 S	T	select_position	1
 A	T	select_position	1
+T	select_position_unit	Select Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	select_position_unit	?
 T	select_rotation	Select Rotation	17	Rotation	scalar	d 0	
 S	T	select_rotation	0
 T	select_falloff	Select Falloff	12	Float	scalar	d 0	
@@ -24988,8 +26434,12 @@ C	T	type	unknown
 T	position	Position	3	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
 A	T	position	1
+T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	position_unit	?
 T	radius	Radius	4	Float	scalar	d 0.5	
 S	T	radius	0
+T	radius_unit	Radius Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
+S	T	radius_unit	?
 T	intensity	Intensity	2	Float	scalar	d 1	
 S	T	intensity	0
 T	color	Color	1	Color	colour	c 255 255 255 255	
@@ -26420,6 +27870,12 @@ S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 O	surface_out	Surface Out	0	image
+N	pc.spout_receive	Node_Spout_Receive	Spout Receive	undocumented	scripts/node_spout_receive/node_spout_receive.gml
+I	receiver_name	Receiver name	0	Text	text	s "PixelComposer"	
+S	I	receiver_name	0
+I	animated	Animated	1	Bool	boolean	b 1	
+S	I	animated	0
+O	surface	Surface	0	image
 N	pc.spout_send	Node_Spout_Send	Spout Sender	io	scripts/node_spout_send/node_spout_send.gml
 I	sender_name	Sender Name	0	Text	text	s "PixelComposer"	
 S	I	sender_name	0
@@ -26928,6 +28384,18 @@ S	I	amount	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 O	text	Text	0	text
+N	pc.string_insert	Node_String_Insert	Insert Text	undocumented	scripts/node_string_insert/node_string_insert.gml
+I	attribute_process	attribute process	-1	Bool	boolean	b 1	
+S	I	attribute_process	0
+I	text	Text	0	Text	text	s ""	
+S	I	text	0
+I	insert_text	Insert Text	1	Text	text	s ""	
+S	I	insert_text	0
+I	position	Position	2	Int	integer	i 0	
+S	I	position	0
+I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
+S	I	attribute_array_process	?
+O	text	Text	0	text
 N	pc.string_join	Node_String_Join	Join Text Array	values	scripts/node_string_join/node_string_join.gml
 I	text_array	Text Array	0	Text	array	a text 0	
 S	I	text_array	0
@@ -27152,6 +28620,10 @@ S	I	attribute_array_process	?
 O	surface_out	Surface Out	0	image
 N	pc.struct	Node_Struct	Struct	values	scripts/node_struct/node_struct.gml
 D	0	2
+T	key	Key	0	Text	text	s ""	
+S	T	key	0
+T	value	value	1	Generic_any	any		
+S	T	value	0
 O	struct	Struct	0	struct
 N	pc.struct_get	Node_Struct_Get	Struct Get	values	scripts/node_struct_get/node_struct_get.gml
 I	struct	Struct	0	Struct	struct		
@@ -27577,8 +29049,6 @@ I	intensity_map_range	Intensity Map Range	-1	MapRange	vector2	v 0 1
 S	I	intensity_map_range	?
 I	intensity_map	Intensity Map	10	Surface	image		
 S	I	intensity_map	0
-I	absolute	Absolute	9	Bool	boolean	b 0	
-S	I	absolute	0
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
 I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat XY;;Repeat X Empty Y;Repeat X Black Y;Repeat X Clamp Y;;Repeat Y Empty X;Repeat Y Black X;Repeat Y Clamp X

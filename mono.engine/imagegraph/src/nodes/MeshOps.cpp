@@ -1152,6 +1152,185 @@ namespace engine::imagegraph::detail {
 			return context.FailureCode == Status::Ok;
 		}
 
+		bool Terrain(NodeContext &context) {
+			ENGINE_PROFILE("imagegraph.mesh.terrain");
+			MeshTransform3D transform;
+			if (!ReadTransform(context, transform)) return false;
+			const int64_t subdivision = context.Integer("subdivision", 4);
+			const double mode = context.SourceChoice("input_type");
+			const bool smooth = context.Boolean("smooth");
+			if (context.FailureCode != Status::Ok) return false;
+			if (subdivision < 0)
+				return context.Fail(
+					Status::InvalidValue, "terrain subdivision must be nonnegative", "subdivision"
+				);
+			if (uint64_t(subdivision) > std::sqrt(double(Limits::MaximumArrayElements / 6)))
+				return context.Fail(
+					Status::LimitExceeded, "terrain subdivision exceeds geometry caps", "subdivision"
+				);
+			const size_t sub = size_t(subdivision), side = sub + 1, cells = sub * sub, samples = side * side;
+			MaterialInput material;
+			if (!ReadMaterial(context, "material", material)) return false;
+			const uint64_t shape = sizeof(MeshData3D) + sizeof(MeshPart3D) + sizeof(MaterialValue3D) +
+								   sizeof(MeshTransform3D) +
+								   cells * (6 * sizeof(MeshVertex3D) + 4 * sizeof(MeshEdge3D));
+			if (MeshAddBytes(shape, material.LogicalBytes) > Limits::MaximumArrayBytes)
+				return context.Fail(Status::LimitExceeded, "terrain exceeds mesh payload bytes", "mesh");
+			if (!context.ReserveOutput(MeshAddBytes(shape, material.Bytes) + PortBytes("mesh"), "mesh"))
+				return false;
+			auto scratch = context.ReserveWorkspace(samples * sizeof(double), "height_array");
+			if (!scratch) return false;
+			std::vector<double> heights(samples, 0);
+			if (mode == 0) {
+				if (const Image *image = context.Input("height_map")) {
+					if (!ValidMaterialSurface(*image))
+						return context.Fail(
+							Status::InvalidValue, "terrain height map is invalid", "height_map"
+						);
+					if (image->Format != SurfaceFormat::RGBA8Unorm)
+						return context.Fail(
+							Status::UnsupportedExecution,
+							"source terrain byte sampler requires RGBA8",
+							"height_map"
+						);
+					const Vector2 range = context.Get<Vector2>("front_height_level", {0, 1});
+					const auto round = [](double number) {
+						const double base = std::floor(number), fraction = number - base;
+						return fraction < .5			 ? base
+							   : fraction > .5			 ? base + 1
+							   : std::fmod(base, 2) == 0 ? base
+														 : base + 1;
+					};
+					for (size_t y = 0; y < side; ++y)
+						for (size_t x = 0; x < side; ++x) {
+							const uint32_t
+								px = uint32_t(
+									std::clamp(
+										round(double(x) * image->Width / side), 0.0, double(image->Width)
+									)
+								),
+								py = uint32_t(
+									std::clamp(
+										round(double(y) * image->Height / side), 0.0, double(image->Height)
+									)
+								);
+							const uint64_t index = uint64_t(py) * image->Width + px;
+							if (index >= uint64_t(image->Width) * image->Height)
+								return context.Fail(
+									Status::InvalidValue,
+									"source terrain height sample falls outside surface bytes",
+									"height_map"
+								);
+							std::array<double, 4> pixel{};
+							LoadSurfacePixel(
+								*image, uint32_t(index % image->Width), uint32_t(index / image->Width), pixel
+							);
+							heights[y * side + x] =
+								range.X +
+								(.299 * pixel[0] + .587 * pixel[1] + .224 * pixel[2]) * (range.Y - range.X);
+						}
+				}
+			} else if (mode == 1) {
+				const Value *value = context.Find("height_array");
+				const auto *array = value ? std::get_if<ArrayValue>(value) : nullptr;
+				if (!array)
+					return context.Fail(
+						Status::TypeMismatch, "terrain heights require an array", "height_array"
+					);
+				size_t index = 0;
+				const auto append = [&](const ElementValue &leaf) {
+					if (index == samples) return true;
+					if (const auto *number = std::get_if<double>(&leaf))
+						heights[index++] = *number;
+					else if (const auto *number = std::get_if<int64_t>(&leaf))
+						heights[index++] = double(*number);
+					else
+						return false;
+					return true;
+				};
+				for (const auto &leaf : array->Elements)
+					if (!append(leaf))
+						return context.Fail(
+							Status::TypeMismatch, "terrain height must be numeric", "height_array"
+						);
+				for (const auto &row : array->Nested)
+					for (const auto &leaf : row)
+						if (!append(leaf))
+							return context.Fail(
+								Status::TypeMismatch, "terrain height must be numeric", "height_array"
+							);
+				for (const auto &item : array->Items) {
+					if (const auto *leaf = std::get_if<ElementValue>(&item.Data)) {
+						if (!append(*leaf))
+							return context.Fail(
+								Status::TypeMismatch, "terrain height must be numeric", "height_array"
+							);
+					} else if (const auto *row = std::get_if<std::vector<SourceArrayItem>>(&item.Data)) {
+						for (const auto &child : *row) {
+							const auto *leaf = std::get_if<ElementValue>(&child.Data);
+							if (!leaf || !append(*leaf))
+								return context.Fail(
+									Status::TypeMismatch, "terrain row must be numeric", "height_array"
+								);
+						}
+					}
+				}
+			}
+			MeshValue3D output;
+			auto &data = output.Data.emplace();
+			data.LocalTransforms.push_back(transform);
+			data.Materials.push_back(CloneMaterial(material));
+			data.Edges.reserve(cells * 4);
+			auto &part = data.Parts.emplace_back();
+			part.Vertices.reserve(cells * 6);
+			const double step = sub ? 1.0 / sub : 0;
+			const auto sample = [&](int64_t x, int64_t y) {
+				return heights
+					[size_t(std::clamp(y, int64_t(0), subdivision)) * side +
+					 size_t(std::clamp(x, int64_t(0), subdivision))];
+			};
+			const auto normal = [](double dx, double dy, double spacing) {
+				const Vector3 n{-dx * spacing, -dy * spacing, spacing * spacing};
+				const double length = std::hypot(n.X, n.Y, n.Z);
+				return Vector3{n.X / length, n.Y / length, n.Z / length};
+			};
+			for (size_t x = 0; x < sub; ++x)
+				for (size_t y = 0; y < sub; ++y) {
+					const std::array<Vector2, 4> uv{
+						{{x * step, y * step},
+						 {(x + 1) * step, y * step},
+						 {x * step, (y + 1) * step},
+						 {(x + 1) * step, (y + 1) * step}}
+					};
+					std::array<MeshVertex3D, 4> vertices{};
+					const Vector3 flat =
+						normal(sample(x + 1, y) - sample(x, y), sample(x, y + 1) - sample(x, y), step);
+					for (size_t k = 0; k < 4; ++k) {
+						const int64_t px = int64_t(x + k % 2), py = int64_t(y + k / 2);
+						vertices[k] = {
+							{uv[k].X - .5, uv[k].Y - .5, sample(px, py)},
+							smooth ? normal(
+										 sample(px + 1, py) - sample(px - 1, py),
+										 sample(px, py + 1) - sample(px, py - 1),
+										 2 * step
+									 )
+								   : flat,
+							uv[k]
+						};
+					}
+					for (size_t k : {0u, 3u, 1u, 0u, 2u, 3u})
+						part.Vertices.push_back(vertices[k]);
+					for (const auto edge :
+						 std::array<std::array<size_t, 2>, 4>{{{0, 2}, {2, 3}, {3, 1}, {1, 0}}})
+						data.Edges.push_back({vertices[edge[0]].Position, vertices[edge[1]].Position});
+				}
+			if (!ValidMeshPayload(output))
+				return context.Fail(
+					Status::InvalidValue, "terrain heights produced nonfinite geometry", "height_array"
+				);
+			context.SetValue("mesh", std::move(output));
+			return context.FailureCode == Status::Ok;
+		}
 		bool ReadMesh(NodeContext &context, const MeshValue3D *&mesh) {
 			const Value *value = context.Find("mesh");
 			if (!value) return true;
@@ -1225,6 +1404,7 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.3_d_mesh_torus", Torus, true},
 			ExecutorEntry{"pc.3_d_mesh_sphere_uv", UVSphere, true},
 			ExecutorEntry{"pc.3_d_mesh_sphere_ico", Icosphere, true},
+			ExecutorEntry{"pc.3_d_mesh_terrain", Terrain, true},
 			ExecutorEntry{"pc.3_d_transform", Transform, true},
 			ExecutorEntry{"pc.3_d_get_data", GetData, true}
 		};

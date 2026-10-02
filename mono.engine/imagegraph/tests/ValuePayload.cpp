@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <limits>
 
 TEST_SUITE_ID("engine.imagegraph.value_payload")
@@ -136,13 +137,21 @@ TEST_CASE(
 	"[imagegraph][value_payload]"
 ) {
 	CHECK(ValidRuntimeValue(ArrayValue{ValueType::Any, {}, {}}));
-	CHECK_FALSE(ValidRuntimeValue(ArrayValue{ValueType::Any, {}, {{}}}));
-	for (ValueType type : {ValueType::Gradient, ValueType::Path2D, ValueType::Matrix, ValueType::AudioBit}) {
+	CHECK(ValidRuntimeValue(ArrayValue{ValueType::Any, {}, {{}}}));
+	for (ValueType type :
+		 {ValueType::Gradient,
+		  ValueType::Path2D,
+		  ValueType::Matrix,
+		  ValueType::AudioBit,
+		  ValueType::Image,
+		  ValueType::Mesh,
+		  ValueType::Buffer,
+		  ValueType::NodeRef,
+		  ValueType::Struct}) {
 		CHECK(ValidRuntimeValue(ArrayValue{type, {}, {}}));
 		CHECK(ValidRuntimeValue(ArrayValue{type, {}, {{}}}));
 	}
-	for (ValueType type :
-		 {ValueType::Image, ValueType::Array, ValueType::Object, static_cast<ValueType>(255)}) {
+	for (ValueType type : {ValueType::Object, ValueType::Array, static_cast<ValueType>(255)}) {
 		CHECK_FALSE(ValidRuntimeValue(ArrayValue{type, {}, {}}));
 		CHECK_FALSE(ValidRuntimeValue(ArrayValue{type, {}, {{}}}));
 	}
@@ -157,4 +166,46 @@ TEST_CASE("preflighted rich array leaves move their owned payload", "[imagegraph
 	CHECK(std::get<AudioBit>(*leaf).Samples.data() == original);
 	CHECK(std::get<AudioBit>(*leaf).Samples.size() == 8192);
 	CHECK_FALSE(ArrayElement(Value{ArrayValue{}}));
+}
+
+TEST_CASE(
+	"Weighted selector owns bounded runtime-only state and deep copies its contents",
+	"[imagegraph][value_payload]"
+) {
+	ArraySelectorValue selector;
+	selector.Data.emplace();
+	selector.Data->Values = ArrayValue{ValueType::Scalar, {10.0, 20.0, 30.0}};
+	selector.Data->CumulativeWeights = {0, 1, 2};
+	selector.Data->TotalWeight = 3;
+	CHECK(ValidRuntimeValue(selector));
+	CHECK_FALSE(detail::ValidPayload(selector, false));
+	auto copy = selector;
+	copy.Data->Values.Elements[0] = 40.0;
+	CHECK(std::get<double>(selector.Data->Values.Elements[0]) == 10);
+	CHECK(
+		detail::RetainedPayloadBytes(selector) >=
+		sizeof(ArraySelectorData) + 3 * sizeof(double) + 3 * sizeof(ElementValue)
+	);
+	selector.Data->CumulativeWeights.pop_back();
+	CHECK_FALSE(ValidRuntimeValue(selector));
+}
+
+TEST_CASE("general array image leaves require finite float samples", "[imagegraph][value_payload]") {
+	Image image;
+	image.Width = image.Height = 1;
+	image.Format = SurfaceFormat::RGBA32Float;
+	image.Pixels.resize(16);
+	REQUIRE(StoreSurfacePixel(image, 0, 0, {.25, .5, 1, 1}));
+	ArrayValue array;
+	array.ElementType = ValueType::Any;
+	array.Items.push_back(SourceArrayItem{image});
+	CHECK(ValidRuntimeValue(array));
+	for (double sample :
+		 {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+		const uint32_t word = std::bit_cast<uint32_t>(static_cast<float>(sample));
+		for (size_t byte = 0; byte < 4; ++byte)
+			image.Pixels[byte] = static_cast<uint8_t>(word >> (byte * 8));
+		array.Items[0] = SourceArrayItem{image};
+		CHECK_FALSE(ValidRuntimeValue(array));
+	}
 }

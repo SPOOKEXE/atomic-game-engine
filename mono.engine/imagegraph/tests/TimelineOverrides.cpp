@@ -260,3 +260,41 @@ TEST_CASE(
 		CHECK(budget.Peak() == previousBytes + workspace + (count - 1) * nodeBytes);
 	}
 }
+
+TEST_CASE(
+	"sampled nodes preserve source expressions metadata and dynamic ports", "[imagegraph][timeline_overrides]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	Node node{"number", "value.number", "", {}, {{"value", 0.0}}};
+	node.SourceDisplayName = std::string(64, 'd');
+	node.SourceInternalName = std::string(64, 'n');
+	node.DynamicInputs = {{"extra", ValueType::Scalar, 2.0, std::string(64, 'l')}};
+	node.DynamicOutputs = {{std::string(64, 'o'), ValueType::Scalar}};
+	node.SourceInputExpressions = {{"value", std::string(1024, 'c'), false}};
+	node.SourceProperties = {{"caption", std::string(2048, 'p')}};
+	document.Nodes = {node};
+	document.Keyframes = {{"number", "value", 0, 0.0, "linear"}, {"number", "value", 2, 10.0, "linear"}};
+	detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+	detail::TimelineOverrides result;
+	EvaluationRequest request;
+	request.Tick = 1;
+	Diagnostic diagnostic;
+	const std::array<uint8_t, 1> needed{1};
+	REQUIRE(
+		detail::ResolveTimelineOverrides(document, needed, request, budget, result, diagnostic) == Status::Ok
+	);
+	auto expected = node;
+	expected.Values[0].Data = 5.0;
+	CHECK(result.Find(0, document.Nodes[0]) == expected);
+	CHECK(document.Nodes[0] == node);
+	CHECK(result.Charge.Bytes() >= 3072);
+	detail::EvaluationBudget tight(result.Charge.Bytes() - 1);
+	detail::TimelineOverrides refused;
+	CHECK(
+		detail::ResolveTimelineOverrides(document, needed, request, tight, refused, diagnostic) ==
+		Status::LimitExceeded
+	);
+	CHECK(refused.Nodes.empty());
+	CHECK(tight.Used() == 0);
+}

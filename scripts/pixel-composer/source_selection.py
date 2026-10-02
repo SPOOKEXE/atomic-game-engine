@@ -41,6 +41,7 @@ def verified_source_nodes(evidence: dict, source_commit: str, root: Path,
             },
             "documentation_status": status,
             "undocumented": status != 200,
+            "source_only": status != 200,
         }
         if node_id in selected and selected[node_id] != metadata:
             raise ValueError(f"conflicting verified source evidence for {node_id}")

@@ -106,8 +106,11 @@ TEST_CASE(
 	REQUIRE(ping.Ok);
 	CHECK(std::get<std::string>(*ping.OutputValue("value")) == "a");
 	const auto random = RunNode("pc.array_get", {}, {{"array", input}, {"mode", EnumValue{1}}});
-	CHECK(random.Code == Status::UnsupportedExecution);
-	CHECK(random.Values.empty());
+	REQUIRE(random.Ok);
+	REQUIRE(random.Values.size() == 1);
+	const auto repeated = RunNode("pc.array_get", {}, {{"array", input}, {"mode", EnumValue{1}}});
+	REQUIRE(repeated.Ok);
+	CHECK(random.Values == repeated.Values);
 }
 TEST_CASE(
 	"Remove sorts indexes then resolves negatives against changing length", "[imagegraph][array_edit]"
@@ -427,4 +430,21 @@ TEST_CASE(
 		CHECK(budget.Used() == 512);
 	}
 	CHECK(std::get<ArrayValue>(source) == A({T("old"), R({T("nested"), N(2)})}));
+}
+
+TEST_CASE("signed weighted selector preserves source endpoint check order", "[imagegraph][array_edit]") {
+	ArraySelectorValue selector;
+	selector.Data.emplace();
+	selector.Data->Values = A({N(10), N(20), N(30)});
+	selector.Data->CumulativeWeights = {0, 1, -2};
+	selector.Data->TotalWeight = -1;
+	REQUIRE(detail::ValidRuntimeValue(selector));
+	for (int64_t seed : {int64_t{0}, int64_t{1}, int64_t{42}}) {
+		const auto result =
+			RunNode("pc.array_get", {}, {{"array", selector}, {"mode", EnumValue{1}}, {"seed", seed}});
+		INFO(result.Message);
+		REQUIRE(result.Ok);
+		REQUIRE(result.OutputValue("value"));
+		CHECK(std::get<double>(*result.OutputValue("value")) == 10);
+	}
 }

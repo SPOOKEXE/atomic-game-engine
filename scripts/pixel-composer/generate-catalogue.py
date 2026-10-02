@@ -10,7 +10,7 @@ A Dimension or unit-bearing input is followed by its "<id>_unit" enum. A mappabl
 for setMappable numeric inputs its "<id>_map_range" [low, high] pair. A curvable input is followed by its
 "<id>_<key>" toggle.
     O <id> <name> <source index> <value type>
-    D <fixed input count> <inputs per dynamic group>
+    D <fixed input count> <inputs per dynamic group> [maximum groups]
     T <id> <name> <offset in group> <source kind> <value type> <default or empty> <choices>
     S <I|T> <id> <source typeArray classification: 0|1|?>
     B <I|T> <id> <strict suggestion> <actual connectability> <fractional interpolation> <clamp mode> <choice count>
@@ -308,6 +308,8 @@ def refine(kind, value_type, raw):
 
 
 def output_type(item):
+    if item.get("effective_type"):
+        return item["effective_type"]
     kind = item["type"].replace("VALUE_TYPE.", "")
     if "Matrix(" in item["default"]:
         return "matrix"
@@ -429,7 +431,7 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
             identifier, suffix = f"{base}_{suffix}", suffix + 1
         seen.add(identifier)
         owners[item["name"]] = identifier
-        value_type = refine(item["kind"], KIND_TYPES.get(item["kind"], "any"), item["default"])
+        value_type = item.get("effective_type") or refine(item["kind"], KIND_TYPES.get(item["kind"], "any"), item["default"])
         default = default_text(item["kind"], value_type, item["default"], item["extra"]) if value_type in AUTHORED else None
         index = item["index"] if re.fullmatch(r"\d+", item["index"]) else "-1"
         labels = ";".join(clean(label).replace(";", ",") for label in (item.get("choices") or []))
@@ -448,6 +450,12 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
             # mask_apply_input reads the Mask junction's mask_alpha_only attribute.
             seen.add("mask_alpha_only")
             lines.append("\t".join(["I", "mask_alpha_only", "Mask Alpha Only", "-1", "MaskAlphaOnly", "boolean", "b 0", ""]))
+        if item.get("array_select"):
+            selector = item["array_select"]
+            lines.append("\t".join([
+                "I", identifier + "_select", clean(item["name"]) + " Array Select", "-1",
+                "SourceArraySelect", "enum", f"e {selector['default']}", ";".join(selector["choices"])
+            ]))
         if item["kind"] == "Dimension" or item.get("unit"):
             # Dimension keeps use_project_dimension; setUnitSimple keeps a pixel or surface-relative unit.
             toggle = identifier + "_unit"
@@ -456,7 +464,9 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
                 lines.append("\t".join(["I", toggle, clean(item["name"]) + " Unit", "-1", "DimensionUnit", "enum", "e 1", "Pixel;Project;Mask"]))
             else:
                 mode = 1 if item["unit"] == "reference" else 0
-                lines.append("\t".join(["I", toggle, clean(item["name"]) + " Unit", "-1", "ValueUnit", "enum", f"e {mode}", "Pixel;Reference"]))
+                unit_kind = item.get("unit_source_kind", "ValueUnit")
+                unit_choices = item.get("unit_choices", ["Pixel", "Reference"])
+                lines.append("\t".join(["I", toggle, clean(item["name"]) + " Unit", "-1", unit_kind, "enum", f"e {mode}", ";".join(unit_choices)]))
         if item.get("mapped"):
             # The source stores the map toggle as an input attribute. While setMappable is on, a numeric
             # input's value becomes a [low, high] range mixed by the map, recorded here as its own input.
@@ -487,15 +497,18 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
     dynamic = node.get("dynamic")
     if dynamic:
         # One dynamic group repeats the template after the fixed inputs. Instances are named "<id>_<group>".
-        lines.append("\t".join(["D", str(dynamic["fixed_length"]), str(dynamic["data_length"] or 1)]))
+        dynamic_fields = ["D", str(dynamic["fixed_length"]), str(dynamic["data_length"] or 1)]
+        if dynamic.get("max_groups") is not None:
+            dynamic_fields.append(str(dynamic["max_groups"]))
+        lines.append("\t".join(dynamic_fields))
         template_ids = set()
         for item in dynamic["template"]:
-            base = snake(item["name"]) if item["name"] else "input_" + snake(item["index"])
+            base = item.get("id") or (snake(item["name"]) if item["name"] else "input_" + snake(item["index"]))
             identifier, suffix = base, 2
             while identifier in template_ids:
                 identifier, suffix = f"{base}_{suffix}", suffix + 1
             template_ids.add(identifier)
-            value_type = refine(item["kind"], KIND_TYPES.get(item["kind"], "any"), item["default"])
+            value_type = item.get("effective_type") or refine(item["kind"], KIND_TYPES.get(item["kind"], "any"), item["default"])
             default = default_text(item["kind"], value_type, item["default"], item["extra"]) if value_type in AUTHORED else None
             index = item["index"] if re.fullmatch(r"\d+", item["index"]) else "-1"
             labels = ";".join(clean(label).replace(";", ",") for label in (item.get("choices") or []))
@@ -510,6 +523,9 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
             if behavior_record is not None:
                 lines.append(behavior_record)
             lines.extend(source_choice_records("T", identifier, item))
+            if item.get("unit"):
+                mode = 1 if item["unit"] == "reference" else 0
+                lines.append("\t".join(["T", identifier + "_unit", clean(item.get("display_name", item["name"])) + " Unit", "-1", "ValueUnit", "enum", f"e {mode}", "Pixel;Reference"]))
     outputs = set()
     for item in node["outputs"]:
         base = snake(item["name"]) if item["name"] else "output_" + snake(item["index"])

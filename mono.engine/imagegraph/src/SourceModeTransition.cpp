@@ -31,7 +31,7 @@ namespace engine::imagegraph {
 				return false;
 			for (const auto &node : document.Nodes)
 				if (node.Values.size() > Limits::MaximumArrayElements ||
-					node.DynamicInputs.size() > Limits::MaximumDynamicInputsPerNode ||
+					node.DynamicInputs.size() > MaximumDynamicInputsForNode(node) ||
 					node.InstanceOverrides.size() > Limits::MaximumArrayElements ||
 					node.SourceAnimatedInputs.size() > Limits::MaximumArrayElements ||
 					node.SourceStaticInputs.size() > Limits::MaximumArrayElements)
@@ -135,12 +135,12 @@ namespace engine::imagegraph {
 		size_t dynamicGroup = 0;
 		const auto *input = entry ? FindCatalogueInput(*entry, transition.Port) : nullptr;
 		if (!input && entry) input = FindDynamicTemplate(*entry, transition.Port, dynamicGroup);
-		if ((input && input->SourceKind == "Trigger") ||
-			(transition.Port == "parent_value" && replay.Find(transition.NodeId) &&
-			 replay.Find(transition.NodeId)->Domain.Kind == SourceSocketKind::Trigger))
+		const bool trigger = (input && input->SourceKind == "Trigger") ||
+							 (transition.Port == "parent_value" && replay.Find(transition.NodeId) &&
+							  replay.Find(transition.NodeId)->Domain.Kind == SourceSocketKind::Trigger);
+		if (trigger && (transition.Time.Subframe != 0 || transition.Time.NegativeFrame))
 			return fail(
-				Status::UnsupportedExecution,
-				"source Trigger mode transitions require represented event semantics"
+				Status::UnsupportedExecution, "source Trigger map requires a nonnegative integer frame"
 			);
 		if (!input || (!detail::AliasedSourceInput(*targetOriginal, transition.Port) &&
 					   !(targetOriginal->Type == "pc.group_input" && transition.Port == "parent_value")))
@@ -231,7 +231,10 @@ namespace engine::imagegraph {
 		Value sampled;
 		bool emptyGroupVector = false;
 		detail::AllocationReservation sampledCharge;
-		if (!transition.Animated || keys.empty()) {
+		if (trigger) {
+			// setAnim sets the mode before capturing; disabled Trigger getters return false.
+			sampled = false;
+		} else if (!transition.Animated || keys.empty()) {
 			if (keys.empty()) {
 				const bool configured = std::any_of(
 					candidate.Tracks.begin(), candidate.Tracks.end(), [&](const AnimationTrack &track) {

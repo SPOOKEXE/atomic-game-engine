@@ -1,6 +1,7 @@
 #include "EvaluationAllocator.hpp"
 #include "GroupBoundary.hpp"
 #include "GroupReplayInternal.hpp"
+#include "SourceLuaSockets.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/FrameTime.hpp>
@@ -82,7 +83,8 @@ namespace engine::imagegraph {
 			// Bound public record counts before following owners or comparing payloads.
 			for (const auto &node : document.Nodes)
 				if (node.Values.size() > Limits::MaximumArrayElements ||
-					node.DynamicInputs.size() > Limits::MaximumDynamicInputsPerNode ||
+					node.SourceProperties.size() > Limits::MaximumPropertiesPerNode ||
+					node.DynamicInputs.size() > MaximumDynamicInputsForNode(node) ||
 					node.InstanceOverrides.size() > Limits::MaximumArrayElements ||
 					node.SourceAnimatedInputs.size() > Limits::MaximumArrayElements ||
 					node.SourceStaticInputs.size() > Limits::MaximumArrayElements)
@@ -110,10 +112,8 @@ namespace engine::imagegraph {
 			diagnostic = {code, std::string(node), "subtype", std::move(message)};
 			return code;
 		};
-		if (previous.InstancesBound() || previous.AuthoringRevision() != revision)
-			return fail(
-				Status::InvalidValue, "Group binding requires the local callback stage at this revision"
-			);
+		if (previous.AuthoringRevision() != revision)
+			return fail(Status::InvalidValue, "Group binding requires callback state at this revision");
 		const auto ownerBudget =
 			AdmitGroupReplayDocument(document, previous, result, maximumBytes, diagnostic);
 		if (!ownerBudget) return diagnostic.Code;
@@ -228,9 +228,16 @@ namespace engine::imagegraph {
 		if (!candidate) return diagnostic.Code;
 		auto bindingCharge = candidate->Budget.Reserve(names);
 		if (!bindingCharge) return fail(Status::LimitExceeded, "Group binding exceeds live operation budget");
-		candidate->Bindings.assign(bindings.begin(), bindings.end());
+		// A revision refresh replaces bindings while retaining frozen callback declarations.
+		std::vector<GroupSubtypeBinding> replacementBindings(bindings.begin(), bindings.end());
+		uint64_t removedBytes = candidate->Bindings.size() * sizeof(GroupSubtypeBinding);
+		for (const auto &binding : candidate->Bindings)
+			removedBytes += std::max(binding.NodeId.size(), std::string{}.capacity()) + 1 +
+							std::max(binding.OwnerId.size(), std::string{}.capacity()) + 1 +
+							std::max(binding.Port.size(), std::string{}.capacity()) + 1;
+		candidate->Bindings.swap(replacementBindings);
+		std::vector<GroupSubtypeBinding>{}.swap(replacementBindings);
 		if (!candidate->Charge.Merge(std::move(*bindingCharge))) std::terminate();
-		uint64_t removedBytes = 0;
 		for (auto &entry : candidate->Entries) {
 			const Node *node = nodeById(entry.NodeId);
 			const bool retired = !node || node->Type != "pc.group_input";
@@ -590,7 +597,8 @@ namespace engine::imagegraph {
 				std::string_view port,
 				const Value &value,
 				bool animated,
-				bool preserveStaticKeys = false
+				bool preserveStaticKeys = false,
+				bool trigger = false
 			) {
 				if (!ValidRuntimeValue(value))
 					return context.Fail(
@@ -671,7 +679,7 @@ namespace engine::imagegraph {
 				Keyframe seed;
 				// A destroyed animator contributes only its reset value, never its original
 				// keys.
-				if (fixed) {
+				if (fixed && !trigger) {
 					auto seedLease = owner.Budget.Reserve(
 						sizeof(Keyframe) + TextBytes(nodeId) + TextBytes(port) + TextBytes("source") +
 						TextBytes("linear") * 2 + RetainedPayloadBytes(*fixed)
@@ -691,7 +699,7 @@ namespace engine::imagegraph {
 					source.reserve(keys.size());
 					for (const auto &key : keys)
 						source.push_back(&key);
-				} else {
+				} else if (!fixed) {
 					const auto count = std::count_if(
 						document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
 							return key.NodeId == nodeId && key.Port == port;
@@ -781,12 +789,44 @@ namespace engine::imagegraph {
 				const Value &value,
 				bool animated
 			) {
-				if (port == "parent_value" && entry.Domain.Kind == SourceSocketKind::Trigger)
+				const auto targetNode =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+						return node.Id == entry.NodeId;
+					});
+				const auto *catalogue =
+					targetNode == document.Nodes.end() ? nullptr : FindCatalogueEntry(targetNode->Type);
+				const auto *sourceInput = catalogue ? FindCatalogueInput(*catalogue, port) : nullptr;
+				const bool trigger =
+					(port == "parent_value" && entry.Domain.Kind == SourceSocketKind::Trigger) ||
+					(sourceInput && sourceInput->SourceKind == "Trigger");
+				if (trigger && !std::holds_alternative<bool>(value))
+					return context.Fail(
+						Status::InvalidValue, "Trigger edits require a boolean and integral frame", port
+					);
+				if (trigger && (GetFrameTime(event.At).Subframe != 0 || GetFrameTime(event.At).NegativeFrame))
 					return context.Fail(
 						Status::UnsupportedExecution,
-						"Group Trigger parent button/tick editing is not represented",
+						"source Trigger map requires a nonnegative integer frame",
 						port
 					);
+				if (trigger && !animated) {
+					auto atZero = event;
+					(void)SetFrameTime(atZero.At, {});
+					return EditAnimator(
+						context,
+						atZero,
+						owner,
+						entry.NodeId,
+						entry.ParentKeys,
+						entry.ParentReset,
+						document,
+						port,
+						value,
+						true,
+						false,
+						true
+					);
+				}
 				if (port != "parent_value" && owner.Bound) {
 					std::string_view sourceId = entry.NodeId;
 					for (const auto &binding : owner.Bindings)
@@ -845,7 +885,8 @@ namespace engine::imagegraph {
 					port,
 					value,
 					animated,
-					true
+					true,
+					trigger
 				);
 			}
 
@@ -1194,6 +1235,7 @@ namespace engine::imagegraph {
 				);
 			const auto *array = std::get_if<ArrayValue>(edit.LocalValue);
 			if (input->Type != ValueType::Any && detail::PayloadType(*edit.LocalValue) != input->Type &&
+				!detail::SourceLuaArgumentType(*node, edit.EditedPort) &&
 				!CatalogueSourceRawValue(*input, *edit.LocalValue) &&
 				!CatalogueSourceEnumValue(*input, *edit.LocalValue) &&
 				!(array && CatalogueAuthoredArray(*FindCatalogueEntry(node->Type), *input, *array)))
@@ -1283,17 +1325,16 @@ namespace engine::imagegraph {
 			});
 			return found;
 		};
-		const auto projectedValue = [&](
-			std::string_view id,
-			std::string_view port,
-			const std::optional<Value> &fixed,
-			const std::vector<Keyframe> &keys
-		) -> const Value * {
+		const auto projectedValue = [&](std::string_view id,
+										std::string_view port,
+										const std::optional<Value> &fixed,
+										const std::vector<Keyframe> &keys) -> const Value * {
 			if (fixed) return &*fixed;
 			if (port != "parent_value" || keys.empty()) return nullptr;
-			const auto node = std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [&](const auto &value) {
-				return value.Id == id;
-			});
+			const auto node =
+				std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [&](const auto &value) {
+					return value.Id == id;
+				});
 			if (node == authored.Nodes.end() || node->Type != "pc.group_input" ||
 				std::find(node->SourceStaticInputs.begin(), node->SourceStaticInputs.end(), port) ==
 					node->SourceStaticInputs.end())
@@ -1323,15 +1364,13 @@ namespace engine::imagegraph {
 			);
 		detail::EvaluationBudget budget(maximumBytes);
 		auto reservation = budget.Reserve(admitted);
-		if (!reservation)
-			return fail(Status::LimitExceeded, "Group authored projection admission failed");
+		if (!reservation) return fail(Status::LimitExceeded, "Group authored projection admission failed");
 		const uint64_t preadmitted = admitted;
 		// Reserve the bounded effect index before allocating its scratch array.
 		auto projectedValues = std::make_unique<ProjectedValue[]>(projectedValueCapacity);
 		size_t projectedValueCount = 0;
 		effects([&](std::string_view id, std::string_view port, const auto &fixed, const auto &keys) {
-			if (projectedValue(id, port, fixed, keys))
-				projectedValues[projectedValueCount++] = {id, port};
+			if (projectedValue(id, port, fixed, keys)) projectedValues[projectedValueCount++] = {id, port};
 			return true;
 		});
 		size_t keyCount = 0, extraTracks = 0;
@@ -1392,11 +1431,10 @@ namespace engine::imagegraph {
 					for (size_t prior = 0; prior < projectedValueIndex; ++prior) {
 						const auto &candidate = projectedValues[prior];
 						if (candidate.NodeId != id) continue;
-						const bool existsInAuthored = std::any_of(
-							node->Values.begin(), node->Values.end(), [&](const auto &value) {
+						const bool existsInAuthored =
+							std::any_of(node->Values.begin(), node->Values.end(), [&](const auto &value) {
 								return value.Port == candidate.Port;
-							}
-						);
+							});
 						bool wasInserted = false;
 						for (size_t earlier = 0; earlier < prior; ++earlier)
 							if (projectedValues[earlier].NodeId == id &&
@@ -1515,9 +1553,9 @@ namespace engine::imagegraph {
 		finalTracks.reserve(authored.Tracks.size() + extraTracks);
 		for (const auto &track : authored.Tracks)
 			finalTracks.push_back(track);
-			effects([&](std::string_view id, std::string_view port, const auto &fixed, const auto &keys) {
-				const auto *replacement = projectedValue(id, port, fixed, keys);
-				if (replacement) {
+		effects([&](std::string_view id, std::string_view port, const auto &fixed, const auto &keys) {
+			const auto *replacement = projectedValue(id, port, fixed, keys);
+			if (replacement) {
 				auto node =
 					std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const auto &node) {
 						return node.Id == id;

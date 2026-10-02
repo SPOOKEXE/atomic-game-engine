@@ -140,3 +140,25 @@ TEST_CASE(
 	CHECK(diagnostic.NodeId == "solid");
 	CHECK(image == previous);
 }
+
+TEST_CASE("Input snapshots preserve resolved group surface policy", "[imagegraph][color_depth]") {
+	auto document = DepthDocument();
+	EvaluationSnapshot snapshot;
+	CHECK_FALSE(snapshot.InheritedSurfaceFormat());
+	Diagnostic diagnostic;
+	Plan plan;
+	document.Groups.front().ColorDepth = 4;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	REQUIRE(EvaluateNodeInputs(document, plan, "solid", {}, snapshot, diagnostic) == Status::Ok);
+	CHECK(snapshot.InheritedSurfaceFormat() == SurfaceFormat::RGBA16Float);
+	document.Groups.back().ColorDepth = 5;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	REQUIRE(EvaluateNodeInputs(document, plan, "solid", {}, snapshot, diagnostic) == Status::Ok);
+	CHECK(snapshot.InheritedSurfaceFormat() == SurfaceFormat::RGBA32Float);
+	CHECK(EvaluateNodeInputs(document, plan, "solid", {}, snapshot, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(snapshot.InheritedSurfaceFormat() == SurfaceFormat::RGBA32Float);
+	document.Groups.back().ColorDepth = 0;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	REQUIRE(EvaluateNodeInputs(document, plan, "solid", {}, snapshot, diagnostic) == Status::Ok);
+	CHECK_FALSE(snapshot.InheritedSurfaceFormat());
+}

@@ -277,11 +277,12 @@ TEST_CASE(
 		const auto *entry = FindCatalogueEntry(type);
 		REQUIRE(entry);
 		return entry->Outputs.size() * (sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-										 sizeof(std::pair<std::string, ImageArray>));
+										(sizeof(std::pair<std::string, ImageArray>) +
+										 sizeof(std::pair<std::string_view, SourceSocketDomain>)));
 	};
 	const uint64_t nameBytes = std::string{}.capacity();
 	for (const auto &[type, count] :
-			{std::pair{"pc.vector2", uint64_t{3}}, std::pair{"pc.vector4", uint64_t{5}}}) {
+		 {std::pair{"pc.vector2", uint64_t{3}}, std::pair{"pc.vector4", uint64_t{5}}}) {
 		const auto exact = invoke(type, outputSlots(type) + count * nameBytes);
 		REQUIRE(exact.first);
 		CHECK(exact.second.size() == count);

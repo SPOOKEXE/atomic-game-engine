@@ -1,0 +1,37 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_script_sha256": {
+    "scripts/node_area/node_area.gml": "ad448b510c6a103ccb58aba40688661706f27a828960eefd9edc8b98b589b101",
+    "scripts/node_logic/node_logic.gml": "f3e304a1b606db78b1552adb238ef140e61a68def5f280948cb56d4ea472aea8",
+    "scripts/node_statistic/node_statistic.gml": "ea91c11d1b0c18abf1a8adf9a2d4f729d1d763a86f8257aa5be22093f5ea8a39",
+    "scripts/node_sec_convert/node_sec_convert.gml": "cffc9d25ce461bdad262e89e25f6103a1dd63738d1c1aae23fb3669199f5cb56",
+    "scripts/string_formatting/string_formatting.gml": "9b43c080f5bd89618bd8b7d07abd1541fa3f09d384282e6db5a1c0dc1e65b89d",
+    "scripts/node_buffer_to_string/node_buffer_to_string.gml": "8fa624b00e3b959845a97a759686b8d53beeb099143f073ba44ae21e9e29fa5d",
+    "scripts/node_number_text_format/node_number_text_format.gml": "52f9cd65829dd171f59db7e8a0d20308633e42202ee27045aa200880c2937c45",
+    "scripts/node_trigger_bool/node_trigger_bool.gml": "d5322f548234e53c78297ff0676f6f626b407da0a7e5bf71079954915ed4dc85",
+    "scripts/node_differential/node_differential.gml": "263f604b52c1eb5068370e36b9f7e4063f6dcfe9abc94f9f71be3acc54d559a9",
+    "scripts/node_path_separate_folder/node_path_separate_folder.gml": "e25b02c992a175ea3305b2710d1769bf77ac8d01a4e3bad5377c93f7089663bf"
+  },
+  "source_behavior_preserved": [
+    "Area center-span mode retains signed span; two-point mode uses midpoint and absolute half extent.",
+    "Statistic array_append spreads only one array level before scalar reduction.",
+    "Seconds format replaces only the first occurrence of each token and appends fractional hundredths independently of the format.",
+    "Negative seconds use floor-based day/hour/minute decomposition.",
+    "Differential stores previous value and signed fractional frame independently per processor row. Same-frame samples return zero but replace the previous value, and rewinds produce signed frame differences.",
+    "Boolean Trigger retains prior Boolean and emitted trigger across condition changes; unsupported conditions preserve the previous trigger while replacing the prior Boolean."
+  ],
+  "native_logic_array_policy": "The inspected evalLogicArray refers to undefined cl in max(al,bl,cl), despite only a and b parameters. Native looping uses max(al,bl), repeats shorter array rows, and treats empty row access as false. Scalar logic follows the pinned source; array looping is an explicit native correction pending desktop evidence.",
+  "number_format_runtime": {
+    "commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+    "url": "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/functions/Function_String.js",
+    "sha256": "8fea0cea0d55e9e6b1ba07aae1502d9f4e75aa4b6ccaffc66d047a8d5d2f9fd3",
+    "behavior": "HTML5 string_format delegates to Number.toFixed. Native conversion corrects exact binary decimal ties to magnitude-away rounding, preserves negative-zero spelling and uses source padding/insertion order. Desktop runtime formatting equivalence remains unverified."
+  },
+  "buffer_base64_native_policy": "Native Base64 uses unsigned byte shifts, avoiding undefined signed-char high-byte shifts in the pinned embedded C++ extension. ASCII preserves bytes through the first zero terminator; binary is MSB-first and hex uppercase.",
+  "file_path_runtime": {
+    "commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+    "url": "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/functions/Function_File.js",
+    "sha256": "d6fd3595fb2ed3029a63b75874e87d61d095d7a9194c72de356f64bf3b235c0f",
+    "behavior": "filename_ext uses substr(lastIndexOf(dot)); a name without a dot returns its final UTF-16 unit. Source filename_name_only replaces the first extension occurrence. Native preserves BMP behavior and refuses extensionless astral final units whose isolated surrogate cannot be represented in valid UTF-8. Desktop equivalence remains unverified."
+  }
+}

@@ -1,3 +1,4 @@
+#include "NativeCatalogue.hpp"
 #include "NodeExecutors.hpp"
 #include "ValueText.hpp"
 
@@ -25,6 +26,7 @@ namespace engine::imagegraph {
 			std::vector<CatalogueInput> Template;
 			int32_t FixedLength = 0;
 			int32_t GroupLength = 0;
+			int32_t GroupLimit = 0;
 			std::map<std::string_view, std::vector<CatalogueSourceChoice>> InputChoices, TemplateChoices;
 			std::vector<CatalogueOutput> Outputs;
 			std::vector<PortSchema> Ports;
@@ -83,9 +85,11 @@ namespace engine::imagegraph {
 					storage.Nodes.back().Inputs.push_back(
 						{fields[1], fields[2], RecordIndex(fields[3]), fields[4], *type, fields[6], fields[7]}
 					);
-				} else if (fields[0] == "D" && fields.size() == 3 && !storage.Nodes.empty()) {
+				} else if (fields[0] == "D" && (fields.size() == 3 || fields.size() == 4) &&
+						   !storage.Nodes.empty()) {
 					storage.Nodes.back().FixedLength = RecordIndex(fields[1]);
 					storage.Nodes.back().GroupLength = RecordIndex(fields[2]);
+					if (fields.size() == 4) storage.Nodes.back().GroupLimit = RecordIndex(fields[3]);
 				} else if (fields[0] == "T" && fields.size() == 8 && !storage.Nodes.empty()) {
 					const auto type = ParseValueTypeName(fields[5]);
 					if (!type) continue;
@@ -227,8 +231,15 @@ namespace engine::imagegraph {
 				entry.Outputs = node.Outputs;
 				entry.DynamicFixedLength = node.FixedLength;
 				entry.DynamicGroupLength = node.GroupLength;
+				entry.DynamicGroupLimit = node.GroupLimit;
 				entry.DynamicTemplate = node.Template;
-				entry.Schema = NodeSchema{entry.Type, node.Ports, node.Properties, node.GroupLength > 0};
+				entry.Schema = NodeSchema{
+					entry.Type,
+					node.Ports,
+					node.Properties,
+					node.GroupLength > 0,
+					entry.Type == "pc.array_split"
+				};
 				storage.ByType.emplace(entry.Type, storage.Entries.size());
 				storage.BySource.emplace(entry.SourceNode, storage.Entries.size());
 				storage.Entries.push_back(entry);
@@ -247,6 +258,7 @@ namespace engine::imagegraph {
 	}
 
 	const CatalogueEntry *FindCatalogueEntry(std::string_view type) {
+		if (const auto *native = detail::FindNativeCatalogueEntry(type)) return native;
 		if (!type.starts_with("pc.")) return nullptr;
 		const CatalogueStorage &storage = CatalogueData();
 		const auto found = storage.ByType.find(type);

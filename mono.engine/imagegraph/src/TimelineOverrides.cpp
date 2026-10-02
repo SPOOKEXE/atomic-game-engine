@@ -1,6 +1,7 @@
 #include "TimelineOverrides.hpp"
 
 #include "EvaluationAllocator.hpp"
+#include "PuppetControl.hpp"
 #include "Timeline.hpp"
 #include "TimelineDrivers.hpp"
 #include "TimelineSchedule.hpp"
@@ -266,11 +267,15 @@ namespace engine::imagegraph::detail {
 				if (!add(
 						CloneOwnedBytes(node.Id) + CloneOwnedBytes(node.Type) +
 						CloneOwnedBytes(node.GroupId) + CloneOwnedBytes(node.InstanceBase) +
+						CloneOwnedBytes(node.SourceDisplayName) + CloneOwnedBytes(node.SourceInternalName) +
 						node.InstanceOverrides.size() * sizeof(std::string) +
 						node.SourceAnimatedInputs.size() * sizeof(std::string) +
 						node.SourceStaticInputs.size() * sizeof(std::string) +
 						node.Values.size() * sizeof(AuthoredValue) +
-						node.DynamicInputs.size() * sizeof(DynamicInput)
+						node.DynamicInputs.size() * sizeof(DynamicInput) +
+						node.DynamicOutputs.size() * sizeof(DynamicOutput) +
+						node.SourceInputExpressions.size() * sizeof(SourceInputExpression) +
+						node.SourceProperties.size() * sizeof(AuthoredValue)
 					))
 					goto clone_refused;
 				for (const auto &port : node.InstanceOverrides)
@@ -283,9 +288,17 @@ namespace engine::imagegraph::detail {
 					if (!add(CloneOwnedBytes(value.Port) + CloneOwnedBytes(value.Data))) goto clone_refused;
 				for (const auto &input : node.DynamicInputs)
 					if (!add(
-							CloneOwnedBytes(input.Id) + (input.Default ? CloneOwnedBytes(*input.Default) : 0)
+							CloneOwnedBytes(input.Id) + CloneOwnedBytes(input.SourceLayerName) +
+							(input.Default ? CloneOwnedBytes(*input.Default) : 0)
 						))
 						goto clone_refused;
+				for (const auto &output : node.DynamicOutputs)
+					if (!add(CloneOwnedBytes(output.Id))) goto clone_refused;
+				for (const auto &expression : node.SourceInputExpressions)
+					if (!add(CloneOwnedBytes(expression.Port) + CloneOwnedBytes(expression.Code)))
+						goto clone_refused;
+				for (const auto &value : node.SourceProperties)
+					if (!add(CloneOwnedBytes(value.Port) + CloneOwnedBytes(value.Data))) goto clone_refused;
 			}
 			const bool dynamic =
 				std::any_of(node.DynamicInputs.begin(), node.DynamicInputs.end(), [&](const auto &input) {
@@ -330,6 +343,11 @@ namespace engine::imagegraph::detail {
 			copy.InstanceOverrides = original.InstanceOverrides;
 			copy.SourceAnimatedInputs = original.SourceAnimatedInputs;
 			copy.SourceStaticInputs = original.SourceStaticInputs;
+			copy.DynamicOutputs = original.DynamicOutputs;
+			copy.SourceDisplayName = original.SourceDisplayName;
+			copy.SourceInternalName = original.SourceInternalName;
+			copy.SourceInputExpressions = original.SourceInputExpressions;
+			copy.SourceProperties = original.SourceProperties;
 			copy.Values.reserve(original.Values.size() + fresh);
 			copy.DynamicInputs.reserve(original.DynamicInputs.size());
 			for (const auto &value : original.Values)
@@ -542,6 +560,8 @@ namespace engine::imagegraph::detail {
 			}
 			// The source's multi-key getter returns its first key at every nonpositive frame.
 			if (keys.size() > 1 && keys.front()->Interpolation == "source" && driverFrame <= 0 &&
+				!(keys.front()->SourceDriver &&
+				  std::holds_alternative<KeyframeAudioDriver>(*keys.front()->SourceDriver)) &&
 				(configured == configuredTracks.end() || configured->second->End != "wrap")) {
 				left = keys.front();
 				right = nullptr;
@@ -571,6 +591,7 @@ namespace engine::imagegraph::detail {
 			// Nonpositive source hold bypasses lookup. Exact positive endpoints remain native policy
 			// pending coercion proof.
 			if (right && left->Interpolation == "source" && driverFrame > 0 &&
+				!(left->SourceDriver && std::holds_alternative<KeyframeAudioDriver>(*left->SourceDriver)) &&
 				std::any_of(
 					keys.begin(), keys.end(), [](const Keyframe *key) { return key->Subframe != 0; }
 				) &&
@@ -589,7 +610,8 @@ namespace engine::imagegraph::detail {
 										 configured->second->End == "wrap" && left == keys.back() &&
 										 right == keys.front();
 			const bool beforeFirst = !wrappingSegment && driverFrame < FrameTimeToReal(GetFrameTime(*left));
-			if (!wrappingSegment && keys.size() > 1 && left == keys.front() && driverFrame == 0.0L)
+			if (!wrappingSegment && keys.size() > 1 && left == keys.front() && driverFrame == 0.0L &&
+				!(left->SourceDriver && std::holds_alternative<KeyframeAudioDriver>(*left->SourceDriver)))
 				suppressDriver = true;
 			if (document.FormatVersion >= 8 && left->Interpolation == "source") {
 				const auto *sourceCatalogue = FindCatalogueEntry(sampled.Type);
@@ -683,11 +705,16 @@ namespace engine::imagegraph::detail {
 						static_cast<double>(
 							document.Timeline ? document.Timeline->Frames : keys.back()->Tick + 1
 						),
-						rawSourceQuaternion && (!port.empty() || [&] {
-							const auto *entry = FindCatalogueEntry(sampled.Type);
-							const auto *input = entry ? FindCatalogueInput(*entry, property.second) : nullptr;
-							return input && input->SourceIndex >= 0 && input->Type == ValueType::Quaternion;
-						}())
+						rawSourceQuaternion && (!port.empty() ||
+												[&] {
+													const auto *entry = FindCatalogueEntry(sampled.Type);
+													const auto *input =
+														entry ? FindCatalogueInput(*entry, property.second)
+															  : nullptr;
+													return input && input->SourceIndex >= 0 &&
+														   input->Type == ValueType::Quaternion;
+												}()),
+						&request
 					);
 					if (status != Status::Ok) {
 						SetDiagnostic(
@@ -701,6 +728,32 @@ namespace engine::imagegraph::detail {
 					}
 					goto resolved_track_value;
 				}
+			}
+			if (right && left->Interpolation == "linear" &&
+				PuppetControlValue(sampled, property.second, ValueType::Struct, left->Data) &&
+				PuppetControlValue(sampled, property.second, ValueType::Struct, right->Data)) {
+				const auto status = ApplySourceDriver(
+					nullptr,
+					left->Data,
+					right->Data,
+					driverRatio,
+					driverRatio,
+					static_cast<double>(driverFrame),
+					true,
+					-1,
+					value
+				);
+				if (status != Status::Ok) {
+					SetDiagnostic(
+						diagnostic,
+						status,
+						"Puppet numeric control interpolation cannot be represented",
+						left->NodeId,
+						left->Port
+					);
+					return diagnostic.Code;
+				}
+				goto resolved_track_value;
 			}
 			if (!right || left->Interpolation == "step" ||
 				(left->Interpolation != "source" && ((document.FormatVersion < 9 && !extendedTime)

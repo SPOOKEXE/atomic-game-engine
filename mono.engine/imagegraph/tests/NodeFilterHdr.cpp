@@ -222,7 +222,8 @@ TEST_CASE(
 	const uint64_t priorBytes = 88;
 	const uint64_t storageBytes =
 		entry->Outputs.size() * (sizeof(std::pair<std::string, Image>) + sizeof(AuthoredValue) +
-								 sizeof(std::pair<std::string, ImageArray>));
+								 (sizeof(std::pair<std::string, ImageArray>) +
+								  sizeof(std::pair<std::string_view, SourceSocketDomain>)));
 	const uint64_t required = priorBytes + storageBytes + 16 +
 							  std::max(std::string_view{"surface_out"}.size(), std::string{}.capacity()) +
 							  9 * sizeof(double);

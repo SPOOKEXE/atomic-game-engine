@@ -31,6 +31,8 @@ function __NodeValue_Vec3(_name, _node, _value) : __NodeValue_Array(_name, _node
                 encoding="utf-8",
             )
             index = SourceIndex(root, {})
+            self.assertEqual(0, index.type_array("Slider"))
+            self.assertEqual(0, declaration_depth(index.type_array("Slider"), "nodeValue_Slider()"))
             self.assertEqual(1, declaration_depth(index.type_array("Slider"), ").setArrayDepth(1);"))
             self.assertEqual(2, declaration_depth(index.type_array("Vec3"), ").setArrayDepth(1);"))
 
@@ -88,6 +90,28 @@ function __NodeValue_Vec3(_name, _node, _value) : __NodeValue_Array(_name, _node
             inputs,
             "if (_mode) inputs[0].setDisplay(VALUE_DISPLAY.vector);",
         )
+        self.assertIsNone(inputs[0]["array_depth"])
+
+    def test_runtime_slider_updates_preserve_scalar_depth_for_rgb_hsv_inputs(self):
+        inputs = [
+            {"index": "0", "kind": "Slider", "array_depth": 0},
+            {"index": "1", "kind": "Slider", "array_depth": 0},
+            {"index": "2", "kind": "Float", "array_depth": 0},
+            {"index": "3", "kind": "Bool", "array_depth": 0},
+        ]
+        resolved = apply_runtime_depth_mutations(
+            inputs,
+            "inputs[0].setType(VALUE_TYPE.float); inputs[0].setDisplay(VALUE_DISPLAY.slider); "
+            "inputs[1].setType(VALUE_TYPE.integer); "
+            "inputs[1].setDisplay(VALUE_DISPLAY.slider, { range: [0, 255, 0.1] }); "
+            "inputs[2].setDisplay(VALUE_DISPLAY._default);",
+        )
+        self.assertEqual([0, 0, 0, 0], [item["array_depth"] for item in inputs])
+        self.assertEqual({"0", "1", "2"}, resolved)
+
+    def test_unknown_runtime_display_expression_remains_unknown(self):
+        inputs = [{"index": "0", "kind": "Slider", "array_depth": 0}]
+        apply_runtime_depth_mutations(inputs, "inputs[0].setDisplay(_display);")
         self.assertIsNone(inputs[0]["array_depth"])
 
 

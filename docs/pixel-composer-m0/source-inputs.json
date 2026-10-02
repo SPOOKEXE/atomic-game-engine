@@ -4726,7 +4726,15 @@
      "index": "12",
      "kind": "Palette",
      "name": "Colors Per Index",
-     "source_array_classification": true
+     "source_array_classification": true,
+     "array_select": {
+      "default": 0,
+      "choices": [
+       "Index Loop",
+       "Index Ping-pong",
+       "Random"
+      ]
+     }
     },
     {
      "array_depth": 0,
@@ -4773,7 +4781,12 @@
     },
     {
      "array_depth": 1,
-     "default": "[0,0,0]",
+     "constructor_default_override": {
+      "guard": "!LOADING && !APPENDING",
+      "method": "setValue",
+      "source_node": "Node_3D_Light"
+     },
+     "default": "[ 0, 0, 1 ]",
      "extra": [
       "{ linkable: false }"
      ],
@@ -4918,7 +4931,12 @@
     },
     {
      "array_depth": 1,
-     "default": "[0,0,0]",
+     "constructor_default_override": {
+      "guard": "!LOADING && !APPENDING",
+      "method": "setValue",
+      "source_node": "Node_3D_Light"
+     },
+     "default": "[ 0, 0, 1 ]",
      "extra": [
       "{ linkable: false }"
      ],
@@ -14707,7 +14725,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": 0,
+     "array_depth": 99,
      "default": "0",
      "extra": [],
      "index": "0",
@@ -26879,43 +26897,6 @@
      "kind": "Bool",
      "name": "Normalize",
      "source_array_classification": false
-    },
-    {
-     "array_depth": 0,
-     "choices": [
-      "Perceived",
-      ""
-     ],
-     "default": "0",
-     "extra": [
-      "[ \"Perceived\", \"\" ]"
-     ],
-     "index": "2",
-     "kind": "EScroll",
-     "name": "Brightness Eq",
-     "source_array_classification": false,
-     "source_behavior": {
-      "actual_connectability": "general",
-      "choice_clamp": {
-       "choice_count": 2,
-       "mode": "default"
-      },
-      "fractional_interpolation": true,
-      "strict_suggestion": false
-     },
-     "source_choices": {
-      "entries": [
-       {
-        "choice_index": 0,
-        "label": "Perceived"
-       },
-       {
-        "choice_index": 1,
-        "label": ""
-       }
-      ],
-      "status": "resolved"
-     }
     }
    ],
    "outputs": [
@@ -27003,7 +26984,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "1",
      "extra": [],
      "index": "0",
@@ -27012,7 +26993,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "1",
      "extra": [],
      "index": "1",
@@ -27021,7 +27002,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "1",
      "extra": [],
      "index": "2",
@@ -27030,7 +27011,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "1",
      "extra": [],
      "index": "4",
@@ -27547,7 +27528,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "1",
      "extra": [],
      "index": "0",
@@ -27556,7 +27537,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "1",
      "extra": [],
      "index": "1",
@@ -27565,7 +27546,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "1",
      "extra": [],
      "index": "2",
@@ -27574,7 +27555,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "1",
      "extra": [],
      "index": "4",
@@ -37464,7 +37445,13 @@
      "index": "8",
      "kind": "Float",
      "name": "Framerate",
-     "source_array_classification": false
+     "source_array_classification": false,
+     "unit": "reference",
+     "unit_source_kind": "ExportFramerateUnit",
+     "unit_choices": [
+      "FPS",
+      "Relative to Preview"
+     ]
     },
     {
      "array_depth": 0,
@@ -42797,7 +42784,14 @@
    },
    "file": "scripts/node_gm_room/node_gm_room.gml",
    "inputs": [],
-   "outputs": []
+   "outputs": [
+    {
+     "default": "",
+     "index": "0",
+     "name": "Room Preview",
+     "type": "surface"
+    }
+   ]
   },
   "Node_Gabor_Noise": {
    "array_process": {
@@ -85945,9 +85939,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 13,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_line_curve/node_pb_draw_line_curve.gml",
    "inputs": [
@@ -86135,9 +86631,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 9,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_diamond/node_pb_draw_diamond.gml",
    "inputs": [
@@ -86299,9 +87297,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 8,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_ellipse/node_pb_draw_ellipse.gml",
    "inputs": [
@@ -86426,9 +87926,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 12,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_line/node_pb_draw_line.gml",
    "inputs": [
@@ -86593,9 +88595,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 9,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_pie/node_pb_draw_pie.gml",
    "inputs": [
@@ -86745,9 +89249,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 10,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_polygon/node_pb_draw_polygon.gml",
    "inputs": [
@@ -86890,9 +89896,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 12,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_quadri/node_pb_draw_quadri.gml",
    "inputs": [
@@ -87053,9 +90561,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 8,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_rectangle/node_pb_draw_rectangle.gml",
    "inputs": [
@@ -87180,9 +91190,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 11,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_round_rectangle/node_pb_draw_round_rectangle.gml",
    "inputs": [
@@ -87362,9 +91874,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 13,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_star/node_pb_draw_star.gml",
    "inputs": [
@@ -87686,9 +92700,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 10,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_trapezoid/node_pb_draw_trapezoid.gml",
    "inputs": [
@@ -87869,9 +93385,511 @@
    },
    "base": "Node_PB_Draw",
    "dynamic": {
-    "data_length": 1,
+    "data_length": 26,
     "fixed_length": 12,
-    "template": []
+    "template": [
+     {
+      "id": "effect_type",
+      "name": "Effect Type",
+      "display_name": "Effect Type",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Fill"
+        },
+        {
+         "choice_index": 1,
+         "label": "Stroke"
+        },
+        {
+         "choice_index": 2,
+         "label": "Corner"
+        },
+        {
+         "choice_index": 3,
+         "label": "Highlight"
+        },
+        {
+         "choice_index": 4,
+         "label": "Extrude"
+        },
+        {
+         "choice_index": 5,
+         "label": "Shine"
+        }
+       ]
+      }
+     },
+     {
+      "id": "color",
+      "name": "Color",
+      "display_name": "Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "1"
+     },
+     {
+      "id": "intensity",
+      "name": "Intensity",
+      "display_name": "Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "2"
+     },
+     {
+      "id": "pattern",
+      "name": "Pattern",
+      "display_name": "Pattern",
+      "kind": "EScroll",
+      "default": "0",
+      "extra": [],
+      "index": "3",
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Solid"
+        },
+        {
+         "choice_index": 1,
+         "separator": -1
+        },
+        {
+         "choice_index": 2,
+         "label": "Stripe X"
+        },
+        {
+         "choice_index": 3,
+         "label": "Stripe Y"
+        },
+        {
+         "choice_index": 4,
+         "label": "Stripe D0"
+        },
+        {
+         "choice_index": 5,
+         "label": "Stripe D1"
+        },
+        {
+         "choice_index": 6,
+         "separator": -1
+        },
+        {
+         "choice_index": 7,
+         "label": "Checker"
+        },
+        {
+         "choice_index": 8,
+         "label": "Checker Diag"
+        },
+        {
+         "choice_index": 9,
+         "separator": -1
+        },
+        {
+         "choice_index": 10,
+         "label": "Grid"
+        },
+        {
+         "choice_index": 11,
+         "label": "Grid Diag"
+        },
+        {
+         "choice_index": 12,
+         "separator": -1
+        },
+        {
+         "choice_index": 13,
+         "label": "Half X"
+        },
+        {
+         "choice_index": 14,
+         "label": "Half Y"
+        },
+        {
+         "choice_index": 15,
+         "label": "Half D0"
+        },
+        {
+         "choice_index": 16,
+         "label": "Half D1"
+        },
+        {
+         "choice_index": 17,
+         "separator": -1
+        },
+        {
+         "choice_index": 18,
+         "label": "Grad X"
+        },
+        {
+         "choice_index": 19,
+         "label": "Grad Y"
+        },
+        {
+         "choice_index": 20,
+         "label": "Grad D0"
+        },
+        {
+         "choice_index": 21,
+         "label": "Grad D1"
+        },
+        {
+         "choice_index": 22,
+         "separator": -1
+        },
+        {
+         "choice_index": 23,
+         "label": "Grad Both X"
+        },
+        {
+         "choice_index": 24,
+         "label": "Grad Both Y"
+        },
+        {
+         "choice_index": 25,
+         "label": "Grad Both D0"
+        },
+        {
+         "choice_index": 26,
+         "label": "Grad Both D1"
+        },
+        {
+         "choice_index": 27,
+         "separator": -1
+        },
+        {
+         "choice_index": 28,
+         "label": "Grad Circular"
+        },
+        {
+         "choice_index": 29,
+         "label": "Grad Radial"
+        },
+        {
+         "choice_index": 30,
+         "separator": -1
+        },
+        {
+         "choice_index": 31,
+         "label": "Brick X"
+        },
+        {
+         "choice_index": 32,
+         "label": "Brick Y"
+        },
+        {
+         "choice_index": 33,
+         "separator": -1
+        },
+        {
+         "choice_index": 34,
+         "label": "Zigzag X"
+        },
+        {
+         "choice_index": 35,
+         "label": "Zigzag Y"
+        },
+        {
+         "choice_index": 36,
+         "label": "Half Zigzag X"
+        },
+        {
+         "choice_index": 37,
+         "label": "Half Zigzag Y"
+        },
+        {
+         "choice_index": 38,
+         "separator": -1
+        },
+        {
+         "choice_index": 39,
+         "label": "Half Wave X"
+        },
+        {
+         "choice_index": 40,
+         "label": "Half Wave Y"
+        },
+        {
+         "choice_index": 41,
+         "separator": -1
+        },
+        {
+         "choice_index": 42,
+         "label": "Noise"
+        }
+       ]
+      }
+     },
+     {
+      "id": "pattern_color",
+      "name": "Pattern Color",
+      "display_name": "Pattern Color",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "4"
+     },
+     {
+      "id": "pattern_intensity",
+      "name": "Pattern Intensity",
+      "display_name": "Pattern Intensity",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "5"
+     },
+     {
+      "id": "pattern_scale",
+      "name": "Pattern Scale",
+      "display_name": "Pattern Scale",
+      "kind": "Vec2",
+      "default": "[1,1]",
+      "extra": [],
+      "index": "6",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_position",
+      "name": "Pattern Position",
+      "display_name": "Pattern Position",
+      "kind": "Vec2",
+      "default": "[0,0]",
+      "extra": [],
+      "index": "7",
+      "unit": "reference"
+     },
+     {
+      "id": "pattern_map",
+      "name": "Map BBOX",
+      "display_name": "Map BBOX",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "8"
+     },
+     {
+      "id": "thickness",
+      "name": "Thickness",
+      "display_name": "Thickness",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "9"
+     },
+     {
+      "id": "stroke_position",
+      "name": "Position",
+      "display_name": "Position",
+      "kind": "EButton",
+      "default": "1",
+      "extra": [],
+      "index": "10",
+      "choices": [
+       "Center",
+       "Inside",
+       "Outside"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Center"
+        },
+        {
+         "choice_index": 1,
+         "label": "Inside"
+        },
+        {
+         "choice_index": 2,
+         "label": "Outside"
+        }
+       ]
+      }
+     },
+     {
+      "id": "stroke_corner",
+      "name": "Corner",
+      "display_name": "Corner",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "11",
+      "choices": [
+       "Round",
+       "Square"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Round"
+        },
+        {
+         "choice_index": 1,
+         "label": "Square"
+        }
+       ]
+      }
+     },
+     {
+      "id": "corner_radius",
+      "name": "Radius",
+      "display_name": "Radius",
+      "kind": "Int",
+      "default": "1",
+      "extra": [],
+      "index": "12"
+     },
+     {
+      "id": "highlight_widths",
+      "name": "Widths",
+      "display_name": "Widths",
+      "kind": "Padding",
+      "default": "[0,0,0,0]",
+      "extra": [],
+      "index": "13"
+     },
+     {
+      "id": "highlight_left",
+      "name": "Color Left",
+      "display_name": "Color Left",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "14"
+     },
+     {
+      "id": "highlight_right",
+      "name": "Color Right",
+      "display_name": "Color Right",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "15"
+     },
+     {
+      "id": "highlight_top",
+      "name": "Color Top",
+      "display_name": "Color Top",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "16"
+     },
+     {
+      "id": "highlight_bottom",
+      "name": "Color Bottom",
+      "display_name": "Color Bottom",
+      "kind": "Color",
+      "default": "ca_white",
+      "extra": [],
+      "index": "17"
+     },
+     {
+      "id": "modify",
+      "name": "Modify",
+      "display_name": "Modify",
+      "kind": "Float",
+      "default": "4",
+      "extra": [],
+      "index": "18"
+     },
+     {
+      "id": "subtract",
+      "name": "Subtract",
+      "display_name": "Subtract",
+      "kind": "Bool",
+      "default": "false",
+      "extra": [],
+      "index": "19"
+     },
+     {
+      "id": "direction",
+      "name": "Direction",
+      "display_name": "Direction",
+      "kind": "Rotation",
+      "default": "-90",
+      "extra": [],
+      "index": "20"
+     },
+     {
+      "id": "shines",
+      "name": "Shines",
+      "display_name": "Shines",
+      "kind": "Float",
+      "default": "[2,1,1]",
+      "extra": [],
+      "index": "21",
+      "effective_type": "array",
+      "array_depth": 1
+     },
+     {
+      "id": "progress",
+      "name": "Progress",
+      "display_name": "Progress",
+      "kind": "Slider",
+      "default": ".5",
+      "extra": [],
+      "index": "22"
+     },
+     {
+      "id": "slope",
+      "name": "Slope",
+      "display_name": "Slope",
+      "kind": "Slider",
+      "default": "1",
+      "extra": [],
+      "index": "23"
+     },
+     {
+      "id": "axis",
+      "name": "Axis",
+      "display_name": "Axis",
+      "kind": "EButton",
+      "default": "0",
+      "extra": [],
+      "index": "24",
+      "choices": [
+       "X",
+       "Y"
+      ],
+      "source_choices": {
+       "status": "resolved",
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "X"
+        },
+        {
+         "choice_index": 1,
+         "label": "Y"
+        }
+       ]
+      }
+     },
+     {
+      "id": "seed",
+      "name": "Seed",
+      "display_name": "Seed",
+      "kind": "Float",
+      "default": "seed_random()",
+      "extra": [],
+      "index": "25"
+     }
+    ],
+    "max_groups": 64
    },
    "file": "scripts/node_pb_draw_triangle/node_pb_draw_triangle.gml",
    "inputs": [
@@ -88584,7 +94602,8 @@
      "index": "4",
      "kind": "Float",
      "name": "Shines",
-     "source_array_classification": true
+     "source_array_classification": true,
+     "effective_type": "array"
     },
     {
      "array_depth": 0,
@@ -92130,7 +98149,7 @@
      "source_array_classification": false
     },
     {
-     "array_depth": null,
+     "array_depth": 0,
      "default": "0",
      "extra": [],
      "index": "0",
@@ -92201,13 +98220,15 @@
      "default": "[0,0]",
      "index": "0",
      "name": "Position out",
-     "type": "VALUE_TYPE.float"
+     "type": "VALUE_TYPE.float",
+     "effective_type": "vector3"
     },
     {
      "default": "self",
      "index": "1",
      "name": "Path data",
-     "type": "VALUE_TYPE.pathnode"
+     "type": "VALUE_TYPE.pathnode",
+     "effective_type": "path3d"
     },
     {
      "default": "[]",
@@ -92475,7 +98496,8 @@
      "default": "self",
      "index": "0",
      "name": "Rendered",
-     "type": "VALUE_TYPE.pathnode"
+     "type": "VALUE_TYPE.pathnode",
+     "effective_type": "path3d"
     }
    ]
   },
@@ -92554,7 +98576,8 @@
      "default": "noone",
      "index": "0",
      "name": "Path",
-     "type": "VALUE_TYPE.pathnode"
+     "type": "VALUE_TYPE.pathnode",
+     "effective_type": "path3d"
     }
    ]
   },
@@ -121844,6 +127867,47 @@
     }
    ]
   },
+  "Node_Spout_Receive": {
+   "base": "Node",
+   "documentation_status": "not present in archived node matrix",
+   "file": "scripts/node_spout_receive/node_spout_receive.gml",
+   "inputs": [
+    {
+     "array_depth": 0,
+     "default": "\"PixelComposer\"",
+     "extra": [],
+     "index": "0",
+     "kind": "Text",
+     "name": "Receiver name",
+     "source_array_classification": false
+    },
+    {
+     "array_depth": 0,
+     "default": "true",
+     "extra": [],
+     "index": "1",
+     "kind": "Bool",
+     "name": "Animated",
+     "source_array_classification": false
+    }
+   ],
+   "outputs": [
+    {
+     "default": "noone",
+     "index": "0",
+     "name": "Surface",
+     "type": "VALUE_TYPE.surface"
+    }
+   ],
+   "source_evidence": {
+    "sha256": "8ea18aa6553ab9841bfd434e6c3ebaf8e7d4cd2f520e36474bf38fd8a937493e",
+    "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+    "source_url": "https://raw.githubusercontent.com/Ttanasart-pt/Pixel-Composer/b69eca232217360cf1502ef0223523d818606652/scripts/node_spout_receive/node_spout_receive.gml"
+   },
+   "source_only": true,
+   "source_origin": "official pinned source",
+   "undocumented": true
+  },
   "Node_Spout_Send": {
    "base": "Node",
    "file": "scripts/node_spout_send/node_spout_send.gml",
@@ -124338,6 +130402,76 @@
     }
    ]
   },
+  "Node_String_Insert": {
+   "array_process": {
+    "choices": [
+     "Loop",
+     "Hold",
+     "Expand",
+     "Expand inverse"
+    ],
+    "default": 0
+   },
+   "base": "Node_Processor",
+   "documentation_status": "not present in archived node matrix",
+   "file": "scripts/node_string_insert/node_string_insert.gml",
+   "inputs": [
+    {
+     "array_depth": 0,
+     "attribute": "process",
+     "default": "true",
+     "extra": [],
+     "index": "-1",
+     "inherited": "Node_Processor",
+     "kind": "Bool",
+     "name": "attribute process",
+     "source_array_classification": false
+    },
+    {
+     "array_depth": 0,
+     "default": "",
+     "extra": [],
+     "index": "0",
+     "kind": "Text",
+     "name": "Text",
+     "source_array_classification": false
+    },
+    {
+     "array_depth": 0,
+     "default": "",
+     "extra": [],
+     "index": "1",
+     "kind": "Text",
+     "name": "Insert Text",
+     "source_array_classification": false
+    },
+    {
+     "array_depth": 0,
+     "default": "0",
+     "extra": [],
+     "index": "2",
+     "kind": "Int",
+     "name": "Position",
+     "source_array_classification": false
+    }
+   ],
+   "outputs": [
+    {
+     "default": "\"\"",
+     "index": "0",
+     "name": "Text",
+     "type": "VALUE_TYPE.text"
+    }
+   ],
+   "source_evidence": {
+    "sha256": "6a55646241620f10331ffa133d12d91efdb8c6a918e9026f089ce4c491881bed",
+    "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+    "source_url": "https://raw.githubusercontent.com/Ttanasart-pt/Pixel-Composer/b69eca232217360cf1502ef0223523d818606652/scripts/node_string_insert/node_string_insert.gml"
+   },
+   "source_only": true,
+   "source_origin": "official pinned source",
+   "undocumented": true
+  },
   "Node_String_Join": {
    "base": "Node",
    "file": "scripts/node_string_join/node_string_join.gml",
@@ -125368,7 +131502,26 @@
    "dynamic": {
     "data_length": 2,
     "fixed_length": 0,
-    "template": []
+    "template": [
+     {
+      "array_depth": 0,
+      "default": "",
+      "extra": [],
+      "index": "0",
+      "kind": "Text",
+      "name": "Key",
+      "source_array_classification": false
+     },
+     {
+      "array_depth": 0,
+      "default": "0",
+      "extra": [],
+      "index": "1",
+      "kind": "Generic_any",
+      "name": "value",
+      "source_array_classification": false
+     }
+    ]
    },
    "file": "scripts/node_struct/node_struct.gml",
    "inputs": [],
@@ -127472,15 +133625,6 @@
      "kind": "Surface",
      "map_of": "Intensity",
      "name": "Intensity Map",
-     "source_array_classification": false
-    },
-    {
-     "array_depth": 0,
-     "default": "false",
-     "extra": [],
-     "index": "9",
-     "kind": "Bool",
-     "name": "Absolute",
      "source_array_classification": false
     },
     {
@@ -149458,5 +155602,71 @@
    "sha256": "687144814ea6a0f8c1832c116157c7a2550caee688a236fa2ef7a2fa21148f98"
   }
  },
- "source_commit": "b69eca232217360cf1502ef0223523d818606652"
+ "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+ "source_constructor_evidence": {
+  "scripts/__node_3d_light/__node_3d_light.gml": {
+   "bytes": 1123,
+   "sha256": "bd0a4c937aed35270f3ff99469d9f2904626cfcb96683ea034d29f51baa8f68f"
+  },
+  "scripts/__node_value_number/__node_value_number.gml": {
+   "bytes": 449,
+   "sha256": "e3b422fe0d6aa12d549137153e04fb7d17e6373571381a1188765cb4871b0a6d"
+  },
+  "scripts/node_array_shift/node_array_shift.gml": {
+   "bytes": 1633,
+   "sha256": "5680bca374489081b0f5fb379b8f28c03011e3405303e238bd714825c72ebb69"
+  },
+  "scripts/node_color_hsv/node_color_hsv.gml": {
+   "bytes": 2340,
+   "sha256": "55a54d02ef4a3f5164142a1a36d9793dacb3e6aa6a0cc243ec16c85c4701dcb0"
+  },
+  "scripts/node_color_rgb/node_color_rgb.gml": {
+   "bytes": 2392,
+   "sha256": "291fa215ba4a608c7f7e8a96655985d230c5bce76ec2a102678b1e70f459dfd8"
+  },
+  "scripts/node_gm_room/node_gm_room.gml": {
+   "bytes": 21608,
+   "sha256": "b27f4a56cec5bc5be2b435f8ed82758db359655f47d6ca1d2aa9673faa369b41"
+  },
+  "scripts/node_path_3d/node_path_3d.gml": {
+   "bytes": 52913,
+   "sha256": "0472ae043ef0b71e5c59699a5104803a4f29fb665fcbeb6d64310066788a01b2"
+  },
+  "scripts/node_struct/node_struct.gml": {
+   "bytes": 4564,
+   "sha256": "629a810c8fb1bb5b2a28178b43d22379782f2414af0a8992d09b4762906ce860"
+  },
+  "scripts/node_value/node_value.gml": {
+   "bytes": 111774,
+   "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd"
+  },
+  "scripts/node_value_float/node_value_float.gml": {
+   "bytes": 4061,
+   "sha256": "23b15be3aad94ae0101dbf500e59c76514aab31cb96c5f619c11f28e57b0e43b"
+  },
+  "scripts/node_3d_instancer/node_3d_instancer.gml": {
+   "bytes": 11854,
+   "sha256": "98b34947f3a697977d37c30b5acee9592a491993083ecc092c21320ab424b719"
+  },
+  "scripts/node_export/node_export.gml": {
+   "bytes": 42364,
+   "sha256": "9c64bc3cb1e066fc786b17af9b4f5487a50f0f9561a05cbd8c06990a1f4408c0"
+  },
+  "scripts/node_path_3d_camera/node_path_3d_camera.gml": {
+   "bytes": 9646,
+   "sha256": "85d218b4ad62cd9219e1521ff4cf1abe235c46c32b950431df053a805575bcd1"
+  },
+  "scripts/node_path_3d_transform/node_path_3d_transform.gml": {
+   "bytes": 7185,
+   "sha256": "8b6405b339109bdc90fd9133013808cc3f1830d6192071e679ddae7b64c11d34"
+  },
+  "scripts/node_pb_draw/node_pb_draw.gml": {
+   "bytes": 14757,
+   "sha256": "edc69b020eb4b39dfa866d00841c857aab2c2e54ba8ce482619a51fc283001cb"
+  },
+  "scripts/node_pd_filter_shine/node_pd_filter_shine.gml": {
+   "bytes": 4090,
+   "sha256": "cdd5b0e574f2fb44f737f305c1dd3c1cbb84e3cd5606b7b8887052d1603246e7"
+  }
+ }
 }

@@ -385,9 +385,10 @@ TEST_CASE(
 	REQUIRE(entry);
 	const auto *red = FindCatalogueInput(*entry, "red");
 	REQUIRE(red);
-	CHECK_FALSE(red->ArrayDepthKnown);
-	CHECK_FALSE(CatalogueAuthoredArray(*entry, *red, Numbers({0, 1})));
-	CHECK(Compile(document, plan, diagnostic) == Status::TypeMismatch);
+	CHECK(red->ArrayDepthKnown);
+	CHECK(red->ArrayDepth == 0);
+	CHECK(CatalogueAuthoredArray(*entry, *red, Numbers({0, 1})));
+	CHECK(Compile(document, plan, diagnostic) == Status::Ok);
 	document.Nodes.front().Type = "image.solid";
 	document.Nodes.front().Values = {{"width", ArrayValue{ValueType::Integer, {int64_t(1), int64_t(2)}}}};
 	document.Outputs.front().Port = "image";

@@ -3,9 +3,12 @@
 #include "EvaluationAllocator.hpp"
 #include "GroupInputDepth.hpp"
 #include "GroupReplayInternal.hpp"
+#include "HostCaptureReceipts.hpp"
 #include "ImageArrayCollector.hpp"
 #include "NodeExecutors.hpp"
 #include "PaletteOps.hpp"
+#include "PcxControls.hpp"
+#include "PixelBoxMath.hpp"
 #include "PixelOps.hpp"
 #include "PixelOpsBasicFilters.hpp"
 #include "PixelOpsBlend.hpp"
@@ -24,8 +27,12 @@
 #include "PixelOpsVignette.hpp"
 #include "PixelOpsWarp.hpp"
 #include "ProcessorBatch.hpp"
+#include "PuppetControl.hpp"
+#include "SimulationAliases.hpp"
 #include "SnapshotAudioMoves.hpp"
 #include "SourceGetterProjection.hpp"
+#include "SourceLuaSockets.hpp"
+#include "SourceVerletPathCodec.hpp"
 #include "Timeline.hpp"
 #include "TimelineDrivers.hpp"
 #include "TimelineOverrides.hpp"
@@ -39,6 +46,9 @@
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/SliceStackReplay.hpp>
+#include <engine/imagegraph/StatefulReplay.hpp>
+#include <engine/imagegraph/StatefulTemporalCone.hpp>
 #include <engine/imagegraph/Vector2Presentation.hpp>
 #include <engine/imagegraph/WavPreview.hpp>
 
@@ -62,6 +72,10 @@
 namespace engine::imagegraph {
 	namespace {
 		bool SourceModePort(const Node &node, std::string_view port) {
+			if (node.Type == "pc.global_scope")
+				return std::ranges::any_of(node.DynamicInputs, [port](const DynamicInput &input) {
+					return input.Id == port;
+				});
 			if (detail::AliasedSourceInput(node, port) ||
 				(node.Type == "pc.group_input" && port == "parent_value"))
 				return true;
@@ -803,7 +817,7 @@ namespace engine::imagegraph {
 		};
 
 		// Indexed by ValueType. Names are durable document text.
-		constexpr std::array<std::string_view, 40> TYPE_NAMES = {
+		constexpr std::array<std::string_view, 41> TYPE_NAMES = {
 			"boolean",	"integer",	  "scalar",		  "text",		  "colour",
 			"vector2",	"image",	  "array",		  "gradient",	  "area",
 			"curve",	"vector4",	  "path2d",		  "vector3",	  "quaternion",
@@ -812,8 +826,9 @@ namespace engine::imagegraph {
 			"sdf",		"armature",	  "atlas",		  "tileset",	  "pixel_box",
 			"scene3d",	"material3d", "light3d",	  "buffer",		  "struct",
 			"any",		"node_ref",	  "pcx_node",	  "object",		  "dynamic_surface",
+			"path3d",
 		};
-		static_assert(static_cast<size_t>(ValueType::DynamicSurface) + 1 == TYPE_NAMES.size());
+		static_assert(static_cast<size_t>(ValueType::Path3D) + 1 == TYPE_NAMES.size());
 
 		constexpr std::array<std::string_view, 9> DEPTH_NAMES = {
 			"input", "inherited", "rgba4", "rgba8", "rgba16f", "rgba32f", "r8", "r16f", "r32f"
@@ -904,6 +919,7 @@ namespace engine::imagegraph {
 			case ValueType::Object:
 				return 1ull << 13;
 			case ValueType::Path2D:
+			case ValueType::Path3D:
 				return 1ull << 15;
 			case ValueType::Particle:
 				return 1ull << 16;
@@ -971,7 +987,30 @@ namespace engine::imagegraph {
 		constexpr std::string_view BYPASS_SUFFIX = ".bypass";
 
 		std::optional<ValueType> FindPortType(const Node &node, std::string_view id, PortDirection side) {
-			if (const PortSchema *port = FindPort(node.Type, id, side)) return port->Type;
+			if (const PortSchema *port = FindPort(node.Type, id, side)) {
+				if (side == PortDirection::Output &&
+					(node.Type == "pc.rgb_channel" || node.Type == "pc.hsv_channel")) {
+					bool outputArray = false;
+					for (const auto &value : node.Values)
+						if (value.Port == "output_array") {
+							if (const auto *flag = std::get_if<bool>(&value.Data))
+								outputArray = *flag;
+							else if (const auto *real = std::get_if<double>(&value.Data))
+								outputArray = *real != 0;
+						}
+					if (outputArray)
+						return (id == "red" || id == "hue") ? std::optional<ValueType>{ValueType::Array}
+															: std::nullopt;
+				}
+				if (side == PortDirection::Output && node.Type == "pc.csv_file_read" && id == "content") {
+					for (const auto &value : node.Values)
+						if (value.Port == "convert_to_number") {
+							if (const auto *flag = std::get_if<bool>(&value.Data))
+								return *flag ? ValueType::Scalar : ValueType::Text;
+						}
+				}
+				return port->Type;
+			}
 			if (side == PortDirection::Output && id.ends_with(BYPASS_SUFFIX)) {
 				if (const CatalogueEntry *entry = FindCatalogueEntry(node.Type)) {
 					if (const auto *input =
@@ -979,9 +1018,16 @@ namespace engine::imagegraph {
 						return input->Type;
 				}
 			}
+			if (side == PortDirection::Output) {
+				for (const DynamicOutput &output : node.DynamicOutputs)
+					if (output.Id == id) return output.Type;
+			}
 			if (side == PortDirection::Input) {
 				for (const DynamicInput &input : node.DynamicInputs) {
-					if (input.Id == id) return input.Type;
+					if (input.Id == id) {
+						if (const auto selected = detail::SourceLuaArgumentType(node, id)) return selected;
+						return input.Type;
+					}
 				}
 			}
 			return std::nullopt;
@@ -1046,6 +1092,8 @@ namespace engine::imagegraph {
 		}
 
 		std::string ValueTag(const Value &value) {
+			if (std::holds_alternative<PathValue3D>(value)) return "p3";
+			if (std::holds_alternative<PixelBoxValue>(value)) return "pb";
 			switch (value.index()) {
 			case 0:
 				return "b";
@@ -1070,7 +1118,9 @@ namespace engine::imagegraph {
 			case 10:
 				return "w";
 			case 11:
-				return "p";
+				return std::get<Path2D>(value).SourceOperation ? "po"
+					   : std::get<Path2D>(value).Segmented	   ? "ps"
+															   : "p";
 			case 12:
 				return "3";
 			case 13:
@@ -1086,6 +1136,34 @@ namespace engine::imagegraph {
 
 		void WriteQuoted(std::ostream &stream, std::string_view text);
 		bool ReadQuoted(std::istream &stream, std::string &text);
+		bool ReadQuoted(std::istream &stream, std::string &text, size_t maximum);
+
+		void WritePathPayload(std::ostream &stream, const Path2D &path) {
+			if (path.SourceOperation) {
+				const auto &operation = *path.SourceOperation;
+				if (operation.Kind == SourcePathOperationKind::VerletMesh) {
+					stream << "verlet ";
+					detail::WriteSourceVerletPath(stream, operation);
+					return;
+				}
+				stream << (operation.Kind == SourcePathOperationKind::Reverse ? "reverse" : operation.Kind == SourcePathOperationKind::Trim ? "trim" : "combine") << ' '
+					   << operation.Inputs.size();
+				if (operation.Kind == SourcePathOperationKind::Trim) stream << ' ' << operation.TrimRange.X << ' ' << operation.TrimRange.Y;
+				for (const auto &child : operation.Inputs) {
+					stream << ' ' << (child.SourceOperation ? "po" : child.Segmented ? "ps" : "p") << ' ';
+					WritePathPayload(stream, child);
+				}
+				return;
+			}
+			stream << path.Loop << ' ' << path.Anchors.size() << ' ' << path.Weights.size();
+			for (const auto &anchor : path.Anchors) {
+				for (double field : anchor.Controls)
+					stream << ' ' << std::setprecision(17) << field;
+				stream << ' ' << anchor.Index;
+			}
+			for (const auto &weight : path.Weights)
+				stream << ' ' << std::setprecision(17) << weight.Position << ' ' << weight.Weight;
+		}
 
 		void WriteValue(std::ostream &stream, const Value &value) {
 			stream << ValueTag(value) << ' ';
@@ -1177,16 +1255,76 @@ namespace engine::imagegraph {
 				stream << std::setprecision(17) << audio->SampleRate << ' ' << audio->Samples.size();
 				for (const double sample : audio->Samples)
 					stream << ' ' << sample;
-			} else if (const auto *storedPath = std::get_if<Path2D>(&value)) {
-				const Path2D &path = *storedPath;
-				stream << (path.Loop ? 1 : 0) << ' ' << path.Anchors.size() << ' ' << path.Weights.size();
-				for (const PathAnchor &anchor : path.Anchors) {
-					for (double field : anchor.Controls)
-						stream << ' ' << std::setprecision(17) << field;
-					stream << ' ' << anchor.Index;
+			} else if (const auto *storedPath = std::get_if<PathValue3D>(&value)) {
+				stream << bool(storedPath->Data);
+				if (storedPath->Data) {
+					const auto &path = *storedPath->Data;
+					stream << ' ' << path.Loop << ' ' << path.Resolution << ' ' << path.Anchors.size() << ' '
+						   << path.SourcePresent << ' ' << bool(path.Source2D) << ' '
+						   << path.Transforms.size();
+					for (const auto &anchor : path.Anchors) {
+						for (double number : anchor.Controls)
+							stream << ' ' << std::setprecision(17) << number;
+						stream << ' ' << anchor.Index;
+					}
+					if (path.Source2D) {
+						stream << ' ';
+						WriteValue(stream, Value{*path.Source2D});
+					}
+					for (const auto &transform : path.Transforms) {
+						const double fields[]{
+							transform.Position.X,
+							transform.Position.Y,
+							transform.Position.Z,
+							transform.Anchor.X,
+							transform.Anchor.Y,
+							transform.Anchor.Z,
+							transform.Scale.X,
+							transform.Scale.Y,
+							transform.Scale.Z,
+							transform.Rotation.X,
+							transform.Rotation.Y,
+							transform.Rotation.Z,
+							transform.Rotation.W
+						};
+						for (double number : fields)
+							stream << ' ' << std::setprecision(17) << number;
+						stream << ' ' << transform.Projective;
+						if (transform.Projective) {
+							stream << ' ' << transform.DepthWeight << ' ' << std::setprecision(17)
+								   << transform.ProjectionScale.X << ' ' << transform.ProjectionScale.Y;
+							for (double value : transform.CameraView)
+								stream << ' ' << std::setprecision(17) << value;
+							for (double value : transform.CameraProjection)
+								stream << ' ' << std::setprecision(17) << value;
+						}
+					}
 				}
-				for (const PathWeight &weight : path.Weights)
-					stream << ' ' << std::setprecision(17) << weight.Position << ' ' << weight.Weight;
+			} else if (const auto *storedPath = std::get_if<Path2D>(&value)) {
+				WritePathPayload(stream, *storedPath);
+			} else if (const auto *pixelBox = std::get_if<PixelBoxValue>(&value)) {
+				stream << bool(pixelBox->Data);
+				if (pixelBox->Data) {
+					const PixelBoxData &box = *pixelBox->Data;
+					for (double field : box.BaseBounds)
+						stream << ' ' << std::setprecision(17) << field;
+					stream << ' ' << bool(box.FixedBounds);
+					if (box.FixedBounds)
+						for (double field : *box.FixedBounds)
+							stream << ' ' << std::setprecision(17) << field;
+					for (uint8_t mode : box.AnchorModes)
+						stream << ' ' << unsigned(mode);
+					for (uint8_t mode : box.PreviousAnchorModes)
+						stream << ' ' << unsigned(mode);
+					for (double anchor : box.Anchors)
+						stream << ' ' << std::setprecision(17) << anchor;
+					for (bool fractional : box.Fractional)
+						stream << ' ' << fractional;
+					for (uint8_t mode : box.DimensionBoundModes)
+						stream << ' ' << unsigned(mode);
+					for (double bound : box.DimensionBounds)
+						stream << ' ' << std::setprecision(17) << bound;
+				}
 			}
 		}
 
@@ -1467,13 +1605,192 @@ namespace engine::imagegraph {
 				value = std::move(audio);
 				return true;
 			}
-			if (tag == "p") {
+			if (tag == "pb") {
+				if (version < 9) return false;
+				unsigned present = 0;
+				if (!(stream >> present) || present > 1) return false;
+				PixelBoxValue stored;
+				if (present) {
+					if (!admit(sizeof(PixelBoxData))) return false;
+					PixelBoxData &box = stored.Data.emplace();
+					for (double &field : box.BaseBounds)
+						if (!(stream >> field) || !std::isfinite(field)) return false;
+					unsigned fixed = 0;
+					if (!(stream >> fixed) || fixed > 1) return false;
+					if (fixed) {
+						box.FixedBounds.emplace();
+						for (double &field : *box.FixedBounds)
+							if (!(stream >> field) || !std::isfinite(field)) return false;
+					}
+					for (uint8_t &mode : box.AnchorModes) {
+						unsigned storedMode = 0;
+						if (!(stream >> storedMode) || storedMode > 3) return false;
+						mode = static_cast<uint8_t>(storedMode);
+					}
+					for (uint8_t &mode : box.PreviousAnchorModes) {
+						unsigned storedMode = 0;
+						if (!(stream >> storedMode) || storedMode > 3) return false;
+						mode = static_cast<uint8_t>(storedMode);
+					}
+					for (double &anchor : box.Anchors)
+						if (!(stream >> anchor) || !std::isfinite(anchor)) return false;
+					for (bool &fractional : box.Fractional) {
+						unsigned storedFractional = 0;
+						if (!(stream >> storedFractional) || storedFractional > 1) return false;
+						fractional = storedFractional != 0;
+					}
+					for (uint8_t &mode : box.DimensionBoundModes) {
+						unsigned storedMode = 0;
+						if (!(stream >> storedMode) || storedMode != 0) return false;
+						mode = static_cast<uint8_t>(storedMode);
+					}
+					for (double &bound : box.DimensionBounds)
+						if (!(stream >> bound) || !std::isfinite(bound)) return false;
+					if (!IsFinite(Value{stored})) return false;
+				}
+				value = std::move(stored);
+				return true;
+			}
+			if (tag == "p3" && version >= 9) {
+				unsigned present = 0, loop = 0, sourcePresent = 1, source2d = 0;
+				uint32_t resolution = 32;
+				size_t count = 0, transforms = 0;
+				if (!(stream >> present) || present > 1) return false;
+				PathValue3D path;
+				if (present) {
+					if (!(stream >> loop >> resolution >> count >> sourcePresent >> source2d >> transforms) ||
+						loop > 1 || resolution == 0 || resolution > Limits::MaximumArrayElements ||
+						count > Limits::MaximumPathAnchors || sourcePresent > 1 || source2d > 1 ||
+						transforms > Limits::MaximumArrayDepth)
+						return false;
+					if (!admit(
+							sizeof(PathData3D) + count * sizeof(PathAnchor3D) +
+							transforms * sizeof(PathTransform3D)
+						))
+						return false;
+					auto &data = path.Data.emplace();
+					data.Loop = bool(loop);
+					data.SourcePresent = bool(sourcePresent);
+					data.Resolution = resolution;
+					data.Anchors.reserve(count);
+					for (size_t i = 0; i < count; ++i) {
+						PathAnchor3D anchor;
+						for (double &number : anchor.Controls)
+							if (!(stream >> number) || !std::isfinite(number)) return false;
+						if (!(stream >> anchor.Index) || !std::isfinite(anchor.Index)) return false;
+						data.Anchors.push_back(anchor);
+					}
+					if (source2d) {
+						Value source;
+						if (!ReadValue(
+								stream,
+								source,
+								version,
+								false,
+								budget,
+								outputCharge,
+								allocationRefused,
+								depth + 1,
+								arrayCount
+							))
+							return false;
+						auto *planar = std::get_if<Path2D>(&source);
+						if (!planar) return false;
+						data.Source2D = std::move(*planar);
+					}
+					data.Transforms.reserve(transforms);
+					for (size_t i = 0; i < transforms; ++i) {
+						PathTransform3D transform;
+						double *fields[]{
+							&transform.Position.X,
+							&transform.Position.Y,
+							&transform.Position.Z,
+							&transform.Anchor.X,
+							&transform.Anchor.Y,
+							&transform.Anchor.Z,
+							&transform.Scale.X,
+							&transform.Scale.Y,
+							&transform.Scale.Z,
+							&transform.Rotation.X,
+							&transform.Rotation.Y,
+							&transform.Rotation.Z,
+							&transform.Rotation.W
+						};
+						for (double *number : fields)
+							if (!(stream >> *number) || !std::isfinite(*number)) return false;
+						unsigned projective = 0, depthWeight = 0;
+						if (!(stream >> projective) || projective > 1) return false;
+						transform.Projective = bool(projective);
+						if (projective) {
+							if (!(stream >> depthWeight >> transform.ProjectionScale.X >>
+								  transform.ProjectionScale.Y) ||
+								depthWeight > 1 || !detail::MeshFinite(transform.ProjectionScale))
+								return false;
+							transform.DepthWeight = bool(depthWeight);
+							for (double &number : transform.CameraView)
+								if (!(stream >> number) || !std::isfinite(number)) return false;
+							for (double &number : transform.CameraProjection)
+								if (!(stream >> number) || !std::isfinite(number)) return false;
+						}
+						data.Transforms.push_back(transform);
+					}
+				}
+				value = std::move(path);
+				return true;
+			}
+
+			if (tag == "po" && version >= 9) {
+				std::string kind;
+				size_t count = 0;
+				if (!(stream >> kind)) return false;
+				if (kind == "verlet") {
+					if (!admit(sizeof(SourcePathData2D))) return false;
+					Path2D path;
+					auto &operation = path.SourceOperation.emplace();
+					operation.Kind = SourcePathOperationKind::VerletMesh;
+					if (!detail::ReadSourceVerletPath(stream, operation, admit)) return false;
+					value = std::move(path);
+					return true;
+				}
+				if (!(stream >> count) || count > Limits::MaximumArrayElements ||
+					(kind != "reverse" && kind != "combine" && kind != "trim") || (kind != "combine" && count > 1))
+					return false;
+				if (!admit(sizeof(SourcePathData2D) + count * sizeof(Path2D))) return false;
+				Path2D path;
+				auto &operation = path.SourceOperation.emplace();
+				operation.Kind =
+					kind == "reverse" ? SourcePathOperationKind::Reverse : kind == "trim" ? SourcePathOperationKind::Trim : SourcePathOperationKind::Combine;
+				if (kind == "trim" && (!(stream >> operation.TrimRange.X >> operation.TrimRange.Y) || !std::isfinite(operation.TrimRange.X) || !std::isfinite(operation.TrimRange.Y))) return false;
+				operation.Inputs.reserve(count);
+				for (size_t index = 0; index < count; ++index) {
+					Value child;
+					if (!ReadValue(
+							stream,
+							child,
+							version,
+							true,
+							budget,
+							outputCharge,
+							allocationRefused,
+							depth + 1,
+							arrayCount
+						))
+						return false;
+					const auto *typed = std::get_if<Path2D>(&child);
+					if (!typed) return false;
+					operation.Inputs.push_back(std::move(std::get<Path2D>(child)));
+				}
+				value = std::move(path);
+				return true;
+			}
+			if (tag == "p" || (tag == "ps" && version >= 9)) {
 				unsigned loop = 0;
 				size_t anchorCount = 0, weightCount = 0;
 				if (!(stream >> loop >> anchorCount >> weightCount) || loop > 1 ||
 					anchorCount > Limits::MaximumPathAnchors || weightCount > Limits::MaximumPathWeights)
 					return false;
 				Path2D path;
+				path.Segmented = tag == "ps";
 				path.Loop = loop != 0;
 				if (!admit(anchorCount * sizeof(PathAnchor) + weightCount * sizeof(PathWeight))) return false;
 				path.Anchors.reserve(anchorCount);
@@ -1531,32 +1848,41 @@ namespace engine::imagegraph {
 		}
 
 		bool ReadQuoted(std::istream &stream, std::string &text) {
+			return ReadQuoted(stream, text, std::numeric_limits<size_t>::max());
+		}
+
+		bool ReadQuoted(std::istream &stream, std::string &text, size_t maximum) {
 			stream >> std::ws;
 			if (stream.get() != '"') return false;
 			text.clear();
+			const auto append = [&](char value) {
+				if (text.size() == maximum) return false;
+				text.push_back(value);
+				return true;
+			};
 			char character = 0;
 			while (stream.get(character)) {
 				if (character == '"') return true;
 				if (character != '\\') {
-					text.push_back(character);
+					if (!append(character)) return false;
 					continue;
 				}
 				if (!stream.get(character)) return false;
 				switch (character) {
 				case '\\':
-					text.push_back('\\');
+					if (!append('\\')) return false;
 					break;
 				case '"':
-					text.push_back('"');
+					if (!append('"')) return false;
 					break;
 				case 'n':
-					text.push_back('\n');
+					if (!append('\n')) return false;
 					break;
 				case 'r':
-					text.push_back('\r');
+					if (!append('\r')) return false;
 					break;
 				case 't':
-					text.push_back('\t');
+					if (!append('\t')) return false;
 					break;
 				default:
 					return false;
@@ -1630,7 +1956,7 @@ namespace engine::imagegraph {
 
 	bool IsAuthoredValueType(ValueType type) {
 		return (type != ValueType::Image && type != ValueType::Mesh && type < ValueType::AudioBit) ||
-			   type == ValueType::Matrix;
+			   type == ValueType::Matrix || type == ValueType::Path3D;
 	}
 
 	bool detail::ReadValueText(std::string_view text, Value &value) {
@@ -1662,9 +1988,19 @@ namespace engine::imagegraph {
 	}
 
 	std::string Write(const Document &document) {
+		if (document.Project && (!ValidProjectAnimationRegions(*document.Project) ||
+								 (document.FormatVersion < 9 && !document.Project->AnimationRegions.empty())))
+			return {};
 		std::ostringstream stream;
 		stream.imbue(std::locale::classic());
 		stream << "imagegraph " << document.FormatVersion << '\n';
+		if (document.FormatVersion < 9 && !document.SliceStackActions.empty()) return {};
+		for (const auto &action : document.SliceStackActions) {
+			stream << "slice_stack_action ";
+			WriteQuoted(stream, action.NodeId);
+			stream << ' ' << action.Time.Tick << ' ' << std::setprecision(17) << action.Time.Subframe << ' '
+				   << action.Time.NegativeFrame << ' ' << action.WorkPixels << '\n';
+		}
 		for (size_t nodeIndex = 0; nodeIndex < document.Nodes.size(); nodeIndex++) {
 			const Node &node = document.Nodes[nodeIndex];
 			stream << "node ";
@@ -1705,6 +2041,20 @@ namespace engine::imagegraph {
 					WriteQuoted(stream, port);
 					stream << '\n';
 				}
+			if (!node.SourceDisplayName.empty()) {
+				stream << "node_name " << nodeIndex << ' ';
+				WriteQuoted(stream, node.Id);
+				stream << ' ';
+				WriteQuoted(stream, node.SourceDisplayName);
+				stream << '\n';
+			}
+			if (!node.SourceInternalName.empty()) {
+				stream << "node_internal_name " << nodeIndex << ' ';
+				WriteQuoted(stream, node.Id);
+				stream << ' ';
+				WriteQuoted(stream, node.SourceInternalName);
+				stream << '\n';
+			}
 			for (const AuthoredValue &value : node.Values) {
 				stream << "value " << nodeIndex << ' ';
 				WriteQuoted(stream, node.Id);
@@ -1714,6 +2064,23 @@ namespace engine::imagegraph {
 				WriteValue(stream, value.Data);
 				stream << '\n';
 			}
+			for (const AuthoredValue &property : node.SourceProperties) {
+				stream << "source_property " << nodeIndex << ' ';
+				WriteQuoted(stream, node.Id);
+				stream << ' ';
+				WriteQuoted(stream, property.Port);
+				stream << ' ';
+				WriteValue(stream, property.Data);
+				stream << '\n';
+			}
+			if (document.FormatVersion >= 9)
+				for (const DynamicOutput &output : node.DynamicOutputs) {
+					stream << "dynamic_output " << nodeIndex << ' ';
+					WriteQuoted(stream, node.Id);
+					stream << ' ';
+					WriteQuoted(stream, output.Id);
+					stream << ' ' << TypeName(output.Type) << '\n';
+				}
 			if (document.FormatVersion >= 2) {
 				for (const DynamicInput &input : node.DynamicInputs) {
 					stream << "dynamic " << nodeIndex << ' ';
@@ -1726,8 +2093,27 @@ namespace engine::imagegraph {
 						WriteValue(stream, *input.Default);
 					}
 					stream << '\n';
+					if (document.FormatVersion >= 9 && !input.SourceLayerName.empty()) {
+						stream << "dynamic_layer " << nodeIndex << ' ';
+						WriteQuoted(stream, node.Id);
+						stream << ' ';
+						WriteQuoted(stream, input.Id);
+						stream << ' ';
+						WriteQuoted(stream, input.SourceLayerName);
+						stream << '\n';
+					}
 				}
 			}
+			if (document.FormatVersion >= 9)
+				for (const SourceInputExpression &expression : node.SourceInputExpressions) {
+					stream << "node_expression " << nodeIndex << ' ';
+					WriteQuoted(stream, node.Id);
+					stream << ' ';
+					WriteQuoted(stream, expression.Port);
+					stream << ' ' << (expression.Enabled ? 1 : 0) << ' ';
+					WriteQuoted(stream, expression.Code);
+					stream << '\n';
+				}
 		}
 		for (const Link &link : document.Links) {
 			stream << "link ";
@@ -1750,6 +2136,13 @@ namespace engine::imagegraph {
 				WriteQuoted(stream, group.ParentId);
 			}
 			stream << '\n';
+			if (document.FormatVersion >= 9 && !group.OwnerNodeId.empty()) {
+				stream << "group_owner ";
+				WriteQuoted(stream, group.Id);
+				stream << ' ';
+				WriteQuoted(stream, group.OwnerNodeId);
+				stream << '\n';
+			}
 			if (document.FormatVersion >= 9 && !group.InstanceBase.empty()) {
 				stream << "group_instance ";
 				WriteQuoted(stream, group.Id);
@@ -1883,6 +2276,13 @@ namespace engine::imagegraph {
 							WriteQuoted(stream, "sine");
 							stream << ' ' << driver.Frequency << ' ' << driver.Amplitude << ' '
 								   << driver.Phase << ' ' << driver.Smooth;
+						} else if constexpr (std::is_same_v<T, KeyframeAudioDriver>) {
+							WriteQuoted(stream, "native_audio");
+							stream << ' ';
+							WriteQuoted(stream, driver.SourceId);
+							stream << ' ';
+							WriteQuoted(stream, driver.Metric);
+							stream << ' ' << driver.Channel << ' ' << driver.Gain << ' ' << driver.Bias;
 						} else if constexpr (std::is_same_v<T, KeyframeCurveDriver>) {
 							WriteQuoted(stream, "curve");
 							stream << ' ';
@@ -1899,6 +2299,11 @@ namespace engine::imagegraph {
 				stream << '\n';
 			}
 		}
+		if (!document.ProjectGlobalNodeId.empty()) {
+			stream << "project_global_node ";
+			WriteQuoted(stream, document.ProjectGlobalNodeId);
+			stream << '\n';
+		}
 		if (document.FormatVersion >= 7 && document.Project) {
 			const ProjectSettings &project = *document.Project;
 			stream << "project " << project.SurfaceWidth << ' ' << project.SurfaceHeight << ' '
@@ -1908,6 +2313,8 @@ namespace engine::imagegraph {
 					   << unsigned(colour.Blue) << ' ' << unsigned(colour.Alpha);
 			stream << '\n';
 			if (document.FormatVersion >= 9) {
+				if (project.Shader3D != 0)
+					stream << "project_shader " << (project.Shader3D == 1 ? "pbr" : "invalid") << '\n';
 				if (project.ColorDepth != 1)
 					stream << "project_depth "
 						   << (project.ColorDepth >= 0 && project.ColorDepth <= 6
@@ -1925,6 +2332,20 @@ namespace engine::imagegraph {
 																		  : "invalid")
 						   << ' ' << guide.Position;
 				stream << '\n';
+				if (!project.AnimationRegions.empty()) {
+					stream << "project_regions " << project.AnimationRegions.size() << '\n';
+					for (const AnimationRegion &region : project.AnimationRegions) {
+						stream << "animation_region ";
+						WriteQuoted(stream, region.Label);
+						stream << ' ' << region.Start.Tick << ' '
+							   << (region.Start.NegativeFrame ? "negative" : "positive") << ' '
+							   << std::setprecision(17) << region.Start.Subframe << ' ' << region.End.Tick
+							   << ' ' << (region.End.NegativeFrame ? "negative" : "positive") << ' '
+							   << region.End.Subframe << ' ';
+						WriteValue(stream, Value{region.Color});
+						stream << '\n';
+					}
+				}
 			}
 		}
 		if (document.FormatVersion >= 4) {
@@ -1984,11 +2405,14 @@ namespace engine::imagegraph {
 
 		std::optional<PreviewGridSettings> previewGrid;
 		std::optional<int64_t> projectDepth;
+		std::optional<int64_t> projectShader;
 		std::set<std::string> groupDepths;
 		std::set<std::string> groupSampling;
 		std::set<size_t> keyTimes;
 		std::set<size_t> keyKinds;
 		std::optional<std::pair<bool, std::vector<PreviewRulerGuide>>> previewRulers;
+		std::optional<size_t> projectRegionCount;
+		size_t projectRegionTextBytes = 0;
 		size_t lineNumber = 1;
 		while (std::getline(input, line)) {
 			lineNumber++;
@@ -2009,7 +2433,20 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				parsed.Nodes.push_back(std::move(node));
-			} else if (marker == "value") {
+			} else if (marker == "node_name" || marker == "node_internal_name") {
+				size_t index = 0;
+				std::string id, name;
+				if (parsed.FormatVersion < 9 || !(row >> index) ||
+					!ReadQuoted(row, id, Limits::MaximumTextBytes) ||
+					!ReadQuoted(row, name, Limits::MaximumTextBytes) || name.empty() || HasTrailing(row) ||
+					index >= parsed.Nodes.size() || parsed.Nodes[index].Id != id ||
+					!(marker == "node_name" ? parsed.Nodes[index].SourceDisplayName
+											: parsed.Nodes[index].SourceInternalName)
+						 .empty())
+					goto malformed;
+				(marker == "node_name" ? parsed.Nodes[index].SourceDisplayName
+									   : parsed.Nodes[index].SourceInternalName) = std::move(name);
+			} else if (marker == "value" || (marker == "source_property" && parsed.FormatVersion >= 9)) {
 				size_t nodeIndex = 0;
 				std::string nodeId, port;
 				Value value;
@@ -2021,7 +2458,8 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				Node &node = parsed.Nodes[nodeIndex];
-				if (node.Values.size() == Limits::MaximumPropertiesPerNode) {
+				auto &properties = marker == "value" ? node.Values : node.SourceProperties;
+				if (properties.size() == Limits::MaximumPropertiesPerNode) {
 					SetDiagnostic(
 						diagnostic,
 						Status::LimitExceeded,
@@ -2041,7 +2479,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
-				node.Values.push_back({std::move(port), std::move(value)});
+				properties.push_back({std::move(port), std::move(value)});
 			} else if (marker == "dynamic" && parsed.FormatVersion >= 2) {
 				size_t nodeIndex = 0;
 				std::string nodeId, inputId, typeName;
@@ -2074,7 +2512,8 @@ namespace engine::imagegraph {
 					dynamic.Default = std::move(value);
 				}
 				if (HasTrailing(row)) goto malformed;
-				if (parsed.Nodes[nodeIndex].DynamicInputs.size() == Limits::MaximumDynamicInputsPerNode) {
+				if (parsed.Nodes[nodeIndex].DynamicInputs.size() ==
+					MaximumDynamicInputsForType(parsed.Nodes[nodeIndex].Type)) {
 					SetDiagnostic(
 						diagnostic,
 						Status::LimitExceeded,
@@ -2085,6 +2524,57 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				parsed.Nodes[nodeIndex].DynamicInputs.push_back(std::move(dynamic));
+			} else if (marker == "dynamic_layer" && parsed.FormatVersion >= 9) {
+				size_t nodeIndex = 0;
+				std::string nodeId, inputId, name;
+				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId) || !ReadQuoted(row, inputId) ||
+					!ReadQuoted(row, name) || name.empty() || HasTrailing(row) ||
+					nodeIndex >= parsed.Nodes.size() || parsed.Nodes[nodeIndex].Id != nodeId)
+					goto malformed;
+				auto &inputs = parsed.Nodes[nodeIndex].DynamicInputs;
+				auto found = std::find_if(inputs.begin(), inputs.end(), [&](const auto &input) {
+					return input.Id == inputId;
+				});
+				if (found == inputs.end() || !found->SourceLayerName.empty()) goto malformed;
+				found->SourceLayerName = std::move(name);
+			} else if (marker == "node_expression" && parsed.FormatVersion >= 9) {
+				size_t nodeIndex = 0;
+				std::string nodeId, port, code;
+				int enabled = 0;
+				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId, Limits::MaximumTextBytes) ||
+					!ReadQuoted(row, port, Limits::MaximumTextBytes) || !(row >> enabled) ||
+					(enabled != 0 && enabled != 1) || !ReadQuoted(row, code, Limits::MaximumTextBytes) ||
+					HasTrailing(row) || port.empty() || port.size() > Limits::MaximumTextBytes ||
+					code.size() > Limits::MaximumTextBytes || nodeIndex >= parsed.Nodes.size() ||
+					parsed.Nodes[nodeIndex].Id != nodeId)
+					goto malformed;
+				auto &expressions = parsed.Nodes[nodeIndex].SourceInputExpressions;
+				if (expressions.size() == Limits::MaximumSourceInputExpressionsPerNode ||
+					std::any_of(expressions.begin(), expressions.end(), [&](const auto &entry) {
+						return entry.Port == port;
+					}))
+					goto malformed;
+				expressions.push_back({std::move(port), std::move(code), enabled != 0});
+			} else if (marker == "dynamic_output" && parsed.FormatVersion >= 9) {
+				size_t nodeIndex = 0;
+				std::string nodeId, outputId, typeName;
+				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId) || !ReadQuoted(row, outputId) ||
+					!(row >> typeName) || HasTrailing(row))
+					goto malformed;
+				const auto type = ParseType(typeName);
+				if (!type || nodeIndex >= parsed.Nodes.size() || parsed.Nodes[nodeIndex].Id != nodeId)
+					goto malformed;
+				if (parsed.Nodes[nodeIndex].DynamicOutputs.size() >= Limits::MaximumDynamicOutputsPerNode) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"node exceeds the dynamic output limit",
+						nodeId,
+						outputId
+					);
+					return diagnostic.Code;
+				}
+				parsed.Nodes[nodeIndex].DynamicOutputs.push_back({std::move(outputId), *type});
 			} else if (marker == "link") {
 				Link link;
 				if (!ReadQuoted(row, link.FromNode) || !ReadQuoted(row, link.FromPort) ||
@@ -2144,6 +2634,16 @@ namespace engine::imagegraph {
 					if (found == parsed.Groups.end() || !found->InstanceBase.empty()) goto malformed;
 					found->InstanceBase = std::move(base);
 				}
+			} else if (marker == "group_owner" && parsed.FormatVersion >= 9) {
+				std::string id, owner;
+				if (!ReadQuoted(row, id) || !ReadQuoted(row, owner) || owner.empty() || HasTrailing(row))
+					goto malformed;
+				const auto group =
+					std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &candidate) {
+						return candidate.Id == id;
+					});
+				if (group == parsed.Groups.end() || !group->OwnerNodeId.empty()) goto malformed;
+				group->OwnerNodeId = std::move(owner);
 			} else if (marker == "group_depth" && parsed.FormatVersion >= 9) {
 				std::string id, name;
 				if (!ReadQuoted(row, id) || !(row >> name) || HasTrailing(row) ||
@@ -2366,6 +2866,12 @@ namespace engine::imagegraph {
 						KeyframeElasticDriver driver;
 						if (!(row >> driver.Amount >> driver.Spacing >> driver.Curve)) goto malformed;
 						key.SourceDriver = driver;
+					} else if (type == "native_audio") {
+						KeyframeAudioDriver driver;
+						if (!ReadQuoted(row, driver.SourceId) || !ReadQuoted(row, driver.Metric) ||
+							!(row >> driver.Channel >> driver.Gain >> driver.Bias))
+							goto malformed;
+						key.SourceDriver = std::move(driver);
 					} else if (type == "curve") {
 						std::string tag;
 						size_t count;
@@ -2395,6 +2901,11 @@ namespace engine::imagegraph {
 					1.0 / timeline.FramesPerSecond <= 0)
 					goto malformed;
 				parsed.Timeline = std::move(timeline);
+			} else if (marker == "project_global_node" && parsed.FormatVersion >= 9) {
+				if (!parsed.ProjectGlobalNodeId.empty() ||
+					!ReadQuoted(row, parsed.ProjectGlobalNodeId, Limits::MaximumTextBytes) ||
+					parsed.ProjectGlobalNodeId.empty() || HasTrailing(row))
+					goto malformed;
 			} else if (marker == "project" && parsed.FormatVersion >= 7) {
 				ProjectSettings project;
 				size_t count = 0;
@@ -2418,6 +2929,21 @@ namespace engine::imagegraph {
 				}
 				if (HasTrailing(row)) goto malformed;
 				parsed.Project = std::move(project);
+			} else if (marker == "slice_stack_action" && parsed.FormatVersion >= 9) {
+				SliceStackAction action;
+				if (parsed.SliceStackActions.size() >= Limits::MaximumNodes ||
+					!ReadQuoted(row, action.NodeId) ||
+					!(row >> action.Time.Tick >> action.Time.Subframe >> action.Time.NegativeFrame >>
+					  action.WorkPixels) ||
+					HasTrailing(row) || action.NodeId.empty() || !ValidFrameTime(action.Time) ||
+					action.WorkPixels > Limits::MaximumArrayElements)
+					goto malformed;
+				parsed.SliceStackActions.push_back(std::move(action));
+			} else if (marker == "project_shader" && parsed.FormatVersion >= 9) {
+				std::string name;
+				if (projectShader || !(row >> name) || HasTrailing(row) || (name != "phong" && name != "pbr"))
+					goto malformed;
+				projectShader = name == "pbr" ? 1 : 0;
 			} else if (marker == "project_depth" && parsed.FormatVersion >= 9) {
 				std::string name;
 				if (projectDepth || !(row >> name) || HasTrailing(row)) goto malformed;
@@ -2456,6 +2982,48 @@ namespace engine::imagegraph {
 				}
 				if (HasTrailing(row)) goto malformed;
 				previewRulers = std::pair{show, std::move(guides)};
+			} else if (marker == "project_regions" && parsed.FormatVersion >= 9) {
+				size_t count = 0;
+				if (!parsed.Project || projectRegionCount || !(row >> count) || HasTrailing(row))
+					goto malformed;
+				if (count > Limits::MaximumAnimationRegions) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"project animation regions exceed their count limit"
+					);
+					return diagnostic.Code;
+				}
+				projectRegionCount = count;
+				parsed.Project->AnimationRegions.reserve(count);
+			} else if (marker == "animation_region" && parsed.FormatVersion >= 9) {
+				AnimationRegion region;
+				std::string startSign, endSign;
+				Value color;
+				if (!parsed.Project || !projectRegionCount ||
+					parsed.Project->AnimationRegions.size() >= *projectRegionCount ||
+					!ReadQuoted(row, region.Label, Limits::MaximumTextBytes) ||
+					!(row >> region.Start.Tick >> startSign >> region.Start.Subframe >> region.End.Tick >>
+					  endSign >> region.End.Subframe) ||
+					(startSign != "positive" && startSign != "negative") ||
+					(endSign != "positive" && endSign != "negative") || !ValidFrameTime(region.Start) ||
+					!ValidFrameTime(region.End) || !ReadValue(row, color, parsed.FormatVersion) ||
+					!std::holds_alternative<Colour>(color) || HasTrailing(row))
+					goto malformed;
+				region.Start.NegativeFrame = startSign == "negative";
+				region.End.NegativeFrame = endSign == "negative";
+				if (!ValidFrameTime(region.Start) || !ValidFrameTime(region.End)) goto malformed;
+				if (region.Label.size() > Limits::MaximumArrayBytes - projectRegionTextBytes) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"project animation region labels exceed their byte limit"
+					);
+					return diagnostic.Code;
+				}
+				projectRegionTextBytes += region.Label.size();
+				region.Color = std::get<Colour>(std::move(color));
+				parsed.Project->AnimationRegions.push_back(std::move(region));
 			} else if (marker == "track_quaternion" && parsed.FormatVersion >= 8) {
 				std::string nodeId, port, mode;
 				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !ReadQuoted(row, mode) ||
@@ -2484,8 +3052,13 @@ namespace engine::imagegraph {
 				goto malformed;
 			}
 		}
-		if ((previewGrid || previewRulers || projectDepth) && !parsed.Project) goto malformed;
+		if ((previewGrid || previewRulers || projectDepth || projectShader || projectRegionCount) &&
+			!parsed.Project)
+			goto malformed;
+		if (projectRegionCount && parsed.Project->AnimationRegions.size() != *projectRegionCount)
+			goto malformed;
 		if (projectDepth) parsed.Project->ColorDepth = *projectDepth;
+		if (projectShader) parsed.Project->Shader3D = *projectShader;
 		if (previewGrid) parsed.Project->PreviewGrid = *previewGrid;
 		if (previewRulers) {
 			parsed.Project->ShowPreviewRulers = previewRulers->first;
@@ -2511,6 +3084,19 @@ namespace engine::imagegraph {
 			if (!std::isfinite(guide.Position) ||
 				(guide.Axis != PreviewRulerAxis::Horizontal && guide.Axis != PreviewRulerAxis::Vertical))
 				return false;
+		return true;
+	}
+
+	bool ValidProjectAnimationRegions(const ProjectSettings &project) {
+		if (project.AnimationRegions.size() > Limits::MaximumAnimationRegions) return false;
+		size_t textBytes = 0;
+		for (const AnimationRegion &region : project.AnimationRegions)
+			if (region.Label.size() > Limits::MaximumTextBytes ||
+				region.Label.size() > Limits::MaximumArrayBytes - textBytes ||
+				!ValidFrameTime(region.Start) || !ValidFrameTime(region.End))
+				return false;
+			else
+				textBytes += region.Label.size();
 		return true;
 	}
 
@@ -2605,6 +3191,8 @@ namespace engine::imagegraph {
 		return Status::Ok;
 	}
 
+	static const Node *
+	EffectiveInputOwner(const Document &document, const Node &start, std::string_view port);
 	static Status CompileWithBudget(
 		const Document &document,
 		Plan &plan,
@@ -2625,10 +3213,58 @@ namespace engine::imagegraph {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "document exceeds a graph count limit");
 			return diagnostic.Code;
 		}
+		if (document.SliceStackActions.size() > Limits::MaximumNodes) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "slice actions exceed node cap");
+			return diagnostic.Code;
+		}
+		if (document.FormatVersion < 9 && !document.SliceStackActions.empty()) {
+			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "slice actions require document version 9");
+			return diagnostic.Code;
+		}
+		for (size_t index = 0; index < document.SliceStackActions.size(); ++index) {
+			const auto &action = document.SliceStackActions[index];
+			const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
+				return n.Id == action.NodeId;
+			});
+			if (node == document.Nodes.end() || node->Type != "pc.3_d_mesh_stack_slice" ||
+				action.NodeId.size() > Limits::MaximumTextBytes || !ValidFrameTime(action.Time) ||
+				action.WorkPixels > Limits::MaximumArrayElements) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"slice action requires a valid Slice Stack identity, time and pixel budget",
+					action.NodeId
+				);
+				return diagnostic.Code;
+			}
+			for (size_t earlier = 0; earlier < index; ++earlier)
+				if (document.SliceStackActions[earlier].NodeId == action.NodeId &&
+					document.SliceStackActions[earlier].Time == action.Time) {
+					SetDiagnostic(
+						diagnostic, Status::DuplicateId, "slice action identity is duplicated", action.NodeId
+					);
+					return diagnostic.Code;
+				}
+		}
 		if (document.FormatVersion < 9) {
 			const auto recursive = [](const Value &value) {
 				const auto *array = std::get_if<ArrayValue>(&value);
-				return array && (array->ElementType == ValueType::Any || !array->Items.empty());
+				const auto *path = std::get_if<Path2D>(&value);
+				if (path && (path->Segmented || path->SourceOperation)) return true;
+				if (array) {
+					const auto segmented = [](const ElementValue &element) {
+						const auto *p = std::get_if<Path2D>(&element);
+						return p && (p->Segmented || p->SourceOperation);
+					};
+					for (const auto &element : array->Elements)
+						if (segmented(element)) return true;
+					for (const auto &row : array->Nested)
+						for (const auto &element : row)
+							if (segmented(element)) return true;
+				}
+				return std::holds_alternative<PathValue3D>(value) ||
+					   (array && (array->ElementType == ValueType::Any ||
+								  array->ElementType == ValueType::Path3D || !array->Items.empty()));
 			};
 			for (const auto &node : document.Nodes) {
 				for (const auto &value : node.Values)
@@ -2636,7 +3272,7 @@ namespace engine::imagegraph {
 						SetDiagnostic(
 							diagnostic,
 							Status::UnsupportedVersion,
-							"recursive source arrays need document version 9",
+							"recursive arrays and spatial paths need document version 9",
 							node.Id,
 							value.Port
 						);
@@ -2647,7 +3283,7 @@ namespace engine::imagegraph {
 						SetDiagnostic(
 							diagnostic,
 							Status::UnsupportedVersion,
-							"recursive source arrays need document version 9",
+							"recursive arrays and spatial paths need document version 9",
 							node.Id,
 							input.Id
 						);
@@ -2655,11 +3291,12 @@ namespace engine::imagegraph {
 					}
 			}
 			for (const auto &junction : document.Junctions)
-				if (junction.Default && recursive(*junction.Default)) {
+				if (junction.Type == ValueType::Path3D ||
+					(junction.Default && recursive(*junction.Default))) {
 					SetDiagnostic(
 						diagnostic,
 						Status::UnsupportedVersion,
-						"recursive source arrays need document version 9",
+						"recursive arrays and spatial paths need document version 9",
 						junction.Id
 					);
 					return diagnostic.Code;
@@ -2669,7 +3306,7 @@ namespace engine::imagegraph {
 					SetDiagnostic(
 						diagnostic,
 						Status::UnsupportedVersion,
-						"recursive source arrays need document version 9",
+						"recursive arrays and spatial paths need document version 9",
 						key.NodeId,
 						key.Port
 					);
@@ -2681,6 +3318,27 @@ namespace engine::imagegraph {
 			const ProjectSettings &project = *document.Project;
 			if (document.FormatVersion < 7) {
 				SetDiagnostic(diagnostic, Status::InvalidValue, "project settings need document version 7");
+				return diagnostic.Code;
+			}
+			if (project.Shader3D < 0 || project.Shader3D > 1 ||
+				(document.FormatVersion < 9 && project.Shader3D != 0)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"project shader requires a supported choice and format version 9"
+				);
+				return diagnostic.Code;
+			}
+			if (document.FormatVersion < 9 && !project.AnimationRegions.empty()) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedVersion,
+					"project animation regions need document version 9"
+				);
+				return diagnostic.Code;
+			}
+			if (!ValidProjectAnimationRegions(project)) {
+				SetDiagnostic(diagnostic, Status::InvalidValue, "project animation regions are invalid");
 				return diagnostic.Code;
 			}
 			if (project.ColorDepth < 0 || project.ColorDepth > 6) {
@@ -2857,6 +3515,23 @@ namespace engine::imagegraph {
 					}
 		}
 
+		for (const auto &node : document.Nodes) {
+			if (node.SourceDisplayName.size() > Limits::MaximumTextBytes ||
+				node.SourceInternalName.size() > Limits::MaximumTextBytes ||
+				((!node.SourceDisplayName.empty() || !node.SourceInternalName.empty()) &&
+				 document.FormatVersion < 9)) {
+				SetDiagnostic(
+					diagnostic,
+					std::max(node.SourceDisplayName.size(), node.SourceInternalName.size()) >
+							Limits::MaximumTextBytes
+						? Status::LimitExceeded
+						: Status::UnsupportedVersion,
+					"source node display name requires bounded imagegraph v9 storage",
+					node.Id
+				);
+				return diagnostic.Code;
+			}
+		}
 		auto nodeIndices = detail::MakeEvaluationHashMap<std::string_view, size_t>(budget);
 		auto junctionIndices = detail::MakeEvaluationHashMap<std::string_view, size_t>(budget);
 		auto groupIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
@@ -2890,7 +3565,7 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			if (node.DynamicInputs.size() > Limits::MaximumDynamicInputsPerNode) {
+			if (node.DynamicInputs.size() > MaximumDynamicInputsForNode(node)) {
 				SetDiagnostic(
 					diagnostic, Status::LimitExceeded, "node exceeds the dynamic input limit", node.Id
 				);
@@ -2911,6 +3586,17 @@ namespace engine::imagegraph {
 			for (const PortSchema &port : FindSchema(node.Type)->Ports)
 				portIds.insert(port.Id);
 			for (const DynamicInput &input : node.DynamicInputs) {
+				if (const auto selected = detail::SourceLuaArgumentType(node, input.Id);
+					selected && *selected != input.Type) {
+					SetDiagnostic(
+						diagnostic,
+						Status::TypeMismatch,
+						"Lua argument socket type does not match its argument type selector",
+						node.Id,
+						input.Id
+					);
+					return diagnostic.Code;
+				}
 				if (TypeName(input.Type).empty()) {
 					SetDiagnostic(
 						diagnostic, Status::InvalidValue, "dynamic input type is invalid", node.Id, input.Id
@@ -2922,6 +3608,17 @@ namespace engine::imagegraph {
 						diagnostic,
 						Status::DuplicateId,
 						"dynamic input id is empty or duplicated",
+						node.Id,
+						input.Id
+					);
+					return diagnostic.Code;
+				}
+				if (input.SourceLayerName.size() > Limits::MaximumTextBytes ||
+					(document.FormatVersion < 9 && !input.SourceLayerName.empty())) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"source layer binding needs bounded imagegraph v9 text",
 						node.Id,
 						input.Id
 					);
@@ -2948,7 +3645,22 @@ namespace engine::imagegraph {
 						);
 						return diagnostic.Code;
 					}
-					if (TypeOf(*input.Default) != input.Type) {
+					const auto *dynamicCatalogue = FindCatalogueEntry(node.Type);
+					size_t dynamicGroup = 0;
+					const auto *dynamicTemplate =
+						dynamicCatalogue ? FindDynamicTemplate(*dynamicCatalogue, input.Id, dynamicGroup)
+										 : nullptr;
+					const auto *dynamicArray = std::get_if<ArrayValue>(&*input.Default);
+					const bool sourceDefault =
+						dynamicTemplate &&
+						(CatalogueSourceRawValue(*dynamicTemplate, *input.Default) ||
+						 CatalogueSourceEnumValue(*dynamicTemplate, *input.Default) ||
+						 (dynamicArray &&
+						  CatalogueAuthoredArray(*dynamicCatalogue, *dynamicTemplate, *dynamicArray)));
+					if (input.Type != ValueType::Any && TypeOf(*input.Default) != input.Type &&
+						!detail::SourceLuaArgumentType(node, input.Id) &&
+						!detail::PuppetControlValue(node, input.Id, input.Type, *input.Default) &&
+						!sourceDefault) {
 						SetDiagnostic(
 							diagnostic,
 							Status::TypeMismatch,
@@ -2969,6 +3681,84 @@ namespace engine::imagegraph {
 						);
 						return diagnostic.Code;
 					}
+				}
+			}
+			if (!node.DynamicOutputs.empty() &&
+				(document.FormatVersion < 9 || !FindSchema(node.Type)->DynamicOutputs)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"node type does not declare dynamic outputs",
+					node.Id,
+					node.DynamicOutputs.front().Id
+				);
+				return diagnostic.Code;
+			}
+			if (node.DynamicOutputs.size() > Limits::MaximumDynamicOutputsPerNode) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "node exceeds the dynamic output limit", node.Id
+				);
+				return diagnostic.Code;
+			}
+			for (const DynamicOutput &output : node.DynamicOutputs) {
+				if (TypeName(output.Type).empty() || output.Id.empty() ||
+					output.Id.size() > Limits::MaximumTextBytes) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"dynamic output declaration is invalid",
+						node.Id,
+						output.Id
+					);
+					return diagnostic.Code;
+				}
+				if (!portIds.insert(output.Id).second) {
+					SetDiagnostic(
+						diagnostic, Status::DuplicateId, "dynamic output id is duplicated", node.Id, output.Id
+					);
+					return diagnostic.Code;
+				}
+			}
+			if (!node.SourceProperties.empty() && document.FormatVersion < 9) {
+				SetDiagnostic(
+					diagnostic, Status::UnsupportedVersion, "source properties require imagegraph v9", node.Id
+				);
+				return diagnostic.Code;
+			}
+			if (node.SourceProperties.size() > Limits::MaximumPropertiesPerNode) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "source property count exceeds its limit", node.Id
+				);
+				return diagnostic.Code;
+			}
+			auto sourcePropertyIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
+			for (const AuthoredValue &property : node.SourceProperties) {
+				if (property.Port.size() > Limits::MaximumTextBytes || !WithinValueBudget(property.Data)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"source property exceeds its limit",
+						node.Id,
+						property.Port
+					);
+					return diagnostic.Code;
+				}
+				if (property.Port.empty() || !IsAuthoredValueType(TypeOf(property.Data)) ||
+					!detail::ValidRuntimeValue(property.Data)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"source property is not a valid authored value",
+						node.Id,
+						property.Port
+					);
+					return diagnostic.Code;
+				}
+				if (!sourcePropertyIds.insert(property.Port).second) {
+					SetDiagnostic(
+						diagnostic, Status::DuplicateId, "duplicate source property", node.Id, property.Port
+					);
+					return diagnostic.Code;
 				}
 			}
 			auto valueIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
@@ -3571,11 +4361,62 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 			if (group.Id.size() > Limits::MaximumTextBytes || group.Name.size() > Limits::MaximumTextBytes ||
-				group.ParentId.size() > Limits::MaximumTextBytes) {
+				group.ParentId.size() > Limits::MaximumTextBytes ||
+				group.OwnerNodeId.size() > Limits::MaximumTextBytes) {
 				SetDiagnostic(
 					diagnostic, Status::LimitExceeded, "group text exceeds the byte limit", group.Id
 				);
 				return diagnostic.Code;
+			}
+			if (!group.OwnerNodeId.empty()) {
+				if (document.FormatVersion < 9) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedVersion,
+						"inline collection ownership needs document version 9",
+						group.Id
+					);
+					return diagnostic.Code;
+				}
+				const auto owner = nodeIndices.find(group.OwnerNodeId);
+				if (owner == nodeIndices.end()) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidGroup,
+						"inline collection owner node is missing",
+						group.Id,
+						group.OwnerNodeId
+					);
+					return diagnostic.Code;
+				}
+				const Node &node = document.Nodes[owner->second];
+				const bool collection =
+					node.Type == "pc.verlet_sim_inline" || node.Type == "pc.rigid_group_inline" ||
+					node.Type == "pc.flip_group_inline" || node.Type == "pc.strand_group_inline" ||
+					node.Type == "pc.pixel_builder";
+				if (!collection || node.GroupId != group.ParentId ||
+					(node.Type != "pc.pixel_builder" && !group.Ports.empty())) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidGroup,
+						"collection owner must share its parent canvas; only Pixel Builder accepts boundary "
+						"ports",
+						group.Id,
+						group.OwnerNodeId
+					);
+					return diagnostic.Code;
+				}
+				for (const Group &other : document.Groups)
+					if (&other != &group && other.OwnerNodeId == group.OwnerNodeId) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidGroup,
+							"collection node owns more than one inline scope",
+							group.Id,
+							group.OwnerNodeId
+						);
+						return diagnostic.Code;
+					}
 			}
 			if (group.Id.empty() || !groupIds.insert(group.Id).second) {
 				SetDiagnostic(diagnostic, Status::DuplicateId, "group id is empty or duplicated", group.Id);
@@ -3965,8 +4806,17 @@ namespace engine::imagegraph {
 			// A dynamic input with an authored type animates like a property.
 			std::optional<ValueType> keyedType = property ? std::optional{property->Type} : std::nullopt;
 			for (const DynamicInput &input : document.Nodes[node->second].DynamicInputs)
-				if (!property && input.Id == keyframe.Port && IsAuthoredValueType(input.Type))
-					keyedType = input.Type;
+				if (!property && input.Id == keyframe.Port) {
+					if (detail::SourceLuaArgumentType(document.Nodes[node->second], input.Id) &&
+						IsAuthoredValueType(TypeOf(keyframe.Data)))
+						keyedType = TypeOf(keyframe.Data);
+					else if (IsAuthoredValueType(input.Type))
+						keyedType = input.Type;
+					else if (detail::PuppetControlValue(
+								 document.Nodes[node->second], input.Id, input.Type, keyframe.Data
+							 ))
+						keyedType = ValueType::Array;
+				}
 			if (!keyedType) {
 				SetDiagnostic(
 					diagnostic,
@@ -3980,6 +4830,10 @@ namespace engine::imagegraph {
 			bool sourceArray = false;
 			const auto *keyCatalogue = FindCatalogueEntry(document.Nodes[node->second].Type);
 			const auto *keyInput = keyCatalogue ? FindCatalogueInput(*keyCatalogue, keyframe.Port) : nullptr;
+			if (!keyInput && keyCatalogue) {
+				size_t dynamicGroup = 0;
+				keyInput = FindDynamicTemplate(*keyCatalogue, keyframe.Port, dynamicGroup);
+			}
 			const bool sourceEnum = keyInput && CatalogueSourceEnumValue(*keyInput, keyframe.Data);
 			if (document.FormatVersion >= 8 && keyframe.Interpolation == "source") {
 				const auto *catalogue = keyCatalogue;
@@ -4319,21 +5173,35 @@ namespace engine::imagegraph {
 			const std::string &targetGroup = to != nodeIndices.end()
 												 ? document.Nodes[to->second].GroupId
 												 : document.Junctions[toJunction->second].GroupId;
-			if (sourceGroup != targetGroup && document.FormatVersion >= 2) {
+			const auto transparentScope = [&](std::string_view scope) {
+				for (size_t depth = 0; !scope.empty() && depth < document.Groups.size(); ++depth) {
+					const auto group =
+						std::find_if(document.Groups.begin(), document.Groups.end(), [&](const Group &item) {
+							return item.Id == scope;
+						});
+					if (group == document.Groups.end() || group->OwnerNodeId.empty()) break;
+					scope = group->ParentId;
+				}
+				return scope;
+			};
+			const auto sourceScope = transparentScope(sourceGroup),
+					   targetScope = transparentScope(targetGroup);
+			if (sourceScope != targetScope && document.FormatVersion >= 2) {
 				const auto sourceOwner =
 					std::find_if(document.Groups.begin(), document.Groups.end(), [&](const Group &group) {
-						return group.Id == sourceGroup;
+						return group.Id == sourceScope;
 					});
 				const auto targetOwner =
 					std::find_if(document.Groups.begin(), document.Groups.end(), [&](const Group &group) {
-						return group.Id == targetGroup;
+						return group.Id == targetScope;
 					});
 				const bool declaredBoundary =
 					(sourceOwner != document.Groups.end() && !sourceOwner->Ports.empty()) ||
 					(targetOwner != document.Groups.end() && !targetOwner->Ports.empty());
 				if (declaredBoundary) {
 					const bool leavesChild =
-						sourceOwner != document.Groups.end() && sourceOwner->ParentId == targetGroup &&
+						sourceOwner != document.Groups.end() &&
+						transparentScope(sourceOwner->ParentId) == targetScope &&
 						fromJunction != junctionIndices.end() &&
 						std::any_of(
 							sourceOwner->Ports.begin(), sourceOwner->Ports.end(), [&](const GroupPort &port) {
@@ -4342,7 +5210,8 @@ namespace engine::imagegraph {
 							}
 						);
 					const bool entersChild =
-						targetOwner != document.Groups.end() && targetOwner->ParentId == sourceGroup &&
+						targetOwner != document.Groups.end() &&
+						transparentScope(targetOwner->ParentId) == sourceScope &&
 						toJunction != junctionIndices.end() &&
 						std::any_of(
 							targetOwner->Ports.begin(), targetOwner->Ports.end(), [&](const GroupPort &port) {
@@ -4408,7 +5277,8 @@ namespace engine::imagegraph {
 				if (const auto *entry = FindCatalogueEntry(document.Nodes[to->second].Type)) {
 					const auto *input = FindCatalogueInput(*entry, link.ToPort);
 					sourceMaterialInput = input && input->SourceIndex >= 0 &&
-						input->Type == ValueType::Material3D && input->SourceKind == "D3Material";
+										  input->Type == ValueType::Material3D &&
+										  input->SourceKind == "D3Material";
 				}
 			}
 			const auto dynamicBoundary = [&](std::string_view junctionId) {
@@ -4546,6 +5416,76 @@ namespace engine::imagegraph {
 				current = input->second->FromNode;
 			}
 		}
+		std::vector<InlineOwnerDependency> inlineDependencies;
+		std::vector<InlineControlDependency> inlineControlDependencies;
+		const bool hasInlineScopes = std::any_of(
+										 document.Groups.begin(),
+										 document.Groups.end(),
+										 [](const Group &group) { return !group.OwnerNodeId.empty(); }
+									 ) ||
+									 !plan.PcxNamedDependencies.empty();
+		auto inlineCharge = budget.Reserve(
+			hasInlineScopes ? document.Nodes.size() * (sizeof(InlineOwnerDependency) + sizeof(size_t)) : 0
+		);
+		if (!inlineCharge || !planCharge.Merge(std::move(*inlineCharge))) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "inline owner dependencies exceed evaluation budget"
+			);
+			return diagnostic.Code;
+		}
+		inlineDependencies.reserve(hasInlineScopes ? document.Nodes.size() : 0);
+		auto controlsCharge = budget.Reserve(
+			hasInlineScopes ? document.Nodes.size() * 4 * (sizeof(InlineControlDependency) + sizeof(size_t))
+							: 0
+		);
+		if (!controlsCharge || !planCharge.Merge(std::move(*controlsCharge))) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "collection control routes exceed evaluation budget"
+			);
+			return diagnostic.Code;
+		}
+		inlineControlDependencies.reserve(hasInlineScopes ? document.Nodes.size() * 4 : 0);
+		const auto addControlRoute = [&](size_t consumer, size_t producer) {
+			const InlineControlDependency route{consumer, producer};
+			if (std::find(inlineControlDependencies.begin(), inlineControlDependencies.end(), route) !=
+				inlineControlDependencies.end())
+				return;
+			inlineControlDependencies.push_back(route);
+			indegree[consumer]++;
+			downstream[producer].push_back(consumer);
+		};
+		for (size_t index = 0; index < document.Nodes.size(); ++index) {
+			std::string_view scope = document.Nodes[index].GroupId;
+			for (size_t depth = 0; !scope.empty() && depth < document.Groups.size(); ++depth) {
+				const auto group =
+					std::find_if(document.Groups.begin(), document.Groups.end(), [&](const Group &item) {
+						return item.Id == scope;
+					});
+				if (group == document.Groups.end()) break;
+				if (!group->OwnerNodeId.empty()) {
+					const size_t owner = nodeIndices.at(group->OwnerNodeId);
+					const bool builder = document.Nodes[owner].Type == "pc.pixel_builder";
+					inlineDependencies.push_back({index, owner, builder});
+					if (!builder) {
+						indegree[index]++;
+						downstream[owner].push_back(index);
+					} else {
+						for (const Link &link : effectiveLinks)
+							if (link.ToNode == group->OwnerNodeId &&
+								(link.ToPort == "dimension" || link.ToPort == "dimension_unit"))
+								addControlRoute(index, nodeIndices.at(link.FromNode));
+						if (document.Nodes[index].Type == "pc.pb_output") {
+							addControlRoute(owner, index);
+							for (const Link &link : effectiveLinks)
+								if (link.ToNode == document.Nodes[index].Id && link.ToPort == "surface")
+									addControlRoute(owner, nodeIndices.at(link.FromNode));
+						}
+					}
+					break;
+				}
+				scope = group->ParentId;
+			}
+		}
 		std::vector<GroupSurfaceDependency> surfaceDependencies;
 		auto surfaceCharge = budget.Reserve(document.Nodes.size() * sizeof(GroupSurfaceDependency));
 		if (!surfaceCharge || !planCharge.Merge(std::move(*surfaceCharge))) {
@@ -4627,6 +5567,224 @@ namespace engine::imagegraph {
 			const size_t to = nodeIndices.at(link.ToNode);
 			indegree[to]++;
 			downstream[from].push_back(to);
+		}
+		if (!document.ProjectGlobalNodeId.empty()) {
+			const auto global = nodeIndices.find(document.ProjectGlobalNodeId);
+			if (document.FormatVersion < 9 ||
+				document.ProjectGlobalNodeId.size() > Limits::MaximumTextBytes ||
+				global == nodeIndices.end() || document.Nodes[global->second].Type != "pc.global_scope") {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"project global root must name a bounded native global scope"
+				);
+				return diagnostic.Code;
+			}
+		}
+		std::vector<PcxNamedDependency> pcxDependencies;
+		uint64_t pcxCompileWork = 0;
+		const auto addPcxRoute = [&](size_t consumer,
+									 size_t producer,
+									 std::string_view name,
+									 std::string_view port,
+									 bool input) -> bool {
+			PcxNamedDependency route{consumer, producer, std::string(name), std::string(port), input};
+			if (std::find(pcxDependencies.begin(), pcxDependencies.end(), route) != pcxDependencies.end())
+				return true;
+			if (pcxDependencies.size() >= Limits::MaximumLinks) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "PCX routes exceed the graph bound");
+				return false;
+			}
+			auto charge = budget.Reserve(
+				2 * sizeof(PcxNamedDependency) + 4 * sizeof(size_t) + name.size() + port.size() + 64
+			);
+			if (!charge || !planCharge.Merge(std::move(*charge))) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "PCX routes exceed their allocation bound");
+				return false;
+			}
+			pcxDependencies.push_back(std::move(route));
+			++indegree[consumer];
+			downstream[producer].push_back(consumer);
+			return true;
+		};
+		for (size_t consumer = 0; consumer < document.Nodes.size(); ++consumer) {
+			const auto &authored = document.Nodes[consumer];
+			const auto *catalogue = FindCatalogueEntry(authored.Type);
+			const size_t inputCount =
+				(catalogue ? catalogue->Inputs.size() : FindSchema(authored.Type)->Ports.size()) +
+				authored.DynamicInputs.size();
+			if ((!authored.SourceInputExpressions.empty() && document.FormatVersion < 9) ||
+				authored.SourceInputExpressions.size() >
+					std::min(Limits::MaximumSourceInputExpressionsPerNode, inputCount)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"PCX input programs require bounded v9 input slots",
+					authored.Id
+				);
+				return diagnostic.Code;
+			}
+			std::vector<std::string_view> expressionPorts;
+			std::vector<std::pair<std::string_view, bool>> programs;
+			for (const auto &expression : authored.SourceInputExpressions) {
+				if (expression.Port.size() > Limits::MaximumTextBytes ||
+					expression.Code.size() > Limits::MaximumTextBytes ||
+					(!FindPortType(authored, expression.Port, PortDirection::Input) &&
+					 (!catalogue || !FindCatalogueInput(*catalogue, expression.Port))) ||
+					std::find(expressionPorts.begin(), expressionPorts.end(), expression.Port) !=
+						expressionPorts.end()) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"PCX input program has an invalid or duplicated port",
+						authored.Id,
+						expression.Port
+					);
+					return diagnostic.Code;
+				}
+				expressionPorts.push_back(expression.Port);
+				if (expression.Enabled) {
+					const auto *owner = EffectiveInputOwner(document, authored, expression.Port);
+					if (!owner || owner->Id == authored.Id) programs.emplace_back(expression.Code, true);
+				}
+			}
+			const auto appendInheritedProgram = [&](std::string_view port) {
+				const auto *owner = EffectiveInputOwner(document, authored, port);
+				if (!owner || owner->Id == authored.Id) return;
+				for (const auto &expression : owner->SourceInputExpressions)
+					if (expression.Port == port && expression.Enabled)
+						programs.emplace_back(expression.Code, true);
+			};
+			if (catalogue)
+				for (const auto &input : catalogue->Inputs)
+					appendInheritedProgram(input.Id);
+			for (const auto &input : authored.DynamicInputs)
+				appendInheritedProgram(input.Id);
+			if (authored.Type == "pc.equation" || authored.Type == "pc.pcx_equation") {
+				if (const auto *value = FindValue(authored, "equation"))
+					if (const auto *text = std::get_if<std::string>(&value->Data))
+						programs.emplace_back(*text, false);
+			}
+			if (authored.Type == "pc.equation" || authored.Type == "pc.pcx_equation")
+				for (const auto &key : document.Keyframes)
+					if (key.NodeId == authored.Id && key.Port == "equation")
+						if (const auto *code = std::get_if<std::string>(&key.Data))
+							programs.emplace_back(*code, false);
+			if (authored.Type == "pc.globalvar" && !document.ProjectGlobalNodeId.empty()) {
+				const size_t producer = nodeIndices.at(document.ProjectGlobalNodeId);
+				for (const auto &input : document.Nodes[producer].DynamicInputs)
+					if (!addPcxRoute(consumer, producer, input.Id, input.Id, true)) return diagnostic.Code;
+			}
+			for (const auto &[code, program] : programs) {
+				auto parserCharge = budget.Reserve(
+					code.size() * 8 + 4096 * sizeof(PcxInstruction) + 4 * Limits::MaximumArrayBytes
+				);
+				if (!parserCharge) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"PCX compiler workspace exceeds its live byte bound",
+						authored.Id
+					);
+					return diagnostic.Code;
+				}
+				PcxExpressionValue tree;
+				Diagnostic parseDiagnostic;
+				const auto status = program ? CompilePcxProgram(code, tree, parseDiagnostic)
+											: CompilePcxExpression(code, tree, parseDiagnostic);
+				if (status != Status::Ok) {
+					diagnostic = std::move(parseDiagnostic);
+					diagnostic.NodeId = authored.Id;
+					return diagnostic.Code;
+				}
+				std::vector<size_t> consumers{consumer};
+				if (!program && authored.Type == "pc.pcx_equation") {
+					for (size_t position = 0; position < consumers.size(); ++position)
+						for (const auto &link : effectiveLinks) {
+							if (++pcxCompileWork > 64'000'000) {
+								SetDiagnostic(
+									diagnostic,
+									Status::LimitExceeded,
+									"PCX dependency compilation exceeds work bound"
+								);
+								return diagnostic.Code;
+							}
+							if (link.FromNode != document.Nodes[consumers[position]].Id) continue;
+							const auto next = nodeIndices.at(link.ToNode);
+							if (std::find(consumers.begin(), consumers.end(), next) == consumers.end())
+								consumers.push_back(next);
+						}
+				}
+				std::vector<std::string_view> locals;
+				if (program) locals = {"name", "node_name", "value", "node_values"};
+				if (catalogue)
+					for (const auto &dynamic : authored.DynamicInputs) {
+						size_t group = 0;
+						const auto *field = FindDynamicTemplate(*catalogue, dynamic.Id, group);
+						if (!field || field->Id != "argument_name") continue;
+						const auto *authoredName = FindValue(authored, dynamic.Id);
+						const Value *value = authoredName	   ? &authoredName->Data
+											 : dynamic.Default ? &*dynamic.Default
+															   : nullptr;
+						if (const auto *name = value ? std::get_if<std::string>(value) : nullptr)
+							locals.push_back(*name);
+					}
+				for (const auto &instruction : tree.Data->Instructions)
+					if ((instruction.Operation == "=" || instruction.Operation == "default") &&
+						instruction.Arguments.size() == 2) {
+						const auto &left = tree.Data->Instructions[instruction.Arguments[0]];
+						if (left.Operation == "name") locals.push_back(std::get<std::string>(left.Literal));
+					}
+				for (const auto &instruction : tree.Data->Instructions) {
+					if (instruction.Operation != "name") continue;
+					const auto &name = std::get<std::string>(instruction.Literal);
+					if (std::find(locals.begin(), locals.end(), name) != locals.end() ||
+						name.starts_with("self."))
+						continue;
+					const auto first = name.find('.'),
+							   second = first == std::string::npos ? first : name.find('.', first + 1);
+					std::optional<size_t> producer;
+					std::string port;
+					bool inputPort = true;
+					if (first == std::string::npos && !document.ProjectGlobalNodeId.empty()) {
+						producer = nodeIndices.at(document.ProjectGlobalNodeId);
+						port = name;
+					} else if (second != std::string::npos) {
+						const auto ownerName = std::string_view(name).substr(0, first);
+						for (size_t candidate = 0; candidate < document.Nodes.size(); ++candidate) {
+							if (++pcxCompileWork > 64'000'000) {
+								SetDiagnostic(
+									diagnostic,
+									Status::LimitExceeded,
+									"PCX dependency compilation exceeds work bound"
+								);
+								return diagnostic.Code;
+							}
+							if (!ownerName.empty() &&
+								document.Nodes[candidate].SourceInternalName == ownerName)
+								producer = candidate;
+						}
+						std::string direction = name.substr(first + 1, second - first - 1);
+						port = name.substr(second + 1);
+						if (const auto extra = port.find('.'); extra != std::string::npos) port.resize(extra);
+						for (char &c : direction)
+							if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+						for (char &c : port)
+							if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+						inputPort = direction == "input" || direction == "inputs";
+						if (!inputPort && direction != "output" && direction != "outputs") continue;
+					}
+					if (!producer || !FindPortType(
+										 document.Nodes[*producer],
+										 port,
+										 inputPort ? PortDirection::Input : PortDirection::Output
+									 ))
+						continue;
+					for (const size_t destination : consumers)
+						if (!addPcxRoute(destination, *producer, name, port, inputPort))
+							return diagnostic.Code;
+				}
+			}
 		}
 		for (const Node &node : document.Nodes) {
 			if (node.Type == "image.transform_3d" && !linkedInputs.contains({node.Id, "surface"})) {
@@ -4739,10 +5897,10 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 			const auto node = nodeIndices.find(output.NodeId);
-			const PortSchema *port =
+			const auto port =
 				node == nodeIndices.end()
-					? nullptr
-					: FindPort(document.Nodes[node->second].Type, output.Port, PortDirection::Output);
+					? std::optional<ValueType>{}
+					: FindPortType(document.Nodes[node->second], output.Port, PortDirection::Output);
 			if (!port) {
 				SetDiagnostic(
 					diagnostic,
@@ -4772,6 +5930,9 @@ namespace engine::imagegraph {
 		compiled.EffectiveLinks = std::move(effectiveLinks);
 		compiled.ResolvedInputs = std::move(resolvedInputs);
 		compiled.GroupSurfaceDependencies = std::move(surfaceDependencies);
+		compiled.InlineOwnerDependencies = std::move(inlineDependencies);
+		compiled.InlineControlDependencies = std::move(inlineControlDependencies);
+		compiled.PcxNamedDependencies = std::move(pcxDependencies);
 		while (!ready.empty()) {
 			const size_t current = ready.top();
 			ready.pop();
@@ -4820,6 +5981,7 @@ namespace engine::imagegraph {
 		std::vector<std::pair<std::string, Image>> Images;
 		std::vector<std::pair<std::string, ImageArray>> ImageArrays;
 		ValueOutputs Values;
+		std::optional<detail::PixelBuilderLayer> PixelBuilderUpdate;
 	};
 	using NodeResult = std::variant<
 		Image,
@@ -4830,7 +5992,9 @@ namespace engine::imagegraph {
 		MirrorOutputs,
 		CatalogueOutputs>;
 	struct EvaluationResult {
-		detail::EvaluationBudget Budget{Limits::MaximumEvaluationBytes};
+		explicit EvaluationResult(uint64_t maximumBytes = Limits::MaximumEvaluationBytes)
+			: Budget(maximumBytes) {}
+		detail::EvaluationBudget Budget;
 		detail::AllocationReservation Charge;
 		NodeResult Data;
 	};
@@ -4839,18 +6003,40 @@ namespace engine::imagegraph {
 		detail::EvaluationBudget Budget;
 		detail::AllocationReservation Charge;
 		detail::AllocationReservation ReplacementShadow;
+		detail::AllocationReservation ReplayCharge;
 		std::vector<EvaluationInputValue> Values;
 		std::vector<EvaluationInputImage> Images;
+		std::vector<SnapshotImageArray> ImageArrays;
+		std::optional<SurfaceFormat> SurfacePolicy;
+		int64_t InterpolationPolicy = 1;
+	};
+	struct StatefulSnapshotAccess {
+		using Storage = EvaluationSnapshot::Storage;
+		static void Install(EvaluationSnapshot &snapshot, std::unique_ptr<Storage> storage) {
+			snapshot.Data = std::move(storage);
+		}
 	};
 	EvaluationSnapshot::EvaluationSnapshot() = default;
 	EvaluationSnapshot::~EvaluationSnapshot() = default;
 	EvaluationSnapshot::EvaluationSnapshot(EvaluationSnapshot &&) noexcept = default;
 	EvaluationSnapshot &EvaluationSnapshot::operator=(EvaluationSnapshot &&) noexcept = default;
 	std::span<const EvaluationInputValue> EvaluationSnapshot::Values() const noexcept {
-		return Data ? std::span<const EvaluationInputValue>(Data->Values) : std::span<const EvaluationInputValue>{};
+		return Data ? std::span<const EvaluationInputValue>(Data->Values)
+					: std::span<const EvaluationInputValue>{};
 	}
 	std::span<const EvaluationInputImage> EvaluationSnapshot::Images() const noexcept {
-		return Data ? std::span<const EvaluationInputImage>(Data->Images) : std::span<const EvaluationInputImage>{};
+		return Data ? std::span<const EvaluationInputImage>(Data->Images)
+					: std::span<const EvaluationInputImage>{};
+	}
+	std::span<const SnapshotImageArray> EvaluationSnapshot::ImageArrays() const noexcept {
+		return Data ? std::span<const SnapshotImageArray>(Data->ImageArrays)
+					: std::span<const SnapshotImageArray>{};
+	}
+	std::optional<SurfaceFormat> EvaluationSnapshot::InheritedSurfaceFormat() const noexcept {
+		return Data ? Data->SurfacePolicy : std::nullopt;
+	}
+	int64_t EvaluationSnapshot::InheritedInterpolation() const noexcept {
+		return Data ? Data->InterpolationPolicy : 1;
 	}
 	uint64_t EvaluationSnapshot::RetainedBytes() const noexcept {
 		return Data ? Data->Charge.Bytes() : 0;
@@ -4874,6 +6060,7 @@ namespace engine::imagegraph {
 		case ValueType::NodeRef:
 			return SourceSocketKind::Node;
 		case ValueType::Path2D:
+		case ValueType::Path3D:
 			return SourceSocketKind::Path;
 		case ValueType::Particle:
 			return SourceSocketKind::Particle;
@@ -4972,7 +6159,6 @@ namespace engine::imagegraph {
 		return nullptr;
 	}
 
-
 	static uint64_t ItemBytes(const ImageArrayItem &item) {
 		const auto *children = std::get_if<std::vector<ImageArrayItem>>(&item.Data);
 		if (!children) return 0;
@@ -4988,6 +6174,57 @@ namespace engine::imagegraph {
 			bytes += ItemBytes(item);
 		for (const Image &image : images.Images)
 			bytes += image.Pixels.size();
+		return bytes;
+	}
+	static bool AddBytes(uint64_t &total, uint64_t bytes);
+	static bool AddArrayBytes(uint64_t &total, size_t count, size_t elementBytes);
+	static uint64_t RetainedImageArrayBytes(const ImageArray &images) {
+		uint64_t bytes = 0;
+		size_t items = 0;
+		const auto retainItems =
+			[&](auto &&self, const std::vector<ImageArrayItem> &rows, size_t depth) -> bool {
+			if (depth > Limits::MaximumArrayDepth || rows.size() > Limits::MaximumArrayElements - items ||
+				!AddArrayBytes(bytes, rows.capacity(), sizeof(ImageArrayItem)))
+				return false;
+			items += rows.size();
+			for (const auto &item : rows)
+				if (const auto *nested = std::get_if<std::vector<ImageArrayItem>>(&item.Data))
+					if (!self(self, *nested, depth + 1)) return false;
+			return true;
+		};
+		if (!AddArrayBytes(bytes, images.Images.capacity(), sizeof(Image)) ||
+			!retainItems(retainItems, images.Items, 0))
+			return std::numeric_limits<uint64_t>::max();
+		for (const auto &image : images.Images)
+			if (!AddBytes(bytes, image.Pixels.capacity())) return std::numeric_limits<uint64_t>::max();
+		return bytes;
+	}
+	static uint64_t RetainedStatefulValueBytes(const std::variant<Image, ImageArray, EvaluatedValue> &value) {
+		return std::visit(
+			[](const auto &output) -> uint64_t {
+				using T = std::decay_t<decltype(output)>;
+				if constexpr (std::is_same_v<T, Image>)
+					return output.Pixels.capacity();
+				else if constexpr (std::is_same_v<T, ImageArray>)
+					return RetainedImageArrayBytes(output);
+				else {
+					uint64_t bytes = detail::RetainedPayloadBytes(output.Data);
+					return AddBytes(bytes, output.Port.capacity()) ? bytes
+																   : std::numeric_limits<uint64_t>::max();
+				}
+			},
+			value
+		);
+	}
+	uint64_t RetainedStatefulOutputBytes(const StatefulOutputEvaluationResult &result) {
+		uint64_t bytes = 0;
+		if (result.Outputs.size() > Limits::MaximumOutputs ||
+			!AddArrayBytes(bytes, result.Outputs.capacity(), sizeof(StatefulNamedOutput)))
+			return std::numeric_limits<uint64_t>::max();
+		for (const auto &output : result.Outputs)
+			if (!AddBytes(bytes, output.Id.capacity()) ||
+				!AddBytes(bytes, RetainedStatefulValueBytes(output.Output)))
+				return std::numeric_limits<uint64_t>::max();
 		return bytes;
 	}
 
@@ -5058,7 +6295,236 @@ namespace engine::imagegraph {
 		std::string_view NodeId;
 		std::vector<EvaluationInputValue> *Values = nullptr;
 		std::vector<EvaluationInputImage> *Images = nullptr;
+		std::optional<SurfaceFormat> *SurfacePolicy = nullptr;
 		detail::AllocationReservation *Charge = nullptr;
+		std::vector<SnapshotImageArray> *ImageArrays = nullptr;
+		int64_t *InterpolationPolicy = nullptr;
+	};
+	struct InlineOwnerInputs {
+		detail::AllocationReservation Charge;
+		std::vector<EvaluationInputValue> Values;
+		std::vector<EvaluationInputImage> Images;
+		std::vector<SnapshotImageArray> ImageArrays;
+		std::vector<std::pair<std::string_view, const Value *>> ValueViews;
+		std::vector<std::pair<std::string_view, const Image *>> ImageViews;
+		std::vector<std::pair<std::string_view, const ImageArray *>> ImageArrayViews;
+		std::optional<SurfaceFormat> SurfacePolicy;
+		std::vector<std::string_view> LinkedValues;
+		bool Captured = false;
+	};
+	struct PcxEvaluationNames final : PcxNameResolver {
+		size_t Consumer;
+		const Plan &Compiled;
+		const Document &Authored;
+		const std::vector<NodeResult> &Results;
+		std::span<const InlineOwnerInputs> Inputs;
+		std::span<const PcxNamedDependency> DynamicRoutes;
+		std::optional<PcxNamedDependency> *PendingRoute = nullptr;
+		detail::EvaluationBudget *RouteBudget = nullptr;
+		detail::AllocationReservation *RouteCharge = nullptr;
+		PcxEvaluationNames(
+			size_t consumer,
+			const Plan &plan,
+			const Document &document,
+			const std::vector<NodeResult> &results,
+			std::span<const InlineOwnerInputs> inputs,
+			std::span<const PcxNamedDependency> dynamicRoutes = {},
+			std::optional<PcxNamedDependency> *pendingRoute = nullptr,
+			detail::EvaluationBudget *routeBudget = nullptr,
+			detail::AllocationReservation *routeCharge = nullptr
+		)
+			: Consumer(consumer), Compiled(plan), Authored(document), Results(results), Inputs(inputs),
+			  DynamicRoutes(dynamicRoutes), PendingRoute(pendingRoute), RouteBudget(routeBudget),
+			  RouteCharge(routeCharge) {}
+		bool Await(
+			size_t producer, std::string_view name, std::string_view port, bool input, Diagnostic &diagnostic
+		) const {
+			diagnostic = {
+				Status::UnsupportedExecution,
+				Authored.Nodes[producer].Id,
+				std::string(port),
+				"PCX named dependency is awaiting its producer"
+			};
+			if (!PendingRoute || !RouteBudget || !RouteCharge) return false;
+			auto charge = RouteBudget->Reserve(
+				2 * (name.size() + port.size()) + 2 * sizeof(PcxNamedDependency) + 4 * sizeof(size_t) + 64
+			);
+			if (!charge || !RouteCharge->Merge(std::move(*charge))) {
+				diagnostic.Code = Status::LimitExceeded;
+				diagnostic.Message = "dynamic PCX dependencies exceed the live byte budget";
+				return false;
+			}
+			*PendingRoute =
+				PcxNamedDependency{Consumer, producer, std::string(name), std::string(port), input};
+			return false;
+		}
+		static bool Copy(const Value &source, Value &owned, Diagnostic &diagnostic) {
+			const auto bytes = ValueClonePayloadBytes(source);
+			if (!bytes || *bytes > Limits::MaximumArrayBytes) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "PCX observation exceeds its value bytes"};
+				return false;
+			}
+			owned = source;
+			return true;
+		}
+		static bool Surface(const Image &source, Value &owned, Diagnostic &diagnostic) {
+			if (source.Pixels.size() > Limits::MaximumArrayBytes) {
+				diagnostic = {
+					Status::LimitExceeded, {}, {}, "PCX surface observation exceeds its value bytes"
+				};
+				return false;
+			}
+			owned = SurfaceValue{source};
+			return true;
+		}
+		static bool Images(const ImageArray &images, Value &owned, Diagnostic &diagnostic) {
+			uint64_t bytes = 0;
+			size_t count = 0;
+			const auto convert =
+				[&](auto &&self, const ImageArrayItem &item, SourceArrayItem &output, size_t depth) -> bool {
+				if (depth > 64 || ++count > Limits::MaximumArrayElements) return false;
+				bytes += sizeof(SourceArrayItem);
+				if (bytes > Limits::MaximumArrayBytes) return false;
+				if (const auto *index = std::get_if<size_t>(&item.Data)) {
+					if (*index >= images.Images.size()) return false;
+					const auto &image = images.Images[*index];
+					if (image.Pixels.size() > Limits::MaximumArrayBytes - bytes) return false;
+					bytes += image.Pixels.size();
+					output.Data = image;
+					return true;
+				}
+				std::vector<SourceArrayItem> children;
+				for (const auto &child : std::get<std::vector<ImageArrayItem>>(item.Data)) {
+					SourceArrayItem next{ElementValue{double{0}}};
+					if (!self(self, child, next, depth + 1)) return false;
+					children.push_back(std::move(next));
+				}
+				output.Data = std::move(children);
+				return true;
+			};
+			ArrayValue array{ValueType::Any, {}};
+			if (images.Items.empty()) {
+				for (size_t i = 0; i < images.Images.size(); ++i) {
+					SourceArrayItem next{ElementValue{double{0}}};
+					if (!convert(convert, ImageArrayItem{i}, next, 1)) {
+						diagnostic = {
+							Status::LimitExceeded, {}, {}, "PCX image observation exceeds shape or bytes"
+						};
+						return false;
+					}
+					array.Items.push_back(std::move(next));
+				}
+			} else
+				for (const auto &item : images.Items) {
+					SourceArrayItem next{ElementValue{double{0}}};
+					if (!convert(convert, item, next, 1)) {
+						diagnostic = {
+							Status::LimitExceeded, {}, {}, "PCX image observation exceeds shape or bytes"
+						};
+						return false;
+					}
+					array.Items.push_back(std::move(next));
+				}
+			owned = std::move(array);
+			return true;
+		}
+		bool Resolve(std::string_view name, Value &value, Diagnostic &diagnostic) const override {
+			if (name.starts_with("Project.") || name.starts_with("Program.") || name.starts_with("Device."))
+				return false;
+			const auto compiled = std::find_if(
+				Compiled.PcxNamedDependencies.begin(),
+				Compiled.PcxNamedDependencies.end(),
+				[&](const auto &route) { return route.Consumer == Consumer && route.Name == name; }
+			);
+			const auto dynamic =
+				std::find_if(DynamicRoutes.begin(), DynamicRoutes.end(), [&](const auto &route) {
+					return route.Consumer == Consumer && route.Name == name;
+				});
+			const PcxNamedDependency *found = compiled != Compiled.PcxNamedDependencies.end() ? &*compiled
+											  : dynamic != DynamicRoutes.end()				  ? &*dynamic
+																							  : nullptr;
+			if (!found) {
+				diagnostic = {};
+				const auto first = name.find('.'),
+						   second = first == std::string_view::npos ? first : name.find('.', first + 1);
+				if (second != std::string_view::npos) {
+					const auto owner = name.substr(0, first);
+					for (auto node = Authored.Nodes.rbegin(); node != Authored.Nodes.rend(); ++node)
+						if (!owner.empty() && node->SourceInternalName == owner) {
+							std::string direction(name.substr(first + 1, second - first - 1)),
+								port(name.substr(second + 1));
+							if (auto extra = port.find('.'); extra != std::string::npos) port.resize(extra);
+							for (char &c : direction)
+								if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+							for (char &c : port)
+								if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+							const bool input = direction == "input" || direction == "inputs";
+							if (!input && direction != "output" && direction != "outputs") break;
+							const auto *entry = FindCatalogueEntry(node->Type);
+							if (FindPortType(
+									*node, port, input ? PortDirection::Input : PortDirection::Output
+								) ||
+								(input && entry && FindCatalogueInput(*entry, port))) {
+								return Await(
+									size_t(node.base() - Authored.Nodes.begin() - 1),
+									name,
+									port,
+									input,
+									diagnostic
+								);
+							}
+							diagnostic.Message = "Junction " + port + " not found.";
+							break;
+						}
+				}
+				if (first == std::string_view::npos && !Authored.ProjectGlobalNodeId.empty())
+					for (size_t index = 0; index < Authored.Nodes.size(); ++index) {
+						const auto &global = Authored.Nodes[index];
+						if (global.Id != Authored.ProjectGlobalNodeId) continue;
+						if (std::any_of(
+								global.DynamicInputs.begin(),
+								global.DynamicInputs.end(),
+								[&](const auto &input) { return input.Id == name; }
+							)) {
+							return Await(index, name, name, true, diagnostic);
+						}
+					}
+				value = double{0};
+				return true;
+			}
+			if (found->Input) {
+				const auto &inputs = Inputs[found->Producer];
+				if (!inputs.Captured) {
+					diagnostic = {Status::InvalidValue, {}, {}, "PCX observed inputs were not captured"};
+					return false;
+				}
+				for (const auto &input : inputs.Values)
+					if (input.Port == found->Port) {
+						return Copy(input.Data, value, diagnostic);
+					}
+				for (const auto &image : inputs.Images)
+					if (image.Port == found->Port) {
+						return Surface(image.Data, value, diagnostic);
+					}
+				for (const auto &images : inputs.ImageArrays)
+					if (images.Port == found->Port) return Images(images.Data, value, diagnostic);
+			} else {
+				const auto &result = Results[found->Producer];
+				if (const auto *values = FindValueOutputs(result))
+					for (const auto &output : *values)
+						if (output.Port == found->Port) {
+							return Copy(output.Data, value, diagnostic);
+						}
+				if (const auto *image = FindImageOutput(result, found->Port)) {
+					return Surface(*image, value, diagnostic);
+				}
+				if (const auto *images = FindImageArrayOutput(result, found->Port))
+					return Images(*images, value, diagnostic);
+			}
+			value = double{0};
+			diagnostic = {};
+			return true;
+		}
 	};
 	struct NodeValuesCapture {
 		std::string_view NodeId;
@@ -5082,12 +6548,47 @@ namespace engine::imagegraph {
 		std::span<NodeResult> results,
 		std::span<detail::AllocationReservation> resultCharges
 	) {
-		if (!context.ImageArrays.empty())
+		*capture.SurfacePolicy = context.InheritedSurfaceFormat;
+		if (capture.InterpolationPolicy) *capture.InterpolationPolicy = context.InheritedInterpolation;
+		if (!context.ImageArrays.empty() && !capture.ImageArrays)
 			return context.Fail(
-				Status::UnsupportedExecution,
-				"node input snapshot cannot contain image arrays",
-				capture.NodeId
+				Status::UnsupportedExecution, "snapshot owner has no image-array storage", capture.NodeId
 			);
+		const auto inputArray = [&](std::string_view port) -> const ImageArray * {
+			const auto found =
+				std::find_if(context.ImageArrays.begin(), context.ImageArrays.end(), [&](const auto &entry) {
+					return entry.first == port;
+				});
+			return found == context.ImageArrays.end() ? nullptr : found->second;
+		};
+		for (const auto &[port, array] : context.ImageArrays) {
+			if (!array || array->Images.size() > Limits::MaximumArrayElements ||
+				RetainedImageArrayBytes(*array) == std::numeric_limits<uint64_t>::max())
+				return context.Fail(
+					Status::LimitExceeded, "node image-array snapshot exceeds native bounds", port
+				);
+			const auto validItems = [&](auto &&self, const std::vector<ImageArrayItem> &items) -> bool {
+				for (const auto &item : items) {
+					if (const auto *image = std::get_if<size_t>(&item.Data)) {
+						if (*image >= array->Images.size()) return false;
+					} else if (!self(self, std::get<std::vector<ImageArrayItem>>(item.Data)))
+						return false;
+				}
+				return true;
+			};
+			if (!validItems(validItems, array->Items))
+				return context.Fail(
+					Status::InvalidValue, "node image-array snapshot has an invalid image index", port
+				);
+			for (const auto &image : array->Images)
+				if (!ValidSurfaceLayout(
+						image, context.Request.MaximumImageDimension, Limits::MaximumEvaluationBytes
+					) ||
+					!FiniteSurfaceSamples(image))
+					return context.Fail(
+						Status::InvalidValue, "node image-array snapshot has invalid surface samples", port
+					);
+		}
 		// Use the same first-port-wins rule as snapshot construction when proving
 		// pointer uniqueness.
 		const auto ports = [&](const auto &visit) {
@@ -5145,13 +6646,20 @@ namespace engine::imagegraph {
 						!AddBytes(bytes, image->Pixels.capacity()))
 						return false;
 				}
+				if (const auto *array = inputArray(port)) {
+					if (!AddBytes(bytes, std::max(port.size(), std::string{}.capacity())) ||
+						!AddBytes(bytes, RetainedImageArrayBytes(*array)))
+						return false;
+				}
 				return true;
 			}))
 			return context.Fail(Status::LimitExceeded, "node input snapshot size overflow", capture.NodeId);
 		const size_t valueSlots = context.Entry.Inputs.size() + context.Authored.DynamicInputs.size();
 		const size_t imageSlots = context.Images.size();
+		const size_t arraySlots = context.ImageArrays.size();
 		if (!AddArrayBytes(bytes, valueSlots, sizeof(EvaluationInputValue)) ||
-			!AddArrayBytes(bytes, imageSlots, sizeof(EvaluationInputImage)))
+			!AddArrayBytes(bytes, imageSlots, sizeof(EvaluationInputImage)) ||
+			!AddArrayBytes(bytes, arraySlots, sizeof(SnapshotImageArray)))
 			return context.Fail(Status::LimitExceeded, "node input snapshot size overflow", capture.NodeId);
 		auto charge = context.ReserveWorkspace(bytes, capture.NodeId);
 		if (!charge || !capture.Charge->Merge(std::move(*charge)))
@@ -5173,6 +6681,7 @@ namespace engine::imagegraph {
 			);
 		capture.Values->reserve(valueSlots);
 		capture.Images->reserve(imageSlots);
+		if (capture.ImageArrays) capture.ImageArrays->reserve(arraySlots);
 		// No source payload changes until all strings, vector capacities and copied
 		// inputs are admitted.
 		if (!ports([&](std::string_view port) {
@@ -5191,12 +6700,16 @@ namespace engine::imagegraph {
 				}
 				if (const Image *image = context.Input(port))
 					capture.Images->push_back({std::string(port), *image, context.InputDomain(port)});
+				if (const auto *array = inputArray(port))
+					capture.ImageArrays->push_back({std::string(port), *array, context.InputDomain(port)});
 				return true;
 			}))
 			return false;
 		uint64_t actual = 0;
 		if (!AddArrayBytes(actual, capture.Values->capacity(), sizeof(EvaluationInputValue)) ||
-			!AddArrayBytes(actual, capture.Images->capacity(), sizeof(EvaluationInputImage)))
+			!AddArrayBytes(actual, capture.Images->capacity(), sizeof(EvaluationInputImage)) ||
+			(capture.ImageArrays &&
+			 !AddArrayBytes(actual, capture.ImageArrays->capacity(), sizeof(SnapshotImageArray))))
 			return context.Fail(
 				Status::LimitExceeded, "node input snapshot actual size overflow", capture.NodeId
 			);
@@ -5211,6 +6724,13 @@ namespace engine::imagegraph {
 				return context.Fail(
 					Status::LimitExceeded, "node input snapshot actual size overflow", image.Port
 				);
+		if (capture.ImageArrays)
+			for (const auto &array : *capture.ImageArrays)
+				if (!AddBytes(actual, array.Port.capacity()) ||
+					!AddBytes(actual, RetainedImageArrayBytes(array.Data)))
+					return context.Fail(
+						Status::LimitExceeded, "node image-array snapshot actual size overflow", array.Port
+					);
 		if (actual > bytes) {
 			auto excess = context.ReserveWorkspace(actual - bytes, capture.NodeId);
 			if (!excess || !capture.Charge->Merge(std::move(*excess)))
@@ -5286,11 +6806,8 @@ namespace engine::imagegraph {
 		});
 	}
 
-	static const Node *EffectiveInputOwner(
-		const Document &document,
-		const Node &start,
-		std::string_view port
-	) {
+	static const Node *
+	EffectiveInputOwner(const Document &document, const Node &start, std::string_view port) {
 		const Node *current = &start;
 		if (port == "parent_value") return current;
 		for (size_t hop = 0; hop < document.Nodes.size(); ++hop) {
@@ -5298,24 +6815,57 @@ namespace engine::imagegraph {
 				current->InstanceOverrides.end())
 				return current;
 			if (current->InstanceBase.empty()) return current;
-			const auto base = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
-				return node.Id == current->InstanceBase && node.Type == current->Type;
-			});
+			const auto base =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+					return node.Id == current->InstanceBase && node.Type == current->Type;
+				});
 			if (base == document.Nodes.end()) return nullptr;
 			current = &*base;
 		}
 		return nullptr;
 	}
 
-	static const Node *EffectiveInputOwner(
+	static std::optional<bool> SourceTriggerInputValue(
 		const Document &document,
-		std::string_view nodeId,
-		std::string_view port
+		const Node &node,
+		const CatalogueInput &input,
+		const EvaluationRequest &request,
+		bool &unsupportedClock
 	) {
-		const auto found = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
-			return node.Id == nodeId;
-		});
-		return found == document.Nodes.end() ? nullptr : EffectiveInputOwner(document, *found, port);
+		const auto *entry = request.GroupReplay ? request.GroupReplay->Find(node.Id) : nullptr;
+		const auto *type = FindValue(node, "input_type");
+		const bool authoredTrigger = type && std::holds_alternative<EnumValue>(type->Data) &&
+									 std::get<EnumValue>(type->Data).Value == 19;
+		const bool trigger = input.SourceKind == "Trigger" ||
+							 (node.Type == "pc.group_input" && input.Id == "parent_value" &&
+							  (entry ? entry->Domain.Kind == SourceSocketKind::Trigger : authoredTrigger));
+		if (!trigger) return std::nullopt;
+		const Node *owner = EffectiveInputOwner(document, node, input.Id);
+		if (!owner) return false;
+		if (std::find(owner->SourceStaticInputs.begin(), owner->SourceStaticInputs.end(), input.Id) !=
+			owner->SourceStaticInputs.end())
+			return false;
+		const auto *overlay =
+			request.GroupReplay ? request.GroupReplay->SharedSubtype(owner->Id, input.Id) : nullptr;
+		const auto *keys = overlay ? &overlay->Keys : entry ? &entry->ParentKeys : nullptr;
+		if ((overlay && overlay->Fixed) || (entry && entry->ParentReset)) return false;
+		// The source Trigger key map marks key positions, irrespective of stored boolean values.
+		// Fractional map coercion is not used by this native integer-frame button path.
+		if (request.Subframe != 0 || request.NegativeFrame) {
+			const bool keyed =
+				(keys && !keys->empty()) ||
+				std::any_of(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
+					return key.NodeId == owner->Id && key.Port == input.Id;
+				});
+			unsupportedClock = keyed;
+			return false;
+		}
+		const auto match = [&](const Keyframe &key) {
+			return key.NodeId == owner->Id && key.Port == input.Id && !key.NegativeFrame &&
+				   key.Subframe == 0 && key.Tick == request.Tick;
+		};
+		if (keys && !keys->empty()) return std::any_of(keys->begin(), keys->end(), match);
+		return std::any_of(document.Keyframes.begin(), document.Keyframes.end(), match);
 	}
 
 	static const Value *SharedGroupInputView(
@@ -5329,9 +6879,10 @@ namespace engine::imagegraph {
 		const auto *binding = replay && replay->InstancesBound() ? replay->Binding(nodeId, port) : nullptr;
 		const Node *owner = nullptr;
 		if (binding) {
-			const auto found = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
-				return node.Id == binding->OwnerId;
-			});
+			const auto found =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+					return node.Id == binding->OwnerId;
+				});
 			if (found != document.Nodes.end()) owner = &*found;
 		} else {
 			owner = EffectiveInputOwner(document, target, port);
@@ -5510,29 +7061,29 @@ namespace engine::imagegraph {
 				std::optional<Quaternion> projection;
 				const auto *value = SharedGroupInputView(*document, replayState, local, port, &projection);
 				const auto *binding = replayState && replayState->InstancesBound()
-							  ? replayState->Binding(local.Id, port)
-							  : nullptr;
-				const auto canonical = std::find_if(document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
-					return node.Id == local.Id;
-				});
+										  ? replayState->Binding(local.Id, port)
+										  : nullptr;
+				const auto canonical =
+					std::find_if(document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
+						return node.Id == local.Id;
+					});
 				const Node *owner = binding || canonical == document->Nodes.end()
-							? nullptr
-							: EffectiveInputOwner(*document, *canonical, port);
+										? nullptr
+										: EffectiveInputOwner(*document, *canonical, port);
 				if (binding) {
-					const auto foundOwner = std::find_if(
-						document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
+					const auto foundOwner =
+						std::find_if(document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
 							return node.Id == binding->OwnerId;
-						}
-					);
+						});
 					if (foundOwner != document->Nodes.end()) owner = &*foundOwner;
 				}
 				if (owner && timelineOverrides) {
-					const auto foundOwner = std::find_if(
-						document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
+					const auto foundOwner =
+						std::find_if(document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
 							return node.Id == owner->Id;
-						}
-					);
-					if (foundOwner == document->Nodes.end()) owner = nullptr;
+						});
+					if (foundOwner == document->Nodes.end())
+						owner = nullptr;
 					else {
 						const size_t ownerIndex = static_cast<size_t>(foundOwner - document->Nodes.begin());
 						owner = &timelineOverrides->Find(ownerIndex, *foundOwner);
@@ -5594,18 +7145,25 @@ namespace engine::imagegraph {
 		);
 		return false;
 	}
+	struct SchemaInputValue {
+		std::string_view Port;
+		const Value *Data = nullptr;
+		bool Linked = false;
+		std::optional<SourceSocketDomain> Source;
+	};
 	static bool CaptureSchemaNodeInputs(
 		const Node &node,
+		std::span<const SchemaInputValue> values,
 		std::span<const std::pair<std::string_view, const Image *>> images,
 		detail::EvaluationBudget &budget,
 		NodeInputCapture &capture,
 		Diagnostic &diagnostic
 	) {
 		uint64_t bytes = 0;
-		for (const AuthoredValue &value : node.Values)
+		for (const SchemaInputValue &value : values)
 			if (!AddBytes(bytes, sizeof(EvaluationInputValue)) ||
 				!AddBytes(bytes, std::max(value.Port.size(), std::string{}.capacity())) ||
-				!AddBytes(bytes, detail::RetainedPayloadBytes(value.Data))) {
+				!AddBytes(bytes, detail::RetainedPayloadBytes(*value.Data))) {
 				SetDiagnostic(
 					diagnostic, Status::LimitExceeded, "node input snapshot size overflow", node.Id
 				);
@@ -5633,16 +7191,36 @@ namespace engine::imagegraph {
 			);
 			return false;
 		}
-		capture.Values->reserve(node.Values.size());
+		capture.Values->reserve(values.size());
 		capture.Images->reserve(images.size());
-		for (const AuthoredValue &value : node.Values)
-			capture.Values->push_back({value.Port, value.Data, false, std::nullopt});
+		for (const SchemaInputValue &value : values)
+			capture.Values->push_back({std::string(value.Port), *value.Data, value.Linked, value.Source});
 		for (const auto &[port, image] : images)
 			if (image) capture.Images->push_back({std::string(port), *image, std::nullopt});
 		return true;
 	}
 
 	static Status ValidateEvaluationRequest(const EvaluationRequest &request, Diagnostic &diagnostic) {
+		if (request.SimulationCacheCaptures.size() > Limits::MaximumNodes) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "simulation cache actions exceed node bounds");
+			return diagnostic.Code;
+		}
+		for (size_t index = 0; index < request.SimulationCacheCaptures.size(); ++index) {
+			const auto id = request.SimulationCacheCaptures[index];
+			if (id.empty() || id.size() > Limits::MaximumTextBytes) {
+				SetDiagnostic(
+					diagnostic, Status::InvalidValue, "simulation cache action identity is invalid"
+				);
+				return diagnostic.Code;
+			}
+			for (size_t earlier = 0; earlier < index; ++earlier)
+				if (request.SimulationCacheCaptures[earlier] == id) {
+					SetDiagnostic(
+						diagnostic, Status::DuplicateId, "simulation cache actions repeat node identity"
+					);
+					return diagnostic.Code;
+				}
+		}
 		if (request.MaximumImageDimension == 0 || request.MaximumImageDimension > Limits::MaximumDimension) {
 			SetDiagnostic(
 				diagnostic,
@@ -5650,6 +7228,17 @@ namespace engine::imagegraph {
 				"evaluation image dimension cap is outside native limits",
 				{},
 				"maximum_image_dimension"
+			);
+			return diagnostic.Code;
+		}
+		if (request.PixelBuilderCirclePrecision < 4 || request.PixelBuilderCirclePrecision > 64 ||
+			request.PixelBuilderCirclePrecision % 4 != 0) {
+			SetDiagnostic(
+				diagnostic,
+				Status::InvalidValue,
+				"pixel builder circle precision requires a multiple of four from 4 through 64",
+				{},
+				"pixel_builder_circle_precision"
 			);
 			return diagnostic.Code;
 		}
@@ -5794,6 +7383,69 @@ namespace engine::imagegraph {
 		bool Captured = false;
 	};
 
+	struct SimulationCapture {
+		SimulationReplayState *Replay;
+		detail::AllocationReservation *Charge;
+		SurfaceFrameReplayState *Surfaces = nullptr;
+		RandomReplayState *Random = nullptr;
+		DataReplayState *Data = nullptr;
+	};
+	struct StatefulOutputCapture {
+		std::span<const std::string> Ids;
+		std::vector<StatefulNamedOutput> *Outputs;
+		detail::AllocationReservation *Charge;
+	};
+
+	template <class Entry>
+	static bool GrowReplayEntries(
+		std::vector<Entry> &entries,
+		detail::EvaluationBudget &budget,
+		detail::AllocationReservation &charge,
+		Diagnostic &diagnostic,
+		const std::string &nodeId
+	) {
+		if (entries.size() < entries.capacity()) return true;
+		if (entries.size() >= Limits::MaximumArrayElements) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "replay entry count exceeds bounds", nodeId);
+			return false;
+		}
+		const size_t previousCapacity = entries.capacity();
+		const size_t capacity =
+			std::min(Limits::MaximumArrayElements, std::max<size_t>(1, previousCapacity * 2));
+		auto admission = budget.Reserve(capacity * sizeof(Entry));
+		if (!admission || !charge.Merge(std::move(*admission))) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "replay slot growth exceeds byte bounds", nodeId
+			);
+			return false;
+		}
+		entries.reserve(capacity);
+		auto released = charge.Split(previousCapacity * sizeof(Entry));
+		if (!released) std::terminate();
+		return true;
+	}
+
+	static Status ValidateSimulationCacheActions(
+		const Document &document, const EvaluationRequest &request, Diagnostic &diagnostic
+	) {
+		for (const auto id : request.SimulationCacheCaptures) {
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
+					return item.Id == id;
+				});
+			if (node == document.Nodes.end() || node->Type != "pc.verlet_sim_mesh_cache") {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"simulation cache action must name an authored Cache Mesh node",
+					std::string(id)
+				);
+				return diagnostic.Code;
+			}
+		}
+		return Status::Ok;
+	}
+
 	static Status EvaluateGraph(
 		const Document &document,
 		const Plan &plan,
@@ -5810,8 +7462,27 @@ namespace engine::imagegraph {
 		std::string_view targetNodeId = {},
 		std::string_view requiredOutputId = {},
 		bool planAlreadyValidated = false,
-		GroupRefreshCapture *groupRefresh = nullptr
+		GroupRefreshCapture *groupRefresh = nullptr,
+		SimulationCapture *simulation = nullptr,
+		StatefulOutputCapture *batch = nullptr
 	) {
+		const auto cacheActions = ValidateSimulationCacheActions(document, request, diagnostic);
+		if (cacheActions != Status::Ok) return cacheActions;
+		detail::AllocationReservation sliceStateShadow;
+		if (request.SliceStackReplay) {
+			if (ValidateSliceStackReplay(
+					*request.SliceStackReplay, Limits::MaximumEvaluationBytes, diagnostic
+				) != Status::Ok)
+				return diagnostic.Code;
+			auto charge = budget.Reserve(RetainedSliceStackReplayBytes(*request.SliceStackReplay));
+			if (!charge) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "slice replay owner exceeds live evaluation budget"
+				);
+				return diagnostic.Code;
+			}
+			sliceStateShadow = std::move(*charge);
+		}
 		detail::AllocationReservation groupStateShadow;
 		if (request.GroupReplay) {
 			if (!request.GroupReplay->InstancesBound() &&
@@ -5845,9 +7516,6 @@ namespace engine::imagegraph {
 				groupStateShadow = std::move(*shadow);
 			}
 		}
-		// Pure image nodes do not sample the seed. Future random nodes receive this
-		// same request.
-		(void)request.Seed;
 		const Status captureStatus = ValidateAudioCaptureFrames(request.AudioFrames, diagnostic);
 		if (captureStatus != Status::Ok) return captureStatus;
 		detail::AllocationReservation currentPlanCharge;
@@ -5871,6 +7539,7 @@ namespace engine::imagegraph {
 			);
 		};
 		const bool captureTarget = !targetNodeId.empty();
+		bool inputsCaptured = false;
 		const auto output = captureTarget ? document.Outputs.end() : findOutput(outputId);
 		const auto requiredOutput =
 			requiredOutputId.empty() ? document.Outputs.end() : findOutput(requiredOutputId);
@@ -5889,7 +7558,11 @@ namespace engine::imagegraph {
 			document.Nodes.size() * (sizeof(std::pair<std::string_view, size_t>) +
 									 sizeof(std::vector<size_t>) + 2 * sizeof(uint8_t) + 2 * sizeof(size_t) +
 									 sizeof(detail::AllocationReservation) + sizeof(NodeResult)) +
-			(2 * (plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size()) + 1) * sizeof(size_t);
+			(2 * (plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size() +
+				  plan.InlineOwnerDependencies.size() + plan.InlineControlDependencies.size() +
+				  plan.PcxNamedDependencies.size()) +
+			 1 + (batch ? batch->Ids.size() : 0) + request.SimulationCacheCaptures.size()) *
+				sizeof(size_t);
 		auto graphCharge = budget.Reserve(graphBytes);
 		if (!graphCharge) {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "graph workspace exceeds the live byte budget");
@@ -5907,11 +7580,53 @@ namespace engine::imagegraph {
 			return diagnostic.Code;
 		}
 		const size_t targetIndex = nodeIndices.at(captureTarget ? targetNodeId : output->NodeId);
+		detail::EvaluationVector<const Output *> selectedOutputs{
+			detail::EvaluationAllocator<const Output *>(budget)
+		};
+		detail::EvaluationVector<uint8_t> retainedTargets{detail::EvaluationAllocator<uint8_t>(budget)};
+		if (batch) {
+			if ((captureTarget && !nodeInputs) || (!nodeInputs && batch->Ids.empty()) ||
+				batch->Ids.size() > Limits::MaximumOutputs) {
+				SetDiagnostic(diagnostic, Status::InvalidOutput, "batch needs bounded selected output IDs");
+				return diagnostic.Code;
+			}
+			selectedOutputs.reserve(batch->Ids.size());
+			retainedTargets.resize(document.Nodes.size(), 0);
+			for (const auto &id : batch->Ids) {
+				const auto selected = findOutput(id);
+				if (selected == document.Outputs.end() ||
+					std::find(selectedOutputs.begin(), selectedOutputs.end(), &*selected) !=
+						selectedOutputs.end()) {
+					SetDiagnostic(
+						diagnostic, Status::InvalidOutput, "batch output ID is missing or duplicated"
+					);
+					return diagnostic.Code;
+				}
+				if (nodeInputs && selected->NodeId == targetNodeId) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidOutput,
+						"input snapshot cannot also execute its selected host output",
+						selected->NodeId,
+						selected->Port
+					);
+					return diagnostic.Code;
+				}
+				selectedOutputs.push_back(&*selected);
+				retainedTargets[nodeIndices.at(selected->NodeId)] = 1;
+			}
+		}
 		std::vector<std::vector<size_t>> upstream(document.Nodes.size());
 		std::vector<size_t> sourceCounts(document.Nodes.size(), 0);
 		for (const Link &link : plan.EffectiveLinks)
 			++sourceCounts[nodeIndices.at(link.ToNode)];
 		for (const auto &route : plan.GroupSurfaceDependencies)
+			++sourceCounts[route.Consumer];
+		for (const auto &route : plan.InlineOwnerDependencies)
+			if (!route.ControlsOnly) ++sourceCounts[route.Consumer];
+		for (const auto &route : plan.InlineControlDependencies)
+			++sourceCounts[route.Consumer];
+		for (const auto &route : plan.PcxNamedDependencies)
 			++sourceCounts[route.Consumer];
 		for (size_t index = 0; index < upstream.size(); ++index)
 			upstream[index].reserve(sourceCounts[index]);
@@ -5923,12 +7638,37 @@ namespace engine::imagegraph {
 			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
 				sources.push_back(route.Producer);
 		}
+		for (const auto &route : plan.InlineOwnerDependencies) {
+			if (route.ControlsOnly) continue;
+			auto &sources = upstream[route.Consumer];
+			if (std::find(sources.begin(), sources.end(), route.Owner) == sources.end())
+				sources.push_back(route.Owner);
+		}
+		for (const auto &route : plan.InlineControlDependencies) {
+			auto &sources = upstream[route.Consumer];
+			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
+				sources.push_back(route.Producer);
+		}
+		for (const auto &route : plan.PcxNamedDependencies) {
+			auto &sources = upstream[route.Consumer];
+			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
+				sources.push_back(route.Producer);
+		}
 		std::vector<uint8_t> needed(document.Nodes.size(), 0);
 		std::vector<size_t> pending;
-		pending.reserve(plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size() + 1);
+		pending.reserve(
+			plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size() +
+			plan.InlineOwnerDependencies.size() + plan.InlineControlDependencies.size() +
+			plan.PcxNamedDependencies.size() + 1 + selectedOutputs.size() +
+			request.SimulationCacheCaptures.size()
+		);
 		pending.push_back(
 			requiredOutput == document.Outputs.end() ? targetIndex : nodeIndices.at(requiredOutput->NodeId)
 		);
+		for (const auto *selected : selectedOutputs)
+			pending.push_back(nodeIndices.at(selected->NodeId));
+		for (const auto id : request.SimulationCacheCaptures)
+			pending.push_back(nodeIndices.at(id));
 		while (!pending.empty()) {
 			const size_t current = pending.back();
 			pending.pop_back();
@@ -5962,8 +7702,10 @@ namespace engine::imagegraph {
 		detail::EvaluationVector<uint8_t> timelineNeeded(
 			needed.begin(), needed.end(), detail::EvaluationAllocator<uint8_t>(budget)
 		);
+		for (const auto &route : plan.InlineOwnerDependencies)
+			if (route.ControlsOnly && needed[route.Consumer]) timelineNeeded[route.Owner] = 1;
 		for (size_t index = 0; index < needed.size(); ++index) {
-			if (!needed[index]) continue;
+			if (!timelineNeeded[index]) continue;
 			const Node *current = &document.Nodes[index];
 			for (size_t hop = 0; !current->InstanceBase.empty() && hop < document.Nodes.size(); ++hop) {
 				const size_t base = nodeIndices.at(current->InstanceBase);
@@ -6006,10 +7748,358 @@ namespace engine::imagegraph {
 
 		std::vector<detail::AllocationReservation> resultCharges(document.Nodes.size());
 		std::vector<NodeResult> results(document.Nodes.size());
+		std::optional<detail::HostCaptureReceiptSink> hostReceipts;
+		if (std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+				return node.Type == "pc.pixel_builder";
+			}))
+			hostReceipts.emplace(budget);
+		const bool dynamicPcx =
+			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+				return node.Type == "pc.equation" || node.Type.starts_with("pc.pcx_") ||
+					   std::any_of(
+						   node.SourceInputExpressions.begin(),
+						   node.SourceInputExpressions.end(),
+						   [](const auto &program) { return program.Enabled; }
+					   );
+			});
+		detail::EvaluationVector<PcxNamedDependency> dynamicPcxRoutes{
+			detail::EvaluationAllocator<PcxNamedDependency>(budget)
+		};
+		detail::AllocationReservation dynamicPcxCharge;
+		std::optional<PcxNamedDependency> pendingPcxRoute;
+		detail::EvaluationVector<uint8_t> completed(
+			dynamicPcx ? document.Nodes.size() : 0, 0, detail::EvaluationAllocator<uint8_t>(budget)
+		);
+		uint64_t scheduleWork = 0;
+		const bool hasInlineOwners =
+			std::any_of(
+				document.Groups.begin(),
+				document.Groups.end(),
+				[](const Group &group) { return !group.OwnerNodeId.empty(); }
+			) ||
+			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+				return node.Type == "pc.pixel_builder";
+			});
+		detail::EvaluationVector<InlineOwnerInputs> inlineInputs(
+			(hasInlineOwners || dynamicPcx || !plan.PcxNamedDependencies.empty()) ? document.Nodes.size() : 0,
+			detail::EvaluationAllocator<InlineOwnerInputs>(budget)
+		);
+		detail::EvaluationVector<detail::PixelBuilderDrawState> builderDrawing(
+			hasInlineOwners ? document.Nodes.size() : 0,
+			detail::PixelBuilderDrawState{request.PixelBuilderCirclePrecision},
+			detail::EvaluationAllocator<detail::PixelBuilderDrawState>(budget)
+		);
 		std::vector<uint8_t> produced(document.Nodes.size(), 0);
+		const auto stagePcxDependency = [&]() -> bool {
+			if (!pendingPcxRoute) return false;
+			const auto &route = *pendingPcxRoute;
+			detail::EvaluationVector<uint8_t> seen(
+				document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
+			);
+			pending.clear();
+			pending.push_back(route.Producer);
+			while (!pending.empty()) {
+				const auto current = pending.back();
+				pending.pop_back();
+				if (++scheduleWork > 64'000'000) {
+					SetDiagnostic(
+						diagnostic, Status::LimitExceeded, "PCX scheduling exceeds its work budget"
+					);
+					return false;
+				}
+				if (current == route.Consumer) {
+					SetDiagnostic(
+						diagnostic,
+						Status::Cycle,
+						"computed PCX dependencies form a cycle",
+						document.Nodes[route.Consumer].Id
+					);
+					return false;
+				}
+				if (seen[current]) continue;
+				seen[current] = 1;
+				for (const auto source : upstream[current])
+					pending.push_back(source);
+			}
+			if (dynamicPcxRoutes.size() >= Limits::MaximumLinks ||
+				std::find(dynamicPcxRoutes.begin(), dynamicPcxRoutes.end(), route) !=
+					dynamicPcxRoutes.end()) {
+				SetDiagnostic(
+					diagnostic,
+					Status::Cycle,
+					"PCX named dependency cannot make progress",
+					document.Nodes[route.Consumer].Id
+				);
+				return false;
+			}
+			dynamicPcxRoutes.push_back(route);
+			auto &sources = upstream[route.Consumer];
+			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
+				sources.push_back(route.Producer);
+			pending.clear();
+			pending.push_back(route.Producer);
+			while (!pending.empty()) {
+				const auto current = pending.back();
+				pending.pop_back();
+				if (++scheduleWork > 64'000'000) {
+					SetDiagnostic(
+						diagnostic, Status::LimitExceeded, "PCX scheduling exceeds its work budget"
+					);
+					return false;
+				}
+				if (needed[current]) continue;
+				needed[current] = 1;
+				for (const auto source : upstream[current])
+					pending.push_back(source);
+			}
+			std::copy(needed.begin(), needed.end(), timelineNeeded.begin());
+			for (const auto &inlineRoute : plan.InlineOwnerDependencies)
+				if (inlineRoute.ControlsOnly && needed[inlineRoute.Consumer])
+					timelineNeeded[inlineRoute.Owner] = 1;
+			for (size_t index = 0; index < needed.size(); ++index) {
+				if (!timelineNeeded[index]) continue;
+				const Node *node = &document.Nodes[index];
+				for (size_t hop = 0; !node->InstanceBase.empty() && hop < document.Nodes.size(); ++hop) {
+					const auto base = nodeIndices.at(node->InstanceBase);
+					timelineNeeded[base] = 1;
+					node = &document.Nodes[base];
+				}
+			}
+			const auto status = detail::ResolveTimelineOverrides(
+				document, timelineNeeded, request, budget, timelineOverrides, diagnostic, {}, true
+			);
+			if (status != Status::Ok) return false;
+			completed[route.Consumer] = 0;
+			pendingPcxRoute.reset();
+			diagnostic = {};
+			return true;
+		};
+		// Builder dimensions are a control snapshot, independent of the later layer composition.
+		// Borrow the same producer results and timeline views that the normal input getter reads.
+		const auto prepareBuilderControls = [&](size_t ownerIndex) -> bool {
+			auto &captured = inlineInputs[ownerIndex];
+			if (captured.Captured) return true;
+			const Node &ownerNode = timelineOverrides.Find(ownerIndex, document.Nodes[ownerIndex]);
+			const auto *entry = FindCatalogueEntry(ownerNode.Type);
+			if (!entry || ownerNode.Type != "pc.pixel_builder") return false;
+			auto workspace = budget.Reserve(
+				2 * (sizeof(Value) + sizeof(std::pair<std::string_view, Value>) +
+					 sizeof(std::pair<std::string_view, const Value *>))
+			);
+			if (!workspace) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"builder control workspace exceeds budget",
+					ownerNode.Id
+				);
+				return false;
+			}
+			detail::NodeContext controls(ownerNode, *entry, request, budget);
+			controls.EvaluationDocument = &document;
+			if (document.Project) {
+				controls.Project.SurfaceWidth = document.Project->SurfaceWidth;
+				controls.Project.SurfaceHeight = document.Project->SurfaceHeight;
+			}
+			controls.Values.reserve(2);
+			controls.ValueViews.reserve(2);
+			controls.LinkedValues.reserve(2);
+			for (std::string_view port : {"dimension", "dimension_unit"}) {
+				const auto *input = FindCatalogueInput(*entry, port);
+				const auto link = std::find_if(
+					plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &item) {
+						return item.ToNode == ownerNode.Id && item.ToPort == port;
+					}
+				);
+				if (link != plan.EffectiveLinks.end()) {
+					const size_t producer = nodeIndices.at(link->FromNode);
+					if (!produced[producer]) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidOutput,
+							"builder control producer was not evaluated",
+							ownerNode.Id,
+							port
+						);
+						return false;
+					}
+					controls.LinkedValues.push_back(port);
+					if (const Image *image = FindImageOutput(results[producer], link->FromPort);
+						image && port == "dimension") {
+						controls.Values.emplace_back(
+							port,
+							Vector2{static_cast<double>(image->Width), static_cast<double>(image->Height)}
+						);
+						continue;
+					}
+					const auto *values = FindValueOutputs(results[producer]);
+					const AuthoredValue *value = nullptr;
+					if (values)
+						for (const auto &item : *values)
+							if (item.Port == link->FromPort) value = &item;
+					if (!value) {
+						SetDiagnostic(
+							diagnostic,
+							Status::TypeMismatch,
+							"builder control requires a typed value",
+							ownerNode.Id,
+							port
+						);
+						return false;
+					}
+					if (const auto *box = std::get_if<PixelBoxValue>(&value->Data);
+						box && port == "dimension") {
+						const auto bounds = detail::PixelBoxBounds(box->Data ? *box->Data : PixelBoxData{});
+						controls.Values.emplace_back(
+							port, Vector2{bounds[2] - bounds[0], bounds[3] - bounds[1]}
+						);
+					} else
+						controls.ValueViews.emplace_back(port, &value->Data);
+					continue;
+				}
+				std::optional<Quaternion> projection;
+				if (const Value *shared =
+						SharedGroupInputView(document, request.GroupReplay, ownerNode, port, &projection)) {
+					controls.ValueViews.emplace_back(port, shared);
+					continue;
+				}
+				const auto routed = std::find_if(
+					plan.ResolvedInputs.begin(), plan.ResolvedInputs.end(), [&](const ResolvedInput &item) {
+						return item.NodeId == ownerNode.Id && item.Port == port;
+					}
+				);
+				if (routed != plan.ResolvedInputs.end()) {
+					controls.LinkedValues.push_back(port);
+					controls.ValueViews.emplace_back(port, &routed->Data);
+					continue;
+				}
+				const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
+										  ? request.GroupReplay->Binding(ownerNode.Id, port)
+										  : nullptr;
+				const Node *authoredOwner = binding ? &document.Nodes[nodeIndices.at(binding->OwnerId)]
+													: EffectiveInputOwner(document, ownerNode, port);
+				if (authoredOwner)
+					authoredOwner =
+						&timelineOverrides.Find(nodeIndices.at(authoredOwner->Id), *authoredOwner);
+				if (const auto *value = authoredOwner ? FindValue(*authoredOwner, port) : nullptr)
+					controls.ValueViews.emplace_back(port, &value->Data);
+				else if (input && !input->Default.empty()) {
+					Value fallback;
+					const Status status = detail::ReadValueText(input->Default, fallback, budget, *workspace);
+					if (status != Status::Ok) {
+						SetDiagnostic(
+							diagnostic, status, "builder control default exceeds budget", ownerNode.Id, port
+						);
+						return false;
+					}
+					controls.Values.emplace_back(port, std::move(fallback));
+				}
+			}
+			detail::SourceGetterProjection getter(controls);
+			if (!getter.Prepare()) {
+				SetDiagnostic(
+					diagnostic,
+					controls.FailureCode,
+					controls.FailureMessage,
+					ownerNode.Id,
+					controls.FailurePort
+				);
+				return false;
+			}
+			const Value *dimensionValue = controls.Find("dimension");
+			const auto *dimension = dimensionValue ? std::get_if<Vector2>(dimensionValue) : nullptr;
+			const Value *unitValue = controls.Find("dimension_unit");
+			const auto unit = unitValue ? detail::SourceChoiceNumber(*unitValue) : std::optional<double>{};
+			if (!dimension || !unit || *unit < 0 || *unit > 2) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"builder dimension controls are unresolved",
+					ownerNode.Id,
+					"dimension"
+				);
+				return false;
+			}
+			Vector2 pixels = *dimension;
+			const bool linked =
+				std::find(controls.LinkedValues.begin(), controls.LinkedValues.end(), "dimension") !=
+				controls.LinkedValues.end();
+			if (!linked && *unit == 1) {
+				pixels.X *= controls.Project.SurfaceWidth;
+				pixels.Y *= controls.Project.SurfaceHeight;
+			}
+			if (!linked && *unit == 2) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedExecution,
+					"builder Mask dimension requires a source mask input",
+					ownerNode.Id,
+					"dimension_unit"
+				);
+				return false;
+			}
+			if (!std::isfinite(pixels.X) || !std::isfinite(pixels.Y) || pixels.X <= 0 || pixels.Y <= 0 ||
+				pixels.X > Limits::MaximumDimension || pixels.Y > Limits::MaximumDimension) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"builder dimension is outside native bounds",
+					ownerNode.Id,
+					"dimension"
+				);
+				return false;
+			}
+			auto charge = budget.Reserve(
+				sizeof(EvaluationInputValue) + sizeof(std::pair<std::string_view, const Value *>) + 16
+			);
+			if (!charge || !captured.Charge.Merge(std::move(*charge))) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"builder dimension snapshot exceeds budget",
+					ownerNode.Id
+				);
+				return false;
+			}
+			captured.Values.reserve(1);
+			captured.ValueViews.reserve(1);
+			captured.Values.push_back({"dimension", pixels, linked, {}});
+			captured.ValueViews.emplace_back(captured.Values.front().Port, &captured.Values.front().Data);
+			captured.Captured = true;
+			return true;
+		};
 		uint64_t evaluationBytes = 0;
-		for (const size_t index : plan.NodeOrder) {
-			if (!needed[index]) continue;
+		size_t ordinaryCursor = 0;
+		while (true) {
+			size_t index = document.Nodes.size();
+			bool unfinished = false;
+			for (size_t position = dynamicPcx ? 0 : ordinaryCursor; position < plan.NodeOrder.size();
+				 ++position) {
+				const auto candidate = plan.NodeOrder[position];
+				if (!dynamicPcx) ordinaryCursor = position + 1;
+				if (++scheduleWork > 64'000'000) {
+					SetDiagnostic(
+						diagnostic, Status::LimitExceeded, "PCX scheduling exceeds its work budget"
+					);
+					return diagnostic.Code;
+				}
+				if (!needed[candidate] || (dynamicPcx && completed[candidate])) continue;
+				unfinished = true;
+				if (!dynamicPcx ||
+					std::all_of(upstream[candidate].begin(), upstream[candidate].end(), [&](size_t source) {
+						return completed[source] != 0;
+					})) {
+					index = candidate;
+					break;
+				}
+			}
+			if (index == document.Nodes.size()) {
+				if (!unfinished) break;
+				SetDiagnostic(diagnostic, Status::Cycle, "computed PCX dependencies form a cycle");
+				return diagnostic.Code;
+			}
+			if (dynamicPcx) completed[index] = 1;
+			pendingPcxRoute.reset();
 			const Node &node = timelineOverrides.Find(index, document.Nodes[index]);
 			size_t valuesIndex = index;
 			for (size_t hop = 0;
@@ -6019,8 +8109,8 @@ namespace engine::imagegraph {
 			const Node &valueNode = timelineOverrides.Find(valuesIndex, document.Nodes[valuesIndex]);
 			const auto inputOwner = [&](std::string_view port) -> const Node & {
 				const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
-								  ? request.GroupReplay->Binding(node.Id, port)
-								  : nullptr;
+										  ? request.GroupReplay->Binding(node.Id, port)
+										  : nullptr;
 				if (binding) {
 					const size_t ownerIndex = nodeIndices.at(binding->OwnerId);
 					return timelineOverrides.Find(ownerIndex, document.Nodes[ownerIndex]);
@@ -6209,9 +8299,57 @@ namespace engine::imagegraph {
 					if (!resolveImage(port.Id, false, image)) return diagnostic.Code;
 					images.emplace_back(port.Id, image);
 				}
-				if (!CaptureSchemaNodeInputs(node, images, budget, *nodeInputs, diagnostic))
+				detail::EvaluationVector<SchemaInputValue> values{
+					detail::EvaluationAllocator<SchemaInputValue>(budget)
+				};
+				values.reserve(node.Values.size() + schema->Ports.size());
+				for (const auto &value : node.Values)
+					values.push_back({value.Port, &value.Data, false, std::nullopt});
+				for (const PortSchema &port : schema->Ports) {
+					if (port.Direction != PortDirection::Input || port.Type == ValueType::Image) continue;
+					const auto link = std::find_if(
+						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
+							return candidate.ToNode == node.Id && candidate.ToPort == port.Id;
+						}
+					);
+					if (link == plan.EffectiveLinks.end()) continue;
+					const size_t sourceIndex = nodeIndices.at(link->FromNode);
+					const auto *outputs =
+						produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
+					const AuthoredValue *source = nullptr;
+					if (outputs)
+						for (const auto &output : *outputs)
+							if (output.Port == link->FromPort) {
+								source = &output;
+								break;
+							}
+					if (!source) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidOutput,
+							"linked control did not produce a typed value",
+							node.Id,
+							std::string(port.Id)
+						);
+						return diagnostic.Code;
+					}
+					const auto domain =
+						FindOutputDomain(document.Nodes[sourceIndex], results[sourceIndex], link->FromPort);
+					const auto authored =
+						std::find_if(values.begin(), values.end(), [&](const SchemaInputValue &value) {
+							return value.Port == port.Id;
+						});
+					const SchemaInputValue resolved{port.Id, &source->Data, true, domain};
+					if (authored == values.end())
+						values.push_back(resolved);
+					else
+						*authored = resolved;
+				}
+				if (!CaptureSchemaNodeInputs(node, values, images, budget, *nodeInputs, diagnostic))
 					return diagnostic.Code;
-				return Status::Ok;
+				inputsCaptured = true;
+				if (!batch) return Status::Ok;
+				continue;
 			}
 			if (const CatalogueEntry *catalogueEntry = FindCatalogueEntry(node.Type)) {
 				const detail::Executor executor = detail::FindExecutor(node.Type);
@@ -6234,6 +8372,95 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				detail::NodeContext context(node, *catalogueEntry, request, budget);
+				context.EvaluationDocument = &document;
+				if (hostReceipts) {
+					context.HostReceipts = &*hostReceipts;
+					context.ObservedHostCaptures = {
+						hostReceipts->Captures.data(), hostReceipts->Captures.size()
+					};
+				}
+				PcxEvaluationNames pcxNames(
+					index,
+					plan,
+					document,
+					results,
+					{inlineInputs.data(), inlineInputs.size()},
+					{dynamicPcxRoutes.data(), dynamicPcxRoutes.size()},
+					dynamicPcx ? &pendingPcxRoute : nullptr,
+					&budget,
+					&dynamicPcxCharge
+				);
+				context.PcxNames = &pcxNames;
+				const auto inlineRoute = std::find_if(
+					plan.InlineOwnerDependencies.begin(),
+					plan.InlineOwnerDependencies.end(),
+					[&](const auto &route) { return route.Consumer == index; }
+				);
+				if (inlineRoute != plan.InlineOwnerDependencies.end()) {
+					if (inlineRoute->ControlsOnly && !prepareBuilderControls(inlineRoute->Owner))
+						return diagnostic.Code;
+					const auto &owner = inlineInputs[inlineRoute->Owner];
+					if (!owner.Captured) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidOutput,
+							"inline owner inputs were not evaluated",
+							node.Id
+						);
+						return diagnostic.Code;
+					}
+					if (inlineRoute->ControlsOnly &&
+						document.Nodes[inlineRoute->Owner].Type == "pc.pixel_builder")
+						context.PixelBuilderDrawing = &builderDrawing[inlineRoute->Owner];
+					context.InlineOwnerId = document.Nodes[inlineRoute->Owner].Id;
+					context.InlineOwnerType = document.Nodes[inlineRoute->Owner].Type;
+					context.InlineOwnerLinkedValues = owner.LinkedValues;
+					context.InlineOwnerValues = owner.ValueViews;
+					context.InlineOwnerImages = owner.ImageViews;
+					context.InlineOwnerImageArrays = owner.ImageArrayViews;
+				}
+
+				detail::EvaluationVector<detail::PixelBuilderLayer> builderLayers{
+					detail::EvaluationAllocator<detail::PixelBuilderLayer>(budget)
+				};
+				if (node.Type == "pc.pixel_builder") {
+					if (!prepareBuilderControls(index)) return diagnostic.Code;
+					context.PixelBuilderCanvas = std::get<Vector2>(inlineInputs[index].Values.front().Data);
+					const size_t layerCount = std::count_if(
+						plan.InlineOwnerDependencies.begin(),
+						plan.InlineOwnerDependencies.end(),
+						[&](const auto &route) {
+							return route.Owner == index && route.ControlsOnly &&
+								   document.Nodes[route.Consumer].Type == "pc.pb_output";
+						}
+					);
+					builderLayers.reserve(layerCount);
+					for (const auto &route : plan.InlineOwnerDependencies) {
+						if (route.Owner != index || !route.ControlsOnly ||
+							document.Nodes[route.Consumer].Type != "pc.pb_output")
+							continue;
+						const auto *child = produced[route.Consumer]
+												? std::get_if<CatalogueOutputs>(&results[route.Consumer])
+												: nullptr;
+						if (!child || !child->PixelBuilderUpdate) {
+							SetDiagnostic(
+								diagnostic,
+								Status::InvalidOutput,
+								"builder layer command was not evaluated",
+								node.Id
+							);
+							return diagnostic.Code;
+						}
+						builderLayers.push_back(*child->PixelBuilderUpdate);
+					}
+					context.PixelBuilderLayers = builderLayers;
+				}
+				context.CurrentSimulation = simulation ? simulation->Replay : request.SimulationReplay;
+				context.CurrentRandom =
+					simulation && simulation->Random ? simulation->Random : request.RandomReplay;
+				context.CurrentData = simulation && simulation->Data ? simulation->Data : request.DataReplay;
+				context.CurrentSurfaces =
+					simulation && simulation->Surfaces ? simulation->Surfaces : request.SurfaceReplay;
 				context.GroupReplay = request.GroupReplay ? request.GroupReplay->Find(node.Id) : nullptr;
 				const auto depthRoute = detail::FindGroupInputDepth(document, valueNode.GroupId);
 				if (depthRoute.Source == detail::GroupInputDepth::Kind::Concrete)
@@ -6363,6 +8590,35 @@ namespace engine::imagegraph {
 						context.ValueViews.emplace_back(input.Id, groupRefresh->Event->LocalValue);
 						continue;
 					}
+					if (!linked) {
+						// Declaration refresh clears Trigger keys before its parent getter is used.
+						if (groupRefresh && node.Type == "pc.group_input" && input.Id == "parent_value" &&
+							groupRefresh->Event->Reason != GroupRefreshReason::Restore &&
+							groupRefresh->Event->Reason != GroupRefreshReason::ParentEdit) {
+							const auto *type = context.Find("input_type");
+							if (type && detail::SourceChoiceNumber(*type) == std::optional<double>{19}) {
+								context.Values.emplace_back(input.Id, false);
+								continue;
+							}
+						}
+						bool unsupportedTriggerClock = false;
+						if (const auto trigger = SourceTriggerInputValue(
+								document, node, input, request, unsupportedTriggerClock
+							)) {
+							if (unsupportedTriggerClock) {
+								SetDiagnostic(
+									diagnostic,
+									Status::UnsupportedExecution,
+									"source Trigger map requires a nonnegative integer frame",
+									node.Id,
+									std::string(input.Id)
+								);
+								return diagnostic.Code;
+							}
+							context.Values.emplace_back(input.Id, *trigger);
+							continue;
+						}
+					}
 					if (!linked && context.GroupReplay && input.Id == "parent_value" &&
 						context.GroupReplay->ParentReset) {
 						context.ValueViews.emplace_back(input.Id, &*context.GroupReplay->ParentReset);
@@ -6459,7 +8715,8 @@ namespace engine::imagegraph {
 						input.SourceKind == "D3Material") {
 						const size_t sourceIndex = nodeIndices.at(link->FromNode);
 						if (produced[sourceIndex]) {
-							if (const auto *array = FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
+							if (const auto *array =
+									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
 								context.ImageArrays.emplace_back(input.Id, array);
 								continue;
 							}
@@ -6471,7 +8728,14 @@ namespace engine::imagegraph {
 					}
 					if (input.Type != ValueType::Any && !IsAuthoredValueType(input.Type)) {
 						if (linked &&
-							(input.Type == ValueType::Mesh || input.Type == ValueType::Material3D)) {
+							(input.Type == ValueType::Mesh || input.Type == ValueType::Mesh2D ||
+							 input.Type == ValueType::Material3D || input.Type == ValueType::Light3D ||
+							 input.Type == ValueType::Scene3D || input.Type == ValueType::Sdf ||
+							 input.Type == ValueType::Buffer || input.Type == ValueType::Struct ||
+							 input.Type == ValueType::Object ||
+							 input.Type == ValueType::PcxNode || input.Type == ValueType::NodeRef ||
+							 input.Type == ValueType::FluidDomain || input.Type == ValueType::PixelBox ||
+							 input.Type == ValueType::DynamicSurface || input.Type == ValueType::Path3D)) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
 							const auto *source =
 								produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
@@ -6482,14 +8746,22 @@ namespace engine::imagegraph {
 							const auto *array = found ? std::get_if<ArrayValue>(&found->Data) : nullptr;
 							if (found && detail::ValidRuntimeValue(found->Data) &&
 								(detail::PayloadType(found->Data) == input.Type ||
-								 (array && array->ElementType == input.Type))) {
+								 (input.Type == ValueType::Object &&
+								  std::holds_alternative<StructValue>(found->Data)) ||
+								 ((input.Type == ValueType::Mesh || input.Type == ValueType::Scene3D) &&
+								  (detail::PayloadType(found->Data) == ValueType::Mesh ||
+								   detail::PayloadType(found->Data) == ValueType::Light3D ||
+								   detail::PayloadType(found->Data) == ValueType::Scene3D)) ||
+								 (array && (array->ElementType == input.Type || !array->Items.empty())))) {
 								context.ValueViews.emplace_back(input.Id, &found->Data);
 								continue;
 							}
 							SetDiagnostic(
-								diagnostic, Status::TypeMismatch,
-								"mesh or material input requires a bounded owned typed source",
-								node.Id, std::string(input.Id)
+								diagnostic,
+								Status::TypeMismatch,
+								"runtime input requires a bounded owned typed source",
+								node.Id,
+								std::string(input.Id)
 							);
 							return diagnostic.Code;
 						}
@@ -6645,6 +8917,11 @@ namespace engine::imagegraph {
 						}
 					);
 					if (input.Type == ValueType::Image) {
+						if (link == plan.EffectiveLinks.end() && input.Default &&
+							detail::SourceLuaArgumentType(node, input.Id)) {
+							context.ValueViews.emplace_back(input.Id, &*input.Default);
+							continue;
+						}
 						if (link != plan.EffectiveLinks.end()) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
 							if (produced[sourceIndex])
@@ -6713,6 +8990,40 @@ namespace engine::imagegraph {
 							context.ValueViews.emplace_back(input.Id, &*selected->Default);
 					}
 				}
+				detail::EvaluationVector<detail::PcxInputProgram> pcxPrograms{
+					detail::EvaluationAllocator<detail::PcxInputProgram>(budget)
+				};
+				pcxPrograms.reserve(inputCount);
+				const auto appendPcxProgram = [&](std::string_view port) {
+					const auto &owner = inputOwner(port);
+					const auto found = std::find_if(
+						owner.SourceInputExpressions.begin(),
+						owner.SourceInputExpressions.end(),
+						[&](const auto &program) { return program.Port == port; }
+					);
+					if (found != owner.SourceInputExpressions.end() && found->Enabled)
+						pcxPrograms.push_back({&owner, &*found});
+				};
+				for (const auto &input : catalogueEntry->Inputs)
+					appendPcxProgram(input.Id);
+				for (const auto &input : node.DynamicInputs)
+					appendPcxProgram(input.Id);
+				if (!detail::ApplyPcxInputExpressions(context, pcxPrograms)) {
+					if (pendingPcxRoute) {
+						if (!stagePcxDependency()) return diagnostic.Code;
+						continue;
+					}
+					SetDiagnostic(
+						diagnostic, context.FailureCode, context.FailureMessage, node.Id, context.FailurePort
+					);
+					return diagnostic.Code;
+				}
+				if (!detail::ResolveSimulationInputAliases(context)) {
+					SetDiagnostic(
+						diagnostic, context.FailureCode, context.FailureMessage, node.Id, context.FailurePort
+					);
+					return diagnostic.Code;
+				}
 				if (groupRefresh && node.Id == groupRefresh->Event->NodeId) {
 					if (!detail::ApplyGroupRefreshContext(
 							context, *groupRefresh->Event, *groupRefresh->Owner, document
@@ -6730,6 +9041,76 @@ namespace engine::imagegraph {
 					diagnostic = {};
 					return Status::Ok;
 				}
+				if ((dynamicPcx ||
+					 std::any_of(
+						 document.Groups.begin(),
+						 document.Groups.end(),
+						 [&](const Group &group) {
+							 return group.OwnerNodeId == node.Id && node.Type != "pc.pixel_builder";
+						 }
+					 ) ||
+					 std::any_of(
+						 plan.PcxNamedDependencies.begin(),
+						 plan.PcxNamedDependencies.end(),
+						 [&](const auto &route) { return route.Producer == index && route.Input; }
+					 )) &&
+					!inlineInputs[index].Captured) {
+					auto &owner = inlineInputs[index];
+					NodeInputCapture capture{
+						node.Id,
+						&owner.Values,
+						&owner.Images,
+						&owner.SurfacePolicy,
+						&owner.Charge,
+						&owner.ImageArrays
+					};
+					detail::SourceGetterProjection projection(context);
+					if (!projection.Prepare() ||
+						!CaptureNodeInputs(
+							context,
+							capture,
+							dynamicPcx ? std::span<NodeResult>{} : std::span<NodeResult>{results},
+							dynamicPcx ? std::span<detail::AllocationReservation>{}
+									   : std::span<detail::AllocationReservation>{resultCharges}
+						)) {
+						SetDiagnostic(
+							diagnostic,
+							context.FailureCode,
+							context.FailureMessage,
+							node.Id,
+							context.FailurePort
+						);
+						return diagnostic.Code;
+					}
+					const uint64_t viewBytes =
+						owner.Values.size() *
+							(sizeof(std::pair<std::string_view, const Value *>) + sizeof(std::string_view)) +
+						owner.Images.size() * sizeof(std::pair<std::string_view, const Image *>) +
+						owner.ImageArrays.size() * sizeof(std::pair<std::string_view, const ImageArray *>);
+					auto viewsCharge = budget.Reserve(viewBytes);
+					if (!viewsCharge || !owner.Charge.Merge(std::move(*viewsCharge))) {
+						SetDiagnostic(
+							diagnostic,
+							Status::LimitExceeded,
+							"inline owner input views exceed evaluation budget",
+							node.Id
+						);
+						return diagnostic.Code;
+					}
+					owner.ValueViews.reserve(owner.Values.size());
+					owner.LinkedValues.reserve(owner.Values.size());
+					owner.ImageViews.reserve(owner.Images.size());
+					owner.ImageArrayViews.reserve(owner.ImageArrays.size());
+					for (const auto &value : owner.Values) {
+						owner.ValueViews.emplace_back(value.Port, &value.Data);
+						if (value.Linked) owner.LinkedValues.emplace_back(value.Port);
+					}
+					for (const auto &image : owner.Images)
+						owner.ImageViews.emplace_back(image.Port, &image.Data);
+					for (const auto &array : owner.ImageArrays)
+						owner.ImageArrayViews.emplace_back(array.Port, &array.Data);
+					owner.Captured = true;
+				}
 				if (nodeInputs && node.Id == nodeInputs->NodeId) {
 					detail::SourceGetterProjection projection(context);
 					if (!projection.Prepare() ||
@@ -6743,7 +9124,17 @@ namespace engine::imagegraph {
 						);
 						return diagnostic.Code;
 					}
-					return Status::Ok;
+					inputsCaptured = true;
+					if (!batch) return Status::Ok;
+					for (const size_t source : upstream[index]) {
+						if (!dynamicPcx && --remainingConsumers[source] == 0 && source != targetIndex &&
+							!retainedTargets[source]) {
+							evaluationBytes -= ResultBytes(results[source]);
+							results[source] = Image{};
+							resultCharges[source].Reset();
+						}
+					}
+					continue;
 				}
 				if (!executor) {
 					SetDiagnostic(
@@ -6879,10 +9270,152 @@ namespace engine::imagegraph {
 					return Status::Ok;
 				}
 				if (!detail::RunProcessorBatch(context, executor) || context.FailureCode != Status::Ok) {
+					if (pendingPcxRoute) {
+						if (!stagePcxDependency()) return diagnostic.Code;
+						continue;
+					}
 					SetDiagnostic(
 						diagnostic, context.FailureCode, context.FailureMessage, node.Id, context.FailurePort
 					);
 					return diagnostic.Code;
+				}
+				if (!context.PcxControlMessages.empty()) {
+					std::string failure;
+					if (!request.HostProvider ||
+						!request.HostProvider->PcxMessages(node.Id, context.PcxControlMessages, failure)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::UnsupportedExecution,
+							failure.empty() ? "PCX notifications require an explicit host" : failure,
+							node.Id
+						);
+						return diagnostic.Code;
+					}
+				}
+				if (simulation) {
+					for (auto &update : context.SimulationUpdates) {
+						const uint64_t bytes = RetainedSimulationEntryBytes(update);
+						auto admitted = context.OutputCharge.Split(bytes);
+						if (!admitted || !simulation->Charge->Merge(std::move(*admitted))) {
+							SetDiagnostic(
+								diagnostic,
+								Status::LimitExceeded,
+								"simulation state lacks allocation admission",
+								node.Id
+							);
+							return diagnostic.Code;
+						}
+						auto &entries = simulation->Replay->Entries;
+						const auto found =
+							std::find_if(entries.begin(), entries.end(), [&](const auto &entry) {
+								return entry.NodeId == update.NodeId &&
+									   entry.ProcessorRow == update.ProcessorRow;
+							});
+						if (found != entries.end()) {
+							const uint64_t replacedBytes = RetainedSimulationEntryBytes(*found);
+							*found = std::move(update);
+							// The displaced snapshot is gone; subsequent affectors reuse its admission.
+							auto released = simulation->Charge->Split(replacedBytes);
+							if (!released) std::terminate();
+						} else {
+							if (!GrowReplayEntries(entries, budget, *simulation->Charge, diagnostic, node.Id))
+								return diagnostic.Code;
+							entries.push_back(std::move(update));
+						}
+					}
+				}
+				if (simulation && simulation->Surfaces) {
+					for (auto &update : context.SurfaceUpdates) {
+						const uint64_t bytes = RetainedSurfaceFrameEntryBytes(update);
+						auto admitted = context.OutputCharge.Split(bytes);
+						if (!admitted || !simulation->Charge->Merge(std::move(*admitted))) {
+							SetDiagnostic(
+								diagnostic,
+								Status::LimitExceeded,
+								"surface cache update lacks admission",
+								node.Id
+							);
+							return diagnostic.Code;
+						}
+						auto &entries = simulation->Surfaces->Entries;
+						const auto found =
+							std::find_if(entries.begin(), entries.end(), [&](const auto &entry) {
+								return entry.NodeId == update.NodeId && entry.Frame == update.Frame &&
+									   entry.ProcessorRow == update.ProcessorRow;
+							});
+						if (found != entries.end()) {
+							const uint64_t oldBytes = RetainedSurfaceFrameEntryBytes(*found);
+							*found = std::move(update);
+							auto released = simulation->Charge->Split(oldBytes);
+							if (!released) std::terminate();
+						} else {
+							if (!GrowReplayEntries(entries, budget, *simulation->Charge, diagnostic, node.Id))
+								return diagnostic.Code;
+							entries.push_back(std::move(update));
+						}
+					}
+				}
+				if (simulation && simulation->Random) {
+					for (auto &update : context.RandomUpdates) {
+						const uint64_t bytes = RetainedRandomEntryBytes(update);
+						auto admitted = context.OutputCharge.Split(bytes);
+						if (!admitted || !simulation->Charge->Merge(std::move(*admitted))) {
+							SetDiagnostic(
+								diagnostic,
+								Status::LimitExceeded,
+								"random replay update lacks admission",
+								node.Id
+							);
+							return diagnostic.Code;
+						}
+						auto &entries = simulation->Random->Entries;
+						const auto found =
+							std::find_if(entries.begin(), entries.end(), [&](const auto &entry) {
+								return entry.NodeId == update.NodeId &&
+									   entry.ProcessorRow == update.ProcessorRow;
+							});
+						if (found != entries.end()) {
+							const uint64_t oldBytes = RetainedRandomEntryBytes(*found);
+							*found = std::move(update);
+							auto released = simulation->Charge->Split(oldBytes);
+							if (!released) std::terminate();
+						} else {
+							if (!GrowReplayEntries(entries, budget, *simulation->Charge, diagnostic, node.Id))
+								return diagnostic.Code;
+							entries.push_back(std::move(update));
+						}
+					}
+				}
+				if (simulation && simulation->Data) {
+					for (auto &update : context.DataUpdates) {
+						const uint64_t bytes = RetainedDataReplayEntryBytes(update);
+						auto admitted = context.OutputCharge.Split(bytes);
+						if (!admitted || !simulation->Charge->Merge(std::move(*admitted))) {
+							SetDiagnostic(
+								diagnostic,
+								Status::LimitExceeded,
+								"data replay update lacks admission",
+								node.Id
+							);
+							return diagnostic.Code;
+						}
+						auto &entries = simulation->Data->Entries;
+						const auto found =
+							std::find_if(entries.begin(), entries.end(), [&](const auto &entry) {
+								return entry.NodeId == update.NodeId &&
+									   entry.ProcessorRow == update.ProcessorRow;
+							});
+						if (found != entries.end()) {
+							const uint64_t oldBytes = RetainedDataReplayEntryBytes(*found);
+							*found = std::move(update);
+							auto released = simulation->Charge->Split(oldBytes);
+							if (!released) std::terminate();
+						} else {
+							if (!GrowReplayEntries(entries, budget, *simulation->Charge, diagnostic, node.Id))
+								return diagnostic.Code;
+							entries.push_back(std::move(update));
+						}
+					}
 				}
 				size_t bypassImages = 0, bypassValues = 0;
 				for (const Link &link : plan.EffectiveLinks) {
@@ -6953,6 +9486,7 @@ namespace engine::imagegraph {
 				catalogueResult.Domains = std::move(context.OutputDomains);
 				catalogueResult.Images = std::move(context.OutputImages);
 				catalogueResult.Values = std::move(context.OutputValues);
+				catalogueResult.PixelBuilderUpdate = context.PixelBuilderUpdate;
 				catalogueResult.ImageArrays = std::move(context.OutputImageArrays);
 				currentCharge = context.TakeOutputReservation();
 				for (auto &[id, array] : catalogueResult.ImageArrays)
@@ -9229,7 +11763,7 @@ namespace engine::imagegraph {
 				}
 			} else if (node.Type == "value.array") {
 				producedArray = true;
-				if (node.DynamicInputs.size() > Limits::MaximumDynamicInputsPerNode) {
+				if (node.DynamicInputs.size() > MaximumDynamicInputsForNode(node)) {
 					SetDiagnostic(
 						diagnostic,
 						Status::LimitExceeded,
@@ -9430,12 +11964,106 @@ namespace engine::imagegraph {
 			produced[index] = 1;
 			// A large chain needs only the current input and output in memory.
 			for (const size_t source : upstream[index]) {
-				if (--remainingConsumers[source] == 0 && source != targetIndex) {
+				if (!dynamicPcx && --remainingConsumers[source] == 0 && source != targetIndex &&
+					(!batch || !retainedTargets[source])) {
 					evaluationBytes -= ResultBytes(results[source]);
 					results[source] = Image{};
 					resultCharges[source].Reset();
 				}
 			}
+		}
+		if (batch && nodeInputs && !inputsCaptured) {
+			SetDiagnostic(
+				diagnostic,
+				Status::UnsupportedExecution,
+				"selected input snapshot has no capture kernel",
+				std::string(targetNodeId)
+			);
+			return diagnostic.Code;
+		}
+		if (batch) {
+			uint64_t bytes = selectedOutputs.size() * sizeof(StatefulNamedOutput);
+			for (const auto *selected : selectedOutputs) {
+				const size_t index = nodeIndices.at(selected->NodeId);
+				if (!produced[index]) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedExecution,
+						"selected batch output was not evaluated",
+						selected->NodeId,
+						selected->Port
+					);
+					return diagnostic.Code;
+				}
+				if (!AddBytes(bytes, std::max(selected->Id.size(), std::string{}.capacity()))) {
+					SetDiagnostic(diagnostic, Status::LimitExceeded, "batch output size overflows");
+					return diagnostic.Code;
+				}
+				uint64_t payload = 0;
+				if (const auto *array = FindImageArrayOutput(results[index], selected->Port))
+					payload = RetainedImageArrayBytes(*array);
+				else if (const auto *image = FindImageOutput(results[index], selected->Port))
+					payload = image->Pixels.capacity();
+				else {
+					const auto *values = FindValueOutputs(results[index]);
+					const auto value =
+						values ? std::find_if(
+									 values->begin(),
+									 values->end(),
+									 [&](const auto &entry) { return entry.Port == selected->Port; }
+								 )
+							   : ValueOutputs::const_iterator{};
+					if (!values || value == values->end()) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidOutput,
+							"node did not produce the selected batch port",
+							selected->NodeId,
+							selected->Port
+						);
+						return diagnostic.Code;
+					}
+					payload = detail::RetainedPayloadBytes(value->Data);
+					if (!AddBytes(payload, std::max(value->Port.size(), std::string{}.capacity())))
+						payload = std::numeric_limits<uint64_t>::max();
+				}
+				if (!AddBytes(bytes, payload)) {
+					SetDiagnostic(diagnostic, Status::LimitExceeded, "batch payload size overflows");
+					return diagnostic.Code;
+				}
+			}
+			auto charge = budget.Reserve(bytes);
+			if (!charge) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "batch replacement exceeds the live byte budget"
+				);
+				return diagnostic.Code;
+			}
+			batch->Outputs->reserve(selectedOutputs.size());
+			for (const auto *selected : selectedOutputs) {
+				const size_t index = nodeIndices.at(selected->NodeId);
+				StatefulNamedOutput named;
+				named.Id = selected->Id;
+				if (const auto *array = FindImageArrayOutput(results[index], selected->Port))
+					named.Output = *array;
+				else if (const auto *image = FindImageOutput(results[index], selected->Port))
+					named.Output = *image;
+				else {
+					const auto *values = FindValueOutputs(results[index]);
+					const auto value = std::find_if(values->begin(), values->end(), [&](const auto &entry) {
+						return entry.Port == selected->Port;
+					});
+					named.Output = EvaluatedValue{
+						value->Port,
+						value->Data,
+						FindOutputDomain(document.Nodes[index], results[index], selected->Port)
+					};
+				}
+				batch->Outputs->push_back(std::move(named));
+			}
+			if (!batch->Charge->Merge(std::move(*charge))) std::terminate();
+			diagnostic = {};
+			return Status::Ok;
 		}
 		if (!produced[targetIndex]) {
 			SetDiagnostic(
@@ -9841,7 +12469,7 @@ namespace engine::imagegraph {
 		EvaluationSnapshot &snapshot,
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes
-	) {
+	) try {
 		if (maximumBytes == 0 || maximumBytes > Limits::MaximumEvaluationBytes) {
 			SetDiagnostic(
 				diagnostic,
@@ -9907,7 +12535,15 @@ namespace engine::imagegraph {
 			);
 			return diagnostic.Code;
 		}
-		NodeInputCapture capture{nodeId, &candidate->Values, &candidate->Images, &candidate->Charge};
+		NodeInputCapture capture{
+			nodeId,
+			&candidate->Values,
+			&candidate->Images,
+			&candidate->SurfacePolicy,
+			&candidate->Charge,
+			&candidate->ImageArrays,
+			&candidate->InterpolationPolicy
+		};
 		NodeResult ignored;
 		const Status status = EvaluateGraph(
 			document,
@@ -9930,6 +12566,14 @@ namespace engine::imagegraph {
 		snapshot.Data = std::move(candidate);
 		diagnostic = {};
 		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		SetDiagnostic(
+			diagnostic,
+			Status::LimitExceeded,
+			"node input snapshot allocation was refused",
+			std::string(nodeId)
+		);
+		return diagnostic.Code;
 	}
 
 	static bool RetainedAuthoredValuesBytes(const std::vector<AuthoredValue> &values, uint64_t &bytes) {
@@ -10016,9 +12660,16 @@ namespace engine::imagegraph {
 		const std::string &outputId,
 		const EvaluationRequest &request,
 		Image &image,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
 	) {
-		EvaluationResult result;
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "image evaluation byte cap is outside native bounds"
+			);
+			return diagnostic.Code;
+		}
+		EvaluationResult result(maximumBytes);
 		const Status status = EvaluateResult(document, plan, outputId, request, result, diagnostic);
 		if (status != Status::Ok) return status;
 		if (auto *single = std::get_if<Image>(&result.Data)) {
@@ -10056,6 +12707,428 @@ namespace engine::imagegraph {
 		}
 		image = std::move(array->Images[std::get<size_t>(array->Items.front().Data)]);
 		return Status::Ok;
+	}
+
+	template <class ReplayResult>
+	static Status EvaluateReplayInternal(
+		const Document &document,
+		const Plan &plan,
+		const std::string &outputId,
+		const EvaluationRequest &request,
+		ReplayResult &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes,
+		std::span<const std::string> batchIds = {},
+		std::string_view inputNodeId = {}
+	) try {
+		constexpr bool inputSupport = std::is_same_v<ReplayResult, StatefulInputEvaluationResult>;
+		constexpr bool batchSupport = std::is_same_v<ReplayResult, StatefulOutputEvaluationResult>;
+		constexpr bool surfaceSupport =
+			std::is_same_v<ReplayResult, StatefulEvaluationResult> || batchSupport || inputSupport;
+		auto &simulationResult = [&]() -> SimulationReplayState & {
+			if constexpr (surfaceSupport)
+				return result.Simulation;
+			else
+				return result.Replay;
+		}();
+		const auto fail = [&](Status status, const char *message) {
+			SetDiagnostic(diagnostic, status, message);
+			return status;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+			document.Nodes.size() > Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "simulation evaluation byte or node cap is outside bounds");
+		const Status validated = ValidateEvaluationRequest(request, diagnostic);
+		if (validated != Status::Ok) return validated;
+		const auto cacheActions = ValidateSimulationCacheActions(document, request, diagnostic);
+		if (cacheActions != Status::Ok) return cacheActions;
+		const auto cone = AnalyzeStatefulTemporalCone(
+			document,
+			plan,
+			inputSupport ? batchIds : (batchSupport ? batchIds : std::span<const std::string>(&outputId, 1)),
+			inputNodeId,
+			request.SimulationCacheCaptures
+		);
+		if (!cone.Valid) return fail(Status::InvalidOutput, "selected temporal closure is invalid");
+
+		const Status destination = ValidateSimulationReplay(simulationResult, maximumBytes, diagnostic);
+		if (destination != Status::Ok) return destination;
+		if (request.SimulationReplay) {
+			const Status prior =
+				ValidateSimulationReplay(*request.SimulationReplay, maximumBytes, diagnostic);
+			if (prior != Status::Ok) return prior;
+		}
+		if constexpr (surfaceSupport) {
+			if (ValidateRandomReplay(result.Random, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			if (request.RandomReplay &&
+				ValidateRandomReplay(*request.RandomReplay, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			if (ValidateDataReplay(result.Data, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			if (request.DataReplay &&
+				ValidateDataReplay(*request.DataReplay, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			if (ValidateSurfaceFrameReplay(result.Surfaces, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			if (request.SurfaceReplay &&
+				ValidateSurfaceFrameReplay(*request.SurfaceReplay, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			const bool temporal = cone.SurfaceCaches != 0;
+			if (temporal &&
+				(request.NegativeFrame || request.Subframe != 0 ||
+				 (request.SurfaceReplay && request.SurfaceReplay->Initialized && !request.ResetSurfaceReplay
+					  ? request.Tick != request.SurfaceReplay->Tick &&
+							(request.SurfaceReplay->Tick >= Limits::MaximumTick ||
+							 request.Tick != request.SurfaceReplay->Tick + 1)
+					  : request.Tick != 0)))
+				return fail(
+					Status::InvalidValue, "surface replay requires reset at zero or contiguous integer frames"
+				);
+		}
+		EvaluationResult evaluation(maximumBytes);
+		std::unique_ptr<StatefulSnapshotAccess::Storage> inputStorage;
+		if constexpr (inputSupport)
+			inputStorage = std::make_unique<StatefulSnapshotAccess::Storage>(maximumBytes);
+		auto &budget = inputSupport ? inputStorage->Budget : evaluation.Budget;
+		auto &outputCharge = inputSupport ? inputStorage->Charge : evaluation.Charge;
+		if constexpr (inputSupport) {
+			auto metadata = budget.Reserve(sizeof(StatefulSnapshotAccess::Storage));
+			if (!metadata || !outputCharge.Merge(std::move(*metadata)))
+				return fail(Status::LimitExceeded, "stateful input metadata exceeds the byte cap");
+		}
+		uint64_t retained = RetainedSimulationReplayBytes(simulationResult);
+		if (request.SimulationReplay && request.SimulationReplay != &simulationResult &&
+			!AddBytes(retained, RetainedSimulationReplayBytes(*request.SimulationReplay)))
+			return fail(Status::LimitExceeded, "simulation prior state size overflows");
+		if constexpr (surfaceSupport) {
+			if (!AddBytes(retained, RetainedSurfaceFrameReplayBytes(result.Surfaces)) ||
+				(request.SurfaceReplay && request.SurfaceReplay != &result.Surfaces &&
+				 !AddBytes(retained, RetainedSurfaceFrameReplayBytes(*request.SurfaceReplay))))
+				return fail(Status::LimitExceeded, "surface retained owner size overflows");
+		}
+		if constexpr (surfaceSupport) {
+			if (!AddBytes(retained, RetainedRandomReplayBytes(result.Random)) ||
+				(request.RandomReplay && request.RandomReplay != &result.Random &&
+				 !AddBytes(retained, RetainedRandomReplayBytes(*request.RandomReplay))))
+				return fail(Status::LimitExceeded, "random replay prior size overflows");
+		}
+		if constexpr (surfaceSupport) {
+			if (!AddBytes(retained, RetainedDataReplayBytes(result.Data)) ||
+				(request.DataReplay && request.DataReplay != &result.Data &&
+				 !AddBytes(retained, RetainedDataReplayBytes(*request.DataReplay))))
+				return fail(Status::LimitExceeded, "data replay prior size overflows");
+		}
+		const uint64_t oldOutput = [&]() -> uint64_t {
+			if constexpr (inputSupport)
+				return result.Inputs.RetainedBytes();
+			else if constexpr (batchSupport)
+				return RetainedStatefulOutputBytes(result);
+			else
+				return std::visit(
+					[](const auto &output) -> uint64_t {
+						using T = std::decay_t<decltype(output)>;
+						if constexpr (std::is_same_v<T, Image>)
+							return output.Pixels.capacity();
+						else if constexpr (std::is_same_v<T, ImageArray>)
+							return RetainedImageArrayBytes(output);
+						else {
+							uint64_t bytes = detail::RetainedPayloadBytes(output.Data);
+							return AddBytes(bytes, output.Port.capacity())
+									   ? bytes
+									   : std::numeric_limits<uint64_t>::max();
+						}
+					},
+					result.Output
+				);
+		}();
+		if (!AddBytes(retained, oldOutput))
+			return fail(Status::LimitExceeded, "simulation old output size overflows");
+		auto oldShadow = budget.Reserve(retained);
+		if (!oldShadow) return fail(Status::LimitExceeded, "simulation replacement overlap exceeds bounds");
+		const size_t slots = std::max(
+			document.Nodes.size(),
+			request.SimulationReplay ? request.SimulationReplay->Entries.size() : size_t{0}
+		);
+		uint64_t copyBytes = slots * sizeof(SimulationReplayEntry);
+		if (request.SimulationReplay &&
+			!AddBytes(copyBytes, RetainedSimulationReplayBytes(*request.SimulationReplay)))
+			return fail(Status::LimitExceeded, "simulation copy size overflows");
+		if constexpr (surfaceSupport) {
+			if (!AddBytes(
+					copyBytes,
+					std::min(
+						Limits::MaximumArrayElements,
+						cone.SurfaceCaches +
+							(request.SurfaceReplay ? request.SurfaceReplay->Entries.size() : 0)
+					) * sizeof(SurfaceFrameReplayEntry)
+				) ||
+				(request.SurfaceReplay &&
+				 !AddBytes(copyBytes, RetainedSurfaceFrameReplayBytes(*request.SurfaceReplay))))
+				return fail(Status::LimitExceeded, "surface candidate owner size overflows");
+		}
+		if constexpr (surfaceSupport) {
+			const size_t randomSlots = std::min(
+				Limits::MaximumArrayElements,
+				cone.RandomGenerators + (request.RandomReplay ? request.RandomReplay->Entries.size() : 0)
+			);
+			if (!AddBytes(copyBytes, randomSlots * sizeof(RandomReplayEntry)) ||
+				(request.RandomReplay &&
+				 !AddBytes(copyBytes, RetainedRandomReplayBytes(*request.RandomReplay))))
+				return fail(Status::LimitExceeded, "random replay candidate size overflows");
+		}
+		if constexpr (surfaceSupport) {
+			const size_t dataSlots = std::min(
+				Limits::MaximumArrayElements,
+				cone.DataProcessors + (request.DataReplay ? request.DataReplay->Entries.size() : 0)
+			);
+			if (!AddBytes(copyBytes, dataSlots * sizeof(DataReplayEntry)) ||
+				(request.DataReplay && !AddBytes(copyBytes, RetainedDataReplayBytes(*request.DataReplay))))
+				return fail(Status::LimitExceeded, "data replay candidate size overflows");
+		}
+		auto stateCharge = budget.Reserve(copyBytes);
+		if (!stateCharge) return fail(Status::LimitExceeded, "simulation candidate state exceeds bounds");
+		ReplayResult candidate;
+		auto &candidateSimulation = [&]() -> SimulationReplayState & {
+			if constexpr (surfaceSupport)
+				return candidate.Simulation;
+			else
+				return candidate.Replay;
+		}();
+		candidateSimulation.Entries.reserve(slots);
+		if (request.SimulationReplay)
+			for (const auto &entry : request.SimulationReplay->Entries)
+				if (std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+						return node.Id == entry.NodeId;
+					}))
+					candidateSimulation.Entries.push_back(entry);
+		SimulationCapture capture{&candidateSimulation, &*stateCharge};
+		if constexpr (surfaceSupport) {
+			const bool temporal = cone.SurfaceCaches != 0;
+			candidate.Surfaces.Entries.reserve(
+				std::min(
+					Limits::MaximumArrayElements,
+					cone.SurfaceCaches + (request.SurfaceReplay ? request.SurfaceReplay->Entries.size() : 0)
+				)
+			);
+			if (request.SurfaceReplay)
+				for (const auto &entry : request.SurfaceReplay->Entries)
+					if (std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+							return node.Id == entry.NodeId;
+						}))
+						candidate.Surfaces.Entries.push_back(entry);
+			candidate.Surfaces.Tick = request.Tick;
+			candidate.Surfaces.Initialized =
+				temporal || (request.SurfaceReplay && request.SurfaceReplay->Initialized);
+			capture.Surfaces = &candidate.Surfaces;
+		}
+		if constexpr (surfaceSupport) {
+			candidate.Random.Entries.reserve(
+				std::min(
+					Limits::MaximumArrayElements,
+					cone.RandomGenerators + (request.RandomReplay ? request.RandomReplay->Entries.size() : 0)
+				)
+			);
+			if (request.RandomReplay)
+				for (const auto &entry : request.RandomReplay->Entries)
+					if (std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+							return node.Id == entry.NodeId;
+						}))
+						candidate.Random.Entries.push_back(entry);
+			capture.Random = &candidate.Random;
+		}
+		if constexpr (surfaceSupport) {
+			candidate.Data.Entries.reserve(
+				std::min(
+					Limits::MaximumArrayElements,
+					cone.DataProcessors + (request.DataReplay ? request.DataReplay->Entries.size() : 0)
+				)
+			);
+			if (request.DataReplay)
+				for (const auto &entry : request.DataReplay->Entries)
+					if (std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+							return node.Id == entry.NodeId;
+						}))
+						candidate.Data.Entries.push_back(entry);
+			capture.Data = &candidate.Data;
+		}
+		NodeInputCapture inputs;
+		if constexpr (inputSupport)
+			inputs = {
+				inputNodeId,
+				&inputStorage->Values,
+				&inputStorage->Images,
+				&inputStorage->SurfacePolicy,
+				&outputCharge,
+				&inputStorage->ImageArrays,
+				&inputStorage->InterpolationPolicy
+			};
+		StatefulOutputCapture batch{batchIds, nullptr, &outputCharge};
+		if constexpr (batchSupport || inputSupport) batch.Outputs = &candidate.Outputs;
+		const Status evaluated = EvaluateGraph(
+			document,
+			plan,
+			outputId,
+			request,
+			evaluation.Data,
+			diagnostic,
+			budget,
+			outputCharge,
+			nullptr,
+			nullptr,
+			inputSupport ? &inputs : nullptr,
+			nullptr,
+			inputNodeId,
+			{},
+			false,
+			nullptr,
+			&capture,
+			(batchSupport || inputSupport) ? &batch : nullptr
+		);
+		if (evaluated != Status::Ok) return evaluated;
+		if constexpr (!batchSupport && !inputSupport) {
+			const auto output =
+				std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const auto &entry) {
+					return entry.Id == outputId;
+				});
+			if (auto *image = std::get_if<Image>(&evaluation.Data))
+				candidate.Output = std::move(*image);
+			else if (auto *array = std::get_if<ImageArray>(&evaluation.Data)) {
+				if constexpr (surfaceSupport)
+					candidate.Output = std::move(*array);
+				else {
+					if (array->Items.size() != 1 ||
+						!std::holds_alternative<size_t>(array->Items.front().Data))
+						return fail(
+							Status::InvalidOutput, "simulation single image requires one top-level image"
+						);
+					candidate.Output = std::move(array->Images[std::get<size_t>(array->Items.front().Data)]);
+				}
+			} else {
+				auto *values = FindValueOutputs(evaluation.Data);
+				if (!values || output == document.Outputs.end())
+					return fail(Status::InvalidOutput, "simulation output is not an image or typed value");
+				const auto selected = std::find_if(values->begin(), values->end(), [&](const auto &entry) {
+					return entry.Port == output->Port;
+				});
+				if (selected == values->end())
+					return fail(Status::InvalidOutput, "simulation selected port was not produced");
+				const auto node =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &entry) {
+						return entry.Id == output->NodeId;
+					});
+				const auto domain = node == document.Nodes.end()
+										? std::optional<SourceSocketDomain>{}
+										: FindOutputDomain(*node, evaluation.Data, selected->Port);
+				candidate.Output =
+					EvaluatedValue{std::move(selected->Port), std::move(selected->Data), domain};
+			}
+		}
+		// Source mesh outputs share their constructor identity, including mutations performed later in
+		// the union closure. Publish every selected view against the final candidate owner.
+		const auto resolveAlias = [&](Value &value) {
+			return detail::ResolveSimulationValueAliases(
+				value, candidateSimulation, budget, outputCharge, diagnostic
+			);
+		};
+		if constexpr (batchSupport || inputSupport) {
+			for (auto &named : candidate.Outputs)
+				if (auto *value = std::get_if<EvaluatedValue>(&named.Output))
+					if (resolveAlias(value->Data) != Status::Ok) return diagnostic.Code;
+		} else if (auto *value = std::get_if<EvaluatedValue>(&candidate.Output)) {
+			if (resolveAlias(value->Data) != Status::Ok) return diagnostic.Code;
+		}
+		if constexpr (inputSupport)
+			for (auto &value : inputStorage->Values)
+				if (resolveAlias(value.Data) != Status::Ok) return diagnostic.Code;
+		if constexpr (inputSupport) {
+			inputStorage->ReplayCharge = std::move(*stateCharge);
+			StatefulSnapshotAccess::Install(candidate.Inputs, std::move(inputStorage));
+		}
+		result = std::move(candidate);
+		oldShadow->Reset();
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		SetDiagnostic(diagnostic, Status::LimitExceeded, "simulation evaluation allocation was refused");
+		return diagnostic.Code;
+	}
+
+	Status EvaluateSimulation(
+		const Document &document,
+		const Plan &plan,
+		const std::string &outputId,
+		const EvaluationRequest &request,
+		SimulationEvaluationResult &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		return EvaluateReplayInternal(document, plan, outputId, request, result, diagnostic, maximumBytes);
+	}
+	Status EvaluateStateful(
+		const Document &document,
+		const Plan &plan,
+		const std::string &outputId,
+		const EvaluationRequest &request,
+		StatefulEvaluationResult &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		return EvaluateReplayInternal(document, plan, outputId, request, result, diagnostic, maximumBytes);
+	}
+
+	static bool ValidateStatefulOutputIds(std::span<const std::string> ids, Diagnostic &diagnostic) {
+		if (ids.size() > Limits::MaximumOutputs) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "selected output count exceeds bounds");
+			return false;
+		}
+		for (size_t index = 0; index < ids.size(); ++index)
+			for (size_t prior = 0; prior < index; ++prior)
+				if (ids[index] == ids[prior]) {
+					SetDiagnostic(diagnostic, Status::DuplicateId, "selected output IDs must be unique");
+					return false;
+				}
+		return true;
+	}
+
+	Status EvaluateStatefulOutputs(
+		const Document &document,
+		const Plan &plan,
+		std::span<const std::string> outputIds,
+		const EvaluationRequest &request,
+		StatefulOutputEvaluationResult &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		if (outputIds.empty() || outputIds.size() > Limits::MaximumOutputs) {
+			SetDiagnostic(diagnostic, Status::InvalidOutput, "batch needs bounded selected output IDs");
+			return diagnostic.Code;
+		}
+		if (!ValidateStatefulOutputIds(outputIds, diagnostic)) return diagnostic.Code;
+		return EvaluateReplayInternal(
+			document, plan, outputIds.front(), request, result, diagnostic, maximumBytes, outputIds
+		);
+	}
+
+	Status EvaluateStatefulNodeInputs(
+		const Document &document,
+		const Plan &plan,
+		std::string_view nodeId,
+		const EvaluationRequest &request,
+		StatefulInputEvaluationResult &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes,
+		std::span<const std::string> outputIds
+	) {
+		if (nodeId.empty()) {
+			SetDiagnostic(diagnostic, Status::InvalidValue, "stateful input snapshot needs a node ID");
+			return diagnostic.Code;
+		}
+		if (!ValidateStatefulOutputIds(outputIds, diagnostic)) return diagnostic.Code;
+		const std::string noOutput;
+		return EvaluateReplayInternal(
+			document, plan, noOutput, request, result, diagnostic, maximumBytes, outputIds, nodeId
+		);
 	}
 
 	Status EvaluateArray(

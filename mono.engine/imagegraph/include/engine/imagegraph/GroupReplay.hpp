@@ -87,6 +87,7 @@ namespace engine::imagegraph {
 	// One explicit delayed setInstance transition. This does not run refresh callbacks.
 	// Local subtype effects on targets are retired when their input animator alias is installed.
 	// The byte bound includes the borrowed document and old/new owner overlap.
+	// Replaces instance bindings at the same revision, preserving frozen callback declarations.
 	Status BindGroupReplay(
 		const Document &document,
 		std::span<const GroupSubtypeBinding> bindings,

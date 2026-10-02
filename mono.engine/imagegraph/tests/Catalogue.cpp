@@ -17,7 +17,9 @@ using namespace engine::imagegraph;
 TEST_CASE("Catalogue covers reviewed selected pinned source declarations", "[imagegraph]") {
 	const auto catalogue = Catalogue();
 	// The selected inventory includes reviewed documentation, project fixtures, and source evidence.
-	CHECK(catalogue.size() == 884);
+	CHECK(catalogue.size() == 886);
+	REQUIRE(FindCatalogueSource("Node_String_Insert"));
+	REQUIRE(FindCatalogueSource("Node_Spout_Receive"));
 	REQUIRE(FindCatalogueSource("Node_Path_Redistribute"));
 	CHECK(FindCatalogueSource("Node_Path_Redistribute")->Family == "undocumented");
 	const std::pair<std::string_view, std::pair<std::string_view, std::string_view>> reviewed[] = {
@@ -61,7 +63,10 @@ TEST_CASE("Catalogue covers reviewed selected pinned source declarations", "[ima
 			INFO(input.Id);
 			const auto value = CatalogueDefault(input);
 			REQUIRE(value);
-			CHECK(IsAuthoredValueType(input.Type));
+			CHECK((
+				IsAuthoredValueType(input.Type) ||
+				(entry.Type == "pc.group_input" && input.Id == "parent_value" && input.Type == ValueType::Any)
+			));
 		}
 		for (const CatalogueOutput &output : entry.Outputs)
 			CHECK(outputs.insert(output.Id).second);
@@ -183,7 +188,19 @@ TEST_CASE("Dynamic input groups repeat a source template after the fixed inputs"
 	CHECK(composite->DynamicFixedLength == 4);
 	CHECK(composite->DynamicGroupLength == 8);
 	CHECK(composite->Schema.DynamicInputs);
-	REQUIRE(composite->DynamicTemplate.size() == 8);
+	CHECK(
+		std::count_if(
+			composite->DynamicTemplate.begin(), composite->DynamicTemplate.end(), [](const auto &input) {
+				return input.SourceIndex >= 0;
+			}
+		) == 8
+	);
+	size_t unitGroup = 0;
+	const auto *unit = FindDynamicTemplate(*composite, "position_unit_2", unitGroup);
+	REQUIRE(unit);
+	CHECK(unitGroup == 2);
+	CHECK(unit->SourceIndex == -1);
+	CHECK(unit->Type == ValueType::Enum);
 	size_t group = 0;
 	const CatalogueInput *blend = FindDynamicTemplate(*composite, "blend_2", group);
 	REQUIRE(blend);
@@ -216,6 +233,65 @@ TEST_CASE("Dynamic input groups repeat a source template after the fixed inputs"
 	Plan plan;
 	Diagnostic diagnostic;
 	CHECK(Compile(document, plan, diagnostic) == Status::Ok);
+}
+
+TEST_CASE("Pinned Pixel Composer metadata preserves hidden source constructors", "[imagegraph]") {
+	const auto *instancer = FindCatalogueEntry("pc.3_d_instancer");
+	REQUIRE(instancer);
+	const auto *selector = FindCatalogueInput(*instancer, "colors_per_index_select");
+	REQUIRE(selector);
+	CHECK(selector->SourceIndex == -1);
+	CHECK(selector->Type == ValueType::Enum);
+	CHECK(selector->Default == "e 0");
+	CHECK(selector->Choices == "Index Loop;Index Ping-pong;Random");
+
+	const auto *exportNode = FindCatalogueEntry("pc.export");
+	REQUIRE(exportNode);
+	const auto *framerateUnit = FindCatalogueInput(*exportNode, "framerate_unit");
+	REQUIRE(framerateUnit);
+	CHECK(framerateUnit->Default == "e 1");
+	CHECK(framerateUnit->SourceKind == "ExportFramerateUnit");
+	CHECK(framerateUnit->Choices == "FPS;Relative to Preview");
+
+	const auto *path = FindCatalogueEntry("pc.path_3_d");
+	REQUIRE(path);
+	const auto output = [](const CatalogueEntry &entry, std::string_view id) -> const CatalogueOutput * {
+		const auto found =
+			std::find_if(entry.Outputs.begin(), entry.Outputs.end(), [&](const auto &candidate) {
+				return candidate.Id == id;
+			});
+		return found == entry.Outputs.end() ? nullptr : &*found;
+	};
+	const auto *position = output(*path, "position_out");
+	const auto *pathData = output(*path, "path_data");
+	REQUIRE(position);
+	REQUIRE(pathData);
+	CHECK(position->Type == ValueType::Vector3);
+	CHECK(pathData->Type == ValueType::Path3D);
+	const auto *camera = FindCatalogueEntry("pc.path_3_d_camera");
+	const auto *transform = FindCatalogueEntry("pc.path_3_d_transform");
+	REQUIRE(camera);
+	REQUIRE(transform);
+	REQUIRE(output(*camera, "rendered"));
+	REQUIRE(output(*transform, "path"));
+	CHECK(output(*camera, "rendered")->Type == ValueType::Path3D);
+	CHECK(output(*transform, "path")->Type == ValueType::Path3D);
+
+	const auto *draw = FindCatalogueEntry("pc.pb_draw_curve");
+	REQUIRE(draw);
+	CHECK(draw->DynamicFixedLength == 13);
+	CHECK(draw->DynamicGroupLength == 26);
+	CHECK(draw->DynamicGroupLimit == 64);
+	CHECK(MaximumDynamicInputsForType(draw->Type) == 1792);
+	CHECK(MaximumDynamicInputsForType("pc.blur") == 64);
+	REQUIRE(draw->DynamicTemplate.size() == 28);
+	size_t group = 0;
+	REQUIRE(FindDynamicTemplate(*draw, "pattern_scale_0", group));
+	CHECK(group == 0);
+	REQUIRE(FindDynamicTemplate(*draw, "pattern_scale_unit_0", group));
+	const auto *shines = FindDynamicTemplate(*draw, "shines_0", group);
+	REQUIRE(shines);
+	CHECK(shines->Type == ValueType::Array);
 }
 
 TEST_CASE("Version 7 project settings round trip and are validated", "[imagegraph]") {

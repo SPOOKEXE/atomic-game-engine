@@ -1,0 +1,14 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_script": "scripts/node_array_shuffle/node_array_shuffle.gml",
+  "source_script_sha256": "6ee7663a1bede4a652b8fc056bd42abc142e4dcb76a5c266ba4a311f2aba98b3",
+  "runtime_repository": "https://github.com/YoYoGames/GameMaker-HTML5",
+  "runtime_commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+  "runtime_source_url": "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/yyVariable.js",
+  "runtime_file_sha256": "da5d6a2fba34a237e563de92df55a3db96999f34b762d59dbae969b6bd08deb0",
+  "runtime_function": "shuffleArray",
+  "runtime_function_sha256": "c9780f4be6ac07c6bf5abfa335857eca3639855eb0d38199aa9e0470d98e4eff",
+  "observed_runtime_behavior": "array_shuffle delegates to shuffleArray. shuffleArray uses Math.random directly, so random_set_seed does not determine its permutation.",
+  "native_behavior": "pc.array_shuffle performs deterministic Fisher-Yates using SourceRandom.Index, clamping the inclusive generator endpoint to the last valid index. Equal seeds repeat the permutation; top-level row contents are preserved.",
+  "parity_limit": "Desktop runner seed-to-permutation parity is unverified. Native deterministic seed handling deliberately differs from the inspected HTML5 shuffle."
+}

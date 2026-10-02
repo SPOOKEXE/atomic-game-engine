@@ -2,6 +2,7 @@
 
 // Scalar key drivers follow node_keyframe_driver.gml; curve drivers sample its 32-interval curveMap.
 
+#include "AudioKeyDriver.hpp"
 #include "ValuePayload.hpp"
 #include "nodes/Curve.hpp"
 
@@ -362,7 +363,9 @@ namespace engine::imagegraph::detail {
 		return std::visit(
 			[](const auto &control) {
 				using T = std::decay_t<decltype(control)>;
-				if constexpr (std::is_same_v<T, KeyframeLinearDriver>)
+				if constexpr (std::is_same_v<T, KeyframeAudioDriver>)
+					return ValidAudioKeyDriver(control);
+				else if constexpr (std::is_same_v<T, KeyframeLinearDriver>)
 					return std::isfinite(control.Speed);
 				else if constexpr (std::is_same_v<T, KeyframeSnapDriver>)
 					return std::isfinite(control.Size);
@@ -391,8 +394,16 @@ namespace engine::imagegraph::detail {
 		int64_t quaternionMode,
 		Value &result,
 		double totalFrames = 1,
-		bool rawSourceQuaternion = false
+		bool rawSourceQuaternion = false,
+		const EvaluationRequest *request = nullptr
 	) {
+		double audioOffset = 0;
+		if (driver)
+			if (const auto *audio = std::get_if<KeyframeAudioDriver>(driver)) {
+				const Status status =
+					request ? ResolveAudioKeyOffset(*audio, *request, audioOffset) : Status::InvalidValue;
+				if (status != Status::Ok) return status;
+			}
 		if (driver && std::holds_alternative<KeyframeSineDriver>(*driver) &&
 			(!std::isfinite(totalFrames) || totalFrames <= 0))
 			return Status::InvalidValue;
@@ -435,7 +446,10 @@ namespace engine::imagegraph::detail {
 			return std::visit(
 				[&](const auto &control) {
 					using T = std::decay_t<decltype(control)>;
-					if constexpr (std::is_same_v<T, KeyframeLinearDriver>)
+					if constexpr (std::is_same_v<T, KeyframeAudioDriver>) {
+						driven = value + audioOffset;
+						return std::isfinite(driven);
+					} else if constexpr (std::is_same_v<T, KeyframeLinearDriver>)
 						return ApplyLinearDriver(value, time, control.Speed, driven);
 					else if constexpr (std::is_same_v<T, KeyframeSnapDriver>)
 						return ApplySnapDriver(value, control.Size, driven);

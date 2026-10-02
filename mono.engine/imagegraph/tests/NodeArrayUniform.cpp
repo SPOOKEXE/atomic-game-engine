@@ -790,7 +790,10 @@ TEST_CASE(
 					CHECK_FALSE(executor(context));
 					CHECK(context.FailureCode == Status::InvalidValue);
 					CHECK(context.FailurePort == "data");
-					CHECK(context.FailureMessage == "source uniform image samples are nonfinite");
+					CHECK(
+						context.FailureMessage == (route == 3 ? "source uniform data is invalid"
+															  : "source uniform image samples are nonfinite")
+					);
 					CHECK(context.OutputValues.empty());
 					CHECK(context.OutputImages.empty());
 					CHECK(context.OutputImageArrays.empty());
