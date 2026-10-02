@@ -66,8 +66,9 @@ retained previous results. Failed evaluation preserves caller-owned results.
 The outside native probe links stable dev53 archives against an owned
 committed53 header/private-source snapshot, with new unoptimized constructor/test
 objects and a replacement source registry. It
-exercises actual Compile, Evaluate, EvaluateArray and Read/Write routes. Joined
-release validation is still required before committing the integration.
+exercises actual Compile, Evaluate, EvaluateArray and Read/Write routes. The fresh
+joined release55 core suite passed all 1,515 cases, including the 24 content-filter
+cases. Its retained log is `.cache/build/dev/evidence/pixel-composer-2026-10-02/core-release-55-initial.log`.
 
 This is a documented CPU source-formula profile. Floating-point shader precision,
 licensed desktop builtin behavior and GPU texture/raster coverage are not
