@@ -1,0 +1,117 @@
+{
+  "scope": "Full imports of the supplied source projects retain official output identities and preserved source records. The import probe on 2026-10-02 reported the listed missing executors; later executor changes require a fresh evaluation. These fixtures do not establish source executable parity.",
+  "import_command": "pxcimport --input NAME_121092.pxc --output Composer-Source-NAME.graph",
+  "import_tool_sha256": "c593cefdcad04b3825374676002719d0f3e3f2e3bfadd5ea9f2ccf8fde3fe1af",
+  "projects": [
+    {
+      "name": "Black-Hole",
+      "source": "Black-Hole_121092.pxc",
+      "source_sha256": "9eaa66e9b0135dfae8938521a06971c87a8867cdc5e15fd4247165e9d430dd65",
+      "graph": "Composer-Source-Black-Hole.graph",
+      "graph_sha256": "b2ddded019c4f32c8d074df63be823021e2aeae14da1ed70b4b52f4968951525",
+      "node_count": 67,
+      "mapped_node_count": 20,
+      "preserved_source_node_count": 47,
+      "output": {
+        "id": "gSKBQW2707447cZLPHO4qsosZuR6bD0L",
+        "node": "gSJ9el29901564gZuoIW19YnO4fepb59",
+        "port": "surface_out"
+      },
+      "native_evaluation": {
+        "tick": 0,
+        "status": "UnsupportedExecution",
+        "blocking_node": "gSJ9WU2493516ZRAdF6THZuvEr7uXusU",
+        "blocking_type": "pc.mk_sparkle",
+        "message": "node has no native executor"
+      }
+    },
+    {
+      "name": "Fire-Tornado",
+      "source": "Fire-Tornado_121092.pxc",
+      "source_sha256": "44a72458b147c1b6f75fd1927494ff63aaaf3671a5146359e8afeb223e1ba2d9",
+      "graph": "Composer-Source-Fire-Tornado.graph",
+      "graph_sha256": "533e6f63bf4a78ab181d36c6c7fd829a4965d087fe7a1a476a0e489031b7d66e",
+      "node_count": 32,
+      "mapped_node_count": 10,
+      "preserved_source_node_count": 22,
+      "output": {
+        "id": "gSKBO82563685pOhaulkBGjkN0ZahGhW",
+        "node": "gSGCdv273281U95ck93aKFVYaOVxXR3b",
+        "port": "image"
+      },
+      "native_evaluation": {
+        "tick": 0,
+        "status": "UnsupportedExecution",
+        "blocking_node": "gSGBvi20669435hTq7FljRJSLZvzak7D",
+        "blocking_type": "pc.noise_aniso",
+        "message": "node has no native executor"
+      }
+    },
+    {
+      "name": "Glass-Block-Refraction",
+      "source": "Glass-Block-Refraction_121092.pxc",
+      "source_sha256": "cf9688cc257d80353f62dbfbba90977f434806a74128880bade5148016f06f75",
+      "graph": "Composer-Source-Glass-Block-Refraction.graph",
+      "graph_sha256": "9ac49414ec0b1df9f9dd60a6bac4a7891cb80668ba5b8e8f0e3ea492f41b68aa",
+      "node_count": 40,
+      "mapped_node_count": 14,
+      "preserved_source_node_count": 26,
+      "output": {
+        "id": "gSKAiP180467pJ0YpXbwrplRMgj671sM",
+        "node": "gSDFAi769794aqfifGPMnFF0oXfSSMt2",
+        "port": "image"
+      },
+      "native_evaluation": {
+        "tick": 0,
+        "status": "UnsupportedExecution",
+        "blocking_node": "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6",
+        "blocking_type": "pc.grid",
+        "message": "node has no native executor"
+      }
+    },
+    {
+      "name": "Ornate-Trim",
+      "source": "Ornate-Trim_121092.pxc",
+      "source_sha256": "955a4b2f5c758c68fb7c6df356597e09436ecc8884f006c6faee44f8552e4fd6",
+      "graph": "Composer-Source-Ornate-Trim.graph",
+      "graph_sha256": "90bd28990fa2d0dd0fe17000326469f8aadfd1723c06873747bde6a8a8669ed2",
+      "node_count": 27,
+      "mapped_node_count": 14,
+      "preserved_source_node_count": 13,
+      "output": {
+        "id": "gSKBQu2731320Bc3gLD9ntjq2djDzQT3",
+        "node": "gSJD0d1443507UtlPsWv1EIVc79N0NPn",
+        "port": "surface_out"
+      },
+      "native_evaluation": {
+        "tick": 0,
+        "status": "UnsupportedExecution",
+        "blocking_node": "gSJCVp1767875rO7HTj3bByFFiOojjgI",
+        "blocking_type": "pc.path_shape",
+        "message": "node has no native executor"
+      }
+    },
+    {
+      "name": "Spark-Bolt",
+      "source": "Spark-Bolt_121092.pxc",
+      "source_sha256": "34b39a7969be45071b2035a76796418ee777546decf4d8255d68e282d17a1bd1",
+      "graph": "Composer-Source-Spark-Bolt.graph",
+      "graph_sha256": "f670a9232b54aafad02cc8a6dcc184eb48ba25022a312318e05dd44a801e13e2",
+      "node_count": 44,
+      "mapped_node_count": 19,
+      "preserved_source_node_count": 25,
+      "output": {
+        "id": "gSKA1Q1237222AW3R5nxuMfz0TUM1wYS",
+        "node": "gSI8Kg5208654sdkZlea7b6nCbzqSFtm",
+        "port": "image"
+      },
+      "native_evaluation": {
+        "tick": 0,
+        "status": "UnsupportedExecution",
+        "blocking_node": "gSI7bB2597429KKfYFA7tlVwd2lZSlip",
+        "blocking_type": "pc.mk_sparkle",
+        "message": "node has no native executor"
+      }
+    }
+  ]
+}

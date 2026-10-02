@@ -1,0 +1,28 @@
+imagegraph 3
+node "gSE5qV377001RdwAZRD7zafCVPfsp95o" "image.noise_simplex" "" -288 672
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "width" i 64
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "height" i 64
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "seed" d 403338
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "iterations" i 1
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "tile" b 1
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "position" v 0 0
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "rotation" d 0
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "scale" v 0.25 0.25
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "iteration_scaling" d 2
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "iteration_amplitude" d 0.5
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "level_in" v 0.29999999999999999 0.85999999999999999
+value 0 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "level_out" v 0 1
+node "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "image.tile" "" -128 672
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "width" i 64
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "height" i 64
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "scaling_type" i 0
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "amount" v 2 2
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "spacing" v 0 0
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "position" v 0 0
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "rotation" d 0
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "scale" v 0.5 0.5
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "shift_axis" i 0
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "shift" d 0
+value 1 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "pattern" i 0
+link "gSE5qV377001RdwAZRD7zafCVPfsp95o" "image" "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "image"
+output "study" "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "image"

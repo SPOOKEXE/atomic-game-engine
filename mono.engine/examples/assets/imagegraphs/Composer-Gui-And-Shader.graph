@@ -1,0 +1,12 @@
+imagegraph 3
+node "mask" "image.shape" "" 0 0
+value 0 "mask" "width" i 128
+value 0 "mask" "height" i 128
+value 0 "mask" "half_size" v 0.35 0.35
+value 0 "mask" "color" c 255 255 255 255
+output "mask" "mask" "mask"
+output "height" "mask" "height"
+output "colour" "mask" "colored"
+keyframe "mask" "half_size" 0 "step" v 0.2 0.2
+keyframe "mask" "half_size" 60 "step" v 0.4 0.4
+keyframe "mask" "half_size" 120 "step" v 0.25 0.4

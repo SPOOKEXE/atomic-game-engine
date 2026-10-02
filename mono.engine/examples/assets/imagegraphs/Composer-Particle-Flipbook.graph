@@ -1,0 +1,70 @@
+imagegraph 5
+node "fire0" "image.shape" "" 0 0
+value 0 "fire0" "width" i 64
+value 0 "fire0" "height" i 64
+value 0 "fire0" "shape" s "Ellipse"
+value 0 "fire0" "half_size" v 0.18 0.24
+value 0 "fire0" "color" c 255 80 10 255
+node "fire1" "image.shape" "" 160 0
+value 1 "fire1" "width" i 64
+value 1 "fire1" "height" i 64
+value 1 "fire1" "shape" s "Ellipse"
+value 1 "fire1" "half_size" v 0.22499999999999998 0.27999999999999997
+value 1 "fire1" "color" c 255 115 20 255
+node "fire2" "image.shape" "" 320 0
+value 2 "fire2" "width" i 64
+value 2 "fire2" "height" i 64
+value 2 "fire2" "shape" s "Ellipse"
+value 2 "fire2" "half_size" v 0.27 0.32
+value 2 "fire2" "color" c 255 150 30 255
+node "fire3" "image.shape" "" 480 0
+value 3 "fire3" "width" i 64
+value 3 "fire3" "height" i 64
+value 3 "fire3" "shape" s "Ellipse"
+value 3 "fire3" "half_size" v 0.315 0.36
+value 3 "fire3" "color" c 255 185 40 255
+node "firesheet" "value.array" "" 700 200
+dynamic 4 "firesheet" "frame0" image 0
+dynamic 4 "firesheet" "frame1" image 0
+dynamic 4 "firesheet" "frame2" image 0
+dynamic 4 "firesheet" "frame3" image 0
+link "fire0" "colored" "firesheet" "frame0"
+link "fire1" "colored" "firesheet" "frame1"
+link "fire2" "colored" "firesheet" "frame2"
+link "fire3" "colored" "firesheet" "frame3"
+output "fire" "firesheet" "array"
+node "spark0" "image.shape" "" 0 200
+value 5 "spark0" "width" i 64
+value 5 "spark0" "height" i 64
+value 5 "spark0" "shape" s "Ellipse"
+value 5 "spark0" "half_size" v 0.025 0.12
+value 5 "spark0" "color" c 255 230 130 255
+node "spark1" "image.shape" "" 160 200
+value 6 "spark1" "width" i 64
+value 6 "spark1" "height" i 64
+value 6 "spark1" "shape" s "Ellipse"
+value 6 "spark1" "half_size" v 0.035 0.18
+value 6 "spark1" "color" c 255 230 130 255
+node "spark2" "image.shape" "" 320 200
+value 7 "spark2" "width" i 64
+value 7 "spark2" "height" i 64
+value 7 "spark2" "shape" s "Ellipse"
+value 7 "spark2" "half_size" v 0.045 0.24
+value 7 "spark2" "color" c 255 230 130 255
+node "spark3" "image.shape" "" 480 400
+value 8 "spark3" "width" i 64
+value 8 "spark3" "height" i 64
+value 8 "spark3" "shape" s "Ellipse"
+value 8 "spark3" "half_size" v 0.055 0.3
+value 8 "spark3" "color" c 255 230 130 255
+node "sparksheet" "value.array" "" 700 400
+dynamic 9 "sparksheet" "frame0" image 0
+dynamic 9 "sparksheet" "frame1" image 0
+dynamic 9 "sparksheet" "frame2" image 0
+dynamic 9 "sparksheet" "frame3" image 0
+link "spark0" "colored" "sparksheet" "frame0"
+link "spark1" "colored" "sparksheet" "frame1"
+link "spark2" "colored" "sparksheet" "frame2"
+link "spark3" "colored" "sparksheet" "frame3"
+output "spark" "sparksheet" "array"
+timeline 4 0 3 "loop" 12

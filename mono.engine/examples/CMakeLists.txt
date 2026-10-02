@@ -275,6 +275,22 @@ add_custom_command(
 	VERBATIM)
 list(APPEND staged_scenes "${flipbook_staged}")
 
+file(GLOB example_imagegraphs CONFIGURE_DEPENDS
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/imagegraphs/*.graph"
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/imagegraphs/*.json")
+
+foreach(imagegraph IN LISTS example_imagegraphs)
+	get_filename_component(imagegraph_name "${imagegraph}" NAME)
+	set(imagegraph_staged "${MONO_STAGE_ROOT}/assets/imagegraphs/${imagegraph_name}")
+	add_custom_command(
+		OUTPUT "${imagegraph_staged}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/imagegraphs"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${imagegraph}" "${imagegraph_staged}"
+		DEPENDS "${imagegraph}"
+		VERBATIM)
+	list(APPEND staged_scenes "${imagegraph_staged}")
+endforeach()
+
 file(GLOB example_pipelines CONFIGURE_DEPENDS
 	"${CMAKE_CURRENT_SOURCE_DIR}/assets/pipelines/*.pipeline")
 

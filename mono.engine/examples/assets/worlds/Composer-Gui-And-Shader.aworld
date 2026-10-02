@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<World format="3" name="Composer-Gui-And-Shader">
+ <Sources>
+  <Source path="scripts/server/Composer-Gui-And-Shader.server.luau"><![CDATA[local function panel(name, x)
+ local p = Instance.new("MeshPart")
+ p.Name = name
+ p.Anchored = true
+ p.Size = Vector3.new(4, 4, 0.2)
+ p.Position = Vector3.new(x, 3, 0)
+ p.Parent = workspace
+ return p
+end
+local function bind(sink, graph, output, texture, linear)
+ sink.ImageGraph = graph
+ sink.ImageGraphOutput = output
+ sink.ImageGraphTexture = texture
+ sink.ImageGraphSeed = 7291
+ sink.ImageGraphTickPolicy = "world"
+ sink.ImageGraphColorSpace = if linear then "linear" else "display"
+end
+local floor = Instance.new("Part")
+floor.Name = "Floor"
+floor.Anchored = true
+floor.Size = Vector3.new(30, 1, 20)
+floor.Position = Vector3.new(0, -0.5, 0)
+floor.Color = Color3.new(0.025, 0.025, 0.025)
+floor.Parent = workspace
+local screen = Instance.new("ScreenGui")
+screen.Name = "ComposerGui"
+screen.Parent = game:GetService("StarterGui")
+local picture = Instance.new("ImageLabel")
+picture.Name = "LiveMask"
+picture.Size = UDim2.fromOffset(128, 128)
+picture.Position = UDim2.fromOffset(20, 20)
+picture.Image = "composer-mask"
+bind(picture, "Composer-Gui-And-Shader", "mask", "composer-mask", false)
+picture.Parent = screen
+local button = Instance.new("ImageButton")
+button.Name = "LiveStates"
+button.Size = UDim2.fromOffset(128, 128)
+button.Position = UDim2.fromOffset(170, 20)
+button.Image = "composer-mask"
+button.HoverImage = "composer-height"
+button.PressedImage = "composer-colour-mask"
+button.Parent = screen
+for _, spec in {{"height", "composer-height"}, {"colour", "composer-colour-mask"}} do
+ local owner = Instance.new("Folder")
+ owner.Name = spec[1] .. "Output"
+ bind(owner, "Composer-Gui-And-Shader", spec[1], spec[2], false)
+ owner.Parent = workspace
+end
+local p = panel("ShaderMask", 0)
+p.TextureID = "composer-mask"
+local shader = Instance.new("ShaderScript")
+shader.Name = "ComposerMaskShader"
+shader.Source = [[#version 450
+layout(location=1) in vec2 inUv;
+layout(location=0) out vec4 outColour;
+layout(set=2,binding=2) uniform sampler2D colourMap;
+void main() { float mask = texture(colourMap, inUv).r; outColour = vec4(mask, mask * 0.5, 1.0 - mask, 1.0); }
+]]
+shader.Parent = workspace
+local material = Instance.new("Material")
+material.Name = "MaskMaterial"
+material.Shader = shader.Name
+material.Parent = p
+]]></Source>
+  <Source path="scripts/client/Composer-Gui-And-Shader.client.luau"><![CDATA[local camera = Instance.new("Camera")
+camera.Name = "ComposerCamera"
+camera.CFrame = CFrame.lookAt(Vector3.new(0, 5, 18), Vector3.new(0, 3, 0))
+camera.FieldOfView = 55
+camera.Parent = workspace
+workspace.CurrentCamera = camera
+]]></Source>
+ </Sources>
+ <Item class="Workspace" name="Workspace" id="1" />
+ <Item class="ServerScriptService" name="ServerScriptService" id="2">
+  <Item class="Script" name="ComposerScene" id="3"><Property name="Source" type="string">scripts/server/Composer-Gui-And-Shader.server.luau</Property></Item>
+ </Item>
+ <Item class="StarterPlayer" name="StarterPlayer" id="4">
+  <Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="5">
+   <Item class="LocalScript" name="ComposerCamera" id="6"><Property name="Source" type="string">scripts/client/Composer-Gui-And-Shader.client.luau</Property></Item>
+  </Item>
+ </Item>
+</World>

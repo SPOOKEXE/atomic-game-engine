@@ -1,0 +1,26 @@
+imagegraph 9
+project 16 16 0 3 0
+node "domain" "pc.flip_domain" "" 0 0
+value 0 "domain" "dimension_unit" e 0
+value 0 "domain" "dimension" v 16 16
+value 0 "domain" "particle_size" i 2
+value 0 "domain" "attribute_max_particles" d 16
+value 0 "domain" "attribute_iteration" d 2
+value 0 "domain" "attribute_iteration_particle" d 0
+value 0 "domain" "attribute_skip_incompressible" b 1
+value 0 "domain" "gravity" d 5
+value 0 "domain" "time_step" d 0.1
+node "fill" "pc.flip_fill" "" 240 0
+value 1 "fill" "spawn_area_unit" e 0
+value 1 "fill" "spawn_area" r 8 8 4 4 0 0
+value 1 "fill" "density" d 0.5
+node "render" "pc.flip_render" "" 480 0
+value 2 "render" "update_step" i 1
+value 2 "render" "particle_size" d 2
+value 2 "render" "draw_obstracles" b 0
+value 2 "render" "threshold" b 0
+value 2 "render" "alpha" v 1 1
+value 2 "render" "lifespan" v 0 0
+link "domain" "domain" "fill" "domain"
+link "fill" "domain" "render" "domain"
+output "fluid" "render" "rendered"

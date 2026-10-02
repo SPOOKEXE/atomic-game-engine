@@ -1,0 +1,75 @@
+imagegraph 9
+node "surface" "image.shape" "" 0 0
+value 0 "surface" "width" i 128
+value 0 "surface" "height" i 128
+value 0 "surface" "half_size" v 0.3 0.3
+value 0 "surface" "color" c 70 160 230 255
+node "transform" "image.transform_3d" "" 240 0
+value 1 "transform" "position" 3 0 0 0
+value 1 "transform" "anchor" 3 0 0 0
+value 1 "transform" "rotation" h 0 0 0 1
+value 1 "transform" "scale" 3 0.75 0.75 1
+value 1 "transform" "texture_tiling" v 1 1
+value 1 "transform" "projection" e 1
+value 1 "transform" "fov" d 45
+value 1 "transform" "view_range" v 0.001 10
+value 1 "transform" "depth_range" v 0 1
+link "surface" "colored" "transform" "surface"
+output "transform" "transform" "rendered"
+output "transform_depth" "transform" "depth"
+output "source" "surface" "colored"
+keyframe "transform" "scale" 0 "step" 3 0.75 0.75 1
+keyframe "transform" "scale" 60 "step" 3 0.5 0.9 1
+keyframe "transform" "position" 0 "step" 3 0 0 0
+keyframe "transform" "position" 120 "step" 3 0.2 0 0
+node "material" "pc.3_d_material" "" 240 240
+link "surface" "colored" "material" "texture"
+node "cube" "pc.3_d_mesh_cube" "" 480 240
+value 3 "cube" "scale" 3 0.65 0.65 0.65
+link "material" "material" "cube" "material"
+node "light" "pc.3_d_light_point" "" 480 480
+value 4 "light" "position" 3 2 -2 -3
+value 4 "light" "intensity" d 2
+value 4 "light" "radius" d 8
+node "scene" "pc.3_d_scene" "" 720 240
+dynamic 5 "scene" "cube" mesh 0
+dynamic 5 "scene" "light" mesh 0
+link "cube" "mesh" "scene" "cube"
+link "light" "light" "scene" "light"
+node "camera" "pc.3_d_camera" "" 960 240
+value 6 "camera" "dimension" v 256 256
+value 6 "camera" "dimension_unit" e 0
+value 6 "camera" "shader" e 1
+value 6 "camera" "clipping_distance" v 0.1 20
+value 6 "camera" "backface_culling" e 0
+link "scene" "scene" "camera" "scene"
+output "rendered" "camera" "rendered"
+output "depth" "camera" "depth"
+output "normal" "camera" "normal"
+output "diffuse" "camera" "diffuse"
+output "view_normal" "camera" "view_normal"
+output "shadow" "camera" "shadow"
+output "ambient_occlusion" "camera" "ambient_occlusion"
+keyframe "camera" "horizontal_angle" 0 "linear" d 0
+keyframe "camera" "horizontal_angle" 120 "linear" d 360
+node "sdf-sphere" "pc.rm_primitive" "" 720 720
+value 7 "sdf-sphere" "shape" e 5
+value 7 "sdf-sphere" "radius" d 0.9
+value 7 "sdf-sphere" "base_color" c 30 200 160 255
+value 7 "sdf-sphere" "specular" d 0.4
+node "sdf-cut" "pc.rm_primitive" "" 720 900
+value 8 "sdf-cut" "shape" e 5
+value 8 "sdf-cut" "radius" d 0.7
+value 8 "sdf-cut" "position" 3 0.4 0 0.4
+node "sdf-composition" "pc.rm_combine" "" 960 720
+value 9 "sdf-composition" "type" e 2
+value 9 "sdf-composition" "merge" d 0.1
+value 9 "sdf-composition" "dimension" v 256 256
+value 9 "sdf-composition" "dimension_unit" e 0
+value 9 "sdf-composition" "camera_rotation" 3 20 30 0
+link "sdf-sphere" "sdf_object" "sdf-composition" "shape_1"
+link "sdf-cut" "sdf_object" "sdf-composition" "shape_2"
+output "raymarch" "sdf-composition" "surface_out"
+output "sdf-scene" "sdf-composition" "sdf_object"
+keyframe "sdf-cut" "position" 0 "linear" 3 0.4 0 0.4
+keyframe "sdf-cut" "position" 120 "linear" 3 -0.4 0 0.4

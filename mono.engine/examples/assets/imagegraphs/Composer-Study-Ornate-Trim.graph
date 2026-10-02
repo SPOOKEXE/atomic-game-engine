@@ -1,0 +1,64 @@
+imagegraph 3
+node "gSJCuE1239016DN83aIXPGkERvhC0oRM" "image.shape" "" 320 16
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "width" i 64
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "height" i 64
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "shape" s "Rectangle"
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "color" c 255 255 255 255
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "bg_color" c 0 0 0 255
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "position_mode" i 1
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "center" v 0.5 0.16200000000000001
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "half_size" v 0.44 0.25
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "shape_rotation" d 0
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "shape_scale" d 1
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "level" v 0 1
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "background" i 2
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "bg_blend" i 0
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "antialias" b 0
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "height_render" b 0
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "opacity" b 0
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "multiply_alpha" b 0
+value 0 "gSJCuE1239016DN83aIXPGkERvhC0oRM" "mask_alpha_only" b 0
+node "gSJCub1261731c4oQJmIATxJEhkmYmgB" "image.shape" "" 480 16
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "width" i 64
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "height" i 64
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "shape" s "Rectangle"
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "color" c 255 255 255 255
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "bg_color" c 0 0 0 255
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "position_mode" i 1
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "center" v 0.5 0.75
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "half_size" v 0.056000000000000001 0.25
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "shape_rotation" d 0
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "shape_scale" d 1
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "level" v 0 1
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "background" i 2
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "bg_blend" i 0
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "antialias" b 0
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "height_render" b 0
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "opacity" b 0
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "multiply_alpha" b 0
+value 1 "gSJCub1261731c4oQJmIATxJEhkmYmgB" "mask_alpha_only" b 0
+node "gSJCul1272215qxeMa8hFMtCikrbZF66" "image.shape" "" 480 176
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "width" i 64
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "height" i 64
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "shape" s "Triangle"
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "color" c 255 255 255 255
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "bg_color" c 0 0 0 255
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "position_mode" i 1
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "center" v 0.5 0.5
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "half_size" v 0.5 0.5
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "shape_rotation" d 0
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "shape_scale" d 1
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "level" v 0 1
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "background" i 2
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "bg_blend" i 0
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "antialias" b 0
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "height_render" b 0
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "opacity" b 0
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "multiply_alpha" b 0
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "mask_alpha_only" b 0
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "point1" v 0 0.40625
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "point2" v 0.5 0.609375
+value 2 "gSJCul1272215qxeMa8hFMtCikrbZF66" "point3" v 1 0.40625
+link "gSJCuE1239016DN83aIXPGkERvhC0oRM" "colored" "gSJCub1261731c4oQJmIATxJEhkmYmgB" "bg_surface"
+link "gSJCub1261731c4oQJmIATxJEhkmYmgB" "colored" "gSJCul1272215qxeMa8hFMtCikrbZF66" "bg_surface"
+output "study" "gSJCul1272215qxeMa8hFMtCikrbZF66" "colored"

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<World format="3" name="Composer-Skybox">
+ <Sources>
+  <Source path="scripts/server/Composer-Skybox.server.luau"><![CDATA[local function panel(name, x)
+ local p = Instance.new("MeshPart")
+ p.Name = name
+ p.Anchored = true
+ p.Size = Vector3.new(4, 4, 0.2)
+ p.Position = Vector3.new(x, 3, 0)
+ p.Parent = workspace
+ return p
+end
+local function bind(sink, graph, output, texture, linear)
+ sink.ImageGraph = graph
+ sink.ImageGraphOutput = output
+ sink.ImageGraphTexture = texture
+ sink.ImageGraphSeed = 7291
+ sink.ImageGraphTickPolicy = "world"
+ sink.ImageGraphColorSpace = if linear then "linear" else "display"
+end
+local floor = Instance.new("Part")
+floor.Name = "Floor"
+floor.Anchored = true
+floor.Size = Vector3.new(30, 1, 20)
+floor.Position = Vector3.new(0, -0.5, 0)
+floor.Color = Color3.new(0.025, 0.025, 0.025)
+floor.Parent = workspace
+local sky = Instance.new("SkyboxTextures")
+sky.Name = "ComposerSky"
+for _, face in {"Front", "Back", "Left", "Right", "Up", "Down"} do
+ local output = string.lower(face)
+ local texture = "composer-sky-" .. output
+ sky[face] = texture
+ local owner = Instance.new("Folder")
+ owner.Name = face .. "Output"
+ bind(owner, "Composer-Skybox", output, texture, false)
+ owner.Parent = workspace
+end
+sky.Parent = game:GetService("Lighting")
+]]></Source>
+  <Source path="scripts/client/Composer-Skybox.client.luau"><![CDATA[local camera = Instance.new("Camera")
+camera.Name = "ComposerCamera"
+camera.CFrame = CFrame.lookAt(Vector3.new(0, 5, 18), Vector3.new(0, 3, 0))
+camera.FieldOfView = 55
+camera.Parent = workspace
+workspace.CurrentCamera = camera
+]]></Source>
+ </Sources>
+ <Item class="Workspace" name="Workspace" id="1" />
+ <Item class="ServerScriptService" name="ServerScriptService" id="2">
+  <Item class="Script" name="ComposerScene" id="3"><Property name="Source" type="string">scripts/server/Composer-Skybox.server.luau</Property></Item>
+ </Item>
+ <Item class="StarterPlayer" name="StarterPlayer" id="4">
+  <Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="5">
+   <Item class="LocalScript" name="ComposerCamera" id="6"><Property name="Source" type="string">scripts/client/Composer-Skybox.client.luau</Property></Item>
+  </Item>
+ </Item>
+</World>

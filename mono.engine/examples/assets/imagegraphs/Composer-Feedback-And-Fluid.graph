@@ -1,0 +1,21 @@
+imagegraph 7
+project 32 32 0 3 0
+node "prior" "image.captured" "" 0 0
+value 0 "prior" "source_id" s "feedback:accumulated"
+node "stamp" "image.shape" "" 0 200
+value 1 "stamp" "width" i 32
+value 1 "stamp" "height" i 32
+value 1 "stamp" "shape" s "Ellipse"
+value 1 "stamp" "half_size" v 0.08 0.08
+value 1 "stamp" "center" v 0.2 0.5
+value 1 "stamp" "color" c 40 180 255 64
+node "mix" "image.blend" "" 250 0
+value 2 "mix" "opacity" d 1
+link "prior" "image" "mix" "background"
+link "stamp" "colored" "mix" "foreground"
+output "accumulated" "mix" "image"
+keyframe "stamp" "center" 0 "step" v 0.2 0.5
+keyframe "stamp" "center" 15 "step" v 0.35 0.65
+keyframe "stamp" "center" 30 "step" v 0.5 0.5
+keyframe "stamp" "center" 45 "step" v 0.65 0.35
+keyframe "stamp" "center" 60 "step" v 0.8 0.5

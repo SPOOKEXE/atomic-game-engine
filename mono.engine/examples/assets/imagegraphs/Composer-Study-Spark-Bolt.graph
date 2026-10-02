@@ -1,0 +1,111 @@
+imagegraph 3
+node "gSI8844450582zrtsnD9C7AKDitG96OR" "image.noise_simplex" "" -576 -448
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "width" i 64
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "height" i 64
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "seed" d 154374
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "iterations" i 3
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "tile" b 1
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "position" v 0 0
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "rotation" d 0
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "scale" v 0.39800000000000002 0.14199999999999999
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "iteration_scaling" d 2
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "iteration_amplitude" d 0.5
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "level_in" v 0.38 0.87
+value 0 "gSI8844450582zrtsnD9C7AKDitG96OR" "level_out" v 0 1
+node "gSI88B4458192OCsaYAOTIAqTMUeADKy" "image.polar" "" -256 -448
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "interpolation" i 2
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "tile" v 0.41999999999999998 3.7599999999999998
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "center" v 0.79861111111111116 0.84375
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "angle" d 0
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "invert" b 0
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "swap_axis" b 0
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "blend" d 1
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "radius_mode" i 0
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "range" v 0 360
+value 1 "gSI88B4458192OCsaYAOTIAqTMUeADKy" "twist" d 0
+node "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "image.gradient" "" -576 -288
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "width" i 64
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "height" i 64
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "gradient" g 0 2 0 255 255 255 255 1 0 0 0 255
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "type" i 0
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "angle" d 0
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "radius" d 0.5
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "center" v 0.5 0.5
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "shape" v 1 1
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "uniform_ratio" b 1
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "shift" d 0.16
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "scale" d 1
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "loop" i 0
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "uv_mix" d 1
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "inverse_axis" d 0
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "level_in" v 0 1
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "level_out" v 0 1
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "progress_remap" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "inverse_curve" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0 -0.33333333333333331 0 1 0 0 0
+value 2 "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "curve" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+node "gSI8Cl4733951wiDLe64uS078R7jSKD3" "image.blend" "" -416 -448
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "swap" b 0
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "invert_mask" b 0
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "mask_feather" d 1
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "output_dimension" i 0
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "constant_dimension" v 64 64
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "blend_mode" i 3
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "opacity" d 1
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "preserve_alpha" b 0
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "fill_mode" i 0
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "position" v 0.5 0.5
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "horizontal_align" i 0
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "vertical_align" i 0
+value 3 "gSI8Cl4733951wiDLe64uS078R7jSKD3" "mask_alpha_only" b 0
+node "gSI8DO4770717LORxpiQatCBkShRpUPT" "image.gradient" "" -416 -288
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "width" i 64
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "height" i 64
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "gradient" g 0 2 0 0 0 0 255 1 255 255 255 255
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "type" i 0
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "angle" d 180
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "radius" d 0.5
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "center" v 0.5 0.5
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "shape" v 1 1
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "uniform_ratio" b 1
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "shift" d -0.40000000000000002
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "scale" d 0.27000000000000002
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "loop" i 0
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "uv_mix" d 1
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "inverse_axis" d 0
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "level_in" v 0 1
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "level_out" v 0 1
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "progress_remap" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "inverse_curve" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0 -0.33333333333333331 0 1 0 0 0
+value 4 "gSI8DO4770717LORxpiQatCBkShRpUPT" "curve" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+node "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "image.blend" "" -256 -288
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "swap" b 0
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "invert_mask" b 0
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "mask_feather" d 1
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "output_dimension" i 0
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "constant_dimension" v 64 64
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "blend_mode" i 8
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "opacity" d 1
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "preserve_alpha" b 0
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "fill_mode" i 0
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "position" v 0.5 0.5
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "horizontal_align" i 0
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "vertical_align" i 0
+value 5 "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "mask_alpha_only" b 0
+node "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "image.posterize" "" -96 -448
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "use_palette" b 1
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "palette" a colour 7 c 192 203 220 255 c 139 155 180 255 c 90 105 136 255 c 58 68 102 255 c 38 43 68 255 c 24 20 37 255 c 255 255 255 255
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "posterize_alpha" b 1
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "steps" i 4
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "gamma" d 1
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "use_global_range" b 1
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "mask_alpha_only" b 0
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "mix" d 1
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "invert_mask" b 0
+value 6 "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "mask_feather" d 0
+link "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "image" "gSI88B4458192OCsaYAOTIAqTMUeADKy" "image"
+link "gSI8844450582zrtsnD9C7AKDitG96OR" "image" "gSI8Cl4733951wiDLe64uS078R7jSKD3" "background"
+link "gSI89N4529496bAqt3inNdZvRJ3TAzRs" "image" "gSI8Cl4733951wiDLe64uS078R7jSKD3" "foreground"
+link "gSI8Cl4733951wiDLe64uS078R7jSKD3" "image" "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "background"
+link "gSI8DO4770717LORxpiQatCBkShRpUPT" "image" "gSI8DT4775825Hupa8mXIutE8QDzK9NC" "foreground"
+link "gSI88B4458192OCsaYAOTIAqTMUeADKy" "image" "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "image"
+output "study" "gSI8Gr4980237wndWmO4ZDvLJD0KQYjP" "image"

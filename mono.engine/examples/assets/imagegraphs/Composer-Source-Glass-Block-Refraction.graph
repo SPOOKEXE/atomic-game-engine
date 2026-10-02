@@ -1,0 +1,1438 @@
+imagegraph 9
+node "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "pc.grid" "" -336 0
+node_name 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "Grid"
+node_internal_name 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "Grid90730"
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "dimension_unit" e 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "dimension" v 1 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "position_unit" e 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "position" v 0 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "grid_size_unit" e 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "grid_size" v 0.5 0.5
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "gap" d 0.26000000000000001
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "angle" d 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "tile_color" g 0 1 0 255 255 255 255
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "gap_color" c 0 0 0 255
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "shift" d 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "shift_axis" e 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "render_type" e 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "seed" d 312523
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "anti_aliasing" b 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "truchet" b 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "texture_seed" d 610658
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "flip_horizontal" d 0.5
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "tile_color_map_range" w 0 0 1 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "flip_vertical" d 0.5
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "random_angle" v 0 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "level_in" v 0 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "use_texture_dimension" b 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "gap_width" d 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "diagonal" b 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "uniform_gap" b 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "secondary_scale" d 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "secondary_shift" d 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "random_shift" d 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "shift_seed" d 694087
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "random_scale" d 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "scale_seed" d 955970
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "mask_alpha_only" b 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "invert_size" b 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "uv_mix" d 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "random_position" w 0 0 0 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "random_scale_2" w 1 1 1 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "secondary_ratio" d 0.5
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "shift_2" d 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "color_seed" d 214474
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "level_out" v 0 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "interpolate" e 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "oversample" e 0
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "attribute_color_depth" e 1
+value 0 "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "attribute_process" b 1
+node "gSDF5B4365384JksJyHTcv513SC542QN" "pc.displace" "" 464 -176
+node_name 1 "gSDF5B4365384JksJyHTcv513SC542QN" "Displace"
+node_internal_name 1 "gSDF5B4365384JksJyHTcv513SC542QN" "Displace22363"
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "position_unit" e 1
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "position" v 1 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "strength_curved" b 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "strength" d 0.17999999999999999
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "mid_value" d 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "mode" e 3
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "iterate" b 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "oversample_mode" e 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "mask_alpha_only" b 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "mix" d 1
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "active" b 1
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "blend_mode" e 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "channel" i 15
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "invert_mask" b 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "mask_feather" d 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "separate_axis" b 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "iteration" i 16
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "fade_distance" b 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "reposition" b 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "repeat" i 1
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "uv_mix" d 1
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "strength_curve" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "mid_point_unit" e 1
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "mid_point" v 0.5 0.5
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "mix_ratio" d 0.5
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "angle_offset" d 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "stop_empty" b 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "interpolate" e 2
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "oversample" e 8
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "attribute_color_depth" e 0
+value 1 "gSDF5B4365384JksJyHTcv513SC542QN" "attribute_process" b 1
+node "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "pc.level" "" -16 0
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "active"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "channel"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "surface_in"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mask"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mix"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "invert_mask"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mask_feather"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_in"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_out"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_in"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_out"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_in"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_out"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_in"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_out"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_in"
+source_static "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_out"
+node_name 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "Level"
+node_internal_name 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "Level84486"
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_in" v 0.040000000000000001 0.53000000000000003
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_in" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_in" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_in" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_in" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mask_alpha_only" b 0
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mix" d 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "active" b 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "channel" i 15
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "invert_mask" b 0
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mask_feather" d 0
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_out" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_out" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_out" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_out" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_out" v 0 1
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "attribute_color_depth" e 0
+value 2 "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "attribute_process" b 1
+node "gSDF5k471654QfHWycITLP9SAklbxWXW" "pc.blur" "" 144 0
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "active"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "channel"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "surface_in"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "uv_map"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "uv_mix"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "mask"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "mix"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "invert_mask"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "mask_feather"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "size"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "size_map"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity_modulation"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "override_color"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "color"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "gamma_correction"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "aspect_ratio"
+source_static "gSDF5k471654QfHWycITLP9SAklbxWXW" "direction"
+node_name 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "Blur"
+node_internal_name 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "Blur88995"
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "size_unit" e 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "size" d 2
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity" e 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "override_color" b 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "color" c 0 0 0 255
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "mask_alpha_only" b 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "mix" d 1
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "active" b 1
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "channel" i 15
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "invert_mask" b 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "mask_feather" d 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "gamma_correction" b 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "aspect_ratio" d 1
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "direction" d 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "uv_mix" d 1
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity_modulation" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "interpolate" e 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "oversample" e 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "attribute_color_depth" e 0
+value 3 "gSDF5k471654QfHWycITLP9SAklbxWXW" "attribute_process" b 1
+node "gSDF6V517020gborPyJhreaVXhnpKb0L" "pc.mk_tree_inline" "" -100 -112
+node_name 4 "gSDF6V517020gborPyJhreaVXhnpKb0L" "MK Tree"
+node_internal_name 4 "gSDF6V517020gborPyJhreaVXhnpKb0L" "MK_Tree86349"
+value 4 "gSDF6V517020gborPyJhreaVXhnpKb0L" "seed" i 915022
+value 4 "gSDF6V517020gborPyJhreaVXhnpKb0L" "gravity" d -90
+value 4 "gSDF6V517020gborPyJhreaVXhnpKb0L" "dimension_unit" e 1
+value 4 "gSDF6V517020gborPyJhreaVXhnpKb0L" "dimension" v 1 1
+value 4 "gSDF6V517020gborPyJhreaVXhnpKb0L" "attribute_members" a text 4 s "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" s "gSDF6V517026CyuI78SHu6VubYmX3v2B" s "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" s "gSDF7D558969D3MZ1k5DVw2fQfUi51Et"
+value 4 "gSDF6V517020gborPyJhreaVXhnpKb0L" "attribute_shape" d 0
+node "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "pc.mk_tree_root" "" -296 -176
+node_name 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "Trunk"
+node_internal_name 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "Trunk95544"
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "position_unit" e 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "position" v 0.5 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "origin_wiggle_unit" e 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "origin_wiggle" w 0 0 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "length" v 26.347999999999999 49.112000000000002
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "direction" a scalar 6 d 0 d 80 d 100 d 0 d 0 d 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "amount" v 5 5
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "thickness_curved" b 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "thickness" v 2 2
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "segments" v 8 8
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "origin_ratio" v 0.5 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "gravity_curved" b 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "gravity" v 0.084000000000000005 0.084000000000000005
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "amplitude_curved" b 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "amplitude" v 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "thickness_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 0.40493827160493912 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "base_color" g 0 1 0 115 62 57 255
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "length_curve" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "seed" d 569706
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "gravity_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "edge_blending" e 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "l_edge_color" g 0 1 0 255 255 255 255
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "wave_curved" b 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "wave" v 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "wave_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "curl_curved" b 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "curl" v 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "curl_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "frequency_2_curved" b 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "frequency_2" v 4 4
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "phase_2" v 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "length_blending" e 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "length_color" g 0 1 0 255 255 255 255
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "r_edge_color" g 0 1 0 255 255 255 255
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "frequency_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "draw_mode" e 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "scatter_area_unit" e 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "scatter_area" v 0.5 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "scatter_shape" e 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "frequency" v 4 4
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "phase" v 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "amplitude_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "draw" b 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "amplitude_2_curved" b 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "amplitude_2" v 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "amplitude_over_length_2" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "override" b 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "gravity_direction" d 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "distribution" e 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "grid" v 6 1
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "spawn_points" v 0 0
+value 5 "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "array_selection" e 0
+node "gSDF6V517026CyuI78SHu6VubYmX3v2B" "pc.mk_tree_render" "" -16 -176
+node_name 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "Render Tree"
+node_internal_name 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "Render_Tree31917"
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "output_array" b 0
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "draw_from_root" b 1
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "blend_mode" e 0
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "filter_root_position" b 0
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "range" v 0 1
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "filter_random" b 0
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "seed" d 539699
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "chance" d 0.5
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "use_outline" b 0
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "position" e 0
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "thickness" i 0
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "color" c 255 255 255 255
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "opacity" d 1
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "use_shadow" b 0
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "grow" i 1
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "blur" d 3
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "color_2" c 0 0 0 255
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "intensity" d 0.5
+value 6 "gSDF6V517026CyuI78SHu6VubYmX3v2B" "attribute_process" b 1
+node "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "pc.mk_tree_branch" "" -176 -176
+node_name 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "Branch"
+node_internal_name 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "Branch53367"
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "origin_position" v 0.5 1
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "origin_wiggle" w 0 0 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "length_curved" b 1
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "length" v 16 32
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "direction" a scalar 6 d 0 d 23 d 43 d 0 d 0 d 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amount" v 4 8
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "thickness_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "thickness_curved_branch" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "thickness" v 1 1
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "segments" v 4 8
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "position" v 0.34999999999999998 1
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "gravity_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "gravity_curved_branch" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "gravity" v 0.436 0.436
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amplitude_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amplitude_curved_branch" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amplitude" v 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "thickness_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "base_color" g 0 1 0 115 62 57 255
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "length_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 0.57654320987654373 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "seed" d 428249
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "reflect" e 2
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "gravity_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "edge_blending" e 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "l_edge_color" g 0 1 0 255 255 255 255
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "distribution_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "distribution" e 1
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "grow_delay" v 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "wave_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "wave" v 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "wave_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "curl_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "curl" v 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "curl_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "frequency_2_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "frequency_2" v 4 4
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "phase_2" v 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "length_blending" e 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "length_color" g 0 1 0 255 255 255 255
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "r_edge_color" g 0 1 0 255 255 255 255
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "direction_type" e 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "apply_to_property_curves" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "gravity_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amplitude_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amplitude_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "thickness_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "inherit_parent_color" d 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "frequency_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "draw_mode" e 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "spread_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "spread" v 15 30
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "spread_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "frequency" v 4 4
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "phase" v 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "chance" d 1
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "distribution_remap" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "draw" b 1
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amplitude_2_curved" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amplitude_2" v 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "amplitude_over_length_2" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "reflect_order" e 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "override" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "gravity_direction" d 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "array_selection" e 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "do_clamp_direction" b 0
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "clamp_direction" v 0 360
+value 7 "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "per_tree_array" b 0
+node "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "pc.mk_tree_leaf" "" -176 -96
+node_name 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "Leaves"
+node_internal_name 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "Leaves31342"
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "position" v 0.17000000000000001 1
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "amount" v 8 16
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "size_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "size_curved_whorled" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "size" w 4 4 2 2
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "random_branch" g 0 2 0 255 255 255 255 1 99 199 77 255
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "seed" d 131131
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "random_leaf" g 0 2 0 0 132 18 255 1 49 242 7 255
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "spread_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "spread" v 90 90
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "shape" e 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "offset_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "offset_curved_whorled" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "offset" v 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "edge_color" g 0 1 0 255 255 255 255
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "render_edge" e 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "whorled_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "whorled" v 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "spread_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "offset_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "size_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "distribution_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "distribution" e 1
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "along_branch" g 0 1 0 255 255 255 255
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "leaf_span" d 0.5
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "grow_delay" v 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "render_top_edge" e 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "top_edge_color" g 0 1 0 255 255 255 255
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "gravity_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "gravity" v 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "gravity_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "geometry" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "resolution" i 6
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "shape_gravity_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "shape_gravity_curved_whorled" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "shape_gravity" v 0.10000000000000001 0.10000000000000001
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "whorled_angle_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "whorled_angle" d 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "whorled_angle_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "along_leaf" g 0 2 0 196 196 196 255 1 255 255 255 255
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "apply_to_property_curves" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "whorled_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "shape_gravity_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "geometry2" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "geometry_type" e 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "twist_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "twist_curved_whorled" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "twist" v 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "random_whorled" g 0 1 0 255 255 255 255
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "size_over_whorled" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "shape_gravity_over_whorled" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "twist_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "twist_over_whorled" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "along_whorled" g 0 1 0 255 255 255 255
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "wiggle_curved" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "wiggle_curved_length" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "wiggle" v 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "wiggle_over_branch" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "wiggle_over_length" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "reflect" e 1
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "distribution_remap" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "offset_over_whorled" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "whorled_span" d 360
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "chance" d 1
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "reflect_order" e 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "override" b 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "gravity_direction" d 0
+value 8 "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "array_selection" e 0
+node "gSDF9X698441EITSARA0faJCVacAhC6q" "image.shape" "" -16 -352
+node_name 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "Draw Shape"
+node_internal_name 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "Draw_Shape14583"
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "width" i 64
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "height" i 64
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "shape" s "Half"
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "color" c 115 62 57 255
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "bg_color" c 0 0 0 255
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "position_mode" i 1
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "center" v 0.5 0.5
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "half_size" v 0.5 0.5
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "shape_rotation" d 0
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "shape_scale" d 1
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "level" v 0 1
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "background" i 2
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "bg_blend" i 0
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "antialias" b 0
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "height_render" b 0
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "opacity" b 0
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "multiply_alpha" b 0
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "mask_alpha_only" b 0
+value 9 "gSDF9X698441EITSARA0faJCVacAhC6q" "point1" v 0.52515723270440262 0.93867924528301894
+node "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "pc.blend" "" 144 -176
+node_name 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "Blend"
+node_internal_name 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "Blend34297"
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "blend_mode" e 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "opacity" d 1
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "mask_alpha_only" b 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "fill_mode" e 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "output_dimension" e 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "constant_dimension" v 64 64
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "active" b 1
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "preserve_alpha" b 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "horizontal_align" e 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "vertical_align" e 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "invert_mask" b 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "mask_feather" d 1
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "position_unit" e 1
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "position" v 0.5 0.5
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "swap" b 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "interpolate" e 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "oversample" e 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "attribute_color_depth" e 0
+value 10 "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "attribute_process" b 1
+node "gSDFAB736748QBfdynQWJt93qn3y2arH" "image.gradient" "" 464 -352
+node_name 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "Draw Gradient"
+node_internal_name 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "Draw_Gradient43573"
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "width" i 64
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "height" i 64
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "gradient" g 0 3 0.18854748603351956 18 78 137 255 0.8994413407821229 44 229 243 255 1 255 255 255 255
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "type" i 1
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "angle" d 90
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "radius" d 0.5
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "center" v 0.5 0.97599999999999998
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "shape" v 8.0719999999999992 0.82799999999999996
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "uniform_ratio" b 1
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "shift" d 0
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "scale" d 2.29
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "loop" i 0
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "uv_mix" d 1
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "inverse_axis" d 0
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "level_in" v 0 1
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "level_out" v 0 1
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "progress_remap" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "inverse_curve" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0 -0.33333333333333331 0 1 0 0 0
+value 11 "gSDFAB736748QBfdynQWJt93qn3y2arH" "curve" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+node "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "image.posterize" "" 880 672
+node_name 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "Posterize"
+node_internal_name 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "Posterize89160"
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "use_palette" b 1
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "palette" a colour 32 c 190 74 47 255 c 215 118 67 255 c 234 212 170 255 c 228 166 114 255 c 184 111 80 255 c 115 62 57 255 c 62 39 49 255 c 162 38 51 255 c 228 59 68 255 c 247 118 34 255 c 254 174 52 255 c 254 231 97 255 c 99 199 77 255 c 62 137 72 255 c 38 92 66 255 c 25 60 62 255 c 18 78 137 255 c 0 153 219 255 c 44 232 245 255 c 255 255 255 255 c 192 203 220 255 c 139 155 180 255 c 90 105 136 255 c 58 68 102 255 c 38 43 68 255 c 24 20 37 255 c 255 0 68 255 c 104 56 108 255 c 181 80 136 255 c 246 117 122 255 c 232 183 150 255 c 194 133 105 255
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "posterize_alpha" b 1
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "steps" i 4
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "gamma" d 1
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "use_global_range" b 1
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "mask_alpha_only" b 0
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "mix" d 1
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "invert_mask" b 0
+value 12 "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "mask_feather" d 0
+node "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "image.blend" "" 624 -176
+node_name 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "Blend"
+node_internal_name 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "Blend93474"
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "swap" b 0
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "invert_mask" b 0
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "mask_feather" d 1
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "output_dimension" i 0
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "constant_dimension" v 64 64
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "blend_mode" i 0
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "opacity" d 1
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "preserve_alpha" b 0
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "fill_mode" i 0
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "position" v 0.5 0.5
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "horizontal_align" i 0
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "vertical_align" i 0
+value 13 "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "mask_alpha_only" b 0
+node "gSDFCD858951CslUdqxzo7QswWaKh7fO" "image.shape" "" 144 -352
+node_name 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "Draw Shape"
+node_internal_name 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "Draw_Shape14583"
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "width" i 64
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "height" i 64
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "shape" s "Half"
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "color" c 62 39 49 255
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "bg_color" c 0 0 0 255
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "position_mode" i 1
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "center" v 0.5 0.5
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "half_size" v 0.5 0.5
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "shape_rotation" d 0
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "shape_scale" d 1
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "level" v 0 1
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "background" i 2
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "bg_blend" i 0
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "antialias" b 0
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "height_render" b 0
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "opacity" b 0
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "multiply_alpha" b 0
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "mask_alpha_only" b 0
+value 14 "gSDFCD858951CslUdqxzo7QswWaKh7fO" "point1" v 0.53301886792452846 0.88207547169811329
+node "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "image.blend" "" 304 -352
+node_name 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "Blend"
+node_internal_name 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "Blend91688"
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "swap" b 0
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "invert_mask" b 0
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "mask_feather" d 1
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "output_dimension" i 0
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "constant_dimension" v 64 64
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "blend_mode" i 0
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "opacity" d 1
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "preserve_alpha" b 0
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "fill_mode" i 0
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "position" v 0.5 0.5
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "horizontal_align" i 0
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "vertical_align" i 0
+value 15 "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "mask_alpha_only" b 0
+node "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "pc.outline" "" 464 -16
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "active"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "surface_in"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "texture"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mask"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mix"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "invert_mask"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mask_feather"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "position"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "profile"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "width"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "width_map"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "start"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "start_map"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "crop_border"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "threshold"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "color"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "anti_aliasing"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "high_res"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_mode"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_alpha"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_alpha_map"
+source_static "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "oversample_mode"
+node_name 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "Outline"
+node_internal_name 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "Outline85431"
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "width_unit" e 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "width" d 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "color" c 62 39 49 255
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend" b 1
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_alpha" d 0.51000000000000001
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "position" e 1
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "anti_aliasing" b 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "oversample_mode" e 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "start" i 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mask_alpha_only" b 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mix" d 1
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "active" b 1
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "crop_border" b 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "invert_mask" b 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mask_feather" d 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "profile" e 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "threshold" d 1
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "high_res" b 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_mode" e 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "interpolate" e 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "attribute_color_depth" e 0
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "attribute_filter" a scalar 9 d 1 d 1 d 1 d 1 d 1 d 1 d 1 d 1 d 1
+value 16 "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "attribute_process" b 1
+node "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "image.color_adjust" "" 624 -16
+node_name 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "Color Adjust"
+node_internal_name 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "Color_Adjust39659"
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "blend" c 255 255 255 255
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "channel" i 15
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "alpha" d 1
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "brightness" d 0
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "contrast" d 0.63
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "exposure" d 1.25
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "hue" d 0
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "saturation" d 0
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "value" d 0
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "blend_mode" i 0
+value 17 "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "blend_amount" d 0
+node "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "image.vignette" "" 784 -16
+node_name 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "Vignette"
+node_internal_name 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "Vignette37640"
+value 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "color" c 255 255 255 255
+value 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "center" v 0.5 0.5
+value 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "roundness" d 0
+value 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "exposure" d 60
+value 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "strength" d 1
+value 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "exponent" d 0.25
+value 18 "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "lighten" d 0
+node "gSDFEa1001690UWE75JxSdpnA14iyDX7" "pc.color_adjust" "" 784 -176
+node_name 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "Color Adjust"
+node_internal_name 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "Color_Adjust96124"
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "brightness" d 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "contrast" d 0.5
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "hue" d 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "saturation" d 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "value" d 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "blend" c 255 255 255 255
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "blend_amount" d 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "mask_alpha_only" b 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "alpha" d 1
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "exposure" d 0.98999999999999999
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "active" b 1
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "input_type" e 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "color" a colour 32 c 190 74 47 255 c 215 118 67 255 c 234 212 170 255 c 228 166 114 255 c 184 111 80 255 c 115 62 57 255 c 62 39 49 255 c 162 38 51 255 c 228 59 68 255 c 247 118 34 255 c 254 174 52 255 c 254 231 97 255 c 99 199 77 255 c 62 137 72 255 c 38 92 66 255 c 25 60 62 255 c 18 78 137 255 c 0 153 219 255 c 44 232 245 255 c 255 255 255 255 c 192 203 220 255 c 139 155 180 255 c 90 105 136 255 c 58 68 102 255 c 38 43 68 255 c 24 20 37 255 c 255 0 68 255 c 104 56 108 255 c 181 80 136 255 c 246 117 122 255 c 232 183 150 255 c 194 133 105 255
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "blend_mode" e 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "channel" i 15
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "invert_mask" b 1
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "mask_feather" d 1
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "attribute_color_depth" e 0
+value 19 "gSDFEa1001690UWE75JxSdpnA14iyDX7" "attribute_process" b 1
+node "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "pc.normal" "" 144 176
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "active"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "surface_in"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "height"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "height_map"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "smooth"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "smooth_map"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "trim_flat"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "mix"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_x"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_y"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "normalize"
+source_static "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "solid_bg"
+node_name 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "Normal"
+node_internal_name 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "Normal84907"
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "height" d 1
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "smooth" d 0
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "active" b 1
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "normalize" b 1
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_x" b 1
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_y" b 0
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "trim_flat" b 0
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "solid_bg" b 0
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "mix" d 1
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "interpolate" e 0
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "oversample" e 0
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "attribute_color_depth" e 0
+value 20 "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "attribute_process" b 1
+node "gSDFFf1066615A4N7cet5ruuxVzAL29o" "pc.normal_light" "" 304 160
+node_name 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "Normal Light"
+node_internal_name 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "Normal_Light71287"
+value 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "height" d 1
+value 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "ambient" c 0 0 0 255
+value 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "keep_alpha" b 1
+value 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "attribute_color_depth" e 0
+value 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "attribute_process" b 1
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "type_0" enum 1 e 1
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "position_0" vector2 1 v 0 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "range_0" scalar 1 d 56.729559748427668
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "intensity_0" scalar 1 d 3
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "color_0" colour 1 c 255 255 255 255
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "end_position_0" vector2 1 v 0 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "end_color_0" colour 1 c 255 255 255 255
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "distance_0" scalar 1 d 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "end_distance_0" scalar 1 d 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "attenuation_0" enum 1 e 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "atten_curve_0" curve 1 q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "radial_banding_0" integer 1 i 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "radial_start_0" scalar 1 d 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "radial_band_ratio_0" scalar 1 d 0.5
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "banding_0" integer 1 i 0
+dynamic 21 "gSDFFf1066615A4N7cet5ruuxVzAL29o" "radial_shadow_0" scalar 1 d 0
+node "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "image.solid" "" 304 128
+node_name 22 "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "Solid"
+node_internal_name 22 "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "Solid34849"
+value 22 "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "width" i 64
+value 22 "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "height" i 64
+value 22 "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "colour" c 255 255 255 255
+value 22 "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "empty" b 0
+value 22 "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "use_mask_dimension" b 1
+value 22 "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "mask_alpha_only" b 0
+node "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "pc.normal_light" "" 304 320
+node_name 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "Normal Light"
+node_internal_name 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "Normal_Light71287"
+value 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "height" d 1
+value 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "ambient" c 0 0 0 255
+value 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "keep_alpha" b 1
+value 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "attribute_color_depth" e 0
+value 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "attribute_process" b 1
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "type_0" enum 1 e 1
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "position_0" vector2 1 v 1 1
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "range_0" scalar 1 d 56.729559748427668
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "intensity_0" scalar 1 d 3
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "color_0" colour 1 c 255 255 255 255
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "end_position_0" vector2 1 v 0 0
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "end_color_0" colour 1 c 255 255 255 255
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "distance_0" scalar 1 d 0
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "end_distance_0" scalar 1 d 0
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "attenuation_0" enum 1 e 0
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "atten_curve_0" curve 1 q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "radial_banding_0" integer 1 i 0
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "radial_start_0" scalar 1 d 0
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "radial_band_ratio_0" scalar 1 d 0.5
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "banding_0" integer 1 i 0
+dynamic 23 "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "radial_shadow_0" scalar 1 d 0
+node "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "image.color_adjust" "" 784 144
+node_name 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "Color Adjust"
+node_internal_name 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "Color_Adjust26454"
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "blend" c 255 255 255 255
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "channel" i 15
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "alpha" d 1
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "brightness" d 0
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "contrast" d 0.5
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "exposure" d 3.0499999999999998
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "hue" d 0
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "saturation" d 0
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "value" d 0
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "blend_mode" i 0
+value 24 "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "blend_amount" d 0
+node "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "image.color_adjust" "" 784 304
+node_name 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "Color Adjust"
+node_internal_name 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "Color_Adjust26454"
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "blend" c 255 255 255 255
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "channel" i 15
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "alpha" d 1
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "brightness" d 0
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "contrast" d 0.5
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "exposure" d 0.65000000000000002
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "hue" d 0
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "saturation" d 0
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "value" d 0
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "blend_mode" i 0
+value 25 "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "blend_amount" d 0
+node "gSDFJV1296798u16SUCVA9wHTsEloRuy" "pc.curve" "" -16 160
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "active"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "channel"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "surface_in"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mask"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mix"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "invert_mask"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mask_feather"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "brightness"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "red"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "green"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "blue"
+source_static "gSDFJV1296798u16SUCVA9wHTsEloRuy" "alpha"
+node_name 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "Curve"
+node_internal_name 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "Curve27948"
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "brightness" q 2 0 1 0 0 1 0 0 0 0 0 0.0057251908396946565 0.62418228928516972 -0.56297709923664119 -0.069135802469135865 1 1 0 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "red" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "green" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "blue" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mask_alpha_only" b 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mix" d 1
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "active" b 1
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "channel" i 15
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "invert_mask" b 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mask_feather" d 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "alpha" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "attribute_color_depth" e 0
+value 26 "gSDFJV1296798u16SUCVA9wHTsEloRuy" "attribute_process" b 1
+node "gSDFKU1355298TSQwaz019E7Xczva9lB" "pc.stripe" "" 464 432
+node_name 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "Stripe"
+node_internal_name 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "Stripe86181"
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "dimension_unit" e 1
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "dimension" v 1 1
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "size_unit" e 1
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "size" d 0.5
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "angle" d 37.133930206298828
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "type" e 0
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "position" v 32 32
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "random" d 0
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "coloring" e 0
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "colors" g 0 1 0 255 255 255 255
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "color_1" c 255 255 255 255
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "color_2" c 0 0 0 255
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "strip_ratio" d 0.78000000000000003
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "colors_map_range" w 0 0 1 0
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "colors_2" a colour 2 c 0 0 0 255 c 255 255 255 255
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "seed" d 373887
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "mask_alpha_only" b 0
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "uv_mix" d 1
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "tiled" b 0
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "amount" d 0.25
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "shift" d 0
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "attribute_color_depth" e 1
+value 27 "gSDFKU1355298TSQwaz019E7Xczva9lB" "attribute_process" b 1
+node "gSDFKg1367381wUIa94XQl6USs9AKJfx" "pc.displace" "" 624 432
+node_name 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "Displace"
+node_internal_name 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "Displace22363"
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "position_unit" e 1
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "position" v -0.77600000000000002 1.6759999999999999
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "strength_curved" b 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "strength" d 0.17999999999999999
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "mid_value" d 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "mode" e 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "iterate" b 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "oversample_mode" e 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "mask_alpha_only" b 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "mix" d 1
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "active" b 1
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "blend_mode" e 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "channel" i 15
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "invert_mask" b 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "mask_feather" d 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "separate_axis" b 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "iteration" i 16
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "fade_distance" b 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "reposition" b 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "repeat" i 1
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "uv_mix" d 1
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "strength_curve" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "mid_point_unit" e 1
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "mid_point" v 0.5 0.5
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "mix_ratio" d 0.5
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "angle_offset" d 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "stop_empty" b 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "interpolate" e 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "oversample" e 8
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "attribute_color_depth" e 0
+value 28 "gSDFKg1367381wUIa94XQl6USs9AKJfx" "attribute_process" b 1
+node "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "pc.invert" "" 304 480
+source_static "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "active"
+source_static "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "channel"
+source_static "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "include_alpha"
+source_static "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "surface_in"
+source_static "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mask"
+source_static "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mix"
+source_static "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "invert_mask"
+source_static "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mask_feather"
+node_name 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "Invert"
+node_internal_name 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "Invert62344"
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mask_alpha_only" b 0
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mix" d 1
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "active" b 1
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "channel" i 15
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "invert_mask" b 0
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mask_feather" d 0
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "include_alpha" b 0
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "attribute_color_depth" e 0
+value 29 "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "attribute_process" b 1
+node "gSDFLN1408595S09RccURORngAGCaMD7" "image.blend" "" 784 464
+node_name 30 "gSDFLN1408595S09RccURORngAGCaMD7" "Blend"
+node_internal_name 30 "gSDFLN1408595S09RccURORngAGCaMD7" "Blend79408"
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "swap" b 0
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "invert_mask" b 0
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "mask_feather" d 1
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "output_dimension" i 0
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "constant_dimension" v 64 64
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "blend_mode" i 8
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "opacity" d 0.25
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "preserve_alpha" b 0
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "fill_mode" i 0
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "position" v 0.5 0.5
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "horizontal_align" i 0
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "vertical_align" i 0
+value 30 "gSDFLN1408595S09RccURORngAGCaMD7" "mask_alpha_only" b 0
+node "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "pc.threshold" "" 384 672
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "active"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "channel"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "surface_in"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mask"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mix"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_mask"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mask_feather"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "brightness"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "algorithm"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold_map"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "adaptive_radius"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "multiply"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "apply_to_alpha"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "alpha"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold_2"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold_2_map"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_2"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve_2"
+source_static "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_2"
+node_name 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "Threshold"
+node_internal_name 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "Threshold39398"
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "brightness" b 1
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold" d 0.040000000000000001
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curved" b 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness" d 0.050000000000000003
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mask_alpha_only" b 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mix" d 1
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "active" b 1
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "alpha" b 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold_2" d 0.5
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_2_curved" b 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_2" d 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "channel" i 15
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_mask" b 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mask_feather" d 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "algorithm" e 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "adaptive_radius" i 4
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert" b 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_2" b 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "apply_to_alpha" e 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "multiply" b 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve_2" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "interpolate" e 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "oversample" e 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "attribute_color_depth" e 0
+value 31 "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "attribute_process" b 1
+node "gSE5ps3399155MFO4PpiVjRFOok0R48k" "pc.invert" "" 544 672
+source_static "gSE5ps3399155MFO4PpiVjRFOok0R48k" "active"
+source_static "gSE5ps3399155MFO4PpiVjRFOok0R48k" "channel"
+source_static "gSE5ps3399155MFO4PpiVjRFOok0R48k" "include_alpha"
+source_static "gSE5ps3399155MFO4PpiVjRFOok0R48k" "surface_in"
+source_static "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mask"
+source_static "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mix"
+source_static "gSE5ps3399155MFO4PpiVjRFOok0R48k" "invert_mask"
+source_static "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mask_feather"
+node_name 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "Invert"
+node_internal_name 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "Invert55994"
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mask_alpha_only" b 0
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mix" d 1
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "active" b 1
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "channel" i 15
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "invert_mask" b 0
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mask_feather" d 0
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "include_alpha" b 0
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "attribute_color_depth" e 0
+value 32 "gSE5ps3399155MFO4PpiVjRFOok0R48k" "attribute_process" b 1
+node "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "pc.color_adjust" "" 720 672
+node_name 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "Color Adjust"
+node_internal_name 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "Color_Adjust60233"
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "brightness" d 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "contrast" d 0.5
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "hue" d 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "saturation" d 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "value" d 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "blend" c 24 20 37 255
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "blend_amount" d 1
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "mask_alpha_only" b 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "alpha" d 1
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "exposure" d 1
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "active" b 1
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "input_type" e 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "color" a colour 32 c 190 74 47 255 c 215 118 67 255 c 234 212 170 255 c 228 166 114 255 c 184 111 80 255 c 115 62 57 255 c 62 39 49 255 c 162 38 51 255 c 228 59 68 255 c 247 118 34 255 c 254 174 52 255 c 254 231 97 255 c 99 199 77 255 c 62 137 72 255 c 38 92 66 255 c 25 60 62 255 c 18 78 137 255 c 0 153 219 255 c 44 232 245 255 c 255 255 255 255 c 192 203 220 255 c 139 155 180 255 c 90 105 136 255 c 58 68 102 255 c 38 43 68 255 c 24 20 37 255 c 255 0 68 255 c 104 56 108 255 c 181 80 136 255 c 246 117 122 255 c 232 183 150 255 c 194 133 105 255
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "blend_mode" e 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "channel" i 15
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "invert_mask" b 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "mask_feather" d 1
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "attribute_color_depth" e 0
+value 33 "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "attribute_process" b 1
+node "gSE5qV377001RdwAZRD7zafCVPfsp95o" "image.noise_simplex" "" -288 672
+node_name 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "Simplex Noise"
+node_internal_name 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "Simplex_Noise84855"
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "width" i 64
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "height" i 64
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "seed" d 403338
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "iterations" i 1
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "tile" b 1
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "position" v 0 0
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "rotation" d 0
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "scale" v 0.25 0.25
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "iteration_scaling" d 2
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "iteration_amplitude" d 0.5
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "level_in" v 0.29999999999999999 0.85999999999999999
+value 34 "gSE5qV377001RdwAZRD7zafCVPfsp95o" "level_out" v 0 1
+node "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "pc.blend" "" 208 672
+node_name 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "Blend"
+node_internal_name 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "Blend96689"
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "blend_mode" e 3
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "opacity" d 1
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "mask_alpha_only" b 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "fill_mode" e 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "output_dimension" e 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "constant_dimension" v 64 64
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "active" b 1
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "preserve_alpha" b 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "horizontal_align" e 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "vertical_align" e 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "invert_mask" b 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "mask_feather" d 1
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "position_unit" e 1
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "position" v 0.5 0.5
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "swap" b 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "interpolate" e 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "oversample" e 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "attribute_color_depth" e 0
+value 35 "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "attribute_process" b 1
+node "gSE5rw463574zeHJlnm27k3rMJy13rqB" "pc.offset" "" -176 0
+source_anim "gSE5rw463574zeHJlnm27k3rMJy13rqB" "x_offset"
+source_anim "gSE5rw463574zeHJlnm27k3rMJy13rqB" "y_offset"
+source_static "gSE5rw463574zeHJlnm27k3rMJy13rqB" "active"
+source_static "gSE5rw463574zeHJlnm27k3rMJy13rqB" "surface_in"
+source_static "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mask"
+source_static "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mix"
+source_static "gSE5rw463574zeHJlnm27k3rMJy13rqB" "invert_mask"
+source_static "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mask_feather"
+source_static "gSE5rw463574zeHJlnm27k3rMJy13rqB" "angle"
+node_name 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "Offset"
+node_internal_name 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "Offset83450"
+value 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "active" b 1
+value 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mask_alpha_only" b 0
+value 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mix" d 1
+value 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "invert_mask" b 0
+value 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mask_feather" d 0
+value 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "angle" d 0
+value 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "attribute_color_depth" e 0
+value 36 "gSE5rw463574zeHJlnm27k3rMJy13rqB" "attribute_process" b 1
+node "gSE5sL486929UkDABNbDFLIbebgIkihW" "pc.offset" "" 32 672
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "active"
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "surface_in"
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "mask"
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "mix"
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "invert_mask"
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "mask_feather"
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "x_offset"
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "y_offset"
+source_static "gSE5sL486929UkDABNbDFLIbebgIkihW" "angle"
+node_name 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "Offset"
+node_internal_name 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "Offset67983"
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "x_offset" d 0.5
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "y_offset" d 0.5
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "active" b 1
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "mask_alpha_only" b 0
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "mix" d 1
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "invert_mask" b 0
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "mask_feather" d 0
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "angle" d 0
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "attribute_color_depth" e 0
+value 37 "gSE5sL486929UkDABNbDFLIbebgIkihW" "attribute_process" b 1
+node "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "image.tile" "" -128 672
+node_name 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "Tile"
+node_internal_name 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "Tile17372"
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "width" i 64
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "height" i 64
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "scaling_type" i 0
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "amount" v 2 2
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "spacing" v 0 0
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "position" v 0 0
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "rotation" d 0
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "scale" v 0.5 0.5
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "shift_axis" i 0
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "shift" d 0
+value 38 "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "pattern" i 0
+node "gSKAiP180467pJ0YpXbwrplRMgj671sM" "pc.project_output" "" 1040 672
+source_static "gSKAiP180467pJ0YpXbwrplRMgj671sM" "surface_in"
+source_static "gSKAiP180467pJ0YpXbwrplRMgj671sM" "animated"
+node_name 39 "gSKAiP180467pJ0YpXbwrplRMgj671sM" "Project Output"
+node_internal_name 39 "gSKAiP180467pJ0YpXbwrplRMgj671sM" "Project_Output18319"
+value 39 "gSKAiP180467pJ0YpXbwrplRMgj671sM" "animated" b 1
+link "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "image" "gSDF5B4365384JksJyHTcv513SC542QN" "surface_in"
+link "gSDF5k471654QfHWycITLP9SAklbxWXW" "surface_out" "gSDF5B4365384JksJyHTcv513SC542QN" "displace_map"
+link "gSE5rw463574zeHJlnm27k3rMJy13rqB" "surface_out" "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "surface_in"
+link "gSDFJV1296798u16SUCVA9wHTsEloRuy" "surface_out" "gSDF5k471654QfHWycITLP9SAklbxWXW" "surface_in"
+link "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "branches" "gSDF6V517026CyuI78SHu6VubYmX3v2B" "tree"
+link "gSDF6V517021ELc9EKlBeK5iXfb9Gzvc" "trunk" "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "tree"
+link "gSDF6m533645vp26Wk7Lmdsks8Y9dNnX" "branches" "gSDF7D558969D3MZ1k5DVw2fQfUi51Et" "branches"
+link "gSDF9X698441EITSARA0faJCVacAhC6q" "colored" "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "background"
+link "gSDF6V517026CyuI78SHu6VubYmX3v2B" "surface_out" "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "foreground"
+link "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "surface_out" "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "image"
+link "gSDFAB736748QBfdynQWJt93qn3y2arH" "image" "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "background"
+link "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "image" "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "foreground"
+link "gSDFCD858951CslUdqxzo7QswWaKh7fO" "colored" "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "background"
+link "gSDF9f707160YqzO6zIqPbbg77Q0ON8X" "surface_out" "gSDFCH862695fBzC1wBxZyySCwyd8mJc" "foreground"
+link "gSDF5B4365384JksJyHTcv513SC542QN" "surface_out" "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "surface_in"
+link "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "surface_out" "gSDFDY939302nHTxhcCXvN4MqSaXSzdy" "image"
+link "gSDFEa1001690UWE75JxSdpnA14iyDX7" "surface_out" "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "image"
+link "gSDFAv7832278z7sg48fiLHsD4V8gsiJ" "image" "gSDFEa1001690UWE75JxSdpnA14iyDX7" "surface_in"
+link "gSDF5k471654QfHWycITLP9SAklbxWXW" "surface_out" "gSDFEa1001690UWE75JxSdpnA14iyDX7" "mask"
+link "gSDF5k471654QfHWycITLP9SAklbxWXW" "surface_out" "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "surface_in"
+link "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "image" "gSDFFf1066615A4N7cet5ruuxVzAL29o" "surface_in"
+link "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "surface_out" "gSDFFf1066615A4N7cet5ruuxVzAL29o" "normal_map"
+link "gSDFFk1071403O40tx3pL7BgkIpUS6NU" "image" "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "surface_in"
+link "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "surface_out" "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "normal_map"
+link "gSDFDr958839g9QkqCwEgmrf30rdJF6F" "image" "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "image"
+link "gSDFFf1066615A4N7cet5ruuxVzAL29o" "surface_out" "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "mask"
+link "gSDFHR1172929rZkNzQH9XEwlIhCRwd4" "image" "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "image"
+link "gSDFHH1162347bbZ45wBDabUMbJkxy6c" "surface_out" "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "mask"
+link "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "surface_out" "gSDFJV1296798u16SUCVA9wHTsEloRuy" "surface_in"
+link "gSDFKU1355298TSQwaz019E7Xczva9lB" "surface_out" "gSDFKg1367381wUIa94XQl6USs9AKJfx" "surface_in"
+link "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "surface_out" "gSDFKg1367381wUIa94XQl6USs9AKJfx" "displace_map"
+link "gSDF5k471654QfHWycITLP9SAklbxWXW" "surface_out" "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "surface_in"
+link "gSDFHh1188402RMpbbRTxgiBuQ5HWshh" "image" "gSDFLN1408595S09RccURORngAGCaMD7" "background"
+link "gSDFKg1367381wUIa94XQl6USs9AKJfx" "surface_out" "gSDFLN1408595S09RccURORngAGCaMD7" "foreground"
+link "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "surface_out" "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "surface_in"
+link "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "surface_out" "gSE5ps3399155MFO4PpiVjRFOok0R48k" "surface_in"
+link "gSDFLN1408595S09RccURORngAGCaMD7" "image" "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "surface_in"
+link "gSE5ps3399155MFO4PpiVjRFOok0R48k" "surface_out" "gSE5q4349937vQTmjolKlVcvnAAXZZEV" "mask"
+link "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "surface_out" "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "background"
+link "gSE5sL486929UkDABNbDFLIbebgIkihW" "surface_out" "gSE5qb382331FB6zZbhPMWvXJFuTxYZC" "foreground"
+link "gSDF4u421661AoRs9UHD5aQ0Xwkj5Hq6" "heightmap" "gSE5rw463574zeHJlnm27k3rMJy13rqB" "surface_in"
+link "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "image" "gSE5sL486929UkDABNbDFLIbebgIkihW" "surface_in"
+link "gSE5qV377001RdwAZRD7zafCVPfsp95o" "image" "gSE5sZ500331JV98qrlxbWtlZ6RVo4V6" "image"
+link "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "image" "gSKAiP180467pJ0YpXbwrplRMgj671sM" "surface_in"
+output "gSKAiP180467pJ0YpXbwrplRMgj671sM" "gSDFAi769794aqfifGPMnFF0oXfSSMt2" "image"
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_in" 0 "source" v 0.040000000000000001 0.53000000000000003
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_in" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_in" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_in" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_in" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_in" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_in" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_in" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_in" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_in" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mix" 0 "source" d 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "active" 0 "source" b 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "channel" 0 "source" i 15
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "channel" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "invert_mask" 0 "source" b 0
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mask_feather" 0 "source" d 0
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_out" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_out" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_out" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_out" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_out" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_out" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_out" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_out" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_out" 0 "source" v 0 1
+key_ease "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_out" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "size" 0 "source" d 2
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "size" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity" 0 "source" e 0
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "override_color" 0 "source" b 0
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "override_color" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "color" 0 "source" c 0 0 0 255
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "color" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "mix" 0 "source" d 1
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "active" 0 "source" b 1
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "channel" 0 "source" i 15
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "channel" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "invert_mask" 0 "source" b 0
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "mask_feather" 0 "source" d 0
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "gamma_correction" 0 "source" b 0
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "gamma_correction" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "aspect_ratio" 0 "source" d 1
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "aspect_ratio" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "direction" 0 "source" d 0
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "direction" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "uv_mix" 0 "source" d 1
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "uv_mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity_modulation" 0 "source" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+key_ease "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity_modulation" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "width" 0 "source" d 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "width" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "color" 0 "source" c 62 39 49 255
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "color" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend" 0 "source" b 1
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_alpha" 0 "source" d 0.51000000000000001
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_alpha" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "position" 0 "source" e 1
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "position" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "anti_aliasing" 0 "source" b 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "anti_aliasing" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "oversample_mode" 0 "source" e 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "oversample_mode" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "start" 0 "source" i 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "start" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mix" 0 "source" d 1
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "active" 0 "source" b 1
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "crop_border" 0 "source" b 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "crop_border" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "invert_mask" 0 "source" b 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mask_feather" 0 "source" d 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "profile" 0 "source" e 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "profile" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "threshold" 0 "source" d 1
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "threshold" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "high_res" 0 "source" b 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "high_res" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_mode" 0 "source" e 0
+key_ease "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_mode" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "height" 0 "source" d 1
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "height" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "smooth" 0 "source" d 0
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "smooth" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "active" 0 "source" b 1
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "normalize" 0 "source" b 1
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "normalize" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_x" 0 "source" b 1
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_x" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_y" 0 "source" b 0
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_y" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "trim_flat" 0 "source" b 0
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "trim_flat" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "solid_bg" 0 "source" b 0
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "solid_bg" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "mix" 0 "source" d 1
+key_ease "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "brightness" 0 "source" q 2 0 1 0 0 1 0 0 0 0 0 0.0057251908396946565 0.62418228928516972 -0.56297709923664119 -0.069135802469135865 1 1 0 0
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "brightness" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "red" 0 "source" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "red" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "green" 0 "source" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "green" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "blue" 0 "source" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "blue" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mix" 0 "source" d 1
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "active" 0 "source" b 1
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "channel" 0 "source" i 15
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "channel" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "invert_mask" 0 "source" b 0
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mask_feather" 0 "source" d 0
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFJV1296798u16SUCVA9wHTsEloRuy" "alpha" 0 "source" q 2 0 1 0 0 1 0 0 0 0 0 0.33333333333333331 0.33333333333333331 -0.33333333333333331 -0.33333333333333331 1 1 0 0
+key_ease "gSDFJV1296798u16SUCVA9wHTsEloRuy" "alpha" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFKU1355298TSQwaz019E7Xczva9lB" "progress" 0 "source" d 0
+key_ease "gSDFKU1355298TSQwaz019E7Xczva9lB" "progress" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFKU1355298TSQwaz019E7Xczva9lB" "progress" 30 "source" d 1
+key_ease "gSDFKU1355298TSQwaz019E7Xczva9lB" "progress" 30 "linear" "linear" 0 1 0 0
+keyframe "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mix" 0 "source" d 1
+key_ease "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "active" 0 "source" b 1
+key_ease "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "channel" 0 "source" i 15
+key_ease "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "channel" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "invert_mask" 0 "source" b 0
+key_ease "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mask_feather" 0 "source" d 0
+key_ease "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "include_alpha" 0 "source" b 0
+key_ease "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "include_alpha" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "brightness" 0 "source" b 1
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "brightness" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold" 0 "source" d 0.040000000000000001
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness" 0 "source" d 0.050000000000000003
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mix" 0 "source" d 1
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "active" 0 "source" b 1
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "alpha" 0 "source" b 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "alpha" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold_2" 0 "source" d 0.5
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold_2" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_2" 0 "source" d 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_2" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "channel" 0 "source" i 15
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "channel" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_mask" 0 "source" b 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mask_feather" 0 "source" d 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "algorithm" 0 "source" e 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "algorithm" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "adaptive_radius" 0 "source" i 4
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "adaptive_radius" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert" 0 "source" b 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_2" 0 "source" b 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_2" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "apply_to_alpha" 0 "source" e 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "apply_to_alpha" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "multiply" 0 "source" b 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "multiply" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve" 0 "source" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve_2" 0 "source" q 2 0 1 0 0 1 0 0 0 0 1 0.33333333333333331 0 -0.33333333333333331 0 1 1 0 0
+key_ease "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve_2" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mix" 0 "source" d 1
+key_ease "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5ps3399155MFO4PpiVjRFOok0R48k" "active" 0 "source" b 1
+key_ease "gSE5ps3399155MFO4PpiVjRFOok0R48k" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5ps3399155MFO4PpiVjRFOok0R48k" "channel" 0 "source" i 15
+key_ease "gSE5ps3399155MFO4PpiVjRFOok0R48k" "channel" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5ps3399155MFO4PpiVjRFOok0R48k" "invert_mask" 0 "source" b 0
+key_ease "gSE5ps3399155MFO4PpiVjRFOok0R48k" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mask_feather" 0 "source" d 0
+key_ease "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5ps3399155MFO4PpiVjRFOok0R48k" "include_alpha" 0 "source" b 0
+key_ease "gSE5ps3399155MFO4PpiVjRFOok0R48k" "include_alpha" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "x_offset" 0 "source" d 0
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "x_offset" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "x_offset" 29 "source" d 0.5
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "x_offset" 29 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "y_offset" 0 "source" d 0
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "y_offset" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "y_offset" 29 "source" d 0.5
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "y_offset" 29 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "active" 0 "source" b 1
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mix" 0 "source" d 1
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "invert_mask" 0 "source" b 0
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mask_feather" 0 "source" d 0
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5rw463574zeHJlnm27k3rMJy13rqB" "angle" 0 "source" d 0
+key_ease "gSE5rw463574zeHJlnm27k3rMJy13rqB" "angle" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5sL486929UkDABNbDFLIbebgIkihW" "x_offset" 0 "source" d 0.5
+key_ease "gSE5sL486929UkDABNbDFLIbebgIkihW" "x_offset" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5sL486929UkDABNbDFLIbebgIkihW" "y_offset" 0 "source" d 0.5
+key_ease "gSE5sL486929UkDABNbDFLIbebgIkihW" "y_offset" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5sL486929UkDABNbDFLIbebgIkihW" "active" 0 "source" b 1
+key_ease "gSE5sL486929UkDABNbDFLIbebgIkihW" "active" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5sL486929UkDABNbDFLIbebgIkihW" "mix" 0 "source" d 1
+key_ease "gSE5sL486929UkDABNbDFLIbebgIkihW" "mix" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5sL486929UkDABNbDFLIbebgIkihW" "invert_mask" 0 "source" b 0
+key_ease "gSE5sL486929UkDABNbDFLIbebgIkihW" "invert_mask" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5sL486929UkDABNbDFLIbebgIkihW" "mask_feather" 0 "source" d 0
+key_ease "gSE5sL486929UkDABNbDFLIbebgIkihW" "mask_feather" 0 "linear" "linear" 0 1 0 0
+keyframe "gSE5sL486929UkDABNbDFLIbebgIkihW" "angle" 0 "source" d 0
+key_ease "gSE5sL486929UkDABNbDFLIbebgIkihW" "angle" 0 "linear" "linear" 0 1 0 0
+keyframe "gSKAiP180467pJ0YpXbwrplRMgj671sM" "animated" 0 "source" b 1
+key_ease "gSKAiP180467pJ0YpXbwrplRMgj671sM" "animated" 0 "linear" "linear" 0 1 0 0
+project 64 64 0 3 32 190 74 47 255 215 118 67 255 234 212 170 255 228 166 114 255 184 111 80 255 115 62 57 255 62 39 49 255 162 38 51 255 228 59 68 255 247 118 34 255 254 174 52 255 254 231 97 255 99 199 77 255 62 137 72 255 38 92 66 255 25 60 62 255 18 78 137 255 0 153 219 255 44 232 245 255 255 255 255 255 192 203 220 255 139 155 180 255 90 105 136 255 58 68 102 255 38 43 68 255 24 20 37 255 255 0 68 255 104 56 108 255 181 80 136 255 246 117 122 255 232 183 150 255 194 133 105 255
+preview_grid 0 0 16 16
+preview_rulers 0 0
+timeline 30 0 29 "loop" 30
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_in" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_in" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_in" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_in" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_in" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mix" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "active" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "channel" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "invert_mask" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "mask_feather" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "white_out" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "red_out" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "green_out" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "blue_out" "hold" -1
+track "gSDF5X458820lIhxW0Ktot5HcaCHNYoH" "alpha_out" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "size" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "override_color" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "color" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "mix" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "active" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "channel" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "invert_mask" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "mask_feather" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "gamma_correction" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "aspect_ratio" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "direction" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "uv_mix" "hold" -1
+track "gSDF5k471654QfHWycITLP9SAklbxWXW" "intensity_modulation" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "width" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "color" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_alpha" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "position" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "anti_aliasing" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "oversample_mode" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "start" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mix" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "active" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "crop_border" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "invert_mask" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "mask_feather" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "profile" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "threshold" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "high_res" "hold" -1
+track "gSDFCh888768Hgcm9FkudI4dyRagBjY9" "blend_mode" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "height" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "smooth" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "active" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "normalize" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_x" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "flip_y" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "trim_flat" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "solid_bg" "hold" -1
+track "gSDFFc10636997PczmYvJ7J4OZUBA8gA" "mix" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "brightness" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "red" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "green" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "blue" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mix" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "active" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "channel" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "invert_mask" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "mask_feather" "hold" -1
+track "gSDFJV1296798u16SUCVA9wHTsEloRuy" "alpha" "hold" -1
+track "gSDFKU1355298TSQwaz019E7Xczva9lB" "progress" "hold" -1
+track "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mix" "hold" -1
+track "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "active" "hold" -1
+track "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "channel" "hold" -1
+track "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "invert_mask" "hold" -1
+track "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "mask_feather" "hold" -1
+track "gSDFL41389858YBYDV3OoI3V9xKp1cgW" "include_alpha" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "brightness" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mix" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "active" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "alpha" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "threshold_2" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_2" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "channel" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_mask" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "mask_feather" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "algorithm" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "adaptive_radius" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "invert_2" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "apply_to_alpha" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "multiply" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve" "hold" -1
+track "gSE5pl332529bvsLvmrGlTdhAuUhipEf" "smoothness_curve_2" "hold" -1
+track "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mix" "hold" -1
+track "gSE5ps3399155MFO4PpiVjRFOok0R48k" "active" "hold" -1
+track "gSE5ps3399155MFO4PpiVjRFOok0R48k" "channel" "hold" -1
+track "gSE5ps3399155MFO4PpiVjRFOok0R48k" "invert_mask" "hold" -1
+track "gSE5ps3399155MFO4PpiVjRFOok0R48k" "mask_feather" "hold" -1
+track "gSE5ps3399155MFO4PpiVjRFOok0R48k" "include_alpha" "hold" -1
+track "gSE5rw463574zeHJlnm27k3rMJy13rqB" "x_offset" "hold" -1
+track "gSE5rw463574zeHJlnm27k3rMJy13rqB" "y_offset" "hold" -1
+track "gSE5rw463574zeHJlnm27k3rMJy13rqB" "active" "hold" -1
+track "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mix" "hold" -1
+track "gSE5rw463574zeHJlnm27k3rMJy13rqB" "invert_mask" "hold" -1
+track "gSE5rw463574zeHJlnm27k3rMJy13rqB" "mask_feather" "hold" -1
+track "gSE5rw463574zeHJlnm27k3rMJy13rqB" "angle" "hold" -1
+track "gSE5sL486929UkDABNbDFLIbebgIkihW" "x_offset" "hold" -1
+track "gSE5sL486929UkDABNbDFLIbebgIkihW" "y_offset" "hold" -1
+track "gSE5sL486929UkDABNbDFLIbebgIkihW" "active" "hold" -1
+track "gSE5sL486929UkDABNbDFLIbebgIkihW" "mix" "hold" -1
+track "gSE5sL486929UkDABNbDFLIbebgIkihW" "invert_mask" "hold" -1
+track "gSE5sL486929UkDABNbDFLIbebgIkihW" "mask_feather" "hold" -1
+track "gSE5sL486929UkDABNbDFLIbebgIkihW" "angle" "hold" -1
+track "gSKAiP180467pJ0YpXbwrplRMgj671sM" "animated" "hold" -1

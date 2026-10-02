@@ -1,0 +1,20 @@
+imagegraph 9
+node "colour" "image.noise_simplex" "" 0 0
+value 0 "colour" "width" i 128
+value 0 "colour" "height" i 128
+value 0 "colour" "seed" d 17
+node "normal" "pc.normal" "" 240 0
+value 1 "normal" "height" d 0.05
+value 1 "normal" "normalize" b 1
+link "colour" "image" "normal" "surface_in"
+node "pbr" "image.solid" "" 240 160
+value 2 "pbr" "width" i 128
+value 2 "pbr" "height" i 128
+value 2 "pbr" "colour" c 170 230 15 255
+output "colour" "colour" "image"
+output "normal" "normal" "surface_out"
+output "pbr" "pbr" "image"
+keyframe "colour" "seed" 0 "step" d 17
+keyframe "colour" "seed" 60 "step" d 18
+keyframe "pbr" "colour" 0 "step" c 170 230 15 255
+keyframe "pbr" "colour" 60 "step" c 70 190 230 255
