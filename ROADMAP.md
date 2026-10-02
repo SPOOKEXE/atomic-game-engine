@@ -73,7 +73,7 @@ Milestone labels describe development scope, not release versions.
   5. PXC and exports: finish node, link and dynamic-input edits and remaining formats; validate modified PXC compatibility.
   6. Acceptance: run C++ and GPU tests, live Studio workflows and release profiling. Exact executable parity requires a licensed reference build and matched captures.
 
-  Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-09-30.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
+  Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
 - [_] Finish measured engine stress optimizations and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
 - [_] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`).

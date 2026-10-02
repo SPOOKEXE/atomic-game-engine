@@ -1,0 +1,717 @@
+{
+  "recorded_date": "2026-10-02",
+  "recorded_timezone": "Australia/Darwin, UTC+09:30",
+  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record.",
+  "runtime_gates": [
+    {
+      "name": "imagegraph IO",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all.log",
+      "log_mtime": "2026-10-02T15:41:29+09:30",
+      "result": "passed",
+      "assertions_passed": 5491,
+      "test_cases_passed": 133
+    },
+    {
+      "name": "imagegraph runner",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/runner.log",
+      "log_mtime": "2026-10-02T15:38:32+09:30",
+      "result": "passed",
+      "assertions_passed": 280,
+      "test_cases_passed": 26
+    },
+    {
+      "name": "assets",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/assets.log",
+      "log_mtime": "2026-10-02T15:42:10+09:30",
+      "result": "passed",
+      "assertions_passed": 32458,
+      "test_cases_passed": 262,
+      "scope_note": "The log contains duplicate content-flag error messages and an empty-lock warning before the test pass summary."
+    },
+    {
+      "name": "effects",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/effects.log",
+      "log_mtime": "2026-10-02T15:42:19+09:30",
+      "result": "passed",
+      "assertions_passed": 22460,
+      "test_cases_passed": 52
+    },
+    {
+      "name": "assetc imagegraph export",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/assetc-export.log",
+      "log_mtime": "2026-10-02T15:42:19+09:30",
+      "filter": "[imagegraph]",
+      "result": "passed",
+      "assertions_passed": 139,
+      "test_cases_passed": 8
+    },
+    {
+      "name": "imagegraph source 2D and source value",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/source2d-value-9.log",
+      "log_mtime": "2026-10-02T16:11:33+09:30",
+      "filters": [
+        "[source_2d]",
+        "[source_value]"
+      ],
+      "result": "passed",
+      "assertions_passed": 472,
+      "test_cases_passed": 42,
+      "scope_note": "Includes a fresh native OKLCH node test. Does not establish licensed executable parity or a complete joined build."
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/architecture.log",
+      "log_mtime": "2026-10-02T15:40:01+09:30",
+      "result": "passed",
+      "modules": 52,
+      "programs": 6,
+      "layered_modules": 36,
+      "fixtures": 6
+    },
+    {
+      "name": "Studio timeline Dopesheet and key editing",
+      "filters": [
+        "[timeline_dopesheet]",
+        "[timeline_keys]"
+      ],
+      "result": "passed, reported by root agent",
+      "assertions_passed": 177,
+      "test_cases_passed": 16,
+      "scope_note": "Headless native coverage includes drag, box and scale selection, and targeted property paste. A standalone timeline-only log was not present in the retained evidence directory. The older studio-new.log is a wider filtered run; later focused Studio source results are recorded below."
+    },
+    {
+      "name": "joined build35 compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-35.log",
+      "log_mtime": "2026-10-02T19:59:17+0930",
+      "result": "passed",
+      "build_steps_completed": 238,
+      "scope_note": "All requested build steps completed and linked. This records build completion, not full test-suite acceptance."
+    },
+    {
+      "name": "imagegraph core suite build35",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-all-35.log",
+      "log_mtime": "2026-10-02T20:00:27+0930",
+      "result": "failed",
+      "test_cases_passed": 1109,
+      "test_cases_failed": 1,
+      "assertions_passed": 1806440,
+      "assertions_failed": 8,
+      "observed_failure": "NodeArrayUniform diagnostic expectation differed from actual \"source uniform data is invalid\" for the asserted nonfinite sample cases."
+    },
+    {
+      "name": "imagegraph I/O suite build35",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all-35.log",
+      "log_mtime": "2026-10-02T20:00:38+0930",
+      "result": "passed",
+      "test_cases_passed": 157,
+      "assertions_passed": 5836
+    },
+    {
+      "name": "imagegraph export suite build35",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-all-35.log",
+      "log_mtime": "2026-10-02T20:00:24+0930",
+      "result": "passed",
+      "test_cases_passed": 31,
+      "assertions_passed": 311
+    },
+    {
+      "name": "assetc bake suite build33",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/bake-all-33.log",
+      "log_mtime": "2026-10-02T19:44:25+0930",
+      "result": "passed",
+      "test_cases_passed": 146,
+      "assertions_passed": 15714
+    },
+    {
+      "name": "Studio focused source suite build35",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-source-35.log",
+      "log_mtime": "2026-10-02T20:00:25+0930",
+      "result": "failed",
+      "test_cases_passed": 18,
+      "test_cases_failed": 6,
+      "assertions_passed": 418,
+      "assertions_failed": 6,
+      "scope_note": "Focused Studio source, output, group-host, and export-trigger suites only."
+    },
+    {
+      "name": "joined build36 compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-36.log",
+      "log_mtime": "2026-10-02T20:07:36+0930",
+      "result": "passed",
+      "build_steps_completed": 25,
+      "scope_note": "All requested build steps completed and linked. This records build completion, not full test-suite acceptance."
+    },
+    {
+      "name": "imagegraph core suite build36",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-all-36.log",
+      "log_mtime": "2026-10-02T20:08:01+0930",
+      "result": "passed",
+      "test_cases_passed": 1110,
+      "assertions_passed": 1806448
+    },
+    {
+      "name": "imagegraph I/O suite build36",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all-36.log",
+      "log_mtime": "2026-10-02T20:08:11+0930",
+      "result": "passed",
+      "test_cases_passed": 157,
+      "assertions_passed": 5836
+    },
+    {
+      "name": "imagegraph export suite build36",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-all-36.log",
+      "log_mtime": "2026-10-02T20:07:56+0930",
+      "result": "passed",
+      "test_cases_passed": 31,
+      "assertions_passed": 311
+    },
+    {
+      "name": "Studio focused source suite build36",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-source-36.log",
+      "log_mtime": "2026-10-02T20:07:56+0930",
+      "result": "failed",
+      "test_cases_passed": 19,
+      "test_cases_failed": 5,
+      "assertions_passed": 422,
+      "assertions_failed": 5,
+      "scope_note": "Focused Studio source, output, group-host, and export-trigger suites only."
+    },
+    {
+      "name": "imagegraph source and matrix scripts build36",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/scripts-36.log",
+      "log_mtime": "2026-10-02T20:07:56+0930",
+      "result": "passed",
+      "test_cases_passed": 65,
+      "scope_note": "The script test runner reports 65 tests passed."
+    },
+    {
+      "name": "client CPU adapter suite build35",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-adapters-35.log",
+      "log_mtime": "2026-10-02T20:07:05+0930",
+      "result": "passed",
+      "test_cases_passed": 13,
+      "assertions_passed": 405,
+      "scope_note": "CPU adapter tests only."
+    },
+    {
+      "name": "renderer CPU filtered suite build35",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/render-cpu-35.log",
+      "log_mtime": "2026-10-02T20:07:43+0930",
+      "result": "passed",
+      "test_cases_passed": 20,
+      "assertions_passed": 2508,
+      "scope_note": "Explicit CPU-only filter excluded GPU cases."
+    },
+    {
+      "name": "renderer focused filtered suite build35",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/render-focused-35.log",
+      "log_mtime": "2026-10-02T20:07:06+0930",
+      "result": "failed; not an accepted GPU gate",
+      "test_cases_passed": 27,
+      "test_cases_failed": 3,
+      "assertions_passed": 2683,
+      "assertions_failed": 10,
+      "scope_note": "The filter unintentionally matched three camera-related GPU cases; this run is not a complete accepted GPU gate."
+    },
+    {
+      "name": "joined build39 compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-39.log",
+      "log_mtime": "2026-10-02T20:40:46+09:30",
+      "result": "passed",
+      "build_steps_completed": 271,
+      "scope_note": "All requested steps completed and linked; compile/link only."
+    },
+    {
+      "name": "imagegraph core suite build39",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-all-39.log",
+      "log_mtime": "2026-10-02T20:45:36+09:30",
+      "result": "failed",
+      "test_cases_passed": 1124,
+      "test_cases_failed": 1,
+      "assertions_passed": 1806687,
+      "assertions_failed": 1,
+      "observed_failure": "NodeAudio invalid input diagnostic expectation returned Status::Ok instead of Status::InvalidValue; build40 retest passed."
+    },
+    {
+      "name": "imagegraph I/O suite build39",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all-39.log",
+      "log_mtime": "2026-10-02T20:45:46+09:30",
+      "result": "passed",
+      "test_cases_passed": 157,
+      "assertions_passed": 5836
+    },
+    {
+      "name": "imagegraph export suite build39",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-all-39.log",
+      "log_mtime": "2026-10-02T20:45:31+09:30",
+      "result": "passed",
+      "test_cases_passed": 33,
+      "assertions_passed": 356
+    },
+    {
+      "name": "Studio focused source suite build39",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-source-39.log",
+      "log_mtime": "2026-10-02T20:45:31+09:30",
+      "result": "failed",
+      "test_cases_passed": 24,
+      "test_cases_failed": 1,
+      "assertions_passed": 512,
+      "assertions_failed": 4,
+      "scope_note": "Focused Studio source/group-host suites only."
+    },
+    {
+      "name": "incremental compile build40",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-40.log",
+      "log_mtime": "2026-10-02T20:51:58+09:30",
+      "result": "passed",
+      "build_steps_completed": 4,
+      "scope_note": "Incremental rebuild and relink of imagegraph and Studio test targets."
+    },
+    {
+      "name": "imagegraph core suite build40",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-all-40.log",
+      "log_mtime": "2026-10-02T20:53:52+09:30",
+      "result": "passed",
+      "test_cases_passed": 1125,
+      "assertions_passed": 1806693
+    },
+    {
+      "name": "Studio focused source suite build40",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-source-40.log",
+      "log_mtime": "2026-10-02T20:53:47+09:30",
+      "result": "failed",
+      "test_cases_passed": 24,
+      "test_cases_failed": 1,
+      "assertions_passed": 506,
+      "assertions_failed": 1,
+      "scope_note": "Focused Studio source/group-host suites only; later build41 run passed."
+    },
+    {
+      "name": "incremental compile build41",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-41.log",
+      "log_mtime": "2026-10-02T21:00:29+09:30",
+      "result": "passed",
+      "build_steps_completed": 6,
+      "scope_note": "Incremental compile and link for focused Studio suite."
+    },
+    {
+      "name": "Studio focused source suite build41",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-source-41.log",
+      "log_mtime": "2026-10-02T21:05:02+09:30",
+      "result": "passed",
+      "test_cases_passed": 25,
+      "assertions_passed": 520,
+      "scope_note": "Focused Studio source, output, group-host, expression and export-trigger filters only; not the full Studio suite."
+    },
+    {
+      "name": "client Composer scenes build38",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-scenes-38.log",
+      "log_mtime": "2026-10-02T20:31:39+09:30",
+      "result": "passed",
+      "test_cases_passed": 8,
+      "assertions_passed": 244,
+      "scope_note": "Headless [composer-scenes] filter; manual and GPU acceptance remain open."
+    },
+    {
+      "name": "example scene fixtures build38",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/example-scenes-38.log",
+      "log_mtime": "2026-10-02T20:31:39+09:30",
+      "result": "passed",
+      "test_cases_passed": 1,
+      "assertions_passed": 199,
+      "scope_note": "One test case loads multiple authored scenes and checks world results."
+    },
+    {
+      "name": "native image export codec checks",
+      "log": ".cache/build/dev/evidence/pc-live-codec-check/evidence.json",
+      "log_mtime": "2026-10-02T20:58:42+09:30",
+      "result": "passed",
+      "verified_routes": 16,
+      "scope_note": "Sixteen bounded native export outputs checked with independent decoders on fixed synthetic inputs. This is codec evidence, not Pixel Composer executable parity."
+    },
+    {
+      "name": "Pixel Composer metadata scripts",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/scripts-metadata-41.log",
+      "log_mtime": "2026-10-02T21:12:28+09:30",
+      "result": "passed",
+      "test_cases_passed": 68,
+      "scope_note": "Pixel Composer script test discovery; includes extractor and catalogue metadata tests."
+    },
+    {
+      "name": "joined build43 compile and link after disk recovery",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-43-resume.log",
+      "log_mtime": "2026-10-02T21:57:21+09:30",
+      "result": "passed",
+      "build_steps_completed": 91,
+      "scope_note": "Initial build-attempt-43.log stopped on ENOSPC; the resumed 91 requested targets built and linked."
+    },
+    {
+      "name": "joined build44 incremental compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-44.log",
+      "log_mtime": "2026-10-02T22:01:33+09:30",
+      "result": "passed",
+      "build_steps_completed": 3,
+      "scope_note": "Three requested targets rebuilt and linked."
+    },
+    {
+      "name": "imagegraph core suite build44",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-all-44.log",
+      "log_mtime": "2026-10-02T22:02:11+09:30",
+      "result": "passed",
+      "test_cases_passed": 1148,
+      "assertions_passed": 1807249
+    },
+    {
+      "name": "imagegraph export suite build43",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-all-43.log",
+      "log_mtime": "2026-10-02T21:57:40+09:30",
+      "result": "passed",
+      "test_cases_passed": 35,
+      "assertions_passed": 432
+    },
+    {
+      "name": "imagegraph WAV export suite build43",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/wav-core-43.log",
+      "log_mtime": "2026-10-02T21:59:36+09:30",
+      "result": "passed",
+      "test_cases_passed": 6,
+      "assertions_passed": 138,
+      "scope_note": "[wav_export] filter only."
+    },
+    {
+      "name": "Studio focused source and file host suite build43",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-source-43.log",
+      "log_mtime": "2026-10-02T21:57:40+09:30",
+      "result": "passed",
+      "test_cases_passed": 30,
+      "assertions_passed": 589,
+      "scope_note": "Focused source, output, group-host, expression, export-trigger, source-transaction and file-host filters only; not the full Studio suite."
+    },
+    {
+      "name": "imagegraph I/O suite build42",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all-42.log",
+      "log_mtime": "2026-10-02T21:34:52+09:30",
+      "result": "passed",
+      "test_cases_passed": 157,
+      "assertions_passed": 5836
+    },
+    {
+      "name": "client CPU adapters suite build42",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-adapters-42.log",
+      "log_mtime": "2026-10-02T21:41:55+09:30",
+      "result": "passed",
+      "test_cases_passed": 13,
+      "assertions_passed": 405,
+      "scope_note": "CPU adapter tests only."
+    },
+    {
+      "name": "renderer CPU filtered suite build42",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/render-cpu-42.log",
+      "log_mtime": "2026-10-02T21:41:55+09:30",
+      "result": "passed",
+      "test_cases_passed": 21,
+      "assertions_passed": 2513,
+      "scope_note": "CPU-focused filters only; no GPU acceptance."
+    },
+    {
+      "name": "client Composer scenes build42",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-scenes-42.log",
+      "log_mtime": "2026-10-02T21:36:55+09:30",
+      "result": "passed",
+      "test_cases_passed": 8,
+      "assertions_passed": 244,
+      "scope_note": "Headless [composer-scenes] filter; manual and GPU acceptance remain open."
+    },
+    {
+      "name": "example scene fixtures build42",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/example-scenes-42.log",
+      "log_mtime": "2026-10-02T21:36:54+09:30",
+      "result": "passed",
+      "test_cases_passed": 1,
+      "assertions_passed": 199,
+      "scope_note": "One test case loads multiple authored scenes and checks world results."
+    },
+    {
+      "name": "source points metadata suite build42",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/points-metadata-42.log",
+      "log_mtime": "2026-10-02T21:35:33+09:30",
+      "result": "passed",
+      "test_cases_passed": 5,
+      "assertions_passed": 58,
+      "scope_note": "[source_points] focused native suite."
+    },
+    {
+      "name": "joined build45 compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-45.log",
+      "log_mtime": "2026-10-02T22:03:57+09:30",
+      "result": "passed",
+      "build_steps_completed": 3,
+      "scope_note": "Three requested targets compiled and linked; no full test suite was run under this build number."
+    },
+    {
+      "name": "release build46 compile and link",
+      "result": "passed",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/release-build-46.log",
+      "log_mtime": "2026-10-02T22:18:59+09:30",
+      "build_steps_completed": 151,
+      "scope_note": "Release-focused imagegraph and dependent targets compiled and linked; runtime profile work is separate."
+    },
+    {
+      "name": "release focused imagegraph suite build46",
+      "result": "passed",
+      "test_cases_passed": 77,
+      "assertions_passed": 2177,
+      "evidence_source": "Root agent report; filtered test output was not retained as a separate log."
+    },
+    {
+      "name": "imagegraph source-family release benchmark",
+      "result": "passed",
+      "command": "just imagegraph-source-family-bench 1",
+      "samples": 1,
+      "timing_values_retained": false,
+      "evidence_source": "Root agent report; command completed successfully and wrote stdout only.",
+      "scope_note": "Native headless microfamilies and array structure/edit only. This does not cover all five required M7 graph classes."
+    },
+    {
+      "name": "Studio WAV export suite build46",
+      "result": "passed",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-wav-46.log",
+      "log_mtime": "2026-10-02T22:22:02+09:30",
+      "test_cases_passed": 3,
+      "assertions_passed": 52,
+      "scope_note": "[wav_export] test filter for bounded Studio WAV publication and process/file policy."
+    },
+    {
+      "name": "scene reflected ImageGraph binding suite build46",
+      "result": "passed",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/scene-bindings-46.log",
+      "log_mtime": "2026-10-02T22:25:25+09:30",
+      "test_cases_passed": 6,
+      "assertions_passed": 79,
+      "scope_note": "Reflected selector properties; GPU/render acceptance remains open."
+    },
+    {
+      "name": "game reflected ImageGraph binding suite build46",
+      "result": "passed",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/game-bindings-46.log",
+      "log_mtime": "2026-10-02T22:25:25+09:30",
+      "test_cases_passed": 1,
+      "assertions_passed": 12,
+      "scope_note": "Reflected selector properties; this is a narrow binding test."
+    }
+  ],
+  "excluded_or_failed_runs": [
+    {
+      "name": "historical build attempt 9 imagegraph IO link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-9.log",
+      "result": "failed",
+      "observed_failure": "Undefined reference to engine::imagegraphio::detail::ProjectInlineCollections from PxcxImport.cpp.",
+      "scope_note": "This earlier link failure was superseded by successful joined build35 and build36 links and passing imagegraph I/O suites in both builds. Retained as historical failure evidence."
+    },
+    {
+      "name": "imagegraph IO attempt 7",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all-7.log",
+      "result": "excluded because completion was not established"
+    },
+    {
+      "name": "wider Studio filtered run",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-new.log",
+      "result": "failed",
+      "test_cases_passed": 24,
+      "test_cases_failed": 2,
+      "assertions_passed": 305,
+      "assertions_failed": 2,
+      "observed_failures": [
+        "ImageGraphGroupHost Compile(restored, plan, error) expected Status::Ok",
+        "ImageGraphGroupHost history.Undo(document) returned false"
+      ],
+      "scope_note": "Historical wider filtered run. Later focused Studio source results are recorded in the build35 and build36 runtime gates; neither is a full Studio suite pass."
+    },
+    {
+      "name": "build43 initial compile attempt",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-43.log",
+      "result": "failed",
+      "observed_failure": "Compiler could not write an assembly file because the filesystem had no free space.",
+      "scope_note": "This attempt was resumed after space was reclaimed; the resumed 91-target build and link passed."
+    }
+  ],
+  "pinned_gml_helper_translation": {
+    "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+    "source_helpers": [
+      {
+        "path": "scripts/okhsl_function/okhsl_function.gml",
+        "bytes": 17884,
+        "sha256": "1006ad7ff497fc8c45d44e8d92cf7b308fe185ed7fe0623d5c61da0e4ed638b6"
+      },
+      {
+        "path": "scripts/node_color_oklch/node_color_oklch.gml",
+        "bytes": 2624,
+        "sha256": "24e47e3afb85b1c59bee1ac25cfe6aad1b36ea97992b9c0bc47a73a8c8e59f85"
+      },
+      {
+        "path": "scripts/node_color_to_oklch/node_color_to_oklch.gml",
+        "bytes": 1206,
+        "sha256": "3cbdc8e0598612d4680c03e6f57053fef1f6775cec58645a7ec77a1c931f53de"
+      }
+    ],
+    "native_translation": {
+      "path": "mono.engine/imagegraph/src/nodes/SourceOklch.hpp",
+      "bytes": 9621,
+      "sha256": "944b1cf637231d3e02f83ed5124ea38fdab83bffe0c5e96f902dfb806cf48a66"
+    },
+    "method": "Independent JavaScript evaluation of the original pinned GML helper functions compared with the C++ helper at dev -O0.",
+    "input_dimensions": {
+      "lightness_values": 3,
+      "chroma_values": 3,
+      "hue_values": 6,
+      "clipping_paths": 3
+    },
+    "comparisons": {
+      "triplet_rows": 162,
+      "finite_triplets_equal": 112,
+      "finite_components_equal": 336,
+      "nan_triplets_matched": 50,
+      "maximum_absolute_delta": 0,
+      "mismatches": 0
+    },
+    "artifacts": [
+      {
+        "path": ".cache/build/dev/evidence/pixel-composer-2026-10-02/oklch-reference.json",
+        "bytes": 9842,
+        "sha256": "7173a83a436a3cfe75829a829172e09a111f31814845b056021dfd0e29cb1577"
+      },
+      {
+        "path": ".cache/build/dev/evidence/pixel-composer-2026-10-02/oklch-native.txt",
+        "bytes": 7630,
+        "sha256": "e391bd6b7df6be34ef5aec396b64dd109341f20f706b80fc88170a2120d5ce17"
+      }
+    ],
+    "scope_limit": "Validates the selected source helper translation only. It is not a full graph parity test, licensed executable comparison, or Pixel Composer release acceptance, and no matrix status is promoted."
+  },
+  "limitations": [
+    "These native gates cover only the named test and architecture scopes. They do not complete M0-M7 acceptance.",
+    "Source-camera and simulation node families remain open.",
+    "The OKLCH numeric comparison covers helper translation only and does not establish product parity.",
+    "External licensed Pixel Composer parity, fractional key-map comparison, and live GUI verification remain unverified.",
+    "Seven scene files exist, but manual and GPU acceptance remains pending.",
+    "Noise Aniso and captured MK Sparkle native kernels are present; full supplied-project acceptance and matched reference behavior remain open. Grid and Path Shape native work remains incomplete.",
+    "No accepted full GPU gate is recorded; the focused filtered run included unintended camera GPU cases and failed.",
+    "No full source tree or tested binary hash snapshot ties these outputs to every current source edit.",
+    "The build45 archive inventory is recorded below. Later unbuilt source additions are excluded from its capability counts."
+  ],
+  "scene_files": {
+    "result": "all seven named .aworld files are present",
+    "paths": [
+      "mono.engine/examples/assets/worlds/Composer-Particle-Flipbook.aworld",
+      "mono.engine/examples/assets/worlds/Composer-Material-Maps.aworld",
+      "mono.engine/examples/assets/worlds/Composer-Gui-And-Shader.aworld",
+      "mono.engine/examples/assets/worlds/Composer-Skybox.aworld",
+      "mono.engine/examples/assets/worlds/Composer-Feedback-And-Fluid.aworld",
+      "mono.engine/examples/assets/worlds/Composer-3D-Reference.aworld",
+      "mono.engine/examples/assets/worlds/Composer-Reference-Studies.aworld"
+    ],
+    "acceptance_status": "Manual and GPU acceptance pending; file presence is not acceptance."
+  },
+  "executor_inventory": {
+    "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build45.json",
+    "archive_sha256": "35e65ad10766a236b3d832c92d977da9a3de565fd60e05b259d0ad52ea5d42a7",
+    "archive_mtime_utc": "2026-10-02T12:33:39.898034Z",
+    "repo_head": "1e7bb7b4995141d944f33652348a986dccd773be",
+    "registered_pc_count": 394,
+    "registered_catalogue_overlap_count": 393,
+    "registered_only_count": 1,
+    "registered_only_pc": [
+      "pc.global_scope"
+    ],
+    "catalogue_pc_count": 886,
+    "catalogue_missing_executor_count": 493,
+    "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes.",
+    "archive_build": "build45 archive present during helper link",
+    "previous_build36_snapshot": {
+      "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build36.json",
+      "archive_sha256": "4348a0eeb8e2e688e665f89f28f5abaede4a4751f0cff3ebc8cf03eff2af48d3",
+      "registered_pc_count": 369,
+      "catalogue_pc_count": 886,
+      "catalogue_missing_executor_count": 518
+    }
+  },
+  "metadata_generation": {
+    "source_snapshot": "docs/pixel-composer-m0/source-inputs.json",
+    "generated_catalogue": "mono.engine/imagegraph/src/SourceCatalogue.inc",
+    "generator": "scripts/pixel-composer/generate-catalogue.py",
+    "pinned_constructor_sources": [
+      {
+        "path": "scripts/node_fn_wave_table/node_fn_wave_table.gml",
+        "bytes": 8401,
+        "sha256": "77f4bab358cf3f5e2ecd6a0905cc6caca9a643bcd7d4a725684c3541ab6b64a0",
+        "verified_default": [
+          0,
+          1,
+          2
+        ],
+        "verified_values": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "path": "scripts/node_points_remap/node_points_remap.gml",
+        "bytes": 2072,
+        "sha256": "e0c42c1c0dcbe48efddb5808b1c6e4e03f22a991c77463fbfd471ce05dd2a356",
+        "verified_default": [
+          [
+            0,
+            0
+          ]
+        ],
+        "effective_type": "array<vector2>"
+      }
+    ],
+    "generation_counts": {
+      "nodes": 886,
+      "inputs": 11724,
+      "authored_defaults_resolved": 10056,
+      "authored_defaults_total": 10348
+    },
+    "scope_limit": "Metadata and generated source catalogue only; no native graph acceptance or licensed executable parity is implied."
+  },
+  "source_commits": [
+    {
+      "hash": "00461df5",
+      "subject": "derive source wavetable and point array defaults",
+      "scope": "Source metadata extractor, generator, tests, source-inputs snapshot and generated SourceCatalogue.inc."
+    },
+    {
+      "hash": "239c15be",
+      "subject": "grant bounded studio file observations through shared hosts",
+      "scope": "Studio host boundary, separate from source metadata."
+    },
+    {
+      "hash": "35acebf4",
+      "subject": "read granted raster inputs and publish bounded wav files",
+      "scope": "Native file adapter and WAV export, separate from source metadata."
+    },
+    {
+      "hash": "1e7bb7b4",
+      "subject": "add owned particle and animation kernels with recorded random draws",
+      "scope": "Current committed core source at the build45 inventory HEAD; core44 full test result is recorded separately."
+    },
+    {
+      "hash": "86c6b155",
+      "subject": "Fix private source helper collisions in release unity builds",
+      "scope": "Release build unity helper symbol ownership; build46 release targets completed."
+    },
+    {
+      "hash": "cc6853dd",
+      "subject": "Share policy-checked WAV publication in Studio",
+      "scope": "Studio WAV publication and its explicit policy tests."
+    },
+    {
+      "hash": "29fb14b6",
+      "subject": "Persist authored image graph selectors through reflected properties",
+      "scope": "Reflected scene and game ImageGraph selector properties with focused tests."
+    }
+  ]
+}

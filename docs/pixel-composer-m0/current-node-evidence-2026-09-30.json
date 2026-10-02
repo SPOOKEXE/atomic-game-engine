@@ -554,6 +554,70 @@
         "Source newer than the pinned commit and released binary equivalence."
       ],
       "evidence_limit": "The release announcement names this node. No declaration with that title was found among the 1,830 verified GML files. Web probes for candidate paths failed with cache misses, which do not establish HTTP 404 or source absence in a newer commit."
+    },
+    {
+      "title": "Insert Text",
+      "source_node_id": "Node_String_Insert",
+      "source_node_id_verified": true,
+      "source_declaration_line": 1,
+      "source": {
+        "immutable_url": "https://raw.githubusercontent.com/Ttanasart-pt/Pixel-Composer/b69eca232217360cf1502ef0223523d818606652/scripts/node_string_insert/node_string_insert.gml",
+        "archive_member": "Pixel-Composer-b69eca232217360cf1502ef0223523d818606652/scripts/node_string_insert/node_string_insert.gml",
+        "bytes": 746,
+        "sha256": "6a55646241620f10331ffa133d12d91efdb8c6a918e9026f089ce4c491881bed",
+        "git_blob_sha1": "cd05a262af8244248ebf224811a8914b4db4363c",
+        "verified_from_pinned_source_archive": true
+      },
+      "behavior_basis": "Pinned official source constructor and source-authored documentation; no released executable comparison.",
+      "verified_behavior_summary": "Constructor declares Text, Insert Text, and Position inputs plus a Text output. Source-authored documentation says it inserts text at a position; executable semantics and edge behavior remain unverified.",
+      "matrix_matches": [],
+      "selected_in_878_record_snapshot": false,
+      "selection_reason": "Explicit source-only constructor metadata allowlist entry. This is not evidence for a native executor or released-build parity.",
+      "unknowns": [
+        "No published documentation row was found in the archived node matrix.",
+        "Exact released 1.22 behavior, defaults, and edge cases remain unverified.",
+        "Native executor schema and acceptance remain pending."
+      ],
+      "published_documentation": {
+        "url": null,
+        "status": "not present in archived node matrix"
+      },
+      "source_authored_documentation": {
+        "immutable_url": "https://raw.githubusercontent.com/Ttanasart-pt/Pixel-Composer/b69eca232217360cf1502ef0223523d818606652/docsdata/content/__nodes/node_string_insert.md",
+        "archive_member": "Pixel-Composer-b69eca232217360cf1502ef0223523d818606652/docsdata/content/__nodes/node_string_insert.md",
+        "bytes": 115,
+        "sha256": "f46da990c97d62815289ed046def25cdd3cb3d8da05ab7f0e78683be0242ed46",
+        "git_blob_sha1": "f01ef1354ddac8e32b1b83606488e0026bb84854",
+        "verified_from_pinned_source_archive": true
+      }
+    },
+    {
+      "title": "Spout Receive",
+      "source_node_id": "Node_Spout_Receive",
+      "source_node_id_verified": true,
+      "source_declaration_line": 1,
+      "source": {
+        "immutable_url": "https://raw.githubusercontent.com/Ttanasart-pt/Pixel-Composer/b69eca232217360cf1502ef0223523d818606652/scripts/node_spout_receive/node_spout_receive.gml",
+        "archive_member": "Pixel-Composer-b69eca232217360cf1502ef0223523d818606652/scripts/node_spout_receive/node_spout_receive.gml",
+        "bytes": 1563,
+        "sha256": "8ea18aa6553ab9841bfd434e6c3ebaf8e7d4cd2f520e36474bf38fd8a937493e",
+        "git_blob_sha1": "1fa87eaaa6e7effaac4a079ff20fc92113d8e108",
+        "verified_from_pinned_source_archive": true
+      },
+      "behavior_basis": "Pinned official constructor only; no released executable comparison.",
+      "verified_behavior_summary": "Constructor declares Receiver name with default PixelComposer, Animated with default true, and a Surface output. Source also creates a Spout receiver and updates its name and receive behavior. Exact released behavior is unverified.",
+      "matrix_matches": [],
+      "selected_in_878_record_snapshot": false,
+      "selection_reason": "Explicit source-only constructor metadata entry required for the native host adapter. This is not evidence of native executor acceptance or released-build parity.",
+      "unknowns": [
+        "No published node-matrix row or source-authored node page was found in the pinned source snapshot.",
+        "Exact released 1.22 behavior, platform behavior, and failure handling remain unverified.",
+        "Native executor schema and acceptance remain pending."
+      ],
+      "published_documentation": {
+        "url": null,
+        "status": "not present in archived node matrix"
+      }
     }
   ]
 }

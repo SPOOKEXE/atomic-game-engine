@@ -261,10 +261,12 @@ GPU/audio checks and licensed executable comparison remain unverified, and M3 re
 The verified Studio key-edit slice selects distinct full property/time identities and stages move, copy and paste
 through one undo transaction. Moves preserve drivers; copied keys start without drivers. Headless ImGui fixtures
 exercise selection, collisions, cancellation and stale originals. Shared frame shifts retain integer components
-and use ordinary floating-point rounding for fractions. Dopesheet drag, box and scale selection, targeted property
-paste and live GUI verification remain open. Key-copy admission covers logical key payloads, not the whole document
-or undo history. The verified snapshot and failed-gate repairs are recorded in the
-[native validation ledger](../pixel-composer-m0/native-validation-2026-09-30.json).
+and use ordinary floating-point rounding for fractions. The native `[timeline_dopesheet]` and `[timeline_keys]`
+headless gates cover drag, box and scale selection, plus targeted property paste. Their focused result is 177
+assertions across 16 cases. This does not establish licensed executable parity for fractional key-map behavior or
+live GUI behavior. A wider Studio test run still has failures outside this timeline slice. Key-copy admission
+covers logical key payloads, not the whole document or undo history. The dated gate record is in the
+[native validation ledger](../pixel-composer-m0/native-validation-2026-10-02.json).
 
 The limited audio path is now `image.audio_recording` to `image.audio_volume`. A bounded `audio-capture 1` file
 stores recorded mono sample arrays by source ID and exact tick. Each line is `frame "mono" 0 2 1 -1`; IDs are
