@@ -457,6 +457,15 @@ imagegraph-evaluation-bench samples="5":
     cmake --build --preset bench --target bench_imagegraph
     ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluation --samples {{samples}}
 
+# Release CPU workloads with correctness first. Timing and concise scope summaries go to stdout only.
+# Heap hooks report unavailable in shipping release; retained bytes are logical payload, not allocator peaks.
+imagegraph-cpu-milestone-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset release-tests --target test_imagegraph bench_imagegraph
+    ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][cpu_milestones]'
+    ATOMIC_IMAGEGRAPH_CPU_PRESET=release-tests ./.cache/build/release-tests/bench/bench_imagegraph --suite engine.imagegraph.bench.cpu-milestones --samples {{samples}}
+
 # Actual headless WAV inspector cache paths. Optional stdout capture:
 # ATOMIC_STUDIO_WAV_TIMELINE_PROFILE=1 just studio-wav-timeline-bench 5
 studio-wav-timeline-bench samples="5":

@@ -47,7 +47,7 @@ Milestone labels describe development scope, not release versions.
   5. Read granted images, directories, animation, audio and structured assets through bounded shared hosts.
   6. Run bounded Lua and export helpers; publish image, sequence and WAV batches with rollback.
   7. Bind live 3D outputs, cooked material shaders and timed 4096-frame atlases; queue camera and SDF jobs. GPU verification remains open.
-  8. Package source projects and authored scenes, including Verlet and CPU fluid studies. Visual acceptance remains open.
+  8. Package source projects and authored scenes; profile static, animated, temporal, Verlet and 3D CPU workloads. Visual acceptance remains open.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
