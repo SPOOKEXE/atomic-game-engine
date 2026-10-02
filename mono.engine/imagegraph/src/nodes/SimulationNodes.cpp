@@ -1,6 +1,7 @@
 #include "Families.hpp"
 #include "FlipNodes.hpp"
 #include "VerletNodes.hpp"
+#include "VfxNodes.hpp"
 
 #include <engine/imagegraph/SimulationReplay.hpp>
 
@@ -318,6 +319,8 @@ namespace engine::imagegraph::detail {
 	}
 	std::span<const ExecutorEntry> SimulationExecutors() {
 		static constexpr std::array entries{
+			ExecutorEntry{"pc.vfx_group_inline", VfxInlineScope},
+			ExecutorEntry{"pc.vfx_renderer", VfxRenderer},
 			ExecutorEntry{"pc.flip_domain", FlipDomain},
 			ExecutorEntry{"pc.flip_update", FlipUpdate},
 			ExecutorEntry{"pc.flip_fill", FlipFill},

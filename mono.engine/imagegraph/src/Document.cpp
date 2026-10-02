@@ -4604,7 +4604,7 @@ namespace engine::imagegraph {
 				const bool collection =
 					node.Type == "pc.verlet_sim_inline" || node.Type == "pc.rigid_group_inline" ||
 					node.Type == "pc.flip_group_inline" || node.Type == "pc.strand_group_inline" ||
-					node.Type == "pc.pixel_builder";
+					node.Type == "pc.vfx_group_inline" || node.Type == "pc.pixel_builder";
 				if (!collection || node.GroupId != group.ParentId ||
 					(node.Type != "pc.pixel_builder" && !group.Ports.empty())) {
 					SetDiagnostic(
@@ -5520,7 +5520,8 @@ namespace engine::imagegraph {
 					const CatalogueInput *input = FindCatalogueInput(*entry, link.ToPort);
 					catalogueArrayInput = input && input->SourceIndex >= 0 && input->ArrayDepthKnown &&
 										  input->Type == ValueType::Image &&
-										  FindCatalogueInput(*entry, "attribute_process");
+										  (FindCatalogueInput(*entry, "attribute_process") ||
+										   (entry->Type == "pc.flip_render" && input->Id == "fluid_particle"));
 				}
 			}
 			bool catalogueAtlasArrayInput = false;

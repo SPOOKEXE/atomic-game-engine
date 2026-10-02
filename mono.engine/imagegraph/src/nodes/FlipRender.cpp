@@ -3,7 +3,10 @@
 #include "../SourceRandom.hpp"
 #include "FlipNodes.hpp"
 #include "Sampler.hpp"
+#include "SourceFlipLines.hpp"
 #include "SourceFlipObstacle.hpp"
+#include "SourceFlipSprite.hpp"
+#include "SourceFlipSpriteFrames.hpp"
 
 #include <engine/imagegraph/FlipReplay.hpp>
 
@@ -140,6 +143,34 @@ namespace engine::imagegraph::detail {
 					return false;
 			return true;
 		}
+		bool DropLine(
+			NodeContext &context,
+			Image &image,
+			Vector2 from,
+			Vector2 to,
+			double width,
+			Colour color,
+			bool additive,
+			uint64_t &work
+		) {
+			// Official HTML5 applies this offscreen-target Y offset before constructing its quad.
+			from.Y -= .01;
+			to.Y -= .01;
+			const double dx = to.X - from.X, dy = to.Y - from.Y, squared = dx * dx + dy * dy;
+			if (!std::isfinite(squared))
+				return context.Fail(Status::InvalidValue, "FLIP line geometry is undefined");
+			if (squared < .0001) return true;
+			const double length = std::sqrt(squared);
+			if (length < .0001) return true;
+			const double xx = .5 * width * dx / length, yy = .5 * width * dy / length;
+			const auto vertex = [](double x, double y) {
+				return DropVertex{{double(float(x)), double(float(y))}, 1};
+			};
+			const auto a = vertex(from.X - yy, from.Y + xx), b = vertex(to.X - yy, to.Y + xx),
+					   c = vertex(to.X + yy, to.Y - xx), d = vertex(from.X + yy, from.Y - xx);
+			return DropTriangle(context, image, a, b, c, color, additive, work) &&
+				   DropTriangle(context, image, c, d, a, color, additive, work);
+		}
 	} // namespace
 	bool FlipRender(NodeContext &context) {
 		if (context.Request.RequireSourceGpuRasterCoverage)
@@ -160,12 +191,8 @@ namespace engine::imagegraph::detail {
 		const auto mode = context.Integer("render_type", 0),
 				   requestedSteps = context.Integer("update_step", 1);
 		const auto steps = context.Request.ReuseSimulationFrame ? int64_t{0} : requestedSteps;
-		if (mode != 0)
-			return context.Fail(
-				Status::UnsupportedExecution,
-				"FLIP line rendering requires source object history snapshots",
-				"render_type"
-			);
+		if (mode < 0 || mode > 1)
+			return context.Fail(Status::InvalidValue, "FLIP source render type is invalid", "render_type");
 		if (requestedSteps < 0)
 			return context.Fail(
 				Status::InvalidValue, "FLIP render update step must be nonnegative", "update_step"
@@ -178,12 +205,6 @@ namespace engine::imagegraph::detail {
 		if (steps > 0 && context.Request.Subframe != 0)
 			return context.Fail(
 				Status::InvalidValue, "FLIP render advance requires an integer frame", "update_step"
-			);
-		if (context.Input("fluid_particle"))
-			return context.Fail(
-				Status::UnsupportedExecution,
-				"FLIP sprite draw requires source sprite raster profile",
-				"fluid_particle"
 			);
 		const auto &settings = input->Data->Settings;
 		const double width = settings.Width - settings.Spacing * 2,
@@ -253,48 +274,98 @@ namespace engine::imagegraph::detail {
 		const double radius = settings.Spacing + FluidDomainLayout(settings)->ParticleRadius * size;
 		if (!std::isfinite(radius))
 			return context.Fail(Status::InvalidValue, "FLIP render radius is nonfinite", "particle_size");
+		SourceFlipSpriteFrames sprites;
+		if (mode == 0 && !ResolveSourceFlipSpriteFrames(context, sprites)) return false;
+		const Image *firstSprite = sprites.Count ? sprites.At(0) : nullptr;
 		SourceRandom random{uint32_t(context.Request.Seed)};
 		uint64_t work = 0;
 		const size_t count =
 			std::min(size_t(settings.MaximumParticles - 1), size_t(SourceFluidParticleCount(data)));
-		for (size_t index = 0; index < count; ++index) {
-			if (index >= life.size()) continue;
-			if (positions[index * 2] == 0 && positions[index * 2 + 1] == 0) continue;
-			const double opacity = random.Range(alpha.X, alpha.Y),
-						 duration = double(random.IntRange(lifespan.X, lifespan.Y));
-			const double ratio = duration ? (duration - life[index]) / duration : 1;
-			if (duration && ratio * radius < .5) continue;
-			if (gradient && gradient->Keys.size() > 1) {
-				const double velocity = std::hypot(velocities[index * 2], velocities[index * 2 + 1]);
-				const double normalized = (velocity - map.X) / (map.Y - map.X);
-				if (!std::isfinite(normalized))
-					return context.Fail(
-						Status::InvalidValue,
-						"FLIP velocity gradient range produced nonfinite ratio",
-						"velocity_map"
-					);
-				const auto mapped = SourceCachedGradient(
-					*gradient, Fract(std::pow(std::clamp(normalized, 0., 1.), 5) + shift)
-				);
-				if (!mapped)
-					return context.Fail(
-						Status::InvalidValue,
-						"FLIP velocity gradient produced nonfinite color",
-						"color_over_velocity"
-					);
-				color = *mapped;
-			}
-			if (!DropCircle(
+		if (mode == 1) {
+			if (!VisitSourceFlipLines(
 					context,
-					temporary,
-					{positions[index * 2] - settings.Spacing, positions[index * 2 + 1] - settings.Spacing},
-					radius,
-					opacity * ratio,
-					color,
-					context.Boolean("additive", true),
-					work
+					data,
+					gradient,
+					lifespan,
+					map,
+					shift,
+					context.Integer("segments", 1),
+					context.Scalar("thickness", 1),
+					[&](Vector2 from, Vector2 to, double thickness, Colour lineColor) {
+						return DropLine(
+							context,
+							temporary,
+							from,
+							to,
+							thickness,
+							lineColor,
+							context.Boolean("additive", true),
+							work
+						);
+					}
 				))
 				return false;
+		} else {
+			for (size_t index = 0; index < count; ++index) {
+				if (index >= life.size()) continue;
+				if (positions[index * 2] == 0 && positions[index * 2 + 1] == 0) continue;
+				const double opacity = random.Range(alpha.X, alpha.Y),
+							 duration = double(random.IntRange(lifespan.X, lifespan.Y));
+				const double ratio = duration ? (duration - life[index]) / duration : 1;
+				if (duration && ratio * radius < .5) continue;
+				if (gradient && gradient->Keys.size() > 1) {
+					const double velocity = std::hypot(velocities[index * 2], velocities[index * 2 + 1]);
+					const double normalized = (velocity - map.X) / (map.Y - map.X);
+					if (!std::isfinite(normalized))
+						return context.Fail(
+							Status::InvalidValue,
+							"FLIP velocity gradient range produced nonfinite ratio",
+							"velocity_map"
+						);
+					const auto mapped = SourceCachedGradient(
+						*gradient, Fract(std::pow(std::clamp(normalized, 0., 1.), 5) + shift)
+					);
+					if (!mapped)
+						return context.Fail(
+							Status::InvalidValue,
+							"FLIP velocity gradient produced nonfinite color",
+							"color_over_velocity"
+						);
+					color = *mapped;
+				}
+				if (const Image *sprite = sprites.At(index)) {
+					if (!DrawSourceFlipSprite(
+							context,
+							temporary,
+							*sprite,
+							{double(firstSprite->Width), double(firstSprite->Height)},
+							{positions[index * 2] - settings.Spacing,
+							 positions[index * 2 + 1] - settings.Spacing},
+							ratio,
+							color,
+							opacity,
+							Filtered(ReadSampler(context)),
+							work,
+							[&](uint32_t x, uint32_t y, Rgba pixel) {
+								return DropBlend(temporary, x, y, pixel, context.Boolean("additive", true));
+							}
+						))
+						return false;
+				} else {
+					if (!DropCircle(
+							context,
+							temporary,
+							{positions[index * 2] - settings.Spacing,
+							 positions[index * 2 + 1] - settings.Spacing},
+							radius,
+							opacity * ratio,
+							color,
+							context.Boolean("additive", true),
+							work
+						))
+						return false;
+				}
+			}
 		}
 		for (uint32_t y = 0; y < output->Height; ++y)
 			for (uint32_t x = 0; x < output->Width; ++x) {
