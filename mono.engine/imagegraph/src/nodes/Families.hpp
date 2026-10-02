@@ -26,4 +26,5 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> PathExecutors();
 	std::span<const ExecutorEntry> PointExecutors();
 	std::span<const ExecutorEntry> MeshExecutors();
+	std::span<const ExecutorEntry> SourceValueExecutors();
 }

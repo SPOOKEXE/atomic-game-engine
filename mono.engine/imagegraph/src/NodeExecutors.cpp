@@ -28,7 +28,8 @@ namespace engine::imagegraph::detail {
 					  TransformExecutors(),
 					  PathExecutors(),
 					  PointExecutors(),
-					  MeshExecutors()})
+					  MeshExecutors(),
+				  SourceValueExecutors()})
 					for (const ExecutorEntry &entry : family)
 						merged.emplace(entry.Type, entry);
 				merged.emplace("pc.group_input", ExecutorEntry{"pc.group_input", ExecuteGroupBoundary, true});
