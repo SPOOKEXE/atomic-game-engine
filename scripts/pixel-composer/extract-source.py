@@ -178,6 +178,63 @@ def call_args(text, start):
     return args
 
 
+def vector2_array_default(kind, raw):
+    """Recognize a literal list of two-number rows passed to a Vec2 input."""
+    if kind not in {"Vec2", "IVec2", "Vector", "Vec2Arr"} or not raw.strip().startswith("["):
+        return False
+    rows = [row for row in call_args(raw.strip(), 0) if row]
+    if not rows:
+        return False
+    number = re.compile(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+    for row in rows:
+        if not row.startswith("["):
+            return False
+        coordinates = call_args(row, 0)
+        if len(coordinates) != 2 or any(not number.fullmatch(value.strip()) for value in coordinates):
+            return False
+    return True
+
+
+def wave_table_attribute(name, body):
+    """Recover the pinned WaveTable's authored enum array after checking its editor mutation."""
+    if name != "Node_Fn_WaveTable":
+        return None
+    members = enum_values.get("WAVETABLE_FN", {})
+    expected = {"sine", "square", "tri", "saw"}
+    if set(members) != expected or sorted(members.values()) != [0, 1, 2, 3]:
+        raise ValueError("WaveTable enum source changed; review attribute_wavetable metadata")
+    assignments = list(re.finditer(r"\battributes\.wavetable\s*=\s*\[", body))
+    if len(assignments) != 1:
+        raise ValueError("WaveTable source must have one literal wavetable constructor default")
+    opening = body.find("[", assignments[0].start())
+    values = [value for value in call_args(body, opening) if value]
+    if values != ["WAVETABLE_FN.sine", "WAVETABLE_FN.square", "WAVETABLE_FN.tri"]:
+        raise ValueError("WaveTable constructor default is not the reviewed sine, square, tri sequence")
+    operation = re.search(
+        r"\bwavetable_apply\s*=\s*function\s*\(\s*typ\s*\)\s*\{([\s\S]*?)\n\s*\}", body
+    )
+    if operation is None or not re.search(
+        r"attributes\.wavetable\s*\[\s*wavetable_selecting\s*\]\s*=\s*typ\b", operation.group(1)
+    ):
+        raise ValueError("WaveTable editor mutation no longer writes the selected wavetable attribute")
+    menu_values = set(re.findall(r"wavetable_apply\s*\(\s*WAVETABLE_FN\.([A-Za-z_][A-Za-z0-9_]*)\s*\)", body))
+    if menu_values != expected:
+        raise ValueError("WaveTable editor menu no longer exposes every reviewed enum value")
+    record_constructor_source(name)
+    return {
+        "index": "-1",
+        "kind": "AttributeArray",
+        "name": "attribute wavetable",
+        "default": "[WAVETABLE_FN.sine,WAVETABLE_FN.square,WAVETABLE_FN.tri]",
+        "extra": [],
+        "attribute": "wavetable",
+        "array_depth": 1,
+        "effective_type": "array",
+        "array_element_type": "integer",
+        "array_allowed_values": [members[member] for member in sorted(expected, key=members.get)],
+    }
+
+
 def _matching_call_end(text, opening):
     if opening < 0:
         return None
@@ -359,6 +416,10 @@ def parse(name, seen):
             "default": args[1] if len(args) > 1 else "",
             "extra": args[2:],
         }
+        if vector2_array_default(entry["kind"], entry["default"]):
+            entry["effective_type"] = "array"
+            entry["array_element_type"] = "vector2"
+            record_constructor_source(name)
         if entry["kind"] in ("EScroll", "EButton", "Enum_Scroll", "Enum_Button") and len(args) > 2:
             entry["choices"] = choices(args[2], body)
         declared.append((match.start(), entry))
@@ -623,6 +684,9 @@ def parse(name, seen):
         kind = "Bool" if raw in ("true", "false") else ("AttributeArray" if raw.startswith("[") else "Float")
         inputs.append({"index": "-1", "kind": kind, "name": f"attribute {key}", "default": raw, "extra": [], "attribute": key,
                        "array_depth": 0 if kind in ("Bool", "Float", "Attribute") else None})
+    custom_attribute = wave_table_attribute(name, body)
+    if custom_attribute is not None:
+        inputs.append(custom_attribute)
     # attribute_oversample and attribute_interpolation both add the two sampling attributes. Value 0
     # inherits the project attribute plus one; separators keep their slot so labels line up with values.
     sampling = re.search(r"attribute_(?:oversample|interpolation)\(([^)]*)\)", body)

@@ -19,6 +19,13 @@ class PixelComposerExtractSourceTest(unittest.TestCase):
             "scripts/node_math/node_math.gml": "",
             "scripts/node_vector_math/node_vector_math.gml": "",
             "scripts/node/node.gml": "function Node(_x, _y, _group = noone) constructor { }\n",
+            "scripts/node_value_vec2/node_value_vec2.gml": """
+function nodeValue_Vec2(_name, _value) { return new __NodeValue_Vec2(_name, self, _value); }
+function __NodeValue_Vec2(_name, _node, _value) : NodeValue(_name, _node, VALUE_TYPE.float, _value) constructor {
+    setDisplay(VALUE_DISPLAY.vector);
+}
+function NodeValue(_name, _node, _type, _value) constructor { type_array = 0; }
+""",
             "scripts/node_value_float/node_value_float.gml": """
 function nodeValue_Slider(_name, _value) { return new __NodeValue_Float(_name, self, _value); }
 function nodeValue_Float(_name, _value) { return new __NodeValue_Float(_name, self, _value); }
@@ -155,6 +162,35 @@ function Node_Comment_Fixture(_x, _y) : Node(_x, _y) constructor {
     newInput(2, nodeValue_Text("Literal // and /* block markers */ with \"quotes\""));
 }
 """,
+            "scripts/node_points_remap/node_points_remap.gml": """
+function Node_Points_Remap(_x, _y) : Node(_x, _y) constructor {
+    newInput(0, nodeValue_Vec2("Points", [[0,0]])).setArrayDepth(1);
+}
+""",
+            "scripts/node_points_triangulate/node_points_triangulate.gml": """
+function Node_Points_Triangulate(_x, _y) : Node(_x, _y) constructor {
+    newInput(0, nodeValue_Vec2("Points", [0,0])).setArrayDepth(1);
+}
+""",
+            "scripts/node_fn_wave_table/node_fn_wave_table.gml": """
+enum WAVETABLE_FN { sine, square, tri, saw }
+function Node_Fn_WaveTable(_x, _y) : Node(_x, _y) constructor {
+    wavetable_apply = function(typ) {
+        attributes.wavetable[wavetable_selecting] = typ;
+    };
+    wavetable_menu = [
+        new MenuItem("Sine", function() { return wavetable_apply(WAVETABLE_FN.sine); }),
+        new MenuItem("Square", function() { return wavetable_apply(WAVETABLE_FN.square); }),
+        new MenuItem("Triangle", function() { return wavetable_apply(WAVETABLE_FN.tri); }),
+        new MenuItem("Sawtooth", function() { return wavetable_apply(WAVETABLE_FN.saw); }),
+    ];
+    attributes.wavetable = [
+        WAVETABLE_FN.sine,
+        WAVETABLE_FN.square,
+        WAVETABLE_FN.tri,
+    ];
+}
+""",
         }
         for relative, content in files.items():
             path = script_root / relative
@@ -175,6 +211,9 @@ function Node_Comment_Fixture(_x, _y) : Node(_x, _y) constructor {
                 "Node_Color_RGB",
                 "Node_Color_HSV",
                 "Node_Comment_Fixture",
+                "Node_Fn_WaveTable",
+                "Node_Points_Remap",
+                "Node_Points_Triangulate",
             ):
                 writer.writerow({"node_id": node})
 
@@ -266,6 +305,35 @@ function Node_Comment_Fixture(_x, _y) : Node(_x, _y) constructor {
             [("2", r'Literal // and /* block markers */ with \"quotes\"')],
             [(item["index"], item["name"]) for item in node["inputs"]],
         )
+
+    def test_wave_table_constructor_attribute_default_is_source_backed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+
+        node = snapshot["nodes"]["Node_Fn_WaveTable"]
+        attribute = next(item for item in node["inputs"] if item["name"] == "attribute wavetable")
+        self.assertEqual(attribute["default"], "[WAVETABLE_FN.sine,WAVETABLE_FN.square,WAVETABLE_FN.tri]")
+        self.assertEqual(attribute["array_depth"], 1)
+        self.assertEqual(attribute["effective_type"], "array")
+        self.assertEqual(attribute["array_element_type"], "integer")
+        self.assertEqual(attribute["array_allowed_values"], [0, 1, 2, 3])
+        self.assertIn("scripts/node_fn_wave_table/node_fn_wave_table.gml", snapshot["source_constructor_evidence"])
+
+    def test_nested_vec2_constructor_default_stays_vector_array_and_flat_vec2_stays_scalar(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+
+        remap = snapshot["nodes"]["Node_Points_Remap"]["inputs"][0]
+        self.assertEqual(remap["default"], "[[0,0]]")
+        self.assertEqual(remap["array_depth"], 2)
+        self.assertEqual(remap["effective_type"], "array")
+        self.assertEqual(remap["array_element_type"], "vector2")
+        self.assertIn("scripts/node_points_remap/node_points_remap.gml", snapshot["source_constructor_evidence"])
+
+        triangulate = snapshot["nodes"]["Node_Points_Triangulate"]["inputs"][0]
+        self.assertEqual(triangulate["default"], "[0,0]")
+        self.assertEqual(triangulate["array_depth"], 2)
+        self.assertNotIn("effective_type", triangulate)
 
 
 if __name__ == "__main__":

@@ -8420,6 +8420,9 @@ I	phase	Phase	4	Float	scalar	d 0
 S	I	phase	0
 I	attribute_wavetable_y_res	attribute wavetable_y_res	-1	Float	scalar	d 24	
 S	I	attribute_wavetable_y_res	0
+I	attribute_wavetable	attribute wavetable	-1	AttributeArray	array	a scalar 3 d 0 d 1 d 2	
+S	I	attribute_wavetable	?
+A	I	attribute_wavetable	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 O	output	Output	0	scalar
@@ -23254,7 +23257,7 @@ I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expan
 S	I	attribute_array_process	?
 O	surface_out	Surface Out	0	image
 N	pc.points_remap	Node_Points_Remap	Points Remap	values	scripts/node_points_remap/node_points_remap.gml
-I	points	Points	0	Vec2	vector2		
+I	points	Points	0	Vec2	array	a vector2 1 v 0 0	
 S	I	points	1
 A	I	points	2
 I	uv_map	UV Map	1	Surface	image		

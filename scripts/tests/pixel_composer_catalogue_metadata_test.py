@@ -203,6 +203,36 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                 ],
                 "outputs": [{"index": "0", "name": "Surface", "type": "VALUE_TYPE.surface", "default": "noone"}],
             },
+            "Node_Points_Remap": {
+                "display_name": "Points Remap", "family": "transform",
+                "file": "scripts/node_points_remap/node_points_remap.gml", "base": "Node",
+                "inputs": [{
+                    "index": "0", "kind": "Vec2", "name": "Points", "default": "[[0,0]]",
+                    "extra": [], "array_depth": 2, "effective_type": "array", "array_element_type": "vector2",
+                    "source_array_classification": True,
+                }],
+                "outputs": [],
+            },
+            "Node_Points_Triangulate": {
+                "display_name": "Points Triangulate", "family": "transform",
+                "file": "scripts/node_points_triangulate/node_points_triangulate.gml", "base": "Node",
+                "inputs": [{
+                    "index": "0", "kind": "Vec2", "name": "Points", "default": "[0,0]",
+                    "extra": [], "array_depth": 2, "source_array_classification": True,
+                }],
+                "outputs": [],
+            },
+            "Node_Fn_WaveTable": {
+                "display_name": "Wave Table", "family": "animation",
+                "file": "scripts/node_fn_wave_table/node_fn_wave_table.gml", "base": "Node_Fn",
+                "inputs": [{
+                    "index": "-1", "kind": "AttributeArray", "name": "attribute wavetable",
+                    "default": "[0,1,2]", "extra": [], "attribute": "wavetable", "array_depth": 1,
+                    "effective_type": "array", "array_element_type": "integer", "array_allowed_values": [0,1,2,3],
+                    "source_array_classification": None,
+                }],
+                "outputs": [],
+            },
         }
         with tempfile.TemporaryDirectory() as temporary:
             lines = self.run_generator(Path(temporary), extra_nodes)
@@ -219,7 +249,29 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
         self.assertIn('T\tkey\tKey\t0\tText\ttext\ts ""\t', lines)
         self.assertIn("T\tvalue\tvalue\t1\tGeneric_any\tany\t\t", lines)
         self.assertIn("I\tposition\tPosition\t0\tVec3\tvector3\t3 0 0 1\t", lines)
+        self.assertIn("I\tpoints\tPoints\t0\tVec2\tarray\ta vector2 1 v 0 0\t", lines)
+        self.assertIn("A\tI\tpoints\t2", lines)
+        self.assertIn("I\tpoints\tPoints\t0\tVec2\tvector2\tv 0 0\t", lines)
+        self.assertIn("A\tI\tpoints\t2", lines)
+        self.assertIn("I\tattribute_wavetable\tattribute wavetable\t-1\tAttributeArray\tarray\ta scalar 3 d 0 d 1 d 2\t", lines)
+        self.assertIn("A\tI\tattribute_wavetable\t1", lines)
         self.assertFalse(any("Node_VerletSim_Simple" in line for line in lines))
+
+    def test_bounded_integer_array_rejects_values_outside_its_source_enum(self):
+        node = {
+            "display_name": "Wave Table", "family": "animation",
+            "file": "scripts/node_fn_wave_table/node_fn_wave_table.gml", "base": "Node_Fn",
+            "inputs": [{
+                "index": "-1", "kind": "AttributeArray", "name": "attribute wavetable",
+                "default": "[0,1,2]", "extra": [], "attribute": "wavetable", "array_depth": 1,
+                "effective_type": "array", "array_element_type": "integer", "array_allowed_values": [0,1],
+                "source_array_classification": None,
+            }],
+            "outputs": [],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.run_generator(Path(temporary), {"Node_Fn_WaveTable": node})
 
 
 if __name__ == "__main__":

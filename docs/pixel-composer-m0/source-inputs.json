@@ -41945,6 +41945,24 @@
      "kind": "Float",
      "name": "attribute wavetable_y_res",
      "source_array_classification": false
+    },
+    {
+     "array_allowed_values": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "array_depth": 1,
+     "array_element_type": "integer",
+     "attribute": "wavetable",
+     "default": "[WAVETABLE_FN.sine,WAVETABLE_FN.square,WAVETABLE_FN.tri]",
+     "effective_type": "array",
+     "extra": [],
+     "index": "-1",
+     "kind": "AttributeArray",
+     "name": "attribute wavetable",
+     "source_array_classification": null
     }
    ],
    "outputs": [
@@ -107401,7 +107419,9 @@
    "inputs": [
     {
      "array_depth": 2,
+     "array_element_type": "vector2",
      "default": "[[0,0]]",
+     "effective_type": "array",
      "extra": [],
      "index": "0",
      "kind": "Vec2",
@@ -155667,6 +155687,14 @@
   "scripts/node_pd_filter_shine/node_pd_filter_shine.gml": {
    "bytes": 4090,
    "sha256": "cdd5b0e574f2fb44f737f305c1dd3c1cbb84e3cd5606b7b8887052d1603246e7"
+  },
+  "scripts/node_fn_wave_table/node_fn_wave_table.gml": {
+   "bytes": 8401,
+   "sha256": "77f4bab358cf3f5e2ecd6a0905cc6caca9a643bcd7d4a725684c3541ab6b64a0"
+  },
+  "scripts/node_points_remap/node_points_remap.gml": {
+   "bytes": 2072,
+   "sha256": "e0c42c1c0dcbe48efddb5808b1c6e4e03f22a991c77463fbfd471ce05dd2a356"
   }
  }
 }

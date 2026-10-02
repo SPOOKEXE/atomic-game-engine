@@ -185,12 +185,6 @@ namespace engine::imagegraph {
 			// Spans are taken only after every vector has reached its final size.
 			for (size_t index = 0; index < storage.Nodes.size(); index++) {
 				CatalogueParsed &node = storage.Nodes[index];
-				if (heads[index].Type == "pc.points_remap")
-					for (auto &input : node.Inputs)
-						if (input.Id == "points" && input.SourceIndex == 0 && input.SourceKind == "Vec2" &&
-							input.Default.empty())
-							// Pinned constructor starts with one coordinate row, [[0,0]].
-							input.Default = "a vector2 1 v 0 0";
 				for (auto &input : node.Inputs)
 					if (input.SourceChoices) input.SourceChoices->Entries = node.InputChoices[input.Id];
 				for (auto &input : node.Template)

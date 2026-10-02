@@ -173,6 +173,47 @@ def numbers(text):
     return None if any(value is None for value in values) else values
 
 
+def vector2_rows(text):
+    """Parse an authored outer array whose rows are two-component vectors."""
+    parts = items(expand(text))
+    if not parts:
+        return None
+    rows = []
+    for part in parts:
+        values = numbers(part)
+        if values is None or len(values) != 2:
+            return None
+        rows.append(values)
+    return rows
+
+
+def validate_array_metadata(source_node, item, value_type):
+    element_type = item.get("array_element_type")
+    if element_type is None:
+        return
+    if value_type != "array":
+        raise ValueError(f"array element metadata requires array value type: {source_node}.{item['name']}")
+    if element_type == "vector2":
+        if item["kind"] not in VECTOR_ARRAY_KINDS or vector2_rows(item["default"]) is None:
+            raise ValueError(f"invalid source vector2 array default: {source_node}.{item['name']}")
+        return
+    if element_type == "integer":
+        allowed = item.get("array_allowed_values")
+        values = numbers(item["default"])
+        if (
+            item["kind"] != "AttributeArray"
+            or not isinstance(allowed, list)
+            or not allowed
+            or any(type(value) is not int for value in allowed)
+            or len(set(allowed)) != len(allowed)
+            or values is None
+            or any(not value.is_integer() or int(value) not in allowed for value in values)
+        ):
+            raise ValueError(f"invalid bounded integer array metadata: {source_node}.{item['name']}")
+        return
+    raise ValueError(f"unsupported array element type {element_type!r}: {source_node}.{item['name']}")
+
+
 def colour(text):
     text = expand(text)
     if text in ("ca_white", "ca_black", "ca_zero"):
@@ -198,7 +239,7 @@ def fmt(value):
     return repr(float(value))
 
 
-def default_text(kind, value_type, raw, extra):
+def default_text(kind, value_type, raw, extra, array_element_type=None):
     raw = raw.strip()
     if value_type == "boolean":
         if kind == "Trigger":
@@ -247,6 +288,13 @@ def default_text(kind, value_type, raw, extra):
             if any(c is None for c in colours):
                 return None
             return f"a colour {len(colours)}" + "".join(" c " + " ".join(str(v) for v in c) for c in colours)
+        if value_type == "array" and array_element_type == "vector2" and kind in VECTOR_ARRAY_KINDS and raw.strip().startswith("[["):
+            vectors = vector2_rows(raw)
+            if vectors is None:
+                return None
+            return f"a vector2 {len(vectors)}" + "".join(
+                " v " + " ".join(fmt(float(value)) for value in vector) for vector in vectors
+            )
         if kind in VECTOR_ARRAY_KINDS and raw.strip() in ("[]", ""):
             return "a vector2 0"
         if kind == "Text" and raw.strip() == "[]":
@@ -432,7 +480,8 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
         seen.add(identifier)
         owners[item["name"]] = identifier
         value_type = item.get("effective_type") or refine(item["kind"], KIND_TYPES.get(item["kind"], "any"), item["default"])
-        default = default_text(item["kind"], value_type, item["default"], item["extra"]) if value_type in AUTHORED else None
+        validate_array_metadata(source_node, item, value_type)
+        default = default_text(item["kind"], value_type, item["default"], item["extra"], item.get("array_element_type")) if value_type in AUTHORED else None
         index = item["index"] if re.fullmatch(r"\d+", item["index"]) else "-1"
         labels = ";".join(clean(label).replace(";", ",") for label in (item.get("choices") or []))
         if labels and not labels.replace(";", ""):
@@ -509,7 +558,8 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
                 identifier, suffix = f"{base}_{suffix}", suffix + 1
             template_ids.add(identifier)
             value_type = item.get("effective_type") or refine(item["kind"], KIND_TYPES.get(item["kind"], "any"), item["default"])
-            default = default_text(item["kind"], value_type, item["default"], item["extra"]) if value_type in AUTHORED else None
+            validate_array_metadata(source_node, item, value_type)
+            default = default_text(item["kind"], value_type, item["default"], item["extra"], item.get("array_element_type")) if value_type in AUTHORED else None
             index = item["index"] if re.fullmatch(r"\d+", item["index"]) else "-1"
             labels = ";".join(clean(label).replace(";", ",") for label in (item.get("choices") or []))
             if labels and not labels.replace(";", ""):

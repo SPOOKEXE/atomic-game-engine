@@ -132,6 +132,10 @@ TEST_CASE("Fresh point remapping evaluates the source origin-row default", "[ima
 	REQUIRE(entry);
 	const auto *input = FindCatalogueInput(*entry, "points");
 	REQUIRE(input);
+	CHECK(input->Type == ValueType::Array);
+	CHECK(input->SourceKind == "Vec2");
+	CHECK(input->ArrayDepthKnown);
+	CHECK(input->ArrayDepth == 2);
 	const auto value = CatalogueDefault(*input);
 	REQUIRE(value);
 	const auto &points = std::get<ArrayValue>(*value);
