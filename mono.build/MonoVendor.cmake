@@ -496,7 +496,7 @@ target_include_directories(vendor_tomlplusplus SYSTEM INTERFACE "${MONO_VENDOR}/
 target_compile_definitions(vendor_tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
 
 # --- minimp3 ------------------------------------------------------------------
-# MP3 decoding, for `Engine::audio`. Two headers, no build system, CC0.
+# MP3 decoding, for `Engine::audiocodec`. Two headers, no build system, CC0.
 #
 # **The licence is why this one exists at all.** `audio/AGENTS.md` said MP3 was
 # "a vendored codec and a licence decision" and left the gap honest rather than
@@ -512,11 +512,11 @@ target_compile_definitions(vendor_tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
 # nothing to keep and is what a file with a `.mp3` extension sometimes actually
 # is; the second would turn off the SSE and NEON paths that make a five-minute
 # track decode in well under a second. `MINIMP3_IMPLEMENTATION` is defined in
-# exactly one translation unit - `audio/src/Mp3.cpp` - because these headers are
+# exactly one translation unit - `audiocodec/src/Mp3.cpp` - because these headers are
 # a single-header library and defining it twice is a duplicate-symbol link
 # error.
 #
-# `client` in engine terms: `audio` is L12 and only the client links it.
+# The shared L8 codec module exports pure decoding without the client device stack.
 add_library(vendor_minimp3 INTERFACE)
 add_library(Vendor::minimp3 ALIAS vendor_minimp3)
 target_include_directories(vendor_minimp3 SYSTEM INTERFACE "${MONO_VENDOR}/minimp3")

@@ -22,7 +22,7 @@
 // truncated file into a shorter sound that plays, so the corruption is
 // inaudible until somebody wonders why a footstep got quieter.
 //
-// @tier L12 · client
+// @tier L8 · shared
 
 #include <engine/audio/Sample.hpp>
 
@@ -62,6 +62,26 @@ namespace engine::audio {
 	//         result, because a partly decoded sound is one that plays.
 	// @since v0.9
 	std::optional<SampleBuffer> DecodeWav(std::span<const std::byte> bytes);
+
+	// Applies an aggregate sample limit before allocating the decoded mixer buffer.
+	std::optional<SampleBuffer> DecodeWav(std::span<const std::byte> bytes, size_t maximumSamples);
+
+	// Structural metadata without allocating samples. Decoding still checks its encoding policy.
+	struct WavMetadata {
+		AudioFormat Format;
+		size_t Samples = 0;
+	};
+	std::optional<WavMetadata> InspectWav(std::span<const std::byte> bytes);
+
+	// Pinned Pixel Composer PCM semantics use doubles and leave unsigned 8-bit samples uncentered.
+	struct PixelComposerWav {
+		AudioFormat Format;
+		std::vector<double> Samples;
+	};
+
+	// Accepts plain fmt(16) PCM8/16/32. The caller bounds aggregate interleaved samples before allocation.
+	std::optional<PixelComposerWav>
+	DecodePixelComposerWav(std::span<const std::byte> bytes, size_t maximumSamples);
 
 	// The largest file this will decode.
 	//

@@ -6,9 +6,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -657,4 +661,184 @@ TEST_CASE("a sound outlives being dropped from under a playing voice", "[audio][
 	// The only other reference is gone. The node still holds one.
 	rig.Render();
 	CHECK(rig.At(0) == 0.5f);
+}
+
+TEST_CASE(
+	"queued seeks use source frames and preserve fractional rate phase", "[audio][mixer][playback_events]"
+) {
+	using namespace engine::audio;
+	Rig rig;
+	rig.Engine.EnablePlaybackEvents();
+	Command sound = SetSound(rig.Player, Ramp(128, {.SampleRate = 24000, .Channels = 1}));
+	sound.PlaybackGeneration = 7;
+	rig.Post(sound);
+	Command seek = Act(CommandKind::Seek, rig.Player, 3);
+	seek.CursorFrames = 2.5;
+	seek.PlaybackGeneration = 7;
+	rig.Post(seek);
+	Command play = Act(CommandKind::Play, rig.Player, 3);
+	play.PlaybackGeneration = 7;
+	rig.Post(play);
+	rig.Render();
+	CHECK(rig.At(2) == 0.0f);
+	CHECK(FrameOf(rig.At(3)) == 2);
+	CHECK(FrameOf(rig.At(4)) == 3);
+	CHECK(FrameOf(rig.At(5)) == 3);
+	std::array<PlaybackEvent, 8> events{};
+	REQUIRE(rig.Engine.PollPlaybackEvents(events) == 3);
+	CHECK(events[1].Applied.Kind == CommandKind::Seek);
+	CHECK(events[1].Applied.AppliedSample == 3);
+	CHECK(events[1].CursorFrames == 2.5);
+	CHECK_FALSE(events[1].Playing);
+	CHECK(events[2].Playing);
+	CHECK(events[2].PlaybackGeneration == 7);
+	CHECK(rig.Engine.PollPlaybackEvents(events) == 0);
+}
+
+TEST_CASE(
+	"seek refusals and stale incarnations leave the current player intact", "[audio][mixer][playback_events]"
+) {
+	using namespace engine::audio;
+	Rig rig;
+	rig.Engine.EnablePlaybackEvents();
+	Command missing = Act(CommandKind::Seek, rig.Player);
+	rig.Post(missing);
+	rig.Engine.ApplyPending();
+	std::array<PlaybackEvent, 1> missingEvent{};
+	REQUIRE(rig.Engine.PollPlaybackEvents(missingEvent) == 1);
+	CHECK(missingEvent[0].Status == PlaybackStatus::MissingSource);
+	Command sound = SetSound(rig.Player, Ramp(8));
+	sound.PlaybackGeneration = 2;
+	rig.Post(sound);
+	rig.Engine.ApplyPending();
+	std::array<PlaybackEvent, 16> events{};
+	REQUIRE(rig.Engine.PollPlaybackEvents(events) == 1);
+	for (const double value :
+		 {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(), 8.5}) {
+		Command seek = Act(CommandKind::Seek, rig.Player);
+		seek.PlaybackGeneration = 2;
+		seek.CursorFrames = value;
+		rig.Post(seek);
+	}
+	sound.PlaybackGeneration = 1;
+	rig.Post(sound);
+	sound.PlaybackGeneration = 2;
+	rig.Post(sound);
+	Command staleStop = Act(CommandKind::Stop, rig.Player);
+	staleStop.PlaybackGeneration = 1;
+	rig.Post(staleStop);
+	rig.Engine.ApplyPending();
+	REQUIRE(rig.Engine.PollPlaybackEvents(events) == 7);
+	for (size_t index = 0; index < 3; ++index)
+		CHECK(events[index].Status == PlaybackStatus::InvalidCursor);
+	CHECK(events[3].Status == PlaybackStatus::OutOfRange);
+	for (size_t index = 4; index < 7; ++index) {
+		CHECK(events[index].Status == PlaybackStatus::StaleGeneration);
+		CHECK(events[index].PlaybackGeneration == 2);
+	}
+	CHECK(events[4].Applied.RequestedPlaybackGeneration == 1);
+	CHECK(rig.Engine.Graph().Find(rig.Player)->Cursor == 0.0);
+	Command seek = Act(CommandKind::Seek, rig.Player);
+	seek.CursorFrames = 8.0;
+	seek.PlaybackGeneration = 2;
+	rig.Post(seek);
+	Command play = Act(CommandKind::Play, rig.Player);
+	play.PlaybackGeneration = 2;
+	rig.Post(play);
+	rig.Render();
+	REQUIRE(rig.Engine.PollPlaybackEvents(events) == 3);
+	CHECK(events[0].Status == PlaybackStatus::Applied);
+	CHECK(events[2].NaturalCompletion);
+	CHECK(events[2].Finished.AtSample == 0);
+	CHECK(events[2].Finished.PlaybackGeneration == 2);
+	CHECK_FALSE(events[2].Playing);
+	Command rewind = Act(CommandKind::Rewind, rig.Player);
+	rewind.PlaybackGeneration = 2;
+	rig.Post(rewind);
+	rig.Post(play);
+	rig.Render();
+	REQUIRE(rig.Engine.PollPlaybackEvents(events) == 3);
+	CHECK(events[2].Finished.AtSample == BLOCK + 8);
+	Command remove = Act(CommandKind::RemoveNode, rig.Player);
+	remove.PlaybackGeneration = 2;
+	rig.Post(remove);
+	rig.Engine.ApplyPending();
+	REQUIRE(rig.Engine.PollPlaybackEvents(events) == 1);
+	CHECK_FALSE(events[0].Present);
+	CHECK(events[0].PlaybackGeneration == 2);
+	rig.Post(seek);
+	rig.Engine.ApplyPending();
+	REQUIRE(rig.Engine.PollPlaybackEvents(events) == 1);
+	CHECK(events[0].Status == PlaybackStatus::MissingTarget);
+}
+
+TEST_CASE("playback copies are opt in and report bounded overflow", "[audio][mixer][playback_events]") {
+	using namespace engine::audio;
+	Rig rig;
+	std::array<PlaybackEvent, 19> events{};
+	for (size_t index = 0; index < AudioMixer::PLAYBACK_EVENT_CAPACITY + 11; ++index) {
+		rig.Post(SetValue(CommandKind::SetGain, rig.Player, 0.5f));
+		rig.Engine.ApplyPending();
+	}
+	CHECK(rig.Engine.PollPlaybackEvents(events) == 0);
+	CHECK(rig.Engine.PlaybackEventsDropped() == 0);
+	rig.Engine.EnablePlaybackEvents();
+	for (size_t index = 0; index < AudioMixer::PLAYBACK_EVENT_CAPACITY + 11; ++index) {
+		Command command = SetValue(CommandKind::SetGain, rig.Player, 0.75f);
+		command.AtSample = index;
+		rig.Post(command);
+		rig.Engine.ApplyPending();
+	}
+	CHECK(rig.Engine.PlaybackEventsDropped() == 11);
+	size_t received = 0;
+	for (size_t count = rig.Engine.PollPlaybackEvents(events); count != 0;
+		 count = rig.Engine.PollPlaybackEvents(events)) {
+		for (size_t index = 0; index < count; ++index)
+			CHECK(events[index].Applied.RequestedSample == received++);
+	}
+	CHECK(received == AudioMixer::PLAYBACK_EVENT_CAPACITY);
+	CHECK(rig.Engine.Graph().Find(rig.Player)->Gain == 0.75f);
+	CHECK(rig.Engine.Commands().Free() == CommandQueue::CAPACITY - 1);
+}
+
+TEST_CASE(
+	"a host polls playback copies while the render owner consumes commands", "[audio][mixer][playback_events]"
+) {
+	using namespace engine::audio;
+	Rig rig;
+	rig.Engine.EnablePlaybackEvents();
+	constexpr size_t total = 8192;
+	std::jthread owner([&](std::stop_token stop) {
+		while (!stop.stop_requested()) {
+			rig.Engine.Render(rig.Out);
+			std::this_thread::yield();
+		}
+	});
+	std::array<PlaybackEvent, 17> events{};
+	size_t posted = 0;
+	size_t received = 0;
+	bool ordered = true;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+	while (received < total && std::chrono::steady_clock::now() < deadline) {
+		while (posted < total && posted - received < 128 && rig.Engine.Commands().Free() > 0) {
+			Command command = SetValue(CommandKind::SetGain, rig.Player, 0.5f);
+			command.AtSample = posted;
+			REQUIRE(rig.Engine.Commands().Post(command));
+			++posted;
+		}
+		const size_t count = rig.Engine.PollPlaybackEvents(events);
+		for (size_t index = 0; index < count; ++index) {
+			ordered = ordered && events[index].Applied.RequestedSample == received && events[index].Present &&
+					  events[index].Applied.Target == rig.Player &&
+					  events[index].Status == PlaybackStatus::Applied;
+			++received;
+		}
+		std::this_thread::yield();
+	}
+	owner.request_stop();
+	owner.join();
+	CHECK(ordered);
+	CHECK(received == total);
+	CHECK(rig.Engine.PlaybackEventsDropped() == 0);
+	CHECK(rig.Engine.Commands().Dropped() == 0);
 }

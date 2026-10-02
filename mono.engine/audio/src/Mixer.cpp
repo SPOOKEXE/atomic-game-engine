@@ -62,7 +62,19 @@ namespace engine::audio {
 		}
 	}
 
-	void AudioMixer::Apply(const Command &command) {
+	PlaybackStatus AudioMixer::Apply(const Command &command) {
+		Node *target = Nodes.Find(command.Target);
+		if (command.Kind != CommandKind::None && command.Kind != CommandKind::AddNode &&
+			command.Kind != CommandKind::SetListener && target == nullptr) {
+			return PlaybackStatus::MissingTarget;
+		}
+		if (target != nullptr && command.PlaybackGeneration != 0 && command.Kind != CommandKind::AddNode &&
+			command.Kind != CommandKind::SetListener) {
+			const bool stale = command.Kind == CommandKind::SetSound
+								   ? command.PlaybackGeneration <= target->PlaybackGeneration
+								   : command.PlaybackGeneration != target->PlaybackGeneration;
+			if (stale) return PlaybackStatus::StaleGeneration;
+		}
 		switch (command.Kind) {
 		case CommandKind::None:
 			break;
@@ -71,24 +83,25 @@ namespace engine::audio {
 			// The producer already named it, which is what makes creation
 			// fire-and-forget. `AudioGraph::Add` mints its own ids, so the
 			// command's id is adopted here instead.
-			Nodes.Adopt(command.Target, command.Node);
+			if (!Nodes.Adopt(command.Target, command.Node)) return PlaybackStatus::Refused;
 			break;
 
 		case CommandKind::RemoveNode:
-			Nodes.Remove(command.Target);
+			if (!Nodes.Remove(command.Target)) return PlaybackStatus::Refused;
 			break;
 
 		case CommandKind::Connect:
-			Nodes.Connect(command.Target, command.Second);
+			if (!Nodes.Connect(command.Target, command.Second)) return PlaybackStatus::Refused;
 			break;
 
 		case CommandKind::Disconnect:
-			Nodes.Disconnect(command.Target, command.Second);
+			if (!Nodes.Disconnect(command.Target, command.Second)) return PlaybackStatus::Refused;
 			break;
 
 		case CommandKind::SetSound:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				node->Sound = command.Sound;
+				node->PlaybackGeneration = command.PlaybackGeneration;
 				// Rewound with the sound. A cursor left where it was would
 				// start the new sound part way through, which is never what
 				// was meant.
@@ -97,25 +110,34 @@ namespace engine::audio {
 			break;
 
 		case CommandKind::Play:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				node->Playing = true;
 			}
 			break;
 
 		case CommandKind::Stop:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				node->Playing = false;
 			}
 			break;
 
+		case CommandKind::Seek:
+			if (!std::isfinite(command.CursorFrames) || command.CursorFrames < 0.0)
+				return PlaybackStatus::InvalidCursor;
+			if (target->Kind != NodeKind::Player || !target->Sound) return PlaybackStatus::MissingSource;
+			if (command.CursorFrames > static_cast<double>(target->Sound->Frames()))
+				return PlaybackStatus::OutOfRange;
+			target->Cursor = command.CursorFrames;
+			break;
+
 		case CommandKind::Rewind:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				node->Cursor = 0.0;
 			}
 			break;
 
 		case CommandKind::SetGain:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				// Negative gain is an inversion rather than silence, and
 				// almost never meant. Clamped at zero; there is no ceiling,
 				// because a deliberate boost is legitimate and the float
@@ -125,25 +147,25 @@ namespace engine::audio {
 			break;
 
 		case CommandKind::SetPan:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				node->Pan = std::clamp(command.Value, -1.0f, 1.0f);
 			}
 			break;
 
 		case CommandKind::SetMuted:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				node->Muted = command.Flag;
 			}
 			break;
 
 		case CommandKind::SetLooping:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				node->Looping = command.Flag;
 			}
 			break;
 
 		case CommandKind::SetPlacement:
-			if (Node *node = Nodes.Find(command.Target)) {
+			if (Node *node = target) {
 				node->Placement = command.Placement;
 			}
 			break;
@@ -152,6 +174,77 @@ namespace engine::audio {
 			Nodes.Listener() = command.Pose;
 			break;
 		}
+		return PlaybackStatus::Applied;
+	}
+
+	void AudioMixer::PublishPlaybackEvent(const PlaybackEvent &event) {
+		if (!PlaybackEventsEnabled) return;
+		const size_t write = PlaybackWrite.load(std::memory_order_relaxed);
+		const size_t read = PlaybackRead.load(std::memory_order_acquire);
+		if (write - read == PLAYBACK_EVENT_CAPACITY) {
+			MissedPlaybackEvents.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
+		PlaybackEvents[write & (PLAYBACK_EVENT_CAPACITY - 1)] = event;
+		PlaybackWrite.store(write + 1, std::memory_order_release);
+	}
+
+	size_t AudioMixer::PollPlaybackEvents(std::span<PlaybackEvent> into) {
+		const size_t write = PlaybackWrite.load(std::memory_order_acquire);
+		const size_t read = PlaybackRead.load(std::memory_order_relaxed);
+		const size_t count = std::min(into.size(), write - read);
+		for (size_t index = 0; index < count; ++index)
+			into[index] = PlaybackEvents[(read + index) & (PLAYBACK_EVENT_CAPACITY - 1)];
+		PlaybackRead.store(read + count, std::memory_order_release);
+		return count;
+	}
+
+	void AudioMixer::ApplyRecorded(const Command &command, size_t offset) {
+		const Node *before = Nodes.Find(command.Target);
+		const uint64_t priorGeneration = before == nullptr ? 0 : before->PlaybackGeneration;
+		const PlaybackStatus status = Apply(command);
+		const Node *after = Nodes.Find(command.Target);
+		const AppliedAudioCommand applied{
+			.Kind = command.Kind,
+			.Target = command.Target,
+			.Related = command.Second,
+			.PlaybackGeneration = after == nullptr ? priorGeneration : after->PlaybackGeneration,
+			.RequestedPlaybackGeneration = command.PlaybackGeneration,
+			.RequestedSample = command.AtSample,
+			.AppliedSample = Rendered + offset,
+			.OffsetFrames = offset,
+			.Status = status,
+		};
+		AppliedCommands[AppliedCommandCount++] = applied;
+		if (!PlaybackEventsEnabled) return;
+		PublishPlaybackEvent({
+			.Applied = applied,
+			.Status = applied.Status,
+			.PlaybackGeneration = applied.PlaybackGeneration,
+			.Present = after != nullptr,
+			.Playing = after != nullptr && after->Playing,
+			.CursorFrames = after == nullptr ? 0.0 : after->Cursor,
+		});
+	}
+
+	void AudioMixer::FinishPlayer(NodeId id, Node &node, size_t offset) {
+		const FinishedAudioSource finished{
+			.Source = id,
+			.PlaybackGeneration = node.PlaybackGeneration,
+			.AtSample = Rendered + offset,
+			.OffsetFrames = offset,
+		};
+		FinishedSources[FinishedSourceCount++] = finished;
+		++FinishedThisBlock;
+		if (!PlaybackEventsEnabled) return;
+		PublishPlaybackEvent({
+			.NaturalCompletion = true,
+			.Finished = finished,
+			.PlaybackGeneration = node.PlaybackGeneration,
+			.Present = true,
+			.Playing = false,
+			.CursorFrames = node.Cursor,
+		});
 	}
 
 	size_t AudioMixer::ApplyPending() {
@@ -161,7 +254,7 @@ namespace engine::audio {
 		Taken.clear();
 		Queue.Drain(Taken);
 		for (const Command &command : Taken) {
-			Apply(command);
+			ApplyRecorded(command, 0);
 		}
 		EnsureScratch();
 		return Taken.size();
@@ -200,12 +293,7 @@ namespace engine::audio {
 				if (node->Cursor >= static_cast<double>(sourceFrames)) {
 					if (!node->Looping) {
 						node->Playing = false;
-						FinishedSources[FinishedSourceCount++] = FinishedAudioSource{
-							.Source = id,
-							.AtSample = Rendered + blockOffset + frame,
-							.OffsetFrames = blockOffset + frame,
-						};
-						++FinishedThisBlock;
+						FinishPlayer(id, *node, blockOffset + frame);
 						break;
 					}
 					// Wrapped by subtraction rather than reset to zero, so a
@@ -234,12 +322,7 @@ namespace engine::audio {
 			// the following callback.
 			if (node->Playing && !node->Looping && node->Cursor >= static_cast<double>(sourceFrames)) {
 				node->Playing = false;
-				FinishedSources[FinishedSourceCount++] = FinishedAudioSource{
-					.Source = id,
-					.AtSample = Rendered + blockOffset + frames,
-					.OffsetFrames = blockOffset + frames,
-				};
-				++FinishedThisBlock;
+				FinishPlayer(id, *node, blockOffset + frames);
 			}
 			return;
 		}
@@ -390,15 +473,7 @@ namespace engine::audio {
 			// Apply everything due exactly here.
 			while (next < Schedule.size() && Schedule[next].Offset <= at) {
 				const Due &due = Schedule[next];
-				AppliedCommands[AppliedCommandCount++] = AppliedAudioCommand{
-					.Kind = due.What.Kind,
-					.Target = due.What.Target,
-					.Related = due.What.Second,
-					.RequestedSample = due.What.AtSample,
-					.AppliedSample = Rendered + at,
-					.OffsetFrames = at,
-				};
-				Apply(Schedule[next].What);
+				ApplyRecorded(due.What, at);
 				++report.Applied;
 				++next;
 			}
@@ -418,15 +493,7 @@ namespace engine::audio {
 		// dropped.
 		while (next < Schedule.size()) {
 			const Due &due = Schedule[next];
-			AppliedCommands[AppliedCommandCount++] = AppliedAudioCommand{
-				.Kind = due.What.Kind,
-				.Target = due.What.Target,
-				.Related = due.What.Second,
-				.RequestedSample = due.What.AtSample,
-				.AppliedSample = Rendered + frames,
-				.OffsetFrames = frames,
-			};
-			Apply(Schedule[next].What);
+			ApplyRecorded(due.What, frames);
 			++report.Applied;
 			++next;
 		}

@@ -168,6 +168,9 @@ namespace engine::audio {
 		// is the right default and not something to make impossible.
 		double Cursor = 0.0;
 
+		// Host incarnation established by the last SetSound command.
+		uint64_t PlaybackGeneration = 0;
+
 		// `Player`: whether it is advancing.
 		bool Playing = false;
 

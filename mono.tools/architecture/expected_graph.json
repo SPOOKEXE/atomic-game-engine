@@ -66,6 +66,7 @@
       "tier": "shared",
       "links": [
         "assets",
+        "audiocodec",
         "bake",
         "bakegraph",
         "core",
@@ -83,9 +84,17 @@
       "tier": "client",
       "layer": 12,
       "links": [
+        "audiocodec",
         "core"
       ],
       "requires": "MONO_BUILD_CLIENT"
+    },
+    "audiocodec": {
+      "tier": "shared",
+      "layer": 8,
+      "links": [
+        "core"
+      ]
     },
     "bake": {
       "tier": "shared",
@@ -123,6 +132,7 @@
       "links": [
         "assets",
         "audio",
+        "audiocodec",
         "bakegraph",
         "collision",
         "control",
@@ -311,6 +321,7 @@
       "tier": "shared",
       "layer": 9,
       "links": [
+        "audiocodec",
         "core"
       ]
     },
@@ -319,6 +330,7 @@
       "layer": 10,
       "links": [
         "assets",
+        "audiocodec",
         "bake",
         "bakegraph",
         "core",
@@ -328,6 +340,7 @@
     "imagegraph_runner": {
       "tier": "shared",
       "links": [
+        "audiocodec",
         "core",
         "imagegraph"
       ]
@@ -451,6 +464,7 @@
       "tier": "shared",
       "links": [
         "assets",
+        "audiocodec",
         "bake",
         "bakegraph",
         "core",
@@ -638,6 +652,7 @@
         "assetc",
         "assets",
         "audio",
+        "audiocodec",
         "bake",
         "bakegraph",
         "cdn",
@@ -715,6 +730,7 @@
       "links": [
         "assets",
         "audio",
+        "audiocodec",
         "bakegraph",
         "cdn",
         "client",
@@ -790,6 +806,7 @@
       "links": [
         "assets",
         "audio",
+        "audiocodec",
         "bakegraph",
         "collision",
         "control",
@@ -885,6 +902,7 @@
         "assetc",
         "assets",
         "audio",
+        "audiocodec",
         "bake",
         "bakegraph",
         "cdn",
@@ -930,6 +948,7 @@
       "links": [
         "assets",
         "audio",
+        "audiocodec",
         "bakegraph",
         "cdn",
         "client",

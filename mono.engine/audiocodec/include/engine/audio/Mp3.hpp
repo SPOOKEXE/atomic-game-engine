@@ -25,7 +25,7 @@
 // and shifting every channel after them. Refusing is the only one of the three
 // that cannot be silently wrong.
 //
-// @tier L12 · client
+// @tier L8 · shared
 
 #include <engine/audio/Sample.hpp>
 
