@@ -127,6 +127,34 @@ function(mono_vendor_system)
 	endforeach()
 endfunction()
 
+# --- Box2D ------------------------------------------------------------------
+# Build the pinned solver without the upstream samples, downloads or output-directory overrides.
+function(mono_configure_box2d)
+	if(NOT EXISTS "${MONO_VENDOR}/box2d/src/CMakeLists.txt")
+		message(FATAL_ERROR "mono.vendor/box2d is missing. Run `just setup`.")
+	endif()
+	set(PROJECT_VERSION "3.1.0")
+	set(PROJECT_VERSION_MAJOR 3)
+	set(BOX2D_VERSION "3.1.0")
+	set(BUILD_SHARED_LIBS OFF)
+	set(BOX2D_PROFILE OFF)
+	set(BOX2D_VALIDATE OFF)
+	set(BOX2D_DISABLE_SIMD OFF)
+	set(BOX2D_AVX2 OFF)
+	add_subdirectory("${MONO_VENDOR}/box2d/src" "${CMAKE_BINARY_DIR}/mono.vendor/box2d" EXCLUDE_FROM_ALL)
+	set_property(TARGET box2d PROPERTY COMPILE_WARNING_AS_ERROR OFF)
+	# Upstream also adds -Werror explicitly. Preserve warnings without extending MONO_WERROR to vendors.
+	get_target_property(box2d_options box2d COMPILE_OPTIONS)
+	list(REMOVE_ITEM box2d_options -Werror)
+	set_property(TARGET box2d PROPERTY COMPILE_OPTIONS "${box2d_options}")
+	if(NOT MSVC)
+		target_compile_options(box2d PRIVATE -ffp-contract=off)
+	endif()
+	mono_vendor_system(box2d)
+	add_library(Vendor::box2d ALIAS box2d)
+endfunction()
+mono_configure_box2d()
+
 # --- SDL3 -------------------------------------------------------------------
 # Only when a client-tier program is being built. A server or delivery-service
 # configure has to work on a machine with no Vulkan SDK and no SDL development

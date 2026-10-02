@@ -28,6 +28,7 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [SDL3](https://github.com/libsdl-org/SDL) | Zlib | window, input, GPU abstraction | client only |
 | [MoltenVK](https://github.com/KhronosGroup/MoltenVK) | Apache-2.0 | Vulkan portability over Metal | Apple client and Studio builds |
 | [glm](https://github.com/g-truc/glm) | MIT / Happy Bunny | the maths under `core/types` | yes |
+| [Box2D](https://github.com/erincatto/box2d/tree/v3.1.0) | MIT | private 2D solver for the explicit Composer rigid-body host, pinned to 3.1.0 | where the rigid-body host is linked |
 | [spdlog](https://github.com/gabime/spdlog) | MIT (bundled fmt is MIT) | logging behind `core::Log` | yes |
 | [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
 | [Catch2](https://github.com/catchorg/Catch2) | BSL-1.0 | the test framework | no - tests only |

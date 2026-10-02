@@ -300,3 +300,6 @@
 [submodule "mono.vendor/accesskit-c"]
 	path = mono.vendor/accesskit-c
 	url = https://github.com/AccessKit/accesskit-c
+[submodule "mono.vendor/box2d"]
+	path = mono.vendor/box2d
+	url = https://github.com/erincatto/box2d.git
