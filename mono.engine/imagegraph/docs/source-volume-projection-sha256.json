@@ -1,0 +1,37 @@
+{
+  "commit": "b69eca232217360cf1502ef0223523d818606652",
+  "files": [
+    {
+      "path": "scripts/node_surface_project_volume_3d/node_surface_project_volume_3d.gml",
+      "sha256": "4da2dcfcbeec276079e58ec6863230b342c2d3cdc58a3592e30ff77161132426"
+    },
+    {
+      "path": "scripts/node_processor/node_processor.gml",
+      "sha256": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc"
+    },
+    {
+      "path": "scripts/node_value_dimension/node_value_dimension.gml",
+      "sha256": "7a31f24df14a2fe19f5566ab7d2e919f792faccac83ecbdff7f59a91e93f54e9"
+    },
+    {
+      "path": "scripts/shader_functions/shader_functions.gml",
+      "sha256": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7"
+    },
+    {
+      "path": "scripts/_draw_defines/_draw_defines.gml",
+      "sha256": "f4702dd2337ca20635d699456b6ef27c11ff1aa890f91610629b4d91b94eb51c"
+    },
+    {
+      "path": "scripts/draw_sprite_ext_override/draw_sprite_ext_override.gml",
+      "sha256": "82ab54767e1b3b9ecfc1221489658e328a227d5b8cdde53c8f8c964c9db05f36"
+    },
+    {
+      "path": "shaders/sh_surface_project_volume_3d/sh_surface_project_volume_3d.fsh",
+      "sha256": "19eacecb76a180f6c62a7fa69fdf8199c9c0b41c9bab59df23a5fd1e0e6bdc8d"
+    },
+    {
+      "path": "shaders/sh_surface_project_volume_3d/sh_surface_project_volume_3d.vsh",
+      "sha256": "accd9b00f5fbd555c11caf31b9ba511e38165fb19c9cfd9685511a1a04cbb813"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# Source volume projection
+
+`pc.surface_project_volume_3_d` has a bounded CPU port of its source GLSL volume walk. The pinned source commit is `b69eca232217360cf1502ef0223523d818606652`. `source-volume-projection-sha256.json` identifies the exact constructor, shaders and shared helpers used for this port.
+
+The processor accepts Top, Front and Right surfaces, density and exponent, Euler view angle and position, orthographic scale or perspective FOV and distance, level, base colour, density gradient, side texture and colour threshold. Dimension, project units, inherited output depth, interpolation and ordinary processor array routing follow the existing core helpers.
+
+The source tests the original presence of each surface when selecting its fallback, then binds Front to the shader's Top sampler, Right to Front and Top to Side. The fallback Front dimensions determine voxel size, while output dimensions determine the view aspect. These swaps are retained. The camera inverts Rx * Ry * Rz, then subtracts position. Near-zero direction components become positive `0.001` without renormalizing.
+
+Each walk steps every tied voxel boundary. RGB means and alpha jointly determine density. The source accumulates both density and attenuated opacity into volume, and records side-texture impact coordinates only while remaining transmission exceeds the colour threshold. Side texture samples those coordinates' x and y regardless of the traversed face. Gradient modes 0 through 6 use source float uniforms and mixing equations, including the source clamped LMS and RGB transforms. GLSL uploads are limited to 64 keys.
+
+The output begins transparent and uses the source ordinary alpha blend. Fixed point fragment values clamp before blending. Floating outputs retain finite signed/HDR values. Sampling follows the existing owned surface decoder with nearest or bilinear clamp reads. Bicubic and Lanczos choices enable bilinear filtering here because this shader calls plain `texture2D`, not its included interpolation wrapper. Oversample has no effect on these reads.
+
+Aggregate work is limited to 64 million gradient/texel visits across all selected processor rows. Admission uses output pixels and the complete worst-case traversal before allocating the output. Output storage uses the common evaluation byte ledger. A failure leaves the caller's previous result unchanged.
+
+Undefined or ambient cases return a named diagnostic: no source surfaces (the source retains an existing uncleared output), invalid projection, singular/nonfinite camera uniforms, collapsed level range, unsupported gradient upload, undefined density powers, nonfinite accumulation or gradient math, and nonfinite/overflowing output storage. CMYK interpolation with a black endpoint preserves the source division-by-zero boundary. Negative density bases and zero bases with nonpositive exponent are undefined by [GLSL 3.30](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.3.30.pdf). The source alpha blend is described by [GameMaker blend modes](https://manual.gamemaker.io/lts/en/Additional_Information/Guide_To_Using_Blendmodes.htm).
+
+This is a CPU execution profile. GPU interpolation precision, shader compiler rounding, native single-channel texture swizzles, floating blend factors, ambient draw tint and licensed desktop visual comparisons remain open verification gates. Fixtures exercise actual compiled graphs and persistence, with independent axial density/blend goldens, sampler swaps, ordered array rows, camera changes, gradient branches and atomic aggregate/byte-budget refusal. No GPU or desktop parity claim is made.
+
+The mixed-header outside linked run is excluded. The rebuilt release55 core passed all 1,515 cases; the focused volume projection run passed all 7 cases and 154 assertions. Retained logs are `core-release-55-initial.log` and `volume-release-55-focused.log` under `.cache/build/dev/evidence/pixel-composer-2026-10-02/`.

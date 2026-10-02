@@ -46,7 +46,7 @@ Milestone labels describe development scope, not release versions.
   4. Edit graphs, groups, keys and tiles with atomic undo/redo; publish Dopesheet selection after history accepts the edit; preserve saved rigid meshes and metadata.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
   6. Run bounded Lua and recorded-random export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
-  7. Bind rigid and 3D outputs, source mesh availability and six-face skyboxes; cook Composer shaders, retain live ShaderScript compilation and queue camera/SDF jobs. GPU verification remains open.
+  7. Evaluate bounded volume projection; bind rigid/3D outputs, mesh availability and skyboxes; cook Composer shaders and queue camera/SDF jobs. Keep live ShaderScript compilation. GPU verification remains open.
   8. Package source projects and authored scenes; profile scene, simulation, atlas, palette and filter CPU workloads. Visual acceptance remains open.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):

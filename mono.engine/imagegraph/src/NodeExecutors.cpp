@@ -54,6 +54,7 @@ namespace engine::imagegraph::detail {
 					  SourceNormalMapExecutors(),
 					  SourceBevelExecutors(),
 					  SourcePixelBevelExecutors(),
+					  SourceVolumeProjectionExecutors(),
 					  SourceAtlasExecutors(),
 					  SourceAtlasPixelExecutors(),
 					  SourcePaletteExecutors(),
