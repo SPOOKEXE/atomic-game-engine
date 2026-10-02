@@ -12,7 +12,7 @@ EXTRACTOR = REPOSITORY / "scripts/pixel-composer/extract-source.py"
 
 
 class PixelComposerExtractSourceTest(unittest.TestCase):
-    def extract(self, root: Path) -> dict:
+    def extract(self, root: Path, include_condition: bool = False) -> dict:
         script_root = root / "source"
         files = {
             "scripts/scrollBox/scrollBox.gml": "",
@@ -192,6 +192,52 @@ function Node_Fn_WaveTable(_x, _y) : Node(_x, _y) constructor {
 }
 """,
         }
+        if include_condition:
+            files["scripts/node_value_enum_scroll/node_value_enum_scroll.gml"] = '''
+#macro nodeValue_EScroll nodeValue_Enum_Scroll
+function __NodeValue_Enum_Scroll(_name, _node, _value, _data) : NodeValue(_name, _node, CONNECT_TYPE.input, VALUE_TYPE.integer, _value, "") constructor {
+    clamp_range = true;
+    static isConnectableStrict = function() { return false; }
+    static lerpAnimKeys = function(from, to, rat) { return lerp(from.value, to.value, rat); }
+    static getValue = function() { if(is_real(val)) val = clamp(val, 0, choicesAmount - 1); return val; }
+    static setUnclamp = function() { clamp_range = false; }
+}
+'''
+            files["scripts/node_value/node_value.gml"] = '''
+function NodeValue(_name, _node, _connect, _type, _value) constructor {
+    array_depth = 0;
+    static isConnectable = function(value) { typeCompatible(value.type, type); searchNodeBackward(); return connect_type; }
+}
+'''
+            files["scripts/node_value_types/node_value_types.gml"] = '''
+function typeCompatible(fromType, toType) { value_bit(fromType); value_type_directional(fromType, toType); }
+'''
+            files["scripts/panel_graph/panel_graph.gml"] = '''
+function suggest(input) { if(!input.isConnectableStrict(value)) return false; }
+'''
+            files["scripts/scrollBox/scrollBox.gml"] = '''
+function __enum_array_gen(arr, __spr) {
+    return array_map(arr, function(v,i) { return new scrollItem(v, __spr, i); });
+}
+function scrollItem(_name, _spr, _index) constructor { name = _name; }
+function scrollBox(_data) : widget() constructor {
+    until(data_list[ind] != -1 || ind == curr_val) { ind++; }
+}
+'''
+            files["scripts/node_condition/node_condition.gml"] = '''
+function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) constructor {
+    cond_array = __enum_array_gen(["Equal", "Not equal", "Less ", "Less or equal ", "Greater ", "Greater or equal"], s_node_condition_type);
+    newInput(1, nodeValue_EScroll("Condition", 0, cond_array)).rejectArray();
+    switch(_cond) {
+        case 0: res = _chck == _valu; break;
+        case 1: res = _chck != _valu; break;
+        case 2: res = _chck < _valu; break;
+        case 3: res = _chck <= _valu; break;
+        case 4: res = _chck > _valu; break;
+        case 5: res = _chck >= _valu; break;
+    }
+}
+'''
         for relative, content in files.items():
             path = script_root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,12 +260,22 @@ function Node_Fn_WaveTable(_x, _y) : Node(_x, _y) constructor {
                 "Node_Fn_WaveTable",
                 "Node_Points_Remap",
                 "Node_Points_Triangulate",
+                *(('Node_Condition',) if include_condition else ()),
             ):
                 writer.writerow({"node_id": node})
 
         output = root / "source-inputs.json"
         subprocess.run([sys.executable, str(EXTRACTOR), str(script_root), str(matrix), str(output)], check=True)
         return json.loads(output.read_text(encoding="utf-8"))
+
+    def test_condition_extraction_recovers_exact_six_source_choices(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary), include_condition=True)
+        condition = next(item for item in snapshot["nodes"]["Node_Condition"]["inputs"] if item["name"] == "Condition")
+        self.assertEqual(["Equal", "Not equal", "Less ", "Less or equal ", "Greater ", "Greater or equal"], condition["choices"])
+        self.assertEqual(list(range(6)), [entry["choice_index"] for entry in condition["source_choices"]["entries"]])
+        self.assertEqual(6, condition["source_behavior"]["choice_clamp"]["choice_count"])
+        self.assertRegex(snapshot["source_choice_generated_evidence"]["cond_array"]["sha256"], r"^[0-9a-f]{64}$")
 
     def test_inherited_constructor_default_override_reaches_light_types(self):
         with tempfile.TemporaryDirectory() as temporary:
