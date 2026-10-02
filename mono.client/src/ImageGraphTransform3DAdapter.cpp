@@ -2,6 +2,8 @@
 
 #include "ImageGraphSurfaceFormat.hpp"
 
+#include <engine/imagegraphphysics/RigidReplay.hpp>
+
 #include <algorithm>
 #include <limits>
 #include <new>
@@ -81,7 +83,12 @@ namespace client::detail {
 		imagegraph::EvaluationSnapshot localSnapshot;
 		imagegraph::CapturedFeedbackHost localReplay;
 		auto &owner = replayOwner ? *replayOwner : localReplay;
+		imagegraphphysics::RigidProvider rigid;
 		imagegraph::EvaluationRequest clock{.Tick = tick, .Seed = seed, .HostProvider = hostProvider};
+		clock.RigidProvider = &rigid;
+		// Native client snapshots sample played frames, including fixed seeks.
+		clock.RigidPlaying = true;
+		clock.RigidFrameProgress = true;
 		if (!owner.PrepareNodeInputs(
 				document,
 				plan,

@@ -1,6 +1,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/imagegraphphysics/RigidReplay.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/TextureTable.hpp>
 #include <engine/scene/Atmosphere.hpp>
@@ -12,6 +13,7 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <client/ImageGraphRuntime.hpp>
@@ -23,6 +25,7 @@
 
 TEST_SUITE_ID("client.imagegraphruntime")
 TEST_DEPENDS("engine.imagegraph.document")
+TEST_DEPENDS("engine.imagegraphphysics.rigid_graph")
 TEST_DEPENDS("engine.scene.imagegraphbinding")
 TEST_DEPENDS("engine.render.liveimagepublisher")
 
@@ -56,6 +59,131 @@ namespace {
 			std::filesystem::remove_all(Assets);
 		}
 	};
+	engine::imagegraph::Document RigidGraph() {
+		using namespace engine::imagegraph;
+		Document document;
+		document.FormatVersion = 9;
+		document.Project = ProjectSettings{};
+		document.Project->SurfaceWidth = document.Project->SurfaceHeight = 32;
+		document.Nodes = {
+			{"owner",
+			 "pc.rigid_group_inline",
+			 "",
+			 {},
+			 {{"dimension", Vector2{32, 32}},
+			  {"dimension_unit", EnumValue{0}},
+			  {"simulation_scale", 16.},
+			  {"strength", 10.},
+			  {"use_wall", true},
+			  {"walls", int64_t{2}}}},
+			{"texture",
+			 "image.solid",
+			 "rigid",
+			 {},
+			 {{"width", int64_t{4}}, {"height", int64_t{4}}, {"colour", Colour{255, 80, 20, 255}}}},
+			{"body",
+			 "pc.rigid_object",
+			 "rigid",
+			 {},
+			 {{"spawn", true},
+			  {"spawn_frame", int64_t{0}},
+			  {"spawn_position", Vector2{16, 6}},
+			  {"spawn_position_unit", EnumValue{0}},
+			  {"fix_rotation", true}}},
+			{"render", "pc.rigid_render", "rigid", {}, {{"timestep", 100.}, {"round_position", true}}}
+		};
+		document.Nodes.back().DynamicInputs = {{"object_0", ValueType::Rigid, std::nullopt}};
+		Group group{"rigid", "Rigid native contact study"};
+		group.OwnerNodeId = "owner";
+		document.Groups = {group};
+		document.Links = {{"texture", "image", "body", "texture"}, {"body", "object", "render", "object_0"}};
+		document.Outputs = {{"final", "render", "surface_out"}};
+		return document;
+	}
+}
+
+TEST_CASE(
+	"Client rigid sampling seeks played frames and repeats reset deterministically",
+	"[client][imagegraph][rigid]"
+) {
+	GraphFile file;
+	{
+		std::ofstream out(client::ImageGraphDocumentPath(file.Assets, GRAPH));
+		out << engine::imagegraph::Write(RigidGraph());
+	}
+	const auto first = client::LoadImageGraphFrame(file.Assets, GRAPH, OUTPUT, 0);
+	INFO(first.Diagnostic.Message);
+	REQUIRE(first.Status == engine::imagegraph::Status::Ok);
+	CHECK(first.Animated);
+	CHECK(first.Image.Width == 32);
+	CHECK(first.Image.Height == 32);
+	CHECK(std::any_of(first.Image.Pixels.begin(), first.Image.Pixels.end(), [](uint8_t value) {
+		return value != 0;
+	}));
+	const auto later = client::LoadImageGraphFrame(file.Assets, GRAPH, OUTPUT, 12);
+	INFO(later.Diagnostic.Message);
+	REQUIRE(later.Status == engine::imagegraph::Status::Ok);
+	CHECK(later.Image.Pixels != first.Image.Pixels);
+	const auto repeated = client::LoadImageGraphFrame(file.Assets, GRAPH, OUTPUT, 12);
+	REQUIRE(repeated.Status == engine::imagegraph::Status::Ok);
+	CHECK(repeated.Image == later.Image);
+	const auto reset = client::LoadImageGraphFrame(file.Assets, GRAPH, OUTPUT, 0);
+	REQUIRE(reset.Status == engine::imagegraph::Status::Ok);
+	CHECK(reset.Image == first.Image);
+	CHECK(
+		client::LoadImageGraphFrame(file.Assets, GRAPH, OUTPUT, 4097).Status ==
+		engine::imagegraph::Status::LimitExceeded
+	);
+}
+
+TEST_CASE(
+	"Client rigid replay cache avoids provider work and keeps last good pixels on refusal",
+	"[client][imagegraph][rigid]"
+) {
+	using namespace engine::imagegraph;
+	struct CountingProvider final : SourceRigidProvider {
+		engine::imagegraphphysics::RigidProvider Physics;
+		size_t Calls = 0;
+		Status Replay(
+			const SourceRigidHistory &history,
+			uint64_t tick,
+			std::optional<SourceRigidEventPosition> position,
+			uint64_t bytes,
+			SourceRigidSnapshot &output,
+			Diagnostic &diagnostic
+		) override {
+			++Calls;
+			return Physics.Replay(history, tick, position, bytes, output, diagnostic);
+		}
+	} provider;
+	const auto document = RigidGraph();
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CapturedFeedbackHost host;
+	EvaluationRequest request;
+	request.Tick = 12;
+	request.RigidProvider = &provider;
+	request.RigidPlaying = request.RigidFrameProgress = true;
+	REQUIRE(host.Prepare(document, plan, 1, 0, request, diagnostic, Limits::MaximumEvaluationBytes, "final"));
+	REQUIRE(host.Output("final"));
+	const auto last = *host.Output("final");
+	REQUIRE(request.RigidReplay);
+	const auto journal = *request.RigidReplay;
+	const auto calls = provider.Calls;
+	REQUIRE(calls > 0);
+	REQUIRE(host.Prepare(document, plan, 1, 0, request, diagnostic, Limits::MaximumEvaluationBytes, "final"));
+	CHECK(provider.Calls == calls);
+	CHECK(*request.RigidReplay == journal);
+	CHECK(*host.Output("final") == last);
+	request.Tick = 4097;
+	CHECK_FALSE(
+		host.Prepare(document, plan, 1, 0, request, diagnostic, Limits::MaximumEvaluationBytes, "final")
+	);
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	CHECK(provider.Calls == calls);
+	CHECK(*request.RigidReplay == journal);
+	CHECK(*host.Output("final") == last);
 }
 
 TEST_CASE("native graph path is a bounded single stem", "[client][imagegraph]") {

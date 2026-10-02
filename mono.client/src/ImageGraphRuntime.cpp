@@ -9,6 +9,7 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/imagegraph/FeedbackReplay.hpp>
+#include <engine/imagegraphphysics/RigidReplay.hpp>
 #include <engine/render/ImageGraphTransform3D.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/Atmosphere.hpp>
@@ -178,8 +179,8 @@ namespace client {
 					   node.Type == "image.audio_recording" || node.Type == "image.captured" ||
 					   node.Type == "pc.audio_window" || node.Type == "pc.audio_loudness" ||
 					   node.Type == "pc.interlaced" || node.Type.starts_with("pc.verlet_sim_") ||
-					   node.Type.starts_with("pc.flip_") || node.Type.starts_with("pc.lua_") ||
-					   node.Type.starts_with("pc.pcx_");
+					   node.Type.starts_with("pc.flip_") || node.Type.starts_with("pc.rigid_") ||
+					   node.Type.starts_with("pc.lua_") || node.Type.starts_with("pc.pcx_");
 			});
 		}
 		ImageGraphFrameResult EvaluateCompiled(
@@ -197,9 +198,14 @@ namespace client {
 			auto &feedback = feedbackOwner ? *feedbackOwner : localFeedback;
 			auto localLua = hostProvider ? nullptr : LuaHostFor(document);
 			LuaMessageDrain drain{localLua.get()};
+			engine::imagegraphphysics::RigidProvider rigid;
 			engine::imagegraph::EvaluationRequest clock{
 				.Tick = tick, .Seed = seed, .HostProvider = hostProvider ? hostProvider : localLua.get()
 			};
+			clock.RigidProvider = &rigid;
+			// Client seeks sample played frames, including fixed ticks. Repeated samples use the host cache.
+			clock.RigidPlaying = true;
+			clock.RigidFrameProgress = true;
 			if (!feedback.Prepare(
 					document,
 					plan,

@@ -5,6 +5,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/SourceCamera3D.hpp>
 #include <engine/imagegraph/Surface.hpp>
+#include <engine/imagegraphphysics/RigidReplay.hpp>
 
 #include <array>
 #include <cmath>
@@ -131,7 +132,12 @@ namespace client::detail {
 		imagegraph::EvaluationSnapshot localSnapshot;
 		imagegraph::CapturedFeedbackHost localReplay;
 		auto &owner = replayOwner ? *replayOwner : localReplay;
+		imagegraphphysics::RigidProvider rigid;
 		imagegraph::EvaluationRequest clock{.Tick = tick, .Seed = seed, .HostProvider = hostProvider};
+		clock.RigidProvider = &rigid;
+		// Native client snapshots sample played frames, including fixed seeks.
+		clock.RigidPlaying = true;
+		clock.RigidFrameProgress = true;
 		if (!owner.PrepareNodeInputs(
 				document, plan, authoringRevision, seed, node.Id, clock, diagnostic, SDF_HOST_BYTES
 			))

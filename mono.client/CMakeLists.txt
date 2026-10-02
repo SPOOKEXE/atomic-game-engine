@@ -35,6 +35,8 @@ mono_add_library(client
 		# `Engine::render`.
 		Engine::graph
 		Engine::imagegraph
+		# Bounded host physics for authored Composer rigid-body journals.
+		Engine::imagegraphphysics
 
 		Engine::render
 
@@ -126,6 +128,9 @@ mono_add_library(client
 	# `VENDOR_PUBLIC` in the same commit.
 	VENDOR SDL3::SDL3 Vendor::json Vendor::accesskit-c
 )
+
+# Graph adapters keep their control readers private to each translation unit.
+set_target_properties(client_lib PROPERTIES UNITY_BUILD OFF)
 
 mono_add_program(client
 	TIER client
