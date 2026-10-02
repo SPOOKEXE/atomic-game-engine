@@ -10,25 +10,32 @@
 
 #include <engine/assets/Resample.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/assets/TexturePixel.hpp>
+#include <engine/core/Float16.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <span>
 #include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.assets.resample")
 
 using engine::assets::BuildMipChain;
+using engine::assets::LoadTexturePixel;
 using engine::assets::MipChainLevels;
 using engine::assets::MipExtent;
 using engine::assets::MipLevelCount;
 using engine::assets::ResizeImage;
 using engine::assets::TextureData;
 using engine::assets::TextureFormat;
+using engine::assets::TexturePixel;
 
 namespace {
 
@@ -123,6 +130,167 @@ TEST_CASE("a box filter averages rather than samples", "[assets][resample]") {
 	CHECK(
 		At(half, 0, 0) == Pixel{(255 + 0 + 0 + 255) / 4, (0 + 255 + 0 + 255) / 4, (0 + 0 + 255 + 0) / 4, 255}
 	);
+}
+
+TEST_CASE("typed resampling preserves packed channels and floating HDR values", "[assets][resample]") {
+	TextureData packed;
+	packed.Width = 2;
+	packed.Height = 1;
+	packed.Format = TextureFormat::RGBA4_UNORM;
+	packed.Pixels = {std::byte{0x21}, std::byte{0x43}, std::byte{0xef}, std::byte{0xdc}};
+	TextureData packedMean;
+	REQUIRE(ResizeImage(packed, 1, 1, packedMean));
+	// Nibbles are R/G/B/A from low to high. Half steps round up explicitly.
+	CHECK((packedMean.Pixels == std::vector<std::byte>{std::byte{0x88}, std::byte{0x98}}));
+
+	TextureData half;
+	half.Width = 2;
+	half.Height = 1;
+	half.Format = TextureFormat::RGBA16_FLOAT;
+	half.Pixels = {
+		std::byte{0x00},
+		std::byte{0x3c},
+		std::byte{0x00},
+		std::byte{0xc2},
+		std::byte{0x00},
+		std::byte{0x38},
+		std::byte{0x00},
+		std::byte{0x3c},
+		std::byte{0x00},
+		std::byte{0x42},
+		std::byte{0x00},
+		std::byte{0x45},
+		std::byte{0x00},
+		std::byte{0x3c},
+		std::byte{0x00},
+		std::byte{0x42}
+	};
+	TextureData halfMean;
+	REQUIRE(ResizeImage(half, 1, 1, halfMean));
+	TexturePixel halfValue{};
+	REQUIRE(LoadTexturePixel(TextureFormat::RGBA16_FLOAT, halfMean.Pixels, halfValue));
+	CHECK((halfValue == TexturePixel{2, 1, .75, 2}));
+
+	TextureData single;
+	single.Width = 2;
+	single.Height = 1;
+	single.Format = TextureFormat::R32_FLOAT;
+	single.Pixels.resize(8);
+	const std::array<float, 2> rValues{-2.0f, 6.0f};
+	for (size_t index = 0; index < rValues.size(); index++) {
+		const uint32_t bits = std::bit_cast<uint32_t>(rValues[index]);
+		for (size_t byte = 0; byte < 4; byte++)
+			single.Pixels[index * 4 + byte] = std::byte((bits >> (byte * 8)) & 0xffu);
+	}
+	TextureData singleMean;
+	REQUIRE(ResizeImage(single, 1, 1, singleMean));
+	TexturePixel singleValue{};
+	REQUIRE(LoadTexturePixel(TextureFormat::R32_FLOAT, singleMean.Pixels, singleValue));
+	CHECK((singleValue == TexturePixel{2, 0, 0, 1}));
+}
+
+TEST_CASE("box resampling covers every stored texture format", "[assets][resample]") {
+	auto resize = [](TextureFormat format, std::vector<std::byte> input, std::vector<std::byte> expected) {
+		TextureData source;
+		source.Width = 2;
+		source.Height = 1;
+		source.Format = format;
+		source.Pixels = std::move(input);
+		TextureData output;
+		REQUIRE(ResizeImage(source, 1, 1, output));
+		CHECK(output.Format == format);
+		CHECK(output.Pixels == expected);
+	};
+	const std::vector<std::byte> twoRgba8{
+		std::byte{0},
+		std::byte{2},
+		std::byte{4},
+		std::byte{6},
+		std::byte{2},
+		std::byte{4},
+		std::byte{6},
+		std::byte{8}
+	};
+	const std::vector<std::byte> meanRgba8{std::byte{1}, std::byte{3}, std::byte{5}, std::byte{7}};
+	resize(TextureFormat::RGBA8, twoRgba8, meanRgba8);
+	resize(TextureFormat::RGBA8_LINEAR, twoRgba8, meanRgba8);
+	resize(TextureFormat::R8, {std::byte{0}, std::byte{2}}, {std::byte{1}});
+	const std::vector<std::byte> twoRgba4{std::byte{0x20}, std::byte{0x64}, std::byte{0x42}, std::byte{0x86}};
+	const std::vector<std::byte> meanRgba4{std::byte{0x31}, std::byte{0x75}};
+	resize(TextureFormat::RGBA4_UNORM, twoRgba4, meanRgba4);
+	resize(TextureFormat::RGBA4_SRGB, twoRgba4, meanRgba4);
+	resize(
+		TextureFormat::RGBA16_FLOAT,
+		{std::byte{0x00},
+		 std::byte{0x3c},
+		 std::byte{0x00},
+		 std::byte{0xc2},
+		 std::byte{0x00},
+		 std::byte{0x38},
+		 std::byte{0x00},
+		 std::byte{0x3c},
+		 std::byte{0x00},
+		 std::byte{0x42},
+		 std::byte{0x00},
+		 std::byte{0x45},
+		 std::byte{0x00},
+		 std::byte{0x3c},
+		 std::byte{0x00},
+		 std::byte{0x42}},
+		{std::byte{0x00},
+		 std::byte{0x40},
+		 std::byte{0x00},
+		 std::byte{0x3c},
+		 std::byte{0x00},
+		 std::byte{0x3a},
+		 std::byte{0x00},
+		 std::byte{0x40}}
+	);
+	auto floatBytes = [](std::initializer_list<float> values) {
+		std::vector<std::byte> bytes;
+		for (float value : values) {
+			const uint32_t bits = std::bit_cast<uint32_t>(value);
+			for (uint32_t shift = 0; shift < 32; shift += 8)
+				bytes.push_back(std::byte((bits >> shift) & 0xffu));
+		}
+		return bytes;
+	};
+	resize(TextureFormat::RGBA32_FLOAT, floatBytes({0, -2, 1, -3, 4, 4, 3, 1}), floatBytes({2, 1, 2, -1}));
+	resize(
+		TextureFormat::R16_FLOAT,
+		{std::byte{0x00}, std::byte{0xc0}, std::byte{0x00}, std::byte{0x44}},
+		{std::byte{0x00}, std::byte{0x3c}}
+	);
+	resize(TextureFormat::R32_FLOAT, floatBytes({-4, 6}), floatBytes({1}));
+}
+
+TEST_CASE("typed mip levels use the same numeric filter without clamping", "[assets][resample]") {
+	TextureData source;
+	source.Width = 4;
+	source.Height = 1;
+	source.Format = TextureFormat::R16_FLOAT;
+	for (float value : {-2.0f, 0.0f, 2.0f, 4.0f}) {
+		const uint16_t bits = engine::core::EncodeFloat16(value);
+		source.Pixels.push_back(std::byte(bits & 0xffu));
+		source.Pixels.push_back(std::byte(bits >> 8));
+	}
+	TextureData chained = source;
+	REQUIRE(BuildMipChain(chained));
+	REQUIRE(chained.Mips.size() == 2);
+	TexturePixel first{}, second{}, final{};
+	REQUIRE(LoadTexturePixel(
+		TextureFormat::R16_FLOAT, std::span<const std::byte>(chained.Mips[0]).first(2), first
+	));
+	CHECK(first[0] == -1.0);
+	REQUIRE(LoadTexturePixel(
+		TextureFormat::R16_FLOAT, std::span<const std::byte>(chained.Mips[0]).subspan(2, 2), second
+	));
+	CHECK(second[0] == 3.0);
+	REQUIRE(LoadTexturePixel(
+		TextureFormat::R16_FLOAT, std::span<const std::byte>(chained.Mips[1]).first(2), final
+	));
+	CHECK(final[0] == 1.0);
+	CHECK(chained.Format == TextureFormat::R16_FLOAT);
 }
 
 TEST_CASE("resizing to nothing is refused", "[assets][resample]") {
