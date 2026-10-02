@@ -15,7 +15,7 @@ namespace engine::imagegraph {
 		uint64_t TextBytes(std::string_view text) {
 			return std::max(text.size(), std::string{}.capacity()) + 1;
 		}
-		bool Add(uint64_t &bytes, uint64_t extra) {
+		bool AddTransitionBytes(uint64_t &bytes, uint64_t extra) {
 			if (extra > UINT64_MAX - bytes) return false;
 			bytes += extra;
 			return true;
@@ -117,7 +117,8 @@ namespace engine::imagegraph {
 		const auto priorBytes =
 			&document == &result ? std::optional<uint64_t>{0} : DocumentRetainedPayloadBytes(result);
 		uint64_t borrowed = oldBytes.value_or(0);
-		if (!oldBytes || !priorBytes || !Add(borrowed, *priorBytes) || !Add(borrowed, replay.RetainedBytes()))
+		if (!oldBytes || !priorBytes || !AddTransitionBytes(borrowed, *priorBytes) ||
+			!AddTransitionBytes(borrowed, replay.RetainedBytes()))
 			return fail(Status::LimitExceeded, "source mode document payload exceeds bounds");
 		detail::EvaluationBudget budget(maximumBytes);
 		auto held = budget.Reserve(borrowed);
@@ -165,7 +166,7 @@ namespace engine::imagegraph {
 		if (status != Status::Ok) return status;
 		const auto candidateBytes = DocumentRetainedPayloadBytes(candidate);
 		uint64_t live = borrowed;
-		if (!candidateBytes || !Add(live, *candidateBytes) || !held->Resize(live))
+		if (!candidateBytes || !AddTransitionBytes(live, *candidateBytes) || !held->Resize(live))
 			return fail(Status::LimitExceeded, "source mode live document overlap exceeds bounds");
 		if (wasAnimated == transition.Animated) {
 			result = std::move(candidate);
@@ -195,7 +196,7 @@ namespace engine::imagegraph {
 			return fail(Status::LimitExceeded, "source mode declaration count exceeds bounds");
 		uint64_t modeBytes = TextBytes(transition.Port);
 		if (addedModes.size() == addedModes.capacity() &&
-			!Add(modeBytes, (addedModes.size() + 1) * sizeof(std::string)))
+			!AddTransitionBytes(modeBytes, (addedModes.size() + 1) * sizeof(std::string)))
 			return fail(Status::LimitExceeded, "source mode declaration allocation overflows");
 		auto modeCharge = budget.Reserve(modeBytes);
 		if (!modeCharge) return fail(Status::LimitExceeded, "source mode declaration exceeds budget");
@@ -212,7 +213,7 @@ namespace engine::imagegraph {
 						Status::UnsupportedExecution, "source mode transition requires source animator keys"
 					);
 				const auto bytes = KeyframePayloadBytes(key);
-				if (!bytes || !Add(sourceBytes, *bytes))
+				if (!bytes || !AddTransitionBytes(sourceBytes, *bytes))
 					return fail(Status::LimitExceeded, "source animator key payload exceeds bounds");
 				++count;
 			}
@@ -378,7 +379,7 @@ namespace engine::imagegraph {
 		for (const auto &key : candidate.Keyframes)
 			if (key.NodeId != ownerId || key.Port != transition.Port) {
 				const auto bytes = KeyframePayloadBytes(key);
-				if (!bytes || !Add(finalBytes, *bytes - sizeof(Keyframe)))
+				if (!bytes || !AddTransitionBytes(finalBytes, *bytes - sizeof(Keyframe)))
 					return fail(Status::LimitExceeded, "source mode retained keys exceed bounds");
 			}
 		auto finalCharge = budget.Reserve(finalBytes);
@@ -396,7 +397,7 @@ namespace engine::imagegraph {
 				return fail(Status::LimitExceeded, "source mode track count exceeds bounds");
 			uint64_t trackBytes = TextBytes(ownerId) + TextBytes(transition.Port) + TextBytes("hold");
 			if (candidate.Tracks.size() == candidate.Tracks.capacity() &&
-				!Add(trackBytes, (candidate.Tracks.size() + 1) * sizeof(AnimationTrack)))
+				!AddTransitionBytes(trackBytes, (candidate.Tracks.size() + 1) * sizeof(AnimationTrack)))
 				return fail(Status::LimitExceeded, "source mode track allocation overflows");
 			auto trackCharge = budget.Reserve(trackBytes);
 			if (!trackCharge) return fail(Status::LimitExceeded, "source mode track exceeds budget");

@@ -166,7 +166,7 @@ namespace engine::imagegraph::detail {
 			return Publish(context, std::move(result));
 		}
 
-		bool Transform(NodeContext &context) {
+		bool TransformMesh2D(NodeContext &context) {
 			const Value *value = context.Find("mesh");
 			const auto *input = value ? std::get_if<MeshValue2D>(value) : nullptr;
 			if (!input || !input->Data) return true;
@@ -208,7 +208,7 @@ namespace engine::imagegraph::detail {
 			{"pc.mesh_warp", SourceMeshWarp, true},
 			{"pc.mesh_create_lattice", Lattice, true},
 			{"pc.mesh_create_path", FromPath, true},
-			{"pc.mesh_transform", Transform, true},
+			{"pc.mesh_transform", TransformMesh2D, true},
 			{"pc.shape_polygon", SourceShapePolygon, true}
 		};
 		return entries;
