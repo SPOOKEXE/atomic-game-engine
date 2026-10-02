@@ -457,6 +457,29 @@ imagegraph-evaluation-bench samples="5":
     cmake --build --preset bench --target bench_imagegraph
     ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluation --samples {{samples}}
 
+# Actual headless WAV inspector cache paths. Optional stdout capture:
+# ATOMIC_STUDIO_WAV_TIMELINE_PROFILE=1 just studio-wav-timeline-bench 5
+studio-wav-timeline-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_studio
+    ./.cache/build/release-tests/tests/test_studio '[studio][wav_timeline]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_studio
+    ./.cache/build/bench/bench/bench_studio --suite studio.bench.wav-timeline --samples {{samples}}
+
+# Profile captured audio, gradient sampling, image batches and recursive array executors headlessly.
+imagegraph-source-family-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_imagegraph
+    ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][source_family],[imagegraph][array_structure],[imagegraph][array_edit],[imagegraph][array_unique],[imagegraph][array_uniform],[imagegraph][array_rearrange]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagegraph
+    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.source-families --samples {{samples}}
+    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.array-structure --samples {{samples}}
+    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.array-edit --samples {{samples}}
+
 # Project a generated PXCX chain while retaining its parsed source archive.
 imagegraphio-pxcx-import-bench samples="5":
     cmake --preset bench > /dev/null
@@ -687,6 +710,33 @@ priority-refinement-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_replication
     ./.cache/build/bench/bench/bench_replication --suite engine.replication.bench.priority-refinement --samples {{samples}}
+
+# Compare grid cells on the dense pile and stacked/scattered controls. Exact
+# contacts and body-state parity is required before the profiled benchmark runs.
+physics-cell-size-sweep samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_physics
+    ./.cache/build/release-tests/tests/test_physics '[physics][cell-sizes]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_physics
+    ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.cell-sizes --samples {{samples}}
+
+# Repeat pile, stack, scattered and mixed-scale cell orders in fresh processes.
+# Owner frames exclude occupancy diagnostics and exact comparisons in each BENCH call.
+physics-cell-size-counterbalance samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_physics test_spatial
+    ./.cache/build/release-tests/tests/test_spatial '[hashgrid]'
+    ./.cache/build/release-tests/tests/test_physics '[physics][cell-sizes]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_physics
+    sha256sum ./.cache/build/bench/bench/bench_physics
+    printf '# cell-run repeat=1 preset=bench compute=serial background=unattributed\n'
+    ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.cell-size-counterbalance --samples {{samples}}
+    printf '# cell-run repeat=2 preset=bench compute=serial background=unattributed\n'
+    ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.cell-size-counterbalance --samples {{samples}}
 
 # Recovery-row re-offer work with acknowledgements withheld after the initial join.
 recovery-rows-bench samples="5":
@@ -2051,3 +2101,34 @@ clean-all:
 bench-mesh-lod samples="5":
     cmake --build --preset bench --target bench_assets
     ./.cache/build/bench/bench/bench_assets --suite engine.assets.bench.mesh-decimate --samples {{samples}}
+
+# Headless whole-rig pose resolution. Profile/canonical diagnostics remain stdout.
+scene-skinning-bench samples="5":
+    @test {{samples}} -ge 1 && test {{samples}} -le 5 || { echo "samples must be 1..5" >&2; exit 2; }
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scene
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scene.bench.skinning --all --samples {{samples}}
+
+# Direct headless convex-hull build phases and returned payload residency.
+convex-hull-bench samples="5":
+    @test {{samples}} -ge 1 && test {{samples}} -le 5 || { echo "samples must be 1..5" >&2; exit 2; }
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_collision
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.collision.bench.convexhull --all --samples {{samples}}
+
+# Actual Audio Window observer/cache paths. Optional in-memory stdout capture by root driver.
+audio-window-panel-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_studio
+    ./.cache/build/release-tests/tests/test_studio '[studio][audio_window_presentation]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_studio
+    ./.cache/build/bench/bench/bench_studio --suite studio.bench.audio-window --samples {{samples}}
+
+# Tagged Metrics lookup diagnostic. Numeric capture uses the isolated driver; stdout stays in RAM.
+metrics-lookup-bench:
+    # Eight warm and exactly five measured phases are required by the diagnostic gate.
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_core
+    ATOMIC_METRICS_LOOKUP_PROFILE=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_core --suite engine.core.bench.instrumentation --samples 5

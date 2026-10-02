@@ -184,6 +184,9 @@ directory. Use the `bench` preset for comparable measurements.
 | `simulation-publish-sweep [samples]` | Measure simulation publication. Default: `3`. |
 | `priority-refinement-bench [samples]` | Measure refined multi-row replication publishing. Default: `5`. |
 | `recovery-rows-bench [samples]` | Measure recovery-row re-offer work. Default: `5`. |
+| `physics-cell-size-sweep [samples]` | Check physical-output parity and profile 4m/2m/1m cells on pile, stacked, and scattered scenes. Default and maximum: `5`. |
+| `physics-cell-size-counterbalance [samples]` | Check floor/index bounds and exact output parity for pile, stacked, scattered and mixed-scale scenes with adjacent floor controls, then profile paired 4m/2m ticks in both orders in two fresh processes. Default and maximum: `5`. |
+| `imagegraph-source-family-bench [samples]` | Verify and profile captured Window/FFT, palette sampling and eight-image Solid/filter batches headlessly. Default and maximum: `5`. |
 | `bench-mesh-lod [samples]` | Measure mesh LOD generation. Default: `5`. |
 
 Profile and soak outputs are retained under `.cache/`, including
