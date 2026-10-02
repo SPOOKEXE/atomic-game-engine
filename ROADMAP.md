@@ -69,6 +69,7 @@ Milestone labels describe development scope, not release versions.
   27. Bind live 3D outputs and timed arrays through one evaluation per client update.
   28. Package authored Composer scenes, supplied source projects and a reproducible CPU fluid study; visual acceptance remains open.
   29. Add Grid, routing/cache, spatial points and FLIP spawn/destroy kernels with per-port diagnostics and bounded replay.
+  30. Add source Grain and Contrast Blur kernels with bounded curves, sampling and failure atomicity.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
