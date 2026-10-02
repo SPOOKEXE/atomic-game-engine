@@ -3,7 +3,7 @@
 #include "ArrayOps.hpp"
 #include "SimulationAliases.hpp"
 #include "SourceGetterProjection.hpp"
-#include "SourceMaterialInputs.hpp"
+#include "SourceMappedInputs.hpp"
 #include "ValuePayload.hpp"
 
 #include <algorithm>
@@ -113,14 +113,14 @@ namespace engine::imagegraph::detail {
 			int64_t index,
 			std::vector<InputRows> &rows
 		) {
-			if (SourceMaterialSynthetic(context.Entry, input)) return true;
-			const bool mapped = SourceMaterialMapped(context, port);
+			if (SourceMappedSynthetic(context.Entry, input)) return true;
+			const bool mapped = SourceRangeMapped(context, port);
 			InputRows selected{
 				port, mapped ? ValueType::Any : input.Type, index, uint8_t(mapped ? 1 : input.ArrayDepth)
 			};
 			for (const auto &[id, array] : context.ImageArrays)
 				if (id == port) selected.Images = array;
-			const Value *value = mapped ? SourceMaterialRange(context, port) : context.Find(port);
+			const Value *value = mapped ? SourceMappedRange(context, port) : context.Find(port);
 			selected.Values = value ? std::get_if<ArrayValue>(value) : nullptr;
 			if (!selected.Images && !selected.Values) return true;
 			const bool spriteShape = context.Entry.Type == "pc.sprite_stack" && port == "base_shape";
@@ -217,7 +217,7 @@ namespace engine::imagegraph::detail {
 				return true;
 			};
 			for (const CatalogueInput &input : context.Entry.Inputs) {
-				if (SourceMaterialSynthetic(context.Entry, input)) continue;
+				if (SourceMappedSynthetic(context.Entry, input)) continue;
 				if (input.SourceIndex < 0) {
 					if (!input.Id.starts_with("attribute_") && input.SourceKind != "DimensionUnit")
 						return context.Fail(

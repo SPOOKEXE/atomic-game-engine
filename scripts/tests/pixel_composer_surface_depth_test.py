@@ -38,6 +38,18 @@ class SurfaceDepthTest(unittest.TestCase):
         for item in ({"index": "unresolved", "kind": "Surface"}, {"index": "0", "kind": "Unknown"}):
             self.assertEqual("", self.attribute(body, inherited=[item])["default"])
 
+    def test_time_remap_explicit_constructor_attribute_is_verified_without_processor_ancestry(self):
+        name = "Node_Time_Remap"
+        body = "function Node_Time_Remap() : Node() constructor { newInput(); attribute_surface_depth(); }"
+        value = depth_attribute(name, {name: body}, {name: "Node"}, [],
+                                [(body.index("newInput"), {"index": "0", "kind": "Surface"})], self.index, 1)
+        self.assertEqual("0", value["default"])
+        self.assertEqual("color_depth", value["attribute"])
+        self.assertTrue(value["source_depth_input_enabled"])
+        self.assertIsNone(self.attribute(body, bases={"Node_Test": "Node"}))
+        nested = "function Node_Time_Remap() : Node() constructor { static late = function() { attribute_surface_depth(); } }"
+        self.assertIsNone(depth_attribute(name, {name: nested}, {name: "Node"}, [], [], self.index, 1))
+
     def test_unverified_ancestry_nested_calls_and_comments_do_not_declare_depth(self):
         body = "function Node_Test() constructor { attribute_surface_depth(); }"
         self.assertIsNone(self.attribute(body, bases={"Node_Test": "Node_Value"}))

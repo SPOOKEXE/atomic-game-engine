@@ -2282,6 +2282,77 @@ namespace engine::imagegraphio {
 								return old == value;
 							}))
 							continue;
+						if (node.Type == "pc.bevel" &&
+							(value.Port == "height_mapped" || value.Port == "height_map_range")) {
+							const auto *height = FindCatalogueInput(*entry, "height");
+							if (!height || height->SourceIndex != 1 || height->SourceKind != "Int" ||
+								inputs.size() <= 1)
+								return Reject(
+									diagnostic,
+									"PXC Bevel mapped Height has no source slot",
+									node.Id,
+									value.Port
+								);
+							Json &record = inputs[1];
+							if (!record.is_object() || record.value("anim", false) ||
+								record.contains("from_node") ||
+								(record.contains("r") &&
+								 (!record["r"].is_object() || !record["r"].contains("d"))))
+								return Reject(
+									diagnostic,
+									"PXC Bevel mapped Height needs a static local source value",
+									node.Id,
+									value.Port
+								);
+							if (value.Port == "height_mapped") {
+								const auto *mapped = std::get_if<bool>(&value.Data);
+								if (!mapped)
+									return Reject(
+										diagnostic,
+										"PXC Bevel map toggle needs a boolean",
+										node.Id,
+										value.Port
+									);
+								if (!record.contains("attri")) record["attri"] = Json::object();
+								if (!record["attri"].is_object())
+									return Reject(
+										diagnostic,
+										"PXC Bevel input attributes are malformed",
+										node.Id,
+										value.Port
+									);
+								record["attri"]["mapped"] = *mapped;
+							} else {
+								const auto *range = FindCatalogueInput(*entry, value.Port);
+								const auto toggle = std::find_if(
+									node.Values.begin(), node.Values.end(), [](const AuthoredValue &item) {
+										return item.Port == "height_mapped";
+									}
+								);
+								const auto *mapped =
+									toggle != node.Values.end() ? std::get_if<bool>(&toggle->Data) : nullptr;
+								if (!range || range->SourceKind != "MapRange" ||
+									range->Type != ValueType::Vector2 || !mapped || !*mapped)
+									return Reject(
+										diagnostic,
+										"PXC Bevel endpoint pair requires its mapped source mode",
+										node.Id,
+										value.Port
+									);
+								auto encoded = EncodeValue(value.Data, Json::array());
+								if (!encoded || !encoded->is_array() || encoded->size() != 2 ||
+									!(*encoded)[0].is_number() || !(*encoded)[1].is_number())
+									return Reject(
+										diagnostic,
+										"PXC Bevel map range needs two numeric endpoints",
+										node.Id,
+										value.Port
+									);
+								if (!record.contains("r")) record["r"] = Json::object();
+								record["r"]["d"] = std::move(*encoded);
+							}
+							continue;
+						}
 						if (node.Type == "pc.export" && value.Port == "framerate_unit") {
 							const auto *mode = std::get_if<EnumValue>(&value.Data);
 							if (!mode || mode->Value < 0 || mode->Value > 1 || inputs.size() <= 8)

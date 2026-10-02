@@ -162,6 +162,11 @@ function Node_Comment_Fixture(_x, _y) : Node(_x, _y) constructor {
     newInput(2, nodeValue_Text("Literal // and /* block markers */ with \"quotes\""));
 }
 """,
+            "scripts/node_scatter_point_fibo/node_scatter_point_fibo.gml": """
+function Node_Scatter_Point_Fibonacci(_x, _y) : Node(_x, _y) constructor {
+    newInput(4, nodeValue_Float("Rotation", (1 + sqrt(5)) / 2));
+}
+""",
             "scripts/node_points_remap/node_points_remap.gml": """
 function Node_Points_Remap(_x, _y) : Node(_x, _y) constructor {
     attributes.filter = [1, 1, 0,
@@ -263,6 +268,7 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
                 "Node_Fn_WaveTable",
                 "Node_Points_Remap",
                 "Node_Points_Triangulate",
+                "Node_Scatter_Point_Fibonacci",
                 *(('Node_Condition',) if include_condition else ()),
             ):
                 writer.writerow({"node_id": node})
@@ -270,6 +276,16 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
         output = root / "source-inputs.json"
         subprocess.run([sys.executable, str(EXTRACTOR), str(script_root), str(matrix), str(output)], check=True)
         return json.loads(output.read_text(encoding="utf-8"))
+
+    def test_fibonacci_square_root_constructor_default_keeps_exact_source_expression(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+        item = snapshot["nodes"]["Node_Scatter_Point_Fibonacci"]["inputs"][0]
+        self.assertEqual("4", item["index"])
+        self.assertEqual("Float", item["kind"])
+        self.assertEqual("(1 + sqrt(5)) / 2", item["default"])
+        self.assertEqual("scripts/node_scatter_point_fibo/node_scatter_point_fibo.gml",
+                         snapshot["nodes"]["Node_Scatter_Point_Fibonacci"]["file"])
 
     def test_condition_extraction_recovers_exact_six_source_choices(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -22,8 +22,10 @@ Defaults use the document value text form, so one reader types authored and cata
 Usage: uv run scripts/pixel-composer/generate-catalogue.py
 """
 
+import ast
 import csv
 import json
+import math
 import re
 from fractions import Fraction
 from pathlib import Path
@@ -128,6 +130,48 @@ def expand(text, depth=0):
     return text
 
 
+def constant_number(text):
+    """Fold bounded square-root constructor expressions without executing source code."""
+    if len(text) > 256 or not re.search(r"\bsqrt\s*\(", text):
+        return None
+    try:
+        tree = ast.parse(text, mode="eval")
+        if sum(1 for _ in ast.walk(tree)) > 64:
+            return None
+
+        def fold(node, depth=0):
+            if depth > 16:
+                raise ValueError("constant expression depth")
+            if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+                value = float(node.value)
+            elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+                value = fold(node.operand, depth + 1)
+                if isinstance(node.op, ast.USub):
+                    value = -value
+            elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+                left, right = fold(node.left, depth + 1), fold(node.right, depth + 1)
+                if isinstance(node.op, ast.Add):
+                    value = left + right
+                elif isinstance(node.op, ast.Sub):
+                    value = left - right
+                elif isinstance(node.op, ast.Mult):
+                    value = left * right
+                else:
+                    value = left / right
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                  and node.func.id == "sqrt" and len(node.args) == 1 and not node.keywords):
+                value = math.sqrt(fold(node.args[0], depth + 1))
+            else:
+                raise ValueError("unsupported constant expression")
+            if not math.isfinite(value):
+                raise ValueError("nonfinite constant expression")
+            return value
+
+        return fold(tree.body)
+    except (SyntaxError, ValueError, ZeroDivisionError, OverflowError, RecursionError):
+        return None
+
+
 def number(text):
     text = text.strip()
     if re.fullmatch(r"-?0b[01]+", text):
@@ -140,7 +184,7 @@ def number(text):
         return float(text)
     if text in ("true", "false"):
         return 1.0 if text == "true" else 0.0
-    return None
+    return constant_number(text)
 
 
 def items(text):
@@ -523,6 +567,9 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
             seen.add(toggle)
             lines.append("\t".join(["I", toggle, clean(item["name"]) + " Mapped", "-1", "MapToggle", "boolean", "b 0", ""]))
             ranged = {"scalar": ("vector2", "v"), "vector2": ("vector4", "w")}.get(value_type)
+            # Bevel Height uses the source Int getter but maps the same two numeric endpoints.
+            if source_node == "Node_Bevel" and identifier == "height" and item["index"] == "1" and item["kind"] == "Int":
+                ranged = ("vector2", "v")
             if ranged and item["mapped"] == "range":
                 current = (default or "").split(" ")[1:]
                 span = ["0"] * len(current) + current if current else []

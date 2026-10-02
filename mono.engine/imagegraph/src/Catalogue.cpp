@@ -348,16 +348,17 @@ namespace engine::imagegraph {
 					array.ElementType == ValueType::Integer || array.ElementType == ValueType::Any) &&
 				   detail::ValidPayload(array, true);
 		// These fields project the mapped source numeric slot, whose endpoint depth is one.
-		const bool materialRange =
-			entry.Type == "pc.3_d_material" && input.SourceKind == "MapRange" &&
-			input.Type == ValueType::Vector2 &&
-			(input.Id == "metalic_map_range" || input.Id == "roughness_map_range") &&
+		const bool mappedRange =
+			input.SourceKind == "MapRange" && input.Type == ValueType::Vector2 &&
+			((entry.Type == "pc.3_d_material" &&
+			  (input.Id == "metalic_map_range" || input.Id == "roughness_map_range")) ||
+			 (entry.Type == "pc.bevel" && input.Id == "height_map_range")) &&
 			std::any_of(
 				entry.Schema.Properties.begin(), entry.Schema.Properties.end(), [&](const auto &property) {
 					return property.Id == input.Id && property.Type == ValueType::Vector2;
 				}
 			);
-		if (materialRange) {
+		if (mappedRange) {
 			if (!array.Nested.empty() || !detail::ValidPayload(array, false)) return false;
 			return array.ElementType == ValueType::Vector2 ||
 				   ((array.ElementType == ValueType::Scalar || array.ElementType == ValueType::Integer) &&

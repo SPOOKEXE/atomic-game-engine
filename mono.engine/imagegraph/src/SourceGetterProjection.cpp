@@ -1,5 +1,6 @@
 #include "SourceGetterProjection.hpp"
 
+#include "SourceMappedInputs.hpp"
 #include "TimelineDrivers.hpp"
 #include "ValuePayload.hpp"
 
@@ -274,7 +275,8 @@ namespace engine::imagegraph::detail {
 		uint64_t payloadBytes = 0;
 		if (!inputs([&](const CatalogueInput &input, std::string_view port) {
 				if (!CatalogueSourceRawValue(input, Value{0.})) return true;
-				const auto *value = Context.Find(port);
+				const auto *value =
+					SourceRangeMapped(Context, port) ? SourceMappedRange(Context, port) : Context.Find(port);
 				if (!value) return true;
 				const auto *array = std::get_if<ArrayValue>(value);
 				if (std::holds_alternative<Quaternion>(*value) ||
@@ -337,7 +339,8 @@ namespace engine::imagegraph::detail {
 			Projected.reserve(count);
 			if (!inputs([&](const CatalogueInput &input, std::string_view port) {
 					if (!CatalogueSourceRawValue(input, Value{0.})) return true;
-					const auto *value = Context.Find(port);
+					const auto *value = SourceRangeMapped(Context, port) ? SourceMappedRange(Context, port)
+																		 : Context.Find(port);
 					if (!value) return true;
 					const auto validator = LimitsFor(Context.Entry, input);
 					if (*Changed(*value, input.Type == ValueType::Integer, validator))

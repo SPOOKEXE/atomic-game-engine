@@ -32,7 +32,8 @@ def depth_attribute(name, bodies, bases, inherited, declarations, source_index, 
     while current and current not in seen and current != "Node_Processor":
         seen.add(current)
         current = bases.get(current)
-    if current != "Node_Processor":
+    # Time Remap declares the same attribute explicitly on the plain source Node base.
+    if current != "Node_Processor" and not (name == "Node_Time_Remap" and bases.get(name) == "Node"):
         return None
     body = bodies[name]
     body = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/',

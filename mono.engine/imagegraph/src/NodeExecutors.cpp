@@ -51,6 +51,8 @@ namespace engine::imagegraph::detail {
 					  SourceTileExecutors(),
 					  SourceSpriteStackExecutors(),
 					  SourceNormalMapExecutors(),
+					  SourceBevelExecutors(),
+					  SourcePixelBevelExecutors(),
 					  SourceAtlasExecutors(),
 					  SourceAtlasPixelExecutors(),
 					  SourcePaletteExecutors(),
@@ -78,8 +80,7 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
-				if (type == "pc.rigid_object" && (port == "attribute_mesh" || port == "texture"))
-					return true;
+				if (type == "pc.rigid_object" && (port == "attribute_mesh" || port == "texture")) return true;
 				if (type == "pc.rigid_override" &&
 					(port == "surfaces" || port == "positions" || port == "rotations" || port == "scales" ||
 					 port == "blends" || port == "alpha" || port == "mass" || port == "friction" ||

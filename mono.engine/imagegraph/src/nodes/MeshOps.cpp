@@ -1,6 +1,6 @@
 // Owned source mesh descriptions preserve geometry order and local wrapper transforms.
 
-#include "../SourceMaterialInputs.hpp"
+#include "../SourceMappedInputs.hpp"
 #include "Curve.hpp"
 #include "Families.hpp"
 
@@ -134,13 +134,13 @@ namespace engine::imagegraph::detail {
 			descriptor.MetallicMapped = context.Boolean("metalic_mapped");
 			descriptor.RoughnessMapped = context.Boolean("roughness_mapped");
 			if (descriptor.MetallicMapped) {
-				if (!ReadSourceMaterialRange(context, "metalic", descriptor.MetallicRange)) return false;
+				if (!ReadSourceMappedRange(context, "metalic", descriptor.MetallicRange)) return false;
 			} else {
 				const double value = context.Scalar("metalic");
 				descriptor.MetallicRange = {value, value};
 			}
 			if (descriptor.RoughnessMapped) {
-				if (!ReadSourceMaterialRange(context, "roughness", descriptor.RoughnessRange)) return false;
+				if (!ReadSourceMappedRange(context, "roughness", descriptor.RoughnessRange)) return false;
 			} else {
 				const double value = context.Scalar("roughness", 1);
 				descriptor.RoughnessRange = {value, value};

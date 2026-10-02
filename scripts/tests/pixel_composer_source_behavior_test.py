@@ -103,6 +103,15 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
         self.assertIsNone(choice_count("__gradTypes", body + " __gradTypes = [];", {}))
         self.assertIsNone(source_choice_map("__gradTypes", body, {}, array_map_verified=False, scroll_item_verified=True, separator_verified=True))
 
+    def test_enum_helper_sprite_indices_do_not_change_choice_indices_or_count(self):
+        body = 'var __slope = __enum_array_gen(["Linear","Smooth","Circular"], s_node_curve_type,, [2,4,5]);'
+        self.assertEqual(3, choice_count("__slope", body, {}))
+        mapped = source_choice_map("__slope", body, {}, array_map_verified=True,
+                                   scroll_item_verified=True, separator_verified=True)
+        self.assertEqual([{"choice_index": 0, "label": "Linear"},
+                          {"choice_index": 1, "label": "Smooth"},
+                          {"choice_index": 2, "label": "Circular"}], mapped)
+
     def test_choice_count_requires_an_exact_resolved_array_length(self):
         globals_ = {"GLOBAL_CHOICES": '["A", /* ignored, comma */ VALUE_X, -1,]'}
         self.assertEqual(3, choice_count('["A", nested(1, 2), -1]', "", {}))

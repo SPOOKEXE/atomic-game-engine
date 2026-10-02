@@ -17782,15 +17782,28 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 3,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Linear"
+       },
+       {
+        "choice_index": 1,
+        "label": "Smooth"
+       },
+       {
+        "choice_index": 2,
+        "label": "Circular"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -135983,6 +135996,29 @@
      "kind": "Bool",
      "name": "Loop",
      "source_array_classification": false
+    },
+    {
+     "array_depth": 0,
+     "attribute": "color_depth",
+     "choices": [
+      "Input",
+      "Inherited",
+      "4 bit RGBA",
+      "8 bit RGBA",
+      "16 bit RGBA",
+      "32 bit RGBA",
+      "8 bit Greyscale",
+      "16 bit Greyscale",
+      "32 bit Greyscale"
+     ],
+     "default": "0",
+     "display_name": "Color Depth",
+     "extra": [],
+     "index": "-1",
+     "kind": "Attribute",
+     "name": "attribute color_depth",
+     "source_array_classification": null,
+     "source_depth_input_enabled": true
     }
    ],
    "outputs": [

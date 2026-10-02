@@ -3309,8 +3309,11 @@ I	mask_feather	Mask feather	10	Slider	scalar	d 0
 S	I	mask_feather	0
 I	slope	Slope	4	EScroll	enum	e 0	
 S	I	slope	0
-B	I	slope	0	general	1	default	?
-C	I	slope	unknown
+B	I	slope	0	general	1	default	3
+C	I	slope	resolved
+Q	I	slope	0	0	s "Linear"
+Q	I	slope	1	0	s "Smooth"
+Q	I	slope	2	0	s "Circular"
 I	slope_curved	Slope curved	-1	CurveToggle	boolean	b 0	
 S	I	slope_curved	?
 I	slope_curve	Slope Curve	13	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
@@ -3320,6 +3323,8 @@ I	height	Height	1	Int	integer	i 4
 S	I	height	0
 I	height_mapped	Height Mapped	-1	MapToggle	boolean	b 0	
 S	I	height_mapped	?
+I	height_map_range	Height Map Range	-1	MapRange	vector2	v 0 4	
+S	I	height_map_range	?
 I	height_map	Height Map	11	Surface	image		
 S	I	height_map	0
 I	highres	Highres	12	Bool	boolean	b 0	
@@ -26074,7 +26079,7 @@ S	I	rotation	0
 I	scale	Scale	3	Vec2	vector2	v 1 1	
 S	I	scale	1
 A	I	scale	1
-I	rotation_2	Rotation	4	Float	scalar		
+I	rotation_2	Rotation	4	Float	scalar	d 1.618033988749895	
 S	I	rotation_2	0
 I	step	Step	5	Float	scalar	d 1	
 S	I	step	0
@@ -29518,6 +29523,8 @@ I	max_life	Max Life	2	Int	integer	i 3
 S	I	max_life	0
 I	loop	Loop	3	Bool	boolean	b 0	
 S	I	loop	0
+I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
+S	I	attribute_color_depth	?
 O	surface_out	Surface Out	0	image
 N	pc.to_number	Node_To_Number	To Number	values	scripts/node_to_number/node_to_number.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	

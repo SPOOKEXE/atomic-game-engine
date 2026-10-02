@@ -118,6 +118,55 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
         output = root / "mono.engine/imagegraph/src/SourceCatalogue.inc"
         return output.read_text(encoding="utf-8").splitlines()
 
+    def test_square_root_constructor_defaults_are_bounded_and_source_only(self):
+        expressions = {
+            "Fibonacci": "(1 + sqrt(5)) / 2",
+            "Nested": "-sqrt(4) + sqrt(sqrt(16)) * 3 / 2",
+            "Zero division": "sqrt(5) / 0",
+            "Negative root": "sqrt(-1)",
+            "Unknown function": "abs(sqrt(5))",
+            "Source variable": "sqrt(PROJECT_WIDTH)",
+            "Attribute call": "math.sqrt(5)",
+            "Keywords": "sqrt(x=5)",
+            "Two arguments": "sqrt(4, 5)",
+            "Power": "sqrt(2 ** 3)",
+            "Boolean": "sqrt(True)",
+            "Nonfinite": "sqrt(1e309)",
+            "Too long": "sqrt(" + "1" * 257 + ")",
+            "Too deep": "sqrt(" * 18 + "1" + ")" * 18,
+            "Too many nodes": "sqrt(1)" + "+1" * 33,
+            "Unrelated arithmetic": "1 + 2",
+        }
+        node = {
+            "display_name": "Constant defaults", "family": "fixture",
+            "file": "scripts/node_constant/node_constant.gml", "base": None,
+            "inputs": [{"index": str(index), "kind": "Float", "name": name,
+                        "default": expression, "extra": [], "array_depth": 0}
+                       for index, (name, expression) in enumerate(expressions.items())],
+            "outputs": [],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            lines = self.run_generator(Path(temporary), {"Node_Constants": node})
+        defaults = {parts[1]: parts[6] for line in lines if (parts := line.split("\t"))[0] == "I"}
+        self.assertEqual("d 1.618033988749895", defaults["fibonacci"])
+        self.assertEqual("d 1", defaults["nested"])
+        for name in expressions:
+            if name in ("Fibonacci", "Nested"):
+                continue
+            with self.subTest(expression=name):
+                self.assertEqual("", defaults[name.lower().replace(" ", "_")])
+
+    def test_bevel_mapped_integer_height_emits_source_endpoint_pair_default(self):
+        node = {"display_name": "Bevel", "family": "fixture", "base": None,
+                "file": "scripts/node_bevel/node_bevel.gml", "outputs": [],
+                "inputs": [{"index": "1", "kind": "Int", "name": "Height", "default": "4",
+                            "extra": [], "array_depth": 0, "mapped": "range"}]}
+        with tempfile.TemporaryDirectory() as temporary:
+            lines = self.run_generator(Path(temporary), {"Node_Bevel": node})
+        self.assertIn("I\theight\tHeight\t1\tInt\tinteger\ti 4\t", lines)
+        self.assertIn("I\theight_map_range\tHeight Map Range\t-1\tMapRange\tvector2\tv 0 4\t", lines)
+        self.assertIn("I\theight_mapped\tHeight Mapped\t-1\tMapToggle\tboolean\tb 0\t", lines)
+
     def test_fixed_input_emits_behavior_and_exact_choice_indices(self):
         with tempfile.TemporaryDirectory() as temporary:
             lines = self.run_generator(Path(temporary))
