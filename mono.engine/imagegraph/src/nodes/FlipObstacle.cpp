@@ -9,6 +9,7 @@ namespace engine::imagegraph::detail {
 		}
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP obstacle domain is invalid", "domain");
+		if (context.Request.ReuseSimulationFrame) return ReuseFlipDomain(context, *input);
 		const int64_t shape = context.Integer("shape", 0);
 		const auto position = FlipPosition(context, *input->Data), size = context.Vec2("size", {4, 4});
 		const double radius = context.Scalar("radius", 4);

@@ -7,6 +7,7 @@ namespace engine::imagegraph::detail {
 		if (!input || !input->Data) return true;
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP force domain is invalid", "domain");
+		if (context.Request.ReuseSimulationFrame) return ReuseFlipDomain(context, *input);
 		const bool repel = context.Authored.Type == "pc.flip_repel",
 				   vortex = context.Authored.Type == "pc.flip_vortex";
 		const Vector2 position =

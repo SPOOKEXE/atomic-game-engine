@@ -79,7 +79,7 @@ namespace engine::imagegraph {
 								   node.Type == "pc.counter" || node.Type == "pc.delay_value" ||
 								   node.Type == "pc.cache_value_array";
 			cone.Simulation |= node.Type == "image.verlet_simple" ||
-							   (node.Type.starts_with("pc.verlet_sim_") || node.Type.starts_with("pc.flip_"));
+							   (node.Type.starts_with("pc.verlet_") || node.Type.starts_with("pc.flip_"));
 			cone.FixedSimulationSteps |= node.Type == "image.verlet_simple" ||
 										 node.Type == "pc.verlet_sim_step" || node.Type == "pc.flip_update";
 			for (const auto &link : plan.EffectiveLinks)

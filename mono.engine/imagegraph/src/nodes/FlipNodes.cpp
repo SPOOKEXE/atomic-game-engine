@@ -21,6 +21,11 @@ namespace engine::imagegraph::detail {
 		}
 	}
 	bool FlipDomain(NodeContext &context) {
+		if (context.Request.ReuseSimulationFrame) {
+			const auto *captured = CapturedFlipFrame(context, context.Authored.Id, context.ProcessorRow);
+			if (!captured) return false;
+			return ReuseFlipDomain(context, *captured);
+		}
 		const auto *previous = FindFluidSimulationOrigin(context, context.Authored.Id, context.ProcessorRow);
 		FluidDomainValue output;
 		if (previous) {
@@ -136,6 +141,7 @@ namespace engine::imagegraph::detail {
 		}
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP update input is invalid", "domain");
+		if (context.Request.ReuseSimulationFrame) return ReuseFlipDomain(context, *input);
 		const uint64_t bytes = FluidStorageBytes<true>(*input);
 		if (!context.ReserveOutput(bytes, "domain")) return false;
 		FluidDomainValue output = *input;
@@ -172,6 +178,7 @@ namespace engine::imagegraph::detail {
 		}
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP fill input is invalid", "domain");
+		if (context.Request.ReuseSimulationFrame) return ReuseFlipDomain(context, *input);
 		const uint64_t bytes = FluidStorageBytes<true>(*input);
 		// Source first-frame checks include subframes; the native timeline starts at zero.
 		if (context.Request.Tick != 0 || context.Request.Subframe != 0 || context.Request.NegativeFrame) {

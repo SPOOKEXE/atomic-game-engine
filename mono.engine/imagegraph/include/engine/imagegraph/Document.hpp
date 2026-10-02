@@ -1383,6 +1383,9 @@ namespace engine::imagegraph {
 		uint64_t GroupAuthoringRevision = 0;
 		// grug borrow immutable previous tick; evaluator returns updates only after every node succeeds.
 		const SimulationReplayState *SimulationReplay = nullptr;
+		// Caller attests unchanged solver controls during an observation-only captured-frame refresh.
+		// Core checks prior tick and revision; resolved control equality remains the caller's responsibility.
+		bool ReuseSimulationFrame = false;
 		// Source Cache Mesh button actions at this exact requested timeline position.
 		std::span<const std::string_view> SimulationCacheCaptures{};
 		// CPU reference coverage is explicit; exact source GPU coverage needs a host capture.

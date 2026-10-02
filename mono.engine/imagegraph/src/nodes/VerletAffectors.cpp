@@ -11,7 +11,7 @@ namespace engine::imagegraph::detail {
 		const Value *input = context.Find("mesh");
 		const auto *source = input ? std::get_if<MeshValue2D>(input) : nullptr;
 		if (!source || !source->Data) return PublishVerletMesh(context, {});
-		if (const auto preserved = PreserveVerletForCacheAction(context, *source)) return *preserved;
+		if (const auto preserved = PreserveCapturedVerlet(context, *source)) return *preserved;
 		if (!ValidMesh2DPayload(*source))
 			return context.Fail(Status::InvalidValue, "pin mesh input is invalid", "mesh");
 		if (!context.ReserveOutput(Mesh2DStorageBytes<false>(*source), "mesh")) return false;
@@ -97,7 +97,7 @@ namespace engine::imagegraph::detail {
 		const Value *input = context.Find("mesh");
 		const auto *mesh = input ? std::get_if<MeshValue2D>(input) : nullptr;
 		if (!mesh || !mesh->Data) return PublishVerletMesh(context, {});
-		if (const auto preserved = PreserveVerletForCacheAction(context, *mesh)) return *preserved;
+		if (const auto preserved = PreserveCapturedVerlet(context, *mesh)) return *preserved;
 		if (!ValidMesh2DPayload(*mesh))
 			return context.Fail(Status::InvalidValue, "force input mesh is invalid", "mesh");
 		if (!context.Boolean("active", true) || !mesh->Data->Verlet) return PublishVerletMesh(context, *mesh);
@@ -168,7 +168,7 @@ namespace engine::imagegraph::detail {
 		const Value *input = context.Find("mesh");
 		const auto *mesh = input ? std::get_if<MeshValue2D>(input) : nullptr;
 		if (!mesh || !mesh->Data) return PublishVerletMesh(context, {});
-		if (const auto preserved = PreserveVerletForCacheAction(context, *mesh)) return *preserved;
+		if (const auto preserved = PreserveCapturedVerlet(context, *mesh)) return *preserved;
 		if (!ValidMesh2DPayload(*mesh))
 			return context.Fail(Status::InvalidValue, "bloat input mesh is invalid", "mesh");
 		if (!context.Boolean("active", true) || !mesh->Data->Verlet) return PublishVerletMesh(context, *mesh);
@@ -244,7 +244,7 @@ namespace engine::imagegraph::detail {
 		const Value *input = context.Find("mesh");
 		const auto *mesh = input ? std::get_if<MeshValue2D>(input) : nullptr;
 		if (!mesh || !mesh->Data) return PublishVerletMesh(context, {});
-		if (const auto preserved = PreserveVerletForCacheAction(context, *mesh)) return *preserved;
+		if (const auto preserved = PreserveCapturedVerlet(context, *mesh)) return *preserved;
 		if (!ValidMesh2DPayload(*mesh))
 			return context.Fail(Status::InvalidValue, "tear input mesh is invalid", "mesh");
 		if (!context.Boolean("active", true) || !mesh->Data->Verlet) return PublishVerletMesh(context, *mesh);
@@ -332,7 +332,7 @@ namespace engine::imagegraph::detail {
 		const Value *input = context.Find("mesh");
 		const auto *mesh = input ? std::get_if<MeshValue2D>(input) : nullptr;
 		if (!mesh || !mesh->Data) return PublishVerletMesh(context, {});
-		if (const auto preserved = PreserveVerletForCacheAction(context, *mesh)) return *preserved;
+		if (const auto preserved = PreserveCapturedVerlet(context, *mesh)) return *preserved;
 		if (!ValidMesh2DPayload(*mesh))
 			return context.Fail(Status::InvalidValue, "wind input mesh is invalid", "mesh");
 		if (!context.Boolean("active", true) || !mesh->Data->Verlet) return PublishVerletMesh(context, *mesh);

@@ -11,6 +11,35 @@ namespace engine::imagegraph::detail {
 		context.SetValue("domain", std::move(value));
 		return context.FailureCode == Status::Ok;
 	}
+	inline const FluidDomainValue *
+	CapturedFlipFrame(NodeContext &context, std::string_view origin, size_t row) {
+		const SimulationReplayEntry *captured = nullptr;
+		if (context.Request.SimulationReplay)
+			for (const auto &entry : context.Request.SimulationReplay->Entries)
+				if (entry.NodeId == origin && entry.ProcessorRow == row && entry.Fluid.Data) {
+					if (captured) {
+						context.Fail(Status::DuplicateId, "FLIP refresh repeats captured origin", "domain");
+						return nullptr;
+					}
+					captured = &entry;
+				}
+		if (!captured || !captured->State.Initialized || captured->State.Tick != context.Request.Tick ||
+			captured->State.AuthoringRevision != context.Request.SimulationAuthoringRevision ||
+			!ValidFluidPayload(captured->Fluid) || captured->Fluid.Data->Tick != context.Request.Tick ||
+			captured->Fluid.Data->AuthoringRevision != context.Request.SimulationAuthoringRevision ||
+			captured->Fluid.Data->OriginNodeId != origin || captured->Fluid.Data->OriginProcessorRow != row) {
+			context.Fail(Status::InvalidValue, "FLIP refresh requires a matching captured frame", "domain");
+			return nullptr;
+		}
+		return &captured->Fluid;
+	}
+	inline bool ReuseFlipDomain(NodeContext &context, const FluidDomainValue &input) {
+		const auto *captured =
+			CapturedFlipFrame(context, input.Data->OriginNodeId, input.Data->OriginProcessorRow);
+		if (!captured || !context.ReserveOutput(FluidStorageBytes<true>(*captured), "domain")) return false;
+		context.SetValue("domain", *captured);
+		return context.FailureCode == Status::Ok;
+	}
 	inline Vector2 FlipPosition(NodeContext &context, const FluidDomainData &domain, Vector2 fallback = {}) {
 		Vector2 value = context.Vec2("position", fallback);
 		if (!context.IsLinked("position") && context.Integer("position_unit", 1) == 1) {

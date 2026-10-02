@@ -240,3 +240,55 @@ TEST_CASE(
 	REQUIRE(sample(60, {5000}));
 	CHECK(result() == Catch::Approx(10.0 / 4996));
 }
+
+TEST_CASE(
+	"constructor-only Verlet host retains geometry and ledger clocks without fixed solver steps",
+	"[imagegraph][feedback]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"grid", "pc.verlet_sim_mesh_grid", "", {}, {{"subdivision", Vector2{1, 1}}}},
+		{"static", "value.number", "", {}, {{"value", 2.}}}
+	};
+	document.Outputs = {{"mesh", "grid", "mesh"}, {"number", "static", "number"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	const std::array<std::string, 1> meshOutput{"mesh"}, staticOutput{"number"};
+	const auto cone = AnalyzeStatefulTemporalCone(document, plan, meshOutput);
+	REQUIRE(cone.Valid);
+	CHECK(cone.Simulation);
+	CHECK_FALSE(cone.FixedSimulationSteps);
+	CHECK_FALSE(AnalyzeStatefulTemporalCone(document, plan, staticOutput).Simulation);
+	CapturedFeedbackHost host;
+	EvaluationRequest request;
+	REQUIRE(host.Prepare(document, plan, 7, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "mesh"));
+	REQUIRE(request.SimulationReplay);
+	REQUIRE(request.SimulationReplay->Entries.size() == 1);
+	const auto original = request.SimulationReplay->Entries.front();
+	REQUIRE(original.State.Initialized);
+	CHECK(original.State.Tick == 0);
+	CHECK(original.State.AuthoringRevision == 7);
+	request.Subframe = .5;
+	REQUIRE(host.Prepare(document, plan, 7, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "mesh"));
+	CHECK(request.SimulationReplay->Entries.front() == original);
+	request.Tick = 1;
+	request.Subframe = 0;
+	REQUIRE(host.Prepare(document, plan, 7, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "mesh"));
+	const auto next = request.SimulationReplay->Entries.front();
+	CHECK(next.State.Tick == 1);
+	CHECK(next.State.Mesh == original.State.Mesh);
+	CHECK(next.Topology == original.Topology);
+	REQUIRE(host.Value("mesh"));
+	const auto retained = *host.Value("mesh");
+	const auto replay = *request.SimulationReplay;
+	request.Tick = 4097;
+	CHECK_FALSE(
+		host.Prepare(document, plan, 7, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "mesh")
+	);
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	CHECK(host.Value("mesh")->Id == retained.Id);
+	CHECK(std::get<EvaluatedValue>(host.Value("mesh")->Output) == std::get<EvaluatedValue>(retained.Output));
+	CHECK(*request.SimulationReplay == replay);
+}

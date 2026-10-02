@@ -114,7 +114,7 @@ namespace engine::imagegraph::detail {
 		const Value *input = context.Find("mesh"), *cacheInput = context.Find("cache_mesh");
 		const auto *source = input ? std::get_if<MeshValue2D>(input) : nullptr;
 		if (!source || !source->Data || !source->Data->Verlet) return true;
-		if (const auto preserved = PreserveVerletForCacheAction(context, *source)) return *preserved;
+		if (const auto preserved = PreserveCapturedVerlet(context, *source)) return *preserved;
 		if (!ValidMesh2DPayload(*source))
 			return context.Fail(Status::InvalidValue, "cache mix input mesh is invalid", "mesh");
 		const auto *cache = cacheInput ? std::get_if<StructValue>(cacheInput) : nullptr;

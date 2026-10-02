@@ -25,6 +25,7 @@ namespace engine::imagegraph::detail {
 		}
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP spawner domain is invalid", "domain");
+		if (context.Request.ReuseSimulationFrame) return ReuseFlipDomain(context, *input);
 		const auto shape = context.Integer("spawn_shape", 0), type = context.Integer("spawn_type", 0);
 		if (shape < 0 || shape > 2 || type < 0 || type > 1)
 			return context.Fail(Status::InvalidValue, "FLIP spawn mode is invalid");

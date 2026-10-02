@@ -9,6 +9,79 @@
 #include <new>
 
 namespace engine::imagegraph {
+	namespace feedback_detail {
+		// Only an upstream rigid dependency can change a simulation's inputs during
+		// observation refresh. A simulation feeding a rigid texture remains reusable.
+		inline bool RigidFeedsSimulation(
+			const Document &document,
+			const Plan &plan,
+			std::span<const std::string> outputs,
+			std::string_view selectedNode,
+			std::span<const std::string_view> actions
+		) {
+			struct Visit {
+				size_t Index;
+				bool Simulation;
+			};
+			std::array<std::array<bool, 2>, Limits::MaximumNodes> visited{};
+			std::array<Visit, 2 * Limits::MaximumNodes> pending{};
+			size_t count = 0;
+			bool invalid = document.Nodes.size() > Limits::MaximumNodes ||
+						   outputs.size() > Limits::MaximumOutputs || actions.size() > Limits::MaximumNodes;
+			if (invalid) return true;
+			const auto add = [&](size_t index, bool simulation) {
+				if (index >= document.Nodes.size() || index >= Limits::MaximumNodes) {
+					invalid = true;
+					return;
+				}
+				if (!visited[index][simulation]) {
+					visited[index][simulation] = true;
+					pending[count++] = {index, simulation};
+				}
+			};
+			const auto addNode = [&](std::string_view id, bool simulation) {
+				for (size_t i = 0; i < document.Nodes.size(); ++i)
+					if (document.Nodes[i].Id == id) {
+						add(i, simulation);
+						return;
+					}
+				invalid = true;
+			};
+			if (!selectedNode.empty()) addNode(selectedNode, false);
+			for (const auto id : actions)
+				addNode(id, false);
+			for (const auto &id : outputs) {
+				const auto found =
+					std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const auto &output) {
+						return output.Id == id;
+					});
+				if (found == document.Outputs.end()) {
+					invalid = true;
+					continue;
+				}
+				addNode(found->NodeId, false);
+			}
+			while (count && !invalid) {
+				const auto current = pending[--count];
+				const auto &node = document.Nodes[current.Index];
+				if (current.Simulation && node.Type.starts_with("pc.rigid_")) return true;
+				const bool simulation = current.Simulation || node.Type == "image.verlet_simple" ||
+										node.Type.starts_with("pc.verlet_") ||
+										node.Type.starts_with("pc.flip_");
+				for (const auto &link : plan.EffectiveLinks)
+					if (link.ToNode == node.Id) addNode(link.FromNode, simulation);
+				for (const auto &edge : plan.GroupSurfaceDependencies)
+					if (edge.Consumer == current.Index) add(edge.Producer, simulation);
+				for (const auto &edge : plan.InlineOwnerDependencies)
+					if (edge.Consumer == current.Index && !edge.ControlsOnly) add(edge.Owner, simulation);
+				for (const auto &edge : plan.InlineControlDependencies)
+					if (edge.Consumer == current.Index) add(edge.Producer, simulation);
+				for (const auto &edge : plan.PcxNamedDependencies)
+					if (edge.Consumer == current.Index) add(edge.Producer, simulation);
+			}
+			return invalid;
+		}
+	}
 	// One host owns feedback generations and source processor state. All selected/bound outputs share
 	// one evaluated closure per tick, so a simulation or cached processor executes once.
 	class CapturedFeedbackHost {
@@ -20,6 +93,7 @@ namespace engine::imagegraph {
 		uint64_t DocumentRevision = 0, InputRevision = 0, Tick = 0;
 		double Subframe = 0;
 		bool NegativeFrame = false;
+		bool RigidPlaying = false, RigidFrameProgress = false;
 		bool Configured = false, Initialized = false, Stateful = false, HaveExternalSources = false;
 
 		static uint64_t SourceBytes(const std::vector<RequestImageSource> &sources) {
@@ -45,7 +119,7 @@ namespace engine::imagegraph {
 		}
 		static bool StateNode(const Node &node) {
 			return node.Type == "pc.interlaced" || node.Type == "image.verlet_simple" ||
-				   node.Type.starts_with("pc.verlet_sim_") || node.Type.starts_with("pc.flip_");
+				   node.Type.starts_with("pc.verlet_") || node.Type.starts_with("pc.flip_");
 		}
 
 	  public:
@@ -66,7 +140,7 @@ namespace engine::imagegraph {
 			InputNode.clear();
 			DocumentRevision = InputRevision = Tick = 0;
 			Subframe = 0;
-			NegativeFrame = false;
+			NegativeFrame = RigidPlaying = RigidFrameProgress = false;
 			Configured = Initialized = Stateful = HaveExternalSources = false;
 		}
 		bool Prepare(
@@ -202,8 +276,23 @@ namespace engine::imagegraph {
 										  oldConfigBytes + externalBytes;
 			if (currentBytes >= maximumBytes)
 				return fail(Status::LimitExceeded, "stateful host residency exceeds byte bounds");
-			if (!changed && Initialized && Tick == request.Tick && Subframe == request.Subframe &&
-				NegativeFrame == request.NegativeFrame && sameSelection &&
+			const bool rigidObservationChanged =
+				temporal.RigidActors && Initialized &&
+				(RigidPlaying != request.RigidPlaying || RigidFrameProgress != request.RigidFrameProgress);
+			const bool refreshRigidObservations = !changed && Initialized && sameSelection &&
+												  Tick == request.Tick && Subframe == request.Subframe &&
+												  NegativeFrame == request.NegativeFrame &&
+												  rigidObservationChanged;
+			if (refreshRigidObservations && temporal.Simulation &&
+				feedback_detail::RigidFeedsSimulation(
+					document, plan, outputs, selectedNode, request.SimulationCacheCaptures
+				))
+				return fail(
+					Status::UnsupportedExecution,
+					"rigid observation refresh cannot reuse simulation inputs that depend on rigid output"
+				);
+			if (!changed && Initialized && !rigidObservationChanged && Tick == request.Tick &&
+				Subframe == request.Subframe && NegativeFrame == request.NegativeFrame && sameSelection &&
 				request.SimulationCacheCaptures.empty()) {
 				if (!bindings.empty())
 					request.ImageSources = Tick || HaveExternalSources
@@ -222,7 +311,8 @@ namespace engine::imagegraph {
 				(!changed && sameSelection && Initialized &&
 				 ((Tick < Limits::MaximumTick && Tick + 1 == request.Tick) ||
 				  (Tick == request.Tick && Subframe == request.Subframe &&
-				   NegativeFrame == request.NegativeFrame && !request.SimulationCacheCaptures.empty()) ||
+				   NegativeFrame == request.NegativeFrame &&
+				   (!request.SimulationCacheCaptures.empty() || rigidObservationChanged)) ||
 				  (temporal.RandomGenerators && !temporal.Simulation && !temporal.SurfaceCaches &&
 				   bindings.empty() && Tick == request.Tick && request.Subframe > Subframe)));
 			if (!contiguous && request.Tick > 4096)
@@ -259,6 +349,7 @@ namespace engine::imagegraph {
 			for (uint64_t tick = first; tick <= request.Tick; tick++) {
 				EvaluationRequest clock = request;
 				clock.Tick = tick;
+				clock.ReuseSimulationFrame = refreshRigidObservations && temporal.Simulation;
 				clock.Subframe = tick == request.Tick ? request.Subframe : 0;
 				if (tick != request.Tick) clock.SimulationCacheCaptures = {};
 				clock.SimulationAuthoringRevision = revision;
@@ -272,9 +363,10 @@ namespace engine::imagegraph {
 				clock.RigidAuthoringRevision = revision;
 				const auto &generation = tick == 0 ? seeds : previous;
 				if (contiguous) {
-					const bool sameFrameAction = Tick == request.Tick && Subframe == request.Subframe &&
-												 NegativeFrame == request.NegativeFrame &&
-												 !request.SimulationCacheCaptures.empty();
+					const bool sameFrameAction =
+						Tick == request.Tick && Subframe == request.Subframe &&
+						NegativeFrame == request.NegativeFrame &&
+						(!request.SimulationCacheCaptures.empty() || rigidObservationChanged);
 					const auto sourceImage = [&](const FeedbackBinding &binding) -> const Image * {
 						if (sameFrameAction) {
 							const auto source =
@@ -408,6 +500,8 @@ namespace engine::imagegraph {
 			Tick = request.Tick;
 			Subframe = request.Subframe;
 			NegativeFrame = request.NegativeFrame;
+			RigidPlaying = request.RigidPlaying;
+			RigidFrameProgress = request.RigidFrameProgress;
 			Stateful = stateful;
 			HaveExternalSources = externalCount != 0;
 			Configured = Initialized = true;

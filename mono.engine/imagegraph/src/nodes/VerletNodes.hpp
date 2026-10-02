@@ -89,18 +89,24 @@ namespace engine::imagegraph::detail {
 		return context.FailureCode == Status::Ok;
 	}
 
-	inline std::optional<bool> PreserveVerletForCacheAction(NodeContext &context, const MeshValue2D &mesh) {
-		if (!mesh.Data || !mesh.Data->Verlet || context.Request.SimulationCacheCaptures.empty() ||
-			!context.Request.SimulationReplay)
+	inline std::optional<bool> PreserveCapturedVerlet(NodeContext &context, const MeshValue2D &mesh) {
+		if (!mesh.Data || !mesh.Data->Verlet ||
+			(!context.Request.ReuseSimulationFrame && context.Request.SimulationCacheCaptures.empty()))
 			return std::nullopt;
-		for (const auto &entry : context.Request.SimulationReplay->Entries)
-			if (!entry.Collider && !entry.Drag && !entry.Cache && entry.NodeId == mesh.Data->OriginNodeId &&
-				entry.ProcessorRow == mesh.Data->OriginProcessorRow &&
-				entry.State.Tick == context.Request.Tick &&
-				entry.State.AuthoringRevision == context.Request.SimulationAuthoringRevision) {
-				if (!context.ReserveOutput(Mesh2DStorageBytes<false>(mesh), "mesh")) return false;
-				return PublishVerletMesh(context, mesh);
-			}
+		if (context.Request.SimulationReplay)
+			for (const auto &entry : context.Request.SimulationReplay->Entries)
+				if (!entry.Collider && !entry.Drag && !entry.Cache &&
+					entry.NodeId == mesh.Data->OriginNodeId &&
+					entry.ProcessorRow == mesh.Data->OriginProcessorRow &&
+					entry.State.Tick == context.Request.Tick &&
+					entry.State.AuthoringRevision == context.Request.SimulationAuthoringRevision) {
+					if (!context.ReserveOutput(Mesh2DStorageBytes<false>(mesh), "mesh")) return false;
+					return PublishVerletMesh(context, mesh);
+				}
+		if (context.Request.ReuseSimulationFrame)
+			return context.Fail(
+				Status::InvalidValue, "verlet refresh requires a matching captured frame", "mesh"
+			);
 		return std::nullopt;
 	}
 	inline std::optional<bool> RestoreVerletConstructor(NodeContext &context) {

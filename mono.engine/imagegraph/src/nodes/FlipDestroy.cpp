@@ -12,6 +12,7 @@ namespace engine::imagegraph::detail {
 		}
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP destroy input is invalid", "domain");
+		if (context.Request.ReuseSimulationFrame) return ReuseFlipDomain(context, *input);
 		const int64_t shape = context.Integer("shape", 0);
 		if (shape < 0 || shape > 2)
 			return context.Fail(Status::InvalidValue, "FLIP destroy shape is invalid", "shape");

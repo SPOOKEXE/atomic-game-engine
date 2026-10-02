@@ -153,18 +153,24 @@ namespace engine::imagegraph::detail {
 		if (!input || !input->Data) return true;
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP render domain is invalid", "domain");
-		const auto mode = context.Integer("render_type", 0), steps = context.Integer("update_step", 1);
+		if (context.Request.ReuseSimulationFrame) {
+			input = CapturedFlipFrame(context, input->Data->OriginNodeId, input->Data->OriginProcessorRow);
+			if (!input) return false;
+		}
+		const auto mode = context.Integer("render_type", 0),
+				   requestedSteps = context.Integer("update_step", 1);
+		const auto steps = context.Request.ReuseSimulationFrame ? int64_t{0} : requestedSteps;
 		if (mode != 0)
 			return context.Fail(
 				Status::UnsupportedExecution,
 				"FLIP line rendering requires source object history snapshots",
 				"render_type"
 			);
-		if (steps < 0)
+		if (requestedSteps < 0)
 			return context.Fail(
 				Status::InvalidValue, "FLIP render update step must be nonnegative", "update_step"
 			);
-		if (steps > FluidDomainLimits::MaximumIterations)
+		if (requestedSteps > FluidDomainLimits::MaximumIterations)
 			return context.Fail(
 				Status::LimitExceeded, "FLIP render steps exceed native bound", "update_step"
 			);

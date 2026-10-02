@@ -206,3 +206,60 @@ TEST_CASE(
 	REQUIRE(request.SimulationReplay->Entries.size() == 1);
 	CHECK(request.SimulationReplay->Entries.front().Fluid.Data->ReadbackPositions.empty());
 }
+TEST_CASE(
+	"Captured FLIP frame refresh preserves solver state and rebuilds identical pixels", "[imagegraph]"
+) {
+	const auto document = FlipRenderScene();
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	EvaluationRequest request;
+	request.SimulationAuthoringRevision = 19;
+	SimulationEvaluationResult result;
+	for (uint64_t tick : {uint64_t{0}, uint64_t{1}}) {
+		request.Tick = tick;
+		request.ReuseSimulationFrame = false;
+		REQUIRE(EvaluateSimulation(document, plan, "image", request, result, diagnostic) == Status::Ok);
+		const auto captured = result.Replay;
+		const auto pixels = std::get<Image>(result.Output);
+		request.SimulationReplay = &result.Replay;
+		request.ReuseSimulationFrame = true;
+		for (int refresh = 0; refresh < 2; ++refresh) {
+			INFO(diagnostic.Message);
+			REQUIRE(EvaluateSimulation(document, plan, "image", request, result, diagnostic) == Status::Ok);
+			CHECK(result.Replay == captured);
+			CHECK(std::get<Image>(result.Output) == pixels);
+		}
+	}
+}
+TEST_CASE(
+	"FLIP captured-frame reuse refuses absent or mismatched prior identity atomically", "[imagegraph]"
+) {
+	const auto document = FlipRenderScene();
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	EvaluationRequest request;
+	request.SimulationAuthoringRevision = 19;
+	SimulationEvaluationResult result;
+	REQUIRE(EvaluateSimulation(document, plan, "image", request, result, diagnostic) == Status::Ok);
+	const auto previous = result.Replay;
+	const auto pixels = std::get<Image>(result.Output);
+	for (int mismatch : {0, 1, 2, 3}) {
+		auto prior = previous;
+		request.SimulationReplay = &prior;
+		request.ReuseSimulationFrame = true;
+		request.Tick = mismatch == 1 ? 1 : 0;
+		request.SimulationAuthoringRevision = mismatch == 2 ? 20 : 19;
+		if (mismatch == 0) request.SimulationReplay = nullptr;
+		if (mismatch == 3) {
+			prior.Entries[0].ProcessorRow = 1;
+			prior.Entries[0].Fluid.Data->OriginProcessorRow = 1;
+		}
+		CHECK(
+			EvaluateSimulation(document, plan, "image", request, result, diagnostic) == Status::InvalidValue
+		);
+		CHECK(result.Replay == previous);
+		CHECK(std::get<Image>(result.Output) == pixels);
+	}
+}

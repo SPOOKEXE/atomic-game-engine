@@ -8,7 +8,7 @@ namespace engine::imagegraph::detail {
 		const Value *input = context.Find("mesh");
 		const auto *mesh = input ? std::get_if<MeshValue2D>(input) : nullptr;
 		if (!mesh || !mesh->Data) return PublishVerletMesh(context, {});
-		if (const auto preserved = PreserveVerletForCacheAction(context, *mesh)) return *preserved;
+		if (const auto preserved = PreserveCapturedVerlet(context, *mesh)) return *preserved;
 		if (!ValidMesh2DPayload(*mesh))
 			return context.Fail(Status::InvalidValue, "drag input mesh is invalid", "mesh");
 		if (!context.Boolean("active", true) || !mesh->Data->Verlet) return PublishVerletMesh(context, *mesh);

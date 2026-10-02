@@ -9,6 +9,7 @@ namespace engine::imagegraph::detail {
 		}
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP solid domain is invalid", "domain");
+		if (context.Request.ReuseSimulationFrame) return ReuseFlipDomain(context, *input);
 		if (!context.ReserveOutput(FluidStorageBytes<true>(*input), "domain")) return false;
 		const Image *surface = context.Input("collider");
 		if (!surface) return PublishFlipDomain(context, *input);

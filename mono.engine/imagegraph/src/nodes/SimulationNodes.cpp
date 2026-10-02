@@ -214,7 +214,14 @@ namespace engine::imagegraph::detail {
 							return context.Fail(Status::DuplicateId, "simulation replay repeats mesh origin");
 						previous = &entry;
 					}
-			if (previous && !context.Request.SimulationCacheCaptures.empty() &&
+			if (context.Request.ReuseSimulationFrame &&
+				(!previous || previous->State.Tick != context.Request.Tick ||
+				 previous->State.AuthoringRevision != context.Request.SimulationAuthoringRevision))
+				return context.Fail(
+					Status::InvalidValue, "verlet refresh requires a matching captured frame", "mesh"
+				);
+			if (previous &&
+				(context.Request.ReuseSimulationFrame || !context.Request.SimulationCacheCaptures.empty()) &&
 				previous->State.Tick == context.Request.Tick &&
 				previous->State.AuthoringRevision == context.Request.SimulationAuthoringRevision) {
 				if (!context.ReserveOutput(Mesh2DStorageBytes<false>(*mesh), "mesh")) return false;
