@@ -21,6 +21,7 @@
 mono_add_library(scriptluau
 	TIER shared
 	DEPS
+		Engine::imagegraph
 		Engine::core
 		Engine::ecs
 		Engine::gui

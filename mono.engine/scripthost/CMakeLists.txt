@@ -21,6 +21,7 @@
 mono_add_library(scripthost
 	TIER shared
 	DEPS
+		Engine::imagegraph
 		Engine::script
 		Engine::scriptjs
 		Engine::scriptluau
