@@ -91,7 +91,7 @@ TEST_CASE("legacy imagegraph document migrates without losing authored fields", 
 	Diagnostic diagnostic;
 	REQUIRE(Read(legacyText, parsed, diagnostic) == Status::Ok);
 	REQUIRE(Migrate(parsed, diagnostic) == Status::Ok);
-	CHECK(parsed.FormatVersion == 6);
+	CHECK(parsed.FormatVersion == 9);
 	Document upgraded;
 	REQUIRE(Read(Write(parsed), upgraded, diagnostic) == Status::Ok);
 	CHECK(upgraded == parsed);
@@ -697,6 +697,39 @@ TEST_CASE("fixed tick evaluation interpolates colour without mutating authored k
 	CHECK(image.Pixels == std::vector<uint8_t>{0, 10, 20, 30, 0, 10, 20, 30});
 }
 
+TEST_CASE("timeline solid dimensions are checked before image allocation", "[imagegraph]") {
+	Document document = SolidDocument();
+	document.Keyframes = {
+		{"node-a", "width", 0, int64_t{2}, "step"},
+		{"node-a", "width", 1, int64_t{0}, "step"},
+		{"node-a", "width", 2, int64_t{-1}, "step"},
+		{"node-a", "width", 3, static_cast<int64_t>(Limits::MaximumDimension) + 1, "step"},
+		{"node-a", "width", 4, int64_t{2}, "step"},
+		{"node-a", "height", 0, int64_t{1}, "step"},
+		{"node-a", "height", 4, int64_t{0}, "step"},
+	};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	engine::imagegraph::Image image;
+	REQUIRE(Evaluate(document, plan, "texture", 0, image, diagnostic) == Status::Ok);
+	const auto lastGoodPixels = image.Pixels;
+	const uint64_t lastGoodHash = image.Hash;
+	const auto checkRefusal = [&](uint64_t tick, const char *port) {
+		CHECK(Evaluate(document, plan, "texture", tick, image, diagnostic) == Status::LimitExceeded);
+		CHECK(diagnostic.NodeId == "node-a");
+		CHECK(diagnostic.Port == port);
+		CHECK(image.Width == 2);
+		CHECK(image.Height == 1);
+		CHECK(image.Pixels == lastGoodPixels);
+		CHECK(image.Hash == lastGoodHash);
+	};
+	checkRefusal(1, "width");
+	checkRefusal(2, "width");
+	checkRefusal(3, "width");
+	checkRefusal(4, "height");
+}
+
 TEST_CASE("fixed tick scalar interpolation changes a selected filter", "[imagegraph]") {
 	Document document = SolidDocument();
 	document.Nodes[0].Values[2].Data = Colour{7, 8, 9, 128};
@@ -996,7 +1029,8 @@ TEST_CASE("inverted mask selects edited colour and feather spreads mask alpha", 
 	edited = original;
 	engine::imagegraph::detail::Invert(edited, false);
 	engine::imagegraph::detail::ApplyMaskMix(original, edited, &halfBlack, 1.0, true);
-	CHECK(edited.Pixels == std::vector<uint8_t>{128, 128, 128, 255});
+	// sh_mask inverts luminance times alpha: 1 - 0 * 0.5 selects the edited colour fully.
+	CHECK(edited.Pixels == std::vector<uint8_t>{245, 235, 225, 255});
 
 	engine::imagegraph::Image impulse{3, 1, {255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 0}, 0};
 	const engine::imagegraph::Image feathered = engine::imagegraph::detail::FeatherMask(impulse, 3.0);

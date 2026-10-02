@@ -2,6 +2,7 @@
 
 // Bounded byte-string operations used by source-authored text value nodes.
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -19,7 +20,7 @@ namespace engine::imagegraph::detail {
 		return count;
 	}
 
-	inline std::optional<std::string> ReplaceText(
+	inline std::optional<size_t> ReplacementTextSize(
 		std::string_view text,
 		std::string_view find,
 		std::string_view replacement,
@@ -27,22 +28,18 @@ namespace engine::imagegraph::detail {
 		size_t maximumBytes
 	) {
 		if (find.empty() || text.size() > maximumBytes) return std::nullopt;
-		std::string result;
-		result.reserve(text.size());
-		size_t offset = 0;
-		while (offset < text.size()) {
-			const size_t match = text.find(find, offset);
-			if (match == std::string_view::npos) break;
-			if (match - offset > maximumBytes - result.size()) return std::nullopt;
-			result.append(text.substr(offset, match - offset));
-			if (replacement.size() > maximumBytes - result.size()) return std::nullopt;
-			result.append(replacement);
-			offset = match + find.size();
+		size_t resultBytes = text.size();
+		for (size_t offset = 0; (offset = text.find(find, offset)) != std::string_view::npos;
+			 offset += find.size()) {
+			if (replacement.size() >= find.size()) {
+				const size_t growth = replacement.size() - find.size();
+				if (growth > maximumBytes - resultBytes) return std::nullopt;
+				resultBytes += growth;
+			} else
+				resultBytes -= find.size() - replacement.size();
 			if (!all) break;
 		}
-		if (text.size() - offset > maximumBytes - result.size()) return std::nullopt;
-		result.append(text.substr(offset));
-		return result;
+		return resultBytes;
 	}
 
 	inline std::optional<std::string> CombineText(std::span<const std::string> pieces, size_t maximumBytes) {
@@ -52,6 +49,61 @@ namespace engine::imagegraph::detail {
 			result += piece;
 		}
 		return result;
+	}
+
+	// The caller pre-admits expectedBytes as retained output storage. Fill a sized string so the builder
+	// never grows its capacity while copying replacement segments.
+	inline std::optional<std::string> BuildReplacementText(
+		std::string_view text,
+		std::string_view find,
+		std::string_view replacement,
+		bool all,
+		size_t maximumBytes,
+		size_t expectedBytes
+	) {
+		const auto exactBytes = ReplacementTextSize(text, find, replacement, all, maximumBytes);
+		if (!exactBytes || *exactBytes != expectedBytes) return std::nullopt;
+		std::string result(expectedBytes, '\0');
+		size_t destination = 0;
+		const auto copy = [&](std::string_view value) {
+			if (value.size() > result.size() - destination) return false;
+			std::copy(value.begin(), value.end(), result.begin() + destination);
+			destination += value.size();
+			return true;
+		};
+		size_t offset = 0;
+		while (offset < text.size()) {
+			const size_t match = text.find(find, offset);
+			if (match == std::string_view::npos) break;
+			if (!copy(text.substr(offset, match - offset)) || !copy(replacement)) return std::nullopt;
+			offset = match + find.size();
+			if (!all) break;
+		}
+		if (!copy(text.substr(offset)) || destination != result.size()) return std::nullopt;
+		return result;
+	}
+
+	inline std::optional<std::string> ReplaceText(
+		std::string_view text,
+		std::string_view find,
+		std::string_view replacement,
+		bool all,
+		size_t maximumBytes,
+		size_t expectedBytes
+	) {
+		return BuildReplacementText(text, find, replacement, all, maximumBytes, expectedBytes);
+	}
+
+	inline std::optional<std::string> ReplaceText(
+		std::string_view text,
+		std::string_view find,
+		std::string_view replacement,
+		bool all,
+		size_t maximumBytes
+	) {
+		const auto expectedBytes = ReplacementTextSize(text, find, replacement, all, maximumBytes);
+		if (!expectedBytes) return std::nullopt;
+		return BuildReplacementText(text, find, replacement, all, maximumBytes, *expectedBytes);
 	}
 
 	inline std::optional<std::vector<std::string>>

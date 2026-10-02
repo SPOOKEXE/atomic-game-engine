@@ -38,7 +38,7 @@ namespace {
 	}
 }
 
-TEST_CASE("v1 through v3 keyed values migrate to v6 without changing left-interval step", "[imagegraph]") {
+TEST_CASE("v1 through v3 keyed values migrate to v8 without changing left-interval step", "[imagegraph]") {
 	for (uint32_t version : {1u, 2u, 3u}) {
 		graph::Document document = NumberTrack(version);
 		document.Keyframes = {
@@ -50,7 +50,7 @@ TEST_CASE("v1 through v3 keyed values migrate to v6 without changing left-interv
 		REQUIRE(Sample(document, 5, before, diagnostic) == graph::Status::Ok);
 		CHECK(before == 2.0);
 		REQUIRE(graph::Migrate(document, diagnostic) == graph::Status::Ok);
-		CHECK(document.FormatVersion == 6);
+		CHECK(document.FormatVersion == 9);
 		CHECK_FALSE(document.Timeline.has_value());
 		CHECK(document.Tracks.empty());
 		CHECK_FALSE(document.Keyframes.front().Ease.has_value());

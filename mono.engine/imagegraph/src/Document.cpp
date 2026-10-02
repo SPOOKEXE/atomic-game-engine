@@ -1,4 +1,10 @@
 #include "ArrayOps.hpp"
+#include "AudioPayload.hpp"
+#include "EvaluationAllocator.hpp"
+#include "GroupInputDepth.hpp"
+#include "GroupReplayInternal.hpp"
+#include "ImageArrayCollector.hpp"
+#include "NodeExecutors.hpp"
 #include "PaletteOps.hpp"
 #include "PixelOps.hpp"
 #include "PixelOpsBasicFilters.hpp"
@@ -17,13 +23,24 @@
 #include "PixelOpsTile.hpp"
 #include "PixelOpsVignette.hpp"
 #include "PixelOpsWarp.hpp"
+#include "ProcessorBatch.hpp"
+#include "SnapshotAudioMoves.hpp"
+#include "SourceGetterProjection.hpp"
 #include "Timeline.hpp"
+#include "TimelineDrivers.hpp"
+#include "TimelineOverrides.hpp"
 #include "TimelineSchedule.hpp"
 #include "ValueNodeEval.hpp"
 #include "ValueNodeSchemas.hpp"
+#include "ValuePayload.hpp"
+#include "ValueText.hpp"
 
 #include <engine/imagegraph/AudioCapture.hpp>
+#include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/Vector2Presentation.hpp>
+#include <engine/imagegraph/WavPreview.hpp>
 
 #include <algorithm>
 #include <array>
@@ -44,6 +61,57 @@
 
 namespace engine::imagegraph {
 	namespace {
+		bool SourceModePort(const Node &node, std::string_view port) {
+			if (detail::AliasedSourceInput(node, port) ||
+				(node.Type == "pc.group_input" && port == "parent_value"))
+				return true;
+			if (node.Type != "pc.gradient" || port != "gradient_map_range") return false;
+			const auto *entry = FindCatalogueEntry(node.Type);
+			const auto *input = entry ? FindCatalogueInput(*entry, port) : nullptr;
+			return input && input->SourceIndex == 16 && input->SourceKind == "Vec4" &&
+				   input->Type == ValueType::Vector4;
+		}
+
+		bool EmptySourceScalarArray(const Value &value) {
+			const auto *array = std::get_if<ArrayValue>(&value);
+			return array && array->ElementType == ValueType::Scalar && array->Elements.empty() &&
+				   array->Nested.empty() && array->Items.empty();
+		}
+		bool SourceEmptyGroupVectorKey(
+			const Document &document, const Node &node, const CatalogueInput *input, std::string_view port
+		) {
+			if (document.FormatVersion < 9 || !input ||
+				(node.Type != "pc.group_input" && node.Type != "pc.group_output") ||
+				input->Type != ValueType::Vector2 ||
+				(input->SourceKind != "Range" && input->SourceKind != "Vec2"))
+				return false;
+			if (std::find(node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), port) ==
+					node.SourceAnimatedInputs.end() &&
+				std::find(node.SourceStaticInputs.begin(), node.SourceStaticInputs.end(), port) ==
+					node.SourceStaticInputs.end())
+				return false;
+			if (std::none_of(
+					document.Tracks.begin(), document.Tracks.end(), [&](const AnimationTrack &track) {
+						return track.NodeId == node.Id && track.Port == port;
+					}
+				))
+				return false;
+			const Keyframe *found = nullptr;
+			for (const auto &key : document.Keyframes)
+				if (key.NodeId == node.Id && key.Port == port) {
+					if (found) return false;
+					found = &key;
+				}
+			return found && found->Interpolation == "source" && found->Kind == KeyframeKind::Normal &&
+				   !found->SourceDriver && !found->SineDriver && EmptySourceScalarArray(found->Data);
+		}
+		constexpr std::array<PortSchema, 1> CAPTURED_IMAGE_PORTS{
+			{{"image", ValueType::Image, PortDirection::Output}}
+		};
+		constexpr std::array<PropertySchema, 1> CAPTURED_IMAGE_PROPERTIES{{{"source_id", ValueType::Text}}};
+		const NodeSchema CAPTURED_IMAGE_SCHEMA{
+			"image.captured", CAPTURED_IMAGE_PORTS, CAPTURED_IMAGE_PROPERTIES
+		};
 		constexpr std::array<PortSchema, 3> SOLID_PORTS = {{
 			{"foreground", ValueType::Image, PortDirection::Input},
 			{"mask", ValueType::Image, PortDirection::Input},
@@ -734,69 +802,36 @@ namespace engine::imagegraph {
 			"image.transform_3d", TRANSFORM_IMAGE_3D_PORTS, TRANSFORM_IMAGE_3D_PROPERTIES
 		};
 
+		// Indexed by ValueType. Names are durable document text.
+		constexpr std::array<std::string_view, 40> TYPE_NAMES = {
+			"boolean",	"integer",	  "scalar",		  "text",		  "colour",
+			"vector2",	"image",	  "array",		  "gradient",	  "area",
+			"curve",	"vector4",	  "path2d",		  "vector3",	  "quaternion",
+			"enum",		"mesh",		  "audiobit",	  "mesh2d",		  "matrix",
+			"particle", "rigid",	  "fluid_domain", "smoke_domain", "strand",
+			"sdf",		"armature",	  "atlas",		  "tileset",	  "pixel_box",
+			"scene3d",	"material3d", "light3d",	  "buffer",		  "struct",
+			"any",		"node_ref",	  "pcx_node",	  "object",		  "dynamic_surface",
+		};
+		static_assert(static_cast<size_t>(ValueType::DynamicSurface) + 1 == TYPE_NAMES.size());
+
+		constexpr std::array<std::string_view, 9> DEPTH_NAMES = {
+			"input", "inherited", "rgba4", "rgba8", "rgba16f", "rgba32f", "r8", "r16f", "r32f"
+		};
+		std::optional<int64_t> ParseDepth(std::string_view name) {
+			const auto found = std::find(DEPTH_NAMES.begin(), DEPTH_NAMES.end(), name);
+			if (found == DEPTH_NAMES.end()) return std::nullopt;
+			return std::distance(DEPTH_NAMES.begin(), found);
+		}
+
 		std::string_view TypeName(ValueType type) {
-			switch (type) {
-			case ValueType::Boolean:
-				return "boolean";
-			case ValueType::Integer:
-				return "integer";
-			case ValueType::Scalar:
-				return "scalar";
-			case ValueType::Text:
-				return "text";
-			case ValueType::Colour:
-				return "colour";
-			case ValueType::Vector2:
-				return "vector2";
-			case ValueType::Image:
-				return "image";
-			case ValueType::Array:
-				return "array";
-			case ValueType::Gradient:
-				return "gradient";
-			case ValueType::Area:
-				return "area";
-			case ValueType::Curve:
-				return "curve";
-			case ValueType::Vector4:
-				return "vector4";
-			case ValueType::Path2D:
-				return "path2d";
-			case ValueType::Vector3:
-				return "vector3";
-			case ValueType::Quaternion:
-				return "quaternion";
-			case ValueType::Enum:
-				return "enum";
-			case ValueType::Mesh:
-				return "mesh";
-			case ValueType::AudioBit:
-				return "audiobit";
-			}
-			return {};
+			const size_t index = static_cast<size_t>(type);
+			return index < TYPE_NAMES.size() ? TYPE_NAMES[index] : std::string_view{};
 		}
 
 		std::optional<ValueType> ParseType(std::string_view name) {
-			for (ValueType type :
-				 {ValueType::Boolean,
-				  ValueType::Integer,
-				  ValueType::Scalar,
-				  ValueType::Text,
-				  ValueType::Colour,
-				  ValueType::Vector2,
-				  ValueType::Image,
-				  ValueType::Array,
-				  ValueType::Gradient,
-				  ValueType::Area,
-				  ValueType::Curve,
-				  ValueType::Vector4,
-				  ValueType::Path2D,
-				  ValueType::Vector3,
-				  ValueType::Quaternion,
-				  ValueType::Enum,
-				  ValueType::Mesh,
-				  ValueType::AudioBit}) {
-				if (TypeName(type) == name) return type;
+			for (size_t index = 0; index < TYPE_NAMES.size(); index++) {
+				if (TYPE_NAMES[index] == name) return static_cast<ValueType>(index);
 			}
 			return std::nullopt;
 		}
@@ -809,123 +844,18 @@ namespace engine::imagegraph {
 			Diagnostic &diagnostic,
 			Status status,
 			std::string message,
-			std::string node = {},
-			std::string port = {}
+			std::string_view node = {},
+			std::string_view port = {}
 		) {
-			diagnostic = {status, std::move(node), std::move(port), std::move(message)};
+			diagnostic = {status, std::string(node), std::string(port), std::move(message)};
 		}
 
 		ValueType TypeOf(const Value &value) {
-			switch (value.index()) {
-			case 0:
-				return ValueType::Boolean;
-			case 1:
-				return ValueType::Integer;
-			case 2:
-				return ValueType::Scalar;
-			case 3:
-				return ValueType::Text;
-			case 4:
-				return ValueType::Colour;
-			case 5:
-				return ValueType::Vector2;
-			case 6:
-				return ValueType::Array;
-			case 7:
-				return ValueType::Gradient;
-			case 8:
-				return ValueType::Area;
-			case 9:
-				return ValueType::Curve;
-			case 10:
-				return ValueType::Vector4;
-			case 11:
-				return ValueType::Path2D;
-			case 12:
-				return ValueType::Vector3;
-			case 13:
-				return ValueType::Quaternion;
-			case 14:
-				return ValueType::Enum;
-			default:
-				return ValueType::AudioBit;
-			}
+			return detail::PayloadType(value);
 		}
 
 		bool IsFinite(const Value &value) {
-			if (const auto *scalar = std::get_if<double>(&value)) return std::isfinite(*scalar);
-			if (const auto *vector = std::get_if<Vector2>(&value)) {
-				return std::isfinite(vector->X) && std::isfinite(vector->Y);
-			}
-			if (const auto *vector = std::get_if<Vector4>(&value))
-				return std::isfinite(vector->X) && std::isfinite(vector->Y) && std::isfinite(vector->Z) &&
-					   std::isfinite(vector->W);
-			if (const auto *vector = std::get_if<Vector3>(&value))
-				return std::isfinite(vector->X) && std::isfinite(vector->Y) && std::isfinite(vector->Z);
-			if (const auto *rotation = std::get_if<Quaternion>(&value))
-				return std::isfinite(rotation->X) && std::isfinite(rotation->Y) &&
-					   std::isfinite(rotation->Z) && std::isfinite(rotation->W);
-			if (const auto *audio = std::get_if<AudioBit>(&value)) {
-				if (!std::isfinite(audio->SampleRate) || audio->SampleRate <= 0.0 ||
-					audio->Samples.size() > Limits::MaximumAudioSamplesPerFrame)
-					return false;
-				return std::all_of(audio->Samples.begin(), audio->Samples.end(), [](double sample) {
-					return std::isfinite(sample);
-				});
-			}
-			if (const auto *gradient = std::get_if<Gradient>(&value)) {
-				if (gradient->Mode > 6 || gradient->Keys.empty() ||
-					gradient->Keys.size() > Limits::MaximumGradientKeys)
-					return false;
-				double previous = -1.0;
-				for (const GradientKey &key : gradient->Keys) {
-					if (!std::isfinite(key.Time) || key.Time < 0.0 || key.Time > 1.0 || key.Time < previous)
-						return false;
-					previous = key.Time;
-				}
-				return true;
-			}
-			if (const auto *area = std::get_if<Area>(&value))
-				return std::isfinite(area->CenterX) && std::isfinite(area->CenterY) &&
-					   std::isfinite(area->HalfWidth) && std::isfinite(area->HalfHeight) &&
-					   area->Shape <= 1 && area->Mode <= 2;
-			if (const auto *curve = std::get_if<Curve>(&value)) {
-				if (curve->Anchors.size() < 2 || curve->Anchors.size() > Limits::MaximumCurveAnchors)
-					return false;
-				for (double field : curve->Header)
-					if (!std::isfinite(field)) return false;
-				for (const auto &anchor : curve->Anchors)
-					for (double field : anchor)
-						if (!std::isfinite(field)) return false;
-				return true;
-			}
-			if (const auto *path = std::get_if<Path2D>(&value)) {
-				if (path->Anchors.size() > Limits::MaximumPathAnchors ||
-					path->Weights.size() > Limits::MaximumPathWeights)
-					return false;
-				for (const PathAnchor &anchor : path->Anchors)
-					for (double field : anchor.Controls)
-						if (!std::isfinite(field)) return false;
-				for (const PathWeight &weight : path->Weights)
-					if (!std::isfinite(weight.Position) || !std::isfinite(weight.Weight)) return false;
-				return true;
-			}
-			if (const auto *array = std::get_if<ArrayValue>(&value)) {
-				for (const ElementValue &element : array->Elements) {
-					if (!std::visit(
-							[](const auto &item) -> bool {
-								if constexpr (std::is_same_v<std::decay_t<decltype(item)>, double>)
-									return std::isfinite(item);
-								if constexpr (std::is_same_v<std::decay_t<decltype(item)>, Vector2>)
-									return std::isfinite(item.X) && std::isfinite(item.Y);
-								return true;
-							},
-							element
-						))
-						return false;
-				}
-			}
-			return true;
+			return detail::ValidValuePayload(value, false);
 		}
 
 		bool IsNodeType(std::string_view type) {
@@ -941,8 +871,114 @@ namespace engine::imagegraph {
 			return nullptr;
 		}
 
+		// node_value_types.gml value_bit: junction families a link may join. Numbers of
+		// every shape share one family, as the source stores them all as integer, float
+		// or boolean junctions.
+		uint64_t JunctionBits(ValueType type) {
+			constexpr uint64_t NUMBER = 1ull << 1;
+			switch (type) {
+			case ValueType::Integer:
+			case ValueType::Enum:
+				return 1ull << 0 | NUMBER;
+			case ValueType::Boolean:
+				return 1ull << 3 | NUMBER;
+			case ValueType::Scalar:
+			case ValueType::Vector2:
+			case ValueType::Vector3:
+			case ValueType::Vector4:
+			case ValueType::Quaternion:
+			case ValueType::Array:
+			case ValueType::Area:
+			case ValueType::Matrix:
+				return 1ull << 2 | NUMBER;
+			case ValueType::Colour:
+				return 1ull << 4;
+			case ValueType::Gradient:
+				return 1ull << 25;
+			case ValueType::Image:
+			case ValueType::Atlas:
+			case ValueType::DynamicSurface:
+				return 1ull << 5 | 1ull << 33;
+			case ValueType::Text:
+				return 1ull << 10;
+			case ValueType::Object:
+				return 1ull << 13;
+			case ValueType::Path2D:
+				return 1ull << 15;
+			case ValueType::Particle:
+				return 1ull << 16;
+			case ValueType::Rigid:
+				return 1ull << 17;
+			case ValueType::SmokeDomain:
+				return 1ull << 18;
+			case ValueType::Struct:
+				return 1ull << 19;
+			case ValueType::Strand:
+				return 1ull << 20;
+			case ValueType::Mesh2D:
+				return 1ull << 21;
+			case ValueType::Armature:
+				return 1ull << 26 | 1ull << 19;
+			case ValueType::NodeRef:
+				return 1ull << 32;
+			case ValueType::Buffer:
+				return 1ull << 27;
+			case ValueType::PixelBox:
+				return 1ull << 28;
+			case ValueType::Mesh:
+			case ValueType::Light3D:
+				return 1ull << 29;
+			case ValueType::Scene3D:
+				return 1ull << 29 | 1ull << 30;
+			case ValueType::Material3D:
+				return 1ull << 33;
+			case ValueType::PcxNode:
+				return 1ull << 34;
+			case ValueType::AudioBit:
+				return 1ull << 35;
+			case ValueType::FluidDomain:
+				return 1ull << 36;
+			case ValueType::Sdf:
+				return 1ull << 37;
+			case ValueType::Tileset:
+			case ValueType::Curve:
+				return 1ull << 38;
+			case ValueType::Any:
+				return ~0ull & ~(1ull << 32);
+			}
+			return 0;
+		}
+
+		// node_value_types.gml typeCompatible with its directional casts, for links
+		// touching catalogue nodes.
+		bool JunctionCompatible(ValueType from, ValueType to) {
+			if ((JunctionBits(from) & JunctionBits(to)) != 0) return true;
+			const bool number = (JunctionBits(from) & (1ull << 1)) != 0;
+			const bool toNumber = (JunctionBits(to) & (1ull << 1)) != 0;
+			if (from == ValueType::Image && toNumber) return true;
+			if (number && to == ValueType::Text) return true;
+			if (number && to == ValueType::Colour) return true;
+			if (from == ValueType::Colour && toNumber) return true;
+			if (from == ValueType::Colour && to == ValueType::Gradient) return true;
+			if (from == ValueType::Strand && to == ValueType::Path2D) return true;
+			if ((from == ValueType::Colour || from == ValueType::Mesh2D || from == ValueType::Particle) &&
+				to == ValueType::Struct)
+				return true;
+			return false;
+		}
+
+		// A catalogue input's bypass junction forwards that input's value unchanged.
+		constexpr std::string_view BYPASS_SUFFIX = ".bypass";
+
 		std::optional<ValueType> FindPortType(const Node &node, std::string_view id, PortDirection side) {
 			if (const PortSchema *port = FindPort(node.Type, id, side)) return port->Type;
+			if (side == PortDirection::Output && id.ends_with(BYPASS_SUFFIX)) {
+				if (const CatalogueEntry *entry = FindCatalogueEntry(node.Type)) {
+					if (const auto *input =
+							FindCatalogueInput(*entry, id.substr(0, id.size() - BYPASS_SUFFIX.size())))
+						return input->Type;
+				}
+			}
 			if (side == PortDirection::Input) {
 				for (const DynamicInput &input : node.DynamicInputs) {
 					if (input.Id == id) return input.Type;
@@ -952,6 +988,8 @@ namespace engine::imagegraph {
 		}
 
 		bool WithinArrayBudget(const ArrayValue &array) {
+			if (array.ElementType == ValueType::Any || !array.Items.empty())
+				return detail::ValidPayload(array, false);
 			if (array.Elements.size() > Limits::MaximumArrayElements) return false;
 			size_t bytes = array.Elements.size() * sizeof(ElementValue);
 			if (bytes > Limits::MaximumArrayBytes) return false;
@@ -971,20 +1009,30 @@ namespace engine::imagegraph {
 				return textValue->size() <= Limits::MaximumTextBytes;
 			if (const auto *array = std::get_if<ArrayValue>(&value)) return WithinArrayBudget(*array);
 			if (const auto *audio = std::get_if<AudioBit>(&value))
-				return audio->Samples.size() <= Limits::MaximumAudioSamplesPerFrame &&
-					   audio->Samples.size() <= Limits::MaximumAudioCaptureSamples;
+				return detail::ValidAudioPlanes(
+					audio->Samples, audio->Channels, Limits::MaximumAudioClipSamples
+				);
+			if (const auto *matrix = std::get_if<MatrixValue>(&value))
+				return matrix->Values.size() <= Limits::MaximumArrayElements;
 			return true;
 		}
 
 		bool ValidArray(const ArrayValue &array) {
-			if (!WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
+			if (array.ElementType == ValueType::Any || !array.Items.empty())
+				return detail::ValidPayload(array, false);
+			if (!array.Nested.empty() || !WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
 				array.ElementType == ValueType::Array || array.ElementType >= ValueType::Gradient ||
 				TypeName(array.ElementType).empty())
 				return false;
-			for (const ElementValue &element : array.Elements) {
-				const Value value = std::visit([](const auto &item) -> Value { return item; }, element);
-				if (TypeOf(value) != array.ElementType || !IsFinite(value)) return false;
-			}
+			for (const ElementValue &element : array.Elements)
+				if (!std::visit(
+						[&](const auto &item) {
+							return detail::PayloadType(item) == array.ElementType &&
+								   detail::ValidPayload(item, false);
+						},
+						element
+					))
+					return false;
 			return true;
 		}
 
@@ -1029,6 +1077,8 @@ namespace engine::imagegraph {
 				return "h";
 			case 14:
 				return "e";
+			case 16:
+				return "m";
 			default:
 				return "u";
 			}
@@ -1054,6 +1104,39 @@ namespace engine::imagegraph {
 			} else if (const auto *vector = std::get_if<Vector2>(&value)) {
 				stream << std::setprecision(17) << vector->X << ' ' << vector->Y;
 			} else if (const auto *array = std::get_if<ArrayValue>(&value)) {
+				if (!array->Items.empty()) {
+					stream << "any " << array->Items.size();
+					const auto writeItem = [&](const auto &self, const SourceArrayItem &entry) -> void {
+						stream << ' ';
+						std::visit(
+							[&](const auto &child) {
+								using C = std::decay_t<decltype(child)>;
+								if constexpr (std::is_same_v<C, ElementValue>)
+									std::visit(
+										[&](const auto &leaf) { WriteValue(stream, Value{leaf}); }, child
+									);
+								else if constexpr (std::is_same_v<C, std::vector<SourceArrayItem>>) {
+									stream << "a any " << child.size();
+									for (const auto &item : child)
+										self(self, item);
+								} else
+									stream << "invalid";
+							},
+							entry.Data
+						);
+					};
+					for (const auto &entry : array->Items)
+						writeItem(writeItem, entry);
+					return;
+				}
+				if (!array->Nested.empty()) {
+					stream << "array " << array->Nested.size();
+					for (const auto &row : array->Nested) {
+						stream << ' ';
+						WriteValue(stream, ArrayValue{array->ElementType, row});
+					}
+					return;
+				}
 				stream << TypeName(array->ElementType) << ' ' << array->Elements.size();
 				for (const ElementValue &element : array->Elements) {
 					stream << ' ';
@@ -1086,12 +1169,16 @@ namespace engine::imagegraph {
 					   << ' ' << rotation->W;
 			} else if (const auto *choice = std::get_if<EnumValue>(&value)) {
 				stream << choice->Value;
+			} else if (const auto *matrix = std::get_if<MatrixValue>(&value)) {
+				stream << matrix->Columns << ' ' << matrix->Rows;
+				for (const double number : matrix->Values)
+					stream << ' ' << std::setprecision(17) << number;
 			} else if (const auto *audio = std::get_if<AudioBit>(&value)) {
 				stream << std::setprecision(17) << audio->SampleRate << ' ' << audio->Samples.size();
 				for (const double sample : audio->Samples)
 					stream << ' ' << sample;
-			} else {
-				const Path2D &path = std::get<Path2D>(value);
+			} else if (const auto *storedPath = std::get_if<Path2D>(&value)) {
+				const Path2D &path = *storedPath;
 				stream << (path.Loop ? 1 : 0) << ' ' << path.Anchors.size() << ' ' << path.Weights.size();
 				for (const PathAnchor &anchor : path.Anchors) {
 					for (double field : anchor.Controls)
@@ -1103,7 +1190,29 @@ namespace engine::imagegraph {
 			}
 		}
 
-		bool ReadValue(std::istream &stream, Value &value, uint32_t version, bool allowArray = true) {
+		bool ReadValue(
+			std::istream &stream,
+			Value &value,
+			uint32_t version,
+			bool allowArray = true,
+			detail::EvaluationBudget *budget = nullptr,
+			detail::AllocationReservation *outputCharge = nullptr,
+			bool *allocationRefused = nullptr,
+			size_t depth = 0,
+			size_t *arrayCount = nullptr
+		) {
+			size_t localArrayCount = 0;
+			if (!arrayCount) arrayCount = &localArrayCount;
+			if (depth > Limits::MaximumArrayDepth) return false;
+			const auto admit = [&](uint64_t bytes) {
+				if (!budget) return true;
+				auto charge = budget->Reserve(bytes);
+				if (!charge) {
+					*allocationRefused = true;
+					return false;
+				}
+				return outputCharge->Merge(std::move(*charge));
+			};
 			std::string tag;
 			if (!(stream >> tag)) return false;
 			if (tag == "b") {
@@ -1126,6 +1235,29 @@ namespace engine::imagegraph {
 			}
 			if (tag == "s") {
 				std::string stored;
+				if (budget) {
+					stream >> std::ws;
+					const auto start = stream.tellg();
+					if (start == std::istream::pos_type(-1) || stream.get() != '"') return false;
+					size_t length = 0;
+					char character = 0;
+					bool closed = false;
+					while (stream.get(character)) {
+						if (character == '"') {
+							closed = true;
+							break;
+						}
+						if (character == '\\' && !stream.get(character)) return false;
+						++length;
+					}
+					if (!closed || length > Limits::MaximumTextBytes) return false;
+					stream.seekg(start);
+					if (!admit(std::max(length, stored.capacity()))) return false;
+					// Sized construction avoids reserve's geometric growth beyond the
+					// admitted payload.
+					stored = std::string(length, '\0');
+					stored.clear();
+				}
 				if (!ReadQuoted(stream, stored)) return false;
 				value = std::move(stored);
 				return true;
@@ -1155,20 +1287,71 @@ namespace engine::imagegraph {
 				std::string typeName;
 				size_t count = 0;
 				if (!(stream >> typeName >> count) || count > Limits::MaximumArrayElements) return false;
+				if (count > Limits::MaximumArrayElements - *arrayCount) return false;
+				*arrayCount += count;
+				if (typeName == "any") {
+					if (version < 9 || !admit(count * sizeof(SourceArrayItem))) return false;
+					ArrayValue array{ValueType::Any, {}};
+					array.Items.reserve(count);
+					for (size_t index = 0; index < count; ++index) {
+						Value element;
+						if (!ReadValue(
+								stream,
+								element,
+								version,
+								true,
+								budget,
+								outputCharge,
+								allocationRefused,
+								depth + 1,
+								arrayCount
+							))
+							return false;
+						if (auto *nested = std::get_if<ArrayValue>(&element)) {
+							if (!nested->Nested.empty()) return false;
+							if (nested->ElementType == ValueType::Any)
+								array.Items.push_back({std::move(nested->Items)});
+							else {
+								if (!admit(nested->Elements.size() * sizeof(SourceArrayItem))) return false;
+								std::vector<SourceArrayItem> children;
+								children.reserve(nested->Elements.size());
+								for (auto &leaf : nested->Elements)
+									children.push_back({std::move(leaf)});
+								array.Items.push_back({std::move(children)});
+							}
+						} else {
+							std::visit(
+								[&](auto &leaf) {
+									using L = std::decay_t<decltype(leaf)>;
+									if constexpr (std::is_constructible_v<ElementValue, L>)
+										array.Items.push_back({ElementValue{std::move(leaf)}});
+								},
+								element
+							);
+						}
+					}
+					value = std::move(array);
+					return IsFinite(value);
+				}
 				const auto type = ParseType(typeName);
 				if (!type || *type == ValueType::Image || *type == ValueType::Array ||
 					*type >= ValueType::Gradient)
 					return false;
 				ArrayValue array{*type, {}};
+				if (!admit(count * sizeof(ElementValue))) return false;
 				array.Elements.reserve(count);
 				for (size_t index = 0; index < count; index++) {
 					Value element;
-					if (!ReadValue(stream, element, version, false) || TypeOf(element) != *type) return false;
+					if (!ReadValue(
+							stream, element, version, false, budget, outputCharge, allocationRefused
+						) ||
+						TypeOf(element) != *type)
+						return false;
 					std::visit(
-						[&](const auto &item) {
+						[&](auto &item) {
 							using T = std::decay_t<decltype(item)>;
 							if constexpr (std::is_constructible_v<ElementValue, T>)
-								array.Elements.emplace_back(item);
+								array.Elements.emplace_back(std::move(item));
 						},
 						element
 					);
@@ -1184,6 +1367,7 @@ namespace engine::imagegraph {
 					count > Limits::MaximumGradientKeys)
 					return false;
 				Gradient gradient{static_cast<uint8_t>(mode), {}};
+				if (!admit(count * sizeof(GradientKey))) return false;
 				gradient.Keys.reserve(count);
 				for (size_t index = 0; index < count; index++) {
 					GradientKey key;
@@ -1220,6 +1404,7 @@ namespace engine::imagegraph {
 				Curve curve;
 				for (double &field : curve.Header)
 					if (!(stream >> field) || !std::isfinite(field)) return false;
+				if (!admit(count * sizeof(std::array<double, 6>))) return false;
 				curve.Anchors.reserve(count);
 				for (size_t index = 0; index < count; index++) {
 					std::array<double, 6> anchor{};
@@ -1254,12 +1439,25 @@ namespace engine::imagegraph {
 				value = choice;
 				return true;
 			}
+			if (tag == "m") {
+				MatrixValue matrix;
+				if (!(stream >> matrix.Columns >> matrix.Rows) || matrix.Columns == 0 || matrix.Rows == 0 ||
+					uint64_t(matrix.Columns) * matrix.Rows > Limits::MaximumArrayElements)
+					return false;
+				if (!admit(uint64_t(matrix.Columns) * matrix.Rows * sizeof(double))) return false;
+				matrix.Values.assign(size_t(matrix.Columns) * matrix.Rows, 0.0);
+				for (double &number : matrix.Values)
+					if (!(stream >> number) || !std::isfinite(number)) return false;
+				value = std::move(matrix);
+				return true;
+			}
 			if (tag == "u") {
 				AudioBit audio;
 				size_t count = 0;
 				if (!(stream >> audio.SampleRate >> count) || !std::isfinite(audio.SampleRate) ||
 					audio.SampleRate <= 0.0 || count > Limits::MaximumAudioSamplesPerFrame)
 					return false;
+				if (!admit(count * sizeof(double))) return false;
 				audio.Samples.reserve(count);
 				for (size_t index = 0; index < count; ++index) {
 					double sample = 0.0;
@@ -1277,6 +1475,7 @@ namespace engine::imagegraph {
 					return false;
 				Path2D path;
 				path.Loop = loop != 0;
+				if (!admit(anchorCount * sizeof(PathAnchor) + weightCount * sizeof(PathWeight))) return false;
 				path.Anchors.reserve(anchorCount);
 				path.Weights.reserve(weightCount);
 				for (size_t index = 0; index < anchorCount; index++) {
@@ -1372,9 +1571,10 @@ namespace engine::imagegraph {
 			}
 			return nullptr;
 		}
-	}
+	} // namespace
 
 	const NodeSchema *FindSchema(std::string_view type) {
+		if (type == CAPTURED_IMAGE_SCHEMA.Type) return &CAPTURED_IMAGE_SCHEMA;
 		if (const NodeSchema *schema = detail::FindValueNodeSchema(type)) return schema;
 		if (type == SOLID_SCHEMA.Type) return &SOLID_SCHEMA;
 		if (type == GRADIENT_SCHEMA.Type) return &GRADIENT_SCHEMA;
@@ -1416,7 +1616,49 @@ namespace engine::imagegraph {
 		if (type == ARRAY_SCHEMA.Type) return &ARRAY_SCHEMA;
 		if (type == ARRAY_GET_SCHEMA.Type) return &ARRAY_GET_SCHEMA;
 		if (type == TRANSFORM_IMAGE_3D_SCHEMA.Type) return &TRANSFORM_IMAGE_3D_SCHEMA;
+		if (const CatalogueEntry *entry = FindCatalogueEntry(type)) return &entry->Schema;
 		return nullptr;
+	}
+
+	std::string_view ValueTypeName(ValueType type) {
+		return TypeName(type);
+	}
+
+	std::optional<ValueType> ParseValueTypeName(std::string_view name) {
+		return ParseType(name);
+	}
+
+	bool IsAuthoredValueType(ValueType type) {
+		return (type != ValueType::Image && type != ValueType::Mesh && type < ValueType::AudioBit) ||
+			   type == ValueType::Matrix;
+	}
+
+	bool detail::ReadValueText(std::string_view text, Value &value) {
+		std::istringstream stream{std::string(text)};
+		stream.imbue(std::locale::classic());
+		// Recursive source arrays use the version 9 value encoding.
+		return ReadValue(stream, value, 9) && !HasTrailing(stream);
+	}
+
+	Status detail::ReadValueText(
+		std::string_view text, Value &value, EvaluationBudget &budget, AllocationReservation &charge
+	) {
+		// The copied stream text and lexical tag/type scratch coexist with the parsed
+		// value.
+		auto workspace = budget.Reserve(5 * text.size() + 4 * std::string{}.capacity());
+		if (!workspace) return Status::LimitExceeded;
+		auto parsedCharge = budget.Reserve(0);
+		if (!parsedCharge) return Status::LimitExceeded;
+		std::istringstream stream{std::string(text)};
+		stream.imbue(std::locale::classic());
+		Value parsed;
+		bool allocationRefused = false;
+		if (!ReadValue(stream, parsed, 9, true, &budget, &*parsedCharge, &allocationRefused) ||
+			HasTrailing(stream))
+			return allocationRefused ? Status::LimitExceeded : Status::InvalidValue;
+		value = std::move(parsed);
+		if (!charge.Merge(std::move(*parsedCharge))) std::terminate();
+		return Status::Ok;
 	}
 
 	std::string Write(const Document &document) {
@@ -1432,6 +1674,37 @@ namespace engine::imagegraph {
 			stream << ' ';
 			WriteQuoted(stream, node.GroupId);
 			stream << ' ' << std::setprecision(17) << node.Position.X << ' ' << node.Position.Y << '\n';
+			if (document.FormatVersion >= 9 && !node.InstanceBase.empty()) {
+				stream << "node_instance ";
+				WriteQuoted(stream, node.Id);
+				stream << ' ';
+				WriteQuoted(stream, node.InstanceBase);
+				stream << '\n';
+			}
+			if (document.FormatVersion >= 9)
+				for (const auto &port : node.InstanceOverrides) {
+					stream << "node_instance_override ";
+					WriteQuoted(stream, node.Id);
+					stream << ' ';
+					WriteQuoted(stream, port);
+					stream << '\n';
+				}
+			if (document.FormatVersion >= 9)
+				for (const auto &port : node.SourceAnimatedInputs) {
+					stream << "source_anim ";
+					WriteQuoted(stream, node.Id);
+					stream << ' ';
+					WriteQuoted(stream, port);
+					stream << '\n';
+				}
+			if (document.FormatVersion >= 9)
+				for (const auto &port : node.SourceStaticInputs) {
+					stream << "source_static ";
+					WriteQuoted(stream, node.Id);
+					stream << ' ';
+					WriteQuoted(stream, port);
+					stream << '\n';
+				}
 			for (const AuthoredValue &value : node.Values) {
 				stream << "value " << nodeIndex << ' ';
 				WriteQuoted(stream, node.Id);
@@ -1477,7 +1750,27 @@ namespace engine::imagegraph {
 				WriteQuoted(stream, group.ParentId);
 			}
 			stream << '\n';
+			if (document.FormatVersion >= 9 && !group.InstanceBase.empty()) {
+				stream << "group_instance ";
+				WriteQuoted(stream, group.Id);
+				stream << ' ';
+				WriteQuoted(stream, group.InstanceBase);
+				stream << '\n';
+			}
+			if (document.FormatVersion >= 9 && group.ColorDepth != 1) {
+				stream << "group_depth ";
+				WriteQuoted(stream, group.Id);
+				stream << ' '
+					   << (group.ColorDepth >= 0 && group.ColorDepth < 9 ? DEPTH_NAMES[group.ColorDepth]
+																		 : "invalid")
+					   << '\n';
+			}
 			if (document.FormatVersion >= 2) {
+				if (document.FormatVersion >= 9 && (group.Interpolation != 0 || group.Oversample != 0)) {
+					stream << "group_sampling ";
+					WriteQuoted(stream, group.Id);
+					stream << ' ' << group.Interpolation << ' ' << group.Oversample << '\n';
+				}
 				for (const GroupPort &port : group.Ports) {
 					stream << "group_port ";
 					WriteQuoted(stream, group.Id);
@@ -1486,6 +1779,15 @@ namespace engine::imagegraph {
 					stream << ' ';
 					WriteQuoted(stream, port.JunctionId);
 					stream << ' ' << DirectionName(port.Direction) << '\n';
+					if (document.FormatVersion >= 9 && !port.ControlNodeId.empty()) {
+						stream << "group_boundary ";
+						WriteQuoted(stream, group.Id);
+						stream << ' ';
+						WriteQuoted(stream, port.Id);
+						stream << ' ';
+						WriteQuoted(stream, port.ControlNodeId);
+						stream << '\n';
+					}
 				}
 			}
 		}
@@ -1522,6 +1824,22 @@ namespace engine::imagegraph {
 			stream << ' ';
 			WriteValue(stream, keyframe.Data);
 			stream << '\n';
+			if (document.FormatVersion >= 9 && (keyframe.Subframe != 0 || keyframe.NegativeFrame)) {
+				stream << "key_time ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' ' << (keyframe.NegativeFrame ? "negative" : "positive")
+					   << ' ' << keyframe.Subframe << '\n';
+			}
+			if (document.FormatVersion >= 9 && keyframe.Kind != KeyframeKind::Normal) {
+				stream << "key_kind ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' '
+					   << (keyframe.Kind == KeyframeKind::Adder ? "adder" : "invalid") << '\n';
+			}
 			if (document.FormatVersion >= 4 && keyframe.Ease) {
 				stream << "key_ease ";
 				WriteQuoted(stream, keyframe.NodeId);
@@ -1545,6 +1863,69 @@ namespace engine::imagegraph {
 					   << keyframe.SineDriver->Amplitude << ' ' << keyframe.SineDriver->Phase << ' '
 					   << keyframe.SineDriver->Smooth << '\n';
 			}
+			if (document.FormatVersion >= 8 && keyframe.SourceDriver) {
+				stream << "key_source_driver ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' ';
+				std::visit(
+					[&](const auto &driver) {
+						using T = std::decay_t<decltype(driver)>;
+						stream << std::setprecision(17);
+						if constexpr (std::is_same_v<T, KeyframeLinearDriver>) {
+							WriteQuoted(stream, "linear");
+							stream << ' ' << driver.Speed;
+						} else if constexpr (std::is_same_v<T, KeyframeSnapDriver>) {
+							WriteQuoted(stream, "snap");
+							stream << ' ' << driver.Size;
+						} else if constexpr (std::is_same_v<T, KeyframeSineDriver>) {
+							WriteQuoted(stream, "sine");
+							stream << ' ' << driver.Frequency << ' ' << driver.Amplitude << ' '
+								   << driver.Phase << ' ' << driver.Smooth;
+						} else if constexpr (std::is_same_v<T, KeyframeCurveDriver>) {
+							WriteQuoted(stream, "curve");
+							stream << ' ';
+							WriteValue(stream, driver.Data);
+						} else {
+							WriteQuoted(
+								stream, std::is_same_v<T, KeyframeBounceDriver> ? "bounce" : "elastic"
+							);
+							stream << ' ' << driver.Amount << ' ' << driver.Spacing << ' ' << driver.Curve;
+						}
+					},
+					*keyframe.SourceDriver
+				);
+				stream << '\n';
+			}
+		}
+		if (document.FormatVersion >= 7 && document.Project) {
+			const ProjectSettings &project = *document.Project;
+			stream << "project " << project.SurfaceWidth << ' ' << project.SurfaceHeight << ' '
+				   << project.Interpolation << ' ' << project.Oversample << ' ' << project.Palette.size();
+			for (const Colour &colour : project.Palette)
+				stream << ' ' << unsigned(colour.Red) << ' ' << unsigned(colour.Green) << ' '
+					   << unsigned(colour.Blue) << ' ' << unsigned(colour.Alpha);
+			stream << '\n';
+			if (document.FormatVersion >= 9) {
+				if (project.ColorDepth != 1)
+					stream << "project_depth "
+						   << (project.ColorDepth >= 0 && project.ColorDepth <= 6
+								   ? DEPTH_NAMES[project.ColorDepth + 2]
+								   : "invalid")
+						   << '\n';
+				stream << "preview_grid " << project.PreviewGrid.Show << ' ' << project.PreviewGrid.Snap
+					   << ' ' << project.PreviewGrid.Size.X << ' ' << project.PreviewGrid.Size.Y << '\n';
+				stream << "preview_rulers " << project.ShowPreviewRulers << ' '
+					   << project.PreviewRulers.size();
+				for (const auto &guide : project.PreviewRulers)
+					stream << ' '
+						   << (guide.Axis == PreviewRulerAxis::Horizontal ? "horizontal"
+							   : guide.Axis == PreviewRulerAxis::Vertical ? "vertical"
+																		  : "invalid")
+						   << ' ' << guide.Position;
+				stream << '\n';
+			}
 		}
 		if (document.FormatVersion >= 4) {
 			if (document.Timeline) {
@@ -1563,6 +1944,15 @@ namespace engine::imagegraph {
 				stream << ' ';
 				WriteQuoted(stream, track.End);
 				stream << ' ' << track.LoopRange << '\n';
+				if (document.FormatVersion >= 8 && track.QuaternionMode) {
+					stream << "track_quaternion ";
+					WriteQuoted(stream, track.NodeId);
+					stream << ' ';
+					WriteQuoted(stream, track.Port);
+					stream << ' ';
+					WriteQuoted(stream, *track.QuaternionMode == 0 ? "raw" : "euler");
+					stream << '\n';
+				}
 			}
 		}
 		return stream.str();
@@ -1587,12 +1977,18 @@ namespace engine::imagegraph {
 			SetDiagnostic(diagnostic, Status::Malformed, "invalid imagegraph header");
 			return diagnostic.Code;
 		}
-		if (parsed.FormatVersion != 1 && parsed.FormatVersion != 2 && parsed.FormatVersion != 3 &&
-			parsed.FormatVersion != 4 && parsed.FormatVersion != 5 && parsed.FormatVersion != 6) {
+		if (parsed.FormatVersion < 1 || parsed.FormatVersion > 9) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
 
+		std::optional<PreviewGridSettings> previewGrid;
+		std::optional<int64_t> projectDepth;
+		std::set<std::string> groupDepths;
+		std::set<std::string> groupSampling;
+		std::set<size_t> keyTimes;
+		std::set<size_t> keyKinds;
+		std::optional<std::pair<bool, std::vector<PreviewRulerGuide>>> previewRulers;
 		size_t lineNumber = 1;
 		while (std::getline(input, line)) {
 			lineNumber++;
@@ -1711,6 +2107,55 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				parsed.Groups.push_back(std::move(group));
+			} else if ((marker == "node_instance_override" || marker == "source_anim" ||
+						marker == "source_static") &&
+					   parsed.FormatVersion >= 9) {
+				std::string nodeId, port;
+				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || port.empty() || HasTrailing(row))
+					goto malformed;
+				auto node = std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const Node &n) {
+					return n.Id == nodeId;
+				});
+				if (node == parsed.Nodes.end()) goto malformed;
+				auto &ports = marker == "source_anim"	  ? node->SourceAnimatedInputs
+							  : marker == "source_static" ? node->SourceStaticInputs
+														  : node->InstanceOverrides;
+				if (ports.size() == Limits::MaximumArrayElements ||
+					std::find(ports.begin(), ports.end(), port) != ports.end())
+					goto malformed;
+				ports.push_back(std::move(port));
+			} else if ((marker == "node_instance" || marker == "group_instance") &&
+					   parsed.FormatVersion >= 9) {
+				std::string id, base;
+				if (!ReadQuoted(row, id) || !ReadQuoted(row, base) || base.empty() || HasTrailing(row))
+					goto malformed;
+				if (marker == "node_instance") {
+					const auto found =
+						std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const Node &n) {
+							return n.Id == id;
+						});
+					if (found == parsed.Nodes.end() || !found->InstanceBase.empty()) goto malformed;
+					found->InstanceBase = std::move(base);
+				} else {
+					const auto found =
+						std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &g) {
+							return g.Id == id;
+						});
+					if (found == parsed.Groups.end() || !found->InstanceBase.empty()) goto malformed;
+					found->InstanceBase = std::move(base);
+				}
+			} else if (marker == "group_depth" && parsed.FormatVersion >= 9) {
+				std::string id, name;
+				if (!ReadQuoted(row, id) || !(row >> name) || HasTrailing(row) ||
+					!groupDepths.insert(id).second)
+					goto malformed;
+				const auto depth = ParseDepth(name);
+				const auto group =
+					std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &candidate) {
+						return candidate.Id == id;
+					});
+				if (!depth || group == parsed.Groups.end()) goto malformed;
+				group->ColorDepth = *depth;
 			} else if (marker == "group_port" && parsed.FormatVersion >= 2) {
 				std::string groupId, portId, junctionId, direction;
 				if (!ReadQuoted(row, groupId) || !ReadQuoted(row, portId) || !ReadQuoted(row, junctionId) ||
@@ -1738,6 +2183,33 @@ namespace engine::imagegraph {
 					 std::move(junctionId),
 					 direction == "input" ? PortDirection::Input : PortDirection::Output}
 				);
+			} else if (marker == "group_sampling" && parsed.FormatVersion >= 9) {
+				std::string groupId;
+				int64_t interpolation, oversample;
+				if (!ReadQuoted(row, groupId) || !(row >> interpolation >> oversample) || HasTrailing(row))
+					goto malformed;
+				auto group = std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &g) {
+					return g.Id == groupId;
+				});
+				if (group == parsed.Groups.end() || !groupSampling.insert(groupId).second) goto malformed;
+				group->Interpolation = interpolation;
+				group->Oversample = oversample;
+			} else if (marker == "group_boundary" && parsed.FormatVersion >= 9) {
+				std::string groupId, portId, controlId;
+				if (!ReadQuoted(row, groupId) || !ReadQuoted(row, portId) || !ReadQuoted(row, controlId) ||
+					controlId.empty() || HasTrailing(row))
+					goto malformed;
+				const auto group =
+					std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &g) {
+						return g.Id == groupId;
+					});
+				if (group == parsed.Groups.end()) goto malformed;
+				const auto port =
+					std::find_if(group->Ports.begin(), group->Ports.end(), [&](const GroupPort &p) {
+						return p.Id == portId;
+					});
+				if (port == group->Ports.end() || !port->ControlNodeId.empty()) goto malformed;
+				port->ControlNodeId = std::move(controlId);
 			} else if (marker == "junction" && parsed.FormatVersion >= 2) {
 				Junction junction;
 				std::string typeName;
@@ -1814,6 +2286,30 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				parsed.Keyframes.push_back(std::move(keyframe));
+			} else if (marker == "key_time" && parsed.FormatVersion >= 9) {
+				std::string nodeId, port, sign;
+				FrameTime time;
+				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) ||
+					!(row >> time.Tick >> sign >> time.Subframe) || HasTrailing(row) ||
+					(sign != "positive" && sign != "negative") || parsed.Keyframes.empty())
+					goto malformed;
+				time.NegativeFrame = sign == "negative";
+				auto &key = parsed.Keyframes.back();
+				if (key.NodeId != nodeId || key.Port != port || key.Tick != time.Tick ||
+					!ValidFrameTime(time) || !keyTimes.emplace(parsed.Keyframes.size() - 1).second)
+					goto malformed;
+				SetFrameTime(key, time);
+			} else if (marker == "key_kind" && parsed.FormatVersion >= 9) {
+				std::string nodeId, port, kind;
+				uint64_t tick = 0;
+				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick >> kind) ||
+					HasTrailing(row) || parsed.Keyframes.empty() || (kind != "normal" && kind != "adder"))
+					goto malformed;
+				auto &key = parsed.Keyframes.back();
+				if (key.NodeId != nodeId || key.Port != port || key.Tick != tick ||
+					!keyKinds.emplace(parsed.Keyframes.size() - 1).second)
+					goto malformed;
+				key.Kind = kind == "adder" ? KeyframeKind::Adder : KeyframeKind::Normal;
 			} else if (marker == "key_ease" && parsed.FormatVersion >= 4) {
 				std::string nodeId, port;
 				uint64_t tick = 0;
@@ -1830,22 +2326,64 @@ namespace engine::imagegraph {
 					!std::isfinite(ease.Out.Y))
 					goto malformed;
 				parsed.Keyframes.back().Ease = std::move(ease);
-			} else if (marker == "key_driver" && parsed.FormatVersion >= 6) {
+			} else if ((marker == "key_driver" && parsed.FormatVersion >= 6) ||
+					   (marker == "key_source_driver" && parsed.FormatVersion >= 8)) {
 				std::string nodeId, port, type;
 				uint64_t tick = 0;
-				KeyframeSineDriver driver;
 				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick) ||
-					!ReadQuoted(row, type) ||
-					!(row >> driver.Frequency >> driver.Amplitude >> driver.Phase >> driver.Smooth) ||
-					HasTrailing(row) || type != "sine" || !std::isfinite(driver.Frequency) ||
-					!std::isfinite(driver.Amplitude) || !std::isfinite(driver.Phase) ||
-					!std::isfinite(driver.Smooth))
+					!ReadQuoted(row, type))
 					goto malformed;
 				if (parsed.Keyframes.empty() || parsed.Keyframes.back().NodeId != nodeId ||
 					parsed.Keyframes.back().Port != port || parsed.Keyframes.back().Tick != tick ||
-					parsed.Keyframes.back().SineDriver)
+					parsed.Keyframes.back().SineDriver || parsed.Keyframes.back().SourceDriver)
 					goto malformed;
-				parsed.Keyframes.back().SineDriver = driver;
+				auto &key = parsed.Keyframes.back();
+				if (type == "sine") {
+					KeyframeSineDriver driver;
+					if (!(row >> driver.Frequency >> driver.Amplitude >> driver.Phase >> driver.Smooth) ||
+						!std::isfinite(driver.Frequency) || !std::isfinite(driver.Amplitude) ||
+						!std::isfinite(driver.Phase) || !std::isfinite(driver.Smooth))
+						goto malformed;
+					if (marker == "key_source_driver")
+						key.SourceDriver = driver;
+					else
+						key.SineDriver = driver;
+				} else {
+					if (marker != "key_source_driver") goto malformed;
+					if (type == "linear") {
+						KeyframeLinearDriver driver;
+						if (!(row >> driver.Speed)) goto malformed;
+						key.SourceDriver = driver;
+					} else if (type == "snap") {
+						KeyframeSnapDriver driver;
+						if (!(row >> driver.Size)) goto malformed;
+						key.SourceDriver = driver;
+					} else if (type == "bounce") {
+						KeyframeBounceDriver driver;
+						if (!(row >> driver.Amount >> driver.Spacing >> driver.Curve)) goto malformed;
+						key.SourceDriver = driver;
+					} else if (type == "elastic") {
+						KeyframeElasticDriver driver;
+						if (!(row >> driver.Amount >> driver.Spacing >> driver.Curve)) goto malformed;
+						key.SourceDriver = driver;
+					} else if (type == "curve") {
+						std::string tag;
+						size_t count;
+						Curve curve;
+						if (!(row >> tag >> count) || tag != "q" || count > Limits::MaximumCurveAnchors)
+							goto malformed;
+						for (double &field : curve.Header)
+							if (!(row >> field) || !std::isfinite(field)) goto malformed;
+						curve.Anchors.resize(count);
+						for (auto &anchor : curve.Anchors)
+							for (double &field : anchor)
+								if (!(row >> field) || !std::isfinite(field)) goto malformed;
+						key.SourceDriver = KeyframeCurveDriver{std::move(curve)};
+					} else
+						goto malformed;
+					if (!detail::ValidSourceDriver(*key.SourceDriver)) goto malformed;
+				}
+				if (HasTrailing(row)) goto malformed;
 			} else if (marker == "timeline" && parsed.FormatVersion >= 4) {
 				TimelineSettings timeline;
 				if (parsed.Timeline || !(row >> timeline.Frames >> timeline.First >> timeline.Last) ||
@@ -1857,6 +2395,75 @@ namespace engine::imagegraph {
 					1.0 / timeline.FramesPerSecond <= 0)
 					goto malformed;
 				parsed.Timeline = std::move(timeline);
+			} else if (marker == "project" && parsed.FormatVersion >= 7) {
+				ProjectSettings project;
+				size_t count = 0;
+				if (parsed.Project ||
+					!(row >> project.SurfaceWidth >> project.SurfaceHeight >> project.Interpolation >>
+					  project.Oversample >> count) ||
+					count > Limits::MaximumProjectPaletteEntries)
+					goto malformed;
+				project.Palette.clear();
+				for (size_t index = 0; index < count; index++) {
+					unsigned red = 0, green = 0, blue = 0, alpha = 0;
+					if (!(row >> red >> green >> blue >> alpha) || red > 255 || green > 255 || blue > 255 ||
+						alpha > 255)
+						goto malformed;
+					project.Palette.push_back(
+						{static_cast<uint8_t>(red),
+						 static_cast<uint8_t>(green),
+						 static_cast<uint8_t>(blue),
+						 static_cast<uint8_t>(alpha)}
+					);
+				}
+				if (HasTrailing(row)) goto malformed;
+				parsed.Project = std::move(project);
+			} else if (marker == "project_depth" && parsed.FormatVersion >= 9) {
+				std::string name;
+				if (projectDepth || !(row >> name) || HasTrailing(row)) goto malformed;
+				const auto depth = ParseDepth(name);
+				if (!depth || *depth < 2) goto malformed;
+				projectDepth = *depth - 2;
+			} else if (marker == "preview_grid" && parsed.FormatVersion >= 9) {
+				PreviewGridSettings grid;
+				if (previewGrid || !(row >> grid.Show >> grid.Snap >> grid.Size.X >> grid.Size.Y) ||
+					HasTrailing(row) || !std::isfinite(grid.Size.X) || !std::isfinite(grid.Size.Y) ||
+					grid.Size.X < 0 || grid.Size.Y < 0)
+					goto malformed;
+				previewGrid = grid;
+			} else if (marker == "preview_rulers" && parsed.FormatVersion >= 9) {
+				bool show = false;
+				size_t count = 0;
+				if (previewRulers || !(row >> show >> count)) goto malformed;
+				if (count > Limits::MaximumArrayElements) {
+					SetDiagnostic(
+						diagnostic, Status::LimitExceeded, "preview guides exceed the array element budget"
+					);
+					return diagnostic.Code;
+				}
+				std::vector<PreviewRulerGuide> guides;
+				guides.reserve(count);
+				for (size_t index = 0; index < count; ++index) {
+					std::string axis;
+					double position = 0;
+					if (!(row >> axis >> position) || !std::isfinite(position) ||
+						(axis != "horizontal" && axis != "vertical"))
+						goto malformed;
+					guides.push_back(
+						{axis == "horizontal" ? PreviewRulerAxis::Horizontal : PreviewRulerAxis::Vertical,
+						 position}
+					);
+				}
+				if (HasTrailing(row)) goto malformed;
+				previewRulers = std::pair{show, std::move(guides)};
+			} else if (marker == "track_quaternion" && parsed.FormatVersion >= 8) {
+				std::string nodeId, port, mode;
+				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !ReadQuoted(row, mode) ||
+					HasTrailing(row) || (mode != "raw" && mode != "euler") || parsed.Tracks.empty() ||
+					parsed.Tracks.back().NodeId != nodeId || parsed.Tracks.back().Port != port ||
+					parsed.Tracks.back().QuaternionMode)
+					goto malformed;
+				parsed.Tracks.back().QuaternionMode = mode == "raw" ? 0 : 1;
 			} else if (marker == "track" && parsed.FormatVersion >= 4) {
 				AnimationTrack track;
 				if (!ReadQuoted(row, track.NodeId) || !ReadQuoted(row, track.Port) ||
@@ -1877,6 +2484,13 @@ namespace engine::imagegraph {
 				goto malformed;
 			}
 		}
+		if ((previewGrid || previewRulers || projectDepth) && !parsed.Project) goto malformed;
+		if (projectDepth) parsed.Project->ColorDepth = *projectDepth;
+		if (previewGrid) parsed.Project->PreviewGrid = *previewGrid;
+		if (previewRulers) {
+			parsed.Project->ShowPreviewRulers = previewRulers->first;
+			parsed.Project->PreviewRulers = std::move(previewRulers->second);
+		}
 		document = std::move(parsed);
 		diagnostic = {};
 		return Status::Ok;
@@ -1888,12 +2502,69 @@ namespace engine::imagegraph {
 		return diagnostic.Code;
 	}
 
+	bool ValidProjectPreviewSettings(const ProjectSettings &project) {
+		const Vector2 size = project.PreviewGrid.Size;
+		if (!std::isfinite(size.X) || !std::isfinite(size.Y) || size.X < 0 || size.Y < 0 ||
+			project.PreviewRulers.size() > Limits::MaximumArrayElements)
+			return false;
+		for (const auto &guide : project.PreviewRulers)
+			if (!std::isfinite(guide.Position) ||
+				(guide.Axis != PreviewRulerAxis::Horizontal && guide.Axis != PreviewRulerAxis::Vertical))
+				return false;
+		return true;
+	}
+
+	bool ValidKeyframeSourceDriver(const KeyframeSourceDriver &driver) {
+		return detail::ValidSourceDriver(driver);
+	}
+
+	bool ConvertSourceQuaternion(const Quaternion &tuple, int64_t mode, Quaternion &result) {
+		if (!detail::ValidRuntimeValue(tuple) || mode < 0 || mode > 1) return false;
+		if (mode == 1) return detail::SourceQuaternionFromEuler(tuple.X, tuple.Y, tuple.Z, result);
+		result = tuple;
+		return true;
+	}
+
 	Status Migrate(Document &document, Diagnostic &diagnostic) {
-		if (document.FormatVersion != 1 && document.FormatVersion != 2 && document.FormatVersion != 3 &&
-			document.FormatVersion != 4 && document.FormatVersion != 5 && document.FormatVersion != 6) {
+		if (document.FormatVersion < 1 || document.FormatVersion > 9) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
+		for (const Node &node : document.Nodes) {
+			for (const auto *modes : {&node.SourceAnimatedInputs, &node.SourceStaticInputs}) {
+				if (modes->size() > Limits::MaximumArrayElements ||
+					(!modes->empty() && document.FormatVersion < 9)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"source animation modes require bounded v9 inputs",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				for (size_t index = 0; index < modes->size(); ++index) {
+					const auto &port = (*modes)[index];
+					if (port.empty() || port.size() > Limits::MaximumTextBytes ||
+						!SourceModePort(node, port) ||
+						std::find(modes->begin(), modes->begin() + index, port) != modes->begin() + index ||
+						(modes == &node.SourceStaticInputs &&
+						 std::find(
+							 node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), port
+						 ) != node.SourceAnimatedInputs.end())) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidValue,
+							"source animation mode must name one source input with "
+							"disjoint modes",
+							node.Id,
+							port
+						);
+						return diagnostic.Code;
+					}
+				}
+			}
+		}
+
 		if (document.FormatVersion == 1) {
 			if (!document.Junctions.empty()) {
 				SetDiagnostic(diagnostic, Status::InvalidValue, "legacy document contains v2 junctions");
@@ -1927,13 +2598,21 @@ namespace engine::imagegraph {
 			document.FormatVersion = 5;
 		}
 		if (document.FormatVersion == 5) document.FormatVersion = 6;
+		if (document.FormatVersion == 6) document.FormatVersion = 7;
+		if (document.FormatVersion == 7) document.FormatVersion = 8;
+		if (document.FormatVersion == 8) document.FormatVersion = 9;
 		diagnostic = {};
 		return Status::Ok;
 	}
 
-	Status Compile(const Document &document, Plan &plan, Diagnostic &diagnostic) {
-		if (document.FormatVersion != 1 && document.FormatVersion != 2 && document.FormatVersion != 3 &&
-			document.FormatVersion != 4 && document.FormatVersion != 5 && document.FormatVersion != 6) {
+	static Status CompileWithBudget(
+		const Document &document,
+		Plan &plan,
+		Diagnostic &diagnostic,
+		detail::EvaluationBudget &budget,
+		detail::AllocationReservation &planCharge
+	) try {
+		if (document.FormatVersion < 1 || document.FormatVersion > 9) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
@@ -1945,6 +2624,98 @@ namespace engine::imagegraph {
 			document.Tracks.size() > Limits::MaximumTracks) {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "document exceeds a graph count limit");
 			return diagnostic.Code;
+		}
+		if (document.FormatVersion < 9) {
+			const auto recursive = [](const Value &value) {
+				const auto *array = std::get_if<ArrayValue>(&value);
+				return array && (array->ElementType == ValueType::Any || !array->Items.empty());
+			};
+			for (const auto &node : document.Nodes) {
+				for (const auto &value : node.Values)
+					if (recursive(value.Data)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::UnsupportedVersion,
+							"recursive source arrays need document version 9",
+							node.Id,
+							value.Port
+						);
+						return diagnostic.Code;
+					}
+				for (const auto &input : node.DynamicInputs)
+					if (input.Default && recursive(*input.Default)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::UnsupportedVersion,
+							"recursive source arrays need document version 9",
+							node.Id,
+							input.Id
+						);
+						return diagnostic.Code;
+					}
+			}
+			for (const auto &junction : document.Junctions)
+				if (junction.Default && recursive(*junction.Default)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedVersion,
+						"recursive source arrays need document version 9",
+						junction.Id
+					);
+					return diagnostic.Code;
+				}
+			for (const auto &key : document.Keyframes)
+				if (recursive(key.Data)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedVersion,
+						"recursive source arrays need document version 9",
+						key.NodeId,
+						key.Port
+					);
+					return diagnostic.Code;
+				}
+		}
+
+		if (document.Project) {
+			const ProjectSettings &project = *document.Project;
+			if (document.FormatVersion < 7) {
+				SetDiagnostic(diagnostic, Status::InvalidValue, "project settings need document version 7");
+				return diagnostic.Code;
+			}
+			if (project.ColorDepth < 0 || project.ColorDepth > 6) {
+				SetDiagnostic(diagnostic, Status::InvalidValue, "project color depth is outside its range");
+				return diagnostic.Code;
+			}
+			if (document.FormatVersion < 9 && project.ColorDepth != 1) {
+				SetDiagnostic(
+					diagnostic, Status::UnsupportedVersion, "project color depth needs document version 9"
+				);
+				return diagnostic.Code;
+			}
+			if (!ValidProjectPreviewSettings(project)) {
+				SetDiagnostic(
+					diagnostic, Status::InvalidValue, "project preview settings are outside their ranges"
+				);
+				return diagnostic.Code;
+			}
+			if (document.FormatVersion < 9 && (project.PreviewGrid != PreviewGridSettings{} ||
+											   !project.PreviewRulers.empty() || project.ShowPreviewRulers)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedVersion,
+					"authored preview settings need document version 9"
+				);
+				return diagnostic.Code;
+			}
+			if (project.SurfaceWidth < 1 || project.SurfaceHeight < 1 ||
+				project.SurfaceWidth > Limits::MaximumDimension ||
+				project.SurfaceHeight > Limits::MaximumDimension || project.Interpolation < 0 ||
+				project.Interpolation > 6 || project.Oversample < 0 || project.Oversample > 12 ||
+				project.Palette.size() > Limits::MaximumProjectPaletteEntries) {
+				SetDiagnostic(diagnostic, Status::InvalidValue, "project settings are outside their ranges");
+				return diagnostic.Code;
+			}
 		}
 		if (document.FormatVersion < 4) {
 			if (document.Timeline || !document.Tracks.empty() ||
@@ -1961,6 +2732,22 @@ namespace engine::imagegraph {
 											  [](const Keyframe &key) { return key.SineDriver.has_value(); }
 										  )) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "sine keyframe driver needs imagegraph v6");
+			return diagnostic.Code;
+		}
+		if (document.FormatVersion < 8 &&
+			(std::any_of(
+				 document.Keyframes.begin(),
+				 document.Keyframes.end(),
+				 [](const Keyframe &key) { return key.SourceDriver.has_value(); }
+			 ) ||
+			 std::any_of(
+				 document.Tracks.begin(),
+				 document.Tracks.end(),
+				 [](const AnimationTrack &track) { return track.QuaternionMode.has_value(); }
+			 ))) {
+			SetDiagnostic(
+				diagnostic, Status::UnsupportedVersion, "source driver metadata needs imagegraph v8"
+			);
 			return diagnostic.Code;
 		}
 		if (document.Timeline) {
@@ -2070,12 +2857,13 @@ namespace engine::imagegraph {
 					}
 		}
 
-		std::unordered_map<std::string, size_t> nodeIndices;
-		std::unordered_map<std::string, size_t> junctionIndices;
-		std::unordered_set<std::string> groupIds;
-		std::unordered_set<std::string> outputIds;
+		auto nodeIndices = detail::MakeEvaluationHashMap<std::string_view, size_t>(budget);
+		auto junctionIndices = detail::MakeEvaluationHashMap<std::string_view, size_t>(budget);
+		auto groupIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
+		auto outputIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
 		for (size_t index = 0; index < document.Nodes.size(); index++) {
 			const Node &node = document.Nodes[index];
+
 			if (node.Id.empty() || node.Type.empty() || !std::isfinite(node.Position.X) ||
 				!std::isfinite(node.Position.Y)) {
 				SetDiagnostic(
@@ -2119,9 +2907,9 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			std::unordered_set<std::string> portIds;
+			auto portIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
 			for (const PortSchema &port : FindSchema(node.Type)->Ports)
-				portIds.insert(std::string(port.Id));
+				portIds.insert(port.Id);
 			for (const DynamicInput &input : node.DynamicInputs) {
 				if (TypeName(input.Type).empty()) {
 					SetDiagnostic(
@@ -2183,7 +2971,7 @@ namespace engine::imagegraph {
 					}
 				}
 			}
-			std::unordered_set<std::string> valueIds;
+			auto valueIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
 			for (const AuthoredValue &value : node.Values) {
 				if (value.Port.size() > Limits::MaximumTextBytes) {
 					SetDiagnostic(
@@ -2214,7 +3002,61 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
-				if (TypeOf(value.Data) != property->Type) {
+				const CatalogueEntry *catalogue = FindCatalogueEntry(node.Type);
+				const CatalogueInput *sourceInput =
+					catalogue ? FindCatalogueInput(*catalogue, value.Port) : nullptr;
+				const auto *sourceArray = std::get_if<ArrayValue>(&value.Data);
+				const bool sourceArrayMatches =
+					sourceInput && sourceArray &&
+					CatalogueAuthoredArray(*catalogue, *sourceInput, *sourceArray);
+				const bool sourceEnumMatches =
+					sourceInput && CatalogueSourceEnumValue(*sourceInput, value.Data);
+				const bool emptyGroupAnimator =
+					sourceInput && (node.Type == "pc.group_input" || node.Type == "pc.group_output") &&
+					std::find(
+						node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), value.Port
+					) != node.SourceAnimatedInputs.end() &&
+					std::any_of(
+						document.Tracks.begin(),
+						document.Tracks.end(),
+						[&](const AnimationTrack &track) {
+							return track.NodeId == node.Id && track.Port == value.Port;
+						}
+					) &&
+					std::none_of(
+						document.Keyframes.begin(), document.Keyframes.end(), [&](const Keyframe &key) {
+							return key.NodeId == node.Id && key.Port == value.Port;
+						}
+					);
+				const auto *emptyScalar = std::get_if<double>(&value.Data);
+				const bool sourceStaticEmptyVector =
+					sourceInput && emptyScalar && *emptyScalar == 0.0 && node.Type == "pc.group_input" &&
+					sourceInput->Type == ValueType::Vector2 &&
+					(sourceInput->SourceKind == "Range" || sourceInput->SourceKind == "Vec2") &&
+					std::find(
+						node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), value.Port
+					) == node.SourceAnimatedInputs.end() &&
+					std::none_of(
+						document.Keyframes.begin(), document.Keyframes.end(), [&](const Keyframe &key) {
+							return key.NodeId == node.Id && key.Port == value.Port;
+						}
+					);
+				const bool sourceEmptyKeyMatches =
+					EmptySourceScalarArray(value.Data) &&
+					SourceEmptyGroupVectorKey(document, node, sourceInput, value.Port);
+				const bool sourceEmptyMatches =
+					emptyGroupAnimator &&
+					((emptyScalar && *emptyScalar == 0.0 && sourceInput->SourceKind != "Range" &&
+					  sourceInput->SourceKind != "Vec2") ||
+					 (sourceArray && sourceArray->ElementType == ValueType::Scalar &&
+					  sourceArray->Elements.empty() && sourceArray->Nested.empty() &&
+					  sourceArray->Items.empty() &&
+					  (sourceInput->SourceKind == "Range" || sourceInput->SourceKind == "Vec2")));
+				if (TypeOf(value.Data) != property->Type &&
+					!(node.Type == "pc.group_input" && value.Port == "parent_value") && !sourceArrayMatches &&
+					!sourceEnumMatches && !sourceEmptyMatches && !sourceEmptyKeyMatches &&
+					!sourceStaticEmptyVector &&
+					!(sourceInput && CatalogueSourceRawValue(*sourceInput, value.Data))) {
 					SetDiagnostic(
 						diagnostic,
 						Status::TypeMismatch,
@@ -2239,6 +3081,25 @@ namespace engine::imagegraph {
 						diagnostic, Status::InvalidValue, "authored array is invalid", node.Id, value.Port
 					);
 					return diagnostic.Code;
+				}
+			}
+			if (const CatalogueEntry *entry = FindCatalogueEntry(node.Type)) {
+				for (const AuthoredValue &value : node.Values) {
+					const auto *choice = std::get_if<EnumValue>(&value.Data);
+					const CatalogueInput *input = choice ? FindCatalogueInput(*entry, value.Port) : nullptr;
+					const size_t count = input && !CatalogueSourceEnumValue(*input, value.Data)
+											 ? CatalogueChoiceCount(*input)
+											 : 0;
+					if (count > 0 && (choice->Value < 0 || static_cast<size_t>(choice->Value) >= count)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidValue,
+							"enum value is outside its declared choices",
+							node.Id,
+							value.Port
+						);
+						return diagnostic.Code;
+					}
 				}
 			}
 			if (node.Type == "image.posterize") {
@@ -2675,6 +3536,40 @@ namespace engine::imagegraph {
 		}
 
 		for (const Group &group : document.Groups) {
+			if (group.Interpolation < 0 || group.Interpolation > 7 || group.Oversample < 0 ||
+				group.Oversample > 13) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidGroup,
+					"group sampling attribute is outside its source range",
+					group.Id
+				);
+				return diagnostic.Code;
+			}
+			if (document.FormatVersion < 9 && (group.Interpolation != 0 || group.Oversample != 0)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedVersion,
+					"group sampling needs document version 9",
+					group.Id
+				);
+				return diagnostic.Code;
+			}
+			if (group.ColorDepth < 0 || group.ColorDepth > 8) {
+				SetDiagnostic(
+					diagnostic, Status::InvalidGroup, "group color depth is outside its range", group.Id
+				);
+				return diagnostic.Code;
+			}
+			if (document.FormatVersion < 9 && group.ColorDepth != 1) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedVersion,
+					"group color depth needs document version 9",
+					group.Id
+				);
+				return diagnostic.Code;
+			}
 			if (group.Id.size() > Limits::MaximumTextBytes || group.Name.size() > Limits::MaximumTextBytes ||
 				group.ParentId.size() > Limits::MaximumTextBytes) {
 				SetDiagnostic(
@@ -2777,7 +3672,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
-				if (TypeOf(*junction.Default) != junction.Type) {
+				if (junction.Type != ValueType::Any && TypeOf(*junction.Default) != junction.Type) {
 					SetDiagnostic(
 						diagnostic,
 						Status::TypeMismatch,
@@ -2796,9 +3691,110 @@ namespace engine::imagegraph {
 				}
 			}
 		}
+		for (const Node &node : document.Nodes) {
+			for (const auto *modes : {&node.SourceAnimatedInputs, &node.SourceStaticInputs}) {
+				if (modes->size() > Limits::MaximumArrayElements ||
+					(!modes->empty() && document.FormatVersion < 9)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"source animation modes require bounded v9 inputs",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				for (size_t index = 0; index < modes->size(); ++index) {
+					const auto &port = (*modes)[index];
+					if (port.empty() || port.size() > Limits::MaximumTextBytes ||
+						!SourceModePort(node, port) ||
+						std::find(modes->begin(), modes->begin() + index, port) != modes->begin() + index ||
+						(modes == &node.SourceStaticInputs &&
+						 std::find(
+							 node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), port
+						 ) != node.SourceAnimatedInputs.end())) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidValue,
+							"source animation mode must name one source input with "
+							"disjoint modes",
+							node.Id,
+							port
+						);
+						return diagnostic.Code;
+					}
+				}
+			}
+		}
+
+		for (const Node &node : document.Nodes) {
+			if (node.InstanceOverrides.size() > Limits::MaximumArrayElements ||
+				(!node.InstanceOverrides.empty() && document.FormatVersion < 9)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"instance override controls exceed the durable bound",
+					node.Id
+				);
+				return diagnostic.Code;
+			}
+			for (size_t index = 0; index < node.InstanceOverrides.size(); ++index) {
+				const auto &port = node.InstanceOverrides[index];
+				const auto type = FindPortType(node, port, PortDirection::Input);
+				if (port.size() > Limits::MaximumTextBytes || !type ||
+					std::find(node.InstanceOverrides.begin(), node.InstanceOverrides.begin() + index, port) !=
+						node.InstanceOverrides.begin() + index) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"instance override must name one declared input",
+						node.Id,
+						port
+					);
+					return diagnostic.Code;
+				}
+			}
+			const Node *current = &node;
+			for (size_t hop = 0; !current->InstanceBase.empty(); ++hop) {
+				if (document.FormatVersion < 9 || current->InstanceBase.size() > Limits::MaximumTextBytes ||
+					hop >= document.Nodes.size()) {
+					SetDiagnostic(
+						diagnostic, Status::InvalidGroup, "node instance base is invalid or cyclic", node.Id
+					);
+					return diagnostic.Code;
+				}
+				const auto base = nodeIndices.find(current->InstanceBase);
+				if (base == nodeIndices.end() || document.Nodes[base->second].Type != node.Type) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidGroup,
+						"node instance base must have the same represented class",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				current = &document.Nodes[base->second];
+			}
+		}
 		for (const Group &group : document.Groups) {
-			std::unordered_set<std::string> portIds;
-			std::unordered_set<std::string> routedJunctions;
+			const Group *current = &group;
+			for (size_t hop = 0; !current->InstanceBase.empty(); ++hop) {
+				const auto base =
+					std::find_if(document.Groups.begin(), document.Groups.end(), [&](const Group &g) {
+						return g.Id == current->InstanceBase;
+					});
+				if (document.FormatVersion < 9 || current->InstanceBase.size() > Limits::MaximumTextBytes ||
+					hop >= document.Groups.size() || base == document.Groups.end()) {
+					SetDiagnostic(
+						diagnostic, Status::InvalidGroup, "group instance base is invalid or cyclic", group.Id
+					);
+					return diagnostic.Code;
+				}
+				current = &*base;
+			}
+		}
+		for (const Group &group : document.Groups) {
+			auto portIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
+			auto routedJunctions = detail::MakeEvaluationHashSet<std::string_view>(budget);
 			for (const GroupPort &port : group.Ports) {
 				if (port.Direction != PortDirection::Input && port.Direction != PortDirection::Output) {
 					SetDiagnostic(
@@ -2807,6 +3803,7 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				if (port.Id.size() > Limits::MaximumTextBytes ||
+					port.ControlNodeId.size() > Limits::MaximumTextBytes ||
 					port.JunctionId.size() > Limits::MaximumTextBytes) {
 					SetDiagnostic(
 						diagnostic,
@@ -2826,6 +3823,23 @@ namespace engine::imagegraph {
 						port.Id
 					);
 					return diagnostic.Code;
+				}
+				if (!port.ControlNodeId.empty()) {
+					const auto control = nodeIndices.find(port.ControlNodeId);
+					const std::string_view expected =
+						port.Direction == PortDirection::Input ? "pc.group_input" : "pc.group_output";
+					if (document.FormatVersion < 9 || control == nodeIndices.end() ||
+						document.Nodes[control->second].GroupId != group.Id ||
+						document.Nodes[control->second].Type != expected) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidGroup,
+							"group boundary must reference its own declared control node",
+							group.Id,
+							port.Id
+						);
+						return diagnostic.Code;
+					}
 				}
 				const auto junction = junctionIndices.find(port.JunctionId);
 				if (junction == junctionIndices.end() ||
@@ -2859,13 +3873,56 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 		}
-		std::set<std::tuple<std::string, std::string, uint64_t>> keyframeIds;
+		auto keyframeIds =
+			detail::MakeEvaluationSet<std::tuple<std::string_view, std::string_view, bool, uint64_t, double>>(
+				budget
+			);
 		for (const Keyframe &keyframe : document.Keyframes) {
 			if (keyframe.Tick > Limits::MaximumTick) {
 				SetDiagnostic(
 					diagnostic,
 					Status::LimitExceeded,
 					"keyframe tick exceeds the fixed timeline limit",
+					keyframe.NodeId,
+					keyframe.Port
+				);
+				return diagnostic.Code;
+			}
+			if (keyframe.Kind != KeyframeKind::Normal && keyframe.Kind != KeyframeKind::Adder) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"keyframe kind must be normal or adder",
+					keyframe.NodeId,
+					keyframe.Port
+				);
+				return diagnostic.Code;
+			}
+			if (document.FormatVersion < 9 && keyframe.Kind != KeyframeKind::Normal) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedVersion,
+					"source key kind metadata needs document version 9",
+					keyframe.NodeId,
+					keyframe.Port
+				);
+				return diagnostic.Code;
+			}
+			if (!ValidFrameTime(GetFrameTime(keyframe))) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"keyframe time must be canonical and bounded",
+					keyframe.NodeId,
+					keyframe.Port
+				);
+				return diagnostic.Code;
+			}
+			if (document.FormatVersion < 9 && (keyframe.Subframe != 0 || keyframe.NegativeFrame)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedVersion,
+					"signed fractional keys need document version 9",
 					keyframe.NodeId,
 					keyframe.Port
 				);
@@ -2905,7 +3962,12 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 			const PropertySchema *property = FindProperty(document.Nodes[node->second].Type, keyframe.Port);
-			if (!property) {
+			// A dynamic input with an authored type animates like a property.
+			std::optional<ValueType> keyedType = property ? std::optional{property->Type} : std::nullopt;
+			for (const DynamicInput &input : document.Nodes[node->second].DynamicInputs)
+				if (!property && input.Id == keyframe.Port && IsAuthoredValueType(input.Type))
+					keyedType = input.Type;
+			if (!keyedType) {
 				SetDiagnostic(
 					diagnostic,
 					Status::UnknownPort,
@@ -2915,7 +3977,24 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			if (TypeOf(keyframe.Data) != property->Type) {
+			bool sourceArray = false;
+			const auto *keyCatalogue = FindCatalogueEntry(document.Nodes[node->second].Type);
+			const auto *keyInput = keyCatalogue ? FindCatalogueInput(*keyCatalogue, keyframe.Port) : nullptr;
+			const bool sourceEnum = keyInput && CatalogueSourceEnumValue(*keyInput, keyframe.Data);
+			if (document.FormatVersion >= 8 && keyframe.Interpolation == "source") {
+				const auto *catalogue = keyCatalogue;
+				const auto *input = keyInput;
+				if (input)
+					if (const auto *array = std::get_if<ArrayValue>(&keyframe.Data))
+						sourceArray = CatalogueAuthoredArray(*catalogue, *input, *array);
+			}
+			const bool sourceEmptyKey =
+				SourceEmptyGroupVectorKey(document, document.Nodes[node->second], keyInput, keyframe.Port);
+			if (TypeOf(keyframe.Data) != *keyedType &&
+				!(document.Nodes[node->second].Type == "pc.group_input" && keyframe.Port == "parent_value") &&
+				!sourceArray && !sourceEnum && !sourceEmptyKey &&
+				!(document.FormatVersion >= 8 && keyframe.Interpolation == "source" && keyInput &&
+				  CatalogueSourceRawValue(*keyInput, keyframe.Data))) {
 				SetDiagnostic(
 					diagnostic,
 					Status::TypeMismatch,
@@ -2974,6 +4053,43 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 			}
+			if (keyframe.SourceDriver) {
+				const auto *array = std::get_if<ArrayValue>(&keyframe.Data);
+				const bool numeric =
+					(sourceEnum && keyInput->SourceBehavior->FractionalInterpolation == true) ||
+					std::holds_alternative<double>(keyframe.Data) ||
+					std::holds_alternative<int64_t>(keyframe.Data) ||
+					std::holds_alternative<Colour>(keyframe.Data) ||
+					std::holds_alternative<Vector2>(keyframe.Data) ||
+					std::holds_alternative<Vector3>(keyframe.Data) ||
+					std::holds_alternative<Vector4>(keyframe.Data) ||
+					std::holds_alternative<Quaternion>(keyframe.Data) ||
+					std::holds_alternative<Area>(keyframe.Data) ||
+					(array && array->Nested.empty() &&
+					 (array->ElementType == ValueType::Scalar || array->ElementType == ValueType::Integer));
+				if (!numeric) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedExecution,
+						"source driver requires a numeric component domain",
+						keyframe.NodeId,
+						keyframe.Port
+					);
+					return diagnostic.Code;
+				}
+				if (keyframe.SineDriver || keyframe.Interpolation != "source" ||
+					!detail::ValidSourceDriver(*keyframe.SourceDriver)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"source driver needs source easing, finite bounded "
+						"controls and no sine driver",
+						keyframe.NodeId,
+						keyframe.Port
+					);
+					return diagnostic.Code;
+				}
+			}
 			if (keyframe.SineDriver) {
 				const KeyframeSineDriver &driver = *keyframe.SineDriver;
 				if (!std::holds_alternative<double>(keyframe.Data)) {
@@ -2992,23 +4108,43 @@ namespace engine::imagegraph {
 					SetDiagnostic(
 						diagnostic,
 						Status::InvalidValue,
-						"sine keyframe driver parameters must be finite and smooth must be in [0, 1]",
+						"sine keyframe driver parameters must be finite and "
+						"smooth must be in [0, 1]",
 						keyframe.NodeId,
 						keyframe.Port
 					);
 					return diagnostic.Code;
 				}
 			}
-			if (!keyframeIds.emplace(keyframe.NodeId, keyframe.Port, keyframe.Tick).second) {
+			if (!keyframeIds
+					 .emplace(
+						 keyframe.NodeId,
+						 keyframe.Port,
+						 keyframe.NegativeFrame,
+						 keyframe.Tick,
+						 keyframe.Subframe
+					 )
+					 .second) {
 				SetDiagnostic(
-					diagnostic, Status::DuplicateId, "duplicate keyframe tick", keyframe.NodeId, keyframe.Port
+					diagnostic,
+					Status::DuplicateId,
+					"duplicate keyframe position",
+					keyframe.NodeId,
+					keyframe.Port
 				);
 				return diagnostic.Code;
 			}
 		}
-		std::map<std::pair<std::string, std::string>, std::vector<const Keyframe *>> authoredTracks;
+		auto authoredTracks = detail::MakeEvaluationMap<
+			std::pair<std::string_view, std::string_view>,
+			detail::EvaluationVector<const Keyframe *>>(budget);
 		for (const Keyframe &keyframe : document.Keyframes)
-			authoredTracks[{keyframe.NodeId, keyframe.Port}].push_back(&keyframe);
+			authoredTracks
+				.try_emplace(
+					std::pair<std::string_view, std::string_view>{keyframe.NodeId, keyframe.Port},
+					detail::EvaluationAllocator<const Keyframe *>(budget)
+				)
+				.first->second.push_back(&keyframe);
 		for (const auto &[identity, keys] : authoredTracks) {
 			const bool source = keys.front()->Interpolation == "source";
 			if (std::any_of(keys.begin(), keys.end(), [source](const Keyframe *key) {
@@ -3024,9 +4160,9 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 		}
-		std::set<std::pair<std::string, std::string>> trackIds;
+		auto trackIds = detail::MakeEvaluationSet<std::pair<std::string_view, std::string_view>>(budget);
 		for (const AnimationTrack &track : document.Tracks) {
-			const auto identity = std::pair{track.NodeId, track.Port};
+			const auto identity = std::pair<std::string_view, std::string_view>{track.NodeId, track.Port};
 			if (!trackIds.insert(identity).second) {
 				SetDiagnostic(
 					diagnostic, Status::DuplicateId, "duplicate animation track", track.NodeId, track.Port
@@ -3034,7 +4170,29 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 			const auto authored = authoredTracks.find(identity);
-			if (authored == authoredTracks.end()) {
+			const bool empty = authored == authoredTracks.end();
+			const auto owner = nodeIndices.find(track.NodeId);
+			const Node *node = owner == nodeIndices.end() ? nullptr : &document.Nodes[owner->second];
+			const bool sourceStatic =
+				node &&
+				std::find(node->SourceStaticInputs.begin(), node->SourceStaticInputs.end(), track.Port) !=
+					node->SourceStaticInputs.end();
+			const bool sourceAnimated =
+				node &&
+				std::find(node->SourceAnimatedInputs.begin(), node->SourceAnimatedInputs.end(), track.Port) !=
+					node->SourceAnimatedInputs.end();
+			const bool sourceEarlyReturn =
+				sourceStatic ||
+				(sourceAnimated && (empty || (authored->second.size() == 1 &&
+											  authored->second.front()->Interpolation == "source")));
+			const bool declaredEmpty =
+				empty && node &&
+				(std::find(
+					 node->SourceAnimatedInputs.begin(), node->SourceAnimatedInputs.end(), track.Port
+				 ) != node->SourceAnimatedInputs.end() ||
+				 std::find(node->SourceStaticInputs.begin(), node->SourceStaticInputs.end(), track.Port) !=
+					 node->SourceStaticInputs.end());
+			if (empty && !declaredEmpty) {
 				SetDiagnostic(
 					diagnostic,
 					Status::InvalidValue,
@@ -3044,10 +4202,31 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
+			if (track.QuaternionMode &&
+				(*track.QuaternionMode < 0 || *track.QuaternionMode > 1 ||
+				 (empty ? FindPortType(*node, track.Port, PortDirection::Input) != ValueType::Quaternion
+						: std::any_of(
+							  authored->second.begin(), authored->second.end(), [](const Keyframe *key) {
+								  return !std::holds_alternative<Quaternion>(key->Data) ||
+										 key->Interpolation != "source";
+							  }
+						  )))) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"quaternion mode needs source quaternion keys and a raw or "
+					"Euler choice",
+					track.NodeId,
+					track.Port
+				);
+				return diagnostic.Code;
+			}
 			if (track.NodeId.size() > Limits::MaximumTextBytes ||
 				track.Port.size() > Limits::MaximumTextBytes || track.End.size() > Limits::MaximumTextBytes ||
 				(track.End != "hold" && track.End != "loop" && track.End != "ping" && track.End != "wrap") ||
-				track.LoopRange < -1 || track.LoopRange >= static_cast<int64_t>(authored->second.size())) {
+				(!sourceEarlyReturn && track.LoopRange < -1) ||
+				(!empty && !sourceEarlyReturn &&
+				 track.LoopRange >= static_cast<int64_t>(authored->second.size()))) {
 				SetDiagnostic(
 					diagnostic,
 					Status::InvalidValue,
@@ -3057,7 +4236,8 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			if (track.End == "wrap" && !document.Timeline) {
+			// Source static and zero/one-key animated getters return before end/range selection.
+			if (!empty && !sourceEarlyReturn && track.End == "wrap" && !document.Timeline) {
 				SetDiagnostic(
 					diagnostic,
 					Status::InvalidValue,
@@ -3081,11 +4261,19 @@ namespace engine::imagegraph {
 			}
 		}
 
-		std::vector<size_t> indegree(document.Nodes.size(), 0);
-		std::vector<std::vector<size_t>> downstream(document.Nodes.size());
-		std::set<std::tuple<std::string, std::string, std::string, std::string>> uniqueLinks;
-		std::unordered_set<std::string> linkedInputs;
-		std::unordered_map<std::string, const Link *> junctionInputs;
+		detail::EvaluationVector<size_t> indegree(
+			document.Nodes.size(), 0, detail::EvaluationAllocator<size_t>(budget)
+		);
+		detail::EvaluationVector<detail::EvaluationVector<size_t>> downstream{
+			detail::EvaluationAllocator<detail::EvaluationVector<size_t>>(budget)
+		};
+		downstream.reserve(document.Nodes.size());
+		for (size_t index = 0; index < document.Nodes.size(); ++index)
+			downstream.emplace_back(detail::EvaluationAllocator<size_t>(budget));
+		auto uniqueLinks = detail::MakeEvaluationSet<
+			std::tuple<std::string_view, std::string_view, std::string_view, std::string_view>>(budget);
+		auto linkedInputs = detail::MakeEvaluationSet<std::pair<std::string_view, std::string_view>>(budget);
+		auto junctionInputs = detail::MakeEvaluationHashMap<std::string_view, const Link *>(budget);
 		for (const Link &link : document.Links) {
 			if (link.FromNode.size() > Limits::MaximumTextBytes ||
 				link.FromPort.size() > Limits::MaximumTextBytes ||
@@ -3100,7 +4288,10 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			const auto key = std::make_tuple(link.FromNode, link.FromPort, link.ToNode, link.ToPort);
+			const auto key =
+				std::tuple<std::string_view, std::string_view, std::string_view, std::string_view>{
+					link.FromNode, link.FromPort, link.ToNode, link.ToPort
+				};
 			if (!uniqueLinks.insert(key).second) {
 				SetDiagnostic(
 					diagnostic, Status::DuplicateLink, "duplicate graph link", link.ToNode, link.ToPort
@@ -3202,8 +4393,40 @@ namespace engine::imagegraph {
 			const bool heightBlendArrayOutput = from != nodeIndices.end() && sourceType == ValueType::Image &&
 												targetType == ValueType::Array &&
 												document.Nodes[from->second].Type == "image.height_blend";
+			bool catalogueArrayInput = false;
+			if (to != nodeIndices.end() && sourceType == ValueType::Array && targetType == ValueType::Image) {
+				if (const CatalogueEntry *entry = FindCatalogueEntry(document.Nodes[to->second].Type)) {
+					const CatalogueInput *input = FindCatalogueInput(*entry, link.ToPort);
+					catalogueArrayInput = input && input->SourceIndex >= 0 && input->ArrayDepthKnown &&
+										  input->Type == ValueType::Image &&
+										  FindCatalogueInput(*entry, "attribute_process");
+				}
+			}
+			bool sourceMaterialInput = false;
+			if (to != nodeIndices.end() && targetType == ValueType::Material3D &&
+				(sourceType == ValueType::Image || sourceType == ValueType::Array)) {
+				if (const auto *entry = FindCatalogueEntry(document.Nodes[to->second].Type)) {
+					const auto *input = FindCatalogueInput(*entry, link.ToPort);
+					sourceMaterialInput = input && input->SourceIndex >= 0 &&
+						input->Type == ValueType::Material3D && input->SourceKind == "D3Material";
+				}
+			}
+			const auto dynamicBoundary = [&](std::string_view junctionId) {
+				return std::any_of(document.Groups.begin(), document.Groups.end(), [&](const Group &group) {
+					return std::any_of(group.Ports.begin(), group.Ports.end(), [&](const GroupPort &port) {
+						return !port.ControlNodeId.empty() && port.JunctionId == junctionId;
+					});
+				});
+			};
+			const bool boundaryLink =
+				(fromJunction != junctionIndices.end() && dynamicBoundary(link.FromNode)) ||
+				(toJunction != junctionIndices.end() && dynamicBoundary(link.ToNode));
+			const bool catalogueLink =
+				(from != nodeIndices.end() && FindCatalogueEntry(document.Nodes[from->second].Type)) ||
+				(to != nodeIndices.end() && FindCatalogueEntry(document.Nodes[to->second].Type));
 			if (sourceType != targetType && !arrayElement && !heightBlendArrayInput &&
-				!heightBlendArrayOutput) {
+				!heightBlendArrayOutput && !catalogueArrayInput && !sourceMaterialInput &&
+				!((catalogueLink || boundaryLink) && JunctionCompatible(sourceType, targetType))) {
 				SetDiagnostic(
 					diagnostic,
 					Status::TypeMismatch,
@@ -3213,7 +4436,7 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			const std::string inputKey = link.ToNode + "\n" + link.ToPort;
+			const auto inputKey = std::pair<std::string_view, std::string_view>{link.ToNode, link.ToPort};
 			if (!linkedInputs.insert(inputKey).second) {
 				SetDiagnostic(
 					diagnostic,
@@ -3226,27 +4449,35 @@ namespace engine::imagegraph {
 			}
 			if (toJunction != junctionIndices.end()) junctionInputs.emplace(link.ToNode, &link);
 		}
+		const uint64_t planStorageBytes = (document.Nodes.size() + document.Outputs.size()) * sizeof(size_t) +
+										  document.Links.size() * (sizeof(Link) + sizeof(ResolvedInput));
+		auto storageCharge = budget.Reserve(planStorageBytes);
+		if (!storageCharge || !planCharge.Merge(std::move(*storageCharge))) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "compile result storage exceeds the live byte budget"
+			);
+			return diagnostic.Code;
+		}
 		std::vector<Link> effectiveLinks;
 		std::vector<ResolvedInput> resolvedInputs;
+		effectiveLinks.reserve(document.Links.size());
+		resolvedInputs.reserve(document.Links.size());
 		for (const Link &link : document.Links) {
 			if (!nodeIndices.contains(link.ToNode)) continue;
-			Link effective = link;
-			std::unordered_set<std::string> visited;
+			std::string_view sourceNode = link.FromNode;
+			std::string_view sourcePort = link.FromPort;
+			auto visited = detail::MakeEvaluationHashSet<std::string_view>(budget);
 			bool usedDefault = false;
-			while (junctionIndices.contains(effective.FromNode)) {
-				if (!visited.insert(effective.FromNode).second) {
+			while (junctionIndices.contains(sourceNode)) {
+				if (!visited.insert(document.Junctions[junctionIndices.at(sourceNode)].Id).second) {
 					SetDiagnostic(
-						diagnostic,
-						Status::Cycle,
-						"junction routing contains a cycle",
-						effective.FromNode,
-						"value"
+						diagnostic, Status::Cycle, "junction routing contains a cycle", sourceNode, "value"
 					);
 					return diagnostic.Code;
 				}
-				const auto input = junctionInputs.find(effective.FromNode);
+				const auto input = junctionInputs.find(sourceNode);
 				if (input == junctionInputs.end()) {
-					const Junction &junction = document.Junctions[junctionIndices.at(effective.FromNode)];
+					const Junction &junction = document.Junctions[junctionIndices.at(sourceNode)];
 					if (!junction.Default) {
 						SetDiagnostic(
 							diagnostic,
@@ -3257,18 +4488,52 @@ namespace engine::imagegraph {
 						);
 						return diagnostic.Code;
 					}
+					auto defaultCharge = budget.Reserve(
+						detail::RetainedPayloadBytes(*junction.Default) +
+						std::max(link.ToNode.size(), std::string{}.capacity()) +
+						std::max(link.ToPort.size(), std::string{}.capacity())
+					);
+					if (!defaultCharge || !planCharge.Merge(std::move(*defaultCharge))) {
+						SetDiagnostic(
+							diagnostic,
+							Status::LimitExceeded,
+							"compile default clone exceeds the live byte budget",
+							link.ToNode,
+							link.ToPort
+						);
+						return diagnostic.Code;
+					}
 					resolvedInputs.push_back({link.ToNode, link.ToPort, *junction.Default});
 					usedDefault = true;
 					break;
 				}
-				effective.FromNode = input->second->FromNode;
-				effective.FromPort = input->second->FromPort;
+				sourceNode = input->second->FromNode;
+				sourcePort = input->second->FromPort;
 			}
-			if (!usedDefault) effectiveLinks.push_back(std::move(effective));
+			if (!usedDefault) {
+				const uint64_t nameBytes = std::max(sourceNode.size(), std::string{}.capacity()) +
+										   std::max(sourcePort.size(), std::string{}.capacity()) +
+										   std::max(link.ToNode.size(), std::string{}.capacity()) +
+										   std::max(link.ToPort.size(), std::string{}.capacity());
+				auto routeCharge = budget.Reserve(nameBytes);
+				if (!routeCharge || !planCharge.Merge(std::move(*routeCharge))) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"compile route names exceed the live byte budget",
+						link.ToNode,
+						link.ToPort
+					);
+					return diagnostic.Code;
+				}
+				effectiveLinks.push_back(
+					{std::string(sourceNode), std::string(sourcePort), link.ToNode, link.ToPort}
+				);
+			}
 		}
 		for (const Junction &junction : document.Junctions) {
-			std::unordered_set<std::string> visited;
-			std::string current = junction.Id;
+			auto visited = detail::MakeEvaluationHashSet<std::string_view>(budget);
+			std::string_view current = junction.Id;
 			while (junctionIndices.contains(current)) {
 				if (!visited.insert(current).second) {
 					SetDiagnostic(
@@ -3281,6 +4546,82 @@ namespace engine::imagegraph {
 				current = input->second->FromNode;
 			}
 		}
+		std::vector<GroupSurfaceDependency> surfaceDependencies;
+		auto surfaceCharge = budget.Reserve(document.Nodes.size() * sizeof(GroupSurfaceDependency));
+		if (!surfaceCharge || !planCharge.Merge(std::move(*surfaceCharge))) {
+			SetDiagnostic(
+				diagnostic,
+				Status::LimitExceeded,
+				"group format dependency storage exceeds the live byte budget"
+			);
+			return diagnostic.Code;
+		}
+		surfaceDependencies.reserve(document.Nodes.size());
+		for (size_t index = 0; index < document.Nodes.size(); ++index) {
+			const Node *attributes = &document.Nodes[index];
+			for (size_t hop = 0; !attributes->InstanceBase.empty() && hop < document.Nodes.size(); ++hop)
+				attributes = &document.Nodes[nodeIndices.at(attributes->InstanceBase)];
+			bool inherited = false;
+			if (const auto *entry = FindCatalogueEntry(attributes->Type)) {
+				if (const auto *depth = FindCatalogueInput(*entry, "attribute_color_depth")) {
+					const auto *authored = FindValue(*attributes, depth->Id);
+					const auto fallback = CatalogueDefault(*depth);
+					const Value *choice = authored ? &authored->Data : (fallback ? &*fallback : nullptr);
+					inherited =
+						choice && (std::get_if<EnumValue>(choice)
+									   ? std::get<EnumValue>(*choice).Value == 1
+									   : std::get_if<int64_t>(choice) && std::get<int64_t>(*choice) == 1);
+					if (std::any_of(effectiveLinks.begin(), effectiveLinks.end(), [&](const Link &link) {
+							return link.ToNode == attributes->Id && link.ToPort == depth->Id;
+						})) {
+						SetDiagnostic(
+							diagnostic,
+							Status::UnsupportedExecution,
+							"linked native depth requires conditional group "
+							"dependency scheduling",
+							attributes->Id,
+							depth->Id
+						);
+						return diagnostic.Code;
+					}
+				}
+			}
+			if (!inherited) continue;
+			const auto route = detail::FindGroupInputDepth(document, attributes->GroupId);
+			if (route.Source == detail::GroupInputDepth::Kind::Invalid) {
+				SetDiagnostic(
+					diagnostic, Status::InvalidGroup, "group input format route is invalid", attributes->Id
+				);
+				return diagnostic.Code;
+			}
+			if (route.Source != detail::GroupInputDepth::Kind::NodeOutput) continue;
+			const auto source = nodeIndices.find(route.NodeId);
+			if (source == nodeIndices.end()) {
+				SetDiagnostic(
+					diagnostic, Status::UnknownNode, "group format producer is missing", attributes->Id
+				);
+				return diagnostic.Code;
+			}
+			auto names = budget.Reserve(std::max(route.Port.size(), std::string{}.capacity()));
+			if (!names || !planCharge.Merge(std::move(*names))) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"group format route names exceed the live byte budget",
+					attributes->Id
+				);
+				return diagnostic.Code;
+			}
+			surfaceDependencies.push_back({index, source->second, std::string(route.Port)});
+			const bool ordinary =
+				std::any_of(effectiveLinks.begin(), effectiveLinks.end(), [&](const Link &link) {
+					return link.FromNode == route.NodeId && link.ToNode == document.Nodes[index].Id;
+				});
+			if (!ordinary) {
+				indegree[index]++;
+				downstream[source->second].push_back(index);
+			}
+		}
 		for (const Link &link : effectiveLinks) {
 			const size_t from = nodeIndices.at(link.FromNode);
 			const size_t to = nodeIndices.at(link.ToNode);
@@ -3288,7 +4629,7 @@ namespace engine::imagegraph {
 			downstream[from].push_back(to);
 		}
 		for (const Node &node : document.Nodes) {
-			if (node.Type == "image.transform_3d" && !linkedInputs.contains(node.Id + "\nsurface")) {
+			if (node.Type == "image.transform_3d" && !linkedInputs.contains({node.Id, "surface"})) {
 				SetDiagnostic(
 					diagnostic,
 					Status::InvalidValue,
@@ -3304,13 +4645,13 @@ namespace engine::imagegraph {
 				 node.Type == "image.posterize" || node.Type == "image.tile" ||
 				 node.Type == "image.vignette" || node.Type == "image.displace" ||
 				 node.Type == "image.polar" || node.Type == "image.curve" || node.Type == "image.colorize") &&
-				!linkedInputs.contains(node.Id + "\nimage")) {
+				!linkedInputs.contains({node.Id, "image"})) {
 				SetDiagnostic(
 					diagnostic, Status::InvalidValue, "node requires an image input", node.Id, "image"
 				);
 				return diagnostic.Code;
 			}
-			if (node.Type == "image.displace" && !linkedInputs.contains(node.Id + "\ndisplace_map")) {
+			if (node.Type == "image.displace" && !linkedInputs.contains({node.Id, "displace_map"})) {
 				SetDiagnostic(
 					diagnostic, Status::InvalidValue, "displace requires a map input", node.Id, "displace_map"
 				);
@@ -3318,7 +4659,7 @@ namespace engine::imagegraph {
 			}
 			if (node.Type == "image.height_blend") {
 				for (const char *port : {"background", "foreground"}) {
-					if (!linkedInputs.contains(node.Id + "\n" + port)) {
+					if (!linkedInputs.contains({node.Id, port})) {
 						SetDiagnostic(
 							diagnostic,
 							Status::InvalidValue,
@@ -3330,7 +4671,7 @@ namespace engine::imagegraph {
 					}
 				}
 			}
-			if (node.Type == "image.blend" && !linkedInputs.contains(node.Id + "\nbackground")) {
+			if (node.Type == "image.blend" && !linkedInputs.contains({node.Id, "background"})) {
 				SetDiagnostic(
 					diagnostic,
 					Status::InvalidValue,
@@ -3340,7 +4681,7 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			if (node.Type == "value.array_get" && !linkedInputs.contains(node.Id + "\narray")) {
+			if (node.Type == "value.array_get" && !linkedInputs.contains({node.Id, "array"})) {
 				SetDiagnostic(
 					diagnostic, Status::InvalidValue, "array get requires an array input", node.Id, "array"
 				);
@@ -3373,6 +4714,7 @@ namespace engine::imagegraph {
 		}
 
 		std::vector<size_t> outputNodes;
+		outputNodes.reserve(document.Outputs.size());
 		for (const Output &output : document.Outputs) {
 			if (output.Id.size() > Limits::MaximumTextBytes ||
 				output.NodeId.size() > Limits::MaximumTextBytes ||
@@ -3418,14 +4760,18 @@ namespace engine::imagegraph {
 			return diagnostic.Code;
 		}
 
-		std::priority_queue<size_t, std::vector<size_t>, std::greater<>> ready;
+		std::priority_queue<size_t, detail::EvaluationVector<size_t>, std::greater<>> ready{
+			std::greater<>{}, detail::EvaluationVector<size_t>{detail::EvaluationAllocator<size_t>(budget)}
+		};
 		for (size_t index = 0; index < indegree.size(); index++) {
 			if (indegree[index] == 0) ready.push(index);
 		}
 		Plan compiled;
+		compiled.NodeOrder.reserve(document.Nodes.size());
 		compiled.OutputNodes = std::move(outputNodes);
 		compiled.EffectiveLinks = std::move(effectiveLinks);
 		compiled.ResolvedInputs = std::move(resolvedInputs);
+		compiled.GroupSurfaceDependencies = std::move(surfaceDependencies);
 		while (!ready.empty()) {
 			const size_t current = ready.top();
 			ready.pop();
@@ -3441,6 +4787,20 @@ namespace engine::imagegraph {
 		plan = std::move(compiled);
 		diagnostic = {};
 		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		SetDiagnostic(
+			diagnostic, Status::LimitExceeded, "compile allocation exceeds the available storage budget"
+		);
+		return diagnostic.Code;
+	} catch (const std::length_error &) {
+		SetDiagnostic(diagnostic, Status::LimitExceeded, "compile storage capacity exceeds native bounds");
+		return diagnostic.Code;
+	}
+
+	Status Compile(const Document &document, Plan &plan, Diagnostic &diagnostic) {
+		detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+		detail::AllocationReservation planCharge;
+		return CompileWithBudget(document, plan, diagnostic, budget, planCharge);
 	}
 
 	using ValueOutputs = std::vector<AuthoredValue>;
@@ -3454,8 +4814,138 @@ namespace engine::imagegraph {
 	struct MirrorOutputs {
 		Image Colored, Mask;
 	};
-	using NodeResult =
-		std::variant<Image, ImageArray, ValueOutputs, ShapeOutputs, ConversionOutputs, MirrorOutputs>;
+	// Named outputs of a source catalogue executor.
+	struct CatalogueOutputs {
+		std::vector<std::pair<std::string_view, SourceSocketDomain>> Domains;
+		std::vector<std::pair<std::string, Image>> Images;
+		std::vector<std::pair<std::string, ImageArray>> ImageArrays;
+		ValueOutputs Values;
+	};
+	using NodeResult = std::variant<
+		Image,
+		ImageArray,
+		ValueOutputs,
+		ShapeOutputs,
+		ConversionOutputs,
+		MirrorOutputs,
+		CatalogueOutputs>;
+	struct EvaluationResult {
+		detail::EvaluationBudget Budget{Limits::MaximumEvaluationBytes};
+		detail::AllocationReservation Charge;
+		NodeResult Data;
+	};
+	struct EvaluationSnapshot::Storage {
+		explicit Storage(uint64_t maximumBytes) : Budget(maximumBytes) {}
+		detail::EvaluationBudget Budget;
+		detail::AllocationReservation Charge;
+		detail::AllocationReservation ReplacementShadow;
+		std::vector<EvaluationInputValue> Values;
+		std::vector<EvaluationInputImage> Images;
+	};
+	EvaluationSnapshot::EvaluationSnapshot() = default;
+	EvaluationSnapshot::~EvaluationSnapshot() = default;
+	EvaluationSnapshot::EvaluationSnapshot(EvaluationSnapshot &&) noexcept = default;
+	EvaluationSnapshot &EvaluationSnapshot::operator=(EvaluationSnapshot &&) noexcept = default;
+	std::span<const EvaluationInputValue> EvaluationSnapshot::Values() const noexcept {
+		return Data ? std::span<const EvaluationInputValue>(Data->Values) : std::span<const EvaluationInputValue>{};
+	}
+	std::span<const EvaluationInputImage> EvaluationSnapshot::Images() const noexcept {
+		return Data ? std::span<const EvaluationInputImage>(Data->Images) : std::span<const EvaluationInputImage>{};
+	}
+	uint64_t EvaluationSnapshot::RetainedBytes() const noexcept {
+		return Data ? Data->Charge.Bytes() : 0;
+	}
+	static std::optional<SourceSocketKind> DeclaredSourceKind(ValueType type) {
+		switch (type) {
+		case ValueType::Integer:
+			return SourceSocketKind::Integer;
+		case ValueType::Scalar:
+			return SourceSocketKind::Float;
+		case ValueType::Boolean:
+			return SourceSocketKind::Boolean;
+		case ValueType::Colour:
+			return SourceSocketKind::Colour;
+		case ValueType::Image:
+			return SourceSocketKind::Surface;
+		case ValueType::Curve:
+			return SourceSocketKind::Curve;
+		case ValueType::Object:
+			return SourceSocketKind::Object;
+		case ValueType::NodeRef:
+			return SourceSocketKind::Node;
+		case ValueType::Path2D:
+			return SourceSocketKind::Path;
+		case ValueType::Particle:
+			return SourceSocketKind::Particle;
+		case ValueType::Rigid:
+			return SourceSocketKind::Rigid;
+		case ValueType::SmokeDomain:
+			return SourceSocketKind::SmokeDomain;
+		case ValueType::Struct:
+			return SourceSocketKind::Struct;
+		case ValueType::Strand:
+			return SourceSocketKind::Strand;
+		case ValueType::Mesh2D:
+			return SourceSocketKind::Mesh2D;
+		case ValueType::Mesh:
+			return SourceSocketKind::Mesh3D;
+		case ValueType::Light3D:
+			return SourceSocketKind::Light3D;
+		case ValueType::Scene3D:
+			return SourceSocketKind::Scene3D;
+		case ValueType::Material3D:
+			return SourceSocketKind::Material3D;
+		case ValueType::PcxNode:
+			return SourceSocketKind::PcxNode;
+		case ValueType::AudioBit:
+			return SourceSocketKind::Audio;
+		case ValueType::FluidDomain:
+			return SourceSocketKind::FluidDomain;
+		case ValueType::Sdf:
+			return SourceSocketKind::Sdf;
+		case ValueType::Gradient:
+			return SourceSocketKind::Gradient;
+		// Text may represent a source file-path declaration. Any may be a dynamic
+		// resource. Neither is inferred from a native carrier or runtime payload
+		// shape.
+		default:
+			return std::nullopt;
+		}
+	}
+	// Typed values produced by a value node or a catalogue executor.
+	static std::optional<SourceSocketDomain>
+	FindOutputDomain(const Node &node, const NodeResult &result, std::string_view port) {
+		if (const auto *outputs = std::get_if<CatalogueOutputs>(&result))
+			for (const auto &[id, domain] : outputs->Domains)
+				if (id == port) return domain;
+		if (const auto *entry = FindCatalogueEntry(node.Type))
+			for (const auto &output : entry->Outputs)
+				if (output.Id == port) {
+					ValueType declared = output.Type;
+					if (node.Type == "pc.gradient_extract" || node.Type == "pc.gradient_sample")
+						declared = ValueType::Colour;
+					return SourceSocketDomain{declared, std::nullopt, DeclaredSourceKind(declared)};
+				}
+		return std::nullopt;
+	}
+
+	static const ValueOutputs *FindValueOutputs(const NodeResult &result) {
+		if (const auto *values = std::get_if<ValueOutputs>(&result)) return values;
+		if (const auto *catalogue = std::get_if<CatalogueOutputs>(&result)) return &catalogue->Values;
+		return nullptr;
+	}
+	static ValueOutputs *FindValueOutputs(NodeResult &result) {
+		if (auto *values = std::get_if<ValueOutputs>(&result)) return values;
+		if (auto *catalogue = std::get_if<CatalogueOutputs>(&result)) return &catalogue->Values;
+		return nullptr;
+	}
+	static const ImageArray *FindImageArrayOutput(const NodeResult &result, std::string_view port) {
+		if (const auto *array = std::get_if<ImageArray>(&result)) return array;
+		if (const auto *catalogue = std::get_if<CatalogueOutputs>(&result))
+			for (const auto &[id, array] : catalogue->ImageArrays)
+				if (id == port) return &array;
+		return nullptr;
+	}
 	static const Image *FindImageOutput(const NodeResult &result, std::string_view port) {
 		if (const auto *image = std::get_if<Image>(&result)) return image;
 		if (const auto *shape = std::get_if<ShapeOutputs>(&result)) {
@@ -3475,22 +4965,61 @@ namespace engine::imagegraph {
 			if (port == "image") return &mirror->Colored;
 			if (port == "mirror_mask") return &mirror->Mask;
 		}
+		if (const auto *catalogue = std::get_if<CatalogueOutputs>(&result)) {
+			for (const auto &[id, image] : catalogue->Images)
+				if (id == port) return &image;
+		}
 		return nullptr;
 	}
 
-	static ImageArrayItem RebaseItem(const ImageArrayItem &source, size_t offset) {
-		if (const auto *leaf = std::get_if<size_t>(&source.Data)) return ImageArrayItem{*leaf + offset};
-		std::vector<ImageArrayItem> children;
-		for (const ImageArrayItem &child : std::get<std::vector<ImageArrayItem>>(source.Data))
-			children.push_back(RebaseItem(child, offset));
-		return ImageArrayItem{std::move(children)};
+
+	static uint64_t ItemBytes(const ImageArrayItem &item) {
+		const auto *children = std::get_if<std::vector<ImageArrayItem>>(&item.Data);
+		if (!children) return 0;
+		uint64_t bytes = children->size() * sizeof(ImageArrayItem);
+		for (const ImageArrayItem &child : *children)
+			bytes += ItemBytes(child);
+		return bytes;
 	}
 
 	static uint64_t ResultBytes(const ImageArray &images) {
-		uint64_t bytes = 0;
+		uint64_t bytes = images.Images.size() * sizeof(Image) + images.Items.size() * sizeof(ImageArrayItem);
+		for (const ImageArrayItem &item : images.Items)
+			bytes += ItemBytes(item);
 		for (const Image &image : images.Images)
 			bytes += image.Pixels.size();
 		return bytes;
+	}
+
+	static uint64_t ResultBytes(const CatalogueOutputs &catalogue) {
+		uint64_t bytes = 0;
+		for (const auto &[id, image] : catalogue.Images)
+			bytes += image.Pixels.size();
+		for (const auto &[id, array] : catalogue.ImageArrays)
+			bytes += ResultBytes(array);
+		for (const AuthoredValue &value : catalogue.Values)
+			bytes += detail::ValuePayloadBytes(value.Data);
+		return bytes;
+	}
+
+	static uint64_t ResultBytes(const ValueOutputs &values) {
+		uint64_t bytes = 0;
+		for (const AuthoredValue &value : values)
+			bytes += detail::ValuePayloadBytes(value.Data);
+		return bytes;
+	}
+	static uint64_t ResultBytes(const ShapeOutputs &shape) {
+		return shape.Colored.Pixels.size() + shape.Mask.Pixels.size() + shape.Height.Pixels.size() +
+			   shape.UV.Pixels.size();
+	}
+	static uint64_t ResultBytes(const ConversionOutputs &conversion) {
+		uint64_t bytes = 0;
+		for (const Image &image : conversion.Channels)
+			bytes += image.Pixels.size();
+		return bytes;
+	}
+	static uint64_t ResultBytes(const MirrorOutputs &mirror) {
+		return mirror.Colored.Pixels.size() + mirror.Mask.Pixels.size();
 	}
 
 	static uint64_t ResultBytes(const NodeResult &result) {
@@ -3507,18 +5036,763 @@ namespace engine::imagegraph {
 		}
 		if (const auto *mirror = std::get_if<MirrorOutputs>(&result))
 			return mirror->Colored.Pixels.size() + mirror->Mask.Pixels.size();
+		if (const auto *catalogue = std::get_if<CatalogueOutputs>(&result)) return ResultBytes(*catalogue);
 		uint64_t bytes = 0;
-		for (const AuthoredValue &value : std::get<ValueOutputs>(result)) {
-			bytes += sizeof(Value);
-			if (const auto *text = std::get_if<std::string>(&value.Data)) bytes += text->size();
-			if (const auto *array = std::get_if<ArrayValue>(&value.Data)) {
-				bytes += array->Elements.size() * sizeof(ElementValue);
-				for (const ElementValue &element : array->Elements)
-					if (const auto *text = std::get_if<std::string>(&element)) bytes += text->size();
-			}
-		}
+		for (const AuthoredValue &value : *FindValueOutputs(result))
+			bytes += detail::ValuePayloadBytes(value.Data);
 		return bytes;
 	}
+
+	struct WavPreviewCapture {
+		std::string_view NodeId;
+		WavPreviewControls Controls;
+		bool Captured = false;
+	};
+
+	struct Vector2PresentationCapture {
+		std::string_view NodeId;
+		Vector2Presentation Controls;
+		const Image *Sprite = nullptr;
+	};
+	struct NodeInputCapture {
+		std::string_view NodeId;
+		std::vector<EvaluationInputValue> *Values = nullptr;
+		std::vector<EvaluationInputImage> *Images = nullptr;
+		detail::AllocationReservation *Charge = nullptr;
+	};
+	struct NodeValuesCapture {
+		std::string_view NodeId;
+		std::vector<AuthoredValue> *Values = nullptr;
+		detail::AllocationReservation *Charge = nullptr;
+	};
+
+	static bool AddBytes(uint64_t &total, uint64_t bytes) {
+		if (bytes > std::numeric_limits<uint64_t>::max() - total) return false;
+		total += bytes;
+		return true;
+	}
+	static bool AddArrayBytes(uint64_t &total, size_t count, size_t elementBytes) {
+		if (elementBytes != 0 && count > std::numeric_limits<uint64_t>::max() / elementBytes) return false;
+		return AddBytes(total, static_cast<uint64_t>(count) * elementBytes);
+	}
+
+	static bool CaptureNodeInputs(
+		detail::NodeContext &context,
+		NodeInputCapture &capture,
+		std::span<NodeResult> results,
+		std::span<detail::AllocationReservation> resultCharges
+	) {
+		if (!context.ImageArrays.empty())
+			return context.Fail(
+				Status::UnsupportedExecution,
+				"node input snapshot cannot contain image arrays",
+				capture.NodeId
+			);
+		// Use the same first-port-wins rule as snapshot construction when proving
+		// pointer uniqueness.
+		const auto ports = [&](const auto &visit) {
+			for (size_t i = 0; i < context.Entry.Inputs.size(); ++i) {
+				const auto id = context.Entry.Inputs[i].Id;
+				bool duplicate = false;
+				for (size_t j = 0; j < i; ++j)
+					if (context.Entry.Inputs[j].Id == id) duplicate = true;
+				if (!duplicate && !visit(id)) return false;
+			}
+			for (size_t i = 0; i < context.Authored.DynamicInputs.size(); ++i) {
+				const auto &id = context.Authored.DynamicInputs[i].Id;
+				bool duplicate = false;
+				for (const auto &input : context.Entry.Inputs)
+					if (input.Id == id) duplicate = true;
+				for (size_t j = 0; j < i; ++j)
+					if (context.Authored.DynamicInputs[j].Id == id) duplicate = true;
+				if (!duplicate && !visit(std::string_view(id))) return false;
+			}
+			return true;
+		};
+		const auto ownedAudio = [&](const Value *value) -> std::optional<detail::SnapshotAudioMove> {
+			if (!value || !std::holds_alternative<AudioBit>(*value)) return std::nullopt;
+			size_t aliases = 0;
+			ports([&](std::string_view port) {
+				if (context.Find(port) == value) ++aliases;
+				return true;
+			});
+			if (aliases != 1) return std::nullopt;
+			for (size_t i = 0; i < results.size(); ++i) {
+				auto *output = FindValueOutputs(results[i]);
+				if (!output) continue;
+				for (auto &entry : *output)
+					if (&entry.Data == value) {
+						auto &audio = std::get<AudioBit>(entry.Data);
+						const uint64_t bytes = detail::RetainedPayloadBytes(audio);
+						if (bytes == 0) return std::nullopt;
+						return detail::SnapshotAudioMove{&audio, nullptr, &resultCharges[i], bytes};
+					}
+			}
+			return std::nullopt;
+		};
+		uint64_t bytes = 0;
+		size_t moveCount = 0;
+		if (!ports([&](std::string_view port) {
+				if (const Value *value = context.Find(port)) {
+					if (!AddBytes(bytes, std::max(port.size(), std::string{}.capacity()))) return false;
+					if (ownedAudio(value))
+						++moveCount;
+					else if (!AddBytes(bytes, detail::RetainedPayloadBytes(*value)))
+						return false;
+				}
+				if (const Image *image = context.Input(port)) {
+					if (!AddBytes(bytes, std::max(port.size(), std::string{}.capacity())) ||
+						!AddBytes(bytes, image->Pixels.capacity()))
+						return false;
+				}
+				return true;
+			}))
+			return context.Fail(Status::LimitExceeded, "node input snapshot size overflow", capture.NodeId);
+		const size_t valueSlots = context.Entry.Inputs.size() + context.Authored.DynamicInputs.size();
+		const size_t imageSlots = context.Images.size();
+		if (!AddArrayBytes(bytes, valueSlots, sizeof(EvaluationInputValue)) ||
+			!AddArrayBytes(bytes, imageSlots, sizeof(EvaluationInputImage)))
+			return context.Fail(Status::LimitExceeded, "node input snapshot size overflow", capture.NodeId);
+		auto charge = context.ReserveWorkspace(bytes, capture.NodeId);
+		if (!charge || !capture.Charge->Merge(std::move(*charge)))
+			return context.Fail(
+				Status::LimitExceeded, "node input snapshot exceeds the evaluation budget", capture.NodeId
+			);
+		uint64_t moveBytes = 0;
+		if (!AddArrayBytes(moveBytes, moveCount, sizeof(detail::SnapshotAudioMove)))
+			return context.Fail(
+				Status::LimitExceeded, "node input snapshot move size overflow", capture.NodeId
+			);
+		auto moveCharge = context.ReserveWorkspace(moveBytes, capture.NodeId);
+		if (!moveCharge) return false;
+		std::vector<detail::SnapshotAudioMove> moves;
+		moves.reserve(moveCount);
+		if (!moveCharge->Resize(moves.capacity() * sizeof(detail::SnapshotAudioMove)))
+			return context.Fail(
+				Status::LimitExceeded, "node input snapshot move workspace exceeds cap", capture.NodeId
+			);
+		capture.Values->reserve(valueSlots);
+		capture.Images->reserve(imageSlots);
+		// No source payload changes until all strings, vector capacities and copied
+		// inputs are admitted.
+		if (!ports([&](std::string_view port) {
+				if (const Value *value = context.Find(port)) {
+					auto move = ownedAudio(value);
+					if (move) {
+						capture.Values->push_back(
+							{std::string(port), AudioBit{}, context.IsLinked(port), context.InputDomain(port)}
+						);
+						move->Target = &std::get<AudioBit>(capture.Values->back().Data);
+						moves.push_back(*move);
+					} else
+						capture.Values->push_back(
+							{std::string(port), *value, context.IsLinked(port), context.InputDomain(port)}
+						);
+				}
+				if (const Image *image = context.Input(port))
+					capture.Images->push_back({std::string(port), *image, context.InputDomain(port)});
+				return true;
+			}))
+			return false;
+		uint64_t actual = 0;
+		if (!AddArrayBytes(actual, capture.Values->capacity(), sizeof(EvaluationInputValue)) ||
+			!AddArrayBytes(actual, capture.Images->capacity(), sizeof(EvaluationInputImage)))
+			return context.Fail(
+				Status::LimitExceeded, "node input snapshot actual size overflow", capture.NodeId
+			);
+		for (const auto &value : *capture.Values)
+			if (!AddBytes(actual, value.Port.capacity()) ||
+				!AddBytes(actual, detail::RetainedPayloadBytes(value.Data)))
+				return context.Fail(
+					Status::LimitExceeded, "node input snapshot actual size overflow", value.Port
+				);
+		for (const auto &image : *capture.Images)
+			if (!AddBytes(actual, image.Port.capacity()) || !AddBytes(actual, image.Data.Pixels.capacity()))
+				return context.Fail(
+					Status::LimitExceeded, "node input snapshot actual size overflow", image.Port
+				);
+		if (actual > bytes) {
+			auto excess = context.ReserveWorkspace(actual - bytes, capture.NodeId);
+			if (!excess || !capture.Charge->Merge(std::move(*excess)))
+				return context.Fail(
+					Status::LimitExceeded, "node input snapshot actual capacities exceed cap", capture.NodeId
+				);
+		}
+		if (!detail::PrepareSnapshotAudioMoves(moves, *capture.Charge))
+			return context.Fail(
+				Status::LimitExceeded,
+				"node input snapshot audio ownership transfer is not admitted",
+				capture.NodeId
+			);
+		detail::CommitSnapshotAudioMoves(moves, *capture.Charge);
+		return true;
+	}
+
+	static const Value *SourceEmptyGroupVectorView(
+		const Document *document,
+		const Node &node,
+		std::string_view port,
+		const Value *value,
+		std::optional<bool> getterAnimated = std::nullopt
+	);
+
+	static std::optional<Quaternion> SourceQuaternionGetterProjection(
+		const Document &document,
+		std::string_view nodeId,
+		std::string_view port,
+		const Value &value,
+		bool linked = false
+	) {
+		const auto target = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+			return node.Id == nodeId;
+		});
+		if (target == document.Nodes.end()) return std::nullopt;
+		const auto *entry = FindCatalogueEntry(target->Type);
+		const auto *input = entry ? FindCatalogueInput(*entry, port) : nullptr;
+		if (!input || input->SourceIndex < 0 || input->Type != ValueType::Quaternion) return std::nullopt;
+		// Quaternion.getValue processes the raw tuple with the receiving prop, after instance lookup.
+		const Node *getter = &*target;
+
+		const auto track =
+			std::find_if(document.Tracks.begin(), document.Tracks.end(), [&](const auto &track) {
+				return track.NodeId == getter->Id && track.Port == port && track.QuaternionMode;
+			});
+		const auto *tuple = std::get_if<Quaternion>(&value);
+		Quaternion linkedTuple;
+		if (!tuple && linked)
+			if (const auto *vector = std::get_if<Vector4>(&value)) {
+				linkedTuple = {vector->X, vector->Y, vector->Z, vector->W};
+				tuple = &linkedTuple;
+			}
+		Quaternion converted;
+		if (tuple && track != document.Tracks.end() &&
+			ConvertSourceQuaternion(*tuple, *track->QuaternionMode, converted))
+			return converted;
+		return std::nullopt;
+	}
+
+	static bool SourceQuaternionKeysPresent(
+		const Document &document,
+		const GroupReplayState *replay,
+		std::string_view nodeId,
+		std::string_view port
+	) {
+		const auto *binding = replay ? replay->Binding(nodeId, port) : nullptr;
+		const auto ownerId = binding ? std::string_view(binding->OwnerId) : nodeId;
+		const auto *overlay = replay ? replay->SharedSubtype(ownerId, port) : nullptr;
+		if (overlay) return !overlay->Keys.empty();
+		return std::any_of(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
+			return key.NodeId == ownerId && key.Port == port;
+		});
+	}
+
+	static const Node *EffectiveInputOwner(
+		const Document &document,
+		const Node &start,
+		std::string_view port
+	) {
+		const Node *current = &start;
+		if (port == "parent_value") return current;
+		for (size_t hop = 0; hop < document.Nodes.size(); ++hop) {
+			if (std::find(current->InstanceOverrides.begin(), current->InstanceOverrides.end(), port) !=
+				current->InstanceOverrides.end())
+				return current;
+			if (current->InstanceBase.empty()) return current;
+			const auto base = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+				return node.Id == current->InstanceBase && node.Type == current->Type;
+			});
+			if (base == document.Nodes.end()) return nullptr;
+			current = &*base;
+		}
+		return nullptr;
+	}
+
+	static const Node *EffectiveInputOwner(
+		const Document &document,
+		std::string_view nodeId,
+		std::string_view port
+	) {
+		const auto found = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+			return node.Id == nodeId;
+		});
+		return found == document.Nodes.end() ? nullptr : EffectiveInputOwner(document, *found, port);
+	}
+
+	static const Value *SharedGroupInputView(
+		const Document &document,
+		const GroupReplayState *replay,
+		const Node &target,
+		std::string_view port,
+		std::optional<Quaternion> *projection = nullptr
+	) {
+		const std::string_view nodeId = target.Id;
+		const auto *binding = replay && replay->InstancesBound() ? replay->Binding(nodeId, port) : nullptr;
+		const Node *owner = nullptr;
+		if (binding) {
+			const auto found = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+				return node.Id == binding->OwnerId;
+			});
+			if (found != document.Nodes.end()) owner = &*found;
+		} else {
+			owner = EffectiveInputOwner(document, target, port);
+		}
+		if (!owner) return nullptr;
+		const std::string_view ownerId = owner->Id;
+		const bool sourceStatic =
+			std::find(owner->SourceStaticInputs.begin(), owner->SourceStaticInputs.end(), port) !=
+			owner->SourceStaticInputs.end();
+		const auto *overlay =
+			replay && replay->InstancesBound() ? replay->SharedSubtype(ownerId, port) : nullptr;
+		const auto *entry = replay ? replay->Find(ownerId) : nullptr;
+		const std::optional<Value> *fixed = overlay ? &overlay->Fixed : nullptr;
+		const std::vector<Keyframe> *keys = overlay ? &overlay->Keys : nullptr;
+		if (!overlay && entry) {
+			if (port == "parent_value") {
+				fixed = &entry->ParentReset;
+				keys = &entry->ParentKeys;
+			} else if (port == "subtype") {
+				fixed = &entry->SubtypeStatic;
+				keys = &entry->SubtypeKeys;
+			}
+		}
+		const auto getterView = [&](const Value *value, bool rawKey = false) {
+			if (projection && rawKey)
+				*projection = SourceQuaternionGetterProjection(document, nodeId, port, *value);
+
+			return SourceEmptyGroupVectorView(
+				&document,
+				*owner,
+				port,
+				value,
+				binding ? std::optional<bool>(binding->Getter == GroupSubtypeAnimator::Animated)
+						: std::nullopt
+			);
+		};
+		if (fixed && *fixed) return getterView(&**fixed);
+		const Keyframe *first = nullptr;
+		size_t count = 0;
+		const auto consider = [&](const Keyframe &key) {
+			if (key.NodeId != ownerId || key.Port != port) return;
+			if (!first) first = &key;
+			++count;
+		};
+		if (keys && !keys->empty())
+			for (const auto &key : *keys)
+				consider(key);
+		else
+			for (const auto &key : document.Keyframes)
+				consider(key);
+		bool raw = binding ? binding->Getter == GroupSubtypeAnimator::Static : sourceStatic;
+		if (binding && binding->Getter == GroupSubtypeAnimator::Animated &&
+			binding->Writer == GroupSubtypeAnimator::Static && count > 1)
+			raw = true;
+		if (!binding && replay && replay->InstancesBound()) {
+			for (const auto &target : replay->Bindings())
+				if (target.OwnerId == nodeId && target.Port == port &&
+					target.Writer == GroupSubtypeAnimator::Static) {
+					raw = true;
+					break;
+				}
+		}
+		if (!raw) return nullptr;
+		if (first) return getterView(&first->Data, true);
+		for (const auto &value : owner->Values)
+			if (value.Port == port) return getterView(&value.Data);
+		return nullptr;
+	}
+
+	// Source static Range/Vec2 getters expand scalar zero. Range also
+	// verifies a represented empty source key to two zero slots.
+	static const Value *SourceEmptyGroupVectorView(
+		const Document *document,
+		const Node &node,
+		std::string_view port,
+		const Value *value,
+		std::optional<bool> getterAnimated
+	) {
+		if (!document || !value || (node.Type != "pc.group_input" && node.Type != "pc.group_output"))
+			return value;
+		const auto *entry = FindCatalogueEntry(node.Type);
+		const auto *input = entry ? FindCatalogueInput(*entry, port) : nullptr;
+		if (!input || input->Type != ValueType::Vector2 ||
+			(input->SourceKind != "Range" && input->SourceKind != "Vec2"))
+			return value;
+		const bool animated = getterAnimated.value_or(
+			std::find(node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), port) !=
+			node.SourceAnimatedInputs.end()
+		);
+		const bool hasKeys =
+			std::any_of(document->Keyframes.begin(), document->Keyframes.end(), [&](const Keyframe &key) {
+				return key.NodeId == node.Id && key.Port == port;
+			});
+		const bool sourceEmptyKey = SourceEmptyGroupVectorKey(*document, node, input, port);
+		if (animated && hasKeys && !sourceEmptyKey) return value;
+		const auto *scalar = std::get_if<double>(value);
+		const bool staticZero = !animated && scalar && *scalar == 0.0;
+		const auto *array = std::get_if<ArrayValue>(value);
+		const bool emptyRange =
+			(animated || sourceEmptyKey) && input->SourceKind == "Range" && array &&
+			array->ElementType == ValueType::Scalar && array->Elements.empty() && array->Nested.empty() &&
+			array->Items.empty() &&
+			std::any_of(document->Tracks.begin(), document->Tracks.end(), [&](const AnimationTrack &track) {
+				return track.NodeId == node.Id && track.Port == port;
+			});
+		if (!staticZero && !emptyRange) return value;
+		static constexpr Value zeroVector{Vector2{0, 0}};
+		return &zeroVector;
+	}
+
+	static bool CaptureAuthoredValues(
+		const Node &base,
+		const Node &local,
+		detail::EvaluationBudget &budget,
+		NodeValuesCapture &capture,
+		Diagnostic &diagnostic,
+		const GroupReplayEntry *replay = nullptr,
+		const GroupReplayState *replayState = nullptr,
+		const Document *document = nullptr,
+		const detail::TimelineOverrides *timelineOverrides = nullptr,
+		bool rawSourceQuaternions = false
+	) {
+		struct Row {
+			std::string_view Port;
+			const Value *Data;
+			std::optional<Quaternion> Projection = std::nullopt;
+		};
+		detail::EvaluationVector<Row> rows{detail::EvaluationAllocator<Row>(budget)};
+		rows.reserve(
+			base.Values.size() + local.Values.size() + base.DynamicInputs.size() +
+			local.DynamicInputs.size() + 2
+		);
+		const auto localPort = [&](std::string_view port) {
+			if (replayState && replayState->Binding(local.Id, port)) return false;
+			if (port == "parent_value") return true;
+			const auto *owner = document ? EffectiveInputOwner(*document, local, port) : nullptr;
+			return owner && owner->Id == local.Id;
+		};
+		for (const auto &value : base.Values)
+			if (&base == &local || !localPort(value.Port))
+				rows.push_back(
+					{value.Port, SourceEmptyGroupVectorView(document, base, value.Port, &value.Data)}
+				);
+		if (&base != &local)
+			for (const auto &value : local.Values)
+				if (localPort(value.Port))
+					rows.push_back(
+						{value.Port, SourceEmptyGroupVectorView(document, local, value.Port, &value.Data)}
+					);
+		const auto defaultFor = [&](const DynamicInput &input) {
+			if (!input.Default ||
+				std::any_of(rows.begin(), rows.end(), [&](const Row &row) { return row.Port == input.Id; }))
+				return;
+			rows.push_back({input.Id, &*input.Default});
+		};
+		for (const auto &input : base.DynamicInputs)
+			if (&base == &local || !localPort(input.Id)) defaultFor(input);
+		if (&base != &local)
+			for (const auto &input : local.DynamicInputs)
+				if (localPort(input.Id)) defaultFor(input);
+		const auto overrideLocal = [&](std::string_view port, const std::optional<Value> &value) {
+			if (!value) return;
+			const auto found =
+				std::find_if(rows.begin(), rows.end(), [&](const auto &row) { return row.Port == port; });
+			if (found == rows.end())
+				rows.push_back({port, &*value});
+			else
+				found->Data = &*value;
+		};
+		if (replay) {
+			overrideLocal("parent_value", replay->ParentReset);
+			overrideLocal("subtype", replay->SubtypeStatic);
+		}
+		if (document) {
+			const auto apply = [&](std::string_view port) {
+				std::optional<Quaternion> projection;
+				const auto *value = SharedGroupInputView(*document, replayState, local, port, &projection);
+				const auto *binding = replayState && replayState->InstancesBound()
+							  ? replayState->Binding(local.Id, port)
+							  : nullptr;
+				const auto canonical = std::find_if(document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
+					return node.Id == local.Id;
+				});
+				const Node *owner = binding || canonical == document->Nodes.end()
+							? nullptr
+							: EffectiveInputOwner(*document, *canonical, port);
+				if (binding) {
+					const auto foundOwner = std::find_if(
+						document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
+							return node.Id == binding->OwnerId;
+						}
+					);
+					if (foundOwner != document->Nodes.end()) owner = &*foundOwner;
+				}
+				if (owner && timelineOverrides) {
+					const auto foundOwner = std::find_if(
+						document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
+							return node.Id == owner->Id;
+						}
+					);
+					if (foundOwner == document->Nodes.end()) owner = nullptr;
+					else {
+						const size_t ownerIndex = static_cast<size_t>(foundOwner - document->Nodes.begin());
+						owner = &timelineOverrides->Find(ownerIndex, *foundOwner);
+					}
+				}
+				const auto *authored = owner ? FindValue(*owner, port) : nullptr;
+				if (!value && authored)
+					value = SourceEmptyGroupVectorView(document, *owner, port, &authored->Data);
+				const std::string_view ownerId = owner ? std::string_view(owner->Id) : local.Id;
+				if (value && rawSourceQuaternions && !projection &&
+					SourceQuaternionKeysPresent(*document, replayState, ownerId, port))
+					projection = SourceQuaternionGetterProjection(*document, local.Id, port, *value);
+				const auto found =
+					std::find_if(rows.begin(), rows.end(), [&](const auto &row) { return row.Port == port; });
+				if (!value) {
+					if (rawSourceQuaternions && found != rows.end() &&
+						SourceQuaternionKeysPresent(*document, replayState, ownerId, port))
+						found->Projection =
+							SourceQuaternionGetterProjection(*document, local.Id, port, *found->Data);
+					return;
+				}
+				if (found == rows.end())
+					rows.push_back({port, value, projection});
+				else {
+					found->Data = value;
+					found->Projection = projection;
+				}
+			};
+			if (const auto *entry = FindCatalogueEntry(local.Type))
+				for (const auto &input : entry->Inputs)
+					if (input.SourceIndex >= 0 && input.Id != "parent_value") apply(input.Id);
+			for (const auto &input : local.DynamicInputs)
+				apply(input.Id);
+			if (local.Type == "pc.group_input") apply("parent_value");
+		}
+
+		uint64_t bytes = 0;
+		if (!AddArrayBytes(bytes, rows.size(), sizeof(AuthoredValue))) goto refused;
+		for (const Row &row : rows)
+			if (!AddBytes(bytes, std::max(row.Port.size(), std::string{}.capacity())) ||
+				!AddBytes(bytes, detail::RetainedPayloadBytes(*row.Data)))
+				goto refused;
+		{
+			auto charge = budget.Reserve(bytes);
+			if (!charge || !capture.Charge->Merge(std::move(*charge))) goto refused;
+		}
+		capture.Values->reserve(rows.size());
+		for (const Row &row : rows)
+			capture.Values->push_back(
+				{std::string(row.Port), row.Projection ? Value(*row.Projection) : *row.Data}
+			);
+		return true;
+	refused:
+		SetDiagnostic(
+			diagnostic,
+			Status::LimitExceeded,
+			"resolved instance values exceed the live byte budget",
+			local.Id
+		);
+		return false;
+	}
+	static bool CaptureSchemaNodeInputs(
+		const Node &node,
+		std::span<const std::pair<std::string_view, const Image *>> images,
+		detail::EvaluationBudget &budget,
+		NodeInputCapture &capture,
+		Diagnostic &diagnostic
+	) {
+		uint64_t bytes = 0;
+		for (const AuthoredValue &value : node.Values)
+			if (!AddBytes(bytes, sizeof(EvaluationInputValue)) ||
+				!AddBytes(bytes, std::max(value.Port.size(), std::string{}.capacity())) ||
+				!AddBytes(bytes, detail::RetainedPayloadBytes(value.Data))) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "node input snapshot size overflow", node.Id
+				);
+				return false;
+			}
+		if (!AddArrayBytes(bytes, images.size(), sizeof(EvaluationInputImage))) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "node input snapshot size overflow", node.Id);
+			return false;
+		}
+		for (const auto &[port, image] : images)
+			if (image && (!AddBytes(bytes, std::max(port.size(), std::string{}.capacity())) ||
+						  !AddBytes(bytes, image->Pixels.capacity()))) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "node input snapshot size overflow", node.Id
+				);
+				return false;
+			}
+		auto charge = budget.Reserve(bytes);
+		if (!charge || !capture.Charge->Merge(std::move(*charge))) {
+			SetDiagnostic(
+				diagnostic,
+				Status::LimitExceeded,
+				"node input snapshot exceeds the evaluation budget",
+				node.Id
+			);
+			return false;
+		}
+		capture.Values->reserve(node.Values.size());
+		capture.Images->reserve(images.size());
+		for (const AuthoredValue &value : node.Values)
+			capture.Values->push_back({value.Port, value.Data, false, std::nullopt});
+		for (const auto &[port, image] : images)
+			if (image) capture.Images->push_back({std::string(port), *image, std::nullopt});
+		return true;
+	}
+
+	static Status ValidateEvaluationRequest(const EvaluationRequest &request, Diagnostic &diagnostic) {
+		if (request.MaximumImageDimension == 0 || request.MaximumImageDimension > Limits::MaximumDimension) {
+			SetDiagnostic(
+				diagnostic,
+				Status::InvalidValue,
+				"evaluation image dimension cap is outside native limits",
+				{},
+				"maximum_image_dimension"
+			);
+			return diagnostic.Code;
+		}
+		if (request.Tick > Limits::MaximumTick) {
+			SetDiagnostic(
+				diagnostic,
+				Status::LimitExceeded,
+				"evaluation tick exceeds the fixed timeline limit",
+				{},
+				"tick"
+			);
+			return diagnostic.Code;
+		}
+		if (!std::isfinite(request.Subframe) || request.Subframe < 0 || request.Subframe >= 1 ||
+			(request.Tick == Limits::MaximumTick && request.Subframe != 0)) {
+			SetDiagnostic(
+				diagnostic, Status::InvalidValue, "subframe must stay within the bounded tick", {}, "subframe"
+			);
+			return diagnostic.Code;
+		}
+		if (!ValidFrameTime(GetFrameTime(request))) {
+			SetDiagnostic(
+				diagnostic,
+				Status::InvalidValue,
+				"evaluation time must be canonical and bounded",
+				{},
+				"negative_frame"
+			);
+			return diagnostic.Code;
+		}
+		diagnostic = {};
+		return Status::Ok;
+	}
+
+	static bool CaptureVector2Row(detail::NodeContext &context, void *state) {
+		auto &capture = *static_cast<Vector2PresentationCapture *>(state);
+		auto &controls = capture.Controls;
+		uint64_t bytes = sizeof(Vector2Presentation);
+		for (const auto &value : context.OutputValues)
+			bytes += detail::ValuePayloadBytes(value.Data);
+		if (bytes > context.ByteBudget)
+			return context.Fail(Status::LimitExceeded, "Vector2 presentation exceeds byte budget");
+		const auto flag = [&](std::string_view port, bool &output) {
+			const Value *value = context.Find(port);
+			if (!value) return context.Fail(Status::InvalidValue, "Vector2 control is missing", port);
+			return std::visit(
+				[&](const auto &leaf) {
+					using T = std::decay_t<decltype(leaf)>;
+					if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, double> ||
+								  std::is_same_v<T, int64_t>) {
+						const double number = static_cast<double>(leaf);
+						if (!std::isfinite(number))
+							return context.Fail(Status::InvalidValue, "Vector2 flag is nonfinite", port);
+						output = number > .5;
+						return true;
+					} else if constexpr (std::is_same_v<T, EnumValue>) {
+						output = leaf.Value > .5;
+						return true;
+					} else
+						return context.Fail(
+							Status::UnsupportedExecution, "Vector2 flag needs a selected numeric value", port
+						);
+				},
+				*value
+			);
+		};
+		const auto vector = [&](std::string_view port, Vector2 &output) {
+			const Value *value = context.Find(port);
+			if (!value) return context.Fail(Status::InvalidValue, "Vector2 control is missing", port);
+			if (const auto *leaf = std::get_if<Vector2>(value))
+				output = *leaf;
+			else if (const auto *leaf = std::get_if<double>(value))
+				output = {*leaf, *leaf};
+			else if (const auto *leaf = std::get_if<int64_t>(value))
+				output = {double(*leaf), double(*leaf)};
+			else
+				return context.Fail(
+					Status::UnsupportedExecution, "Vector2 control needs a selected vector", port
+				);
+			if (!std::isfinite(output.X) || !std::isfinite(output.Y))
+				return context.Fail(Status::InvalidValue, "Vector2 control is nonfinite", port);
+			return true;
+		};
+		const auto computed = std::find_if(
+			context.OutputValues.begin(), context.OutputValues.end(), [](const AuthoredValue &value) {
+				return value.Port == "vector";
+			}
+		);
+		if (computed == context.OutputValues.end() || !std::holds_alternative<Vector2>(computed->Data))
+			return context.Fail(
+				Status::UnsupportedExecution, "Vector2 presentation needs a computed vector", "vector"
+			);
+		const auto position = std::get<Vector2>(computed->Data);
+		controls.X = position.X;
+		controls.Y = position.Y;
+		if (!flag("integer", controls.Integer) || !flag("show_on_global", controls.ShowOnGlobal) ||
+			!flag("relative_unit", controls.RelativeUnit) || !vector("gizmo_offset", controls.Offset) ||
+			!vector("gizmo_size", controls.Size))
+			return false;
+		controls.DisplayType = context.SourceChoice("display_type");
+		controls.Style = context.SourceChoice("gizmo_style");
+		controls.Shape = context.SourceChoice("gizmo_shape");
+		controls.Scale = context.Scalar("gizmo_scale", 1);
+		if (!std::isfinite(controls.Scale))
+			return context.Fail(Status::InvalidValue, "Vector2 scale is nonfinite", "gizmo_scale");
+		if (context.FailureCode != Status::Ok) return false;
+		controls.ProjectWidth = context.Project.SurfaceWidth;
+		controls.ProjectHeight = context.Project.SurfaceHeight;
+		controls.XLinked = context.IsLinked("x");
+		controls.YLinked = context.IsLinked("y");
+		++controls.ProcessorCount;
+		capture.Sprite = context.Input("gizmo_sprite");
+		return true;
+	}
+
+	// Evaluation borrows durable names and keeps one exact-capacity index buffer.
+	class EvaluationNodeIndices {
+	  public:
+		explicit EvaluationNodeIndices(const Document &document) {
+			Entries.reserve(document.Nodes.size());
+			for (size_t index = 0; index < document.Nodes.size(); ++index)
+				Entries.emplace_back(document.Nodes[index].Id, index);
+			std::sort(Entries.begin(), Entries.end());
+		}
+		size_t at(std::string_view id) const {
+			const auto found = std::lower_bound(
+				Entries.begin(), Entries.end(), id, [](const auto &entry, std::string_view name) {
+					return entry.first < name;
+				}
+			);
+			assert(found != Entries.end() && found->first == id);
+			return found->second;
+		}
+
+	  private:
+		std::vector<std::pair<std::string_view, size_t>> Entries;
+	};
+
+	struct GroupRefreshCapture {
+		const GroupRefreshEvent *Event;
+		detail::GroupReplayAccess::Owner *Owner;
+		bool Captured = false;
+	};
 
 	static Status EvaluateGraph(
 		const Document &document,
@@ -3526,40 +5800,135 @@ namespace engine::imagegraph {
 		const std::string &outputId,
 		const EvaluationRequest &request,
 		NodeResult &outputValue,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		detail::EvaluationBudget &budget,
+		detail::AllocationReservation &outputCharge,
+		WavPreviewCapture *wavPreview = nullptr,
+		Vector2PresentationCapture *vectorPreview = nullptr,
+		NodeInputCapture *nodeInputs = nullptr,
+		NodeValuesCapture *nodeValues = nullptr,
+		std::string_view targetNodeId = {},
+		std::string_view requiredOutputId = {},
+		bool planAlreadyValidated = false,
+		GroupRefreshCapture *groupRefresh = nullptr
 	) {
-		// Pure image nodes do not sample the seed. Future random nodes receive this same request.
+		detail::AllocationReservation groupStateShadow;
+		if (request.GroupReplay) {
+			if (!request.GroupReplay->InstancesBound() &&
+				std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+					return !node.InstanceBase.empty();
+				})) {
+				SetDiagnostic(
+					diagnostic, Status::InvalidValue, "Group instance animator binding has not been applied"
+				);
+				return diagnostic.Code;
+			}
+			if (request.GroupReplay->AuthoringRevision() != request.GroupAuthoringRevision) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"group replay revision does not match the authored owner"
+				);
+				return diagnostic.Code;
+			}
+			if (!groupRefresh ||
+				detail::GroupReplayAccess::Get(*request.GroupReplay) != groupRefresh->Owner) {
+				auto shadow = budget.Reserve(request.GroupReplay->RetainedBytes());
+				if (!shadow) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"retained group replay state exceeds the live evaluation budget"
+					);
+					return diagnostic.Code;
+				}
+				groupStateShadow = std::move(*shadow);
+			}
+		}
+		// Pure image nodes do not sample the seed. Future random nodes receive this
+		// same request.
 		(void)request.Seed;
 		const Status captureStatus = ValidateAudioCaptureFrames(request.AudioFrames, diagnostic);
 		if (captureStatus != Status::Ok) return captureStatus;
+		detail::AllocationReservation currentPlanCharge;
 		Plan currentPlan;
-		const Status compileStatus = Compile(document, currentPlan, diagnostic);
-		if (compileStatus != Status::Ok) return compileStatus;
-		if (currentPlan != plan) {
+		if (!planAlreadyValidated) {
+			const Status compileStatus =
+				CompileWithBudget(document, currentPlan, diagnostic, budget, currentPlanCharge);
+			if (compileStatus != Status::Ok) return compileStatus;
+			if (currentPlan != plan) {
+				SetDiagnostic(
+					diagnostic, Status::InvalidOutput, "compile plan does not match the authored document"
+				);
+				return diagnostic.Code;
+			}
+		}
+		const auto findOutput = [&](std::string_view id) {
+			return std::find_if(
+				document.Outputs.begin(), document.Outputs.end(), [&](const Output &candidate) {
+					return candidate.Id == id;
+				}
+			);
+		};
+		const bool captureTarget = !targetNodeId.empty();
+		const auto output = captureTarget ? document.Outputs.end() : findOutput(outputId);
+		const auto requiredOutput =
+			requiredOutputId.empty() ? document.Outputs.end() : findOutput(requiredOutputId);
+		if ((!captureTarget && output == document.Outputs.end()) ||
+			(!requiredOutputId.empty() && requiredOutput == document.Outputs.end())) {
 			SetDiagnostic(
-				diagnostic, Status::InvalidOutput, "compile plan does not match the authored document"
+				diagnostic,
+				Status::InvalidOutput,
+				"selected output does not exist",
+				{},
+				captureTarget ? requiredOutputId : std::string_view(outputId)
 			);
 			return diagnostic.Code;
 		}
-		const auto output =
-			std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const Output &candidate) {
-				return candidate.Id == outputId;
-			});
-		if (output == document.Outputs.end()) {
-			SetDiagnostic(diagnostic, Status::InvalidOutput, "selected output does not exist", {}, outputId);
+		const uint64_t graphBytes =
+			document.Nodes.size() * (sizeof(std::pair<std::string_view, size_t>) +
+									 sizeof(std::vector<size_t>) + 2 * sizeof(uint8_t) + 2 * sizeof(size_t) +
+									 sizeof(detail::AllocationReservation) + sizeof(NodeResult)) +
+			(2 * (plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size()) + 1) * sizeof(size_t);
+		auto graphCharge = budget.Reserve(graphBytes);
+		if (!graphCharge) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "graph workspace exceeds the live byte budget");
 			return diagnostic.Code;
 		}
-		std::unordered_map<std::string, size_t> nodeIndices;
-		for (size_t index = 0; index < document.Nodes.size(); index++) {
-			nodeIndices.emplace(document.Nodes[index].Id, index);
+		const EvaluationNodeIndices nodeIndices(document);
+		const auto targetNode =
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+				return node.Id == targetNodeId;
+			});
+		if (captureTarget && targetNode == document.Nodes.end()) {
+			SetDiagnostic(
+				diagnostic, Status::InvalidValue, "selected node does not exist", std::string(targetNodeId)
+			);
+			return diagnostic.Code;
 		}
-		const size_t targetIndex = nodeIndices.at(output->NodeId);
+		const size_t targetIndex = nodeIndices.at(captureTarget ? targetNodeId : output->NodeId);
 		std::vector<std::vector<size_t>> upstream(document.Nodes.size());
+		std::vector<size_t> sourceCounts(document.Nodes.size(), 0);
+		for (const Link &link : plan.EffectiveLinks)
+			++sourceCounts[nodeIndices.at(link.ToNode)];
+		for (const auto &route : plan.GroupSurfaceDependencies)
+			++sourceCounts[route.Consumer];
+		for (size_t index = 0; index < upstream.size(); ++index)
+			upstream[index].reserve(sourceCounts[index]);
 		for (const Link &link : plan.EffectiveLinks) {
 			upstream[nodeIndices.at(link.ToNode)].push_back(nodeIndices.at(link.FromNode));
 		}
+		for (const auto &route : plan.GroupSurfaceDependencies) {
+			auto &sources = upstream[route.Consumer];
+			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
+				sources.push_back(route.Producer);
+		}
 		std::vector<uint8_t> needed(document.Nodes.size(), 0);
-		std::vector<size_t> pending{targetIndex};
+		std::vector<size_t> pending;
+		pending.reserve(plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size() + 1);
+		pending.push_back(
+			requiredOutput == document.Outputs.end() ? targetIndex : nodeIndices.at(requiredOutput->NodeId)
+		);
 		while (!pending.empty()) {
 			const size_t current = pending.back();
 			pending.pop_back();
@@ -3568,6 +5937,66 @@ namespace engine::imagegraph {
 			for (const size_t source : upstream[current])
 				pending.push_back(source);
 		}
+		if (requiredOutput != document.Outputs.end()) {
+			if (!needed[targetIndex]) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"selected node is not reachable from the selected output",
+					std::string(targetNodeId)
+				);
+				return diagnostic.Code;
+			}
+			std::fill(needed.begin(), needed.end(), 0);
+			pending.clear();
+			pending.push_back(targetIndex);
+			while (!pending.empty()) {
+				const size_t current = pending.back();
+				pending.pop_back();
+				if (needed[current]) continue;
+				needed[current] = 1;
+				for (const size_t source : upstream[current])
+					pending.push_back(source);
+			}
+		}
+		detail::EvaluationVector<uint8_t> timelineNeeded(
+			needed.begin(), needed.end(), detail::EvaluationAllocator<uint8_t>(budget)
+		);
+		for (size_t index = 0; index < needed.size(); ++index) {
+			if (!needed[index]) continue;
+			const Node *current = &document.Nodes[index];
+			for (size_t hop = 0; !current->InstanceBase.empty() && hop < document.Nodes.size(); ++hop) {
+				const size_t base = nodeIndices.at(current->InstanceBase);
+				timelineNeeded[base] = 1;
+				current = &document.Nodes[base];
+			}
+		}
+		detail::TimelineOverrides timelineOverrides;
+		const Status timelineStatus = detail::ResolveTimelineOverrides(
+			document, timelineNeeded, request, budget, timelineOverrides, diagnostic, {}, true
+		);
+		if (timelineStatus != Status::Ok) return timelineStatus;
+		if (nodeValues) {
+			size_t valuesIndex = targetIndex;
+			for (size_t hop = 0;
+				 !document.Nodes[valuesIndex].InstanceBase.empty() && hop < document.Nodes.size();
+				 ++hop)
+				valuesIndex = nodeIndices.at(document.Nodes[valuesIndex].InstanceBase);
+			if (!CaptureAuthoredValues(
+					timelineOverrides.Find(valuesIndex, document.Nodes[valuesIndex]),
+					timelineOverrides.Find(targetIndex, document.Nodes[targetIndex]),
+					budget,
+					*nodeValues,
+					diagnostic,
+					request.GroupReplay ? request.GroupReplay->Find(document.Nodes[targetIndex].Id) : nullptr,
+					request.GroupReplay,
+					&document,
+					&timelineOverrides,
+					true
+				))
+				return diagnostic.Code;
+			return Status::Ok;
+		}
 		std::vector<size_t> remainingConsumers(document.Nodes.size(), 0);
 		for (size_t index = 0; index < upstream.size(); index++) {
 			if (!needed[index]) continue;
@@ -3575,12 +6004,50 @@ namespace engine::imagegraph {
 				remainingConsumers[source]++;
 		}
 
+		std::vector<detail::AllocationReservation> resultCharges(document.Nodes.size());
 		std::vector<NodeResult> results(document.Nodes.size());
 		std::vector<uint8_t> produced(document.Nodes.size(), 0);
 		uint64_t evaluationBytes = 0;
 		for (const size_t index : plan.NodeOrder) {
 			if (!needed[index]) continue;
-			const Node &node = document.Nodes[index];
+			const Node &node = timelineOverrides.Find(index, document.Nodes[index]);
+			size_t valuesIndex = index;
+			for (size_t hop = 0;
+				 !document.Nodes[valuesIndex].InstanceBase.empty() && hop < document.Nodes.size();
+				 ++hop)
+				valuesIndex = nodeIndices.at(document.Nodes[valuesIndex].InstanceBase);
+			const Node &valueNode = timelineOverrides.Find(valuesIndex, document.Nodes[valuesIndex]);
+			const auto inputOwner = [&](std::string_view port) -> const Node & {
+				const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
+								  ? request.GroupReplay->Binding(node.Id, port)
+								  : nullptr;
+				if (binding) {
+					const size_t ownerIndex = nodeIndices.at(binding->OwnerId);
+					return timelineOverrides.Find(ownerIndex, document.Nodes[ownerIndex]);
+				}
+				const auto *owner = EffectiveInputOwner(document, node, port);
+				if (!owner) return valueNode;
+				const size_t ownerIndex = nodeIndices.at(owner->Id);
+				return timelineOverrides.Find(ownerIndex, document.Nodes[ownerIndex]);
+			};
+			detail::AllocationReservation currentCharge;
+			detail::AllocationReservation scratchCharge;
+			const auto admit =
+				[&](uint64_t bytes, detail::AllocationReservation &destination, std::string_view port = {}) {
+					auto charge = budget.Reserve(bytes);
+					if (!charge) {
+						SetDiagnostic(
+							diagnostic,
+							Status::LimitExceeded,
+							"node storage exceeds the live evaluation byte budget",
+							node.Id,
+							std::string(port)
+						);
+						return false;
+					}
+					if (!destination.Merge(std::move(*charge))) std::terminate();
+					return true;
+				};
 			Image result;
 			ImageArray arrayResult;
 			bool producedArray = false;
@@ -3592,6 +6059,57 @@ namespace engine::imagegraph {
 			bool producedConversion = false;
 			MirrorOutputs mirrorResult;
 			bool producedMirror = false;
+			CatalogueOutputs catalogueResult;
+			bool producedCatalogue = false;
+			if (!FindCatalogueEntry(node.Type)) {
+				for (const Link &link : plan.EffectiveLinks) {
+					if (link.ToNode != node.Id) continue;
+					const ValueOutputs *source = FindValueOutputs(results[nodeIndices.at(link.FromNode)]);
+					if (!source) continue;
+					for (const AuthoredValue &value : *source) {
+						const auto *array = std::get_if<ArrayValue>(&value.Data);
+						if (value.Port == link.FromPort && array &&
+							(!array->Nested.empty() || !array->Items.empty())) {
+							SetDiagnostic(
+								diagnostic,
+								Status::UnsupportedExecution,
+								"legacy node input does not support nested runtime arrays",
+								node.Id,
+								link.ToPort
+							);
+							return diagnostic.Code;
+						}
+					}
+				}
+			}
+
+			// Legacy arithmetic is still byte based; pure collectors and copies
+			// preserve raw formats.
+			if (!FindCatalogueEntry(node.Type) && node.Type != "value.array" &&
+				node.Type != "value.array_get" && node.Type != "image.passthrough") {
+				for (const Link &link : plan.EffectiveLinks) {
+					if (link.ToNode != node.Id) continue;
+					const NodeResult &source = results[nodeIndices.at(link.FromNode)];
+					const Image *image = FindImageOutput(source, link.FromPort);
+					const ImageArray *images = FindImageArrayOutput(source, link.FromPort);
+					const bool typed =
+						(image && image->Format != SurfaceFormat::RGBA8Unorm) ||
+						(images &&
+						 std::any_of(images->Images.begin(), images->Images.end(), [](const Image &item) {
+							 return item.Format != SurfaceFormat::RGBA8Unorm;
+						 }));
+					if (typed) {
+						SetDiagnostic(
+							diagnostic,
+							Status::UnsupportedExecution,
+							"legacy executor requires RGBA8 pending format migration",
+							node.Id,
+							link.ToPort
+						);
+						return diagnostic.Code;
+					}
+				}
+			}
 			const auto resolveImage = [&](std::string_view port, bool required, const Image *&resolved) {
 				resolved = nullptr;
 				const auto link = std::find_if(
@@ -3618,6 +6136,17 @@ namespace engine::imagegraph {
 					return false;
 				}
 				resolved = FindImageOutput(results[sourceIndex], link->FromPort);
+				if (!resolved && !required &&
+					(document.Nodes[sourceIndex].Type == "pc.group_input" ||
+					 document.Nodes[sourceIndex].Type == "pc.group_output")) {
+					if (const auto *values = FindValueOutputs(results[sourceIndex]))
+						for (const auto &value : *values)
+							if (value.Port == link->FromPort) {
+								const auto *integer = std::get_if<int64_t>(&value.Data);
+								const auto *scalar = std::get_if<double>(&value.Data);
+								if ((integer && *integer == -4) || (scalar && *scalar == -4)) return true;
+							}
+				}
 				if (resolved == nullptr) {
 					SetDiagnostic(
 						diagnostic,
@@ -3630,9 +6159,841 @@ namespace engine::imagegraph {
 				}
 				return true;
 			};
-			if (detail::FindValueNodeSchema(node.Type)) {
+			if (nodeInputs && node.Id == nodeInputs->NodeId && !FindCatalogueEntry(node.Type)) {
+				const NodeSchema *schema = FindSchema(node.Type);
+				if (!schema) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedExecution,
+						"node input snapshot needs a declared schema",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				size_t imageInputCount = 0;
+				for (const PortSchema &port : schema->Ports)
+					if (port.Direction == PortDirection::Input && port.Type == ValueType::Image)
+						++imageInputCount;
+				if (imageInputCount > std::numeric_limits<uint64_t>::max() /
+										  sizeof(std::pair<std::string_view, const Image *>)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"node input workspace exceeds the live byte budget",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				auto imageInputsCharge =
+					budget.Reserve(imageInputCount * sizeof(std::pair<std::string_view, const Image *>));
+				if (!imageInputsCharge) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"node input workspace exceeds the live byte budget",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				std::vector<std::pair<std::string_view, const Image *>> images;
+				images.reserve(imageInputCount);
+				for (const PortSchema &port : schema->Ports) {
+					if (port.Direction != PortDirection::Input || port.Type != ValueType::Image) continue;
+					const auto link = std::find_if(
+						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
+							return candidate.ToNode == node.Id && candidate.ToPort == port.Id;
+						}
+					);
+					if (link == plan.EffectiveLinks.end()) continue;
+					const Image *image = nullptr;
+					if (!resolveImage(port.Id, false, image)) return diagnostic.Code;
+					images.emplace_back(port.Id, image);
+				}
+				if (!CaptureSchemaNodeInputs(node, images, budget, *nodeInputs, diagnostic))
+					return diagnostic.Code;
+				return Status::Ok;
+			}
+			if (const CatalogueEntry *catalogueEntry = FindCatalogueEntry(node.Type)) {
+				const detail::Executor executor = detail::FindExecutor(node.Type);
+				const size_t inputCount = catalogueEntry->Inputs.size() + node.DynamicInputs.size();
+				const uint64_t inputBytes =
+					inputCount *
+					(sizeof(std::pair<std::string_view, const Image *>) +
+					 sizeof(std::pair<std::string_view, const ImageArray *>) +
+					 sizeof(std::pair<std::string_view, Value>) +
+					 sizeof(std::pair<std::string_view, const Value *>) + sizeof(std::string_view) +
+					 sizeof(std::pair<std::string_view, SourceSocketDomain>));
+				auto inputCharge = budget.Reserve(inputBytes);
+				if (!inputCharge) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"node input workspace exceeds the live byte budget",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				detail::NodeContext context(node, *catalogueEntry, request, budget);
+				context.GroupReplay = request.GroupReplay ? request.GroupReplay->Find(node.Id) : nullptr;
+				const auto depthRoute = detail::FindGroupInputDepth(document, valueNode.GroupId);
+				if (depthRoute.Source == detail::GroupInputDepth::Kind::Concrete)
+					context.InheritedSurfaceFormat = SourceSurfaceFormat(depthRoute.Choice);
+				else if (depthRoute.Source == detail::GroupInputDepth::Kind::AuthoredValue)
+					context.InheritedSurfaceFormat = SurfaceFormat::RGBA8Unorm;
+				else if (depthRoute.Source == detail::GroupInputDepth::Kind::NodeOutput &&
+						 std::any_of(
+							 plan.GroupSurfaceDependencies.begin(),
+							 plan.GroupSurfaceDependencies.end(),
+							 [&](const auto &route) { return route.Consumer == index; }
+						 )) {
+					const size_t source = nodeIndices.at(depthRoute.NodeId);
+					if (!produced[source]) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidOutput,
+							"group depth dependency was not evaluated",
+							node.Id
+						);
+						return diagnostic.Code;
+					}
+					if (const auto *surface = FindImageOutput(results[source], depthRoute.Port))
+						context.InheritedSurfaceFormat = surface->Format;
+					else if (const auto *array = FindImageArrayOutput(results[source], depthRoute.Port)) {
+						const std::vector<ImageArrayItem> *items = &array->Items;
+						const ImageArrayItem *first = items->empty() ? nullptr : &items->front();
+						for (size_t hop = 0; first && hop < Limits::MaximumArrayElements; ++hop) {
+							if (const auto *leaf = std::get_if<size_t>(&first->Data)) {
+								if (*leaf >= array->Images.size()) {
+									SetDiagnostic(
+										diagnostic,
+										Status::InvalidValue,
+										"group depth image-array leaf is invalid",
+										node.Id
+									);
+									return diagnostic.Code;
+								}
+								context.InheritedSurfaceFormat = array->Images[*leaf].Format;
+								break;
+							}
+							const auto &children = std::get<std::vector<ImageArrayItem>>(first->Data);
+							first = children.empty() ? nullptr : &children.front();
+						}
+						if (!first) context.InheritedSurfaceFormat = SurfaceFormat::RGBA8Unorm;
+					} else
+						context.InheritedSurfaceFormat = SurfaceFormat::RGBA8Unorm;
+				} else
+					context.InheritedSurfaceFormat.reset();
+				// Image-capable contexts reserve all slots before borrowed views are
+				// formed; scalar-only contexts need no image storage.
+				const auto imageInput = [](const auto &input) {
+					return input.Type == ValueType::Image || input.Type == ValueType::Any ||
+						   input.Type == ValueType::Material3D;
+				};
+				if (std::any_of(catalogueEntry->Inputs.begin(), catalogueEntry->Inputs.end(), imageInput) ||
+					std::any_of(node.DynamicInputs.begin(), node.DynamicInputs.end(), imageInput)) {
+					context.Images.reserve(inputCount);
+					context.ImageArrays.reserve(inputCount);
+				}
+				context.Values.reserve(inputCount);
+				context.ValueViews.reserve(inputCount);
+				context.LinkedValues.reserve(inputCount);
+				context.InputDomains.reserve(inputCount);
+				for (const auto &link : plan.EffectiveLinks)
+					if (link.ToNode == node.Id) {
+						const size_t source = nodeIndices.at(link.FromNode);
+						if (produced[source])
+							if (const auto domain =
+									FindOutputDomain(document.Nodes[source], results[source], link.FromPort))
+								context.InputDomains.emplace_back(link.ToPort, *domain);
+					}
+				context.Timeline = document.Timeline ? &*document.Timeline : nullptr;
+				if (document.Project) {
+					// Only evaluation attributes enter node contexts; authored editor
+					// guides stay with the document.
+					const auto &project = *document.Project;
+					context.Project.SurfaceWidth = project.SurfaceWidth;
+					context.Project.SurfaceHeight = project.SurfaceHeight;
+					context.Project.Interpolation = project.Interpolation;
+					context.Project.Oversample = project.Oversample;
+					context.Project.ColorDepth = project.ColorDepth;
+					context.Project.Palette = project.Palette;
+				}
+				const auto inheritedInterpolation =
+					detail::FindGroupSampling(document, valueNode.GroupId, true);
+				const auto inheritedOversample =
+					detail::FindGroupSampling(document, valueNode.GroupId, false);
+				if (!inheritedInterpolation || !inheritedOversample) {
+					SetDiagnostic(
+						diagnostic, Status::InvalidGroup, "group sampling inheritance is invalid", node.Id
+					);
+					return diagnostic.Code;
+				}
+				context.InheritedInterpolation = *inheritedInterpolation;
+				context.InheritedOversample = *inheritedOversample;
+				context.ByteBudget = budget.Available();
+				for (const CatalogueInput &input : catalogueEntry->Inputs) {
+					const auto link = std::find_if(
+						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
+							return candidate.ToNode == node.Id && candidate.ToPort == input.Id;
+						}
+					);
+					const bool linked = link != plan.EffectiveLinks.end();
+					if (linked) context.LinkedValues.emplace_back(input.Id);
+					// A junction default is a resolved link to the local parent,
+					// so its GET precedes the inactive local animator as a producer would.
+					if (!linked && node.Type == "pc.group_input" && input.Id == "parent_value") {
+						const auto routed = std::find_if(
+							plan.ResolvedInputs.begin(),
+							plan.ResolvedInputs.end(),
+							[&](const ResolvedInput &value) {
+								return value.NodeId == node.Id && value.Port == input.Id;
+							}
+						);
+						if (routed != plan.ResolvedInputs.end()) {
+							context.LinkedValues.emplace_back(input.Id);
+							context.ValueViews.emplace_back(input.Id, &routed->Data);
+							continue;
+						}
+					}
+					if (!linked && groupRefresh && groupRefresh->Event->NodeId == node.Id &&
+						(groupRefresh->Event->EditedPort == input.Id ||
+						 (groupRefresh->Event->Reason == GroupRefreshReason::ParentEdit &&
+						  input.Id == "parent_value")) &&
+						groupRefresh->Event->LocalValue) {
+						context.ValueViews.emplace_back(input.Id, groupRefresh->Event->LocalValue);
+						continue;
+					}
+					if (!linked && context.GroupReplay && input.Id == "parent_value" &&
+						context.GroupReplay->ParentReset) {
+						context.ValueViews.emplace_back(input.Id, &*context.GroupReplay->ParentReset);
+						continue;
+					}
+					if (!linked) {
+						std::optional<Quaternion> projection;
+						if (const auto *view = SharedGroupInputView(
+								document, request.GroupReplay, node, input.Id, &projection
+							)) {
+							if (projection)
+								context.Values.emplace_back(input.Id, *projection);
+							else
+								context.ValueViews.emplace_back(input.Id, view);
+							continue;
+						}
+						if (request.GroupReplay && request.GroupReplay->Binding(node.Id, input.Id)) {
+							const Node &owner = inputOwner(input.Id);
+							if (const auto *value = FindValue(owner, input.Id)) {
+								if (const auto converted = SourceQuaternionGetterProjection(
+										document, node.Id, input.Id, value->Data
+									)) {
+									context.Values.emplace_back(input.Id, *converted);
+									continue;
+								}
+								context.ValueViews.emplace_back(
+									input.Id,
+									SourceEmptyGroupVectorView(&document, owner, input.Id, &value->Data)
+								);
+								continue;
+							}
+						}
+					}
+
+					if (!linked && context.GroupReplay && input.Id == "subtype" &&
+						context.GroupReplay->SubtypeStatic &&
+						!(groupRefresh && groupRefresh->Event->NodeId == node.Id &&
+						  groupRefresh->Event->EditedPort == "subtype")) {
+						context.ValueViews.emplace_back(input.Id, &*context.GroupReplay->SubtypeStatic);
+						continue;
+					}
+					if (input.Type == ValueType::Image) {
+						if (linked) {
+							const size_t sourceIndex = nodeIndices.at(link->FromNode);
+							if (const ImageArray *array =
+									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
+								context.ImageArrays.emplace_back(input.Id, array);
+								continue;
+							}
+						}
+						const Image *image = nullptr;
+						if (!resolveImage(input.Id, false, image)) return diagnostic.Code;
+						if (image) context.Images.emplace_back(input.Id, image);
+						continue;
+					}
+					// An Any input takes whatever its link carries: an image or a typed
+					// value.
+					if (input.Type == ValueType::Any && linked) {
+						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						if (!produced[sourceIndex]) {
+							SetDiagnostic(
+								diagnostic,
+								Status::InvalidOutput,
+								"source was not evaluated",
+								node.Id,
+								std::string(input.Id)
+							);
+							return diagnostic.Code;
+						}
+						if (const ImageArray *array =
+								FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
+							context.ImageArrays.emplace_back(input.Id, array);
+							continue;
+						}
+						if (const Image *image = FindImageOutput(results[sourceIndex], link->FromPort)) {
+							context.Images.emplace_back(input.Id, image);
+							continue;
+						}
+						if (const ValueOutputs *source = FindValueOutputs(results[sourceIndex])) {
+							const auto found =
+								std::find_if(source->begin(), source->end(), [&](const AuthoredValue &entry) {
+									return entry.Port == link->FromPort;
+								});
+							if (found != source->end()) {
+								context.ValueViews.emplace_back(input.Id, &found->Data);
+								continue;
+							}
+						}
+					}
+					// D3Material clones a linked surface into its default material before
+					// source row scheduling. Borrow it here; the mesh executor admits and
+					// owns the selected row's bytes.
+					if (linked && input.Type == ValueType::Material3D && input.SourceIndex >= 0 &&
+						input.SourceKind == "D3Material") {
+						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						if (produced[sourceIndex]) {
+							if (const auto *array = FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
+								context.ImageArrays.emplace_back(input.Id, array);
+								continue;
+							}
+							if (const auto *image = FindImageOutput(results[sourceIndex], link->FromPort)) {
+								context.Images.emplace_back(input.Id, image);
+								continue;
+							}
+						}
+					}
+					if (input.Type != ValueType::Any && !IsAuthoredValueType(input.Type)) {
+						if (linked &&
+							(input.Type == ValueType::Mesh || input.Type == ValueType::Material3D)) {
+							const size_t sourceIndex = nodeIndices.at(link->FromNode);
+							const auto *source =
+								produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
+							const AuthoredValue *found = nullptr;
+							if (source)
+								for (const auto &value : *source)
+									if (value.Port == link->FromPort) found = &value;
+							const auto *array = found ? std::get_if<ArrayValue>(&found->Data) : nullptr;
+							if (found && detail::ValidRuntimeValue(found->Data) &&
+								(detail::PayloadType(found->Data) == input.Type ||
+								 (array && array->ElementType == input.Type))) {
+								context.ValueViews.emplace_back(input.Id, &found->Data);
+								continue;
+							}
+							SetDiagnostic(
+								diagnostic, Status::TypeMismatch,
+								"mesh or material input requires a bounded owned typed source",
+								node.Id, std::string(input.Id)
+							);
+							return diagnostic.Code;
+						}
+						if (input.Type == ValueType::AudioBit && linked) {
+							const size_t sourceIndex = nodeIndices.at(link->FromNode);
+							const ValueOutputs *source =
+								produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
+							const AuthoredValue *found = nullptr;
+							if (source)
+								for (const auto &value : *source)
+									if (value.Port == link->FromPort) found = &value;
+							if (found && std::holds_alternative<AudioBit>(found->Data) &&
+								IsFinite(found->Data)) {
+
+								context.ValueViews.emplace_back(input.Id, &found->Data);
+								continue;
+							}
+							SetDiagnostic(
+								diagnostic,
+								Status::InvalidValue,
+								"audio input requires finite bounded typed audio "
+								"with a positive sample rate",
+								node.Id,
+								std::string(input.Id)
+							);
+							return diagnostic.Code;
+						}
+						if (linked) {
+							SetDiagnostic(
+								diagnostic,
+								Status::UnsupportedExecution,
+								"runtime-only input has no native producer",
+								node.Id,
+								std::string(input.Id)
+							);
+							return diagnostic.Code;
+						}
+						continue;
+					}
+					const Value *value = nullptr;
+					if (linked) {
+						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						// Rearrange's Int-array getter reads source surfaces as dimensions.
+						const bool rearrangeOrders = node.Type == "pc.array_rearrange" &&
+													 input.Id == "orders" && input.Type == ValueType::Array &&
+													 input.SourceKind == "Int";
+						if ((input.Type == ValueType::Any || rearrangeOrders) && produced[sourceIndex]) {
+							if (const ImageArray *array =
+									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
+								context.ImageArrays.emplace_back(input.Id, array);
+								continue;
+							}
+							if (const Image *image = FindImageOutput(results[sourceIndex], link->FromPort)) {
+								context.Images.emplace_back(input.Id, image);
+								continue;
+							}
+						}
+						const ValueOutputs *source =
+							produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
+						const auto found =
+							source
+								? std::find_if(
+									  source->begin(),
+									  source->end(),
+									  [&](const AuthoredValue &entry) { return entry.Port == link->FromPort; }
+								  )
+								: ValueOutputs::const_iterator{};
+						// __NodeValue_Dimension reads a linked surface as its pixel size.
+						const Image *surface = produced[sourceIndex]
+												   ? FindImageOutput(results[sourceIndex], link->FromPort)
+												   : nullptr;
+						if ((!source || found == source->end()) && surface &&
+							input.SourceKind == "Dimension") {
+							context.Values.emplace_back(
+								input.Id,
+								Vector2{
+									static_cast<double>(surface->Width), static_cast<double>(surface->Height)
+								}
+							);
+							continue;
+						}
+						if (!source || found == source->end()) {
+							SetDiagnostic(
+								diagnostic,
+								Status::UnsupportedExecution,
+								"value input needs a typed source",
+								node.Id,
+								std::string(input.Id)
+							);
+							return diagnostic.Code;
+						}
+						value = &found->Data;
+					} else {
+						const auto resolved = std::find_if(
+							plan.ResolvedInputs.begin(),
+							plan.ResolvedInputs.end(),
+							[&](const ResolvedInput &entry) {
+								return entry.NodeId == node.Id && entry.Port == input.Id;
+							}
+						);
+						// The generic group parent animator remains local when its boundary
+						// has no producer or routed junction default.
+						const AuthoredValue *localParent =
+							node.Type == "pc.group_input" && input.Id == "parent_value"
+								? FindValue(node, input.Id)
+								: nullptr;
+						if (localParent) {
+							value = &localParent->Data;
+						} else if (resolved != plan.ResolvedInputs.end()) {
+							context.LinkedValues.emplace_back(input.Id);
+							value = &resolved->Data;
+						} else if (const AuthoredValue *authored = FindValue(inputOwner(input.Id), input.Id))
+							value = &authored->Data;
+					}
+					if (value) {
+						if (linked ||
+							SourceQuaternionKeysPresent(document, request.GroupReplay, node.Id, input.Id)) {
+							if (const auto converted = SourceQuaternionGetterProjection(
+									document, node.Id, input.Id, *value, linked
+								)) {
+								context.Values.emplace_back(input.Id, *converted);
+								continue;
+							}
+						}
+						const Node &owner = inputOwner(input.Id);
+						context.ValueViews.emplace_back(
+							input.Id,
+							linked ? value : SourceEmptyGroupVectorView(&document, owner, input.Id, value)
+						);
+					} else if (!input.Default.empty()) {
+						Value fallback;
+						const Status parsed =
+							detail::ReadValueText(input.Default, fallback, budget, *inputCharge);
+						if (parsed != Status::Ok) {
+							SetDiagnostic(
+								diagnostic,
+								parsed,
+								"catalogue default could not be admitted and parsed",
+								node.Id,
+								std::string(input.Id)
+							);
+							return diagnostic.Code;
+						}
+						context.Values.emplace_back(input.Id, std::move(fallback));
+					}
+				}
+				// Dynamic group inputs follow the same order: a link, then the instance
+				// default.
+				for (const DynamicInput &input : node.DynamicInputs) {
+					const auto link = std::find_if(
+						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
+							return candidate.ToNode == node.Id && candidate.ToPort == input.Id;
+						}
+					);
+					if (input.Type == ValueType::Image) {
+						if (link != plan.EffectiveLinks.end()) {
+							const size_t sourceIndex = nodeIndices.at(link->FromNode);
+							if (produced[sourceIndex])
+								if (const ImageArray *array =
+										FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
+									context.ImageArrays.emplace_back(input.Id, array);
+									continue;
+								}
+						}
+						const Image *image = nullptr;
+						if (!resolveImage(input.Id, false, image)) return diagnostic.Code;
+						if (image) context.Images.emplace_back(input.Id, image);
+						continue;
+					}
+					if (link != plan.EffectiveLinks.end()) {
+						context.LinkedValues.emplace_back(input.Id);
+						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						if (input.Type == ValueType::Any && produced[sourceIndex]) {
+							if (const ImageArray *array =
+									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
+								context.ImageArrays.emplace_back(input.Id, array);
+								continue;
+							}
+							if (const Image *image = FindImageOutput(results[sourceIndex], link->FromPort)) {
+								context.Images.emplace_back(input.Id, image);
+								continue;
+							}
+						}
+						const ValueOutputs *source =
+							produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
+						const AuthoredValue *found = nullptr;
+						if (source)
+							for (const AuthoredValue &entry : *source)
+								if (entry.Port == link->FromPort) found = &entry;
+						if (!found) {
+							SetDiagnostic(
+								diagnostic,
+								Status::UnsupportedExecution,
+								"value input needs a typed source",
+								node.Id,
+								input.Id
+							);
+							return diagnostic.Code;
+						}
+						context.ValueViews.emplace_back(input.Id, &found->Data);
+					} else {
+						std::optional<Quaternion> projection;
+						if (const auto *view = SharedGroupInputView(
+								document, request.GroupReplay, node, input.Id, &projection
+							)) {
+							if (projection)
+								context.Values.emplace_back(input.Id, *projection);
+							else
+								context.ValueViews.emplace_back(input.Id, view);
+							continue;
+						}
+						const bool aliased =
+							request.GroupReplay && request.GroupReplay->Binding(node.Id, input.Id);
+						const Node &defaultsNode = aliased ? valueNode : inputOwner(input.Id);
+						const auto selected = std::find_if(
+							defaultsNode.DynamicInputs.begin(),
+							defaultsNode.DynamicInputs.end(),
+							[&](const auto &candidate) { return candidate.Id == input.Id; }
+						);
+						if (selected != defaultsNode.DynamicInputs.end() && selected->Default)
+							context.ValueViews.emplace_back(input.Id, &*selected->Default);
+					}
+				}
+				if (groupRefresh && node.Id == groupRefresh->Event->NodeId) {
+					if (!detail::ApplyGroupRefreshContext(
+							context, *groupRefresh->Event, *groupRefresh->Owner, document
+						)) {
+						SetDiagnostic(
+							diagnostic,
+							context.FailureCode,
+							context.FailureMessage,
+							node.Id,
+							context.FailurePort
+						);
+						return diagnostic.Code;
+					}
+					groupRefresh->Captured = true;
+					diagnostic = {};
+					return Status::Ok;
+				}
+				if (nodeInputs && node.Id == nodeInputs->NodeId) {
+					detail::SourceGetterProjection projection(context);
+					if (!projection.Prepare() ||
+						!CaptureNodeInputs(context, *nodeInputs, results, resultCharges)) {
+						SetDiagnostic(
+							diagnostic,
+							context.FailureCode,
+							context.FailureMessage,
+							node.Id,
+							context.FailurePort
+						);
+						return diagnostic.Code;
+					}
+					return Status::Ok;
+				}
+				if (!executor) {
+					SetDiagnostic(
+						diagnostic, Status::UnsupportedExecution, "node has no native executor", node.Id
+					);
+					return diagnostic.Code;
+				}
+				if (wavPreview && node.Id == wavPreview->NodeId) {
+					// Preview resolves exactly the same linked and animated controls,
+					// without cloning the data output.
+					for (const char *port :
+						 {"path", "attribute_play", "attribute_preview_gain", "attribute_preview_shift"}) {
+						const Value *value = context.Find(port);
+						if (value && std::holds_alternative<ArrayValue>(*value)) {
+							SetDiagnostic(
+								diagnostic,
+								Status::UnsupportedExecution,
+								"audio preview controls cannot be arrays",
+								node.Id,
+								port
+							);
+							return diagnostic.Code;
+						}
+					}
+					const std::string path = context.Get<std::string>("path");
+					const AudioClipSource *clip = nullptr;
+					if (request.AudioClips.size() > Limits::MaximumNodes) {
+						SetDiagnostic(
+							diagnostic, Status::LimitExceeded, "too many WAV sources", node.Id, "path"
+						);
+						return diagnostic.Code;
+					}
+					for (const auto &source : request.AudioClips) {
+						if (source.SourceId != path) continue;
+						if (clip) {
+							SetDiagnostic(
+								diagnostic, Status::DuplicateId, "duplicate WAV source name", node.Id, "path"
+							);
+							return diagnostic.Code;
+						}
+						clip = &source;
+					}
+					if (path.empty() || !clip) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidValue,
+							"WAV preview needs an explicitly loaded source",
+							node.Id,
+							"path"
+						);
+						return diagnostic.Code;
+					}
+					const auto &audio = clip->Data;
+					if (!detail::ValidAudioPlanes(
+							audio.Samples, audio.Channels, Limits::MaximumAudioClipSamples
+						) ||
+						!std::isfinite(audio.SampleRate) || audio.SampleRate <= 0 ||
+						std::floor(audio.SampleRate) != audio.SampleRate ||
+						audio.SampleRate > std::numeric_limits<uint32_t>::max()) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidValue,
+							"WAV preview needs finite planar audio",
+							node.Id,
+							"path"
+						);
+						return diagnostic.Code;
+					}
+					const double gain = context.Scalar("attribute_preview_gain", .5);
+					const double shift = context.Scalar("attribute_preview_shift");
+					if (!std::isfinite(gain) || !std::isfinite(shift)) {
+						SetDiagnostic(
+							diagnostic, Status::InvalidValue, "WAV preview controls must be finite", node.Id
+						);
+						return diagnostic.Code;
+					}
+					wavPreview->Controls = {
+						path,
+						context.Boolean("attribute_play", true),
+						gain,
+						shift,
+						static_cast<uint32_t>(audio.SampleRate),
+						detail::AudioChannel(audio, 0).size()
+					};
+					wavPreview->Captured = true;
+					return Status::Ok;
+				}
+
+				if (vectorPreview && node.Id == vectorPreview->NodeId) {
+					if (!detail::RunProcessorBatch(context, executor, CaptureVector2Row, vectorPreview) ||
+						context.FailureCode != Status::Ok) {
+						SetDiagnostic(
+							diagnostic,
+							context.FailureCode,
+							context.FailureMessage,
+							node.Id,
+							context.FailurePort
+						);
+						return diagnostic.Code;
+					}
+					auto &controls = vectorPreview->Controls;
+					if (!controls.ProcessorCount) {
+						SetDiagnostic(
+							diagnostic,
+							Status::UnsupportedExecution,
+							"Vector2 presentation has no scheduled value",
+							node.Id
+						);
+						return diagnostic.Code;
+					}
+					// Source gizmos are hidden for multiple processor rows. Avoid copying
+					// their sprite.
+					if (controls.ProcessorCount == 1 && controls.Style == 2 && vectorPreview->Sprite) {
+						const Image &sprite = *vectorPreview->Sprite;
+						uint64_t outputBytes = sizeof(Vector2Presentation);
+						for (const auto &value : context.OutputValues)
+							outputBytes += detail::ValuePayloadBytes(value.Data);
+						if (sprite.Width > request.MaximumImageDimension ||
+							sprite.Height > request.MaximumImageDimension ||
+							outputBytes > context.ByteBudget ||
+							sprite.Pixels.size() > context.ByteBudget - outputBytes) {
+							SetDiagnostic(
+								diagnostic,
+								Status::LimitExceeded,
+								"Vector2 sprite exceeds presentation budget",
+								node.Id,
+								"gizmo_sprite"
+							);
+							return diagnostic.Code;
+						}
+						controls.Sprite = sprite;
+					}
+					return Status::Ok;
+				}
+				if (!detail::RunProcessorBatch(context, executor) || context.FailureCode != Status::Ok) {
+					SetDiagnostic(
+						diagnostic, context.FailureCode, context.FailureMessage, node.Id, context.FailurePort
+					);
+					return diagnostic.Code;
+				}
+				size_t bypassImages = 0, bypassValues = 0;
+				for (const Link &link : plan.EffectiveLinks) {
+					if (link.FromNode != node.Id || !link.FromPort.ends_with(BYPASS_SUFFIX)) continue;
+					const auto input = std::string_view(link.FromPort)
+										   .substr(0, link.FromPort.size() - BYPASS_SUFFIX.size());
+					if (context.Input(input))
+						++bypassImages;
+					else if (context.Find(input))
+						++bypassValues;
+				}
+				// Replacement capacity coexists with the original reserved output slots
+				// during reserve.
+				const uint64_t replacementBytes =
+					(bypassImages ? (context.OutputImages.size() + bypassImages) *
+										sizeof(std::pair<std::string, Image>)
+								  : 0) +
+					(bypassValues ? (context.OutputValues.size() + bypassValues) * sizeof(AuthoredValue) : 0);
+				if (replacementBytes && !context.ReserveOutput(replacementBytes)) {
+					SetDiagnostic(
+						diagnostic, context.FailureCode, context.FailureMessage, node.Id, context.FailurePort
+					);
+					return diagnostic.Code;
+				}
+				if (bypassImages) context.OutputImages.reserve(context.OutputImages.size() + bypassImages);
+				if (bypassValues) context.OutputValues.reserve(context.OutputValues.size() + bypassValues);
+				for (const Link &link : plan.EffectiveLinks) {
+					if (link.FromNode != node.Id || !link.FromPort.ends_with(BYPASS_SUFFIX)) continue;
+					const std::string_view input =
+						std::string_view(link.FromPort)
+							.substr(0, link.FromPort.size() - BYPASS_SUFFIX.size());
+					if (const Image *image = context.Input(input)) {
+						if (!context.ReserveOutput(
+								image->Pixels.size() +
+									std::max(link.FromPort.size(), std::string{}.capacity()),
+								link.FromPort
+							)) {
+							SetDiagnostic(
+								diagnostic,
+								context.FailureCode,
+								context.FailureMessage,
+								node.Id,
+								context.FailurePort
+							);
+							return diagnostic.Code;
+						}
+						context.OutputImages.emplace_back(link.FromPort, *image);
+					} else if (const Value *value = context.Find(input)) {
+						if (!context.ReserveOutput(
+								detail::RetainedPayloadBytes(*value) +
+									std::max(link.FromPort.size(), std::string{}.capacity()),
+								link.FromPort
+							)) {
+							SetDiagnostic(
+								diagnostic,
+								context.FailureCode,
+								context.FailureMessage,
+								node.Id,
+								context.FailurePort
+							);
+							return diagnostic.Code;
+						}
+						context.OutputValues.push_back({link.FromPort, *value});
+					}
+				}
+				for (auto &[id, image] : context.OutputImages)
+					image.Hash = detail::PixelHash(image);
+				catalogueResult.Domains = std::move(context.OutputDomains);
+				catalogueResult.Images = std::move(context.OutputImages);
+				catalogueResult.Values = std::move(context.OutputValues);
+				catalogueResult.ImageArrays = std::move(context.OutputImageArrays);
+				currentCharge = context.TakeOutputReservation();
+				for (auto &[id, array] : catalogueResult.ImageArrays)
+					for (Image &image : array.Images)
+						image.Hash = detail::PixelHash(image);
+
+				producedCatalogue = true;
+			} else if (detail::FindValueNodeSchema(node.Type)) {
 				producedValue = true;
-				std::vector<AuthoredValue> inputs = node.Values;
+				const NodeSchema *valueSchema = detail::FindValueNodeSchema(node.Type);
+				size_t inputCapacity = node.Values.size() + node.DynamicInputs.size();
+				for (const PortSchema &port : valueSchema->Ports)
+					if (port.Direction == PortDirection::Input) inputCapacity++;
+				if (inputCapacity > Limits::MaximumEvaluationBytes / sizeof(detail::ValueInputView)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"typed value inputs exceed the live byte budget",
+						node.Id,
+						"inputs"
+					);
+					return diagnostic.Code;
+				}
+				auto inputCharge = budget.Reserve(inputCapacity * sizeof(detail::ValueInputView));
+				if (!inputCharge) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"typed value inputs exceed the live byte budget",
+						node.Id,
+						"inputs"
+					);
+					return diagnostic.Code;
+				}
+				// The source node and resolved results own these values. Keep borrowed
+				// views here instead of cloning every authored string and payload before
+				// evaluation.
+				std::vector<detail::ValueInputView> inputs;
+				inputs.reserve(inputCapacity);
+				for (const AuthoredValue &input : node.Values)
+					inputs.push_back({input.Port, &input.Data});
 				const auto resolveValueInput = [&](std::string_view port, const Value *fallback) {
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
@@ -3642,9 +7003,8 @@ namespace engine::imagegraph {
 					const Value *value = fallback;
 					if (link != plan.EffectiveLinks.end()) {
 						const size_t sourceIndex = nodeIndices.at(link->FromNode);
-						const ValueOutputs *source = produced[sourceIndex]
-														 ? std::get_if<ValueOutputs>(&results[sourceIndex])
-														 : nullptr;
+						const ValueOutputs *source =
+							produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
 						if (!source) {
 							SetDiagnostic(
 								diagnostic,
@@ -3682,13 +7042,13 @@ namespace engine::imagegraph {
 					}
 					if (!value) return true;
 					const auto existing =
-						std::find_if(inputs.begin(), inputs.end(), [&](const AuthoredValue &entry) {
+						std::find_if(inputs.begin(), inputs.end(), [&](const detail::ValueInputView &entry) {
 							return entry.Port == port;
 						});
 					if (existing == inputs.end())
-						inputs.push_back({std::string(port), *value});
+						inputs.push_back({port, value});
 					else
-						existing->Data = *value;
+						existing->Data = value;
 					return true;
 				};
 				for (const PortSchema &port : FindSchema(node.Type)->Ports) {
@@ -3706,13 +7066,61 @@ namespace engine::imagegraph {
 					request,
 					document.Timeline ? &*document.Timeline : nullptr,
 					valueResult,
+					budget,
+					currentCharge,
 					failedPort,
 					failureMessage
 				);
+
 				if (status != Status::Ok) {
 					SetDiagnostic(diagnostic, status, failureMessage, node.Id, failedPort);
 					return diagnostic.Code;
 				}
+
+			} else if (node.Type == "image.captured") {
+				const AuthoredValue *name = FindValue(node, "source_id");
+				const auto *id = name ? std::get_if<std::string>(&name->Data) : nullptr;
+				if (!id || id->empty() || id->size() > 255 ||
+					request.ImageSources.size() > Limits::MaximumNodes) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"captured image needs a bounded durable source ID",
+						node.Id,
+						"source_id"
+					);
+					return diagnostic.Code;
+				}
+				const Image *source = nullptr;
+				for (const auto &capture : request.ImageSources) {
+					if (capture.SourceId != *id) continue;
+					if (source) {
+						SetDiagnostic(
+							diagnostic,
+							Status::DuplicateId,
+							"captured image source ID is duplicated",
+							node.Id,
+							"source_id"
+						);
+						return diagnostic.Code;
+					}
+					source = &capture.Data;
+				}
+				if (!source ||
+					!ValidSurfaceLayout(*source, request.MaximumImageDimension, Limits::MaximumOutputBytes) ||
+					!FiniteSurfaceSamples(*source)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"captured image is missing or has invalid numeric storage",
+						node.Id,
+						"source_id"
+					);
+					return diagnostic.Code;
+				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
+				result = *source;
+				result.Hash = SurfaceHash(result);
 			} else if (node.Type == "image.solid") {
 				const AuthoredValue *widthValue = FindValue(node, "width");
 				const AuthoredValue *heightValue = FindValue(node, "height");
@@ -3737,6 +7145,17 @@ namespace engine::imagegraph {
 					mask && maskDimension ? mask->Width : static_cast<uint64_t>(*widthInteger);
 				const uint64_t height =
 					mask && maskDimension ? mask->Height : static_cast<uint64_t>(*heightInteger);
+				if (width == 0 || height == 0 || width > Limits::MaximumDimension ||
+					height > Limits::MaximumDimension) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"solid dimensions are outside the supported range",
+						node.Id,
+						width == 0 || width > Limits::MaximumDimension ? "width" : "height"
+					);
+					return diagnostic.Code;
+				}
 				const uint64_t byteCount = width * height * 4;
 				if (byteCount > Limits::MaximumEvaluationBytes - evaluationBytes) {
 					SetDiagnostic(
@@ -3749,6 +7168,7 @@ namespace engine::imagegraph {
 				}
 				result.Width = static_cast<uint32_t>(width);
 				result.Height = static_cast<uint32_t>(height);
+				if (!admit(static_cast<size_t>(byteCount), currentCharge, "image")) return diagnostic.Code;
 				result.Pixels.resize(static_cast<size_t>(byteCount));
 				const AuthoredValue *emptyValue = FindValue(node, "empty");
 				const bool empty = emptyValue ? std::get<bool>(emptyValue->Data) : false;
@@ -3802,6 +7222,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				const detail::ConversionStatus status = detail::RenderMonochrome(
 					*source,
@@ -3831,6 +7252,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				const AuthoredValue *curve = FindValue(node, "curve");
 				const AuthoredValue *invert = FindValue(node, "invert");
@@ -3879,6 +7301,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!admit(4 * source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				for (Image &image : conversionResult.Channels) {
 					image.Width = source->Width;
 					image.Height = source->Height;
@@ -3970,6 +7393,7 @@ namespace engine::imagegraph {
 				}
 				result.Width = dimensions->Width;
 				result.Height = dimensions->Height;
+				if (!admit(dimensions->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result.Pixels.resize(dimensions->Pixels.size());
 				const AuthoredValue *mode = FindValue(node, hsv ? "color_space" : "sampling_type");
 				const int64_t modeValue = mode ? std::get<int64_t>(mode->Data) : 0;
@@ -4017,9 +7441,11 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				if (enabled && node.Type == "image.gamma_map") {
 					const AuthoredValue *invert = FindValue(node, "invert");
+					if (!admit(result.Pixels.size(), scratchCharge, "image")) return diagnostic.Code;
 					if (detail::RenderGammaMap(*source, result, invert && std::get<bool>(invert->Data)) !=
 						detail::ChannelAssemblyStatus::Ok) {
 						SetDiagnostic(
@@ -4157,6 +7583,7 @@ namespace engine::imagegraph {
 				}
 				detail::SpatialWarpStatus status = detail::SpatialWarpStatus::InvalidControl;
 				if (mirror) {
+					if (!admit(2 * source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 					mirrorResult.Colored = *source;
 					mirrorResult.Mask = *source;
 					const Vector2 position = vector("position", {0.5, 0.5});
@@ -4168,6 +7595,7 @@ namespace engine::imagegraph {
 					control.BothSide = boolean("both_side", false);
 					status = detail::RenderMirror(*source, mirrorResult.Colored, mirrorResult.Mask, control);
 				} else {
+					if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 					result = *source;
 					const Vector2 center = vector("center", {0.5, 0.5});
 					if (barrel) {
@@ -4292,7 +7720,15 @@ namespace engine::imagegraph {
 					SetDiagnostic(diagnostic, Status::LimitExceeded, "curve exceeds byte budget", node.Id);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
+				uint64_t curveBytes = source->Pixels.size();
+				for (const char *port : {"brightness", "red", "green", "blue", "alpha"}) {
+					const AuthoredValue *value = FindValue(node, port);
+					curveBytes += value ? detail::PayloadOwnedBytes(std::get<Curve>(value->Data))
+										: 2 * sizeof(std::array<double, 6>);
+				}
+				if (!admit(curveBytes, scratchCharge, "image")) return diagnostic.Code;
 				const auto curve = [&](std::string_view port) {
 					const AuthoredValue *value = FindValue(node, port);
 					return value ? std::get<Curve>(value->Data) : detail::IdentityColorCurve();
@@ -4363,8 +7799,16 @@ namespace engine::imagegraph {
 					SetDiagnostic(diagnostic, Status::LimitExceeded, "colorize exceeds byte budget", node.Id);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				const AuthoredValue *gradientValue = FindValue(node, "gradient");
+				if (!admit(
+						gradientValue ? detail::PayloadOwnedBytes(std::get<Gradient>(gradientValue->Data))
+									  : 2 * sizeof(GradientKey),
+						scratchCharge,
+						"gradient"
+					))
+					return diagnostic.Code;
 				const Gradient gradient =
 					gradientValue ? std::get<Gradient>(gradientValue->Data)
 								  : Gradient{0, {{0.0, {0, 0, 0, 255}}, {1.0, {255, 255, 255, 255}}}};
@@ -4423,7 +7867,8 @@ namespace engine::imagegraph {
 					SetDiagnostic(
 						diagnostic,
 						Status::UnsupportedExecution,
-						"displace mapped, mask, channel, iteration or oversample control is unavailable",
+						"displace mapped, mask, channel, iteration or oversample "
+						"control is unavailable",
 						node.Id
 					);
 					return diagnostic.Code;
@@ -4432,6 +7877,7 @@ namespace engine::imagegraph {
 					SetDiagnostic(diagnostic, Status::LimitExceeded, "displace exceeds byte budget", node.Id);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				detail::DisplaceControls control;
 				control.Mode = integer("mode", 0);
@@ -4504,6 +7950,7 @@ namespace engine::imagegraph {
 					SetDiagnostic(diagnostic, Status::LimitExceeded, "polar exceeds byte budget", node.Id);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				detail::PolarControls control;
 				if (const AuthoredValue *tile = FindValue(node, "tile")) {
@@ -4580,6 +8027,7 @@ namespace engine::imagegraph {
 					SetDiagnostic(diagnostic, Status::LimitExceeded, "vignette exceeds byte budget", node.Id);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				detail::VignetteControls control;
 				if (const AuthoredValue *center = FindValue(node, "center"))
@@ -4626,7 +8074,8 @@ namespace engine::imagegraph {
 					SetDiagnostic(
 						diagnostic,
 						Status::UnsupportedExecution,
-						"color adjust palette, mapped, mask modification or mix path is unavailable",
+						"color adjust palette, mapped, mask modification or mix "
+						"path is unavailable",
 						node.Id
 					);
 					return diagnostic.Code;
@@ -4637,6 +8086,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				detail::ColorAdjustControls control;
 				control.Brightness = scalar("brightness", 0.0);
@@ -4690,6 +8140,7 @@ namespace engine::imagegraph {
 					SetDiagnostic(diagnostic, Status::LimitExceeded, "blur exceeds byte budget", node.Id);
 					return diagnostic.Code;
 				}
+				if (!admit(source->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *source;
 				detail::GaussianBlurControls control;
 				control.Size = scalar("size", 8.0);
@@ -4700,6 +8151,8 @@ namespace engine::imagegraph {
 				control.OverrideColor = boolean("override_color", false);
 				if (const AuthoredValue *colour = FindValue(node, "color"))
 					control.OverrideColour = std::get<Colour>(colour->Data);
+				if (!admit(source->Pixels.size() + 32 * sizeof(double), scratchCharge, "image"))
+					return diagnostic.Code;
 				const detail::BlurStatus status = detail::GaussianBlurDefault(*source, result, control);
 				if (status != detail::BlurStatus::Ok) {
 					SetDiagnostic(
@@ -4782,7 +8235,8 @@ namespace engine::imagegraph {
 				}
 				detail::ShapeRenderControls control;
 				const auto *kind = FindValue(node, "shape");
-				const std::string name = kind ? std::get<std::string>(kind->Data) : "Rectangle";
+				const std::string_view name =
+					kind ? std::string_view(std::get<std::string>(kind->Data)) : "Rectangle";
 				if (name == "Rectangle")
 					control.Geometry.Kind = detail::ShapeKind::Rectangle;
 				else if (name == "Ellipse")
@@ -4836,6 +8290,7 @@ namespace engine::imagegraph {
 				}
 				control.LevelIn = level.X / scale;
 				control.LevelOut = level.Y / scale;
+				if (!admit(uint64_t(width) * height * 16, currentCharge, "image")) return diagnostic.Code;
 				const auto makeImage = [&]() {
 					return Image{
 						static_cast<uint32_t>(width),
@@ -4894,7 +8349,8 @@ namespace engine::imagegraph {
 					SetDiagnostic(
 						diagnostic,
 						Status::UnsupportedExecution,
-						"checker mapped, mask, UV or non-solid render control is unavailable",
+						"checker mapped, mask, UV or non-solid render control is "
+						"unavailable",
 						node.Id
 					);
 					return diagnostic.Code;
@@ -4913,6 +8369,7 @@ namespace engine::imagegraph {
 					control.Second = std::get<Colour>(second->Data);
 				result.Width = width;
 				result.Height = height;
+				if (!admit(static_cast<size_t>(bytes), currentCharge, "image")) return diagnostic.Code;
 				result.Pixels.resize(static_cast<size_t>(bytes));
 				const detail::CheckerStatus status = detail::RenderChecker(result, control);
 				if (status != detail::CheckerStatus::Ok) {
@@ -5002,7 +8459,7 @@ namespace engine::imagegraph {
 				if (angleLink != plan.EffectiveLinks.end()) {
 					const size_t sourceIndex = nodeIndices.at(angleLink->FromNode);
 					const ValueOutputs *source =
-						produced[sourceIndex] ? std::get_if<ValueOutputs>(&results[sourceIndex]) : nullptr;
+						produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
 					const AuthoredValue *value = nullptr;
 					if (source) {
 						const auto found =
@@ -5060,6 +8517,7 @@ namespace engine::imagegraph {
 					keys.push_back({key.Time, key.Color});
 				result.Width = width;
 				result.Height = height;
+				if (!admit(static_cast<size_t>(bytes), currentCharge, "image")) return diagnostic.Code;
 				result.Pixels.resize(static_cast<size_t>(bytes));
 				const detail::GradientStatus status =
 					detail::RenderGradientBase(result, geometry, keys, gradient->Mode, mask, controls);
@@ -5147,6 +8605,7 @@ namespace engine::imagegraph {
 				control.LevelOut = {levelOut.X, levelOut.Y};
 				result.Width = width;
 				result.Height = height;
+				if (!admit(static_cast<size_t>(bytes), currentCharge, "image")) return diagnostic.Code;
 				result.Pixels.resize(static_cast<size_t>(bytes));
 				const detail::NoiseStatus status = detail::SimplexGrey(control, result);
 				if (status != detail::NoiseStatus::Ok) {
@@ -5229,6 +8688,7 @@ namespace engine::imagegraph {
 				control.Pattern = integer("pattern", 0);
 				result.Width = static_cast<uint32_t>(requestedWidth);
 				result.Height = static_cast<uint32_t>(requestedHeight);
+				if (!admit(static_cast<size_t>(bytes), currentCharge, "image")) return diagnostic.Code;
 				result.Pixels.resize(static_cast<size_t>(bytes));
 				if (detail::TileImage(*source, result, control) != detail::TileStatus::Ok) {
 					SetDiagnostic(
@@ -5295,6 +8755,7 @@ namespace engine::imagegraph {
 				}
 				result.Width = width;
 				result.Height = height;
+				if (!admit(static_cast<size_t>(bytes), currentCharge, "image")) return diagnostic.Code;
 				result.Pixels.resize(static_cast<size_t>(bytes));
 				const bool invertMask = authoredBool("invert_mask", false);
 				const bool maskAlphaOnly = authoredBool("mask_alpha_only", false);
@@ -5316,6 +8777,8 @@ namespace engine::imagegraph {
 						);
 						return diagnostic.Code;
 					}
+					if (!admit(3 * mask->Pixels.size() + radius * sizeof(double), scratchCharge, "mask"))
+						return diagnostic.Code;
 					modifiedMask = detail::ModifyBlendMask(*mask, invertMask, maskAlphaOnly, feather);
 					mask = &modifiedMask;
 				}
@@ -5364,10 +8827,10 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
-				std::array<const NodeResult *, 2> inputs{};
+				std::array<const ImageArray *, 2> inputArrays{};
 				std::array<const Image *, 2> directImages{};
 				std::array<size_t, 2> lengths{};
-				for (size_t input = 0; input < inputs.size(); input++) {
+				for (size_t input = 0; input < inputArrays.size(); input++) {
 					const char *port = input == 0 ? "background" : "foreground";
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
@@ -5384,13 +8847,43 @@ namespace engine::imagegraph {
 						);
 						return diagnostic.Code;
 					}
-					inputs[input] = &results[nodeIndices.at(link->FromNode)];
-					directImages[input] = FindImageOutput(*inputs[input], link->FromPort);
-					if (const auto *array = std::get_if<ImageArray>(inputs[input])) {
+					inputArrays[input] =
+						FindImageArrayOutput(results[nodeIndices.at(link->FromNode)], link->FromPort);
+					directImages[input] =
+						FindImageOutput(results[nodeIndices.at(link->FromNode)], link->FromPort);
+					if (const auto *array = inputArrays[input]) {
 						lengths[input] = array->Items.size();
 						producedArray = true;
 					} else
 						lengths[input] = 1;
+				}
+				detail::ArrayScheduleFootprint scheduleFootprint;
+				const Status measured = detail::MeasureArraySchedule(
+					lengths,
+					static_cast<detail::ArrayProcessMode>(process),
+					Limits::MaximumArrayElements,
+					scheduleFootprint
+				);
+				if (measured != Status::Ok) {
+					SetDiagnostic(
+						diagnostic,
+						measured,
+						"height blend schedule exceeds native bounds",
+						node.Id,
+						"array_process"
+					);
+					return diagnostic.Code;
+				}
+				auto scheduleCharge = budget.Reserve(scheduleFootprint.PeakBytes);
+				if (!scheduleCharge) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"height blend schedule exceeds live byte budget",
+						node.Id,
+						"array_process"
+					);
+					return diagnostic.Code;
 				}
 				std::vector<std::vector<size_t>> schedule;
 				const Status scheduleStatus = detail::BuildArraySchedule(
@@ -5403,11 +8896,21 @@ namespace engine::imagegraph {
 					SetDiagnostic(
 						diagnostic,
 						scheduleStatus,
-						"height blend array schedule exceeds native bounds or has an empty input",
+						"height blend array schedule exceeds native bounds or "
+						"has an empty input",
 						node.Id,
 						"array_process"
 					);
 					return diagnostic.Code;
+				}
+				if (!scheduleCharge->Resize(scheduleFootprint.RetainedBytes)) std::terminate();
+				if (producedArray) {
+					if (!admit(
+							schedule.size() * (sizeof(ImageArrayItem) + sizeof(Image)), currentCharge, "image"
+						))
+						return diagnostic.Code;
+					arrayResult.Items.reserve(schedule.size());
+					arrayResult.Images.reserve(schedule.size());
 				}
 				uint64_t outputBytes = 0;
 				for (const auto &row : schedule) {
@@ -5416,7 +8919,7 @@ namespace engine::imagegraph {
 						if (directImages[input])
 							selected[input] = directImages[input];
 						else {
-							const ImageArray &array = std::get<ImageArray>(*inputs[input]);
+							const ImageArray &array = *inputArrays[input];
 							const auto *leaf = std::get_if<size_t>(&array.Items[row[input]].Data);
 							if (!leaf) {
 								SetDiagnostic(
@@ -5447,6 +8950,7 @@ namespace engine::imagegraph {
 					Image frame;
 					frame.Width = selected[0]->Width;
 					frame.Height = selected[0]->Height;
+					if (!admit(bytes, currentCharge, "image")) return diagnostic.Code;
 					frame.Pixels.resize(static_cast<size_t>(bytes));
 					if (!detail::BlendHeight(*selected[0], *selected[1], frame, mode, type, factor)) {
 						SetDiagnostic(
@@ -5539,6 +9043,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!admit(sourceImage->Pixels.size(), currentCharge, "image")) return diagnostic.Code;
 				result = *sourceImage;
 				const AuthoredValue *mixValue = FindValue(node, "mix");
 				const double mix = mixValue ? std::get<double>(mixValue->Data) : 1.0;
@@ -5572,6 +9077,8 @@ namespace engine::imagegraph {
 						);
 						return diagnostic.Code;
 					}
+					if (!admit(2 * mask->Pixels.size() + radius * sizeof(double), scratchCharge, "mask"))
+						return diagnostic.Code;
 					featheredMask = detail::FeatherMask(*mask, feather);
 					mask = &featheredMask;
 				}
@@ -5722,8 +9229,18 @@ namespace engine::imagegraph {
 				}
 			} else if (node.Type == "value.array") {
 				producedArray = true;
-				uint64_t arrayBytes = 0;
-				std::vector<ImageArrayItem> inputItems;
+				if (node.DynamicInputs.size() > Limits::MaximumDynamicInputsPerNode) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"image array input count exceeds native bounds",
+						node.Id,
+						"array"
+					);
+					return diagnostic.Code;
+				}
+				std::array<detail::ImageArrayInput, Limits::MaximumDynamicInputsPerNode> inputs;
+				size_t inputCount = 0;
 				for (const DynamicInput &input : node.DynamicInputs) {
 					if (input.Type != ValueType::Image && input.Type != ValueType::Array) {
 						SetDiagnostic(
@@ -5761,30 +9278,11 @@ namespace engine::imagegraph {
 						);
 						return diagnostic.Code;
 					}
-					const auto appendImage = [&](const Image &image) {
-						if (arrayResult.Images.size() == Limits::MaximumArrayElements ||
-							image.Pixels.size() > Limits::MaximumOutputBytes - arrayBytes ||
-							image.Pixels.size() >
-								Limits::MaximumEvaluationBytes - evaluationBytes - arrayBytes)
-							return false;
-						arrayBytes += image.Pixels.size();
-						arrayResult.Images.push_back(image);
-						return true;
-					};
+
 					if (const Image *image = FindImageOutput(results[sourceIndex], link->FromPort)) {
-						if (!appendImage(*image)) {
-							SetDiagnostic(
-								diagnostic,
-								Status::LimitExceeded,
-								"image array exceeds byte budget",
-								node.Id,
-								input.Id
-							);
-							return diagnostic.Code;
-						}
-						inputItems.push_back(ImageArrayItem{arrayResult.Images.size() - 1});
+						inputs[inputCount++] = image;
 					} else {
-						const ImageArray *source = std::get_if<ImageArray>(&results[sourceIndex]);
+						const ImageArray *source = FindImageArrayOutput(results[sourceIndex], link->FromPort);
 						if (!source) {
 							SetDiagnostic(
 								diagnostic,
@@ -5795,31 +9293,27 @@ namespace engine::imagegraph {
 							);
 							return diagnostic.Code;
 						}
-						const ImageArray &sourceArray = *source;
-						const size_t offset = arrayResult.Images.size();
-						for (const Image &image : sourceArray.Images) {
-							if (!appendImage(image)) {
-								SetDiagnostic(
-									diagnostic,
-									Status::LimitExceeded,
-									"image array exceeds byte budget",
-									node.Id,
-									input.Id
-								);
-								return diagnostic.Code;
-							}
-						}
-						std::vector<ImageArrayItem> children;
-						for (const ImageArrayItem &item : sourceArray.Items)
-							children.push_back(RebaseItem(item, offset));
-						inputItems.push_back(ImageArrayItem{std::move(children)});
+						inputs[inputCount++] = source;
 					}
 				}
 				const AuthoredValue *spreadValue = FindValue(node, "spread");
 				const bool spread = spreadValue ? std::get<bool>(spreadValue->Data) : false;
-				const Status collectStatus = detail::CollectArray<size_t>(
-					inputItems, spread, Limits::MaximumArrayElements, arrayResult.Items
-				);
+				detail::ImageArrayFootprint footprint;
+				const auto borrowed = std::span(inputs.data(), inputCount);
+				const Status measured = detail::MeasureImageArray(borrowed, spread, footprint);
+				if (measured != Status::Ok ||
+					footprint.Pixels > Limits::MaximumEvaluationBytes - evaluationBytes) {
+					SetDiagnostic(
+						diagnostic,
+						measured == Status::Ok ? Status::LimitExceeded : measured,
+						"image array shape or pixels exceed native bounds",
+						node.Id,
+						"array"
+					);
+					return diagnostic.Code;
+				}
+				const Status collectStatus =
+					detail::CollectImageArray(borrowed, spread, budget, arrayResult, currentCharge);
 				if (collectStatus != Status::Ok) {
 					SetDiagnostic(
 						diagnostic, collectStatus, "image array shape exceeds native bounds", node.Id, "array"
@@ -5840,7 +9334,8 @@ namespace engine::imagegraph {
 				}
 				const size_t sourceIndex = nodeIndices.at(link->FromNode);
 				const ImageArray *sourceArray =
-					produced[sourceIndex] ? std::get_if<ImageArray>(&results[sourceIndex]) : nullptr;
+					produced[sourceIndex] ? FindImageArrayOutput(results[sourceIndex], link->FromPort)
+										  : nullptr;
 				if (!sourceArray) {
 					SetDiagnostic(
 						diagnostic,
@@ -5888,6 +9383,8 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!admit(sourceArray->Images[*imageIndex].Pixels.size(), currentCharge, "image"))
+					return diagnostic.Code;
 				result = sourceArray->Images[*imageIndex];
 			} else {
 				SetDiagnostic(
@@ -5898,11 +9395,12 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			const uint64_t resultBytes = producedValue		  ? ResultBytes(NodeResult{valueResult})
+			const uint64_t resultBytes = producedValue		  ? ResultBytes(valueResult)
 										 : producedArray	  ? ResultBytes(arrayResult)
-										 : producedShape	  ? ResultBytes(NodeResult{shapeResult})
-										 : producedConversion ? ResultBytes(NodeResult{conversionResult})
-										 : producedMirror	  ? ResultBytes(NodeResult{mirrorResult})
+										 : producedShape	  ? ResultBytes(shapeResult)
+										 : producedConversion ? ResultBytes(conversionResult)
+										 : producedMirror	  ? ResultBytes(mirrorResult)
+										 : producedCatalogue  ? ResultBytes(catalogueResult)
 															  : result.Pixels.size();
 			if (resultBytes > Limits::MaximumEvaluationBytes - evaluationBytes) {
 				SetDiagnostic(
@@ -5924,14 +9422,18 @@ namespace engine::imagegraph {
 				results[index] = std::move(conversionResult);
 			else if (producedMirror)
 				results[index] = std::move(mirrorResult);
+			else if (producedCatalogue)
+				results[index] = std::move(catalogueResult);
 			else
 				results[index] = std::move(result);
+			resultCharges[index] = std::move(currentCharge);
 			produced[index] = 1;
 			// A large chain needs only the current input and output in memory.
 			for (const size_t source : upstream[index]) {
 				if (--remainingConsumers[source] == 0 && source != targetIndex) {
 					evaluationBytes -= ResultBytes(results[source]);
 					results[source] = Image{};
+					resultCharges[source].Reset();
 				}
 			}
 		}
@@ -5945,7 +9447,58 @@ namespace engine::imagegraph {
 			);
 			return diagnostic.Code;
 		}
-		if (std::holds_alternative<MirrorOutputs>(results[targetIndex])) {
+		if (auto *catalogue = std::get_if<CatalogueOutputs>(&results[targetIndex])) {
+			const auto imageArray = std::find_if(
+				catalogue->ImageArrays.begin(), catalogue->ImageArrays.end(), [&](const auto &entry) {
+					return entry.first == output->Port;
+				}
+			);
+			const auto image =
+				std::find_if(catalogue->Images.begin(), catalogue->Images.end(), [&](const auto &entry) {
+					return entry.first == output->Port;
+				});
+			const auto value = std::find_if(
+				catalogue->Values.begin(), catalogue->Values.end(), [&](const AuthoredValue &entry) {
+					return entry.Port == output->Port;
+				}
+			);
+			if (imageArray != catalogue->ImageArrays.end())
+				outputValue = std::move(imageArray->second);
+			else if (image != catalogue->Images.end())
+				outputValue = std::move(image->second);
+			else if (value != catalogue->Values.end()) {
+				auto selectionCharge = budget.Reserve(sizeof(AuthoredValue));
+				if (!selectionCharge) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"selected output storage exceeds the byte budget",
+						output->NodeId,
+						output->Port
+					);
+					return diagnostic.Code;
+				}
+				// initializer_list elements are const and would clone the moved typed
+				// payload.
+				CatalogueOutputs selected;
+				selected.Values.reserve(1);
+				selected.Values.push_back(std::move(*value));
+				// Dynamic group declarations travel with the raw value through final
+				// output selection.
+				selected.Domains = std::move(catalogue->Domains);
+				outputValue = std::move(selected);
+				if (!resultCharges[targetIndex].Merge(std::move(*selectionCharge))) std::terminate();
+			} else {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidOutput,
+					"node did not produce the selected output",
+					output->NodeId,
+					output->Port
+				);
+				return diagnostic.Code;
+			}
+		} else if (std::holds_alternative<MirrorOutputs>(results[targetIndex])) {
 			MirrorOutputs &mirror = std::get<MirrorOutputs>(results[targetIndex]);
 			Image *selected = output->Port == "image"		  ? &mirror.Colored
 							  : output->Port == "mirror_mask" ? &mirror.Mask
@@ -5996,6 +9549,7 @@ namespace engine::imagegraph {
 			outputValue = std::move(*selected);
 		} else
 			outputValue = std::move(results[targetIndex]);
+		outputCharge = std::move(resultCharges[targetIndex]);
 		diagnostic = {};
 		return Status::Ok;
 	}
@@ -6028,331 +9582,364 @@ namespace engine::imagegraph {
 		return Status::Ok;
 	}
 
+	Status ReplayGroupRefresh(
+		const Document &document,
+		const Plan &plan,
+		std::span<const GroupRefreshEvent> events,
+		const GroupReplayState &previous,
+		uint64_t revision,
+		GroupReplayState &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraph.group_refresh");
+		if (events.empty() && previous.RetainedBytes() && previous.AuthoringRevision() != revision) {
+			SetDiagnostic(
+				diagnostic, Status::InvalidValue, "group replay revision changed without an explicit event"
+			);
+			return diagnostic.Code;
+		}
+		const uint64_t destinationBytes = &previous == &result ? 0 : result.RetainedBytes();
+		auto candidate = detail::CloneGroupReplay(
+			previous, events.size(), revision, maximumBytes, destinationBytes, diagnostic
+		);
+		if (!candidate) return diagnostic.Code;
+		GroupReplayState working;
+		detail::GroupReplayAccess::Install(working, std::move(candidate));
+		auto &owner = *detail::GroupReplayAccess::Get(working);
+		detail::AllocationReservation planCharge;
+		Plan checked;
+		const Status compiled = CompileWithBudget(document, checked, diagnostic, owner.Budget, planCharge);
+		if (compiled != Status::Ok) return compiled;
+		if (checked != plan) {
+			SetDiagnostic(
+				diagnostic, Status::InvalidOutput, "group replay plan does not match the authored document"
+			);
+			return diagnostic.Code;
+		}
+		for (const auto &entry : previous.Entries()) {
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+					return node.Id == entry.NodeId && node.Type == "pc.group_input";
+				});
+			if (node == document.Nodes.end()) {
+				SetDiagnostic(
+					diagnostic, Status::InvalidGroup, "group replay has a stale input boundary", entry.NodeId
+				);
+				return diagnostic.Code;
+			}
+		}
+		for (const auto &event : events) {
+			if (event.Reason != GroupRefreshReason::Load && event.Reason != GroupRefreshReason::Edit &&
+				event.Reason != GroupRefreshReason::Connect &&
+				event.Reason != GroupRefreshReason::ParentEdit &&
+				event.Reason != GroupRefreshReason::Restore) {
+				SetDiagnostic(
+					diagnostic, Status::InvalidValue, "group refresh event reason is invalid", event.NodeId
+				);
+				return diagnostic.Code;
+			}
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+					return node.Id == event.NodeId && node.Type == "pc.group_input";
+				});
+			if (node == document.Nodes.end()) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidGroup,
+					"group refresh needs a native input boundary",
+					event.NodeId
+				);
+				return diagnostic.Code;
+			}
+			EvaluationRequest request = event.At;
+			request.GroupReplay = &working;
+			request.GroupAuthoringRevision = revision;
+			const Status validation = ValidateEvaluationRequest(request, diagnostic);
+			if (validation != Status::Ok) return validation;
+			detail::AllocationReservation ignoredCharge;
+			NodeResult ignored;
+			GroupRefreshCapture capture{&event, &owner};
+			const Status evaluated = EvaluateGraph(
+				document,
+				plan,
+				{},
+				request,
+				ignored,
+				diagnostic,
+				owner.Budget,
+				ignoredCharge,
+				nullptr,
+				nullptr,
+				nullptr,
+				nullptr,
+				event.NodeId,
+				{},
+				true,
+				&capture
+			);
+			if (evaluated != Status::Ok) return evaluated;
+			if (!capture.Captured) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedExecution,
+					"group refresh controls were not resolved",
+					event.NodeId
+				);
+				return diagnostic.Code;
+			}
+		}
+		// Release transient compile storage before transferring its ledger owner to
+		// the caller.
+		checked = {};
+		planCharge.Reset();
+		owner.PreviousShadow.Reset();
+		result = std::move(working);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		SetDiagnostic(diagnostic, Status::LimitExceeded, "group refresh allocation was refused");
+		return diagnostic.Code;
+	}
+
 	static Status EvaluateResult(
 		const Document &document,
 		const Plan &plan,
 		const std::string &outputId,
 		const EvaluationRequest &request,
-		NodeResult &outputValue,
+		EvaluationResult &evaluation,
 		Diagnostic &diagnostic,
-		Document *resolvedDocument = nullptr
+		WavPreviewCapture *wavPreview = nullptr,
+		Vector2PresentationCapture *vectorPreview = nullptr
 	) {
-		const uint64_t tick = request.Tick;
-		if (tick > Limits::MaximumTick) {
+		ENGINE_PROFILE("imagegraph.evaluate");
+		auto &outputValue = evaluation.Data;
+		auto &budget = evaluation.Budget;
+		auto &outputCharge = evaluation.Charge;
+		const Status validation = ValidateEvaluationRequest(request, diagnostic);
+		if (validation != Status::Ok) return validation;
+		return EvaluateGraph(
+			document,
+			plan,
+			outputId,
+			request,
+			outputValue,
+			diagnostic,
+			budget,
+			outputCharge,
+			wavPreview,
+			vectorPreview
+		);
+	}
+
+	Status ResolveWavPreviewControls(
+		const Document &document,
+		const std::string &nodeId,
+		const EvaluationRequest &request,
+		WavPreviewControls &controls,
+		Diagnostic &diagnostic
+	) {
+		ENGINE_PROFILE("imagegraph.evaluate");
+		const Status requestStatus = ValidateEvaluationRequest(request, diagnostic);
+		if (requestStatus != Status::Ok) return requestStatus;
+		EvaluationResult evaluation;
+		detail::AllocationReservation originalPlanCharge;
+		Plan original;
+		const Status checked =
+			CompileWithBudget(document, original, diagnostic, evaluation.Budget, originalPlanCharge);
+		if (checked != Status::Ok) return checked;
+		const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &entry) {
+			return entry.Id == nodeId;
+		});
+		if (node == document.Nodes.end() || node->Type != "pc.wav_file_read") {
+			SetDiagnostic(diagnostic, Status::UnknownNode, "audio preview needs a WAV file node", nodeId);
+			return diagnostic.Code;
+		}
+		WavPreviewCapture capture{nodeId, {}, false};
+		NodeResult ignored;
+		const Status evaluated = EvaluateGraph(
+			document,
+			original,
+			{},
+			request,
+			ignored,
+			diagnostic,
+			evaluation.Budget,
+			evaluation.Charge,
+			&capture,
+			nullptr,
+			nullptr,
+			nullptr,
+			nodeId,
+			{},
+			true
+		);
+		if (evaluated != Status::Ok) return evaluated;
+		if (!capture.Captured) {
+			SetDiagnostic(
+				diagnostic, Status::UnsupportedExecution, "WAV preview controls were not resolved", nodeId
+			);
+			return diagnostic.Code;
+		}
+		controls = std::move(capture.Controls);
+		return Status::Ok;
+	}
+
+	Status ResolveVector2Presentation(
+		const Document &document,
+		const std::string &nodeId,
+		const EvaluationRequest &request,
+		Vector2Presentation &result,
+		Diagnostic &diagnostic
+	) {
+		const Status requestStatus = ValidateEvaluationRequest(request, diagnostic);
+		if (requestStatus != Status::Ok) return requestStatus;
+		EvaluationResult evaluation;
+		detail::AllocationReservation originalPlanCharge;
+		Plan original;
+		const Status checked =
+			CompileWithBudget(document, original, diagnostic, evaluation.Budget, originalPlanCharge);
+		if (checked != Status::Ok) return checked;
+		const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &entry) {
+			return entry.Id == nodeId;
+		});
+		if (node == document.Nodes.end() || node->Type != "pc.vector2") {
+			SetDiagnostic(
+				diagnostic, Status::UnknownNode, "Vector2 presentation needs a Vector2 node", nodeId
+			);
+			return diagnostic.Code;
+		}
+		Vector2PresentationCapture capture{nodeId, {}, nullptr};
+		NodeResult ignored;
+		const Status evaluated = EvaluateGraph(
+			document,
+			original,
+			{},
+			request,
+			ignored,
+			diagnostic,
+			evaluation.Budget,
+			evaluation.Charge,
+			nullptr,
+			&capture,
+			nullptr,
+			nullptr,
+			nodeId,
+			{},
+			true
+		);
+		if (evaluated != Status::Ok) return evaluated;
+		result = std::move(capture.Controls);
+		return Status::Ok;
+	}
+
+	Status EvaluateNodeInputs(
+		const Document &document,
+		const Plan &plan,
+		std::string_view nodeId,
+		const EvaluationRequest &request,
+		EvaluationSnapshot &snapshot,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		if (maximumBytes == 0 || maximumBytes > Limits::MaximumEvaluationBytes) {
+			SetDiagnostic(
+				diagnostic,
+				maximumBytes == 0 ? Status::InvalidValue : Status::LimitExceeded,
+				"node snapshot byte cap is outside native limits",
+				std::string(nodeId)
+			);
+			return diagnostic.Code;
+		}
+		const Status requestStatus = ValidateEvaluationRequest(request, diagnostic);
+		if (requestStatus != Status::Ok) return requestStatus;
+		const auto node =
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &candidate) {
+				return candidate.Id == nodeId;
+			});
+		if (node == document.Nodes.end()) {
+			SetDiagnostic(
+				diagnostic, Status::InvalidValue, "selected node does not exist", std::string(nodeId)
+			);
+			return diagnostic.Code;
+		}
+		if (!FindCatalogueEntry(node->Type) && !FindSchema(node->Type)) {
+			SetDiagnostic(
+				diagnostic,
+				Status::UnsupportedExecution,
+				"node input snapshot needs a declared input schema",
+				std::string(nodeId)
+			);
+			return diagnostic.Code;
+		}
+		const uint64_t oldBytes = snapshot.RetainedBytes();
+		const uint64_t metadataBytes = sizeof(EvaluationSnapshot::Storage);
+		if (oldBytes > maximumBytes || metadataBytes > maximumBytes - oldBytes) {
 			SetDiagnostic(
 				diagnostic,
 				Status::LimitExceeded,
-				"evaluation tick exceeds the fixed timeline limit",
-				{},
-				"tick"
+				"existing and replacement node snapshots exceed the byte cap",
+				std::string(nodeId)
 			);
 			return diagnostic.Code;
 		}
-		if (!std::isfinite(request.Subframe) || request.Subframe < 0 || request.Subframe >= 1 ||
-			(tick == Limits::MaximumTick && request.Subframe != 0)) {
-			SetDiagnostic(
-				diagnostic, Status::InvalidValue, "subframe must stay within the bounded tick", {}, "subframe"
-			);
-			return diagnostic.Code;
-		}
-		if (document.Keyframes.empty()) {
-			if (resolvedDocument != nullptr) *resolvedDocument = document;
-			return EvaluateGraph(document, plan, outputId, request, outputValue, diagnostic);
-		}
-
-		Plan currentPlan;
-		const Status compileStatus = Compile(document, currentPlan, diagnostic);
-		if (compileStatus != Status::Ok) return compileStatus;
-		if (currentPlan != plan) {
-			SetDiagnostic(
-				diagnostic, Status::InvalidOutput, "compile plan does not match the authored document"
-			);
-			return diagnostic.Code;
-		}
-		const auto output =
-			std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const Output &candidate) {
-				return candidate.Id == outputId;
-			});
-		if (output == document.Outputs.end()) {
-			SetDiagnostic(diagnostic, Status::InvalidOutput, "selected output does not exist", {}, outputId);
-			return diagnostic.Code;
-		}
-		std::unordered_map<std::string, size_t> nodeIndices;
-		for (size_t index = 0; index < document.Nodes.size(); index++) {
-			nodeIndices.emplace(document.Nodes[index].Id, index);
-		}
-		std::vector<std::vector<size_t>> upstream(document.Nodes.size());
-		for (const Link &link : plan.EffectiveLinks) {
-			upstream[nodeIndices.at(link.ToNode)].push_back(nodeIndices.at(link.FromNode));
-		}
-		std::vector<uint8_t> needed(document.Nodes.size(), 0);
-		std::vector<size_t> pending{nodeIndices.at(output->NodeId)};
-		while (!pending.empty()) {
-			const size_t index = pending.back();
-			pending.pop_back();
-			if (needed[index]) continue;
-			needed[index] = 1;
-			for (const size_t source : upstream[index])
-				pending.push_back(source);
-		}
-
-		using PropertyKey = std::pair<size_t, std::string_view>;
-		std::map<PropertyKey, std::vector<const Keyframe *>> tracks;
-		for (const Keyframe &keyframe : document.Keyframes) {
-			const size_t nodeIndex = nodeIndices.at(keyframe.NodeId);
-			if (!needed[nodeIndex]) continue;
-			tracks[{nodeIndex, keyframe.Port}].push_back(&keyframe);
-		}
-		if (tracks.empty()) {
-			if (resolvedDocument != nullptr) *resolvedDocument = document;
-			return EvaluateGraph(document, plan, outputId, request, outputValue, diagnostic);
-		}
-		std::map<std::pair<std::string_view, std::string_view>, const AnimationTrack *> configuredTracks;
-		for (const AnimationTrack &track : document.Tracks)
-			configuredTracks[{track.NodeId, track.Port}] = &track;
-		Document resolved = document;
-		for (auto &[property, keys] : tracks) {
-			std::sort(keys.begin(), keys.end(), [](const Keyframe *left, const Keyframe *right) {
-				return left->Tick < right->Tick;
-			});
-			Value value;
-			const auto configured =
-				configuredTracks.find({resolved.Nodes[property.first].Id, property.second});
-			const Keyframe *left = nullptr;
-			const Keyframe *right = nullptr;
-			uint64_t numerator = 0;
-			uint64_t denominator = 1;
-			double fractionalRatio = 0;
-			double driverRatio = 0.5;
-			long double driverFrame = static_cast<long double>(tick) + request.Subframe;
-			bool suppressDriver = false;
-			if (configured == configuredTracks.end()) {
-				const auto next =
-					std::upper_bound(keys.begin(), keys.end(), tick, [](uint64_t value, const Keyframe *key) {
-						return value < key->Tick;
-					});
-				if (next == keys.begin()) {
-					left = keys.front();
-				} else {
-					left = *(next - 1);
-					if (next != keys.end() && (left->Tick != tick || request.Subframe != 0)) {
-						right = *next;
-						numerator = tick - left->Tick;
-						denominator = right->Tick - left->Tick;
-						if (request.Subframe != 0)
-							fractionalRatio = static_cast<double>(
-								(static_cast<long double>(numerator) + request.Subframe) / denominator
-							);
-					}
-				}
-			} else {
-				std::vector<uint64_t> keyTicks;
-				keyTicks.reserve(keys.size());
-				for (const Keyframe *key : keys)
-					keyTicks.push_back(key->Tick);
-				const AnimationTrack &track = *configured->second;
-				const detail::KeyEnd end = track.End == "loop"	 ? detail::KeyEnd::Loop
-										   : track.End == "ping" ? detail::KeyEnd::Ping
-										   : track.End == "wrap" ? detail::KeyEnd::Wrap
-																 : detail::KeyEnd::Hold;
-				const size_t loopStart =
-					track.LoopRange < 0 ? 0 : keys.size() - 1 - static_cast<size_t>(track.LoopRange);
-				const uint64_t totalFrames =
-					document.Timeline ? document.Timeline->Frames : keys.back()->Tick + 1;
-				const long double sampleFrame = driverFrame;
-				const long double firstFrame = static_cast<long double>(keyTicks[loopStart]);
-				const long double lastFrame = static_cast<long double>(keyTicks.back());
-				// The source bypasses range remapping for its single-key fast path.
-				if (keys.size() > 1 && track.End == "loop" && sampleFrame > lastFrame) {
-					const long double period = lastFrame - firstFrame + 1.0L;
-					driverFrame = firstFrame + std::fmod(sampleFrame - lastFrame, period);
-				} else if (keys.size() > 1 && track.End == "ping" && sampleFrame > lastFrame) {
-					const long double duration = lastFrame - firstFrame;
-					if (duration == 0.0L) {
-						driverFrame = firstFrame;
-					} else {
-						const long double phase = std::fmod(sampleFrame - firstFrame, duration * 2.0L);
-						driverFrame =
-							phase < duration ? firstFrame + phase : firstFrame + duration * 2.0L - phase;
-					}
-				}
-				if (request.Subframe == 0) {
-					detail::KeySelection selection;
-					if (!detail::SelectKeys(keyTicks, tick, totalFrames, end, loopStart, selection)) {
-						SetDiagnostic(
-							diagnostic,
-							Status::InvalidValue,
-							"keyframe time is outside the bounded track",
-							resolved.Nodes[property.first].Id,
-							std::string(property.second)
-						);
-						return diagnostic.Code;
-					}
-					left = keys[selection.From];
-					if (selection.To != selection.From) right = keys[selection.To];
-					numerator = selection.Numerator;
-					denominator = selection.Denominator;
-				} else {
-					detail::FractionalKeySelection selection;
-					if (!detail::SelectKeysFractional(
-							keyTicks, tick, request.Subframe, totalFrames, end, loopStart, selection
-						)) {
-						SetDiagnostic(
-							diagnostic,
-							Status::InvalidValue,
-							"fractional keyframe time is outside the bounded track",
-							resolved.Nodes[property.first].Id,
-							std::string(property.second)
-						);
-						return diagnostic.Code;
-					}
-					left = keys[selection.From];
-					if (selection.To != selection.From) right = keys[selection.To];
-					fractionalRatio = selection.Ratio;
-				}
-			}
-			if (right) {
-				driverRatio = request.Subframe == 0
-								  ? static_cast<double>(numerator) / static_cast<double>(denominator)
-								  : fractionalRatio;
-			} else if (keys.size() > 1 && left != keys.back() && driverFrame == left->Tick) {
-				driverRatio = 0.0;
-			}
-			const bool wrappingSegment = configured != configuredTracks.end() &&
-										 configured->second->End == "wrap" && left == keys.back() &&
-										 right == keys.front();
-			const bool beforeFirst = !wrappingSegment && driverFrame < left->Tick;
-			if (!wrappingSegment && keys.size() > 1 && left == keys.front() && driverFrame == 0.0L)
-				suppressDriver = true;
-			if (!right || left->Interpolation == "step" ||
-				(left->Interpolation != "source" && left->Tick == tick)) {
-				value = left->Data;
-			} else if (left->Interpolation == "cubic") {
+		auto candidate = std::make_unique<EvaluationSnapshot::Storage>(maximumBytes);
+		if (oldBytes != 0) {
+			auto shadow = candidate->Budget.Reserve(oldBytes);
+			if (!shadow) {
 				SetDiagnostic(
 					diagnostic,
-					Status::UnsupportedExecution,
-					"cubic keyframe needs authored tangent controls",
-					resolved.Nodes[property.first].Id,
-					std::string(property.second)
+					Status::LimitExceeded,
+					"existing and replacement node snapshots exceed the byte cap",
+					std::string(nodeId)
 				);
 				return diagnostic.Code;
-			} else if (left->Interpolation == "source") {
-				const auto side = [](const std::string &type) {
-					return type == "bezier" ? detail::CurveSide::Bezier
-						   : type == "cut"	? detail::CurveSide::Cut
-											: detail::CurveSide::Linear;
-				};
-				const detail::KeyEase ease{
-					side(left->Ease->OutType),
-					side(right->Ease->InType),
-					left->Ease->Out.X,
-					left->Ease->Out.Y,
-					right->Ease->In.X,
-					right->Ease->In.Y
-				};
-				detail::KeyBlend blend;
-				const double ratio =
-					request.Subframe == 0 ? static_cast<double>(numerator) / denominator : fractionalRatio;
-				if (!detail::EaseKeys(ease, ratio, blend)) {
-					SetDiagnostic(
-						diagnostic,
-						Status::InvalidValue,
-						"keyframe easing could not be evaluated",
-						resolved.Nodes[property.first].Id,
-						std::string(property.second)
-					);
-					return diagnostic.Code;
-				}
-				if (blend.Choice == detail::KeyChoice::From) {
-					value = left->Data;
-					suppressDriver = true;
-				} else if (blend.Choice == detail::KeyChoice::To) {
-					value = right->Data;
-					suppressDriver = true;
-				} else {
-					const Status status =
-						detail::InterpolateEased(left->Data, right->Data, blend.Ratio, value);
-					if (status != Status::Ok) {
-						SetDiagnostic(
-							diagnostic,
-							status,
-							"source easing needs finite scalar, vector or colour values",
-							resolved.Nodes[property.first].Id,
-							std::string(property.second)
-						);
-						return diagnostic.Code;
-					}
-				}
-			} else {
-				const Status status =
-					request.Subframe == 0
-						? detail::Interpolate(left->Data, right->Data, numerator, denominator, value)
-						: detail::InterpolateEased(left->Data, right->Data, fractionalRatio, value);
-				if (status != Status::Ok) {
-					SetDiagnostic(
-						diagnostic,
-						status,
-						"linear interpolation needs finite scalar, vector or colour values",
-						resolved.Nodes[property.first].Id,
-						std::string(property.second)
-					);
-					return diagnostic.Code;
-				}
 			}
-			if (left->SineDriver && !suppressDriver && !beforeFirst) {
-				const KeyframeSineDriver &driver = *left->SineDriver;
-				const uint64_t totalFrames =
-					document.Timeline ? document.Timeline->Frames : keys.back()->Tick + 1;
-				const double frameRate = driver.Frequency / static_cast<double>(totalFrames);
-				const double wholeFrame = std::floor(static_cast<double>(driverFrame));
-				const double subframe = static_cast<double>(driverFrame - wholeFrame);
-				const double cycle = std::fmod(
-					std::fmod(driver.Phase, 1.0) + std::fmod(frameRate, 1.0) * wholeFrame +
-						std::fmod(frameRate * subframe, 1.0),
-					1.0
-				);
-				constexpr double twoPi = 6.2831853071795864769252867665590057683943387987502;
-				double envelope = 1.0;
-				if (driver.Smooth > 0.0) {
-					const double edge = std::clamp(
-						std::min(
-							{1.0,
-							 2.0 * driverRatio / driver.Smooth,
-							 2.0 * (1.0 - driverRatio) / driver.Smooth}
-						),
-						0.0,
-						1.0
-					);
-					envelope = edge * edge * (3.0 - 2.0 * edge);
-				}
-				const double modulation = std::sin(cycle * twoPi) * driver.Amplitude * envelope;
-				const double base = std::get<double>(value);
-				const double driven = base + modulation;
-				if (!std::isfinite(driven)) {
-					SetDiagnostic(
-						diagnostic,
-						Status::InvalidValue,
-						"sine keyframe driver result is not finite",
-						resolved.Nodes[property.first].Id,
-						std::string(property.second)
-					);
-					return diagnostic.Code;
-				}
-				value = driven;
-			}
-			Node &node = resolved.Nodes[property.first];
-			const auto authored =
-				std::find_if(node.Values.begin(), node.Values.end(), [&](const AuthoredValue &candidate) {
-					return candidate.Port == property.second;
-				});
-			if (authored == node.Values.end()) {
-				node.Values.push_back({std::string(property.second), std::move(value)});
-			} else {
-				authored->Data = std::move(value);
-			}
+			candidate->ReplacementShadow = std::move(*shadow);
 		}
-		if (resolvedDocument != nullptr) *resolvedDocument = resolved;
-		return EvaluateGraph(resolved, plan, outputId, request, outputValue, diagnostic);
+		auto metadata = candidate->Budget.Reserve(metadataBytes);
+		if (!metadata || !candidate->Charge.Merge(std::move(*metadata))) {
+			SetDiagnostic(
+				diagnostic,
+				Status::LimitExceeded,
+				"replacement node snapshot metadata exceeds the byte cap",
+				std::string(nodeId)
+			);
+			return diagnostic.Code;
+		}
+		NodeInputCapture capture{nodeId, &candidate->Values, &candidate->Images, &candidate->Charge};
+		NodeResult ignored;
+		const Status status = EvaluateGraph(
+			document,
+			plan,
+			{},
+			request,
+			ignored,
+			diagnostic,
+			candidate->Budget,
+			candidate->Charge,
+			nullptr,
+			nullptr,
+			&capture,
+			nullptr,
+			nodeId
+		);
+		if (status != Status::Ok) return status;
+		snapshot.Data.reset();
+		candidate->ReplacementShadow.Reset();
+		snapshot.Data = std::move(candidate);
+		diagnostic = {};
+		return Status::Ok;
+	}
+
+	static bool RetainedAuthoredValuesBytes(const std::vector<AuthoredValue> &values, uint64_t &bytes) {
+		bytes = 0;
+		if (!AddArrayBytes(bytes, values.capacity(), sizeof(AuthoredValue))) return false;
+		for (const AuthoredValue &value : values)
+			if (!AddBytes(bytes, value.Port.capacity()) ||
+				!AddBytes(bytes, detail::RetainedPayloadBytes(value.Data)))
+				return false;
+		return true;
 	}
 
 	Status ResolveNodeValues(
@@ -6364,22 +9951,63 @@ namespace engine::imagegraph {
 		std::vector<AuthoredValue> &values,
 		Diagnostic &diagnostic
 	) {
-		values.clear();
-		Document resolved;
-		NodeResult ignored;
-		const Status status =
-			EvaluateResult(document, plan, outputId, request, ignored, diagnostic, &resolved);
-		if (status != Status::Ok && resolved.Nodes.empty()) return status;
+		const Status requestStatus = ValidateEvaluationRequest(request, diagnostic);
+		if (requestStatus != Status::Ok) return requestStatus;
 		const auto node =
-			std::find_if(resolved.Nodes.begin(), resolved.Nodes.end(), [&](const Node &candidate) {
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &candidate) {
 				return candidate.Id == nodeId;
 			});
-		if (node == resolved.Nodes.end()) {
+		if (node == document.Nodes.end()) {
 			SetDiagnostic(diagnostic, Status::InvalidValue, "selected node does not exist", nodeId);
 			return diagnostic.Code;
 		}
-		values = node->Values;
-		return status == Status::UnsupportedExecution ? Status::Ok : status;
+		uint64_t oldBytes = 0;
+		if (!RetainedAuthoredValuesBytes(values, oldBytes)) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "existing node values exceed the live byte budget", nodeId
+			);
+			return diagnostic.Code;
+		}
+		detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+		detail::AllocationReservation oldShadow;
+		if (oldBytes != 0) {
+			auto reservation = budget.Reserve(oldBytes);
+			if (!reservation) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"existing and resolved node values exceed the live byte budget",
+					nodeId
+				);
+				return diagnostic.Code;
+			}
+			oldShadow = std::move(*reservation);
+		}
+		detail::AllocationReservation newCharge;
+		std::vector<AuthoredValue> resolvedValues;
+		NodeValuesCapture capture{nodeId, &resolvedValues, &newCharge};
+		NodeResult ignored;
+		const Status status = EvaluateGraph(
+			document,
+			plan,
+			{},
+			request,
+			ignored,
+			diagnostic,
+			budget,
+			newCharge,
+			nullptr,
+			nullptr,
+			nullptr,
+			&capture,
+			nodeId,
+			outputId
+		);
+		if (status != Status::Ok) return status;
+		values = std::move(resolvedValues);
+		oldShadow.Reset();
+		diagnostic = {};
+		return Status::Ok;
 	}
 
 	Status Evaluate(
@@ -6390,14 +10018,14 @@ namespace engine::imagegraph {
 		Image &image,
 		Diagnostic &diagnostic
 	) {
-		NodeResult result;
+		EvaluationResult result;
 		const Status status = EvaluateResult(document, plan, outputId, request, result, diagnostic);
 		if (status != Status::Ok) return status;
-		if (auto *single = std::get_if<Image>(&result)) {
+		if (auto *single = std::get_if<Image>(&result.Data)) {
 			image = std::move(*single);
 			return Status::Ok;
 		}
-		ImageArray *array = std::get_if<ImageArray>(&result);
+		ImageArray *array = std::get_if<ImageArray>(&result.Data);
 		if (!array) {
 			const auto output =
 				std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const Output &candidate) {
@@ -6438,10 +10066,10 @@ namespace engine::imagegraph {
 		ImageArray &images,
 		Diagnostic &diagnostic
 	) {
-		NodeResult result;
+		EvaluationResult result;
 		const Status status = EvaluateResult(document, plan, outputId, request, result, diagnostic);
 		if (status != Status::Ok) return status;
-		if (auto *array = std::get_if<ImageArray>(&result)) {
+		if (auto *array = std::get_if<ImageArray>(&result.Data)) {
 			images = std::move(*array);
 			return Status::Ok;
 		}
@@ -6467,14 +10095,14 @@ namespace engine::imagegraph {
 		EvaluatedValue &value,
 		Diagnostic &diagnostic
 	) {
-		NodeResult result;
+		EvaluationResult result;
 		const Status status = EvaluateResult(document, plan, outputId, request, result, diagnostic);
 		if (status != Status::Ok) return status;
 		const auto output =
 			std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const Output &candidate) {
 				return candidate.Id == outputId;
 			});
-		const auto *ports = std::get_if<ValueOutputs>(&result);
+		ValueOutputs *ports = FindValueOutputs(result.Data);
 		if (!ports) {
 			SetDiagnostic(
 				diagnostic, Status::InvalidOutput, "selected output is an image", output->NodeId, output->Port
@@ -6494,7 +10122,18 @@ namespace engine::imagegraph {
 			);
 			return diagnostic.Code;
 		}
-		value = {selected->Port, selected->Data};
+		const auto selectedOutput =
+			std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const auto &output) {
+				return output.Id == outputId;
+			});
+		const auto selectedNode =
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+				return selectedOutput != document.Outputs.end() && node.Id == selectedOutput->NodeId;
+			});
+		const auto domain = selectedNode == document.Nodes.end()
+								? std::optional<SourceSocketDomain>{}
+								: FindOutputDomain(*selectedNode, result.Data, selected->Port);
+		value = {std::move(selected->Port), std::move(selected->Data), domain};
 		diagnostic = {};
 		return Status::Ok;
 	}
@@ -6519,4 +10158,4 @@ namespace engine::imagegraph {
 	) {
 		return Evaluate(document, plan, outputId, 0, image, diagnostic);
 	}
-}
+} // namespace engine::imagegraph

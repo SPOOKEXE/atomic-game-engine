@@ -1,0 +1,649 @@
+#include "ProcessorBatch.hpp"
+
+#include "ArrayOps.hpp"
+#include "SourceGetterProjection.hpp"
+#include "SourceMaterialInputs.hpp"
+#include "ValuePayload.hpp"
+
+#include <algorithm>
+#include <optional>
+
+namespace engine::imagegraph::detail {
+	namespace {
+		std::string_view FamilyProfile(std::string_view type) {
+			if (type == "pc.fft" || type == "pc.audio_window" || type == "pc.audio_loudness")
+				return "imagegraph.node.audio";
+			if (type.starts_with("pc.gradient_")) return "imagegraph.node.gradient";
+			if (type == "pc.solid") return "imagegraph.node.generate";
+			if (type == "pc.invert") return "imagegraph.node.filter";
+			return "imagegraph.node.other";
+		}
+
+		bool Execute(NodeContext &context, Executor executor) {
+			ENGINE_PROFILE_DYNAMIC_STABLE(
+				"imagegraph.node", FamilyProfile(context.Authored.Type), core::ProfileCategory::Engine
+			);
+			core::Metrics::Count("imagegraph.node.executions", 1);
+			return executor(context);
+		}
+
+		struct InputRows {
+			std::string_view Port;
+			ValueType Type;
+			int64_t Index;
+			uint8_t Depth;
+			const ArrayValue *Values = nullptr;
+			const ImageArray *Images = nullptr;
+			size_t Count = 1;
+			bool Batch = false;
+		};
+
+		uint8_t LeafDepth(ValueType type) {
+			switch (type) {
+			case ValueType::Vector2:
+			case ValueType::Vector3:
+			case ValueType::Vector4:
+			case ValueType::Quaternion:
+			case ValueType::Area:
+			case ValueType::Curve:
+			case ValueType::Matrix:
+				return 1;
+			default:
+				return 0;
+			}
+		}
+
+		bool AddRows(
+			NodeContext &context,
+			const CatalogueInput &input,
+			std::string_view port,
+			int64_t index,
+			std::vector<InputRows> &rows
+		) {
+			if (SourceMaterialSynthetic(context.Entry, input)) return true;
+			const bool mapped = SourceMaterialMapped(context, port);
+			InputRows selected{
+				port, mapped ? ValueType::Any : input.Type, index, uint8_t(mapped ? 1 : input.ArrayDepth)
+			};
+			for (const auto &[id, array] : context.ImageArrays)
+				if (id == port) selected.Images = array;
+			const Value *value = mapped ? SourceMaterialRange(context, port) : context.Find(port);
+			selected.Values = value ? std::get_if<ArrayValue>(value) : nullptr;
+			if (selected.Values && !selected.Values->Items.empty() &&
+				input.ArrayDepth < Limits::MaximumArrayDepth)
+				return context.Fail(
+					Status::UnsupportedExecution,
+					"processor batch requires homogeneous source array normalization",
+					input.Id
+				);
+			if (!selected.Images && !selected.Values) return true;
+			// Source Array Shift declares its array input depth 99 and consumes the entire shape.
+			if (input.ArrayDepth >= Limits::MaximumArrayDepth) return true;
+			if (context.Entry.Type == "pc.3_d_mesh_plane" && port == "both_side")
+				return context.Fail(Status::UnsupportedExecution, "source Both Side rejects arrays", port);
+			if (!mapped && !input.ArrayDepthKnown)
+				return context.Fail(
+					Status::UnsupportedExecution, "source input array depth is dynamic", port
+				);
+			if (selected.Images) {
+				selected.Count = selected.Images->Items.size();
+				selected.Batch = true;
+				for (const auto &item : selected.Images->Items) {
+					const auto *image = std::get_if<size_t>(&item.Data);
+					if (!image || *image >= selected.Images->Images.size())
+						return context.Fail(
+							Status::UnsupportedExecution, "surface processor needs flat image rows", port
+						);
+				}
+			} else {
+				const auto leaf = selected.Values->ElementType;
+				const bool numeric = leaf == ValueType::Scalar || leaf == ValueType::Integer;
+				const bool supported =
+					mapped || input.Type == ValueType::Any || input.Type == ValueType::Array ||
+					leaf == input.Type ||
+					(numeric && (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
+								 input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
+								 input.Type == ValueType::Vector2 || input.Type == ValueType::Vector3 ||
+								 input.Type == ValueType::Vector4 || input.Type == ValueType::Quaternion));
+				if (!supported)
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"processor array leaf type is unsupported for this input",
+						port
+					);
+				if (!ValidRuntimeValue(*value))
+					return context.Fail(Status::InvalidValue, "processor array payload is invalid", port);
+				const uint8_t depth =
+					(selected.Values->Nested.empty() ? 1 : 2) + LeafDepth(selected.Values->ElementType);
+				selected.Batch = depth > selected.Depth;
+				selected.Count = selected.Values->Nested.empty() ? selected.Values->Elements.size()
+																 : selected.Values->Nested.size();
+			}
+			if (selected.Batch && selected.Count == 0)
+				return context.Fail(Status::InvalidValue, "empty processor input has no typed row", port);
+			rows.push_back(selected);
+			return true;
+		}
+
+		// Source inverse indexes a suffix table for every input, not only batched arrays.
+		// Missing constructor positions cannot be reconstructed from a compact native array list.
+		bool SourceSlotLengths(
+			NodeContext &context, const std::vector<InputRows> &rows, std::vector<size_t> &lengths
+		) {
+			std::vector<size_t> indices;
+			indices.reserve(context.Entry.Inputs.size() + context.Authored.DynamicInputs.size());
+			const auto add = [&](int64_t index) {
+				if (index < 0 || size_t(index) >= Limits::MaximumDynamicInputsPerNode) return false;
+				indices.push_back(size_t(index));
+				return true;
+			};
+			for (const CatalogueInput &input : context.Entry.Inputs) {
+				if (SourceMaterialSynthetic(context.Entry, input)) continue;
+				if (input.SourceIndex < 0) {
+					if (!input.Id.starts_with("attribute_") && input.SourceKind != "DimensionUnit")
+						return context.Fail(
+							Status::UnsupportedExecution,
+							"source processor input slot layout is unresolved",
+							input.Id
+						);
+					continue;
+				}
+				if (!add(input.SourceIndex))
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"source processor input slot layout is unresolved",
+						input.Id
+					);
+			}
+			for (const auto &input : context.Authored.DynamicInputs) {
+				size_t group = 0;
+				const auto *source = FindDynamicTemplate(context.Entry, input.Id, group);
+				if (!source || context.Entry.DynamicGroupLength <= 0 || source->SourceIndex < 0 ||
+					source->SourceIndex >= context.Entry.DynamicGroupLength ||
+					group >= Limits::MaximumDynamicInputsPerNode ||
+					!add(
+						int64_t(context.Entry.DynamicFixedLength) +
+						int64_t(group) * context.Entry.DynamicGroupLength + source->SourceIndex
+					))
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"source processor dynamic slot layout is unresolved",
+						input.Id
+					);
+			}
+			std::sort(indices.begin(), indices.end());
+			for (size_t slot = 0; slot < indices.size(); slot++)
+				if (indices[slot] != slot)
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"source processor input slot layout is unresolved",
+						"attribute_array_process"
+					);
+			lengths.assign(indices.size(), 1);
+			for (const auto &input : rows) {
+				if (input.Index < 0 || size_t(input.Index) >= lengths.size())
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"source processor input slot layout is unresolved",
+						input.Port
+					);
+				if (input.Batch) lengths[size_t(input.Index)] = input.Count;
+			}
+			return true;
+		}
+
+		double Number(const ElementValue &element) {
+			if (const auto *number = std::get_if<double>(&element)) return *number;
+			if (const auto *number = std::get_if<int64_t>(&element)) return static_cast<double>(*number);
+			return 0;
+		}
+
+		Value NormalizeVector(Value value, ValueType target) {
+			const auto *array = std::get_if<ArrayValue>(&value);
+			if (!array || !array->Nested.empty() ||
+				(array->ElementType != ValueType::Scalar && array->ElementType != ValueType::Integer))
+				return value;
+			const auto component = [&](size_t index) {
+				return index < array->Elements.size() ? Number(array->Elements[index]) : 0;
+			};
+			if (target == ValueType::Vector2) return Vector2{component(0), component(1)};
+			if (target == ValueType::Vector3) return Vector3{component(0), component(1), component(2)};
+			if (target == ValueType::Vector4)
+				return Vector4{component(0), component(1), component(2), component(3)};
+			if (target == ValueType::Quaternion)
+				return Quaternion{component(0), component(1), component(2), component(3)};
+			return value;
+		}
+
+		bool CheckOutputs(NodeContext &context, uint64_t maximumBytes) {
+			uint64_t bytes = 0;
+			for (const auto &[port, image] : context.OutputImages) {
+				if (image.Pixels.size() > maximumBytes - bytes)
+					return context.Fail(Status::LimitExceeded, "processor outputs exceed byte budget", port);
+				bytes += image.Pixels.size();
+			}
+			for (const auto &[port, array] : context.OutputImageArrays) {
+				if (array.Images.size() > Limits::MaximumArrayElements ||
+					array.Items.size() > Limits::MaximumArrayElements)
+					return context.Fail(
+						Status::LimitExceeded, "processor image array exceeds element budget", port
+					);
+				uint64_t size =
+					array.Images.size() * sizeof(Image) + array.Items.size() * sizeof(ImageArrayItem);
+				for (const Image &image : array.Images)
+					size += image.Pixels.size();
+				size_t items = array.Items.size();
+				for (const ImageArrayItem &item : array.Items) {
+					if (const auto *leaf = std::get_if<size_t>(&item.Data)) {
+						if (*leaf >= array.Images.size())
+							return context.Fail(Status::InvalidValue, "image array has invalid index", port);
+					} else {
+						const auto &children = std::get<std::vector<ImageArrayItem>>(item.Data);
+						if (children.size() > Limits::MaximumArrayElements - items)
+							return context.Fail(
+								Status::LimitExceeded, "image array exceeds nested element budget", port
+							);
+						items += children.size();
+						size += children.size() * sizeof(ImageArrayItem);
+						for (const ImageArrayItem &child : children) {
+							const auto *leaf = std::get_if<size_t>(&child.Data);
+							if (!leaf || *leaf >= array.Images.size())
+								return context.Fail(
+									Status::UnsupportedExecution,
+									"image array exceeds supported nested depth",
+									port
+								);
+						}
+					}
+				}
+				if (size > maximumBytes - bytes)
+					return context.Fail(
+						Status::LimitExceeded, "processor image arrays exceed byte budget", port
+					);
+				bytes += size;
+			}
+			for (const auto &value : context.OutputValues) {
+				if (!ValidRuntimeValue(value.Data))
+					return context.Fail(
+						Status::InvalidValue, "processor produced an invalid typed value", value.Port
+					);
+				const uint64_t size = ValuePayloadBytes(value.Data);
+				if (size > maximumBytes - bytes)
+					return context.Fail(
+						Status::LimitExceeded, "processor outputs exceed byte budget", value.Port
+					);
+				bytes += size;
+			}
+			return true;
+		}
+
+		struct PendingOutputs {
+			NodeContext &Context;
+			bool Committed = false;
+			~PendingOutputs() {
+				if (Committed) return;
+				Context.ClearOutputs();
+			}
+		};
+
+		struct RestoreInputs {
+			NodeContext &Context;
+			std::vector<std::pair<std::string_view, const Image *>> Images;
+			std::vector<std::pair<std::string_view, const Value *>> Values;
+			std::span<const std::pair<std::string_view, const Value *>> OriginalValues;
+			~RestoreInputs() {
+				Context.ProcessorOriginalValues = OriginalValues;
+				Context.Images = std::move(Images);
+				Context.ValueViews = std::move(Values);
+			}
+		};
+	}
+
+	bool RunProcessorBatch(NodeContext &context, Executor executor, ProcessorObserver observer, void *state) {
+		ENGINE_PROFILE("imagegraph.processor");
+		const uint64_t budget = context.ByteBudget;
+		PendingOutputs pending{context};
+		SourceGetterProjection getters(context);
+		if (!getters.Prepare()) return false;
+		struct RestoreBudget {
+			NodeContext &Context;
+			uint64_t Budget;
+			~RestoreBudget() {
+				Context.ByteBudget = Budget;
+			}
+		} restoreBudget{context, budget};
+		const auto observe = [&] {
+			if (!observer || observer(context, state)) return context.FailureCode == Status::Ok;
+			if (context.FailureCode == Status::Ok)
+				context.Fail(Status::UnsupportedExecution, "processor observer refused the selected row");
+			return false;
+		};
+		const bool processor = FindCatalogueInput(context.Entry, "attribute_process") != nullptr;
+		if (!processor) {
+			pending.Committed = Execute(context, executor) && context.FailureCode == Status::Ok &&
+								observe() && context.FailureCode == Status::Ok &&
+								CheckOutputs(context, budget);
+			return pending.Committed;
+		}
+		const size_t maximumRows = context.Entry.Inputs.size() + context.Authored.DynamicInputs.size();
+		const uint64_t selectionBytes =
+			maximumRows * (sizeof(InputRows) + 2 * sizeof(size_t) + sizeof(Value) +
+						   3 * sizeof(std::pair<std::string_view, const Value *>)) +
+			2 * context.Images.size() * sizeof(std::pair<std::string_view, const Image *>) +
+			2 * context.ValueViews.size() * sizeof(std::pair<std::string_view, const Value *>);
+		auto selectionCharge = context.ReserveWorkspace(selectionBytes, "attribute_array_process");
+		if (!selectionCharge) return false;
+		std::vector<InputRows> rows;
+		rows.reserve(maximumRows);
+		for (const CatalogueInput &input : context.Entry.Inputs) {
+			if (input.SourceIndex < 0) continue;
+			if (!AddRows(context, input, input.Id, input.SourceIndex, rows)) return false;
+		}
+		for (const auto &input : context.Authored.DynamicInputs) {
+			size_t group = 0;
+			const auto *source = FindDynamicTemplate(context.Entry, input.Id, group);
+			if (source && !AddRows(
+							  context,
+							  *source,
+							  input.Id,
+							  int64_t(context.Entry.DynamicFixedLength) +
+								  int64_t(group) * context.Entry.DynamicGroupLength + source->SourceIndex,
+							  rows
+						  ))
+				return false;
+		}
+		std::sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) { return a.Index < b.Index; });
+		std::vector<size_t> lengths;
+		lengths.reserve(maximumRows);
+		for (const auto &input : rows)
+			if (input.Batch) lengths.push_back(input.Count);
+		if (!lengths.empty() && !context.Boolean("attribute_process", true))
+			return context.Fail(
+				Status::UnsupportedExecution,
+				"native executor cannot consume unprocessed outer arrays",
+				"attribute_process"
+			);
+		const int64_t mode = context.Integer("attribute_array_process");
+		if (context.FailureCode != Status::Ok) return false;
+		if (mode < 0 || mode > 3)
+			return context.Fail(
+				Status::InvalidValue, "array processor mode is invalid", "attribute_array_process"
+			);
+		const bool sourceInverse = mode == int64_t(ArrayProcessMode::ExpandInverse);
+		if (sourceInverse && !lengths.empty() && !SourceSlotLengths(context, rows, lengths)) return false;
+		auto scheduleCharge = context.ReserveWorkspace(0, "attribute_array_process");
+		if (!scheduleCharge) return false;
+		std::vector<std::vector<size_t>> schedule;
+		if (!lengths.empty()) {
+			ArrayScheduleFootprint footprint;
+			const Status measured = MeasureArraySchedule(
+				lengths, static_cast<ArrayProcessMode>(mode), Limits::MaximumArrayElements, footprint
+			);
+			if (measured != Status::Ok)
+				return context.Fail(
+					measured, "array processor exceeds row budget", "attribute_array_process"
+				);
+			auto charge = context.ReserveWorkspace(footprint.PeakBytes, "attribute_array_process");
+			if (!charge) return false;
+			if (!scheduleCharge->Merge(std::move(*charge))) std::terminate();
+			const Status status = BuildSourceArraySchedule(
+				lengths,
+				static_cast<ArrayProcessMode>(mode),
+				Limits::MaximumArrayElements,
+				schedule,
+				footprint.PeakBytes
+			);
+			if (status != Status::Ok)
+				return context.Fail(status, "array processor exceeds row budget", "attribute_array_process");
+			if (!scheduleCharge->Resize(footprint.RetainedBytes)) std::terminate();
+		}
+		const size_t count = schedule.empty() ? 1 : schedule.size();
+		const uint64_t scheduleBytes =
+			uint64_t(schedule.size()) * (sizeof(std::vector<size_t>) + lengths.size() * sizeof(size_t));
+		const uint64_t rowViewsBytes =
+			rows.size() * (sizeof(Value) + sizeof(std::pair<std::string_view, const Value *>));
+		if (scheduleBytes > budget || rowViewsBytes > budget - scheduleBytes)
+			return context.Fail(
+				Status::LimitExceeded,
+				"processor selection workspace exceeds byte budget",
+				"attribute_array_process"
+			);
+		const uint64_t workspaceBytes = scheduleBytes + rowViewsBytes;
+		const uint64_t shapeBytes = uint64_t(count) * context.Entry.Outputs.size() *
+									(sizeof(ElementValue) + sizeof(ImageArrayItem) + sizeof(Image));
+		if (count > 1 && shapeBytes > budget - workspaceBytes)
+			return context.Fail(
+				Status::LimitExceeded,
+				"array processor output shape exceeds byte budget",
+				"attribute_array_process"
+			);
+		auto aggregateCharge = context.ReserveWorkspace(
+			count > 1 ? shapeBytes + context.Entry.Outputs.size() *
+										 (sizeof(AuthoredValue) + sizeof(std::pair<std::string, ImageArray>))
+					  : 0,
+			"attribute_array_process"
+		);
+		if (!aggregateCharge) return false;
+		RestoreInputs restore{context, context.Images, context.ValueViews, context.ProcessorOriginalValues};
+		context.ProcessorOriginalValues = restore.Values;
+		auto selectedCharge = context.ReserveWorkspace(0, "attribute_array_process");
+		if (!selectedCharge) return false;
+		std::vector<Value> selected;
+		selected.reserve(rows.size());
+		context.ValueViews.reserve(rows.size() + restore.Values.size());
+		std::vector<std::pair<std::string, ImageArray>> images;
+		std::vector<AuthoredValue> values;
+		if (count > 1) {
+			images.reserve(context.Entry.Outputs.size());
+			values.reserve(context.Entry.Outputs.size());
+		}
+		uint64_t accumulated = workspaceBytes + (count > 1 ? shapeBytes : 0);
+		for (size_t row = 0; row < count; row++) {
+			selected.clear();
+			selectedCharge = context.ReserveWorkspace(0, "attribute_array_process");
+			if (!selectedCharge) return false;
+			context.ValueViews = restore.Values;
+			context.Images = restore.Images;
+			context.ClearOutputs();
+			context.ByteBudget = budget;
+			size_t slot = 0;
+			uint64_t scratchOwned = 0;
+			for (const InputRows &input : rows) {
+				const size_t index =
+					input.Batch ? schedule[row][sourceInverse ? size_t(input.Index) : slot++] : 0;
+				if (input.Images) {
+					const size_t imageIndex = std::get<size_t>(input.Images->Items[index].Data);
+					context.Images.emplace_back(input.Port, &input.Images->Images[imageIndex]);
+				} else {
+					if (!input.Batch && input.Type != ValueType::Vector2 &&
+						input.Type != ValueType::Vector3 && input.Type != ValueType::Vector4 &&
+						input.Type != ValueType::Quaternion)
+						continue;
+					const ArrayValue &array = *input.Values;
+					uint64_t scratchBytes = 0;
+					if (input.Batch && !array.Nested.empty()) {
+						for (const auto &element : array.Nested[index])
+							scratchBytes +=
+								sizeof(ElementValue) +
+								std::visit(
+									[](const auto &leaf) { return RetainedPayloadBytes(leaf); }, element
+								);
+					} else if (input.Batch)
+						scratchBytes = std::visit(
+							[](const auto &leaf) { return RetainedPayloadBytes(leaf); }, array.Elements[index]
+						);
+					else
+						scratchBytes = RetainedPayloadBytes(array);
+					if (scratchBytes > context.ByteBudget - scratchOwned)
+						return context.Fail(
+							Status::LimitExceeded, "processor selected row exceeds byte budget", input.Port
+						);
+					scratchOwned += scratchBytes;
+					auto charge = context.ReserveWorkspace(scratchBytes, input.Port);
+					if (!charge || !selectedCharge->Merge(std::move(*charge))) return false;
+					Value item =
+						input.Batch
+							? (!array.Nested.empty()
+								   ? Value{ArrayValue{array.ElementType, array.Nested[index]}}
+								   : std::visit(
+										 [](const auto &leaf) -> Value { return leaf; }, array.Elements[index]
+									 ))
+							: Value{array};
+					item = NormalizeVector(std::move(item), input.Type);
+					if (const auto kind = PayloadType(item);
+						input.Type != ValueType::Any && input.Type != ValueType::Array &&
+						kind != input.Type && !(kind == ValueType::Array && input.Depth > 0) &&
+						!((kind == ValueType::Scalar || kind == ValueType::Integer) &&
+						  (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
+						   input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
+						   input.Type == ValueType::Vector2)))
+						return context.Fail(
+							Status::UnsupportedExecution,
+							"selected processor leaf requires an unsupported conversion",
+							input.Port
+						);
+
+					selected.push_back(std::move(item));
+					context.ValueViews.emplace_back(input.Port, &selected.back());
+				}
+			}
+			if (!Execute(context, executor) || context.FailureCode != Status::Ok || !observe() ||
+				context.FailureCode != Status::Ok ||
+				!CheckOutputs(context, budget - accumulated - scratchOwned))
+				return false;
+			if (count > 1 && !context.OutputImageArrays.empty())
+				return context.Fail(
+					Status::UnsupportedExecution, "processor output exceeds supported image array depth"
+				);
+			if (count == 1) {
+				selected.clear();
+				pending.Committed = true;
+				return true;
+			}
+			for (auto &[port, image] : context.OutputImages) {
+				auto target = std::find_if(images.begin(), images.end(), [&](const auto &item) {
+					return item.first == port;
+				});
+				if (target == images.end()) {
+					if (!context.ReserveOutput(port.size(), port)) return false;
+					images.emplace_back(port, ImageArray{});
+					target = images.end() - 1;
+					target->second.Images.reserve(count);
+					target->second.Items.reserve(count);
+				}
+				if (image.Pixels.size() > budget - accumulated)
+					return context.Fail(
+						Status::LimitExceeded, "processor image array exceeds byte budget", port
+					);
+				accumulated += image.Pixels.size();
+				target->second.Items.push_back({target->second.Images.size()});
+				target->second.Images.push_back(std::move(image));
+			}
+			for (auto &value : context.OutputValues) {
+				auto target = std::find_if(values.begin(), values.end(), [&](const auto &item) {
+					return item.Port == value.Port;
+				});
+				if (target == values.end()) {
+					if (!context.ReserveOutput(value.Port.size(), value.Port)) return false;
+					values.push_back({value.Port, ArrayValue{PayloadType(value.Data), {}}});
+					target = values.end() - 1;
+					auto &array = std::get<ArrayValue>(target->Data);
+					if (std::holds_alternative<ArrayValue>(value.Data) &&
+						context.Authored.Type == "pc.array_shift") {
+						if (!context.ReserveOutput(count * sizeof(SourceArrayItem), value.Port)) return false;
+						array.ElementType = ValueType::Any;
+						array.Items.reserve(count);
+					} else if (std::holds_alternative<ArrayValue>(value.Data))
+						array.Nested.reserve(count);
+					else
+						array.Elements.reserve(count);
+				}
+				auto &array = std::get<ArrayValue>(target->Data);
+				const uint64_t owned =
+					std::visit([](const auto &item) { return PayloadOwnedBytes(item); }, value.Data);
+				if (owned > budget - accumulated)
+					return context.Fail(
+						Status::LimitExceeded, "processor typed array exceeds byte budget", value.Port
+					);
+				const uint64_t growth = std::holds_alternative<ArrayValue>(value.Data)
+											? owned + sizeof(std::vector<ElementValue>)
+											: owned + sizeof(ElementValue);
+				if (growth > Limits::MaximumArrayBytes - PayloadOwnedBytes(array))
+					return context.Fail(
+						Status::LimitExceeded, "processor typed array exceeds 4 MiB", value.Port
+					);
+				accumulated += owned;
+				if (auto *nested = std::get_if<ArrayValue>(&value.Data)) {
+					if (context.Authored.Type == "pc.array_shift") {
+						std::vector<SourceArrayItem> members;
+						if (!nested->Items.empty())
+							members = std::move(nested->Items);
+						else if (nested->Nested.empty()) {
+							if (!context.ReserveOutput(
+									nested->Elements.size() * sizeof(SourceArrayItem), value.Port
+								))
+								return false;
+							members.reserve(nested->Elements.size());
+							for (auto &leaf : nested->Elements)
+								members.push_back({std::move(leaf)});
+						} else {
+							size_t nodes = nested->Nested.size();
+							for (const auto &children : nested->Nested)
+								nodes += children.size();
+							if (!context.ReserveOutput(nodes * sizeof(SourceArrayItem), value.Port))
+								return false;
+							members.reserve(nested->Nested.size());
+							for (auto &children : nested->Nested) {
+								std::vector<SourceArrayItem> entries;
+								entries.reserve(children.size());
+								for (auto &leaf : children)
+									entries.push_back({std::move(leaf)});
+								members.push_back({std::move(entries)});
+							}
+						}
+						array.Items.push_back({std::move(members)});
+						continue;
+					}
+					if (!nested->Nested.empty())
+						return context.Fail(
+							Status::UnsupportedExecution,
+							"processor output exceeds supported nested array depth",
+							value.Port
+						);
+					if (!array.Elements.empty() || (row && array.ElementType != nested->ElementType))
+						return context.Fail(
+							Status::InvalidValue,
+							"processor output array shape changed between rows",
+							value.Port
+						);
+					array.ElementType = nested->ElementType;
+					array.Nested.push_back(std::move(nested->Elements));
+				} else {
+					if (!array.Nested.empty() || array.ElementType != PayloadType(value.Data))
+						return context.Fail(
+							Status::InvalidValue,
+							"processor output value type changed between rows",
+							value.Port
+						);
+					auto element = ArrayElement(std::move(value.Data));
+					array.Elements.push_back(std::move(*element));
+				}
+			}
+			if (!aggregateCharge->Merge(std::move(context.OutputCharge))) std::terminate();
+			selected.clear();
+		}
+		context.ClearOutputs();
+		std::vector<std::pair<std::string, Image>>{}.swap(context.OutputImages);
+		context.OutputValues = std::move(values);
+		context.OutputImageArrays = std::move(images);
+		context.ReplaceOutputReservation(std::move(*aggregateCharge));
+		for (const auto &value : context.OutputValues)
+			if (!ValidRuntimeValue(value.Data))
+				return context.Fail(
+					Status::LimitExceeded, "processor typed array exceeds payload limits", value.Port
+				);
+		context.ByteBudget = budget - accumulated;
+		pending.Committed = true;
+		return true;
+	}
+}

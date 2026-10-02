@@ -166,7 +166,8 @@ TEST_CASE("Generic mask inversion follows feathering while Blend converts first"
 	Image blend = generic;
 	const Image feathered = engine::imagegraph::detail::FeatherMask(mask, 2.0);
 	engine::imagegraph::detail::ApplyMaskMix(original, generic, &feathered, 1.0, true);
-	CHECK(generic.Pixels == std::vector<uint8_t>{22, 22, 22, 255, 43, 43, 43, 255, 38, 38, 38, 255});
+	// Feathered texels (137,111,148,46), (104,91,123,74), (83,81,108,59) give 1 - luma * alpha.
+	CHECK(generic.Pixels == std::vector<uint8_t>{231, 231, 231, 255, 224, 224, 224, 255, 234, 234, 234, 255});
 	const Image modified = engine::imagegraph::detail::ModifyBlendMask(mask, true, false, 2.0);
 	engine::imagegraph::detail::ApplyMaskMix(original, blend, &modified, 1.0);
 	CHECK(blend.Pixels == std::vector<uint8_t>{22, 22, 22, 255, 44, 44, 44, 255, 38, 38, 38, 255});

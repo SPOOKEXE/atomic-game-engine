@@ -142,7 +142,7 @@ TEST_CASE("v1 and v2 documents migrate to v3 without changing old values", "[ima
 		const auto oldValues = document.Nodes[0].Values;
 		Diagnostic diagnostic;
 		REQUIRE(Migrate(document, diagnostic) == Status::Ok);
-		CHECK(document.FormatVersion == 6);
+		CHECK(document.FormatVersion == 9);
 		CHECK(document.Nodes[0].Values == oldValues);
 		Document parsed;
 		REQUIRE(Read(Write(document), parsed, diagnostic) == Status::Ok);

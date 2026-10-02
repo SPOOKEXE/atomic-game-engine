@@ -37,6 +37,39 @@ namespace engine::imagegraph::detail {
 			result = value;
 			return Status::Ok;
 		}
+		if (const auto *vector = std::get_if<Vector3>(&first)) {
+			const Vector3 end = std::get<Vector3>(last);
+			if (!std::isfinite(vector->X) || !std::isfinite(vector->Y) || !std::isfinite(vector->Z) ||
+				!std::isfinite(end.X) || !std::isfinite(end.Y) || !std::isfinite(end.Z))
+				return Status::InvalidValue;
+			const Vector3 value{
+				std::lerp(vector->X, end.X, fraction),
+				std::lerp(vector->Y, end.Y, fraction),
+				std::lerp(vector->Z, end.Z, fraction),
+			};
+			if (!std::isfinite(value.X) || !std::isfinite(value.Y) || !std::isfinite(value.Z))
+				return Status::InvalidValue;
+			result = value;
+			return Status::Ok;
+		}
+		if (const auto *vector = std::get_if<Vector4>(&first)) {
+			const Vector4 end = std::get<Vector4>(last);
+			if (!std::isfinite(vector->X) || !std::isfinite(vector->Y) || !std::isfinite(vector->Z) ||
+				!std::isfinite(vector->W) || !std::isfinite(end.X) || !std::isfinite(end.Y) ||
+				!std::isfinite(end.Z) || !std::isfinite(end.W))
+				return Status::InvalidValue;
+			const Vector4 value{
+				std::lerp(vector->X, end.X, fraction),
+				std::lerp(vector->Y, end.Y, fraction),
+				std::lerp(vector->Z, end.Z, fraction),
+				std::lerp(vector->W, end.W, fraction),
+			};
+			if (!std::isfinite(value.X) || !std::isfinite(value.Y) || !std::isfinite(value.Z) ||
+				!std::isfinite(value.W))
+				return Status::InvalidValue;
+			result = value;
+			return Status::Ok;
+		}
 		if (const auto *colour = std::get_if<Colour>(&first)) {
 			const Colour end = std::get<Colour>(last);
 			result = Colour{

@@ -83,3 +83,31 @@ TEST_CASE("array processor refuses empty inputs and product overflow", "[imagegr
 	CHECK(output.size() == 4096);
 	CHECK(output.back() == std::vector<size_t>(longLengths.size(), 4095));
 }
+
+TEST_CASE(
+	"schedule admission covers index tables overlapping the result", "[imagegraph][array][evaluation_budget]"
+) {
+	const std::array<size_t, 2> lengths{2, 3};
+	engine::imagegraph::detail::ArrayScheduleFootprint footprint;
+	REQUIRE(
+		engine::imagegraph::detail::MeasureArraySchedule(
+			lengths, ArrayProcessMode::ExpandInverse, 8, footprint
+		) == Status::Ok
+	);
+	CHECK(footprint.Rows == 6);
+	CHECK(footprint.RetainedBytes == 6 * (sizeof(std::vector<size_t>) + 2 * sizeof(size_t)));
+	CHECK(footprint.PeakBytes == footprint.RetainedBytes + 6 * sizeof(size_t));
+	std::vector<std::vector<size_t>> output{{99}};
+	CHECK(
+		engine::imagegraph::detail::BuildSourceArraySchedule(
+			lengths, ArrayProcessMode::ExpandInverse, 8, output, footprint.PeakBytes - 1
+		) == Status::LimitExceeded
+	);
+	CHECK(output == std::vector<std::vector<size_t>>{{99}});
+	REQUIRE(
+		engine::imagegraph::detail::BuildSourceArraySchedule(
+			lengths, ArrayProcessMode::ExpandInverse, 8, output, footprint.PeakBytes
+		) == Status::Ok
+	);
+	CHECK(output == std::vector<std::vector<size_t>>{{0, 0}, {1, 0}, {0, 0}, {1, 1}, {0, 1}, {1, 1}});
+}

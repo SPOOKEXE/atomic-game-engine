@@ -1,0 +1,233 @@
+#pragma once
+
+// Runtime path evaluation from node_path.gml _pathObject. Paths travel between nodes as Path2D values:
+// each anchor is (x, y, in-handle x, in-handle y, out-handle x, out-handle y) with its mirror flag as Index,
+// and weights are (position 0..100, weight) pairs.
+
+#include "../NodeExecutors.hpp"
+
+#include <engine/imagegraph/Document.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <optional>
+#include <utility>
+#include <vector>
+
+namespace engine::imagegraph::detail {
+	// PREFERENCES.path_resolution default.
+	inline constexpr int PATH_RESOLUTION = 32;
+
+	struct PathPoint {
+		double X = 0.0, Y = 0.0, Weight = 1.0;
+	};
+
+	inline double BezierComponent(double t, double p0, double p1, double c0, double c1) {
+		return std::pow(1 - t, 3) * p0 + 3 * std::pow(1 - t, 2) * t * c0 + 3 * std::pow(t, 2) * (1 - t) * c1 +
+			   std::pow(t, 3) * p1;
+	}
+
+	// GML x % y keeps the dividend's sign.
+	inline double GmlMod(double value, double divisor) {
+		return std::fmod(value, divisor);
+	}
+
+	class PathRuntime {
+		// Storage is freed before its lease, including the old buffers displaced by Init.
+		AllocationReservation StorageCharge;
+
+	  public:
+		PathRuntime() = default;
+
+		static std::optional<uint64_t> StorageBytes(const Path2D &path) {
+			if (path.Anchors.size() > Limits::MaximumPathAnchors ||
+				path.Weights.size() > Limits::MaximumPathWeights)
+				return std::nullopt;
+			const uint64_t count = path.Anchors.size();
+			const uint64_t segments = count < 2 ? 0 : (path.Loop ? count : count - 1);
+			return count * sizeof(std::array<double, 6>) +
+				   path.Weights.size() * sizeof(std::array<double, 2>) +
+				   (segments * 2 + (count < 2 ? 0 : count + 1 + 101)) * sizeof(double);
+		}
+
+		// Admit the full replacement while old storage is still live; refusal preserves this runtime.
+		bool Init(NodeContext &context, const Path2D &path) {
+			const auto bytes = StorageBytes(path);
+			if (!bytes)
+				return context.Fail(Status::LimitExceeded, "path exceeds the anchor or weight limit", "path");
+			auto charge = context.ReserveWorkspace(*bytes, "path");
+			if (!charge) return false;
+			PathRuntime replacement;
+			replacement.StorageCharge = std::move(*charge);
+			replacement.Loop = path.Loop;
+			replacement.Anchors.reserve(path.Anchors.size());
+			replacement.Weights.reserve(path.Weights.size());
+			if (path.Anchors.size() >= 2) {
+				const size_t segments = path.Loop ? path.Anchors.size() : path.Anchors.size() - 1;
+				replacement.Lengths.reserve(segments);
+				replacement.LengthAccumulated.reserve(segments);
+				replacement.LengthRatio.reserve(path.Anchors.size() + 1);
+				replacement.WeightRatio.reserve(101);
+			}
+			for (const PathAnchor &anchor : path.Anchors)
+				replacement.Anchors.push_back(anchor.Controls);
+			for (const PathWeight &weight : path.Weights)
+				replacement.Weights.push_back({weight.Position, weight.Weight});
+			replacement.UpdateLength();
+			Swap(replacement);
+			return true;
+		}
+
+		void Swap(PathRuntime &other) {
+			using std::swap;
+			swap(StorageCharge, other.StorageCharge);
+			swap(Loop, other.Loop);
+			Anchors.swap(other.Anchors);
+			Weights.swap(other.Weights);
+			Lengths.swap(other.Lengths);
+			LengthAccumulated.swap(other.LengthAccumulated);
+			LengthRatio.swap(other.LengthRatio);
+			WeightRatio.swap(other.WeightRatio);
+			swap(LengthTotal, other.LengthTotal);
+			swap(MinX, other.MinX);
+			swap(MinY, other.MinY);
+			swap(MaxX, other.MaxX);
+			swap(MaxY, other.MaxY);
+			swap(HasBoundary, other.HasBoundary);
+		}
+
+		bool Loop = false;
+		std::vector<std::array<double, 6>> Anchors;
+		std::vector<std::array<double, 2>> Weights;
+		std::vector<double> Lengths, LengthAccumulated, LengthRatio, WeightRatio;
+		double LengthTotal = 0.0;
+		double MinX = 0, MinY = 0, MaxX = 0, MaxY = 0;
+		bool HasBoundary = false;
+
+		size_t SegmentCount() const {
+			return Lengths.size();
+		}
+
+		PathPoint SegmentPoint(size_t index, double t) const {
+			const auto &a0 = Anchors[index % Anchors.size()];
+			const auto &a1 = Anchors[(index + 1) % Anchors.size()];
+			if (a0[4] == 0 && a0[5] == 0 && a1[2] == 0 && a1[3] == 0)
+				return {a0[0] + (a1[0] - a0[0]) * t, a0[1] + (a1[1] - a0[1]) * t, 1.0};
+			return {
+				BezierComponent(t, a0[0], a1[0], a0[0] + a0[4], a1[0] + a1[2]),
+				BezierComponent(t, a0[1], a1[1], a0[1] + a0[5], a1[1] + a1[3]),
+				1.0
+			};
+		}
+
+		// updateLength: each segment is sampled at PATH_RESOLUTION + 1 points and measured as a polyline.
+		void UpdateLength() {
+			const size_t count = Anchors.size();
+			if (count < 2) return;
+			const size_t segments = Loop ? count : count - 1;
+			for (size_t index = 0; index < segments; index++) {
+				double length = 0.0, previousX = 0.0, previousY = 0.0;
+				for (int step = 0; step <= PATH_RESOLUTION; step++) {
+					const PathPoint point = SegmentPoint(index, double(step) / PATH_RESOLUTION);
+					AddBoundary(point.X, point.Y);
+					if (step) length += std::hypot(point.X - previousX, point.Y - previousY);
+					previousX = point.X;
+					previousY = point.Y;
+				}
+				Lengths.push_back(length);
+				LengthTotal += length;
+				LengthAccumulated.push_back(LengthTotal);
+			}
+			LengthRatio.assign(count + 1, 0.0);
+			for (size_t index = 0; index < segments; index++)
+				LengthRatio[index + 1] = LengthAccumulated[index] / LengthTotal;
+			// The source builds weightRatio only for two or more weights; fewer read an unset variable, so a
+			// constant table stands in for that error path.
+			if (Weights.size() < 2) {
+				WeightRatio.assign(101, Weights.empty() ? 1.0 : Weights[0][1]);
+				return;
+			}
+			WeightRatio.assign(101, 0.0);
+			size_t cursor = 0;
+			std::array<double, 2> from = Weights[0], to = Weights[1];
+			for (int index = 0; index <= 100; index++) {
+				if (index < 100 && double(index) == to[0]) {
+					cursor++;
+					from = Weights[cursor % Weights.size()];
+					to = Weights[(cursor + 1) % Weights.size()];
+				}
+				const double x = (index - from[0]) / (to[0] - from[0]);
+				WeightRatio[size_t(index)] = from[1] + (to[1] - from[1]) * (x * x * (3.0 - 2.0 * x));
+			}
+		}
+
+		void AddBoundary(double x, double y) {
+			if (!HasBoundary) {
+				MinX = MaxX = x;
+				MinY = MaxY = y;
+				HasBoundary = true;
+				return;
+			}
+			MinX = std::min(MinX, x);
+			MaxX = std::max(MaxX, x);
+			MinY = std::min(MinY, y);
+			MaxY = std::max(MaxY, y);
+		}
+
+		double WeightAt(double index) const {
+			const auto at = [&](double position) {
+				if (position < 0 || position >= WeightRatio.size()) return 0.0;
+				return WeightRatio[size_t(position)];
+			};
+			const double whole = std::floor(index);
+			if (index == whole) return at(whole);
+			return at(whole) + (at(whole + 1) - at(whole)) * (index - whole);
+		}
+
+		PathPoint PointDistance(double distance) const {
+			PathPoint out{0.0, 0.0, 1.0};
+			if (Lengths.empty()) return out;
+			if (distance < 0) distance = LengthTotal + GmlMod(distance, LengthTotal);
+			if (Loop)
+				distance =
+					LengthTotal == 0 ? 0 : GmlMod(distance, LengthTotal) + (distance < 0 ? LengthTotal : 0);
+			size_t index = 0;
+			for (size_t repeat = 0; repeat < Anchors.size(); repeat++) {
+				const double length = Lengths[std::min(index, Lengths.size() - 1)];
+				if (distance > length) {
+					distance -= length;
+					index++;
+					continue;
+				}
+				const double t = length == 0 ? 0 : distance / length;
+				const double ratio =
+					(LengthRatio[index] + (LengthRatio[index + 1] - LengthRatio[index]) * t) * 100.0;
+				out = SegmentPoint(index, t);
+				out.Weight = WeightAt(ratio);
+				return out;
+			}
+			return out;
+		}
+
+		PathPoint PointRatio(double ratio) const {
+			if (ratio < 0) ratio = 1 + (ratio - std::trunc(ratio));
+			const double position = Loop ? ratio - std::trunc(ratio) : std::clamp(ratio, 0.0, 0.9999);
+			return PointDistance(position * LengthTotal);
+		}
+
+		PathPoint PointSegment(double ratio) const {
+			if (Lengths.empty()) return {};
+			const size_t count = Anchors.size();
+			if (ratio < 0) return {Anchors[0][0], Anchors[0][1], 1.0};
+			ratio = std::fmod(ratio, double(count));
+			const size_t from = std::min(size_t(std::floor(ratio)), count - 1);
+			const size_t to = (from + 1) % count;
+			const double t = ratio - std::trunc(ratio);
+			if (to >= count && !Loop) return {Anchors[count - 1][0], Anchors[count - 1][1], 1.0};
+			PathPoint point = SegmentPoint(from, t);
+			point.Weight = 1.0;
+			return point;
+		}
+	};
+}

@@ -46,12 +46,47 @@ namespace engine::imagegraph::detail {
 		}
 	}
 
-	// The documented Mask and Mix inputs use luminance-times-alpha weight. Mask
-	// pixels use native nearest normalized-UV sampling when dimensions differ.
-	inline void ApplyMaskMix(
-		const Image &original, Image &edited, const Image *mask, double mix, bool invertMask = false
+	// shaders/sh_mask: the mask amount is luminance times alpha, or alpha alone with maskAlpha, and
+	// Invert mask flips that product. Mask pixels use nearest normalized-UV sampling when sizes differ.
+	inline bool ApplyMaskMix(
+		const Image &original,
+		Image &edited,
+		const Image *mask,
+		double mix,
+		bool invertMask = false,
+		bool alphaOnly = false
 	) {
-		if (mask == nullptr && mix == 1.0) return;
+		if (mask == nullptr && mix == 1.0) return true;
+		if (original.Format != SurfaceFormat::RGBA8Unorm || edited.Format != SurfaceFormat::RGBA8Unorm ||
+			(mask && mask->Format != SurfaceFormat::RGBA8Unorm)) {
+			for (uint32_t y = 0; y < edited.Height; ++y) {
+				for (uint32_t x = 0; x < edited.Width; ++x) {
+					SurfacePixel before{}, after{};
+					if (!LoadSurfacePixel(original, x, y, before) || !LoadSurfacePixel(edited, x, y, after))
+						return false;
+					double weight = mix;
+					if (mask) {
+						const uint32_t mx =
+							uint32_t((uint64_t(2 * x + 1) * mask->Width) / (2 * edited.Width));
+						const uint32_t my =
+							uint32_t((uint64_t(2 * y + 1) * mask->Height) / (2 * edited.Height));
+						SurfacePixel sampled{};
+						if (!LoadSurfacePixel(*mask, mx, my, sampled)) return false;
+						const double amount =
+							alphaOnly ? sampled[3] : (sampled[0] + sampled[1] + sampled[2]) / 3 * sampled[3];
+						weight *= invertMask ? 1 - amount : amount;
+					}
+					weight = std::clamp(weight, 0.0, 1.0);
+					SurfacePixel blended{};
+					for (size_t channel = 0; channel < 4; ++channel)
+						blended[channel] = before[channel] * (1 - weight) + after[channel] * weight;
+					if (before[3] == 0) std::copy_n(after.begin(), 3, blended.begin());
+					if (after[3] == 0) std::copy_n(before.begin(), 3, blended.begin());
+					if (!StoreSurfacePixel(edited, x, y, blended)) return false;
+				}
+			}
+			return true;
+		}
 		for (size_t pixel = 0; pixel < edited.Pixels.size() / 4; pixel++) {
 			const size_t offset = pixel * 4;
 			double weight = mix;
@@ -65,8 +100,8 @@ namespace engine::imagegraph::detail {
 										  mask->Pixels[maskOffset + 1] + mask->Pixels[maskOffset + 2]) /
 										 (3.0 * 255.0);
 				const double maskAlpha = static_cast<double>(mask->Pixels[maskOffset + 3]) / 255.0;
-				const double maskAmount = (invertMask ? 1.0 - luminance : luminance) * maskAlpha;
-				weight *= maskAmount;
+				const double amount = alphaOnly ? maskAlpha : luminance * maskAlpha;
+				weight *= invertMask ? 1.0 - amount : amount;
 			}
 			weight = std::clamp(weight, 0.0, 1.0);
 			std::array<uint8_t, 4> blended{};
@@ -84,10 +119,11 @@ namespace engine::imagegraph::detail {
 			}
 			std::copy(blended.begin(), blended.end(), edited.Pixels.begin() + offset);
 		}
+		return true;
 	}
 
 	// The source shader performs two alpha-aware Gaussian passes with transparent
-	// samples outside the mask. Quantize each pass to the native RGBA8 surface.
+	// samples outside the mask. Store each pass in its selected numeric surface format.
 	inline Image FeatherMask(const Image &mask, double feather) {
 		if (feather <= 0.0) return mask;
 		const int radius = std::max(1, static_cast<int>(std::lround(feather)));
@@ -99,6 +135,35 @@ namespace engine::imagegraph::detail {
 		}
 		Image horizontal = mask;
 		Image vertical = mask;
+		if (mask.Format != SurfaceFormat::RGBA8Unorm) {
+			for (int pass = 0; pass < 2; ++pass) {
+				const Image &source = pass == 0 ? mask : horizontal;
+				Image &target = pass == 0 ? horizontal : vertical;
+				for (uint32_t y = 0; y < mask.Height; ++y)
+					for (uint32_t x = 0; x < mask.Width; ++x) {
+						double sumAlpha = 0, sumWeight = 0;
+						SurfacePixel sums{}, result{};
+						for (int offset = 1 - radius; offset < radius; ++offset) {
+							const double weight = weights[size_t(std::abs(offset))];
+							sumWeight += weight;
+							const int64_t sx = pass == 0 ? int64_t(x) + offset : x,
+										  sy = pass == 0 ? y : int64_t(y) + offset;
+							if (sx < 0 || sy < 0 || sx >= mask.Width || sy >= mask.Height) continue;
+							SurfacePixel pixel{};
+							if (!LoadSurfacePixel(source, uint32_t(sx), uint32_t(sy), pixel)) return {};
+							sumAlpha += weight * pixel[3];
+							for (size_t channel = 0; channel < 3; ++channel)
+								sums[channel] += weight * pixel[3] * pixel[channel];
+						}
+						for (size_t channel = 0; channel < 3; ++channel)
+							result[channel] = sumAlpha > 0 ? sums[channel] / sumAlpha : 0;
+						result[3] = sumAlpha / sumWeight;
+						if (!StoreSurfacePixel(target, x, y, result)) return {};
+					}
+			}
+			return vertical;
+		}
+
 		for (int pass = 0; pass < 2; pass++) {
 			const Image &source = pass == 0 ? mask : horizontal;
 			Image &target = pass == 0 ? horizontal : vertical;
@@ -135,7 +200,19 @@ namespace engine::imagegraph::detail {
 	}
 
 	// Channel bits select which edited RGBA channels survive after mask/mix.
-	inline void ApplyChannels(const Image &original, Image &edited, int64_t channels) {
+	inline bool ApplyChannels(const Image &original, Image &edited, int64_t channels) {
+		if (original.Format != SurfaceFormat::RGBA8Unorm || edited.Format != SurfaceFormat::RGBA8Unorm) {
+			for (uint32_t y = 0; y < edited.Height; ++y)
+				for (uint32_t x = 0; x < edited.Width; ++x) {
+					SurfacePixel before{}, after{};
+					if (!LoadSurfacePixel(original, x, y, before) || !LoadSurfacePixel(edited, x, y, after))
+						return false;
+					for (size_t channel = 0; channel < 4; ++channel)
+						if ((channels & (int64_t{1} << channel)) == 0) after[channel] = before[channel];
+					if (!StoreSurfacePixel(edited, x, y, after)) return false;
+				}
+			return true;
+		}
 		for (size_t offset = 0; offset < edited.Pixels.size(); offset += 4) {
 			for (size_t channel = 0; channel < 4; channel++) {
 				if ((channels & (int64_t{1} << channel)) == 0) {
@@ -143,14 +220,10 @@ namespace engine::imagegraph::detail {
 				}
 			}
 		}
+		return true;
 	}
 
 	inline uint64_t PixelHash(const Image &image) {
-		uint64_t hash = 14695981039346656037ull;
-		for (const uint8_t byte : image.Pixels) {
-			hash ^= byte;
-			hash *= 1099511628211ull;
-		}
-		return hash;
+		return SurfaceHash(image);
 	}
 }

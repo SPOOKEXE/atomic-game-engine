@@ -85,7 +85,7 @@ TEST_CASE("default sine driver parameters use normalized timeline time", "[image
 	CHECK(std::get<double>(value.Data) == Catch::Approx(1.0));
 }
 
-TEST_CASE("legacy graph versions migrate to v6 without creating sine drivers", "[imagegraph]") {
+TEST_CASE("legacy graph versions migrate to v8 without creating sine drivers", "[imagegraph]") {
 	using namespace engine::imagegraph;
 	Diagnostic diagnostic;
 	for (uint32_t version = 1; version <= 5; version++) {
@@ -94,7 +94,7 @@ TEST_CASE("legacy graph versions migrate to v6 without creating sine drivers", "
 		document.Keyframes = {{"number", "value", 0, 2.0, "linear", std::nullopt}};
 		if (version >= 4) document.Timeline = TimelineSettings{4, 0, 3, "loop", 30.0};
 		REQUIRE(Migrate(document, diagnostic) == Status::Ok);
-		CHECK(document.FormatVersion == 6);
+		CHECK(document.FormatVersion == 9);
 		CHECK_FALSE(document.Keyframes.front().SineDriver.has_value());
 		if (document.Timeline) CHECK(document.Timeline->FramesPerSecond == 30.0);
 	}

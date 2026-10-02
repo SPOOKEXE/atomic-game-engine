@@ -1,3 +1,5 @@
+#include "AudioPayload.hpp"
+
 #include <engine/imagegraph/AudioCapture.hpp>
 
 #include <algorithm>
@@ -95,8 +97,15 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			if (frame.Samples.size() > Limits::MaximumAudioSamplesPerFrame ||
-				frame.Samples.size() > Limits::MaximumAudioCaptureSamples - totalSamples) {
+			if (frame.Channels.size() > Limits::MaximumAudioChannels) {
+				SetCaptureDiagnostic(
+					diagnostic, Status::LimitExceeded, "audio capture exceeds the channel limit", "channels"
+				);
+				return diagnostic.Code;
+			}
+			const size_t frameSamples = detail::AudioSampleCount(frame.Samples, frame.Channels);
+			if (frameSamples > Limits::MaximumAudioSamplesPerFrame ||
+				frameSamples > Limits::MaximumAudioCaptureSamples - totalSamples) {
 				SetCaptureDiagnostic(
 					diagnostic,
 					Status::LimitExceeded,
@@ -105,15 +114,25 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			totalSamples += frame.Samples.size();
-			for (const double sample : frame.Samples) {
-				if (!std::isfinite(sample)) {
-					SetCaptureDiagnostic(
-						diagnostic, Status::InvalidValue, "audio capture samples must be finite", "samples"
-					);
-					return diagnostic.Code;
-				}
+			if (!detail::ValidAudioPlanes(frame.Samples, frame.Channels)) {
+				SetCaptureDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"audio capture requires finite equal-length channel planes or mono samples",
+					"samples"
+				);
+				return diagnostic.Code;
 			}
+			if (!frame.Channels.empty() && frame.SampleRate <= 0) {
+				SetCaptureDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"planar audio requires a positive sample rate",
+					"sample_rate"
+				);
+				return diagnostic.Code;
+			}
+			totalSamples += frameSamples;
 		}
 		diagnostic = {};
 		return Status::Ok;
@@ -137,9 +156,11 @@ namespace engine::imagegraph {
 		RemoveCarriageReturn(line);
 		const bool versionOne = line == "audio-capture 1";
 		const bool versionTwo = line == "audio-capture 2";
-		if (!versionOne && !versionTwo) {
+		const bool versionThree = line == "audio-capture 3";
+		const bool hasSampleRate = versionTwo || versionThree;
+		if (!versionOne && !versionTwo && !versionThree) {
 			SetCaptureDiagnostic(
-				diagnostic, Status::UnsupportedVersion, "expected audio-capture version 1 or 2"
+				diagnostic, Status::UnsupportedVersion, "expected audio-capture version 1, 2 or 3"
 			);
 			return diagnostic.Code;
 		}
@@ -156,8 +177,10 @@ namespace engine::imagegraph {
 			std::string tickToken;
 			std::string sampleRateToken;
 			std::string countToken;
+			std::string channelsToken;
 			if (!(record >> tag >> std::quoted(sourceId) >> tickToken) ||
-				(versionTwo && !(record >> sampleRateToken)) || !(record >> countToken) || tag != "frame") {
+				(hasSampleRate && !(record >> sampleRateToken)) ||
+				(versionThree && !(record >> channelsToken)) || !(record >> countToken) || tag != "frame") {
 				SetCaptureDiagnostic(
 					diagnostic, Status::Malformed, "audio capture frame record is malformed"
 				);
@@ -165,8 +188,10 @@ namespace engine::imagegraph {
 			}
 			AudioCaptureFrame frame;
 			uint64_t sampleCount = 0;
+			uint64_t channelCount = 0;
 			if (!ParseUnsigned(tickToken, frame.Tick) || !ParseUnsigned(countToken, sampleCount) ||
-				(versionTwo &&
+				(versionThree && !ParseUnsigned(channelsToken, channelCount)) ||
+				(hasSampleRate &&
 				 (!ParseSample(sampleRateToken, frame.SampleRate) || frame.SampleRate <= 0.0))) {
 				SetCaptureDiagnostic(
 					diagnostic,
@@ -176,6 +201,23 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 			frame.SourceId = std::move(sourceId);
+			if (channelCount > Limits::MaximumAudioChannels) {
+				SetCaptureDiagnostic(
+					diagnostic, Status::LimitExceeded, "audio capture exceeds the channel limit", "channels"
+				);
+				return diagnostic.Code;
+			}
+			const size_t planes = std::max(uint64_t{1}, channelCount);
+			if (sampleCount > Limits::MaximumAudioSamplesPerFrame / planes) {
+				SetCaptureDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"audio capture exceeds the per-frame sample limit",
+					"samples"
+				);
+				return diagnostic.Code;
+			}
+			const size_t aggregateCount = static_cast<size_t>(sampleCount) * planes;
 			if (sampleCount > Limits::MaximumAudioSamplesPerFrame ||
 				sampleCount > Limits::MaximumAudioCaptureSamples) {
 				SetCaptureDiagnostic(
@@ -186,7 +228,7 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			if (sampleCount > Limits::MaximumAudioCaptureSamples - totalSamples) {
+			if (aggregateCount > Limits::MaximumAudioCaptureSamples - totalSamples) {
 				SetCaptureDiagnostic(
 					diagnostic,
 					Status::LimitExceeded,
@@ -195,21 +237,25 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			totalSamples += static_cast<size_t>(sampleCount);
-			frame.Samples.reserve(static_cast<size_t>(sampleCount));
+			totalSamples += aggregateCount;
+			if (channelCount) frame.Channels.resize(channelCount);
 			std::string token;
-			for (uint64_t sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
-				double sample = 0.0;
-				if (!(record >> token) || !ParseSample(token, sample)) {
-					SetCaptureDiagnostic(
-						diagnostic,
-						Status::Malformed,
-						"audio capture sample is malformed or non-finite",
-						"samples"
-					);
-					return diagnostic.Code;
+			for (size_t plane = 0; plane < planes; plane++) {
+				auto &samples = channelCount ? frame.Channels[plane] : frame.Samples;
+				samples.reserve(static_cast<size_t>(sampleCount));
+				for (uint64_t sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
+					double sample = 0;
+					if (!(record >> token) || !ParseSample(token, sample)) {
+						SetCaptureDiagnostic(
+							diagnostic,
+							Status::Malformed,
+							"audio capture sample is malformed or non-finite",
+							"samples"
+						);
+						return diagnostic.Code;
+					}
+					samples.push_back(sample);
 				}
-				frame.Samples.push_back(sample);
 			}
 			if (record >> token) {
 				SetCaptureDiagnostic(
@@ -241,6 +287,10 @@ namespace engine::imagegraph {
 		if (validation != Status::Ok) return validation;
 		std::ostringstream output;
 		output.imbue(std::locale::classic());
+		const bool hasChannels =
+			std::any_of(frames.begin(), frames.end(), [](const AudioCaptureFrame &frame) {
+				return !frame.Channels.empty();
+			});
 		const bool hasSampleRate =
 			std::any_of(frames.begin(), frames.end(), [](const AudioCaptureFrame &frame) {
 				return frame.SampleRate > 0.0;
@@ -251,19 +301,30 @@ namespace engine::imagegraph {
 			SetCaptureDiagnostic(
 				diagnostic,
 				Status::InvalidValue,
-				"audio-capture v2 requires a positive sample rate on every frame",
+				"audio-capture v2/v3 requires a positive sample rate on every frame",
 				"sample_rate"
 			);
 			return diagnostic.Code;
 		}
-		output << "audio-capture " << (hasSampleRate ? 2 : 1) << '\n'
+		output << "audio-capture "
+			   << (hasChannels	   ? 3
+				   : hasSampleRate ? 2
+								   : 1)
+			   << '\n'
 			   << std::setprecision(std::numeric_limits<double>::max_digits10);
 		for (const AudioCaptureFrame &frame : frames) {
 			output << "frame " << std::quoted(frame.SourceId) << ' ' << frame.Tick << ' ';
 			if (hasSampleRate) output << frame.SampleRate << ' ';
-			output << frame.Samples.size();
-			for (const double sample : frame.Samples)
-				output << ' ' << sample;
+			if (hasChannels) output << frame.Channels.size() << ' ';
+			output << (frame.Channels.empty() ? frame.Samples.size() : frame.Channels.front().size());
+			if (frame.Channels.empty()) {
+				for (const double sample : frame.Samples)
+					output << ' ' << sample;
+			} else {
+				for (const auto &channel : frame.Channels)
+					for (const double sample : channel)
+						output << ' ' << sample;
+			}
 			output << '\n';
 			if (output.tellp() > static_cast<std::streamoff>(Limits::MaximumAudioCaptureDocumentBytes)) {
 				SetCaptureDiagnostic(

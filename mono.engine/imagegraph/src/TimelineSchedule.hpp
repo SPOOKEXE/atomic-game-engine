@@ -3,6 +3,7 @@
 // Pure frame selection. Stateful image history remains with a future sequence evaluator.
 
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/FrameTime.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -168,9 +169,11 @@ namespace engine::imagegraph::detail {
 	}
 
 	// The source checks the incoming cut before the outgoing cut, then inverts Bezier x for eight steps.
-	inline bool EaseKeys(const KeyEase &ease, double ratio, KeyBlend &blend) {
-		if (!std::isfinite(ratio) || ratio < 0 || ratio > 1 || !std::isfinite(ease.OutX) ||
-			!std::isfinite(ease.OutY) || !std::isfinite(ease.InX) || !std::isfinite(ease.InY))
+	inline bool
+	EaseKeys(const KeyEase &ease, double ratio, KeyBlend &blend, bool sourceExtrapolation = false) {
+		if (!std::isfinite(ratio) || (!sourceExtrapolation && (ratio < 0 || ratio > 1)) ||
+			!std::isfinite(ease.OutX) || !std::isfinite(ease.OutY) || !std::isfinite(ease.InX) ||
+			!std::isfinite(ease.InY))
 			return false;
 		if (ease.InType == CurveSide::Cut) {
 			blend = {KeyChoice::From, 0};
@@ -183,6 +186,11 @@ namespace engine::imagegraph::detail {
 		if ((ease.OutType == CurveSide::Linear && ease.InType == CurveSide::Linear) || ratio == 0 ||
 			ratio == 1) {
 			blend = {KeyChoice::Blend, ratio};
+			return true;
+		}
+		// Source Bezier endpoint evaluation clamps x, while two linear sides return the raw ratio.
+		if (sourceExtrapolation && (ratio < 0 || ratio > 1)) {
+			blend = {KeyChoice::Blend, std::clamp(ratio, 0.0, 1.0)};
 			return true;
 		}
 		double outX = ease.OutX;
@@ -234,6 +242,10 @@ namespace engine::imagegraph::detail {
 		}
 		if (const auto *vector = std::get_if<Vector4>(&from)) {
 			const Vector4 end = std::get<Vector4>(to);
+			if (!std::isfinite(vector->X) || !std::isfinite(vector->Y) || !std::isfinite(vector->Z) ||
+				!std::isfinite(vector->W) || !std::isfinite(end.X) || !std::isfinite(end.Y) ||
+				!std::isfinite(end.Z) || !std::isfinite(end.W))
+				return Status::InvalidValue;
 			const Vector4 value{
 				std::lerp(vector->X, end.X, ratio),
 				std::lerp(vector->Y, end.Y, ratio),
@@ -242,6 +254,21 @@ namespace engine::imagegraph::detail {
 			};
 			if (!std::isfinite(value.X) || !std::isfinite(value.Y) || !std::isfinite(value.Z) ||
 				!std::isfinite(value.W))
+				return Status::InvalidValue;
+			result = value;
+			return Status::Ok;
+		}
+		if (const auto *vector = std::get_if<Vector3>(&from)) {
+			const Vector3 end = std::get<Vector3>(to);
+			if (!std::isfinite(vector->X) || !std::isfinite(vector->Y) || !std::isfinite(vector->Z) ||
+				!std::isfinite(end.X) || !std::isfinite(end.Y) || !std::isfinite(end.Z))
+				return Status::InvalidValue;
+			const Vector3 value{
+				std::lerp(vector->X, end.X, ratio),
+				std::lerp(vector->Y, end.Y, ratio),
+				std::lerp(vector->Z, end.Z, ratio),
+			};
+			if (!std::isfinite(value.X) || !std::isfinite(value.Y) || !std::isfinite(value.Z))
 				return Status::InvalidValue;
 			result = value;
 			return Status::Ok;
@@ -328,8 +355,8 @@ namespace engine::imagegraph::detail {
 		return false;
 	}
 
-	// Fractional time follows the source's continuous loop, ping and wrap arithmetic.
-	// Integer requests use SelectKeys so legacy tick results remain exact.
+	// Native fractional selection uses source-derived loop, ping and wrap formulas.
+	// It does not emulate unverified GML fractional key_map indexing; integer requests use SelectKeys.
 	inline bool SelectKeysFractional(
 		std::span<const uint64_t> ticks,
 		uint64_t tick,
@@ -400,4 +427,79 @@ namespace engine::imagegraph::detail {
 		}
 		return false;
 	}
+	// Signed authoring positions use exact tuple ordering; bounded interval deltas retain fractions.
+	inline bool SelectFrameTimes(
+		std::span<const FrameTime> times,
+		FrameTime sample,
+		uint64_t totalFrames,
+		KeyEnd end,
+		size_t loopRangeStart,
+		FractionalKeySelection &selection,
+		FrameTime &mapped
+	) {
+		if (times.empty() || times.size() > Limits::MaximumKeyframes || !ValidFrameTime(sample) ||
+			totalFrames == 0 || totalFrames > Limits::MaximumTick + 1 || loopRangeStart >= times.size())
+			return false;
+		for (size_t i = 0; i < times.size(); ++i)
+			if (!ValidFrameTime(times[i]) || (i && CompareFrameTime(times[i - 1], times[i]) >= 0))
+				return false;
+		if (end == KeyEnd::Wrap &&
+			(FrameTimeToReal(times.back()) >= totalFrames || FrameTimeToReal(sample) >= totalFrames))
+			return false;
+		mapped = sample;
+		if (times.size() == 1) {
+			selection = {0, 0, 0};
+			return true;
+		}
+		const size_t last = times.size() - 1;
+		const long double firstFrame = FrameTimeToReal(times[loopRangeStart]);
+		const long double lastFrame = FrameTimeToReal(times.back());
+		long double frame = FrameTimeToReal(sample);
+		if (CompareFrameTime(sample, times.back()) > 0 && end == KeyEnd::Loop) {
+			frame = firstFrame + std::fmod(frame - lastFrame, lastFrame - firstFrame + 1);
+		} else if (CompareFrameTime(sample, times.back()) > 0 && end == KeyEnd::Ping) {
+			const long double duration = lastFrame - firstFrame;
+			if (duration == 0)
+				frame = firstFrame;
+			else {
+				const long double phase = std::fmod(frame - firstFrame, 2 * duration);
+				frame = phase < duration ? firstFrame + phase : firstFrame + 2 * duration - phase;
+			}
+		}
+		if (frame != FrameTimeToReal(sample) && !SplitFrameTime(static_cast<double>(frame), mapped))
+			return false;
+		if (end == KeyEnd::Wrap && (FrameTimeToReal(times.back()) >= totalFrames || frame >= totalFrames))
+			return false;
+		if (CompareFrameTime(mapped, times.front()) < 0) {
+			if (end == KeyEnd::Wrap) {
+				const long double duration = totalFrames - lastFrame + FrameTimeToReal(times.front());
+				if (duration <= 0) return false;
+				selection = {last, 0, static_cast<double>((totalFrames - lastFrame + frame) / duration)};
+			} else
+				selection = {0, 0, 0};
+		} else if (CompareFrameTime(mapped, times.back()) >= 0) {
+			if (end == KeyEnd::Wrap) {
+				const long double duration = totalFrames - lastFrame + FrameTimeToReal(times.front());
+				if (duration <= 0) return false;
+				selection = {last, 0, static_cast<double>((frame - lastFrame) / duration)};
+			} else
+				selection = {last, last, 0};
+		} else {
+			const auto next = std::upper_bound(
+				times.begin(), times.end(), mapped, [](const FrameTime &a, const FrameTime &b) {
+					return CompareFrameTime(a, b) < 0;
+				}
+			);
+			const size_t to = static_cast<size_t>(next - times.begin());
+			selection = {
+				to - 1,
+				to,
+				static_cast<double>(
+					FrameTimeDelta(mapped, times[to - 1]) / FrameTimeDelta(times[to], times[to - 1])
+				)
+			};
+		}
+		return std::isfinite(selection.Ratio) && selection.Ratio >= 0 && selection.Ratio <= 1;
+	}
+
 }

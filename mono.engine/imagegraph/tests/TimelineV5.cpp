@@ -44,7 +44,7 @@ namespace {
 }
 
 TEST_CASE(
-	"v1 through v4 migrate to v6 without changing integer samples or adding a timeline", "[imagegraph]"
+	"v1 through v4 migrate to v8 without changing integer samples or adding a timeline", "[imagegraph]"
 ) {
 	for (uint32_t version : {1u, 2u, 3u, 4u}) {
 		graph::Document document = NumberTrack(version);
@@ -56,7 +56,7 @@ TEST_CASE(
 		double before = 0;
 		REQUIRE(Sample(document, {5, 0}, before, diagnostic) == graph::Status::Ok);
 		REQUIRE(graph::Migrate(document, diagnostic) == graph::Status::Ok);
-		CHECK(document.FormatVersion == 6);
+		CHECK(document.FormatVersion == 9);
 		CHECK_FALSE(document.Timeline.has_value());
 		double after = 0;
 		REQUIRE(Sample(document, {5, 0, 0}, after, diagnostic) == graph::Status::Ok);

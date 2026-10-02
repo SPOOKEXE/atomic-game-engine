@@ -2,9 +2,12 @@
 
 // CPU evaluation of typed value nodes after graph inputs have been resolved.
 
+#include "EvaluationBudget.hpp"
 #include "TextOps.hpp"
 #include "Utf8TextOps.hpp"
+#include "ValueNodeSchemas.hpp"
 #include "ValueOps.hpp"
+#include "ValuePayload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -19,19 +22,32 @@
 #include <vector>
 
 namespace engine::imagegraph::detail {
+	struct ValueInputView {
+		std::string_view Port;
+		const Value *Data = nullptr;
+	};
+
 	template <class T>
-	T ValueInput(std::span<const AuthoredValue> inputs, std::string_view port, T fallback) {
-		for (const AuthoredValue &input : inputs)
-			if (input.Port == port) return std::get<T>(input.Data);
+	T ValueInput(std::span<const ValueInputView> inputs, std::string_view port, T fallback) {
+		for (const ValueInputView &input : inputs)
+			if (input.Port == port && input.Data) return std::get<T>(*input.Data);
 		return fallback;
+	}
+
+	inline bool
+	ReserveLegacyValueOutput(EvaluationBudget &budget, AllocationReservation &charge, uint64_t bytes) {
+		auto reservation = budget.Reserve(bytes);
+		return reservation && charge.Merge(std::move(*reservation));
 	}
 
 	inline Status EvaluateValueNode(
 		const Node &node,
-		std::span<const AuthoredValue> inputs,
+		std::span<const ValueInputView> inputs,
 		const EvaluationRequest &request,
 		const TimelineSettings *timeline,
 		std::vector<AuthoredValue> &outputs,
+		EvaluationBudget &budget,
+		AllocationReservation &outputCharge,
 		std::string &failedPort,
 		std::string &failureMessage
 	) {
@@ -50,18 +66,60 @@ namespace engine::imagegraph::detail {
 		const auto colour = [&](std::string_view port, Colour fallback = {}) {
 			return ValueInput<Colour>(inputs, port, fallback);
 		};
-		const auto text = [&](std::string_view port, std::string fallback = {}) {
-			return ValueInput<std::string>(inputs, port, std::move(fallback));
+		const auto text = [&](std::string_view port, std::string_view fallback = {}) {
+			for (const ValueInputView &input : inputs)
+				if (input.Port == port && input.Data)
+					if (const auto *value = std::get_if<std::string>(input.Data))
+						return std::string_view(*value);
+			return fallback;
 		};
 		const auto valueInput = [&](std::string_view port) -> const Value * {
-			for (const AuthoredValue &input : inputs)
-				if (input.Port == port) return &input.Data;
+			for (const ValueInputView &input : inputs)
+				if (input.Port == port) return input.Data;
 			return nullptr;
 		};
 		outputs.clear();
 		failureMessage = "typed value operation failed";
+		const NodeSchema *schema = FindValueNodeSchema(node.Type);
+		if (!schema) return Status::UnsupportedExecution;
+		size_t outputCount = 0;
+		uint64_t outputBaseBytes = 0;
+		std::string_view firstOutput;
+		for (const PortSchema &port : schema->Ports) {
+			if (port.Direction != PortDirection::Output) continue;
+			if (firstOutput.empty()) firstOutput = port.Id;
+			outputCount++;
+			const uint64_t nameBytes = std::max<uint64_t>(port.Id.size(), std::string{}.capacity());
+			if (nameBytes > Limits::MaximumEvaluationBytes - outputBaseBytes) return Status::LimitExceeded;
+			outputBaseBytes += nameBytes;
+		}
+		if (outputCount > (Limits::MaximumEvaluationBytes - outputBaseBytes) / sizeof(AuthoredValue))
+			return Status::LimitExceeded;
+		outputBaseBytes += outputCount * sizeof(AuthoredValue);
+		if (!ReserveLegacyValueOutput(budget, outputCharge, outputBaseBytes)) {
+			failedPort = std::string(firstOutput);
+			failureMessage = "typed value output exceeds the live byte budget";
+			return Status::LimitExceeded;
+		}
+		outputs.reserve(outputCount);
+		const auto reservePayload = [&](uint64_t bytes, std::string_view port) {
+			if (bytes > Limits::MaximumEvaluationBytes ||
+				!ReserveLegacyValueOutput(budget, outputCharge, bytes)) {
+				failedPort = std::string(port);
+				return false;
+			}
+			return true;
+		};
+		const auto publishText = [&](std::string_view port, std::string_view source) {
+			if (!reservePayload(std::max<uint64_t>(source.size(), std::string{}.capacity()), port))
+				return false;
+			std::string result(source.size(), '\0');
+			std::copy(source.begin(), source.end(), result.begin());
+			outputs.push_back({std::string(port), std::move(result)});
+			return true;
+		};
 		if (node.Type == "image.audio_recording") {
-			const std::string sourceId = text("source_id");
+			const std::string_view sourceId = text("source_id");
 			const auto capture = std::find_if(
 				request.AudioFrames.begin(), request.AudioFrames.end(), [&](const AudioCaptureFrame &frame) {
 					return frame.SourceId == sourceId && frame.Tick == request.Tick;
@@ -72,12 +130,49 @@ namespace engine::imagegraph::detail {
 				failureMessage = "no recorded mono audio frame matches this source ID and exact tick";
 				return Status::InvalidValue;
 			}
+			if (capture->Samples.size() > Limits::MaximumEvaluationBytes / sizeof(ElementValue) ||
+				capture->Samples.size() > Limits::MaximumEvaluationBytes / sizeof(double) ||
+				capture->Channels.size() >
+					Limits::MaximumEvaluationBytes / sizeof(std::vector<ElementValue>) ||
+				capture->Channels.size() > Limits::MaximumEvaluationBytes / sizeof(std::vector<double>)) {
+				failedPort = "source_id";
+				return Status::LimitExceeded;
+			}
+			uint64_t copiedBytes = capture->Samples.size() * sizeof(ElementValue) +
+								   capture->Channels.size() * sizeof(std::vector<ElementValue>);
+			uint64_t audioBytes = capture->Samples.size() * sizeof(double) +
+								  capture->Channels.size() * sizeof(std::vector<double>);
+			if (copiedBytes > Limits::MaximumEvaluationBytes || audioBytes > Limits::MaximumEvaluationBytes) {
+				failedPort = "source_id";
+				return Status::LimitExceeded;
+			}
+			for (const auto &channel : capture->Channels) {
+				if (channel.size() > (Limits::MaximumEvaluationBytes - copiedBytes) / sizeof(ElementValue) ||
+					channel.size() > (Limits::MaximumEvaluationBytes - audioBytes) / sizeof(double)) {
+					failedPort = "source_id";
+					return Status::LimitExceeded;
+				}
+				copiedBytes += channel.size() * sizeof(ElementValue);
+				audioBytes += channel.size() * sizeof(double);
+			}
+			if (copiedBytes > Limits::MaximumEvaluationBytes - audioBytes ||
+				!reservePayload(copiedBytes + audioBytes, "source_id"))
+				return Status::LimitExceeded;
 			ArrayValue samples{ValueType::Scalar, {}};
 			samples.Elements.reserve(capture->Samples.size());
 			for (const double sample : capture->Samples)
 				samples.Elements.emplace_back(sample);
+			if (!capture->Channels.empty()) {
+				samples.Nested.reserve(capture->Channels.size());
+				for (const auto &channel : capture->Channels) {
+					auto &row = samples.Nested.emplace_back();
+					row.reserve(channel.size());
+					for (double sample : channel)
+						row.emplace_back(sample);
+				}
+			}
 			outputs.push_back({"samples", std::move(samples)});
-			outputs.push_back({"audio", AudioBit{capture->Samples, capture->SampleRate}});
+			outputs.push_back({"audio", AudioBit{capture->Samples, capture->SampleRate, capture->Channels}});
 		} else if (node.Type == "image.audio_volume") {
 			const Value *data = valueInput("samples");
 			const auto *samples = data ? std::get_if<ArrayValue>(data) : nullptr;
@@ -153,8 +248,14 @@ namespace engine::imagegraph::detail {
 				failureMessage = "Audio Window Cursor Location must be Start, Middle, or End";
 				return Status::InvalidValue;
 			}
+			AllocationReservation legacySamplesCharge;
 			std::vector<double> legacySamples;
 			if (audio == nullptr) {
+				const uint64_t scratchBytes = samples->Elements.size() * sizeof(double);
+				if (!ReserveLegacyValueOutput(budget, legacySamplesCharge, scratchBytes)) {
+					failedPort = "samples";
+					return Status::LimitExceeded;
+				}
 				legacySamples.reserve(samples->Elements.size());
 				for (const ElementValue &element : samples->Elements) {
 					const auto *sample = std::get_if<double>(&element);
@@ -191,7 +292,10 @@ namespace engine::imagegraph::detail {
 						"Audio Window Match Timeline requires declared timeline frames per second";
 					return Status::UnsupportedExecution;
 				}
-				location = static_cast<double>(request.Tick) / timeline->FramesPerSecond * audio->SampleRate;
+				// Legacy slicing still ignores Subframe; the authoring sign applies to its whole tick.
+				location = (request.NegativeFrame ? -static_cast<double>(request.Tick)
+												  : static_cast<double>(request.Tick)) /
+						   timeline->FramesPerSecond * audio->SampleRate;
 			}
 			if (!std::isfinite(location)) {
 				failedPort = "location";
@@ -211,8 +315,11 @@ namespace engine::imagegraph::detail {
 				start -= width;
 			const int64_t span = std::min(width, count);
 			start = std::clamp(start, int64_t{0}, std::max(int64_t{0}, count - span));
+			const size_t windowCount = static_cast<size_t>((span + step - 1) / step);
+			const uint64_t windowBytes = windowCount * sizeof(ElementValue);
+			if (!reservePayload(windowBytes, "samples")) return Status::LimitExceeded;
 			ArrayValue window{ValueType::Scalar, {}};
-			window.Elements.reserve(static_cast<size_t>((span + step - 1) / step));
+			window.Elements.reserve(windowCount);
 			for (int64_t index = start; index < start + span; index += step)
 				window.Elements.emplace_back(source[static_cast<size_t>(index)]);
 			outputs.push_back({"samples", std::move(window)});
@@ -220,9 +327,9 @@ namespace engine::imagegraph::detail {
 			outputs.push_back({"number", scalar("value")});
 		else if (node.Type == "value.boolean")
 			outputs.push_back({"boolean", boolean("value")});
-		else if (node.Type == "value.text")
-			outputs.push_back({"text", text("value")});
-		else if (node.Type == "value.vector2")
+		else if (node.Type == "value.text") {
+			if (!publishText("text", text("value"))) return Status::LimitExceeded;
+		} else if (node.Type == "value.vector2")
 			outputs.push_back({"vector", Vector2{scalar("x"), scalar("y")}});
 		else if (node.Type == "value.math") {
 			const auto result = Math(
@@ -311,43 +418,99 @@ namespace engine::imagegraph::detail {
 		else if (node.Type == "value.text_count")
 			outputs.push_back({"count", static_cast<int64_t>(CountText(text("text"), text("find")))});
 		else if (node.Type == "value.text_replace") {
-			const auto result = ReplaceText(
-				text("text"),
-				text("find"),
-				text("replacement"),
-				boolean("all", true),
-				Limits::MaximumTextBytes
-			);
-			if (!result) {
+			const std::string_view source = text("text");
+			const std::string_view find = text("find");
+			const std::string_view replacement = text("replacement");
+			const bool replaceAll = boolean("all", true);
+			const auto resultBytes =
+				ReplacementTextSize(source, find, replacement, replaceAll, Limits::MaximumTextBytes);
+			if (!resultBytes) {
 				failedPort = "find";
 				return Status::InvalidValue;
 			}
-			outputs.push_back({"result", *result});
+			if (!reservePayload(std::max<uint64_t>(*resultBytes, std::string{}.capacity()), "result"))
+				return Status::LimitExceeded;
+			auto result = BuildReplacementText(
+				source, find, replacement, replaceAll, Limits::MaximumTextBytes, *resultBytes
+			);
+			if (!result) return Status::InvalidValue;
+			outputs.push_back({"result", std::move(*result)});
 		} else if (node.Type == "value.text_combine") {
-			std::vector<std::string> pieces;
+			AllocationReservation piecesCharge;
+			const size_t pieceCount = node.DynamicInputs.size();
+			if (pieceCount > Limits::MaximumEvaluationBytes / sizeof(std::string_view) ||
+				!ReserveLegacyValueOutput(budget, piecesCharge, pieceCount * sizeof(std::string_view))) {
+				failedPort = "inputs";
+				return Status::LimitExceeded;
+			}
+			std::vector<std::string_view> pieces;
+			pieces.reserve(pieceCount);
+			size_t outputBytes = 0;
 			for (const DynamicInput &input : node.DynamicInputs) {
 				if (input.Type != ValueType::Text) {
 					failedPort = input.Id;
 					return Status::TypeMismatch;
 				}
-				pieces.push_back(text(input.Id));
+				const std::string_view piece = text(input.Id);
+				if (piece.size() > Limits::MaximumTextBytes - outputBytes) {
+					failedPort = "text";
+					return Status::LimitExceeded;
+				}
+				outputBytes += piece.size();
+				pieces.push_back(piece);
 			}
-			const auto result = CombineText(pieces, Limits::MaximumTextBytes);
-			if (!result) {
-				failedPort = "text";
+			if (!reservePayload(std::max<uint64_t>(outputBytes, std::string{}.capacity()), "text"))
 				return Status::LimitExceeded;
+			std::string result(outputBytes, '\0');
+			size_t destination = 0;
+			for (const std::string_view piece : pieces) {
+				std::copy(piece.begin(), piece.end(), result.begin() + destination);
+				destination += piece.size();
 			}
-			outputs.push_back({"text", *result});
+			outputs.push_back({"text", std::move(result)});
 		} else if (node.Type == "value.text_split") {
-			const auto result = SplitText(text("text"), text("delimiter", " "), Limits::MaximumArrayElements);
-			if (!result) {
+			const std::string_view source = text("text");
+			const std::string_view delimiter = text("delimiter", " ");
+			if (delimiter.empty()) {
 				failedPort = "delimiter";
 				return Status::InvalidValue;
 			}
+			size_t partCount = 1;
+			for (size_t offset = 0; (offset = source.find(delimiter, offset)) != std::string_view::npos;
+				 offset += delimiter.size())
+				partCount++;
+			if (partCount > Limits::MaximumArrayElements) {
+				failedPort = "delimiter";
+				return Status::InvalidValue;
+			}
+			if (partCount > Limits::MaximumEvaluationBytes / sizeof(ElementValue)) {
+				failedPort = "array";
+				return Status::LimitExceeded;
+			}
+			uint64_t payloadBytes = partCount * sizeof(ElementValue);
+			size_t offset = 0;
+			for (size_t part = 0; part < partCount; part++) {
+				const size_t match = source.find(delimiter, offset);
+				const size_t end = match == std::string_view::npos ? source.size() : match;
+				const uint64_t retained = std::max<uint64_t>(end - offset, std::string{}.capacity());
+				if (retained > Limits::MaximumEvaluationBytes - payloadBytes) {
+					failedPort = "array";
+					return Status::LimitExceeded;
+				}
+				payloadBytes += retained;
+				offset = match == std::string_view::npos ? source.size() : match + delimiter.size();
+			}
+			if (!reservePayload(payloadBytes, "array")) return Status::LimitExceeded;
 			ArrayValue array;
 			array.ElementType = ValueType::Text;
-			for (const std::string &part : *result)
-				array.Elements.push_back(part);
+			array.Elements.reserve(partCount);
+			offset = 0;
+			for (size_t part = 0; part < partCount; part++) {
+				const size_t match = source.find(delimiter, offset);
+				const size_t end = match == std::string_view::npos ? source.size() : match;
+				array.Elements.emplace_back(std::string(source.substr(offset, end - offset)));
+				offset = match == std::string_view::npos ? source.size() : match + delimiter.size();
+			}
 			outputs.push_back({"array", std::move(array)});
 		} else if (node.Type == "value.text_length") {
 			int64_t length = 0;
@@ -360,10 +523,13 @@ namespace engine::imagegraph::detail {
 		} else if (node.Type == "value.text_get_char" || node.Type == "value.text_delete") {
 			const int64_t index = integer("index", node.Type == "value.text_get_char" ? 1 : 0);
 			const int64_t amount = integer("amount", 1);
-			std::string result;
+			const std::string_view source = text("text");
+			if (!reservePayload(std::max<uint64_t>(source.size(), std::string{}.capacity()), "text"))
+				return Status::LimitExceeded;
+			std::string result(source.size(), '\0');
 			const TextOpStatus status = node.Type == "value.text_get_char"
-											? CopyText(text("text"), index, amount, result)
-											: DeleteText(text("text"), index, amount, result);
+											? CopyText(source, index, amount, result)
+											: DeleteText(source, index, amount, result);
 			if (status != TextOpStatus::Ok) {
 				failedPort = status == TextOpStatus::UnsupportedIndex
 								 ? (node.Type == "value.text_get_char" && index > 0 ? "amount" : "index")

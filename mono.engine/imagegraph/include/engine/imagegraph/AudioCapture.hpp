@@ -1,6 +1,6 @@
 #pragma once
 
-// Bounded text codec for deterministic mono audio frames supplied to evaluation.
+// Bounded text codec for deterministic planar audio frames supplied to evaluation.
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -14,11 +14,13 @@ namespace engine::imagegraph {
 	// Checks IDs, ticks, duplicate keys, sample finiteness and aggregate limits.
 	Status ValidateAudioCaptureFrames(std::span<const AudioCaptureFrame> frames, Diagnostic &diagnostic);
 
-	// Parses a bounded `audio-capture 1` or `audio-capture 2` document without changing output on failure.
+	// Parses a bounded `audio-capture 1`, `audio-capture 2` or `audio-capture 3` document without changing
+	// output on failure.
 	Status
 	ReadAudioCapture(std::string_view text, std::vector<AudioCaptureFrame> &frames, Diagnostic &diagnostic);
 
-	// Writes a stable, locale-independent capture document, using v2 when any frame carries a sample rate.
+	// Writes a stable, locale-independent capture document, using v2 for mono sample rates and v3 for
+	// explicit planar channels.
 	Status
 	WriteAudioCapture(std::span<const AudioCaptureFrame> frames, std::string &text, Diagnostic &diagnostic);
 }

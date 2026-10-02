@@ -70,11 +70,16 @@ namespace engine::imagegraph::detail {
 	}
 
 	// Each output row gives the selected element index for every input array.
-	inline Status BuildArraySchedule(
+	struct ArrayScheduleFootprint {
+		size_t Rows = 0;
+		uint64_t RetainedBytes = 0;
+		uint64_t PeakBytes = 0;
+	};
+	inline Status MeasureArraySchedule(
 		std::span<const size_t> lengths,
 		ArrayProcessMode mode,
 		size_t maximumOutputs,
-		std::vector<std::vector<size_t>> &output
+		ArrayScheduleFootprint &footprint
 	) {
 		if (lengths.empty() || lengths.size() > Limits::MaximumDynamicInputsPerNode || maximumOutputs == 0 ||
 			maximumOutputs > Limits::MaximumArrayElements)
@@ -82,19 +87,37 @@ namespace engine::imagegraph::detail {
 		if (mode != ArrayProcessMode::Loop && mode != ArrayProcessMode::Hold &&
 			mode != ArrayProcessMode::Expand && mode != ArrayProcessMode::ExpandInverse)
 			return Status::InvalidValue;
-
-		size_t outputCount = 1;
-		for (const size_t length : lengths) {
-			if (length == 0) return Status::InvalidValue;
+		size_t count = 1;
+		for (size_t length : lengths) {
+			if (!length) return Status::InvalidValue;
 			if (length > Limits::MaximumArrayElements) return Status::LimitExceeded;
 			if (mode == ArrayProcessMode::Loop || mode == ArrayProcessMode::Hold)
-				outputCount = std::max(outputCount, length);
+				count = std::max(count, length);
 			else {
-				if (length > maximumOutputs / outputCount) return Status::LimitExceeded;
-				outputCount *= length;
+				if (length > maximumOutputs / count) return Status::LimitExceeded;
+				count *= length;
 			}
 		}
-		if (outputCount > maximumOutputs) return Status::LimitExceeded;
+		if (count > maximumOutputs) return Status::LimitExceeded;
+		const uint64_t retained =
+			uint64_t(count) * (sizeof(std::vector<size_t>) + lengths.size() * sizeof(size_t));
+		// Prefix/suffix tables and the row initializer overlap the allocated result.
+		footprint = {count, retained, retained + 3 * lengths.size() * sizeof(size_t)};
+		return Status::Ok;
+	}
+
+	inline Status BuildArraySchedule(
+		std::span<const size_t> lengths,
+		ArrayProcessMode mode,
+		size_t maximumOutputs,
+		std::vector<std::vector<size_t>> &output,
+		uint64_t maximumScheduleBytes = Limits::MaximumEvaluationBytes
+	) {
+		ArrayScheduleFootprint footprint;
+		const Status measured = MeasureArraySchedule(lengths, mode, maximumOutputs, footprint);
+		if (measured != Status::Ok) return measured;
+		if (footprint.PeakBytes > maximumScheduleBytes) return Status::LimitExceeded;
+		const size_t outputCount = footprint.Rows;
 
 		std::vector<size_t> suffix(lengths.size(), 1);
 		std::vector<size_t> prefix(lengths.size(), 1);
@@ -129,4 +152,30 @@ namespace engine::imagegraph::detail {
 		output = std::move(candidate);
 		return Status::Ok;
 	}
+	// Source inverse reverses the full suffix table, including singleton source input slots.
+	// BuildArraySchedule retains the native Cartesian inverse contract.
+	inline Status BuildSourceArraySchedule(
+		std::span<const size_t> lengths,
+		ArrayProcessMode mode,
+		size_t maximumOutputs,
+		std::vector<std::vector<size_t>> &output,
+		uint64_t maximumScheduleBytes = Limits::MaximumEvaluationBytes
+	) {
+		if (mode != ArrayProcessMode::ExpandInverse)
+			return BuildArraySchedule(lengths, mode, maximumOutputs, output, maximumScheduleBytes);
+		std::vector<std::vector<size_t>> candidate;
+		const Status status = BuildArraySchedule(
+			lengths, ArrayProcessMode::Expand, maximumOutputs, candidate, maximumScheduleBytes
+		);
+		if (status != Status::Ok) return status;
+		std::vector<size_t> suffix(lengths.size(), 1);
+		for (size_t index = lengths.size(); index > 1; index--)
+			suffix[index - 2] = suffix[index - 1] * lengths[index - 1];
+		for (size_t row = 0; row < candidate.size(); row++)
+			for (size_t input = 0; input < lengths.size(); input++)
+				candidate[row][input] = (row / suffix[lengths.size() - 1 - input]) % lengths[input];
+		output = std::move(candidate);
+		return Status::Ok;
+	}
+
 }

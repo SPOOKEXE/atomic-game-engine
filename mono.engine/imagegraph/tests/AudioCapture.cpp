@@ -349,3 +349,40 @@ TEST_CASE(
 	CHECK(EvaluateWindow(document, plan, captures, value, diagnostic, 4) == Status::UnsupportedExecution);
 	CHECK(diagnostic.Port == "match_timeline");
 }
+
+TEST_CASE(
+	"planar audio capture v3 round trips channel shape and mixed mono frames", "[imagegraph][audio_capture]"
+) {
+	const std::vector<AudioCaptureFrame> frames{
+		{"stereo", 0, {}, 10, {{0, 1, 2}, {10, 11, 12}}},
+		{"mono", 0, {1, -1}, 10},
+		{"empty", 0, {}, 10, {{}, {}}},
+	};
+	Diagnostic diagnostic;
+	std::string text;
+	REQUIRE(WriteAudioCapture(frames, text, diagnostic) == Status::Ok);
+	CHECK(text.starts_with("audio-capture 3\n"));
+	CHECK(text.find("frame \"stereo\" 0 10 2 3 0 1 2 10 11 12") != std::string::npos);
+	CHECK(text.find("frame \"mono\" 0 10 0 2 1 -1") != std::string::npos);
+	std::vector<AudioCaptureFrame> decoded;
+	REQUIRE(ReadAudioCapture(text, decoded, diagnostic) == Status::Ok);
+	CHECK(decoded == frames);
+	std::string replay;
+	REQUIRE(WriteAudioCapture(decoded, replay, diagnostic) == Status::Ok);
+	CHECK(replay == text);
+	for (const std::string_view bad :
+		 {"audio-capture 3\nframe \"bad\" 0 10 9 1\n",
+		  "audio-capture 3\nframe \"bad\" 0 10 2 4096\n",
+		  "audio-capture 3\nframe \"bad\" 0 10 2 2 0 1 2\n",
+		  "audio-capture 3\nframe \"bad\" 0 10 2 1 nan 1\n"}) {
+		const auto saved = decoded;
+		CHECK(ReadAudioCapture(bad, decoded, diagnostic) != Status::Ok);
+		CHECK(decoded == saved);
+	}
+	for (const auto &frame :
+		 {AudioCaptureFrame{"bad", 0, {1}, 10, {{1}}},
+		  AudioCaptureFrame{"bad", 0, {}, 10, {{1}, {2, 3}}},
+		  AudioCaptureFrame{"bad", 0, {}, 0, {{1}}}}) {
+		CHECK(ValidateAudioCaptureFrames(std::span(&frame, 1), diagnostic) == Status::InvalidValue);
+	}
+}
