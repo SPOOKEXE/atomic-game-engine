@@ -75,6 +75,81 @@ namespace studio {
 			BorrowedBytes = 0;
 		}
 
+		// Source boundary defaults mirror the compact animator storage, so native history
+		// and source save retain the same declaration after a parent edit.
+		bool NormalizeSourceParent(
+			engine::imagegraph::Document &document,
+			std::string_view nodeId,
+			uint64_t headroom,
+			engine::imagegraph::Diagnostic &error
+		) const {
+			using namespace engine::imagegraph;
+			for (const auto &group : document.Groups) {
+				for (const auto &port : group.Ports) {
+					if (port.Direction != PortDirection::Input || port.ControlNodeId != nodeId ||
+						port.JunctionId != std::string(nodeId) + "/parent-value")
+						continue;
+					auto node =
+						std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
+							return n.Id == nodeId;
+						});
+					auto junction = std::find_if(
+						document.Junctions.begin(), document.Junctions.end(), [&](const auto &j) {
+							return j.Id == port.JunctionId;
+						}
+					);
+					if (node == document.Nodes.end() || junction == document.Junctions.end()) return true;
+					const bool animated = std::find(
+											  node->SourceAnimatedInputs.begin(),
+											  node->SourceAnimatedInputs.end(),
+											  "parent_value"
+										  ) != node->SourceAnimatedInputs.end();
+					auto value = std::find_if(node->Values.begin(), node->Values.end(), [](const auto &v) {
+						return v.Port == "parent_value";
+					});
+					if (animated) {
+						if (value != node->Values.end()) node->Values.erase(value);
+						junction->Default = -1.;
+					} else if (value != node->Values.end()) {
+						const auto key = std::find_if(
+							document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &k) {
+								return k.NodeId == nodeId && k.Port == "parent_value";
+							}
+						);
+						const Value &fixed = key == document.Keyframes.end() ? value->Data : key->Data;
+						const auto bytes = ValueClonePayloadBytes(fixed);
+						if (!bytes || *bytes > headroom / 2) {
+							error = {
+								Status::LimitExceeded,
+								std::string(nodeId),
+								"parent_value",
+								"source Group default copies exceed the transaction budget"
+							};
+							return false;
+						}
+						Value replacement = fixed;
+						value->Data = replacement;
+						junction->Default = std::move(replacement);
+					}
+					const bool keyed =
+						std::any_of(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &k) {
+							return k.NodeId == nodeId && k.Port == "parent_value";
+						});
+					const bool linked =
+						std::any_of(document.Links.begin(), document.Links.end(), [&](const auto &l) {
+							return l.ToNode == port.JunctionId;
+						});
+					if (keyed && !linked)
+						std::erase_if(document.Links, [&](const auto &l) {
+							return l.FromNode == port.JunctionId && l.ToNode == nodeId &&
+								   l.ToPort == "parent_value";
+						});
+					return true;
+				}
+			}
+			return true;
+		}
+
 		bool Prepare(
 			const engine::imagegraph::Document &document,
 			const engine::imagegraph::Plan &plan,
@@ -369,6 +444,9 @@ namespace studio {
 				) != Status::Ok)
 				return false;
 			controls = {};
+			const auto parentHeadroom = Budget(error, {&document, &projected}, {&Replay, &edited});
+			if (!parentHeadroom || !NormalizeSourceParent(projected, event.NodeId, parentHeadroom, error))
+				return false;
 			if (RebindProjectedGroupReplay(
 					projected,
 					edited,

@@ -338,3 +338,84 @@ TEST_CASE(
 	));
 	CHECK(capture.ImageArrays[0].Frames[0].Pixels.size() == 16);
 }
+
+TEST_CASE(
+	"Studio animated read observes signed fractional frame and exact resource grants", "[studio][file_host]"
+) {
+	Temporary temp;
+	const auto red = temp.Path / "red.bmp", blue = temp.Path / "blue.bmp";
+	const auto write = [&](const auto &path, uint8_t r, uint8_t b) {
+		std::array<uint8_t, 58> bitmap{};
+		bitmap[0] = 'B';
+		bitmap[1] = 'M';
+		bitmap[2] = 58;
+		bitmap[10] = 54;
+		bitmap[14] = 40;
+		bitmap[18] = 1;
+		bitmap[22] = 1;
+		bitmap[26] = 1;
+		bitmap[28] = 24;
+		bitmap[34] = 4;
+		bitmap[54] = b;
+		bitmap[56] = r;
+		std::ofstream file(path, std::ios::binary);
+		file.write(reinterpret_cast<const char *>(bitmap.data()), bitmap.size());
+		REQUIRE(file.good());
+	};
+	write(red, 255, 0);
+	write(blue, 0, 255);
+	Node node;
+	node.Id = "animated";
+	node.Type = "pc.image_animated";
+	ArrayValue paths{ValueType::Text, {red.string(), blue.string()}};
+	std::vector<AuthoredValue> inputs{
+		{"path", paths},
+		{"padding", Vector4{}},
+		{"canvas_size", EnumValue{2}},
+		{"loop_modes", EnumValue{0}},
+		{"stretch_frame", false},
+		{"start_frame", int64_t{1}},
+		{"animation_speed", 1.},
+		{"draw_before_start", true},
+		{"custom_frame_order", false},
+		{"frame", int64_t{0}},
+		{"edit_in_timeline", true},
+		{"set_animation_length_to_match", false}
+	};
+	std::array<engine::imagegraphexport::GraphFileGrant, 2> grants{
+		{{node.Id, red, false, red.string()}, {node.Id, blue, false, blue.string()}}
+	};
+	studio::detail::ImageGraphHost host;
+	host.Grants = grants;
+	EvaluationRequest request;
+	request.Subframe = .25;
+	HostNodeCapture capture;
+	std::string failure;
+	HostNodeInvocation invocation{node, request, inputs, {}, 1024 * 1024};
+	REQUIRE(studio::detail::ImageGraphFileReadType(node.Type));
+	CHECK_FALSE(studio::detail::ImageGraphFileNeedsPrimary(node.Type));
+	const auto check = [&](uint64_t tick, bool negative, SurfacePixel expected) {
+		request.Tick = tick;
+		request.NegativeFrame = negative;
+		auto accepted = host.Capture(invocation, capture, failure);
+		INFO(failure);
+		REQUIRE(accepted);
+		REQUIRE(capture.Images.size() == 1);
+		SurfacePixel pixel{};
+		REQUIRE(LoadSurfacePixel(capture.Images[0].Data, 0, 0, pixel));
+		CHECK(pixel == expected);
+		CHECK(capture.Tick == tick);
+		CHECK(capture.Subframe == .25);
+		CHECK(capture.NegativeFrame == negative);
+	};
+	check(0, false, {1, 0, 0, 1});
+	check(1, false, {0, 0, 1, 1});
+	check(0, true, {});
+	check(0, false, {1, 0, 0, 1});
+	const auto retained = host.RetainedBytes;
+	const auto before = capture.Images[0].Data;
+	grants[1].Resource = "wrong-blue-path";
+	CHECK_FALSE(host.Capture(invocation, capture, failure));
+	CHECK(capture.Images[0].Data == before);
+	CHECK(host.RetainedBytes == retained);
+}

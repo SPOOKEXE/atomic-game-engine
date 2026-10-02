@@ -72,6 +72,7 @@ Milestone labels describe development scope, not release versions.
   30. Add source Grain and Contrast Blur kernels with bounded curves, sampling and failure atomicity.
   31. Reject fractional FLIP advances while preserving zero-step rendering.
   32. Round-trip group values and nested Any arrays in PXC; refuse ambiguous moves of opaque source keys.
+  33. Edit mixed and nested arrays in Studio; preserve source group history, combined workflows and animated file observations.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

@@ -1,5 +1,6 @@
 #include "AudioWindowPanel.hpp"
 #include "ImageComposerInternal.hpp"
+#include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphChoices.hpp"
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphExportTriggers.hpp"
@@ -1569,6 +1570,9 @@ namespace studio {
 		bool DrawArrayValue(State &state, engine::imagegraph::ArrayValue &array, bool colourPalette = false) {
 			using engine::imagegraph::ElementValue;
 			using engine::imagegraph::ValueType;
+			if (!colourPalette &&
+				(array.ElementType == ValueType::Any || !array.Items.empty() || !array.Nested.empty()))
+				return detail::DrawImageGraphSourceArray(array, state.ArrayPageOffset);
 			static constexpr ValueType elementTypes[] = {
 				ValueType::Boolean,
 				ValueType::Integer,
@@ -2587,7 +2591,9 @@ namespace studio {
 				const std::filesystem::path file(controls.File.data());
 				std::string resource(controls.Resource.data());
 				const auto *node = FindNode(state.Authored, nodeId);
-				if (node && node->Type == "pc.image_sequence" && resource.empty()) resource = file.string();
+				if (node && (node->Type == "pc.image_sequence" || node->Type == "pc.image_animated") &&
+					resource.empty())
+					resource = file.string();
 				if (file.empty())
 					controls.Message = "Enter an exact file path.";
 				else if (!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)

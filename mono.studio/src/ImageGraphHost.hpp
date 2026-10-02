@@ -14,6 +14,7 @@ namespace studio::detail {
 		constexpr std::string_view types[] = {
 			"pc.image",
 			"pc.image_sequence",
+			"pc.image_animated",
 			"pc.csv_file_read",
 			"pc.json_file_read",
 			"pc.xml_file_read",
@@ -36,7 +37,8 @@ namespace studio::detail {
 		return type == "pc.ase_layer" || type == "pc.ase_tag" || type == "pc.ase_tileset";
 	}
 	inline bool ImageGraphFileNeedsPrimary(std::string_view type) {
-		return !ImageGraphFileUsesOwnedContent(type) && type != "pc.image_sequence";
+		return !ImageGraphFileUsesOwnedContent(type) && type != "pc.image_sequence" &&
+			   type != "pc.image_animated";
 	}
 
 	inline std::optional<uint64_t>
@@ -184,7 +186,8 @@ namespace studio::detail {
 			for (const auto &file : Files)
 				if (file && sameGrants(*file) && file->OutputFormat == invocation.OutputFormat &&
 					file->Interpolation == invocation.Interpolation &&
-					(!invocation.Authored.Type.starts_with("pc.ase_") ||
+					(!(invocation.Authored.Type.starts_with("pc.ase_") ||
+					   invocation.Authored.Type == "pc.image_animated") ||
 					 (file->Capture.Tick == invocation.Request.Tick &&
 					  file->Capture.Subframe == invocation.Request.Subframe &&
 					  file->Capture.NegativeFrame == invocation.Request.NegativeFrame)) &&
