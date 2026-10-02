@@ -60,6 +60,9 @@
 // these four changes, about 179 ns per element. The retained scenario rows below
 // separately measure the source-scan hit that avoids this work.
 
+#include "../tests/fixtures/LayoutOracle.hpp"
+#include "LayoutProfile.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
@@ -229,6 +232,7 @@ namespace interface_bench {
 		// A collector without a GUI service ancestor is deliberately ignored by
 		// layout. Verify the fixture is a drawable tree before timing it.
 		Require(Layout(store, Display()) == count);
+		layout_fixture::CheckTree(store, made.Root, Display(), count);
 
 		built.emplace_back(std::make_pair(count, depth), std::move(made));
 		return built.back().second;
@@ -568,23 +572,41 @@ using namespace interface_bench;
 // and says directly whether layout is linear in the tree.
 
 BENCH_PER_ITEM("Layout · 100 elements, 3 deep", 100) {
-	Interface &tree = TreeOf(100, 3);
-	Consume(Layout(*tree.Data, Display()));
+	layout_bench::Capture(
+		0,
+		[&] {
+			Interface &tree = TreeOf(100, 3);
+			Consume(Layout(*tree.Data, Display()));
+		},
+		[&](size_t call) { layout_fixture::DumpResolved(*TreeOf(100, 3).Data, 0, call); }
+	);
 }
 
 BENCH_PER_ITEM("Layout · 1k elements, 3 deep", 1000) {
-	Interface &tree = TreeOf(1000, 3);
-	Consume(Layout(*tree.Data, Display()));
+	layout_bench::Capture(
+		1,
+		[&] {
+			Interface &tree = TreeOf(1000, 3);
+			Consume(Layout(*tree.Data, Display()));
+		},
+		[&](size_t call) { layout_fixture::DumpResolved(*TreeOf(1000, 3).Data, 1, call); }
+	);
 }
 
 BENCH_PER_ITEM("Layout · 10k elements, 3 deep", 10'000) {
-	// **A ten-thousand-element interface is an inventory grid, not an absurdity**
-	// - a hundred slots with a hundred badges each is exactly this. If the
-	// per-element cost is flat from a hundred up to here, layout is linear and a
-	// large interface is merely proportionally expensive; if it climbs, there is
-	// a per-element search and the grid is quadratic.
-	Interface &tree = TreeOf(10'000, 3);
-	Consume(Layout(*tree.Data, Display()));
+	layout_bench::Capture(
+		2,
+		[&] {
+			// **A ten-thousand-element interface is an inventory grid, not an absurdity**
+			// - a hundred slots with a hundred badges each is exactly this. If the
+			// per-element cost is flat from a hundred up to here, layout is linear and a
+			// large interface is merely proportionally expensive; if it climbs, there is
+			// a per-element search and the grid is quadratic.
+			Interface &tree = TreeOf(10'000, 3);
+			Consume(Layout(*tree.Data, Display()));
+		},
+		[&](size_t call) { layout_fixture::DumpResolved(*TreeOf(10000, 3).Data, 2, call); }
+	);
 }
 
 // --- layout, by depth -------------------------------------------------------------
@@ -595,21 +617,39 @@ BENCH_PER_ITEM("Layout · 10k elements, 3 deep", 10'000) {
 // ladder climbs and the wide one does not.
 
 BENCH_PER_ITEM("Layout · 1k elements, 2 deep", 1000) {
-	Interface &tree = TreeOf(1000, 2);
-	Consume(Layout(*tree.Data, Display()));
+	layout_bench::Capture(
+		3,
+		[&] {
+			Interface &tree = TreeOf(1000, 2);
+			Consume(Layout(*tree.Data, Display()));
+		},
+		[&](size_t call) { layout_fixture::DumpResolved(*TreeOf(1000, 2).Data, 3, call); }
+	);
 }
 
 BENCH_PER_ITEM("Layout · 1k elements, 8 deep", 1000) {
-	Interface &tree = TreeOf(1000, 8);
-	Consume(Layout(*tree.Data, Display()));
+	layout_bench::Capture(
+		4,
+		[&] {
+			Interface &tree = TreeOf(1000, 8);
+			Consume(Layout(*tree.Data, Display()));
+		},
+		[&](size_t call) { layout_fixture::DumpResolved(*TreeOf(1000, 8).Data, 4, call); }
+	);
 }
 
 BENCH_PER_ITEM("Layout · 1k elements, 16 deep", 1000) {
-	// Sixteen levels is a panel inside a scroller inside a tab inside a window,
-	// nested the way a real editor nests things. Read against the 2-deep row at
-	// the same count: any gap is the cost of depth itself.
-	Interface &tree = TreeOf(1000, 16);
-	Consume(Layout(*tree.Data, Display()));
+	layout_bench::Capture(
+		5,
+		[&] {
+			// Sixteen levels is a panel inside a scroller inside a tab inside a window,
+			// nested the way a real editor nests things. Read against the 2-deep row at
+			// the same count: any gap is the cost of depth itself.
+			Interface &tree = TreeOf(1000, 16);
+			Consume(Layout(*tree.Data, Display()));
+		},
+		[&](size_t call) { layout_fixture::DumpResolved(*TreeOf(1000, 16).Data, 5, call); }
+	);
 }
 
 // --- compilation ------------------------------------------------------------------
