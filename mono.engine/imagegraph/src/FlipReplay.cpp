@@ -237,6 +237,12 @@ namespace engine::imagegraph {
 			velocities[destination] = particles[index].Velocity.X;
 			velocities[destination + 1] = particles[index].Velocity.Y;
 		}
+		if (!detail::AddSourceFluidParticles(data, int64_t(particles.size())))
+			return Refuse(
+				diagnostic,
+				Status::LimitExceeded,
+				"FLIP source object particle count exceeds its finite bound"
+			);
 		data.ParticleCount += uint32_t(count);
 		result = std::move(candidate);
 		diagnostic = {};

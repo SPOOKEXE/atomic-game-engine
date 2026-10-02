@@ -64,7 +64,11 @@ TEST_CASE("FLIP source spawning truncates capacity without advancing tick", "[im
 	REQUIRE(
 		SpawnFlipReplay(state, particles, Limits::MaximumEvaluationBytes, state, diagnostic) == Status::Ok
 	);
-	CHECK(*state.Data == *full.Data);
+	CHECK(state.Data->ParticleCount == full.Data->ParticleCount);
+	CHECK(state.Data->SourceParticleCount == std::variant<int64_t, double>{int64_t{6}});
+	auto expected = full;
+	expected.Data->SourceParticleCount = int64_t{6};
+	CHECK(*state.Data == *expected.Data);
 }
 TEST_CASE("FLIP source integration applies full timestep on each global iteration", "[imagegraph]") {
 	FluidDomainSettings settings;
@@ -349,4 +353,36 @@ TEST_CASE("FLIP object mirrors stay stale through spawn and store pre-step histo
 	CHECK(state.Data->History[1].Positions == previousPose);
 	CHECK(state.Data->ReadbackPositions.size() == 4);
 	CHECK(detail::ValidFluidPayload(state));
+}
+
+TEST_CASE(
+	"FLIP object counter retains overflow independently from native capacity and numeric kind", "[imagegraph]"
+) {
+	FluidDomainSettings settings;
+	settings.MaximumParticles = 2;
+	FluidDomainValue state;
+	Diagnostic diagnostic;
+	REQUIRE(ResetFlipReplay(settings, 0, 1, Limits::MaximumEvaluationBytes, state, diagnostic) == Status::Ok);
+	const std::array particles{
+		FluidSpawnParticle{{8, 8}, {}}, FluidSpawnParticle{{10, 8}, {}}, FluidSpawnParticle{{12, 8}, {}}
+	};
+	REQUIRE(
+		SpawnFlipReplay(state, particles, Limits::MaximumEvaluationBytes, state, diagnostic) == Status::Ok
+	);
+	CHECK(state.Data->ParticleCount == 2);
+	CHECK(std::get<int64_t>(state.Data->SourceParticleCount) == 3);
+	REQUIRE(detail::AddSourceFluidParticles(*state.Data, 2.0));
+	CHECK(std::holds_alternative<double>(state.Data->SourceParticleCount));
+	CHECK(detail::SourceFluidParticleCount(*state.Data) == 5);
+	REQUIRE(detail::ValidFluidPayload(state));
+	const auto previous = state;
+	state.Data->SourceParticleCount = std::numeric_limits<double>::quiet_NaN();
+	CHECK_FALSE(detail::ValidFluidPayload(state));
+	state = previous;
+	state.Data->Spawners = {{"spawn", 0, .5, {1, 2}, 0}};
+	REQUIRE(detail::ValidFluidPayload(state));
+	const auto retained = detail::FluidStorageBytes<true>(state);
+	CHECK(retained >= detail::FluidStorageBytes<true>(previous) + sizeof(FluidDomainData::SpawnerState));
+	state.Data->Spawners.push_back(state.Data->Spawners[0]);
+	CHECK_FALSE(detail::ValidFluidPayload(state));
 }

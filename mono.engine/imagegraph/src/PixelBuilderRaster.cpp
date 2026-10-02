@@ -128,6 +128,7 @@ namespace engine::imagegraph::detail {
 		request.AudioClips = data.AudioClips;
 		request.ImageSources = data.ImageSources;
 		request.HostCaptures = data.HostCaptures;
+		request.BuiltinRandomCaptures = data.BuiltinRandomCaptures;
 		request.PcxObservations = data.PcxObservations;
 		request.ProjectName = data.ProjectName;
 		request.RandomEntropy = data.Entropy;

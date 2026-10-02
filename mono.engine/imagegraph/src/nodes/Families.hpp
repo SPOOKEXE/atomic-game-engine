@@ -33,6 +33,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> Source2DExecutors();
 	std::span<const ExecutorEntry> SourceTextExecutors();
 	std::span<const ExecutorEntry> SourcePcxExecutors();
+	std::span<const ExecutorEntry> SourceAnimationExecutors();
 	std::span<const ExecutorEntry> SceneExecutors();
 	std::span<const ExecutorEntry> SourceSdfExecutors();
 	std::span<const ExecutorEntry> SimulationExecutors();

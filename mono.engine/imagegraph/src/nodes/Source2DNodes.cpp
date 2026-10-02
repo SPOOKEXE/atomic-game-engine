@@ -277,6 +277,8 @@ namespace engine::imagegraph::detail {
 		}
 	}
 
+	bool MkSparkle(NodeContext &context);
+	bool SourceNormalize(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.pb_draw_surface", PixelDrawSurface, true},
@@ -301,6 +303,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.matrix_color_apply", MatrixColorApply, true},
 			ExecutorEntry{"pc.blend_edge", BlendEdge, true},
 			ExecutorEntry{"pc.noise_aniso", AnisotropicNoise, true},
+			ExecutorEntry{"pc.mk_sparkle", MkSparkle, true},
+			ExecutorEntry{"pc.normalize", SourceNormalize, true},
 			ExecutorEntry{"pc.de_stray", DeStray, true},
 			ExecutorEntry{"pc.color_select", ColorSelect, true},
 			ExecutorEntry{"pc.corner", RoundCorner, true},

@@ -1,6 +1,8 @@
 #pragma once
 #include "MeshPayload.hpp"
 
+#include <tuple>
+
 namespace engine::imagegraph::detail {
 	struct FluidLayout {
 		uint32_t Columns = 0, Rows = 0, HashColumns = 0, HashRows = 0;
@@ -61,6 +63,9 @@ namespace engine::imagegraph::detail {
 			sizeof(FluidDomainData), Retained ? data.OriginNodeId.capacity() : data.OriginNodeId.size()
 		);
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.Obstacles));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.Spawners));
+		for (const auto &state : data.Spawners)
+			bytes = MeshAddBytes(bytes, Retained ? state.NodeId.capacity() : state.NodeId.size());
 		for (const auto &buffer : data.Buffers)
 			bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(buffer));
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.ReadbackPositions));
@@ -79,15 +84,48 @@ namespace engine::imagegraph::detail {
 			   data.ReadbackPositions.size() * sizeof(double) +
 			   uint64_t(data.ParticleCount) * 5 * sizeof(double);
 	}
+	inline double SourceFluidParticleCount(const FluidDomainData &data) {
+		return std::visit([](auto count) { return double(count); }, data.SourceParticleCount);
+	}
+	inline bool ValidSourceFluidParticleCount(const FluidDomainData &data) {
+		const double count = SourceFluidParticleCount(data);
+		return std::isfinite(count) && count >= data.ParticleCount && count == std::trunc(count) &&
+			   count <= FluidDomainLimits::MaximumWork;
+	}
+	inline bool AddSourceFluidParticles(FluidDomainData &data, std::variant<int64_t, double> amount) {
+		const double added = std::visit([](auto count) { return double(count); }, amount);
+		const double previous = SourceFluidParticleCount(data);
+		if (!std::isfinite(added) || added < 0 || added != std::trunc(added) ||
+			added > FluidDomainLimits::MaximumWork - previous)
+			return false;
+		if (std::holds_alternative<int64_t>(data.SourceParticleCount) &&
+			std::holds_alternative<int64_t>(amount))
+			data.SourceParticleCount =
+				std::get<int64_t>(data.SourceParticleCount) + std::get<int64_t>(amount);
+		else
+			data.SourceParticleCount = previous + added;
+		return true;
+	}
 	inline bool ValidFluidDomainData(const FluidDomainData &data) {
 		const auto layout = FluidDomainLayout(data.Settings);
 		if (!layout || !data.Initialized || data.Tick > Limits::MaximumTick ||
-			data.ParticleCount > data.Settings.MaximumParticles ||
+			data.ParticleCount > data.Settings.MaximumParticles || !ValidSourceFluidParticleCount(data) ||
+			data.Spawners.size() > Limits::MaximumNodes ||
 			data.OriginNodeId.size() > Limits::MaximumTextBytes ||
 			data.Obstacles.size() > Limits::MaximumArrayElements ||
 			!std::isfinite(data.ParticleRestDensity) ||
 			FluidDataStorageBytes<true>(data) > Limits::MaximumEvaluationBytes)
 			return false;
+		for (size_t index = 0; index < data.Spawners.size(); ++index) {
+			const auto &state = data.Spawners[index];
+			if (state.NodeId.empty() || state.NodeId.size() > Limits::MaximumTextBytes ||
+				state.Tick > Limits::MaximumTick || !std::isfinite(state.Accumulator) ||
+				std::abs(state.Accumulator) > FluidDomainLimits::MaximumWork ||
+				!std::isfinite(state.PreviousPosition[0]) || !std::isfinite(state.PreviousPosition[1]) ||
+				(index && std::tie(data.Spawners[index - 1].NodeId, data.Spawners[index - 1].ProcessorRow) >=
+							  std::tie(state.NodeId, state.ProcessorRow)))
+				return false;
+		}
 		for (size_t index = 0; index < data.Buffers.size(); ++index) {
 			if (data.Buffers[index].size() != layout->Sizes[index]) return false;
 			for (const auto value : data.Buffers[index])

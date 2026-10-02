@@ -28,6 +28,19 @@ namespace engine::imagegraph::detail {
 					"dynamic_builder"
 				);
 			uint64_t bytes = sizeof(PixelBuilderData) + *documentBytes + context.Authored.Id.capacity();
+			uint64_t builtinBytes = 0;
+			Diagnostic builtinDiagnostic;
+			if (ValidateBuiltinRandomCaptures(
+					context.Request.BuiltinRandomCaptures,
+					Limits::MaximumEvaluationBytes,
+					builtinBytes,
+					builtinDiagnostic
+				) != Status::Ok)
+				return context.Fail(builtinDiagnostic.Code, builtinDiagnostic.Message);
+			if (!AddRecipeBytes(bytes, builtinBytes))
+				return context.Fail(
+					Status::LimitExceeded, "Builder builtin RNG snapshot exceeds its byte bound"
+				);
 			if (context.Request.GroupReplay &&
 				!AddRecipeBytes(bytes, PixelBuilderGroupCloneBytes(*context.Request.GroupReplay)))
 				return context.Fail(
@@ -269,6 +282,9 @@ namespace engine::imagegraph::detail {
 			data.ProjectName = context.Request.ProjectName;
 			data.PcxObservations.assign(
 				context.Request.PcxObservations.begin(), context.Request.PcxObservations.end()
+			);
+			data.BuiltinRandomCaptures.assign(
+				context.Request.BuiltinRandomCaptures.begin(), context.Request.BuiltinRandomCaptures.end()
 			);
 			data.Entropy.assign(context.Request.RandomEntropy.begin(), context.Request.RandomEntropy.end());
 			if (!ValidPixelBuilderPayload(recipe))

@@ -229,6 +229,13 @@ namespace engine::imagegraph::detail {
 		const auto status =
 			SpawnFlipReplay(*input, particles, Limits::MaximumEvaluationBytes, output, diagnostic);
 		if (status != Status::Ok) return context.Fail(status, diagnostic.Message, "domain");
+		output.Data->SourceParticleCount = input->Data->SourceParticleCount;
+		if (!AddSourceFluidParticles(*output.Data, rows * columns))
+			return context.Fail(
+				Status::LimitExceeded,
+				"FLIP fill object particle count exceeds its finite bound",
+				"spawn_area"
+			);
 		return PublishFlipDomain(context, std::move(output));
 	}
 }

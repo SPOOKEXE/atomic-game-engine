@@ -28,6 +28,48 @@ namespace engine::imagegraph::detail {
 			return executor(context);
 		}
 
+		bool
+		MoveGeneralItem(NodeContext &context, Value &value, std::string_view port, SourceArrayItem &item) {
+			const auto *array = std::get_if<ArrayValue>(&value);
+			if (!array) {
+				auto leaf = ArrayElement(std::move(value));
+				if (!leaf)
+					return context.Fail(Status::TypeMismatch, "processor value cannot enter an array", port);
+				item.Data = std::move(*leaf);
+				return true;
+			}
+			auto &source = std::get<ArrayValue>(value);
+			if (!source.Items.empty()) {
+				item.Data = std::move(source.Items);
+				return true;
+			}
+			size_t nodes = source.Nested.empty() ? source.Elements.size() : source.Nested.size();
+			for (const auto &children : source.Nested)
+				nodes += children.size();
+			if (nodes > Limits::MaximumArrayElements)
+				return context.Fail(
+					Status::LimitExceeded, "processor generic array exceeds element budget", port
+				);
+			if (!context.ReserveOutput(nodes * sizeof(SourceArrayItem), port)) return false;
+			std::vector<SourceArrayItem> members;
+			if (source.Nested.empty()) {
+				members.reserve(source.Elements.size());
+				for (auto &leaf : source.Elements)
+					members.push_back({std::move(leaf)});
+			} else {
+				members.reserve(source.Nested.size());
+				for (auto &children : source.Nested) {
+					std::vector<SourceArrayItem> entries;
+					entries.reserve(children.size());
+					for (auto &leaf : children)
+						entries.push_back({std::move(leaf)});
+					members.push_back({std::move(entries)});
+				}
+			}
+			item.Data = std::move(members);
+			return true;
+		}
+
 		struct InputRows {
 			std::string_view Port;
 			ValueType Type;
@@ -686,6 +728,11 @@ namespace engine::imagegraph::detail {
 				target->second.Images.push_back(std::move(image));
 			}
 			for (auto &value : context.OutputValues) {
+				const bool generic = std::any_of(
+					context.Entry.Outputs.begin(), context.Entry.Outputs.end(), [&](const auto &output) {
+						return output.Id == value.Port && output.Type == ValueType::Any;
+					}
+				);
 				auto target = std::find_if(values.begin(), values.end(), [&](const auto &item) {
 					return item.Port == value.Port;
 				});
@@ -694,8 +741,12 @@ namespace engine::imagegraph::detail {
 					values.push_back({value.Port, ArrayValue{PayloadType(value.Data), {}}});
 					target = values.end() - 1;
 					auto &array = std::get<ArrayValue>(target->Data);
-					if (std::holds_alternative<ArrayValue>(value.Data) &&
-						context.Authored.Type == "pc.array_shift") {
+					if (generic) {
+						if (!context.ReserveOutput(count * sizeof(SourceArrayItem), value.Port)) return false;
+						array.ElementType = ValueType::Any;
+						array.Items.reserve(count);
+					} else if (std::holds_alternative<ArrayValue>(value.Data) &&
+							   context.Authored.Type == "pc.array_shift") {
 						if (!context.ReserveOutput(count * sizeof(SourceArrayItem), value.Port)) return false;
 						array.ElementType = ValueType::Any;
 						array.Items.reserve(count);
@@ -719,6 +770,16 @@ namespace engine::imagegraph::detail {
 						Status::LimitExceeded, "processor typed array exceeds 4 MiB", value.Port
 					);
 				accumulated += owned;
+				if (generic) {
+					SourceArrayItem item;
+					if (!MoveGeneralItem(context, value.Data, value.Port, item)) return false;
+					array.Items.push_back(std::move(item));
+					if (PayloadOwnedBytes(array) > Limits::MaximumArrayBytes)
+						return context.Fail(
+							Status::LimitExceeded, "processor generic array exceeds 4 MiB", value.Port
+						);
+					continue;
+				}
 				if (auto *nested = std::get_if<ArrayValue>(&value.Data)) {
 					if (context.Authored.Type == "pc.array_shift") {
 						std::vector<SourceArrayItem> members;

@@ -1,4 +1,5 @@
 #include "Sampler.hpp"
+#include "SourceSafeDraw.hpp"
 
 namespace engine::imagegraph::detail {
 	namespace {
@@ -63,7 +64,7 @@ namespace engine::imagegraph::detail {
 		Image previous{source->Width, source->Height, std::vector<uint8_t>(bytes), 0}, next = previous;
 		for (uint32_t y = 0; y < source->Height; ++y)
 			for (uint32_t x = 0; x < source->Width; ++x)
-				if (!WritePixel(previous, x, y, ReadPixel(*source, x, y)))
+				if (!WritePixel(previous, x, y, SourceSafeDrawPixel(*source, x, y)))
 					return context.Fail(Status::InvalidValue, "De-Stray input is nonfinite");
 		for (int64_t iteration = 0; iteration < iterations; ++iteration) {
 			for (uint32_t y = 0; y < source->Height; ++y)

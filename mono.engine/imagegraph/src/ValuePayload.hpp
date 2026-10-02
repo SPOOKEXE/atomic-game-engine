@@ -3,6 +3,7 @@
 #include "FluidPayload.hpp"
 #include "Mesh2DPayload.hpp"
 #include "MeshPayload.hpp"
+#include "ParticlePayload.hpp"
 #include "PixelBuilderPayload.hpp"
 #include "ScenePayload.hpp"
 #include "SdfPayload.hpp"
@@ -18,17 +19,21 @@
 
 namespace engine::imagegraph::detail {
 	inline constexpr ValueType VALUE_PAYLOAD_TYPES[] = {
-		ValueType::Boolean, ValueType::Integer,	   ValueType::Scalar,		  ValueType::Text,
-		ValueType::Colour,	ValueType::Vector2,	   ValueType::Array,		  ValueType::Gradient,
-		ValueType::Area,	ValueType::Curve,	   ValueType::Vector4,		  ValueType::Path2D,
-		ValueType::Vector3, ValueType::Quaternion, ValueType::Enum,			  ValueType::AudioBit,
-		ValueType::Matrix,	ValueType::Mesh,	   ValueType::Material3D,	  ValueType::Light3D,
-		ValueType::Scene3D, ValueType::Mesh2D,	   ValueType::Struct,		  ValueType::Any,
-		ValueType::Image,	ValueType::Buffer,	   ValueType::NodeRef,		  ValueType::Path3D,
-		ValueType::PcxNode, ValueType::PixelBox,   ValueType::DynamicSurface, ValueType::Array,
-		ValueType::Sdf,		ValueType::FluidDomain
+		ValueType::Boolean, ValueType::Integer,		ValueType::Scalar,		   ValueType::Text,
+		ValueType::Colour,	ValueType::Vector2,		ValueType::Array,		   ValueType::Gradient,
+		ValueType::Area,	ValueType::Curve,		ValueType::Vector4,		   ValueType::Path2D,
+		ValueType::Vector3, ValueType::Quaternion,	ValueType::Enum,		   ValueType::AudioBit,
+		ValueType::Matrix,	ValueType::Mesh,		ValueType::Material3D,	   ValueType::Light3D,
+		ValueType::Scene3D, ValueType::Mesh2D,		ValueType::Struct,		   ValueType::Any,
+		ValueType::Image,	ValueType::Buffer,		ValueType::NodeRef,		   ValueType::Path3D,
+		ValueType::PcxNode, ValueType::PixelBox,	ValueType::DynamicSurface, ValueType::Array,
+		ValueType::Sdf,		ValueType::FluidDomain, ValueType::Particle
 	};
 	static_assert(std::size(VALUE_PAYLOAD_TYPES) == std::variant_size_v<Value>);
+	static_assert(std::variant_size_v<Value> == 35 && std::variant_size_v<ElementValue> == 34);
+	static_assert(std::is_same_v<std::variant_alternative_t<34, Value>, ParticleValue>);
+	static_assert(std::is_same_v<std::variant_alternative_t<33, ElementValue>, ParticleValue>);
+	static_assert(sizeof(ParticleValue) == 8 && sizeof(Value) == 88);
 	inline ValueType PayloadType(const Value &value) {
 		return VALUE_PAYLOAD_TYPES[value.index()];
 	}
@@ -129,6 +134,8 @@ namespace engine::imagegraph::detail {
 			return ValueType::Sdf;
 		else if constexpr (std::is_same_v<T, FluidDomainValue>)
 			return ValueType::FluidDomain;
+		else if constexpr (std::is_same_v<T, ParticleValue>)
+			return ValueType::Particle;
 		else {
 			static_assert(std::is_same_v<T, ArrayValue>);
 			return ValueType::Array;
@@ -206,6 +213,8 @@ namespace engine::imagegraph::detail {
 			return SdfStorageBytes(item, false);
 		else if constexpr (std::is_same_v<T, FluidDomainValue>)
 			return FluidStorageBytes<false>(item);
+		else if constexpr (std::is_same_v<T, ParticleValue>)
+			return ParticleStorageBytes<false>(item);
 		else if constexpr (std::is_same_v<T, SourceArrayItem>) {
 			return std::visit(
 				[](const auto &child) -> uint64_t {
@@ -313,6 +322,8 @@ namespace engine::imagegraph::detail {
 			return SdfStorageBytes(item, true);
 		else if constexpr (std::is_same_v<T, FluidDomainValue>)
 			return FluidStorageBytes<true>(item);
+		else if constexpr (std::is_same_v<T, ParticleValue>)
+			return ParticleStorageBytes<true>(item);
 		else if constexpr (std::is_same_v<T, SourceArrayItem>) {
 			return std::visit(
 				[](const auto &child) -> uint64_t {
@@ -414,6 +425,8 @@ namespace engine::imagegraph::detail {
 			return runtime && ValidSdfPayload(item);
 		else if constexpr (std::is_same_v<T, FluidDomainValue>)
 			return runtime && ValidFluidPayload(item);
+		else if constexpr (std::is_same_v<T, ParticleValue>)
+			return ValidParticlePayload(item);
 		else if constexpr (std::is_same_v<T, MatrixValue>)
 			return item.Columns > 0 && item.Rows > 0 && item.Values.size() <= Limits::MaximumArrayElements &&
 				   uint64_t(item.Columns) * item.Rows == item.Values.size() &&

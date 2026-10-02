@@ -6,7 +6,13 @@
 #include <vector>
 
 namespace engine::imagegraph {
-	// Each processor row owns its source differential or Boolean trigger history.
+	// A source value cache owns a cloned value at an integer timeline frame.
+	struct DataReplayValueFrame {
+		uint64_t Frame = 0;
+		Value Data = double{0};
+		bool operator==(const DataReplayValueFrame &) const = default;
+	};
+	// Each processor row owns its source scalar, trigger, or delayed value history.
 	struct DataReplayEntry {
 		std::string NodeId;
 		size_t ProcessorRow = 0;
@@ -17,6 +23,7 @@ namespace engine::imagegraph {
 		double PreviousValue = 0;
 		double PreviousFrame = 0;
 		bool Trigger = false;
+		std::vector<DataReplayValueFrame> Values;
 		bool operator==(const DataReplayEntry &) const = default;
 	};
 	struct DataReplayState {

@@ -1,5 +1,6 @@
 #include "ColorSpace.hpp"
 #include "Processor.hpp"
+#include "SourceSafeDraw.hpp"
 
 namespace engine::imagegraph::detail {
 	bool ColorSelect(NodeContext &context) {
@@ -18,6 +19,9 @@ namespace engine::imagegraph::detail {
 			return 0.0;
 		};
 		return RunPixelProcessor(context, [&](const Image &source, uint32_t x, uint32_t y, double, double) {
+			if (source.Format == SurfaceFormat::R8Unorm || source.Format == SurfaceFormat::R16Float ||
+				source.Format == SurfaceFormat::R32Float)
+				return SourceSafeDrawPixel(source, x, y);
 			const Rgba original = ReadPixel(source, x, y);
 			const Rgb3 hsv = ShaderRgbToHsv({original[0], original[1], original[2]});
 			const double shiftedHue = hsv[0] - context.Scalar("h_shift");

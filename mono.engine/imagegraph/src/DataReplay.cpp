@@ -1,4 +1,5 @@
 #include "MeshPayload.hpp"
+#include "ValuePayload.hpp"
 
 #include <engine/imagegraph/DataReplay.hpp>
 
@@ -8,7 +9,11 @@
 
 namespace engine::imagegraph {
 	uint64_t RetainedDataReplayEntryBytes(const DataReplayEntry &entry) {
-		return detail::MeshAddBytes(sizeof(entry), entry.NodeId.capacity());
+		uint64_t bytes = detail::MeshAddBytes(sizeof(entry), entry.NodeId.capacity());
+		bytes = detail::MeshAddBytes(bytes, detail::MeshVectorBytes<true>(entry.Values));
+		for (const auto &frame : entry.Values)
+			bytes = detail::MeshAddBytes(bytes, detail::RetainedPayloadBytes(frame.Data));
+		return bytes;
 	}
 	uint64_t RetainedDataReplayBytes(const DataReplayState &state) {
 		uint64_t bytes = detail::MeshAddBytes(sizeof(state), detail::MeshVectorBytes<true>(state.Entries));
@@ -55,6 +60,24 @@ namespace engine::imagegraph {
 				return refuse(
 					Status::InvalidValue, "data replay identity or scalar state is invalid", entry.NodeId
 				);
+			if (entry.Values.size() > Limits::MaximumArrayElements)
+				return refuse(
+					Status::LimitExceeded, "data replay value history exceeds frame budget", entry.NodeId
+				);
+			uint64_t previousFrame = 0;
+			bool first = true;
+			for (const auto &frame : entry.Values) {
+				if (frame.Frame > Limits::MaximumTick || (!first && frame.Frame <= previousFrame) ||
+					!detail::ValidValuePayload(frame.Data, true))
+					return refuse(Status::InvalidValue, "data replay value history is invalid", entry.NodeId);
+				const auto clone = ValueClonePayloadBytes(frame.Data);
+				if (!clone || *clone > maximumBytes)
+					return refuse(
+						Status::LimitExceeded, "data replay value clone exceeds byte budget", entry.NodeId
+					);
+				first = false;
+				previousFrame = frame.Frame;
+			}
 		}
 		return Status::Ok;
 	}

@@ -7,6 +7,7 @@
 #include "ImageArrayCollector.hpp"
 #include "NodeExecutors.hpp"
 #include "PaletteOps.hpp"
+#include "ParticleCodec.hpp"
 #include "PcxControls.hpp"
 #include "PixelBoxMath.hpp"
 #include "PixelOps.hpp"
@@ -47,6 +48,7 @@
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/SliceStackReplay.hpp>
+#include <engine/imagegraph/SourceBuiltinRandom.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/StatefulTemporalCone.hpp>
 #include <engine/imagegraph/Vector2Presentation.hpp>
@@ -872,7 +874,9 @@ namespace engine::imagegraph {
 		bool IsFinite(const Value &value) {
 			if (const auto *array = std::get_if<ArrayValue>(&value); array && !array->Nested.empty())
 				return array->ElementType != ValueType::Image && array->ElementType != ValueType::Array &&
-					   array->ElementType < ValueType::Gradient && detail::ValidPayload(*array, true);
+					   (array->ElementType < ValueType::Gradient ||
+						array->ElementType == ValueType::Particle) &&
+					   detail::ValidPayload(*array, true);
 			return detail::ValidValuePayload(value, false);
 		}
 
@@ -1037,6 +1041,7 @@ namespace engine::imagegraph {
 		}
 
 		bool WithinArrayBudget(const ArrayValue &array) {
+			if (array.ElementType == ValueType::Particle) return detail::ValidPayload(array, true);
 			if (!array.Nested.empty()) {
 				if (array.Nested.size() > Limits::MaximumArrayElements) return false;
 				size_t count = array.Elements.size();
@@ -1079,11 +1084,14 @@ namespace engine::imagegraph {
 		bool ValidArray(const ArrayValue &array) {
 			if (!array.Nested.empty())
 				return array.ElementType != ValueType::Image && array.ElementType != ValueType::Array &&
-					   array.ElementType < ValueType::Gradient && detail::ValidPayload(array, true);
+					   (array.ElementType < ValueType::Gradient ||
+						array.ElementType == ValueType::Particle) &&
+					   detail::ValidPayload(array, true);
 			if (array.ElementType == ValueType::Any || !array.Items.empty())
 				return detail::ValidPayload(array, false);
 			if (!array.Nested.empty() || !WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
-				array.ElementType == ValueType::Array || array.ElementType >= ValueType::Gradient ||
+				array.ElementType == ValueType::Array ||
+				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Particle) ||
 				TypeName(array.ElementType).empty())
 				return false;
 			for (const ElementValue &element : array.Elements)
@@ -1111,6 +1119,7 @@ namespace engine::imagegraph {
 			if (const auto *path = std::get_if<PathValue3D>(&value))
 				return path->Data && path->Data->SourceOperation ? "p3o" : "p3";
 			if (std::holds_alternative<PixelBoxValue>(value)) return "pb";
+			if (std::holds_alternative<ParticleValue>(value)) return "particle2";
 			switch (value.index()) {
 			case 0:
 				return "b";
@@ -1187,7 +1196,10 @@ namespace engine::imagegraph {
 
 		void WriteValue(std::ostream &stream, const Value &value) {
 			stream << ValueTag(value) << ' ';
-			if (const auto *boolean = std::get_if<bool>(&value)) {
+			if (const auto *particle = std::get_if<ParticleValue>(&value)) {
+				stream << std::setprecision(17);
+				detail::WriteParticleValue(stream, *particle);
+			} else if (const auto *boolean = std::get_if<bool>(&value)) {
 				stream << (*boolean ? 1 : 0);
 			} else if (const auto *integer = std::get_if<int64_t>(&value)) {
 				stream << *integer;
@@ -1534,7 +1546,7 @@ namespace engine::imagegraph {
 				}
 				const auto type = ParseType(typeName);
 				if (!type || *type == ValueType::Image || *type == ValueType::Array ||
-					*type >= ValueType::Gradient)
+					(*type >= ValueType::Gradient && !(version >= 9 && *type == ValueType::Particle)))
 					return false;
 				ArrayValue array{*type, {}};
 				if (!admit(count * sizeof(ElementValue))) return false;
@@ -1664,6 +1676,13 @@ namespace engine::imagegraph {
 					audio.Samples.push_back(sample);
 				}
 				value = std::move(audio);
+				return true;
+			}
+			if (tag == "particle2") {
+				if (version < 9) return false;
+				ParticleValue particle;
+				if (!detail::ReadParticleValue(stream, particle, admit)) return false;
+				value = std::move(particle);
 				return true;
 			}
 			if (tag == "pb") {
@@ -3366,8 +3385,10 @@ namespace engine::imagegraph {
 							if (segmented(element)) return true;
 				}
 				return std::holds_alternative<PathValue3D>(value) ||
-					   (array && (array->ElementType == ValueType::Any ||
-								  array->ElementType == ValueType::Path3D || !array->Items.empty()));
+					   std::holds_alternative<ParticleValue>(value) ||
+					   (array &&
+						(array->ElementType == ValueType::Any || array->ElementType == ValueType::Path3D ||
+						 array->ElementType == ValueType::Particle || !array->Items.empty()));
 			};
 			for (const auto &node : document.Nodes) {
 				for (const auto &value : node.Values)
@@ -7309,6 +7330,11 @@ namespace engine::imagegraph {
 	}
 
 	static Status ValidateEvaluationRequest(const EvaluationRequest &request, Diagnostic &diagnostic) {
+		uint64_t builtinBytes = 0;
+		const auto builtinStatus = ValidateBuiltinRandomCaptures(
+			request.BuiltinRandomCaptures, Limits::MaximumEvaluationBytes, builtinBytes, diagnostic
+		);
+		if (builtinStatus != Status::Ok) return builtinStatus;
 		if (request.SimulationCacheCaptures.size() > Limits::MaximumNodes) {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "simulation cache actions exceed node bounds");
 			return diagnostic.Code;
@@ -7574,6 +7600,19 @@ namespace engine::imagegraph {
 		SimulationCapture *simulation = nullptr,
 		StatefulOutputCapture *batch = nullptr
 	) {
+		uint64_t builtinBytes = 0;
+		const auto builtinStatus = ValidateBuiltinRandomCaptures(
+			request.BuiltinRandomCaptures, budget.Available(), builtinBytes, diagnostic
+		);
+		if (builtinStatus != Status::Ok) return builtinStatus;
+		// Borrowed recordings remain live while evaluation owns its intermediate results.
+		auto builtinShadow = budget.Reserve(builtinBytes);
+		if (!builtinShadow) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "builtin random recordings exceed live evaluation budget"
+			);
+			return diagnostic.Code;
+		}
 		const auto cacheActions = ValidateSimulationCacheActions(document, request, diagnostic);
 		if (cacheActions != Status::Ok) return cacheActions;
 		detail::AllocationReservation sliceStateShadow;
@@ -8843,8 +8882,8 @@ namespace engine::imagegraph {
 							 input.Type == ValueType::Buffer || input.Type == ValueType::Struct ||
 							 input.Type == ValueType::Object || input.Type == ValueType::PcxNode ||
 							 input.Type == ValueType::NodeRef || input.Type == ValueType::FluidDomain ||
-							 input.Type == ValueType::PixelBox || input.Type == ValueType::DynamicSurface ||
-							 input.Type == ValueType::Path3D)) {
+							 input.Type == ValueType::Particle || input.Type == ValueType::PixelBox ||
+							 input.Type == ValueType::DynamicSurface || input.Type == ValueType::Path3D)) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
 							const auto *source =
 								produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;

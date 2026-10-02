@@ -6,6 +6,7 @@
 // data and never become part of the saved document.
 
 #include <engine/imagegraph/FluidDomain.hpp>
+#include <engine/imagegraph/Particle.hpp>
 #include <engine/imagegraph/Surface.hpp>
 
 #include <array>
@@ -53,13 +54,13 @@ namespace engine::imagegraph {
 		Mesh,
 		// Runtime-only planar audio samples with their source sample rate.
 		AudioBit,
-		// The remaining types are runtime-only typed sockets. They carry no authored document value, and a
-		// link needs a source of the same type. Each mirrors one Pixel Composer junction type.
+		// The remaining types mirror source typed sockets. Most are runtime-only; explicitly owned
+		// authored payloads are noted below. Links preserve their declared source type.
 		// 2D deformable mesh.
 		Mesh2D,
 		// Numeric matrix with an authored document value.
 		Matrix,
-		// Particle system state.
+		// Owned source particle objects; collections use particle-element arrays.
 		Particle,
 		// Rigid body simulation objects.
 		Rigid,
@@ -419,6 +420,10 @@ namespace engine::imagegraph {
 		OwnedPayload3D<MeshData2D> Data;
 		bool operator==(const MeshValue2D &) const = default;
 	};
+	struct ParticleValue {
+		OwnedPayload3D<ParticleData2D> Data;
+		bool operator==(const ParticleValue &) const = default;
+	};
 	struct FluidDomainValue {
 		OwnedPayload3D<FluidDomainData> Data;
 		bool operator==(const FluidDomainValue &) const = default;
@@ -571,7 +576,8 @@ namespace engine::imagegraph {
 		DynamicSurfaceValue,
 		ArraySelectorValue,
 		SdfValue,
-		FluidDomainValue>;
+		FluidDomainValue,
+		ParticleValue>;
 
 	// Source arrays may mix leaves, nested arrays and owned surfaces. No pointer survives evaluation.
 	struct SourceArrayItem {
@@ -634,7 +640,8 @@ namespace engine::imagegraph {
 		DynamicSurfaceValue,
 		ArraySelectorValue,
 		SdfValue,
-		FluidDomainValue>;
+		FluidDomainValue,
+		ParticleValue>;
 
 	// Fields retain owned runtime values; nesting never creates shared mutable references.
 	struct StructData {
@@ -1207,6 +1214,7 @@ namespace engine::imagegraph {
 	};
 
 	struct HostNodeCapture;
+	struct SourceBuiltinRandomCapture;
 	class HostNodeProvider;
 	class GroupReplayState;
 	struct SimulationReplayState;
@@ -1234,6 +1242,7 @@ namespace engine::imagegraph {
 		std::span<const RequestImageSource> ImageSources{};
 		// Immutable host capability recordings. Missing records refuse execution explicitly.
 		std::span<const HostNodeCapture> HostCaptures{};
+		std::span<const SourceBuiltinRandomCapture> BuiltinRandomCaptures{};
 		HostNodeProvider *HostProvider = nullptr;
 		// Host observations are captured once; the evaluator never reads a clock or source path.
 		std::span<const AuthoredValue> PcxObservations{};

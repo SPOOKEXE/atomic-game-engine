@@ -69,9 +69,12 @@ namespace engine::imagegraph {
 			const size_t index = pending[--count];
 			const auto &node = document.Nodes[index];
 			++cone.Nodes;
-			cone.SurfaceCaches += node.Type == "pc.interlaced";
+			cone.SurfaceCaches += node.Type == "pc.interlaced" || node.Type == "pc.anim_loop" ||
+								  node.Type == "pc.delay" || node.Type == "pc.rate_remap" ||
+								  node.Type == "pc.revert" || node.Type == "pc.stagger";
 			cone.RandomGenerators += node.Type == "pc.random";
-			cone.DataProcessors += node.Type == "pc.trigger_bool" || node.Type == "pc.differential";
+			cone.DataProcessors += node.Type == "pc.trigger_bool" || node.Type == "pc.differential" ||
+								   node.Type == "pc.counter" || node.Type == "pc.delay_value";
 			cone.Simulation |= node.Type == "image.verlet_simple" ||
 							   (node.Type.starts_with("pc.verlet_sim_") || node.Type.starts_with("pc.flip_"));
 			cone.FixedSimulationSteps |= node.Type == "image.verlet_simple" ||

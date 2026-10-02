@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace engine::imagegraph {
@@ -53,10 +54,23 @@ namespace engine::imagegraph {
 			std::vector<double> Positions;
 			bool operator==(const HistoryFrame &) const = default;
 		};
+		struct SpawnerState {
+			std::string NodeId;
+			size_t ProcessorRow = 0;
+			double Accumulator = 0;
+			std::array<double, 2> PreviousPosition{};
+			uint64_t Tick = 0;
+			bool operator==(const SpawnerState &) const = default;
+		};
 		FluidDomainSettings Settings;
 		std::array<std::vector<double>, size_t(FluidBuffer::Count)> Buffers;
 		std::vector<FluidObstacle> Obstacles;
 		uint32_t ParticleCount = 0;
+		// The source object increments before the native solver capacity-clamps a spawn.
+		std::variant<int64_t, double> SourceParticleCount{int64_t{0}};
+		// Sorted by durable producer ID and processor row; controls retain their last update tick.
+		std::vector<SpawnerState> Spawners;
+
 		// Object readback remains unchanged by native spawn/force calls until a source Step.
 		std::vector<double> ReadbackPositions, ReadbackVelocities, ReadbackLife;
 		// Missing slots in these sparse rows are the source's zero-initialized array entries.

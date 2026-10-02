@@ -36,4 +36,6 @@ namespace engine::imagegraph::detail {
 		data.Tick = tick;
 	}
 	bool FlipParticleForce(NodeContext &context);
+	bool FlipToVfx(NodeContext &context);
+	bool FlipRender(NodeContext &context);
 }

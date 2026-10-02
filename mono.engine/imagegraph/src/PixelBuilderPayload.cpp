@@ -63,6 +63,7 @@ namespace engine::imagegraph {
 			   BaseDimension == other.BaseDimension && Tick == other.Tick && Seed == other.Seed &&
 			   Subframe == other.Subframe && NegativeFrame == other.NegativeFrame &&
 			   ResetSurfaceReplay == other.ResetSurfaceReplay &&
+			   BuiltinRandomCaptures == other.BuiltinRandomCaptures &&
 			   RequireSourceGpuRasterCoverage == other.RequireSourceGpuRasterCoverage &&
 			   MaximumImageDimension == other.MaximumImageDimension &&
 			   CirclePrecision == other.CirclePrecision && AudioFrames == other.AudioFrames &&
@@ -235,9 +236,30 @@ namespace engine::imagegraph::detail {
 		if (!AuthoredSnapshot(data.Authored)) return UINT64_MAX;
 		for (const auto &capture : data.HostCaptures)
 			if (!FrozenCapture(capture)) return UINT64_MAX;
+		uint64_t builtinBytes = 0;
+		Diagnostic builtinDiagnostic;
+		if (ValidateBuiltinRandomCaptures(
+				data.BuiltinRandomCaptures, Limits::MaximumEvaluationBytes, builtinBytes, builtinDiagnostic
+			) != Status::Ok)
+			return UINT64_MAX;
 		const auto documentBytes = DocumentRetainedPayloadBytes(data.Authored);
 		if (!documentBytes) return UINT64_MAX;
-		uint64_t bytes = Add(sizeof(PixelBuilderData), *documentBytes);
+		uint64_t bytes = Add(Add(sizeof(PixelBuilderData), *documentBytes), builtinBytes);
+		if (retained) {
+			bytes =
+				Add(bytes,
+					(data.BuiltinRandomCaptures.capacity() - data.BuiltinRandomCaptures.size()) *
+						sizeof(SourceBuiltinRandomCapture));
+			for (const auto &capture : data.BuiltinRandomCaptures) {
+				bytes =
+					Add(bytes,
+						(capture.Draws.capacity() - capture.Draws.size()) * sizeof(SourceBuiltinRandomDraw));
+				bytes =
+					Add(bytes, (capture.Inputs.capacity() - capture.Inputs.size()) * sizeof(AuthoredValue));
+				for (const auto &input : capture.Inputs)
+					bytes = Add(bytes, input.Port.capacity() + RetainedPayloadBytes(input.Data));
+			}
+		}
 		bytes = Add(bytes, Text(data.OwnerNodeId, retained));
 		if (data.Groups) bytes = Add(bytes, data.Groups->Replay.RetainedBytes());
 		if (data.DataHistory) bytes = Add(bytes, RetainedDataReplayBytes(*data.DataHistory));
@@ -314,6 +336,12 @@ namespace engine::imagegraph::detail {
 	bool ValidPixelBuilderPayload(const DynamicSurfaceValue &value) {
 		if (!value.Data) return true;
 		const auto &data = *value.Data;
+		uint64_t builtinBytes = 0;
+		Diagnostic builtinDiagnostic;
+		if (ValidateBuiltinRandomCaptures(
+				data.BuiltinRandomCaptures, Limits::MaximumEvaluationBytes, builtinBytes, builtinDiagnostic
+			) != Status::Ok)
+			return false;
 		if (data.OwnerNodeId.empty() || data.OwnerNodeId.size() > Limits::MaximumTextBytes ||
 			!std::isfinite(data.BaseDimension.X) || !std::isfinite(data.BaseDimension.Y) ||
 			std::abs(data.BaseDimension.X) > Limits::MaximumDimension ||
