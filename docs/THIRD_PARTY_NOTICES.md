@@ -263,6 +263,39 @@ point at and no licence text landing in the tree beside it. The rule this
 follows is the one the compiled-in texture above follows: **provenance is
 recorded where the work came from, whether or not anything obliges it.**
 
+## Pixel Composer source ports
+
+Native imagegraph nodes and interchange tools use source-derived behaviour from
+[Pixel Composer](https://github.com/Ttanasart-pt/Pixel-Composer), pinned at commit
+`b69eca232217360cf1502ef0223523d818606652`. Its MIT grant permits these ports.
+The notice below travels with release archives through this notices file.
+The verbatim upstream text also lives in
+`docs/pixel-composer-m0/PixelComposer-LICENSE.txt`.
+
+```text
+MIT License
+
+Copyright (c) 2023 Tanasart
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## If you add one
 
 1. Check the licence is compatible with MPL-2.0 **before** anything else.
