@@ -4,6 +4,7 @@
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphExportTriggers.hpp"
 #include "ImageGraphGroupHost.hpp"
+#include "ImageGraphHost.hpp"
 #include "ImageGraphInputs.hpp"
 #include "ImageGraphObservations.hpp"
 #include "ImageGraphPorts.hpp"
@@ -26,6 +27,7 @@
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/WavPreview.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
+#include <engine/imagegraphexport/GraphExport.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scripthost/ComposerLua.hpp>
@@ -83,6 +85,12 @@ namespace studio {
 			std::vector<std::filesystem::path> RetainedFrames;
 		};
 
+		struct FileReadControls {
+			std::string NodeId;
+			std::array<char, 4096> File{}, Resource{};
+			std::string Message;
+		};
+
 		struct State {
 			bool Initialized = false;
 			std::vector<ExportGrant> ExportGrants;
@@ -92,6 +100,9 @@ namespace studio {
 			std::vector<engine::imagegraph::ComposerLuaMessage> LuaMessages;
 			std::unique_ptr<engine::imagegraph::ComposerLuaHost> LuaHost =
 				engine::script::MakeComposerLuaHost();
+			detail::ImageGraphHost Host;
+			std::vector<engine::imagegraphexport::GraphFileGrant> FileGrants;
+			std::vector<FileReadControls> FileControls;
 			bool LivePreview = true;
 			bool PreviewDirty = true;
 			bool CanvasNeedsReload = false;
@@ -108,7 +119,7 @@ namespace studio {
 			bool HaveActiveEdit = false;
 			bool ShowAdvancedDiagnostics = false;
 			uint64_t DocumentRevision = 1;
-			uint64_t AudioInputRevision = 1;
+			uint64_t EvaluationInputRevision = 1;
 			ImageGraphWavPreview WavAudio;
 			std::string WavAudioMessage;
 			engine::imagegraph::WavExport WavExportArtifact;
@@ -191,6 +202,20 @@ namespace studio {
 		}
 
 		void AuthoredDocumentChanged(State &state) {
+			std::erase_if(state.FileGrants, [&](const auto &grant) {
+				return std::none_of(
+					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
+						return node.Id == grant.NodeId && detail::ImageGraphFileReadType(node.Type);
+					}
+				);
+			});
+			std::erase_if(state.FileControls, [&](const auto &control) {
+				return std::none_of(
+					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
+						return node.Id == control.NodeId && detail::ImageGraphFileReadType(node.Type);
+					}
+				);
+			});
 			std::erase_if(state.ExportGrants, [&](const auto &grant) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
@@ -199,6 +224,7 @@ namespace studio {
 				);
 			});
 			if (state.LuaHost) state.LuaHost->Reset();
+			state.Host.ResetFiles();
 			state.LuaMessages.clear();
 			if (state.DocumentRevision == std::numeric_limits<uint64_t>::max()) {
 				state.DocumentRevision = 1;
@@ -246,6 +272,12 @@ namespace studio {
 			canvas.Look.WidgetFill = 0xFF858585;
 		}
 
+		detail::ImageGraphHost &HostFor(State &state) {
+			state.Host.Lua = state.LuaHost.get();
+			state.Host.Grants = state.FileGrants;
+			return state.Host;
+		}
+
 		void BindObservations(State &state, engine::imagegraph::EvaluationRequest &request) {
 			const auto frame = GetImageGraphFrame(state.Playback);
 			const std::string project =
@@ -281,7 +313,7 @@ namespace studio {
 			if (engine::imagegraph::Compile(document, plan, error) != engine::imagegraph::Status::Ok)
 				return true;
 			engine::imagegraph::EvaluationRequest request;
-			request.HostProvider = state.LuaHost.get();
+			request.HostProvider = &HostFor(state);
 			request.GroupReplay = replay;
 			request.GroupAuthoringRevision = replay ? replay->AuthoringRevision() : 0;
 			BindObservations(state, request);
@@ -503,7 +535,7 @@ namespace studio {
 			for (const auto &id : nodes) {
 				auto &grant = GrantFor(state, id);
 				engine::imagegraph::EvaluationRequest request;
-				request.HostProvider = state.LuaHost.get();
+				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
@@ -513,7 +545,7 @@ namespace studio {
 						state.Authored,
 						plan,
 						state.DocumentRevision,
-						state.AudioInputRevision,
+						state.EvaluationInputRevision,
 						request,
 						error,
 						engine::imagegraph::Limits::MaximumEvaluationBytes,
@@ -633,6 +665,8 @@ namespace studio {
 			}
 			state.Authored = std::move(candidate);
 			state.ExportGrants.clear();
+			state.FileGrants.clear();
+			state.FileControls.clear();
 			state.ExportUpdate = {};
 			state.Playback.CurrentTick = 0;
 			ApplyImageGraphTimeline(state.Authored, state.Playback);
@@ -663,7 +697,7 @@ namespace studio {
 				return false;
 			}
 			state.AudioCapturePathDisplay = path.string();
-			++state.AudioInputRevision;
+			++state.EvaluationInputRevision;
 			state.AudioCaptureMessage =
 				"loaded " + std::to_string(state.AudioFrames.size()) + " recorded frames";
 			state.LastDiagnostic = {};
@@ -728,6 +762,8 @@ namespace studio {
 			state.PxcxProjection = imported.Graph;
 			state.Authored = std::move(imported.Graph);
 			state.ExportGrants.clear();
+			state.FileGrants.clear();
+			state.FileControls.clear();
 			state.ExportUpdate = {};
 			state.Playback.CurrentTick = 0;
 			ApplyImageGraphTimeline(state.Authored, state.Playback);
@@ -944,11 +980,12 @@ namespace studio {
 				ENGINE_PROFILE_CAT("image composer preview", engine::core::ProfileCategory::Render);
 				if (engine::imagegraph::Compile(previewDocument, plan, diagnostic) != Status::Ok) {
 					if (state.LuaHost) state.LuaHost->Reset();
+					state.Host.ResetFiles();
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
 				}
 				engine::imagegraph::EvaluationRequest request;
-				request.HostProvider = state.LuaHost.get();
+				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames =
@@ -964,7 +1001,7 @@ namespace studio {
 						previewDocument,
 						plan,
 						state.DocumentRevision,
-						state.AudioInputRevision,
+						state.EvaluationInputRevision,
 						request,
 						diagnostic,
 						engine::imagegraph::Limits::MaximumEvaluationBytes,
@@ -1157,6 +1194,8 @@ namespace studio {
 				if (state.History.TryRecord(before, fresh)) {
 					state.Authored = std::move(fresh);
 					state.ExportGrants.clear();
+					state.FileGrants.clear();
+					state.FileControls.clear();
 					state.ExportUpdate = {};
 					AuthoredDocumentChanged(state);
 					state.SelectedOutput = "output-main";
@@ -1855,7 +1894,7 @@ namespace studio {
 				const bool sourceInput = node && choiceInput && choiceInput->SourceIndex >= 0;
 				if (boundary || sourceInput || triggerButton) {
 					engine::imagegraph::GroupRefreshEvent event;
-					event.At.HostProvider = state.LuaHost.get();
+					event.At.HostProvider = &HostFor(state);
 					event.At.AudioFrames = state.AudioFrames;
 					event.At.AudioClips = state.AudioClips;
 					BindObservations(state, event.At);
@@ -2343,7 +2382,7 @@ namespace studio {
 					event.EditedPort = input.Id;
 					event.LocalValue = &*input.Default;
 					event.LocalAnimated = true;
-					event.At.HostProvider = state.LuaHost.get();
+					event.At.HostProvider = &HostFor(state);
 					event.At.AudioFrames = state.AudioFrames;
 					event.At.AudioClips = state.AudioClips;
 					BindObservations(state, event.At);
@@ -2364,7 +2403,7 @@ namespace studio {
 				if (changed) {
 					const std::string nodeId = node.Id;
 					engine::imagegraph::EvaluationRequest request;
-					request.HostProvider = state.LuaHost.get();
+					request.HostProvider = &HostFor(state);
 					request.AudioFrames = state.AudioFrames;
 					request.AudioClips = state.AudioClips;
 					BindObservations(state, request);
@@ -2517,6 +2556,110 @@ namespace studio {
 			ImGui::TreePop();
 		}
 
+		void DrawFileGrants(State &state, std::string_view nodeId) {
+			auto found =
+				std::find_if(state.FileControls.begin(), state.FileControls.end(), [&](const auto &control) {
+					return control.NodeId == nodeId;
+				});
+			if (found == state.FileControls.end()) {
+				FileReadControls controls;
+				controls.NodeId = nodeId;
+				state.FileControls.push_back(std::move(controls));
+				found = std::prev(state.FileControls.end());
+			}
+			auto &controls = *found;
+			ImGui::InputTextWithHint(
+				"##read-file", "Exact file path", controls.File.data(), controls.File.size()
+			);
+			ImGui::InputTextWithHint(
+				"##read-resource",
+				"Resource key (blank for primary)",
+				controls.Resource.data(),
+				controls.Resource.size()
+			);
+			const auto changed = [&] {
+				state.Host.RefreshFile(nodeId);
+				state.PreviewCache.Clear();
+				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
+				RequestPreview(state, true);
+			};
+			if (ImGui::Button("Grant read")) {
+				const std::filesystem::path file(controls.File.data());
+				const std::string resource(controls.Resource.data());
+				if (file.empty())
+					controls.Message = "Enter an exact file path.";
+				else if (!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)
+							  .AllowsName(file.string()))
+					controls.Message = "File type is disabled by content policy.";
+				else {
+					auto grant =
+						std::find_if(state.FileGrants.begin(), state.FileGrants.end(), [&](const auto &item) {
+							return item.NodeId == nodeId && item.Resource == resource;
+						});
+					if (grant != state.FileGrants.end()) {
+						grant->File = file;
+						controls.Message.clear();
+						changed();
+					} else if (state.FileGrants.size() >= 256 ||
+							   std::count_if(
+								   state.FileGrants.begin(), state.FileGrants.end(), [&](const auto &item) {
+									   return item.NodeId == nodeId;
+								   }
+							   ) >= 128)
+						controls.Message = "Read grants exceed the session limit.";
+					else {
+						state.FileGrants.push_back({std::string(nodeId), file, false, resource});
+						controls.Message.clear();
+						changed();
+					}
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Read / refresh")) {
+				changed();
+				engine::imagegraph::Plan plan;
+				Diagnostic error;
+				engine::imagegraph::EvaluationRequest request;
+				request.HostProvider = &HostFor(state);
+				BindObservations(state, request);
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				request.AudioFrames = state.AudioFrames;
+				request.AudioClips = state.AudioClips;
+				request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				engine::imagegraph::HostNodeCapture capture;
+				if (engine::imagegraph::Compile(state.Authored, plan, error) != Status::Ok ||
+					!state.GroupHost.Prepare(state.Authored, plan, state.DocumentRevision, request, error) ||
+					!state.FeedbackHost.Prepare(
+						state.Authored,
+						plan,
+						state.DocumentRevision,
+						state.EvaluationInputRevision,
+						request,
+						error,
+						engine::imagegraph::Limits::MaximumEvaluationBytes,
+						state.SelectedOutput
+					))
+					controls.Message = error.Message;
+				else if (engine::imagegraphexport::ExecuteGraphHostNode(
+							 state.Authored, plan, request, nodeId, capture, controls.Message
+						 ))
+					controls.Message = "Read captured.";
+			}
+			if (ImGui::Button("Revoke reads")) {
+				std::erase_if(state.FileGrants, [&](const auto &grant) { return grant.NodeId == nodeId; });
+				controls.Message.clear();
+				changed();
+			}
+			for (const auto &grant : state.FileGrants)
+				if (grant.NodeId == nodeId)
+					ImGui::TextWrapped(
+						"%s: %s",
+						grant.Resource.empty() ? "Primary" : grant.Resource.c_str(),
+						grant.File.string().c_str()
+					);
+			if (!controls.Message.empty()) ImGui::TextWrapped("%s", controls.Message.c_str());
+		}
+
 		void DrawExportGrant(State &state, std::string_view nodeId) {
 			auto &grant = GrantFor(state, nodeId);
 			ImGui::InputTextWithHint(
@@ -2589,7 +2732,7 @@ namespace studio {
 			}
 			if (node->Type == "pc.verlet_sim_mesh_cache" && ImGui::Button("Cache Mesh")) {
 				engine::imagegraph::EvaluationRequest request;
-				request.HostProvider = state.LuaHost.get();
+				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
@@ -2605,7 +2748,7 @@ namespace studio {
 						state.Authored,
 						plan,
 						state.DocumentRevision,
-						state.AudioInputRevision,
+						state.EvaluationInputRevision,
 						request,
 						state.LastDiagnostic,
 						engine::imagegraph::Limits::MaximumEvaluationBytes,
@@ -2616,6 +2759,8 @@ namespace studio {
 				}
 			}
 			if (node->Type == "pc.export") DrawExportGrant(state, nodeId);
+			if (detail::ImageGraphFileReadType(node->Type) && detail::ImageGraphFileNeedsPrimary(node->Type))
+				DrawFileGrants(state, nodeId);
 			if (schema->Properties.empty() && !schema->DynamicInputs) {
 				ImGui::TextDisabled("No authored properties.");
 				return;
@@ -2623,7 +2768,7 @@ namespace studio {
 			ImGui::Separator();
 			if (node->Type == "pc.audio_window") {
 				engine::imagegraph::EvaluationRequest request;
-				request.HostProvider = state.LuaHost.get();
+				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
@@ -2635,7 +2780,7 @@ namespace studio {
 						nodeId,
 						request,
 						state.DocumentRevision,
-						state.AudioInputRevision,
+						state.EvaluationInputRevision,
 						error
 					))
 					state.AudioWindow.Draw();
@@ -2645,7 +2790,7 @@ namespace studio {
 			if (node->Type == "pc.wav_file_read") {
 				if (ImGui::Button("Sync length")) {
 					engine::imagegraph::EvaluationRequest request;
-					request.HostProvider = state.LuaHost.get();
+					request.HostProvider = &HostFor(state);
 					BindObservations(state, request);
 					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 					request.AudioFrames = state.AudioFrames;
@@ -2662,7 +2807,7 @@ namespace studio {
 				}
 				ImGui::TextWrapped("File watching is unavailable.");
 				engine::imagegraph::EvaluationRequest waveformRequest;
-				waveformRequest.HostProvider = state.LuaHost.get();
+				waveformRequest.HostProvider = &HostFor(state);
 				BindObservations(state, waveformRequest);
 				(void)engine::imagegraph::SetFrameTime(waveformRequest, GetImageGraphFrame(state.Playback));
 				waveformRequest.AudioClips = state.AudioClips;
@@ -2675,7 +2820,7 @@ namespace studio {
 						waveformRequest,
 						state.Playback.FramesPerSecond,
 						state.DocumentRevision,
-						state.AudioInputRevision,
+						state.EvaluationInputRevision,
 						waveformError
 					))
 					state.WavTimeline.Draw();
@@ -2684,7 +2829,7 @@ namespace studio {
 			}
 			if (node->Type == "pc.wav_file_write") {
 				engine::imagegraph::EvaluationRequest request;
-				request.HostProvider = state.LuaHost.get();
+				request.HostProvider = &HostFor(state);
 				BindObservations(state, request);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
@@ -3877,7 +4022,7 @@ namespace studio {
 						state.AudioClips, state.PreviewCache, state.WavSourceId, state.WavFilePath, diagnostic
 					)) {
 					state.WavSourceMessage = "loaded " + std::string(state.WavSourceId);
-					++state.AudioInputRevision;
+					++state.EvaluationInputRevision;
 					state.LastDiagnostic = {};
 					RequestPreview(state, true);
 				} else {
@@ -3906,7 +4051,7 @@ namespace studio {
 					if (state.WavAudio.RemoveSource(
 							state.AudioClips, state.PreviewCache, source.SourceId, diagnostic
 						)) {
-						++state.AudioInputRevision;
+						++state.EvaluationInputRevision;
 						RequestPreview(state, true);
 					} else {
 						state.WavSourceMessage = diagnostic.Message;
@@ -3927,7 +4072,7 @@ namespace studio {
 			ImGui::SameLine();
 			if (ImGui::Button("Clear audio capture")) {
 				ClearImageGraphAudioCapture(state.AudioFrames, state.PreviewCache);
-				++state.AudioInputRevision;
+				++state.EvaluationInputRevision;
 				state.AudioCapturePathDisplay.clear();
 				state.AudioCaptureMessage = "no recorded audio loaded";
 				RequestPreview(state, true);
@@ -4281,6 +4426,7 @@ namespace studio {
 			ImGui::PopStyleColor(2);
 			if (!open) {
 				if (state.LuaHost) state.LuaHost->Reset();
+				state.Host.ResetFiles();
 				state.ExportUpdate = {};
 				CloseImageComposerAudioPreview();
 				state.VectorControls.Close(renderer);
@@ -4292,7 +4438,7 @@ namespace studio {
 						state.AudioFrames,
 						state.Playback,
 						state.DocumentRevision,
-						state.AudioInputRevision,
+						state.EvaluationInputRevision,
 						diagnostic
 					))
 					state.WavAudioMessage = diagnostic.Message;
@@ -4304,14 +4450,14 @@ namespace studio {
 		FinishInactiveEdit(state);
 		DrawToolbar(state);
 		engine::imagegraph::EvaluationRequest vectorRequest;
-		vectorRequest.HostProvider = state.LuaHost.get();
+		vectorRequest.HostProvider = &HostFor(state);
 		BindObservations(state, vectorRequest);
 		(void)engine::imagegraph::SetFrameTime(vectorRequest, GetImageGraphFrame(state.Playback));
 		vectorRequest.AudioFrames = state.AudioFrames;
 		vectorRequest.AudioClips = state.AudioClips;
 		vectorRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
 		state.VectorControls.Refresh(
-			state.Authored, vectorRequest, state.DocumentRevision, state.AudioInputRevision
+			state.Authored, vectorRequest, state.DocumentRevision, state.EvaluationInputRevision
 		);
 		ImGui::Separator();
 
@@ -4371,7 +4517,7 @@ namespace studio {
 		ImGui::EndChild();
 		RefreshPreview(state, renderer);
 		if (state.ExportUpdate.Accept(
-				state.DocumentRevision, state.AudioInputRevision, GetImageGraphFrame(state.Playback)
+				state.DocumentRevision, state.EvaluationInputRevision, GetImageGraphFrame(state.Playback)
 			))
 			RunAuthoredExports(state, detail::ImageGraphExportEvent::Update);
 		Diagnostic audioDiagnostic;
@@ -4381,7 +4527,7 @@ namespace studio {
 				state.AudioFrames,
 				state.Playback,
 				state.DocumentRevision,
-				state.AudioInputRevision,
+				state.EvaluationInputRevision,
 				audioDiagnostic
 			))
 			state.WavAudioMessage = audioDiagnostic.Message;
@@ -4394,6 +4540,7 @@ namespace studio {
 		ImGui::End();
 		if (!open) {
 			if (state.LuaHost) state.LuaHost->Reset();
+			state.Host.ResetFiles();
 			state.ExportUpdate = {};
 			CloseImageComposerAudioPreview();
 			state.VectorControls.Close(renderer);

@@ -57,6 +57,7 @@ Milestone labels describe development scope, not release versions.
   15. Preserve source FLIP readback buffers and bounded step history for replay.
   16. Edit source groups and keys atomically; preserve undo/redo, instance writers and PXC saves.
   17. Generate source WaveTable choices and typed Points Remap defaults without handwritten fallbacks.
+  18. Read explicitly granted files in Studio with bounded immutable observations and shared Lua delegation.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
