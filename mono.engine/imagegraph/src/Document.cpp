@@ -33,6 +33,8 @@
 #include "SnapshotAudioMoves.hpp"
 #include "SourceGetterProjection.hpp"
 #include "SourceLuaSockets.hpp"
+#include "SourcePathShapeCodec.hpp"
+#include "SourceTilesetCodec.hpp"
 #include "SourceVerletPathCodec.hpp"
 #include "Timeline.hpp"
 #include "TimelineDrivers.hpp"
@@ -875,7 +877,8 @@ namespace engine::imagegraph {
 			if (const auto *array = std::get_if<ArrayValue>(&value); array && !array->Nested.empty())
 				return array->ElementType != ValueType::Image && array->ElementType != ValueType::Array &&
 					   (array->ElementType < ValueType::Gradient ||
-						array->ElementType == ValueType::Particle) &&
+						(array->ElementType == ValueType::Particle ||
+						 array->ElementType == ValueType::Tileset)) &&
 					   detail::ValidPayload(*array, true);
 			return detail::ValidValuePayload(value, false);
 		}
@@ -1016,6 +1019,12 @@ namespace engine::imagegraph {
 								return *flag ? ValueType::Scalar : ValueType::Text;
 						}
 				}
+				if (side == PortDirection::Output && node.Type == "pc.directory_search" && id == "outputs") {
+					for (const auto &value : node.Values)
+						if (value.Port == "type")
+							if (const auto *mode = std::get_if<EnumValue>(&value.Data))
+								return mode->Value == 1 ? ValueType::Text : ValueType::Image;
+				}
 				return port->Type;
 			}
 			if (side == PortDirection::Output && id.ends_with(BYPASS_SUFFIX)) {
@@ -1041,7 +1050,8 @@ namespace engine::imagegraph {
 		}
 
 		bool WithinArrayBudget(const ArrayValue &array) {
-			if (array.ElementType == ValueType::Particle) return detail::ValidPayload(array, true);
+			if (array.ElementType == ValueType::Particle || array.ElementType == ValueType::Tileset)
+				return detail::ValidPayload(array, true);
 			if (!array.Nested.empty()) {
 				if (array.Nested.size() > Limits::MaximumArrayElements) return false;
 				size_t count = array.Elements.size();
@@ -1085,13 +1095,15 @@ namespace engine::imagegraph {
 			if (!array.Nested.empty())
 				return array.ElementType != ValueType::Image && array.ElementType != ValueType::Array &&
 					   (array.ElementType < ValueType::Gradient ||
-						array.ElementType == ValueType::Particle) &&
+						(array.ElementType == ValueType::Particle ||
+						 array.ElementType == ValueType::Tileset)) &&
 					   detail::ValidPayload(array, true);
 			if (array.ElementType == ValueType::Any || !array.Items.empty())
 				return detail::ValidPayload(array, false);
 			if (!array.Nested.empty() || !WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
 				array.ElementType == ValueType::Array ||
-				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Particle) ||
+				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Particle &&
+				 array.ElementType != ValueType::Tileset) ||
 				TypeName(array.ElementType).empty())
 				return false;
 			for (const ElementValue &element : array.Elements)
@@ -1120,6 +1132,7 @@ namespace engine::imagegraph {
 				return path->Data && path->Data->SourceOperation ? "p3o" : "p3";
 			if (std::holds_alternative<PixelBoxValue>(value)) return "pb";
 			if (std::holds_alternative<ParticleValue>(value)) return "particle2";
+			if (std::holds_alternative<TilesetValue>(value)) return "tileset";
 			switch (value.index()) {
 			case 0:
 				return "b";
@@ -1167,6 +1180,11 @@ namespace engine::imagegraph {
 		void WritePathPayload(std::ostream &stream, const Path2D &path) {
 			if (path.SourceOperation) {
 				const auto &operation = *path.SourceOperation;
+				if (operation.Kind == SourcePathOperationKind::Shape) {
+					stream << "shape ";
+					detail::WriteSourcePathShape(stream, *operation.Shape);
+					return;
+				}
 				if (operation.Kind == SourcePathOperationKind::VerletMesh) {
 					stream << "verlet ";
 					detail::WriteSourceVerletPath(stream, operation);
@@ -1199,6 +1217,8 @@ namespace engine::imagegraph {
 			if (const auto *particle = std::get_if<ParticleValue>(&value)) {
 				stream << std::setprecision(17);
 				detail::WriteParticleValue(stream, *particle);
+			} else if (const auto *tileset = std::get_if<TilesetValue>(&value)) {
+				detail::WriteTilesetValue(stream, *tileset);
 			} else if (const auto *boolean = std::get_if<bool>(&value)) {
 				stream << (*boolean ? 1 : 0);
 			} else if (const auto *integer = std::get_if<int64_t>(&value)) {
@@ -1546,7 +1566,8 @@ namespace engine::imagegraph {
 				}
 				const auto type = ParseType(typeName);
 				if (!type || *type == ValueType::Image || *type == ValueType::Array ||
-					(*type >= ValueType::Gradient && !(version >= 9 && *type == ValueType::Particle)))
+					(*type >= ValueType::Gradient &&
+					 !(version >= 9 && (*type == ValueType::Particle || *type == ValueType::Tileset))))
 					return false;
 				ArrayValue array{*type, {}};
 				if (!admit(count * sizeof(ElementValue))) return false;
@@ -1683,6 +1704,13 @@ namespace engine::imagegraph {
 				ParticleValue particle;
 				if (!detail::ReadParticleValue(stream, particle, admit)) return false;
 				value = std::move(particle);
+				return true;
+			}
+			if (tag == "tileset") {
+				if (version < 9) return false;
+				TilesetValue tileset;
+				if (!detail::ReadTilesetValue(stream, tileset, admit)) return false;
+				value = std::move(tileset);
 				return true;
 			}
 			if (tag == "pb") {
@@ -1860,6 +1888,15 @@ namespace engine::imagegraph {
 				std::string kind;
 				size_t count = 0;
 				if (!(stream >> kind)) return false;
+				if (kind == "shape") {
+					if (!admit(sizeof(SourcePathData2D))) return false;
+					Path2D path;
+					auto &operation = path.SourceOperation.emplace();
+					operation.Kind = SourcePathOperationKind::Shape;
+					if (!detail::ReadSourcePathShape(stream, operation.Shape.emplace(), admit)) return false;
+					value = std::move(path);
+					return true;
+				}
 				if (kind == "verlet") {
 					if (!admit(sizeof(SourcePathData2D))) return false;
 					Path2D path;
@@ -2330,6 +2367,9 @@ namespace engine::imagegraph {
 			stream << '\n';
 		}
 		for (const Keyframe &keyframe : document.Keyframes) {
+			if (keyframe.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes ||
+				(document.FormatVersion < 9 && !keyframe.SourceKeyId.empty()))
+				return {};
 			stream << "keyframe ";
 			WriteQuoted(stream, keyframe.NodeId);
 			stream << ' ';
@@ -2339,6 +2379,15 @@ namespace engine::imagegraph {
 			stream << ' ';
 			WriteValue(stream, keyframe.Data);
 			stream << '\n';
+			if (!keyframe.SourceKeyId.empty()) {
+				stream << "key_source_id ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' ';
+				WriteQuoted(stream, keyframe.SourceKeyId);
+				stream << '\n';
+			}
 			if (document.FormatVersion >= 9 && (keyframe.Subframe != 0 || keyframe.NegativeFrame)) {
 				stream << "key_time ";
 				WriteQuoted(stream, keyframe.NodeId);
@@ -2532,6 +2581,7 @@ namespace engine::imagegraph {
 		std::set<std::string> groupSampling;
 		std::set<size_t> keyTimes;
 		std::set<size_t> keyKinds;
+		std::set<size_t> keySourceIds;
 		std::optional<std::pair<bool, std::vector<PreviewRulerGuide>>> previewRulers;
 		std::optional<size_t> projectRegionCount;
 		size_t projectRegionTextBytes = 0;
@@ -2908,6 +2958,18 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				parsed.Keyframes.push_back(std::move(keyframe));
+			} else if (marker == "key_source_id" && parsed.FormatVersion >= 9) {
+				std::string nodeId, port, id;
+				uint64_t tick = 0;
+				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick) ||
+					!ReadQuoted(row, id, Limits::MaximumSourceKeyIdBytes) || id.empty() || HasTrailing(row) ||
+					parsed.Keyframes.empty())
+					goto malformed;
+				auto &key = parsed.Keyframes.back();
+				if (key.NodeId != nodeId || key.Port != port || key.Tick != tick ||
+					!keySourceIds.emplace(parsed.Keyframes.size() - 1).second)
+					goto malformed;
+				key.SourceKeyId = std::move(id);
 			} else if (marker == "key_time" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, sign;
 				FrameTime time;
@@ -3386,9 +3448,11 @@ namespace engine::imagegraph {
 				}
 				return std::holds_alternative<PathValue3D>(value) ||
 					   std::holds_alternative<ParticleValue>(value) ||
+					   std::holds_alternative<TilesetValue>(value) ||
 					   (array &&
 						(array->ElementType == ValueType::Any || array->ElementType == ValueType::Path3D ||
-						 array->ElementType == ValueType::Particle || !array->Items.empty()));
+						 array->ElementType == ValueType::Particle ||
+						 array->ElementType == ValueType::Tileset || !array->Items.empty()));
 			};
 			for (const auto &node : document.Nodes) {
 				for (const auto &value : node.Values)
@@ -4842,7 +4906,43 @@ namespace engine::imagegraph {
 			detail::MakeEvaluationSet<std::tuple<std::string_view, std::string_view, bool, uint64_t, double>>(
 				budget
 			);
+		auto sourceKeyIds =
+			detail::MakeEvaluationSet<std::tuple<std::string_view, std::string_view, std::string_view>>(
+				budget
+			);
 		for (const Keyframe &keyframe : document.Keyframes) {
+			if (keyframe.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"source key identity exceeds its byte limit",
+					keyframe.NodeId,
+					keyframe.Port
+				);
+				return diagnostic.Code;
+			}
+			if (!keyframe.SourceKeyId.empty()) {
+				if (document.FormatVersion < 9) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedVersion,
+						"source key identity needs document version 9",
+						keyframe.NodeId,
+						keyframe.Port
+					);
+					return diagnostic.Code;
+				}
+				if (!sourceKeyIds.emplace(keyframe.NodeId, keyframe.Port, keyframe.SourceKeyId).second) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"duplicate source key identity",
+						keyframe.NodeId,
+						keyframe.Port
+					);
+					return diagnostic.Code;
+				}
+			}
 			if (keyframe.Tick > Limits::MaximumTick) {
 				SetDiagnostic(
 					diagnostic,
@@ -5545,6 +5645,50 @@ namespace engine::imagegraph {
 				current = input->second->FromNode;
 			}
 		}
+		for (const auto &node : document.Nodes) {
+			if (node.Type != "pc.directory_search") continue;
+			const auto *owner = EffectiveInputOwner(document, node, "type");
+			if (!owner) owner = &node;
+			const bool staticMode =
+				std::find(owner->SourceStaticInputs.begin(), owner->SourceStaticInputs.end(), "type") !=
+				owner->SourceStaticInputs.end();
+			const bool changing =
+				std::any_of(
+					resolvedInputs.begin(),
+					resolvedInputs.end(),
+					[&](const ResolvedInput &input) {
+						return input.NodeId == owner->Id && input.Port == "type";
+					}
+				) ||
+				std::any_of(
+					effectiveLinks.begin(),
+					effectiveLinks.end(),
+					[&](const Link &link) { return link.ToNode == owner->Id && link.ToPort == "type"; }
+				) ||
+				std::find(owner->SourceAnimatedInputs.begin(), owner->SourceAnimatedInputs.end(), "type") !=
+					owner->SourceAnimatedInputs.end() ||
+				(!staticMode &&
+				 std::any_of(
+					 document.Keyframes.begin(),
+					 document.Keyframes.end(),
+					 [&](const Keyframe &key) { return key.NodeId == owner->Id && key.Port == "type"; }
+				 )) ||
+				std::any_of(
+					owner->SourceInputExpressions.begin(),
+					owner->SourceInputExpressions.end(),
+					[](const SourceInputExpression &expression) { return expression.Port == "type"; }
+				);
+			if (changing) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedExecution,
+					"Directory Search output typing requires a static authored type selector",
+					node.Id,
+					"type"
+				);
+				return diagnostic.Code;
+			}
+		}
 		std::vector<InlineOwnerDependency> inlineDependencies;
 		std::vector<InlineControlDependency> inlineControlDependencies;
 		const bool hasInlineScopes = std::any_of(
@@ -5614,6 +5758,110 @@ namespace engine::imagegraph {
 				}
 				scope = group->ParentId;
 			}
+		}
+		const auto verletStep = [&](const InlineOwnerDependency &route) {
+			const auto &type = document.Nodes[route.Consumer].Type;
+			return document.Nodes[route.Owner].Type == "pc.verlet_sim_inline" &&
+				   (type == "pc.verlet_sim_step" || type == "pc.verlet_sim_render");
+		};
+		size_t colliderRoutes = 0;
+		for (size_t index = 0; index < inlineDependencies.size(); ++index) {
+			const auto &step = inlineDependencies[index];
+			if (!verletStep(step)) continue;
+			const size_t count =
+				std::count_if(inlineDependencies.begin(), inlineDependencies.end(), [&](const auto &route) {
+					return route.Owner == step.Owner &&
+						   document.Nodes[route.Consumer].Type == "pc.verlet_sim_collide";
+				});
+			const bool first = std::none_of(
+				inlineDependencies.begin(), inlineDependencies.begin() + index, [&](const auto &route) {
+					return route.Owner == step.Owner && verletStep(route);
+				}
+			);
+			const size_t additional = count + (first && count ? count - 1 : 0);
+			if (additional > Limits::MaximumLinks - colliderRoutes) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"Verlet collider dependency graph exceeds native link bound",
+					document.Nodes[step.Consumer].Id,
+					"mesh"
+				);
+				return diagnostic.Code;
+			}
+			colliderRoutes += additional;
+		}
+		if (colliderRoutes) {
+			const size_t ownerEdges =
+				std::count_if(inlineDependencies.begin(), inlineDependencies.end(), [](const auto &route) {
+					return !route.ControlsOnly;
+				});
+			const size_t existingEdges =
+				effectiveLinks.size() + ownerEdges + inlineControlDependencies.size();
+			if (existingEdges > Limits::MaximumLinks ||
+				colliderRoutes > Limits::MaximumLinks - existingEdges) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"Verlet collider dependency graph exceeds native link bound"
+				);
+				return diagnostic.Code;
+			}
+			auto additionsCharge = budget.Reserve(document.Nodes.size() * sizeof(size_t));
+			if (!additionsCharge) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"collider dependency workspace exceeds evaluation budget"
+				);
+				return diagnostic.Code;
+			}
+			std::vector<size_t> additions(document.Nodes.size());
+			const auto visitColliderRoutes = [&](auto append) {
+				for (size_t index = 0; index < inlineDependencies.size(); ++index) {
+					const auto &step = inlineDependencies[index];
+					if (!verletStep(step)) continue;
+					const bool first = std::none_of(
+						inlineDependencies.begin(),
+						inlineDependencies.begin() + index,
+						[&](const auto &route) { return route.Owner == step.Owner && verletStep(route); }
+					);
+					std::optional<size_t> previous;
+					for (const auto &route : inlineDependencies) {
+						if (route.Owner != step.Owner ||
+							document.Nodes[route.Consumer].Type != "pc.verlet_sim_collide")
+							continue;
+						append(step.Consumer, route.Consumer);
+						if (first && previous) append(route.Consumer, *previous);
+						previous = route.Consumer;
+					}
+				}
+			};
+			visitColliderRoutes([&](size_t, size_t producer) { ++additions[producer]; });
+			const size_t required = inlineControlDependencies.size() + colliderRoutes;
+			if (required > inlineControlDependencies.capacity()) {
+				auto charge = budget.Reserve(required * sizeof(InlineControlDependency));
+				if (!charge || !planCharge.Merge(std::move(*charge))) {
+					SetDiagnostic(
+						diagnostic, Status::LimitExceeded, "collider control routes exceed evaluation budget"
+					);
+					return diagnostic.Code;
+				}
+				inlineControlDependencies.reserve(required);
+			}
+			for (size_t producer = 0; producer < additions.size(); ++producer) {
+				const size_t required = downstream[producer].size() + additions[producer];
+				if (!additions[producer] || required <= downstream[producer].capacity()) continue;
+				auto charge = budget.Reserve(required * sizeof(size_t));
+				if (!charge || !planCharge.Merge(std::move(*charge))) {
+					SetDiagnostic(
+						diagnostic, Status::LimitExceeded, "collider dependency rows exceed evaluation budget"
+					);
+					return diagnostic.Code;
+				}
+				downstream[producer].reserve(required);
+			}
+			visitColliderRoutes(addControlRoute);
 		}
 		std::vector<GroupSurfaceDependency> surfaceDependencies;
 		auto surfaceCharge = budget.Reserve(document.Nodes.size() * sizeof(GroupSurfaceDependency));
@@ -8733,6 +8981,51 @@ namespace engine::imagegraph {
 				context.InheritedInterpolation = *inheritedInterpolation;
 				context.InheritedOversample = *inheritedOversample;
 				context.ByteBudget = budget.Available();
+				detail::AllocationReservation colliderIdsCharge;
+				std::vector<std::string_view> colliderIds;
+				if (node.Type == "pc.verlet_sim_step" || node.Type == "pc.verlet_sim_render") {
+					const size_t count = std::count_if(
+						plan.InlineControlDependencies.begin(),
+						plan.InlineControlDependencies.end(),
+						[&](const auto &route) {
+							return route.Consumer == index &&
+								   document.Nodes[route.Producer].Type == "pc.verlet_sim_collide";
+						}
+					);
+					if (count && !simulation) {
+						SetDiagnostic(
+							diagnostic,
+							Status::UnsupportedExecution,
+							"source collider registrations require EvaluateSimulation or stateful evaluation",
+							node.Id,
+							"mesh"
+						);
+						return diagnostic.Code;
+					}
+					if (count) {
+						auto charge = context.ReserveWorkspace(count * sizeof(std::string_view), "mesh");
+						if (!charge) {
+							SetDiagnostic(
+								diagnostic,
+								context.FailureCode,
+								context.FailureMessage,
+								node.Id,
+								context.FailurePort
+							);
+							return diagnostic.Code;
+						}
+						colliderIdsCharge = std::move(*charge);
+						colliderIds.reserve(count);
+						for (const auto &route : plan.InlineControlDependencies)
+							if (route.Consumer == index &&
+								document.Nodes[route.Producer].Type == "pc.verlet_sim_collide")
+								colliderIds.push_back(document.Nodes[route.Producer].Id);
+						std::sort(colliderIds.begin(), colliderIds.end(), [&](auto left, auto right) {
+							return nodeIndices.at(left) < nodeIndices.at(right);
+						});
+						context.SimulationColliderIds = colliderIds;
+					}
+				}
 				for (const CatalogueInput &input : catalogueEntry->Inputs) {
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
@@ -8902,6 +9195,41 @@ namespace engine::imagegraph {
 						}
 					}
 					if (input.Type != ValueType::Any && !IsAuthoredValueType(input.Type)) {
+						// Compile resolves an unconnected junction's owned default without
+						// a producer edge. Admit it before runtime-only inputs skip local values.
+						if (!linked) {
+							const auto resolved = std::find_if(
+								plan.ResolvedInputs.begin(),
+								plan.ResolvedInputs.end(),
+								[&](const ResolvedInput &value) {
+									return value.NodeId == node.Id && value.Port == input.Id;
+								}
+							);
+							if (resolved != plan.ResolvedInputs.end()) {
+								const auto type = detail::PayloadType(resolved->Data);
+								const auto *array = std::get_if<ArrayValue>(&resolved->Data);
+								const bool compatible =
+									type == input.Type ||
+									(input.Type == ValueType::Object && type == ValueType::Struct) ||
+									((input.Type == ValueType::Mesh || input.Type == ValueType::Scene3D) &&
+									 (type == ValueType::Mesh || type == ValueType::Light3D ||
+									  type == ValueType::Scene3D)) ||
+									(array && (array->ElementType == input.Type || !array->Items.empty()));
+								if (!detail::ValidRuntimeValue(resolved->Data) || !compatible) {
+									SetDiagnostic(
+										diagnostic,
+										Status::TypeMismatch,
+										"runtime junction default requires a bounded owned typed value",
+										node.Id,
+										std::string(input.Id)
+									);
+									return diagnostic.Code;
+								}
+								context.LinkedValues.emplace_back(input.Id);
+								context.ValueViews.emplace_back(input.Id, &resolved->Data);
+								continue;
+							}
+						}
 						if (linked &&
 							(input.Type == ValueType::Mesh || input.Type == ValueType::Mesh2D ||
 							 input.Type == ValueType::Material3D || input.Type == ValueType::Light3D ||
@@ -8909,8 +9237,9 @@ namespace engine::imagegraph {
 							 input.Type == ValueType::Buffer || input.Type == ValueType::Struct ||
 							 input.Type == ValueType::Object || input.Type == ValueType::PcxNode ||
 							 input.Type == ValueType::NodeRef || input.Type == ValueType::FluidDomain ||
-							 input.Type == ValueType::Particle || input.Type == ValueType::PixelBox ||
-							 input.Type == ValueType::DynamicSurface || input.Type == ValueType::Path3D)) {
+							 input.Type == ValueType::Particle || input.Type == ValueType::Tileset ||
+							 input.Type == ValueType::PixelBox || input.Type == ValueType::DynamicSurface ||
+							 input.Type == ValueType::Path3D)) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
 							const auto *source =
 								produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;

@@ -1,5 +1,6 @@
 #include "FluidPayload.hpp"
 #include "MeshPayload.hpp"
+#include "SourceVerletCollider.hpp"
 
 #include <engine/imagegraph/SimulationReplay.hpp>
 
@@ -13,6 +14,7 @@ namespace engine::imagegraph {
 		bytes = detail::MeshAddBytes(bytes, detail::MeshVectorBytes<true>(entry.Topology.Triangles));
 		bytes = detail::MeshAddBytes(bytes, detail::MeshVectorBytes<true>(entry.Topology.Quads));
 		bytes = detail::MeshAddBytes(bytes, detail::MeshVectorBytes<true>(entry.Topology.SparseQuads));
+		if (entry.Collider) bytes = detail::MeshAddBytes(bytes, entry.Collider->OwnerNodeId.capacity());
 		if (entry.Cache) bytes = detail::MeshAddBytes(bytes, detail::MeshVectorBytes<true>(*entry.Cache));
 		return detail::MeshAddBytes(bytes, detail::FluidStorageBytes<true>(entry.Fluid));
 	}
@@ -47,13 +49,13 @@ namespace engine::imagegraph {
 					Status::InvalidValue, "simulation replay identity or tick is invalid", entry.NodeId
 				);
 			if (entry.Drag &&
-				(!detail::MeshFinite(entry.Drag->Move) || !detail::MeshFinite(entry.Drag->Previous) ||
-				 !std::isfinite(entry.Drag->PreviousAngle) ||
+				(entry.Collider || !detail::MeshFinite(entry.Drag->Move) ||
+				 !detail::MeshFinite(entry.Drag->Previous) || !std::isfinite(entry.Drag->PreviousAngle) ||
 				 (entry.Drag->Anchor && !detail::MeshFinite(*entry.Drag->Anchor)) ||
 				 !entry.State.Mesh.Points.empty() || !entry.State.Mesh.Edges.empty()))
 				return refuse(Status::InvalidValue, "simulation drag replay is invalid", entry.NodeId);
 			if (entry.Fluid.Data &&
-				(entry.Cache || entry.Drag || !entry.State.Mesh.Points.empty() ||
+				(entry.Collider || entry.Cache || entry.Drag || !entry.State.Mesh.Points.empty() ||
 				 !entry.State.Mesh.Edges.empty() || !entry.Topology.Triangles.empty() ||
 				 !entry.Topology.Quads.empty() || !entry.Topology.SparseQuads.empty() ||
 				 !detail::ValidFluidPayload(entry.Fluid) || entry.Fluid.Data->OriginNodeId != entry.NodeId ||
@@ -62,8 +64,8 @@ namespace engine::imagegraph {
 				 entry.Fluid.Data->AuthoringRevision != entry.State.AuthoringRevision))
 				return refuse(Status::InvalidValue, "simulation fluid replay is invalid", entry.NodeId);
 			if (entry.Cache) {
-				if (entry.Drag || !entry.State.Mesh.Points.empty() || !entry.State.Mesh.Edges.empty() ||
-					entry.Cache->size() > Limits::MaximumArrayElements)
+				if (entry.Collider || entry.Drag || !entry.State.Mesh.Points.empty() ||
+					!entry.State.Mesh.Edges.empty() || entry.Cache->size() > Limits::MaximumArrayElements)
 					return refuse(
 						Status::InvalidValue, "simulation cached controls are invalid", entry.NodeId
 					);
@@ -72,6 +74,18 @@ namespace engine::imagegraph {
 						return refuse(
 							Status::InvalidValue, "simulation cached point must be finite", entry.NodeId
 						);
+			}
+			if (entry.Collider) {
+				const auto &collider = *entry.Collider;
+				if (collider.OwnerNodeId.empty() || collider.OwnerNodeId.size() > Limits::MaximumTextBytes ||
+					entry.ProcessorRow >= Limits::MaximumArrayElements || entry.Cache || entry.Drag ||
+					entry.Fluid.Data || !entry.State.Mesh.Points.empty() || !entry.State.Mesh.Edges.empty() ||
+					!entry.Topology.Triangles.empty() || !entry.Topology.Quads.empty() ||
+					!entry.Topology.SparseQuads.empty() ||
+					!detail::ValidSourceVerletCollider(collider.Geometry, collider.Active))
+					return refuse(
+						Status::InvalidValue, "simulation collider control replay is invalid", entry.NodeId
+					);
 			}
 			for (size_t earlier = 0; earlier < index; ++earlier)
 				if (state.Entries[earlier].NodeId == entry.NodeId &&

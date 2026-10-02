@@ -148,8 +148,27 @@ namespace engine::imagegraph::detail {
 						return false;
 			return true;
 		};
+		const auto sourceTriggerKey = [&](const Keyframe &key) {
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
+					return item.Id == key.NodeId;
+				});
+			if (node == document.Nodes.end()) return false;
+			const auto *catalogue = FindCatalogueEntry(node->Type);
+			const auto *input = catalogue ? FindCatalogueInput(*catalogue, key.Port) : nullptr;
+			if (input && input->SourceKind == "Trigger") return true;
+			if (node->Type != "pc.group_input" || key.Port != "parent_value") return false;
+			const auto *loaded = request.GroupReplay ? request.GroupReplay->Find(node->Id) : nullptr;
+			if (loaded) return loaded->Domain.Kind == SourceSocketKind::Trigger;
+			const auto type = std::find_if(node->Values.begin(), node->Values.end(), [](const auto &value) {
+				return value.Port == "input_type";
+			});
+			return type != node->Values.end() && std::holds_alternative<EnumValue>(type->Data) &&
+				   std::get<EnumValue>(type->Data).Value == 19;
+		};
 		const auto suppressed = [&](const Keyframe &key) {
-			if (staticSourceKey(key)) return true;
+			// Source Trigger maps own key positions. Sampling boolean easing here preempts that getter.
+			if (staticSourceKey(key) || sourceTriggerKey(key)) return true;
 			if (request.GroupReplay && request.GroupReplay->Binding(key.NodeId, key.Port)) return true;
 			const auto *entry = request.GroupReplay ? request.GroupReplay->Find(key.NodeId) : nullptr;
 			const auto *shared =
@@ -164,14 +183,14 @@ namespace engine::imagegraph::detail {
 			for (const auto &overlay : request.GroupReplay->SharedSubtypes())
 				if (!overlay.Fixed)
 					for (const auto &key : overlay.Keys)
-						if (!staticSourceKey(key)) visit(key);
+						if (!staticSourceKey(key) && !sourceTriggerKey(key)) visit(key);
 			for (const auto &entry : request.GroupReplay->Entries()) {
 				if (!entry.SubtypeStatic)
 					for (const auto &key : entry.SubtypeKeys)
-						if (!staticSourceKey(key)) visit(key);
+						if (!staticSourceKey(key) && !sourceTriggerKey(key)) visit(key);
 				if (!entry.ParentReset)
 					for (const auto &key : entry.ParentKeys)
-						if (!staticSourceKey(key)) visit(key);
+						if (!staticSourceKey(key) && !sourceTriggerKey(key)) visit(key);
 			}
 		};
 		size_t extraKeys = 0;

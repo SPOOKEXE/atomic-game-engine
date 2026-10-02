@@ -14,6 +14,12 @@ namespace engine::imagegraph {
 		double PreviousAngle = 0;
 		bool operator==(const VerletDragReplay &) const = default;
 	};
+	struct VerletColliderReplay {
+		std::string OwnerNodeId;
+		VerletCollider Geometry;
+		bool Active = true;
+		bool operator==(const VerletColliderReplay &) const = default;
+	};
 	struct SimulationReplayEntry {
 		std::string NodeId;
 		VerletReplayState State;
@@ -22,6 +28,7 @@ namespace engine::imagegraph {
 		std::optional<VerletDragReplay> Drag;
 		std::optional<std::vector<Vector2>> Cache;
 		FluidDomainValue Fluid;
+		std::optional<VerletColliderReplay> Collider;
 		bool operator==(const SimulationReplayEntry &) const = default;
 	};
 	struct SimulationReplayState {

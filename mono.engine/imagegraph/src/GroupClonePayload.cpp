@@ -167,7 +167,8 @@ namespace engine::imagegraph {
 		for (const auto &output : document.Outputs)
 			if (!text(output.Id) || !text(output.NodeId) || !text(output.Port)) return std::nullopt;
 		for (const auto &key : document.Keyframes) {
-			if (!text(key.NodeId) || !text(key.Port) || !text(key.Interpolation) || !value(key.Data))
+			if (key.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes || !text(key.SourceKeyId) ||
+				!text(key.NodeId) || !text(key.Port) || !text(key.Interpolation) || !value(key.Data))
 				return std::nullopt;
 			if (key.Ease && (!text(key.Ease->InType) || !text(key.Ease->OutType))) return std::nullopt;
 			if (key.SourceDriver) {

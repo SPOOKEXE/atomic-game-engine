@@ -140,3 +140,32 @@ TEST_CASE("key transfer uses source declaration and display domains", "[imagegra
 	);
 	CHECK(retained == original);
 }
+
+TEST_CASE(
+	"source key provenance is charged and property cloning creates a fresh identity",
+	"[imagegraph][key_provenance]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"source", "value.number", "", {}, {{"value", 1.0}}},
+		{"target", "value.number", "", {}, {{"value", 2.0}}}
+	};
+	Keyframe key{"source", "value", 2, 3.0, "linear"};
+	const auto originalBytes = KeyframePayloadBytes(key);
+	REQUIRE(originalBytes);
+	key.SourceKeyId.assign(Limits::MaximumSourceKeyIdBytes, 'x');
+	REQUIRE(KeyframePayloadBytes(key));
+	CHECK(*KeyframePayloadBytes(key) == *originalBytes + Limits::MaximumSourceKeyIdBytes);
+	Keyframe copied;
+	Diagnostic error;
+	REQUIRE(PrepareKeyframeCloneForProperty(document, key, "target", "value", copied, error) == Status::Ok);
+	CHECK(copied.SourceKeyId.empty());
+	CHECK(key.SourceKeyId.size() == Limits::MaximumSourceKeyIdBytes);
+	CHECK(copied.Data == key.Data);
+	key.SourceKeyId.push_back('x');
+	CHECK_FALSE(KeyframePayloadBytes(key));
+	const auto retained = copied;
+	CHECK(PrepareKeyframeCloneForProperty(document, key, "target", "value", copied, error) != Status::Ok);
+	CHECK(copied == retained);
+}

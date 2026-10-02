@@ -9,14 +9,14 @@ namespace engine::imagegraph::detail {
 		if (origin.empty()) return nullptr;
 		for (size_t index = context.PendingSimulationRows.size(); index > 0; --index) {
 			const auto &entry = context.PendingSimulationRows[index - 1];
-			if (entry.NodeId == origin && entry.ProcessorRow == processorRow && !entry.Drag && !entry.Cache &&
-				!entry.Fluid.Data)
+			if (entry.NodeId == origin && entry.ProcessorRow == processorRow && !entry.Collider &&
+				!entry.Drag && !entry.Cache && !entry.Fluid.Data)
 				return &entry;
 		}
 		if (!context.CurrentSimulation) return nullptr;
 		for (const auto &entry : context.CurrentSimulation->Entries)
-			if (entry.NodeId == origin && entry.ProcessorRow == processorRow && !entry.Drag && !entry.Cache &&
-				!entry.Fluid.Data)
+			if (entry.NodeId == origin && entry.ProcessorRow == processorRow && !entry.Collider &&
+				!entry.Drag && !entry.Cache && !entry.Fluid.Data)
 				return &entry;
 		return nullptr;
 	}

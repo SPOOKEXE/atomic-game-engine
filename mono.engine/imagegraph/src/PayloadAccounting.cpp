@@ -1,5 +1,5 @@
-#include "ValuePayload.hpp"
 #include "PuppetControl.hpp"
+#include "ValuePayload.hpp"
 
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
@@ -10,7 +10,8 @@
 
 namespace engine::imagegraph {
 	std::optional<uint64_t> KeyframePayloadBytes(const Keyframe &key) {
-		if (!detail::ValidRuntimeValue(key.Data) ||
+		if (key.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes ||
+			!detail::ValidRuntimeValue(key.Data) ||
 			(key.SourceDriver && !ValidKeyframeSourceDriver(*key.SourceDriver)))
 			return std::nullopt;
 		uint64_t bytes = sizeof(Keyframe);
@@ -20,7 +21,7 @@ namespace engine::imagegraph {
 			return true;
 		};
 		if (!add(detail::ValuePayloadBytes(key.Data) - sizeof(Value)) || !add(key.NodeId.size()) ||
-			!add(key.Port.size()) || !add(key.Interpolation.size()))
+			!add(key.Port.size()) || !add(key.Interpolation.size()) || !add(key.SourceKeyId.size()))
 			return std::nullopt;
 		if (key.Ease && (!add(key.Ease->InType.size()) || !add(key.Ease->OutType.size())))
 			return std::nullopt;
@@ -141,6 +142,7 @@ namespace engine::imagegraph {
 			Keyframe candidate = key;
 			candidate.NodeId = nodeId;
 			candidate.Port = property;
+			candidate.SourceKeyId.clear();
 			result = std::move(candidate);
 		} catch (const std::bad_alloc &) {
 			return fail(Status::LimitExceeded, "key transfer allocation was refused");

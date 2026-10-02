@@ -15,8 +15,8 @@
 
 TEST_SUITE_ID("engine.imagegraph.document")
 
-using engine::imagegraph::ArrayValue;
 using engine::imagegraph::AnimationRegion;
+using engine::imagegraph::ArrayValue;
 using engine::imagegraph::Colour;
 using engine::imagegraph::Compile;
 using engine::imagegraph::Diagnostic;
@@ -25,8 +25,8 @@ using engine::imagegraph::DynamicInput;
 using engine::imagegraph::Evaluate;
 using engine::imagegraph::EvaluateArray;
 using engine::imagegraph::EvaluationRequest;
-using engine::imagegraph::FrameTime;
 using engine::imagegraph::FindSchema;
+using engine::imagegraph::FrameTime;
 using engine::imagegraph::Group;
 using engine::imagegraph::ImageArray;
 using engine::imagegraph::Junction;
@@ -1217,4 +1217,56 @@ TEST_CASE(
 	Plan plan;
 	CHECK(Compile(downgraded, plan, diagnostic) == Status::UnsupportedVersion);
 	CHECK(Write(downgraded).empty());
+}
+
+TEST_CASE(
+	"source key provenance has a bounded optional native stanza and scoped uniqueness",
+	"[imagegraph][key_provenance]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes.push_back({"number", "value.number", "", {}, {{"value", 1.0}}});
+	document.Outputs.push_back({"out", "number", "number"});
+	document.Keyframes = {{"number", "value", 2, 3.0, "linear"}};
+	document.Keyframes[0].SourceKeyId = "pxc:0:2:0:0:0";
+	Diagnostic error;
+	Plan plan;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	const auto encoded = Write(document);
+	CHECK(encoded.find("key_source_id \"number\" \"value\" 2 \"pxc:0:2:0:0:0\"") != std::string::npos);
+	Document restored;
+	REQUIRE(Read(encoded, restored, error) == Status::Ok);
+	CHECK(restored == document);
+	restored.Keyframes[0].Tick = 7;
+	REQUIRE(Compile(restored, plan, error) == Status::Ok);
+	CHECK(restored.Keyframes[0].SourceKeyId == document.Keyframes[0].SourceKeyId);
+	const auto moved = Write(restored);
+	REQUIRE(Read(moved, restored, error) == Status::Ok);
+	CHECK(restored.Keyframes[0].Tick == 7);
+	CHECK(restored.Keyframes[0].SourceKeyId == document.Keyframes[0].SourceKeyId);
+
+	auto duplicate = restored.Keyframes[0];
+	duplicate.Tick = 8;
+	restored.Keyframes.push_back(duplicate);
+	CHECK(Compile(restored, plan, error) == Status::InvalidValue);
+	CHECK(error.Message == "duplicate source key identity");
+	restored = document;
+	restored.FormatVersion = 8;
+	CHECK(Write(restored).empty());
+	CHECK(Compile(restored, plan, error) == Status::UnsupportedVersion);
+	restored = document;
+	restored.Keyframes[0].SourceKeyId.assign(Limits::MaximumSourceKeyIdBytes + 1, 'x');
+	CHECK(Write(restored).empty());
+	CHECK(Compile(restored, plan, error) == Status::LimitExceeded);
+
+	restored = document;
+	const auto retained = restored;
+	CHECK(
+		Read(encoded + "key_source_id \"number\" \"value\" 2 \"duplicate\"\n", restored, error) ==
+		Status::Malformed
+	);
+	CHECK(restored == retained);
+	const auto withoutIdentity = encoded.substr(0, encoded.find("key_source_id"));
+	REQUIRE(Read(withoutIdentity, restored, error) == Status::Ok);
+	CHECK(restored.Keyframes[0].SourceKeyId.empty());
 }

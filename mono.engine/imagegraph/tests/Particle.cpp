@@ -77,7 +77,6 @@ namespace {
 TEST_CASE(
 	"Source particle snapshots own histories and sprites without widening value layout", "[imagegraph]"
 ) {
-	static_assert(std::variant_size_v<Value> == 35);
 	static_assert(std::is_same_v<std::variant_alternative_t<34, Value>, ParticleValue>);
 	static_assert(sizeof(Value) == 88 && sizeof(ParticleValue) == 8);
 	auto original = Particle(), copy = original;

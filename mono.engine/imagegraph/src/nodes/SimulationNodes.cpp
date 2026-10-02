@@ -251,7 +251,13 @@ namespace engine::imagegraph::detail {
 				return context.Fail(Status::LimitExceeded, "inline step count exceeds work budget", "step");
 			if (sourceInline && !render && context.Boolean("pre_render") && context.Request.Tick != 0)
 				repeat = 0;
-			const uint64_t units = mesh->Data->Simulation.Points.size() + mesh->Data->Simulation.Edges.size();
+			std::vector<VerletCollider> colliders;
+			AllocationReservation colliderCharge;
+			if (sourceInline && !ResolveVerletColliderControls(context, colliders, colliderCharge))
+				return false;
+			const uint64_t units = mesh->Data->Simulation.Points.size() +
+								   mesh->Data->Simulation.Edges.size() + colliders.size() +
+								   (!colliders.empty() ? mesh->Data->Simulation.Points.size() * 2 : 0);
 			if (units && uint64_t(repeat) * uint64_t(substeps) > settings.MaximumWork / units)
 				return context.Fail(Status::LimitExceeded, "inline step repeats exceed work budget", "step");
 			settings.MaximumBytes = context.AvailableBytes();
@@ -281,7 +287,8 @@ namespace engine::imagegraph::detail {
 					context.Request.SimulationAuthoringRevision,
 					settings,
 					state,
-					diagnostic
+					diagnostic,
+					colliders
 				);
 				if (stepped != Status::Ok) return context.Fail(stepped, diagnostic.Message, "mesh");
 				prior.Mesh = std::move(state.Mesh);
@@ -330,6 +337,7 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.verlet_sim_mesh_tear", VerletTear},
 			ExecutorEntry{"pc.verlet_sim_bloat", VerletBloat},
 			ExecutorEntry{"pc.verlet_sim_drag", VerletDragMesh},
+			ExecutorEntry{"pc.verlet_sim_collide", VerletCollide},
 			ExecutorEntry{"pc.verlet_sim_inline", Inline},
 			ExecutorEntry{"pc.verlet_sim_step", InlineStep},
 			ExecutorEntry{"image.verlet_simple", Simple}

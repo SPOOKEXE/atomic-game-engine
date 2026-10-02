@@ -42,6 +42,7 @@ namespace engine::imagegraph::detail {
 		Vector2 TrimRange{0, 1};
 		std::vector<PathRuntime> Inputs;
 		const SourcePathData2D *SourceMesh = nullptr;
+		const SourcePathShapeData2D *Shape = nullptr;
 		NodeContext *EvaluationContext = nullptr;
 
 	  public:
@@ -67,7 +68,11 @@ namespace engine::imagegraph::detail {
 				return context.Fail(Status::InvalidValue, "source path operation is invalid", "path");
 			if (path.SourceOperation) {
 				const auto &operation = *path.SourceOperation;
-				auto charge = context.ReserveWorkspace(operation.Inputs.size() * sizeof(PathRuntime), "path");
+				const uint64_t shapeSlots =
+					operation.Shape ? operation.Shape->Points.size() + size_t(operation.Shape->Loop) : 0;
+				auto charge = context.ReserveWorkspace(
+					operation.Inputs.size() * sizeof(PathRuntime) + shapeSlots * 2 * sizeof(double), "path"
+				);
 				if (!charge) return false;
 				PathRuntime replacement;
 				replacement.StorageCharge = std::move(*charge);
@@ -76,13 +81,41 @@ namespace engine::imagegraph::detail {
 				replacement.EvaluationContext = &context;
 				if (operation.Kind == SourcePathOperationKind::VerletMesh)
 					replacement.SourceMesh = &operation;
+				if (operation.Shape) {
+					replacement.Shape = &*operation.Shape;
+					replacement.Loop = operation.Shape->Loop;
+					replacement.Lengths.resize(shapeSlots);
+					replacement.LengthAccumulated.resize(shapeSlots);
+					const auto &points = operation.Shape->Points;
+					for (size_t index = 1; index < points.size(); ++index)
+						replacement.Lengths[index - 1] = std::hypot(
+							points[index].X - points[index - 1].X, points[index].Y - points[index - 1].Y
+						);
+					if (!points.empty() && operation.Shape->Loop)
+						replacement.Lengths[points.size() - 1] = std::hypot(
+							points.back().X - points.front().X, points.back().Y - points.front().Y
+						);
+					for (size_t index = 0; index < replacement.Lengths.size(); ++index) {
+						replacement.LengthTotal += replacement.Lengths[index];
+						replacement.LengthAccumulated[index] = replacement.LengthTotal;
+					}
+					if (!std::isfinite(replacement.LengthTotal))
+						return context.Fail(
+							Status::InvalidValue, "source shape chord length is nonfinite", "path"
+						);
+					replacement.MinX = operation.Shape->Position.X - operation.Shape->HalfSize.X;
+					replacement.MinY = operation.Shape->Position.Y - operation.Shape->HalfSize.Y;
+					replacement.MaxX = operation.Shape->Position.X + operation.Shape->HalfSize.X;
+					replacement.MaxY = operation.Shape->Position.Y + operation.Shape->HalfSize.Y;
+					replacement.HasBoundary = true;
+				}
 				replacement.Inputs.reserve(operation.Inputs.size());
 				for (const auto &child : operation.Inputs) {
 					PathRuntime runtime;
 					if (!runtime.Init(context, child)) return false;
 					replacement.Inputs.push_back(std::move(runtime));
 				}
-				replacement.LengthTotal = replacement.Length();
+				if (!replacement.Shape) replacement.LengthTotal = replacement.Length();
 				if (!replacement.Inputs.empty()) {
 					const auto &first = replacement.Inputs[0];
 					replacement.MinX = first.MinX;
@@ -126,6 +159,7 @@ namespace engine::imagegraph::detail {
 			swap(TrimRange, other.TrimRange);
 			Inputs.swap(other.Inputs);
 			swap(SourceMesh, other.SourceMesh);
+			swap(Shape, other.Shape);
 			swap(EvaluationContext, other.EvaluationContext);
 			swap(Loop, other.Loop);
 			swap(Segmented, other.Segmented);
@@ -152,6 +186,14 @@ namespace engine::imagegraph::detail {
 		double MinX = 0, MinY = 0, MaxX = 0, MaxY = 0;
 		bool HasBoundary = false;
 
+		PathPoint ShapePoint(const std::optional<Vector2> &point) const {
+			if (point) return {point->X, point->Y, 1};
+			if (EvaluationContext)
+				EvaluationContext->Fail(
+					Status::InvalidValue, "source shape path sample is undefined or nonfinite", "path"
+				);
+			return {NAN, NAN, NAN};
+		}
 		PathPoint MeshPoint(const std::optional<std::array<double, 3>> &point) const {
 			if (point) return {(*point)[0], (*point)[1], (*point)[2]};
 			if (EvaluationContext)
@@ -179,6 +221,7 @@ namespace engine::imagegraph::detail {
 			return count;
 		}
 		double Length(size_t line = 0) const {
+			if (Shape) return LengthTotal;
 			if (SourceMesh) return LengthSourceVerletPath(*SourceMesh, line);
 			if (!Operation) return LengthTotal;
 			const auto *child = SelectLine(line);
@@ -187,6 +230,7 @@ namespace engine::imagegraph::detail {
 						 : 0;
 		}
 		size_t SegmentCount(size_t line = 0) const {
+			if (Shape) return Lengths.size();
 			if (SourceMesh) return SourceMesh->CachedLengths.size();
 			if (Operation) {
 				const auto *child = SelectLine(line);
@@ -272,6 +316,7 @@ namespace engine::imagegraph::detail {
 		}
 
 		PathPoint PointDistance(double distance, size_t line = 0) const {
+			if (Shape) return ShapePoint(SourceShapeDistance(*Shape, Lengths, LengthTotal, distance));
 			if (SourceMesh) return MeshPoint(DistanceSourceVerletPath(*SourceMesh, distance, line));
 			if (Operation) {
 				if (*Operation == SourcePathOperationKind::Reverse ||
@@ -305,6 +350,7 @@ namespace engine::imagegraph::detail {
 		}
 
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
+			if (Shape) return ShapePoint(SourceShapeRatio(*Shape, Lengths, LengthTotal, ratio));
 			if (SourceMesh) return MeshPoint(SampleSourceVerletPath(*SourceMesh, ratio, line));
 			if (Operation) {
 				const auto *child = SelectLine(line);

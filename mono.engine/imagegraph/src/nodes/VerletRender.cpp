@@ -161,6 +161,11 @@ namespace engine::imagegraph::detail {
 		MeshValue2D stepped;
 		const MeshData2D *mesh = &*source->Data;
 		if (context.Boolean("step", true)) {
+			// Native physics replay uses integer samples; rendering without Step remains continuous.
+			if (context.Request.Subframe != 0)
+				return context.Fail(
+					Status::InvalidValue, "Verlet render advance requires an integer frame", "step"
+				);
 			if (!VerletRenderStepMesh(context)) return false;
 			for (auto &output : context.OutputValues)
 				if (output.Port == "mesh") stepped = std::move(std::get<MeshValue2D>(output.Data));

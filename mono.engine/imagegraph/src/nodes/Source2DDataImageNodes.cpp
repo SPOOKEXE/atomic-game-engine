@@ -1,50 +1,7 @@
-#include "Gradient.hpp"
 #include "Source2DGenerator.hpp"
+#include "SourceInterpret.hpp"
 
 namespace engine::imagegraph::detail {
-	namespace {
-		Rgba InterpretColour(NodeContext &context, double value) {
-			const int64_t mode = context.Integer("mode");
-			if (mode == 1) {
-				const auto *palette = std::get_if<ArrayValue>(context.Find("palette"));
-				if (!palette || palette->ElementType != ValueType::Colour || !palette->Nested.empty() ||
-					palette->Elements.empty() || palette->Elements.size() > 256) {
-					context.Fail(
-						Status::InvalidValue, "Interpret palette requires 1 to 256 colours", "palette"
-					);
-					return {};
-				}
-				if (!std::isfinite(value) || std::trunc(value) < 0 ||
-					value > double(std::numeric_limits<int32_t>::max())) {
-					context.Fail(
-						Status::InvalidValue, "Palette index must fit a nonnegative shader integer", "number"
-					);
-					return {};
-				}
-				const size_t index = size_t(value) % palette->Elements.size();
-				const auto *colour = std::get_if<Colour>(&palette->Elements[index]);
-				if (!colour) {
-					context.Fail(Status::InvalidValue, "Interpret palette contains a non-colour", "palette");
-					return {};
-				}
-				return {
-					colour->Red / 255.0, colour->Green / 255.0, colour->Blue / 255.0, colour->Alpha / 255.0
-				};
-			}
-			const Vector2 range = context.Vec2("range", {0, 1});
-			const double grey = (value - range.X) / (range.Y - range.X);
-			if (mode == 0) return {grey, grey, grey, 1};
-			const auto *gradient = std::get_if<Gradient>(context.Find("gradient"));
-			if (!gradient || !std::isfinite(grey)) {
-				context.Fail(Status::InvalidValue, "Interpret gradient requires finite progress", "gradient");
-				return {};
-			}
-			return GradientEval(
-				ReadGradient(context, "gradient", *gradient),
-				ShaderFract(ShaderFract(grey + context.Scalar("shift")) + 1)
-			);
-		}
-	}
 
 	bool InterpretMatrix(NodeContext &context) {
 		const auto *matrix = std::get_if<MatrixValue>(context.Find("matrix"));

@@ -1,3 +1,5 @@
+#include "SourceVerletCollider.hpp"
+
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/VerletReplay.hpp>
 
@@ -169,7 +171,8 @@ namespace engine::imagegraph {
 		uint64_t authoringRevision,
 		const VerletStepSettings &settings,
 		VerletReplayState &next,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		std::span<const VerletCollider> colliders
 	) {
 		ENGINE_PROFILE("imagegraph.verlet.step");
 		diagnostic = {};
@@ -191,7 +194,23 @@ namespace engine::imagegraph {
 				Status::UnsupportedExecution,
 				"source combined wall cursor behavior requires a reference capture"
 			);
-		const uint64_t units = previous.Mesh.Points.size() + previous.Mesh.Edges.size();
+		if (colliders.size() > Limits::MaximumNodes)
+			return Refuse(
+				diagnostic, Status::LimitExceeded, "verlet collider count exceeds bounded controls"
+			);
+		if (settings.Simple && !colliders.empty())
+			return Refuse(
+				diagnostic, Status::InvalidValue, "inline colliders cannot be applied to the simple solver"
+			);
+		for (const auto &collider : colliders)
+			if (!detail::ValidSourceVerletCollider(collider))
+				return Refuse(
+					diagnostic,
+					Status::InvalidValue,
+					"verlet collider shape or finite ellipse denominator is invalid"
+				);
+		const uint64_t units = previous.Mesh.Points.size() + previous.Mesh.Edges.size() + colliders.size() +
+							   (!colliders.empty() ? previous.Mesh.Points.size() * 2 : 0);
 		if (settings.Substeps > Limits::MaximumRangeFrames ||
 			(units != 0 && settings.Substeps > settings.MaximumWork / units))
 			return Refuse(diagnostic, Status::LimitExceeded, "verlet step exceeds work budget");
@@ -202,9 +221,25 @@ namespace engine::imagegraph {
 		bool inverse = false;
 		for (uint32_t step = 0; step < settings.Substeps; ++step) {
 			Propagate(candidate.Mesh, settings, inverse);
-			if (!settings.Simple) CollideWall(candidate.Mesh, settings);
+			if (!settings.Simple) {
+				CollideWall(candidate.Mesh, settings);
+				if (!detail::ApplySourceVerletColliders(candidate.Mesh, colliders))
+					return Refuse(
+						diagnostic,
+						Status::UnsupportedExecution,
+						"source collider cursor attempts an undefined point access"
+					);
+			}
 			Constrain(candidate.Mesh, settings.Simple, inverse);
-			if (!settings.Simple) CollideWall(candidate.Mesh, settings);
+			if (!settings.Simple) {
+				CollideWall(candidate.Mesh, settings);
+				if (!detail::ApplySourceVerletColliders(candidate.Mesh, colliders))
+					return Refuse(
+						diagnostic,
+						Status::UnsupportedExecution,
+						"source collider cursor attempts an undefined point access"
+					);
+			}
 			if (!settings.Simple) inverse = !inverse;
 		}
 		const auto valid =

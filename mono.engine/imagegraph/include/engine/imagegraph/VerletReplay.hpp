@@ -15,6 +15,11 @@ namespace engine::imagegraph {
 		bool Initialized = false;
 		bool operator==(const VerletReplayState &) const = default;
 	};
+	struct VerletCollider {
+		int64_t Shape = 0;
+		Area Region;
+		bool operator==(const VerletCollider &) const = default;
+	};
 	struct VerletStepSettings {
 		uint32_t Substeps = 8;
 		Vector2 Gravity{0, .5};
@@ -36,12 +41,14 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic
 	);
 	// grug accepts only next fixed tick and same authored revision. seek requires reset and replay.
+	// Collider geometry is borrowed synchronously; no span or pointer enters the returned snapshot.
 	[[nodiscard]] Status StepVerletReplay(
 		const VerletReplayState &previous,
 		uint64_t tick,
 		uint64_t authoringRevision,
 		const VerletStepSettings &settings,
 		VerletReplayState &next,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		std::span<const VerletCollider> colliders = {}
 	);
 }

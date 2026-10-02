@@ -171,3 +171,32 @@ TEST_CASE("source inline single walls collide before and after constraints", "[i
 	CHECK(StepVerletReplay(state, 2, 7, settings, state, diagnostic) == Status::UnsupportedExecution);
 	CHECK(state == unchanged);
 }
+
+TEST_CASE(
+	"Source collider passes preserve inclusive boundaries, negative ordered extents and cursor refusal",
+	"[imagegraph]"
+) {
+	const std::array points{VerletPoint{{0, 0}, {0, 0}}, VerletPoint{{4, 4}, {4, 4}}};
+	auto initial = Reset(points);
+	VerletStepSettings settings;
+	settings.Substeps = 1;
+	settings.Gravity = {0, 10};
+	const std::array colliders{VerletCollider{0, Area{0, 1, 0, 0}}, VerletCollider{0, Area{4, 5, 1, 1}}};
+	Diagnostic diagnostic;
+	VerletReplayState next;
+	REQUIRE(StepVerletReplay(initial, 1, 7, settings, next, diagnostic, colliders) == Status::Ok);
+	CHECK(next.Mesh.Points[0].Position == Vector2{0, 0});
+	CHECK(next.Mesh.Points[1].Position == Vector2{4, 5});
+	const std::array negative{VerletCollider{0, Area{0, 1, -1, 1}}};
+	REQUIRE(StepVerletReplay(initial, 1, 7, settings, next, diagnostic, negative) == Status::Ok);
+	CHECK(next.Mesh.Points[0].Position == Vector2{0, 1});
+	const auto previous = next;
+	const std::array overrun{colliders[0], colliders[1], colliders[0], colliders[1]};
+	CHECK(
+		StepVerletReplay(initial, 1, 7, settings, next, diagnostic, overrun) == Status::UnsupportedExecution
+	);
+	CHECK(next == previous);
+	const std::array ellipse{VerletCollider{1, Area{0, 1, 0, 1}}};
+	CHECK(StepVerletReplay(initial, 1, 7, settings, next, diagnostic, ellipse) == Status::InvalidValue);
+	CHECK(next == previous);
+}

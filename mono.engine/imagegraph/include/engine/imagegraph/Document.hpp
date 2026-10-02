@@ -244,7 +244,35 @@ namespace engine::imagegraph {
 		bool operator==(const Path2D &) const = default;
 	};
 
-	enum class SourcePathOperationKind : uint8_t { Reverse, Combine, VerletMesh, Trim };
+	enum class SourcePathOperationKind : uint8_t { Reverse, Combine, VerletMesh, Trim, Shape };
+	// Shape ratio samples preserve the source analytic curve independently of
+	// sampled chord lengths.
+	enum class SourcePathShapeKind2D : uint8_t {
+		Rectangle,
+		Trapezoid,
+		Parallelogram,
+		Ellipse,
+		Arc,
+		Squircle,
+		Hypocycloid,
+		Epitrochoid,
+		Polygon,
+		Star,
+		StarDraw,
+		Twist,
+		Line,
+		Curve,
+		Spiral,
+		SpiralCircle
+	};
+	struct SourcePathShapeData2D {
+		SourcePathShapeKind2D Kind = SourcePathShapeKind2D::Rectangle;
+		std::vector<Vector2> Points;
+		bool Loop = true;
+		Vector2 Position, HalfSize, AngleRange;
+		double Rotation = 0, Factor = 4;
+		bool operator==(const SourcePathShapeData2D &) const = default;
+	};
 	struct MeshData2D;
 	struct SourcePathData2D {
 		SourcePathOperationKind Kind = SourcePathOperationKind::Reverse;
@@ -253,6 +281,7 @@ namespace engine::imagegraph {
 		std::vector<std::optional<double>> CachedLengths;
 		double CachedTotalLength = 0;
 		Vector2 TrimRange{0, 1};
+		std::optional<SourcePathShapeData2D> Shape;
 		bool operator==(const SourcePathData2D &) const = default;
 	};
 
@@ -444,6 +473,58 @@ namespace engine::imagegraph {
 		bool operator==(const ExecutionThreadValue &) const = default;
 	};
 
+	struct TileSelection {
+		double Index = -1;
+		bool Terrain = false;
+		bool operator==(const TileSelection &) const = default;
+	};
+	struct TileRuleData {
+		std::string Name = "rule";
+		bool Active = true;
+		uint32_t Range = 1;
+		Vector2 Size{1, 1};
+		double Probability = 100;
+		std::vector<TileSelection> Selection{
+			{-1, false},
+			{-1, false},
+			{-1, false},
+			{-1, false},
+			{-10000, false},
+			{-1, false},
+			{-1, false},
+			{-1, false},
+			{-1, false}
+		};
+		std::vector<std::vector<double>> Replacements;
+		bool operator==(const TileRuleData &) const = default;
+	};
+	struct TileAnimationData {
+		std::string Name = "animated";
+		std::vector<int32_t> Indices;
+		uint32_t Length = 0;
+		bool operator==(const TileAnimationData &) const = default;
+	};
+	struct TileTerrainData {
+		std::string Name = "autoterrain";
+		int32_t Type = -1;
+		std::vector<int32_t> Indices;
+		uint32_t PreviewIndex = 0;
+		bool operator==(const TileTerrainData &) const = default;
+	};
+	struct TilesetData {
+		Image Texture;
+		Vector2 TileSize{1, 1};
+		std::string DisplayName = "Tileset";
+		std::vector<TileAnimationData> Animations;
+		std::vector<TileTerrainData> Terrains;
+		std::vector<TileRuleData> Rules;
+		bool operator==(const TilesetData &) const = default;
+	};
+	struct TilesetValue {
+		OwnedPayload3D<TilesetData> Data;
+		bool operator==(const TilesetValue &) const = default;
+	};
+
 	struct StructData;
 	struct StructValue {
 		OwnedPayload3D<StructData> Data;
@@ -490,6 +571,13 @@ namespace engine::imagegraph {
 	struct PcxExpressionData;
 	struct PcxExpressionValue {
 		OwnedPayload3D<PcxExpressionData> Data;
+		// Define ownership operations after the recursive executable payload is complete.
+		PcxExpressionValue();
+		~PcxExpressionValue();
+		PcxExpressionValue(const PcxExpressionValue &);
+		PcxExpressionValue(PcxExpressionValue &&) noexcept;
+		PcxExpressionValue &operator=(const PcxExpressionValue &);
+		PcxExpressionValue &operator=(PcxExpressionValue &&) noexcept;
 		bool operator==(const PcxExpressionValue &other) const;
 	};
 
@@ -577,7 +665,8 @@ namespace engine::imagegraph {
 		ArraySelectorValue,
 		SdfValue,
 		FluidDomainValue,
-		ParticleValue>;
+		ParticleValue,
+		TilesetValue>;
 
 	// Source arrays may mix leaves, nested arrays and owned surfaces. No pointer survives evaluation.
 	struct SourceArrayItem {
@@ -641,7 +730,8 @@ namespace engine::imagegraph {
 		ArraySelectorValue,
 		SdfValue,
 		FluidDomainValue,
-		ParticleValue>;
+		ParticleValue,
+		TilesetValue>;
 
 	// Fields retain owned runtime values; nesting never creates shared mutable references.
 	struct StructData {
@@ -665,6 +755,12 @@ namespace engine::imagegraph {
 		std::vector<std::pair<std::string, Value>> Bindings;
 		bool operator==(const PcxExpressionData &) const = default;
 	};
+	inline PcxExpressionValue::PcxExpressionValue() = default;
+	inline PcxExpressionValue::~PcxExpressionValue() = default;
+	inline PcxExpressionValue::PcxExpressionValue(const PcxExpressionValue &) = default;
+	inline PcxExpressionValue::PcxExpressionValue(PcxExpressionValue &&) noexcept = default;
+	inline PcxExpressionValue &PcxExpressionValue::operator=(const PcxExpressionValue &) = default;
+	inline PcxExpressionValue &PcxExpressionValue::operator=(PcxExpressionValue &&) noexcept = default;
 	inline bool PcxExpressionValue::operator==(const PcxExpressionValue &other) const {
 		return Data == other.Data;
 	}
@@ -945,6 +1041,8 @@ namespace engine::imagegraph {
 		bool NegativeFrame = false;
 		// Durable source marker; Adder does not introduce additive arithmetic.
 		KeyframeKind Kind = KeyframeKind::Normal;
+		// Archive-scoped source record identity. Moves retain it; copied or newly authored keys start empty.
+		std::string SourceKeyId = {};
 		// Compares all authored keyframe fields.
 		bool operator==(const Keyframe &) const = default;
 	};
@@ -1137,6 +1235,7 @@ namespace engine::imagegraph {
 		static constexpr size_t MaximumOutputs = 64;
 		// Maximum keyframe count.
 		static constexpr size_t MaximumKeyframes = 65536;
+		static constexpr size_t MaximumSourceKeyIdBytes = 64;
 		static constexpr size_t MaximumTracks = 65536;
 		// Maximum properties recorded on one node. The largest catalogue node, Particle, declares 94 inputs.
 		static constexpr size_t MaximumPropertiesPerNode = 128;

@@ -93,6 +93,7 @@ namespace engine::imagegraph::detail {
 		HostCaptureReceiptSink *HostReceipts = nullptr;
 		std::span<const HostNodeCapture> ObservedHostCaptures;
 		// Borrowed nearest inline owner's fully resolved inputs, retained by the evaluation.
+		std::span<const std::string_view> SimulationColliderIds;
 		std::string_view InlineOwnerId;
 		std::string_view InlineOwnerType;
 		std::span<const std::string_view> InlineOwnerLinkedValues;

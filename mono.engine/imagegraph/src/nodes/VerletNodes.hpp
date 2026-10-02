@@ -8,6 +8,8 @@
 #include <limits>
 
 namespace engine::imagegraph::detail {
+	bool VerletCollide(NodeContext &context);
+	bool ResolveVerletColliderControls(NodeContext &, std::vector<VerletCollider> &, AllocationReservation &);
 	inline const Value *VerletScopeValue(const NodeContext &context, std::string_view port) {
 		for (const auto &[id, value] : context.InlineOwnerValues)
 			if (id == port) return value;
@@ -92,7 +94,7 @@ namespace engine::imagegraph::detail {
 			!context.Request.SimulationReplay)
 			return std::nullopt;
 		for (const auto &entry : context.Request.SimulationReplay->Entries)
-			if (!entry.Drag && !entry.Cache && entry.NodeId == mesh.Data->OriginNodeId &&
+			if (!entry.Collider && !entry.Drag && !entry.Cache && entry.NodeId == mesh.Data->OriginNodeId &&
 				entry.ProcessorRow == mesh.Data->OriginProcessorRow &&
 				entry.State.Tick == context.Request.Tick &&
 				entry.State.AuthoringRevision == context.Request.SimulationAuthoringRevision) {

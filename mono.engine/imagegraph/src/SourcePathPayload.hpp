@@ -1,4 +1,5 @@
 #pragma once
+#include "SourcePathShape.hpp"
 #include "SourceVerletPath.hpp"
 
 #include <engine/imagegraph/Document.hpp>
@@ -22,8 +23,12 @@ namespace engine::imagegraph::detail {
 		if (!path.SourceOperation) return true;
 		if (path.Loop || path.Segmented || !path.Anchors.empty() || !path.Weights.empty()) return false;
 		const auto &op = *path.SourceOperation;
+		if (op.Shape && op.Kind != SourcePathOperationKind::Shape) return false;
 		if (op.Kind == SourcePathOperationKind::VerletMesh) return ValidSourceVerletPath(op);
 		if (op.Mesh || !op.CachedLengths.empty() || op.CachedTotalLength != 0) return false;
+		if (op.Kind == SourcePathOperationKind::Shape)
+			return op.Inputs.empty() && op.Shape && op.TrimRange == Vector2{0, 1} &&
+				   ValidSourcePathShape(*op.Shape);
 		if (op.Kind != SourcePathOperationKind::Reverse && op.Kind != SourcePathOperationKind::Combine &&
 			op.Kind != SourcePathOperationKind::Trim)
 			return false;
@@ -44,6 +49,13 @@ namespace engine::imagegraph::detail {
 			if (own > std::numeric_limits<uint64_t>::max() - bytes)
 				return std::numeric_limits<uint64_t>::max();
 			bytes += own;
+			if (op.Shape) {
+				const uint64_t points =
+					(Retained ? op.Shape->Points.capacity() : op.Shape->Points.size()) * sizeof(Vector2);
+				if (points > std::numeric_limits<uint64_t>::max() - bytes)
+					return std::numeric_limits<uint64_t>::max();
+				bytes += points;
+			}
 			const uint64_t meshBytes = SourceVerletPathBytes<Retained>(op);
 			if (meshBytes > std::numeric_limits<uint64_t>::max() - bytes)
 				return std::numeric_limits<uint64_t>::max();
