@@ -31,7 +31,7 @@ namespace engine::imagegraph {
 		static uint64_t OutputBytes(const StatefulOutputEvaluationResult &state) {
 			return RetainedStatefulOutputBytes(state) + RetainedSimulationReplayBytes(state.Simulation) +
 				   RetainedSurfaceFrameReplayBytes(state.Surfaces) + RetainedRandomReplayBytes(state.Random) +
-				   RetainedDataReplayBytes(state.Data);
+				   RetainedDataReplayBytes(state.Data) + RetainedRigidReplayBytes(state.Rigid);
 		}
 		static const Image *ImageOutput(const StatefulNamedOutput &output) {
 			if (const auto *image = std::get_if<Image>(&output.Output)) return image;
@@ -51,6 +51,11 @@ namespace engine::imagegraph {
 	  public:
 		bool Active() const {
 			return Stateful || !Bindings.empty();
+		}
+		// Native playback restart reconstructs tick zero while retaining source cache controls.
+		// Provider sessions and authored revisions remain owned by their existing callers.
+		void RestartCycle() {
+			Initialized = false;
 		}
 		void Clear() {
 			Bindings = {};
@@ -140,9 +145,11 @@ namespace engine::imagegraph {
 			stateful = temporal.Simulation || temporal.SurfaceCaches != 0 || temporal.RandomGenerators != 0 ||
 					   temporal.DataProcessors != 0 || !State.Simulation.Entries.empty() ||
 					   !State.Surfaces.Entries.empty() || !State.Random.Entries.empty() ||
-					   !State.Data.Entries.empty();
+					   !State.Data.Entries.empty() || temporal.RigidActors != 0 ||
+					   !State.Rigid.Owners.empty();
 			const bool directData = temporal.DataProcessors != 0 && !temporal.Simulation &&
-									!temporal.SurfaceCaches && !temporal.RandomGenerators && bindings.empty();
+									!temporal.SurfaceCaches && !temporal.RandomGenerators &&
+									!temporal.RigidActors && bindings.empty();
 			if (!stateful && bindings.empty()) {
 				if (changed || Stateful) {
 					Clear();
@@ -206,6 +213,8 @@ namespace engine::imagegraph {
 				request.SurfaceReplay = &State.Surfaces;
 				request.RandomReplay = &State.Random;
 				request.DataReplay = &State.Data;
+				request.RigidReplay = &State.Rigid;
+				request.RigidAuthoringRevision = revision;
 				return true;
 			}
 			const bool contiguous =
@@ -259,6 +268,8 @@ namespace engine::imagegraph {
 				clock.SurfaceReplay = &prior.Surfaces;
 				clock.RandomReplay = &prior.Random;
 				clock.DataReplay = &prior.Data;
+				clock.RigidReplay = &prior.Rigid;
+				clock.RigidAuthoringRevision = revision;
 				const auto &generation = tick == 0 ? seeds : previous;
 				if (contiguous) {
 					const bool sameFrameAction = Tick == request.Tick && Subframe == request.Subframe &&
@@ -345,6 +356,7 @@ namespace engine::imagegraph {
 					candidate.Surfaces = std::move(captured.Surfaces);
 					candidate.Random = std::move(captured.Random);
 					candidate.Data = std::move(captured.Data);
+					candidate.Rigid = std::move(captured.Rigid);
 					candidateSnapshot = std::move(captured.Inputs);
 				}
 				inputs = externalCount && !bindings.empty() ? std::move(captures) : std::move(previous);
@@ -407,6 +419,8 @@ namespace engine::imagegraph {
 			request.SurfaceReplay = &State.Surfaces;
 			request.RandomReplay = &State.Random;
 			request.DataReplay = &State.Data;
+			request.RigidReplay = &State.Rigid;
+			request.RigidAuthoringRevision = revision;
 			return true;
 		} catch (const std::bad_alloc &) {
 			diagnostic = {Status::LimitExceeded, {}, {}, "stateful host allocation was refused"};

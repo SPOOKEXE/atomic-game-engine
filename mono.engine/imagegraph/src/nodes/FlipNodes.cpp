@@ -173,15 +173,16 @@ namespace engine::imagegraph::detail {
 		if (!ValidFluidPayload(*input))
 			return context.Fail(Status::InvalidValue, "FLIP fill input is invalid", "domain");
 		const uint64_t bytes = FluidStorageBytes<true>(*input);
-		if (!context.ReserveOutput(bytes, "domain")) return false;
-		if (context.Request.Tick != 0) return PublishFlipDomain(context, *input);
+		// Source first-frame checks include subframes; the native timeline starts at zero.
+		if (context.Request.Tick != 0 || context.Request.Subframe != 0 || context.Request.NegativeFrame) {
+			if (!context.ReserveOutput(bytes, "domain")) return false;
+			return PublishFlipDomain(context, *input);
+		}
 		const auto shape = context.Integer("spawn_shape", 0);
+		if (shape == 1) return FlipFillSurface(context, *input);
 		if (shape != 0)
-			return context.Fail(
-				Status::UnsupportedExecution,
-				"FLIP fill surface grayscale sampler requires a captured source profile",
-				"spawn_shape"
-			);
+			return context.Fail(Status::InvalidValue, "FLIP fill source shape is invalid", "spawn_shape");
+		if (!context.ReserveOutput(bytes, "domain")) return false;
 		Area area = context.Get<Area>(
 			"spawn_area", {.CenterX = .5, .CenterY = .5, .HalfWidth = .5, .HalfHeight = .5}
 		);

@@ -2,6 +2,7 @@
 
 #include "FluidPayload.hpp"
 #include "Mesh2DPayload.hpp"
+#include "SourceFlipObstacle.hpp"
 
 namespace engine::imagegraph::detail {
 	const SimulationReplayEntry *
@@ -50,7 +51,7 @@ namespace engine::imagegraph::detail {
 					if (const auto *entry = FindFluidSimulationOrigin(
 							context, item.Data->OriginNodeId, item.Data->OriginProcessorRow
 						))
-						return FluidStorageBytes<true>(entry->Fluid);
+						return ResolvedSourceFlipFluidBytes(context, *entry->Fluid.Data);
 				return 0;
 			} else if constexpr (std::is_same_v<T, MeshValue2D>) {
 				if (item.Data)
@@ -152,8 +153,10 @@ namespace engine::imagegraph::detail {
 				if (item.Data)
 					if (const auto *entry = FindFluidSimulationOrigin(
 							context, item.Data->OriginNodeId, item.Data->OriginProcessorRow
-						))
+						)) {
 						item = entry->Fluid;
+						ResolveSourceFlipFluidVisuals(context, *item.Data);
+					}
 			} else if constexpr (std::is_same_v<T, MeshValue2D>) {
 				const auto *entry = item.Data
 										? FindSimulationOrigin(

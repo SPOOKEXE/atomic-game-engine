@@ -356,6 +356,8 @@ namespace engine::imagegraph::detail {
 			return CopyImage(context, "preview", *source->second);
 		}
 	}
+	bool ReplayRecordedHostOutputs(NodeContext &context) { return RecordedHost(context); }
+
 	std::span<const ExecutorEntry> HostExecutors() {
 		static constexpr ExecutorEntry entries[]{
 			{"pc.image", RecordedHost, true},
@@ -365,6 +367,7 @@ namespace engine::imagegraph::detail {
 			{"pc.datetime_get", RecordedHost, true},
 			{"pc.export", ExportPreview, true},
 			{"pc.wav_file_write", RecordedHost, true},
+			{"pc.tile_tilemap_export", RecordedHost, true},
 			{"pc.byte_file_read", RecordedHost, true},
 			{"pc.byte_file_write", RecordedHost, true},
 			{"pc.text_file_read", RecordedHost, true},

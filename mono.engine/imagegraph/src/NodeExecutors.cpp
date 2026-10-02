@@ -39,6 +39,7 @@ namespace engine::imagegraph::detail {
 					  SceneExecutors(),
 					  SourceSdfExecutors(),
 					  SimulationExecutors(),
+					  SourceRigidExecutors(),
 					  SourceValueExecutors(),
 					  SourceDataExecutors(),
 					  SourceMatrixExecutors(),
@@ -46,13 +47,16 @@ namespace engine::imagegraph::detail {
 					  SourcePointsExecutors(),
 					  SourceSpatialPointsExecutors(),
 					  SourceTileExecutors(),
+					  SourceSpriteStackExecutors(),
+					  SourceNormalMapExecutors(),
 					  HostExecutors(),
 					  TriggerExecutors(),
 					  TemporalExecutors(),
 					  SourceAnimationExecutors(),
 					  SourceRoutingExecutors(),
 					  SourceCacheValueExecutors(),
-					  SourceConversionExecutors()})
+					  SourceConversionExecutors(),
+					  SourceColourFilterExecutors()})
 					for (const ExecutorEntry &entry : family)
 						merged.emplace(entry.Type, entry);
 				merged.emplace("pc.group_input", ExecutorEntry{"pc.group_input", ExecuteGroupBoundary, true});
@@ -88,7 +92,9 @@ namespace engine::imagegraph::detail {
 					   type == "pc.points_remap" || type == "pc.point_3_d_camera" ||
 					   type == "pc.scatter_points_3_d" || type == "pc.delay_value" ||
 					   type == "pc.plot_linear" || type == "pc.condition" || type == "pc.cache_value_array" ||
-					   type == "pc.interpret_number";
+					   type == "pc.interpret_number" || type == "pc.color_adjust" ||
+					   type == "pc.color_replace" || type == "pc.colors_replace" ||
+					   type == "pc.color_separate";
 			};
 			const auto validateValue = [&](const Value &value, std::string_view port) {
 				const auto *array = std::get_if<ArrayValue>(&value);
@@ -121,6 +127,13 @@ namespace engine::imagegraph::detail {
 			};
 			for (const auto &[port, image] : context.Images)
 				if (image && !validate(*image, port)) return false;
+			for (const auto &input : context.Entry.Inputs)
+				if (input.Type == ValueType::Image &&
+					std::none_of(context.Images.begin(), context.Images.end(), [&](const auto &entry) {
+						return entry.first == input.Id;
+					}))
+					if (const auto *image = context.Input(input.Id); image && !validate(*image, input.Id))
+						return false;
 			for (const auto &[port, images] : context.ImageArrays)
 				if (images)
 					for (const Image &image : images->Images)

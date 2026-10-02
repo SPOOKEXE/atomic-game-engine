@@ -41,8 +41,8 @@ Milestone labels describe development scope, not release versions.
 - [x] Pixel Composer foundations:
 
   1. Retain the source licence, pinned metadata and generated enum choices; save instance ports and reflected graph selectors.
-  2. Evaluate bounded source kernels, Shape paths, Tilesets, conversions, typed arrays and Pixel Builder recipes.
-  3. Replay animation, particles, FLIP, Verlet colliders, random draws and delay history deterministically.
+  2. Evaluate bounded source kernels, colour and normal filters, Shape paths, Tilesets, conversions, typed arrays and Pixel Builder recipes.
+  3. Replay animation controls, particles, FLIP obstacles, Verlet colliders, random draws and delay history deterministically.
   4. Edit native and PXC graphs, groups, keys and tile properties with atomic undo/redo; retain source metadata across key moves and copies.
   5. Read granted images, directories, animation, audio and structured assets through bounded shared hosts.
   6. Run bounded Lua and export helpers; publish image, sequence and WAV batches with rollback.

@@ -20,6 +20,7 @@
 #include <engine/imagegraph/HostCapture.hpp>
 #include <engine/imagegraph/PcxExpression.hpp>
 #include <engine/imagegraph/RandomReplay.hpp>
+#include <engine/imagegraph/RigidReplay.hpp>
 #include <engine/imagegraph/SimulationReplay.hpp>
 #include <engine/imagegraph/SurfaceFrameReplay.hpp>
 
@@ -143,6 +144,9 @@ namespace engine::imagegraph::detail {
 		const SurfaceFrameReplayState *CurrentSurfaces = nullptr;
 		const RandomReplayState *CurrentRandom = nullptr;
 		const DataReplayState *CurrentData = nullptr;
+		// One bounded transaction journal is shared by every actor and processor row.
+		RigidReplayState *CurrentRigid = nullptr;
+		AllocationReservation *CurrentRigidCharge = nullptr;
 		std::vector<DataReplayEntry> DataUpdates;
 		std::vector<RandomReplayEntry> RandomUpdates;
 		std::vector<SurfaceFrameReplayEntry> SurfaceUpdates;
@@ -312,6 +316,9 @@ namespace engine::imagegraph::detail {
 		const Image *Input(std::string_view id) const {
 			for (const auto &[port, image] : Images)
 				if (port == id) return image;
+			if (const auto *value = Find(id))
+				if (const auto *atlas = std::get_if<AtlasValue>(value); atlas && atlas->Data)
+					return &atlas->Data->Surface.Data;
 			return nullptr;
 		}
 

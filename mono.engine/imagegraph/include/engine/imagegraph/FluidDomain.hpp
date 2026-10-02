@@ -1,8 +1,10 @@
 #pragma once
+#include <engine/imagegraph/Surface.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -62,9 +64,27 @@ namespace engine::imagegraph {
 			uint64_t Tick = 0;
 			bool operator==(const SpawnerState &) const = default;
 		};
+		// Source node objects retain an index separately from each domain's native obstacles.
+		struct ObstacleControl {
+			std::string NodeId;
+			size_t ProcessorRow = 0;
+			uint32_t Index = 0;
+			uint64_t Serial = 0, Tick = 0;
+			double X = 0, Y = 0;
+			std::optional<Image> Texture;
+			bool operator==(const ObstacleControl &) const = default;
+		};
+		struct ObstacleVisual {
+			std::string NodeId;
+			size_t ProcessorRow = 0;
+			bool operator==(const ObstacleVisual &) const = default;
+		};
 		FluidDomainSettings Settings;
 		std::array<std::vector<double>, size_t(FluidBuffer::Count)> Buffers;
 		std::vector<FluidObstacle> Obstacles;
+		std::vector<ObstacleControl> ObstacleControls;
+		// Ordered source obstracles entries reference a mutable source node's visual object.
+		std::vector<ObstacleVisual> ObstacleVisuals;
 		uint32_t ParticleCount = 0;
 		// The source object increments before the native solver capacity-clamps a spawn.
 		std::variant<int64_t, double> SourceParticleCount{int64_t{0}};

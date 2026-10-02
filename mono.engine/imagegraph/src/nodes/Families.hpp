@@ -39,15 +39,21 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SceneExecutors();
 	std::span<const ExecutorEntry> SourceSdfExecutors();
 	std::span<const ExecutorEntry> SimulationExecutors();
+	std::span<const ExecutorEntry> SourceRigidExecutors();
 	std::span<const ExecutorEntry> SourceValueExecutors();
 	std::span<const ExecutorEntry> SourceConversionExecutors();
+	std::span<const ExecutorEntry> SourceColourFilterExecutors();
 	std::span<const ExecutorEntry> SourceDataExecutors();
 	std::span<const ExecutorEntry> SourceMatrixExecutors();
 	std::span<const ExecutorEntry> SourcePathExecutors();
 	std::span<const ExecutorEntry> SourcePointsExecutors();
 	std::span<const ExecutorEntry> SourceSpatialPointsExecutors();
 	std::span<const ExecutorEntry> SourceTileExecutors();
+	std::span<const ExecutorEntry> SourceSpriteStackExecutors();
+	std::span<const ExecutorEntry> SourceNormalMapExecutors();
 	std::span<const ExecutorEntry> HostExecutors();
+	// Reuse exact authored/time/control/image validation for opaque source observations.
+	bool ReplayRecordedHostOutputs(NodeContext &context);
 	std::span<const ExecutorEntry> TriggerExecutors();
 	std::span<const ExecutorEntry> TemporalExecutors();
 }

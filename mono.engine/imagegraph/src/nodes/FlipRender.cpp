@@ -3,6 +3,7 @@
 #include "../SourceRandom.hpp"
 #include "FlipNodes.hpp"
 #include "Sampler.hpp"
+#include "SourceFlipObstacle.hpp"
 
 #include <engine/imagegraph/FlipReplay.hpp>
 
@@ -178,12 +179,6 @@ namespace engine::imagegraph::detail {
 				"FLIP sprite draw requires source sprite raster profile",
 				"fluid_particle"
 			);
-		if (context.Boolean("draw_obstracles", true) && !input->Data->Obstacles.empty())
-			return context.Fail(
-				Status::UnsupportedExecution,
-				"FLIP obstacle draw requires source obstacle raster profile",
-				"draw_obstracles"
-			);
 		const auto &settings = input->Data->Settings;
 		const double width = settings.Width - settings.Spacing * 2,
 					 height = settings.Height - settings.Spacing * 2;
@@ -310,6 +305,54 @@ namespace engine::imagegraph::detail {
 				if (!WritePixel(*output, x, y, sample))
 					return context.Fail(Status::InvalidValue, "FLIP threshold output is nonfinite");
 			}
+		if (context.Boolean("draw_obstracles", true)) {
+			for (const auto &visual : stepped.Data->ObstacleVisuals) {
+				const auto control = std::lower_bound(
+					stepped.Data->ObstacleControls.begin(),
+					stepped.Data->ObstacleControls.end(),
+					std::tie(visual.NodeId, visual.ProcessorRow),
+					[](const auto &item, const auto &key) {
+						return std::tie(item.NodeId, item.ProcessorRow) < key;
+					}
+				);
+				if (control == stepped.Data->ObstacleControls.end() || !control->Texture) continue;
+				const auto &texture = *control->Texture;
+				const double left = control->X - texture.Width / 2., top = control->Y - texture.Height / 2.;
+				const auto x0 = uint32_t(std::clamp(std::ceil(left - .5), 0., double(output->Width))),
+						   x1 = uint32_t(
+							   std::clamp(std::ceil(left + texture.Width - .5), 0., double(output->Width))
+						   ),
+						   y0 = uint32_t(std::clamp(std::ceil(top - .5), 0., double(output->Height))),
+						   y1 = uint32_t(
+							   std::clamp(std::ceil(top + texture.Height - .5), 0., double(output->Height))
+						   );
+				const uint64_t samples = uint64_t(x1 - x0) * (y1 - y0);
+				if (samples > FluidDomainLimits::MaximumWork - work)
+					return context.Fail(
+						Status::LimitExceeded,
+						"FLIP obstacle texture raster exceeds bounded work",
+						"draw_obstracles"
+					);
+				work += samples;
+				for (uint32_t y = y0; y < y1; ++y)
+					for (uint32_t x = x0; x < x1; ++x) {
+						const auto source = Texture(
+							texture, (x + .5 - left) / texture.Width, (y + .5 - top) / texture.Height, false
+						);
+						const auto destination = ReadPixel(*output, x, y);
+						Rgba blended;
+						for (size_t channel = 0; channel < 4; ++channel)
+							blended[channel] =
+								source[channel] * source[3] + destination[channel] * (1 - source[3]);
+						if (!WritePixel(*output, x, y, blended))
+							return context.Fail(
+								Status::InvalidValue,
+								"FLIP obstacle texture blend is nonfinite",
+								"draw_obstracles"
+							);
+					}
+			}
+		}
 		return true;
 	}
 } // namespace engine::imagegraph::detail

@@ -1,4 +1,7 @@
 #include "../src/HostCaptureReceipts.hpp"
+#include "../src/NodeExecutors.hpp"
+#include <engine/imagegraph/Catalogue.hpp>
+#include <tuple>
 
 #include <engine/imagegraph/HostCapture.hpp>
 #include <engine/testing/Suite.hpp>
@@ -162,4 +165,58 @@ TEST_CASE("parsed layer content selects last matching name and places cropped pi
 	CHECK(result.Pixels[10] == 0);
 	CHECK(result.Pixels[11] == 255);
 	CHECK(result.Pixels[15] == 0);
+}
+
+TEST_CASE(
+	"Tile manual export receipts reject changed surface bytes dimensions and format",
+	"[imagegraph][host][tile]"
+) {
+	using namespace engine::imagegraph;
+	Node node;
+	node.Id = "export";
+	node.Type = "pc.tile_tilemap_export";
+	Image map;
+	map.Width = 2;
+	map.Height = 1;
+	map.Format = SurfaceFormat::RGBA16Float;
+	map.Pixels.resize(16);
+	REQUIRE(StoreSurfacePixel(map, 0, 0, {1, 0, 0, 1}));
+	REQUIRE(StoreSurfacePixel(map, 1, 0, {2, 0, 0, 1}));
+	HostNodeCapture capture;
+	capture.Authored = node;
+	capture.InputImages = {{"tilemap", SurfaceHash(map)}};
+	EvaluationRequest request;
+	request.HostCaptures = std::span<const HostNodeCapture>(&capture, 1);
+	const auto *catalogue = FindCatalogueEntry(node.Type);
+	const auto executor = detail::FindExecutor(node.Type);
+	REQUIRE(catalogue);
+	REQUIRE(executor);
+	const auto run = [&] {
+		detail::NodeContext context(node, *catalogue, request);
+		context.Images = {{"tilemap", &map}};
+		const bool accepted = executor(context);
+		return std::tuple{accepted, context.FailureCode, context.FailurePort};
+	};
+	{
+		const auto [accepted, status, port] = run();
+		CHECK(accepted);
+		CHECK(status == Status::Ok);
+		CHECK(port.empty());
+	}
+	SECTION("changed bytes with caller hash unchanged") {
+		REQUIRE(StoreSurfacePixel(map, 0, 0, {3, 0, 0, 1}));
+	}
+	SECTION("different dimensions with identical storage") {
+		map.Width = 1;
+		map.Height = 2;
+	}
+	SECTION("different format with equal storage size") {
+		map.Width = 1;
+		map.Height = 1;
+		map.Format = SurfaceFormat::RGBA32Float;
+	}
+	const auto [accepted, status, port] = run();
+	CHECK_FALSE(accepted);
+	CHECK(status == Status::InvalidValue);
+	CHECK(port == "tilemap");
 }

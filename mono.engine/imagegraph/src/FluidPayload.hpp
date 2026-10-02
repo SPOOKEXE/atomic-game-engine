@@ -58,11 +58,29 @@ namespace engine::imagegraph::detail {
 		layout.Sizes[size_t(FluidBuffer::CellParticleIds)] = settings.MaximumParticles;
 		return layout;
 	}
+	template <bool Retained>
+	uint64_t FluidObstacleControlBytes(const FluidDomainData::ObstacleControl &control) {
+		return MeshAddBytes(
+			sizeof(control),
+			MeshAddBytes(
+				Retained ? control.NodeId.capacity() : control.NodeId.size(),
+				control.Texture
+					? (Retained ? control.Texture->Pixels.capacity() : control.Texture->Pixels.size())
+					: 0
+			)
+		);
+	}
 	template <bool Retained> uint64_t FluidDataStorageBytes(const FluidDomainData &data) {
 		uint64_t bytes = MeshAddBytes(
 			sizeof(FluidDomainData), Retained ? data.OriginNodeId.capacity() : data.OriginNodeId.size()
 		);
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.Obstacles));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.ObstacleControls));
+		for (const auto &control : data.ObstacleControls)
+			bytes = MeshAddBytes(bytes, FluidObstacleControlBytes<Retained>(control) - sizeof(control));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.ObstacleVisuals));
+		for (const auto &visual : data.ObstacleVisuals)
+			bytes = MeshAddBytes(bytes, Retained ? visual.NodeId.capacity() : visual.NodeId.size());
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(data.Spawners));
 		for (const auto &state : data.Spawners)
 			bytes = MeshAddBytes(bytes, Retained ? state.NodeId.capacity() : state.NodeId.size());
@@ -111,11 +129,47 @@ namespace engine::imagegraph::detail {
 		if (!layout || !data.Initialized || data.Tick > Limits::MaximumTick ||
 			data.ParticleCount > data.Settings.MaximumParticles || !ValidSourceFluidParticleCount(data) ||
 			data.Spawners.size() > Limits::MaximumNodes ||
+			data.ObstacleControls.size() > Limits::MaximumArrayElements ||
+			data.ObstacleVisuals.size() > Limits::MaximumArrayElements ||
 			data.OriginNodeId.size() > Limits::MaximumTextBytes ||
 			data.Obstacles.size() > Limits::MaximumArrayElements ||
 			!std::isfinite(data.ParticleRestDensity) ||
 			FluidDataStorageBytes<true>(data) > Limits::MaximumEvaluationBytes)
 			return false;
+		for (size_t index = 0; index < data.ObstacleControls.size(); ++index) {
+			const auto &control = data.ObstacleControls[index];
+			if (control.NodeId.empty() || control.NodeId.size() > Limits::MaximumTextBytes ||
+				control.ProcessorRow > Limits::MaximumArrayElements ||
+				control.Index >= Limits::MaximumArrayElements || !control.Serial ||
+				control.Tick > Limits::MaximumTick || !std::isfinite(control.X) ||
+				!std::isfinite(control.Y) ||
+				(index &&
+				 std::tie(
+					 data.ObstacleControls[index - 1].NodeId, data.ObstacleControls[index - 1].ProcessorRow
+				 ) >= std::tie(control.NodeId, control.ProcessorRow)) ||
+				(control.Texture &&
+				 (!ValidSurfaceLayout(
+					  *control.Texture, Limits::MaximumDimension, Limits::MaximumEvaluationBytes
+				  ) ||
+				  !FiniteSurfaceSamples(*control.Texture))))
+				return false;
+		}
+		for (const auto &visual : data.ObstacleVisuals) {
+			if (visual.NodeId.empty() || visual.NodeId.size() > Limits::MaximumTextBytes ||
+				visual.ProcessorRow > Limits::MaximumArrayElements)
+				return false;
+			const auto control = std::lower_bound(
+				data.ObstacleControls.begin(),
+				data.ObstacleControls.end(),
+				std::tie(visual.NodeId, visual.ProcessorRow),
+				[](const auto &item, const auto &key) {
+					return std::tie(item.NodeId, item.ProcessorRow) < key;
+				}
+			);
+			if (control == data.ObstacleControls.end() || control->NodeId != visual.NodeId ||
+				control->ProcessorRow != visual.ProcessorRow)
+				return false;
+		}
 		for (size_t index = 0; index < data.Spawners.size(); ++index) {
 			const auto &state = data.Spawners[index];
 			if (state.NodeId.empty() || state.NodeId.size() > Limits::MaximumTextBytes ||

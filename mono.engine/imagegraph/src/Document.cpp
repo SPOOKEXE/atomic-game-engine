@@ -35,6 +35,9 @@
 #include "SourceLuaSockets.hpp"
 #include "SourcePathShapeCodec.hpp"
 #include "SourceTilesetCodec.hpp"
+#include "SourceRigidCodec.hpp"
+#include "SourceAtlasCodec.hpp"
+#include "RigidSchedule.hpp"
 #include "SourceVerletPathCodec.hpp"
 #include "Timeline.hpp"
 #include "TimelineDrivers.hpp"
@@ -878,7 +881,7 @@ namespace engine::imagegraph {
 				return array->ElementType != ValueType::Image && array->ElementType != ValueType::Array &&
 					   (array->ElementType < ValueType::Gradient ||
 						(array->ElementType == ValueType::Particle ||
-						 array->ElementType == ValueType::Tileset)) &&
+						 array->ElementType == ValueType::Tileset || array->ElementType == ValueType::Rigid || array->ElementType == ValueType::Atlas)) &&
 					   detail::ValidPayload(*array, true);
 			return detail::ValidValuePayload(value, false);
 		}
@@ -1050,7 +1053,7 @@ namespace engine::imagegraph {
 		}
 
 		bool WithinArrayBudget(const ArrayValue &array) {
-			if (array.ElementType == ValueType::Particle || array.ElementType == ValueType::Tileset)
+			if (array.ElementType == ValueType::Particle || array.ElementType == ValueType::Tileset || array.ElementType == ValueType::Rigid || array.ElementType == ValueType::Atlas)
 				return detail::ValidPayload(array, true);
 			if (!array.Nested.empty()) {
 				if (array.Nested.size() > Limits::MaximumArrayElements) return false;
@@ -1096,14 +1099,14 @@ namespace engine::imagegraph {
 				return array.ElementType != ValueType::Image && array.ElementType != ValueType::Array &&
 					   (array.ElementType < ValueType::Gradient ||
 						(array.ElementType == ValueType::Particle ||
-						 array.ElementType == ValueType::Tileset)) &&
+						 array.ElementType == ValueType::Tileset || array.ElementType == ValueType::Rigid || array.ElementType == ValueType::Atlas)) &&
 					   detail::ValidPayload(array, true);
 			if (array.ElementType == ValueType::Any || !array.Items.empty())
 				return detail::ValidPayload(array, false);
 			if (!array.Nested.empty() || !WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
 				array.ElementType == ValueType::Array ||
 				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Particle &&
-				 array.ElementType != ValueType::Tileset) ||
+				 array.ElementType != ValueType::Tileset && array.ElementType != ValueType::Rigid && array.ElementType != ValueType::Atlas) ||
 				TypeName(array.ElementType).empty())
 				return false;
 			for (const ElementValue &element : array.Elements)
@@ -1133,6 +1136,8 @@ namespace engine::imagegraph {
 			if (std::holds_alternative<PixelBoxValue>(value)) return "pb";
 			if (std::holds_alternative<ParticleValue>(value)) return "particle2";
 			if (std::holds_alternative<TilesetValue>(value)) return "tileset";
+			if (std::holds_alternative<RigidValue>(value)) return "rg";
+			if (std::holds_alternative<AtlasValue>(value)) return "at";
 			switch (value.index()) {
 			case 0:
 				return "b";
@@ -1219,6 +1224,10 @@ namespace engine::imagegraph {
 				detail::WriteParticleValue(stream, *particle);
 			} else if (const auto *tileset = std::get_if<TilesetValue>(&value)) {
 				detail::WriteTilesetValue(stream, *tileset);
+			} else if (const auto *rigid = std::get_if<RigidValue>(&value)) {
+				detail::WriteSourceRigidAlias(stream, *rigid, WriteQuoted);
+			} else if (const auto *atlas = std::get_if<AtlasValue>(&value)) {
+				detail::WriteAtlasValue(stream, *atlas);
 			} else if (const auto *boolean = std::get_if<bool>(&value)) {
 				stream << (*boolean ? 1 : 0);
 			} else if (const auto *integer = std::get_if<int64_t>(&value)) {
@@ -1567,7 +1576,7 @@ namespace engine::imagegraph {
 				const auto type = ParseType(typeName);
 				if (!type || *type == ValueType::Image || *type == ValueType::Array ||
 					(*type >= ValueType::Gradient &&
-					 !(version >= 9 && (*type == ValueType::Particle || *type == ValueType::Tileset))))
+					 !(version >= 9 && (*type == ValueType::Particle || *type == ValueType::Tileset || *type == ValueType::Rigid || *type == ValueType::Atlas))))
 					return false;
 				ArrayValue array{*type, {}};
 				if (!admit(count * sizeof(ElementValue))) return false;
@@ -1704,6 +1713,20 @@ namespace engine::imagegraph {
 				ParticleValue particle;
 				if (!detail::ReadParticleValue(stream, particle, admit)) return false;
 				value = std::move(particle);
+				return true;
+			}
+			if (tag == "rg") {
+				if (version < 9) return false;
+				RigidValue rigid;
+				if (!detail::ReadSourceRigidAlias(stream, rigid, admit, [](auto &input, auto &text, size_t count) { return ReadQuoted(input, text, count); })) return false;
+				value = std::move(rigid);
+				return true;
+			}
+			if (tag == "at") {
+				if (version < 9) return false;
+				AtlasValue atlas;
+				if (!detail::ReadAtlasValue(stream, atlas, admit)) return false;
+				value = std::move(atlas);
 				return true;
 			}
 			if (tag == "tileset") {
@@ -3448,11 +3471,11 @@ namespace engine::imagegraph {
 				}
 				return std::holds_alternative<PathValue3D>(value) ||
 					   std::holds_alternative<ParticleValue>(value) ||
-					   std::holds_alternative<TilesetValue>(value) ||
+					   std::holds_alternative<TilesetValue>(value) || std::holds_alternative<RigidValue>(value) || std::holds_alternative<AtlasValue>(value) ||
 					   (array &&
 						(array->ElementType == ValueType::Any || array->ElementType == ValueType::Path3D ||
 						 array->ElementType == ValueType::Particle ||
-						 array->ElementType == ValueType::Tileset || !array->Items.empty()));
+						 array->ElementType == ValueType::Tileset || array->ElementType == ValueType::Rigid || array->ElementType == ValueType::Atlas || !array->Items.empty()));
 			};
 			for (const auto &node : document.Nodes) {
 				for (const auto &value : node.Values)
@@ -6322,6 +6345,7 @@ namespace engine::imagegraph {
 			SetDiagnostic(diagnostic, Status::Cycle, "graph contains a cycle");
 			return diagnostic.Code;
 		}
+		if (const auto status = detail::AppendRigidSchedule(document, compiled, budget, planCharge, diagnostic); status != Status::Ok) return status;
 		plan = std::move(compiled);
 		diagnostic = {};
 		return Status::Ok;
@@ -7784,6 +7808,7 @@ namespace engine::imagegraph {
 		SurfaceFrameReplayState *Surfaces = nullptr;
 		RandomReplayState *Random = nullptr;
 		DataReplayState *Data = nullptr;
+		RigidReplayState *Rigid = nullptr;
 	};
 	struct StatefulOutputCapture {
 		std::span<const std::string> Ids;
@@ -7861,6 +7886,34 @@ namespace engine::imagegraph {
 		SimulationCapture *simulation = nullptr,
 		StatefulOutputCapture *batch = nullptr
 	) {
+
+		// Ordinary evaluations share a temporary journal; stateful evaluations supply
+		// their already admitted candidate. The borrowed prior is never mutated.
+		detail::AllocationReservation rigidPriorShadow, temporaryRigidCharge;
+		RigidReplayState temporaryRigid;
+		RigidReplayState *currentRigid = simulation ? simulation->Rigid : nullptr;
+		detail::AllocationReservation *rigidCharge = currentRigid ? simulation->Charge : nullptr;
+		if (!currentRigid) {
+			if (request.RigidReplay) {
+				if (ValidateRigidReplay(*request.RigidReplay, budget.Available(), diagnostic) != Status::Ok)
+					return diagnostic.Code;
+				const uint64_t bytes = RetainedRigidReplayBytes(*request.RigidReplay);
+				auto prior = budget.Reserve(bytes), copied = budget.Reserve(bytes);
+				if (!prior || !copied) {
+					SetDiagnostic(
+						diagnostic, Status::LimitExceeded, "rigid journal copy exceeds live bounds"
+					);
+					return diagnostic.Code;
+				}
+				rigidPriorShadow = std::move(*prior);
+				temporaryRigidCharge = std::move(*copied);
+				temporaryRigid.Owners.reserve(request.RigidReplay->Owners.capacity());
+				for (const auto &owner : request.RigidReplay->Owners)
+					temporaryRigid.Owners.push_back(owner);
+			}
+			currentRigid = &temporaryRigid;
+			rigidCharge = &temporaryRigidCharge;
+		}
 		uint64_t builtinBytes = 0;
 		const auto builtinStatus = ValidateBuiltinRandomCaptures(
 			request.BuiltinRandomCaptures, budget.Available(), builtinBytes, diagnostic
@@ -8882,6 +8935,8 @@ namespace engine::imagegraph {
 				context.CurrentRandom =
 					simulation && simulation->Random ? simulation->Random : request.RandomReplay;
 				context.CurrentData = simulation && simulation->Data ? simulation->Data : request.DataReplay;
+				context.CurrentRigid = currentRigid;
+				context.CurrentRigidCharge = rigidCharge;
 				context.CurrentSurfaces =
 					simulation && simulation->Surfaces ? simulation->Surfaces : request.SurfaceReplay;
 				context.GroupReplay = request.GroupReplay ? request.GroupReplay->Find(node.Id) : nullptr;
@@ -9131,6 +9186,17 @@ namespace engine::imagegraph {
 					if (input.Type == ValueType::Image) {
 						if (linked) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
+							if (const auto *values = FindValueOutputs(results[sourceIndex])) {
+								for (const auto &value : *values) {
+									if (value.Port != link->FromPort) continue;
+									const auto *array = std::get_if<ArrayValue>(&value.Data);
+									if ((std::holds_alternative<AtlasValue>(value.Data) || (array && array->ElementType == ValueType::Atlas)) && detail::ValidRuntimeValue(value.Data)) {
+										context.ValueViews.emplace_back(input.Id, &value.Data);
+										break;
+									}
+								}
+								if (context.Find(input.Id)) continue;
+							}
 							if (const ImageArray *array =
 									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
 								context.ImageArrays.emplace_back(input.Id, array);
@@ -9237,7 +9303,7 @@ namespace engine::imagegraph {
 							 input.Type == ValueType::Buffer || input.Type == ValueType::Struct ||
 							 input.Type == ValueType::Object || input.Type == ValueType::PcxNode ||
 							 input.Type == ValueType::NodeRef || input.Type == ValueType::FluidDomain ||
-							 input.Type == ValueType::Particle || input.Type == ValueType::Tileset ||
+							 input.Type == ValueType::Particle || input.Type == ValueType::Tileset || input.Type == ValueType::Rigid || input.Type == ValueType::Atlas ||
 							 input.Type == ValueType::PixelBox || input.Type == ValueType::DynamicSurface ||
 							 input.Type == ValueType::Path3D)) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
@@ -13276,6 +13342,12 @@ namespace engine::imagegraph {
 			if (prior != Status::Ok) return prior;
 		}
 		if constexpr (surfaceSupport) {
+
+			if (ValidateRigidReplay(result.Rigid, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			if (request.RigidReplay &&
+				ValidateRigidReplay(*request.RigidReplay, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
 			if (ValidateRandomReplay(result.Random, maximumBytes, diagnostic) != Status::Ok)
 				return diagnostic.Code;
 			if (request.RandomReplay &&
@@ -13335,6 +13407,13 @@ namespace engine::imagegraph {
 				(request.DataReplay && request.DataReplay != &result.Data &&
 				 !AddBytes(retained, RetainedDataReplayBytes(*request.DataReplay))))
 				return fail(Status::LimitExceeded, "data replay prior size overflows");
+		}
+
+		if constexpr (surfaceSupport) {
+			if (!AddBytes(retained, RetainedRigidReplayBytes(result.Rigid)) ||
+				(request.RigidReplay && request.RigidReplay != &result.Rigid &&
+				 !AddBytes(retained, RetainedRigidReplayBytes(*request.RigidReplay))))
+				return fail(Status::LimitExceeded, "rigid replay prior size overflows");
 		}
 		const uint64_t oldOutput = [&]() -> uint64_t {
 			if constexpr (inputSupport)
@@ -13403,6 +13482,11 @@ namespace engine::imagegraph {
 				(request.DataReplay && !AddBytes(copyBytes, RetainedDataReplayBytes(*request.DataReplay))))
 				return fail(Status::LimitExceeded, "data replay candidate size overflows");
 		}
+
+		if constexpr (surfaceSupport) {
+			if (request.RigidReplay && !AddBytes(copyBytes, RetainedRigidReplayBytes(*request.RigidReplay)))
+				return fail(Status::LimitExceeded, "rigid replay candidate size overflows");
+		}
 		auto stateCharge = budget.Reserve(copyBytes);
 		if (!stateCharge) return fail(Status::LimitExceeded, "simulation candidate state exceeds bounds");
 		ReplayResult candidate;
@@ -13468,6 +13552,15 @@ namespace engine::imagegraph {
 						}))
 						candidate.Data.Entries.push_back(entry);
 			capture.Data = &candidate.Data;
+		}
+
+		if constexpr (surfaceSupport) {
+			if (request.RigidReplay) {
+				candidate.Rigid.Owners.reserve(request.RigidReplay->Owners.capacity());
+				for (const auto &owner : request.RigidReplay->Owners)
+					candidate.Rigid.Owners.push_back(owner);
+			}
+			capture.Rigid = &candidate.Rigid;
 		}
 		NodeInputCapture inputs;
 		if constexpr (inputSupport)

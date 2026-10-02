@@ -10,6 +10,8 @@
 #include "SourcePathPayload.hpp"
 #include "SourcePathPayload3D.hpp"
 #include "SourceTilesetPayload.hpp"
+#include "SourceRigidPayload.hpp"
+#include "AtlasPayload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -28,15 +30,21 @@ namespace engine::imagegraph::detail {
 		ValueType::Scene3D, ValueType::Mesh2D,		ValueType::Struct,		   ValueType::Any,
 		ValueType::Image,	ValueType::Buffer,		ValueType::NodeRef,		   ValueType::Path3D,
 		ValueType::PcxNode, ValueType::PixelBox,	ValueType::DynamicSurface, ValueType::Array,
-		ValueType::Sdf,		ValueType::FluidDomain, ValueType::Particle,	   ValueType::Tileset
+		ValueType::Sdf,		ValueType::FluidDomain, ValueType::Particle,	   ValueType::Tileset,
+		ValueType::Rigid, ValueType::Atlas
 	};
 	static_assert(std::size(VALUE_PAYLOAD_TYPES) == std::variant_size_v<Value>);
-	static_assert(std::variant_size_v<Value> == 36 && std::variant_size_v<ElementValue> == 35);
+	static_assert(std::variant_size_v<Value> == 38 && std::variant_size_v<ElementValue> == 37);
 	static_assert(std::is_same_v<std::variant_alternative_t<34, Value>, ParticleValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<33, ElementValue>, ParticleValue>);
 	static_assert(sizeof(ParticleValue) == 8 && sizeof(TilesetValue) == 8 && sizeof(Value) == 88);
 	static_assert(std::is_same_v<std::variant_alternative_t<35, Value>, TilesetValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<34, ElementValue>, TilesetValue>);
+	static_assert(sizeof(RigidValue) == 8 && sizeof(AtlasValue) == 8 && sizeof(Value) == 88);
+	static_assert(std::is_same_v<std::variant_alternative_t<36, Value>, RigidValue>);
+	static_assert(std::is_same_v<std::variant_alternative_t<37, Value>, AtlasValue>);
+	static_assert(std::is_same_v<std::variant_alternative_t<35, ElementValue>, RigidValue>);
+	static_assert(std::is_same_v<std::variant_alternative_t<36, ElementValue>, AtlasValue>);
 	inline ValueType PayloadType(const Value &value) {
 		return VALUE_PAYLOAD_TYPES[value.index()];
 	}
@@ -141,6 +149,10 @@ namespace engine::imagegraph::detail {
 			return ValueType::Particle;
 		else if constexpr (std::is_same_v<T, TilesetValue>)
 			return ValueType::Tileset;
+		else if constexpr (std::is_same_v<T, RigidValue>)
+			return ValueType::Rigid;
+		else if constexpr (std::is_same_v<T, AtlasValue>)
+			return ValueType::Atlas;
 		else {
 			static_assert(std::is_same_v<T, ArrayValue>);
 			return ValueType::Array;
@@ -222,6 +234,10 @@ namespace engine::imagegraph::detail {
 			return ParticleStorageBytes<false>(item);
 		else if constexpr (std::is_same_v<T, TilesetValue>)
 			return TilesetStorageBytes<false>(item);
+		else if constexpr (std::is_same_v<T, RigidValue>)
+			return RigidStorageBytes<false>(item);
+		else if constexpr (std::is_same_v<T, AtlasValue>)
+			return AtlasStorageBytes(item, false);
 		else if constexpr (std::is_same_v<T, SourceArrayItem>) {
 			return std::visit(
 				[](const auto &child) -> uint64_t {
@@ -333,6 +349,10 @@ namespace engine::imagegraph::detail {
 			return ParticleStorageBytes<true>(item);
 		else if constexpr (std::is_same_v<T, TilesetValue>)
 			return TilesetStorageBytes<true>(item);
+		else if constexpr (std::is_same_v<T, RigidValue>)
+			return RigidStorageBytes<true>(item);
+		else if constexpr (std::is_same_v<T, AtlasValue>)
+			return AtlasStorageBytes(item, true);
 		else if constexpr (std::is_same_v<T, SourceArrayItem>) {
 			return std::visit(
 				[](const auto &child) -> uint64_t {
@@ -438,6 +458,10 @@ namespace engine::imagegraph::detail {
 			return ValidParticlePayload(item);
 		else if constexpr (std::is_same_v<T, TilesetValue>)
 			return ValidTilesetPayload(item);
+		else if constexpr (std::is_same_v<T, RigidValue>)
+			return ValidRigidPayload(item);
+		else if constexpr (std::is_same_v<T, AtlasValue>)
+			return ValidAtlasPayload(item);
 		else if constexpr (std::is_same_v<T, MatrixValue>)
 			return item.Columns > 0 && item.Rows > 0 && item.Values.size() <= Limits::MaximumArrayElements &&
 				   uint64_t(item.Columns) * item.Rows == item.Values.size() &&

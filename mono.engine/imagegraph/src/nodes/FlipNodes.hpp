@@ -35,6 +35,9 @@ namespace engine::imagegraph::detail {
 		}
 		data.Tick = tick;
 	}
+	bool FlipObstacle(NodeContext &context);
+	bool FlipSolid(NodeContext &context);
+	bool FlipFillSurface(NodeContext &context, const FluidDomainValue &input);
 	bool FlipSpawner(NodeContext &context);
 	bool FlipDestroy(NodeContext &context);
 	bool FlipParticleForce(NodeContext &context);

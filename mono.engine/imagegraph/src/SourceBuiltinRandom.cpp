@@ -31,7 +31,8 @@ namespace engine::imagegraph {
 		}
 
 		std::optional<uint64_t> PriorRecordingBytes(const SourceBuiltinRandomCapture &capture) {
-			if (capture.Inputs.size() > Limits::MaximumLinks || capture.Draws.size() > 65536 ||
+			if (capture.Inputs.size() > Limits::MaximumLinks ||
+				capture.InputImages.size() > Limits::MaximumLinks || capture.Draws.size() > 65536 ||
 				RecordingNodeStatus(capture.Authored) != Status::Ok)
 				return std::nullopt;
 			const auto authored = NodeClonePayloadBytes(capture.Authored);
@@ -43,7 +44,8 @@ namespace engine::imagegraph {
 				return true;
 			};
 			if (!add(*authored) || !add(capture.Inputs.capacity() * sizeof(AuthoredValue)) ||
-				!add(capture.Draws.capacity() * sizeof(SourceBuiltinRandomDraw)))
+				!add(capture.Draws.capacity() * sizeof(SourceBuiltinRandomDraw)) ||
+				!add(capture.InputImages.capacity() * sizeof(SourceBuiltinRandomInputImage)))
 				return std::nullopt;
 			const auto &node = capture.Authored;
 			const auto slack = [&](const auto &items) {
@@ -87,6 +89,9 @@ namespace engine::imagegraph {
 				const auto payload = ValueClonePayloadBytes(input.Data);
 				if (!payload || !add(*payload) || !add(input.Port.capacity())) return std::nullopt;
 			}
+			for (const auto &input : capture.InputImages) {
+				if (!add(input.Port.capacity()) || !add(input.Data.Pixels.capacity())) return std::nullopt;
+			}
 			return bytes;
 		}
 	} // namespace
@@ -123,7 +128,8 @@ namespace engine::imagegraph {
 					Status::InvalidValue, capture, "Builtin RNG authored identity or time is invalid"
 				);
 			if (capture.ProcessorRow >= Limits::MaximumArrayElements ||
-				capture.Inputs.size() > Limits::MaximumLinks || capture.Draws.size() > 65536)
+				capture.Inputs.size() > Limits::MaximumLinks ||
+				capture.InputImages.size() > Limits::MaximumLinks || capture.Draws.size() > 65536)
 				return fail(Status::LimitExceeded, capture, "Builtin RNG recording exceeds bounded slots");
 			for (size_t previous = 0; previous < index; ++previous) {
 				const auto &other = captures[previous];
@@ -145,7 +151,9 @@ namespace engine::imagegraph {
 			if (!nodeBytes || !add(sizeof(capture) + *nodeBytes) ||
 				!add(
 					capture.Inputs.size() * (sizeof(AuthoredValue) + sizeof(std::string_view)) +
-					capture.Draws.size() * sizeof(SourceBuiltinRandomDraw)
+					capture.Draws.size() * sizeof(SourceBuiltinRandomDraw) +
+					capture.InputImages.size() *
+						(sizeof(SourceBuiltinRandomInputImage) + sizeof(std::string_view))
 				))
 				return fail(
 					Status::LimitExceeded, capture, "Builtin RNG recordings exceed owned byte admission"
@@ -167,6 +175,25 @@ namespace engine::imagegraph {
 			std::sort(ports.begin(), ports.end());
 			if (std::adjacent_find(ports.begin(), ports.end()) != ports.end())
 				return fail(Status::DuplicateId, capture, "Builtin RNG resolved control is duplicated");
+			ports.clear();
+			ports.reserve(capture.InputImages.size());
+			for (const auto &input : capture.InputImages) {
+				if (input.Port.empty() || input.Port.size() > Limits::MaximumTextBytes ||
+					!ValidSurfaceLayout(input.Data, Limits::MaximumDimension, Limits::MaximumEvaluationBytes))
+					return fail(
+						Status::InvalidValue, capture, "Builtin RNG resolved image layout is invalid"
+					);
+				if (!add(input.Port.size() + 32) || !add(input.Data.Pixels.size()))
+					return fail(
+						Status::LimitExceeded, capture, "Builtin RNG images exceed owned byte admission"
+					);
+				if (!FiniteSurfaceSamples(input.Data))
+					return fail(Status::InvalidValue, capture, "Builtin RNG resolved image is nonfinite");
+				ports.push_back(input.Port);
+			}
+			std::sort(ports.begin(), ports.end());
+			if (std::adjacent_find(ports.begin(), ports.end()) != ports.end())
+				return fail(Status::DuplicateId, capture, "Builtin RNG resolved image is duplicated");
 			for (const auto &draw : capture.Draws) {
 				if (!std::isfinite(draw.Lower) || !std::isfinite(draw.Upper) || !std::isfinite(draw.Result))
 					return fail(Status::InvalidValue, capture, "Builtin RNG draw is nonfinite");
@@ -281,18 +308,19 @@ namespace engine::imagegraph {
 		const auto status =
 			EvaluateNodeInputs(document, plan, nodeId, request, snapshot, diagnostic, availableBytes);
 		if (status != Status::Ok) return status;
-		if (!snapshot.Images().empty()) {
+		if (!snapshot.ImageArrays().empty()) {
 			diagnostic = {
 				Status::UnsupportedExecution,
 				std::string(nodeId),
 				{},
-				"Builtin RNG capture image bindings require an explicit "
+				"Builtin RNG capture image arrays require a per-row "
 				"source recording contract"
 			};
 			return diagnostic.Code;
 		}
 
-		if (snapshot.Values().size() > Limits::MaximumLinks) {
+		if (snapshot.Values().size() > Limits::MaximumLinks ||
+			snapshot.Images().size() > Limits::MaximumLinks) {
 			diagnostic = {
 				Status::LimitExceeded,
 				std::string(nodeId),
@@ -337,6 +365,47 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 		}
+		if (!admit(
+				snapshot.Images().size() * (sizeof(SourceBuiltinRandomInputImage) + sizeof(std::string_view))
+			)) {
+			diagnostic = {
+				Status::LimitExceeded,
+				std::string(nodeId),
+				{},
+				"Builtin RNG preparation image slots exceed owned byte admission"
+			};
+			return diagnostic.Code;
+		}
+		for (const auto &input : snapshot.Images()) {
+			if (input.Port.empty() || input.Port.size() > Limits::MaximumTextBytes ||
+				!ValidSurfaceLayout(input.Data, Limits::MaximumDimension, Limits::MaximumEvaluationBytes)) {
+				diagnostic = {
+					Status::InvalidValue,
+					std::string(nodeId),
+					input.Port,
+					"Builtin RNG preparation image layout is invalid"
+				};
+				return diagnostic.Code;
+			}
+			if (!admit(input.Port.size() + 32) || !admit(input.Data.Pixels.size())) {
+				diagnostic = {
+					Status::LimitExceeded,
+					std::string(nodeId),
+					input.Port,
+					"Builtin RNG preparation images exceed owned byte admission"
+				};
+				return diagnostic.Code;
+			}
+			if (!FiniteSurfaceSamples(input.Data)) {
+				diagnostic = {
+					Status::InvalidValue,
+					std::string(nodeId),
+					input.Port,
+					"Builtin RNG preparation image is nonfinite"
+				};
+				return diagnostic.Code;
+			}
+		}
 		if (snapshot.RetainedBytes() > availableBytes - preparationBytes) {
 			diagnostic = {
 				Status::LimitExceeded,
@@ -354,6 +423,9 @@ namespace engine::imagegraph {
 		prepared.Inputs.reserve(snapshot.Values().size());
 		for (const auto &input : snapshot.Values())
 			prepared.Inputs.push_back({input.Port, input.Data});
+		prepared.InputImages.reserve(snapshot.Images().size());
+		for (const auto &input : snapshot.Images())
+			prepared.InputImages.push_back({input.Port, input.Data});
 		uint64_t bytes = 0;
 		if (ValidateBuiltinRandomCaptures({&prepared, 1}, maximumBytes, bytes, diagnostic) != Status::Ok)
 			return diagnostic.Code;

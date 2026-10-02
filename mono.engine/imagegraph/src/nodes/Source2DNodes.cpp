@@ -283,6 +283,8 @@ namespace engine::imagegraph::detail {
 	bool SourceGrain(NodeContext &context);
 	bool SourceContrastBlur(NodeContext &context);
 	bool SourcePathShape(NodeContext &context);
+	bool SourceCosGradient(NodeContext &context);
+	bool SourceRadialBlur(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.pb_draw_surface", PixelDrawSurface, true},
@@ -313,6 +315,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.grain", SourceGrain, true},
 			ExecutorEntry{"pc.blur_contrast", SourceContrastBlur, true},
 			ExecutorEntry{"pc.path_shape", SourcePathShape, true},
+			ExecutorEntry{"pc.gradient_cos", SourceCosGradient, true},
+			ExecutorEntry{"pc.blur_radial", SourceRadialBlur, true},
 			ExecutorEntry{"pc.de_stray", DeStray, true},
 			ExecutorEntry{"pc.color_select", ColorSelect, true},
 			ExecutorEntry{"pc.corner", RoundCorner, true},

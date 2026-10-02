@@ -525,6 +525,32 @@ namespace engine::imagegraph {
 		bool operator==(const TilesetValue &) const = default;
 	};
 
+	struct RigidObjectData {
+		std::string OwnerId;
+		std::string BodyId;
+		bool operator==(const RigidObjectData &) const = default;
+	};
+	// Source object lists retain aliases; the owner journal resolves current physical and visual state.
+	struct RigidValue {
+		OwnedPayload3D<RigidObjectData> Data;
+		bool operator==(const RigidValue &) const = default;
+	};
+	enum class AtlasKind : uint8_t { Atlas, SurfaceAtlas };
+	struct AtlasData {
+		SurfaceValue Surface;
+		Vector2 Position{}, Scale{1, 1}, Dimension{1, 1};
+		double RotationDegrees = 0, Alpha = 1;
+		Colour Blend{255, 255, 255, 255};
+		std::optional<SurfaceValue> OriginalSurface;
+		Vector2 OriginalDimension{1, 1};
+		AtlasKind Kind = AtlasKind::Atlas;
+		bool operator==(const AtlasData &) const = default;
+	};
+	struct AtlasValue {
+		OwnedPayload3D<AtlasData> Data;
+		bool operator==(const AtlasValue &) const = default;
+	};
+
 	struct StructData;
 	struct StructValue {
 		OwnedPayload3D<StructData> Data;
@@ -666,7 +692,9 @@ namespace engine::imagegraph {
 		SdfValue,
 		FluidDomainValue,
 		ParticleValue,
-		TilesetValue>;
+		TilesetValue,
+		RigidValue,
+		AtlasValue>;
 
 	// Source arrays may mix leaves, nested arrays and owned surfaces. No pointer survives evaluation.
 	struct SourceArrayItem {
@@ -731,7 +759,9 @@ namespace engine::imagegraph {
 		SdfValue,
 		FluidDomainValue,
 		ParticleValue,
-		TilesetValue>;
+		TilesetValue,
+		RigidValue,
+		AtlasValue>;
 
 	// Fields retain owned runtime values; nesting never creates shared mutable references.
 	struct StructData {
@@ -1320,6 +1350,8 @@ namespace engine::imagegraph {
 	struct SurfaceFrameReplayState;
 	struct RandomReplayState;
 	struct DataReplayState;
+	struct RigidReplayState;
+	class SourceRigidProvider;
 	struct SliceStackReplayState;
 	struct RandomEntropyCapture;
 	// Fixed evaluation inputs. Seed is reserved for deterministic random nodes.
@@ -1360,6 +1392,11 @@ namespace engine::imagegraph {
 		const SurfaceFrameReplayState *SurfaceReplay = nullptr;
 		const RandomReplayState *RandomReplay = nullptr;
 		const DataReplayState *DataReplay = nullptr;
+		// Borrowed host physics capability and immutable durable event journal.
+		const RigidReplayState *RigidReplay = nullptr;
+		SourceRigidProvider *RigidProvider = nullptr;
+		uint64_t RigidAuthoringRevision = 0;
+		bool RigidPlaying = false, RigidFrameProgress = false;
 		const SliceStackReplayState *SliceStackReplay = nullptr;
 		std::span<const RandomEntropyCapture> RandomEntropy{};
 		// Restart surface replay time at zero while retaining source cache entries.

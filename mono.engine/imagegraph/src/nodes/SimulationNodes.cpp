@@ -314,6 +314,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.flip_domain", FlipDomain},
 			ExecutorEntry{"pc.flip_update", FlipUpdate},
 			ExecutorEntry{"pc.flip_fill", FlipFill},
+			ExecutorEntry{"pc.flip_solid", FlipSolid},
+			ExecutorEntry{"pc.flip_apply_force", FlipObstacle},
 			ExecutorEntry{"pc.flip_apply_velocity", FlipParticleForce},
 			ExecutorEntry{"pc.flip_repel", FlipParticleForce},
 			ExecutorEntry{"pc.flip_vortex", FlipParticleForce},

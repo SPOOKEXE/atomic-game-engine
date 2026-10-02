@@ -31,10 +31,12 @@ namespace engine::imagegraph::detail {
 			capture->Subframe != context.Request.Subframe ||
 			capture->NegativeFrame != context.Request.NegativeFrame)
 			return context.Fail(Status::InvalidValue, "Builtin RNG recording is stale", "seed");
-		if (capture->Inputs.size() > Limits::MaximumLinks || capture->Draws.size() > 65536)
+		if (capture->Inputs.size() > Limits::MaximumLinks ||
+			capture->InputImages.size() > Limits::MaximumLinks || capture->Draws.size() > 65536)
 			return context.Fail(Status::LimitExceeded, "Builtin RNG recording exceeds its bounded slots");
-		auto controlsCharge =
-			context.ReserveWorkspace(capture->Inputs.size() * (sizeof(std::string_view) + 32));
+		auto controlsCharge = context.ReserveWorkspace(
+			(capture->Inputs.size() + capture->InputImages.size()) * (sizeof(std::string_view) + 32)
+		);
 		if (!controlsCharge) return false;
 		std::unordered_set<std::string_view> ports;
 		for (const auto &input : capture->Inputs) {
@@ -53,6 +55,27 @@ namespace engine::imagegraph::detail {
 			if (value && !ports.contains(port))
 				return context.Fail(
 					Status::InvalidValue, "Builtin RNG recording omits a resolved control", port
+				);
+		ports.clear();
+		for (const auto &input : capture->InputImages) {
+			const Image *resolved = context.Input(input.Port);
+			if (!ports.insert(input.Port).second || !resolved || resolved->Width != input.Data.Width ||
+				resolved->Height != input.Data.Height || resolved->Format != input.Data.Format ||
+				resolved->Pixels != input.Data.Pixels)
+				return context.Fail(Status::InvalidValue, "Builtin RNG resolved image is stale", input.Port);
+		}
+		for (const auto &[port, image] : context.Images)
+			if (image && !ports.contains(port))
+				return context.Fail(
+					Status::InvalidValue, "Builtin RNG recording omits a resolved image", port
+				);
+		// ProcessorBatch retains its original array while binding one owned row image by port.
+		for (const auto &[port, images] : context.ImageArrays)
+			if (images && !context.Input(port))
+				return context.Fail(
+					Status::UnsupportedExecution,
+					"Builtin RNG image arrays require a per-row source recording",
+					port
 				);
 		return true;
 	}

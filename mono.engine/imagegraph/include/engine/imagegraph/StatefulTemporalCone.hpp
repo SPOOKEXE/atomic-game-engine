@@ -14,6 +14,7 @@ namespace engine::imagegraph {
 		size_t SurfaceCaches = 0;
 		size_t RandomGenerators = 0;
 		size_t DataProcessors = 0;
+		size_t RigidActors = 0;
 	};
 	// Follows the compiled union of output dependencies, including group allocation and inline owners.
 	// Bounded stack storage keeps temporal admission independent of graph traversal allocations.
@@ -73,6 +74,7 @@ namespace engine::imagegraph {
 								  node.Type == "pc.delay" || node.Type == "pc.rate_remap" ||
 								  node.Type == "pc.revert" || node.Type == "pc.stagger";
 			cone.RandomGenerators += node.Type == "pc.random";
+			cone.RigidActors += node.Type.starts_with("pc.rigid_");
 			cone.DataProcessors += node.Type == "pc.trigger_bool" || node.Type == "pc.differential" ||
 								   node.Type == "pc.counter" || node.Type == "pc.delay_value" ||
 								   node.Type == "pc.cache_value_array";

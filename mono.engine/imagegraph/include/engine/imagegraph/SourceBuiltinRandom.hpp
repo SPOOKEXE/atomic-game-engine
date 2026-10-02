@@ -12,7 +12,16 @@ namespace engine::imagegraph {
 		double Lower = 0, Upper = 0, Result = 0;
 		bool operator==(const SourceBuiltinRandomDraw &) const = default;
 	};
-	// Desktop builtin observations own the authored node, resolved controls and ordered draws.
+	struct SourceBuiltinRandomInputImage {
+		std::string Port;
+		Image Data;
+		bool operator==(const SourceBuiltinRandomInputImage &other) const {
+			return Port == other.Port && Data.Width == other.Data.Width && Data.Height == other.Data.Height &&
+				   Data.Format == other.Data.Format && Data.Pixels == other.Data.Pixels;
+		}
+	};
+	// Desktop builtin observations own the authored node, resolved controls, image bindings and ordered
+	// draws.
 	struct SourceBuiltinRandomCapture {
 		Node Authored;
 		size_t ProcessorRow = 0;
@@ -21,9 +30,10 @@ namespace engine::imagegraph {
 		bool NegativeFrame = false;
 		std::vector<AuthoredValue> Inputs;
 		std::vector<SourceBuiltinRandomDraw> Draws;
+		std::vector<SourceBuiltinRandomInputImage> InputImages;
 		bool operator==(const SourceBuiltinRandomCapture &) const = default;
 	};
-	// Preparation resolves a non-batched node's controls without executing its random calls.
+	// Preparation resolves a non-batched node's controls and images without executing its random calls.
 	Status PrepareSourceBuiltinRandomCapture(
 		const Document &document,
 		const Plan &plan,

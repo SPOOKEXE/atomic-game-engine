@@ -123,11 +123,25 @@ namespace engine::imagegraph::detail {
 			const Value *value = mapped ? SourceMaterialRange(context, port) : context.Find(port);
 			selected.Values = value ? std::get_if<ArrayValue>(value) : nullptr;
 			if (!selected.Images && !selected.Values) return true;
+			const bool spriteShape = context.Entry.Type == "pc.sprite_stack" && port == "base_shape";
+			if (spriteShape) {
+				const auto *selector = context.Find("array_process");
+				const auto mode = selector ? SourceChoiceNumber(*selector) : std::optional<double>{1};
+				if (!mode || !std::isfinite(*mode))
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"source Sprite Stack array condition requires a scalar Array Process selector",
+						"array_process"
+					);
+				// Source preGetInputs preserves the whole surface array in Combined mode.
+				if (*mode != 0) return true;
+				selected.Depth = 0;
+			}
 			// Source Array Shift declares its array input depth 99 and consumes the entire shape.
 			if (input.ArrayDepth >= Limits::MaximumArrayDepth) return true;
 			if (context.Entry.Type == "pc.3_d_mesh_plane" && port == "both_side")
 				return context.Fail(Status::UnsupportedExecution, "source Both Side rejects arrays", port);
-			if (!mapped && !input.ArrayDepthKnown)
+			if (!mapped && !spriteShape && !input.ArrayDepthKnown)
 				return context.Fail(
 					Status::UnsupportedExecution, "source input array depth is dynamic", port
 				);
@@ -154,6 +168,7 @@ namespace engine::imagegraph::detail {
 				const bool supported =
 					mapped || input.Type == ValueType::Any || input.Type == ValueType::Array ||
 					leaf == input.Type ||
+					(leaf == ValueType::Atlas && input.Type == ValueType::Image) ||
 					(numeric && (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
 								 input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
 								 input.Type == ValueType::Vector2 || input.Type == ValueType::Vector3 ||

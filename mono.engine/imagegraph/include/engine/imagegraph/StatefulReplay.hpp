@@ -2,6 +2,7 @@
 
 #include <engine/imagegraph/DataReplay.hpp>
 #include <engine/imagegraph/RandomReplay.hpp>
+#include <engine/imagegraph/RigidReplay.hpp>
 #include <engine/imagegraph/SimulationReplay.hpp>
 #include <engine/imagegraph/SurfaceFrameReplay.hpp>
 
@@ -12,6 +13,7 @@ namespace engine::imagegraph {
 		SurfaceFrameReplayState Surfaces;
 		RandomReplayState Random;
 		DataReplayState Data;
+		RigidReplayState Rigid;
 	};
 	struct StatefulNamedOutput {
 		std::string Id;
@@ -24,6 +26,7 @@ namespace engine::imagegraph {
 		SurfaceFrameReplayState Surfaces;
 		RandomReplayState Random;
 		DataReplayState Data;
+		RigidReplayState Rigid;
 	};
 	// grug capture resolved inputs and replay owners before the selected host kernel runs.
 	Status EvaluateStatefulNodeInputs(
@@ -42,6 +45,7 @@ namespace engine::imagegraph {
 		SurfaceFrameReplayState Surfaces;
 		RandomReplayState Random;
 		DataReplayState Data;
+		RigidReplayState Rigid;
 	};
 	uint64_t RetainedStatefulOutputBytes(const StatefulOutputEvaluationResult &result);
 	// grug run the union of selected closures once, then publish every output and replay owner together.
