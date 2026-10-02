@@ -51,6 +51,10 @@ mono_add_library(bake
 		Vendor::zstd
 )
 
+# Importers intentionally keep independent private Reader and Json types.
+# Combining their translation units merges those anonymous namespaces.
+set_target_properties(engine_bake PROPERTIES UNITY_BUILD OFF)
+
 if(TARGET test_bake)
 	target_link_libraries(test_bake PRIVATE Vendor::json)
 endif()

@@ -75,6 +75,9 @@ mono_add_library(render
 		${CMAKE_SOURCE_DIR}/mono.vendor/sdl/src/video/khronos
 )
 
+# Render adapters keep independent private conversion and file helpers.
+set_target_properties(engine_render PROPERTIES UNITY_BUILD OFF)
+
 # Compile the extension example as part of the render suite. It stays out of
 # the shipped library while every API call in it remains build-checked.
 if(TARGET test_render)

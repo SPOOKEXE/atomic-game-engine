@@ -12,3 +12,6 @@ mono_add_library(imagegraphexport
         Vendor::json
         glm::glm
 )
+
+# Independent file hosts reuse private Input and Json helpers.
+set_target_properties(engine_imagegraphexport PROPERTIES UNITY_BUILD OFF)
