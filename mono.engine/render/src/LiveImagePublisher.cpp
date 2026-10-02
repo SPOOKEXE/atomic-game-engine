@@ -44,7 +44,7 @@ namespace engine::render {
 			const auto support = detail::TextureFormatForUpload(published);
 			const uint64_t uploadBytes = pixelCount * support->UploadBytesPerPixel;
 			return uploadBytes <= LiveImagePublisher::MAXIMUM_IMAGE_BYTES &&
-				   detail::SupportsTextureFormat(device, published);
+				   (!device || detail::SupportsTextureFormat(device, published));
 		}
 	}
 
@@ -82,7 +82,9 @@ namespace engine::render {
 		uint32_t height,
 		std::span<const std::byte> pixels,
 		LiveImageColorSpace colorSpace,
-		assets::TextureFormat format
+		assets::TextureFormat format,
+		uint8_t flipbookSide,
+		std::span<const float> frameDurations
 	) {
 		if (!binding.Owner.IsValid() || !binding.Name.IsValid() || binding.Generation == 0) {
 			return LiveImagePublishStatus::Invalid;
@@ -110,12 +112,17 @@ namespace engine::render {
 		image.Width = width;
 		image.Height = height;
 		image.Format = published;
+		if (frameDurations.size() > 4096) return LiveImagePublishStatus::Invalid;
+		image.FlipbookSide = flipbookSide;
+		image.FlipbookFrames = static_cast<uint16_t>(frameDurations.size());
 		try {
+			image.FlipbookFrameDurations.assign(frameDurations.begin(), frameDurations.end());
 			image.Pixels.assign(pixels.begin(), pixels.end());
 		} catch (const std::bad_alloc &) {
 			return LiveImagePublishStatus::UploadFailed;
 		}
 
+		if (!image.IsValid()) return LiveImagePublishStatus::Invalid;
 		return renderer.AddTexture(binding.Name, image, binding.Owner) ? LiveImagePublishStatus::Published
 																	   : LiveImagePublishStatus::UploadFailed;
 	}

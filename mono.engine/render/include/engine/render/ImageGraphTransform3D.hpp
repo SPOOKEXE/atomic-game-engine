@@ -63,10 +63,12 @@ namespace engine::render::imagegraph {
 		std::vector<std::byte> RenderedPixels, DepthRgba8;
 		std::vector<float> Depth;
 	};
+	enum class TransformImage3DOutput : uint8_t { Rendered, Depth };
 	struct TransformImage3DLiveRequest {
 		core::Name Owner;
 		core::Name Name;
 		uint64_t Generation = 0;
+		TransformImage3DOutput Output = TransformImage3DOutput::Rendered;
 		TransformImage3DRequest Request;
 	};
 	enum class TransformImage3DQueueResult : uint8_t { Queued, Replaced, Duplicate, Invalid, Full };

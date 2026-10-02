@@ -61,7 +61,9 @@ namespace engine::render {
 			uint32_t height,
 			std::span<const std::byte> pixels,
 			LiveImageColorSpace colorSpace = LiveImageColorSpace::Display,
-			assets::TextureFormat format = assets::TextureFormat::RGBA8
+			assets::TextureFormat format = assets::TextureFormat::RGBA8,
+			uint8_t flipbookSide = 0,
+			std::span<const float> frameDurations = {}
 		);
 
 		// Commits up to six current bindings as one renderer texture generation.

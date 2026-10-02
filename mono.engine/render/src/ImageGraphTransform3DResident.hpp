@@ -18,6 +18,8 @@ namespace engine::render::test_support {
 		uint64_t SourceBytes = 0;
 		uint64_t ScratchBytes = 0;
 		bool Cancelled = false;
+		uint32_t CameraOutputs = 0;
+		imagegraph::TransformImage3DOutput Output = imagegraph::TransformImage3DOutput::Rendered;
 		imagegraph::TransformImage3DRequest Request;
 	};
 
@@ -31,6 +33,9 @@ namespace engine::render::test_support {
 		static bool RecordAndSubmit(Renderer &renderer);
 		static void Poll(Renderer &renderer);
 		static void *PublishedTexture(const Renderer &renderer, core::Name owner, core::Name name);
+		static bool PublishedFormat(
+			const Renderer &renderer, core::Name owner, core::Name name, assets::TextureFormat &format
+		);
 		static uint64_t PublishedGeneration(const Renderer &renderer, core::Name owner, core::Name name);
 	};
 }

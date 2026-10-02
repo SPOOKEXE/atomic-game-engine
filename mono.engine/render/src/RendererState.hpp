@@ -4,6 +4,8 @@
 #include "GraphHistory.hpp"
 #include "ImageGraphTransform3D.hpp"
 #include "PortalCaptureTreeWork.hpp"
+#include "SourceCamera3D.hpp"
+#include "SourceSdf.hpp"
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
 // over them.
@@ -763,8 +765,19 @@ namespace engine::render {
 				core::Name Owner;
 				core::Name Name;
 				uint64_t Generation = 0;
+				imagegraph::TransformImage3DOutput Output = imagegraph::TransformImage3DOutput::Rendered;
 				imagegraph::TransformImage3DRequest Request;
 				imagegraph::TransformImage3DLiveResources Resources;
+				struct CameraBinding {
+					core::Name Name;
+					uint64_t Generation = 0;
+					imagegraph::SourceCamera3DOutput Output = imagegraph::SourceCamera3DOutput::Rendered;
+					bool Cancelled = false;
+				};
+				std::vector<CameraBinding> CameraBindings;
+				std::optional<imagegraph::SourceCamera3DRequest> CameraRequest;
+				std::optional<imagegraph::SourceSdfRequest> SdfRequest;
+				imagegraph::SourceCamera3DResources CameraResources;
 				uint32_t Width = 0, Height = 0;
 				uint64_t SourceBytes = 0;
 				uint64_t ScratchBytes = 0;

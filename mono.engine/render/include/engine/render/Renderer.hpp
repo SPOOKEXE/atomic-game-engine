@@ -28,6 +28,8 @@
 #include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
 #include <engine/render/ResourceImage.hpp>
+#include <engine/render/SourceCamera3D.hpp>
+#include <engine/render/SourceSdf.hpp>
 #include <engine/render/VisibilityObservation.hpp>
 #include <engine/scene/CloudDensity.hpp>
 #include <engine/scene/Components.hpp>
@@ -2736,7 +2738,10 @@ namespace engine::render {
 		// @return The handles, both empty before Initialise.
 		BackendHandles Backend() const;
 
-		// Queues one bounded Transform Image 3D generation for render-thread recording.
+		// Queues bounded source image work for render-thread recording.
+		imagegraph::TransformImage3DQueueResult
+		QueueSourceCamera3D(imagegraph::SourceCamera3DLiveRequest request);
+		imagegraph::TransformImage3DQueueResult QueueSourceSdf(imagegraph::SourceSdfLiveRequest request);
 		imagegraph::TransformImage3DQueueResult
 		QueueTransformImage3D(imagegraph::TransformImage3DLiveRequest request);
 		bool CancelTransformImage3D(core::Name owner, core::Name name, uint64_t generation);

@@ -44,6 +44,7 @@ mono_add_library(render
 		Engine::script
 
 		# Public table APIs use asset data types.
+		Engine::imagegraph
 		Engine::assets
 
 		# The built-in SPIR-V, and the one name that says where it is staged.

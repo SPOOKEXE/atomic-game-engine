@@ -290,7 +290,7 @@ TEST_CASE("Transform Image 3D queue replaces queued sources by net budget", "[re
 		REQUIRE(renderer.QueueTransformImage3D(std::move(request)) == TransformImage3DQueueResult::Queued);
 	}
 	const uint64_t held = test_support::TransformImage3DResidentTestAccess::SourceBytes(renderer);
-	CHECK(held > imagegraph::MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES - uint64_t(side) * side * 8);
+	CHECK(held > render::imagegraph::MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES - uint64_t(side) * side * 8);
 	auto replacement = LiveRequest(owner, name, 5, side, side);
 	replacement.Request.Back = SolidSurface(side, side, 47);
 	CHECK(renderer.QueueTransformImage3D(std::move(replacement)) == TransformImage3DQueueResult::Replaced);
@@ -390,4 +390,29 @@ TEST_CASE("Transform Image 3D live queue records one fenced resident GPU pass", 
 		test_support::TransformImage3DResidentTestAccess::PublishedGeneration(fixture.Render, owner, name) ==
 		2
 	);
+}
+
+TEST_CASE("live Transform Image 3D depth publishes numeric storage", "[render][gpu]") {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name owner("imagegraph.depth.owner"), name("imagegraph.depth.output");
+	auto request = LiveRequest(owner, name, 1);
+	request.Output = TransformImage3DOutput::Depth;
+	REQUIRE(fixture.Render.QueueTransformImage3D(std::move(request)) == TransformImage3DQueueResult::Queued);
+	REQUIRE(test_support::TransformImage3DResidentTestAccess::RecordAndSubmit(fixture.Render));
+	REQUIRE(SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device)));
+	test_support::TransformImage3DResidentTestAccess::Poll(fixture.Render);
+	CHECK(
+		test_support::TransformImage3DResidentTestAccess::PublishedTexture(fixture.Render, owner, name) !=
+		nullptr
+	);
+	CHECK(
+		test_support::TransformImage3DResidentTestAccess::PublishedGeneration(fixture.Render, owner, name) ==
+		1
+	);
+	assets::TextureFormat format;
+	REQUIRE(
+		test_support::TransformImage3DResidentTestAccess::PublishedFormat(fixture.Render, owner, name, format)
+	);
+	CHECK(format == assets::TextureFormat::RGBA8_LINEAR);
 }

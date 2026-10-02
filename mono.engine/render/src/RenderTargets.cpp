@@ -353,6 +353,69 @@ namespace engine::render {
 			SDL_ReleaseGPUFence(Device, submission.Fence);
 			for (uint32_t transform = 0; transform < submission.Transform3DCount; transform++) {
 				auto &slot = GraphResources.Transform3D[submission.Transform3DSlots[transform]];
+				if (slot.CameraRequest) {
+					if (slot.Succeeded && !slot.Cancelled)
+						for (const auto &binding : slot.CameraBindings) {
+							if (binding.Cancelled) continue;
+							const bool superseded = std::any_of(
+								GraphResources.Transform3D.begin(),
+								GraphResources.Transform3D.end(),
+								[&](const auto &candidate) {
+									if (candidate.Owner != slot.Owner || candidate.Cancelled) return false;
+									if (candidate.CameraRequest)
+										return std::any_of(
+											candidate.CameraBindings.begin(),
+											candidate.CameraBindings.end(),
+											[&](const auto &b) {
+												return !b.Cancelled && b.Name == binding.Name &&
+													   b.Generation > binding.Generation;
+											}
+										);
+									return candidate.Name == binding.Name &&
+										   candidate.Generation > binding.Generation;
+								}
+							);
+							auto published = std::find_if(
+								GraphResources.PublishedTransform3DOutputs.begin(),
+								GraphResources.PublishedTransform3DOutputs.end(),
+								[&](const auto &p) { return p.Owner == slot.Owner && p.Name == binding.Name; }
+							);
+							if (superseded ||
+								(published != GraphResources.PublishedTransform3DOutputs.end() &&
+								 published->Generation >= binding.Generation))
+								continue;
+							auto *&texture = slot.CameraResources.Outputs[size_t(binding.Output)];
+							if (!texture) continue;
+							SDL_GPUTexture *retired = nullptr;
+							const auto format = slot.CameraRequest->Format;
+							const uint32_t pixelBytes = imagegraph::detail::TransformImage3DBytesPerPixel(
+								format, imagegraph::TransformImage3DColorSpace::Linear
+							);
+							const size_t bytes = uint64_t(slot.Width) * slot.Height * pixelBytes;
+							if (Textures.ReplaceAdopt(
+									binding.Name,
+									texture,
+									slot.Width,
+									slot.Height,
+									bytes,
+									slot.Owner,
+									retired,
+									format
+								)) {
+								texture = nullptr;
+								if (retired) GraphResources.RetiredTextures.push_back(retired);
+								if (published == GraphResources.PublishedTransform3DOutputs.end())
+									GraphResources.PublishedTransform3DOutputs.push_back(
+										{slot.Owner, binding.Name, binding.Generation}
+									);
+								else
+									published->Generation = binding.Generation;
+								++ResourceEpoch;
+							}
+						}
+					ReleaseTransform3D(slot);
+					continue;
+				}
 				const bool superseded = std::any_of(
 					GraphResources.Transform3D.begin(),
 					GraphResources.Transform3D.end(),
@@ -372,9 +435,24 @@ namespace engine::render {
 									  published->Generation >= slot.Generation;
 				if (slot.Succeeded && !slot.Cancelled && !superseded && !obsolete) {
 					SDL_GPUTexture *retired = nullptr;
-					const uint32_t bytesPerPixel = imagegraph::detail::TransformImage3DBytesPerPixel(
-						slot.Request.Front.Format, slot.Request.ColorSpace
-					);
+					const bool depthOutput = slot.Output == imagegraph::TransformImage3DOutput::Depth;
+					SDL_GPUTexture *&outputTexture = (slot.CameraRequest || slot.SdfRequest)
+														 ? slot.CameraResources.Output
+													 : depthOutput ? slot.Resources.EncodedDepth
+																   : slot.Resources.Rendered;
+					const uint32_t bytesPerPixel =
+						slot.SdfRequest
+							? imagegraph::detail::TransformImage3DBytesPerPixel(
+								  slot.SdfRequest->Format, imagegraph::TransformImage3DColorSpace::Linear
+							  )
+						: slot.CameraRequest
+							? imagegraph::detail::TransformImage3DBytesPerPixel(
+								  slot.CameraRequest->Format, imagegraph::TransformImage3DColorSpace::Linear
+							  )
+						: depthOutput ? 4
+									  : imagegraph::detail::TransformImage3DBytesPerPixel(
+											slot.Request.Front.Format, slot.Request.ColorSpace
+										);
 					const uint64_t bytes64 = uint64_t(slot.Width) * slot.Height * bytesPerPixel;
 					if (bytesPerPixel == 0 || bytes64 > std::numeric_limits<size_t>::max()) {
 						ReleaseTransform3D(slot);
@@ -382,12 +460,15 @@ namespace engine::render {
 					}
 					const size_t bytes = static_cast<size_t>(bytes64);
 					const assets::TextureFormat renderedFormat =
-						imagegraph::detail::ResolveTransformImage3DFormat(
-							slot.Request.Front.Format, slot.Request.ColorSpace
-						);
+						slot.SdfRequest		 ? slot.SdfRequest->Format
+						: slot.CameraRequest ? slot.CameraRequest->Format
+						: depthOutput		 ? assets::TextureFormat::RGBA8_LINEAR
+											 : imagegraph::detail::ResolveTransformImage3DFormat(
+											   slot.Request.Front.Format, slot.Request.ColorSpace
+										   );
 					if (Textures.ReplaceAdopt(
 							slot.Name,
-							slot.Resources.Rendered,
+							outputTexture,
 							slot.Width,
 							slot.Height,
 							bytes,
@@ -395,7 +476,8 @@ namespace engine::render {
 							retired,
 							renderedFormat
 						)) {
-						slot.Resources.Rendered = nullptr;
+						if (slot.SdfRequest) std::erase(slot.CameraResources.Textures, outputTexture);
+						outputTexture = nullptr;
 						if (retired != nullptr) GraphResources.RetiredTextures.push_back(retired);
 						if (published == GraphResources.PublishedTransform3DOutputs.end()) {
 							GraphResources.PublishedTransform3DOutputs.push_back(
