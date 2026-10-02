@@ -6763,6 +6763,13 @@ namespace engine::imagegraph {
 		if (const auto *catalogue = std::get_if<CatalogueOutputs>(&result)) {
 			for (const auto &[id, image] : catalogue->Images)
 				if (id == port) return &image;
+			for (const auto &value : catalogue->Values) {
+				if (value.Port != port) continue;
+				const auto *atlas = std::get_if<AtlasValue>(&value.Data);
+				if (atlas && atlas->Data && atlas->Data->Kind == AtlasKind::SurfaceAtlas &&
+					detail::ValidRuntimeValue(value.Data))
+					return &atlas->Data->Surface.Data;
+			}
 		}
 		return nullptr;
 	}
@@ -9392,6 +9399,26 @@ namespace engine::imagegraph {
 						continue;
 					}
 					if (input.Type == ValueType::Image) {
+						if (!linked) {
+							const auto resolved = std::find_if(
+								plan.ResolvedInputs.begin(),
+								plan.ResolvedInputs.end(),
+								[&](const ResolvedInput &value) {
+									return value.NodeId == node.Id && value.Port == input.Id;
+								}
+							);
+							if (resolved != plan.ResolvedInputs.end()) {
+								const auto *array = std::get_if<ArrayValue>(&resolved->Data);
+								// Junction defaults retain the same owned Atlas identity as producer links.
+								if ((std::holds_alternative<AtlasValue>(resolved->Data) ||
+									 (array && array->ElementType == ValueType::Atlas)) &&
+									detail::ValidRuntimeValue(resolved->Data)) {
+									context.LinkedValues.emplace_back(input.Id);
+									context.ValueViews.emplace_back(input.Id, &resolved->Data);
+									continue;
+								}
+							}
+						}
 						if (linked) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
 							if (const auto *values = FindValueOutputs(results[sourceIndex])) {
@@ -13476,6 +13503,18 @@ namespace engine::imagegraph {
 		if (auto *single = std::get_if<Image>(&result.Data)) {
 			image = std::move(*single);
 			return Status::Ok;
+		}
+		if (auto *catalogue = std::get_if<CatalogueOutputs>(&result.Data);
+			catalogue && catalogue->Values.size() == 1) {
+			auto &value = catalogue->Values.front();
+			if (auto *atlas = std::get_if<AtlasValue>(&value.Data);
+				atlas && atlas->Data && atlas->Data->Kind == AtlasKind::SurfaceAtlas &&
+				detail::ValidRuntimeValue(value.Data) &&
+				ValidSurfaceLayout(atlas->Data->Surface.Data, Limits::MaximumDimension, maximumBytes)) {
+				// The typed result retains Atlas identity; the image overload transfers its owned pixels.
+				image = std::move(atlas->Data->Surface.Data);
+				return Status::Ok;
+			}
 		}
 		ImageArray *array = std::get_if<ImageArray>(&result.Data);
 		if (!array) {

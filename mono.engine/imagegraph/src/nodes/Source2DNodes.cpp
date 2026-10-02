@@ -288,6 +288,8 @@ namespace engine::imagegraph::detail {
 	bool SourceEdgeDetect(NodeContext &context);
 	bool SourceBokehBlur(NodeContext &context);
 	bool SourcePathBlur(NodeContext &context);
+	bool SourceSimpleBlur(NodeContext &context);
+	bool SourceComposeBlend(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.pb_draw_surface", PixelDrawSurface, true},
@@ -323,6 +325,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.edge_detect", SourceEdgeDetect, true},
 			ExecutorEntry{"pc.blur_bokeh", SourceBokehBlur, true},
 			ExecutorEntry{"pc.blur_path", SourcePathBlur, true},
+			ExecutorEntry{"pc.blur_simple", SourceSimpleBlur, true},
+			ExecutorEntry{"pc.blend", SourceComposeBlend, true},
 			ExecutorEntry{"pc.de_stray", DeStray, true},
 			ExecutorEntry{"pc.color_select", ColorSelect, true},
 			ExecutorEntry{"pc.corner", RoundCorner, true},
