@@ -1,5 +1,7 @@
 #include "GroupInstances.hpp"
 #include "InlineCollections.hpp"
+#include "PxcxKeyProvenance.hpp"
+#include "TileProperties.hpp"
 
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
@@ -1477,6 +1479,8 @@ namespace engine::imagegraphio {
 				keyframe.Data = std::move(data);
 				keyframe.Interpolation = "source";
 				keyframe.Ease = imagegraph::KeyframeEase{"linear", "linear", {0, 1}, {0, 0}};
+				if (!AdmitNativeText(detail::CompactSourceKeyId, budget)) return false;
+				keyframe.SourceKeyId = detail::CompactSourceKeyId;
 				out.push_back(std::move(keyframe));
 				return true;
 			}
@@ -1485,6 +1489,7 @@ namespace engine::imagegraphio {
 				return false;
 			if (!AdmitNativeSlots(out, out.size() + records.size(), budget)) return false;
 			static constexpr std::array<std::string_view, 3> SIDES = {"linear", "bezier", "cut"};
+			size_t occurrence = 0;
 			for (const Json &record : records) {
 				if (!record.is_array() || record.size() < 8 || !record[0].is_array() || record[0].size() < 2)
 					return false;
@@ -1528,6 +1533,9 @@ namespace engine::imagegraphio {
 					{easeOut[0], easeOut[1]}
 				};
 				if (!CatalogueDriver(record[7], keyframe, budget)) return false;
+				const auto identity = detail::SourceKeyId(frame, keyframe.Kind, occurrence++);
+				if (!identity || !AdmitNativeText(identity->View(), budget)) return false;
+				keyframe.SourceKeyId = identity->View();
 				out.push_back(std::move(keyframe));
 			}
 			return true;
@@ -2255,6 +2263,34 @@ namespace engine::imagegraphio {
 				}
 				node.Values.resize(valuesBefore);
 				node.DynamicInputs.push_back(std::move(dynamic));
+			}
+			if (entry.Type == "pc.tile_tileset" || entry.Type == "pc.tile_rule" ||
+				entry.Type == "pc.tile_convert") {
+				for (std::string_view port :
+					 {"animatedTiles", "autoterrain", "ruleTiles", "colorList", "colorMap"}) {
+					const bool relevant =
+						entry.Type == "pc.tile_tileset"
+							? port == "animatedTiles" || port == "autoterrain" || port == "ruleTiles"
+						: entry.Type == "pc.tile_rule" ? port == "ruleTiles"
+													   : port == "colorList" || port == "colorMap";
+					if (!relevant) continue;
+					if (auto raw = Attribute(source, port)) {
+						imagegraph::Value value;
+						const bool decoded = port == "colorMap"
+												 ? detail::DecodeTileColorMap(*raw, value, budget)
+												 : detail::DecodeTileProperty(*raw, value, budget);
+						if (!decoded ||
+							!AdmitNativeSlots(
+								node.SourceProperties, node.SourceProperties.size() + 1, budget
+							) ||
+							!AdmitNativeText(port, budget)) {
+							reason = "tile source properties exceed their native mapping or budget";
+							return false;
+						}
+						node.SourceProperties.push_back({std::string(port), std::move(value)});
+						animation.FormatVersion = 9;
+					}
+				}
 			}
 			if (entry.Type == "pc.mesh_warp") {
 				for (std::string_view port : {"pin", "mesh_bound"})
@@ -4027,6 +4063,10 @@ namespace engine::imagegraphio {
 				return Fail(failure, "source animator getter provenance is absent");
 		}
 
+		if (std::any_of(result.Graph.Keyframes.begin(), result.Graph.Keyframes.end(), [](const auto &key) {
+				return !key.SourceKeyId.empty();
+			}))
+			result.Graph.FormatVersion = 9;
 		out = std::move(result);
 		return true;
 	} catch (const std::bad_alloc &) {

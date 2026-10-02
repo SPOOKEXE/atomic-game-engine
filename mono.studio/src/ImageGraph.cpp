@@ -265,7 +265,7 @@ namespace studio {
 				if (keyframe.SineDriver) required = std::max(required, 6u);
 				if (keyframe.SourceDriver) required = std::max(required, 8u);
 				if (keyframe.Subframe != 0 || keyframe.NegativeFrame ||
-					keyframe.Kind == engine::imagegraph::KeyframeKind::Adder)
+					keyframe.Kind == engine::imagegraph::KeyframeKind::Adder || !keyframe.SourceKeyId.empty())
 					required = std::max(required, 9u);
 			}
 			if (!document.Tracks.empty()) required = std::max(required, 4u);
@@ -2251,6 +2251,7 @@ namespace studio {
 			Keyframe key = original;
 			(void)SetFrameTime(key, destination);
 			if (copy) {
+				key.SourceKeyId.clear();
 				key.SourceDriver.reset();
 				// The native legacy driver also starts absent on a clone.
 				key.SineDriver.reset();

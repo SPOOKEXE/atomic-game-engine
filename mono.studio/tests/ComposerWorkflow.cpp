@@ -4,11 +4,13 @@
 #include "TimelineDopesheet.hpp"
 
 #include <engine/imagegraphio/PxcxImport.hpp>
+#include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/scripthost/ComposerLua.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <studio/PxcxSave.hpp>
@@ -109,7 +111,9 @@ namespace {
 			EvaluationRequest request;
 			request.Tick = tick;
 			request.HostProvider = &Host;
-			REQUIRE(Groups.Prepare(Doc, Compiled, Revision, request, Error));
+			const auto prepared = Groups.Prepare(Doc, Compiled, Revision, request, Error);
+			INFO(Error.Message);
+			REQUIRE(prepared);
 			return request;
 		}
 		Value Preview(std::string_view output, uint64_t tick = 0) {
@@ -274,11 +278,16 @@ TEST_CASE(
 	engine::imagegraphio::PxcxImport reloaded;
 	REQUIRE(engine::imagegraphio::ImportPxcxImageGraph(archive, reloaded, failure));
 	REQUIRE(Migrate(reloaded.Graph, ui.Error) == Status::Ok);
-	CHECK(reloaded.Graph == ui.Doc);
+	auto semanticAuthored = ui.Doc;
+	for (auto &key : semanticAuthored.Keyframes)
+		key.SourceKeyId.clear();
+	for (auto &key : reloaded.Graph.Keyframes)
+		key.SourceKeyId.clear();
+	CHECK(reloaded.Graph == semanticAuthored);
 }
 
 TEST_CASE(
-	"existing source Group Trigger key drag refuses an unproved opaque PXC inverse atomically",
+	"existing opaque source Group Trigger key survives real drag native save reload and undo",
 	"[studio][composer_workflow]"
 ) {
 	Workflow ui(true);
@@ -302,8 +311,8 @@ TEST_CASE(
 		REQUIRE(file.good());
 	}
 	const auto saved = studio::SavePxcxProjection(path, ui.Imported.Source, ui.Doc, {}, ui.Error);
-	CHECK_FALSE(saved);
-	CHECK(ui.Error.Message == "PXC group key opaque metadata has no unambiguous surviving identity");
+	INFO(ui.Error.Message);
+	REQUIRE(saved);
 	CHECK(ui.Doc == edited);
 	std::ifstream file(path, std::ios::binary | std::ios::ate);
 	REQUIRE(file.is_open());
@@ -312,7 +321,28 @@ TEST_CASE(
 	file.read(reinterpret_cast<char *>(bytes.data()), bytes.size());
 	file.close();
 	std::filesystem::remove(path);
-	CHECK(bytes == ui.Imported.Source.OriginalBytes);
+	engine::bake::PxcxArchive archive;
+	std::string failure;
+	REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+	CHECK(archive.GraphJson.find("\"opaque_key\":{\"keep\":43}") != std::string::npos);
+	engine::imagegraphio::PxcxImport reloaded;
+	REQUIRE(engine::imagegraphio::ImportPxcxImageGraph(archive, reloaded, failure));
+	auto originalKey = std::find_if(edited.Keyframes.begin(), edited.Keyframes.end(), [](const auto &key) {
+		return key.NodeId == "trigger" && key.Port == "parent_value";
+	});
+	auto savedKey =
+		std::find_if(reloaded.Graph.Keyframes.begin(), reloaded.Graph.Keyframes.end(), [](const auto &key) {
+			return key.NodeId == "trigger" && key.Port == "parent_value";
+		});
+	REQUIRE(originalKey != edited.Keyframes.end());
+	REQUIRE(savedKey != reloaded.Graph.Keyframes.end());
+	CHECK(savedKey->Tick == 7);
+	CHECK_FALSE(originalKey->SourceKeyId.empty());
+	CHECK_FALSE(savedKey->SourceKeyId.empty());
+	CHECK(savedKey->SourceKeyId != originalKey->SourceKeyId);
+	Document nativeReload;
+	REQUIRE(Read(Write(edited), nativeReload, ui.Error) == Status::Ok);
+	CHECK(nativeReload == edited);
 	REQUIRE(ui.History.Undo(ui.Doc));
 	++ui.Revision;
 	ui.Compile();
@@ -323,4 +353,67 @@ TEST_CASE(
 	ui.Compile();
 	CHECK(ui.Doc == edited);
 	CHECK(ui.Preview("trigger-sink", 7) == Value{true});
+}
+
+TEST_CASE(
+	"source key clipboard creates fresh provenance and explicit deletion keeps only the new key",
+	"[studio][composer_workflow]"
+) {
+	Workflow ui(true);
+	const auto original = ui.Doc;
+	const std::array<studio::ImageGraphKeyframeIdentity, 1> selected{
+		{{"trigger", "parent_value", {5, 0, false}}}
+	};
+	std::vector<Keyframe> clipboard;
+	REQUIRE(studio::CaptureImageGraphKeyframes(ui.Doc, selected, clipboard, ui.Error));
+	REQUIRE(clipboard.size() == 1);
+	CHECK_FALSE(clipboard[0].SourceKeyId.empty());
+	bool copied = false;
+	REQUIRE(studio::ApplyImageGraphDocumentEdit(ui.Doc, ui.History, [&](Document &document) {
+		copied = studio::TransferImageGraphKeyframes(
+			document, clipboard, {5, 0, false}, {9, 0, false}, true, ui.Error
+		);
+	}));
+	REQUIRE(copied);
+	++ui.Revision;
+	ui.Compile();
+	auto sourceKey = std::find_if(ui.Doc.Keyframes.begin(), ui.Doc.Keyframes.end(), [](const auto &key) {
+		return key.NodeId == "trigger" && key.Port == "parent_value" && key.Tick == 5;
+	});
+	auto clone = std::find_if(ui.Doc.Keyframes.begin(), ui.Doc.Keyframes.end(), [](const auto &key) {
+		return key.NodeId == "trigger" && key.Port == "parent_value" && key.Tick == 9;
+	});
+	REQUIRE(sourceKey != ui.Doc.Keyframes.end());
+	REQUIRE(clone != ui.Doc.Keyframes.end());
+	CHECK(sourceKey->SourceKeyId == clipboard[0].SourceKeyId);
+	CHECK(clone->SourceKeyId.empty());
+	const auto copiedDocument = ui.Doc;
+	std::vector<std::byte> bytes;
+	REQUIRE(engine::imagegraphio::WritePxcxProjection(ui.Imported, ui.Doc, {}, bytes, ui.Error));
+	engine::bake::PxcxArchive archive;
+	std::string failure;
+	REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+	const auto opaque = archive.GraphJson.find("\"opaque_key\"");
+	REQUIRE(opaque != std::string::npos);
+	CHECK(archive.GraphJson.find("\"opaque_key\"", opaque + 1) == std::string::npos);
+	CHECK(ui.Preview("trigger-sink", 5) == Value{true});
+	CHECK(ui.Preview("trigger-sink", 9) == Value{true});
+	CHECK(ui.Preview("trigger-sink", 6) == Value{false});
+	CHECK(ui.Preview("trigger-sink", 8) == Value{false});
+	REQUIRE(studio::ApplyImageGraphDocumentEdit(ui.Doc, ui.History, [&](Document &document) {
+		std::erase_if(document.Keyframes, [](const auto &key) {
+			return key.NodeId == "trigger" && key.Port == "parent_value" && key.Tick == 5;
+		});
+	}));
+	++ui.Revision;
+	ui.Compile();
+	REQUIRE(engine::imagegraphio::WritePxcxProjection(ui.Imported, ui.Doc, {}, bytes, ui.Error));
+	REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+	CHECK(archive.GraphJson.find("\"opaque_key\"") == std::string::npos);
+	CHECK(ui.Preview("trigger-sink", 5) == Value{false});
+	CHECK(ui.Preview("trigger-sink", 9) == Value{true});
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == copiedDocument);
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == original);
 }

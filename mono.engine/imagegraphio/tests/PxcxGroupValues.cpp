@@ -84,6 +84,14 @@ namespace {
 		REQUIRE(accepted);
 		return result;
 	}
+	void ClearSourceIds(Document &document) {
+		for (auto &key : document.Keyframes)
+			key.SourceKeyId.clear();
+		std::sort(document.Keyframes.begin(), document.Keyframes.end(), [](const auto &a, const auto &b) {
+			return std::tie(a.NodeId, a.Port, a.NegativeFrame, a.Tick, a.Subframe) <
+				   std::tie(b.NodeId, b.Port, b.NegativeFrame, b.Tick, b.Subframe);
+		});
+	}
 	Node &Input(Document &document) {
 		auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [](const auto &n) {
 			return n.Id == "input";
@@ -183,7 +191,10 @@ TEST_CASE(
 	REQUIRE(saved);
 	auto reloaded = Reload(bytes);
 	REQUIRE(Migrate(reloaded.Graph, error) == Status::Ok);
-	CHECK(reloaded.Graph == desired);
+	ClearSourceIds(reloaded.Graph);
+	auto semanticDesired = desired;
+	ClearSourceIds(semanticDesired);
+	CHECK(reloaded.Graph == semanticDesired);
 	CHECK(reloaded.Source.GraphJson.find("\"keep\":17") != std::string::npos);
 	auto opaqueCompact = Source(false, 19);
 	bytes = {std::byte{23}};
@@ -217,7 +228,8 @@ TEST_CASE(
 	CHECK(retained.Source.OriginalBytes == source.Source.OriginalBytes);
 }
 TEST_CASE(
-	"PXC Group key compound value swaps and moves refuse ambiguous opaque record identity",
+	"PXC Group durable key provenance preserves opaque records through compound swaps moves and native "
+	"reload",
 	"[imagegraphio][pxcx_group_values]"
 ) {
 	auto source = Source(false, 19, 0, false);
@@ -275,11 +287,56 @@ TEST_CASE(
 			}
 		}
 	std::reverse(desired.Keyframes.begin(), desired.Keyframes.end());
-	bytes = {std::byte{23}};
-	CHECK_FALSE(WritePxcxProjection(source, desired, {}, bytes, error));
-	CHECK(error.Message == "PXC group key opaque metadata has no unambiguous surviving identity");
-	CHECK(bytes == std::vector<std::byte>{std::byte{23}});
+	const auto retained = desired;
+	Document nativeReload;
+	REQUIRE(Read(Write(desired), nativeReload, error) == Status::Ok);
+	CHECK(nativeReload == desired);
+	const auto written = WritePxcxProjection(source, nativeReload, {}, bytes, error);
+	INFO(error.Message);
+	REQUIRE(written);
 	CHECK(source.Graph == original);
+	CHECK(desired == retained);
+	auto moved = Reload(bytes);
+	const auto movedJson = Json::parse(moved.Source.GraphJson.c_str());
+	const auto &records = movedJson["nodes"][0]["inputs"][0]["r"];
+	REQUIRE(records.size() == 2);
+	const auto firstRecord = std::find_if(records.begin(), records.end(), [](const auto &record) {
+		return record.size() > 9 && record[9]["opaque_key"] == 43;
+	});
+	const auto secondRecord = std::find_if(records.begin(), records.end(), [](const auto &record) {
+		return record.size() > 9 && record[9]["opaque_key"] == 44;
+	});
+	REQUIRE(firstRecord != records.end());
+	REQUIRE(secondRecord != records.end());
+	CHECK((*firstRecord)[0][1] == 7);
+	CHECK((*firstRecord)[1] == true);
+	CHECK((*firstRecord)[9]["opaque_key"] == 43);
+	CHECK((*secondRecord)[0][1] == 8);
+	CHECK((*secondRecord)[1] == false);
+	CHECK((*secondRecord)[9]["opaque_key"] == 44);
+	REQUIRE(Migrate(moved.Graph, error) == Status::Ok);
+	ClearSourceIds(moved.Graph);
+	auto semanticDesired = desired;
+	ClearSourceIds(semanticDesired);
+	CHECK(moved.Graph == semanticDesired);
+
+	// Deliberately forged or duplicated identities refuse before publishing destination bytes.
+	auto duplicate = desired;
+	auto first = std::find_if(duplicate.Keyframes.begin(), duplicate.Keyframes.end(), [](const auto &key) {
+		return key.Port == "parent_value";
+	});
+	REQUIRE(first != duplicate.Keyframes.end());
+	auto next = std::find_if(first + 1, duplicate.Keyframes.end(), [](const auto &key) {
+		return key.Port == "parent_value";
+	});
+	REQUIRE(next != duplicate.Keyframes.end());
+	next->SourceKeyId = first->SourceKeyId;
+	bytes = {std::byte{23}};
+	CHECK_FALSE(WritePxcxProjection(source, duplicate, {}, bytes, error));
+	CHECK(bytes == std::vector<std::byte>{std::byte{23}});
+	next->SourceKeyId = "unknown-source-key";
+	CHECK_FALSE(WritePxcxProjection(source, duplicate, {}, bytes, error));
+	CHECK(bytes == std::vector<std::byte>{std::byte{23}});
 
 	// An edit at the original exact source position retains that record's opaque tail.
 	desired = original;
@@ -292,4 +349,86 @@ TEST_CASE(
 	CHECK(reloaded.Graph == desired);
 	CHECK(reloaded.Source.GraphJson.find("\"opaque_key\":43") != std::string::npos);
 	CHECK(reloaded.Source.GraphJson.find("\"opaque_key\":44") != std::string::npos);
+}
+
+TEST_CASE(
+	"PXC ordinary source animator uses provenance through simultaneous key swaps",
+	"[imagegraphio][pxcx_group_values]"
+) {
+	const Json records = Json::array(
+		{Json::array(
+			 {Json::array({0, 2}),
+			  1.0,
+			  Json::array({0, 1}),
+			  Json::array({0, 0}),
+			  0,
+			  0,
+			  true,
+			  0,
+			  16777215,
+			  Json{{"opaque_key", 43}}}
+		 ),
+		 Json::array(
+			 {Json::array({0, 5}),
+			  2.0,
+			  Json::array({0, 1}),
+			  Json::array({0, 0}),
+			  0,
+			  0,
+			  true,
+			  0,
+			  16777215,
+			  Json{{"opaque_key", 44}}}
+		 )}
+	);
+	const Json graph = {
+		{"nodes",
+		 Json::array({Json{
+			 {"id", "number"},
+			 {"type", "Node_Number_Simple"},
+			 {"x", 0},
+			 {"y", 0},
+			 {"inputs", Json::array({Json{{"anim", true}, {"r", records}}})}
+		 }})}
+	};
+	engine::bake::PxcxArchive archive;
+	archive.MetadataNumber = 121092;
+	archive.MetadataText = "1.22.10.201";
+	archive.GraphJson = graph.dump();
+	archive.GraphJson.push_back('\0');
+	std::vector<std::byte> bytes;
+	std::string failure;
+	REQUIRE(engine::bake::WritePxcx(archive, bytes, failure));
+	auto source = Reload(bytes);
+	REQUIRE(source.Graph.Keyframes.size() == 2);
+	auto desired = source.Graph;
+	Diagnostic error;
+	REQUIRE(Migrate(desired, error) == Status::Ok);
+	const auto firstId = desired.Keyframes[0].SourceKeyId;
+	const auto secondId = desired.Keyframes[1].SourceKeyId;
+	CHECK_FALSE(firstId.empty());
+	CHECK(firstId != secondId);
+	desired.Keyframes[0].Tick = 5;
+	desired.Keyframes[0].Data = 20.0;
+	desired.Keyframes[1].Tick = 2;
+	desired.Keyframes[1].Data = 10.0;
+	const auto saved = WritePxcxProjection(source, desired, {}, bytes, error);
+	INFO(error.Message);
+	REQUIRE(saved);
+	auto reloaded = Reload(bytes);
+	const auto result = Json::parse(reloaded.Source.GraphJson.c_str());
+	const auto &keys = result["nodes"][0]["inputs"][0]["r"];
+	REQUIRE(keys.size() == 2);
+	for (const auto &key : keys) {
+		if (key[0][1] == 5) {
+			CHECK(key[1] == 20.0);
+			CHECK(key[9]["opaque_key"] == 43);
+		} else {
+			CHECK(key[0][1] == 2);
+			CHECK(key[1] == 10.0);
+			CHECK(key[9]["opaque_key"] == 44);
+		}
+	}
+	CHECK(desired.Keyframes[0].SourceKeyId == firstId);
+	CHECK(desired.Keyframes[1].SourceKeyId == secondId);
 }

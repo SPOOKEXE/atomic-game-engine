@@ -142,7 +142,12 @@ TEST_CASE(
 	INFO(diagnostic.Message);
 	REQUIRE(written);
 	const auto projected = Reimport(bytes, imported.Options);
-	CHECK(projected.Graph.Keyframes[0] == replacement);
+	// A new archive rebases record identity; every executable key field must remain exact.
+	auto expected = replacement;
+	expected.SourceKeyId = projected.Graph.Keyframes[0].SourceKeyId;
+	CHECK_FALSE(expected.SourceKeyId.empty());
+	CHECK(expected.SourceKeyId != replacement.SourceKeyId);
+	CHECK(projected.Graph.Keyframes[0] == expected);
 	CHECK(std::get<double>(EvaluateNumber(projected, -.5)) == 4);
 	CHECK(std::get<double>(EvaluateNumber(projected, 12)) == 10);
 	CHECK(projected.Source.GraphJson.find(R"([1,-1.5,"marker-tail"])") != std::string::npos);

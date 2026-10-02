@@ -142,7 +142,12 @@ TEST_CASE(
 	const std::array<PxcxEdit, 1> remove{PxcxKeyframeDeleteEdit{"number", "value", FrameTime{2}}};
 	const auto lone = Edited(original, remove);
 	REQUIRE(lone.Graph.Keyframes.size() == 1);
-	CHECK(lone.Graph.Keyframes[0] == original.Graph.Keyframes[1]);
+	// Deletion changes the retained record's occurrence in the fresh source archive.
+	auto expected = original.Graph.Keyframes[1];
+	expected.SourceKeyId = lone.Graph.Keyframes[0].SourceKeyId;
+	CHECK_FALSE(expected.SourceKeyId.empty());
+	CHECK(expected.SourceKeyId != original.Graph.Keyframes[1].SourceKeyId);
+	CHECK(lone.Graph.Keyframes[0] == expected);
 	CHECK(lone.Source.GraphJson.find("last-marker") != std::string::npos);
 	CHECK(lone.Source.GraphJson.find("first-tail") == std::string::npos);
 	CHECK(Evaluated(lone, 3) == 80);

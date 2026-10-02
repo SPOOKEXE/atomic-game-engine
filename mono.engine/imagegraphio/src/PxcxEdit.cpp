@@ -1,3 +1,6 @@
+#include "PxcxKeyProvenance.hpp"
+#include "TileProperties.hpp"
+
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/SourceAnimatorCapture.hpp>
 #include <engine/imagegraphio/PxcxEdit.hpp>
@@ -482,27 +485,26 @@ namespace engine::imagegraphio {
 			if (name == "cut") return 2;
 			return std::nullopt;
 		}
-		bool
-		GroupParentRecord(const Document &document, const Node &node, Json &record, Diagnostic &diagnostic) {
+		bool AuthoredKeyRecord(
+			const Document &document,
+			const Node &node,
+			std::string_view port,
+			Json &record,
+			Diagnostic &diagnostic
+		) {
 			const auto fail = [&](std::string reason) {
-				return Reject(diagnostic, std::move(reason), node.Id, "parent_value");
+				return Reject(diagnostic, std::move(reason), node.Id, port);
 			};
 			if (record.contains("from_node") || record.value("global_use", false)) return true;
 			std::vector<const Keyframe *> keys;
 			for (const auto &key : document.Keyframes)
-				if (key.NodeId == node.Id && key.Port == "parent_value") keys.push_back(&key);
+				if (key.NodeId == node.Id && key.Port == port) keys.push_back(&key);
 			const bool animated =
-				std::find(
-					node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), "parent_value"
-				) != node.SourceAnimatedInputs.end();
+				std::find(node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), port) !=
+				node.SourceAnimatedInputs.end();
 			if (keys.empty()) {
-				if (record.contains("r") && record["r"].is_array() &&
-					std::any_of(record["r"].begin(), record["r"].end(), [](const auto &key) {
-						return key.is_array() && key.size() > 9;
-					}))
-					return fail("PXC group key opaque metadata has no unambiguous surviving identity");
-				const auto value = std::find_if(node.Values.begin(), node.Values.end(), [](const auto &v) {
-					return v.Port == "parent_value";
+				const auto value = std::find_if(node.Values.begin(), node.Values.end(), [&](const auto &v) {
+					return v.Port == port;
 				});
 				if (value == node.Values.end()) return true;
 				const Json old =
@@ -514,6 +516,11 @@ namespace engine::imagegraphio {
 				record["anim"] = animated;
 				return true;
 			}
+			if (record.contains("r") && record["r"].is_object() &&
+				std::any_of(keys.begin(), keys.end(), [](const auto *key) {
+					return !key->SourceKeyId.empty() && key->SourceKeyId != detail::CompactSourceKeyId;
+				}))
+				return fail("PXC source key identity does not belong to this compact archive input");
 			if (!animated && keys.size() == 1 && GetFrameTime(*keys.front()) == FrameTime{} &&
 				keys.front()->Kind == KeyframeKind::Normal && !keys.front()->SourceDriver &&
 				record.contains("r") && record["r"].is_object()) {
@@ -534,7 +541,28 @@ namespace engine::imagegraphio {
 					return std::nullopt;
 				return time;
 			};
-			std::vector<bool> consumed(previous.is_array() ? previous.size() : 0, false);
+			struct SourceRecord {
+				detail::SourceKeyIdText Identity;
+				size_t Index = 0;
+				bool Consumed = false;
+			};
+			const size_t recordCount = previous.is_array() ? previous.size() : 0;
+			if (recordCount > Limits::MaximumKeyframes ||
+				recordCount > Limits::MaximumArrayBytes / sizeof(SourceRecord))
+				return fail("PXC source key identity table exceeds its payload limit");
+			std::vector<SourceRecord> records;
+			records.reserve(recordCount);
+			for (size_t index = 0; index < recordCount; ++index) {
+				const auto time = sourceTime(previous[index]);
+				if (!time) continue;
+				const auto kind = previous[index][0][0] == 0 ? KeyframeKind::Normal : KeyframeKind::Adder;
+				const auto identity = detail::SourceKeyId(*time, kind, index);
+				if (!identity) return fail("PXC source key identity exceeds its byte limit");
+				records.push_back({*identity, index, false});
+			}
+			std::sort(records.begin(), records.end(), [](const auto &a, const auto &b) {
+				return a.Identity.View() < b.Identity.View();
+			});
 			Json expanded = Json::array();
 			for (const auto *key : keys) {
 				if (key->Interpolation != "source" || !key->Ease || !Side(key->Ease->InType) ||
@@ -546,18 +574,21 @@ namespace engine::imagegraphio {
 					return fail("PXC group key clock is not exactly representable");
 				Json old;
 				std::optional<size_t> recordIndex;
-				if (previous.is_array()) {
-					for (size_t index = 0; index < previous.size(); ++index)
-						if (!consumed[index] && sourceTime(previous[index]) == GetFrameTime(*key) &&
-							previous[index][0][0] == (key->Kind == KeyframeKind::Normal ? 0 : 1)) {
-							recordIndex = index;
-							break;
-						}
-					if (recordIndex) {
-						consumed[*recordIndex] = true;
-						old = previous[*recordIndex];
-					}
-				}
+				if (previous.is_array() && !key->SourceKeyId.empty()) {
+					const auto found = std::lower_bound(
+						records.begin(),
+						records.end(),
+						key->SourceKeyId,
+						[](const auto &record, std::string_view id) { return record.Identity.View() < id; }
+					);
+					if (found == records.end() || found->Identity.View() != key->SourceKeyId)
+						return fail("PXC group source key identity does not belong to this archive input");
+					if (found->Consumed) return fail("PXC group source key identity is duplicated");
+					found->Consumed = true;
+					recordIndex = found->Index;
+					old = previous[*recordIndex];
+				} else if (!key->SourceKeyId.empty() && key->SourceKeyId != detail::CompactSourceKeyId)
+					return fail("PXC group source key identity does not belong to this archive input");
 				if (!old.is_array())
 					old = Json::array(
 						{Json::array({0, frame}),
@@ -584,14 +615,11 @@ namespace engine::imagegraphio {
 				old[7] = std::move(*driver);
 				expanded.push_back(std::move(old));
 			}
-			for (size_t index = 0; index < consumed.size(); ++index)
-				if (!consumed[index] && previous[index].is_array() && previous[index].size() > 9)
-					return fail("PXC group key opaque metadata has no unambiguous surviving identity");
 			record["r"] = std::move(expanded);
 			record["anim"] = animated;
 			const auto track =
 				std::find_if(document.Tracks.begin(), document.Tracks.end(), [&](const auto &t) {
-					return t.NodeId == node.Id && t.Port == "parent_value";
+					return t.NodeId == node.Id && t.Port == port;
 				});
 			if (track != document.Tracks.end()) {
 				constexpr std::string_view ends[]{"hold", "loop", "ping", "wrap"};
@@ -967,6 +995,9 @@ namespace engine::imagegraphio {
 							const auto &key = operation.Replacement;
 							if constexpr (std::is_same_v<T, PxcxKeyframeEdit>)
 								if (!ValidFrameTime(operation.OriginalTime)) return false;
+							if (key.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes ||
+								!Spend(key.SourceKeyId.size(), budget))
+								return false;
 							if (!ValidFrameTime(GetFrameTime(key)) || key.NodeId != operation.NodeId ||
 								key.Port != operation.Port || key.Interpolation != "source" ||
 								key.SineDriver ||
@@ -1358,6 +1389,7 @@ namespace engine::imagegraphio {
 			return Reject(diagnostic, failure);
 		// The import's minimum format is derived from retained source metadata, not an edited field.
 		intended.FormatVersion = projected.Graph.FormatVersion;
+		detail::RebaseKeyProvenance(intended, projected.Graph);
 		if (intended != projected.Graph)
 			return Reject(diagnostic, "PXC edited projection changed unsupported or ambiguous semantics");
 		out = std::move(bytes);
@@ -1756,9 +1788,25 @@ namespace engine::imagegraphio {
 			if (!Spend(junction.Id.size() + junction.GroupId.size(), payloadBudget) ||
 				(junction.Default && !BoundedValue(*junction.Default, payloadBudget)))
 				return Reject(diagnostic, "PXC authored junction exceeds its budget", junction.Id);
-		for (const auto &key : authored.Keyframes)
-			if (!BoundedValue(key.Data, payloadBudget))
+		std::set<std::tuple<std::string_view, std::string_view, std::string_view>> keyIdentities;
+		for (const auto &key : authored.Keyframes) {
+			if (key.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes ||
+				!Spend(key.SourceKeyId.size(), payloadBudget) || !BoundedValue(key.Data, payloadBudget))
 				return Reject(diagnostic, "PXC authored keys exceed their payload limit");
+			if (!key.SourceKeyId.empty()) {
+				if (!Spend(
+						sizeof(std::tuple<std::string_view, std::string_view, std::string_view>) +
+							4 * sizeof(void *),
+						payloadBudget
+					))
+					return Reject(diagnostic, "PXC source key identity table exceeds its payload limit");
+				if (!keyIdentities.emplace(key.NodeId, key.Port, key.SourceKeyId).second)
+					return Reject(
+						diagnostic, "PXC authored source key identity is duplicated", key.NodeId, key.Port
+					);
+			}
+		}
+
 		Document desired = authored;
 		if (Migrate(desired, diagnostic) != Status::Ok) return false;
 		if (desired == initial) {
@@ -1791,6 +1839,11 @@ namespace engine::imagegraphio {
 			Json *savedInput =
 				entry && savedNode ? SourceInput(*keyRoot, *savedNode, *entry, key.Port) : nullptr;
 			if (savedInput && savedInput->contains("r") && (*savedInput)["r"].is_object()) continue;
+			if (savedInput && savedInput->contains("r") && (*savedInput)["r"].is_array() &&
+				std::any_of(desired.Keyframes.begin(), desired.Keyframes.end(), [&](const auto &wanted) {
+					return wanted.NodeId == key.NodeId && wanted.Port == key.Port;
+				}))
+				continue;
 			const auto wanted =
 				std::find_if(desired.Keyframes.begin(), desired.Keyframes.end(), [&](const auto &item) {
 					return item.NodeId == key.NodeId && item.Port == key.Port &&
@@ -1807,6 +1860,14 @@ namespace engine::imagegraphio {
 			const auto *node = NativeNode(working.Graph, key.NodeId);
 			if (!node) continue;
 			if (node->Type == "pc.group_input" && key.Port == "parent_value") continue;
+			const auto *entry = FindCatalogueEntry(node->Type);
+			CatalogueEntry globalEntry{};
+			globalEntry.Type = "pc.global_scope";
+			if (node->Type == "pc.global_scope") entry = &globalEntry;
+			auto *savedNode = SourceNode(*keyRoot, key.NodeId);
+			auto *savedInput =
+				entry && savedNode ? SourceInput(*keyRoot, *savedNode, *entry, key.Port) : nullptr;
+			if (savedInput && savedInput->contains("r") && (*savedInput)["r"].is_array()) continue;
 			const auto old = std::find_if(
 				imported.Graph.Keyframes.begin(), imported.Graph.Keyframes.end(), [&](const auto &item) {
 					return item.NodeId == key.NodeId && item.Port == key.Port &&
@@ -2377,6 +2438,46 @@ namespace engine::imagegraphio {
 							);
 					}
 				}
+				if (node.Type == "pc.tile_tileset" || node.Type == "pc.tile_rule" ||
+					node.Type == "pc.tile_convert") {
+					for (const auto &property : node.SourceProperties) {
+						if (auto old = NativeNode(working.Graph, node.Id);
+							old && std::any_of(
+									   old->SourceProperties.begin(),
+									   old->SourceProperties.end(),
+									   [&](const auto &p) { return p == property; }
+								   ))
+							continue;
+						if (property.Port != "animatedTiles" && property.Port != "autoterrain" &&
+							property.Port != "ruleTiles" && property.Port != "colorList" &&
+							property.Port != "colorMap")
+							return Reject(
+								diagnostic, "tile source property is not whitelisted", node.Id, property.Port
+							);
+						nlohmann::json encoded;
+						const nlohmann::json seed =
+							source->contains("attri") && (*source)["attri"].contains(property.Port)
+								? (*source)["attri"][property.Port]
+								: Json::object();
+						const bool valid =
+							property.Port == "colorMap"
+								? detail::EncodeTileColorMap(
+									  property.Data, seed, encoded, Limits::MaximumEvaluationBytes
+								  )
+								: detail::EncodeTileProperty(
+									  property.Data, encoded, Limits::MaximumEvaluationBytes
+								  );
+						if (!valid)
+							return Reject(
+								diagnostic,
+								"tile source property has no bounded inverse",
+								node.Id,
+								property.Port
+							);
+						if (property.Port != "colorMap") detail::MergeTileSourceFields(encoded, seed);
+						(*source)["attri"][property.Port] = std::move(encoded);
+					}
+				}
 				if (source->contains("inputs") && (*source)["inputs"].is_array()) {
 					std::vector<std::string> ports;
 					for (const auto &e : node.SourceInputExpressions)
@@ -2462,7 +2563,28 @@ namespace engine::imagegraphio {
 					return Reject(
 						diagnostic, "PXC group parent source record is missing", node.Id, "parent_value"
 					);
-				if (!GroupParentRecord(desired, node, *record, diagnostic)) return false;
+				if (!AuthoredKeyRecord(desired, node, "parent_value", *record, diagnostic)) return false;
+			}
+			// Rebuild each expanded animator once, preserving opaque records by durable provenance
+			// through simultaneous moves and value swaps instead of sequential timestamp collisions.
+			for (const auto &node : desired.Nodes) {
+				const auto *entry = FindCatalogueEntry(node.Type);
+				CatalogueEntry globalEntry{};
+				globalEntry.Type = "pc.global_scope";
+				if (node.Type == "pc.global_scope") entry = &globalEntry;
+				auto *source = SourceNode(root, node.Id);
+				if (!entry || !source) continue;
+				std::set<std::string_view> ports;
+				for (const auto &key : desired.Keyframes)
+					if (key.NodeId == node.Id &&
+						!(node.Type == "pc.group_input" && key.Port == "parent_value"))
+						ports.insert(key.Port);
+				for (const auto port : ports) {
+					auto *record = SourceInput(root, *source, *entry, port);
+					if (record && record->contains("r") && (*record)["r"].is_array() &&
+						!AuthoredKeyRecord(desired, node, port, *record, diagnostic))
+						return false;
+				}
 			}
 			const auto boundaryPort = [&](
 										  const Document &document, std::string_view junction
@@ -2672,6 +2794,9 @@ namespace engine::imagegraphio {
 			for (const auto &track : projected.Graph.Tracks)
 				if (track.NodeId == node.Id) desired.Tracks.push_back(track);
 		}
+		detail::RebaseKeyProvenance(desired, projected.Graph);
+		detail::CanonicalizeKeyOrder(desired);
+		detail::CanonicalizeKeyOrder(projected.Graph);
 		if (projected.Graph != desired) {
 			std::string field = "document fields";
 			std::string nodeId;
@@ -2713,6 +2838,8 @@ namespace engine::imagegraphio {
 		}
 		Document unchanged = imported.Graph;
 		if (Migrate(unchanged, diagnostic) != Status::Ok) return false;
+		detail::RebaseKeyProvenance(unchanged, projected.Graph);
+		detail::CanonicalizeKeyOrder(unchanged);
 		out = desired == unchanged ? imported.Source.OriginalBytes : std::move(written);
 		return true;
 	}
