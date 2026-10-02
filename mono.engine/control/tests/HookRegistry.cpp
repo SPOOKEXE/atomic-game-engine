@@ -7,6 +7,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 
 #include <array>
 #include <nlohmann/json.hpp>
@@ -698,4 +699,160 @@ TEST_CASE("stale copied resources and prompts cannot run a newer owner", "[contr
 	CHECK(failure == "hook is draining: atomic://same");
 	CHECK(stalePrompt(json::object(), failure).empty());
 	CHECK(failure == "hook is draining: same");
+}
+
+TEST_CASE("tool discovery evaluates live schemas on every request", "[control][hooks][discovery]") {
+	Surface surface("test", "live schema");
+	int version = 1;
+	size_t calls = 0;
+	bool refuse = false;
+	std::string failure;
+	auto lease = surface.ActivateHook(
+		Descriptor("test.live-schema"),
+		[&](HookRegistration &rows) {
+			rows.Add(
+				Tool{
+					"z_live",
+					"live metadata",
+					[&] {
+						++calls;
+						if (refuse) throw std::runtime_error("live schema refused");
+						return json{{"type", "object"}, {"version", version}};
+					},
+					[](const json &, std::string &) { return json::object(); }
+				}
+			);
+			rows.Add(Tool{"a_default", "default metadata", nullptr, [](const json &, std::string &) {
+							  return json::object();
+						  }});
+		},
+		failure
+	);
+	REQUIRE(lease.IsValid());
+	const auto first = Ask(surface, "tools/list");
+	const json expected = json::array({
+		{{"name", "z_live"},
+		 {"description", "live metadata"},
+		 {"inputSchema", {{"type", "object"}, {"version", 1}}}},
+		{{"name", "a_default"}, {"description", "default metadata"}, {"inputSchema", {{"type", "object"}}}},
+	});
+	CHECK(first == json{{"jsonrpc", "2.0"}, {"id", 1}, {"result", {{"tools", expected}}}});
+	CHECK(calls == 1);
+	version = 2;
+	CHECK(Ask(surface, "tools/list")["result"]["tools"][0]["inputSchema"]["version"] == 2);
+	CHECK(calls == 2);
+	refuse = true;
+	CHECK_THROWS_WITH(Ask(surface, "tools/list"), "live schema refused");
+	CHECK(calls == 3);
+	refuse = false;
+	CHECK(Ask(surface, "tools/list")["result"]["tools"][0]["inputSchema"]["version"] == 2);
+	CHECK(calls == 4);
+	CHECK(first["result"]["tools"][0]["inputSchema"]["version"] == 1);
+}
+
+TEST_CASE("discovery metadata follows draining and renewed hook generations", "[control][hooks][discovery]") {
+	Surface surface("test", "metadata lifetime");
+	bool terminal = false;
+	size_t reads = 0, renders = 0;
+	std::string failure;
+	const auto install = [&](int version) {
+		return surface.ActivateHook(
+			Descriptor("test.metadata-lifetime"),
+			[&](HookRegistration &rows) {
+				rows.SetDrain([&] { return terminal; });
+				rows.Add(
+					Tool{
+						"cleanup",
+						"cleanup v" + std::to_string(version),
+						nullptr,
+						[](const json &, std::string &) { return json::object(); }
+					}
+				);
+				rows.KeepToolDuringDrain("cleanup");
+				rows.Add(
+					Resource{
+						"test://metadata",
+						"resource v" + std::to_string(version),
+						"resource description",
+						version == 1 ? "text/plain" : "application/json",
+						[&](std::string &) {
+							++reads;
+							return "value";
+						}
+					}
+				);
+				rows.Add(
+					Prompt{
+						"metadata_prompt",
+						"prompt v" + std::to_string(version),
+						{{"input", "argument v" + std::to_string(version), version == 2}},
+						[&](const json &, std::string &) {
+							++renders;
+							return "prompt";
+						}
+					}
+				);
+			},
+			failure
+		);
+	};
+	auto lease = install(1);
+	REQUIRE(lease.IsValid());
+	const auto firstResources = Ask(surface, "resources/list");
+	const auto firstPrompts = Ask(surface, "prompts/list");
+	CHECK(
+		firstResources["result"]["resources"] == json::array(
+													 {{{"uri", "test://metadata"},
+													   {"name", "resource v1"},
+													   {"description", "resource description"},
+													   {"mimeType", "text/plain"}}}
+												 )
+	);
+	CHECK(
+		firstPrompts["result"]["prompts"] ==
+		json::array(
+			{{{"name", "metadata_prompt"},
+			  {"description", "prompt v1"},
+			  {"arguments",
+			   json::array({{{"name", "input"}, {"description", "argument v1"}, {"required", false}}})}}}
+		)
+	);
+	CHECK(Ask(surface, "resources/list") == firstResources);
+	CHECK(Ask(surface, "prompts/list") == firstPrompts);
+	const auto generation = surface.Hooks().ControlGeneration();
+	lease.Close();
+	CHECK(surface.Hooks().ControlGeneration() > generation);
+	CHECK(Ask(surface, "resources/list")["result"]["resources"].empty());
+	CHECK(Ask(surface, "prompts/list")["result"]["prompts"].empty());
+	CHECK(
+		Ask(surface, "tools/list")["result"]["tools"] ==
+		json::array(
+			{{{"name", "cleanup"}, {"description", "cleanup v1"}, {"inputSchema", {{"type", "object"}}}}}
+		)
+	);
+	terminal = true;
+	surface.PumpHooks();
+	CHECK_FALSE(lease.IsValid());
+	CHECK(Ask(surface, "tools/list")["result"]["tools"].empty());
+	terminal = false;
+	auto renewed = install(2);
+	REQUIRE(renewed.IsValid());
+	const auto resources = Ask(surface, "resources/list")["result"]["resources"];
+	const auto prompts = Ask(surface, "prompts/list")["result"]["prompts"];
+	REQUIRE(resources.size() == 1);
+	CHECK(resources[0]["name"] == "resource v2");
+	CHECK(resources[0]["mimeType"] == "application/json");
+	REQUIRE(prompts.size() == 1);
+	CHECK(prompts[0]["description"] == "prompt v2");
+	CHECK(
+		prompts[0]["arguments"] ==
+		json::array({{{"name", "input"}, {"description", "argument v2"}, {"required", true}}})
+	);
+	CHECK(Ask(surface, "tools/list")["result"]["tools"][0]["description"] == "cleanup v2");
+	CHECK(firstResources["result"]["resources"][0]["name"] == "resource v1");
+	CHECK(firstPrompts["result"]["prompts"][0]["description"] == "prompt v1");
+	CHECK(reads == 0);
+	CHECK(renders == 0);
+	terminal = true;
+	renewed.Close();
 }

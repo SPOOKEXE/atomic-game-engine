@@ -28,8 +28,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -805,6 +809,23 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 	);
 	CHECK(bytes["encoding"] == "base64");
 	CHECK(bytes["data"] == "AQID");
+	const json saved = Called(
+		surface,
+		"save_resource",
+		json{
+			{"id", "capture/1/rgb_linear_hdr"}, {"options", {{"instance_id", "capture-world"}, {"ticket", 1}}}
+		}
+	);
+	CHECK(saved["encoding"] == "file");
+	CHECK(saved["byte_size"] == 3);
+	const std::filesystem::path savedPath = saved["path"].get<std::string>();
+	{
+		std::ifstream savedFile(savedPath, std::ios::binary);
+		const std::string savedBytes{
+			std::istreambuf_iterator<char>(savedFile), std::istreambuf_iterator<char>()
+		};
+		CHECK(savedBytes == std::string("\x01\x02\x03", 3));
+	}
 	CHECK(
 		Called(
 			surface,
@@ -828,6 +849,10 @@ TEST_CASE("capture tools retain metadata and return bounded base64 resources", "
 			json{{"instance_id", "capture-world"}, {"ticket", 1}, {"operation_id", "release-1"}}
 		)["status"] == "released"
 	);
+	// Releasing the ticket deletes what save_resource wrote for it, and the
+	// directories above it once nothing else is in them.
+	CHECK_FALSE(std::filesystem::exists(savedPath));
+	CHECK_FALSE(std::filesystem::exists(savedPath.parent_path().parent_path().parent_path()));
 	bool overflowFailed = false;
 	const json overflow = Called(
 		surface,
@@ -2533,4 +2558,31 @@ TEST_CASE(
 	CHECK(failed);
 	CHECK(refused["error"].get<std::string>().starts_with("operation_id_capacity:"));
 	CHECK_FALSE(universe.Find(Name("ledger-refused")).IsValid());
+}
+
+TEST_CASE(
+	"capture option schemas match the reviewed complete discovery contracts",
+	"[control][data-capture][discovery-schema]"
+) {
+	std::ifstream input(
+		std::filesystem::path(__FILE__).parent_path() / "fixtures" / "DataCaptureSchemas.json"
+	);
+	REQUIRE(input.good());
+	const json expected = json::parse(input).at("schemas");
+	Universe universe;
+	MakeWorld(universe, "capture-schema-world");
+	engine::world::DataFactorySession session(universe);
+	auto bridge = std::make_shared<FakeCapture>();
+	Surface surface("test", "a suite");
+	engine::control::test::Install(surface, std::array{engine::control::test::DataCapture(session, bridge)});
+	const json first = Ask(surface, "tools/list").at("result").at("tools");
+	CHECK(Ask(surface, "tools/list").at("result").at("tools") == first);
+	for (const std::string_view name : {"capture_bundle", "capture_multi_camera"}) {
+		const auto found = std::find_if(first.begin(), first.end(), [name](const json &row) {
+			return row.at("name").get<std::string>() == name;
+		});
+		REQUIRE(found != first.end());
+		// Full tree equality includes nested bounds, required fields and additional-property rules.
+		CHECK(found->at("inputSchema") == expected.at(std::string(name)));
+	}
 }

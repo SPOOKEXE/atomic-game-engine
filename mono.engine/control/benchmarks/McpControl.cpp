@@ -4,6 +4,7 @@
 #include <engine/control/HookRegistry.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
@@ -12,7 +13,10 @@
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cinttypes>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -175,7 +179,8 @@ namespace {
 
 	template <class Registration> void KeepCaptureCleanupDuringDrain(Registration &registration) {
 		if constexpr (requires(Registration &candidate) { candidate.KeepToolDuringDrain(std::string{}); }) {
-			for (const char *name : {"poll_capture", "get_resource", "release_capture", "cancel_capture"})
+			for (const char *name :
+				 {"poll_capture", "get_resource", "save_resource", "release_capture", "cancel_capture"})
 				registration.KeepToolDuringDrain(name);
 		}
 	}
@@ -189,6 +194,7 @@ namespace {
 		Report Measurements;
 		std::string Failure;
 		size_t NextCaptureOperation = 0;
+		uint64_t VerifiedToolsGeneration = 0;
 		const std::string ListRequest = R"({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})";
 		const std::string DispatchRequest =
 			R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"capture","arguments":{}}})";
@@ -318,17 +324,195 @@ namespace {
 		PrintDistribution("hook_drain", fixture.Measurements.HookDrain);
 	}
 
+	// Build expected list metadata directly from the registered provider rows,
+	// independently of Surface's JSON list construction. Preflight is unmeasured.
+	void VerifyToolsList(Fixture &fixture) {
+		const uint64_t generation = fixture.Surface.Hooks().ControlGeneration();
+		if (fixture.VerifiedToolsGeneration == generation) return;
+		nlohmann::json expected = nlohmann::json::array();
+		for (const auto &tool : fixture.Surface.Registered()) {
+			if (!fixture.Surface.Hooks().VisibleTool(tool.Name)) continue;
+			expected.push_back(
+				{{"name", tool.Name},
+				 {"description", tool.Description},
+				 {"inputSchema", tool.Schema ? tool.Schema() : nlohmann::json{{"type", "object"}}}}
+			);
+		}
+		if (expected.empty()) throw std::runtime_error("capture provider offered no tools for oracle");
+		const nlohmann::json envelope{{"jsonrpc", "2.0"}, {"id", 1}, {"result", {{"tools", expected}}}};
+		for (size_t repeat = 0; repeat < 2; ++repeat)
+			if (nlohmann::json::parse(fixture.Surface.Answer(fixture.ListRequest)) != envelope)
+				throw std::runtime_error(
+					"capture provider metadata, schema, order or envelope differ from oracle"
+				);
+		fixture.VerifiedToolsGeneration = generation;
+	}
+
+	constexpr std::array<std::string_view, 3> DISCOVERY_PHASES{
+		"control answer", "control tools list", "control tool schema"
+	};
+	using DiscoveryHeap = std::array<core::HeapNodeView, DISCOVERY_PHASES.size()>;
+
+	DiscoveryHeap ReadDiscoveryHeap() {
+		const uint32_t count = core::HeapProfile::NodeCount();
+		if (count > 4096) throw std::runtime_error("control discovery heap tree exceeds diagnostic bound");
+		DiscoveryHeap result{};
+		for (uint32_t index = 1; index < count; ++index) {
+			const auto node = core::HeapProfile::Node(index);
+			for (size_t phase = 0; phase < DISCOVERY_PHASES.size(); ++phase) {
+				if (node.Name != DISCOVERY_PHASES[phase]) continue;
+				auto &total = result[phase];
+				total.TotalBytes += node.TotalBytes;
+				total.TotalBlocks += node.TotalBlocks;
+				total.LiveBytes += node.LiveBytes;
+				total.LiveBlocks += node.LiveBlocks;
+				total.PeakBytes += node.PeakBytes;
+			}
+		}
+		return result;
+	}
+
+	struct DiscoveryProfile {
+		bool Enabled = false;
+		bool Previous = core::FrameGraph::IsEnabled();
+		DiscoveryHeap Before{};
+		core::HeapTotals TotalsBefore{};
+		std::array<float, DISCOVERY_PHASES.size()> Inclusive{}, Self{};
+		float Frame = 0, Unmarked = 0;
+		size_t Frames = 0, Spans = 0;
+
+		DiscoveryProfile() {
+			const char *value = std::getenv("ATOMIC_CONTROL_DISCOVERY_PROFILE");
+			Enabled = value != nullptr && std::string_view(value) == "1";
+			if (!Enabled) return;
+			if (!core::HeapProfile::IsCompiledIn())
+				throw std::runtime_error("control profile requires heap hooks");
+			Before = ReadDiscoveryHeap();
+			TotalsBefore = core::HeapProfile::Totals();
+			core::FrameGraph::SetEnabled(true);
+		}
+		~DiscoveryProfile() {
+			if (Enabled) core::FrameGraph::SetEnabled(Previous);
+		}
+
+		void Begin() {
+			if (Enabled) core::FrameGraph::BeginFrame();
+		}
+		void End() {
+			if (!Enabled) return;
+			core::FrameGraph::EndFrame();
+			const auto &spans = core::FrameGraph::Spans();
+			std::array<bool, DISCOVERY_PHASES.size()> found{};
+			bool tree = !spans.empty();
+			for (size_t index = 0; index < spans.size(); ++index) {
+				const auto &span = spans[index];
+				if (span.Parent == core::FrameGraph::NO_PARENT)
+					tree &= span.Depth == 0;
+				else
+					tree &= span.Parent < index && span.Depth == spans[span.Parent].Depth + 1;
+				for (size_t phase = 0; phase < DISCOVERY_PHASES.size(); ++phase) {
+					if (span.Name != DISCOVERY_PHASES[phase]) continue;
+					found[phase] = true;
+					Inclusive[phase] += span.Milliseconds;
+					Self[phase] += span.SelfMilliseconds;
+				}
+			}
+			if (!tree || core::FrameGraph::Dropped() != 0 ||
+				std::find(found.begin(), found.end(), false) != found.end())
+				throw std::runtime_error(
+					"control discovery profile missing phase, hierarchy or dropped scopes"
+				);
+			++Frames;
+			Spans += spans.size();
+			Frame += core::FrameGraph::FrameMilliseconds();
+			Unmarked += core::FrameGraph::UnmarkedMilliseconds();
+		}
+
+		void Print() const {
+			if (!Enabled) return;
+			static size_t calls = 0;
+			if (++calls > 128) throw std::runtime_error("control discovery profile exceeds 128 batches");
+			const auto after = ReadDiscoveryHeap();
+			const auto totalsAfter = core::HeapProfile::Totals();
+			if (Frames != OPERATIONS_PER_BATCH || totalsAfter.DroppedScopes != TotalsBefore.DroppedScopes)
+				throw std::runtime_error("control discovery profile incomplete frame or heap capture");
+			std::printf(
+				"# control-discovery-profile call=%zu benchmark_warmup=%d internal_warmup_operations=8 "
+				"frames=%zu spans=%zu frame_drops=0 heap_drop_delta=0 frame_ms=%.6f unmarked_ms=%.6f "
+				"heap_coverage=cxx_new_delete profiler_overhead_bytes=%" PRId64,
+				calls,
+				calls <= 8,
+				Frames,
+				Spans,
+				Frame,
+				Unmarked,
+				totalsAfter.OverheadBytes
+			);
+			for (size_t phase = 0; phase < DISCOVERY_PHASES.size(); ++phase)
+				std::printf(
+					" phase%zu_inclusive_ms=%.6f phase%zu_self_ms=%.6f "
+					"phase%zu_allocated_bytes=%" PRIu64 " phase%zu_allocated_blocks=%" PRIu64 " "
+					"phase%zu_live_bytes_before=%" PRId64 " phase%zu_live_bytes_after=%" PRId64 " "
+					"phase%zu_live_blocks_before=%" PRId64 " phase%zu_live_blocks_after=%" PRId64 " "
+					"phase%zu_sum_tag_peak_bytes=%" PRId64,
+					phase,
+					Inclusive[phase],
+					phase,
+					Self[phase],
+					phase,
+					after[phase].TotalBytes - Before[phase].TotalBytes,
+					phase,
+					after[phase].TotalBlocks - Before[phase].TotalBlocks,
+					phase,
+					Before[phase].LiveBytes,
+					phase,
+					after[phase].LiveBytes,
+					phase,
+					Before[phase].LiveBlocks,
+					phase,
+					after[phase].LiveBlocks,
+					phase,
+					after[phase].PeakBytes
+				);
+			std::printf("\n");
+		}
+	};
+
 	void RunToolsList() {
 		Fixture &fixture = BenchFixture();
 		fixture.EnsureActive();
+		VerifyToolsList(fixture);
 		for (size_t index = 0; index < WARMUP_OPERATIONS; ++index)
 			if (fixture.Surface.Answer(fixture.ListRequest).empty())
 				throw std::runtime_error("tools/list warmup returned no response");
-		for (size_t index = 0; index < OPERATIONS_PER_BATCH; ++index)
-			fixture.Measurements.ToolsList.Measure([&] {
-				if (fixture.Surface.Answer(fixture.ListRequest).empty())
-					throw std::runtime_error("tools/list returned no response");
-			});
+		static const bool capture = [] {
+			const char *value = std::getenv("ATOMIC_CONTROL_DISCOVERY_PROFILE");
+			return value != nullptr && std::string_view(value) == "1";
+		}();
+		if (!capture) {
+			for (size_t index = 0; index < OPERATIONS_PER_BATCH; ++index)
+				fixture.Measurements.ToolsList.Measure([&] {
+					if (fixture.Surface.Answer(fixture.ListRequest).empty())
+						throw std::runtime_error("tools/list returned no response");
+				});
+			return;
+		}
+		DiscoveryProfile profile;
+		for (size_t index = 0; index < OPERATIONS_PER_BATCH; ++index) {
+			profile.Begin();
+			try {
+				fixture.Measurements.ToolsList.Measure([&] {
+					if (fixture.Surface.Answer(fixture.ListRequest).empty())
+						throw std::runtime_error("tools/list returned no response");
+				});
+			} catch (...) {
+				// Close the owner frame on refusal before collector restoration.
+				if (profile.Enabled) core::FrameGraph::EndFrame();
+				throw;
+			}
+			profile.End();
+		}
+		profile.Print();
 	}
 
 	void RunToolDispatch() {

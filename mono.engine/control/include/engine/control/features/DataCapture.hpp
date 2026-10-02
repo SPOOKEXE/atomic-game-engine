@@ -1,12 +1,14 @@
 #pragma once
 
 // The bounded MCP adapter for a host-installed script capture bridge.
-// Capture bytes remain in the bridge until explicit release; this surface only
-// serializes a caller-selected range as base64.
+// Capture bytes remain in the bridge until explicit release; this surface
+// serializes a caller-selected range as base64, or writes a whole plane to an
+// engine-chosen file for a caller on the same machine.
 
 #include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/core/Clock.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/world/DataFactory.hpp>
 
@@ -16,12 +18,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -394,6 +400,33 @@ namespace engine::control {
 			};
 		}
 
+		// Maps an identifier onto one path component. Anything but ASCII letters,
+		// digits, '-' and '_' becomes '_', so no identifier can name a parent or a
+		// separator.
+		inline std::string PathComponent(std::string_view text) {
+			std::string safe;
+			safe.reserve(text.size());
+			for (const char character : text) {
+				const bool plain = (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
+								   (character >= '0' && character <= '9') || character == '-' || character == '_';
+				safe.push_back(plain ? character : '_');
+			}
+			return safe;
+		}
+
+		// Where save_resource writes one ticket's planes. Every part comes from
+		// validated identifiers, so a client never chooses where the engine writes.
+		inline std::filesystem::path
+		TicketDirectory(const std::filesystem::path &root, std::string_view instance, uint64_t ticket) {
+			return root / PathComponent(instance) / std::to_string(ticket);
+		}
+
+		// One plane's file name. PathComponent can map two resource names onto one
+		// string, so the name's hash keeps them apart.
+		inline std::string ResourceFileName(std::string_view resource) {
+			return PathComponent(resource) + "-" + std::to_string(std::hash<std::string_view>{}(resource)) + ".bin";
+		}
+
 		// Encodes retained binary bytes for the JSON-only MCP transport.
 		inline std::string Base64(std::span<const std::byte> bytes) {
 			static constexpr std::array alphabet{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K',
@@ -681,6 +714,15 @@ namespace engine::control {
 			};
 		});
 		auto ledger = DataFactoryOperations();
+		// Named by the clock, as script_check's scratch file is, so two hosts on one
+		// machine never write into each other's directory. Empty when the system has
+		// no temporary directory, and save_resource then refuses.
+		std::error_code noTemporary;
+		const std::filesystem::path temporary = std::filesystem::temp_directory_path(noTemporary);
+		const auto captureFiles = std::make_shared<const std::filesystem::path>(
+			noTemporary ? std::filesystem::path{}
+						: temporary / ("atomic-data-capture-" + std::to_string(core::Clock::Nanoseconds()))
+		);
 
 		Add(Tool{
 			"capture",
@@ -908,7 +950,7 @@ namespace engine::control {
 			"capture_bundle",
 			"Queues one data-scene-options/v1 bundle from a paused world's exact completed snapshot.",
 			[] {
-				const json optionProperties{
+				json optionProperties{
 					{"schema_version",
 					 {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					{"channels",
@@ -949,7 +991,7 @@ namespace engine::control {
 					 {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"options",
 					  {{"type", "object"},
-					   {"properties", optionProperties},
+					   {"properties", std::move(optionProperties)},
 					   {"required",
 						json::array(
 							{"schema_version",
@@ -1050,7 +1092,7 @@ namespace engine::control {
 			"Queues 2 to 6 named camera captures in one renderer frame from one exact paused world "
 			"snapshot. The shared renderer frame does not make simulation stepping atomic.",
 			[] {
-				const json optionProperties{
+				json optionProperties{
 					{"schema_version", {{"type", "string"}}},
 					{"channels", {{"type", "array"}, {"minItems", 1}, {"maxItems", MAXIMUM_CHANNELS}}},
 					{"pipeline", {{"type", "string"}}},
@@ -1075,7 +1117,7 @@ namespace engine::control {
 					   {"items", {{"type", "object"}}}}},
 					 {"options",
 					  {{"type", "object"},
-					   {"properties", optionProperties},
+					   {"properties", std::move(optionProperties)},
 					   {"additionalProperties", false}}},
 					 {"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"expected_tick", {{"type", "integer"}, {"minimum", 0}}},
@@ -1482,7 +1524,75 @@ namespace engine::control {
 			},
 		});
 
-		auto action = [bridge, ledger](const char *name, bool release) {
+		Add(Tool{
+			"save_resource",
+			"Writes one whole retained capture plane to a file on this machine and returns the file's path. "
+			"Takes the same id and options as get_resource, without offset or max_bytes. Use it instead "
+			"of repeated get_resource calls when the caller can read this machine's files: it skips "
+			"base64 and the one MiB range limit. The engine chooses the path, and release_capture "
+			"deletes the ticket's files.",
+			[] {
+				return Schema(
+					{{"id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"options", {{"type", "object"}}}},
+					{"id", "options"}
+				);
+			},
+			[bridge, captureFiles](const json &values, std::string &failure) -> json {
+				if (!Only(values, {"id", "options"}, failure)) return nullptr;
+				const json *field = nullptr;
+				std::string resource;
+				if (!Field(values, "id", field, failure) || !Text(*field, "id", resource, failure) ||
+					!Field(values, "options", field, failure) || !field->is_object()) {
+					if (failure.empty()) failure = Error("validation_failed", "options must be an object");
+					return nullptr;
+				}
+				const json &options = *field;
+				if (!Only(options, {"instance_id", "ticket"}, failure)) return nullptr;
+				std::string instance;
+				uint64_t ticket = 0;
+				if (!Field(options, "instance_id", field, failure) ||
+					!Text(*field, "instance_id", instance, failure) ||
+					!Field(options, "ticket", field, failure) || !UInt(*field, "ticket", ticket, failure))
+					return nullptr;
+				if (ticket == 0) {
+					failure = Error("validation_failed", "ticket must be positive");
+					return nullptr;
+				}
+				if (captureFiles->empty()) {
+					failure = Error("resource_unavailable", "this system has no temporary directory");
+					return nullptr;
+				}
+				std::vector<std::byte> bytes;
+				std::string detail;
+				if (!bridge->ReadPlane(
+						instance, ticket, resource, 0, std::numeric_limits<size_t>::max(), bytes, detail
+					)) {
+					failure = Error("resource_unavailable", detail);
+					return nullptr;
+				}
+				const std::filesystem::path directory = TicketDirectory(*captureFiles, instance, ticket);
+				std::error_code created;
+				std::filesystem::create_directories(directory, created);
+				const std::filesystem::path file = directory / ResourceFileName(resource);
+				std::ofstream output(file, std::ios::binary | std::ios::trunc);
+				output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+				output.close();
+				if (created || !output) {
+					failure = Error("resource_unavailable", "could not write " + file.string());
+					return nullptr;
+				}
+				return {
+					{"id", resource},
+					{"ticket", ticket},
+					{"byte_size", bytes.size()},
+					{"encoding", "file"},
+					{"path", file.string()}
+				};
+			},
+		});
+
+		auto action = [bridge, ledger, captureFiles](const char *name, bool release) {
 			return Tool{
 				name,
 				release ? "Releases one terminal capture and its retained bytes."
@@ -1495,7 +1605,7 @@ namespace engine::control {
 						{"instance_id", "ticket", "operation_id"}
 					);
 				},
-				[bridge, ledger, name, release](const json &values, std::string &failure) -> json {
+				[bridge, ledger, captureFiles, name, release](const json &values, std::string &failure) -> json {
 					if (!Only(values, {"instance_id", "ticket", "operation_id"}, failure)) return nullptr;
 					const json *field = nullptr;
 					std::string instance, operation;
@@ -1520,9 +1630,20 @@ namespace engine::control {
 					if (prior == DataFactoryOperationReplay::Replay) return replay;
 					std::string detail;
 					bool ok = true;
-					if (release)
+					if (release) {
 						ok = bridge->Release(instance, ticket, detail);
-					else
+						// The retained bytes are gone, so any files save_resource wrote
+						// for this ticket go with them.
+						if (ok && !captureFiles->empty()) {
+							const std::filesystem::path directory = TicketDirectory(*captureFiles, instance, ticket);
+							std::error_code ignored;
+							std::filesystem::remove_all(directory, ignored);
+							// remove() refuses a directory that still holds another
+							// ticket, so these only clear parents left empty.
+							std::filesystem::remove(directory.parent_path(), ignored);
+							std::filesystem::remove(*captureFiles, ignored);
+						}
+					} else
 						bridge->Cancel(instance, ticket);
 					json result{
 						{"status", ok ? (release ? "released" : "cancel_requested") : "refused"},
