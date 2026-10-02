@@ -45,7 +45,7 @@ Milestone labels describe development scope, not release versions.
   3. Replay animation, Time Remap, FLIP/Verlet and rigid actors with bounded frame history; retain recorded random state and rasterize trails/VFX.
   4. Edit graphs, groups, keys and tiles with atomic undo/redo; generate saved rigid meshes and preserve source metadata.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
-  6. Run bounded Lua and export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
+  6. Run bounded Lua and recorded-random export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
   7. Bind rigid and 3D outputs, source mesh availability and six-face skyboxes; cook Composer shaders, retain live ShaderScript compilation and queue camera/SDF jobs. GPU verification remains open.
   8. Package source projects and authored scenes; profile scene, simulation, atlas, palette and filter CPU workloads. Visual acceptance remains open.
 

@@ -17,6 +17,8 @@ namespace engine::imagegraphexport {
 	struct GraphExportSettings {
 		std::filesystem::path Input;
 		std::filesystem::path Output;
+		// Exact caller file containing owned desktop builtin random observations.
+		std::filesystem::path BuiltinRandomCapture;
 		std::string OutputId;
 		std::vector<GraphImageInput> ImageInputs;
 		std::span<const engine::imagegraph::HostNodeCapture> HostCaptures;

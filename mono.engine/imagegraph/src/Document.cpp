@@ -2212,6 +2212,10 @@ namespace engine::imagegraph {
 			   type == ValueType::Matrix || type == ValueType::Path3D;
 	}
 
+	void detail::WriteValueText(std::ostream &stream, const Value &value) {
+		WriteValue(stream, value);
+	}
+
 	bool detail::ReadValueText(std::string_view text, Value &value) {
 		std::istringstream stream{std::string(text)};
 		stream.imbue(std::locale::classic());

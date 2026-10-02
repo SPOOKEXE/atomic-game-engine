@@ -1,5 +1,6 @@
 // Source: Pixel Composer b69eca232217360cf1502ef0223523d818606652 node_array_*
 // and array_functions.gml.
+#include "../SourceBuiltinRandomContext.hpp"
 #include "../SourceRandom.hpp"
 #include "../TimelineDrivers.hpp"
 #include "ArraySource.hpp"
@@ -1036,6 +1037,19 @@ namespace engine::imagegraph::detail {
 				return context.Fail(
 					Status::InvalidValue, "source sample shift produces a negative index", "shift"
 				);
+			if (mode == 1 && context.Request.BuiltinRandomCaptures.size() > Limits::MaximumNodes)
+				return context.Fail(
+					Status::LimitExceeded, "Array Sample builtin capture count exceeds bounded nodes", "seed"
+				);
+			const SourceBuiltinRandomCapture *capture = nullptr;
+			if (mode == 1 && std::any_of(
+								 context.Request.BuiltinRandomCaptures.begin(),
+								 context.Request.BuiltinRandomCaptures.end(),
+								 [&](const auto &record) { return record.Authored.Id == context.Authored.Id; }
+							 )) {
+				if (!FindSourceBuiltinRandomCapture(context, capture)) return false;
+			}
+			size_t drawCursor = 0;
 			const auto walk =
 				[&](
 					auto &&self, const Items &row, int64_t dim, size_t depth, TreeCost *cost, Items *output
@@ -1078,7 +1092,28 @@ namespace engine::imagegraph::detail {
 				double at = first;
 				SourceRandom random(seed);
 				for (size_t index = 0; index < count; ++index) {
-					if (mode == 1) at = random.Index(uint32_t(row.size()));
+					if (mode == 1) {
+						if (capture) {
+							if (drawCursor == capture->Draws.size())
+								return context.Fail(
+									Status::UnsupportedExecution,
+									"Array Sample builtin recording is incomplete",
+									"seed"
+								);
+							const auto &draw = capture->Draws[drawCursor++];
+							if (draw.Operation != SourceBuiltinRandomOperation::IRandom || draw.Lower != 0 ||
+								draw.Upper != double(row.size() - 1) || !std::isfinite(draw.Result) ||
+								std::trunc(draw.Result) != draw.Result || draw.Result < 0 ||
+								draw.Result > draw.Upper)
+								return context.Fail(
+									Status::InvalidValue,
+									"Array Sample builtin draw does not match its source call",
+									"seed"
+								);
+							at = draw.Result;
+						} else
+							at = random.Index(uint32_t(row.size()));
+					}
 					if (at >= row.size()) {
 						if (amountType == 0) break;
 						return context.Fail(
@@ -1098,6 +1133,11 @@ namespace engine::imagegraph::detail {
 			};
 			TreeCost cost;
 			if (!walk(walk, *input, dimension, 1, &cost, nullptr)) return false;
+			if (capture && drawCursor != capture->Draws.size())
+				return context.Fail(
+					Status::InvalidValue, "Array Sample builtin recording has unused draws", "seed"
+				);
+			drawCursor = 0;
 			auto charge = context.ReserveWorkspace(cost.Bytes, "array");
 			if (!charge) return false;
 			Items output;

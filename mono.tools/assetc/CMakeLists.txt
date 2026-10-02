@@ -29,4 +29,13 @@ if(MONO_BUILD_TESTS)
 			-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/rigid.graph
 			-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-tests/rigid
 			-P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RigidCli.cmake")
+	add_test(
+		NAME assetc_cli_builtin_random_observations
+		COMMAND "${CMAKE_COMMAND}"
+			-DASSETC=$<TARGET_FILE:assetc>
+			-DIMAGEGRAPH=$<TARGET_FILE:imagegraph>
+			-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/palette-random.graph
+			-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-tests/builtin-random
+			-P "${CMAKE_CURRENT_SOURCE_DIR}/tests/BuiltinRandomCli.cmake")
+	set_tests_properties(assetc_cli_builtin_random_observations PROPERTIES TIMEOUT 180)
 endif()

@@ -3,6 +3,7 @@
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/HostCapture.hpp>
+#include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
 #include <engine/imagegraphexport/GraphInputs.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
@@ -310,6 +311,13 @@ namespace engine::imagegraphexport {
 			failure = "input graph and output must be different valid paths";
 			return false;
 		}
+		if (!settings.BuiltinRandomCapture.empty()) {
+			const auto capture = std::filesystem::weakly_canonical(settings.BuiltinRandomCapture, error);
+			if (error || capture == input || capture == output) {
+				failure = "builtin random capture must differ from graph input and output";
+				return false;
+			}
+		}
 		const auto parent = output.parent_path();
 		std::filesystem::create_directories(parent, error);
 		if (error) {
@@ -377,6 +385,10 @@ namespace engine::imagegraphexport {
 			if (settings.RetainTemporaryFrames && animation && !bundle && extension == ".apng")
 				values.insert(values.end(), {"--debug-frame-directory", stage.Directory.string()});
 			if (settings.NativeGif) values.push_back("--require-rgba8");
+			if (!settings.BuiltinRandomCapture.empty())
+				values.insert(
+					values.end(), {"--builtin-random-capture", settings.BuiltinRandomCapture.string()}
+				);
 			if (settings.RigidPlaying) values.push_back("--rigid-playing");
 			if (settings.RigidFrameProgress) values.push_back("--rigid-frame-progress");
 			if (settings.ArrayIndex)
@@ -728,6 +740,14 @@ namespace engine::imagegraphexport {
 			return false;
 		}
 		EvaluationRequest request;
+		std::vector<SourceBuiltinRandomCapture> builtinRandomCaptures;
+		if (!settings.BuiltinRandomCapture.empty()) {
+			if (!LoadBuiltinRandomCaptureFile(
+					settings.BuiltinRandomCapture, settings.Content, builtinRandomCaptures, failure
+				))
+				return false;
+			request.BuiltinRandomCaptures = builtinRandomCaptures;
+		}
 		request.Tick = settings.Frames.First;
 		request.RigidPlaying = settings.RigidPlaying;
 		request.RigidFrameProgress = settings.RigidFrameProgress;

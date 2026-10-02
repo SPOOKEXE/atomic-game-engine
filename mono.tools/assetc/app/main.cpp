@@ -4,6 +4,7 @@
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/GraphDirectoryHost.hpp>
 
 #include <algorithm>
@@ -83,6 +84,20 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"host-grants", "PATH", "Explicit bounded HTTP/process grants in imagegraph-host-grants format"
 	);
+	arguments.Value(
+		"builtin-random-capture", "PATH", "Recorded builtin random input; requires --export-graph"
+	);
+	arguments.Value(
+		"prepare-builtin-random", "NODE", "Prepare one node observation; requires --export-graph"
+	);
+	arguments.Value(
+		"builtin-random-draw",
+		"OP:LOWER:UPPER:RESULT",
+		"Explicit observed draw, repeatable; requires --prepare-builtin-random"
+	);
+	arguments.Value(
+		"builtin-random-output", "PATH", "Exact recording destination; requires --prepare-builtin-random"
+	);
 	arguments.Value("execute-node", "NODE", "Execute one explicitly granted host file node");
 	arguments.Value("export-graph", "PATH", "Export a named imagegraph output instead of baking a tree");
 	arguments.Value(
@@ -132,6 +147,32 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 
+	if ((arguments.Has("builtin-random-capture") || arguments.Has("prepare-builtin-random") ||
+		 arguments.Has("builtin-random-draw") || arguments.Has("builtin-random-output")) &&
+		!arguments.Has("export-graph")) {
+		std::fputs("assetc: builtin random capture options require --export-graph\n", stderr);
+		return 2;
+	}
+	if ((arguments.Has("builtin-random-draw") || arguments.Has("builtin-random-output")) &&
+		!arguments.Has("prepare-builtin-random")) {
+		std::fputs(
+			"assetc: observed draws and capture destination require "
+			"--prepare-builtin-random\n",
+			stderr
+		);
+		return 2;
+	}
+	if (arguments.Has("prepare-builtin-random") &&
+		(!arguments.Has("builtin-random-output") || !arguments.Has("builtin-random-draw") ||
+		 arguments.Has("export-node") || arguments.Has("execute-node") ||
+		 arguments.Has("builtin-random-capture") || arguments.Has("export-frames"))) {
+		std::fputs(
+			"assetc: preparation needs explicit draws and destination, and "
+			"a single graph tick\n",
+			stderr
+		);
+		return 2;
+	}
 	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
 	if (!configured.Ok) {
 		std::fprintf(stderr, "%s\n", configured.Error.c_str());
@@ -144,12 +185,15 @@ int main(int argc, char **argv) {
 
 	if (const auto graph = arguments.Get("export-graph")) {
 		assetc::GraphExportSettings exportSettings;
+		if (const auto capture = arguments.Get("builtin-random-capture"))
+			exportSettings.BuiltinRandomCapture = *capture;
 		exportSettings.RigidPlaying = arguments.Has("rigid-playing");
 		exportSettings.RigidFrameProgress = arguments.Has("rigid-frame-progress");
 		exportSettings.Input = std::filesystem::path(*graph);
 		const auto output = arguments.Get("output");
 		const auto selected = arguments.Get("graph-output");
-		if ((!output || !selected) && !arguments.Has("execute-node")) {
+		if ((!output || !selected) && !arguments.Has("execute-node") &&
+			!arguments.Has("prepare-builtin-random")) {
 			ENGINE_ERROR("assetc: graph export requires --output and --graph-output");
 			return 2;
 		}
@@ -358,6 +402,30 @@ int main(int argc, char **argv) {
 			!processGrants.empty() || !httpGrants.empty() || !clockGrants.empty())
 			exportSettings.HostProvider = &host;
 		std::string failure;
+		if (const auto node = arguments.Get("prepare-builtin-random")) {
+			std::vector<engine::imagegraph::SourceBuiltinRandomDraw> draws;
+			for (const auto text : arguments.GetAll("builtin-random-draw")) {
+				engine::imagegraph::SourceBuiltinRandomDraw draw;
+				if (draws.size() >= 65536 ||
+					!engine::imagegraphexport::ParseBuiltinRandomDraw(text, draw, failure)) {
+					ENGINE_ERROR("assetc: invalid observed draw: {}", failure);
+					return 2;
+				}
+				draws.push_back(draw);
+			}
+			if (!engine::imagegraphexport::PrepareBuiltinRandomCaptureFile(
+					exportSettings,
+					*node,
+					std::filesystem::path(*arguments.Get("builtin-random-output")),
+					draws,
+					failure
+				)) {
+				ENGINE_ERROR("assetc: {}", failure);
+				return EXIT_FAILURE;
+			}
+			ENGINE_INFO("assetc: recorded supplied builtin random observations for {}", *node);
+			return EXIT_SUCCESS;
+		}
 		if (const auto node = arguments.Get("execute-node")) {
 			engine::imagegraph::HostNodeCapture capture;
 			if (!assetc::ExecuteGraphHostNode(exportSettings, *node, capture, failure)) {

@@ -6,6 +6,7 @@
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/WavClip.hpp>
+#include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
 
@@ -1238,6 +1239,9 @@ namespace engine::imagegraphexport::runner {
 		arguments.Flag("rigid-frame-progress", "Capture source rigid frame advancement");
 		arguments.Flag("value", "Evaluate a numeric scalar or array output and print its value record");
 		arguments.Value("audio-capture", "PATH", "Bounded recorded audio input frames");
+		arguments.Value(
+			"builtin-random-capture", "PATH", "Exact file containing recorded builtin random observations"
+		);
 		arguments.Value("audio-source", "SOURCE=PATH", "Explicit source PCM WAV whole clip; may be repeated");
 		arguments.Value(
 			"bundle", "DIR", "Publish a complete PNG frame range and manifest into a new directory"
@@ -1289,6 +1293,7 @@ namespace engine::imagegraphexport::runner {
 		const auto outputPath = arguments.Get("output");
 		const auto bundlePath = arguments.Get("bundle");
 		const auto audioCapturePath = arguments.Get("audio-capture");
+		const auto builtinRandomPath = arguments.Get("builtin-random-capture");
 		const bool bundleOutput = bundlePath.has_value();
 		const bool scalarOutput = arguments.Has("value");
 		const bool pngOutput = outputPath.has_value();
@@ -1462,6 +1467,25 @@ namespace engine::imagegraphexport::runner {
 			PrintDiagnostic(errors, diagnostic);
 			return 1;
 		}
+		std::vector<engine::imagegraph::SourceBuiltinRandomCapture> builtinRandomCaptures;
+		if (builtinRandomPath) {
+			const std::filesystem::path captureFile(*builtinRandomPath);
+			if (SamePath(inputFile, captureFile) || (pngOutput && SamePath(outputFile, captureFile)) ||
+				(bundleOutput && SamePath(bundleDirectory, captureFile))) {
+				errors << "error status=Arguments message=\"graph, output and builtin "
+						  "random capture paths must differ\"\n";
+				return 2;
+			}
+			if (!LoadBuiltinRandomCaptureFile(
+					captureFile,
+					engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+					builtinRandomCaptures,
+					fileFailure
+				)) {
+				errors << "error status=InputError message=" << std::quoted(fileFailure) << '\n';
+				return 1;
+			}
+		}
 		std::vector<AudioCaptureFrame> audioFrames;
 		if (audioCapturePath) {
 			const std::filesystem::path captureFile(*audioCapturePath);
@@ -1609,6 +1633,7 @@ namespace engine::imagegraphexport::runner {
 					? " frame=" + FrameText({request.Tick, request.Subframe, request.NegativeFrame})
 				: authoredFrame ? " frame=" + FrameText(*authoredFrame)
 								: " tick=" + std::to_string(tick);
+			if (builtinRandomPath) request.BuiltinRandomCaptures = builtinRandomCaptures;
 			if (!liveRequest || audioCapturePath)
 				request.AudioFrames = std::span<const AudioCaptureFrame>(audioFrames);
 			if (!liveRequest || !audioClips.empty()) request.AudioClips = audioClips;

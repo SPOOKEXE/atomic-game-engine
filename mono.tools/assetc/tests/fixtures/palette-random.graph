@@ -1,0 +1,16 @@
+imagegraph 9
+node "palette" "pc.palette_shrink" "" 0 0
+value 0 "palette" "palette_in" a colour 5 c 0 0 0 255 c 64 64 64 255 c 128 128 128 255 c 192 192 192 255 c 255 255 255 255
+value 0 "palette" "amount" i 2
+value 0 "palette" "sample_type" e 1
+value 0 "palette" "seed" d 42
+node "gradient" "pc.gradient_palette" "" 0 0
+node "sample" "pc.gradient_out" "" 0 0
+value 2 "sample" "sample" d 0
+node "image" "pc.solid" "" 0 0
+value 3 "image" "dimension" v 8 8
+value 3 "image" "dimension_unit" e 0
+link "palette" "palette" "gradient" "palette"
+link "gradient" "gradient" "sample" "gradient"
+link "sample" "color" "image" "color"
+output "image" "image" "surface_out"

@@ -2,6 +2,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphInputs.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
@@ -901,6 +902,14 @@ namespace engine::imagegraphexport {
 		std::vector<RequestImageSource> sources;
 		if (!LoadGraphImageInputs(grants, sources, failure)) return false;
 		EvaluationRequest request;
+		std::vector<SourceBuiltinRandomCapture> builtinRandomCaptures;
+		if (!grants.BuiltinRandomCapture.empty()) {
+			if (!LoadBuiltinRandomCaptureFile(
+					grants.BuiltinRandomCapture, grants.Content, builtinRandomCaptures, failure
+				))
+				return false;
+			request.BuiltinRandomCaptures = builtinRandomCaptures;
+		}
 		request.Tick = grants.Frames.First;
 		request.RigidPlaying = grants.RigidPlaying;
 		request.RigidFrameProgress = grants.RigidFrameProgress;
