@@ -1,3 +1,5 @@
+#include "WavFileWatch.hpp"
+
 #include <engine/imagegraph/WavPreview.hpp>
 
 #include <algorithm>
@@ -87,11 +89,12 @@ namespace studio {
 		std::unique_ptr<engine::audio::Device> Device;
 		std::vector<Prepared> Sounds;
 		std::vector<Voice> Voices;
+		detail::WavFileWatches FileWatches;
 		uint64_t NextGeneration = 1;
 		uint64_t DroppedEvents = 0;
 		bool Failed = false;
 		uint64_t SoundBytes() const {
-			uint64_t bytes = 0;
+			uint64_t bytes = FileWatches.RetainedBytes();
 			for (const auto &sound : Sounds)
 				bytes += sizeof(Prepared) + sizeof(engine::audio::SampleBuffer) + sound.SourceId.size() +
 						 sound.Sound->Data().size_bytes();
@@ -436,11 +439,44 @@ namespace studio {
 		const std::filesystem::path &path,
 		Diagnostic &diagnostic
 	) {
-		const auto soundBytes = Audio->SoundBytes();
+		return LoadSourceWithWorkspace(sources, cache, sourceId, path, 0, diagnostic);
+	}
+	bool ImageGraphWavPreview::LoadSourceWithWorkspace(
+		std::vector<AudioClipSource> &sources,
+		ImageGraphPreviewCache &cache,
+		std::string_view sourceId,
+		const std::filesystem::path &path,
+		uint64_t workspaceBytes,
+		Diagnostic &diagnostic
+	) {
+		const auto retainedSounds = Audio->SoundBytes();
+		if (workspaceBytes > Limits::MaximumEvaluationBytes ||
+			retainedSounds > Limits::MaximumEvaluationBytes - workspaceBytes)
+			return Fail(
+				diagnostic, Status::LimitExceeded, "WAV reload workspace exceeds the live byte budget"
+			);
+		const auto soundBytes = retainedSounds + workspaceBytes;
+		detail::PreparedWavFileWatch watched;
+		if (soundBytes > Limits::MaximumEvaluationBytes ||
+			!Audio->FileWatches.PrepareBinding(
+				sourceId, path, Limits::MaximumEvaluationBytes - soundBytes, watched, diagnostic
+			))
+			return false;
+		const uint64_t bindingBytes =
+			sizeof(watched) + watched.Record.SourceId.capacity() + watched.Record.GrantedPath.capacity();
+		if (bindingBytes > Limits::MaximumEvaluationBytes - soundBytes)
+			return Fail(
+				diagnostic, Status::LimitExceeded, "WAV checker binding exceeds the live byte budget"
+			);
 		AudioClipSource candidate;
 		if (soundBytes > Limits::MaximumEvaluationBytes ||
 			!ReadImageGraphWavSource(
-				sources, sourceId, path, candidate, diagnostic, Limits::MaximumEvaluationBytes - soundBytes
+				sources,
+				sourceId,
+				path,
+				candidate,
+				diagnostic,
+				Limits::MaximumEvaluationBytes - soundBytes - bindingBytes
 			))
 			return false;
 		engine::audio::SoundRef prepared;
@@ -448,7 +484,10 @@ namespace studio {
 			(!candidate.Data.Samples.empty() ||
 			 (!candidate.Data.Channels.empty() && !candidate.Data.Channels.front().empty()))) {
 			prepared = Audio->Prepare(
-				candidate, ClipBytes(sources) + ClipBytes(std::span(&candidate, 1)), diagnostic, false
+				candidate,
+				ClipBytes(sources) + ClipBytes(std::span(&candidate, 1)) + bindingBytes + workspaceBytes,
+				diagnostic,
+				false
 			);
 			if (!prepared) return false;
 		}
@@ -464,7 +503,93 @@ namespace studio {
 		else
 			*found = std::move(candidate);
 		if (replacement.Sound) Audio->Sounds.push_back(std::move(replacement));
+		Audio->FileWatches.Publish(std::move(watched));
 		cache.Clear();
+		return true;
+	}
+	bool ImageGraphWavPreview::CheckFiles(
+		const Document &document,
+		const EvaluationRequest &observations,
+		uint64_t hostFrame,
+		std::vector<AudioClipSource> &sources,
+		ImageGraphPreviewCache &cache,
+		size_t &reloaded,
+		Diagnostic &diagnostic
+	) {
+		ENGINE_PROFILE("studio.wav_checker.poll");
+		reloaded = 0;
+		diagnostic = {};
+		if (std::none_of(
+				Audio->FileWatches.Files.begin(), Audio->FileWatches.Files.end(), [](const auto &file) {
+					return file.has_value();
+				}
+			))
+			return true;
+		std::array<bool, Limits::MaximumNodes> enabled{};
+		EvaluationRequest request = observations;
+		request.AudioClips = sources;
+		for (const auto &node : document.Nodes) {
+			if (node.Type != "pc.wav_file_read") continue;
+			bool checker = true, found = false;
+			for (const auto &property : node.SourceProperties)
+				if (property.Port == "file_checker") {
+					const auto *value = std::get_if<bool>(&property.Data);
+					if (!value || found) {
+						diagnostic = {
+							Status::InvalidValue,
+							node.Id,
+							"file_checker",
+							"WAV checker requires one boolean source property"
+						};
+						return false;
+					}
+					found = true;
+					checker = *value;
+				}
+			if (!checker) continue;
+			WavPreviewControls controls;
+			if (ResolveWavPreviewControls(document, node.Id, request, controls, diagnostic) != Status::Ok)
+				return false;
+			for (size_t index = 0; index < Audio->FileWatches.Files.size(); ++index)
+				if (Audio->FileWatches.Files[index] &&
+					Audio->FileWatches.Files[index]->SourceId == controls.SourceId)
+					enabled[index] = true;
+		}
+		for (size_t index = 0; index < Audio->FileWatches.Files.size(); ++index) {
+			auto &watched = Audio->FileWatches.Files[index];
+			if (!watched) continue;
+			// Path conversion and callback names coexist with decoder/prepared binding allocations.
+			const uint64_t workspaceBytes = sizeof(std::filesystem::path) + sizeof(std::string) +
+											watched->SourceId.capacity() + watched->GrantedPath.size() * 32 +
+											128;
+			const uint64_t retainedBytes = Audio->SoundBytes() + ClipBytes(sources);
+			if (retainedBytes > Limits::MaximumEvaluationBytes ||
+				workspaceBytes > Limits::MaximumEvaluationBytes - retainedBytes)
+				return Fail(
+					diagnostic,
+					Status::LimitExceeded,
+					"WAV checker path workspace exceeds the live byte budget"
+				);
+			const auto modified =
+				enabled[index] ? detail::WavFileModifiedSecond(std::filesystem::path(watched->GrantedPath))
+							   : std::nullopt;
+			size_t due = 0;
+			if (detail::AdvanceWavFileChecker(
+					watched->Checker, hostFrame, enabled[index], modified, due, diagnostic
+				) != Status::Ok)
+				return false;
+			for (size_t callback = 0; callback < due; ++callback) {
+				ENGINE_PROFILE("studio.wav_checker.reload");
+				engine::core::Metrics::Count("studio.wav_checker.reload_attempts", 1);
+				// LoadSource may replace this record; copied names remain owned for the synchronous reload.
+				const auto source = watched->SourceId;
+				const std::filesystem::path path(watched->GrantedPath);
+				if (!LoadSourceWithWorkspace(sources, cache, source, path, workspaceBytes, diagnostic))
+					return false;
+				++reloaded;
+				engine::core::Metrics::Count("studio.wav_checker.reloads", 1);
+			}
+		}
 		return true;
 	}
 	bool ImageGraphWavPreview::RemoveSource(
@@ -474,6 +599,8 @@ namespace studio {
 		Diagnostic &diagnostic
 	) {
 		if (!Audio->Retire(diagnostic)) return false;
+		const std::string removed(sourceId);
+		Audio->FileWatches.Remove(removed);
 		return RemoveImageGraphWavSource(sources, cache, sourceId);
 	}
 }

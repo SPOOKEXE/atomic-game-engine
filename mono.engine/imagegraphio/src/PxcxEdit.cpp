@@ -2376,6 +2376,30 @@ namespace engine::imagegraphio {
 						))
 						(*source)["attri"].erase("layer_visible");
 				}
+				if (node.Type == "pc.wav_file_read") {
+					const bool *checker = nullptr;
+					for (const auto &property : node.SourceProperties) {
+						if (property.Port != "file_checker") continue;
+						const auto *value = std::get_if<bool>(&property.Data);
+						if (checker || !value)
+							return Reject(
+								diagnostic,
+								"WAV File Watcher must be one source boolean",
+								node.Id,
+								property.Port
+							);
+						checker = value;
+					}
+					if (checker) {
+						if (!source->contains("attri")) (*source)["attri"] = Json::object();
+						if (!(*source)["attri"].is_object())
+							return Reject(
+								diagnostic, "WAV source attributes are malformed", node.Id, "file_checker"
+							);
+						(*source)["attri"]["file_checker"] = *checker;
+					} else if (source->contains("attri") && (*source)["attri"].is_object())
+						(*source)["attri"].erase("file_checker");
+				}
 				if (node.Type == "pc.mesh_warp") {
 					const auto *old = NativeNode(working.Graph, node.Id);
 					if (old)

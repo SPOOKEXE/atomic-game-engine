@@ -2292,6 +2292,17 @@ namespace engine::imagegraphio {
 					}
 				}
 			}
+			if (entry.Type == "pc.wav_file_read")
+				if (auto raw = Attribute(source, "file_checker")) {
+					if (!raw->is_boolean() ||
+						!AdmitNativeSlots(node.SourceProperties, node.SourceProperties.size() + 1, budget) ||
+						!AdmitNativeText("file_checker", budget)) {
+						reason = "WAV File Watcher must be a bounded source boolean";
+						return false;
+					}
+					node.SourceProperties.push_back({"file_checker", raw->get<bool>()});
+					animation.FormatVersion = 9;
+				}
 			if (entry.Type == "pc.mesh_warp") {
 				for (std::string_view port : {"pin", "mesh_bound"})
 					if (auto raw = Attribute(source, port)) {

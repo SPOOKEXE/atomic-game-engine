@@ -178,6 +178,7 @@ namespace studio {
 			double ScalarPreviewValue = 0.0;
 			std::vector<engine::imagegraph::AudioCaptureFrame> AudioFrames;
 			std::vector<engine::imagegraph::AudioClipSource> AudioClips;
+			uint64_t WavCheckerHostFrame = 0;
 			Image PxcxReferenceThumbnail;
 			ImageGraphPreviewCache PreviewCache;
 			Diagnostic LastDiagnostic;
@@ -4673,6 +4674,32 @@ namespace studio {
 	void DrawImageComposer(engine::render::Renderer &renderer, bool &open) {
 		State &state = Composer();
 		Initialize(state);
+		if (state.WavCheckerHostFrame != std::numeric_limits<uint64_t>::max()) {
+			engine::imagegraphphysics::RigidProvider checkerRigidProvider;
+			engine::imagegraph::EvaluationRequest checkerRequest;
+			checkerRequest.HostProvider = &HostFor(state);
+			BindObservations(state, checkerRequest);
+			detail::BindImageGraphRigid(checkerRequest, checkerRigidProvider, state.Playback);
+			(void)SetFrameTime(checkerRequest, GetImageGraphFrame(state.Playback));
+			checkerRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+			size_t reloaded = 0;
+			Diagnostic diagnostic;
+			const bool checked = state.WavAudio.CheckFiles(
+				state.Authored,
+				checkerRequest,
+				state.WavCheckerHostFrame++,
+				state.AudioClips,
+				state.PreviewCache,
+				reloaded,
+				diagnostic
+			);
+			if (reloaded) {
+				state.WavSourceMessage.clear();
+				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
+				RequestPreview(state, true);
+			}
+			if (!checked) state.WavSourceMessage = diagnostic.Message;
+		}
 		PumpRetiredTexture(state, renderer);
 		state.VectorControls.PumpRetired(renderer);
 

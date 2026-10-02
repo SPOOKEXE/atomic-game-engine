@@ -1,0 +1,51 @@
+{
+  "profile": "native-granted-wav-file-checker",
+  "status": "outside-draft-no-runtime-studio-gate",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "sources": [
+    {
+      "path": "scripts/node_wav_file_read/node_wav_file_read.gml",
+      "sha256": "881b47c157f9554acb14a99315d23f9e6db501ddff565d105dcd28dda1c0cb67"
+    },
+    {
+      "path": "scripts/time_source/time_source.gml",
+      "sha256": "f111ac37b52e87426667c46bc260d5a93154aa39810507e64b18e2f4bba67d1b"
+    },
+    {
+      "path": "scripts/file_functions/file_functions.gml",
+      "sha256": "15d5c6ba910e6c6fc90f97b3c036d26d1addb0419e832c111878c9ad27da0640"
+    }
+  ],
+  "observed_source_contract": {
+    "node": "Node_WAV_File_Read",
+    "native_type": "pc.wav_file_read",
+    "attribute": "file_checker",
+    "default": true,
+    "comparison": "strictly newer packed calendar timestamp from file_get_modify_s",
+    "cadence": "one source step poll per host frame while enabled and file exists",
+    "delay": "run_in(2) creates a global frame-unit time source and starts it",
+    "callbacks": "separate callback per detected modification; disabling does not cancel scheduled callbacks",
+    "edit_baseline": "updatePaths sets edit_time=max(edit_time,file_get_modify_s(path_current))",
+    "callback_literal": "updatePaths(); triggerRender();"
+  },
+  "native_profile": {
+    "authority": "only exact paths supplied to successful explicit LoadSource; authored path edits cannot widen this set",
+    "mtime": "floor system filesystem modification time to UTC seconds; source packed-calendar/timezone equality not established",
+    "clock": "monotonic host update counter, independent of timeline tick/seek",
+    "scheduling": "two pending slots suffice for one observation per host frame and a two-frame delay",
+    "records": "existing Limits::MaximumNodes source bound",
+    "reload": "existing bounded ReadImageGraphWavSource and exclusive preview owner retirement; previous decoded source and cached pixels survive decode failure",
+    "effects": "successful reload clears existing preview cache, advances evaluation-input revision, requests preview",
+    "device": "polling never enables a device"
+  },
+  "open_reference_gates": [
+    "source callback supplies no path argument to updatePaths(path); behavior in licensed runtime unobserved",
+    "source file_datetime_modified_* timezone and exact packed-calendar query parity",
+    "OS notification/event support is not part of this polling profile",
+    "device lifecycle verification remains independent"
+  ],
+  "manual_sources": [
+    "https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Time_Sources/time_source_create.htm",
+    "https://manual.gamemaker.io/beta/en/GameMaker_Language/GML_Reference/Time_Sources/Time_Source_Units.htm"
+  ]
+}

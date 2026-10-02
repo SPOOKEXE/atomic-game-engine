@@ -1,0 +1,11 @@
+# Granted WAV file checker
+
+This native host profile monitors only paths already selected through a successful Studio WAV load. A graph path cannot establish or change a read grant. It reuses the existing bounded WAV decoder and clip replacement, including retained-source overlap admission. Polling works while the preview device is closed and never opens one.
+
+The pinned WAV In node defaults `attributes.file_checker` to true. Its step observes an existing file and schedules `run_in(2)` only when the modification scalar increases. `run_in` creates and starts a global time source in frame units. Separate detected edits schedule separate callbacks; disabling the checkbox does not cancel a pending callback. [GameMaker time-source documentation](https://manual.gamemaker.io/monthly/en/GameMaker_Language/GML_Reference/Time_Sources/time_source_create.htm) confirms that frame-unit periods are frame-dependent and a time source runs once by default.
+
+The native scheduler uses a monotonic host-frame counter, independently of timeline seeks. Filesystem modification time is rounded down to UTC seconds. Two pending slots suffice because one host-frame observation can schedule one callback two frames ahead. Watch records retain the existing native source-count and text bounds. Equal, older and missing timestamps do not schedule a reload.
+
+Each due callback reloads the recorded granted path. A successful reload clears the existing image preview cache, advances the evaluation-input revision and requests a new preview. A malformed replacement preserves the prior clip and cached image. The failed callback is consumed; another strictly newer edit can schedule recovery. Multiple WAV nodes using one loaded source share that native source's watcher.
+
+The pinned source callback literally invokes `updatePaths()` while the method declares a `path` parameter. Its licensed-runtime behavior is unobserved. The native profile explicitly supplies the existing granted path. Source modification timestamps pack local calendar fields rather than Unix seconds; timezone and calendar-query equality are also unverified. Neither behavior is presented as exact executable parity. The companion JSON records the inspected source hashes and remaining comparison gates.

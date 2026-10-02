@@ -43,6 +43,16 @@ namespace studio {
 			const std::filesystem::path &path,
 			engine::imagegraph::Diagnostic &diagnostic
 		);
+		// Polls only explicitly loaded paths; no audio device is opened.
+		bool CheckFiles(
+			const engine::imagegraph::Document &document,
+			const engine::imagegraph::EvaluationRequest &request,
+			uint64_t hostFrame,
+			std::vector<engine::imagegraph::AudioClipSource> &sources,
+			ImageGraphPreviewCache &cache,
+			size_t &reloaded,
+			engine::imagegraph::Diagnostic &diagnostic
+		);
 		bool RemoveSource(
 			std::vector<engine::imagegraph::AudioClipSource> &sources,
 			ImageGraphPreviewCache &cache,
@@ -52,6 +62,14 @@ namespace studio {
 		void Close();
 
 	  private:
+		bool LoadSourceWithWorkspace(
+			std::vector<engine::imagegraph::AudioClipSource> &sources,
+			ImageGraphPreviewCache &cache,
+			std::string_view sourceId,
+			const std::filesystem::path &path,
+			uint64_t workspaceBytes,
+			engine::imagegraph::Diagnostic &diagnostic
+		);
 		struct Owner;
 		std::unique_ptr<Owner> Audio;
 	};
