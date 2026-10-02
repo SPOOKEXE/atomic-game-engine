@@ -1,3 +1,4 @@
+#include <engine/core/Profiling.hpp>
 #include <engine/datastore/Sqlite.hpp>
 #include <engine/world/SharedStoreFile.hpp>
 
@@ -73,12 +74,14 @@ namespace engine::datastore {
 
 		world::DataStoreStatus
 		Open(const std::filesystem::path &path, const int flags, Database &database, std::string &error) {
+			ENGINE_PROFILE("datastore sqlite open");
 			const int opened = sqlite3_open_v2(path.string().c_str(), &database.Handle, flags, nullptr);
 			return opened == SQLITE_OK ? world::DataStoreStatus::Ok : Fail(database.Handle, opened, error);
 		}
 
 		world::DataStoreStatus
 		Prepare(sqlite3 *database, const char *sql, Statement &statement, std::string &error) {
+			ENGINE_PROFILE("datastore sqlite prepare");
 			sqlite3_stmt *prepared = nullptr;
 			const int result = sqlite3_prepare_v2(database, sql, -1, &prepared, nullptr);
 			if (result != SQLITE_OK) {
@@ -86,6 +89,11 @@ namespace engine::datastore {
 			}
 			statement.Handle = prepared;
 			return world::DataStoreStatus::Ok;
+		}
+
+		int Step(sqlite3_stmt *statement) {
+			ENGINE_PROFILE("datastore sqlite step");
+			return sqlite3_step(statement);
 		}
 
 		class SqliteDataStoreAdapter final : public world::DataStoreAdapter {
@@ -98,6 +106,7 @@ namespace engine::datastore {
 			world::DataStoreStatus Load(
 				const core::Name store, std::vector<world::SharedStoreEntry> &entries, std::string &error
 			) override {
+				ENGINE_PROFILE("datastore sqlite load");
 				error.clear();
 				if (!ValidStoreName(store)) {
 					error = "invalid datastore name";
@@ -134,7 +143,7 @@ namespace engine::datastore {
 					return Fail(database.Handle, sqlite3_errcode(database.Handle), error);
 				}
 
-				const int stepped = sqlite3_step(statement.Handle);
+				const int stepped = Step(statement.Handle);
 				if (stepped == SQLITE_DONE) {
 					return world::DataStoreStatus::NotFound;
 				}
@@ -158,6 +167,7 @@ namespace engine::datastore {
 					return world::DataStoreStatus::IoError;
 				}
 				const std::span<const std::byte> image(first, static_cast<size_t>(byteCount));
+				ENGINE_PROFILE("datastore sqlite decode");
 				const world::SharedStoreFileStatus decoded =
 					world::DecodeSharedStoreImage(image, world::BusKind::DataStore, entries, error);
 				return decoded == world::SharedStoreFileStatus::Ok ? world::DataStoreStatus::Ok
@@ -169,6 +179,7 @@ namespace engine::datastore {
 				const std::span<const world::SharedStoreEntry> entries,
 				std::string &error
 			) override {
+				ENGINE_PROFILE("datastore sqlite save");
 				error.clear();
 				if (!ValidStoreName(store)) {
 					error = "invalid datastore name";
@@ -176,9 +187,12 @@ namespace engine::datastore {
 				}
 
 				std::vector<std::byte> image;
-				if (world::EncodeSharedStoreImage(world::BusKind::DataStore, entries, image, error) !=
-					world::SharedStoreFileStatus::Ok) {
-					return world::DataStoreStatus::Malformed;
+				{
+					ENGINE_PROFILE("datastore sqlite encode");
+					if (world::EncodeSharedStoreImage(world::BusKind::DataStore, entries, image, error) !=
+						world::SharedStoreFileStatus::Ok) {
+						return world::DataStoreStatus::Malformed;
+					}
 				}
 				if (image.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
 					error = "SQLite DataStore image is too large";
@@ -198,7 +212,11 @@ namespace engine::datastore {
 				if (status != world::DataStoreStatus::Ok) {
 					return status;
 				}
-				const int schema = sqlite3_exec(database.Handle, CREATE_SCHEMA, nullptr, nullptr, nullptr);
+				int schema;
+				{
+					ENGINE_PROFILE("datastore sqlite schema");
+					schema = sqlite3_exec(database.Handle, CREATE_SCHEMA, nullptr, nullptr, nullptr);
+				}
 				if (schema != SQLITE_OK) {
 					return Fail(database.Handle, schema, error);
 				}
@@ -222,7 +240,7 @@ namespace engine::datastore {
 				if (nameBound != SQLITE_OK || imageBound != SQLITE_OK) {
 					return Fail(database.Handle, sqlite3_errcode(database.Handle), error);
 				}
-				const int stepped = sqlite3_step(statement.Handle);
+				const int stepped = Step(statement.Handle);
 				return stepped == SQLITE_DONE ? world::DataStoreStatus::Ok
 											  : Fail(database.Handle, stepped, error);
 			}

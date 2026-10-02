@@ -103,7 +103,9 @@ namespace engine::world {
 		// @return `false` for a world with no fanout slot, which is an unknown
 		//         world or one created since the last barrier.
 		bool Deliver(WorldId id, Delivery delivery);
-		void DiscardPendingDeliveries(WorldId id);
+		// Retires slot-owned membership and queued traffic before a registry slot
+		// can be reused. Shared values/queues and historical applied traffic survive.
+		void RemoveWorld(WorldId id, core::Name name);
 		bool QueueDelivery(
 			WorldId id,
 			const Delivery &delivery,
@@ -198,6 +200,7 @@ namespace engine::world {
 		void ReadBuses(core::ByteReader &reader, const WorldDirectory &directory);
 
 	  private:
+		void DiscardPendingDeliveries(WorldId id);
 		void ApplyEnvelope(
 			World &sender,
 			const Envelope &envelope,

@@ -149,8 +149,8 @@ namespace engine::world {
 			return SharedStoreFileStatus::Malformed;
 		}
 
-		const auto encoded = writer.Bytes();
-		bytes.assign(encoded.begin(), encoded.end());
+		// Commit only the validated image; the caller retains its prior bytes on refusal.
+		bytes = writer.TakeBytes();
 		return SharedStoreFileStatus::Ok;
 	}
 
