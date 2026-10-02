@@ -1,7 +1,7 @@
 {
   "recorded_date": "2026-10-02",
   "recorded_timezone": "Australia/Darwin, UTC+09:30",
-  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record.",
+  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate.",
   "runtime_gates": [
     {
       "name": "imagegraph IO",
@@ -498,6 +498,108 @@
       "test_cases_passed": 1,
       "assertions_passed": 12,
       "scope_note": "Reflected selector properties; this is a narrow binding test."
+    },
+    {
+      "name": "joined build47 initial compile attempt",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-47.log",
+      "result": "failed",
+      "observed_failure": "Compiler could not write assembly output because the filesystem ran out of space.",
+      "scope_note": "The attempt resumed as build-resume-47; the resumed compile/link completed 125 targets."
+    },
+    {
+      "name": "joined build47 resumed compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-resume-47.log",
+      "result": "passed",
+      "build_steps_completed": 125,
+      "scope_note": "Resumed build completed and linked requested targets; compile/link completion is not full-suite acceptance."
+    },
+    {
+      "name": "imagegraph core suite build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-all-47.log",
+      "result": "failed",
+      "test_cases_passed": 1171,
+      "test_cases_failed": 4,
+      "assertions_passed": 1807996,
+      "assertions_failed": 5,
+      "scope_note": "Four failed cases: Source2DGridNodes mixed-producer, FlipDestroy direct-budget, OutputDiagnostics with two PXC assertions, and SourceRouting fresh-seek cache with one assertion. Five failed assertions total. Build48 repairs are recorded separately."
+    },
+    {
+      "name": "imagegraph I/O suite build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all-47.log",
+      "result": "passed",
+      "test_cases_passed": 157,
+      "assertions_passed": 5836
+    },
+    {
+      "name": "imagegraph export suite build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-all-47.log",
+      "result": "passed",
+      "test_cases_passed": 35,
+      "assertions_passed": 639,
+      "scope_note": "Native export and granted raster-host focused coverage. This is not official Pixel Composer parity."
+    },
+    {
+      "name": "Studio focused source suite build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-source-47.log",
+      "result": "passed",
+      "test_cases_passed": 33,
+      "assertions_passed": 641,
+      "scope_note": "Focused source, group, expression, host, WAV, and export-trigger filters; not the full Studio suite."
+    },
+    {
+      "name": "client CPU adapter suite build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-adapters-47.log",
+      "result": "passed",
+      "test_cases_passed": 13,
+      "assertions_passed": 405,
+      "scope_note": "CPU adapter tests only."
+    },
+    {
+      "name": "client live array suite build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-array-47.log",
+      "result": "passed",
+      "test_cases_passed": 2,
+      "assertions_passed": 10,
+      "scope_note": "Ordered frame packing and authored sequence timing only."
+    },
+    {
+      "name": "client Composer scenes build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-scenes-47.log",
+      "result": "passed",
+      "test_cases_passed": 9,
+      "assertions_passed": 256,
+      "scope_note": "Headless composer-scenes filter; manual and GPU acceptance remain open."
+    },
+    {
+      "name": "example Composer scene fixtures build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/example-scenes-47.log",
+      "result": "passed",
+      "test_cases_passed": 1,
+      "assertions_passed": 203,
+      "scope_note": "One fixture case exercises multiple authored scenes."
+    },
+    {
+      "name": "renderer CPU filtered suite build47",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/render-cpu-47.log",
+      "result": "passed",
+      "test_cases_passed": 25,
+      "assertions_passed": 2541,
+      "scope_note": "CPU-filtered camera, SDF, sequence, and flipbook paths; does not establish GPU acceptance."
+    },
+    {
+      "name": "joined build48 core repair compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-core-48.log",
+      "result": "passed",
+      "build_steps_completed": 180,
+      "scope_note": "Core repair build completed and linked. Other full-suite results are not implied."
+    },
+    {
+      "name": "imagegraph core suite build48",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-all-48.log",
+      "result": "passed",
+      "test_cases_passed": 1175,
+      "assertions_passed": 1808028,
+      "scope_note": "Core suite green. This does not establish whole-repository acceptance or parity."
     }
   ],
   "excluded_or_failed_runs": [
@@ -533,6 +635,13 @@
       "result": "failed",
       "observed_failure": "Compiler could not write an assembly file because the filesystem had no free space.",
       "scope_note": "This attempt was resumed after space was reclaimed; the resumed 91-target build and link passed."
+    },
+    {
+      "name": "imagegraph build47 initial compile",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-attempt-47.log",
+      "result": "failed and resumed",
+      "observed_failure": "No space left on device while the compiler wrote assembly output.",
+      "scope_note": "The resumed build-resume-47 completed 125 targets; the initial failure is retained as build history."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -590,14 +699,14 @@
   },
   "limitations": [
     "These native gates cover only the named test and architecture scopes. They do not complete M0-M7 acceptance.",
-    "Source-camera and simulation node families remain open.",
+    "Source camera and SDF renderer slices now have bounded native CPU coverage; full camera/SDF, simulation, and GPU acceptance remain open.",
     "The OKLCH numeric comparison covers helper translation only and does not establish product parity.",
     "External licensed Pixel Composer parity, fractional key-map comparison, and live GUI verification remain unverified.",
     "Seven scene files exist, but manual and GPU acceptance remains pending.",
     "Noise Aniso and captured MK Sparkle native kernels are present; full supplied-project acceptance and matched reference behavior remain open. Grid and Path Shape native work remains incomplete.",
     "No accepted full GPU gate is recorded; the focused filtered run included unintended camera GPU cases and failed.",
     "No full source tree or tested binary hash snapshot ties these outputs to every current source edit.",
-    "The build45 archive inventory is recorded below. Later unbuilt source additions are excluded from its capability counts."
+    "The build48 archive inventory is recorded below. Later unbuilt source additions are excluded from its capability counts."
   ],
   "scene_files": {
     "result": "all seven named .aworld files are present",
@@ -613,20 +722,31 @@
     "acceptance_status": "Manual and GPU acceptance pending; file presence is not acceptance."
   },
   "executor_inventory": {
-    "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build45.json",
-    "archive_sha256": "35e65ad10766a236b3d832c92d977da9a3de565fd60e05b259d0ad52ea5d42a7",
-    "archive_mtime_utc": "2026-10-02T12:33:39.898034Z",
-    "repo_head": "1e7bb7b4995141d944f33652348a986dccd773be",
-    "registered_pc_count": 394,
-    "registered_catalogue_overlap_count": 393,
+    "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build48.json",
+    "archive_sha256": "14483fae7296bd8943f14fdaf0f69334dc1dc04bf26c92966c0c71ac1363313f",
+    "archive_mtime_utc": "2026-10-02T14:02:40.023805Z",
+    "archive_size_bytes": 4231848224,
+    "repo_head": "1b0188aa3b8789025fa87b122a1938d64d20fcc3",
+    "helper_sha256": "d564a47f505136dbb56a932c4ff4da7590926262e5b16add6a52737ba76c0340",
+    "registered_pc_count": 404,
+    "registered_catalogue_overlap_count": 403,
     "registered_only_count": 1,
     "registered_only_pc": [
       "pc.global_scope"
     ],
     "catalogue_pc_count": 886,
-    "catalogue_missing_executor_count": 493,
-    "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes.",
-    "archive_build": "build45 archive present during helper link",
+    "catalogue_missing_executor_count": 483,
+    "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. The archive predates later unbuilt source edits.",
+    "archive_build": "build48 archive present during helper link",
+    "previous_build45_snapshot": {
+      "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build45.json",
+      "archive_sha256": "35e65ad10766a236b3d832c92d977da9a3de565fd60e05b259d0ad52ea5d42a7",
+      "archive_mtime_utc": "2026-10-02T12:33:39.898034Z",
+      "repo_head": "1e7bb7b4995141d944f33652348a986dccd773be",
+      "registered_pc_count": 394,
+      "catalogue_pc_count": 886,
+      "catalogue_missing_executor_count": 493
+    },
     "previous_build36_snapshot": {
       "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build36.json",
       "archive_sha256": "4348a0eeb8e2e688e665f89f28f5abaede4a4751f0cff3ebc8cf03eff2af48d3",
@@ -675,7 +795,25 @@
       "authored_defaults_resolved": 10056,
       "authored_defaults_total": 10348
     },
-    "scope_limit": "Metadata and generated source catalogue only; no native graph acceptance or licensed executable parity is implied."
+    "scope_limit": "Metadata and generated source catalogue only; no native graph acceptance or licensed executable parity is implied.",
+    "verified_choice_sources": [
+      {
+        "path": "scripts/node_condition/node_condition.gml",
+        "bytes": 3694,
+        "sha256": "3bc81b66c7ceed28aae33e62a7ddf713caa717307e7f926866ee5611904db834",
+        "count": 6,
+        "source_default": 0,
+        "choices": [
+          "Equal",
+          "Not equal",
+          "Less ",
+          "Less or equal ",
+          "Greater ",
+          "Greater or equal"
+        ],
+        "mapping": "Source cases 0..5 map to ==, !=, <, <=, >, >=; registered only with verified __enum_array_gen source mapping."
+      }
+    ]
   },
   "source_commits": [
     {
@@ -712,6 +850,46 @@
       "hash": "29fb14b6",
       "subject": "Persist authored image graph selectors through reflected properties",
       "scope": "Reflected scene and game ImageGraph selector properties with focused tests."
+    },
+    {
+      "hash": "28b3e64b",
+      "subject": "Read source animated images through bounded granted raster hosts",
+      "scope": "Bounded raster file host route; included in build47 export suite, no Pixel Composer parity claim."
+    },
+    {
+      "hash": "f2136ebd",
+      "subject": "Derive six Condition choices from verified source comparators",
+      "scope": "Pinned source metadata extractor, source-inputs snapshot, and generated catalogue metadata."
+    },
+    {
+      "hash": "cd8c455f",
+      "subject": "Cover exact Condition choices through source extraction",
+      "scope": "Functional six-choice extraction test; source metadata test coverage."
+    },
+    {
+      "hash": "cae0626b",
+      "subject": "Queue bounded source camera and SDF renderer outputs",
+      "scope": "Native camera and SDF renderer slices; build47 CPU-filtered render suite passed, GPU acceptance remains open."
+    },
+    {
+      "hash": "b980f56f",
+      "subject": "Bind live source outputs through a single client evaluation",
+      "scope": "Client live-output evaluation path and bounded adapter tests; not full sink acceptance."
+    },
+    {
+      "hash": "c908f9fc",
+      "subject": "Package authored Composer scenes and deterministic fluid study",
+      "scope": "Authored scene/example fixtures; headless client and example fixture filters passed in build47. Manual/GPU acceptance remains open."
+    },
+    {
+      "hash": "c57e05ca",
+      "subject": "Correct audio implementation evidence and remaining roadmap gates",
+      "scope": "Audio evidence/status corrections; preserves M3 partial status and device, File Watcher, thumbnail/index, and licensed-reference gates."
+    },
+    {
+      "hash": "1b0188aa",
+      "subject": "Repair core imagegraph replay and diagnostics gates",
+      "scope": "Core build48 repairs; the imagegraph core suite passed 1,175 cases and 1,808,028 assertions."
     }
   ]
 }
