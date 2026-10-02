@@ -71,6 +71,7 @@ Milestone labels describe development scope, not release versions.
   29. Add Grid, routing/cache, spatial points and FLIP spawn/destroy kernels with per-port diagnostics and bounded replay.
   30. Add source Grain and Contrast Blur kernels with bounded curves, sampling and failure atomicity.
   31. Reject fractional FLIP advances while preserving zero-step rendering.
+  32. Round-trip group values and nested Any arrays in PXC; refuse ambiguous moves of opaque source keys.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

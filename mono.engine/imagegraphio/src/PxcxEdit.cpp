@@ -55,6 +55,24 @@ namespace engine::imagegraphio {
 			budget -= bytes;
 			return true;
 		}
+		template <class T> bool Bounded(const T &, size_t &);
+		bool
+		BoundedItems(const std::vector<SourceArrayItem> &items, size_t depth, size_t &count, size_t &budget) {
+			if (depth >= Limits::MaximumArrayDepth || items.size() > Limits::MaximumArrayElements - count ||
+				!Spend(items.size() * sizeof(SourceArrayItem), budget))
+				return false;
+			count += items.size();
+			for (const auto &item : items) {
+				if (const auto *leaf = std::get_if<ElementValue>(&item.Data)) {
+					if (!std::visit([&](const auto &value) { return Bounded(value, budget); }, *leaf))
+						return false;
+				} else if (const auto *nested = std::get_if<std::vector<SourceArrayItem>>(&item.Data)) {
+					if (!BoundedItems(*nested, depth + 1, count, budget)) return false;
+				} else
+					return false;
+			}
+			return true;
+		}
 		template <class T> bool Bounded(const T &value, size_t &budget) {
 			if (!Spend(sizeof(T), budget)) return false;
 			if constexpr (std::is_same_v<T, double>)
@@ -103,13 +121,41 @@ namespace engine::imagegraphio {
 					   std::isfinite(value.HalfWidth) && std::isfinite(value.HalfHeight) &&
 					   value.Shape <= 1 && value.Mode <= 2;
 			else if constexpr (std::is_same_v<T, ArrayValue>) {
-				if (!value.Nested.empty() || value.Elements.size() > Limits::MaximumArrayElements ||
-					value.ElementType > ValueType::Vector2)
+				if (unsigned(!value.Elements.empty()) + unsigned(!value.Nested.empty()) +
+							unsigned(!value.Items.empty()) >
+						1 ||
+					(value.ElementType > ValueType::Vector2 && value.ElementType != ValueType::Any))
 					return false;
-				for (const auto &leaf : value.Elements)
-					if (!std::visit([&](const auto &item) { return Bounded(item, budget); }, leaf))
+				size_t count = 0, arrayBudget = std::min(budget, size_t(Limits::MaximumArrayBytes));
+				const size_t initialBudget = arrayBudget;
+				const auto valid = [&] {
+					if (!value.Items.empty()) return BoundedItems(value.Items, 0, count, arrayBudget);
+					if (value.Elements.size() > Limits::MaximumArrayElements ||
+						!Spend(value.Elements.size() * sizeof(ElementValue), arrayBudget))
 						return false;
-				return true;
+					count = value.Elements.size();
+					for (const auto &leaf : value.Elements)
+						if (!std::visit([&](const auto &item) { return Bounded(item, arrayBudget); }, leaf))
+							return false;
+					if (value.Nested.size() > Limits::MaximumArrayElements - count ||
+						!Spend(value.Nested.size() * sizeof(std::vector<ElementValue>), arrayBudget))
+						return false;
+					count += value.Nested.size();
+					for (const auto &row : value.Nested) {
+						if (row.size() > Limits::MaximumArrayElements - count ||
+							!Spend(row.size() * sizeof(ElementValue), arrayBudget))
+							return false;
+						count += row.size();
+						for (const auto &leaf : row)
+							if (!std::visit(
+									[&](const auto &item) { return Bounded(item, arrayBudget); }, leaf
+								))
+								return false;
+					}
+					return true;
+				}();
+				budget -= initialBudget - arrayBudget;
+				return valid;
 			} else
 				return std::is_same_v<T, bool> || std::is_same_v<T, int64_t> ||
 					   std::is_same_v<T, EnumValue> || std::is_same_v<T, Colour>;
@@ -128,6 +174,24 @@ namespace engine::imagegraphio {
 			for (const auto &anchor : curve.Anchors)
 				for (double number : anchor)
 					result.push_back(number);
+			return result;
+		}
+		template <class T> std::optional<Json> Encode(const T &, const Json &);
+		std::optional<Json>
+		EncodeItems(const std::vector<SourceArrayItem> &items, const Json &original, size_t depth = 0) {
+			if (depth >= Limits::MaximumArrayDepth) return std::nullopt;
+			Json result = Json::array();
+			for (size_t index = 0; index < items.size(); ++index) {
+				const Json empty;
+				const auto &old = original.is_array() && index < original.size() ? original[index] : empty;
+				std::optional<Json> encoded;
+				if (const auto *leaf = std::get_if<ElementValue>(&items[index].Data))
+					encoded = std::visit([&](const auto &value) { return Encode(value, old); }, *leaf);
+				else if (const auto *nested = std::get_if<std::vector<SourceArrayItem>>(&items[index].Data))
+					encoded = EncodeItems(*nested, old, depth + 1);
+				if (!encoded) return std::nullopt;
+				result.push_back(std::move(*encoded));
+			}
 			return result;
 		}
 		template <class T> std::optional<Json> Encode(const T &value, const Json &original) {
@@ -190,11 +254,31 @@ namespace engine::imagegraphio {
 				result["raw"] = value.Values;
 				return result;
 			} else if constexpr (std::is_same_v<T, ArrayValue>) {
-				if (!original.is_array()) return std::nullopt;
+				if (!value.Items.empty()) return EncodeItems(value.Items, original);
 				Json result = Json::array();
+				if (!value.Nested.empty()) {
+					for (size_t row = 0; row < value.Nested.size(); ++row) {
+						Json encoded = Json::array();
+						for (size_t index = 0; index < value.Nested[row].size(); ++index) {
+							const Json empty;
+							const auto &old = original.is_array() && row < original.size() &&
+													  original[row].is_array() && index < original[row].size()
+												  ? original[row][index]
+												  : empty;
+							auto leaf = std::visit(
+								[&](const auto &item) { return Encode(item, old); }, value.Nested[row][index]
+							);
+							if (!leaf) return std::nullopt;
+							encoded.push_back(std::move(*leaf));
+						}
+						result.push_back(std::move(encoded));
+					}
+					return result;
+				}
 				for (size_t index = 0; index < value.Elements.size(); index++) {
 					const Json empty;
-					const Json &old = index < original.size() ? original[index] : empty;
+					const Json &old =
+						original.is_array() && index < original.size() ? original[index] : empty;
 					auto leaf = std::visit(
 						[&](const auto &item) { return Encode(item, old); }, value.Elements[index]
 					);
@@ -373,11 +457,150 @@ namespace engine::imagegraphio {
 			Json &record = source["inputs"][index];
 			return record.is_object() ? &record : nullptr;
 		}
+		Json *SourceInput(Json &root, Json &source, const CatalogueEntry &entry, std::string_view port) {
+			if (entry.Type != "pc.group_input" || port != "parent_value")
+				return FixedInput(source, entry, port);
+			const auto groupId = source.find("group"), id = source.find("id");
+			if (groupId == source.end() || !groupId->is_string() || id == source.end() || !id->is_string())
+				return nullptr;
+			auto *group = SourceNode(root, groupId->get_ref<const std::string &>());
+			if (!group || !group->contains("attri") || !(*group)["attri"].contains("custom_input_list") ||
+				!group->contains("inputs"))
+				return nullptr;
+			auto &list = (*group)["attri"]["custom_input_list"];
+			auto &inputs = (*group)["inputs"];
+			if (!list.is_array() || !inputs.is_array()) return nullptr;
+			const auto item = std::find(list.begin(), list.end(), *id);
+			if (item == list.end() || std::find(item + 1, list.end(), *id) != list.end()) return nullptr;
+			const size_t offset = group->value("type", "") == "Node_Group" ? 0 : 4;
+			const size_t index = size_t(item - list.begin()) + offset;
+			return index < inputs.size() && inputs[index].is_object() ? &inputs[index] : nullptr;
+		}
 		std::optional<uint8_t> Side(std::string_view name) {
 			if (name == "linear") return 0;
 			if (name == "bezier") return 1;
 			if (name == "cut") return 2;
 			return std::nullopt;
+		}
+		bool
+		GroupParentRecord(const Document &document, const Node &node, Json &record, Diagnostic &diagnostic) {
+			const auto fail = [&](std::string reason) {
+				return Reject(diagnostic, std::move(reason), node.Id, "parent_value");
+			};
+			if (record.contains("from_node") || record.value("global_use", false)) return true;
+			std::vector<const Keyframe *> keys;
+			for (const auto &key : document.Keyframes)
+				if (key.NodeId == node.Id && key.Port == "parent_value") keys.push_back(&key);
+			const bool animated =
+				std::find(
+					node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), "parent_value"
+				) != node.SourceAnimatedInputs.end();
+			if (keys.empty()) {
+				if (record.contains("r") && record["r"].is_array() &&
+					std::any_of(record["r"].begin(), record["r"].end(), [](const auto &key) {
+						return key.is_array() && key.size() > 9;
+					}))
+					return fail("PXC group key opaque metadata has no unambiguous surviving identity");
+				const auto value = std::find_if(node.Values.begin(), node.Values.end(), [](const auto &v) {
+					return v.Port == "parent_value";
+				});
+				if (value == node.Values.end()) return true;
+				const Json old =
+					record.contains("r") && record["r"].is_object() ? record["r"].value("d", Json{}) : Json{};
+				auto encoded = EncodeValue(value->Data, old);
+				if (!encoded) return fail("PXC group parent has no inverse raw codec");
+				if (!record.contains("r") || !record["r"].is_object()) record["r"] = Json::object();
+				record["r"]["d"] = std::move(*encoded);
+				record["anim"] = animated;
+				return true;
+			}
+			if (!animated && keys.size() == 1 && GetFrameTime(*keys.front()) == FrameTime{} &&
+				keys.front()->Kind == KeyframeKind::Normal && !keys.front()->SourceDriver &&
+				record.contains("r") && record["r"].is_object()) {
+				auto encoded = EncodeValue(keys.front()->Data, record["r"].value("d", Json{}));
+				if (!encoded) return fail("PXC group parent has no inverse compact codec");
+				record["r"]["d"] = std::move(*encoded);
+				record["anim"] = false;
+				return true;
+			}
+			const Json previous = record.value("r", Json{});
+			if (previous.is_object() && (previous.size() != 1 || !previous.contains("d")))
+				return fail("PXC group animation expansion would discard compact source fields");
+			const auto sourceTime = [](const Json &candidate) -> std::optional<FrameTime> {
+				FrameTime time;
+				if (!candidate.is_array() || candidate.size() < 8 || !candidate[0].is_array() ||
+					candidate[0].size() < 2 || !candidate[0][1].is_number() ||
+					!SplitFrameTime(candidate[0][1].get<double>(), time))
+					return std::nullopt;
+				return time;
+			};
+			std::vector<bool> consumed(previous.is_array() ? previous.size() : 0, false);
+			Json expanded = Json::array();
+			for (const auto *key : keys) {
+				if (key->Interpolation != "source" || !key->Ease || !Side(key->Ease->InType) ||
+					!Side(key->Ease->OutType))
+					return fail("PXC group parent key has no source easing mapping");
+				const double frame = double(FrameTimeToReal(GetFrameTime(*key)));
+				FrameTime exact;
+				if (!SplitFrameTime(frame, exact) || exact != GetFrameTime(*key))
+					return fail("PXC group key clock is not exactly representable");
+				Json old;
+				std::optional<size_t> recordIndex;
+				if (previous.is_array()) {
+					for (size_t index = 0; index < previous.size(); ++index)
+						if (!consumed[index] && sourceTime(previous[index]) == GetFrameTime(*key) &&
+							previous[index][0][0] == (key->Kind == KeyframeKind::Normal ? 0 : 1)) {
+							recordIndex = index;
+							break;
+						}
+					if (recordIndex) {
+						consumed[*recordIndex] = true;
+						old = previous[*recordIndex];
+					}
+				}
+				if (!old.is_array())
+					old = Json::array(
+						{Json::array({0, frame}),
+						 Json{},
+						 Json::array({0, 1}),
+						 Json::array({0, 0}),
+						 0,
+						 0,
+						 true,
+						 0,
+						 uint32_t(0xffffff)}
+					);
+				auto encoded = EncodeValue(key->Data, old[1]);
+				auto driver = DriverValue(key->SourceDriver, old[7]);
+				if (!encoded || !driver) return fail("PXC group key has no inverse raw codec");
+				old[0][0] = key->Kind == KeyframeKind::Normal ? 0 : 1;
+				old[0][1] = frame;
+				if (key->Kind == KeyframeKind::Adder && old[0].size() < 3) old[0].push_back(0);
+				old[1] = std::move(*encoded);
+				old[2] = {key->Ease->In.X, key->Ease->In.Y};
+				old[3] = {key->Ease->Out.X, key->Ease->Out.Y};
+				old[4] = *Side(key->Ease->InType);
+				old[5] = *Side(key->Ease->OutType);
+				old[7] = std::move(*driver);
+				expanded.push_back(std::move(old));
+			}
+			for (size_t index = 0; index < consumed.size(); ++index)
+				if (!consumed[index] && previous[index].is_array() && previous[index].size() > 9)
+					return fail("PXC group key opaque metadata has no unambiguous surviving identity");
+			record["r"] = std::move(expanded);
+			record["anim"] = animated;
+			const auto track =
+				std::find_if(document.Tracks.begin(), document.Tracks.end(), [&](const auto &t) {
+					return t.NodeId == node.Id && t.Port == "parent_value";
+				});
+			if (track != document.Tracks.end()) {
+				constexpr std::string_view ends[]{"hold", "loop", "ping", "wrap"};
+				const auto end = std::find(std::begin(ends), std::end(ends), track->End);
+				if (end == std::end(ends)) return fail("PXC group parent has no inverse end mode");
+				record["on_end"] = size_t(end - std::begin(ends));
+				record["loop_range"] = track->LoopRange;
+			}
+			return true;
 		}
 		bool ResetLastKey(
 			const PxcxKeyframeDeleteEdit &operation,
@@ -836,7 +1059,7 @@ namespace engine::imagegraphio {
 								operation.NodeId,
 								operation.Port
 							);
-						Json *input = FixedInput(*source, *entry, operation.Port);
+						Json *input = SourceInput(root, *source, *entry, operation.Port);
 						if (!input || !input->contains("r") || input->contains("from_node") ||
 							input->value("global_use", false))
 							return Reject(
@@ -928,6 +1151,25 @@ namespace engine::imagegraphio {
 								compact->Data = Value(operation.Data);
 							}
 							*storedData = Value(operation.Data);
+							if (node->Type == "pc.group_input" && operation.Port == "parent_value") {
+								const auto junction = std::find_if(
+									intended.Junctions.begin(), intended.Junctions.end(), [&](const auto &j) {
+										return j.Id == node->Id + "/parent-value" &&
+											   j.GroupId == node->GroupId;
+									}
+								);
+								if (junction != intended.Junctions.end()) {
+									const auto bytes = ValueClonePayloadBytes(operation.Data);
+									if (!bytes || !Spend(*bytes, budget))
+										return Reject(
+											diagnostic,
+											"PXC group default copy exceeds edit headroom",
+											node->Id,
+											operation.Port
+										);
+									junction->Default = Value(operation.Data);
+								}
+							}
 						} else if constexpr (std::is_same_v<T, PxcxKeyframeInsertEdit> ||
 											 std::is_same_v<T, PxcxKeyframeDeleteEdit>) {
 							bool reset = false;
@@ -1537,14 +1779,17 @@ namespace engine::imagegraphio {
 		};
 		std::vector<PxcxEdit> keys;
 		for (const auto &key : imported.Graph.Keyframes) {
-			if (!wantedNode(key.NodeId)) continue;
+			const auto *parentNode = wantedNode(key.NodeId);
+			if (!parentNode) continue;
+			if (parentNode->Type == "pc.group_input" && key.Port == "parent_value") continue;
 			const auto *native = NativeNode(working.Graph, key.NodeId);
 			const auto *entry = native ? FindCatalogueEntry(native->Type) : nullptr;
 			Json *savedNode = SourceNode(*keyRoot, key.NodeId);
 			CatalogueEntry globalEntry{};
 			globalEntry.Type = "pc.global_scope";
 			if (native && native->Type == "pc.global_scope") entry = &globalEntry;
-			Json *savedInput = entry && savedNode ? FixedInput(*savedNode, *entry, key.Port) : nullptr;
+			Json *savedInput =
+				entry && savedNode ? SourceInput(*keyRoot, *savedNode, *entry, key.Port) : nullptr;
 			if (savedInput && savedInput->contains("r") && (*savedInput)["r"].is_object()) continue;
 			const auto wanted =
 				std::find_if(desired.Keyframes.begin(), desired.Keyframes.end(), [&](const auto &item) {
@@ -1559,7 +1804,9 @@ namespace engine::imagegraphio {
 				keys.emplace_back(PxcxKeyframeEdit{key.NodeId, key.Port, GetFrameTime(key), *wanted});
 		}
 		for (const auto &key : desired.Keyframes) {
-			if (!NativeNode(working.Graph, key.NodeId)) continue;
+			const auto *node = NativeNode(working.Graph, key.NodeId);
+			if (!node) continue;
+			if (node->Type == "pc.group_input" && key.Port == "parent_value") continue;
 			const auto old = std::find_if(
 				imported.Graph.Keyframes.begin(), imported.Graph.Keyframes.end(), [&](const auto &item) {
 					return item.NodeId == key.NodeId && item.Port == key.Port &&
@@ -1967,6 +2214,7 @@ namespace engine::imagegraphio {
 						record["r"]["d"] = std::move(*encoded);
 					}
 					for (const auto &value : node.Values) {
+						if (node.Type == "pc.group_input" && value.Port == "parent_value") continue;
 						const auto *oldNode = NativeNode(working.Graph, node.Id);
 						if (oldNode &&
 							std::any_of(oldNode->Values.begin(), oldNode->Values.end(), [&](const auto &old) {
@@ -2204,6 +2452,17 @@ namespace engine::imagegraphio {
 					(*source)["attri"]["interpolate"] = group.Interpolation;
 					(*source)["attri"]["oversample"] = group.Oversample;
 				}
+			}
+			for (const auto &node : desired.Nodes) {
+				if (node.Type != "pc.group_input") continue;
+				auto *source = SourceNode(root, node.Id);
+				const auto *entry = FindCatalogueEntry(node.Type);
+				auto *record = source && entry ? SourceInput(root, *source, *entry, "parent_value") : nullptr;
+				if (!record)
+					return Reject(
+						diagnostic, "PXC group parent source record is missing", node.Id, "parent_value"
+					);
+				if (!GroupParentRecord(desired, node, *record, diagnostic)) return false;
 			}
 			const auto boundaryPort = [&](
 										  const Document &document, std::string_view junction

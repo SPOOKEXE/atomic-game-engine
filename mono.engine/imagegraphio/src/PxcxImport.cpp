@@ -1016,6 +1016,54 @@ namespace engine::imagegraphio {
 			return true;
 		}
 
+		bool SourceArrayItems(
+			const Json &value,
+			std::vector<imagegraph::SourceArrayItem> &items,
+			size_t depth,
+			size_t &count,
+			uint64_t &bytes,
+			detail::ImportBudget *budget
+		) {
+			using namespace imagegraph;
+			if (!value.is_array() || depth >= Limits::MaximumArrayDepth ||
+				value.size() > Limits::MaximumArrayElements - count)
+				return false;
+			count += value.size();
+			const uint64_t storage = value.size() * sizeof(SourceArrayItem);
+			if (storage > Limits::MaximumArrayBytes - bytes || !AdmitNativeSlots(items, value.size(), budget))
+				return false;
+			bytes += storage;
+			for (const auto &child : value) {
+				SourceArrayItem item;
+				if (child.is_array()) {
+					std::vector<SourceArrayItem> nested;
+					if (!SourceArrayItems(child, nested, depth + 1, count, bytes, budget)) return false;
+					item.Data = std::move(nested);
+				} else if (child.is_boolean())
+					item.Data = ElementValue{child.get<bool>()};
+				else if (child.is_number_unsigned()) {
+					const auto number = child.get<uint64_t>();
+					if (number > uint64_t(INT64_MAX)) return false;
+					item.Data = ElementValue{int64_t(number)};
+				} else if (child.is_number_integer())
+					item.Data = ElementValue{child.get<int64_t>()};
+				else if (child.is_number_float()) {
+					const double number = child.get<double>();
+					if (!std::isfinite(number)) return false;
+					item.Data = ElementValue{number};
+				} else if (child.is_string()) {
+					const auto &text = child.get_ref<const std::string &>();
+					if (text.size() > Limits::MaximumTextBytes ||
+						text.size() > Limits::MaximumArrayBytes - bytes || !AdmitNativeText(text, budget))
+						return false;
+					bytes += text.size();
+					item.Data = ElementValue{std::string(text)};
+				} else
+					return false;
+				items.push_back(std::move(item));
+			}
+			return true;
+		}
 		// Converts one serialized source value to a catalogue input type. False means the value has no exact
 		// native meaning, and the node stays opaque.
 		bool CatalogueValue(
@@ -1056,8 +1104,19 @@ namespace engine::imagegraphio {
 					out = value.get<std::string>();
 					return true;
 				}
-				if (value.is_array())
-					return CatalogueValue(value, ValueType::Array, 0, out, ValueType::Scalar, budget);
+				if (value.is_array()) {
+					const bool numeric = std::all_of(value.begin(), value.end(), [](const Json &item) {
+						return item.is_number() && std::isfinite(item.get<double>());
+					});
+					if (numeric)
+						return CatalogueValue(value, ValueType::Array, 0, out, ValueType::Scalar, budget);
+					ArrayValue array{ValueType::Any, {}};
+					size_t count = 0;
+					uint64_t bytes = 0;
+					if (!SourceArrayItems(value, array.Items, 0, count, bytes, budget)) return false;
+					out = std::move(array);
+					return true;
+				}
 				return false;
 			case ValueType::Boolean:
 				if (value.is_boolean()) {
