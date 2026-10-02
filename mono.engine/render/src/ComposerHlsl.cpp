@@ -32,7 +32,7 @@ struct VertexShaderOutput {
 
 void main(in VertexShaderInput input, out VertexShaderOutput output) {
     output.pos  = mul(gm_Matrices[MATRIX_WORLD_VIEW_PROJECTION], float4(input.pos, 1.0f));
-    output.uv   = input.uv;   
+    output.uv   = input.uv;
 })HLSL";
 		constexpr std::string_view PRE_MAIN =
 			R"HLSL(Texture2D gm_BaseTextureObject : register(t0);
