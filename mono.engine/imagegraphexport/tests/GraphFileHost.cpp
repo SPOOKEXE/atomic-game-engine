@@ -13,6 +13,8 @@
 TEST_SUITE_ID("engine.imagegraphexport.graph_file_host")
 TEST_DEPENDS("engine.imagegraph.host_capture")
 TEST_DEPENDS("engine.bake.layered_image")
+TEST_DEPENDS("engine.bake.gifsequence")
+TEST_DEPENDS("engine.assets.contentpolicy")
 
 TEST_CASE("File host requires exact node path and operation grants", "[assetc][imagegraph]") {
 	using namespace engine::imagegraph;
@@ -569,5 +571,171 @@ TEST_CASE("Image file host admits headers and preserves exact padded pixels", "[
 		CHECK(capture.Images[0].Data == old);
 		grants[0].Write = true;
 		CHECK_FALSE(host.Capture(invocation, capture, failure));
+	}
+}
+
+TEST_CASE(
+	"GIF still reads admit the full ledger and publish only the source first subimage",
+	"[imagegraph][raster_host][gif]"
+) {
+	using namespace engine::imagegraph;
+	using namespace engine::imagegraphexport;
+	// Independent two-frame LZW fixture: red/blue first, blue/red second.
+	std::vector<uint8_t> bytes{'G', 'I', 'F', '8', '9', 'a', 2, 0, 1, 0, 0x80, 0, 0, 255, 0, 0, 0, 0, 255};
+	const auto frame = [&](uint8_t codes) {
+		bytes.insert(bytes.end(), {0x21, 0xf9, 4, 0, 4, 0, 0, 0, 0x2c,	0,	  0, 0,
+								   0,	 2,	   0, 1, 0, 0, 2, 2, codes, 0x0a, 0});
+	};
+	frame(0x44);
+	frame(0x0c);
+	bytes.push_back(0x3b);
+	const auto file = std::filesystem::temp_directory_path() / "atomic-graph-raster-host-first.gif";
+	struct Cleanup {
+		std::filesystem::path File;
+		~Cleanup() {
+			std::error_code error;
+			std::filesystem::remove(File, error);
+		}
+	} cleanup{file};
+	const auto write = [&] {
+		std::ofstream stream(file, std::ios::binary);
+		stream.write(reinterpret_cast<const char *>(bytes.data()), std::streamsize(bytes.size()));
+		REQUIRE(bool(stream));
+	};
+	write();
+	Node node;
+	node.Id = "gif";
+	node.Type = "pc.image";
+	std::vector<AuthoredValue> controls{{"path", file.string()}, {"padding", Vector4{}}};
+	std::array<GraphFileGrant, 1> grants{{{node.Id, file, false}}};
+	GraphFileHost provider(grants, {});
+	EvaluationRequest request;
+	request.Tick = 1;
+	request.Subframe = .5;
+	HostNodeInvocation in{node, request, controls, {}, 1024 * 1024};
+	HostNodeCapture capture;
+	std::string failure;
+	REQUIRE(provider.Capture(in, capture, failure));
+	REQUIRE(capture.Images.size() == 1);
+	const auto original = capture.Images[0].Data;
+	CHECK(original.Width == 2);
+	CHECK(original.Height == 1);
+	SurfacePixel pixel;
+	REQUIRE(LoadSurfacePixel(original, 0, 0, pixel));
+	CHECK(pixel == SurfacePixel{1, 0, 0, 1});
+	REQUIRE(LoadSurfacePixel(original, 1, 0, pixel));
+	CHECK(pixel == SurfacePixel{0, 0, 1, 1});
+	SECTION("still and array evaluation retain the first subimage") {
+		node.Values = controls;
+		Document document;
+		document.FormatVersion = 9;
+		document.Nodes = {node};
+		document.Outputs = {{"gif", node.Id, "surface_out"}};
+		Plan plan;
+		Diagnostic diagnostic;
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		request.HostProvider = &provider;
+		Image evaluated;
+		REQUIRE(Evaluate(document, plan, "gif", request, evaluated, diagnostic) == Status::Ok);
+		CHECK(evaluated.Pixels == original.Pixels);
+		node.Type = "pc.image_sequence";
+		ArrayValue paths;
+		paths.ElementType = ValueType::Text;
+		paths.Elements = {file.string(), file.string()};
+		std::vector<AuthoredValue> arrayControls{
+			{"paths", paths},
+			{"padding", Vector4{}},
+			{"canvas_size", EnumValue{0}},
+			{"sizing_method", EnumValue{0}}
+		};
+		grants[0].Resource = file.string();
+		HostNodeInvocation array{node, request, arrayControls, {}, 8 * 1024 * 1024};
+		REQUIRE(provider.Capture(array, capture, failure));
+		REQUIRE(capture.ImageArrays[0].Frames.size() == 2);
+		CHECK(capture.ImageArrays[0].Frames[0].Pixels == original.Pixels);
+		CHECK(capture.ImageArrays[0].Frames[1].Pixels == original.Pixels);
+	}
+	SECTION("workspace and unknown-version failures retain prior pixels") {
+		in.MaximumOperationBytes = 64 * 1024;
+		CHECK_FALSE(provider.Capture(in, capture, failure));
+		CHECK(failure.find("workspace") != std::string::npos);
+		CHECK(capture.Images[0].Data == original);
+		in.MaximumOperationBytes = 1024 * 1024;
+		bytes[4] = '8';
+		write();
+		CHECK_FALSE(provider.Capture(in, capture, failure));
+		CHECK(capture.Images[0].Data == original);
+		bytes[4] = '9';
+		bytes.pop_back();
+		write();
+		CHECK_FALSE(provider.Capture(in, capture, failure));
+		CHECK(capture.Images[0].Data == original);
+	}
+	SECTION("oversized logical canvas and out-of-canvas descriptors are rejected before decode") {
+		bytes[6] = 255;
+		bytes[7] = 255;
+		write();
+		CHECK_FALSE(provider.Capture(in, capture, failure));
+		CHECK(capture.Images[0].Data == original);
+		bytes[6] = 2;
+		bytes[7] = 0;
+		bytes[28] = 2;
+		write();
+		CHECK_FALSE(provider.Capture(in, capture, failure));
+		CHECK(capture.Images[0].Data == original);
+	}
+	SECTION("still pixels are independent of unrepresentable sequence-clock accumulation") {
+		bytes.resize(19);
+		for (size_t index = 0; index < 1000; ++index) {
+			const auto start = bytes.size();
+			frame(0x44);
+			bytes[start + 4] = index == 999 ? 1 : 255;
+			bytes[start + 5] = index == 999 ? 0 : 255;
+		}
+		bytes.push_back(0x3b);
+		write();
+		REQUIRE(provider.Capture(in, capture, failure));
+		CHECK(capture.Images[0].Data == original);
+	}
+	SECTION("frame-ledger growth and frame ceilings are admitted before decoding") {
+		bytes.resize(19);
+		bytes[6] = 64;
+		bytes[8] = 64;
+		for (size_t index = 0; index < 20; ++index)
+			frame(0x44);
+		bytes.push_back(0x3b);
+		write();
+		CHECK_FALSE(provider.Capture(in, capture, failure));
+		CHECK(failure.find("frame ledger") != std::string::npos);
+		CHECK(capture.Images[0].Data == original);
+		bytes.resize(19);
+		bytes[6] = 2;
+		bytes[8] = 1;
+		for (size_t index = 0; index < 4097; ++index)
+			frame(0x44);
+		bytes.push_back(0x3b);
+		write();
+		CHECK_FALSE(provider.Capture(in, capture, failure));
+		CHECK(capture.Images[0].Data == original);
+	}
+	SECTION("named and actual GIF decoding obey the supplied read policy") {
+		engine::assets::ContentPolicy policy;
+		policy.Allow(engine::assets::ContentForm::Gif, false);
+		GraphFileHost denied(grants, policy);
+		CHECK_FALSE(denied.Capture(in, capture, failure));
+		CHECK(capture.Images[0].Data == original);
+		const auto disguised = file.parent_path() / "atomic-graph-raster-host-first.png";
+		Cleanup disguisedCleanup{disguised};
+		{
+			std::ofstream stream(disguised, std::ios::binary);
+			stream.write(reinterpret_cast<const char *>(bytes.data()), std::streamsize(bytes.size()));
+			REQUIRE(bool(stream));
+		}
+		controls[0].Data = disguised.string();
+		grants[0].File = disguised;
+		REQUIRE(policy.AllowsName(disguised.string()));
+		CHECK_FALSE(denied.Capture(in, capture, failure));
+		CHECK(failure.find("content policy") != std::string::npos);
+		CHECK(capture.Images[0].Data == original);
 	}
 }

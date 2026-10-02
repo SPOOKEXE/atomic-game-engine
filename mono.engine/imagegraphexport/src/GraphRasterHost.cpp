@@ -1,9 +1,11 @@
 #include "GraphRasterHost.hpp"
 
+#include <engine/bake/GifSequence.hpp>
 #include <engine/bake/Image.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 
 namespace engine::imagegraphexport {
@@ -39,7 +41,8 @@ namespace engine::imagegraphexport {
 			return out;
 		}
 		// Admit decoder workspace from the actual header before invoking the codec.
-		bool Dimensions(std::span<const std::byte> bytes, uint32_t &width, uint32_t &height) {
+		bool Dimensions(std::span<std::byte> bytes, uint32_t &width, uint32_t &height, uint32_t &frames) {
+			frames = 1;
 			using engine::bake::ImageFormat;
 			switch (engine::bake::ImageFormatOfBytes(bytes)) {
 			case ImageFormat::Png:
@@ -55,6 +58,64 @@ namespace engine::imagegraphexport {
 				width = uint32_t(w);
 				height = uint32_t(h < 0 ? -h : h);
 				return true;
+			}
+			case ImageFormat::Gif: {
+				if (bytes.size() < 13 ||
+					(std::memcmp(bytes.data(), "GIF87a", 6) && std::memcmp(bytes.data(), "GIF89a", 6)))
+					return false;
+				width = Word(bytes, 6, 2, false);
+				height = Word(bytes, 8, 2, false);
+				frames = 0;
+				size_t at = 13;
+				const auto skip = [&](size_t count) {
+					if (count > bytes.size() - at) return false;
+					at += count;
+					return true;
+				};
+				const auto blocks = [&] {
+					while (at < bytes.size()) {
+						const size_t n = std::to_integer<uint8_t>(bytes[at++]);
+						if (!n) return true;
+						if (!skip(n)) return false;
+					}
+					return false;
+				};
+				const auto table = [&](uint8_t packed) {
+					return !(packed & 128) || skip((size_t{1} << ((packed & 7) + 1)) * 3);
+				};
+				if (!table(std::to_integer<uint8_t>(bytes[10]))) return false;
+				while (at < bytes.size()) {
+					const auto marker = std::to_integer<uint8_t>(bytes[at++]);
+					if (marker == 0x3b) return frames > 0 && at == bytes.size();
+					if (marker == 0x21) {
+						if (at == bytes.size()) return false;
+						const auto label = std::to_integer<uint8_t>(bytes[at++]);
+						if (label == 0xf9) {
+							if (bytes.size() - at < 6 || bytes[at] != std::byte{4} ||
+								bytes[at + 5] != std::byte{0})
+								return false;
+							// Still output ignores delays; avoid the sequence codec's float-time ceiling.
+							bytes[at + 2] = std::byte{1};
+							bytes[at + 3] = std::byte{0};
+							at += 6;
+						} else if (!blocks())
+							return false;
+						continue;
+					}
+					if (marker != 0x2c || bytes.size() - at < 9 ||
+						++frames > engine::assets::TextureSequence::MAXIMUM_FRAMES)
+						return false;
+					const auto left = Word(bytes, at, 2, false), top = Word(bytes, at + 2, 2, false),
+							   w = Word(bytes, at + 4, 2, false), h = Word(bytes, at + 6, 2, false);
+					const auto packed = std::to_integer<uint8_t>(bytes[at + 8]);
+					at += 9;
+					if (!w || !h || left + w > width || top + h > height || !table(packed) ||
+						at == bytes.size())
+						return false;
+					const auto code = std::to_integer<uint8_t>(bytes[at++]);
+					if (code < 2 || code > 8 || !blocks()) return false;
+				}
+				return false;
 			}
 			case ImageFormat::Jpeg: {
 				size_t at = 2;
@@ -432,11 +493,25 @@ namespace engine::imagegraphexport {
 		std::ifstream stream(grant->File, std::ios::binary);
 		stream.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 		if (!stream) return fail("cannot read complete granted image");
-		uint32_t width = 0, height = 0;
-		if (!Dimensions(bytes, width, height) || width > Limits::MaximumDimension ||
+		const auto encodedFormat = engine::bake::ImageFormatOfBytes(bytes);
+		using engine::assets::ContentForm;
+		using engine::bake::ImageFormat;
+		const auto actualForm = encodedFormat == ImageFormat::Png	 ? ContentForm::Png
+								: encodedFormat == ImageFormat::Bmp	 ? ContentForm::Bmp
+								: encodedFormat == ImageFormat::Jpeg ? ContentForm::Jpeg
+								: encodedFormat == ImageFormat::Gif	 ? ContentForm::Gif
+																	 : ContentForm::Unknown;
+		if (!policy.Allows(actualForm))
+			return fail("actual encoded image format is disabled by content policy");
+		uint32_t width = 0, height = 0, frames = 0;
+		if (!Dimensions(bytes, width, height, frames) || width > Limits::MaximumDimension ||
 			height > Limits::MaximumDimension ||
 			!CheckedSurfaceLayout(width, height, SurfaceFormat::RGBA8Unorm, budget / 16))
 			return fail("image header is unsupported or exceeds predecode dimensions/workspace budget");
+		// Charge both frame copies, canvas/restore and bounded palette/LZW scratch before decoding.
+		if (encodedFormat == ImageFormat::Gif &&
+			(uint64_t(width) * height * 4 + 64) * (uint64_t(frames) + 2) * 2 + 64 * 1024 > budget / 2)
+			return fail("GIF frame ledger exceeds predecode workspace budget");
 		const std::array pad{padding->X, padding->Y, padding->Z, padding->W};
 		const double w = width + pad[0] + pad[2], h = height + pad[1] + pad[3];
 		const auto format = in.OutputFormat.value_or(SurfaceFormat::RGBA8Unorm);
@@ -445,9 +520,20 @@ namespace engine::imagegraphexport {
 		const auto layout = CheckedSurfaceLayout(uint32_t(w), uint32_t(h), format, budget / 4);
 		if (!layout) return fail("padded image exceeds output budget");
 		engine::assets::TextureData decoded;
-		if (!engine::bake::ReadImage(bytes, decoded, failure)) return false;
-		if (decoded.Width != width || decoded.Height != height || decoded.FlipbookFrames)
-			return fail("decoded image dimensions differ from admitted still header");
+		engine::assets::TextureSequenceData sequence;
+		std::span<const std::byte> pixels;
+		if (encodedFormat == ImageFormat::Gif) {
+			if (!engine::bake::ReadGifSequence(bytes, sequence, failure)) return false;
+			if (sequence.Width != width || sequence.Height != height ||
+				sequence.FrameDurations.size() != frames)
+				return fail("decoded GIF differs from its admitted frame ledger");
+			pixels = sequence.FramePixels(0);
+		} else {
+			if (!engine::bake::ReadImage(bytes, decoded, failure)) return false;
+			if (decoded.Width != width || decoded.Height != height || decoded.FlipbookFrames)
+				return fail("decoded image dimensions differ from admitted still header");
+			pixels = decoded.Pixels;
+		}
 		Image image;
 		image.Width = uint32_t(w);
 		image.Height = uint32_t(h);
@@ -460,8 +546,7 @@ namespace engine::imagegraphexport {
 				if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
 					const auto at = (uint64_t(sy) * width + uint64_t(sx)) * 4;
 					for (size_t channel = 0; channel < 4; ++channel)
-						pixel[channel] =
-							std::to_integer<uint8_t>(decoded.Pixels[size_t(at) + channel]) / 255.;
+						pixel[channel] = std::to_integer<uint8_t>(pixels[size_t(at) + channel]) / 255.;
 				}
 				if (!StoreSurfacePixel(image, x, y, pixel)) return fail("image precision conversion failed");
 			}

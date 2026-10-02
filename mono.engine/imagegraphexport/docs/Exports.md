@@ -39,7 +39,7 @@ frame list. Sequence exports evaluate each planned frame; single exports retain
 the live request's exact clock.
 
 Still, image-array and animated-image reads admit actual PNG, BMP and baseline
-JPEG dimensions before invoking the decoder. Each array pathname requires its
+JPEG dimensions and GIF frame ledgers before invoking the decoder. Each array pathname requires its
 own exact named resource grant, including repeated paths in the ordered inputs.
 The source `IPadding` getter rounds every component to even after unit conversion,
 matching the [documented GameMaker round function](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Maths_And_Numbers/Number_Functions/round.htm).
@@ -63,3 +63,16 @@ File watcher refresh, embedded sprite-cache restoration and the timeline match
 button remain host workflow parity gates. The source audit uses commit
 `b69eca232217360cf1502ef0223523d818606652`, scripts `node_value_padding`,
 `node_image_sequence`, `node_image_animated`, `safe_operation` and `shader_functions`.
+
+GIF still input preflight accepts only GIF87a/GIF89a, scans bounded colour tables,
+extension and image subblocks, canvas-contained descriptors, the frame count and
+final trailer before decoding. It admits the full composited frame ledger and
+fixed decoder scratch space against the caller's byte cap. `pc.image`, image
+arrays and animated-image file rows publish only subimage zero, matching the
+pinned sprite draw index; they do not turn GIF file subframes into extra rows.
+Content policy checks both the supplied filename and the actual encoded image
+format before decoder dispatch, including GIF bytes presented under a PNG name.
+Still input normalizes only graphic-control delay fields in its owned encoded
+copy, avoiding the sequence codec's float-clock ceiling without changing pixels,
+disposal or the original file. Native GIF decoding uses the shared bake compositor. Exact equality with
+GameMaker's GIF import and background handling remains an observation gate.
