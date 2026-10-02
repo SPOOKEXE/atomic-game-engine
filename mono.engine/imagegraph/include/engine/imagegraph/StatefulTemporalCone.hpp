@@ -72,7 +72,7 @@ namespace engine::imagegraph {
 			const size_t index = pending[--count];
 			const auto &node = document.Nodes[index];
 			++cone.Nodes;
-			cone.SurfaceCaches += node.Type == "pc.interlaced" || node.Type == "pc.anim_loop" ||
+			cone.SurfaceCaches += node.Type == "pc.interlaced" || node.Type == "pc.time_remap" || node.Type == "pc.anim_loop" ||
 								  node.Type == "pc.delay" || node.Type == "pc.rate_remap" ||
 								  node.Type == "pc.revert" || node.Type == "pc.stagger";
 			cone.RandomGenerators += node.Type == "pc.random";

@@ -358,8 +358,7 @@ namespace engine::imagegraph {
 			std::vector<RequestImageSource> candidateStartInputs;
 			bool candidateStartValid = false, candidateStartResetSurfaces = false;
 			EvaluationSnapshot candidateSnapshot;
-			// Source interlace caches deliberately survive authored edits and backward
-			// seeks.
+			// Interlace caches survive edits and seeks; Time Remap clears on native revision changes.
 			const auto retainCache = [&](const SimulationReplayEntry &entry) {
 				return entry.Cache && entry.State.AuthoringRevision == revision &&
 					   std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
@@ -379,6 +378,14 @@ namespace engine::imagegraph {
 				return fail(Status::LimitExceeded, "stateful seek cache copy exceeds bounds");
 			if (!contiguous) {
 				candidate.Surfaces = State.Surfaces;
+				if (changed)
+					std::erase_if(candidate.Surfaces.Entries, [&](const SurfaceFrameReplayEntry &entry) {
+						return std::any_of(
+							document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+								return node.Id == entry.NodeId && node.Type == "pc.time_remap";
+							}
+						);
+					});
 				candidate.Simulation.Entries.reserve(retainedCaches);
 				for (const auto &entry : State.Simulation.Entries)
 					if (retainCache(entry)) candidate.Simulation.Entries.push_back(entry);

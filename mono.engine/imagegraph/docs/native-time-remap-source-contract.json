@@ -1,0 +1,64 @@
+{
+  "pinnedCommit": "b69eca232217360cf1502ef0223523d818606652",
+  "node": "pc.time_remap",
+  "sourceFiles": [
+    {
+      "path": "scripts/node_time_remap/node_time_remap.gml",
+      "sha256": "ffebebe0ee771784a37412774f01a9ca3d9aad6a5a9de02dab4bd3557fc00c8b"
+    },
+    {
+      "path": "scripts/__node_cache/__node_cache.gml",
+      "sha256": "527e8382130fd91f0040607b0d209585a0543d4156350a12180b46615515d2d9"
+    },
+    {
+      "path": "scripts/shader_functions/shader_functions.gml",
+      "sha256": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7"
+    },
+    {
+      "path": "scripts/surface_functions/surface_functions.gml",
+      "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2"
+    },
+    {
+      "path": "shaders/sh_time_remap/sh_time_remap.fsh",
+      "sha256": "3292638ea1da73c4a5de7063eec2ace96523e55172729a7b6cbb0867c3f327db"
+    },
+    {
+      "path": "scripts/_draw_defines/_draw_defines.gml",
+      "sha256": "f4702dd2337ca20635d699456b6ef27c11ff1aa890f91610629b4d91b94eb51c"
+    },
+    {
+      "path": "scripts/node_attributes/node_attributes.gml",
+      "sha256": "eb8d437db17f4df6904fba562b7ac1ce4f0a89dc001c507724ff0d3e31e23721"
+    },
+    {
+      "path": "scripts/node_data/node_data.gml",
+      "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d"
+    }
+  ],
+  "nativeProfile": {
+    "clock": "integer nonnegative frame; captured input caches bound to the selected evaluation owner",
+    "inputCacheFormat": "RGBA8Unorm, as surface_verify default in cacheCurrentFrame",
+    "outputFormat": "source-backed attribute_color_depth: Input default, Inherited project/group ancestry, or concrete formats2..8; cached inputs remain RGBA8",
+    "mapSampling": "nearest at each cached surface draw UV; unscaled draw clips to current output dimensions",
+    "bands": "inclusive min and max, luminance RGB times alpha, youngest to oldest alpha blending",
+    "loop": "single negative-frame addition by TOTAL_FRAMES - 1",
+    "reset": "manual source cache survives restart and backward seek; native document/input revision changes clear Time Remap entries only",
+    "bounds": "4096 life limit; 64000000 conservative whole-batch work units: rows times cached pixel clone plus draw pixels times draw count plus retained history entries times draw count; shared live byte admission",
+    "invalidation": "coarse native owner revision invalidation, not an exact licensed per-node editor renderActive/cache-group scheduling claim"
+  },
+  "openGates": [
+    "licensed shader/raster reference comparison",
+    "zero life nonfinite shader uniforms are refused explicitly",
+    "hardware sampling and floating uniform precision comparison",
+    "licensed source editor per-node invalidation/cache-group renderActive scheduling"
+  ],
+  "otherRows": {
+    "pc.frame": "editor-only framing/layout, empty update and no outputs; requires editor workflow",
+    "pc.cache": "requires IS_PLAYING and actual cache-group renderActive lifecycle plus loaded serialized cache",
+    "pc.cache_array": "same playback/lifecycle, explicit missing surface sentinels and one-based start/inclusive stop",
+    "pc.cache_results": "retains run-index/history surface array, source Clear action and current surfaceIndex",
+    "pc.feedback": "typed Group IO recurrence and explicit Feedback loop NodeValue link routing",
+    "pc.feedback_input": "uses paired output cached previous frame after frame zero",
+    "pc.feedback_output": "clones typed scalar/surface-array cache and clears at last frame"
+  }
+}
