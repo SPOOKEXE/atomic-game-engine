@@ -1,8 +1,10 @@
 #include <engine/assets/Resample.hpp>
+#include <engine/assets/TexturePixel.hpp>
 
 #include <algorithm>
 #include <bit>
 #include <cstddef>
+#include <span>
 #include <utility>
 
 namespace engine::assets {
@@ -56,6 +58,59 @@ namespace engine::assets {
 		resized.FlipbookFrameDurations = source.FlipbookFrameDurations;
 
 		resized.Pixels.resize(static_cast<size_t>(width) * height * channels);
+		const bool byteFormat = source.Format == TextureFormat::R8 || source.Format == TextureFormat::RGBA8 ||
+								source.Format == TextureFormat::RGBA8_LINEAR;
+		if (!byteFormat) {
+			for (uint32_t row = 0; row < height; row++) {
+				const uint32_t firstRow =
+					static_cast<uint32_t>(static_cast<uint64_t>(row) * source.Height / height);
+				const uint32_t lastRow = std::max(
+					firstRow + 1,
+					static_cast<uint32_t>(static_cast<uint64_t>(row + 1) * source.Height / height)
+				);
+				for (uint32_t column = 0; column < width; column++) {
+					const uint32_t firstColumn =
+						static_cast<uint32_t>(static_cast<uint64_t>(column) * source.Width / width);
+					const uint32_t lastColumn = std::max(
+						firstColumn + 1,
+						static_cast<uint32_t>(static_cast<uint64_t>(column + 1) * source.Width / width)
+					);
+					TexturePixel total{};
+					uint32_t count = 0;
+					for (uint32_t sourceRow = firstRow; sourceRow < lastRow && sourceRow < source.Height;
+						 sourceRow++) {
+						for (uint32_t sourceColumn = firstColumn;
+							 sourceColumn < lastColumn && sourceColumn < source.Width;
+							 sourceColumn++) {
+							const size_t offset =
+								(static_cast<size_t>(sourceRow) * source.Width + sourceColumn) * channels;
+							TexturePixel sample{};
+							if (!LoadTexturePixel(
+									source.Format,
+									std::span<const std::byte>(source.Pixels).subspan(offset, channels),
+									sample
+								))
+								return false;
+							for (size_t channel = 0; channel < total.size(); channel++)
+								total[channel] += sample[channel];
+							count++;
+						}
+					}
+					if (count == 0) return false;
+					for (double &channel : total)
+						channel /= count;
+					const size_t destination = (static_cast<size_t>(row) * width + column) * channels;
+					if (!StoreTexturePixel(
+							source.Format,
+							total,
+							std::span<std::byte>(resized.Pixels).subspan(destination, channels)
+						))
+						return false;
+				}
+			}
+			out = std::move(resized);
+			return true;
+		}
 
 		for (uint32_t row = 0; row < height; row++) {
 			// The source rows this destination row averages over. Computed as a

@@ -56,6 +56,20 @@ namespace engine::assets {
 		// The same RGBA byte layout without sRGB decoding. Material data maps,
 		// normals, roughness, metallic and other numeric fields use this.
 		RGBA8_LINEAR = 2,
+
+		// Four normalized bits per RGBA channel, packed little-endian.
+		RGBA4_UNORM = 3,
+
+		// Floating point channels in little-endian IEEE binary16 or binary32.
+		RGBA16_FLOAT = 4,
+		RGBA32_FLOAT = 5,
+
+		// One little-endian floating point channel.
+		R16_FLOAT = 6,
+		R32_FLOAT = 7,
+
+		// Packed 4-bit channels expanded for sRGB sampling.
+		RGBA4_SRGB = 8,
 	};
 
 	// How many bytes one pixel of a format takes.
@@ -63,12 +77,31 @@ namespace engine::assets {
 	// @param format The layout.
 	// @return The stride of a single pixel.
 	constexpr uint32_t BytesPerPixel(TextureFormat format) {
-		return format == TextureFormat::R8 ? 1u : 4u;
+		switch (format) {
+		case TextureFormat::R8:
+			return 1;
+		case TextureFormat::R16_FLOAT:
+			return 2;
+		case TextureFormat::R32_FLOAT:
+			return 4;
+		case TextureFormat::RGBA4_UNORM:
+			return 2;
+		case TextureFormat::RGBA4_SRGB:
+			return 2;
+		case TextureFormat::RGBA8:
+		case TextureFormat::RGBA8_LINEAR:
+			return 4;
+		case TextureFormat::RGBA16_FLOAT:
+			return 8;
+		case TextureFormat::RGBA32_FLOAT:
+			return 16;
+		}
+		return 0;
 	}
 
 	// Whether the device sampler must decode this texture from sRGB.
 	constexpr bool IsSRGB(TextureFormat format) {
-		return format == TextureFormat::RGBA8;
+		return format == TextureFormat::RGBA8 || format == TextureFormat::RGBA4_SRGB;
 	}
 
 	// One axis of a mip level, halving and stopping at one.

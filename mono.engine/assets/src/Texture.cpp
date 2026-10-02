@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace engine::assets {
 
 	bool TextureData::IsValid() const {
-		if (Width == 0 || Height == 0) {
+		const uint32_t pixelStride = BytesPerPixel(Format);
+		if (Width == 0 || Height == 0 || pixelStride == 0) {
 			return false;
 		}
 		const uint32_t side = FlipbookSide;
@@ -32,8 +34,9 @@ namespace engine::assets {
 		// **Computed in 64 bits and compared against the vector's size**, so a
 		// width and height whose product overflows 32 bits cannot describe a
 		// small buffer as a large image.
-		const uint64_t expected = static_cast<uint64_t>(Width) * static_cast<uint64_t>(Height) *
-								  static_cast<uint64_t>(BytesPerPixel(Format));
+		const uint64_t pixels = static_cast<uint64_t>(Width) * static_cast<uint64_t>(Height);
+		if (pixels > std::numeric_limits<uint64_t>::max() / pixelStride) return false;
+		const uint64_t expected = pixels * pixelStride;
 		if (expected != static_cast<uint64_t>(Pixels.size())) {
 			return false;
 		}
@@ -46,9 +49,10 @@ namespace engine::assets {
 		}
 		for (size_t index = 0; index < Mips.size(); index++) {
 			const uint32_t level = static_cast<uint32_t>(index) + 1;
-			const uint64_t bytes = static_cast<uint64_t>(MipExtent(Width, level)) *
-								   static_cast<uint64_t>(MipExtent(Height, level)) *
-								   static_cast<uint64_t>(BytesPerPixel(Format));
+			const uint64_t pixels = static_cast<uint64_t>(MipExtent(Width, level)) *
+									static_cast<uint64_t>(MipExtent(Height, level));
+			if (pixels > std::numeric_limits<uint64_t>::max() / pixelStride) return false;
+			const uint64_t bytes = pixels * pixelStride;
 			if (bytes != static_cast<uint64_t>(Mips[index].size())) {
 				return false;
 			}
@@ -117,7 +121,7 @@ namespace engine::assets {
 		}
 
 		const uint8_t format = reader.ReadUInt8();
-		if (format > static_cast<uint8_t>(TextureFormat::RGBA8_LINEAR)) {
+		if (format > static_cast<uint8_t>(TextureFormat::RGBA4_SRGB)) {
 			// **Range-checked before the cast**, for `ReadMessage`'s reason: a
 			// cast of an out-of-range byte produces a value no switch handles,
 			// and every consumer downstream then reads something the type says

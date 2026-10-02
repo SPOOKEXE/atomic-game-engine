@@ -18,12 +18,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <vector>
 
 TEST_SUITE_ID("engine.assets.texture")
 
 using engine::assets::BytesPerPixel;
+using engine::assets::IsSRGB;
 using engine::assets::MipExtent;
 using engine::assets::MipLevelCount;
 using engine::assets::Texture;
@@ -78,6 +80,39 @@ TEST_CASE("a texture round-trips", "[assets][texture]") {
 	// Every byte consumed. A reader and a writer that disagree about the layout
 	// otherwise surface as a bug much later.
 	CHECK(reader.AtEnd());
+}
+
+TEST_CASE("extended numeric texture layouts round-trip without changing bytes", "[assets][texture]") {
+	constexpr std::array formats{
+		TextureFormat::RGBA4_UNORM,
+		TextureFormat::RGBA4_SRGB,
+		TextureFormat::RGBA16_FLOAT,
+		TextureFormat::RGBA32_FLOAT,
+		TextureFormat::R16_FLOAT,
+		TextureFormat::R32_FLOAT,
+	};
+	for (const TextureFormat format : formats) {
+		TextureData source = Made(3, 2, format);
+		GiveChain(source);
+		REQUIRE(source.IsValid());
+		ByteWriter writer;
+		REQUIRE(Texture::Write(writer, source));
+		TextureData read;
+		ByteReader reader(writer.Bytes());
+		REQUIRE(Texture::Read(reader, read));
+		CHECK(read.Format == format);
+		CHECK(read.Pixels == source.Pixels);
+		CHECK(read.Mips == source.Mips);
+		CHECK(reader.AtEnd());
+	}
+	CHECK(BytesPerPixel(TextureFormat::RGBA4_UNORM) == 2);
+	CHECK(BytesPerPixel(TextureFormat::RGBA4_SRGB) == 2);
+	CHECK(BytesPerPixel(TextureFormat::RGBA16_FLOAT) == 8);
+	CHECK(BytesPerPixel(TextureFormat::RGBA32_FLOAT) == 16);
+	CHECK(BytesPerPixel(TextureFormat::R16_FLOAT) == 2);
+	CHECK(BytesPerPixel(TextureFormat::R32_FLOAT) == 4);
+	CHECK(IsSRGB(TextureFormat::RGBA4_SRGB));
+	CHECK_FALSE(Made(1, 1, static_cast<TextureFormat>(255)).IsValid());
 }
 
 TEST_CASE("rgba alpha bytes round-trip exactly", "[assets][texture]") {
