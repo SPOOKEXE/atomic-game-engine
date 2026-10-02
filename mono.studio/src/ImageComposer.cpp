@@ -1208,15 +1208,19 @@ namespace studio {
 			}
 		}
 
-		bool ApplyDocumentEdit(State &state, const auto &edit) {
-			const bool accepted =
-				ApplyImageGraphDocumentEdit(state.Authored, state.History, [&](Document &document) {
+		bool ApplyDocumentEdit(State &state, const auto &edit, bool *unchanged = nullptr) {
+			const bool accepted = ApplyImageGraphDocumentEdit(
+				state.Authored,
+				state.History,
+				[&](Document &document) {
 					if constexpr (std::is_same_v<std::invoke_result_t<decltype(edit), Document &>, bool>) {
 						if (!edit(document)) return false;
 					} else
 						edit(document);
 					return ReconcileSplitOutputs(state, document);
-				});
+				},
+				unchanged
+			);
 			if (accepted)
 				AuthoredDocumentChanged(state);
 			else if (state.GroupHost.Revision != state.DocumentRevision)
@@ -4231,11 +4235,16 @@ namespace studio {
 				}
 			);
 			state.Keys.Draw(state.Authored, GetImageGraphFrame(state.Playback), state.LastDiagnostic, [&] {
-				bool accepted = false;
-				ApplyDocumentEdit(state, [&](Document &document) {
-					accepted = state.Keys.Commit(document, state.LastDiagnostic);
-				});
-				return accepted;
+				bool unchanged = false;
+				const bool accepted = ApplyDocumentEdit(
+					state,
+					[&](Document &document) {
+						return state.Keys.PrepareCommit(document, state.LastDiagnostic);
+					},
+					&unchanged
+				);
+				if (accepted || unchanged) state.Keys.PublishCommit();
+				return accepted || unchanged;
 			});
 			if (ImGui::BeginTable("##keyframes", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
 				ImGui::TableSetupColumn("Property");

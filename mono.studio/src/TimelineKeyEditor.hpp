@@ -10,7 +10,8 @@ namespace studio {
 	// Selection is session state. A staged move pins the full originals so changes
 	// to value, easing or drivers cannot be overwritten by a later Apply.
 	struct TimelineKeyEditor {
-		std::vector<ImageGraphKeyframeIdentity> Selection;
+		std::vector<ImageGraphKeyframeIdentity> Selection, PreparedSelection;
+		bool Prepared = false;
 		std::vector<engine::imagegraph::Keyframe> Clipboard, Originals;
 		engine::imagegraph::FrameTime Anchor, Destination;
 		bool Active = false, Copying = false;
@@ -69,6 +70,14 @@ namespace studio {
 		std::optional<uint64_t> Remaining(bool includeClipboard, bool includeOriginals) const {
 			using namespace engine::imagegraph;
 			uint64_t remaining = Limits::MaximumEvaluationBytes;
+			const uint64_t pendingBytes = PreparedSelection.capacity() * sizeof(ImageGraphKeyframeIdentity);
+			if (pendingBytes > remaining) return std::nullopt;
+			remaining -= pendingBytes;
+			for (const auto &identity : PreparedSelection) {
+				const uint64_t bytes = identity.NodeId.size() + identity.Port.size();
+				if (bytes > remaining) return std::nullopt;
+				remaining -= bytes;
+			}
 			const uint64_t spareSelection =
 				(Selection.capacity() - Selection.size()) * sizeof(ImageGraphKeyframeIdentity);
 			if (spareSelection > remaining) return std::nullopt;
@@ -135,37 +144,67 @@ namespace studio {
 			Active = true;
 			return true;
 		}
-		bool Commit(engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error) {
+		// Stage the document without closing the popup or replacing its pinned selection.
+		bool PrepareCommit(engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error) {
 			using namespace engine::imagegraph;
-			const auto remaining = Remaining(true, true);
-			if (!Active || !remaining) return false;
+			Prepared = false;
+			const auto budget = Remaining(true, true);
+			if (!Active || !budget) return false;
+			uint64_t remaining = *budget;
+			std::vector<ImageGraphKeyframeIdentity> selection;
 			if (Copying && !TargetNode.empty()) {
 				if (!PasteImageGraphKeyframesToProperty(
-						document, Originals, Destination, TargetNode, TargetPort, error, *remaining
+						document, Originals, Destination, TargetNode, TargetPort, error, remaining
 					))
 					return false;
-				Selection.clear();
-				Cancel();
-				return true;
+			} else {
+				for (const auto &key : Originals) {
+					const uint64_t bytes =
+						sizeof(ImageGraphKeyframeIdentity) + key.NodeId.size() + key.Port.size();
+					if (bytes > remaining) {
+						error = {
+							Status::LimitExceeded, {}, {}, "key transfer selection exceeds the payload budget"
+						};
+						return false;
+					}
+					remaining -= bytes;
+				}
+				selection.reserve(Originals.size());
+				for (const auto &key : Originals) {
+					FrameTime time;
+					if (!ShiftFrameTime(GetFrameTime(key), Anchor, Destination, time)) {
+						error = {
+							Status::InvalidValue, {}, {}, "shifted key frame exceeds the authored range"
+						};
+						return false;
+					}
+					ImageGraphKeyframeIdentity identity{key.NodeId, key.Port, time};
+					if (std::find(selection.begin(), selection.end(), identity) == selection.end())
+						selection.push_back(std::move(identity));
+				}
+				if (!TransferImageGraphKeyframes(
+						document, Originals, Anchor, Destination, Copying, error, remaining
+					))
+					return false;
 			}
-			if (!TransferImageGraphKeyframes(
-					document, Originals, Anchor, Destination, Copying, error, *remaining
-				))
-				return false;
-			Selection.clear();
-			for (const auto &key : Originals) {
-				FrameTime time;
-				(void)ShiftFrameTime(GetFrameTime(key), Anchor, Destination, time);
-				ImageGraphKeyframeIdentity identity{key.NodeId, key.Port, time};
-				if (std::find(Selection.begin(), Selection.end(), identity) == Selection.end())
-					Selection.push_back(std::move(identity));
-			}
+			PreparedSelection = std::move(selection);
+			Prepared = true;
+			return true;
+		}
+		void PublishCommit() {
+			if (!Prepared) return;
+			Selection.swap(PreparedSelection);
 			Cancel();
+		}
+		bool Commit(engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error) {
+			if (!PrepareCommit(document, error)) return false;
+			PublishCommit();
 			return true;
 		}
 		void Cancel() {
-			Active = false;
+			Active = Prepared = false;
 			std::vector<engine::imagegraph::Keyframe>().swap(Originals);
+			std::vector<ImageGraphKeyframeIdentity>().swap(PreparedSelection);
 		}
 
 		template <class Apply>

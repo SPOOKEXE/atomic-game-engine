@@ -45,6 +45,8 @@ namespace {
 		std::vector<ImVec2> Rows;
 		std::vector<ImGuiID> RowIds;
 		unsigned Changes = 0;
+		bool ReconcileSplit = false;
+		size_t SplitCount = 1;
 		Timeline() {
 			ImGui::SetCurrentContext(Context);
 			auto &io = ImGui::GetIO();
@@ -76,12 +78,20 @@ namespace {
 			ImGui::SetNextWindowSize({700, 500});
 			ImGui::Begin("Timeline", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 			Editor.Draw(Doc, Cursor, Error, [&] {
-				bool accepted = false;
-				if (studio::ApplyImageGraphDocumentEdit(Doc, History, [&](Document &doc) {
-						accepted = Editor.Commit(doc, Error);
-					}))
-					++Changes;
-				return accepted;
+				bool unchanged = false;
+				const bool accepted = studio::ApplyImageGraphDocumentEdit(
+					Doc,
+					History,
+					[&](Document &doc) {
+						if (!Editor.PrepareCommit(doc, Error)) return false;
+						return !ReconcileSplit ||
+							   studio::SetImageGraphSplitOutputCount(doc, "split", SplitCount, Error, false);
+					},
+					&unchanged
+				);
+				if (accepted || unchanged) Editor.PublishCommit();
+				if (accepted) ++Changes;
+				return accepted || unchanged;
 			});
 			Rows.clear();
 			RowIds.clear();
@@ -320,4 +330,156 @@ TEST_CASE(
 	CHECK_FALSE(ui.History.CanUndo());
 	REQUIRE(ui.History.Redo(ui.Doc));
 	CHECK(ui.Doc.Keyframes.size() == 5);
+}
+
+TEST_CASE("timeline refused move Apply keeps popup and pinned keys", "[studio][timeline_history55]") {
+	Timeline ui;
+	ui.History = studio::ImageGraphHistory(128, 1);
+	ui.Frame();
+	ui.Frame();
+	const auto before = ui.Doc;
+	ui.Click(0);
+	const auto selected = ui.Editor.Selection;
+	ui.Button("Move keys");
+	REQUIRE(ui.Editor.Active);
+	const auto originals = ui.Editor.Originals;
+	ui.Whole("5");
+	ui.Button("Apply");
+	CHECK(ui.Doc == before);
+	CHECK(ui.Changes == 0);
+	CHECK_FALSE(ui.History.CanUndo());
+	CHECK(ui.Editor.Active);
+	CHECK_FALSE(ui.Context->OpenPopupStack.empty());
+	CHECK(ui.Editor.Selection == selected);
+	CHECK(ui.Editor.Originals == originals);
+	ui.History = studio::ImageGraphHistory{};
+	ui.Button("Apply");
+	REQUIRE(ui.Changes == 1);
+	CHECK_FALSE(ui.Editor.Active);
+	CHECK(ui.Context->OpenPopupStack.empty());
+	const auto edited = ui.Doc;
+	REQUIRE(edited != before);
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == edited);
+	CHECK_FALSE(ui.History.CanRedo());
+}
+
+TEST_CASE(
+	"timeline refused paste preserves redo clipboard and cancel selection", "[studio][timeline_history55]"
+) {
+	Timeline ui;
+	const auto before = ui.Doc;
+	auto priorEdit = before;
+	priorEdit.Nodes[0].Values[0].Data = 2.0;
+	const auto bytes = std::max(Write(before).size(), Write(priorEdit).size());
+	ui.History = studio::ImageGraphHistory(128, bytes);
+	REQUIRE(ui.History.TryRecord(before, priorEdit));
+	ui.Doc = priorEdit;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	REQUIRE(ui.Doc == before);
+	REQUIRE(ui.History.CanRedo());
+	ui.Frame();
+	ui.Frame();
+	ui.Click(0);
+	const auto selected = ui.Editor.Selection;
+	ui.Button("Copy keys");
+	const auto clipboard = ui.Editor.Clipboard;
+	REQUIRE(clipboard.size() == 1);
+	ui.Button("Paste keys");
+	const auto originals = ui.Editor.Originals;
+	ui.Button("Apply");
+	CHECK(ui.Doc == before);
+	CHECK(ui.Changes == 0);
+	CHECK(ui.Editor.Active);
+	CHECK_FALSE(ui.Context->OpenPopupStack.empty());
+	CHECK(ui.Editor.Selection == selected);
+	CHECK(ui.Editor.Originals == originals);
+	CHECK(ui.Editor.Clipboard == clipboard);
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.CanRedo());
+	ui.Button("Cancel");
+	CHECK_FALSE(ui.Editor.Active);
+	CHECK(ui.Editor.Selection == selected);
+	CHECK(ui.Editor.Clipboard == clipboard);
+	CHECK(ui.Editor.PreparedSelection.empty());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == priorEdit);
+}
+
+TEST_CASE("timeline unchanged Apply closes popup without consuming undo", "[studio][timeline_history55]") {
+	Timeline ui;
+	ui.History = studio::ImageGraphHistory(128, 1);
+	ui.Frame();
+	ui.Frame();
+	const auto before = ui.Doc;
+	ui.Click(0);
+	const auto selected = ui.Editor.Selection;
+	ui.Button("Move keys");
+	REQUIRE(ui.Editor.Active);
+	ui.Button("Apply");
+	CHECK(ui.Doc == before);
+	CHECK(ui.Changes == 0);
+	CHECK(ui.Editor.Selection == selected);
+	CHECK_FALSE(ui.Editor.Active);
+	CHECK(ui.Context->OpenPopupStack.empty());
+	CHECK_FALSE(ui.History.CanUndo());
+	CHECK_FALSE(ui.History.CanRedo());
+}
+
+TEST_CASE("timeline no-op follows actual split reconciliation admission", "[studio][timeline_history55]") {
+	Timeline ui;
+	Node split;
+	split.Id = "split";
+	split.Type = "pc.array_split";
+	ui.Doc.Nodes.push_back(std::move(split));
+	REQUIRE(studio::SetImageGraphSplitOutputCount(ui.Doc, "split", 1, ui.Error, false));
+	ui.ReconcileSplit = true;
+	const auto before = ui.Doc;
+	ui.Frame();
+	ui.Frame();
+	ui.Click(0);
+	const auto selected = ui.Editor.Selection;
+	ui.Button("Move keys");
+	const auto originals = ui.Editor.Originals;
+	SECTION("rejected reconciliation preserves staged popup") {
+		ui.SplitCount = Limits::MaximumArrayElements + 1;
+		ui.Button("Apply");
+		CHECK(ui.Doc == before);
+		CHECK(ui.Changes == 0);
+		CHECK(ui.Error.Code == Status::LimitExceeded);
+		CHECK(ui.Editor.Active);
+		CHECK_FALSE(ui.Context->OpenPopupStack.empty());
+		CHECK(ui.Editor.Originals == originals);
+		CHECK(ui.Editor.Selection == selected);
+		CHECK_FALSE(ui.History.CanUndo());
+		ui.Button("Cancel");
+		CHECK(ui.Doc == before);
+	}
+	SECTION("successful reconciliation resize requires single undo") {
+		ui.SplitCount = 3;
+		ui.Button("Apply");
+		REQUIRE(ui.Changes == 1);
+		CHECK_FALSE(ui.Editor.Active);
+		CHECK(ui.Context->OpenPopupStack.empty());
+		REQUIRE(ui.Doc.Nodes.back().DynamicOutputs.size() == 2);
+		const auto resized = ui.Doc;
+		REQUIRE(ui.History.Undo(ui.Doc));
+		CHECK(ui.Doc == before);
+		CHECK_FALSE(ui.History.CanUndo());
+		REQUIRE(ui.History.Redo(ui.Doc));
+		CHECK(ui.Doc == resized);
+	}
+	SECTION("successful unchanged reconciliation closes without undo") {
+		ui.SplitCount = 1;
+		ui.Button("Apply");
+		CHECK(ui.Doc == before);
+		CHECK(ui.Changes == 0);
+		CHECK_FALSE(ui.Editor.Active);
+		CHECK(ui.Context->OpenPopupStack.empty());
+		CHECK(ui.Editor.Selection == selected);
+		CHECK_FALSE(ui.History.CanUndo());
+	}
 }
