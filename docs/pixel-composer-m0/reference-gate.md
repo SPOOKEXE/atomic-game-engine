@@ -36,3 +36,9 @@ in 27 cases and `test_imagegraph_runner '[imagegraph][runner]' --reporter compac
 with 121 assertions in 19 cases. The product matrix records these native
 slices separately from executable comparison. These suites do not exercise
 the interactive Studio canvas or establish whole-workflow acceptance.
+
+## Native validation update, 2026-10-03
+
+Build51's latest release imagegraph core suite passed 1,295 cases and 1,811,481 assertions. The prepared export suite passed 48 cases and 1,924 assertions, the changed Studio suite passed 62 cases and 1,507 assertions, and the scoped assetc CLI rerun passed 14 of 14 tests after rebuilding the executable. The server-headless recipe completed 114 build steps after two disk-exhaustion failures; the server Composer CTest selection, including core, I/O, export, native physics, and CLI, passed 19/19, and an independent headless server run completed 10 ticks with 16 entities. A private Palette producer source was present in one test binary but remains unregistered and unaccepted. These native results document bounded engine behavior only. They do not supply a licensed Pixel Composer executable or a matched reference capture. M0-M7 remain incomplete, the executable comparison gate remains open, and no node or workflow parity row is promoted by these results.
+
+The finalcore51 executor inventory counts 431 registered `pc.*` names, 430 overlapping with the 886-entry source catalogue, and 456 catalogue entries without a registered executor. Registration is capability evidence, not runtime behavior or parity. Adapter routes outside the registry are excluded.
