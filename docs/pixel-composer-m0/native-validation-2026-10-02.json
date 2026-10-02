@@ -1477,7 +1477,7 @@
       "test_cases_failed": 5,
       "assertions_passed": 342,
       "assertions_failed": 15,
-      "observed_failure": "An unmatched Palette producer returned an incompatible-port error in Atlas integration cases. The producer mismatch was fixed before the later full core passes.",
+      "observed_failure": "The five failed cases covered several issues, not one common failure: an Atlas canonical image hash expectation mismatch, graph compiler rejection of an Array-to-Atlas connection as incompatible port types, an invalid junction default in an image influence-map fixture, and a Palette producer/value-shape mismatch that surfaced as an unexpected variant alternative. The source log retains each failing assertion. These fixture and producer issues were repaired before the later full core passes.",
       "source_commits_after_repair": [
         "bd72d275",
         "e2b862fa"
