@@ -1,7 +1,7 @@
 #include "WavExport.hpp"
 
-#include <atomic>
-#include <cstdio>
+#include <engine/imagegraphexport/GraphFileHost.hpp>
+
 #include <filesystem>
 #include <imgui.h>
 #include <new>
@@ -17,6 +17,16 @@ namespace studio {
 		engine::imagegraph::Diagnostic &diagnostic
 	) {
 		using namespace engine::imagegraph;
+		const auto &policy = engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Publish);
+		if (!policy.Allows(engine::assets::ContentForm::Wav)) {
+			diagnostic = {
+				Status::UnsupportedExecution,
+				std::string(nodeId),
+				"path",
+				"WAV publication refused by content policy"
+			};
+			return false;
+		}
 		WavExport candidate;
 		const uint64_t oldBytes = lastGood.Bytes.capacity() + lastGood.Path.capacity() + 1;
 		if (oldBytes > Limits::MaximumEvaluationBytes) {
@@ -33,57 +43,26 @@ namespace studio {
 				diagnostic
 			) != Status::Ok)
 			return false;
-		static std::atomic<uint64_t> serial{0};
-		const std::filesystem::path destination(candidate.Path);
-		auto temporary = destination;
-		temporary += ".atomic-export-" + std::to_string(serial.fetch_add(1)) + ".tmp";
-		std::error_code error;
-		// Exclusive creation prevents truncating another export's temporary file.
-		struct TemporaryCleanup {
-			const std::filesystem::path &Path;
-			bool Active = false;
-			~TemporaryCleanup() {
-				if (!Active) return;
-				try {
-					std::error_code ignored;
-					std::filesystem::remove(Path, ignored);
-				} catch (...) {}
-			}
-		} cleanup{temporary};
-		FILE *stream = std::fopen(temporary.string().c_str(), "wbx");
-		if (!stream) {
+		if (!policy.AllowsName(candidate.Path)) {
 			diagnostic = {
-				Status::InvalidValue, std::string(nodeId), "path", "could not create WAV temporary file"
-			};
-			return false;
-		}
-		cleanup.Active = true;
-		const bool written =
-			std::fwrite(candidate.Bytes.data(), 1, candidate.Bytes.size(), stream) == candidate.Bytes.size();
-		const bool closed = std::fclose(stream) == 0;
-		if (!written || !closed) {
-			std::filesystem::remove(temporary, error);
-			diagnostic = {
-				Status::InvalidValue,
+				Status::UnsupportedExecution,
 				std::string(nodeId),
 				"path",
-				"could not write complete WAV temporary file"
+				"WAV destination refused by content policy"
 			};
 			return false;
 		}
-		std::filesystem::rename(temporary, destination, error);
-		if (error) {
-			const auto reason = error.message();
-			std::filesystem::remove(temporary, error);
-			diagnostic = {
-				Status::InvalidValue,
-				std::string(nodeId),
-				"path",
-				"could not replace WAV destination: " + reason
-			};
+		// This explicit action grants only the resolved, suffix-normalized destination.
+		const engine::imagegraphexport::GraphFileGrant grant{
+			std::string(nodeId), std::filesystem::path(candidate.Path), true
+		};
+		std::string failure;
+		if (!engine::imagegraphexport::PublishGraphHostFile(
+				grant, policy, candidate.Bytes, Limits::MaximumEvaluationBytes - oldBytes, failure
+			)) {
+			diagnostic = {Status::InvalidValue, std::string(nodeId), "path", std::move(failure)};
 			return false;
 		}
-		cleanup.Active = false;
 		lastGood = std::move(candidate);
 		diagnostic = {};
 		return true;

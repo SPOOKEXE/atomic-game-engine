@@ -1,5 +1,7 @@
 #include "../src/WavExport.hpp"
 
+#include <engine/assets/ContentPolicy.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -11,6 +13,8 @@
 
 TEST_SUITE_ID("studio.wav_export")
 TEST_DEPENDS("engine.imagegraph.wav_export")
+TEST_DEPENDS("engine.imagegraphexport.graph_file_host")
+TEST_DEPENDS("engine.assets.contentpolicy")
 namespace {
 	using namespace engine::imagegraph;
 	struct ExportFixture {
@@ -159,5 +163,60 @@ TEST_CASE("Inspector WAV button writes only on explicit ImGui click", "[studio][
 	CHECK(std::filesystem::exists(fixture.Directory / "output.wav"));
 	CHECK(message.starts_with("Exported "));
 	CHECK_FALSE(fixture.LastGood.Bytes.empty());
+	const auto artifact = fixture.LastGood;
+	const auto previousFile = fixture.ReadFile();
+	fixture.Doc.Nodes.back().Values.front().Data = (fixture.Directory / "missing" / "output").string();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	CHECK_FALSE(message.empty());
+	CHECK_FALSE(message.starts_with("Exported "));
+	CHECK(fixture.LastGood.Path == artifact.Path);
+	CHECK(fixture.LastGood.Bytes == artifact.Bytes);
+	CHECK(fixture.ReadFile() == previousFile);
+	CHECK_FALSE(std::filesystem::exists(fixture.Directory / "missing"));
 	ImGui::DestroyContext(context);
+}
+
+TEST_CASE(
+	"Studio WAV publication respects the process content policy", "[studio][wav_export][content_policy]"
+) {
+	using namespace engine::assets;
+	using namespace engine::core;
+	Flags::Reset();
+	struct ResetPolicy {
+		~ResetPolicy() {
+			Flags::Reset();
+		}
+	} reset;
+	REQUIRE(DeclareContentFlags(ContentVerb::Publish));
+	ExportFixture fixture;
+	fixture.Compile();
+	REQUIRE(
+		studio::ExportImageGraphWav(
+			fixture.Doc, fixture.Graph, "sink", fixture.Request, fixture.LastGood, fixture.Error
+		)
+	);
+	const auto artifact = fixture.LastGood;
+	const auto previousFile = fixture.ReadFile();
+	REQUIRE(Flags::Set("cdn.publish.wav", "false", FlagSource::ConfigFile) == FlagStatus::Applied);
+	Flags::Freeze();
+	REQUIRE_FALSE(ContentPolicy::Process(ContentVerb::Publish).AllowsName(artifact.Path));
+	fixture.Clips.front().Data.Channels.front() = {1, .25, 0, 1};
+	CHECK_FALSE(
+		studio::ExportImageGraphWav(
+			fixture.Doc, fixture.Graph, "sink", fixture.Request, fixture.LastGood, fixture.Error
+		)
+	);
+	CHECK(fixture.Error.Port == "path");
+	CHECK(fixture.Error.Message.find("content policy") != std::string::npos);
+	CHECK(fixture.LastGood.Path == artifact.Path);
+	CHECK(fixture.LastGood.Bytes == artifact.Bytes);
+	CHECK(fixture.ReadFile() == previousFile);
+	CHECK(
+		std::distance(
+			std::filesystem::directory_iterator(fixture.Directory), std::filesystem::directory_iterator{}
+		) == 1
+	);
 }
