@@ -44,6 +44,7 @@ Milestone labels describe development scope, not release versions.
   2. Save, clone and hash per-instance output ports; prune invalid links.
   3. Launch export helpers in a child working directory without changing the parent.
   4. Implement Boolean, RGB, HSV, colour data, blend and OKLCH source kernels.
+  5. Encode native GIFs with bounded memory, deterministic palettes and explicit frame delays.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
