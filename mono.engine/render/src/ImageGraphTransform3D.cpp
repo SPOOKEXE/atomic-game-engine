@@ -1,6 +1,7 @@
 #include "ImageGraphTransform3D.hpp"
 
 #include "GpuHeap.hpp"
+#include "ImageGraphTransform3DFormats.hpp"
 #include "ShaderBinary.hpp"
 
 #include <engine/render/Renderer.hpp>
@@ -38,11 +39,16 @@ namespace engine::render::imagegraph {
 			return input ? code : std::vector<uint8_t>{};
 		}
 
-		SDL_GPUTexture *
-		Texture(SDL_GPUDevice *device, uint32_t width, uint32_t height, SDL_GPUTextureUsageFlags usage) {
+		SDL_GPUTexture *Texture(
+			SDL_GPUDevice *device,
+			uint32_t width,
+			uint32_t height,
+			SDL_GPUTextureUsageFlags usage,
+			SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+		) {
 			SDL_GPUTextureCreateInfo info{};
 			info.type = SDL_GPU_TEXTURETYPE_2D;
-			info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+			info.format = format;
 			info.usage = usage;
 			info.width = width;
 			info.height = height;
@@ -50,6 +56,59 @@ namespace engine::render::imagegraph {
 			info.num_levels = 1;
 			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 			return gpu::CreateTexture(device, &info);
+		}
+
+		SDL_GPUTextureFormat ColourFormat(const TransformImage3DRequest &request) {
+			return *detail::TransformImage3DFormat(request.Front.Format, request.ColorSpace);
+		}
+
+		bool SupportsColourFormat(SDL_GPUDevice *device, const TransformImage3DRequest &request) {
+			return detail::SupportsTransformImage3DFormats(
+				device,
+				request.Front.Format,
+				request.Back.Format,
+				!request.Back.Pixels.empty(),
+				request.ColorSpace
+			);
+		}
+
+		uint32_t PixelBytes(uint32_t width, uint32_t height, uint32_t bytesPerPixel) {
+			return static_cast<uint32_t>(uint64_t(width) * height * bytesPerPixel);
+		}
+
+		bool CopySurfaceToTransfer(
+			SDL_GPUDevice *device,
+			SDL_GPUTransferBuffer *transfer,
+			const TransformImage3DSurface &surface,
+			TransformImage3DColorSpace colorSpace
+		) {
+			void *mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
+			if (mapped == nullptr) return false;
+			const assets::TextureFormat resolved =
+				detail::ResolveTransformImage3DFormat(surface.Format, colorSpace);
+			const uint32_t destinationBytes = PixelBytes(
+				surface.Width,
+				surface.Height,
+				detail::TransformImage3DBytesPerPixel(surface.Format, colorSpace)
+			);
+			const std::span<const std::byte> source(surface.Pixels);
+			const std::span<std::byte> destination(static_cast<std::byte *>(mapped), destinationBytes);
+			const bool copied =
+				resolved == assets::TextureFormat::RGBA4_UNORM ||
+						resolved == assets::TextureFormat::RGBA4_SRGB
+					? engine::render::detail::CopyPixelsForUpload(resolved, source, destination)
+					: (source.size() == destination.size() &&
+					   (std::memcpy(mapped, source.data(), source.size()), true));
+			SDL_UnmapGPUTransferBuffer(device, transfer);
+			return copied;
+		}
+
+		uint32_t InputBytes(const TransformImage3DSurface &surface, TransformImage3DColorSpace colorSpace) {
+			return PixelBytes(
+				surface.Width,
+				surface.Height,
+				detail::TransformImage3DBytesPerPixel(surface.Format, colorSpace)
+			);
 		}
 
 		SDL_GPUTransferBuffer *
@@ -117,9 +176,19 @@ namespace engine::render::imagegraph {
 	}
 
 	uint64_t TransformImage3DLiveScratchBytes(const TransformImage3DRequest &request) {
+		if (ValidateTransformImage3D(request) != TransformImage3DStatus::Ok) return 0;
 		const uint64_t pixels = uint64_t(request.Front.Width) * request.Front.Height;
-		// Two sampled sources, two colour outputs, depth, and two upload copies.
-		return pixels * 28 + sizeof(QUAD) * 2;
+		const uint64_t frontBytes =
+			pixels * detail::TransformImage3DBytesPerPixel(request.Front.Format, request.ColorSpace);
+		const uint64_t backBytes =
+			pixels *
+			detail::TransformImage3DBytesPerPixel(
+				request.Back.Pixels.empty() ? request.Front.Format : request.Back.Format, request.ColorSpace
+			);
+		const uint64_t outputBytes = frontBytes;
+		// Count each input texture and upload copy, output target and download,
+		// plus encoded and floating depth targets with their transfer buffers.
+		return 2 * (frontBytes + backBytes + outputBytes + 8 * pixels) + sizeof(QUAD) * 2;
 	}
 
 	void ReleaseTransformImage3DLive(SDL_GPUDevice *device, TransformImage3DLiveResources &resources) {
@@ -147,9 +216,13 @@ namespace engine::render::imagegraph {
 		TransformImage3DLiveResources &resources
 	) {
 		if (device == nullptr || command == nullptr ||
-			ValidateTransformImage3D(request) != TransformImage3DStatus::Ok) {
+			ValidateTransformImage3D(request) != TransformImage3DStatus::Ok ||
+			!SupportsColourFormat(device, request)) {
 			return false;
 		}
+		const TransformImage3DSurface &back = request.Back.Pixels.empty() ? request.Front : request.Back;
+		const uint32_t frontBytes = InputBytes(request.Front, request.ColorSpace);
+		const uint32_t backBytes = InputBytes(back, request.ColorSpace);
 		ReleaseTransformImage3DLive(device, resources);
 		const ShaderBinary binary = ShaderBinaryFor(device);
 		const std::vector<uint8_t> vertexCode = ReadShader("imagegraph-transform-3d.vert", binary.Form);
@@ -182,7 +255,7 @@ namespace engine::render::imagegraph {
 			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, Uv)},
 		};
 		SDL_GPUColorTargetDescription targets[2]{};
-		targets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		targets[0].format = ColourFormat(request);
 		targets[1].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 		SDL_GPUGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.vertex_shader = resources.VertexShader;
@@ -201,18 +274,28 @@ namespace engine::render::imagegraph {
 		pipelineInfo.target_info.has_depth_stencil_target = true;
 		resources.Pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipelineInfo);
 
-		const uint32_t bytes = request.Front.Width * request.Front.Height * 4;
-		resources.Front =
-			Texture(device, request.Front.Width, request.Front.Height, SDL_GPU_TEXTUREUSAGE_SAMPLER);
-		resources.Back =
-			Texture(device, request.Front.Width, request.Front.Height, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+		resources.Front = Texture(
+			device,
+			request.Front.Width,
+			request.Front.Height,
+			SDL_GPU_TEXTUREUSAGE_SAMPLER,
+			*detail::TransformImage3DFormat(request.Front.Format, request.ColorSpace)
+		);
+		resources.Back = Texture(
+			device,
+			request.Front.Width,
+			request.Front.Height,
+			SDL_GPU_TEXTUREUSAGE_SAMPLER,
+			*detail::TransformImage3DFormat(back.Format, request.ColorSpace)
+		);
 		// The completed output is adopted by TextureTable after its submission
 		// fence. It must remain both a render target here and sampleable there.
 		resources.Rendered = Texture(
 			device,
 			request.Front.Width,
 			request.Front.Height,
-			SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
+			SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
+			ColourFormat(request)
 		);
 		resources.EncodedDepth =
 			Texture(device, request.Front.Width, request.Front.Height, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
@@ -226,8 +309,8 @@ namespace engine::render::imagegraph {
 		depth.num_levels = 1;
 		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
 		resources.Depth = gpu::CreateTexture(device, &depth);
-		resources.FrontUpload = Transfer(device, bytes, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
-		resources.BackUpload = Transfer(device, bytes, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
+		resources.FrontUpload = Transfer(device, frontBytes, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
+		resources.BackUpload = Transfer(device, backBytes, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
 		SDL_GPUBufferCreateInfo vertexInfoBuffer{};
 		vertexInfoBuffer.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 		vertexInfoBuffer.size = sizeof(QUAD);
@@ -245,12 +328,8 @@ namespace engine::render::imagegraph {
 			!resources.Back || !resources.Rendered || !resources.EncodedDepth || !resources.Depth ||
 			!resources.FrontUpload || !resources.BackUpload || !resources.Vertices ||
 			!resources.VertexUpload || !resources.Sampler ||
-			!CopyToTransfer(device, resources.FrontUpload, request.Front.Rgba8) ||
-			!CopyToTransfer(
-				device,
-				resources.BackUpload,
-				request.Back.Rgba8.empty() ? std::span(request.Front.Rgba8) : std::span(request.Back.Rgba8)
-			) ||
+			!CopySurfaceToTransfer(device, resources.FrontUpload, request.Front, request.ColorSpace) ||
+			!CopySurfaceToTransfer(device, resources.BackUpload, back, request.ColorSpace) ||
 			!CopyToTransfer(device, resources.VertexUpload, std::as_bytes(std::span(QUAD)))) {
 			ReleaseTransformImage3DLive(device, resources);
 			return false;
@@ -311,7 +390,7 @@ namespace engine::render::imagegraph {
 		const FragmentUniforms uniforms{
 			{request.TextureTiling[0], request.TextureTiling[1]},
 			{request.DepthRange[0], request.DepthRange[1]},
-			request.Back.Rgba8.empty() ? 0u : 1u
+			request.Back.Pixels.empty() ? 0u : 1u
 		};
 		SDL_PushGPUVertexUniformData(command, 0, &matrix, sizeof(matrix));
 		SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
@@ -325,7 +404,7 @@ namespace engine::render::imagegraph {
 		Release();
 	}
 
-	bool TransformImage3DGpuPass::CreatePipeline() {
+	bool TransformImage3DGpuPass::CreatePipeline(const TransformImage3DRequest &request) {
 		const ShaderBinary binary = ShaderBinaryFor(Device);
 		const std::vector<uint8_t> vertexCode = ReadShader("imagegraph-transform-3d.vert", binary.Form);
 		const std::vector<uint8_t> fragmentCode = ReadShader("imagegraph-transform-3d.frag", binary.Form);
@@ -356,7 +435,7 @@ namespace engine::render::imagegraph {
 		attributes[0] = {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Position)};
 		attributes[1] = {1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, Uv)};
 		SDL_GPUColorTargetDescription targets[2]{};
-		targets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		targets[0].format = ColourFormat(request);
 		targets[1].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 		SDL_GPUGraphicsPipelineCreateInfo info{};
 		info.vertex_shader = VertexShader;
@@ -378,11 +457,32 @@ namespace engine::render::imagegraph {
 	}
 
 	bool TransformImage3DGpuPass::CreateResources(const TransformImage3DRequest &request) {
-		const uint32_t bytes = request.Front.Width * request.Front.Height * 4;
-		Front = Texture(Device, request.Front.Width, request.Front.Height, SDL_GPU_TEXTUREUSAGE_SAMPLER);
-		Back = Texture(Device, request.Front.Width, request.Front.Height, SDL_GPU_TEXTUREUSAGE_SAMPLER);
-		Colour =
-			Texture(Device, request.Front.Width, request.Front.Height, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
+		const TransformImage3DSurface &back = request.Back.Pixels.empty() ? request.Front : request.Back;
+		const uint32_t frontBytes = InputBytes(request.Front, request.ColorSpace);
+		const uint32_t backBytes = InputBytes(back, request.ColorSpace);
+		const uint32_t outputBytes = frontBytes;
+		const uint32_t depthBytes = request.Front.Width * request.Front.Height * 4;
+		Front = Texture(
+			Device,
+			request.Front.Width,
+			request.Front.Height,
+			SDL_GPU_TEXTUREUSAGE_SAMPLER,
+			*detail::TransformImage3DFormat(request.Front.Format, request.ColorSpace)
+		);
+		Back = Texture(
+			Device,
+			request.Front.Width,
+			request.Front.Height,
+			SDL_GPU_TEXTUREUSAGE_SAMPLER,
+			*detail::TransformImage3DFormat(back.Format, request.ColorSpace)
+		);
+		Colour = Texture(
+			Device,
+			request.Front.Width,
+			request.Front.Height,
+			SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+			ColourFormat(request)
+		);
 		EncodedDepth =
 			Texture(Device, request.Front.Width, request.Front.Height, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
 		SDL_GPUTextureCreateInfo depth{};
@@ -395,16 +495,16 @@ namespace engine::render::imagegraph {
 		depth.num_levels = 1;
 		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
 		Depth = gpu::CreateTexture(Device, &depth);
-		FrontUpload = Transfer(Device, bytes, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
-		BackUpload = Transfer(Device, bytes, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
+		FrontUpload = Transfer(Device, frontBytes, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
+		BackUpload = Transfer(Device, backBytes, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
 		SDL_GPUBufferCreateInfo vertexInfo{};
 		vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 		vertexInfo.size = sizeof(QUAD);
 		Vertices = gpu::CreateBuffer(Device, &vertexInfo);
 		VertexUpload = Transfer(Device, sizeof(QUAD), SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
-		ColourDownload = Transfer(Device, bytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
-		EncodedDepthDownload = Transfer(Device, bytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
-		DepthDownload = Transfer(Device, bytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
+		ColourDownload = Transfer(Device, outputBytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
+		EncodedDepthDownload = Transfer(Device, depthBytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
+		DepthDownload = Transfer(Device, depthBytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
 		SDL_GPUSamplerCreateInfo sampler{};
 		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
 		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
@@ -418,13 +518,9 @@ namespace engine::render::imagegraph {
 	}
 
 	bool TransformImage3DGpuPass::UploadAndRecord(const TransformImage3DRequest &request) {
-		if (!CopyToTransfer(Device, FrontUpload, request.Front.Rgba8)) return false;
-		if (!CopyToTransfer(
-				Device,
-				BackUpload,
-				request.Back.Rgba8.empty() ? std::span(request.Front.Rgba8) : std::span(request.Back.Rgba8)
-			))
-			return false;
+		const TransformImage3DSurface &back = request.Back.Pixels.empty() ? request.Front : request.Back;
+		if (!CopySurfaceToTransfer(Device, FrontUpload, request.Front, request.ColorSpace)) return false;
+		if (!CopySurfaceToTransfer(Device, BackUpload, back, request.ColorSpace)) return false;
 		if (!CopyToTransfer(Device, VertexUpload, std::as_bytes(std::span(QUAD)))) return false;
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		if (command == nullptr) return false;
@@ -483,7 +579,7 @@ namespace engine::render::imagegraph {
 		const FragmentUniforms uniforms{
 			{request.TextureTiling[0], request.TextureTiling[1]},
 			{request.DepthRange[0], request.DepthRange[1]},
-			request.Back.Rgba8.empty() ? 0u : 1u
+			request.Back.Pixels.empty() ? 0u : 1u
 		};
 		SDL_PushGPUVertexUniformData(command, 0, &matrix, sizeof(matrix));
 		SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
@@ -518,25 +614,41 @@ namespace engine::render::imagegraph {
 		const TransformImage3DRequest &request, TransformImage3DResult &result
 	) {
 		if (!SDL_WaitForGPUFences(Device, true, &Fence, 1)) return false;
-		const size_t bytes = static_cast<size_t>(request.Front.Width) * request.Front.Height * 4;
-		const auto read = [this,
-						   bytes](SDL_GPUTransferBuffer *transfer, std::vector<std::byte> &destination) {
-			const void *mapped = SDL_MapGPUTransferBuffer(Device, transfer, false);
-			if (mapped == nullptr) return false;
-			destination.resize(bytes);
-			std::memcpy(destination.data(), mapped, bytes);
-			SDL_UnmapGPUTransferBuffer(Device, transfer);
-			return true;
-		};
-		if (!read(ColourDownload, result.RenderedRgba8) || !read(EncodedDepthDownload, result.DepthRgba8))
-			return false;
+		const size_t pixels = static_cast<size_t>(request.Front.Width) * request.Front.Height;
+		const size_t colourBytes =
+			pixels * detail::TransformImage3DBytesPerPixel(request.Front.Format, request.ColorSpace);
+		const size_t depthBytes = pixels * 4;
+		const auto read =
+			[this](SDL_GPUTransferBuffer *transfer, std::vector<std::byte> &destination, size_t bytes) {
+				const void *mapped = SDL_MapGPUTransferBuffer(Device, transfer, false);
+				if (mapped == nullptr) return false;
+				destination.resize(bytes);
+				std::memcpy(destination.data(), mapped, bytes);
+				SDL_UnmapGPUTransferBuffer(Device, transfer);
+				return true;
+			};
+		const void *colourMapped = SDL_MapGPUTransferBuffer(Device, ColourDownload, false);
+		if (colourMapped == nullptr) return false;
+		const std::span<const std::byte> gpuColour(static_cast<const std::byte *>(colourMapped), colourBytes);
+		const size_t resultBytes = pixels * assets::BytesPerPixel(request.Front.Format);
+		result.RenderedPixels.resize(resultBytes);
+		const bool rgba4 = request.Front.Format == assets::TextureFormat::RGBA4_UNORM ||
+						   request.Front.Format == assets::TextureFormat::RGBA4_SRGB;
+		const bool copied =
+			rgba4 ? engine::render::detail::CopyRgba8ToRgba4(gpuColour, result.RenderedPixels)
+				  : gpuColour.size() == result.RenderedPixels.size() &&
+						(std::memcpy(result.RenderedPixels.data(), gpuColour.data(), gpuColour.size()), true);
+		SDL_UnmapGPUTransferBuffer(Device, ColourDownload);
+		if (!copied || !read(EncodedDepthDownload, result.DepthRgba8, depthBytes)) return false;
 		const void *mapped = SDL_MapGPUTransferBuffer(Device, DepthDownload, false);
 		if (mapped == nullptr) return false;
-		result.Depth.resize(bytes / sizeof(float));
-		std::memcpy(result.Depth.data(), mapped, bytes);
+		result.Depth.resize(depthBytes / sizeof(float));
+		std::memcpy(result.Depth.data(), mapped, depthBytes);
 		SDL_UnmapGPUTransferBuffer(Device, DepthDownload);
 		result.Width = request.Front.Width;
 		result.Height = request.Front.Height;
+		result.RenderedFormat =
+			detail::ResolveTransformImage3DFormat(request.Front.Format, request.ColorSpace);
 		return true;
 	}
 
@@ -546,8 +658,8 @@ namespace engine::render::imagegraph {
 		const TransformImage3DStatus valid = ValidateTransformImage3D(request);
 		if (valid != TransformImage3DStatus::Ok) return valid;
 		Release();
-		if (Device == nullptr || !CreatePipeline() || !CreateResources(request) ||
-			!UploadAndRecord(request) || !Readback(request, result)) {
+		if (Device == nullptr || !SupportsColourFormat(Device, request) || !CreatePipeline(request) ||
+			!CreateResources(request) || !UploadAndRecord(request) || !Readback(request, result)) {
 			Release();
 			return TransformImage3DStatus::GpuUnavailable;
 		}

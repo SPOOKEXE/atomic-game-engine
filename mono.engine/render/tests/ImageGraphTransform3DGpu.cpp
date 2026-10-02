@@ -1,4 +1,5 @@
 #include "../src/ImageGraphTransform3D.hpp"
+#include "../src/ImageGraphTransform3DFormats.hpp"
 #include "../src/ImageGraphTransform3DResident.hpp"
 #include "GpuHeap.hpp"
 #include "RenderFixture.hpp"
@@ -24,9 +25,9 @@ namespace {
 		TransformImage3DSurface surface;
 		surface.Width = 2;
 		surface.Height = 2;
-		surface.Rgba8.resize(pixels.size());
+		surface.Pixels.resize(pixels.size());
 		for (size_t index = 0; index < pixels.size(); index++)
-			surface.Rgba8[index] = std::byte{pixels[index]};
+			surface.Pixels[index] = std::byte{pixels[index]};
 		return surface;
 	}
 
@@ -34,7 +35,7 @@ namespace {
 		TransformImage3DSurface surface;
 		surface.Width = width;
 		surface.Height = height;
-		surface.Rgba8.assign(uint64_t(width) * height * 4, std::byte{value});
+		surface.Pixels.assign(uint64_t(width) * height * 4, std::byte{value});
 		return surface;
 	}
 
@@ -81,7 +82,7 @@ TEST_CASE("Transform Image 3D draws uploaded back pixels and reads both depth ou
 		CHECK(gpu::MemoryStatistics(device).LiveBytes == before.LiveBytes);
 
 		REQUIRE(pass.Run(request, backResult) == TransformImage3DStatus::Ok);
-		CHECK(backResult.RenderedRgba8 == request.Back.Rgba8);
+		CHECK(backResult.RenderedPixels == request.Back.Pixels);
 
 		// The second run has no back surface and uses the perspective branch. Reusing
 		// the pass proves its old fence and textures are released before replacement.
@@ -90,7 +91,7 @@ TEST_CASE("Transform Image 3D draws uploaded back pixels and reads both depth ou
 		request.Projection = TransformImage3DProjection::Perspective;
 		request.FieldOfViewDegrees = 120;
 		REQUIRE(pass.Run(request, result) == TransformImage3DStatus::Ok);
-		CHECK(result.RenderedRgba8 == request.Front.Rgba8);
+		CHECK(result.RenderedPixels == request.Front.Pixels);
 
 		// The pinned Pixel Composer transform applies anchor before rotation and scale.
 		// A uniform source keeps this asymmetric anchor and rotation check independent
@@ -102,19 +103,19 @@ TEST_CASE("Transform Image 3D draws uploaded back pixels and reads both depth ou
 		request.Scale = {2, 2, 1};
 		request.Projection = TransformImage3DProjection::Orthographic;
 		REQUIRE(pass.Run(request, result) == TransformImage3DStatus::Ok);
-		CHECK(result.RenderedRgba8 == request.Back.Rgba8);
+		CHECK(result.RenderedPixels == request.Back.Pixels);
 	}
 	TransformImage3DResult adapterResult;
 	REQUIRE(ExecuteTransformImage3D(fixture.Render, request, adapterResult) == TransformImage3DStatus::Ok);
-	CHECK(adapterResult.RenderedRgba8 == request.Back.Rgba8);
+	CHECK(adapterResult.RenderedPixels == request.Back.Pixels);
 	CHECK(adapterResult.Mesh.Positions[0] == -1);
 	CHECK(adapterResult.Mesh.Positions[16] == 1);
 	CHECK(adapterResult.Mesh.TextureCoordinates[11] == 0);
 	CHECK(result.Width == 2);
 	CHECK(result.Height == 2);
-	REQUIRE(result.RenderedRgba8.size() == request.Front.Rgba8.size());
-	CHECK(result.RenderedRgba8 == request.Back.Rgba8);
-	REQUIRE(backResult.DepthRgba8.size() == request.Front.Rgba8.size());
+	REQUIRE(result.RenderedPixels.size() == request.Front.Pixels.size());
+	CHECK(result.RenderedPixels == request.Back.Pixels);
+	REQUIRE(backResult.DepthRgba8.size() == request.Front.Pixels.size());
 	for (size_t index = 0; index < backResult.DepthRgba8.size(); index += 4) {
 		CHECK(std::to_integer<uint8_t>(backResult.DepthRgba8[index]) >= 225);
 		CHECK(std::to_integer<uint8_t>(backResult.DepthRgba8[index]) <= 232);
@@ -125,6 +126,53 @@ TEST_CASE("Transform Image 3D draws uploaded back pixels and reads both depth ou
 		CHECK((depth > .09f && depth < .11f));
 	const GpuMemoryStatistics after = gpu::MemoryStatistics(device);
 	CHECK(after.LiveBytes == before.LiveBytes);
+}
+
+TEST_CASE("Transform Image 3D preserves packed and floating pixel layouts", "[render][gpu][.]") {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	REQUIRE(device != nullptr);
+
+	TransformImage3DRequest halfRequest;
+	halfRequest.Front.Width = halfRequest.Front.Height = 1;
+	halfRequest.Front.Format = assets::TextureFormat::RGBA16_FLOAT;
+	halfRequest.Front.Pixels = {
+		std::byte{0x00},
+		std::byte{0x40},
+		std::byte{0x00},
+		std::byte{0x38},
+		std::byte{0x00},
+		std::byte{0x44},
+		std::byte{0x00},
+		std::byte{0x3c}
+	};
+	halfRequest.Position = {0, 0, -1};
+	if (!engine::render::imagegraph::detail::SupportsTransformImage3DFormats(
+			device, halfRequest.Front.Format, halfRequest.Front.Format, false, halfRequest.ColorSpace
+		))
+		SKIP("device does not support RGBA16 float sampling and render targets");
+	TransformImage3DResult halfResult;
+	REQUIRE(ExecuteTransformImage3D(fixture.Render, halfRequest, halfResult) == TransformImage3DStatus::Ok);
+	CHECK(halfResult.RenderedFormat == assets::TextureFormat::RGBA16_FLOAT);
+	CHECK(halfResult.RenderedPixels == halfRequest.Front.Pixels);
+
+	TransformImage3DRequest packedRequest;
+	packedRequest.Front.Width = packedRequest.Front.Height = 1;
+	packedRequest.Front.Format = assets::TextureFormat::RGBA4_UNORM;
+	packedRequest.Front.Pixels = {std::byte{0x34}, std::byte{0x12}};
+	packedRequest.ColorSpace = TransformImage3DColorSpace::Display;
+	packedRequest.Position = {0, 0, -1};
+	if (!engine::render::imagegraph::detail::SupportsTransformImage3DFormats(
+			device, packedRequest.Front.Format, packedRequest.Front.Format, false, packedRequest.ColorSpace
+		))
+		SKIP("device does not support sRGB RGBA8 sampling and render targets for packed RGBA4");
+	TransformImage3DResult packedResult;
+	REQUIRE(
+		ExecuteTransformImage3D(fixture.Render, packedRequest, packedResult) == TransformImage3DStatus::Ok
+	);
+	CHECK(packedResult.RenderedFormat == assets::TextureFormat::RGBA4_SRGB);
+	CHECK(packedResult.RenderedPixels == packedRequest.Front.Pixels);
 }
 
 TEST_CASE("Transform Image 3D refuses invalid source data before GPU allocation", "[render][gpu]") {
@@ -165,7 +213,7 @@ TEST_CASE("Transform Image 3D queue preserves controls and in-flight ownership",
 	CHECK(slots[firstSlot].Request.FieldOfViewDegrees == expected.FieldOfViewDegrees);
 	CHECK(slots[firstSlot].Request.ViewRange == expected.ViewRange);
 	CHECK(slots[firstSlot].Request.DepthRange == expected.DepthRange);
-	CHECK(slots[firstSlot].Request.Front.Rgba8 == expected.Front.Rgba8);
+	CHECK(slots[firstSlot].Request.Front.Pixels == expected.Front.Pixels);
 
 	REQUIRE(
 		test_support::TransformImage3DResidentTestAccess::SetPhase(

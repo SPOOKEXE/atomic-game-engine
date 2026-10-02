@@ -1,5 +1,6 @@
 #pragma once
 
+#include <engine/assets/Texture.hpp>
 #include <engine/core/Name.hpp>
 
 #include <cstddef>
@@ -33,11 +34,12 @@ namespace engine::render {
 		LiveImageBinding Binding;
 		uint32_t Width = 0;
 		uint32_t Height = 0;
-		std::span<const std::byte> Rgba8;
+		std::span<const std::byte> Pixels;
 		LiveImageColorSpace ColorSpace = LiveImageColorSpace::Display;
+		assets::TextureFormat Format = assets::TextureFormat::RGBA8;
 	};
 
-	// Copies bounded RGBA8 images into renderer-owned, owner-scoped textures.
+	// Copies bounded typed images into renderer-owned, owner-scoped textures.
 	// Calls must run on the renderer's owning thread.
 	class LiveImagePublisher {
 	  public:
@@ -57,8 +59,9 @@ namespace engine::render {
 			const LiveImageBinding &binding,
 			uint32_t width,
 			uint32_t height,
-			std::span<const std::byte> rgba8,
-			LiveImageColorSpace colorSpace = LiveImageColorSpace::Display
+			std::span<const std::byte> pixels,
+			LiveImageColorSpace colorSpace = LiveImageColorSpace::Display,
+			assets::TextureFormat format = assets::TextureFormat::RGBA8
 		);
 
 		// Commits up to six current bindings as one renderer texture generation.
@@ -68,6 +71,10 @@ namespace engine::render {
 		// Retires one current binding and drops its texture once. A stale generation
 		// cannot retire its replacement.
 		bool Retire(Renderer &renderer, const LiveImageBinding &binding);
+
+		// Releases one current binding record without touching its resident texture.
+		// This transfers name ownership to another asynchronous renderer producer.
+		bool ReleaseBinding(const LiveImageBinding &binding);
 
 		// Retires every tracked binding for an owner and returns the number of
 		// binding records removed.

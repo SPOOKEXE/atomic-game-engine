@@ -49,7 +49,7 @@ namespace engine::render::imagegraph {
 		TransformImage3DStatus Run(const TransformImage3DRequest &request, TransformImage3DResult &result);
 
 	  private:
-		bool CreatePipeline();
+		bool CreatePipeline(const TransformImage3DRequest &request);
 		bool CreateResources(const TransformImage3DRequest &request);
 		bool UploadAndRecord(const TransformImage3DRequest &request);
 		bool Readback(const TransformImage3DRequest &request, TransformImage3DResult &result);

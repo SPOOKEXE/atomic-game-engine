@@ -3,6 +3,7 @@
 // Typed CPU-facing contract for the render-owned Transform Image 3D pass.
 // GPU device handles remain private to render.
 
+#include <engine/assets/Texture.hpp>
 #include <engine/core/Name.hpp>
 
 #include <array>
@@ -26,10 +27,14 @@ namespace engine::render::imagegraph {
 		GpuUnavailable
 	};
 	enum class TransformImage3DProjection : uint8_t { Perspective, Orthographic };
+	// Display applies sRGB reads and writes to normalized RGBA8 and RGBA4 formats.
+	// Linear selects UNORM storage there; float and single-channel formats stay numeric.
+	enum class TransformImage3DColorSpace : uint8_t { Linear, Display };
 
 	struct TransformImage3DSurface {
 		uint32_t Width = 0, Height = 0;
-		std::vector<std::byte> Rgba8;
+		assets::TextureFormat Format = assets::TextureFormat::RGBA8;
+		std::vector<std::byte> Pixels;
 	};
 
 	// The fixed plane is supplied with the result so a graph consumer can carry
@@ -45,13 +50,17 @@ namespace engine::render::imagegraph {
 		std::array<float, 4> Rotation{0, 0, 0, 1};
 		std::array<float, 2> TextureTiling{1, 1}, ViewRange{.001f, 10}, DepthRange{0, 1};
 		TransformImage3DProjection Projection = TransformImage3DProjection::Orthographic;
+		TransformImage3DColorSpace ColorSpace = TransformImage3DColorSpace::Linear;
 		float FieldOfViewDegrees = 45;
 	};
 
 	struct TransformImage3DResult {
 		uint32_t Width = 0, Height = 0;
 		TransformImage3DMesh Mesh;
-		std::vector<std::byte> RenderedRgba8, DepthRgba8;
+		// RenderedPixels preserves the input numeric format. DepthRgba8 is the
+		// fixed encoded-depth output and is always RGBA8 UNORM.
+		assets::TextureFormat RenderedFormat = assets::TextureFormat::RGBA8;
+		std::vector<std::byte> RenderedPixels, DepthRgba8;
 		std::vector<float> Depth;
 	};
 	struct TransformImage3DLiveRequest {
@@ -65,8 +74,7 @@ namespace engine::render::imagegraph {
 	TransformImage3DStatus ValidateTransformImage3D(const TransformImage3DRequest &request);
 
 	// Executes one bounded, synchronous export pass using an initialized renderer.
-	// This is for headless export and tests. A live frame scheduler owns asynchronous
-	// submission and resident outputs when that path is added.
+	// Live requests use the frame scheduler and keep their output resident.
 	TransformImage3DStatus ExecuteTransformImage3D(
 		Renderer &renderer, const TransformImage3DRequest &request, TransformImage3DResult &result
 	);

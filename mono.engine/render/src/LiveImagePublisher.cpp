@@ -1,3 +1,5 @@
+#include "TextureFormatSupport.hpp"
+
 #include <engine/assets/Texture.hpp>
 #include <engine/render/LiveImagePublisher.hpp>
 #include <engine/render/Renderer.hpp>
@@ -9,6 +11,42 @@
 #include <vector>
 
 namespace engine::render {
+	namespace {
+		assets::TextureFormat PublishedFormat(assets::TextureFormat format, LiveImageColorSpace colorSpace) {
+			if (format == assets::TextureFormat::RGBA8 || format == assets::TextureFormat::RGBA8_LINEAR)
+				return colorSpace == LiveImageColorSpace::Display ? assets::TextureFormat::RGBA8
+																  : assets::TextureFormat::RGBA8_LINEAR;
+			if (format == assets::TextureFormat::RGBA4_UNORM || format == assets::TextureFormat::RGBA4_SRGB)
+				return colorSpace == LiveImageColorSpace::Display ? assets::TextureFormat::RGBA4_SRGB
+																  : assets::TextureFormat::RGBA4_UNORM;
+			return format;
+		}
+
+		bool ValidUpload(
+			SDL_GPUDevice *device,
+			uint32_t width,
+			uint32_t height,
+			std::span<const std::byte> pixels,
+			LiveImageColorSpace colorSpace,
+			assets::TextureFormat format
+		) {
+			const assets::TextureFormat published = PublishedFormat(format, colorSpace);
+			const uint32_t bytesPerPixel = assets::BytesPerPixel(published);
+			const uint64_t pixelCount = uint64_t(width) * height;
+			if (width == 0 || height == 0 || width > LiveImagePublisher::MAXIMUM_SIDE ||
+				height > LiveImagePublisher::MAXIMUM_SIDE || bytesPerPixel == 0 ||
+				pixelCount > std::numeric_limits<uint64_t>::max() / bytesPerPixel ||
+				pixelCount * bytesPerPixel != pixels.size() ||
+				pixelCount * bytesPerPixel > LiveImagePublisher::MAXIMUM_IMAGE_BYTES ||
+				(colorSpace != LiveImageColorSpace::Display && colorSpace != LiveImageColorSpace::Linear) ||
+				!detail::TextureFormatForUpload(published))
+				return false;
+			const auto support = detail::TextureFormatForUpload(published);
+			const uint64_t uploadBytes = pixelCount * support->UploadBytesPerPixel;
+			return uploadBytes <= LiveImagePublisher::MAXIMUM_IMAGE_BYTES &&
+				   detail::SupportsTextureFormat(device, published);
+		}
+	}
 
 	uint64_t LiveImagePublisher::Key(core::Name owner, core::Name name) {
 		return (uint64_t(owner.Id()) << 32) | name.Id();
@@ -42,8 +80,9 @@ namespace engine::render {
 		const LiveImageBinding &binding,
 		uint32_t width,
 		uint32_t height,
-		std::span<const std::byte> rgba8,
-		LiveImageColorSpace colorSpace
+		std::span<const std::byte> pixels,
+		LiveImageColorSpace colorSpace,
+		assets::TextureFormat format
 	) {
 		if (!binding.Owner.IsValid() || !binding.Name.IsValid() || binding.Generation == 0) {
 			return LiveImagePublishStatus::Invalid;
@@ -55,20 +94,24 @@ namespace engine::render {
 			return LiveImagePublishStatus::Stale;
 		}
 
-		const uint64_t expectedBytes = uint64_t(width) * height * 4;
-		if (width == 0 || height == 0 || width > MAXIMUM_SIDE || height > MAXIMUM_SIDE ||
-			expectedBytes > MAXIMUM_IMAGE_BYTES || expectedBytes != rgba8.size() ||
-			(colorSpace != LiveImageColorSpace::Display && colorSpace != LiveImageColorSpace::Linear)) {
+		const assets::TextureFormat published = PublishedFormat(format, colorSpace);
+		if (!ValidUpload(
+				renderer.Backend().Device ? static_cast<SDL_GPUDevice *>(renderer.Backend().Device) : nullptr,
+				width,
+				height,
+				pixels,
+				colorSpace,
+				published
+			)) {
 			return LiveImagePublishStatus::Invalid;
 		}
 
 		assets::TextureData image;
 		image.Width = width;
 		image.Height = height;
-		image.Format = colorSpace == LiveImageColorSpace::Linear ? assets::TextureFormat::RGBA8_LINEAR
-																 : assets::TextureFormat::RGBA8;
+		image.Format = published;
 		try {
-			image.Pixels.assign(rgba8.begin(), rgba8.end());
+			image.Pixels.assign(pixels.begin(), pixels.end());
 		} catch (const std::bad_alloc &) {
 			return LiveImagePublishStatus::UploadFailed;
 		}
@@ -83,6 +126,7 @@ namespace engine::render {
 		const core::Name owner = images.front().Binding.Owner;
 		std::array<assets::TextureData, 6> prepared;
 		std::array<TextureBatchImage, 6> batch{};
+		std::array<assets::TextureFormat, 6> formats{};
 		for (size_t index = 0; index < images.size(); ++index) {
 			const LiveImageUpload &source = images[index];
 			const LiveImageBinding &binding = source.Binding;
@@ -94,19 +138,22 @@ namespace engine::render {
 			const auto held = Generations.find(Key(owner, binding.Name));
 			if (held == Generations.end() || held->second != binding.Generation)
 				return LiveImagePublishStatus::Stale;
-			const uint64_t bytes = uint64_t(source.Width) * source.Height * 4;
-			if (source.Width == 0 || source.Height == 0 || source.Width > MAXIMUM_SIDE ||
-				source.Height > MAXIMUM_SIDE || bytes > MAXIMUM_IMAGE_BYTES || bytes != source.Rgba8.size() ||
-				(source.ColorSpace != LiveImageColorSpace::Display &&
-				 source.ColorSpace != LiveImageColorSpace::Linear))
+			formats[index] = PublishedFormat(source.Format, source.ColorSpace);
+			if (!ValidUpload(
+					renderer.Backend().Device ? static_cast<SDL_GPUDevice *>(renderer.Backend().Device)
+											  : nullptr,
+					source.Width,
+					source.Height,
+					source.Pixels,
+					source.ColorSpace,
+					formats[index]
+				))
 				return LiveImagePublishStatus::Invalid;
 			prepared[index].Width = source.Width;
 			prepared[index].Height = source.Height;
-			prepared[index].Format = source.ColorSpace == LiveImageColorSpace::Linear
-										 ? assets::TextureFormat::RGBA8_LINEAR
-										 : assets::TextureFormat::RGBA8;
+			prepared[index].Format = formats[index];
 			try {
-				prepared[index].Pixels.assign(source.Rgba8.begin(), source.Rgba8.end());
+				prepared[index].Pixels.assign(source.Pixels.begin(), source.Pixels.end());
 			} catch (const std::bad_alloc &) {
 				return LiveImagePublishStatus::UploadFailed;
 			}
@@ -128,6 +175,14 @@ namespace engine::render {
 		}
 
 		(void)renderer.DropTexture(binding.Name, binding.Owner);
+		Generations.erase(found);
+		return true;
+	}
+
+	bool LiveImagePublisher::ReleaseBinding(const LiveImageBinding &binding) {
+		if (!binding.Owner.IsValid() || !binding.Name.IsValid() || binding.Generation == 0) return false;
+		const auto found = Generations.find(Key(binding.Owner, binding.Name));
+		if (found == Generations.end() || found->second != binding.Generation) return false;
 		Generations.erase(found);
 		return true;
 	}

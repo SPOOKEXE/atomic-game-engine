@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <unordered_map>
@@ -24,6 +25,11 @@ struct SDL_GPUSampler;
 struct SDL_GPUTexture;
 
 namespace engine::render {
+	// Device bytes stored for one uploaded pixel, including format expansion.
+	// @param format The source texture layout.
+	// @return The resident pixel stride, or empty for an unknown format.
+	std::optional<uint32_t> TextureUploadBytesPerPixel(assets::TextureFormat format) noexcept;
+
 	// One named image in a texture-table transaction. The caller owns Image
 	// through the synchronous AddBatch call.
 	struct TextureBatchImage {
@@ -183,6 +189,8 @@ namespace engine::render {
 
 		// Replaces one owned texture without releasing the prior handle. The caller
 		// must retire that handle only after the frame which sampled it completes.
+		// `format` records the logical pixel format even when the GPU upload uses
+		// a wider supported representation.
 		bool ReplaceAdopt(
 			const core::Name &name,
 			SDL_GPUTexture *texture,
@@ -190,7 +198,8 @@ namespace engine::render {
 			uint32_t height,
 			size_t bytes,
 			core::Name owner,
-			SDL_GPUTexture *&retired
+			SDL_GPUTexture *&retired,
+			assets::TextureFormat format
 		);
 
 		// The texture for a name, or null when it is not registered.

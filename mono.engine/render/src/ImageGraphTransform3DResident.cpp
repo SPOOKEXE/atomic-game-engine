@@ -1,8 +1,11 @@
 #include "ImageGraphTransform3DResident.hpp"
 
+#include "ImageGraphTransform3DFormats.hpp"
 #include "RendererState.hpp"
 
 #include <engine/render/Renderer.hpp>
+
+#include <limits>
 
 namespace engine::render {
 	void Renderer::Impl::ReleaseTransform3D(GraphResourceCache::Transform3DSlot &slot) {
@@ -55,7 +58,19 @@ namespace engine::render {
 		if (!request.Owner.IsValid() || !request.Name.IsValid() || request.Generation == 0 ||
 			imagegraph::ValidateTransformImage3D(request.Request) != imagegraph::TransformImage3DStatus::Ok)
 			return imagegraph::TransformImage3DQueueResult::Invalid;
-		const uint64_t bytes = request.Request.Front.Rgba8.size() + request.Request.Back.Rgba8.size();
+		if (State->Device != nullptr && !imagegraph::detail::SupportsTransformImage3DFormats(
+											State->Device,
+											request.Request.Front.Format,
+											request.Request.Back.Format,
+											!request.Request.Back.Pixels.empty(),
+											request.Request.ColorSpace
+										))
+			return imagegraph::TransformImage3DQueueResult::Invalid;
+		const uint64_t frontBytes = request.Request.Front.Pixels.size();
+		const uint64_t backBytes = request.Request.Back.Pixels.size();
+		if (backBytes > std::numeric_limits<uint64_t>::max() - frontBytes)
+			return imagegraph::TransformImage3DQueueResult::Invalid;
+		const uint64_t bytes = frontBytes + backBytes;
 		auto hasBudget = [&](uint64_t replaced) {
 			const uint64_t held = State->GraphResources.Transform3DSourceBytes - replaced;
 			return bytes <= imagegraph::MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES &&

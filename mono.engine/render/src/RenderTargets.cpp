@@ -9,6 +9,7 @@
 // indexed by level *and* slot.
 
 #include "DisplayColour.hpp"
+#include "ImageGraphTransform3DFormats.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "VulkanTimestamps.hpp"
@@ -25,6 +26,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -370,7 +372,19 @@ namespace engine::render {
 									  published->Generation >= slot.Generation;
 				if (slot.Succeeded && !slot.Cancelled && !superseded && !obsolete) {
 					SDL_GPUTexture *retired = nullptr;
-					const size_t bytes = size_t(slot.Width) * slot.Height * 4;
+					const uint32_t bytesPerPixel = imagegraph::detail::TransformImage3DBytesPerPixel(
+						slot.Request.Front.Format, slot.Request.ColorSpace
+					);
+					const uint64_t bytes64 = uint64_t(slot.Width) * slot.Height * bytesPerPixel;
+					if (bytesPerPixel == 0 || bytes64 > std::numeric_limits<size_t>::max()) {
+						ReleaseTransform3D(slot);
+						continue;
+					}
+					const size_t bytes = static_cast<size_t>(bytes64);
+					const assets::TextureFormat renderedFormat =
+						imagegraph::detail::ResolveTransformImage3DFormat(
+							slot.Request.Front.Format, slot.Request.ColorSpace
+						);
 					if (Textures.ReplaceAdopt(
 							slot.Name,
 							slot.Resources.Rendered,
@@ -378,7 +392,8 @@ namespace engine::render {
 							slot.Height,
 							bytes,
 							slot.Owner,
-							retired
+							retired,
+							renderedFormat
 						)) {
 						slot.Resources.Rendered = nullptr;
 						if (retired != nullptr) GraphResources.RetiredTextures.push_back(retired);

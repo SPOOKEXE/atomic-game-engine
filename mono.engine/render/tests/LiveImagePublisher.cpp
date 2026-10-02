@@ -37,6 +37,31 @@ namespace {
 	}
 }
 
+TEST_CASE(
+	"live image binding ownership transfers without dropping the resident texture", "[render][live-image]"
+) {
+	engine::render::LiveImagePublisher publisher;
+	const Name owner("live-image:transfer"), name("live-image:transfer-output");
+	const auto firstResult = publisher.BeginBinding(owner, name);
+	REQUIRE(firstResult.has_value());
+	const LiveImageBinding first = *firstResult;
+	CHECK(publisher.ActiveBindingCount() == 1);
+	CHECK_FALSE(publisher.ReleaseBinding({owner, name, first.Generation + 1}));
+	CHECK(publisher.ActiveBindingCount() == 1);
+	CHECK(publisher.ReleaseBinding(first));
+	CHECK(publisher.ActiveBindingCount() == 0);
+	CHECK_FALSE(publisher.ReleaseBinding(first));
+
+	const auto reboundResult = publisher.BeginBinding(owner, name);
+	REQUIRE(reboundResult.has_value());
+	const LiveImageBinding rebound = *reboundResult;
+	CHECK(rebound.Generation > first.Generation);
+	CHECK_FALSE(publisher.ReleaseBinding(first));
+	CHECK(publisher.ActiveBindingCount() == 1);
+	CHECK(publisher.ReleaseBinding(rebound));
+	CHECK(publisher.ActiveBindingCount() == 0);
+}
+
 TEST_CASE("live images are isolated by owner and retire once", "[render][gpu][live-image][.]") {
 	engine::render::test::FixtureDevice fixture;
 	fixture.Initialise();
