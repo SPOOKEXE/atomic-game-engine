@@ -73,6 +73,7 @@
         "imagegraph",
         "imagegraphexport",
         "imagegraphio",
+        "imagegraphphysics",
         "parallel"
       ]
     },
@@ -365,6 +366,7 @@
         "imagegraph",
         "imagegraphexport",
         "imagegraphio",
+        "imagegraphphysics",
         "parallel"
       ]
     },
@@ -827,6 +829,7 @@
         "core",
         "imagegraph",
         "imagegraphio",
+        "imagegraphphysics",
         "parallel"
       ]
     }

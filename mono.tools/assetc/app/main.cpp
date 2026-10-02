@@ -59,6 +59,8 @@ int main(int argc, char **argv) {
 	arguments.Value("flipbook-frames", "COUNT", "Populated static-atlas flipbook cells, up to side squared");
 	arguments.Value("graph-output", "NAME", "Select this named image graph output when baking .graph files");
 	arguments.Value("graph-tick", "TICK", "Evaluate .graph files at this fixed tick (default: 0)");
+	arguments.Flag("rigid-playing", "Capture source rigid playback as active; requires --export-graph");
+	arguments.Flag("rigid-frame-progress", "Capture source rigid frame advancement; requires --export-graph");
 	arguments.Value("graph-seed", "SEED", "Evaluate .graph files with this seed (default: 0)");
 	arguments.Value(
 		"graph-image", "SOURCE=PATH", "Explicit static image input for image.captured; may be repeated"
@@ -124,6 +126,12 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
+	if ((arguments.Has("rigid-playing") || arguments.Has("rigid-frame-progress")) &&
+		!arguments.Has("export-graph")) {
+		std::fputs("assetc: --rigid-playing and --rigid-frame-progress require --export-graph\n", stderr);
+		return 2;
+	}
+
 	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
 	if (!configured.Ok) {
 		std::fprintf(stderr, "%s\n", configured.Error.c_str());
@@ -136,6 +144,8 @@ int main(int argc, char **argv) {
 
 	if (const auto graph = arguments.Get("export-graph")) {
 		assetc::GraphExportSettings exportSettings;
+		exportSettings.RigidPlaying = arguments.Has("rigid-playing");
+		exportSettings.RigidFrameProgress = arguments.Has("rigid-frame-progress");
 		exportSettings.Input = std::filesystem::path(*graph);
 		const auto output = arguments.Get("output");
 		const auto selected = arguments.Get("graph-output");

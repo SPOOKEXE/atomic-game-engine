@@ -7,6 +7,7 @@
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/WavClip.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
+#include <engine/imagegraphphysics/RigidReplay.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1233,6 +1234,8 @@ namespace engine::imagegraphexport::runner {
 		arguments.Value("input", "PATH", "Authored imagegraph text document");
 		arguments.Value("output-id", "ID", "Durable output ID to evaluate");
 		arguments.Value("output", "PATH", "PNG, BMP or EXR path, or JSON image-array manifest path");
+		arguments.Flag("rigid-playing", "Capture source rigid playback as active");
+		arguments.Flag("rigid-frame-progress", "Capture source rigid frame advancement");
 		arguments.Flag("value", "Evaluate a numeric scalar or array output and print its value record");
 		arguments.Value("audio-capture", "PATH", "Bounded recorded audio input frames");
 		arguments.Value("audio-source", "SOURCE=PATH", "Explicit source PCM WAV whole clip; may be repeated");
@@ -1585,12 +1588,18 @@ namespace engine::imagegraphexport::runner {
 		if (bundleOutput) bundleFrames.reserve(frameCount);
 		uint64_t rangeOutputBytes = 0;
 		uint64_t tick = tickRange.First;
+		engine::imagegraphphysics::RigidProvider rigidProvider;
 		engine::imagegraph::CapturedFeedbackHost replayHost;
 		for (size_t frameIndex = 0; frameIndex < frameCount; frameIndex++) {
 			const std::filesystem::path framePath =
 				bundleOutput ? FramePath(bundleStage.Directory / "frame.png", tick)
 							 : (renderRange ? FramePath(outputFile, tick) : outputFile);
 			auto request = liveRequest ? *liveRequest : engine::imagegraph::EvaluationRequest{};
+			if (!request.RigidProvider) request.RigidProvider = &rigidProvider;
+			if (!liveRequest) {
+				request.RigidPlaying = arguments.Has("rigid-playing");
+				request.RigidFrameProgress = arguments.Has("rigid-frame-progress");
+			}
 			if (!liveRequest || renderRange)
 				(void)engine::imagegraph::SetFrameTime(
 					request, authoredFrame.value_or(engine::imagegraph::FrameTime{tick})
@@ -1607,7 +1616,14 @@ namespace engine::imagegraphexport::runner {
 			request.HostCaptures = captures;
 			request.HostProvider = provider;
 			if (!replayHost.Prepare(
-					document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, *outputId
+					document,
+					plan,
+					liveRequest ? liveRequest->RigidAuthoringRevision : 1,
+					1,
+					request,
+					diagnostic,
+					Limits::MaximumEvaluationBytes,
+					*outputId
 				)) {
 				PrintDiagnostic(errors, diagnostic);
 				return 1;

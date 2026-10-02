@@ -34,4 +34,18 @@ namespace engine::imagegraphexport {
 		std::vector<std::filesystem::path> *retainedTemporaryDirectories = nullptr
 	);
 
+	// The caller attests this snapshot belongs to the selected node, immutable document and exact
+	// request observations. Single exports encode its owned surfaces without evaluating upstream.
+	// Animated exports use these resolved controls and a fresh replay owner for their full range.
+	bool ExportAuthoredGraphNode(
+		const engine::imagegraph::Document &document,
+		const engine::imagegraph::Plan &plan,
+		const engine::imagegraph::EvaluationRequest &request,
+		const GraphExportSettings &grants,
+		std::string_view nodeId,
+		const engine::imagegraph::EvaluationSnapshot &preparedInputs,
+		std::string &failure,
+		std::vector<std::filesystem::path> *retainedTemporaryDirectories = nullptr
+	);
+
 }

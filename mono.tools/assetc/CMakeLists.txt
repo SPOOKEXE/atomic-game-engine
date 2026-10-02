@@ -19,3 +19,14 @@ target_compile_options(assetc PRIVATE ${MONO_COMPILE_OPTIONS})
 
 set_target_properties(assetc PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/tools")
+
+if(MONO_BUILD_TESTS)
+	add_test(
+		NAME assetc_cli_rigid_observations
+		COMMAND "${CMAKE_COMMAND}"
+			-DASSETC=$<TARGET_FILE:assetc>
+			-DIMAGEGRAPH=$<TARGET_FILE:imagegraph>
+			-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/rigid.graph
+			-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-tests/rigid
+			-P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RigidCli.cmake")
+endif()

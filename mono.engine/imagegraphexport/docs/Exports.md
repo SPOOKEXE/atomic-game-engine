@@ -120,3 +120,62 @@ entries from order replays. Raster counters report real stream bytes read and
 actual decode attempts once at those boundaries. Directory counters report
 skipped invalid images and emitted pixel payloads. The last-session gauge counts
 owned logical observation bytes; it does not claim allocator heap residency.
+
+## CSV and tilemap publication
+
+`pc.csv_file_write` uses source row traversal across flat, nested and mixed array
+carriers. It preserves comma-space separators, mixed-row separator quirks and
+literal string commas, quotes and newlines. It appends `.csv` unless that exact
+extension exists, and requires a write grant for the resulting path. Its source
+string formatter is separate from JSON serialization. Runtime object conversions
+whose source `toString` behavior is unavailable fail explicitly.
+
+`pc.tile_tilemap_export` executes only through an explicitly selected manual
+callback. It requires an owned Tileset and bounded finite RGBA16Float tilemap,
+reading red half samples only. CSV retains each row and replaces the extension
+with `.csv`. GameMaker Room replaces it with `.yy` and requires an exact named
+read dependency `tileset_gamemaker2_room.yy`; unknown fields of that actual JSON
+template are retained. The source square-map iteration retains row order;
+rectangular GameMaker maps fail because source indexing exceeds a row or column.
+The unused source GM Room pathname is never read.
+
+Both writers stage their recording before atomic publication and preserve prior
+files on refusal. Assetc uses `--execute-node`, `--graph-file-write NODE=PATH` and,
+for a room template, `--graph-file-resource NODE:tileset_gamemaker2_room.yy=PATH`.
+The [numeric and text profiles](CsvTileProfiles.md) identify the verified official
+HTML5 string behavior and the remaining proprietary runtime observation gates.
+
+## Rigid playback observations
+
+The shared runner and explicit host callbacks attach a synchronous native rigid
+provider when the caller supplies none. Its lifetime covers the complete replay
+range or input preparation and callback. Live requests retain the caller's
+provider, journals, authoring revision and playback observations. Prepared manual
+inputs use the shared stateful evaluator once, so a file action consumes the same
+owned upstream generation as its replay inputs.
+
+File-backed assetc and runner commands expose `--rigid-playing` and
+`--rigid-frame-progress`; both default false. Supply both for the played-frame
+sampling profile used by source animation rendering. The pinned source
+`animation_controller.render()` sets both observations true. Paused manual
+snapshots can leave them false. The native host pins its documented Box2D profile;
+this does not establish the unpublished source runtime's solver parity.
+
+Manual hosts that already called `PrepareNodeInputs` pass its immutable snapshot
+to the capture-only `ExecuteGraphHostNode(document, request, nodeId, snapshot, ...)`
+overload. The caller attests that snapshot, document, selected node and exact
+request observations belong to the same preparation. Snapshots do not expose
+identity metadata, so the exporter validates the selected node, provider and byte
+bounds without claiming to verify that relationship. It never evaluates upstream
+nodes or advances journals on this path. Request-only execution prepares inputs
+from a prefix journal; a completed current-frame journal uses the snapshot path.
+
+The prepared `ExportAuthoredGraphNode` overload uses that same caller attestation
+for `pc.export`. Single exports build a bounded private graph of owned captured
+surfaces, preserving native formats, flat array order, scaling and inherited
+sampling. The existing encoder and transactional batch publisher consume those
+surfaces without reading graph inputs or advancing upstream simulations. Animated
+exports resolve controls from the snapshot and reconstruct their full requested
+range with one fresh replay owner. The supplied current-frame journals remain
+unchanged. Authored export scopes report logical captured image clone bytes and
+operation counts at the actual copy boundary.

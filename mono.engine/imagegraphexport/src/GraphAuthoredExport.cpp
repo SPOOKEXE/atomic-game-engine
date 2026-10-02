@@ -1,6 +1,10 @@
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
+#include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphInputs.hpp>
+#include <engine/imagegraphphysics/RigidReplay.hpp>
 
 #include <algorithm>
 #include <array>
@@ -666,8 +670,10 @@ namespace engine::imagegraphexport {
 		std::string_view nodeId,
 		std::span<const GraphExportRegion> regions,
 		std::string &failure,
-		std::vector<std::filesystem::path> *retainedTemporaryDirectories
+		std::vector<std::filesystem::path> *retainedTemporaryDirectories,
+		const engine::imagegraph::EvaluationSnapshot *preparedInputs = nullptr
 	) {
+		ENGINE_PROFILE_CAT("image composer authored export", engine::core::ProfileCategory::Engine);
 		using namespace engine::imagegraph;
 		Diagnostic diagnostic;
 		const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &v) {
@@ -685,9 +691,32 @@ namespace engine::imagegraphexport {
 			failure = "selected output must bind this export node preview";
 			return false;
 		}
-		EvaluationSnapshot snapshot;
-		if (EvaluateNodeInputs(document, plan, nodeId, request, snapshot, diagnostic) != Status::Ok) {
-			failure = diagnostic.Message;
+		EvaluationSnapshot directInputs;
+		CapturedFeedbackHost inputHost;
+		engine::imagegraphphysics::RigidProvider rigidProvider;
+		auto inputRequest = request;
+		if (!inputRequest.RigidProvider) inputRequest.RigidProvider = &rigidProvider;
+		if (!preparedInputs) {
+			if (!inputHost.PrepareNodeInputs(
+					document, plan, request.RigidAuthoringRevision, 0, nodeId, inputRequest, diagnostic
+				)) {
+				failure = diagnostic.Message;
+				return false;
+			}
+			if (inputHost.Active())
+				preparedInputs = &inputHost.Snapshot();
+			else {
+				if (EvaluateNodeInputs(document, plan, nodeId, inputRequest, directInputs, diagnostic) !=
+					Status::Ok) {
+					failure = diagnostic.Message;
+					return false;
+				}
+				preparedInputs = &directInputs;
+			}
+		}
+		const auto &snapshot = *preparedInputs;
+		if (snapshot.RetainedBytes() > Limits::MaximumEvaluationBytes / 3) {
+			failure = "authored prepared inputs exceed their export budget";
 			return false;
 		}
 		std::vector<AuthoredValue> values;
@@ -746,12 +775,96 @@ namespace engine::imagegraphexport {
 		if (!PlanAuthoredGraphExport(invocation, grants, regions, exports, failure, imageCount)) return false;
 		for (auto &settings : exports) {
 			if (arraySurface && !settings.ArrayIndex) settings.ArrayIndex = 0;
-			settings.LinearScaling = document.Project && document.Project->Interpolation == 1;
+			settings.LinearScaling = snapshot.InheritedInterpolation() == 1;
 		}
 		double exportType = 0;
 		(void)Number(invocation, "type", exportType);
+		if (exportType == 0) {
+			if (imageCount > std::min(Limits::MaximumNodes, Limits::MaximumOutputs)) {
+				failure = "prepared export surface count exceeds its captured graph bound";
+				return false;
+			}
+			std::vector<const Image *> surfaces;
+			for (const auto &image : snapshot.Images())
+				if (image.Port == "surface") surfaces.push_back(&image.Data);
+			for (const auto &array : snapshot.ImageArrays()) {
+				if (array.Port != "surface") continue;
+				for (const auto &item : array.Data.Items) {
+					const auto *index = std::get_if<size_t>(&item.Data);
+					if (!index || *index >= array.Data.Images.size()) {
+						failure = "prepared export surface array has an invalid image reference";
+						return false;
+					}
+					surfaces.push_back(&array.Data.Images[*index]);
+				}
+			}
+			if (surfaces.empty() ||
+				surfaces.size() > std::min(Limits::MaximumNodes, Limits::MaximumOutputs)) {
+				failure = "prepared export surface count exceeds its captured graph bound";
+				return false;
+			}
+			Document capturedDocument;
+			std::vector<RequestImageSource> captures;
+			uint64_t retained = snapshot.RetainedBytes();
+			for (size_t index = 0; index < surfaces.size(); ++index) {
+				const auto bytes = surfaces[index]->Pixels.capacity() + sizeof(RequestImageSource) +
+								   sizeof(Node) + sizeof(Output) + 1024;
+				if (bytes > Limits::MaximumEvaluationBytes / 2 -
+								std::min(retained, Limits::MaximumEvaluationBytes / 2)) {
+					failure = "prepared export captured surfaces exceed their combined byte budget";
+					return false;
+				}
+				retained += bytes;
+				const auto id = "prepared/" + std::to_string(index);
+				capturedDocument.Nodes.push_back({id, "image.captured", "", {}, {{"source_id", id}}});
+				capturedDocument.Outputs.push_back({id, id, "image"});
+				captures.push_back({id, *surfaces[index]});
+				engine::core::Metrics::Count(
+					"image composer prepared image clone bytes",
+					static_cast<double>(captures.back().Data.Pixels.size())
+				);
+				engine::core::Metrics::Count("image composer prepared image clones", 1);
+			}
+			Plan capturedPlan;
+			if (Compile(capturedDocument, capturedPlan, diagnostic) != Status::Ok) {
+				failure = diagnostic.Message;
+				return false;
+			}
+			for (auto &settings : exports) {
+				const auto index = settings.ArrayIndex.value_or(0);
+				if (index >= surfaces.size()) {
+					failure = "prepared export selects an absent surface member";
+					return false;
+				}
+				settings.OutputId = "prepared/" + std::to_string(index);
+				settings.ArrayIndex.reset();
+				settings.ImageInputs.clear();
+			}
+			EvaluationRequest capturedRequest;
+			(void)SetFrameTime(capturedRequest, {request.Tick, request.Subframe, request.NegativeFrame});
+			capturedRequest.MaximumImageDimension = request.MaximumImageDimension;
+			capturedRequest.ImageSources = captures;
+			return ExportBatch(
+				exports,
+				capturedDocument,
+				capturedPlan,
+				capturedRequest,
+				false,
+				failure,
+				retainedTemporaryDirectories
+			);
+		}
+		// A completed current-frame journal is not the prefix of the first requested animation frame.
+		// The shared runner reconstructs the complete range with one fresh replay owner.
+		auto rangeRequest = request;
+		rangeRequest.SimulationReplay = nullptr;
+		rangeRequest.SurfaceReplay = nullptr;
+		rangeRequest.RandomReplay = nullptr;
+		rangeRequest.DataReplay = nullptr;
+		rangeRequest.RigidReplay = nullptr;
+		rangeRequest.ReuseSimulationFrame = false;
 		return ExportBatch(
-			exports, document, plan, request, exportType != 0, failure, retainedTemporaryDirectories
+			exports, document, plan, rangeRequest, true, failure, retainedTemporaryDirectories
 		);
 	}
 
@@ -789,6 +902,8 @@ namespace engine::imagegraphexport {
 		if (!LoadGraphImageInputs(grants, sources, failure)) return false;
 		EvaluationRequest request;
 		request.Tick = grants.Frames.First;
+		request.RigidPlaying = grants.RigidPlaying;
+		request.RigidFrameProgress = grants.RigidFrameProgress;
 		request.HostProvider = grants.HostProvider;
 		request.HostCaptures = grants.HostCaptures;
 		request.ImageSources = sources;
@@ -799,14 +914,15 @@ namespace engine::imagegraphexport {
 		);
 	}
 
-	bool ExportAuthoredGraphNode(
+	static bool ExportAuthoredGraphLive(
 		const engine::imagegraph::Document &document,
 		const engine::imagegraph::Plan &plan,
 		const engine::imagegraph::EvaluationRequest &request,
 		const GraphExportSettings &grants,
 		std::string_view nodeId,
 		std::string &failure,
-		std::vector<std::filesystem::path> *retainedTemporaryDirectories
+		std::vector<std::filesystem::path> *retainedTemporaryDirectories,
+		const engine::imagegraph::EvaluationSnapshot *preparedInputs
 	) {
 		using namespace engine::imagegraph;
 		auto resolvedGrants = grants;
@@ -847,12 +963,47 @@ namespace engine::imagegraphexport {
 					nodeId,
 					{},
 					failure,
-					retainedTemporaryDirectories
+					retainedTemporaryDirectories,
+					preparedInputs
 				);
 			}
 		}
 		return ExportAuthoredGraphImpl(
-			document, plan, request, resolvedGrants, nodeId, {}, failure, retainedTemporaryDirectories
+			document,
+			plan,
+			request,
+			resolvedGrants,
+			nodeId,
+			{},
+			failure,
+			retainedTemporaryDirectories,
+			preparedInputs
+		);
+	}
+
+	bool ExportAuthoredGraphNode(
+		const engine::imagegraph::Document &document,
+		const engine::imagegraph::Plan &plan,
+		const engine::imagegraph::EvaluationRequest &request,
+		const GraphExportSettings &grants,
+		std::string_view nodeId,
+		std::string &failure,
+		std::vector<std::filesystem::path> *retained
+	) {
+		return ExportAuthoredGraphLive(document, plan, request, grants, nodeId, failure, retained, nullptr);
+	}
+	bool ExportAuthoredGraphNode(
+		const engine::imagegraph::Document &document,
+		const engine::imagegraph::Plan &plan,
+		const engine::imagegraph::EvaluationRequest &request,
+		const GraphExportSettings &grants,
+		std::string_view nodeId,
+		const engine::imagegraph::EvaluationSnapshot &preparedInputs,
+		std::string &failure,
+		std::vector<std::filesystem::path> *retained
+	) {
+		return ExportAuthoredGraphLive(
+			document, plan, request, grants, nodeId, failure, retained, &preparedInputs
 		);
 	}
 

@@ -25,6 +25,9 @@ namespace engine::imagegraphexport {
 			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle);
 		engine::imagegraph::TickRange Frames{};
 		bool Animation = false;
+		// Captured source playback observations for file-backed execution; live requests retain their own.
+		bool RigidPlaying = false;
+		bool RigidFrameProgress = false;
 		double Scale = 1;
 		bool LinearScaling = false;
 		uint8_t PngSubformat = 2;
@@ -90,6 +93,18 @@ namespace engine::imagegraphexport {
 		const engine::imagegraph::Plan &plan,
 		const engine::imagegraph::EvaluationRequest &request,
 		std::string_view nodeId,
+		engine::imagegraph::HostNodeCapture &capture,
+		std::string &failure
+	);
+
+	// Capture only. The caller attests that preparedInputs came from the selected node in this
+	// immutable document at these exact request observations. EvaluationSnapshot has no identity
+	// metadata to validate that relationship; this overload never evaluates upstream nodes again.
+	bool ExecuteGraphHostNode(
+		const engine::imagegraph::Document &document,
+		const engine::imagegraph::EvaluationRequest &request,
+		std::string_view nodeId,
+		const engine::imagegraph::EvaluationSnapshot &preparedInputs,
 		engine::imagegraph::HostNodeCapture &capture,
 		std::string &failure
 	);

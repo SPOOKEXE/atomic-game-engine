@@ -1,5 +1,8 @@
 #include <engine/bake/GifSequence.hpp>
+#include <engine/bake/Image.hpp>
+#include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/HostCapture.hpp>
+#include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -15,6 +18,8 @@
 TEST_SUITE_ID("engine.imagegraphexport.graph_export")
 TEST_DEPENDS("engine.imagegraphexport.runner")
 TEST_DEPENDS("engine.parallel.process")
+TEST_DEPENDS("engine.imagegraph.flip_replay")
+TEST_DEPENDS("engine.imagegraph.simulation_replay")
 
 TEST_CASE("graph exporter builds literal encoder argv for each source format", "[assetc][imagegraph]") {
 	engine::imagegraphexport::GraphExportSettings settings;
@@ -279,4 +284,250 @@ TEST_CASE(
 	EvaluatedValue value;
 	REQUIRE(EvaluateValue(document, plan, "text", request, value, diagnostic) == Status::Ok);
 	CHECK(std::get<std::string>(value.Data) == "live contents");
+}
+
+TEST_CASE(
+	"Prepared manual snapshots preserve mixed Verlet and FLIP generations", "[imagegraph][export][prepared]"
+) {
+	using namespace engine::imagegraph;
+	const auto directory = std::filesystem::temp_directory_path() / "atomic-prepared-mixed-export";
+	std::filesystem::create_directories(directory);
+	struct Cleanup {
+		std::filesystem::path Directory;
+		~Cleanup() {
+			std::error_code error;
+			std::filesystem::remove_all(Directory, error);
+		}
+	} cleanup{directory};
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"grid", "pc.verlet_sim_mesh_grid", "", {}, {{"subdivision", Vector2{1, 1}}}},
+		{"step", "image.verlet_simple", "", {}, {{"substep", int64_t{1}}, {"gravity", Vector2{0, 1}}}},
+		{"array", "pc.array", "", {}, {}},
+		{"length", "pc.array_length", "", {}, {}},
+		{"solid", "pc.solid", "", {}, {{"dimension_unit", EnumValue{0}}}},
+		{"export",
+		 "pc.export",
+		 "",
+		 {},
+		 {{"directory", directory.string()},
+		  {"file_name", std::string{"prepared"}},
+		  {"template", std::string{"%d%n"}},
+		  {"type", EnumValue{0}}}}
+	};
+	document.Nodes[2].DynamicInputs = {{"input_0", ValueType::Any, std::nullopt}};
+	document.Links = {
+		{"grid", "mesh", "step", "mesh"},
+		{"step", "mesh", "array", "input_0"},
+		{"array", "array", "length", "array"},
+		{"length", "size", "solid", "dimension"},
+		{"solid", "surface_out", "export", "surface"}
+	};
+	SECTION("Verlet prepared generation") {}
+	SECTION("Mixed Verlet and FLIP prepared generation") {
+		document.Nodes.push_back(
+			{"fluid",
+			 "pc.flip_domain",
+			 "",
+			 {},
+			 {{"dimension_unit", EnumValue{0}},
+			  {"dimension", Vector2{16, 16}},
+			  {"particle_size", int64_t{2}},
+			  {"attribute_max_particles", 16.},
+			  {"attribute_iteration", 2.},
+			  {"attribute_iteration_particle", 0.},
+			  {"attribute_skip_incompressible", true},
+			  {"gravity", 5.},
+			  {"time_step", .1}}}
+		);
+		document.Nodes.push_back(
+			{"fill",
+			 "pc.flip_fill",
+			 "",
+			 {},
+			 {{"spawn_area_unit", EnumValue{0}}, {"spawn_area", Area{8, 8, 4, 4}}, {"density", .5}}}
+		);
+		document.Nodes.push_back(
+			{"update",
+			 "pc.flip_render",
+			 "",
+			 {},
+			 {{"update_step", int64_t{1}},
+			  {"particle_size", 2.},
+			  {"draw_obstracles", false},
+			  {"threshold", false},
+			  {"alpha", Vector2{1, 1}},
+			  {"lifespan", Vector2{0, 0}}}}
+		);
+		document.Nodes.push_back({"combined", "image.blend", "", {}, {}});
+		document.Links.back() = {"combined", "image", "export", "surface"};
+		document.Links.insert(
+			document.Links.end(),
+			{{"fluid", "domain", "fill", "domain"},
+			 {"fill", "domain", "update", "domain"},
+			 {"update", "rendered", "combined", "foreground"},
+			 {"solid", "surface_out", "combined", "background"}}
+		);
+	}
+	document.Outputs = {{"image", "solid", "surface_out"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compiled = Compile(document, plan, diagnostic);
+	INFO(diagnostic.NodeId << ':' << diagnostic.Port << ' ' << diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	EvaluationRequest request;
+	CapturedFeedbackHost host;
+	const bool prepared = host.PrepareNodeInputs(document, plan, 1, 1, "export", request, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(prepared);
+	REQUIRE(host.Active());
+	const auto &snapshot = host.Snapshot();
+	REQUIRE(snapshot.Images().size() == 1);
+	REQUIRE(request.SimulationReplay);
+	const auto simulation = *request.SimulationReplay;
+	const auto surfaces = *request.SurfaceReplay;
+	const auto random = *request.RandomReplay;
+	const auto data = *request.DataReplay;
+	const auto rigid = *request.RigidReplay;
+	const auto expectedHash = SurfaceHash(snapshot.Images()[0].Data);
+	struct Sink final : HostNodeProvider {
+		uint64_t Expected;
+		size_t Calls = 0;
+		explicit Sink(uint64_t expected) : Expected(expected) {}
+		bool Capture(const HostNodeInvocation &in, HostNodeCapture &out, std::string &failure) override {
+			if (in.Images.size() != 1 || in.Images[0].Port != "surface" || !in.Images[0].Data ||
+				SurfaceHash(*in.Images[0].Data) != Expected) {
+				failure = "prepared pixels were replaced";
+				return false;
+			}
+			++Calls;
+			out.Authored = in.Authored;
+			out.Inputs.assign(in.Inputs.begin(), in.Inputs.end());
+			return true;
+		}
+	} sink{expectedHash};
+	request.HostProvider = &sink;
+	for (size_t repeat = 0; repeat < 2; ++repeat) {
+		HostNodeCapture capture;
+		std::string failure;
+		const bool captured = engine::imagegraphexport::ExecuteGraphHostNode(
+			document, request, "export", snapshot, capture, failure
+		);
+		INFO(failure);
+		REQUIRE(captured);
+		CHECK(*request.SimulationReplay == simulation);
+		CHECK(*request.SurfaceReplay == surfaces);
+		CHECK(*request.RandomReplay == random);
+		CHECK(*request.DataReplay == data);
+		CHECK(*request.RigidReplay == rigid);
+		CHECK(SurfaceHash(snapshot.Images()[0].Data) == expectedHash);
+	}
+	CHECK(sink.Calls == 2);
+	engine::imagegraphexport::GraphExportSettings grants;
+	grants.Input = directory / "unused-context.graph";
+	grants.Output = directory;
+	std::string exportFailure;
+	const bool published = engine::imagegraphexport::ExportAuthoredGraphNode(
+		document, plan, request, grants, "export", snapshot, exportFailure
+	);
+	INFO(exportFailure);
+	REQUIRE(published);
+	const auto target = directory / "prepared.png";
+	const auto readFile = [&] {
+		std::ifstream stream(target, std::ios::binary);
+		return std::string{std::istreambuf_iterator<char>(stream), {}};
+	};
+	const auto bytes = readFile();
+	engine::assets::TextureData decoded;
+	REQUIRE(
+		engine::bake::ReadImage(
+			{reinterpret_cast<const std::byte *>(bytes.data()), bytes.size()}, decoded, exportFailure
+		)
+	);
+	CHECK(decoded.Width == snapshot.Images()[0].Data.Width);
+	CHECK(decoded.Height == snapshot.Images()[0].Data.Height);
+	CHECK(
+		std::equal(
+			decoded.Pixels.begin(),
+			decoded.Pixels.end(),
+			snapshot.Images()[0].Data.Pixels.begin(),
+			snapshot.Images()[0].Data.Pixels.end(),
+			[](std::byte left, uint8_t right) { return std::to_integer<uint8_t>(left) == right; }
+		)
+	);
+	CHECK(*request.SimulationReplay == simulation);
+	CHECK(*request.SurfaceReplay == surfaces);
+	CHECK(*request.RandomReplay == random);
+	CHECK(*request.DataReplay == data);
+	CHECK(*request.RigidReplay == rigid);
+	grants.Output = directory / "other-grant";
+	CHECK_FALSE(
+		engine::imagegraphexport::ExportAuthoredGraphNode(
+			document, plan, request, grants, "export", snapshot, exportFailure
+		)
+	);
+	CHECK(readFile() == bytes);
+	HostNodeCapture capture;
+	std::string failure;
+	CHECK_FALSE(
+		engine::imagegraphexport::ExecuteGraphHostNode(
+			document, request, "absent", snapshot, capture, failure
+		)
+	);
+	request.HostProvider = nullptr;
+	CHECK_FALSE(
+		engine::imagegraphexport::ExecuteGraphHostNode(
+			document, request, "export", snapshot, capture, failure
+		)
+	);
+	CHECK(sink.Calls == 2);
+}
+
+TEST_CASE(
+	"Prepared capability execution refuses image arrays before invoking its provider",
+	"[imagegraph][export][prepared]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	Node array{"array", "value.array", "", {}, {}};
+	array.DynamicInputs = {{"image", ValueType::Image, std::nullopt}};
+	document.Nodes = {
+		{"solid",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t{1}}, {"height", int64_t{1}}, {"colour", Colour{255, 0, 0, 255}}}},
+		array,
+		{"capture", "pc.array_copy", "", {}, {}}
+	};
+	document.Links = {{"solid", "image", "array", "image"}, {"array", "array", "capture", "array"}};
+	document.Outputs = {{"image", "array", "array"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	EvaluationSnapshot snapshot;
+	EvaluationRequest request;
+	REQUIRE(EvaluateNodeInputs(document, plan, "capture", request, snapshot, diagnostic) == Status::Ok);
+	REQUIRE(snapshot.ImageArrays().size() == 1);
+	struct Sink final : HostNodeProvider {
+		size_t Calls = 0;
+		bool Capture(const HostNodeInvocation &, HostNodeCapture &, std::string &) override {
+			++Calls;
+			return true;
+		}
+	} sink;
+	request.HostProvider = &sink;
+	HostNodeCapture capture;
+	capture.Failure = "previous recording";
+	std::string failure;
+	CHECK_FALSE(
+		engine::imagegraphexport::ExecuteGraphHostNode(
+			document, request, "capture", snapshot, capture, failure
+		)
+	);
+	CHECK(failure == "prepared host image arrays need an explicit normalized capture route");
+	CHECK(sink.Calls == 0);
+	CHECK(capture.Failure == "previous recording");
 }

@@ -1,0 +1,29 @@
+imagegraph 9
+node "owner" "pc.rigid_group_inline" "" 0 0
+value 0 "owner" "dimension" v 32 32
+value 0 "owner" "dimension_unit" e 0
+value 0 "owner" "simulation_scale" d 16
+value 0 "owner" "strength" d 10
+value 0 "owner" "use_wall" b 1
+value 0 "owner" "walls" i 2
+node "texture" "image.solid" "rigid" 0 0
+value 1 "texture" "width" i 4
+value 1 "texture" "height" i 4
+value 1 "texture" "colour" c 255 80 20 255
+node "body" "pc.rigid_object" "rigid" 0 0
+value 2 "body" "spawn" b 1
+value 2 "body" "spawn_frame" i 0
+value 2 "body" "spawn_position" v 16 6
+value 2 "body" "spawn_position_unit" e 0
+value 2 "body" "fix_rotation" b 1
+node "render" "pc.rigid_render" "rigid" 0 0
+value 3 "render" "timestep" d 100
+value 3 "render" "round_position" b 1
+dynamic 3 "render" "object_0" rigid 0
+group "rigid" "Rigid native contact study" ""
+group_owner "rigid" "owner"
+link "texture" "image" "body" "texture"
+link "body" "object" "render" "object_0"
+output "image" "render" "surface_out"
+output "atlas" "render" "atlas_out"
+project 32 32 0 3 0

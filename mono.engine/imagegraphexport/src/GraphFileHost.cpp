@@ -2,6 +2,7 @@
 #include "GraphRasterHost.hpp"
 #include "GraphSpriteHost.hpp"
 #include "GraphTextFileHost.hpp"
+#include "GraphTileHost.hpp"
 
 #include <engine/bake/LayeredImage.hpp>
 #include <engine/imagegraph/WavExport.hpp>
@@ -140,6 +141,8 @@ namespace engine::imagegraphexport {
 		if (invocation.Authored.Type == "pc.3_d_mesh_obj" || invocation.Authored.Type == "pc.3_d_mesh_json" ||
 			invocation.Authored.Type == "pc.3_d_mesh_export")
 			return CaptureGraphMeshFile(Grants, Policy, invocation, output, failure);
+		if (invocation.Authored.Type == "pc.tile_tilemap_export")
+			return CaptureGraphTileFile(invocation, Grants, Policy, output, failure);
 		if (IsGraphTextFileHost(invocation.Authored.Type))
 			return CaptureGraphTextFile(Grants, Policy, invocation, output, failure);
 		if (IsGraphSpriteHost(invocation.Authored.Type))

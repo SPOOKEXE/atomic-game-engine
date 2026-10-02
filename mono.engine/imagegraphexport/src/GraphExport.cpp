@@ -1,10 +1,12 @@
 #include <engine/bake/GifWrite.hpp>
 #include <engine/bake/Image.hpp>
+#include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/HostCapture.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
 #include <engine/imagegraphexport/GraphInputs.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
+#include <engine/imagegraphphysics/RigidReplay.hpp>
 #include <engine/parallel/Process.hpp>
 
 #include <algorithm>
@@ -375,6 +377,8 @@ namespace engine::imagegraphexport {
 			if (settings.RetainTemporaryFrames && animation && !bundle && extension == ".apng")
 				values.insert(values.end(), {"--debug-frame-directory", stage.Directory.string()});
 			if (settings.NativeGif) values.push_back("--require-rgba8");
+			if (settings.RigidPlaying) values.push_back("--rigid-playing");
+			if (settings.RigidFrameProgress) values.push_back("--rigid-frame-progress");
 			if (settings.ArrayIndex)
 				values.insert(values.end(), {"--array-index", std::to_string(*settings.ArrayIndex)});
 			if (animation) {
@@ -725,6 +729,8 @@ namespace engine::imagegraphexport {
 		}
 		EvaluationRequest request;
 		request.Tick = settings.Frames.First;
+		request.RigidPlaying = settings.RigidPlaying;
+		request.RigidFrameProgress = settings.RigidFrameProgress;
 		request.HostProvider = settings.HostProvider;
 		request.HostCaptures = settings.HostCaptures;
 		std::vector<RequestImageSource> imageSources;
@@ -754,11 +760,74 @@ namespace engine::imagegraphexport {
 			return false;
 		}
 		Diagnostic diagnostic;
-		EvaluationSnapshot snapshot;
-		if (EvaluateNodeInputs(document, plan, nodeId, request, snapshot, diagnostic) != Status::Ok) {
-			failure = diagnostic.Message;
+		engine::imagegraphphysics::RigidProvider rigidProvider;
+		auto evaluationRequest = request;
+		if (!evaluationRequest.RigidProvider) evaluationRequest.RigidProvider = &rigidProvider;
+		CapturedFeedbackHost replayHost;
+		StatefulInputEvaluationResult prepared;
+		EvaluationSnapshot directSnapshot;
+		const EvaluationSnapshot *resolved = &directSnapshot;
+		// Request-only execution continues a caller-owned prior prefix. A completed frame uses the
+		// explicit prepared-snapshot overload so constructors and simulation steps are not repeated.
+		if (request.SimulationReplay || request.SurfaceReplay || request.RandomReplay || request.DataReplay ||
+			request.RigidReplay) {
+			if (EvaluateStatefulNodeInputs(document, plan, nodeId, evaluationRequest, prepared, diagnostic) !=
+				Status::Ok) {
+				failure = diagnostic.Message;
+				return false;
+			}
+			resolved = &prepared.Inputs;
+			evaluationRequest.SimulationReplay = &prepared.Simulation;
+			evaluationRequest.SurfaceReplay = &prepared.Surfaces;
+			evaluationRequest.RandomReplay = &prepared.Random;
+			evaluationRequest.DataReplay = &prepared.Data;
+			evaluationRequest.RigidReplay = &prepared.Rigid;
+		} else {
+			if (!replayHost.PrepareNodeInputs(
+					document, plan, request.RigidAuthoringRevision, 0, nodeId, evaluationRequest, diagnostic
+				)) {
+				failure = diagnostic.Message;
+				return false;
+			}
+			if (replayHost.Active())
+				resolved = &replayHost.Snapshot();
+			else if (EvaluateNodeInputs(
+						 document, plan, nodeId, evaluationRequest, directSnapshot, diagnostic
+					 ) != Status::Ok) {
+				failure = diagnostic.Message;
+				return false;
+			}
+		}
+		return ExecuteGraphHostNode(document, evaluationRequest, nodeId, *resolved, capture, failure);
+	}
+
+	bool ExecuteGraphHostNode(
+		const engine::imagegraph::Document &document,
+		const engine::imagegraph::EvaluationRequest &request,
+		std::string_view nodeId,
+		const engine::imagegraph::EvaluationSnapshot &snapshot,
+		engine::imagegraph::HostNodeCapture &capture,
+		std::string &failure
+	) {
+		using namespace engine::imagegraph;
+		if (!request.HostProvider || nodeId.empty()) {
+			failure = "prepared host execution needs an explicit provider and selected node ID";
 			return false;
 		}
+		const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &entry) {
+			return entry.Id == nodeId;
+		});
+		if (node == document.Nodes.end()) {
+			failure = "selected prepared host node does not exist";
+			return false;
+		}
+		if (!snapshot.ImageArrays().empty()) {
+			failure = "prepared host image arrays need an explicit normalized capture route";
+			return false;
+		}
+		engine::imagegraphphysics::RigidProvider rigidProvider;
+		auto evaluationRequest = request;
+		if (!evaluationRequest.RigidProvider) evaluationRequest.RigidProvider = &rigidProvider;
 		if (snapshot.RetainedBytes() > Limits::MaximumEvaluationBytes / 3) {
 			failure = "resolved host inputs exceed their execution budget";
 			return false;
@@ -771,9 +840,9 @@ namespace engine::imagegraphexport {
 			values.push_back({value.Port, value.Data});
 		for (const auto &image : snapshot.Images())
 			images.push_back({image.Port, &image.Data});
-		return request.HostProvider->Capture(
+		return evaluationRequest.HostProvider->Capture(
 			{*node,
-			 request,
+			 evaluationRequest,
 			 values,
 			 images,
 			 Limits::MaximumEvaluationBytes - snapshot.RetainedBytes() * 2,

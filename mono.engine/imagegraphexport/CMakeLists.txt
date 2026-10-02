@@ -6,6 +6,7 @@ mono_add_library(imagegraphexport
         Engine::assets
         Engine::imagegraph
         Engine::imagegraphio
+        Engine::imagegraphphysics
         Engine::bake
         Engine::parallel
     VENDOR

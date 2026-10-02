@@ -1,5 +1,6 @@
 #include "GraphTextFileHost.hpp"
 
+#include "GraphCsvWrite.hpp"
 #include "GraphFileHostIO.hpp"
 
 #include <engine/bake/ComposerXml.hpp>
@@ -238,6 +239,7 @@ namespace engine::imagegraphexport {
 		std::string &failure
 	) {
 		const auto &kind = call.Authored.Type;
+		if (kind == "pc.csv_file_write") return CaptureGraphCsvWrite(grants, policy, call, out, failure);
 		const bool write = kind.ends_with("_write");
 		const auto *path = Get<std::string>(call, "path");
 		const GraphFileGrant *grant = nullptr;
@@ -266,58 +268,22 @@ namespace engine::imagegraphexport {
 		capture.Inputs.assign(call.Inputs.begin(), call.Inputs.end());
 		std::string text;
 		if (write) {
-			if (kind == "pc.csv_file_write") {
-				const auto *value = Input(call, "content");
-				if (!value) {
-					failure = "CSV write content is absent";
+			const auto *value = Get<StructValue>(call, "struct");
+			if (!value) {
+				failure = "document writer needs an owned struct";
+				return false;
+			}
+			if (kind == "pc.json_file_write") {
+				const auto *pretty = Get<bool>(call, "pretty_print"),
+						   *serialize = Get<bool>(call, "serialize");
+				if (!pretty || !serialize || (*serialize && Field(*value, "serialize")) ||
+					!Json(*value, text, maximum, *pretty)) {
+					failure = "JSON contains unsupported runtime values or exceeds its text budget";
 					return false;
 				}
-				bool valid = true;
-				if (const auto *array = std::get_if<ArrayValue>(value)) {
-					size_t row = 0;
-					for (const auto &item : array->Elements) {
-						const Value field = std::visit([](const auto &v) -> Value { return v; }, item);
-						if (const auto *nested = std::get_if<ArrayValue>(&field)) {
-							size_t column = 0;
-							for (const auto &element : nested->Elements) {
-								const auto leaf =
-									std::visit([](const auto &v) -> Value { return v; }, element);
-								if ((column++ && !Append(text, ", ", maximum)) ||
-									!Append(text, Scalar(leaf, valid), maximum))
-									valid = false;
-							}
-							if (!Append(text, "\n", maximum)) valid = false;
-						} else {
-							if ((row && !Append(text, ", ", maximum)) ||
-								!Append(text, Scalar(field, valid), maximum))
-								valid = false;
-						}
-						row++;
-					}
-				} else if (!Append(text, Scalar(*value, valid), maximum))
-					valid = false;
-				if (!valid) {
-					failure = "CSV contains unsupported values or exceeds its text budget";
-					return false;
-				}
-			} else {
-				const auto *value = Get<StructValue>(call, "struct");
-				if (!value) {
-					failure = "document writer needs an owned struct";
-					return false;
-				}
-				if (kind == "pc.json_file_write") {
-					const auto *pretty = Get<bool>(call, "pretty_print"),
-							   *serialize = Get<bool>(call, "serialize");
-					if (!pretty || !serialize || (*serialize && Field(*value, "serialize")) ||
-						!Json(*value, text, maximum, *pretty)) {
-						failure = "JSON contains unsupported runtime values or exceeds its text budget";
-						return false;
-					}
-				} else if (!Xml(*value, text, maximum)) {
-					failure = "XML source structure is invalid or exceeds its budget";
-					return false;
-				}
+			} else if (!Xml(*value, text, maximum)) {
+				failure = "XML source structure is invalid or exceeds its budget";
+				return false;
 			}
 			if (!policy.AllowsName(target.string()) || !Publish(target, text, failure)) return false;
 		} else {
