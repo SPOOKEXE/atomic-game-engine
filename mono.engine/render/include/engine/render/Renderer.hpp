@@ -63,6 +63,8 @@ namespace engine::graph {
 }
 
 namespace engine::render {
+	enum class SourceTextureStatus : uint8_t;
+	struct SourceTexturePublication;
 	// Planner outcome recorded with a portal view for capture diagnostics.
 	enum class PortalDemandStatus { Ready, Hidden, Invalid, Unsupported };
 
@@ -2746,6 +2748,15 @@ namespace engine::render {
 		QueueTransformImage3D(imagegraph::TransformImage3DLiveRequest request);
 		bool CancelTransformImage3D(core::Name owner, core::Name name, uint64_t generation);
 		void DropTransformImage3DOwner(core::Name owner);
+		SourceTextureStatus SourceOutputStatus(core::Name owner, core::Name name, uint64_t generation) const;
+		bool StageSourceTexture(
+			core::Name owner, const SourceTexturePublication &target, const assets::TextureData &texture
+		);
+		bool PromoteTextureGroup(
+			core::Name sourceOwner,
+			core::Name destinationOwner,
+			std::span<const SourceTexturePublication> targets
+		);
 
 	  private:
 		bool AdoptResourceImagesInternal(

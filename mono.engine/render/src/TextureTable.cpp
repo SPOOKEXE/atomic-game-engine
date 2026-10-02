@@ -3,6 +3,8 @@
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/render/DefaultTexture.hpp>
 #include <engine/render/MissingTexture.hpp>
 #include <engine/render/TextureTable.hpp>
@@ -655,6 +657,65 @@ namespace engine::render {
 		UploadedBytes += bytes;
 		Awaiting.erase(TextureKey(name, owner));
 		TimingGeneration++;
+		return true;
+	}
+
+	bool TextureTable::MoveBatch(
+		core::Name sourceOwner,
+		core::Name destinationOwner,
+		std::span<const core::Name> names,
+		std::span<SDL_GPUTexture *> retired
+	) {
+		ENGINE_PROFILE("texture-table.move-batch");
+		if (!Device || !sourceOwner.IsValid() || !destinationOwner.IsValid() ||
+			sourceOwner == destinationOwner || names.size() != 6 || retired.size() != 6)
+			return false;
+		std::array<uint64_t, 6> sourceKeys{}, destinationKeys{};
+		size_t oldBytes = 0, oldCopies = 0;
+		for (size_t i = 0; i < 6; ++i) {
+			if (!names[i].IsValid()) return false;
+			for (size_t j = 0; j < i; ++j)
+				if (names[i] == names[j]) return false;
+			sourceKeys[i] = TextureKey(names[i], sourceOwner);
+			destinationKeys[i] = TextureKey(names[i], destinationOwner);
+			const auto source = Textures.find(sourceKeys[i]);
+			if (source == Textures.end() || !source->second.Texture) return false;
+			const auto prior = Textures.find(destinationKeys[i]);
+			if (prior != Textures.end()) {
+				if (prior->second.Bytes > UploadedBytes - oldBytes ||
+					prior->second.SourcePixels.size() > RetainedCopyBytes - oldCopies)
+					return false;
+				oldBytes += prior->second.Bytes;
+				oldCopies += prior->second.SourcePixels.size();
+			}
+		}
+		// No node allocation occurs after extraction: existing source nodes are rekeyed and transferred.
+		try {
+			Textures.reserve(Textures.size());
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+		std::array<decltype(Textures)::node_type, 6> sources;
+		std::array<SDL_GPUTexture *, 6> priorHandles{};
+		for (size_t i = 0; i < 6; ++i) {
+			sources[i] = Textures.extract(sourceKeys[i]);
+			const auto prior = Textures.find(destinationKeys[i]);
+			if (prior != Textures.end()) {
+				priorHandles[i] = prior->second.Texture;
+				Textures.erase(prior);
+			}
+		}
+		for (size_t i = 0; i < 6; ++i) {
+			sources[i].key() = destinationKeys[i];
+			Textures.insert(std::move(sources[i]));
+			Awaiting.erase(sourceKeys[i]);
+			Awaiting.erase(destinationKeys[i]);
+		}
+		UploadedBytes -= oldBytes;
+		RetainedCopyBytes -= oldCopies;
+		std::copy(priorHandles.begin(), priorHandles.end(), retired.begin());
+		++TimingGeneration;
+		core::Metrics::Count("skybox published texture entries", 6);
 		return true;
 	}
 

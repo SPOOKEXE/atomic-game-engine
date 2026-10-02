@@ -202,6 +202,15 @@ namespace engine::render {
 			assets::TextureFormat format
 		);
 
+		// Moves exactly six resident names atomically; prior handles remain caller-owned for fenced
+		// retirement.
+		bool MoveBatch(
+			core::Name sourceOwner,
+			core::Name destinationOwner,
+			std::span<const core::Name> names,
+			std::span<SDL_GPUTexture *> retired
+		);
+
 		// The texture for a name, or null when it is not registered.
 		//
 		// **Stays honest about absence**, which is what makes it usable for the

@@ -22,6 +22,7 @@ namespace engine::imagegraph::detail {
 	bool SourceMeshSurfaceExtrude(NodeContext &context);
 	bool SourceMeshSliceStack(NodeContext &context);
 	bool SourceMeshFromSdf(NodeContext &context);
+	bool SourceSceneAffector(NodeContext &context);
 	namespace {
 		bool ReadVector(NodeContext &context, std::string_view port, Vector3 &output) {
 			const Value *value = context.Find(port);
@@ -639,6 +640,7 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.path_3_d_transform", TransformSourcePath3D, true},
 			ExecutorEntry{"pc.path_3_d_camera", ProjectSourcePath3D, true},
 			ExecutorEntry{"pc.3_d_point_affector", PointAffector, true},
+			ExecutorEntry{"pc.3_d_affector", SourceSceneAffector, true},
 			ExecutorEntry{"pc.3_d_mirror", Mirror, true},
 			ExecutorEntry{"pc.3_d_transform_scene", TransformScene, true},
 			ExecutorEntry{"pc.3_d_light_point", Light, true},

@@ -1,0 +1,9 @@
+# Source scene affector
+
+`pc.3_d_affector` consumes a typed scene and clones its immediate children before applying the pinned source sphere or plane falloff. Nested groups contribute their source center and receive one outer transform; their descendants are not independently affected. Rotation preserves the source raw quaternion Slerp behavior, including non-unit tuples.
+
+The source captures a 100-interval curve map at its first frame. Native replay retains the resulting 101 scalar samples in the existing data replay owner. A fresh live seek replays from frame zero through the shared bounded host rather than using the direct data-node shortcut. Forward contiguous sampling reuses the captured map, backward seeks recapture it, and a fresh noncontiguous seek beyond 4096 frames is refused. Direct evaluator calls at later frames require the captured data replay state. Negative and fractional frames receive an explicit diagnostic.
+
+Source `clone(false)` retains drawable vertex and edge buffers while clearing CPU vertex and edge availability. Each copied part loses its local matrix, matching the source clone. Downstream CPU modifiers use the shared availability helpers; raster consumers retain the drawable buffers until a source rebuild clears them. Light clones become plain empty mesh objects, as in the pinned inherited clone. The source instancer clone has no defined object result and receives a named unsupported-execution diagnostic.
+
+The kernel admits scene and replay payloads before copying, publishes neither on failure, and records clone logical payload bytes and operations through the engine profiler metrics. `tests/SourceSceneAffector.cpp` covers source falloff, group behavior, input isolation, clone availability, captured curves, quaternion behavior, admission failure and registered host seeks. Native source camera appearance remains subject to the separate device verification gate.

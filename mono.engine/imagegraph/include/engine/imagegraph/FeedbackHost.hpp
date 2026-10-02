@@ -221,9 +221,9 @@ namespace engine::imagegraph {
 					   !State.Surfaces.Entries.empty() || !State.Random.Entries.empty() ||
 					   !State.Data.Entries.empty() || temporal.RigidActors != 0 ||
 					   !State.Rigid.Owners.empty();
-			const bool directData = temporal.DataProcessors != 0 && !temporal.Simulation &&
-									!temporal.SurfaceCaches && !temporal.RandomGenerators &&
-									!temporal.RigidActors && bindings.empty();
+			const bool directData = temporal.DataProcessors != 0 && !temporal.FirstFrameData &&
+									!temporal.Simulation && !temporal.SurfaceCaches &&
+									!temporal.RandomGenerators && !temporal.RigidActors && bindings.empty();
 			if (!stateful && bindings.empty()) {
 				if (changed || Stateful) {
 					Clear();

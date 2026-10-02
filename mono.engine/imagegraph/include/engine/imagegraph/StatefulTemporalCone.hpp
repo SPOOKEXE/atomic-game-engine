@@ -15,6 +15,8 @@ namespace engine::imagegraph {
 		size_t RandomGenerators = 0;
 		size_t DataProcessors = 0;
 		size_t RigidActors = 0;
+		// First-frame curve captures require bounded replay from frame zero on a fresh seek.
+		bool FirstFrameData = false;
 	};
 	// Follows the compiled union of output dependencies, including group allocation and inline owners.
 	// Bounded stack storage keeps temporal admission independent of graph traversal allocations.
@@ -77,7 +79,8 @@ namespace engine::imagegraph {
 			cone.RigidActors += node.Type.starts_with("pc.rigid_");
 			cone.DataProcessors += node.Type == "pc.trigger_bool" || node.Type == "pc.differential" ||
 								   node.Type == "pc.counter" || node.Type == "pc.delay_value" ||
-								   node.Type == "pc.cache_value_array";
+								   node.Type == "pc.cache_value_array" || node.Type == "pc.3_d_affector";
+			cone.FirstFrameData |= node.Type == "pc.3_d_affector";
 			cone.Simulation |= node.Type == "image.verlet_simple" ||
 							   (node.Type.starts_with("pc.verlet_") || node.Type.starts_with("pc.flip_"));
 			cone.FixedSimulationSteps |= node.Type == "image.verlet_simple" ||

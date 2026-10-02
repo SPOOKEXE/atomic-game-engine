@@ -9,6 +9,7 @@
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/render/ImageGraphTransform3D.hpp>
 #include <engine/render/LiveImagePublisher.hpp>
+#include <engine/render/SourceSkyboxGroup.hpp>
 #include <engine/scene/ImageGraphBinding.hpp>
 
 #include <array>
@@ -151,6 +152,17 @@ namespace client {
 			uint64_t StoreIdentity = 0;
 		};
 
+		struct PendingSkyboxGroup {
+			engine::render::imagegraph::SourceSkyboxGroup Work;
+			std::array<engine::scene::ImageGraphBinding, 6> Selectors;
+			std::array<engine::ecs::Entity, 6> Entities;
+			std::array<std::filesystem::file_time_type, 6> Modified;
+			std::array<uintmax_t, 6> FileBytes{};
+			std::array<uint64_t, 6> Ticks{};
+			std::array<bool, 6> Animated{};
+			uint64_t StoreIdentity = 0;
+		};
+		std::unordered_map<uint32_t, PendingSkyboxGroup> PendingSkyboxes;
 		engine::render::LiveImagePublisher Publisher;
 		std::unordered_map<uint64_t, Entry> Entries;
 		std::unordered_map<std::string, CachedDocument> Documents;
