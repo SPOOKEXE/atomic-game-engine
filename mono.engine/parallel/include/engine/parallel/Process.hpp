@@ -121,6 +121,14 @@ namespace engine::parallel {
 	//
 	// @since v0.2
 	class Process {
+	  private:
+		bool StartImpl(
+			const std::filesystem::path &program,
+			const std::vector<std::string> &arguments,
+			ChannelEnd endpoint,
+			const std::filesystem::path *workingDirectory
+		);
+
 	  public:
 		// Creates a handle that owns no child.
 		Process() = default;
@@ -154,6 +162,19 @@ namespace engine::parallel {
 		// @param arguments The arguments, not including the program name.
 		// @return `false` when the child could not be started.
 		bool Start(const std::filesystem::path &program, const std::vector<std::string> &arguments = {});
+
+		// Starts a program after changing directory in the child before it runs.
+		// This process keeps its current directory.
+		//
+		// @param program          The executable to run.
+		// @param arguments        The arguments, not including the program name.
+		// @param workingDirectory The child's initial working directory.
+		// @return `false` when the child could not be started.
+		bool Start(
+			const std::filesystem::path &program,
+			const std::vector<std::string> &arguments,
+			const std::filesystem::path &workingDirectory
+		);
 
 		// Starts a program holding one end of a channel.
 		//
