@@ -5,6 +5,7 @@
 
 #include <engine/bake/LayeredImage.hpp>
 #include <engine/imagegraph/WavExport.hpp>
+#include <engine/imagegraphexport/GraphDirectoryHost.hpp>
 #include <engine/imagegraphexport/GraphFileHost.hpp>
 #include <engine/imagegraphexport/GraphMeshHost.hpp>
 
@@ -120,11 +121,19 @@ namespace engine::imagegraphexport {
 			return false;
 		}
 	}
-	GraphFileHost::GraphFileHost(std::span<const GraphFileGrant> grants, engine::assets::ContentPolicy policy)
-		: Grants(grants), Policy(policy) {}
+	GraphFileHost::GraphFileHost(
+		std::span<const GraphFileGrant> grants,
+		engine::assets::ContentPolicy policy,
+		std::span<const GraphDirectoryGrant> directories
+	)
+		: Grants(grants), Directories(directories), Policy(policy) {}
 	bool GraphFileHost::Capture(
 		const HostNodeInvocation &invocation, HostNodeCapture &output, std::string &failure
 	) {
+		if (invocation.Authored.Type == "pc.directory_search") {
+			GraphDirectoryHost reader(Directories, Grants, Policy);
+			return reader.Capture(invocation, output, failure);
+		}
 		if (invocation.Authored.Type == "pc.image" || invocation.Authored.Type == "pc.image_sequence" ||
 			invocation.Authored.Type == "pc.image_animated")
 			return CaptureGraphRaster(invocation, Grants, Policy, output, failure);

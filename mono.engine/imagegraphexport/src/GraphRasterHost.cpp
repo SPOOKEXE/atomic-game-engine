@@ -2,6 +2,7 @@
 
 #include <engine/bake/GifSequence.hpp>
 #include <engine/bake/Image.hpp>
+#include <engine/core/Metrics.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -41,8 +42,11 @@ namespace engine::imagegraphexport {
 			return out;
 		}
 		// Admit decoder workspace from the actual header before invoking the codec.
-		bool Dimensions(std::span<std::byte> bytes, uint32_t &width, uint32_t &height, uint32_t &frames) {
+		bool Dimensions(
+			std::span<std::byte> bytes, uint32_t &width, uint32_t &height, uint32_t &frames, bool &frameLimit
+		) {
 			frames = 1;
+			frameLimit = false;
 			using engine::bake::ImageFormat;
 			switch (engine::bake::ImageFormatOfBytes(bytes)) {
 			case ImageFormat::Png:
@@ -102,9 +106,11 @@ namespace engine::imagegraphexport {
 							return false;
 						continue;
 					}
-					if (marker != 0x2c || bytes.size() - at < 9 ||
-						++frames > engine::assets::TextureSequence::MAXIMUM_FRAMES)
+					if (marker != 0x2c || bytes.size() - at < 9) return false;
+					if (++frames > engine::assets::TextureSequence::MAXIMUM_FRAMES) {
+						frameLimit = true;
 						return false;
+					}
 					const auto left = Word(bytes, at, 2, false), top = Word(bytes, at + 2, 2, false),
 							   w = Word(bytes, at + 4, 2, false), h = Word(bytes, at + 6, 2, false);
 					const auto packed = std::to_integer<uint8_t>(bytes[at + 8]);
@@ -447,12 +453,15 @@ namespace engine::imagegraphexport {
 		std::span<const GraphFileGrant> grants,
 		const engine::assets::ContentPolicy &policy,
 		engine::imagegraph::HostNodeCapture &out,
-		std::string &failure
+		std::string &failure,
+		RasterFailure *classification
 	) {
 		using namespace engine::imagegraph;
+		if (classification) *classification = RasterFailure::Refused;
 		if (in.Authored.Type == "pc.image_animated") return CaptureAnimated(in, grants, policy, out, failure);
 		if (in.Authored.Type == "pc.image_sequence") return CaptureSequence(in, grants, policy, out, failure);
-		const auto fail = [&](const char *message) {
+		const auto fail = [&](const char *message, RasterFailure kind = RasterFailure::Refused) {
+			if (classification) *classification = kind;
 			failure = message;
 			return false;
 		};
@@ -488,14 +497,22 @@ namespace engine::imagegraphexport {
 		}
 		const uint64_t budget =
 			std::min<uint64_t>(in.MaximumOperationBytes - captureBytes, 64ull * 1024 * 1024);
-		if (error || size == 0 || size > budget / 8) return fail("image encoded bytes exceed decoder budget");
+		if (!error && size == 0)
+			return fail("image encoded source is empty", RasterFailure::SourceDecodeFailure);
+		if (error || size > budget / 8) return fail("image encoded bytes exceed decoder budget");
 		std::vector<std::byte> bytes(static_cast<size_t>(size));
 		std::ifstream stream(grant->File, std::ios::binary);
 		stream.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+		engine::core::Metrics::Count("image composer raster read operations", 1);
+		engine::core::Metrics::Count("image composer raster encoded bytes read", double(stream.gcount()));
 		if (!stream) return fail("cannot read complete granted image");
 		const auto encodedFormat = engine::bake::ImageFormatOfBytes(bytes);
 		using engine::assets::ContentForm;
 		using engine::bake::ImageFormat;
+		if (encodedFormat == ImageFormat::Unknown)
+			return fail(
+				"image encoded source has no recognized raster header", RasterFailure::SourceDecodeFailure
+			);
 		const auto actualForm = encodedFormat == ImageFormat::Png	 ? ContentForm::Png
 								: encodedFormat == ImageFormat::Bmp	 ? ContentForm::Bmp
 								: encodedFormat == ImageFormat::Jpeg ? ContentForm::Jpeg
@@ -504,8 +521,20 @@ namespace engine::imagegraphexport {
 		if (!policy.Allows(actualForm))
 			return fail("actual encoded image format is disabled by content policy");
 		uint32_t width = 0, height = 0, frames = 0;
-		if (!Dimensions(bytes, width, height, frames) || width > Limits::MaximumDimension ||
-			height > Limits::MaximumDimension ||
+		bool frameLimit = false;
+		if (!Dimensions(bytes, width, height, frames, frameLimit))
+			return fail(
+				"image header is malformed or outside native decoder coverage",
+				!frameLimit && (encodedFormat == ImageFormat::Png || encodedFormat == ImageFormat::Gif)
+					? RasterFailure::SourceDecodeFailure
+					: RasterFailure::Refused
+			);
+		if (encodedFormat == ImageFormat::Png && bytes.size() >= 29) {
+			const auto depth = std::to_integer<uint8_t>(bytes[24]);
+			if ((depth != 8 && depth != 16) || bytes[28] != std::byte{0})
+				return fail("PNG depth or interlacing is outside native still decoder coverage");
+		}
+		if (width > Limits::MaximumDimension || height > Limits::MaximumDimension ||
 			!CheckedSurfaceLayout(width, height, SurfaceFormat::RGBA8Unorm, budget / 16))
 			return fail("image header is unsupported or exceeds predecode dimensions/workspace budget");
 		// Charge both frame copies, canvas/restore and bounded palette/LZW scratch before decoding.
@@ -522,14 +551,21 @@ namespace engine::imagegraphexport {
 		engine::assets::TextureData decoded;
 		engine::assets::TextureSequenceData sequence;
 		std::span<const std::byte> pixels;
+		engine::core::Metrics::Count("image composer raster decode operations", 1);
 		if (encodedFormat == ImageFormat::Gif) {
-			if (!engine::bake::ReadGifSequence(bytes, sequence, failure)) return false;
+			if (!engine::bake::ReadGifSequence(bytes, sequence, failure)) {
+				if (classification) *classification = RasterFailure::SourceDecodeFailure;
+				return false;
+			}
 			if (sequence.Width != width || sequence.Height != height ||
 				sequence.FrameDurations.size() != frames)
 				return fail("decoded GIF differs from its admitted frame ledger");
 			pixels = sequence.FramePixels(0);
 		} else {
-			if (!engine::bake::ReadImage(bytes, decoded, failure)) return false;
+			if (!engine::bake::ReadImage(bytes, decoded, failure)) {
+				if (classification) *classification = RasterFailure::SourceDecodeFailure;
+				return false;
+			}
 			if (decoded.Width != width || decoded.Height != height || decoded.FlipbookFrames)
 				return fail("decoded image dimensions differ from admitted still header");
 			pixels = decoded.Pixels;

@@ -419,3 +419,84 @@ TEST_CASE(
 	CHECK(capture.Images[0].Data == before);
 	CHECK(host.RetainedBytes == retained);
 }
+
+TEST_CASE(
+	"Studio directory roots preserve observed order until refresh and require exact grants",
+	"[studio][file_host][directory_host]"
+) {
+	Temporary temp;
+	constexpr std::array<uint8_t, 77> PNG_RGB{
+		{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x08, 0x02, 0x00, 0x00, 0x00, 0xFD, 0xD4, 0x9A,
+		 0x73, 0x00, 0x00, 0x00, 0x14, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0xF8, 0xCF, 0xC0, 0xC0,
+		 0x00, 0xC2, 0x0C, 0xFF, 0xFF, 0xFF, 0x67, 0x00, 0x00, 0x1E, 0xEF, 0x04, 0xFC, 0x73, 0x1C, 0x53,
+		 0xCC, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82}
+	};
+	const auto first = temp.Path / "first.png", second = temp.Path / "second.png";
+	const auto write = [&](const auto &path) {
+		std::ofstream stream(path, std::ios::binary);
+		stream.write(reinterpret_cast<const char *>(PNG_RGB.data()), PNG_RGB.size());
+		REQUIRE(bool(stream));
+	};
+	write(first);
+	Node node;
+	node.Id = "directory";
+	node.Type = "pc.directory_search";
+	std::array<AuthoredValue, 4> inputs{
+		{{"path", temp.Path.string()},
+		 {"extensions", std::string(".png")},
+		 {"type", EnumValue{0}},
+		 {"recursive", false}}
+	};
+	std::array<engine::imagegraphexport::GraphDirectoryGrant, 1> directories{{{node.Id, temp.Path}}};
+	std::array<engine::imagegraphexport::GraphFileGrant, 2> files{
+		{{node.Id, first, false, first.string()}, {node.Id, second, false, second.string()}}
+	};
+	studio::detail::ImageGraphHost host;
+	host.Grants = files;
+	EvaluationRequest request;
+	request.Tick = 2;
+	request.Subframe = .5;
+	request.NegativeFrame = true;
+	HostNodeInvocation invocation{node, request, inputs, {}, 16 * 1024 * 1024};
+	HostNodeCapture captured;
+	std::string failure;
+	CHECK_FALSE(host.Capture(invocation, captured, failure));
+	host.Directories = directories;
+	REQUIRE(host.Capture(invocation, captured, failure));
+	REQUIRE(captured.ImageArrays[0].Frames.size() == 1);
+	const auto originalPaths = captured.Outputs[0].Data;
+	write(second);
+	request.Tick = 10;
+	request.Subframe = .25;
+	request.NegativeFrame = false;
+	REQUIRE(host.Capture(invocation, captured, failure));
+	CHECK(captured.ImageArrays[0].Frames.size() == 1);
+	CHECK(captured.Outputs[0].Data == originalPaths);
+	CHECK(captured.Tick == 10);
+	CHECK(captured.Subframe == .25);
+	CHECK_FALSE(captured.NegativeFrame);
+	host.RefreshFile(node.Id);
+	REQUIRE(host.Capture(invocation, captured, failure));
+	CHECK(captured.ImageArrays[0].Frames.size() == 2);
+	const auto prior = captured.ImageArrays[0].Frames;
+	host.Directories = {};
+	CHECK_FALSE(host.Capture(invocation, captured, failure));
+	CHECK(captured.ImageArrays[0].Frames == prior);
+	host.Directories = directories;
+	directories[0].Root = temp.Path / "other";
+	CHECK_FALSE(host.Capture(invocation, captured, failure));
+	CHECK(captured.ImageArrays[0].Frames == prior);
+	directories[0].Root = temp.Path;
+	files[0].Resource = "revoked";
+	CHECK_FALSE(host.Capture(invocation, captured, failure));
+	CHECK(captured.ImageArrays[0].Frames == prior);
+	host.Grants = {};
+	inputs[2].Data = EnumValue{1};
+	REQUIRE(host.Capture(invocation, captured, failure));
+	CHECK(captured.ImageArrays.empty());
+	CHECK(std::get<ArrayValue>(captured.Outputs[1].Data).Elements.empty());
+	invocation.MaximumOperationBytes = host.RetainedBytes;
+	CHECK_FALSE(host.Capture(invocation, captured, failure));
+	CHECK(captured.ImageArrays.empty());
+}

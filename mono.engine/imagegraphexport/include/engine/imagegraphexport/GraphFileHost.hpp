@@ -9,6 +9,7 @@
 #include <string>
 
 namespace engine::imagegraphexport {
+	struct GraphDirectoryGrant;
 	struct GraphFileGrant {
 		std::string NodeId;
 		std::filesystem::path File;
@@ -27,7 +28,11 @@ namespace engine::imagegraphexport {
 	// A grant binds one authored node to one exact path and operation. Graph paths confer no access.
 	class GraphFileHost final : public engine::imagegraph::HostNodeProvider {
 	  public:
-		GraphFileHost(std::span<const GraphFileGrant> grants, engine::assets::ContentPolicy policy);
+		GraphFileHost(
+			std::span<const GraphFileGrant> grants,
+			engine::assets::ContentPolicy policy,
+			std::span<const GraphDirectoryGrant> directories = {}
+		);
 		bool Capture(
 			const engine::imagegraph::HostNodeInvocation &invocation,
 			engine::imagegraph::HostNodeCapture &output,
@@ -36,6 +41,7 @@ namespace engine::imagegraphexport {
 
 	  private:
 		std::span<const GraphFileGrant> Grants;
+		std::span<const GraphDirectoryGrant> Directories;
 		engine::assets::ContentPolicy Policy;
 	};
 }

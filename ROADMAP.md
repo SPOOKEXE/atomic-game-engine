@@ -44,7 +44,7 @@ Milestone labels describe development scope, not release versions.
   2. Evaluate bounded source kernels, Shape paths, Tilesets, conversions, typed arrays and Pixel Builder recipes.
   3. Replay animation, particles, FLIP, Verlet colliders, random draws and delay history deterministically.
   4. Edit native and PXC graphs, groups and keys with atomic undo/redo; preserve opaque data or refuse ambiguous edits.
-  5. Read granted images, animation, audio and structured assets through bounded shared hosts and Studio observations.
+  5. Read granted images, directories, animation, audio and structured assets through bounded shared hosts.
   6. Run bounded Lua and export helpers; publish image, sequence and WAV batches with rollback.
   7. Bind live 3D outputs and timed 4096-frame atlases; queue camera and SDF jobs. GPU verification remains open.
   8. Package source projects, authored scenes and a reproducible CPU fluid study. Visual acceptance remains open.

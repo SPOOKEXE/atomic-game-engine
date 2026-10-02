@@ -3,6 +3,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/ComposerLuaHost.hpp>
 #include <engine/imagegraph/Surface.hpp>
+#include <engine/imagegraphexport/GraphDirectoryHost.hpp>
 #include <engine/imagegraphexport/GraphFileHost.hpp>
 
 #include <algorithm>
@@ -15,6 +16,7 @@ namespace studio::detail {
 			"pc.image",
 			"pc.image_sequence",
 			"pc.image_animated",
+			"pc.directory_search",
 			"pc.csv_file_read",
 			"pc.json_file_read",
 			"pc.xml_file_read",
@@ -38,7 +40,7 @@ namespace studio::detail {
 	}
 	inline bool ImageGraphFileNeedsPrimary(std::string_view type) {
 		return !ImageGraphFileUsesOwnedContent(type) && type != "pc.image_sequence" &&
-			   type != "pc.image_animated";
+			   type != "pc.image_animated" && type != "pc.directory_search";
 	}
 
 	inline std::optional<uint64_t>
@@ -83,9 +85,11 @@ namespace studio::detail {
 			uint64_t Bytes = 0;
 			std::optional<engine::imagegraph::SurfaceFormat> OutputFormat;
 			int64_t Interpolation = 1;
+			std::optional<engine::imagegraphexport::GraphDirectoryGrant> Directory;
 		};
 		engine::imagegraph::ComposerLuaHost *Lua = nullptr;
 		std::span<const engine::imagegraphexport::GraphFileGrant> Grants;
+		std::span<const engine::imagegraphexport::GraphDirectoryGrant> Directories;
 		std::array<std::optional<CachedFile>, 64> Files;
 		uint64_t RetainedBytes = sizeof(Files);
 
@@ -161,7 +165,26 @@ namespace studio::detail {
 					failure = "Studio file grant violates the current read policy";
 					return false;
 				}
+			const engine::imagegraphexport::GraphDirectoryGrant *directory = nullptr;
+			if (invocation.Authored.Type == "pc.directory_search") {
+				for (const auto &grant : Directories) {
+					if (grant.NodeId != invocation.Authored.Id) continue;
+					if (directory) {
+						failure = "Studio directory grant is duplicated";
+						return false;
+					}
+					directory = &grant;
+				}
+				if (!directory) {
+					failure = "Grant the node's exact directory root before reading it";
+					return false;
+				}
+			}
 			const auto sameGrants = [&](const CachedFile &file) {
+				if (bool(directory) != file.Directory.has_value() ||
+					(directory && (file.Directory->NodeId != directory->NodeId ||
+								   file.Directory->Root != directory->Root)))
+					return false;
 				size_t index = 0;
 				for (const auto &grant : Grants) {
 					if (grant.NodeId != invocation.Authored.Id) continue;
@@ -218,6 +241,15 @@ namespace studio::detail {
 				return false;
 			}
 			uint64_t grantBytes = 0;
+			if (directory) {
+				if (directory->Root.native().size() > 4096 ||
+					directory->NodeId.size() > Limits::MaximumTextBytes) {
+					failure = "Studio directory grant exceeds its bounds";
+					return false;
+				}
+				grantBytes =
+					sizeof(*directory) + directory->NodeId.size() + directory->Root.native().size() * 4 + 64;
+			}
 			size_t grantCount = 0;
 			for (const auto &grant : Grants) {
 				if (grant.NodeId != invocation.Authored.Id) continue;
@@ -241,7 +273,7 @@ namespace studio::detail {
 				if (grant.NodeId == invocation.Authored.Id) selectedGrants.push_back(grant);
 			HostNodeInvocation bounded = invocation;
 			bounded.MaximumOperationBytes = available - grantBytes * 3;
-			engine::imagegraphexport::GraphFileHost reader(Grants, policy);
+			engine::imagegraphexport::GraphFileHost reader(Grants, policy, Directories);
 			CaptureRecord captured;
 			if (!reader.Capture(bounded, captured, failure)) return false;
 			auto bytes = ImageGraphCaptureCloneBytes(captured);
@@ -252,7 +284,12 @@ namespace studio::detail {
 			}
 			*bytes += grantBytes;
 			CachedFile retained{
-				captured, std::move(selectedGrants), *bytes, invocation.OutputFormat, invocation.Interpolation
+				captured,
+				std::move(selectedGrants),
+				*bytes,
+				invocation.OutputFormat,
+				invocation.Interpolation,
+				directory ? std::optional(*directory) : std::nullopt
 			};
 			*slot = std::move(retained);
 			RetainedBytes += *bytes;

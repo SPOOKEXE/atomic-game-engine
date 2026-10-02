@@ -88,7 +88,7 @@ namespace studio {
 
 		struct FileReadControls {
 			std::string NodeId;
-			std::array<char, 4096> File{}, Resource{};
+			std::array<char, 4096> File{}, Resource{}, Directory{};
 			std::string Message;
 		};
 
@@ -103,6 +103,7 @@ namespace studio {
 				engine::script::MakeComposerLuaHost();
 			detail::ImageGraphHost Host;
 			std::vector<engine::imagegraphexport::GraphFileGrant> FileGrants;
+			std::vector<engine::imagegraphexport::GraphDirectoryGrant> DirectoryGrants;
 			std::vector<FileReadControls> FileControls;
 			bool LivePreview = true;
 			bool PreviewDirty = true;
@@ -203,6 +204,13 @@ namespace studio {
 		}
 
 		void AuthoredDocumentChanged(State &state) {
+			std::erase_if(state.DirectoryGrants, [&](const auto &grant) {
+				return std::none_of(
+					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
+						return node.Id == grant.NodeId && node.Type == "pc.directory_search";
+					}
+				);
+			});
 			std::erase_if(state.FileGrants, [&](const auto &grant) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
@@ -276,6 +284,7 @@ namespace studio {
 		detail::ImageGraphHost &HostFor(State &state) {
 			state.Host.Lua = state.LuaHost.get();
 			state.Host.Grants = state.FileGrants;
+			state.Host.Directories = state.DirectoryGrants;
 			return state.Host;
 		}
 
@@ -667,6 +676,7 @@ namespace studio {
 			state.Authored = std::move(candidate);
 			state.ExportGrants.clear();
 			state.FileGrants.clear();
+			state.DirectoryGrants.clear();
 			state.FileControls.clear();
 			state.ExportUpdate = {};
 			state.Playback.CurrentTick = 0;
@@ -764,6 +774,7 @@ namespace studio {
 			state.Authored = std::move(imported.Graph);
 			state.ExportGrants.clear();
 			state.FileGrants.clear();
+			state.DirectoryGrants.clear();
 			state.FileControls.clear();
 			state.ExportUpdate = {};
 			state.Playback.CurrentTick = 0;
@@ -1196,6 +1207,7 @@ namespace studio {
 					state.Authored = std::move(fresh);
 					state.ExportGrants.clear();
 					state.FileGrants.clear();
+					state.DirectoryGrants.clear();
 					state.FileControls.clear();
 					state.ExportUpdate = {};
 					AuthoredDocumentChanged(state);
@@ -2587,11 +2599,45 @@ namespace studio {
 				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
 				RequestPreview(state, true);
 			};
+			const auto *selectedNode = FindNode(state.Authored, nodeId);
+			if (selectedNode && selectedNode->Type == "pc.directory_search") {
+				ImGui::InputTextWithHint(
+					"##directory-root",
+					"Exact absolute directory root",
+					controls.Directory.data(),
+					controls.Directory.size()
+				);
+				if (ImGui::Button("Grant directory")) {
+					const std::filesystem::path root(controls.Directory.data());
+					if (!root.is_absolute() || root.lexically_normal() != root)
+						controls.Message = "Enter an exact absolute directory root.";
+					else {
+						auto grant = std::find_if(
+							state.DirectoryGrants.begin(),
+							state.DirectoryGrants.end(),
+							[&](const auto &item) { return item.NodeId == nodeId; }
+						);
+						if (grant != state.DirectoryGrants.end()) {
+							grant->Root = root;
+							controls.Message.clear();
+							changed();
+						} else if (state.DirectoryGrants.size() == 64)
+							controls.Message = "Directory grants exceed the session limit.";
+						else {
+							state.DirectoryGrants.push_back({std::string(nodeId), root});
+							controls.Message.clear();
+							changed();
+						}
+					}
+				}
+			}
 			if (ImGui::Button("Grant read")) {
 				const std::filesystem::path file(controls.File.data());
 				std::string resource(controls.Resource.data());
 				const auto *node = FindNode(state.Authored, nodeId);
-				if (node && (node->Type == "pc.image_sequence" || node->Type == "pc.image_animated") &&
+				if (node &&
+					(node->Type == "pc.image_sequence" || node->Type == "pc.image_animated" ||
+					 node->Type == "pc.directory_search") &&
 					resource.empty())
 					resource = file.string();
 				if (file.empty())
@@ -2655,9 +2701,14 @@ namespace studio {
 			}
 			if (ImGui::Button("Revoke reads")) {
 				std::erase_if(state.FileGrants, [&](const auto &grant) { return grant.NodeId == nodeId; });
+				std::erase_if(state.DirectoryGrants, [&](const auto &grant) {
+					return grant.NodeId == nodeId;
+				});
 				controls.Message.clear();
 				changed();
 			}
+			for (const auto &grant : state.DirectoryGrants)
+				if (grant.NodeId == nodeId) ImGui::TextWrapped("Directory: %s", grant.Root.string().c_str());
 			for (const auto &grant : state.FileGrants)
 				if (grant.NodeId == nodeId)
 					ImGui::TextWrapped(

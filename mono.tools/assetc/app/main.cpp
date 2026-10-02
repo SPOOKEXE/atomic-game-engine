@@ -4,7 +4,9 @@
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/imagegraphexport/GraphDirectoryHost.hpp>
 
+#include <algorithm>
 #include <assetc/Bake.hpp>
 #include <assetc/GraphAuthoredExport.hpp>
 #include <assetc/GraphCommandHost.hpp>
@@ -19,6 +21,7 @@
 #include <fstream>
 #include <limits>
 #include <string>
+#include <vector>
 
 // The CLI parses options and reports the bake library's rows.
 
@@ -65,6 +68,7 @@ int main(int argc, char **argv) {
 		"NODE=PATH",
 		"Grant one exact graph file read, including layered archives; repeatable"
 	);
+	arguments.Value("graph-directory-read", "NODE=ROOT", "Grant exact directory enumeration; repeatable");
 	arguments.Value("graph-file-write", "NODE=PATH", "Grant one exact graph file write; repeatable");
 	arguments.Value(
 		"graph-file-resource", "NODE:RESOURCE=PATH", "Grant an exact native room dependency; repeatable"
@@ -251,7 +255,23 @@ int main(int argc, char **argv) {
 				 std::string(assignment.substr(colon + 1, separator - colon - 1))}
 			);
 		}
-		assetc::GraphFileHost fileHost(fileGrants, exportSettings.Content);
+		std::vector<engine::imagegraphexport::GraphDirectoryGrant> directoryGrants;
+		for (const auto assignment : arguments.GetAll("graph-directory-read")) {
+			const auto separator = assignment.find('=');
+			if (assignment.size() > 4096 || separator == std::string_view::npos || !separator ||
+				separator + 1 == assignment.size() || directoryGrants.size() == 64) {
+				ENGINE_ERROR("assetc: directory grant requires bounded NODE=ROOT");
+				return 2;
+			}
+			directoryGrants.push_back(
+				{std::string(assignment.substr(0, separator)),
+				 std::filesystem::path(assignment.substr(separator + 1))}
+			);
+		}
+		assetc::GraphFileHost fileHost(fileGrants, exportSettings.Content, directoryGrants);
+		engine::imagegraphexport::GraphDirectoryHost directoryHost(
+			directoryGrants, fileGrants, exportSettings.Content
+		);
 		std::vector<assetc::GraphVideoGrant> videoGrants;
 		for (const auto assignment : arguments.GetAll("graph-video-read")) {
 			const size_t separator = assignment.find('=');
@@ -297,19 +317,24 @@ int main(int argc, char **argv) {
 			assetc::GraphFileHost &Files;
 			assetc::GraphVideoHost &Videos;
 			assetc::GraphCommandHost &Commands;
+			engine::imagegraphexport::GraphDirectoryHost &Directories;
 
 		  public:
 			Host(
 				assetc::GraphFileHost &files,
 				assetc::GraphVideoHost &videos,
-				assetc::GraphCommandHost &commands
+				assetc::GraphCommandHost &commands,
+				engine::imagegraphexport::GraphDirectoryHost &directories
 			)
-				: Files(files), Videos(videos), Commands(commands) {}
+				: Files(files), Videos(videos), Commands(commands), Directories(directories) {}
+
 			bool Capture(
 				const engine::imagegraph::HostNodeInvocation &invocation,
 				engine::imagegraph::HostNodeCapture &output,
 				std::string &failure
 			) override {
+				if (invocation.Authored.Type == "pc.directory_search")
+					return Directories.Capture(invocation, output, failure);
 				if (invocation.Authored.Type == "pc.image_mp4" || invocation.Authored.Type == "pc.image_gif")
 					return Videos.Capture(invocation, output, failure);
 				if (invocation.Authored.Type == "pc.shell" || invocation.Authored.Type == "pc.http_request" ||
@@ -318,9 +343,9 @@ int main(int argc, char **argv) {
 					return Commands.Capture(invocation, output, failure);
 				return Files.Capture(invocation, output, failure);
 			}
-		} host(fileHost, videoHost, commands);
-		if (!fileGrants.empty() || !videoGrants.empty() || !processGrants.empty() || !httpGrants.empty() ||
-			!clockGrants.empty())
+		} host(fileHost, videoHost, commands, directoryHost);
+		if (!directoryGrants.empty() || !fileGrants.empty() || !videoGrants.empty() ||
+			!processGrants.empty() || !httpGrants.empty() || !clockGrants.empty())
 			exportSettings.HostProvider = &host;
 		std::string failure;
 		if (const auto node = arguments.Get("execute-node")) {

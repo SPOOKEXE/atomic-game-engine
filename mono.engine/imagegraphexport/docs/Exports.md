@@ -76,3 +76,47 @@ Still input normalizes only graphic-control delay fields in its owned encoded
 copy, avoiding the sequence codec's float-clock ceiling without changing pixels,
 disposal or the original file. Native GIF decoding uses the shared bake compositor. Exact equality with
 GameMaker's GIF import and background handling remains an observation gate.
+
+## Directory observations
+
+`pc.directory_search` uses an exact absolute canonical root grant to perform a
+bounded native directory observation. An authored path never grants access.
+Assetc accepts repeated `--graph-directory-read NODE=ROOT` grants; selected
+images also require `--graph-file-resource NODE:PATH=PATH` grants. Studio exposes
+Grant directory beside its exact per-image read grants, with Read / refresh and
+Revoke reads. Revoking the root also prevents reuse of a prior capture.
+
+The shared provider records each directory's entry order once and retains it
+across frames for the same node, root and recursion control. Its explicit
+`Refresh` operation discards that node's recorded order. Assetc uses this provider
+for its complete render range. Studio keeps
+the captured ordered paths and decoded images until refresh or changed controls
+or grants. Explicit `GraphDirectoryObservation` records can also be projected
+without enumerating again. The observation is limited to 64 directories and
+256 entries, with paths, traversal storage, captures and decoder work admitted
+against the operation byte cap before growth. Symbolic links and non-regular
+entries are refused.
+
+Projection preserves the pinned source's stack traversal: non-recursive mode
+still includes immediate child directories. Extension filter tokens retain
+case, while observed filename extensions use ASCII lowercase. Image mode emits
+PNG/JPG/JPEG/GIF surfaces and their ordered paths. Text mode preserves the
+source's empty output arrays because its publication guard tests sprite existence.
+This mode does not read otherwise unused text file contents. The authored mode
+selects the compiled output type; changing it requires recompilation.
+
+The recorded `std::filesystem` order is a native host profile. It does not prove
+GameMaker `file_find` or `struct_get_names` ordering, hidden/system attributes,
+or symbolic-link behavior. Admitted images that the
+native decoder rejects are skipped with their paths, matching the source
+`sprite_exists` publication guard. Grant, policy, dimension, byte-cap and native
+codec-coverage failures reject the complete read and preserve the prior capture.
+Each successful image keeps its own source dimensions. Ambient `file_checker`
+polling is represented by explicit host refresh. Those source parity gates remain explicit.
+
+Directory observation, capture, session and refresh use the existing Engine
+profile scopes. Metrics distinguish actual enumeration operations and observed
+entries from order replays. Raster counters report real stream bytes read and
+actual decode attempts once at those boundaries. Directory counters report
+skipped invalid images and emitted pixel payloads. The last-session gauge counts
+owned logical observation bytes; it does not claim allocator heap residency.

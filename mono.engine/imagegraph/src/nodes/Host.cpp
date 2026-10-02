@@ -155,6 +155,11 @@ namespace engine::imagegraph::detail {
 					const auto *convert = value ? std::get_if<bool>(value) : nullptr;
 					if (convert && *convert) return ValueType::Scalar;
 				}
+				if (context.Authored.Type == "pc.directory_search" && id == "outputs") {
+					const auto *raw = context.Find("type");
+					const auto *mode = raw ? std::get_if<EnumValue>(raw) : nullptr;
+					if (mode && mode->Value == 1) return ValueType::Text;
+				}
 				if (context.Authored.Type == "pc.json_file_read" && id == "struct") return ValueType::Any;
 				for (const auto &port : context.Entry.Outputs)
 					if (port.Id == id) return port.Type;
@@ -355,25 +360,44 @@ namespace engine::imagegraph::detail {
 		static constexpr ExecutorEntry entries[]{
 			{"pc.image", RecordedHost, true},
 			{"pc.image_sequence", RecordedHost, true},
+			{"pc.directory_search", RecordedHost, true},
 			{"pc.image_animated", RecordedHost, true},
-			{"pc.datetime_get", RecordedHost, true},	  {"pc.export", ExportPreview, true},
-			{"pc.wav_file_write", RecordedHost, true},	  {"pc.byte_file_read", RecordedHost, true},
-			{"pc.byte_file_write", RecordedHost, true},	  {"pc.text_file_read", RecordedHost, true},
-			{"pc.text_file_write", RecordedHost, true},	  {"pc.csv_file_read", RecordedHost, true},
-			{"pc.csv_file_write", RecordedHost, true},	  {"pc.json_file_read", RecordedHost, true},
-			{"pc.json_file_write", RecordedHost, true},	  {"pc.xml_file_read", RecordedHost, true},
-			{"pc.xml_file_write", RecordedHost, true},	  {"pc.http_request", RecordedHost, true},
-			{"pc.http_request_file", RecordedHost, true}, {"pc.shell", RecordedHost, true},
-			{"pc.midi_in", RecordedHost, true},			  {"pc.spout_send", RecordedHost, true},
-			{"pc.spout_receive", RecordedHost, true},	  {"pc.ase_file_read", RecordedHost, true},
-			{"pc.ase_layer", RecordedHost, true},		  {"pc.ase_tag", RecordedHost, true},
-			{"pc.ase_tileset", RecordedHost, true},		  {"pc.ora_file_read", RecordedHost, true},
-			{"pc.ora_layer", LayerSurface, true},		  {"pc.krita_file_read", RecordedHost, true},
-			{"pc.krita_layer", LayerSurface, true},		  {"pc.gmroom", RecordedHost, true},
-			{"pc.lua_compute", RecordedHost, true},		  {"pc.lua_global", RecordedHost, true},
-			{"pc.lua_surface", RecordedHost, true},		  {"pc.image_mp4", RecordedHost, true},
-			{"pc.image_gif", RecordedHost, true},		  {"pc.3_d_mesh_obj", RecordedHost, true},
-			{"pc.3_d_mesh_json", RecordedHost, true},	  {"pc.3_d_mesh_export", RecordedHost, true}
+			{"pc.datetime_get", RecordedHost, true},
+			{"pc.export", ExportPreview, true},
+			{"pc.wav_file_write", RecordedHost, true},
+			{"pc.byte_file_read", RecordedHost, true},
+			{"pc.byte_file_write", RecordedHost, true},
+			{"pc.text_file_read", RecordedHost, true},
+			{"pc.text_file_write", RecordedHost, true},
+			{"pc.csv_file_read", RecordedHost, true},
+			{"pc.csv_file_write", RecordedHost, true},
+			{"pc.json_file_read", RecordedHost, true},
+			{"pc.json_file_write", RecordedHost, true},
+			{"pc.xml_file_read", RecordedHost, true},
+			{"pc.xml_file_write", RecordedHost, true},
+			{"pc.http_request", RecordedHost, true},
+			{"pc.http_request_file", RecordedHost, true},
+			{"pc.shell", RecordedHost, true},
+			{"pc.midi_in", RecordedHost, true},
+			{"pc.spout_send", RecordedHost, true},
+			{"pc.spout_receive", RecordedHost, true},
+			{"pc.ase_file_read", RecordedHost, true},
+			{"pc.ase_layer", RecordedHost, true},
+			{"pc.ase_tag", RecordedHost, true},
+			{"pc.ase_tileset", RecordedHost, true},
+			{"pc.ora_file_read", RecordedHost, true},
+			{"pc.ora_layer", LayerSurface, true},
+			{"pc.krita_file_read", RecordedHost, true},
+			{"pc.krita_layer", LayerSurface, true},
+			{"pc.gmroom", RecordedHost, true},
+			{"pc.lua_compute", RecordedHost, true},
+			{"pc.lua_global", RecordedHost, true},
+			{"pc.lua_surface", RecordedHost, true},
+			{"pc.image_mp4", RecordedHost, true},
+			{"pc.image_gif", RecordedHost, true},
+			{"pc.3_d_mesh_obj", RecordedHost, true},
+			{"pc.3_d_mesh_json", RecordedHost, true},
+			{"pc.3_d_mesh_export", RecordedHost, true}
 		};
 		return entries;
 	}
