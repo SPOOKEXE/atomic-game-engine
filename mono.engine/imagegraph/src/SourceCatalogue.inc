@@ -8985,8 +8985,12 @@ S	I	progress_remap	1
 A	I	progress_remap	1
 I	type	Type	14	EScroll	enum	e 0	
 S	I	type	0
-B	I	type	0	general	1	default	?
-C	I	type	unknown
+B	I	type	0	general	1	default	4
+C	I	type	resolved
+Q	I	type	0	0	s "Linear"
+Q	I	type	1	0	s "Circular"
+Q	I	type	2	0	s "Radial"
+Q	I	type	3	0	s "Diamond"
 I	angle	Angle	15	Rotation	scalar	d 0	
 S	I	angle	0
 I	radius	Radius	16	Float	scalar	d 0.5	

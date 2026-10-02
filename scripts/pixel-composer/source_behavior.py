@@ -122,6 +122,17 @@ def _without_comments(text: str) -> str:
     return "".join(result)
 
 
+def _local_source_array(expression: str, body: str) -> str | None:
+    assignment = re.search(r"\b" + re.escape(expression) + r"\s*=\s*(\[|__enum_array_gen\s*\()", body)
+    if assignment is None:
+        return None
+    opening = assignment.end() - 1
+    end = _matching_end(body, opening)
+    if end is None or re.search(r"\b" + re.escape(expression) + r"\s*(?:\[[^]]*\]\s*)?=|array_push\(\s*" + re.escape(expression) + r"\b", body[end:]):
+        return None
+    return body[assignment.start(1):end]
+
+
 def _array_count(expression: str, body: str, global_arrays: dict[str, str], seen: set[str]) -> int | None:
     expression = expression.strip()
     if expression.startswith("["):
@@ -152,14 +163,11 @@ def _array_count(expression: str, body: str, global_arrays: dict[str, str], seen
         seen.add(expression)
         return _array_count(global_arrays[expression], body, global_arrays, seen)
 
-    assignment = re.search(r"\b" + re.escape(expression) + r"\s*=\s*\[", body)
-    if assignment is None or re.search(r"\b" + re.escape(expression) + r"\s*(?:\[[^]]*\]\s*)?=|array_push\(\s*" + re.escape(expression) + r"\b", body[assignment.end():]):
-        return None
-    end = _matching_end(body, assignment.end() - 1)
-    if end is None:
+    assigned = _local_source_array(expression, body)
+    if assigned is None:
         return None
     seen.add(expression)
-    return _array_count(body[assignment.end() - 1:end], body, global_arrays, seen)
+    return _array_count(assigned, body, global_arrays, seen)
 
 
 def choice_count(argument: str, body: str, global_arrays: dict[str, str]) -> int | None:
@@ -377,16 +385,11 @@ def _resolved_source_array(
         if expression in global_arrays:
             seen.add(expression)
             return _resolved_source_array(global_arrays[expression], body, global_arrays, seen, array_map_verified)
-        assignment = re.search(r"\b" + re.escape(expression) + r"\s*=\s*\[", body)
-        if assignment is None:
-            return None
-        end = _matching_end(body, assignment.end() - 1)
-        if end is None:
-            return None
-        if re.search(r"\b" + re.escape(expression) + r"\s*(?:\[[^]]*\]\s*)?=|array_push\(\s*" + re.escape(expression) + r"\b", body[end:]):
+        assigned = _local_source_array(expression, body)
+        if assigned is None:
             return None
         seen.add(expression)
-        return _split_top_level(body[assignment.end():end - 1])
+        return _resolved_source_array(assigned, body, global_arrays, seen, array_map_verified)
     return None
 
 

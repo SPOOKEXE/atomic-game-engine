@@ -94,6 +94,15 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
         self.assertEqual("unknown", conditional["choice_clamp"]["mode"])
         self.assertEqual("unknown", later_mutation["choice_clamp"]["mode"])
 
+    def test_local_enum_helper_alias_retains_source_positions_and_count(self):
+        body = 'var __gradTypes = __enum_array_gen(["Linear", "Circular", "Radial", "Diamond"], s_node_gradient_type);'
+        self.assertEqual(4, choice_count("__gradTypes", body, {}))
+        mapped = source_choice_map("__gradTypes", body, {}, array_map_verified=True, scroll_item_verified=True, separator_verified=True)
+        self.assertEqual(["Linear", "Circular", "Radial", "Diamond"], [item["label"] for item in mapped])
+        self.assertEqual([0, 1, 2, 3], [item["choice_index"] for item in mapped])
+        self.assertIsNone(choice_count("__gradTypes", body + " __gradTypes = [];", {}))
+        self.assertIsNone(source_choice_map("__gradTypes", body, {}, array_map_verified=False, scroll_item_verified=True, separator_verified=True))
+
     def test_choice_count_requires_an_exact_resolved_array_length(self):
         globals_ = {"GLOBAL_CHOICES": '["A", /* ignored, comma */ VALUE_X, -1,]'}
         self.assertEqual(3, choice_count('["A", nested(1, 2), -1]', "", {}))
