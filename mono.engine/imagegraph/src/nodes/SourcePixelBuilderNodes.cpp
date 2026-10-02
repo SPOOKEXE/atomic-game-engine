@@ -182,6 +182,9 @@ namespace engine::imagegraph::detail {
 					"Builder surface snapshot exceeds its byte bound",
 					"dynamic_builder"
 				);
+			if (context.Request.RigidReplay &&
+				!AddRecipeBytes(bytes, RetainedRigidReplayBytes(*context.Request.RigidReplay)))
+				return context.Fail(Status::LimitExceeded, "Builder rigid history exceeds its byte bound");
 			if (context.Request.DataReplay &&
 				!AddRecipeBytes(bytes, RetainedDataReplayBytes(*context.Request.DataReplay)))
 				return context.Fail(Status::LimitExceeded, "Builder data history exceeds its byte bound");
@@ -271,6 +274,11 @@ namespace engine::imagegraph::detail {
 			for (const auto *receipt : receipts)
 				data.HostCaptures.push_back(*receipt);
 			if (context.Request.DataReplay) data.DataHistory = *context.Request.DataReplay;
+			// Retained Draw regenerates this frame from the immutable prior, never the current actor prefix.
+			if (context.Request.RigidReplay) data.RigidHistory = *context.Request.RigidReplay;
+			data.RigidAuthoringRevision = context.Request.RigidAuthoringRevision;
+			data.RigidPlaying = context.Request.RigidPlaying;
+			data.RigidFrameProgress = context.Request.RigidFrameProgress;
 			if (context.Request.SliceStackReplay) data.SliceStack = *context.Request.SliceStackReplay;
 			data.SimulationAuthoringRevision = context.Request.SimulationAuthoringRevision;
 			if (context.Request.SimulationReplay) data.Simulation = *context.Request.SimulationReplay;

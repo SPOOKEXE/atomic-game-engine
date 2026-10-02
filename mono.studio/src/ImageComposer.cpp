@@ -2,6 +2,7 @@
 #include "ImageComposerInternal.hpp"
 #include "ImageGraphAnimationControl.hpp"
 #include "ImageGraphArrayEditor.hpp"
+#include "ImageGraphCanvasInputs.hpp"
 #include "ImageGraphChoices.hpp"
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphExportTriggers.hpp"
@@ -12,6 +13,7 @@
 #include "ImageGraphPorts.hpp"
 #include "ImageGraphPreview.hpp"
 #include "ImageGraphRigid.hpp"
+#include "ImageGraphRigidMeshAction.hpp"
 #include "ImageGraphSourceEdit.hpp"
 #include "KeyframeKindEditor.hpp"
 #include "TimelineDopesheet.hpp"
@@ -375,17 +377,7 @@ namespace studio {
 		}
 
 		void SyncCanvas(State &state) {
-			for (const nodegraph::Node &canvasNode : state.Graph.Nodes()) {
-				if (state.Ids.ToDocument.contains(canvasNode.Id) || !canvasNode.DynamicInputs.empty())
-					continue;
-				const engine::imagegraph::NodeSchema *schema =
-					engine::imagegraph::FindSchema(canvasNode.Type);
-				if (schema != nullptr && schema->DynamicInputs) {
-					(void)state.Graph.SetDynamicInputs(
-						canvasNode.Id, {nodegraph::PortSpec{"item-1", "imagegraph.image"}}
-					);
-				}
-			}
+			detail::SeedImageGraphCanvasInputs(state.Graph, state.Ids);
 			Document updated;
 			if (!SaveImageGraphCanvas(state.Graph, state.Authored, state.Ids, updated, state.AdapterError)) {
 				RequestPreview(state);
@@ -2975,6 +2967,81 @@ namespace studio {
 			if (schema == nullptr) {
 				ImGui::TextDisabled("This node type is not registered in this build.");
 				return;
+			}
+			if (node->Type == "pc.rigid_object") {
+				engine::imagegraph::EvaluationSnapshot directInputs;
+				detail::DrawImageGraphRigidMeshAction(
+					state.Authored,
+					state.History,
+					nodeId,
+					[&](Diagnostic &error) -> const engine::imagegraph::EvaluationSnapshot * {
+						FinishInactiveEdit(state);
+						const auto *target = FindNode(state.Authored, nodeId);
+						if (SelectedNodeId(state) != nodeId || !target || target->Type != "pc.rigid_object") {
+							error = {
+								Status::InvalidValue,
+								nodeId,
+								"attribute_mesh",
+								"Generate Mesh selection changed"
+							};
+							return nullptr;
+						}
+						const uint64_t revision = state.DocumentRevision;
+						const uint64_t inputRevision = state.EvaluationInputRevision;
+						const auto current = [&] {
+							return detail::ImageGraphRigidMeshCaptureCurrent(
+								state.Authored,
+								nodeId,
+								SelectedNodeId(state),
+								state.DocumentRevision,
+								state.EvaluationInputRevision,
+								revision,
+								inputRevision,
+								error
+							);
+						};
+						engine::imagegraphphysics::RigidProvider requestRigidProvider;
+						engine::imagegraph::EvaluationRequest request;
+						request.HostProvider = &HostFor(state);
+						BindObservations(state, request);
+						detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
+						(void)SetFrameTime(request, GetImageGraphFrame(state.Playback));
+						request.AudioFrames = state.AudioFrames;
+						request.AudioClips = state.AudioClips;
+						request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+						engine::imagegraph::Plan plan;
+						if (Compile(state.Authored, plan, error) != Status::Ok ||
+							!state.GroupHost.Prepare(
+								state.Authored, plan, state.DocumentRevision, request, error
+							) ||
+							!state.FeedbackHost.PrepareNodeInputs(
+								state.Authored,
+								plan,
+								state.DocumentRevision,
+								state.EvaluationInputRevision,
+								nodeId,
+								request,
+								error
+							))
+							return nullptr;
+						if (!current()) return nullptr;
+						if (state.FeedbackHost.Active()) return &state.FeedbackHost.Snapshot();
+						if (EvaluateNodeInputs(state.Authored, plan, nodeId, request, directInputs, error) !=
+							Status::Ok)
+							return nullptr;
+						return current() ? &directInputs : nullptr;
+					},
+					[&] {
+						AuthoredDocumentChanged(state);
+						state.PreviewCache.Clear();
+						RequestPreview(state, true);
+					},
+					state.LastDiagnostic
+				);
+				node = FindNode(state.Authored, nodeId);
+				if (!node) return;
+				schema = engine::imagegraph::FindSchema(node->Type);
+				if (!schema) return;
 			}
 			if (node->Type == "pc.verlet_sim_mesh_cache" && ImGui::Button("Cache Mesh")) {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;

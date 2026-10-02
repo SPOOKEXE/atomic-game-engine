@@ -524,7 +524,12 @@ namespace engine::imagegraph {
 						};
 						Diagnostic diagnostic;
 						const auto status = RasterizePixelBuilder(
-							*builder, requested, rendered.Data, diagnostic, Context.MaximumBytes
+							*builder,
+							requested,
+							rendered.Data,
+							diagnostic,
+							Context.MaximumBytes,
+							Context.Request.RigidProvider
 						);
 						if (status != Status::Ok) {
 							Error = std::move(diagnostic);

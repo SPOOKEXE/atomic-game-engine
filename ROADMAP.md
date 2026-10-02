@@ -42,8 +42,8 @@ Milestone labels describe development scope, not release versions.
 
   1. Retain the source licence, pinned metadata and generated enum choices; save instance ports and reflected graph selectors.
   2. Evaluate bounded image/data kernels, palettes, atlases, path blur, Tilesets, typed arrays and Pixel Builder recipes; inherit instance input routes.
-  3. Replay animation, FLIP/Verlet, rigid actors and recorded random/history state; rasterize trails and VFX without extra simulation steps.
-  4. Edit native and PXC graphs, groups, keys and tile properties with atomic undo/redo; retain source metadata across key moves and copies.
+  3. Replay animation, FLIP/Verlet and rigid actors from frame-start checkpoints; retain recorded random/history state and rasterize trails/VFX.
+  4. Edit graphs, groups, keys and tiles with atomic undo/redo; generate saved rigid meshes and preserve source metadata.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
   6. Run bounded Lua and export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
   7. Bind rigid and 3D outputs, source mesh availability and six-face skyboxes; cook materials/HLSL and queue camera/SDF jobs. GPU verification remains open.
@@ -51,7 +51,7 @@ Milestone labels describe development scope, not release versions.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
-  1. Graph and Studio: pass combined Group, Range, Any and Trigger tests; finish atomic undo/redo, Dopesheet gestures and host compatibility.
+  1. Graph and Studio: finish Dopesheet gestures and remaining undo/redo and host workflows.
   2. Nodes: finish 2D, data, array, VFX and simulation coverage; verify defaults, controls, errors and animation; update the parity matrices.
   3. Animation and audio: finish audio workflows and feedback; verify seek/reset and fractional-key semantics.
   4. 3D and outputs: finish live Transform Image 3D, mesh consumers, remaining 3D nodes, material/shader/skybox bindings and large-sequence playback.

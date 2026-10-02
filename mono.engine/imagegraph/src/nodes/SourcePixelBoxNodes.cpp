@@ -220,8 +220,9 @@ namespace engine::imagegraph::detail {
 			renderingCharge = context.ReserveWorkspace(budget, "surface");
 			if (!renderingCharge) return false;
 			Diagnostic diagnostic;
-			const Status status =
-				RasterizePixelBuilder(*dynamic, sourceDimension, rendered, diagnostic, budget);
+			const Status status = RasterizePixelBuilder(
+				*dynamic, sourceDimension, rendered, diagnostic, budget, context.Request.RigidProvider
+			);
 			if (status != Status::Ok) return context.Fail(status, diagnostic.Message, "surface");
 			surface = &rendered;
 			if (!renderingCharge->Resize(rendered.Pixels.capacity()))

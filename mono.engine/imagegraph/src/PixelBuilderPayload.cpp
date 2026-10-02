@@ -70,6 +70,8 @@ namespace engine::imagegraph {
 			   Simulation == other.Simulation && Surfaces == other.Surfaces && Random == other.Random &&
 			   Groups == other.Groups && GroupAuthoringRevision == other.GroupAuthoringRevision &&
 			   DataHistory == other.DataHistory && SliceStack == other.SliceStack &&
+			   RigidHistory == other.RigidHistory && RigidAuthoringRevision == other.RigidAuthoringRevision &&
+			   RigidPlaying == other.RigidPlaying && RigidFrameProgress == other.RigidFrameProgress &&
 			   SimulationAuthoringRevision == other.SimulationAuthoringRevision && Entropy == other.Entropy &&
 			   PcxObservations == other.PcxObservations && ProjectName == other.ProjectName &&
 			   SimulationCacheCaptures == other.SimulationCacheCaptures &&
@@ -263,6 +265,7 @@ namespace engine::imagegraph::detail {
 		bytes = Add(bytes, Text(data.OwnerNodeId, retained));
 		if (data.Groups) bytes = Add(bytes, data.Groups->Replay.RetainedBytes());
 		if (data.DataHistory) bytes = Add(bytes, RetainedDataReplayBytes(*data.DataHistory));
+		if (data.RigidHistory) bytes = Add(bytes, RetainedRigidReplayBytes(*data.RigidHistory));
 		if (data.SliceStack) bytes = Add(bytes, RetainedSliceStackReplayBytes(*data.SliceStack));
 		bytes = Add(bytes, Container(data.AudioFrames, retained));
 		for (const auto &frame : data.AudioFrames) {
@@ -391,6 +394,9 @@ namespace engine::imagegraph::detail {
 				entry.Subframe < 0 || entry.Subframe >= 1)
 				return false;
 		Diagnostic diagnostic;
+		if (data.RigidHistory &&
+			ValidateRigidReplay(*data.RigidHistory, Limits::MaximumEvaluationBytes, diagnostic) != Status::Ok)
+			return false;
 		if (data.DataHistory &&
 			ValidateDataReplay(*data.DataHistory, Limits::MaximumEvaluationBytes, diagnostic) != Status::Ok)
 			return false;

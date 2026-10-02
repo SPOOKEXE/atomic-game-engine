@@ -9,7 +9,8 @@ namespace engine::imagegraph::detail {
 		Vector2 dimension,
 		Image &image,
 		Diagnostic &diagnostic,
-		uint64_t maximumBytes
+		uint64_t maximumBytes,
+		SourceRigidProvider *rigidProvider
 	) {
 		if (!value.Data || !ValidPixelBuilderPayload(value)) {
 			diagnostic = {
@@ -115,6 +116,11 @@ namespace engine::imagegraph::detail {
 		request.Subframe = data.Subframe;
 		request.NegativeFrame = data.NegativeFrame;
 		request.DataReplay = data.DataHistory ? &*data.DataHistory : nullptr;
+		request.RigidReplay = data.RigidHistory ? &*data.RigidHistory : nullptr;
+		request.RigidProvider = rigidProvider;
+		request.RigidAuthoringRevision = data.RigidAuthoringRevision;
+		request.RigidPlaying = data.RigidPlaying;
+		request.RigidFrameProgress = data.RigidFrameProgress;
 		request.SliceStackReplay = data.SliceStack ? &*data.SliceStack : nullptr;
 		request.SimulationAuthoringRevision = data.SimulationAuthoringRevision;
 		request.GroupReplay = replayGroups ? &replayGroups->Replay : nullptr;

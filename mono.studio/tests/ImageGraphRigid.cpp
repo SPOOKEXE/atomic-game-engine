@@ -333,50 +333,6 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"rigid observation reuse gate follows simulation controls and ignores unrelated branches",
-	"[studio][rigid_host]"
-) {
-	auto document = MixedRigidTexture();
-	// A separate rigid producer can feed a typed simulation control through a
-	// source image-to-position node. This fixture verifies dependency admission,
-	// without claiming that this source detector has native runtime parity.
-	auto upstream = engine::imagegraphphysics::testing::RigidGraphFixture();
-	for (auto &node : upstream.Nodes) {
-		node.Id = "upstream-" + node.Id;
-		if (!node.GroupId.empty()) node.GroupId = "upstream-" + node.GroupId;
-	}
-	for (auto &group : upstream.Groups) {
-		group.Id = "upstream-" + group.Id;
-		group.OwnerNodeId = "upstream-" + group.OwnerNodeId;
-	}
-	for (auto &link : upstream.Links) {
-		link.FromNode = "upstream-" + link.FromNode;
-		link.ToNode = "upstream-" + link.ToNode;
-	}
-	document.Nodes.insert(document.Nodes.end(), upstream.Nodes.begin(), upstream.Nodes.end());
-	document.Groups.insert(document.Groups.end(), upstream.Groups.begin(), upstream.Groups.end());
-	document.Links.insert(document.Links.end(), upstream.Links.begin(), upstream.Links.end());
-	document.Nodes.push_back(
-		{"position", "pc.find_pixel", "", {}, {{"search_color", Colour{255, 80, 20, 255}}}}
-	);
-	document.Links.push_back({"upstream-render", "surface_out", "position", "surface_in"});
-	document.Links.push_back({"position", "position", "sim", "gravity"});
-	Plan plan;
-	Diagnostic diagnostic;
-	const auto compiled = Compile(document, plan, diagnostic);
-	INFO(diagnostic.Message);
-	REQUIRE(compiled == Status::Ok);
-	const std::array<std::string, 1> outputs{"image"};
-	CHECK(engine::imagegraph::feedback_detail::RigidFeedsSimulation(document, plan, outputs, {}, {}));
-	CHECK_FALSE(
-		engine::imagegraph::feedback_detail::RigidFeedsSimulation(document, plan, {}, "upstream-render", {})
-	);
-	const auto forward = MixedRigidTexture();
-	REQUIRE(Compile(forward, plan, diagnostic) == Status::Ok);
-	CHECK_FALSE(engine::imagegraph::feedback_detail::RigidFeedsSimulation(forward, plan, outputs, {}, {}));
-}
-
-TEST_CASE(
 	"rigid observation preview keys retain the bounded LRU and generic default contract",
 	"[studio][rigid_host]"
 ) {

@@ -6,88 +6,88 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <new>
 
 namespace engine::imagegraph {
 	namespace feedback_detail {
-		// Only an upstream rigid dependency can change a simulation's inputs during
-		// observation refresh. A simulation feeding a rigid texture remains reusable.
-		inline bool RigidFeedsSimulation(
+		// Lua VM state belongs to its provider session, outside the replay checkpoint.
+		inline bool RefreshTouchesLua(
 			const Document &document,
 			const Plan &plan,
 			std::span<const std::string> outputs,
 			std::string_view selectedNode,
 			std::span<const std::string_view> actions
 		) {
-			struct Visit {
-				size_t Index;
-				bool Simulation;
-			};
-			std::array<std::array<bool, 2>, Limits::MaximumNodes> visited{};
-			std::array<Visit, 2 * Limits::MaximumNodes> pending{};
+			if (document.Nodes.size() > Limits::MaximumNodes || outputs.size() > Limits::MaximumOutputs ||
+				actions.size() > Limits::MaximumNodes)
+				return true;
+			std::array<bool, Limits::MaximumNodes> visited{};
+			std::array<size_t, Limits::MaximumNodes> pending{};
 			size_t count = 0;
-			bool invalid = document.Nodes.size() > Limits::MaximumNodes ||
-						   outputs.size() > Limits::MaximumOutputs || actions.size() > Limits::MaximumNodes;
-			if (invalid) return true;
-			const auto add = [&](size_t index, bool simulation) {
-				if (index >= document.Nodes.size() || index >= Limits::MaximumNodes) {
+			bool invalid = false;
+			const auto add = [&](size_t index) {
+				if (index >= document.Nodes.size()) {
 					invalid = true;
 					return;
 				}
-				if (!visited[index][simulation]) {
-					visited[index][simulation] = true;
-					pending[count++] = {index, simulation};
+				if (!visited[index]) {
+					visited[index] = true;
+					pending[count++] = index;
 				}
 			};
-			const auto addNode = [&](std::string_view id, bool simulation) {
+			const auto addNode = [&](std::string_view id) {
 				for (size_t i = 0; i < document.Nodes.size(); ++i)
 					if (document.Nodes[i].Id == id) {
-						add(i, simulation);
+						add(i);
 						return;
 					}
 				invalid = true;
 			};
-			if (!selectedNode.empty()) addNode(selectedNode, false);
-			for (const auto id : actions)
-				addNode(id, false);
+			if (!selectedNode.empty()) addNode(selectedNode);
+			for (auto id : actions)
+				addNode(id);
 			for (const auto &id : outputs) {
-				const auto found =
-					std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const auto &output) {
-						return output.Id == id;
+				const auto output =
+					std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const auto &item) {
+						return item.Id == id;
 					});
-				if (found == document.Outputs.end()) {
+				if (output == document.Outputs.end())
 					invalid = true;
-					continue;
-				}
-				addNode(found->NodeId, false);
+				else
+					addNode(output->NodeId);
 			}
 			while (count && !invalid) {
 				const auto current = pending[--count];
-				const auto &node = document.Nodes[current.Index];
-				if (current.Simulation && node.Type.starts_with("pc.rigid_")) return true;
-				const bool simulation = current.Simulation || node.Type == "image.verlet_simple" ||
-										node.Type.starts_with("pc.verlet_") ||
-										node.Type.starts_with("pc.flip_");
+				const auto &node = document.Nodes[current];
+				if (node.Type.starts_with("pc.lua_")) return true;
 				for (const auto &link : plan.EffectiveLinks)
-					if (link.ToNode == node.Id) addNode(link.FromNode, simulation);
+					if (link.ToNode == node.Id) addNode(link.FromNode);
 				for (const auto &edge : plan.GroupSurfaceDependencies)
-					if (edge.Consumer == current.Index) add(edge.Producer, simulation);
+					if (edge.Consumer == current) add(edge.Producer);
 				for (const auto &edge : plan.InlineOwnerDependencies)
-					if (edge.Consumer == current.Index && !edge.ControlsOnly) add(edge.Owner, simulation);
+					if (edge.Consumer == current) add(edge.Owner);
 				for (const auto &edge : plan.InlineControlDependencies)
-					if (edge.Consumer == current.Index) add(edge.Producer, simulation);
+					if (edge.Consumer == current) add(edge.Producer);
 				for (const auto &edge : plan.PcxNamedDependencies)
-					if (edge.Consumer == current.Index) add(edge.Producer, simulation);
+					if (edge.Consumer == current) add(edge.Producer);
 			}
 			return invalid;
 		}
-	}
-	// One host owns feedback generations and source processor state. All selected/bound outputs share
-	// one evaluated closure per tick, so a simulation or cached processor executes once.
+
+	} // namespace feedback_detail
+	// One host owns feedback generations and source processor state. All
+	// selected/bound outputs share one evaluated closure per tick, so a simulation
+	// or cached processor executes once.
 	class CapturedFeedbackHost {
 		std::vector<FeedbackBinding> Bindings;
 		std::vector<RequestImageSource> Seeds, Inputs;
 		StatefulOutputEvaluationResult State;
+		// The immutable journal before the current frame; current pixels are never
+		// duplicated here.
+		StatefulOutputEvaluationResult FrameStart;
+		std::vector<RequestImageSource> FrameStartInputs;
+		bool FrameStartValid = false, FrameStartResetSurfaces = false;
 		EvaluationSnapshot InputSnapshot;
 		std::string InputNode;
 		uint64_t DocumentRevision = 0, InputRevision = 0, Tick = 0;
@@ -106,6 +106,36 @@ namespace engine::imagegraph {
 			return RetainedStatefulOutputBytes(state) + RetainedSimulationReplayBytes(state.Simulation) +
 				   RetainedSurfaceFrameReplayBytes(state.Surfaces) + RetainedRandomReplayBytes(state.Random) +
 				   RetainedDataReplayBytes(state.Data) + RetainedRigidReplayBytes(state.Rigid);
+		}
+		static uint64_t LedgerBytes(const StatefulOutputEvaluationResult &state) {
+			const std::array<uint64_t, 5> records{
+				RetainedSimulationReplayBytes(state.Simulation),
+				RetainedSurfaceFrameReplayBytes(state.Surfaces),
+				RetainedRandomReplayBytes(state.Random),
+				RetainedDataReplayBytes(state.Data),
+				RetainedRigidReplayBytes(state.Rigid)
+			};
+			uint64_t bytes = 0;
+			for (const auto record : records) {
+				if (record > std::numeric_limits<uint64_t>::max() - bytes)
+					return std::numeric_limits<uint64_t>::max();
+				bytes += record;
+			}
+			return bytes;
+		}
+		static void
+		CopyLedgers(const StatefulOutputEvaluationResult &source, StatefulOutputEvaluationResult &target) {
+			target.Simulation = source.Simulation;
+			target.Surfaces = source.Surfaces;
+			target.Random = source.Random;
+			target.Data = source.Data;
+			target.Rigid = source.Rigid;
+		}
+		static uint64_t CaptureBytes(std::span<const RequestImageSource> sources) {
+			uint64_t bytes = sources.size() * sizeof(RequestImageSource);
+			for (const auto &source : sources)
+				bytes += source.SourceId.capacity() + source.Data.Pixels.capacity();
+			return bytes;
 		}
 		static const Image *ImageOutput(const StatefulNamedOutput &output) {
 			if (const auto *image = std::get_if<Image>(&output.Output)) return image;
@@ -126,8 +156,9 @@ namespace engine::imagegraph {
 		bool Active() const {
 			return Stateful || !Bindings.empty();
 		}
-		// Native playback restart reconstructs tick zero while retaining source cache controls.
-		// Provider sessions and authored revisions remain owned by their existing callers.
+		// Native playback restart reconstructs tick zero while retaining source cache
+		// controls. Provider sessions and authored revisions remain owned by their
+		// existing callers.
 		void RestartCycle() {
 			Initialized = false;
 		}
@@ -136,6 +167,9 @@ namespace engine::imagegraph {
 			Seeds = {};
 			Inputs = {};
 			State = {};
+			FrameStart = {};
+			FrameStartInputs = {};
+			FrameStartValid = false;
 			InputSnapshot = {};
 			InputNode.clear();
 			DocumentRevision = InputRevision = Tick = 0;
@@ -273,23 +307,24 @@ namespace engine::imagegraph {
 					oldConfigBytes += binding.SourceId.capacity() + binding.OutputId.capacity();
 			const uint64_t currentBytes = OutputBytes(State) + InputSnapshot.RetainedBytes() +
 										  InputNode.capacity() + SourceBytes(Inputs) + configBytes +
-										  oldConfigBytes + externalBytes;
+										  oldConfigBytes + externalBytes + LedgerBytes(FrameStart) +
+										  SourceBytes(FrameStartInputs);
 			if (currentBytes >= maximumBytes)
 				return fail(Status::LimitExceeded, "stateful host residency exceeds byte bounds");
 			const bool rigidObservationChanged =
 				temporal.RigidActors && Initialized &&
 				(RigidPlaying != request.RigidPlaying || RigidFrameProgress != request.RigidFrameProgress);
-			const bool refreshRigidObservations = !changed && Initialized && sameSelection &&
-												  Tick == request.Tick && Subframe == request.Subframe &&
-												  NegativeFrame == request.NegativeFrame &&
-												  rigidObservationChanged;
-			if (refreshRigidObservations && temporal.Simulation &&
-				feedback_detail::RigidFeedsSimulation(
-					document, plan, outputs, selectedNode, request.SimulationCacheCaptures
-				))
+			const bool refreshFrame = !changed && Initialized && sameSelection && Tick == request.Tick &&
+									  NegativeFrame == request.NegativeFrame && temporal.RigidActors &&
+									  (rigidObservationChanged || Subframe != request.Subframe ||
+									   !request.SimulationCacheCaptures.empty());
+			if (refreshFrame && !FrameStartValid)
+				return fail(Status::InvalidValue, "rigid refresh has no frame-start checkpoint");
+			if (refreshFrame && feedback_detail::RefreshTouchesLua(
+									document, plan, outputs, selectedNode, request.SimulationCacheCaptures
+								))
 				return fail(
-					Status::UnsupportedExecution,
-					"rigid observation refresh cannot reuse simulation inputs that depend on rigid output"
+					Status::UnsupportedExecution, "rigid frame refresh cannot replay Lua session side effects"
 				);
 			if (!changed && Initialized && !rigidObservationChanged && Tick == request.Tick &&
 				Subframe == request.Subframe && NegativeFrame == request.NegativeFrame && sameSelection &&
@@ -307,7 +342,7 @@ namespace engine::imagegraph {
 				return true;
 			}
 			const bool contiguous =
-				directData ||
+				directData || refreshFrame ||
 				(!changed && sameSelection && Initialized &&
 				 ((Tick < Limits::MaximumTick && Tick + 1 == request.Tick) ||
 				  (Tick == request.Tick && Subframe == request.Subframe &&
@@ -319,8 +354,12 @@ namespace engine::imagegraph {
 				return fail(Status::LimitExceeded, "stateful seek exceeds the 4096-step bound");
 			std::string candidateNode(selectedNode);
 			StatefulOutputEvaluationResult candidate;
+			StatefulOutputEvaluationResult candidateStart;
+			std::vector<RequestImageSource> candidateStartInputs;
+			bool candidateStartValid = false, candidateStartResetSurfaces = false;
 			EvaluationSnapshot candidateSnapshot;
-			// Source interlace caches deliberately survive authored edits and backward seeks.
+			// Source interlace caches deliberately survive authored edits and backward
+			// seeks.
 			const auto retainCache = [&](const SimulationReplayEntry &entry) {
 				return entry.Cache && entry.State.AuthoringRevision == revision &&
 					   std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
@@ -349,20 +388,55 @@ namespace engine::imagegraph {
 			for (uint64_t tick = first; tick <= request.Tick; tick++) {
 				EvaluationRequest clock = request;
 				clock.Tick = tick;
-				clock.ReuseSimulationFrame = refreshRigidObservations && temporal.Simulation;
+				clock.ReuseSimulationFrame = false;
 				clock.Subframe = tick == request.Tick ? request.Subframe : 0;
 				if (tick != request.Tick) clock.SimulationCacheCaptures = {};
 				clock.SimulationAuthoringRevision = revision;
-				clock.ResetSurfaceReplay = !contiguous && tick == 0;
-				const auto &prior = contiguous ? State : candidate;
+				clock.ResetSurfaceReplay = refreshFrame ? FrameStartResetSurfaces : !contiguous && tick == 0;
+				if (refreshFrame) {
+					uint64_t overlayBytes = 0;
+					size_t overlayCount = 0;
+					for (const auto &entry : State.Simulation.Entries)
+						if (retainCache(entry)) {
+							overlayBytes += RetainedSimulationEntryBytes(entry);
+							++overlayCount;
+						}
+					const uint64_t copyBytes =
+						LedgerBytes(FrameStart) + SourceBytes(FrameStartInputs) + overlayBytes;
+					if (copyBytes > maximumBytes - currentBytes)
+						return fail(Status::LimitExceeded, "frame-start checkpoint overlay exceeds bounds");
+					CopyLedgers(FrameStart, candidateStart);
+					candidateStartInputs = FrameStartInputs;
+					candidateStart.Simulation.Entries.reserve(
+						candidateStart.Simulation.Entries.size() + overlayCount
+					);
+					for (const auto &entry : State.Simulation.Entries)
+						if (retainCache(entry)) {
+							const auto found = std::find_if(
+								candidateStart.Simulation.Entries.begin(),
+								candidateStart.Simulation.Entries.end(),
+								[&](const auto &old) {
+									return old.NodeId == entry.NodeId &&
+										   old.ProcessorRow == entry.ProcessorRow && old.Cache;
+								}
+							);
+							if (found == candidateStart.Simulation.Entries.end())
+								candidateStart.Simulation.Entries.push_back(entry);
+							else
+								*found = entry;
+						}
+					candidateStartValid = true;
+					candidateStartResetSurfaces = FrameStartResetSurfaces;
+				}
+				const auto &prior = refreshFrame ? candidateStart : contiguous ? State : candidate;
 				clock.SimulationReplay = &prior.Simulation;
 				clock.SurfaceReplay = &prior.Surfaces;
 				clock.RandomReplay = &prior.Random;
 				clock.DataReplay = &prior.Data;
 				clock.RigidReplay = &prior.Rigid;
 				clock.RigidAuthoringRevision = revision;
-				const auto &generation = tick == 0 ? seeds : previous;
-				if (contiguous) {
+				const auto &generation = refreshFrame ? candidateStartInputs : tick == 0 ? seeds : previous;
+				if (contiguous && !refreshFrame) {
 					const bool sameFrameAction =
 						Tick == request.Tick && Subframe == request.Subframe &&
 						NegativeFrame == request.NegativeFrame &&
@@ -419,10 +493,27 @@ namespace engine::imagegraph {
 					} else
 						clock.ImageSources = generation;
 				}
-				const uint64_t held = configBytes + oldConfigBytes + externalBytes + OutputBytes(State) +
-									  InputSnapshot.RetainedBytes() + candidateSnapshot.RetainedBytes() +
-									  SourceBytes(Inputs) + SourceBytes(previous) + SourceBytes(captures) +
-									  SourceBytes(inputs);
+				if (refreshFrame) clock.ImageSources = candidateStartInputs;
+				if (tick == request.Tick && temporal.RigidActors && !refreshFrame) {
+					const uint64_t copyBytes = LedgerBytes(prior) + CaptureBytes(clock.ImageSources);
+					const uint64_t resident = currentBytes + OutputBytes(candidate) +
+											  candidateSnapshot.RetainedBytes() + SourceBytes(previous) +
+											  SourceBytes(captures) + SourceBytes(inputs);
+					if (resident >= maximumBytes || copyBytes > maximumBytes - resident)
+						return fail(Status::LimitExceeded, "frame-start checkpoint copy exceeds bounds");
+					CopyLedgers(prior, candidateStart);
+					candidateStartInputs.reserve(clock.ImageSources.size());
+					candidateStartInputs.insert(
+						candidateStartInputs.end(), clock.ImageSources.begin(), clock.ImageSources.end()
+					);
+					candidateStartValid = true;
+					candidateStartResetSurfaces = clock.ResetSurfaceReplay;
+				}
+				const uint64_t held =
+					LedgerBytes(FrameStart) + SourceBytes(FrameStartInputs) + LedgerBytes(candidateStart) +
+					SourceBytes(candidateStartInputs) + configBytes + oldConfigBytes + externalBytes +
+					OutputBytes(State) + InputSnapshot.RetainedBytes() + candidateSnapshot.RetainedBytes() +
+					SourceBytes(Inputs) + SourceBytes(previous) + SourceBytes(captures) + SourceBytes(inputs);
 				if (held >= maximumBytes)
 					return fail(Status::LimitExceeded, "stateful generation overlap exceeds byte bounds");
 				if (selectedNode.empty()) {
@@ -451,7 +542,16 @@ namespace engine::imagegraph {
 					candidate.Rigid = std::move(captured.Rigid);
 					candidateSnapshot = std::move(captured.Inputs);
 				}
-				inputs = externalCount && !bindings.empty() ? std::move(captures) : std::move(previous);
+				if (refreshFrame) {
+					const uint64_t copyBytes = SourceBytes(candidateStartInputs);
+					if (held >= maximumBytes ||
+						OutputBytes(candidate) + candidateSnapshot.RetainedBytes() > maximumBytes - held ||
+						copyBytes >
+							maximumBytes - held - OutputBytes(candidate) - candidateSnapshot.RetainedBytes())
+						return fail(Status::LimitExceeded, "frame-start feedback publication exceeds bounds");
+					inputs = candidateStartInputs;
+				} else
+					inputs = externalCount && !bindings.empty() ? std::move(captures) : std::move(previous);
 				previous.clear();
 				if (tick != request.Tick) {
 					inputs.clear();
@@ -485,13 +585,18 @@ namespace engine::imagegraph {
 					}
 				}
 			}
-			// Admit the retained preceding generation before its final copy/publication.
+			// Admit the retained preceding generation before its final
+			// copy/publication.
 			if (request.Tick == 0 && !externalCount) inputs.clear();
 			if (changed) {
 				Bindings = std::move(declarations);
 				Seeds = std::move(blanks);
 			}
 			State = std::move(candidate);
+			FrameStart = std::move(candidateStart);
+			FrameStartInputs = std::move(candidateStartInputs);
+			FrameStartValid = candidateStartValid;
+			FrameStartResetSurfaces = candidateStartResetSurfaces;
 			InputSnapshot = std::move(candidateSnapshot);
 			InputNode = std::move(candidateNode);
 			Inputs = std::move(inputs);
@@ -547,4 +652,4 @@ namespace engine::imagegraph {
 			return value ? ImageOutput(*value) : nullptr;
 		}
 	};
-}
+} // namespace engine::imagegraph

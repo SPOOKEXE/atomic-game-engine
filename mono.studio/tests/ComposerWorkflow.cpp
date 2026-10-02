@@ -1,3 +1,4 @@
+#include "ImageGraphCanvasInputs.hpp"
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphGroupHost.hpp"
 #include "ImageGraphHost.hpp"
@@ -13,6 +14,7 @@
 #include <array>
 #include <chrono>
 #include <fstream>
+#include <nodegraph/Editor.hpp>
 #include <studio/PxcxSave.hpp>
 TEST_SUITE_ID("studio.composer_workflow")
 TEST_DEPENDS("studio.imagegraph")
@@ -416,4 +418,127 @@ TEST_CASE(
 	CHECK(ui.Doc == copiedDocument);
 	REQUIRE(ui.History.Undo(ui.Doc));
 	CHECK(ui.Doc == original);
+}
+
+TEST_CASE(
+	"source canvas grouped-node placement compiles through the actual "
+	"SyncCanvas seed path",
+	"[studio][composer_workflow53]"
+) {
+	Workflow ui;
+	nodegraph::Graph graph;
+	studio::ImageGraphCanvasIds ids;
+	std::string failure;
+	REQUIRE(studio::LoadImageGraphCanvas(ui.Doc, graph, ids, failure));
+	for (const char *type : {"pc.struct", "pc.lua_compute", "pc.pb_draw_rectangle"}) {
+		INFO(type);
+		const auto created = graph.Add(type, 600, 100);
+		REQUIRE(created != nodegraph::NO_NODE);
+		studio::detail::SeedImageGraphCanvasInputs(graph, ids);
+		REQUIRE(graph.Find(created)->DynamicInputs.empty());
+		Document next;
+		REQUIRE(studio::SaveImageGraphCanvas(graph, ui.Doc, ids, next, failure));
+		const auto authored = std::find_if(next.Nodes.begin(), next.Nodes.end(), [&](const auto &node) {
+			return node.Type == type;
+		});
+		REQUIRE(authored != next.Nodes.end());
+		const auto id = authored->Id;
+		const auto grouped = studio::SetSourceImageGraphDynamicGroupCount(next, id, 1, ui.Error);
+		INFO(ui.Error.Message);
+		REQUIRE(grouped);
+		Plan plan;
+		const auto status = Compile(next, plan, ui.Error);
+		INFO(ui.Error.Message << " node=" << ui.Error.NodeId << " port=" << ui.Error.Port);
+		REQUIRE(status == Status::Ok);
+		REQUIRE(graph.Remove(created));
+	}
+}
+
+TEST_CASE(
+	"combined Group Range Any Trigger canvas gestures commit one undo "
+	"and preserve source save",
+	"[studio][composer_workflow53]"
+) {
+	Workflow ui;
+	nodegraph::Graph graph;
+	studio::ImageGraphCanvasIds ids;
+	std::string failure;
+	REQUIRE(studio::LoadImageGraphCanvas(ui.Doc, graph, ids, failure));
+	const auto target = ids.ToCanvas.at("trigger-sink");
+	graph.Find(target)->X = 500;
+	graph.Find(target)->Y = 200;
+	Document positioned;
+	REQUIRE(studio::SaveImageGraphCanvas(graph, ui.Doc, ids, positioned, failure));
+	ui.Doc = positioned;
+	ui.Compile();
+	const auto before = ui.Doc;
+	nodegraph::Canvas canvas;
+	unsigned commits = 0;
+	canvas.Signals.Changed = [&] {
+		Document edited;
+		REQUIRE(studio::SaveImageGraphCanvas(graph, ui.Doc, ids, edited, failure));
+		REQUIRE(ui.History.TryRecord(ui.Doc, edited));
+		ui.Doc = std::move(edited);
+		++ui.Revision;
+		++commits;
+		ui.Compile();
+	};
+	ImVec2 origin;
+	auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos({0, 0});
+		ImGui::SetNextWindowSize({1000, 600});
+		ImGui::Begin(
+			"canvas52",
+			nullptr,
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize
+		);
+		origin = ImGui::GetCursorScreenPos();
+		canvas.Draw(graph);
+		ImGui::End();
+		ImGui::Render();
+	};
+	frame();
+	frame();
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(origin.x + 530, origin.y + 210);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMousePosEvent(origin.x + 590, origin.y + 250);
+	frame();
+	CHECK(commits == 0);
+	// Node drags promote after the canvas's hold interval, then commit on release.
+	for (unsigned held = 0; held < 10; ++held)
+		frame();
+	CHECK(commits == 0);
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	frame();
+	REQUIRE(commits == 1);
+	const auto moved = ui.Doc;
+	const auto sink = std::find_if(ui.Doc.Nodes.begin(), ui.Doc.Nodes.end(), [](const auto &node) {
+		return node.Id == "trigger-sink";
+	});
+	REQUIRE(sink != ui.Doc.Nodes.end());
+	CHECK(sink->Position.X == 560);
+	CHECK(sink->Position.Y == 240);
+	CHECK(ui.Doc.Links == before.Links);
+	CHECK(ui.Preview("trigger-sink", 0) == Value{false});
+	REQUIRE(ui.History.Undo(ui.Doc));
+	++ui.Revision;
+	ui.Compile();
+	CHECK(ui.Doc == before);
+	REQUIRE(ui.History.Redo(ui.Doc));
+	++ui.Revision;
+	ui.Compile();
+	CHECK(ui.Doc == moved);
+	std::vector<std::byte> bytes;
+	REQUIRE(engine::imagegraphio::WritePxcxProjection(ui.Imported, ui.Doc, {}, bytes, ui.Error));
+	engine::bake::PxcxArchive archive;
+	REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+	engine::imagegraphio::PxcxImport reloaded;
+	REQUIRE(engine::imagegraphio::ImportPxcxImageGraph(archive, reloaded, failure));
+	REQUIRE(Migrate(reloaded.Graph, ui.Error) == Status::Ok);
+	CHECK(reloaded.Graph == ui.Doc);
 }

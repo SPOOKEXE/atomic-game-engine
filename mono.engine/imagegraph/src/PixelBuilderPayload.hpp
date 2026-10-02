@@ -5,6 +5,7 @@
 #include <engine/imagegraph/GroupReplay.hpp>
 #include <engine/imagegraph/HostCapture.hpp>
 #include <engine/imagegraph/RandomReplay.hpp>
+#include <engine/imagegraph/RigidReplay.hpp>
 #include <engine/imagegraph/SimulationReplay.hpp>
 #include <engine/imagegraph/SliceStackReplay.hpp>
 #include <engine/imagegraph/SourceBuiltinRandom.hpp>
@@ -40,6 +41,9 @@ namespace engine::imagegraph {
 		std::optional<SurfaceFrameReplayState> Surfaces;
 		std::optional<RandomReplayState> Random;
 		std::optional<DataReplayState> DataHistory;
+		std::optional<RigidReplayState> RigidHistory;
+		uint64_t RigidAuthoringRevision = 0;
+		bool RigidPlaying = false, RigidFrameProgress = false;
 		std::optional<SliceStackReplayState> SliceStack;
 		uint64_t SimulationAuthoringRevision = 0;
 		std::optional<PixelBuilderGroupState> Groups;
@@ -84,6 +88,7 @@ namespace engine::imagegraph::detail {
 		Vector2 dimension,
 		Image &image,
 		Diagnostic &diagnostic,
-		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes,
+		SourceRigidProvider *rigidProvider = nullptr
 	);
 }

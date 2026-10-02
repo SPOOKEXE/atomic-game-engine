@@ -9323,6 +9323,14 @@ namespace engine::imagegraph {
 								for (const auto &value : *values) {
 									if (value.Port != link->FromPort) continue;
 									const auto *array = std::get_if<ArrayValue>(&value.Data);
+									// Draw Surface can synchronously rasterize a retained Builder recipe.
+									const bool dynamicBuilder = node.Type == "pc.pb_draw_surface" &&
+										input.Id == "surface" &&
+										std::holds_alternative<DynamicSurfaceValue>(value.Data);
+									if (dynamicBuilder && detail::ValidRuntimeValue(value.Data)) {
+										context.ValueViews.emplace_back(input.Id, &value.Data);
+										break;
+									}
 									if ((std::holds_alternative<AtlasValue>(value.Data) || (array && array->ElementType == ValueType::Atlas)) && detail::ValidRuntimeValue(value.Data)) {
 										context.ValueViews.emplace_back(input.Id, &value.Data);
 										break;
