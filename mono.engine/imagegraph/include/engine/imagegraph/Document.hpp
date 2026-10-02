@@ -244,7 +244,16 @@ namespace engine::imagegraph {
 		bool operator==(const Path2D &) const = default;
 	};
 
-	enum class SourcePathOperationKind : uint8_t { Reverse, Combine, VerletMesh, Trim, Shape };
+	enum class SourcePathOperationKind : uint8_t {
+		Reverse,
+		Combine,
+		VerletMesh,
+		Trim,
+		Shape,
+		Offset,
+		Blend,
+		Join
+	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
 	enum class SourcePathShapeKind2D : uint8_t {
@@ -282,6 +291,13 @@ namespace engine::imagegraph {
 		double CachedTotalLength = 0;
 		Vector2 TrimRange{0, 1};
 		std::optional<SourcePathShapeData2D> Shape;
+		double Offset = 0, BlendAmount = 0;
+		bool ClampOffset = false;
+		uint8_t BlendMode = 0;
+		std::array<bool, 2> BlendInputsValid{false, false};
+		std::vector<uint8_t> Reversed;
+		std::vector<double> BlendLengths;
+		std::vector<std::vector<double>> BlendAccumulated;
 		bool operator==(const SourcePathData2D &) const = default;
 	};
 

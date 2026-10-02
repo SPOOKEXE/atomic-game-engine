@@ -1195,12 +1195,35 @@ namespace engine::imagegraph {
 					detail::WriteSourceVerletPath(stream, operation);
 					return;
 				}
-				stream << (operation.Kind == SourcePathOperationKind::Reverse ? "reverse"
-						   : operation.Kind == SourcePathOperationKind::Trim  ? "trim"
-																			  : "combine")
+				stream << (operation.Kind == SourcePathOperationKind::Reverse  ? "reverse"
+						   : operation.Kind == SourcePathOperationKind::Trim   ? "trim"
+						   : operation.Kind == SourcePathOperationKind::Offset ? "offset"
+						   : operation.Kind == SourcePathOperationKind::Blend  ? "blend"
+						   : operation.Kind == SourcePathOperationKind::Join   ? "join"
+																			   : "combine")
 					   << ' ' << operation.Inputs.size();
 				if (operation.Kind == SourcePathOperationKind::Trim)
 					stream << ' ' << operation.TrimRange.X << ' ' << operation.TrimRange.Y;
+
+				if (operation.Kind == SourcePathOperationKind::Offset)
+					stream << ' ' << std::setprecision(17) << operation.Offset << ' '
+						   << operation.ClampOffset;
+				if (operation.Kind == SourcePathOperationKind::Blend) {
+					stream << ' ' << unsigned(operation.BlendMode) << ' ' << std::setprecision(17)
+						   << operation.BlendAmount << ' ' << operation.BlendInputsValid[0] << ' '
+						   << operation.BlendInputsValid[1];
+					stream << ' ' << operation.BlendLengths.size();
+					for (size_t line = 0; line < operation.BlendLengths.size(); ++line) {
+						stream << ' ' << operation.BlendLengths[line] << ' '
+							   << operation.BlendAccumulated[line].size();
+						for (double value : operation.BlendAccumulated[line])
+							stream << ' ' << value;
+					}
+				}
+
+				if (operation.Kind == SourcePathOperationKind::Join)
+					for (uint8_t reverse : operation.Reversed)
+						stream << ' ' << unsigned(reverse);
 				for (const auto &child : operation.Inputs) {
 					stream << ' ' << (child.SourceOperation ? "po" : child.Segmented ? "ps" : "p") << ' ';
 					WritePathPayload(stream, child);
@@ -1930,19 +1953,67 @@ namespace engine::imagegraph {
 					return true;
 				}
 				if (!(stream >> count) || count > Limits::MaximumArrayElements ||
-					(kind != "reverse" && kind != "combine" && kind != "trim") ||
-					(kind != "combine" && count > 1))
+					(kind != "reverse" && kind != "combine" && kind != "trim" && kind != "offset" &&
+					 kind != "blend" && kind != "join") ||
+					(kind == "blend" ? count != 2 : (kind != "combine" && kind != "join" && count > 1)))
 					return false;
 				if (!admit(sizeof(SourcePathData2D) + count * sizeof(Path2D))) return false;
 				Path2D path;
 				auto &operation = path.SourceOperation.emplace();
-				operation.Kind = kind == "reverse" ? SourcePathOperationKind::Reverse
-								 : kind == "trim"  ? SourcePathOperationKind::Trim
-												   : SourcePathOperationKind::Combine;
+				operation.Kind = kind == "reverse"	? SourcePathOperationKind::Reverse
+								 : kind == "trim"	? SourcePathOperationKind::Trim
+								 : kind == "offset" ? SourcePathOperationKind::Offset
+								 : kind == "blend"	? SourcePathOperationKind::Blend
+								 : kind == "join"	? SourcePathOperationKind::Join
+													: SourcePathOperationKind::Combine;
 				if (kind == "trim" &&
 					(!(stream >> operation.TrimRange.X >> operation.TrimRange.Y) ||
 					 !std::isfinite(operation.TrimRange.X) || !std::isfinite(operation.TrimRange.Y)))
 					return false;
+
+				if (kind == "offset" && (!(stream >> operation.Offset >> operation.ClampOffset) ||
+										 !std::isfinite(operation.Offset)))
+					return false;
+				if (kind == "blend") {
+					unsigned mode = 0;
+					if (!(stream >> mode >> operation.BlendAmount >> operation.BlendInputsValid[0] >>
+						  operation.BlendInputsValid[1]) ||
+						mode > 3 || !std::isfinite(operation.BlendAmount))
+						return false;
+					operation.BlendMode = uint8_t(mode);
+					size_t lines = 0;
+					if (!(stream >> lines) || lines > Limits::MaximumArrayElements ||
+						!admit(lines * (sizeof(double) + sizeof(std::vector<double>))))
+						return false;
+					operation.BlendLengths.reserve(lines);
+					operation.BlendAccumulated.reserve(lines);
+					size_t total = lines;
+					for (size_t line = 0; line < lines; ++line) {
+						double length = 0;
+						size_t points = 0;
+						if (!(stream >> length >> points) || !std::isfinite(length) ||
+							points > Limits::MaximumArrayElements - total || !admit(points * sizeof(double)))
+							return false;
+						total += points;
+						operation.BlendLengths.push_back(length);
+						auto &row = operation.BlendAccumulated.emplace_back();
+						row.reserve(points);
+						for (size_t i = 0; i < points; ++i) {
+							double value = 0;
+							if (!(stream >> value) || !std::isfinite(value)) return false;
+							row.push_back(value);
+						}
+					}
+				}
+				if (kind == "join") {
+					if (!admit(count * sizeof(uint8_t))) return false;
+					operation.Reversed.reserve(count);
+					for (size_t i = 0; i < count; ++i) {
+						unsigned reverse = 0;
+						if (!(stream >> reverse) || reverse > 1) return false;
+						operation.Reversed.push_back(uint8_t(reverse));
+					}
+				}
 				operation.Inputs.reserve(count);
 				for (size_t index = 0; index < count; ++index) {
 					Value child;

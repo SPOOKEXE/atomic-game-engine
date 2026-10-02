@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -42,6 +43,8 @@ namespace engine::imagegraph::detail {
 		Vector2 TrimRange{0, 1};
 		std::vector<PathRuntime> Inputs;
 		const SourcePathData2D *SourceMesh = nullptr;
+		const SourcePathData2D *SourceData = nullptr;
+		std::vector<Vector2> JoinTranslations;
 		const SourcePathShapeData2D *Shape = nullptr;
 		NodeContext *EvaluationContext = nullptr;
 
@@ -71,12 +74,15 @@ namespace engine::imagegraph::detail {
 				const uint64_t shapeSlots =
 					operation.Shape ? operation.Shape->Points.size() + size_t(operation.Shape->Loop) : 0;
 				auto charge = context.ReserveWorkspace(
-					operation.Inputs.size() * sizeof(PathRuntime) + shapeSlots * 2 * sizeof(double), "path"
+					operation.Inputs.size() * (sizeof(PathRuntime) + sizeof(Vector2)) +
+						shapeSlots * 2 * sizeof(double),
+					"path"
 				);
 				if (!charge) return false;
 				PathRuntime replacement;
 				replacement.StorageCharge = std::move(*charge);
 				replacement.Operation = operation.Kind;
+				replacement.SourceData = &operation;
 				replacement.TrimRange = operation.TrimRange;
 				replacement.EvaluationContext = &context;
 				if (operation.Kind == SourcePathOperationKind::VerletMesh)
@@ -115,6 +121,27 @@ namespace engine::imagegraph::detail {
 					if (!runtime.Init(context, child)) return false;
 					replacement.Inputs.push_back(std::move(runtime));
 				}
+				if (operation.Kind == SourcePathOperationKind::Join) {
+					replacement.JoinTranslations.reserve(replacement.Inputs.size());
+					Vector2 origin{};
+					for (size_t i = 0; i < replacement.Inputs.size(); ++i) {
+						const auto &child = replacement.Inputs[i];
+						const bool reverse = operation.Reversed[i] != 0;
+						if (i) {
+							const auto start = child.PointRatio(reverse ? .999 : 0);
+							origin.X -= start.X;
+							origin.Y -= start.Y;
+						}
+						replacement.JoinTranslations.push_back(origin);
+						const auto end = child.PointRatio(reverse ? 0 : .999);
+						origin.X += end.X;
+						origin.Y += end.Y;
+						if (!std::isfinite(origin.X) || !std::isfinite(origin.Y))
+							return context.Fail(
+								Status::InvalidValue, "Source joined path translation is nonfinite", "path"
+							);
+					}
+				}
 				if (!replacement.Shape) replacement.LengthTotal = replacement.Length();
 				if (!replacement.Inputs.empty()) {
 					const auto &first = replacement.Inputs[0];
@@ -123,6 +150,60 @@ namespace engine::imagegraph::detail {
 					replacement.MaxX = first.MaxX;
 					replacement.MaxY = first.MaxY;
 					replacement.HasBoundary = first.HasBoundary;
+				}
+
+				if (operation.Kind == SourcePathOperationKind::Offset && !replacement.Inputs.empty() &&
+					!replacement.Inputs[0].HasBoundary) {
+					replacement.MinX = replacement.MinY = replacement.MaxX = replacement.MaxY = -4;
+					replacement.HasBoundary = true;
+				}
+				if (operation.Kind == SourcePathOperationKind::Offset && replacement.Inputs.empty()) {
+					replacement.MinX = 0;
+					replacement.MinY = 0;
+					replacement.MaxX = 1;
+					replacement.MaxY = 1;
+					replacement.HasBoundary = true;
+				}
+				if (operation.Kind == SourcePathOperationKind::Blend ||
+					operation.Kind == SourcePathOperationKind::Join) {
+					// Source BoundingBox starts each coordinate at noone (-4); Join's addBBOX uses raw
+					// min/max.
+					replacement.MinX = replacement.MinY = replacement.MaxX = replacement.MaxY = -4;
+					replacement.HasBoundary = true;
+					if (operation.Kind == SourcePathOperationKind::Join) {
+						for (const auto &child : replacement.Inputs) {
+							replacement.MinX =
+								std::min(replacement.MinX, child.HasBoundary ? child.MinX : -4.);
+							replacement.MinY =
+								std::min(replacement.MinY, child.HasBoundary ? child.MinY : -4.);
+							replacement.MaxX =
+								std::max(replacement.MaxX, child.HasBoundary ? child.MaxX : -4.);
+							replacement.MaxY =
+								std::max(replacement.MaxY, child.HasBoundary ? child.MaxY : -4.);
+						}
+					} else {
+						const auto bounds = [](const PathRuntime &child) {
+							return child.HasBoundary
+									   ? std::array<double, 4>{child.MinX, child.MinY, child.MaxX, child.MaxY}
+									   : std::array<double, 4>{-4, -4, -4, -4};
+						};
+						auto value = std::array<double, 4>{-4, -4, -4, -4};
+						const bool first = operation.BlendInputsValid[0],
+								   second = operation.BlendInputsValid[1];
+						if (first) value = bounds(replacement.Inputs[0]);
+						if (second) {
+							const auto b = bounds(replacement.Inputs[1]);
+							if (first)
+								for (size_t i = 0; i < 4; ++i)
+									value[i] += (b[i] - value[i]) * operation.BlendAmount;
+							else
+								value = b;
+						}
+						replacement.MinX = value[0];
+						replacement.MinY = value[1];
+						replacement.MaxX = value[2];
+						replacement.MaxY = value[3];
+					}
 				}
 				Swap(replacement);
 				return true;
@@ -159,6 +240,8 @@ namespace engine::imagegraph::detail {
 			swap(TrimRange, other.TrimRange);
 			Inputs.swap(other.Inputs);
 			swap(SourceMesh, other.SourceMesh);
+			swap(SourceData, other.SourceData);
+			JoinTranslations.swap(other.JoinTranslations);
 			swap(Shape, other.Shape);
 			swap(EvaluationContext, other.EvaluationContext);
 			swap(Loop, other.Loop);
@@ -213,7 +296,9 @@ namespace engine::imagegraph::detail {
 		size_t LineCount() const {
 			if (SourceMesh) return LineCountSourceVerletPath(*SourceMesh);
 			if (!Operation) return 1;
-			if (*Operation != SourcePathOperationKind::Combine)
+			if (*Operation == SourcePathOperationKind::Blend)
+				return SourceData->BlendInputsValid[0] ? Inputs[0].LineCount() : 1;
+			if (*Operation != SourcePathOperationKind::Combine && *Operation != SourcePathOperationKind::Join)
 				return Inputs.empty() ? 1 : Inputs[0].LineCount();
 			size_t count = 0;
 			for (const auto &child : Inputs)
@@ -224,6 +309,14 @@ namespace engine::imagegraph::detail {
 			if (Shape) return LengthTotal;
 			if (SourceMesh) return LengthSourceVerletPath(*SourceMesh, line);
 			if (!Operation) return LengthTotal;
+			if (*Operation == SourcePathOperationKind::Join) {
+				double total = 0;
+				for (const auto &child : Inputs)
+					total += child.Length();
+				return total;
+			}
+			if (*Operation == SourcePathOperationKind::Blend)
+				return line < SourceData->BlendLengths.size() ? SourceData->BlendLengths[line] : 0;
 			const auto *child = SelectLine(line);
 			return child ? child->Length(line) *
 							   (*Operation == SourcePathOperationKind::Trim ? TrimRange.Y - TrimRange.X : 1)
@@ -233,6 +326,17 @@ namespace engine::imagegraph::detail {
 			if (Shape) return Lengths.size();
 			if (SourceMesh) return SourceMesh->CachedLengths.size();
 			if (Operation) {
+				if (*Operation == SourcePathOperationKind::Join) {
+					size_t count = 0;
+					for (const auto &child : Inputs)
+						count += child.SegmentCount();
+					return count;
+				}
+				if (*Operation == SourcePathOperationKind::Blend) {
+					const auto a = SourceData->BlendInputsValid[0] ? Inputs[0].SegmentCount(line) : 0,
+							   b = SourceData->BlendInputsValid[1] ? Inputs[1].SegmentCount(line) : 0;
+					return std::max(a, b);
+				}
 				const auto *child = SelectLine(line);
 				return child ? child->SegmentCount(line) : 0;
 			}
@@ -315,11 +419,105 @@ namespace engine::imagegraph::detail {
 			return at(whole) + (at(whole + 1) - at(whole)) * (index - whole);
 		}
 
+		size_t AccumulatedCount(size_t line = 0) const {
+			if (SourceMesh) {
+				size_t n = SourceMesh->CachedLengths.size();
+				while (n && !SourceMesh->CachedLengths[n - 1])
+					--n;
+				return n;
+			}
+			if (!Operation || Shape) return LengthAccumulated.size();
+			if (*Operation == SourcePathOperationKind::Join) {
+				size_t n = 0;
+				for (const auto &child : Inputs)
+					n += child.AccumulatedCount();
+				return n;
+			}
+			if (*Operation == SourcePathOperationKind::Blend)
+				return line < SourceData->BlendAccumulated.size() ? SourceData->BlendAccumulated[line].size()
+																  : 0;
+			const auto *child = SelectLine(line);
+			return child ? child->AccumulatedCount(line) : 0;
+		}
+		double AccumulatedAt(size_t index, size_t line = 0) const {
+			if (SourceMesh) {
+				if (index >= AccumulatedCount() || !SourceMesh->CachedLengths[index]) return 0;
+				double total = 0;
+				for (size_t i = 0; i <= index; ++i)
+					if (SourceMesh->CachedLengths[i]) total += *SourceMesh->CachedLengths[i];
+				return total;
+			}
+			if (!Operation || Shape) return index < LengthAccumulated.size() ? LengthAccumulated[index] : 0;
+			if (*Operation == SourcePathOperationKind::Join) {
+				for (const auto &child : Inputs) {
+					const size_t n = child.AccumulatedCount();
+					if (index < n) return child.AccumulatedAt(index);
+					index -= n;
+				}
+				return 0;
+			}
+			if (*Operation == SourcePathOperationKind::Blend)
+				return line < SourceData->BlendAccumulated.size() &&
+							   index < SourceData->BlendAccumulated[line].size()
+						   ? SourceData->BlendAccumulated[line][index]
+						   : 0;
+			const auto *child = SelectLine(line);
+			if (!child) return 0;
+			const size_t n = child->AccumulatedCount(line);
+			if (*Operation == SourcePathOperationKind::Reverse ||
+				*Operation == SourcePathOperationKind::Offset)
+				return index < n ? child->AccumulatedAt(n - index - 1, line) : 0;
+			return child->AccumulatedAt(index, line);
+		}
+		PathPoint JoinedDistance(double distance, size_t line) const {
+			if (Inputs.empty()) return {};
+			size_t i = 0;
+			while (i < Inputs.size() && distance > Inputs[i].Length()) {
+				distance -= Inputs[i].Length();
+				++i;
+			}
+			if (i == Inputs.size()) return {};
+			if (SourceData->Reversed[i]) distance = Inputs[i].Length() - distance;
+			auto p = Inputs[i].PointDistance(distance, line);
+			p.X += JoinTranslations[i].X;
+			p.Y += JoinTranslations[i].Y;
+			return p;
+		}
+		PathPoint BlendRatio(double ratio, size_t line) const {
+			const bool first = SourceData->BlendInputsValid[0], second = SourceData->BlendInputsValid[1];
+			if (!first && !second) return {};
+			if (first && !second) return Inputs[0].PointRatio(ratio, line);
+			if (!first && second) return Inputs[1].PointRatio(ratio, line);
+			const auto a = Inputs[0].PointRatio(ratio, line), b = Inputs[1].PointRatio(ratio, line);
+			const double amount = SourceData->BlendAmount;
+			if (SourceData->BlendMode == 0)
+				return {
+					a.X + (b.X - a.X) * amount,
+					a.Y + (b.Y - a.Y) * amount,
+					a.Weight + (b.Weight - a.Weight) * amount
+				};
+			if (SourceData->BlendMode == 1)
+				return {a.X + b.X * amount, a.Y + b.Y * amount, a.Weight + b.Weight * amount};
+			if (SourceData->BlendMode == 2)
+				return {a.X - b.X * amount, a.Y - b.Y * amount, a.Weight - b.Weight * amount};
+			const auto before = Inputs[0].PointRatio(std::clamp(ratio - .01, 0., .999), line),
+					   after = Inputs[0].PointRatio(std::clamp(ratio + .01, 0., .999), line);
+			const double dir = std::atan2(before.Y - after.Y, after.X - before.X) + std::numbers::pi / 2,
+						 dist = b.Y * amount;
+			return {
+				a.X + dist * std::cos(dir),
+				a.Y - dist * std::sin(dir),
+				a.Weight + (b.Weight - a.Weight) * amount
+			};
+		}
 		PathPoint PointDistance(double distance, size_t line = 0) const {
 			if (Shape) return ShapePoint(SourceShapeDistance(*Shape, Lengths, LengthTotal, distance));
 			if (SourceMesh) return MeshPoint(DistanceSourceVerletPath(*SourceMesh, distance, line));
 			if (Operation) {
+				if (*Operation == SourcePathOperationKind::Join) return JoinedDistance(distance, line);
 				if (*Operation == SourcePathOperationKind::Reverse ||
+					*Operation == SourcePathOperationKind::Offset ||
+					*Operation == SourcePathOperationKind::Blend ||
 					*Operation == SourcePathOperationKind::Trim)
 					return PointRatio(distance / Length(), line);
 				const auto *child = SelectLine(line);
@@ -353,6 +551,13 @@ namespace engine::imagegraph::detail {
 			if (Shape) return ShapePoint(SourceShapeRatio(*Shape, Lengths, LengthTotal, ratio));
 			if (SourceMesh) return MeshPoint(SampleSourceVerletPath(*SourceMesh, ratio, line));
 			if (Operation) {
+				if (*Operation == SourcePathOperationKind::Join)
+					return JoinedDistance(ratio * Length(), line);
+				if (*Operation == SourcePathOperationKind::Blend) return BlendRatio(ratio, line);
+				if (*Operation == SourcePathOperationKind::Offset) {
+					const double sum = ratio + SourceData->Offset;
+					ratio = SourceData->ClampOffset ? std::clamp(sum, 0., 1.) : sum - std::floor(sum);
+				}
 				const auto *child = SelectLine(line);
 				return child ? child->PointRatio(
 								   *Operation == SourcePathOperationKind::Reverse ? 1 - ratio
