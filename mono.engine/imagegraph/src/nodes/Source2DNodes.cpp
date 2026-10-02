@@ -290,6 +290,8 @@ namespace engine::imagegraph::detail {
 	bool SourcePathBlur(NodeContext &context);
 	bool SourceSimpleBlur(NodeContext &context);
 	bool SourceComposeBlend(NodeContext &context);
+	bool SourceGapContract(NodeContext &context);
+	bool SourceAlignContent(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.pb_draw_surface", PixelDrawSurface, true},
@@ -327,6 +329,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.blur_path", SourcePathBlur, true},
 			ExecutorEntry{"pc.blur_simple", SourceSimpleBlur, true},
 			ExecutorEntry{"pc.blend", SourceComposeBlend, true},
+			ExecutorEntry{"pc.gap_contract", SourceGapContract, true},
+			ExecutorEntry{"pc.align_content", SourceAlignContent, true},
 			ExecutorEntry{"pc.de_stray", DeStray, true},
 			ExecutorEntry{"pc.color_select", ColorSelect, true},
 			ExecutorEntry{"pc.corner", RoundCorner, true},
