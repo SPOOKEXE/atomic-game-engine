@@ -21,8 +21,8 @@ namespace engine::imagegraph::detail {
 					  SourceMesh2DExecutors(),	 Source2DExecutors(),	 SourceTextExecutors(),
 					  SourcePcxExecutors(),		 SceneExecutors(),		 SourceSdfExecutors(),
 					  SimulationExecutors(),	 SourceValueExecutors(), SourceDataExecutors(),
-					  SourceMatrixExecutors(),	 SourcePathExecutors(),	 HostExecutors(),
-					  TriggerExecutors(),		 TemporalExecutors()})
+					  SourceMatrixExecutors(),	 SourcePathExecutors(),	 SourcePointsExecutors(),
+					  HostExecutors(),			 TriggerExecutors(),	 TemporalExecutors()})
 					for (const ExecutorEntry &entry : family)
 						merged.emplace(entry.Type, entry);
 				merged.emplace("pc.group_input", ExecutorEntry{"pc.group_input", ExecuteGroupBoundary, true});
@@ -54,7 +54,7 @@ namespace engine::imagegraph::detail {
 					   type == "pc.path_array" || type == "pc.statistic" || type == "pc.global_scope" ||
 					   type == "pc.globalvar" || type == "pc.equation" || type == "pc.pcx_equation" ||
 					   type == "pc.pcx_var" || type == "pc.pcx_fn_var" || type == "pc.pcx_array_get" ||
-					   type == "pc.pcx_array_set" || type == "pc.pcx_condition";
+					   type == "pc.pcx_array_set" || type == "pc.pcx_condition" || type == "pc.points_remap";
 			};
 			const auto validateValue = [&](const Value &value, std::string_view port) {
 				const auto *array = std::get_if<ArrayValue>(&value);

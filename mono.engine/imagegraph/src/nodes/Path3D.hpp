@@ -9,6 +9,8 @@ namespace engine::imagegraph::detail {
 	};
 	class PathRuntime3D {
 		const PathData3D &Data;
+		AllocationReservation ChildCharge;
+		std::vector<PathRuntime3D> Children;
 		std::array<double, Limits::MaximumPathAnchors> Lengths{};
 		size_t SegmentCount = 0;
 		double Total = 0;
@@ -50,6 +52,16 @@ namespace engine::imagegraph::detail {
 			}
 			return point;
 		}
+		const PathRuntime3D *Child(size_t &line) const {
+			if (Children.empty()) return nullptr;
+			if (Data.SourceOperation->Kind != SourcePathOperationKind::Combine) return &Children.front();
+			for (const auto &child : Children) {
+				const size_t count = child.LineCount();
+				if (line < count) return &child;
+				line -= count;
+			}
+			return nullptr;
+		}
 		Vector3 Segment(size_t index, double ratio) const {
 			const auto &a = Data.Anchors[index].Controls;
 			const auto &b = Data.Anchors[(index + 1) % Data.Anchors.size()].Controls;
@@ -68,6 +80,33 @@ namespace engine::imagegraph::detail {
 	  public:
 		explicit PathRuntime3D(const PathData3D &data, NodeContext *context = nullptr) : Data(data) {
 			if (!data.SourcePresent) return;
+			if (data.SourceOperation) {
+				if (!context) {
+					Ready = false;
+					return;
+				}
+				const auto &op = *data.SourceOperation;
+				auto charge = context->ReserveWorkspace(op.Inputs.size() * sizeof(PathRuntime3D), "path");
+				if (!charge) {
+					Ready = false;
+					return;
+				}
+				ChildCharge = std::move(*charge);
+				Children.reserve(op.Inputs.size());
+				for (const auto &child : op.Inputs) {
+					if (!child.Data) {
+						Ready = false;
+						return;
+					}
+					Children.emplace_back(*child.Data, context);
+					if (!Children.back().Valid()) {
+						Ready = false;
+						return;
+					}
+				}
+				Total = Length();
+				return;
+			}
 			if (data.Source2D) {
 				if (!context) {
 					Ready = false;
@@ -99,13 +138,47 @@ namespace engine::imagegraph::detail {
 		bool Valid() const {
 			return Ready && std::isfinite(Total);
 		}
-		double Length() const {
-			return Total;
+		size_t LineCount() const {
+			if (Data.SourceOperation) {
+				if (Data.SourceOperation->Kind != SourcePathOperationKind::Combine)
+					return Children.empty() ? 1 : Children.front().LineCount();
+				size_t count = 0;
+				for (const auto &child : Children)
+					count += child.LineCount();
+				return count;
+			}
+			return Runtime2D ? Runtime2D->LineCount() : 1;
 		}
-		bool SpatialLine(size_t = 0) const {
-			return Data.Transforms.empty() ? !Data.Source2D.has_value() : !Data.Transforms.back().Projective;
+		double Length(size_t line = 0) const {
+			if (Data.SourceOperation) {
+				const auto *child = Child(line);
+				return child
+						   ? child->Length(line) *
+								 (Data.SourceOperation->Kind == SourcePathOperationKind::Trim
+									  ? Data.SourceOperation->TrimRange.Y - Data.SourceOperation->TrimRange.X
+									  : 1)
+						   : 0;
+			}
+			return Runtime2D ? Runtime2D->Length(line) : Total;
+		}
+		bool SpatialLine(size_t line = 0) const {
+			if (!Data.Transforms.empty()) return !Data.Transforms.back().Projective;
+			if (Data.SourceOperation) {
+				const auto *child = Child(line);
+				return child && child->SpatialLine(line);
+			}
+			return !Data.Source2D;
 		}
 		PathPoint3D Ratio(double ratio, size_t line = 0) const {
+			if (Data.SourceOperation) {
+				const auto &op = *Data.SourceOperation;
+				const auto *child = Child(line);
+				if (op.Kind == SourcePathOperationKind::Reverse)
+					ratio = 1 - ratio;
+				else if (op.Kind == SourcePathOperationKind::Trim)
+					ratio = op.TrimRange.X + (op.TrimRange.Y - op.TrimRange.X) * ratio;
+				return Apply(child ? child->Ratio(ratio, line) : PathPoint3D{});
+			}
 			if (Runtime2D) {
 				const auto point = Runtime2D->PointRatio(ratio, line);
 				return Apply({{point.X, point.Y, 0}, point.Weight});
@@ -124,7 +197,8 @@ namespace engine::imagegraph::detail {
 			return {};
 		}
 		PathPoint3D BySegment(double ratio) const {
-			if (!Data.Transforms.empty() || (Data.Source2D && Data.Source2D->SourceOperation))
+			if (Data.SourceOperation || !Data.Transforms.empty() ||
+				(Data.Source2D && Data.Source2D->SourceOperation))
 				return {{NAN, NAN, NAN}, 1};
 			if (Runtime2D) {
 				const auto point = Runtime2D->PointSegment(ratio);

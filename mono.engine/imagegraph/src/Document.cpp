@@ -870,6 +870,9 @@ namespace engine::imagegraph {
 		}
 
 		bool IsFinite(const Value &value) {
+			if (const auto *array = std::get_if<ArrayValue>(&value); array && !array->Nested.empty())
+				return array->ElementType != ValueType::Image && array->ElementType != ValueType::Array &&
+					   array->ElementType < ValueType::Gradient && detail::ValidPayload(*array, true);
 			return detail::ValidValuePayload(value, false);
 		}
 
@@ -1034,6 +1037,16 @@ namespace engine::imagegraph {
 		}
 
 		bool WithinArrayBudget(const ArrayValue &array) {
+			if (!array.Nested.empty()) {
+				if (array.Nested.size() > Limits::MaximumArrayElements) return false;
+				size_t count = array.Elements.size();
+				if (count > Limits::MaximumArrayElements) return false;
+				for (const auto &row : array.Nested) {
+					if (row.size() > Limits::MaximumArrayElements - count) return false;
+					count += row.size();
+				}
+				return detail::PayloadOwnedBytes(array) <= Limits::MaximumArrayBytes;
+			}
 			if (array.ElementType == ValueType::Any || !array.Items.empty())
 				return detail::ValidPayload(array, false);
 			if (array.Elements.size() > Limits::MaximumArrayElements) return false;
@@ -1064,6 +1077,9 @@ namespace engine::imagegraph {
 		}
 
 		bool ValidArray(const ArrayValue &array) {
+			if (!array.Nested.empty())
+				return array.ElementType != ValueType::Image && array.ElementType != ValueType::Array &&
+					   array.ElementType < ValueType::Gradient && detail::ValidPayload(array, true);
 			if (array.ElementType == ValueType::Any || !array.Items.empty())
 				return detail::ValidPayload(array, false);
 			if (!array.Nested.empty() || !WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
@@ -1092,7 +1108,8 @@ namespace engine::imagegraph {
 		}
 
 		std::string ValueTag(const Value &value) {
-			if (std::holds_alternative<PathValue3D>(value)) return "p3";
+			if (const auto *path = std::get_if<PathValue3D>(&value))
+				return path->Data && path->Data->SourceOperation ? "p3o" : "p3";
 			if (std::holds_alternative<PixelBoxValue>(value)) return "pb";
 			switch (value.index()) {
 			case 0:
@@ -1146,9 +1163,12 @@ namespace engine::imagegraph {
 					detail::WriteSourceVerletPath(stream, operation);
 					return;
 				}
-				stream << (operation.Kind == SourcePathOperationKind::Reverse ? "reverse" : operation.Kind == SourcePathOperationKind::Trim ? "trim" : "combine") << ' '
-					   << operation.Inputs.size();
-				if (operation.Kind == SourcePathOperationKind::Trim) stream << ' ' << operation.TrimRange.X << ' ' << operation.TrimRange.Y;
+				stream << (operation.Kind == SourcePathOperationKind::Reverse ? "reverse"
+						   : operation.Kind == SourcePathOperationKind::Trim  ? "trim"
+																			  : "combine")
+					   << ' ' << operation.Inputs.size();
+				if (operation.Kind == SourcePathOperationKind::Trim)
+					stream << ' ' << operation.TrimRange.X << ' ' << operation.TrimRange.Y;
 				for (const auto &child : operation.Inputs) {
 					stream << ' ' << (child.SourceOperation ? "po" : child.Segmented ? "ps" : "p") << ' ';
 					WritePathPayload(stream, child);
@@ -1299,6 +1319,15 @@ namespace engine::imagegraph {
 								stream << ' ' << std::setprecision(17) << value;
 						}
 					}
+					if (path.SourceOperation) {
+						const auto &op = *path.SourceOperation;
+						stream << ' ' << unsigned(op.Kind) << ' ' << std::setprecision(17) << op.TrimRange.X
+							   << ' ' << op.TrimRange.Y << ' ' << op.Inputs.size();
+						for (const auto &child : op.Inputs) {
+							stream << ' ';
+							WriteValue(stream, Value{child});
+						}
+					}
 				}
 			} else if (const auto *storedPath = std::get_if<Path2D>(&value)) {
 				WritePathPayload(stream, *storedPath);
@@ -1427,6 +1456,38 @@ namespace engine::imagegraph {
 				if (!(stream >> typeName >> count) || count > Limits::MaximumArrayElements) return false;
 				if (count > Limits::MaximumArrayElements - *arrayCount) return false;
 				*arrayCount += count;
+				if (typeName == "array") {
+					if (version < 9 || !count || !admit(count * sizeof(std::vector<ElementValue>)))
+						return false;
+					ArrayValue array;
+					array.Nested.reserve(count);
+					for (size_t index = 0; index < count; ++index) {
+						Value element;
+						if (!ReadValue(
+								stream,
+								element,
+								version,
+								true,
+								budget,
+								outputCharge,
+								allocationRefused,
+								depth + 1,
+								arrayCount
+							))
+							return false;
+						auto *row = std::get_if<ArrayValue>(&element);
+						if (!row || !row->Nested.empty() || !row->Items.empty() || !ValidArray(*row))
+							return false;
+						if (index == 0)
+							array.ElementType = row->ElementType;
+						else if (row->ElementType != array.ElementType)
+							return false;
+						array.Nested.push_back(std::move(row->Elements));
+					}
+					if (!ValidArray(array)) return false;
+					value = std::move(array);
+					return true;
+				}
 				if (typeName == "any") {
 					if (version < 9 || !admit(count * sizeof(SourceArrayItem))) return false;
 					ArrayValue array{ValueType::Any, {}};
@@ -1651,7 +1712,7 @@ namespace engine::imagegraph {
 				value = std::move(stored);
 				return true;
 			}
-			if (tag == "p3" && version >= 9) {
+			if ((tag == "p3" || tag == "p3o") && version >= 9) {
 				unsigned present = 0, loop = 0, sourcePresent = 1, source2d = 0;
 				uint32_t resolution = 32;
 				size_t count = 0, transforms = 0;
@@ -1734,7 +1795,44 @@ namespace engine::imagegraph {
 						}
 						data.Transforms.push_back(transform);
 					}
-				}
+					if (tag == "p3o") {
+						unsigned kind = 0;
+						size_t children = 0;
+						Vector2 range;
+						if (!(stream >> kind >> range.X >> range.Y >> children) ||
+							(kind != unsigned(SourcePathOperationKind::Reverse) &&
+							 kind != unsigned(SourcePathOperationKind::Combine) &&
+							 kind != unsigned(SourcePathOperationKind::Trim)) ||
+							!detail::MeshFinite(range) || children > Limits::MaximumArrayElements ||
+							(kind != unsigned(SourcePathOperationKind::Combine) && children > 1) ||
+							!admit(sizeof(SourcePathData3D) + children * sizeof(PathValue3D)))
+							return false;
+						auto &op = data.SourceOperation.emplace();
+						op.Kind = SourcePathOperationKind(kind);
+						op.TrimRange = range;
+						op.Inputs.reserve(children);
+						for (size_t i = 0; i < children; ++i) {
+							Value child;
+							if (!ReadValue(
+									stream,
+									child,
+									version,
+									false,
+									budget,
+									outputCharge,
+									allocationRefused,
+									depth + 1,
+									arrayCount
+								))
+								return false;
+							auto *spatial = std::get_if<PathValue3D>(&child);
+							if (!spatial || !spatial->Data) return false;
+							op.Inputs.push_back(std::move(*spatial));
+						}
+					}
+					if (!detail::ValidSourcePath3D(data)) return false;
+				} else if (tag == "p3o")
+					return false;
 				value = std::move(path);
 				return true;
 			}
@@ -1753,14 +1851,19 @@ namespace engine::imagegraph {
 					return true;
 				}
 				if (!(stream >> count) || count > Limits::MaximumArrayElements ||
-					(kind != "reverse" && kind != "combine" && kind != "trim") || (kind != "combine" && count > 1))
+					(kind != "reverse" && kind != "combine" && kind != "trim") ||
+					(kind != "combine" && count > 1))
 					return false;
 				if (!admit(sizeof(SourcePathData2D) + count * sizeof(Path2D))) return false;
 				Path2D path;
 				auto &operation = path.SourceOperation.emplace();
-				operation.Kind =
-					kind == "reverse" ? SourcePathOperationKind::Reverse : kind == "trim" ? SourcePathOperationKind::Trim : SourcePathOperationKind::Combine;
-				if (kind == "trim" && (!(stream >> operation.TrimRange.X >> operation.TrimRange.Y) || !std::isfinite(operation.TrimRange.X) || !std::isfinite(operation.TrimRange.Y))) return false;
+				operation.Kind = kind == "reverse" ? SourcePathOperationKind::Reverse
+								 : kind == "trim"  ? SourcePathOperationKind::Trim
+												   : SourcePathOperationKind::Combine;
+				if (kind == "trim" &&
+					(!(stream >> operation.TrimRange.X >> operation.TrimRange.Y) ||
+					 !std::isfinite(operation.TrimRange.X) || !std::isfinite(operation.TrimRange.Y)))
+					return false;
 				operation.Inputs.reserve(count);
 				for (size_t index = 0; index < count; ++index) {
 					Value child;
@@ -4807,7 +4910,12 @@ namespace engine::imagegraph {
 			std::optional<ValueType> keyedType = property ? std::optional{property->Type} : std::nullopt;
 			for (const DynamicInput &input : document.Nodes[node->second].DynamicInputs)
 				if (!property && input.Id == keyframe.Port) {
-					if (detail::SourceLuaArgumentType(document.Nodes[node->second], input.Id) &&
+					const auto *source = detail::AliasedSourceInput(document.Nodes[node->second], input.Id);
+					const bool physicalAny =
+						document.FormatVersion >= 9 && keyframe.Interpolation == "source" &&
+						input.Type == ValueType::Any && source && source->Type == ValueType::Any;
+					if ((physicalAny ||
+						 detail::SourceLuaArgumentType(document.Nodes[node->second], input.Id)) &&
 						IsAuthoredValueType(TypeOf(keyframe.Data)))
 						keyedType = TypeOf(keyframe.Data);
 					else if (IsAuthoredValueType(input.Type))
@@ -8732,10 +8840,10 @@ namespace engine::imagegraph {
 							 input.Type == ValueType::Material3D || input.Type == ValueType::Light3D ||
 							 input.Type == ValueType::Scene3D || input.Type == ValueType::Sdf ||
 							 input.Type == ValueType::Buffer || input.Type == ValueType::Struct ||
-							 input.Type == ValueType::Object ||
-							 input.Type == ValueType::PcxNode || input.Type == ValueType::NodeRef ||
-							 input.Type == ValueType::FluidDomain || input.Type == ValueType::PixelBox ||
-							 input.Type == ValueType::DynamicSurface || input.Type == ValueType::Path3D)) {
+							 input.Type == ValueType::Object || input.Type == ValueType::PcxNode ||
+							 input.Type == ValueType::NodeRef || input.Type == ValueType::FluidDomain ||
+							 input.Type == ValueType::PixelBox || input.Type == ValueType::DynamicSurface ||
+							 input.Type == ValueType::Path3D)) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
 							const auto *source =
 								produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;

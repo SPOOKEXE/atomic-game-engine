@@ -7,6 +7,7 @@
 #include "ScenePayload.hpp"
 #include "SdfPayload.hpp"
 #include "SourcePathPayload.hpp"
+#include "SourcePathPayload3D.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -192,10 +193,7 @@ namespace engine::imagegraph::detail {
 		else if constexpr (std::is_same_v<T, MeshValue2D>)
 			return Mesh2DStorageBytes<false>(item);
 		else if constexpr (std::is_same_v<T, PathValue3D>)
-			return item.Data ? sizeof(PathData3D) + item.Data->Anchors.size() * sizeof(PathAnchor3D) +
-								   item.Data->Transforms.size() * sizeof(PathTransform3D) +
-								   (item.Data->Source2D ? PayloadOwnedBytes(*item.Data->Source2D) : 0)
-							 : 0;
+			return item.Data ? SourcePath3DBytes<true>(*item.Data) : 0;
 		else if constexpr (std::is_same_v<T, MeshValue3D>)
 			return MeshStorageBytes<false>(item);
 		else if constexpr (std::is_same_v<T, MaterialValue3D>)
@@ -450,29 +448,7 @@ namespace engine::imagegraph::detail {
 					if (!std::isfinite(number)) return false;
 			return true;
 		} else if constexpr (std::is_same_v<T, PathValue3D>) {
-			if (!item.Data) return true;
-			if (item.Data->Transforms.size() > Limits::MaximumArrayDepth ||
-				(item.Data->Source2D && !ValidPayload(*item.Data->Source2D, runtime)))
-				return false;
-			for (const auto &transform : item.Data->Transforms) {
-				if (!MeshFinite(transform.Position) || !MeshFinite(transform.Anchor) ||
-					!MeshFinite(transform.Scale) || !MeshFinite(transform.Rotation))
-					return false;
-				if (!MeshFinite(transform.ProjectionScale)) return false;
-				for (double value : transform.CameraView)
-					if (!std::isfinite(value)) return false;
-				for (double value : transform.CameraProjection)
-					if (!std::isfinite(value)) return false;
-			}
-			if (item.Data->Anchors.size() > Limits::MaximumPathAnchors || item.Data->Resolution == 0 ||
-				item.Data->Resolution > Limits::MaximumArrayElements)
-				return false;
-			for (const auto &anchor : item.Data->Anchors) {
-				if (!std::isfinite(anchor.Index)) return false;
-				for (double number : anchor.Controls)
-					if (!std::isfinite(number)) return false;
-			}
-			return true;
+			return !item.Data || ValidSourcePath3D(*item.Data);
 		} else if constexpr (std::is_same_v<T, Path2D>) {
 			return ValidSourcePath2D(item);
 		} else if constexpr (std::is_same_v<T, ArrayValue>) {

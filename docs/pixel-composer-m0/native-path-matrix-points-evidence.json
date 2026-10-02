@@ -1,0 +1,29 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_script_sha256": {
+    "scripts/node_path_reverse/node_path_reverse.gml": "08df338f6b1bbe5734dcd920d264f48d1f68c9a65efe04e20e54208315ed2fd0",
+    "scripts/node_path_array/node_path_array.gml": "adca98fdd2219d8575b2c50f39477488d857db671360648e695abc948012c6de",
+    "scripts/node_path_sample/node_path_sample.gml": "3417410f84a90e767789bec8b180d746207b04d385664af9d75b402e743379cd",
+    "scripts/node_path_anchor/node_path_anchor.gml": "865dadd92c73cf327de43daf2cf1bf8740b9f0395cf4ec7ed5a0a45a7aa69d53",
+    "scripts/node_path_trim/node_path_trim.gml": "9672cb5ad29f05278b1df2dac89992bf28395bcc351edccfd2140059a260eb6f",
+    "scripts/node_points_remap/node_points_remap.gml": "e0c42c1c0dcbe48efddb5808b1c6e4e03f22a991c77463fbfd471ce05dd2a356",
+    "scripts/node_matrix_projection/node_matrix_projection.gml": "e264699bdd638375b5ff8b63e4ce1e65037bc226dd03ed416734479250b436cc",
+    "scripts/node_matrix_transform_3d/node_matrix_transform_3d.gml": "fed8b0b6d48ec700b5f6c2e96e1ad98c3d1ca46cbda07449f946d1b9daa27482",
+    "scripts/node_matrix_eigen/node_matrix_eigen.gml": "5dadc6d6068a19ecf841aca2fdd2c2ef0ba1e0ba28eae9d15f1cfc8316c07339",
+    "scripts/surface_sampler/surface_sampler.gml": "f94f25a55c36b584535c6b8bc92d2b3c02bf2b32687e4a2444ce4e4471fa894a"
+  },
+  "native_path_contract": [
+    "Reverse and Combine preserve recursively owned operation trees and independent source lines; native version 9 po encoding roundtrips these operations.",
+    "Trim preserves signed length, shifted/clamped range and delegates lazy point ratios rather than flattening anchors.",
+    "Path Anchor preserves all six source numeric coordinates, including reflected controls when mirror is enabled.",
+    "Source operation getPointSegment is absent and remains a named unsupported path consumer boundary rather than fabricated segment geometry."
+  ],
+  "runtime_matrix_evidence": {
+    "commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+    "url": "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/Matrix.js",
+    "sha256": "5887d45f616a1113d3ec9e9d562f1e3109ca02f30650df759ef411549babd216",
+    "behavior": "Native transform uses the official BuildMatrix coefficient order and negative Euler radians after source quaternion-to-Euler rounding. Degenerate perspective/orthographic divisions preserve the official identity guards. Desktop runtime equivalence remains unverified."
+  },
+  "point_uv_contract": "Pinned Surface_sampler rounds coordinates ties-even then clamps to edge; floating RGBA samples retain signed/HDR channels and single-channel floats enter packed-color getters. Native RGBA4/R8 are refused because that sampler does not define their formats.",
+  "matrix_eigen_contract": "Retains source 1000-iteration, 1e-5 threshold, Rayleigh quotient and break-before-candidate assignment. Non-square matrices, zero-norm iteration and nonfinite geometry receive explicit native diagnostics. Native CPU order is capped at 32 to bound cubic work; this is a native limit, not a source restriction."
+}

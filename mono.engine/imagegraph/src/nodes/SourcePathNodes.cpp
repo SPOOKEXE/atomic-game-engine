@@ -5,12 +5,40 @@
 #include <numbers>
 namespace engine::imagegraph::detail {
 	bool SampleSourcePath3D(NodeContext &context);
+	bool SourceSpatialPathOperation(NodeContext &context);
 	namespace {
 		bool Present(const Path2D &path) {
 			return path.SourceOperation || !path.Anchors.empty();
 		}
 		bool BuildOperation(NodeContext &context) {
 			const bool reverse = context.Authored.Type != "pc.path_array";
+			const auto spatialItems = [&](auto &&self, const std::vector<SourceArrayItem> &entries) -> bool {
+				for (const auto &item : entries) {
+					if (const auto *leaf = std::get_if<ElementValue>(&item.Data)) {
+						if (std::holds_alternative<PathValue3D>(*leaf)) return true;
+					} else if (self(self, std::get<std::vector<SourceArrayItem>>(item.Data)))
+						return true;
+				}
+				return false;
+			};
+			const auto spatial = [&](const Value *value) {
+				if (!value || !ValidRuntimeValue(*value)) return false;
+				if (std::holds_alternative<PathValue3D>(*value)) return true;
+				const auto *array = std::get_if<ArrayValue>(value);
+				if (!array) return false;
+				if (spatialItems(spatialItems, array->Items)) return true;
+				for (const auto &leaf : array->Elements)
+					if (std::holds_alternative<PathValue3D>(leaf)) return true;
+				for (const auto &row : array->Nested)
+					for (const auto &leaf : row)
+						if (std::holds_alternative<PathValue3D>(leaf)) return true;
+				return false;
+			};
+			if (reverse) {
+				if (spatial(context.Find("path"))) return SourceSpatialPathOperation(context);
+			} else
+				for (const auto &input : context.Authored.DynamicInputs)
+					if (spatial(context.Find(input.Id))) return SourceSpatialPathOperation(context);
 			std::vector<const Path2D *> inputs;
 			bool materialize = false;
 			size_t inputCount = 0;

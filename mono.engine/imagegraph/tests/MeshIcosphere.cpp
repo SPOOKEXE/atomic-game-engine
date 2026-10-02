@@ -616,26 +616,3 @@ TEST_CASE(
 	CHECK(material.Port == "material");
 	CHECK(material.Values.empty());
 }
-TEST_CASE(
-	"Icosphere nested integer authoring remains a named preexecution carrier gap",
-	"[imagegraph][mesh_sphere_ico]"
-) {
-	Document doc;
-	doc.FormatVersion = 9;
-	doc.Nodes = {
-		{"sphere",
-		 std::string(SPHERE),
-		 "",
-		 {},
-		 {{"subdivision", ArrayValue{ValueType::Integer, {}, {{int64_t{1}, int64_t{2}}}}}}}
-	};
-	doc.Outputs = {{"out", "sphere", "mesh"}};
-	Document restored;
-	Diagnostic diagnostic;
-	CHECK(Read(Write(doc), restored, diagnostic) == Status::Malformed);
-	CHECK(diagnostic.Message.find("malformed imagegraph record") != std::string::npos);
-	Plan plan;
-	CHECK(Compile(doc, plan, diagnostic) == Status::TypeMismatch);
-	CHECK(diagnostic.Port == "subdivision");
-	CHECK(diagnostic.Message == "authored property has the wrong value type");
-}

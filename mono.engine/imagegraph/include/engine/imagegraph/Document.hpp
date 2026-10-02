@@ -5,8 +5,8 @@
 // Identifiers in this format are durable text. Plans and pixels are derived
 // data and never become part of the saved document.
 
-#include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraph/FluidDomain.hpp>
+#include <engine/imagegraph/Surface.hpp>
 
 #include <array>
 #include <cstddef>
@@ -459,11 +459,13 @@ namespace engine::imagegraph {
 		bool operator==(const PathTransform3D &) const = default;
 	};
 
+	struct SourcePathData3D;
 	struct PathData3D {
 		bool Loop = false, SourcePresent = true;
 		uint32_t Resolution = 32;
 		std::vector<PathAnchor3D> Anchors;
 		std::optional<Path2D> Source2D;
+		OwnedPayload3D<SourcePathData3D> SourceOperation;
 		// Sampling applies inner wrappers first without changing source length or weight.
 		std::vector<PathTransform3D> Transforms;
 		bool operator==(const PathData3D &) const = default;
@@ -471,6 +473,13 @@ namespace engine::imagegraph {
 	struct PathValue3D {
 		OwnedPayload3D<PathData3D> Data;
 		bool operator==(const PathValue3D &) const = default;
+	};
+
+	struct SourcePathData3D {
+		SourcePathOperationKind Kind = SourcePathOperationKind::Reverse;
+		Vector2 TrimRange{0, 1};
+		std::vector<PathValue3D> Inputs;
+		bool operator==(const SourcePathData3D &) const = default;
 	};
 
 	struct PcxExpressionData;

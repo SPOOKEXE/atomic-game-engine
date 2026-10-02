@@ -669,3 +669,35 @@ TEST_CASE("Source global modes require declared controls and disjoint names", "[
 		CHECK(diagnostic.Port == "speed");
 	}
 }
+
+TEST_CASE("Source physical Any controls retain their raw key type", "[imagegraph][source_mode]") {
+	Document document;
+	document.FormatVersion = 9;
+	Node node{"record", "pc.struct", "", {}, {}};
+	node.DynamicInputs = {
+		{"key_0", ValueType::Text, Value{std::string{"answer"}}}, {"value_0", ValueType::Any, Value{3.0}}
+	};
+	node.SourceStaticInputs = {"value_0"};
+	document.Nodes = {node};
+	document.Keyframes = {{"record", "value_0", 0, 3.0, "source", KeyframeEase{}}};
+	document.Tracks = {{"record", "value_0", "hold", -1}};
+	document.Outputs = {{"value", "record", "struct"}};
+	Diagnostic diagnostic;
+	Document restored;
+	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
+	CHECK(restored.Nodes.front().DynamicInputs[1].Type == ValueType::Any);
+	Plan plan;
+	const auto compiled = Compile(restored, plan, diagnostic);
+	INFO(diagnostic.Message << " port=" << diagnostic.Port);
+	REQUIRE(compiled == Status::Ok);
+	EvaluatedValue result;
+	REQUIRE(EvaluateValue(restored, plan, "value", {}, result, diagnostic) == Status::Ok);
+	const auto &record = std::get<StructValue>(result.Data);
+	REQUIRE(record.Data);
+	REQUIRE(record.Data->Fields.size() == 1);
+	CHECK(record.Data->Fields.front().first == "answer");
+	CHECK(std::get<double>(record.Data->Fields.front().second) == 3.0);
+	restored.Keyframes.front().Port = "missing";
+	CHECK(Compile(restored, plan, diagnostic) == Status::UnknownPort);
+	CHECK(diagnostic.Port == "missing");
+}

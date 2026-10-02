@@ -52,6 +52,7 @@ Milestone labels describe development scope, not release versions.
   10. Run bounded Composer Lua sessions, drawing and notifications through an explicit host adapter.
   11. Support PCX tuples, typed numeric values and source integer random ranges.
   12. Share bounded file and export hosts; publish authored export batches with rollback.
+  13. Save and evaluate nested point arrays, source Any keys and recursive 3D paths.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

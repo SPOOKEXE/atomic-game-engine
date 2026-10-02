@@ -185,6 +185,12 @@ namespace engine::imagegraph {
 			// Spans are taken only after every vector has reached its final size.
 			for (size_t index = 0; index < storage.Nodes.size(); index++) {
 				CatalogueParsed &node = storage.Nodes[index];
+				if (heads[index].Type == "pc.points_remap")
+					for (auto &input : node.Inputs)
+						if (input.Id == "points" && input.SourceIndex == 0 && input.SourceKind == "Vec2" &&
+							input.Default.empty())
+							// Pinned constructor starts with one coordinate row, [[0,0]].
+							input.Default = "a vector2 1 v 0 0";
 				for (auto &input : node.Inputs)
 					if (input.SourceChoices) input.SourceChoices->Entries = node.InputChoices[input.Id];
 				for (auto &input : node.Template)
@@ -325,6 +331,13 @@ namespace engine::imagegraph {
 	bool CatalogueAuthoredArray(
 		const CatalogueEntry &entry, const CatalogueInput &input, const ArrayValue &array
 	) {
+		// This Node-derived update consumes the full list of coordinate rows itself.
+		if (entry.Type == "pc.points_remap" && input.Id == "points" && input.SourceIndex == 0 &&
+			input.SourceKind == "Vec2" && input.Type == ValueType::Vector2 && input.ArrayDepthKnown &&
+			input.ArrayDepth == 2)
+			return (array.ElementType == ValueType::Vector2 || array.ElementType == ValueType::Scalar ||
+					array.ElementType == ValueType::Integer || array.ElementType == ValueType::Any) &&
+				   detail::ValidPayload(array, true);
 		// These fields project the mapped source numeric slot, whose endpoint depth is one.
 		const bool materialRange =
 			entry.Type == "pc.3_d_material" && input.SourceKind == "MapRange" &&

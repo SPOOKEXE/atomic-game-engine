@@ -421,7 +421,14 @@ TEST_CASE(
 	document.Nodes.back() = {"legacy", "pc.fft", "", {}, {{"data", nested}}, {}};
 	document.Links.pop_back();
 	document.Outputs.back() = {"legacy", "legacy", "array"};
-	CHECK(Compile(document, plan, diagnostic) == Status::InvalidValue);
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	// The source processor consumes one sample row; FFT returns [] for N <= 1.
+	REQUIRE(EvaluateValue(document, plan, "legacy", request, value, diagnostic) == Status::Ok);
+	const auto &singleSampleSpectrum = std::get<ArrayValue>(value.Data);
+	CHECK(singleSampleSpectrum.ElementType == ValueType::Scalar);
+	CHECK(singleSampleSpectrum.Elements.empty());
+	CHECK(singleSampleSpectrum.Nested.empty());
+	CHECK(std::get<ArrayValue>(document.Nodes.back().Values.front().Data) == nested);
 }
 
 TEST_CASE("linked Audio Window integer controls reject out of range scalars", "[imagegraph][node_audio]") {
