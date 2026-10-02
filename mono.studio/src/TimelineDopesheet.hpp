@@ -22,7 +22,8 @@ namespace studio {
 		std::vector<Marker> Markers;
 		std::vector<engine::imagegraph::Keyframe> Originals;
 		std::vector<engine::imagegraph::FrameTime> Destinations;
-		std::vector<ImageGraphKeyframeIdentity> BoxSelection;
+		std::vector<ImageGraphKeyframeIdentity> BoxSelection, PreparedSelection;
+		bool Prepared = false;
 		uint64_t Revision = std::numeric_limits<uint64_t>::max();
 		double PixelsPerFrame = 20, PanX = 0, PanY = 0;
 		ImVec2 BoxStart, BoxEnd;
@@ -31,12 +32,15 @@ namespace studio {
 
 		std::optional<uint64_t> CacheBytes() const {
 			using namespace engine::imagegraph;
-			uint64_t bytes = Tracks.capacity() * sizeof(Track) + Markers.capacity() * sizeof(Marker) +
-							 Destinations.capacity() * sizeof(FrameTime) +
-							 BoxSelection.capacity() * sizeof(ImageGraphKeyframeIdentity);
+			uint64_t bytes =
+				Tracks.capacity() * sizeof(Track) + Markers.capacity() * sizeof(Marker) +
+				Destinations.capacity() * sizeof(FrameTime) +
+				(BoxSelection.capacity() + PreparedSelection.capacity()) * sizeof(ImageGraphKeyframeIdentity);
 			for (const auto &track : Tracks)
 				bytes += track.NodeId.size() + track.Port.size();
 			for (const auto &identity : BoxSelection)
+				bytes += identity.NodeId.size() + identity.Port.size();
+			for (const auto &identity : PreparedSelection)
 				bytes += identity.NodeId.size() + identity.Port.size();
 			for (const auto &key : Originals) {
 				const auto payload = KeyframePayloadBytes(key);
@@ -147,10 +151,11 @@ namespace studio {
 			return true;
 		}
 		void Cancel() {
-			Dragging = Scaling = Copying = Boxing = false;
+			Dragging = Scaling = Copying = Boxing = Prepared = false;
 			std::vector<engine::imagegraph::Keyframe>().swap(Originals);
 			std::vector<engine::imagegraph::FrameTime>().swap(Destinations);
 			std::vector<ImageGraphKeyframeIdentity>().swap(BoxSelection);
+			std::vector<ImageGraphKeyframeIdentity>().swap(PreparedSelection);
 		}
 		bool Begin(
 			const engine::imagegraph::Document &document,
@@ -217,12 +222,15 @@ namespace studio {
 			return true;
 		}
 
-		bool Commit(
+		// Prepare only the staged document. Selection publishes after the host
+		// retains its undo entry.
+		bool PrepareCommit(
 			engine::imagegraph::Document &document,
-			TimelineKeyEditor &editor,
+			const TimelineKeyEditor &editor,
 			engine::imagegraph::Diagnostic &error
 		) {
 			using namespace engine::imagegraph;
+			Prepared = false;
 			const auto budget = editor.Remaining(true, true);
 			uint64_t remaining = budget.value_or(0);
 			const auto retained = CacheBytes();
@@ -239,19 +247,45 @@ namespace studio {
 					return false;
 				}
 			remaining -= *retained;
-			if (!RetimeImageGraphKeyframes(document, Originals, Destinations, Copying, error, remaining))
-				return false;
-			editor.Selection.clear();
+			for (const auto &original : Originals) {
+				const uint64_t bytes =
+					sizeof(ImageGraphKeyframeIdentity) + original.NodeId.size() + original.Port.size();
+				if (bytes > remaining) {
+					error = {
+						Status::LimitExceeded, {}, {}, "key gesture selection exceeds the payload budget"
+					};
+					return false;
+				}
+				remaining -= bytes;
+			}
+			std::vector<ImageGraphKeyframeIdentity> selection;
+			selection.reserve(Originals.size());
 			for (size_t index = 0; index < Originals.size(); ++index) {
 				ImageGraphKeyframeIdentity identity{
 					Originals[index].NodeId, Originals[index].Port, Destinations[index]
 				};
-				if (std::find(editor.Selection.begin(), editor.Selection.end(), identity) ==
-					editor.Selection.end())
-					editor.Selection.push_back(std::move(identity));
+				if (std::find(selection.begin(), selection.end(), identity) == selection.end())
+					selection.push_back(std::move(identity));
 			}
+			if (!RetimeImageGraphKeyframes(document, Originals, Destinations, Copying, error, remaining))
+				return false;
+			PreparedSelection = std::move(selection);
+			Prepared = true;
+			return true;
+		}
+		void PublishCommit(TimelineKeyEditor &editor) {
+			if (!Prepared) return;
+			editor.Selection.swap(PreparedSelection);
 			Cancel();
 			Revision = std::numeric_limits<uint64_t>::max();
+		}
+		bool Commit(
+			engine::imagegraph::Document &document,
+			TimelineKeyEditor &editor,
+			engine::imagegraph::Diagnostic &error
+		) {
+			if (!PrepareCommit(document, editor, error)) return false;
+			PublishCommit(editor);
 			return true;
 		}
 

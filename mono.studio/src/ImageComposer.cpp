@@ -1208,18 +1208,21 @@ namespace studio {
 			}
 		}
 
-		void ApplyDocumentEdit(State &state, const auto &edit) {
-			if (ApplyImageGraphDocumentEdit(state.Authored, state.History, [&](Document &document) {
+		bool ApplyDocumentEdit(State &state, const auto &edit) {
+			const bool accepted =
+				ApplyImageGraphDocumentEdit(state.Authored, state.History, [&](Document &document) {
 					if constexpr (std::is_same_v<std::invoke_result_t<decltype(edit), Document &>, bool>) {
 						if (!edit(document)) return false;
 					} else
 						edit(document);
 					return ReconcileSplitOutputs(state, document);
-				}))
+				});
+			if (accepted)
 				AuthoredDocumentChanged(state);
 			else if (state.GroupHost.Revision != state.DocumentRevision)
 				// A refused staged transaction must rebuild previews from the retained document.
 				state.GroupHost.Clear();
+			return accepted;
 		}
 
 		engine::imagegraph::TimelineSettings PlaybackTimeline(const ImageGraphPlayback &playback) {
@@ -4220,10 +4223,10 @@ namespace studio {
 				GetImageGraphFrame(state.Playback),
 				state.LastDiagnostic,
 				[&] {
-					bool accepted = false;
-					ApplyDocumentEdit(state, [&](Document &document) {
-						accepted = state.Dopesheet.Commit(document, state.Keys, state.LastDiagnostic);
+					const bool accepted = ApplyDocumentEdit(state, [&](Document &document) {
+						return state.Dopesheet.PrepareCommit(document, state.Keys, state.LastDiagnostic);
 					});
+					if (accepted) state.Dopesheet.PublishCommit(state.Keys);
 					return accepted;
 				}
 			);

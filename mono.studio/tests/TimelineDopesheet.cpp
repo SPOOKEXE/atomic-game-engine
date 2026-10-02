@@ -68,10 +68,11 @@ namespace {
 			ImGui::SetNextWindowSize({900, 500});
 			ImGui::Begin("Dopesheet", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 			View.Draw(Doc, Revision, Keys, {}, Error, [&] {
-				bool accepted = false;
-				if (studio::ApplyImageGraphDocumentEdit(Doc, History, [&](Document &doc) {
-						accepted = View.Commit(doc, Keys, Error);
-					})) {
+				const bool accepted = studio::ApplyImageGraphDocumentEdit(Doc, History, [&](Document &doc) {
+					return View.PrepareCommit(doc, Keys, Error);
+				});
+				if (accepted) {
+					View.PublishCommit(Keys);
 					++Changes;
 					++Revision;
 				}
@@ -323,4 +324,99 @@ TEST_CASE(
 	CHECK(GetFrameTime(ui.Doc.Keyframes[1]) == FrameTime{1, 0, false});
 	REQUIRE(ui.History.Undo(ui.Doc));
 	CHECK(ui.Doc == before);
+}
+
+TEST_CASE("dopesheet history refusal retains authored key selection", "[studio][timeline_history54]") {
+	Sheet ui;
+	ui.History = studio::ImageGraphHistory(128, 1);
+	ui.Frame();
+	ui.Frame();
+	const auto before = ui.Doc;
+	const auto point = ui.View.Markers[0].Position;
+	ui.Down(point);
+	const auto selected = ui.Keys.Selection;
+	REQUIRE(selected.size() == 1);
+	ui.Mouse({point.x + 4 * float(ui.View.PixelsPerFrame), point.y});
+	ui.Up();
+	CHECK(ui.Doc == before);
+	CHECK(ui.Changes == 0);
+	CHECK_FALSE(ui.History.CanUndo());
+	CHECK(ui.Keys.Selection == selected);
+	CHECK_FALSE(ui.View.Dragging);
+}
+
+TEST_CASE("dopesheet staged refusal preserves gesture and retry commits one undo", "[studio][timeline_history54]") {
+	Sheet ui;
+	ui.History = studio::ImageGraphHistory(128, 1);
+	ui.Frame();
+	ui.Frame();
+	const auto before = ui.Doc;
+	const auto point = ui.View.Markers[0].Position;
+	ui.Down(point);
+	ui.Mouse({point.x + 4 * float(ui.View.PixelsPerFrame), point.y});
+	const auto selected = ui.Keys.Selection;
+	const auto originals = ui.View.Originals;
+	const auto destinations = ui.View.Destinations;
+	Document staged = ui.Doc;
+	REQUIRE(ui.View.PrepareCommit(staged, ui.Keys, ui.Error));
+	REQUIRE_FALSE(ui.History.TryRecord(ui.Doc, staged));
+	CHECK(ui.Doc == before);
+	CHECK(ui.Keys.Selection == selected);
+	CHECK(ui.View.Originals == originals);
+	CHECK(ui.View.Destinations == destinations);
+	CHECK(ui.View.Dragging);
+	ui.View.Cancel();
+	ui.Up();
+	ui.History = studio::ImageGraphHistory{};
+	ui.Down(ui.View.Markers[0].Position);
+	const auto retry = ui.View.Markers[0].Position;
+	ui.Mouse({retry.x + 4 * float(ui.View.PixelsPerFrame), retry.y});
+	CHECK(ui.Doc == before);
+	ui.Up();
+	REQUIRE(ui.Changes == 1);
+	const auto moved = ui.Doc;
+	REQUIRE(moved != before);
+	REQUIRE(ui.Keys.Selection.size() == 1);
+	CHECK(ui.Keys.Selection[0].Time == FrameTime{5, 0, false});
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == moved);
+	CHECK_FALSE(ui.History.CanRedo());
+}
+
+TEST_CASE("dopesheet refused Alt copy preserves redo and selection", "[studio][timeline_history54]") {
+	Sheet ui;
+	const auto before = ui.Doc;
+	auto priorEdit = before;
+	priorEdit.Nodes[0].Values[0].Data = 2.0;
+	const auto bytes = std::max(Write(before).size(), Write(priorEdit).size());
+	ui.History = studio::ImageGraphHistory(128, bytes);
+	REQUIRE(ui.History.TryRecord(before, priorEdit));
+	ui.Doc = priorEdit;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	REQUIRE(ui.Doc == before);
+	REQUIRE(ui.History.CanRedo());
+	ui.Frame();
+	ui.Frame();
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Alt, true);
+	ui.Frame();
+	const auto point = ui.View.Markers[0].Position;
+	ui.Down(point);
+	REQUIRE(ui.View.Copying);
+	const auto selected = ui.Keys.Selection;
+	ui.Mouse({point.x + 4 * float(ui.View.PixelsPerFrame), point.y});
+	ui.Up();
+	CHECK(ui.Doc == before);
+	CHECK(ui.Changes == 0);
+	CHECK(ui.Keys.Selection == selected);
+	CHECK_FALSE(ui.View.Dragging);
+	CHECK_FALSE(ui.View.Prepared);
+	CHECK(ui.View.PreparedSelection.empty());
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.CanRedo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == priorEdit);
 }
