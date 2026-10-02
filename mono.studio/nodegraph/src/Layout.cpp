@@ -46,6 +46,7 @@ namespace nodegraph {
 			return derived;
 		}
 		const NodeType *type = NodeTypes::Find(node.Type);
+		if (node.OutputPorts) return *node.OutputPorts;
 		return type != nullptr ? type->Outputs : std::vector<PortSpec>{};
 	}
 

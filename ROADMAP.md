@@ -38,6 +38,11 @@ Milestone labels describe development scope, not release versions.
 
 ### v0.25
 
+- [x] Pixel Composer foundations:
+
+  1. Retain the pinned source licence in release notices.
+  2. Save, clone and hash per-instance output ports; prune invalid links.
+
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
   1. Graph and Studio: pass combined Group, Range, Any and Trigger tests; finish atomic undo/redo, Dopesheet gestures and host compatibility.

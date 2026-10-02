@@ -102,3 +102,34 @@ TEST_CASE("a graph naming an unknown type still loads", "[nodegraph]") {
 	CHECK(loaded.Nodes().size() == 1);
 	CHECK(loaded.Nodes().front().Type == "field.absent");
 }
+
+TEST_CASE("instance output interface survives file and template round trips", "[nodegraph]") {
+	RegisterFixtureNodes();
+	Graph graph;
+	const auto source = graph.Add("field.source", 0, 0);
+	REQUIRE(graph.SetOutputs(source, {PortSpec{"Extra", "data.FIELD"}}));
+	Graph restored;
+	std::string failure;
+	REQUIRE(Load(Save(graph), restored, failure));
+	REQUIRE(restored.Nodes().size() == 1);
+	REQUIRE(restored.Nodes()[0].OutputPorts);
+	CHECK(restored.Nodes()[0].OutputPorts->size() == 1);
+	CHECK(restored.Nodes()[0].OutputPorts->front().Name == "Extra");
+	CHECK(restored.Hash(restored.Nodes()[0].Id) == graph.Hash(source));
+}
+
+TEST_CASE("empty output override retains its presence after saving", "[nodegraph]") {
+	RegisterFixtureNodes();
+	Graph graph;
+	const auto node = graph.Add("field.source", 0, 0);
+	const auto original = graph.Hash(node);
+	REQUIRE(graph.SetOutputs(node, {}));
+	REQUIRE(graph.Hash(node) != original);
+	Graph restored;
+	std::string error;
+	REQUIRE(Load(Save(graph), restored, error));
+	REQUIRE(restored.Nodes().size() == 1);
+	REQUIRE(restored.Nodes()[0].OutputPorts);
+	CHECK(restored.Nodes()[0].OutputPorts->empty());
+	CHECK(restored.Hash(restored.Nodes()[0].Id) == graph.Hash(node));
+}

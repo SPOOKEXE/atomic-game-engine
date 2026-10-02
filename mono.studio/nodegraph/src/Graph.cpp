@@ -209,6 +209,26 @@ namespace nodegraph {
 		return true;
 	}
 
+	bool Graph::SetOutputs(NodeId id, std::vector<PortSpec> outputs) {
+		auto *node = Find(id);
+		if (!node || node->Compressed() || !NodeTypes::Find(node->Type)) return false;
+		std::unordered_set<std::string> names;
+		for (const auto &port : outputs)
+			if (port.Name.empty() || !DataTypes::Find(port.Type) || !names.insert(port.Name).second)
+				return false;
+		node->OutputPorts = std::move(outputs);
+		std::erase_if(Wires, [&](const auto &link) {
+			if (link.From != id) return false;
+			const auto *output = FindPort(*node->OutputPorts, link.FromPort);
+			const auto *sink = Find(link.To);
+			if (!output || !sink) return true;
+			const auto inputs = InputsOf(*sink);
+			const auto *input = FindPort(inputs, link.ToPort);
+			return !input || !DataTypes::CanConnect(output->Type, input->Type);
+		});
+		return true;
+	}
+
 	LinkResult
 	Graph::Connect(NodeId from, const std::string &fromPort, NodeId to, const std::string &toPort) {
 		const LinkResult can = CanConnect(from, fromPort, to, toPort);
@@ -678,6 +698,7 @@ namespace nodegraph {
 			Node *placed = Find(id);
 			placed->Widgets = node.Widgets;
 			placed->DynamicInputs = node.DynamicInputs;
+			placed->OutputPorts = node.OutputPorts;
 			placed->Label = node.Label;
 			placed->Collapsed = node.Collapsed;
 			placed->Proxies = node.Proxies;
@@ -772,6 +793,16 @@ namespace nodegraph {
 		}
 
 		uint64_t hash = MixText(SEED, node->Type);
+		const uint8_t outputsOverridden = node->OutputPorts.has_value();
+		hash = Mix(hash, &outputsOverridden, sizeof(outputsOverridden));
+		if (node->OutputPorts) {
+			const uint64_t count = node->OutputPorts->size();
+			hash = Mix(hash, &count, sizeof(count));
+			for (const auto &port : *node->OutputPorts) {
+				hash = MixText(hash, port.Name);
+				hash = MixText(hash, port.Type);
+			}
+		}
 
 		// **Widgets in the type's declared order, not the map's.** A hash that
 		// walked an unordered map would differ between two processes holding one

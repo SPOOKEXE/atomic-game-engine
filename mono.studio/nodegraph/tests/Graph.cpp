@@ -261,3 +261,35 @@ TEST_CASE("suggestion exclusions leave manual port connections available", "[nod
 	CHECK(graph.CanConnect(source, "Out", target, "In") == LinkResult::Made);
 	CHECK(graph.Connect(source, "Out", target, "In") == LinkResult::Made);
 }
+
+TEST_CASE(
+	"instance output changes prune wires and invalidate hashes without changing shared schemas", "[nodegraph]"
+) {
+	RegisterFixtureNodes();
+	Graph graph;
+	const auto source = graph.Add("field.source", 0, 0), peer = graph.Add("field.source", 0, 50),
+			   sink = graph.Add("field.terrace", 100, 0);
+	const auto before = graph.Hash(source);
+	REQUIRE(graph.SetOutputs(source, {PortSpec{"Extra", "data.FIELD"}}));
+	REQUIRE(graph.Connect(source, "Extra", sink, "In") == LinkResult::Made);
+	CHECK(graph.CanConnect(peer, "Extra", sink, "In") == LinkResult::NoSuchPort);
+	CHECK(graph.Hash(source) != before);
+	CHECK_FALSE(graph.SetOutputs(source, {PortSpec{"Extra", "missing"}}));
+	CHECK(graph.Links().size() == 1);
+	REQUIRE(graph.SetOutputs(source, {}));
+	CHECK(graph.Links().empty());
+}
+
+TEST_CASE("empty output override invalidates an otherwise empty interface", "[nodegraph]") {
+	NodeType empty;
+	empty.Id = "fixture.empty-output-interface";
+	NodeTypes::Register(empty);
+	Graph graph;
+	const auto node = graph.Add(empty.Id, 0, 0);
+	REQUIRE(node != NO_NODE);
+	const auto original = graph.Hash(node);
+	REQUIRE(graph.SetOutputs(node, {}));
+	CHECK(graph.Hash(node) != original);
+	CHECK(graph.Links().empty());
+	CHECK(graph.Find(node)->OutputPorts.has_value());
+}

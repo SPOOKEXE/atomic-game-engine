@@ -103,6 +103,11 @@ namespace nodegraph {
 			// node, which is what makes adding one safe.
 			out << "node | " << node.Id << " | " << node.Type << " | " << node.X << " | " << node.Y << " | "
 				<< node.Label << " | " << (node.Collapsed ? "collapsed" : "open") << "\n";
+			if (node.OutputPorts) {
+				out << "outputs | " << node.Id << "\n";
+				for (const auto &port : *node.OutputPorts)
+					out << "output | " << node.Id << " | " << port.Name << " | " << port.Type << "\n";
+			}
 
 			// **In the type's order where there is a type**, so two saves of one
 			// graph produce one file: an unordered map's order is not a promise
@@ -345,6 +350,19 @@ namespace nodegraph {
 				continue;
 			}
 
+			if (fields[0] == "outputs" && fields.size() >= 2) {
+				if (const auto found = placed.find(Whole(fields[1])); found != placed.end())
+					if (auto *node = graph.Find(found->second)) node->OutputPorts.emplace();
+				continue;
+			}
+			if (fields[0] == "output" && fields.size() >= 4) {
+				if (const auto found = placed.find(Whole(fields[1])); found != placed.end())
+					if (auto *node = graph.Find(found->second)) {
+						if (!node->OutputPorts) node->OutputPorts.emplace();
+						node->OutputPorts->push_back({std::string(fields[2]), std::string(fields[3])});
+					}
+				continue;
+			}
 			if (fields[0] == "value" && fields.size() >= 5) {
 				const auto found = placed.find(Whole(fields[1]));
 				if (found == placed.end()) {

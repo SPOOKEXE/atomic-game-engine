@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <nodegraph/Registry.hpp>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -145,6 +146,8 @@ namespace nodegraph {
 		std::vector<nodegraph::Proxy> Proxies;
 		std::vector<nodegraph::Promotion> Promoted;
 		//@}
+		// An instance may replace the type's outputs when its authored shape changes.
+		std::optional<std::vector<PortSpec>> OutputPorts;
 
 		// Whether this node stands for a subtree rather than being one node.
 		//
@@ -254,6 +257,8 @@ namespace nodegraph {
 		// Replaces one node's additional inputs and drops links made invalid by
 		// removing or changing their type.
 		bool SetDynamicInputs(NodeId id, std::vector<PortSpec> inputs);
+		// Replaces the complete instance output interface and removes incompatible wires.
+		bool SetOutputs(NodeId id, std::vector<PortSpec> outputs);
 
 		// Removes whatever link ends on an input port.
 		//
