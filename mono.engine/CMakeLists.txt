@@ -25,6 +25,7 @@ add_subdirectory(bakegraph) # L9 what a bake pipeline is, with no decoders [shar
 add_subdirectory(bake)      # L9 importing and baking content [shared]
 add_subdirectory(graph)     # L9 what is drawn, before binding [shared]
 add_subdirectory(imagegraph) # L9 authored image graphs, before execution [shared]
+add_subdirectory(imagegraphphysics) # L10 copied rigid commands and private Box2D host [shared]
 add_subdirectory(imagegraphio) # L10 foreign image graph adapter [shared]
 add_subdirectory(imagegraphexport) # L11 explicit graph export host boundary [shared]
 add_subdirectory(scriptluau) # L10 the Luau adapter        [shared]

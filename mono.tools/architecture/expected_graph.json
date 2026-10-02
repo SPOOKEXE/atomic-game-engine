@@ -332,6 +332,15 @@
         "core"
       ]
     },
+    "imagegraphphysics": {
+      "tier": "shared",
+      "layer": 10,
+      "links": [
+        "audiocodec",
+        "core",
+        "imagegraph"
+      ]
+    },
     "imagegraphio": {
       "tier": "shared",
       "layer": 10,

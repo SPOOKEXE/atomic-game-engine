@@ -42,12 +42,12 @@ Milestone labels describe development scope, not release versions.
 
   1. Retain the source licence, pinned metadata and generated enum choices; save instance ports and reflected graph selectors.
   2. Evaluate bounded source kernels, colour and normal filters, Shape paths, Tilesets, conversions, typed arrays and Pixel Builder recipes.
-  3. Replay animation controls, particles, FLIP obstacles, Verlet colliders, random draws and delay history deterministically.
+  3. Replay animation controls, particles, FLIP obstacles, Verlet colliders, rigid-world fixtures, random draws and delay history deterministically.
   4. Edit native and PXC graphs, groups, keys and tile properties with atomic undo/redo; retain source metadata across key moves and copies.
   5. Read granted images, directories, animation, audio and structured assets through bounded shared hosts.
   6. Run bounded Lua and export helpers; publish image, sequence and WAV batches with rollback.
   7. Bind live 3D outputs, cooked materials and 4096-frame atlases; cook Composer HLSL and queue camera/SDF jobs. GPU verification remains open.
-  8. Package source projects and authored scenes; profile static, animated, temporal, Verlet and 3D CPU workloads. Visual acceptance remains open.
+  8. Package source projects and authored scenes; profile static, animated, temporal, Verlet, rigid and 3D CPU workloads. Visual acceptance remains open.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 

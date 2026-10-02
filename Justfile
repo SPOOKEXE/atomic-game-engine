@@ -466,6 +466,14 @@ imagegraph-cpu-milestone-bench samples="5":
     ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][cpu_milestones]'
     ATOMIC_IMAGEGRAPH_CPU_PRESET=release-tests ./.cache/build/release-tests/bench/bench_imagegraph --suite engine.imagegraph.bench.cpu-milestones --samples {{samples}}
 
+# Native rigid CPU seek cost with contact and exact replay checks. Results stay on stdout.
+imagegraph-rigid-replay-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset release-tests --target test_imagegraphphysics bench_imagegraphphysics
+    ./.cache/build/release-tests/tests/test_imagegraphphysics
+    ./.cache/build/release-tests/bench/bench_imagegraphphysics --suite engine.imagegraphphysics.bench.replay --samples {{samples}}
+
 # Actual headless WAV inspector cache paths. Optional stdout capture:
 # ATOMIC_STUDIO_WAV_TIMELINE_PROFILE=1 just studio-wav-timeline-bench 5
 studio-wav-timeline-bench samples="5":
