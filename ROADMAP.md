@@ -45,6 +45,7 @@ Milestone labels describe development scope, not release versions.
   3. Launch export helpers in a child working directory without changing the parent.
   4. Implement Boolean, RGB, HSV, colour data, blend and OKLCH source kernels.
   5. Encode native GIFs with bounded memory, deterministic palettes and explicit frame delays.
+  6. Read bounded layered images, models, XML and GameMaker rooms from bytes.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
