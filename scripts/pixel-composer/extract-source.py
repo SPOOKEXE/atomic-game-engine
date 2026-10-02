@@ -26,6 +26,7 @@ from source_behavior import (
     choice_count,
     choice_source_evidence,
     enum_behavior,
+    node_condition_choice_source,
     node_math_choice_source,
     node_vector_math_choice_source,
     source_choice_map,
@@ -316,6 +317,7 @@ source_classification = SourceArrayClassification(root, macros)
 source_choice_evidence = choice_source_evidence(root)
 math_choice_labels, math_choice_evidence = node_math_choice_source(root)
 vector_math_choice_labels, vector_math_choice_evidence = node_vector_math_choice_source(root)
+condition_choice_labels, condition_choice_evidence = node_condition_choice_source(root)
 source_choice_generated_evidence = {}
 generated_choice_arrays = {}
 if source_choice_evidence is not None:
@@ -326,6 +328,9 @@ if source_choice_evidence is not None:
         if labels is not None and evidence is not None:
             source_choice_generated_evidence[expression] = evidence
             generated_choice_arrays[expression] = labels
+    if condition_choice_labels is not None and condition_choice_evidence is not None:
+        source_choice_generated_evidence["cond_array"] = condition_choice_evidence
+        generated_choice_arrays["cond_array"] = condition_choice_labels
 
 
 def array_process_metadata(name):

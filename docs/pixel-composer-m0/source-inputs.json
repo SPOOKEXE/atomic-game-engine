@@ -30550,7 +30550,14 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Equal",
+      "Not equal",
+      "Less ",
+      "Less or equal ",
+      "Greater ",
+      "Greater or equal"
+     ],
      "default": "0",
      "extra": [
       "cond_array"
@@ -30562,15 +30569,40 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 6,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Equal"
+       },
+       {
+        "choice_index": 1,
+        "label": "Not equal"
+       },
+       {
+        "choice_index": 2,
+        "label": "Less "
+       },
+       {
+        "choice_index": 3,
+        "label": "Less or equal "
+       },
+       {
+        "choice_index": 4,
+        "label": "Greater "
+       },
+       {
+        "choice_index": 5,
+        "label": "Greater or equal"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -155614,6 +155646,12 @@
    "mapping": "node_math_scroll copies node_math_names[i] in array_create_ext index order",
    "path": "scripts/node_math/node_math.gml",
    "sha256": "c93a3af03b1f032b5b4d8968245a50748e6fc36fe1218cc3ad7082f558d09d13"
+  },
+  "cond_array": {
+   "count": 6,
+   "mapping": "cond_array source order maps indices 0..5 to ==, !=, <, <=, >, >=",
+   "path": "scripts/node_condition/node_condition.gml",
+   "sha256": "3bc81b66c7ceed28aae33e62a7ddf713caa717307e7f926866ee5611904db834"
   },
   "global.node_vmath_scroll": {
    "count": 8,

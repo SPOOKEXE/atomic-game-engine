@@ -16,6 +16,8 @@ SUGGESTION_SOURCE = "scripts/panel_graph/panel_graph.gml"
 CHOICE_SOURCE = "scripts/scrollBox/scrollBox.gml"
 MATH_CHOICE_SOURCE = "scripts/node_math/node_math.gml"
 VECTOR_MATH_CHOICE_SOURCE = "scripts/node_vector_math/node_vector_math.gml"
+CONDITION_CHOICE_SOURCE = "scripts/node_condition/node_condition.gml"
+CONDITION_CHOICES = ["Equal", "Not equal", "Less ", "Less or equal ", "Greater ", "Greater or equal"]
 
 
 def _matching_end(text: str, opening: int) -> int | None:
@@ -300,6 +302,47 @@ def node_vector_math_choice_source(root: Path) -> tuple[list[str] | None, dict |
         node_name="Node_Vector_Math",
         sprite_name="s_node_vmath_operators",
     )
+
+
+def node_condition_choice_source(root: Path) -> tuple[list[str] | None, dict | None]:
+    """Verify Condition's authored labels and their six numeric comparator cases."""
+    path = root / CONDITION_CHOICE_SOURCE
+    if not path.is_file():
+        return None, None
+    source = path.read_text(encoding="utf-8")
+    node = re.search(r"function\s+Node_Condition\([^)]*\)(?:\s*:[^{]+)?\s*\{", source)
+    if node is None:
+        return None, None
+    opening = source.find("{", node.start())
+    end = _matching_end(source, opening)
+    if end is None:
+        return None, None
+    body = _without_comments(source[opening + 1:end - 1])
+    labels = re.search(r'cond_array\s*=\s*__enum_array_gen\(\s*\[([^]]*)\]\s*,\s*s_node_condition_type\s*\)', body)
+    declaration = re.search(
+        r'newInput\(\s*1\s*,\s*nodeValue_EScroll\(\s*"Condition"\s*,\s*0\s*,\s*cond_array\s*\)\s*\)\s*\.\s*rejectArray\(\s*\)\s*;',
+        body,
+    )
+    cases = re.search(
+        r"switch\s*\(\s*_cond\s*\)\s*\{\s*case\s+0\s*:\s*res\s*=\s*_chck\s*==\s*_valu\s*;\s*break\s*;\s*"
+        r"case\s+1\s*:\s*res\s*=\s*_chck\s*!=\s*_valu\s*;\s*break\s*;\s*"
+        r"case\s+2\s*:\s*res\s*=\s*_chck\s*<\s*_valu\s*;\s*break\s*;\s*"
+        r"case\s+3\s*:\s*res\s*=\s*_chck\s*<=\s*_valu\s*;\s*break\s*;\s*"
+        r"case\s+4\s*:\s*res\s*=\s*_chck\s*>\s*_valu\s*;\s*break\s*;\s*"
+        r"case\s+5\s*:\s*res\s*=\s*_chck\s*>=\s*_valu\s*;\s*break\s*;\s*\}",
+        body,
+    )
+    if labels is None or declaration is None or cases is None:
+        return None, None
+    found = re.findall(r'"((?:[^"\\]|\\.)*)"', labels.group(1))
+    if found != CONDITION_CHOICES:
+        return None, None
+    return found, {
+        "path": CONDITION_CHOICE_SOURCE,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "count": 6,
+        "mapping": "cond_array source order maps indices 0..5 to ==, !=, <, <=, >, >=",
+    }
 
 
 def _resolved_source_array(

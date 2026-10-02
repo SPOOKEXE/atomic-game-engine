@@ -9,6 +9,7 @@ from source_behavior import (
     choice_count,
     choice_source_evidence,
     enum_behavior,
+    node_condition_choice_source,
     node_math_choice_source,
     node_vector_math_choice_source,
     source_choice_map,
@@ -243,6 +244,28 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
                 allowlisted_arrays={"global.node_math_scroll": found_labels},
             )
         )
+
+    def test_node_condition_choices_are_verified_against_source_order_and_comparators(self):
+        root = self.make_root()
+        source = root / "scripts/node_condition/node_condition.gml"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            'function Node_Condition() {\n'
+            'cond_array = __enum_array_gen(["Equal", "Not equal", "Less ", "Less or equal ", "Greater ", "Greater or equal"], s_node_condition_type);\n'
+            'newInput(1, nodeValue_EScroll("Condition", 0, cond_array)).rejectArray();\n'
+            'switch(_cond) { case 0: res = _chck == _valu; break; case 1: res = _chck != _valu; break; '
+            'case 2: res = _chck < _valu; break; case 3: res = _chck <= _valu; break; '
+            'case 4: res = _chck > _valu; break; case 5: res = _chck >= _valu; break; }\n'
+            '}',
+            encoding="utf-8",
+        )
+        labels, evidence = node_condition_choice_source(root)
+        self.assertEqual(["Equal", "Not equal", "Less ", "Less or equal ", "Greater ", "Greater or equal"], labels)
+        self.assertEqual(6, evidence["count"])
+
+        changed = source.read_text(encoding="utf-8").replace('case 4: res = _chck > _valu;', 'case 4: res = _chck < _valu;')
+        source.write_text(changed, encoding="utf-8")
+        self.assertEqual((None, None), node_condition_choice_source(root))
 
     def test_node_math_scroll_mapping_rejects_dynamic_labels_or_changed_schema(self):
         root = self.make_root()

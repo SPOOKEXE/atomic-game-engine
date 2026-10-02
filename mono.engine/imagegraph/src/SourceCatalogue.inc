@@ -6039,10 +6039,16 @@ Q	I	eval_mode	1	0	s "Number compare"
 Q	I	eval_mode	2	0	s "Text compare"
 I	check_value	Check value	0	Float	scalar	d 0	
 S	I	check_value	0
-I	condition	Condition	1	EScroll	enum	e 0	
+I	condition	Condition	1	EScroll	enum	e 0	Equal;Not equal;Less;Less or equal;Greater;Greater or equal
 S	I	condition	0
-B	I	condition	0	general	1	default	?
-C	I	condition	unknown
+B	I	condition	0	general	1	default	6
+C	I	condition	resolved
+Q	I	condition	0	0	s "Equal"
+Q	I	condition	1	0	s "Not equal"
+Q	I	condition	2	0	s "Less "
+Q	I	condition	3	0	s "Less or equal "
+Q	I	condition	4	0	s "Greater "
+Q	I	condition	5	0	s "Greater or equal"
 I	compare_to	Compare to	2	Float	scalar	d 0	
 S	I	compare_to	0
 I	boolean	Boolean	6	Bool	boolean	b 0	

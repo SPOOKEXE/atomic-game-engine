@@ -56,7 +56,7 @@ Milestone labels describe development scope, not release versions.
   14. Add four 2D kernels and preserve Pixel Builder signed dimensions, grayscale draws and instance resizing.
   15. Preserve source FLIP readback buffers and bounded step history for replay.
   16. Edit source groups and keys atomically; preserve undo/redo, instance writers and PXC saves.
-  17. Generate source WaveTable choices and typed Points Remap defaults without handwritten fallbacks.
+  17. Generate source WaveTable and Condition choices and typed Points Remap defaults without handwritten fallbacks.
   18. Read explicitly granted files in Studio with bounded immutable observations and shared Lua delegation.
   19. Read granted still images and integer-aligned sequences; publish bounded PCM WAV through exact grants and shared policy-checked Studio publication.
   20. Add animation kernels and owned delay history; preserve mixed processor rows and compile source kernels in release unity builds.
