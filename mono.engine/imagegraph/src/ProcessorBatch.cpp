@@ -311,6 +311,60 @@ namespace engine::imagegraph::detail {
 
 		bool CheckOutputs(NodeContext &context, uint64_t maximumBytes) {
 			uint64_t bytes = 0;
+			if (context.OutputDiagnostics.size() >
+				context.Entry.Outputs.size() + context.Authored.DynamicOutputs.size())
+				return context.Fail(Status::InvalidOutput, "too many output diagnostics");
+			for (size_t index = 0; index < context.OutputDiagnostics.size(); ++index) {
+				const auto &diagnostic = context.OutputDiagnostics[index];
+				const bool declared = std::any_of(
+										  context.Entry.Outputs.begin(),
+										  context.Entry.Outputs.end(),
+										  [&](const auto &output) { return output.Id == diagnostic.Port; }
+									  ) ||
+									  std::any_of(
+										  context.Authored.DynamicOutputs.begin(),
+										  context.Authored.DynamicOutputs.end(),
+										  [&](const auto &output) { return output.Id == diagnostic.Port; }
+									  );
+				if (!declared || diagnostic.Code != Status::UnsupportedExecution ||
+					diagnostic.NodeId != context.Authored.Id || diagnostic.Message.empty())
+					return context.Fail(Status::InvalidOutput, "invalid output diagnostic", diagnostic.Port);
+				if (diagnostic.NodeId.size() > Limits::MaximumTextBytes ||
+					diagnostic.Port.size() > Limits::MaximumTextBytes ||
+					diagnostic.Message.size() > Limits::MaximumTextBytes)
+					return context.Fail(
+						Status::LimitExceeded, "output diagnostic text exceeds bounds", diagnostic.Port
+					);
+				for (size_t previous = 0; previous < index; ++previous)
+					if (context.OutputDiagnostics[previous].Port == diagnostic.Port)
+						return context.Fail(
+							Status::InvalidOutput, "duplicate output diagnostic", diagnostic.Port
+						);
+				const uint64_t size =
+					diagnostic.NodeId.capacity() + diagnostic.Port.capacity() + diagnostic.Message.capacity();
+				if (size > maximumBytes - bytes)
+					return context.Fail(
+						Status::LimitExceeded,
+						"processor output diagnostics exceed byte budget",
+						diagnostic.Port
+					);
+				bytes += size;
+				for (const auto &[port, image] : context.OutputImages)
+					if (port == diagnostic.Port)
+						return context.Fail(
+							Status::InvalidOutput, "output payload conflicts with a refusal", port
+						);
+				for (const auto &[port, images] : context.OutputImageArrays)
+					if (port == diagnostic.Port)
+						return context.Fail(
+							Status::InvalidOutput, "output payload conflicts with a refusal", port
+						);
+				for (const auto &value : context.OutputValues)
+					if (value.Port == diagnostic.Port)
+						return context.Fail(
+							Status::InvalidOutput, "output payload conflicts with a refusal", value.Port
+						);
+			}
 			for (const auto &[port, image] : context.OutputImages) {
 				if (image.Pixels.size() > maximumBytes - bytes)
 					return context.Fail(Status::LimitExceeded, "processor outputs exceed byte budget", port);
@@ -537,6 +591,12 @@ namespace engine::imagegraph::detail {
 		context.ValueViews.reserve(rows.size() + restore.Values.size());
 		std::vector<std::pair<std::string, ImageArray>> images;
 		std::vector<AuthoredValue> values;
+		std::vector<Diagnostic> diagnostics;
+		const auto blocked = [&](std::string_view port) {
+			return std::any_of(diagnostics.begin(), diagnostics.end(), [&](const auto &diagnostic) {
+				return diagnostic.Port == port;
+			});
+		};
 		if (count > 1) {
 			images.reserve(context.Entry.Outputs.size());
 			values.reserve(context.Entry.Outputs.size());
@@ -708,7 +768,53 @@ namespace engine::imagegraph::detail {
 				dataRows.push_back(std::move(update));
 			}
 
+			if (!context.OutputDiagnostics.empty() && !diagnostics.capacity()) {
+				const size_t slots = context.Entry.Outputs.size() + context.Authored.DynamicOutputs.size();
+				auto charge = context.ReserveWorkspace(slots * sizeof(Diagnostic), "attribute_array_process");
+				if (!charge || !aggregateCharge->Merge(std::move(*charge))) return false;
+				diagnostics.reserve(slots);
+			}
+			for (auto &diagnostic : context.OutputDiagnostics) {
+				if (blocked(diagnostic.Port)) {
+					const uint64_t strings = diagnostic.NodeId.capacity() + diagnostic.Port.capacity() +
+											 diagnostic.Message.capacity();
+					{
+						Diagnostic dropped;
+						std::swap(diagnostic, dropped);
+					}
+					auto released = context.OutputCharge.Split(strings);
+					continue;
+				}
+				const auto oldImage = std::find_if(images.begin(), images.end(), [&](const auto &item) {
+					return item.first == diagnostic.Port;
+				});
+				if (oldImage != images.end()) {
+					uint64_t retained = oldImage->second.Images.capacity() * sizeof(Image) +
+										oldImage->second.Items.capacity() * sizeof(ImageArrayItem);
+					for (const auto &image : oldImage->second.Images)
+						retained += image.Pixels.capacity();
+					images.erase(oldImage);
+					auto released = aggregateCharge->Split(retained);
+				}
+				const auto oldValue = std::find_if(values.begin(), values.end(), [&](const auto &item) {
+					return item.Port == diagnostic.Port;
+				});
+				if (oldValue != values.end()) {
+					const uint64_t retained = RetainedPayloadBytes(oldValue->Data);
+					values.erase(oldValue);
+					auto released = aggregateCharge->Split(retained);
+				}
+				diagnostics.push_back(std::move(diagnostic));
+			}
+			context.OutputDiagnostics.clear();
 			for (auto &[port, image] : context.OutputImages) {
+				if (blocked(port)) {
+					const uint64_t retained = image.Pixels.capacity() + port.capacity();
+					image = {};
+					std::string{}.swap(port);
+					auto released = context.OutputCharge.Split(retained);
+					continue;
+				}
 				auto target = std::find_if(images.begin(), images.end(), [&](const auto &item) {
 					return item.first == port;
 				});
@@ -728,6 +834,15 @@ namespace engine::imagegraph::detail {
 				target->second.Images.push_back(std::move(image));
 			}
 			for (auto &value : context.OutputValues) {
+				if (blocked(value.Port)) {
+					const uint64_t retained = RetainedPayloadBytes(value.Data) + value.Port.capacity();
+					{
+						AuthoredValue dropped;
+						std::swap(value, dropped);
+					}
+					auto released = context.OutputCharge.Split(retained);
+					continue;
+				}
 				const bool generic = std::any_of(
 					context.Entry.Outputs.begin(), context.Entry.Outputs.end(), [&](const auto &output) {
 						return output.Id == value.Port && output.Type == ValueType::Any;
@@ -841,12 +956,14 @@ namespace engine::imagegraph::detail {
 		}
 		context.ClearOutputs();
 		std::vector<std::pair<std::string, Image>>{}.swap(context.OutputImages);
+		std::vector<Diagnostic>{}.swap(context.OutputDiagnostics);
 		context.SimulationUpdates = std::move(simulationRows);
 		context.SurfaceUpdates = std::move(surfaceRows);
 		context.RandomUpdates = std::move(randomRows);
 		context.DataUpdates = std::move(dataRows);
 		context.OutputValues = std::move(values);
 		context.OutputImageArrays = std::move(images);
+		context.OutputDiagnostics = std::move(diagnostics);
 		context.ReplaceOutputReservation(std::move(*aggregateCharge));
 		for (const auto &value : context.OutputValues)
 			if (!ValidRuntimeValue(value.Data))

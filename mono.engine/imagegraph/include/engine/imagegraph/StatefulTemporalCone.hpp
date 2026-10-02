@@ -74,7 +74,8 @@ namespace engine::imagegraph {
 								  node.Type == "pc.revert" || node.Type == "pc.stagger";
 			cone.RandomGenerators += node.Type == "pc.random";
 			cone.DataProcessors += node.Type == "pc.trigger_bool" || node.Type == "pc.differential" ||
-								   node.Type == "pc.counter" || node.Type == "pc.delay_value";
+								   node.Type == "pc.counter" || node.Type == "pc.delay_value" ||
+								   node.Type == "pc.cache_value_array";
 			cone.Simulation |= node.Type == "image.verlet_simple" ||
 							   (node.Type.starts_with("pc.verlet_sim_") || node.Type.starts_with("pc.flip_"));
 			cone.FixedSimulationSteps |= node.Type == "image.verlet_simple" ||

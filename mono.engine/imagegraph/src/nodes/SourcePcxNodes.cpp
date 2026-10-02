@@ -58,7 +58,7 @@ namespace engine::imagegraph::detail {
 			Diagnostic diagnostic;
 			if (context.PcxNames && !context.PcxNames->Resolve(name, value, diagnostic) &&
 				diagnostic.Code != Status::Ok)
-				return context.Fail(diagnostic.Code, diagnostic.Message, "globalvar");
+				return context.Fail(diagnostic, "globalvar");
 			if (!context.ReserveOutput(RetainedPayloadBytes(value), "value")) return false;
 			context.SetValue("value", std::move(value));
 			return context.FailureCode == Status::Ok;
@@ -78,7 +78,7 @@ namespace engine::imagegraph::detail {
 			PcxExpressionValue tree;
 			Diagnostic diagnostic;
 			if (CompilePcxExpression(source, tree, diagnostic) != Status::Ok)
-				return context.Fail(diagnostic.Code, diagnostic.Message, "equation");
+				return context.Fail(diagnostic, "equation");
 			if (!Arguments(context, tree)) return false;
 			if (context.Authored.Type == "pc.pcx_equation")
 				return Publish(context, std::move(tree), "result");
@@ -93,7 +93,7 @@ namespace engine::imagegraph::detail {
 			execution.MaximumBytes = std::min(context.AvailableBytes(), Limits::MaximumArrayBytes);
 			PcxExecutionResult result;
 			if (ExecutePcxExpression(tree, execution, result, diagnostic) != Status::Ok)
-				return context.Fail(diagnostic.Code, diagnostic.Message, "equation");
+				return context.Fail(diagnostic, "equation");
 			if (!result.Messages.empty()) {
 				uint64_t bytes = 2 * result.Messages.size() * sizeof(PcxMessage);
 				for (const auto &message : result.Messages)

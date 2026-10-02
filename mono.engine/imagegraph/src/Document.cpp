@@ -6106,6 +6106,7 @@ namespace engine::imagegraph {
 	};
 	// Named outputs of a source catalogue executor.
 	struct CatalogueOutputs {
+		std::vector<Diagnostic> Diagnostics;
 		std::vector<std::pair<std::string_view, SourceSocketDomain>> Domains;
 		std::vector<std::pair<std::string, Image>> Images;
 		std::vector<std::pair<std::string, ImageArray>> ImageArrays;
@@ -6245,6 +6246,12 @@ namespace engine::imagegraph {
 		return std::nullopt;
 	}
 
+	static const Diagnostic *FindOutputDiagnostic(const NodeResult &result, std::string_view port) {
+		if (const auto *outputs = std::get_if<CatalogueOutputs>(&result))
+			for (const auto &diagnostic : outputs->Diagnostics)
+				if (diagnostic.Port == port) return &diagnostic;
+		return nullptr;
+	}
 	static const ValueOutputs *FindValueOutputs(const NodeResult &result) {
 		if (const auto *values = std::get_if<ValueOutputs>(&result)) return values;
 		if (const auto *catalogue = std::get_if<CatalogueOutputs>(&result)) return &catalogue->Values;
@@ -6358,7 +6365,9 @@ namespace engine::imagegraph {
 	}
 
 	static uint64_t ResultBytes(const CatalogueOutputs &catalogue) {
-		uint64_t bytes = 0;
+		uint64_t bytes = catalogue.Diagnostics.size() * sizeof(Diagnostic);
+		for (const auto &diagnostic : catalogue.Diagnostics)
+			bytes += diagnostic.NodeId.size() + diagnostic.Port.size() + diagnostic.Message.size();
 		for (const auto &[id, image] : catalogue.Images)
 			bytes += image.Pixels.size();
 		for (const auto &[id, array] : catalogue.ImageArrays)
@@ -6639,6 +6648,10 @@ namespace engine::imagegraph {
 					if (images.Port == found->Port) return Images(images.Data, value, diagnostic);
 			} else {
 				const auto &result = Results[found->Producer];
+				if (const auto *refusal = FindOutputDiagnostic(result, found->Port)) {
+					diagnostic = *refusal;
+					return false;
+				}
 				if (const auto *values = FindValueOutputs(result))
 					for (const auto &output : *values)
 						if (output.Port == found->Port) {
@@ -8071,6 +8084,10 @@ namespace engine::imagegraph {
 						return false;
 					}
 					controls.LinkedValues.push_back(port);
+					if (const auto *refusal = FindOutputDiagnostic(results[producer], link->FromPort)) {
+						diagnostic = *refusal;
+						return false;
+					}
 					if (const Image *image = FindImageOutput(results[producer], link->FromPort);
 						image && port == "dimension") {
 						controls.Values.emplace_back(
@@ -8268,6 +8285,16 @@ namespace engine::imagegraph {
 				const size_t ownerIndex = nodeIndices.at(owner->Id);
 				return timelineOverrides.Find(ownerIndex, document.Nodes[ownerIndex]);
 			};
+			// Every connected input is resolved before executing this node, including animator aliases.
+			for (const auto &link : plan.EffectiveLinks) {
+				if (link.ToNode != node.Id && inputOwner(link.ToPort).Id != link.ToNode) continue;
+				const size_t producer = nodeIndices.at(link.FromNode);
+				if (!produced[producer]) continue;
+				if (const auto *refusal = FindOutputDiagnostic(results[producer], link.FromPort)) {
+					diagnostic = *refusal;
+					return diagnostic.Code;
+				}
+			}
 			detail::AllocationReservation currentCharge;
 			detail::AllocationReservation scratchCharge;
 			const auto admit =
@@ -9423,7 +9450,11 @@ namespace engine::imagegraph {
 						continue;
 					}
 					SetDiagnostic(
-						diagnostic, context.FailureCode, context.FailureMessage, node.Id, context.FailurePort
+						diagnostic,
+						context.FailureCode,
+						context.FailureMessage,
+						context.FailureNodeId.empty() ? node.Id : context.FailureNodeId,
+						context.FailurePort
 					);
 					return diagnostic.Code;
 				}
@@ -9632,6 +9663,7 @@ namespace engine::imagegraph {
 				for (auto &[id, image] : context.OutputImages)
 					image.Hash = detail::PixelHash(image);
 				catalogueResult.Domains = std::move(context.OutputDomains);
+				catalogueResult.Diagnostics = std::move(context.OutputDiagnostics);
 				catalogueResult.Images = std::move(context.OutputImages);
 				catalogueResult.Values = std::move(context.OutputValues);
 				catalogueResult.PixelBuilderUpdate = context.PixelBuilderUpdate;
@@ -12147,6 +12179,10 @@ namespace engine::imagegraph {
 					SetDiagnostic(diagnostic, Status::LimitExceeded, "batch output size overflows");
 					return diagnostic.Code;
 				}
+				if (const auto *refusal = FindOutputDiagnostic(results[index], selected->Port)) {
+					diagnostic = *refusal;
+					return diagnostic.Code;
+				}
 				uint64_t payload = 0;
 				if (const auto *array = FindImageArrayOutput(results[index], selected->Port))
 					payload = RetainedImageArrayBytes(*array);
@@ -12221,6 +12257,10 @@ namespace engine::imagegraph {
 				output->NodeId,
 				output->Port
 			);
+			return diagnostic.Code;
+		}
+		if (const auto *refusal = FindOutputDiagnostic(results[targetIndex], output->Port)) {
+			diagnostic = *refusal;
 			return diagnostic.Code;
 		}
 		if (auto *catalogue = std::get_if<CatalogueOutputs>(&results[targetIndex])) {

@@ -312,6 +312,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.flip_vortex", FlipParticleForce},
 			ExecutorEntry{"pc.flip_to_vfx", FlipToVfx},
 			ExecutorEntry{"pc.flip_render", FlipRender},
+			ExecutorEntry{"pc.flip_destroy", FlipDestroy},
+			ExecutorEntry{"pc.flip_spawner", FlipSpawner},
 			ExecutorEntry{"pc.verlet_sim_mesh_grid", Grid},
 			ExecutorEntry{"pc.verlet_sim_mesh_disk", VerletDiskMesh},
 			ExecutorEntry{"pc.verlet_sim_mesh_pleat", VerletPleatMesh},

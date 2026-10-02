@@ -10,20 +10,26 @@ namespace engine::imagegraph::detail {
 		const std::unordered_map<std::string_view, ExecutorEntry> &Executors() {
 			static const std::unordered_map<std::string_view, ExecutorEntry> executors = [] {
 				std::unordered_map<std::string_view, ExecutorEntry> merged;
-				for (const auto family :
-					 {AudioExecutors(),			 AudioFileExecutors(),	 ArrayExecutors(),
-					  ArrayStructureExecutors(), ArrayEditExecutors(),	 ArrayNumericExecutors(),
-					  RandomExecutors(),		 FilterExecutors(),		 GenerateExecutors(),
-					  GradientExecutors(),		 MatrixExecutors(),		 CurveExecutors(),
-					  ValueExecutors(),			 VectorExecutors(),		 OutlineExecutors(),
-					  BlurExecutors(),			 TransformExecutors(),	 PathExecutors(),
-					  PointExecutors(),			 MeshExecutors(),		 MeshModifyExecutors(),
-					  SourceMesh2DExecutors(),	 Source2DExecutors(),	 SourceTextExecutors(),
-					  SourcePcxExecutors(),		 SceneExecutors(),		 SourceSdfExecutors(),
-					  SimulationExecutors(),	 SourceValueExecutors(), SourceDataExecutors(),
-					  SourceMatrixExecutors(),	 SourcePathExecutors(),	 SourcePointsExecutors(),
-					  HostExecutors(),			 TriggerExecutors(),	 TemporalExecutors(),
-					  SourceAnimationExecutors()})
+				for (const auto family : {AudioExecutors(),			AudioFileExecutors(),
+										  ArrayExecutors(),			ArrayStructureExecutors(),
+										  ArrayEditExecutors(),		ArrayNumericExecutors(),
+										  RandomExecutors(),		FilterExecutors(),
+										  GenerateExecutors(),		GradientExecutors(),
+										  MatrixExecutors(),		CurveExecutors(),
+										  ValueExecutors(),			VectorExecutors(),
+										  OutlineExecutors(),		BlurExecutors(),
+										  TransformExecutors(),		PathExecutors(),
+										  PointExecutors(),			MeshExecutors(),
+										  MeshModifyExecutors(),	SourceMesh2DExecutors(),
+										  Source2DExecutors(),		SourceTextExecutors(),
+										  SourcePcxExecutors(),		SceneExecutors(),
+										  SourceSdfExecutors(),		SimulationExecutors(),
+										  SourceValueExecutors(),	SourceDataExecutors(),
+										  SourceMatrixExecutors(),	SourcePathExecutors(),
+										  SourcePointsExecutors(),	SourceSpatialPointsExecutors(),
+										  HostExecutors(),			TriggerExecutors(),
+										  TemporalExecutors(),		SourceAnimationExecutors(),
+										  SourceRoutingExecutors(), SourceCacheValueExecutors()})
 					for (const ExecutorEntry &entry : family)
 						merged.emplace(entry.Type, entry);
 				merged.emplace("pc.group_input", ExecutorEntry{"pc.group_input", ExecuteGroupBoundary, true});
@@ -56,7 +62,9 @@ namespace engine::imagegraph::detail {
 					   type == "pc.globalvar" || type == "pc.equation" || type == "pc.pcx_equation" ||
 					   type == "pc.pcx_var" || type == "pc.pcx_fn_var" || type == "pc.pcx_array_get" ||
 					   type == "pc.pcx_array_set" || type == "pc.pcx_condition" ||
-					   type == "pc.points_remap" || type == "pc.delay_value" || type == "pc.plot_linear";
+					   type == "pc.points_remap" || type == "pc.point_3_d_camera" ||
+					   type == "pc.scatter_points_3_d" || type == "pc.delay_value" ||
+					   type == "pc.plot_linear" || type == "pc.condition" || type == "pc.cache_value_array";
 			};
 			const auto validateValue = [&](const Value &value, std::string_view port) {
 				const auto *array = std::get_if<ArrayValue>(&value);

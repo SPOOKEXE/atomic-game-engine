@@ -23,6 +23,7 @@
 #include <engine/imagegraph/SimulationReplay.hpp>
 #include <engine/imagegraph/SurfaceFrameReplay.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -47,6 +48,7 @@ namespace engine::imagegraph::detail {
 		EvaluationBudget LocalBudget{Limits::MaximumEvaluationBytes};
 		EvaluationBudget *Ledger = &LocalBudget;
 		AllocationReservation OutputStorageCharge;
+		AllocationReservation OutputDiagnosticStorageCharge;
 		uint64_t PublishedPayloadBytes = 0;
 		bool OutputStorageReady = false;
 
@@ -129,6 +131,7 @@ namespace engine::imagegraph::detail {
 		AllocationReservation OutputCharge;
 		std::vector<std::pair<std::string, Image>> OutputImages;
 		std::vector<AuthoredValue> OutputValues;
+		std::vector<Diagnostic> OutputDiagnostics;
 		std::optional<PixelBuilderLayer> PixelBuilderUpdate;
 		std::span<const PixelBuilderLayer> PixelBuilderLayers;
 		std::optional<Vector2> PixelBuilderCanvas;
@@ -150,6 +153,7 @@ namespace engine::imagegraph::detail {
 		std::vector<std::pair<std::string, ImageArray>> OutputImageArrays;
 		mutable Status FailureCode = Status::Ok;
 		mutable std::string FailureMessage;
+		mutable std::string FailureNodeId;
 		mutable std::string FailurePort;
 
 		EvaluationBudget &AllocationBudget() const {
@@ -179,6 +183,8 @@ namespace engine::imagegraph::detail {
 		void ClearOutputs() {
 			OutputImages.clear();
 			OutputValues.clear();
+			std::vector<Diagnostic>{}.swap(OutputDiagnostics);
+			OutputDiagnosticStorageCharge.Reset();
 			PixelBuilderUpdate.reset();
 			SimulationUpdates.clear();
 			SurfaceUpdates.clear();
@@ -192,11 +198,13 @@ namespace engine::imagegraph::detail {
 		// Call after moving all output buffers to the destination owned alongside this reservation.
 		AllocationReservation TakeOutputReservation() {
 			if (!OutputCharge.Merge(std::move(OutputStorageCharge))) std::terminate();
+			if (!OutputCharge.Merge(std::move(OutputDiagnosticStorageCharge))) std::terminate();
 			return std::move(OutputCharge);
 		}
 		// The replacement buffers must already have displaced the old reserved output storage.
 		void ReplaceOutputReservation(AllocationReservation &&charge) {
 			OutputStorageCharge.Reset();
+			OutputDiagnosticStorageCharge.Reset();
 			OutputCharge = std::move(charge);
 		}
 
@@ -239,6 +247,67 @@ namespace engine::imagegraph::detail {
 		}
 
 	  public:
+		const Diagnostic *OutputDiagnostic(std::string_view port) const {
+			for (const auto &diagnostic : OutputDiagnostics)
+				if (diagnostic.Port == port) return &diagnostic;
+			return nullptr;
+		}
+		// A refused port never substitutes a payload; sibling outputs remain available.
+		bool SetOutputDiagnostic(std::string_view port, Status code, std::string_view message) {
+			const bool declared = std::any_of(
+									  Entry.Outputs.begin(),
+									  Entry.Outputs.end(),
+									  [&](const auto &output) { return output.Id == port; }
+								  ) ||
+								  std::any_of(
+									  Authored.DynamicOutputs.begin(),
+									  Authored.DynamicOutputs.end(),
+									  [&](const auto &output) { return output.Id == port; }
+								  );
+			if (!declared || code != Status::UnsupportedExecution || message.empty())
+				return Fail(
+					Status::InvalidOutput, "output diagnostic requires a declared refused port", port
+				);
+			if (port.size() > Limits::MaximumTextBytes || message.size() > Limits::MaximumTextBytes ||
+				Authored.Id.size() > Limits::MaximumTextBytes)
+				return Fail(Status::LimitExceeded, "output diagnostic text exceeds bounds", port);
+			if (const auto *previous = OutputDiagnostic(port))
+				return previous->Code == code && previous->Message == message
+						   ? true
+						   : Fail(
+								 Status::InvalidOutput,
+								 "output diagnostic conflicts with an earlier refusal",
+								 port
+							 );
+			for (const auto &[id, image] : OutputImages)
+				if (id == port)
+					return Fail(Status::InvalidOutput, "output diagnostic conflicts with a payload", port);
+			for (const auto &[id, images] : OutputImageArrays)
+				if (id == port)
+					return Fail(Status::InvalidOutput, "output diagnostic conflicts with a payload", port);
+			for (const auto &value : OutputValues)
+				if (value.Port == port)
+					return Fail(Status::InvalidOutput, "output diagnostic conflicts with a payload", port);
+			if (!OutputDiagnostics.capacity()) {
+				const size_t slots = Entry.Outputs.size() + Authored.DynamicOutputs.size();
+				if (slots > Limits::MaximumArrayElements)
+					return Fail(Status::LimitExceeded, "output diagnostic slots exceed bounds", port);
+				auto charge = ReserveWorkspace(slots * sizeof(Diagnostic), port);
+				if (!charge) return false;
+				OutputDiagnosticStorageCharge = std::move(*charge);
+				OutputDiagnostics.reserve(slots);
+			}
+			if (OutputDiagnostics.size() == OutputDiagnostics.capacity())
+				return Fail(Status::LimitExceeded, "output diagnostic table exceeds declared slots", port);
+			const uint64_t strings = std::max(port.size(), std::string{}.capacity()) +
+									 std::max(message.size(), std::string{}.capacity()) +
+									 std::max(Authored.Id.size(), std::string{}.capacity());
+			if (!AdmitPublication(strings, port)) return false;
+			OutputDiagnostics.push_back(
+				{code, std::string(Authored.Id), std::string(port), std::string(message)}
+			);
+			return true;
+		}
 		const Image *Input(std::string_view id) const {
 			for (const auto &[port, image] : Images)
 				if (port == id) return image;
@@ -386,6 +455,10 @@ namespace engine::imagegraph::detail {
 			uint32_t height,
 			SurfaceFormat format = SurfaceFormat::RGBA8Unorm
 		) {
+			if (OutputDiagnostic(id)) {
+				Fail(Status::InvalidOutput, "output payload conflicts with a refusal", id);
+				return nullptr;
+			}
 			if (!PrepareOutputStorage(id)) return nullptr;
 			if (Request.MaximumImageDimension == 0 ||
 				Request.MaximumImageDimension > Limits::MaximumDimension) {
@@ -429,6 +502,10 @@ namespace engine::imagegraph::detail {
 		}
 
 		template <class T> void SetValue(std::string_view id, T &&value) {
+			if (OutputDiagnostic(id)) {
+				Fail(Status::InvalidOutput, "output payload conflicts with a refusal", id);
+				return;
+			}
 			const uint64_t owned = RetainedPayloadBytes(value);
 			if (!AdmitPublication(owned + std::max(id.size(), std::string{}.capacity()), id)) return;
 			if (OutputValues.size() == OutputValues.capacity()) {
@@ -443,6 +520,16 @@ namespace engine::imagegraph::detail {
 			core::Metrics::Count("imagegraph.value.outputs", 1);
 		}
 
+		// Preserve producer identity when an indirect input reader returns a diagnostic.
+		bool Fail(const Diagnostic &diagnostic, std::string_view fallbackPort = {}) const {
+			if (FailureCode != Status::Ok) return false;
+			FailureNodeId = diagnostic.NodeId;
+			return Fail(
+				diagnostic.Code,
+				diagnostic.Message,
+				diagnostic.Port.empty() ? fallbackPort : std::string_view{diagnostic.Port}
+			);
+		}
 		bool Fail(Status code, std::string message, std::string_view port = {}) const {
 			if (FailureCode != Status::Ok) return false;
 			FailureCode = code;

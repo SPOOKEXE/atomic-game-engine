@@ -34,6 +34,8 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceTextExecutors();
 	std::span<const ExecutorEntry> SourcePcxExecutors();
 	std::span<const ExecutorEntry> SourceAnimationExecutors();
+	std::span<const ExecutorEntry> SourceRoutingExecutors();
+	std::span<const ExecutorEntry> SourceCacheValueExecutors();
 	std::span<const ExecutorEntry> SceneExecutors();
 	std::span<const ExecutorEntry> SourceSdfExecutors();
 	std::span<const ExecutorEntry> SimulationExecutors();
@@ -42,6 +44,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceMatrixExecutors();
 	std::span<const ExecutorEntry> SourcePathExecutors();
 	std::span<const ExecutorEntry> SourcePointsExecutors();
+	std::span<const ExecutorEntry> SourceSpatialPointsExecutors();
 	std::span<const ExecutorEntry> HostExecutors();
 	std::span<const ExecutorEntry> TriggerExecutors();
 	std::span<const ExecutorEntry> TemporalExecutors();

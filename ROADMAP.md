@@ -68,6 +68,7 @@ Milestone labels describe development scope, not release versions.
   26. Queue source camera and SDF outputs through bounded renderer jobs; GPU verification remains open.
   27. Bind live 3D outputs and timed arrays through one evaluation per client update.
   28. Package authored Composer scenes, supplied source projects and a reproducible CPU fluid study; visual acceptance remains open.
+  29. Add Grid, routing/cache, spatial points and FLIP spawn/destroy kernels with per-port diagnostics and bounded replay.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
