@@ -1,0 +1,34 @@
+imagegraph 9
+project 64 64 0 3 0
+node "scope" "pc.verlet_sim_inline" "" 0 0
+value 0 "scope" "dimension_unit" e 0
+value 0 "scope" "dimension" v 64 64
+value 0 "scope" "substep" i 32
+value 0 "scope" "gravity" v 0 0.8
+value 0 "scope" "wall" i 2
+node "disk" "pc.verlet_sim_mesh_disk" "scope-group" 240 0
+value 1 "disk" "subdivision" v 4 1
+value 1 "disk" "area_unit" e 0
+value 1 "disk" "area" r 32 12 6 6 0 0
+value 1 "disk" "tension" d 1
+value 1 "disk" "stiffness" d 0
+value 1 "disk" "drag" d 0.2
+value 1 "disk" "quad" b 0
+node "step" "pc.verlet_sim_step" "scope-group" 480 0
+value 2 "step" "step" i 1
+value 2 "step" "pre_render" b 0
+node "render" "pc.verlet_sim_render" "scope-group" 720 0
+value 3 "render" "step" b 0
+value 3 "render" "type" e 0
+value 3 "render" "trim" d 1
+node "texture" "image.solid" "" 480 240
+value 4 "texture" "width" i 64
+value 4 "texture" "height" i 64
+value 4 "texture" "colour" c 35 180 210 255
+link "disk" "mesh" "step" "mesh"
+link "step" "mesh" "render" "mesh"
+link "texture" "image" "render" "texture"
+group "scope-group" "Braced Verlet disk" ""
+group_owner "scope-group" "scope"
+output "body-image" "render" "surface_out"
+output "mesh-state" "step" "mesh"

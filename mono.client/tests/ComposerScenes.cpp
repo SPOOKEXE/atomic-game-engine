@@ -43,7 +43,8 @@ TEST_CASE(
 		"Composer-Skybox",
 		"Composer-Feedback-And-Fluid",
 		"Composer-3D-Reference",
-		"Composer-Reference-Studies"
+		"Composer-Reference-Studies",
+		"Composer-Verlet-Braced-Disk"
 	);
 	std::ifstream file(Assets() / "examples/worlds" / (scene + ".aworld"));
 	REQUIRE(file.good());
@@ -265,4 +266,41 @@ TEST_CASE(
 		}
 	CHECK(readable);
 	CHECK(visible);
+}
+
+TEST_CASE(
+	"Braced Verlet study falls onto its floor and reproduces reset and seek pixels",
+	"[client][composer-scenes]"
+) {
+	const auto initial = Frame("Composer-Verlet-Braced-Disk", "body-image"),
+			   falling = Frame("Composer-Verlet-Braced-Disk", "body-image", 4),
+			   floor = Frame("Composer-Verlet-Braced-Disk", "body-image", 16),
+			   reset = Frame("Composer-Verlet-Braced-Disk", "body-image"),
+			   seek = Frame("Composer-Verlet-Braced-Disk", "body-image", 4);
+	CHECK(initial.Image == reset.Image);
+	CHECK(falling.Image == seek.Image);
+	CHECK(initial.Image.Hash != falling.Image.Hash);
+	CHECK(falling.Image.Hash != floor.Image.Hash);
+	auto coverage = [](const engine::imagegraph::Image &image) {
+		uint32_t count = 0;
+		double centreY = 0;
+		bool readable = true;
+		for (uint32_t y = 0; y < image.Height; ++y)
+			for (uint32_t x = 0; x < image.Width; ++x) {
+				engine::imagegraph::SurfacePixel pixel{};
+				readable = LoadSurfacePixel(image, x, y, pixel) && readable;
+				if (pixel[3] > 0) {
+					++count;
+					centreY += y;
+				}
+			}
+		REQUIRE(readable);
+		REQUIRE(count > 0);
+		return centreY / count;
+	};
+	CHECK(initial.Image.Width == 64);
+	CHECK(initial.Image.Height == 64);
+	CHECK(coverage(initial.Image) < 20);
+	CHECK(coverage(falling.Image) > 30);
+	CHECK(coverage(floor.Image) > 50);
 }

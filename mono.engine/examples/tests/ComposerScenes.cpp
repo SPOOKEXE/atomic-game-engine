@@ -31,7 +31,8 @@ TEST_CASE(
 		"Composer-Particle-Flipbook",
 		"Composer-3D-Reference",
 		"Composer-Reference-Studies",
-		"Composer-Feedback-And-Fluid"
+		"Composer-Feedback-And-Fluid",
+		"Composer-Verlet-Braced-Disk"
 	);
 	const std::filesystem::path assets = engine::core::Paths::Base().parent_path() / "assets";
 	const engine::examples::DemosLoader demos(assets / "examples");
@@ -79,9 +80,10 @@ TEST_CASE(
 			CHECK(binding.Graph.Text() == scene);
 		graphs.emplace(binding.Graph.Text());
 		CHECK(
-			binding.TickPolicy == (scene == "Composer-Feedback-And-Fluid"
-									   ? engine::scene::ImageGraphTickPolicy::Fixed
-									   : engine::scene::ImageGraphTickPolicy::World)
+			binding.TickPolicy ==
+			((scene == "Composer-Feedback-And-Fluid" || scene == "Composer-Verlet-Braced-Disk")
+				 ? engine::scene::ImageGraphTickPolicy::Fixed
+				 : engine::scene::ImageGraphTickPolicy::World)
 		);
 		CHECK(
 			std::filesystem::is_regular_file(
@@ -130,7 +132,10 @@ TEST_CASE(
 		CHECK(outputs == std::set<std::string>{"mask", "height", "colour"});
 	else if (scene == "Composer-Feedback-And-Fluid")
 		CHECK(outputs == std::set<std::string>{"accumulated", "fluid"});
-	else if (scene == "Composer-Reference-Studies") {
+	else if (scene == "Composer-Verlet-Braced-Disk") {
+		CHECK(outputs == std::set<std::string>{"body-image"});
+		CHECK(bindingCount == 2);
+	} else if (scene == "Composer-Reference-Studies") {
 		CHECK(
 			outputs == std::set<std::string>{
 						   "study",

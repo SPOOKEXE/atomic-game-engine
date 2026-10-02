@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<World format="3" name="Composer-Verlet-Braced-Disk">
+ <Sources>
+  <Source path="scripts/server/Composer-Verlet-Braced-Disk.server.luau"><![CDATA[local function panel(name, x, texture)
+ local p = Instance.new("MeshPart")
+ p.Name = name
+ p.Anchored = true
+ p.Size = Vector3.new(4, 4, 0.2)
+ p.Position = Vector3.new(x, 3, 0)
+ p.TextureID = texture
+ p.ImageGraph = "Composer-Verlet-Braced-Disk"
+ p.ImageGraphOutput = "body-image"
+ p.ImageGraphTexture = texture
+ p.ImageGraphSeed = 7291
+ p.ImageGraphTickPolicy = "fixed"
+ p.ImageGraphFixedTick = 0
+ p.ImageGraphColorSpace = "display"
+ p.Parent = workspace
+ return p
+end
+local reset = panel("ResetConstraintDisk", -3, "composer-verlet-reset")
+local stepped = panel("GravityAndFloorConstraintDisk", 3, "composer-verlet-step")
+local floor = Instance.new("Part")
+floor.Name = "Floor"
+floor.Anchored = true
+floor.Size = Vector3.new(20, 1, 12)
+floor.Position = Vector3.new(0, -0.5, 0)
+floor.Color = Color3.new(0, 0, 0)
+floor.Parent = workspace
+game:GetService("RunService").Heartbeat:Connect(function()
+ stepped.ImageGraphFixedTick = math.floor(elapsedTime() * 8) % 32
+end)
+local screen = Instance.new("ScreenGui")
+screen.Name = "ConstraintScope"
+screen.Parent = game:GetService("StarterGui")
+local label = Instance.new("TextLabel")
+label.Name = "Scope"
+label.Size = UDim2.new(1, 0, 0, 50)
+label.Text = "Native Verlet constraints: reset left, gravity/floor replay right. Source rigid-body family incomplete; GPU raster parity unverified."
+label.TextColor3 = Color3.new(1, 1, 1)
+label.BackgroundColor3 = Color3.new(0, 0, 0)
+label.Parent = screen
+]]></Source>
+  <Source path="scripts/client/Composer-Verlet-Braced-Disk.client.luau"><![CDATA[local camera = Instance.new("Camera")
+camera.Name = "ComposerCamera"
+camera.CFrame = CFrame.lookAt(Vector3.new(0, 5, 18), Vector3.new(0, 3, 0))
+camera.FieldOfView = 55
+camera.Parent = workspace
+workspace.CurrentCamera = camera
+]]></Source>
+ </Sources>
+ <Item class="Workspace" name="Workspace" id="1" />
+ <Item class="ServerScriptService" name="ServerScriptService" id="2">
+  <Item class="Script" name="ComposerScene" id="3"><Property name="Source" type="string">scripts/server/Composer-Verlet-Braced-Disk.server.luau</Property></Item>
+ </Item>
+ <Item class="StarterPlayer" name="StarterPlayer" id="4">
+  <Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="5">
+   <Item class="LocalScript" name="ComposerCamera" id="6"><Property name="Source" type="string">scripts/client/Composer-Verlet-Braced-Disk.client.luau</Property></Item>
+  </Item>
+ </Item>
+</World>
