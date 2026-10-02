@@ -1,7 +1,7 @@
 {
   "recorded_date": "2026-10-03",
   "recorded_timezone": "Australia/Darwin, UTC+09:30",
-  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim.",
+  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs.",
   "runtime_gates": [
     {
       "name": "imagegraph IO",
@@ -9,7 +9,8 @@
       "log_mtime": "2026-10-02T15:41:29+09:30",
       "result": "passed",
       "assertions_passed": 5491,
-      "test_cases_passed": 133
+      "test_cases_passed": 133,
+      "scope_note": ""
     },
     {
       "name": "imagegraph runner",
@@ -17,7 +18,8 @@
       "log_mtime": "2026-10-02T15:38:32+09:30",
       "result": "passed",
       "assertions_passed": 280,
-      "test_cases_passed": 26
+      "test_cases_passed": 26,
+      "scope_note": ""
     },
     {
       "name": "assets",
@@ -34,7 +36,8 @@
       "log_mtime": "2026-10-02T15:42:19+09:30",
       "result": "passed",
       "assertions_passed": 22460,
-      "test_cases_passed": 52
+      "test_cases_passed": 52,
+      "scope_note": ""
     },
     {
       "name": "assetc imagegraph export",
@@ -43,7 +46,8 @@
       "filter": "[imagegraph]",
       "result": "passed",
       "assertions_passed": 139,
-      "test_cases_passed": 8
+      "test_cases_passed": 8,
+      "scope_note": ""
     },
     {
       "name": "imagegraph source 2D and source value",
@@ -66,7 +70,8 @@
       "modules": 52,
       "programs": 6,
       "layered_modules": 36,
-      "fixtures": 6
+      "fixtures": 6,
+      "scope_note": ""
     },
     {
       "name": "Studio timeline Dopesheet and key editing",
@@ -96,7 +101,8 @@
       "test_cases_failed": 1,
       "assertions_passed": 1806440,
       "assertions_failed": 8,
-      "observed_failure": "NodeArrayUniform diagnostic expectation differed from actual \"source uniform data is invalid\" for the asserted nonfinite sample cases."
+      "observed_failure": "NodeArrayUniform diagnostic expectation differed from actual \"source uniform data is invalid\" for the asserted nonfinite sample cases.",
+      "scope_note": ""
     },
     {
       "name": "imagegraph I/O suite build35",
@@ -104,7 +110,8 @@
       "log_mtime": "2026-10-02T20:00:38+0930",
       "result": "passed",
       "test_cases_passed": 157,
-      "assertions_passed": 5836
+      "assertions_passed": 5836,
+      "scope_note": ""
     },
     {
       "name": "imagegraph export suite build35",
@@ -112,7 +119,8 @@
       "log_mtime": "2026-10-02T20:00:24+0930",
       "result": "passed",
       "test_cases_passed": 31,
-      "assertions_passed": 311
+      "assertions_passed": 311,
+      "scope_note": ""
     },
     {
       "name": "assetc bake suite build33",
@@ -120,7 +128,8 @@
       "log_mtime": "2026-10-02T19:44:25+0930",
       "result": "passed",
       "test_cases_passed": 146,
-      "assertions_passed": 15714
+      "assertions_passed": 15714,
+      "scope_note": ""
     },
     {
       "name": "Studio focused source suite build35",
@@ -147,7 +156,8 @@
       "log_mtime": "2026-10-02T20:08:01+0930",
       "result": "passed",
       "test_cases_passed": 1110,
-      "assertions_passed": 1806448
+      "assertions_passed": 1806448,
+      "scope_note": ""
     },
     {
       "name": "imagegraph I/O suite build36",
@@ -155,7 +165,8 @@
       "log_mtime": "2026-10-02T20:08:11+0930",
       "result": "passed",
       "test_cases_passed": 157,
-      "assertions_passed": 5836
+      "assertions_passed": 5836,
+      "scope_note": ""
     },
     {
       "name": "imagegraph export suite build36",
@@ -163,7 +174,8 @@
       "log_mtime": "2026-10-02T20:07:56+0930",
       "result": "passed",
       "test_cases_passed": 31,
-      "assertions_passed": 311
+      "assertions_passed": 311,
+      "scope_note": ""
     },
     {
       "name": "Studio focused source suite build36",
@@ -230,7 +242,8 @@
       "test_cases_failed": 1,
       "assertions_passed": 1806687,
       "assertions_failed": 1,
-      "observed_failure": "NodeAudio invalid input diagnostic expectation returned Status::Ok instead of Status::InvalidValue; build40 retest passed."
+      "observed_failure": "NodeAudio invalid input diagnostic expectation returned Status::Ok instead of Status::InvalidValue; build40 retest passed.",
+      "scope_note": ""
     },
     {
       "name": "imagegraph I/O suite build39",
@@ -238,7 +251,8 @@
       "log_mtime": "2026-10-02T20:45:46+09:30",
       "result": "passed",
       "test_cases_passed": 157,
-      "assertions_passed": 5836
+      "assertions_passed": 5836,
+      "scope_note": ""
     },
     {
       "name": "imagegraph export suite build39",
@@ -246,7 +260,8 @@
       "log_mtime": "2026-10-02T20:45:31+09:30",
       "result": "passed",
       "test_cases_passed": 33,
-      "assertions_passed": 356
+      "assertions_passed": 356,
+      "scope_note": ""
     },
     {
       "name": "Studio focused source suite build39",
@@ -273,7 +288,8 @@
       "log_mtime": "2026-10-02T20:53:52+09:30",
       "result": "passed",
       "test_cases_passed": 1125,
-      "assertions_passed": 1806693
+      "assertions_passed": 1806693,
+      "scope_note": ""
     },
     {
       "name": "Studio focused source suite build40",
@@ -359,7 +375,8 @@
       "log_mtime": "2026-10-02T22:02:11+09:30",
       "result": "passed",
       "test_cases_passed": 1148,
-      "assertions_passed": 1807249
+      "assertions_passed": 1807249,
+      "scope_note": ""
     },
     {
       "name": "imagegraph export suite build43",
@@ -367,7 +384,8 @@
       "log_mtime": "2026-10-02T21:57:40+09:30",
       "result": "passed",
       "test_cases_passed": 35,
-      "assertions_passed": 432
+      "assertions_passed": 432,
+      "scope_note": ""
     },
     {
       "name": "imagegraph WAV export suite build43",
@@ -393,7 +411,8 @@
       "log_mtime": "2026-10-02T21:34:52+09:30",
       "result": "passed",
       "test_cases_passed": 157,
-      "assertions_passed": 5836
+      "assertions_passed": 5836,
+      "scope_note": ""
     },
     {
       "name": "client CPU adapters suite build42",
@@ -461,7 +480,8 @@
       "result": "passed",
       "test_cases_passed": 77,
       "assertions_passed": 2177,
-      "evidence_source": "Root agent report; filtered test output was not retained as a separate log."
+      "evidence_source": "Root agent report; filtered test output was not retained as a separate log.",
+      "scope_note": ""
     },
     {
       "name": "imagegraph source-family release benchmark",
@@ -528,7 +548,8 @@
       "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-all-47.log",
       "result": "passed",
       "test_cases_passed": 157,
-      "assertions_passed": 5836
+      "assertions_passed": 5836,
+      "scope_note": ""
     },
     {
       "name": "imagegraph export suite build47",
@@ -680,6 +701,123 @@
       "result": "passed",
       "executed_date": "2026-10-03",
       "scope_note": "406 registered pc.* names; 405 overlap the 886-entry catalogue; 481 catalogue entries lack a registered executor; registered-only name is pc.global_scope. Registration does not prove behavior or parity."
+    },
+    {
+      "name": "joined build50 development compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-joined-50-final.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Final joined development build completed 23 Ninja steps, including compilation and link steps.",
+      "build_steps_completed": 23
+    },
+    {
+      "name": "imagegraph core suite build50 development",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-50-final.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 1227,
+      "assertions_passed": 1809515,
+      "scope_note": "Final accepted full development core suite after two earlier failed attempts were repaired."
+    },
+    {
+      "name": "joined build50 release compile and link",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/build-release-50.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Release imagegraph and benchmark build completed 184 Ninja steps, including compilation and link steps.",
+      "build_steps_completed": 184
+    },
+    {
+      "name": "imagegraph core suite build50 release",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-release-50.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 1227,
+      "assertions_passed": 1809515,
+      "scope_note": "Full release-configured imagegraph core suite."
+    },
+    {
+      "name": "imagegraph I/O suite build50",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-50-accepted.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 165,
+      "assertions_passed": 5993,
+      "scope_note": "Accepted rerun after a fixture-order assumption was repaired."
+    },
+    {
+      "name": "imagegraph export suite build50",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-50-final.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 37,
+      "assertions_passed": 1091,
+      "scope_note": "Final focused export suite. Output includes expected invalid-image and curl size-limit diagnostics."
+    },
+    {
+      "name": "Studio focused suite build50",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-50-final.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 50,
+      "assertions_passed": 1094,
+      "scope_note": "Focused source, group, Lua, export trigger, file host, WAV, array editor, Composer workflow, and timeline key filters.",
+      "filters": [
+        "[dynamic_outputs]",
+        "[source_group_ports]",
+        "[group_host]",
+        "[lua]",
+        "[source_inputs]",
+        "[pcx_observations]",
+        "[export_triggers]",
+        "[source_transaction]",
+        "[file_host]",
+        "[wav_export]",
+        "[array_editor]",
+        "[composer_workflow]",
+        "[timeline_keys]"
+      ]
+    },
+    {
+      "name": "client CPU adapters build50",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/client-50-final.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 45,
+      "assertions_passed": 1746,
+      "scope_note": "CPU-only client adapter filters; GPU cases excluded."
+    },
+    {
+      "name": "renderer CPU filtered suite build50",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/render-cpu-50-final.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 39,
+      "assertions_passed": 1108,
+      "scope_note": "CPU-filtered renderer tests. This does not establish GPU acceptance."
+    },
+    {
+      "name": "example scene fixtures build50",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/examples-50-correct-filter.log",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 1,
+      "assertions_passed": 217,
+      "scope_note": "Correctly selected examples fixture suite; the earlier empty filter run is not counted."
+    },
+    {
+      "name": "release CPU source-family benchmark build50",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/stdout-only benchmark result",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Five-sample benchmark reported to stdout; no timing file retained. Mean native headless timings: static 2D 469342 ns, animation 3927280 ns, temporal 2229359 ns, Verlet 555013 ns, CPU 3D 262453 ns. Instrumented frame ranges: static 2D 0.230383-0.246263 ms, animation 3.686618-3.830759 ms, temporal 1.990220-2.007422 ms, Verlet 0.358313-0.421281 ms, CPU 3D 0.054763-0.055995 ms. Heap profiling was unavailable. CPU 3D is not GPU performance evidence; these bounded headless CPU micrograph measurements do not establish representative full-graph acceptance for all required workload classes."
+    },
+    {
+      "name": "imagegraph executor inventory build50",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build50.json",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "415 registered pc.* names; 414 overlap the 886-entry source catalogue; 472 catalogue entries have no registered executor; only registered-only name is pc.global_scope. Registration is capability evidence, not behavior or parity."
     }
   ],
   "excluded_or_failed_runs": [
@@ -722,6 +860,56 @@
       "result": "failed and resumed",
       "observed_failure": "No space left on device while the compiler wrote assembly output.",
       "scope_note": "The resumed build-resume-47 completed 125 targets; the initial failure is retained as build history."
+    },
+    {
+      "name": "imagegraph core build50 initial run",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-50.log",
+      "result": "failed, superseded by core-50-final.log",
+      "test_cases_passed": 1225,
+      "test_cases_failed": 2,
+      "assertions_passed": 1809499,
+      "assertions_failed": 2,
+      "scope_note": "Final accepted build50 development core rerun passed 1,227 cases and 1,809,515 assertions."
+    },
+    {
+      "name": "imagegraph core build50 intermediate repair run",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/core-50-repaired.log",
+      "result": "failed, superseded by core-50-final.log",
+      "test_cases_passed": 1226,
+      "test_cases_failed": 1,
+      "assertions_passed": 1809495,
+      "assertions_failed": 1,
+      "scope_note": "Final accepted build50 development core rerun passed 1,227 cases and 1,809,515 assertions."
+    },
+    {
+      "name": "imagegraph I/O build50 intermediate run",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/io-50-final.log",
+      "result": "failed, superseded by io-50-accepted.log",
+      "test_cases_passed": 164,
+      "test_cases_failed": 1,
+      "assertions_passed": 5985,
+      "assertions_failed": 6,
+      "scope_note": "A fixture-order assumption was repaired; later accepted rerun passed 165 cases and 5,993 assertions."
+    },
+    {
+      "name": "imagegraph export build50 initial run",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/export-50.log",
+      "result": "failed, superseded by export-50-final.log",
+      "test_cases_passed": 36,
+      "test_cases_failed": 1,
+      "assertions_passed": 1087,
+      "assertions_failed": 4,
+      "scope_note": "Final focused export rerun passed 37 cases and 1,091 assertions."
+    },
+    {
+      "name": "Studio focused build50 initial run",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/studio-50.log",
+      "result": "failed, superseded by studio-50-final.log",
+      "test_cases_passed": 49,
+      "test_cases_failed": 1,
+      "assertions_passed": 1085,
+      "assertions_failed": 2,
+      "scope_note": "Final filter included timeline keys and passed 50 cases and 1,094 assertions."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -788,7 +976,10 @@
     "No full source tree or tested binary hash snapshot ties these outputs to every current source edit.",
     "The build48 archive inventory is recorded below. Later unbuilt source additions are excluded from its capability counts.",
     "Build49 executor inventory is registration-only capability evidence: 406 registered names, 405 catalogue overlaps, 481 catalogue entries without registered executors. Some product adapter routes, including 3D outputs, are outside this registry. This is not a parity count.",
-    "The Composer workflow focused suite passed 2 cases and 122 assertions. It covers bounded group editing dependencies and preserves atomic refusal for an ambiguous opaque PXC key move; source compatibility for ambiguous moved opaque keys remains open."
+    "The Composer workflow focused suite passed 2 cases and 122 assertions. It covers bounded group editing dependencies and preserves atomic refusal for an ambiguous opaque PXC key move; source compatibility for ambiguous moved opaque keys remains open.",
+    "Build50 final accepted core development and release suites each passed 1,227 cases and 1,809,515 assertions. Earlier build50 development core runs failed first 2 cases and then 1 case; both attempts are retained as superseded history.",
+    "Build50 release CPU benchmark reported five native microfamily samples to stdout only. Heap data was unavailable, CPU 3D is not GPU measurement, and the run does not satisfy all required full-graph release profiles.",
+    "Build50 executor inventory is registration-only capability evidence: 415 registered names, 414 catalogue overlaps, and 472 catalogue entries without registered executors. Some adapter routes are outside the graph executor registry."
   ],
   "scene_files": {
     "result": "all seven named .aworld files are present",
@@ -804,39 +995,74 @@
     "acceptance_status": "Manual and GPU acceptance pending; file presence is not acceptance."
   },
   "executor_inventory": {
-    "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build49.json",
-    "archive_sha256": "fac9455259b5c09c0b2f2824e5b49a39cb64c8943029f56ceaffd1919a775cb4",
-    "archive_mtime_utc": "2026-10-02T14:22:13.099183Z",
-    "archive_size_bytes": 4268407886,
-    "repo_head": "ef769cea",
-    "helper_sha256": "ae2cfebc677137db9939f19ae8e1986658d7f0d15da89601bffd881e52059d1c",
-    "registered_pc_count": 406,
-    "registered_catalogue_overlap_count": 405,
+    "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build50.json",
+    "archive_sha256": "a83e8aaf4df14983d6b38597a6279cd78612e33f706ab281c59133cec1207f78",
+    "archive_mtime_utc": "2026-10-02T16:14:03.288435Z",
+    "archive_size_bytes": 4668161836,
+    "repo_head": "25686b5b",
+    "helper_sha256": "693316d75abbad92a875e87cbd01b9f07384223b2057bbf90b2e31a8529d6669",
+    "raw_helper_output_sha256": "2dc1e909f59bf5bf3b46b0462d59c9044ae5b113c9695affa1a909b9134449df",
+    "registered_pc_count": 415,
+    "registered_catalogue_overlap_count": 414,
     "registered_only_count": 1,
     "registered_only_pc": [
       "pc.global_scope"
     ],
     "catalogue_pc_count": 886,
-    "catalogue_missing_executor_count": 481,
-    "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. Archive was linked at build49 against repository HEAD ef769cea; the inventory does not establish behavioral parity.",
-    "archive_build": "build49 archive present during helper link",
-    "previous_build48_snapshot": {
-      "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build48.json",
-      "archive_sha256": "14483fae7296bd8943f14fdaf0f69334dc1dc04bf26c92966c0c71ac1363313f",
-      "archive_mtime_utc": "2026-10-02T14:02:40.023805Z",
-      "archive_size_bytes": 4231848224,
-      "repo_head": "1b0188aa3b8789025fa87b122a1938d64d20fcc3",
-      "helper_sha256": "d564a47f505136dbb56a932c4ff4da7590926262e5b16add6a52737ba76c0340",
-      "registered_pc_count": 404,
-      "registered_catalogue_overlap_count": 403,
+    "catalogue_missing_executor_count": 472,
+    "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. Helper binary was removed after the archive-stability check; raw E/C rows and full inventory lists are retained in the linked artifact.",
+    "archive_build": "build50 archive present during helper link",
+    "previous_build49_snapshot": {
+      "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build49.json",
+      "archive_sha256": "fac9455259b5c09c0b2f2824e5b49a39cb64c8943029f56ceaffd1919a775cb4",
+      "archive_mtime_utc": "2026-10-02T14:22:13.099183Z",
+      "archive_size_bytes": 4268407886,
+      "repo_head": "ef769cea",
+      "helper_sha256": "ae2cfebc677137db9939f19ae8e1986658d7f0d15da89601bffd881e52059d1c",
+      "registered_pc_count": 406,
+      "registered_catalogue_overlap_count": 405,
       "registered_only_count": 1,
       "registered_only_pc": [
         "pc.global_scope"
       ],
       "catalogue_pc_count": 886,
-      "catalogue_missing_executor_count": 483,
-      "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. The archive predates later unbuilt source edits.",
-      "archive_build": "build48 archive present during helper link",
+      "catalogue_missing_executor_count": 481,
+      "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. Archive was linked at build49 against repository HEAD ef769cea; the inventory does not establish behavioral parity.",
+      "archive_build": "build49 archive present during helper link",
+      "previous_build48_snapshot": {
+        "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build48.json",
+        "archive_sha256": "14483fae7296bd8943f14fdaf0f69334dc1dc04bf26c92966c0c71ac1363313f",
+        "archive_mtime_utc": "2026-10-02T14:02:40.023805Z",
+        "archive_size_bytes": 4231848224,
+        "repo_head": "1b0188aa3b8789025fa87b122a1938d64d20fcc3",
+        "helper_sha256": "d564a47f505136dbb56a932c4ff4da7590926262e5b16add6a52737ba76c0340",
+        "registered_pc_count": 404,
+        "registered_catalogue_overlap_count": 403,
+        "registered_only_count": 1,
+        "registered_only_pc": [
+          "pc.global_scope"
+        ],
+        "catalogue_pc_count": 886,
+        "catalogue_missing_executor_count": 483,
+        "scope_limit": "Executor registration is capability evidence only, not parity or correctness. Product adapters may not register as graph executors, including some 3D output routes. The archive predates later unbuilt source edits.",
+        "archive_build": "build48 archive present during helper link",
+        "previous_build45_snapshot": {
+          "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build45.json",
+          "archive_sha256": "35e65ad10766a236b3d832c92d977da9a3de565fd60e05b259d0ad52ea5d42a7",
+          "archive_mtime_utc": "2026-10-02T12:33:39.898034Z",
+          "repo_head": "1e7bb7b4995141d944f33652348a986dccd773be",
+          "registered_pc_count": 394,
+          "catalogue_pc_count": 886,
+          "catalogue_missing_executor_count": 493
+        },
+        "previous_build36_snapshot": {
+          "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build36.json",
+          "archive_sha256": "4348a0eeb8e2e688e665f89f28f5abaede4a4751f0cff3ebc8cf03eff2af48d3",
+          "registered_pc_count": 369,
+          "catalogue_pc_count": 886,
+          "catalogue_missing_executor_count": 518
+        }
+      },
       "previous_build45_snapshot": {
         "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build45.json",
         "archive_sha256": "35e65ad10766a236b3d832c92d977da9a3de565fd60e05b259d0ad52ea5d42a7",
@@ -853,22 +1079,6 @@
         "catalogue_pc_count": 886,
         "catalogue_missing_executor_count": 518
       }
-    },
-    "previous_build45_snapshot": {
-      "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build45.json",
-      "archive_sha256": "35e65ad10766a236b3d832c92d977da9a3de565fd60e05b259d0ad52ea5d42a7",
-      "archive_mtime_utc": "2026-10-02T12:33:39.898034Z",
-      "repo_head": "1e7bb7b4995141d944f33652348a986dccd773be",
-      "registered_pc_count": 394,
-      "catalogue_pc_count": 886,
-      "catalogue_missing_executor_count": 493
-    },
-    "previous_build36_snapshot": {
-      "evidence": ".cache/build/dev/evidence/pixel-composer-2026-10-02/executor-inventory/registered-vs-catalogue-build36.json",
-      "archive_sha256": "4348a0eeb8e2e688e665f89f28f5abaede4a4751f0cff3ebc8cf03eff2af48d3",
-      "registered_pc_count": 369,
-      "catalogue_pc_count": 886,
-      "catalogue_missing_executor_count": 518
     }
   },
   "metadata_generation": {
@@ -1036,6 +1246,16 @@
       "hash": "ef769cea",
       "subject": "Apply source camera set lights and terrain atlas pixel centres",
       "scope": "Adds camera-set, light and terrain atlas slices; GPU and full source behavior gates remain open."
+    },
+    {
+      "hash": "2dcb7e61",
+      "subject": "Preserve Composer key metadata across timeline edits",
+      "scope": "Build50 key identity behavior; focused native Studio and core suites passed. Ambiguous source-compatibility and complete workflow gates remain open."
+    },
+    {
+      "hash": "7e4a2aa2",
+      "subject": "Measure Composer CPU milestone workloads in release",
+      "scope": "Five-sample stdout-only CPU benchmark; no timing file retained, heap profiling unavailable, CPU 3D is not GPU evidence."
     }
   ]
 }
