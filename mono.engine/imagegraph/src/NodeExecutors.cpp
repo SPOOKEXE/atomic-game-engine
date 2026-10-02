@@ -49,6 +49,8 @@ namespace engine::imagegraph::detail {
 					  SourceTileExecutors(),
 					  SourceSpriteStackExecutors(),
 					  SourceNormalMapExecutors(),
+					  SourceAtlasExecutors(),
+					  SourceAtlasPixelExecutors(),
 					  HostExecutors(),
 					  TriggerExecutors(),
 					  TemporalExecutors(),
@@ -71,7 +73,12 @@ namespace engine::imagegraph::detail {
 			const auto found = Executors().find(context.Authored.Type);
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
-			const auto acceptsGeneral = [](std::string_view type) {
+			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if (((type == "pc.atlas_get" || type == "pc.atlas_set" || type == "pc.atlas_struct") &&
+					 port == "input_0") ||
+					(type == "pc.atlas_draw" && port == "input_1") ||
+					(type == "pc.atlas_affector" && (port == "atlas_in" || port == "target_atlas")))
+					return true;
 				return type == "pc.array_add" || type == "pc.array_get" || type == "pc.array_set" ||
 					   type == "pc.array_insert" || type == "pc.array_remove" || type == "pc.array_find" ||
 					   type == "pc.array_zip" || type == "pc.array_unique" || type == "pc.array_rearrange" ||
@@ -102,7 +109,7 @@ namespace engine::imagegraph::detail {
 					(context.Authored.Type == "pc.group_input" && port == "parent_value") ||
 					(context.Authored.Type == "pc.group_output" && port == "value");
 				if (array && !array->Items.empty() && !groupTransport &&
-					!acceptsGeneral(context.Authored.Type))
+					!acceptsGeneral(context.Authored.Type, port))
 					return context.Fail(
 						Status::UnsupportedExecution,
 						"executor requires homogeneous source array normalization",

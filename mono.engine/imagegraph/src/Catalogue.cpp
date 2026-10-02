@@ -215,6 +215,14 @@ namespace engine::imagegraph {
 				if (heads[index].Type == "pc.gradient_extract" || heads[index].Type == "pc.gradient_sample")
 					for (CatalogueOutput &output : node.Outputs)
 						if (output.Id == "colors") output.Type = ValueType::Array;
+				// Atlas Get writes one tuple or scalar per processor row before array aggregation.
+				if (heads[index].Type == "pc.atlas_get")
+					for (CatalogueOutput &output : node.Outputs) {
+						if (output.Id == "position" || output.Id == "scale")
+							output.Type = ValueType::Vector2;
+						else if (output.Id == "rotation" || output.Id == "alpha")
+							output.Type = ValueType::Scalar;
+					}
 				for (const CatalogueInput &input : node.Inputs) {
 					node.Ports.push_back({input.Id, input.Type, PortDirection::Input});
 					if (IsAuthoredValueType(input.Type) ||

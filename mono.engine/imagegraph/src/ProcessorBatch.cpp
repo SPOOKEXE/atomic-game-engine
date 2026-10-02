@@ -137,11 +137,23 @@ namespace engine::imagegraph::detail {
 				if (*mode != 0) return true;
 				selected.Depth = 0;
 			}
+			const bool atlasDraw = context.Entry.Type == "pc.atlas_draw" && port == "input_1";
+			if (atlasDraw) {
+				const auto *selector = context.Find("combine");
+				const auto *combine = selector ? std::get_if<bool>(selector) : nullptr;
+				if (selector && !combine)
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"source Atlas Draw array depth requires a scalar Combine selector",
+						"combine"
+					);
+				selected.Depth = !combine || *combine ? 1 : 0;
+			}
 			// Source Array Shift declares its array input depth 99 and consumes the entire shape.
 			if (input.ArrayDepth >= Limits::MaximumArrayDepth) return true;
 			if (context.Entry.Type == "pc.3_d_mesh_plane" && port == "both_side")
 				return context.Fail(Status::UnsupportedExecution, "source Both Side rejects arrays", port);
-			if (!mapped && !spriteShape && !input.ArrayDepthKnown)
+			if (!mapped && !spriteShape && !atlasDraw && !input.ArrayDepthKnown)
 				return context.Fail(
 					Status::UnsupportedExecution, "source input array depth is dynamic", port
 				);
@@ -167,8 +179,7 @@ namespace engine::imagegraph::detail {
 				const bool numeric = leaf == ValueType::Scalar || leaf == ValueType::Integer;
 				const bool supported =
 					mapped || input.Type == ValueType::Any || input.Type == ValueType::Array ||
-					leaf == input.Type ||
-					(leaf == ValueType::Atlas && input.Type == ValueType::Image) ||
+					leaf == input.Type || (leaf == ValueType::Atlas && input.Type == ValueType::Image) ||
 					(numeric && (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
 								 input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
 								 input.Type == ValueType::Vector2 || input.Type == ValueType::Vector3 ||

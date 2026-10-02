@@ -5523,6 +5523,21 @@ namespace engine::imagegraph {
 										  FindCatalogueInput(*entry, "attribute_process");
 				}
 			}
+			bool catalogueAtlasArrayInput = false;
+			if (to != nodeIndices.end() && sourceType == ValueType::Array && targetType == ValueType::Atlas) {
+				if (const auto *entry = FindCatalogueEntry(document.Nodes[to->second].Type)) {
+					const auto *input = FindCatalogueInput(*entry, link.ToPort);
+					const bool atlasPort = ((entry->Type == "pc.atlas_get" || entry->Type == "pc.atlas_set" ||
+											 entry->Type == "pc.atlas_struct") &&
+											link.ToPort == "input_0") ||
+										   (entry->Type == "pc.atlas_draw" && link.ToPort == "input_1") ||
+										   (entry->Type == "pc.atlas_affector" &&
+											(link.ToPort == "atlas_in" || link.ToPort == "target_atlas"));
+					catalogueAtlasArrayInput =
+						atlasPort && input && input->SourceIndex >= 0 && input->Type == ValueType::Atlas &&
+						input->SourceKind == "Atlas" && FindCatalogueInput(*entry, "attribute_process");
+				}
+			}
 			bool sourceMaterialInput = false;
 			if (to != nodeIndices.end() && targetType == ValueType::Material3D &&
 				(sourceType == ValueType::Image || sourceType == ValueType::Array)) {
@@ -5547,7 +5562,8 @@ namespace engine::imagegraph {
 				(from != nodeIndices.end() && FindCatalogueEntry(document.Nodes[from->second].Type)) ||
 				(to != nodeIndices.end() && FindCatalogueEntry(document.Nodes[to->second].Type));
 			if (sourceType != targetType && !arrayElement && !heightBlendArrayInput &&
-				!heightBlendArrayOutput && !catalogueArrayInput && !sourceMaterialInput &&
+				!heightBlendArrayOutput && !catalogueArrayInput && !catalogueAtlasArrayInput &&
+				!sourceMaterialInput &&
 				!((catalogueLink || boundaryLink) && JunctionCompatible(sourceType, targetType))) {
 				SetDiagnostic(
 					diagnostic,
