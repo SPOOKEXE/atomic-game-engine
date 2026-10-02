@@ -44,14 +44,47 @@ namespace engine::imagegraph {
 			}
 			static bool Numeric(const Value &value) {
 				return std::holds_alternative<double>(value) || std::holds_alternative<int64_t>(value) ||
-					   std::holds_alternative<bool>(value);
+					   std::holds_alternative<bool>(value) || std::holds_alternative<EnumValue>(value) ||
+					   std::holds_alternative<Colour>(value);
+			}
+			// GML stores colours and enum selections as integers, while native sockets retain typed carriers.
+			static Value SourceNumber(const Value &value) {
+				if (const auto *v = std::get_if<EnumValue>(&value)) return v->Value;
+				if (const auto *v = std::get_if<Colour>(&value))
+					return int64_t(
+						uint32_t(v->Red) | (uint32_t(v->Green) << 8) | (uint32_t(v->Blue) << 16) |
+						(uint32_t(v->Alpha) << 24)
+					);
+				return value;
 			}
 			static double Number(const Value &value) {
 				if (const auto *v = std::get_if<double>(&value)) return *v;
 				if (const auto *v = std::get_if<int64_t>(&value)) return double(*v);
 				if (const auto *v = std::get_if<bool>(&value)) return double(*v);
+				if (std::holds_alternative<EnumValue>(value) || std::holds_alternative<Colour>(value))
+					return double(std::get<int64_t>(SourceNumber(value)));
 				return 0;
 			}
+			// Source vector and quaternion values are GML arrays. Projection is local to each VM
+			// operation, so socket types remain intact and transient copies obey the VM byte limit.
+			const ArrayValue *AsArray(const Value &value, std::optional<Value> &projection) {
+				if (const auto *array = std::get_if<ArrayValue>(&value)) return array;
+				ArrayValue array{ValueType::Scalar, {}};
+				if (const auto *v = std::get_if<Vector2>(&value))
+					array.Elements = {v->X, v->Y};
+				else if (const auto *v = std::get_if<Vector3>(&value))
+					array.Elements = {v->X, v->Y, v->Z};
+				else if (const auto *v = std::get_if<Vector4>(&value))
+					array.Elements = {v->X, v->Y, v->Z, v->W};
+				else if (const auto *v = std::get_if<Quaternion>(&value))
+					array.Elements = {v->X, v->Y, v->Z, v->W};
+				else
+					return nullptr;
+				projection = std::move(array);
+				if (!Admit(*projection)) return nullptr;
+				return &std::get<ArrayValue>(*projection);
+			}
+
 			std::string String(const Value &value, size_t depth = 1) {
 				if (depth > 64) {
 					Fail("PCX string conversion depth exceeded", Status::LimitExceeded);
@@ -60,7 +93,8 @@ namespace engine::imagegraph {
 				if (const auto *text = std::get_if<std::string>(&value)) return *text;
 				if (Numeric(value)) {
 					char text[512];
-					const auto *integer = std::get_if<int64_t>(&value);
+					const auto numeric = SourceNumber(value);
+					const auto *integer = std::get_if<int64_t>(&numeric);
 					const double number = Number(value);
 					const auto converted = integer ? std::to_chars(text, text + sizeof(text), *integer)
 												   : std::to_chars(
@@ -77,7 +111,8 @@ namespace engine::imagegraph {
 					return std::string(text, converted.ptr);
 				}
 				if (std::holds_alternative<UndefinedValue>(value)) return "undefined";
-				if (const auto *array = std::get_if<ArrayValue>(&value)) {
+				std::optional<Value> projection;
+				if (const auto *array = AsArray(value, projection)) {
 					std::string text = "[";
 					const auto items = source_array::FromValues(*array);
 					for (size_t i = 0; i < items.size(); ++i) {
@@ -90,13 +125,6 @@ namespace engine::imagegraph {
 					}
 					return text + "]";
 				}
-				if (const auto *v = std::get_if<Vector2>(&value))
-					return "[" + String(v->X) + ", " + String(v->Y) + "]";
-				if (const auto *v = std::get_if<Vector3>(&value))
-					return "[" + String(v->X) + ", " + String(v->Y) + ", " + String(v->Z) + "]";
-				if (const auto *v = std::get_if<Vector4>(&value))
-					return "[" + String(v->X) + ", " + String(v->Y) + ", " + String(v->Z) + ", " +
-						   String(v->W) + "]";
 				Fail("PCX string conversion received an unsupported value");
 				return {};
 			}
@@ -126,7 +154,8 @@ namespace engine::imagegraph {
 				if (!std::isfinite(index) || std::abs(index) > double(Limits::MaximumArrayElements))
 					return double{0};
 				int64_t position = int64_t(index);
-				if (const auto *array = std::get_if<ArrayValue>(&value)) {
+				std::optional<Value> projection;
+				if (const auto *array = AsArray(value, projection)) {
 					const auto items = source_array::FromValues(*array);
 					if (position < 0) position += int64_t(items.size());
 					return position >= 0 && uint64_t(position) < items.size() ? Item(items[size_t(position)])
@@ -163,7 +192,9 @@ namespace engine::imagegraph {
 					Fail("PCX unary nesting exceeded", Status::LimitExceeded);
 					return double{0};
 				}
-				const auto *array = std::get_if<ArrayValue>(&value);
+				std::optional<Value> projection;
+				const auto *array = AsArray(value, projection);
+				if (Error.Code != Status::Ok) return double{0};
 				if (!array) return double(int64_t(~Bits(Number(value))));
 				const auto items = source_array::FromValues(*array);
 				if (items.size() > Context.MaximumBytes / sizeof(SourceArrayItem)) {
@@ -183,7 +214,9 @@ namespace engine::imagegraph {
 					Fail("PCX arithmetic nesting exceeded", Status::LimitExceeded);
 					return double{0};
 				}
-				const auto *aa = std::get_if<ArrayValue>(&a), *bb = std::get_if<ArrayValue>(&b);
+				std::optional<Value> projectedA, projectedB;
+				const auto *aa = AsArray(a, projectedA), *bb = AsArray(b, projectedB);
+				if (Error.Code != Status::Ok) return double{0};
 				if (aa || bb) {
 					const auto x = aa ? source_array::FromValues(*aa) : source_array::Items{},
 							   y = bb ? source_array::FromValues(*bb) : source_array::Items{};
@@ -317,7 +350,7 @@ namespace engine::imagegraph {
 				}
 				if (name == "string") return String(v(0));
 				if (name == "number") {
-					if (Numeric(v(0))) return n(0);
+					if (Numeric(v(0))) return SourceNumber(v(0));
 					const auto *text = std::get_if<std::string>(&v(0));
 					if (!text) return double{0};
 					double x = 0;
@@ -361,7 +394,8 @@ namespace engine::imagegraph {
 				}
 				if (name == "range") return Range(n(0), n(1), n(2, 1));
 				if (name == "length") {
-					if (const auto *array = std::get_if<ArrayValue>(&v(0)))
+					std::optional<Value> projection;
+					if (const auto *array = AsArray(v(0), projection))
 						return double(source_array::FromValues(*array).size());
 					if (const auto *text = std::get_if<std::string>(&v(0))) {
 						size_t characters = 0;
@@ -677,7 +711,11 @@ namespace engine::imagegraph {
 						Variables.try_emplace(std::get<std::string>(owner.Literal), UndefinedValue{});
 					(void)inserted;
 					auto &storage = stored->second;
-					auto *array = std::get_if<ArrayValue>(&storage);
+					std::optional<Value> projection;
+					const auto *sourceArray = AsArray(storage, projection);
+					if (Error.Code != Status::Ok) return false;
+					if (projection) storage = std::move(*projection);
+					auto *array = sourceArray ? std::get_if<ArrayValue>(&storage) : nullptr;
 					if (!array) return true;
 					const auto indexValue = Eval(expression, node.Arguments[1], depth + 1);
 					if (!Numeric(indexValue) || Number(indexValue) < 0) return true;
@@ -749,7 +787,9 @@ namespace engine::imagegraph {
 						return result;
 					}
 					const auto source = Eval(expression, node.Arguments[0], depth + 1);
-					const auto *array = std::get_if<ArrayValue>(&source);
+					std::optional<Value> projection;
+					const auto *array = AsArray(source, projection);
+					if (Error.Code != Status::Ok) return result;
 					if (!array) {
 						Fail("PCX foreach requires an array");
 						return result;

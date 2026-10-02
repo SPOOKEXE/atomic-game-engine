@@ -338,3 +338,82 @@ TEST_CASE("PCX node builders compose typed instruction trees and retained bindin
 	REQUIRE(ExecutePcxExpression(parent, execution, result, diagnostic) == Status::Ok);
 	CHECK(std::get<double>(result.Data) == 6);
 }
+
+TEST_CASE("PCX source tuples project as arrays and preserve integer numeric values", "[imagegraph][pcx]") {
+	// pcx_ast.gml uses is_array for vector inputs; toNumber returns numeric carriers unchanged.
+	const std::array parameters{
+		AuthoredValue{"v2", Vector2{2, 3}},
+		AuthoredValue{"v3", Vector3{4, 5, 6}},
+		AuthoredValue{"v4", Vector4{7, 8, 9, 10}},
+		AuthoredValue{"q", Quaternion{1, 2, 3, 4}},
+		AuthoredValue{"integer", int64_t{9007199254740993}},
+		AuthoredValue{"flag", true},
+		AuthoredValue{"selection", EnumValue{5}},
+		AuthoredValue{"colour", Colour{0x11, 0x22, 0x33, 0x44}}
+	};
+	CHECK(std::get<double>(Evaluate("v2[-1]", parameters)) == 3);
+	CHECK(std::get<double>(Evaluate("v3[1]", parameters)) == 5);
+	CHECK(std::get<double>(Evaluate("v4[-1]", parameters)) == 10);
+	CHECK(std::get<double>(Evaluate("q[3]", parameters)) == 4);
+	CHECK(std::get<double>(Evaluate("length(v2)+length(v3)+length(v4)+length(q)", parameters)) == 13);
+	CHECK(std::get<double>(Evaluate("(v2+v3)[2]", parameters)) == 6);
+	CHECK(std::get<double>(Evaluate("(2*v4)[-1]", parameters)) == 20);
+	CHECK(std::get<double>(Evaluate("(~q)[0]", parameters)) == -2);
+	CHECK(std::get<int64_t>(Evaluate("number(integer)", parameters)) == 9007199254740993);
+	CHECK(std::get<bool>(Evaluate("number(flag)", parameters)));
+	CHECK(std::get<int64_t>(Evaluate("number(selection)", parameters)) == 5);
+	CHECK(std::get<int64_t>(Evaluate("number(colour)", parameters)) == 0x44332211);
+	CHECK(std::get<double>(Evaluate("colour & 255", parameters)) == 0x11);
+	CHECK(std::get<double>(Evaluate("selection+2", parameters)) == 7);
+	CHECK(std::get<std::string>(Evaluate("string(integer)", parameters)) == "9007199254740993");
+	CHECK(std::get<std::string>(Evaluate("string(colour)", parameters)) == "1144201745");
+	CHECK(std::get<double>(Evaluate("Project.dimension[1]")) == 32);
+	PcxExpressionValue tree;
+	Diagnostic diagnostic;
+	REQUIRE(
+		CompilePcxProgram(
+			"sum=0\nfor(index,item:q){sum+=index+item}\nv2[1]=9\nsum+v2[1]", tree, diagnostic
+		) == Status::Ok
+	);
+	EvaluationRequest request;
+	PcxExecutionContext context{request, parameters, nullptr, {32, 32}, {}};
+	PcxExecutionResult result;
+	const auto executed = ExecutePcxExpression(tree, context, result, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(executed == Status::Ok);
+	CHECK(std::get<double>(result.Data) == 25);
+	CHECK(std::get<Vector2>(parameters[0].Data) == Vector2{2, 3});
+	context.MaximumBytes = 1;
+	CHECK(ExecutePcxExpression(tree, context, result, diagnostic) == Status::LimitExceeded);
+	CHECK(std::get<double>(result.Data) == 25);
+
+	Document document;
+	document.FormatVersion = 9;
+	Node globals{"globals", "pc.global_scope", "", {}, {}};
+	globals.DynamicInputs = {
+		DynamicInput{"position", ValueType::Vector3, Value{Vector3{4, 5, 6}}},
+		DynamicInput{"enabled", ValueType::Boolean, Value{true}},
+		DynamicInput{"large", ValueType::Integer, Value{int64_t{9007199254740993}}}
+	};
+	Node equation{
+		"equation", "pc.equation", "", {}, {{"equation", std::string{"(position+2)[-1]+length(position)"}}}
+	};
+	document.Nodes = {equation, globals};
+	document.ProjectGlobalNodeId = "globals";
+	document.Outputs = {{"value", "equation", "result"}};
+	Plan plan;
+	EvaluatedValue output;
+	const auto compiled = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	REQUIRE(EvaluateValue(document, plan, "value", request, output, diagnostic) == Status::Ok);
+	CHECK(std::get<double>(output.Data) == 11);
+	document.Nodes[0].Values[0].Data = std::string{"number(large)"};
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	REQUIRE(EvaluateValue(document, plan, "value", request, output, diagnostic) == Status::Ok);
+	CHECK(std::get<int64_t>(output.Data) == 9007199254740993);
+	document.Nodes[0].Values[0].Data = std::string{"number(enabled)"};
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	REQUIRE(EvaluateValue(document, plan, "value", request, output, diagnostic) == Status::Ok);
+	CHECK(std::get<bool>(output.Data));
+}
