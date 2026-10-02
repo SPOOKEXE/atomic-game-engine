@@ -94,6 +94,7 @@ namespace engine::imagegraph::detail {
 			if (ExecutePcxExpression(tree, execution, result, diagnostic) != Status::Ok)
 				return context.Fail(diagnostic.Code, diagnostic.Message, expression.Port);
 			if (std::holds_alternative<UndefinedValue>(result.Data)) result.Data = double{0};
+			std::erase(context.CatalogueDefaultInputs, std::string_view(expression.Port));
 			if (!result.Messages.empty()) {
 				uint64_t bytes = 2 * result.Messages.size() * sizeof(PcxMessage);
 				for (const auto &message : result.Messages)

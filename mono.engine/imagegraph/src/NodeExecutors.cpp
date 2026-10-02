@@ -52,6 +52,7 @@ namespace engine::imagegraph::detail {
 					  SourceAtlasExecutors(),
 					  SourceAtlasPixelExecutors(),
 					  SourcePaletteExecutors(),
+					  SourceSurfaceDataExecutors(),
 					  HostExecutors(),
 					  TriggerExecutors(),
 					  TemporalExecutors(),

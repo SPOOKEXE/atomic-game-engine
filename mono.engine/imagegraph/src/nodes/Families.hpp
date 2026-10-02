@@ -54,6 +54,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceAtlasExecutors();
 	std::span<const ExecutorEntry> SourceAtlasPixelExecutors();
 	std::span<const ExecutorEntry> SourcePaletteExecutors();
+	std::span<const ExecutorEntry> SourceSurfaceDataExecutors();
 	std::span<const ExecutorEntry> HostExecutors();
 	// Reuse exact authored/time/control/image validation for opaque source observations.
 	bool ReplayRecordedHostOutputs(NodeContext &context);

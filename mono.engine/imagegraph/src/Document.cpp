@@ -5669,6 +5669,112 @@ namespace engine::imagegraph {
 				);
 			}
 		}
+		// An unconnected source instance reads the nearest base input, including its link.
+		// Publish that route in the plan so ordinary DAG retention and ordering cover it too.
+		const size_t authoredRoutes = effectiveLinks.size(), authoredDefaults = resolvedInputs.size();
+		uint64_t instanceRouteWork = 0;
+		const auto inputRouteOwner = [&](const Node &start, std::string_view port) -> const Node * {
+			const Node *current = &start;
+			for (size_t hop = 0; hop < document.Nodes.size(); ++hop) {
+				const uint64_t hopWork = current->InstanceOverrides.size() + 1;
+				if (hopWork > 64'000'000 - instanceRouteWork) return nullptr;
+				instanceRouteWork += hopWork;
+				if (linkedInputs.contains({current->Id, port}) ||
+					std::find(current->InstanceOverrides.begin(), current->InstanceOverrides.end(), port) !=
+						current->InstanceOverrides.end() ||
+					current->InstanceBase.empty())
+					return current;
+				const auto found = nodeIndices.find(current->InstanceBase);
+				if (found == nodeIndices.end()) return nullptr;
+				current = &document.Nodes[found->second];
+			}
+			return nullptr;
+		};
+		size_t inheritedRoutes = 0, inheritedDefaults = 0;
+		uint64_t inheritedBytes = 0;
+		const auto visitInherited = [&](bool publish) -> bool {
+			for (const Node &node : document.Nodes) {
+				if (node.InstanceBase.empty()) continue;
+				for (size_t routeIndex = 0; routeIndex < authoredRoutes + authoredDefaults; ++routeIndex) {
+					const bool isDefault = routeIndex >= authoredRoutes;
+					const size_t sourceIndex = isDefault ? routeIndex - authoredRoutes : routeIndex;
+					const std::string_view port = isDefault
+													  ? std::string_view(resolvedInputs[sourceIndex].Port)
+													  : std::string_view(effectiveLinks[sourceIndex].ToPort);
+					const std::string_view sourceOwner =
+						isDefault ? std::string_view(resolvedInputs[sourceIndex].NodeId)
+								  : std::string_view(effectiveLinks[sourceIndex].ToNode);
+					const Node *owner = inputRouteOwner(node, port);
+					if (!owner) {
+						SetDiagnostic(
+							diagnostic,
+							Status::LimitExceeded,
+							"instance input route resolution exceeds bounded work",
+							node.Id,
+							port
+						);
+						return false;
+					}
+					if (owner->Id != sourceOwner || owner->Id == node.Id) continue;
+					if (!publish) {
+						if (isDefault) {
+							++inheritedDefaults;
+							inheritedBytes += detail::RetainedPayloadBytes(resolvedInputs[sourceIndex].Data) +
+											  std::max(node.Id.size(), std::string{}.capacity()) +
+											  std::max(port.size(), std::string{}.capacity());
+						} else {
+							++inheritedRoutes;
+							const Link &source = effectiveLinks[sourceIndex];
+							inheritedBytes += std::max(source.FromNode.size(), std::string{}.capacity()) +
+											  std::max(source.FromPort.size(), std::string{}.capacity()) +
+											  std::max(node.Id.size(), std::string{}.capacity()) +
+											  std::max(port.size(), std::string{}.capacity());
+						}
+						if (inheritedRoutes + inheritedDefaults >
+							Limits::MaximumLinks - document.Links.size()) {
+							SetDiagnostic(
+								diagnostic,
+								Status::LimitExceeded,
+								"instance input routes exceed native link bound",
+								node.Id,
+								port
+							);
+							return false;
+						}
+					} else if (isDefault) {
+						const auto &source = resolvedInputs[sourceIndex];
+						resolvedInputs.push_back({node.Id, source.Port, source.Data});
+					} else {
+						const auto &source = effectiveLinks[sourceIndex];
+						effectiveLinks.push_back({source.FromNode, source.FromPort, node.Id, source.ToPort});
+					}
+				}
+			}
+			return true;
+		};
+		if (!visitInherited(false)) return diagnostic.Code;
+		if (inheritedRoutes || inheritedDefaults) {
+			// reserve() temporarily retains the old allocation while constructing its replacement.
+			inheritedBytes += (authoredRoutes + inheritedRoutes) * sizeof(Link) +
+							  (authoredDefaults + inheritedDefaults) * sizeof(ResolvedInput);
+			auto inheritedCharge = budget.Reserve(inheritedBytes);
+			if (!inheritedCharge || !planCharge.Merge(std::move(*inheritedCharge))) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"instance route clones exceed the live compile byte budget"
+				);
+				return diagnostic.Code;
+			}
+			effectiveLinks.reserve(authoredRoutes + inheritedRoutes);
+			resolvedInputs.reserve(authoredDefaults + inheritedDefaults);
+			if (!visitInherited(true)) return diagnostic.Code;
+			// Final vectors own these names; nearest-owner resolution above used authored links only.
+			for (size_t i = authoredRoutes; i < effectiveLinks.size(); ++i)
+				linkedInputs.insert({effectiveLinks[i].ToNode, effectiveLinks[i].ToPort});
+			for (size_t i = authoredDefaults; i < resolvedInputs.size(); ++i)
+				linkedInputs.insert({resolvedInputs[i].NodeId, resolvedInputs[i].Port});
+		}
 		for (const Junction &junction : document.Junctions) {
 			auto visited = detail::MakeEvaluationHashSet<std::string_view>(budget);
 			std::string_view current = junction.Id;
@@ -8852,7 +8958,8 @@ namespace engine::imagegraph {
 					 sizeof(std::pair<std::string_view, const ImageArray *>) +
 					 sizeof(std::pair<std::string_view, Value>) +
 					 sizeof(std::pair<std::string_view, const Value *>) + sizeof(std::string_view) +
-					 sizeof(std::pair<std::string_view, SourceSocketDomain>));
+					 sizeof(std::pair<std::string_view, SourceSocketDomain>) + sizeof(std::string_view) +
+					 sizeof(std::pair<std::string_view, std::string_view>));
 				auto inputCharge = budget.Reserve(inputBytes);
 				if (!inputCharge) {
 					SetDiagnostic(
@@ -9018,6 +9125,13 @@ namespace engine::imagegraph {
 				context.Values.reserve(inputCount);
 				context.ValueViews.reserve(inputCount);
 				context.LinkedValues.reserve(inputCount);
+				context.CatalogueDefaultInputs.reserve(inputCount);
+				context.InputOwnerIds.reserve(inputCount);
+				context.EffectiveInputLinks = plan.EffectiveLinks;
+				for (const auto &input : catalogueEntry->Inputs)
+					context.InputOwnerIds.emplace_back(input.Id, inputOwner(input.Id).Id);
+				for (const auto &input : node.DynamicInputs)
+					context.InputOwnerIds.emplace_back(input.Id, inputOwner(input.Id).Id);
 				context.InputDomains.reserve(inputCount);
 				for (const auto &link : plan.EffectiveLinks)
 					if (link.ToNode == node.Id) {
@@ -9492,6 +9606,7 @@ namespace engine::imagegraph {
 							return diagnostic.Code;
 						}
 						context.Values.emplace_back(input.Id, std::move(fallback));
+						context.CatalogueDefaultInputs.emplace_back(input.Id);
 					}
 				}
 				// Dynamic group inputs follow the same order: a link, then the instance
@@ -9594,6 +9709,7 @@ namespace engine::imagegraph {
 					appendPcxProgram(input.Id);
 				for (const auto &input : node.DynamicInputs)
 					appendPcxProgram(input.Id);
+				context.InputProvenanceResolved = true;
 				if (!detail::ApplyPcxInputExpressions(context, pcxPrograms)) {
 					if (pendingPcxRoute) {
 						if (!stagePcxDependency()) return diagnostic.Code;

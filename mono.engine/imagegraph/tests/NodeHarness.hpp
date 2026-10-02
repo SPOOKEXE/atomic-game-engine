@@ -78,9 +78,12 @@ namespace imagegraph_test {
 			});
 			if (given != values.end())
 				context.Values.emplace_back(input.Id, given->second);
-			else if (std::optional<Value> fallback = CatalogueDefault(input))
+			else if (std::optional<Value> fallback = CatalogueDefault(input)) {
 				context.Values.emplace_back(input.Id, *fallback);
+				context.CatalogueDefaultInputs.emplace_back(input.Id);
+			}
 		}
+		context.InputProvenanceResolved = true;
 		run.Ok = executor(context) && context.FailureCode == Status::Ok;
 		run.Code = context.FailureCode;
 		run.Message = context.FailureMessage;

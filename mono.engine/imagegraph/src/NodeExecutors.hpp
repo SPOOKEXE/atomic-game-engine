@@ -5,7 +5,7 @@
 // The evaluator resolves every input before calling an executor: linked image inputs, and for each authored
 // input the linked value, junction default, authored value or catalogue default in that order. An executor
 // reads those through NodeContext, writes typed outputs, and reports a failure with a durable port name. It
-// never sees links, the plan or other nodes.
+// borrows resolved producer identities when source behavior depends on its linked node.
 
 #include "EvaluationBudget.hpp"
 #include "SourceChoice.hpp"
@@ -70,6 +70,11 @@ namespace engine::imagegraph::detail {
 		const Node &Authored;
 		const CatalogueEntry &Entry;
 		const EvaluationRequest &Request;
+		bool InputProvenanceResolved = false;
+		// Only the branch selecting a catalogue fallback marks a port. Empty payloads carry no identity.
+		std::vector<std::string_view> CatalogueDefaultInputs;
+		std::vector<std::pair<std::string_view, std::string_view>> InputOwnerIds;
+		std::span<const Link> EffectiveInputLinks;
 		// Authored timeline, or null when the document has none.
 		const TimelineSettings *Timeline = nullptr;
 		// Document project attributes, or the fresh-project defaults.
@@ -322,6 +327,24 @@ namespace engine::imagegraph::detail {
 			return nullptr;
 		}
 
+		std::optional<bool> IsCatalogueDefault(std::string_view port) const {
+			if (!InputProvenanceResolved) return std::nullopt;
+			return std::find(CatalogueDefaultInputs.begin(), CatalogueDefaultInputs.end(), port) !=
+				   CatalogueDefaultInputs.end();
+		}
+		const Link *InputProducer(std::string_view port) const {
+			std::string_view ownerId = Authored.Id;
+			for (const auto &[input, owner] : InputOwnerIds)
+				if (input == port) {
+					ownerId = owner;
+					break;
+				}
+			for (const auto &link : EffectiveInputLinks)
+				if (link.ToNode == Authored.Id && link.ToPort == port) return &link;
+			for (const auto &link : EffectiveInputLinks)
+				if (link.ToNode == ownerId && link.ToPort == port) return &link;
+			return nullptr;
+		}
 		bool IsLinked(std::string_view id) const {
 			for (std::string_view linked : LinkedValues)
 				if (linked == id) return true;
