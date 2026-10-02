@@ -49,7 +49,32 @@ if [ ${#patches[@]} -eq 0 ]; then
     exit 1
 fi
 
-git submodule update --init --recursive --checkout --depth 1 -- "$src" >&2
+submodule_checkout_matches_index() {
+	local entry mode commit stage path head status line
+
+	entry=$(git ls-files --stage -- "$src") || return 1
+	[ "$(printf '%s\n' "$entry" | wc -l)" -eq 1 ] || return 1
+	read -r mode commit stage path <<< "$entry"
+	[ "$mode" = 160000 ] && [ "$stage" = 0 ] && [ "$path" = "$src" ] || return 1
+
+	head=$(git -C "$src" rev-parse --verify HEAD^{commit} 2>/dev/null) || return 1
+	[ "$head" = "$commit" ] || return 1
+
+	status=$(git submodule status --recursive -- "$src" 2>/dev/null) || return 1
+	[ -n "$status" ] || return 1
+	while IFS= read -r line; do
+		case "${line:0:1}" in
+			' ') ;;
+			*) return 1 ;;
+		esac
+	done <<< "$status"
+}
+
+# Updating an already matching checkout can still rewrite the superproject's
+# gitdir config. Only skip it when the index and every recursive gitlink agree.
+if ! submodule_checkout_matches_index; then
+	git submodule update --init --recursive --checkout --depth 1 -- "$src" >&2
+fi
 
 # **The enforcement half of the contract.** Nothing writes to a patched
 # submodule any more, so anything found there is a hand-edit that no clean clone
