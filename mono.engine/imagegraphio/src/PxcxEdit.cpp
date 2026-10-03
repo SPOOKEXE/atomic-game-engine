@@ -296,6 +296,22 @@ namespace engine::imagegraphio {
 		std::optional<Json> EncodeValue(const Value &value, const Json &original) {
 			return std::visit([&](const auto &item) { return Encode(item, original); }, value);
 		}
+		// Fresh key values use the pinned value serializers, without copying another key's opaque fields.
+		std::optional<Json> EncodeInsertedValue(const Value &value) {
+			if (const auto *gradient = std::get_if<Gradient>(&value)) {
+				Json keys = Json::array();
+				for (const auto &key : gradient->Keys)
+					keys.push_back(Json{{"time", key.Time}, {"value", Packed(key.Color)}});
+				return Json(Json{{"type", gradient->Mode}, {"keys", std::move(keys)}}.dump());
+			}
+			if (const auto *matrix = std::get_if<MatrixValue>(&value))
+				return Json{
+					{"size", Json::array({matrix->Columns, matrix->Rows})},
+					{"isize", matrix->Values.size()},
+					{"raw", matrix->Values}
+				};
+			return EncodeValue(value, std::holds_alternative<ArrayValue>(value) ? Json::array() : Json{});
+		}
 		std::string DriverName(const KeyframeSourceDriver &driver) {
 			return std::visit(
 				[](const auto &item) -> std::string {
@@ -914,10 +930,7 @@ namespace engine::imagegraphio {
 				const double sourceFrame = static_cast<double>(FrameTimeToReal(time));
 				if (!SplitFrameTime(sourceFrame, represented) || represented != time)
 					return reject("PXC key time cannot be represented exactly as a source real");
-				auto data = EncodeValue(
-					operation.Replacement.Data,
-					std::holds_alternative<ArrayValue>(operation.Replacement.Data) ? Json::array() : Json{}
-				);
+				auto data = EncodeInsertedValue(operation.Replacement.Data);
 				auto driver = DriverValue(operation.Replacement.SourceDriver, Json(0));
 				if (!data || !driver) return reject("PXC inserted key requires an unsupported inverse codec");
 				Json marker =

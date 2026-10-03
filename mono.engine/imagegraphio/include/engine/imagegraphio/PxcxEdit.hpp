@@ -48,7 +48,7 @@ namespace engine::imagegraphio {
 	// Payloads share the native 4 MiB array budget. Key moves must retain source record order.
 	// Insert/delete require an existing animated expanded track. Surviving records retain their tails.
 	// Sequence scans and shifts share a bounded transaction work budget.
-	// Insert accepts seed-free value codecs; Gradient/Matrix insertion and fractional multi-key maps
+	// Insert emits canonical pinned Gradient/Matrix value descriptors; fractional multi-key maps
 	// are unsupported. Last-key deletion requires CaptureTime and captures raw setAnim(false) values.
 	// A surviving lone key stays expanded to retain metadata that the source serializer compacts.
 	// Unknown inverse mappings and conflicting edits fail without replacing out. Retained thumbnails
