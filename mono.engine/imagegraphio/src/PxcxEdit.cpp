@@ -3412,6 +3412,57 @@ namespace engine::imagegraphio {
 					);
 				if (!AuthoredKeyRecord(desired, node, "parent_value", *record, diagnostic)) return false;
 			}
+			// Quaternion source keys retain raw tuples; their display mode belongs to the input.
+			const bool hadQuaternionTracks =
+				std::any_of(working.Graph.Tracks.begin(), working.Graph.Tracks.end(), [](const auto &track) {
+					return track.QuaternionMode.has_value();
+				});
+			for (size_t index = 0; index < desired.Tracks.size(); ++index) {
+				const auto &track = desired.Tracks[index];
+				const AnimationTrack *before = nullptr;
+				const auto sameIdentity = [&](const auto &old) {
+					return old.NodeId == track.NodeId && old.Port == track.Port;
+				};
+				if (index < working.Graph.Tracks.size() && sameIdentity(working.Graph.Tracks[index]))
+					before = &working.Graph.Tracks[index];
+				else if (track.QuaternionMode || hadQuaternionTracks) {
+					if (working.Graph.Tracks.size() > compactWorkRemaining)
+						return Reject(diagnostic, "PXC Quaternion track lookup exceeds its work limit");
+					compactWorkRemaining -= working.Graph.Tracks.size();
+					for (const auto &old : working.Graph.Tracks) {
+						if (!sameIdentity(old)) continue;
+						before = &old;
+						break;
+					}
+				}
+				if (before ? before->QuaternionMode == track.QuaternionMode : !track.QuaternionMode) continue;
+				const uint64_t modeWork = desired.Nodes.size() + root["nodes"].size();
+				if (modeWork > compactWorkRemaining)
+					return Reject(diagnostic, "PXC Quaternion mode edits exceed their work limit");
+				compactWorkRemaining -= modeWork;
+				const auto *node = wantedNode(track.NodeId);
+				const auto *entry = node ? FindCatalogueEntry(node->Type) : nullptr;
+				const auto *input = entry ? FindCatalogueInput(*entry, track.Port) : nullptr;
+				auto *source = SourceNode(root, track.NodeId);
+				auto *record = source && entry ? SourceInput(root, *source, *entry, track.Port) : nullptr;
+				if (!before || !before->QuaternionMode || !track.QuaternionMode ||
+					*track.QuaternionMode < 0 || *track.QuaternionMode > 1 || !input ||
+					input->Type != ValueType::Quaternion || input->SourceIndex < 0 || !record ||
+					record->contains("from_node") || record->value("global_use", false) ||
+					!record->contains("r") || !(*record)["r"].is_array())
+					return Reject(
+						diagnostic,
+						"PXC Quaternion mode edit requires a retained local Quaternion animator",
+						track.NodeId,
+						track.Port
+					);
+				if (!record->contains("attri")) (*record)["attri"] = Json::object();
+				if (!(*record)["attri"].is_object())
+					return Reject(
+						diagnostic, "PXC Quaternion input attributes are malformed", track.NodeId, track.Port
+					);
+				(*record)["attri"]["angle_display"] = *track.QuaternionMode;
+			}
 			// Rebuild each expanded animator once, preserving opaque records by durable provenance
 			// through simultaneous moves and value swaps instead of sequential timestamp collisions.
 			for (const auto &node : desired.Nodes) {

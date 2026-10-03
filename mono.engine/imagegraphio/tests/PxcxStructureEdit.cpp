@@ -1336,3 +1336,144 @@ TEST_CASE(
 	CHECK_FALSE(WritePxcxProjection(imported, edited, {}, out, diagnostic));
 	CHECK(out == sentinel);
 }
+
+TEST_CASE(
+	"PXC Quaternion track mode edits preserve raw animator keys through native history",
+	"[imagegraphio][pxcx_structure][pxcx_quaternion_mode]"
+) {
+	Json source = Json::parse(
+		R"({"nodes":[{"id":"angles","type":"Node_Quarternion_To_Euler","x":1,"y":2,"inputs":[{"anim":true,"on_end":2,"loop_range":2,"attri":{"angle_display":1,"future":{"input":[4,false]}},"r":[[[0,2],[0,0,0,1],[0,1],[0,0],0,0,true,0,4294967295,{"future":"first"}],[[0,6],[0.5,0,0,0.8660254037844386],[0,1],[0,0],0,0,true,0,4294967295,{"future":"second"}]],"future":{"socket":"retain"}}],"future":{"node":17}}],"future":{"project":"retain"}})"
+	);
+	int64_t initialMode = 1;
+	SECTION("Explicit Euler to raw") {}
+	SECTION("Explicit raw to Euler") {
+		initialMode = 0;
+		source["nodes"][0]["inputs"][0]["attri"]["angle_display"] = 0;
+	}
+	SECTION("Constructor Euler default to raw") {
+		source["nodes"][0]["inputs"][0]["attri"].erase("angle_display");
+	}
+	const auto imported = Imported(source.dump());
+	Document before = imported.Graph;
+	Diagnostic diagnostic;
+	REQUIRE(Migrate(before, diagnostic) == Status::Ok);
+	REQUIRE(before.Nodes.front().Type == "pc.quarternion_to_euler");
+	REQUIRE(before.Tracks.size() == 1);
+	REQUIRE(before.Keyframes.size() == 2);
+	REQUIRE(before.Tracks.front().QuaternionMode == initialMode);
+	Document after = before;
+	after.Tracks.front().QuaternionMode = 1 - initialMode;
+	Document durable;
+	REQUIRE(Read(Write(after), durable, diagnostic) == Status::Ok);
+	REQUIRE(durable == after);
+	const auto project = [&](const PxcxImport &baseline, const Document &wanted) {
+		std::vector<std::byte> bytes;
+		const bool written = WritePxcxProjection(baseline, wanted, {}, bytes, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(written);
+		engine::bake::PxcxArchive archive;
+		std::string failure;
+		REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+		PxcxImport result;
+		REQUIRE(ImportPxcxImageGraph(archive, result, failure));
+		REQUIRE(Migrate(result.Graph, diagnostic) == Status::Ok);
+		CHECK(result.Graph == wanted);
+		CHECK(result.Source.MetadataPayload == imported.Source.MetadataPayload);
+		CHECK(result.Source.ThumbnailRgba == imported.Source.ThumbnailRgba);
+		return result;
+	};
+	const auto changed = project(imported, durable);
+	const auto changedJson = Graph(changed);
+	const auto originalJson = Graph(imported);
+	const auto &originalInput = originalJson["nodes"][0]["inputs"][0];
+	const auto &changedInput = changedJson["nodes"][0]["inputs"][0];
+	CHECK(changedInput["attri"]["angle_display"] == 1 - initialMode);
+	CHECK(changedInput["r"] == originalInput["r"]);
+	CHECK(changedInput["attri"]["future"] == originalInput["attri"]["future"]);
+	CHECK(changedInput["future"] == originalInput["future"]);
+	CHECK(changedInput["on_end"] == originalInput["on_end"]);
+	CHECK(changedInput["loop_range"] == originalInput["loop_range"]);
+	CHECK(changedJson["nodes"][0]["future"] == originalJson["nodes"][0]["future"]);
+	CHECK(changedJson["future"] == originalJson["future"]);
+	std::vector<std::byte> unchanged;
+	REQUIRE(WritePxcxProjection(imported, before, {}, unchanged, diagnostic));
+	CHECK(unchanged == imported.Source.OriginalBytes);
+	const auto undone = project(changed, before);
+	const auto redone = project(undone, after);
+	CHECK(Graph(redone) == changedJson);
+	REQUIRE(WritePxcxProjection(changed, after, {}, unchanged, diagnostic));
+	CHECK(unchanged == changed.Source.OriginalBytes);
+	Document missingMode = after;
+	missingMode.Tracks.front().QuaternionMode.reset();
+	const std::vector<std::byte> sentinel{std::byte{17}, std::byte{9}};
+	auto rejected = sentinel;
+	CHECK_FALSE(WritePxcxProjection(imported, missingMode, {}, rejected, diagnostic));
+	CHECK(rejected == sentinel);
+	Document invalidMode = after;
+	invalidMode.Tracks.front().QuaternionMode = 2;
+	CHECK_FALSE(WritePxcxProjection(imported, invalidMode, {}, rejected, diagnostic));
+	CHECK(rejected == sentinel);
+}
+
+TEST_CASE(
+	"PXC Quaternion mode scanning keeps dense unchanged scalar tracks within the work budget",
+	"[imagegraphio][pxcx_structure][pxcx_quaternion_mode]"
+) {
+	Json source = Json::parse(
+		R"({"nodes":[{"id":"angles","type":"Node_Quarternion_To_Euler","x":0,"y":0,"inputs":[{"anim":true,"attri":{"angle_display":1},"r":[[[0,2],[0,0,0,1],[0,1],[0,0],0,0,true,0],[[0,6],[0.5,0,0,0.8660254037844386],[0,1],[0,0],0,0,true,0]]}]}]})"
+	);
+	for (size_t index = 0; index < 400; ++index)
+		source["nodes"].push_back(
+			{{"id", "number-" + std::to_string(index)},
+			 {"type", "Node_Number_Simple"},
+			 {"x", 0},
+			 {"y", 0},
+			 {"inputs", Json::parse(R"([{"anim":true,"r":[[[0,0],5,[0,1],[0,0],0,0,true,0]]}])")}}
+		);
+	// Unserialized value data retains the verified Number Simple constructor default of zero.
+	for (size_t index = 0; index < 800; ++index)
+		source["nodes"].push_back(
+			{{"id", "static-number-" + std::to_string(index)},
+			 {"type", "Node_Number_Simple"},
+			 {"x", 0},
+			 {"y", 0},
+			 {"inputs", Json::parse(R"([{"anim":false}])")}}
+		);
+	const auto imported = Imported(source.dump());
+	Document edited = imported.Graph;
+	Diagnostic diagnostic;
+	REQUIRE(Migrate(edited, diagnostic) == Status::Ok);
+	REQUIRE(edited.Nodes.size() == 1201);
+	REQUIRE(edited.Tracks.size() == 401);
+	REQUIRE(edited.Keyframes.size() == 402);
+	CHECK(std::all_of(edited.Nodes.begin(), edited.Nodes.end(), [](const auto &node) {
+		return !node.Id.starts_with("static-number-") ||
+			   (node.Type == "pc.number_simple" && node.Values.empty());
+	}));
+
+	const uint64_t admitted = uint64_t(edited.Nodes.size()) * imported.Source.Nodes.size() +
+							  uint64_t(edited.Nodes.size()) * edited.Nodes.size() +
+							  uint64_t(edited.Keyframes.size()) * imported.Graph.Keyframes.size() * 2;
+	const uint64_t oldModeCharge =
+		uint64_t(edited.Tracks.size()) *
+		(imported.Graph.Tracks.size() + edited.Nodes.size() + imported.Source.Nodes.size());
+	REQUIRE(admitted < engine::bake::PxcxLimits::MaximumLinks * 16);
+	REQUIRE(admitted + oldModeCharge > engine::bake::PxcxLimits::MaximumLinks * 16);
+	SECTION("Unrelated authored layout change") {
+		edited.Nodes.front().Position.X = 9;
+	}
+	SECTION("One Quaternion mode edit among unchanged scalar tracks") {
+		edited.Tracks.front().QuaternionMode = 0;
+	}
+	std::vector<std::byte> bytes;
+	const bool written = WritePxcxProjection(imported, edited, {}, bytes, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(written);
+	engine::bake::PxcxArchive archive;
+	std::string failure;
+	REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+	PxcxImport result;
+	REQUIRE(ImportPxcxImageGraph(archive, result, failure));
+	REQUIRE(Migrate(result.Graph, diagnostic) == Status::Ok);
+	CHECK(result.Graph == edited);
+}
