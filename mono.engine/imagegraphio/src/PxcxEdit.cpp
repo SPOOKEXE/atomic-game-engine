@@ -693,6 +693,18 @@ namespace engine::imagegraphio {
 					}
 				}
 			}
+			// Import retains declaration order; source socket indices can be deliberately
+			// reordered.
+			const auto sourceOrder = [&](std::string_view port) {
+				if (node.Type == "pc.group_input" && port == "parent_value") return int32_t{-1};
+				for (size_t i = 0; i < entry.Inputs.size(); ++i)
+					if (entry.Inputs[i].SourceIndex >= 0 && entry.Inputs[i].Id == port) return int32_t(i);
+				for (size_t i = 0; i < entry.Inputs.size(); ++i)
+					if (entry.Inputs[i].SourceIndex >= 0 &&
+						port.starts_with(std::string(entry.Inputs[i].Id) + "_"))
+						return int32_t(i);
+				return INT32_MAX;
+			};
 			for (size_t index = 0; index < count; ++index) {
 				auto &snapshot = snapshots[index];
 				const std::string port(snapshot.Schema->Id);
@@ -818,7 +830,7 @@ namespace engine::imagegraphio {
 						const auto before = std::find_if(
 							node.SourceStaticInputs.begin(),
 							node.SourceStaticInputs.end(),
-							[&](const auto &mode) { return sourceIndex(mode) > snapshot.Schema->SourceIndex; }
+							[&](const auto &mode) { return sourceOrder(mode) > sourceOrder(port); }
 						);
 						node.SourceStaticInputs.insert(before, std::string(port));
 					}
@@ -1839,6 +1851,26 @@ namespace engine::imagegraphio {
 				if (node.Id == id) return &node;
 			return nullptr;
 		};
+		const auto unmappedGradientValue =
+			[](const Node &old, const Node &wanted, std::string_view port) -> const Value * {
+			if (old.Type != "pc.gradient" || wanted.Type != old.Type ||
+				(port != "angle" && port != "radius" && port != "shift" && port != "scale"))
+				return nullptr;
+			const auto toggle = std::string(port) + "_mapped";
+			const auto range = std::string(port) + "_map_range";
+			if (!std::any_of(
+					old.Values.begin(),
+					old.Values.end(),
+					[&](const auto &v) { return v.Port == toggle && v.Data == Value{true}; }
+				) ||
+				std::any_of(wanted.Values.begin(), wanted.Values.end(), [&](const auto &v) {
+					return v.Port == toggle || v.Port == range;
+				}))
+				return nullptr;
+			for (const auto &v : wanted.Values)
+				if (v.Port == port && std::holds_alternative<double>(v.Data)) return &v.Data;
+			return nullptr;
+		};
 		std::vector<PxcxEdit> keys;
 		for (const auto &key : imported.Graph.Keyframes) {
 			const auto *parentNode = wantedNode(key.NodeId);
@@ -1888,6 +1920,14 @@ namespace engine::imagegraphio {
 						   GetFrameTime(item) == GetFrameTime(key);
 				}
 			);
+			// Disabling a map restores the compact primary animator through its authored value.
+			if (const auto *wanted = wantedNode(key.NodeId);
+				wanted && savedInput && savedInput->contains("r") && (*savedInput)["r"].is_object()) {
+				const auto *value = unmappedGradientValue(*node, *wanted, key.Port);
+				if (value && key.Kind == KeyframeKind::Normal && GetFrameTime(key) == FrameTime{} &&
+					!key.SourceDriver && key.Data == *value)
+					continue;
+			}
 			if (old == imported.Graph.Keyframes.end())
 				keys.emplace_back(PxcxKeyframeInsertEdit{key.NodeId, key.Port, key});
 		}
@@ -2306,22 +2346,37 @@ namespace engine::imagegraphio {
 							 (value.Port == "width_mapped" || value.Port == "width_map_range")) ||
 							(node.Type == "pc.ambient_occlusion" &&
 							 (value.Port == "height_mapped" || value.Port == "height_map_range" ||
-							  value.Port == "intensity_mapped" || value.Port == "intensity_map_range"))) {
-							const bool occlusion = node.Type == "pc.ambient_occlusion";
+							  value.Port == "intensity_mapped" || value.Port == "intensity_map_range")) ||
+							(node.Type == "pc.gradient" &&
+							 (value.Port == "angle_mapped" || value.Port == "angle_map_range" ||
+							  value.Port == "radius_mapped" || value.Port == "radius_map_range" ||
+							  value.Port == "shift_mapped" || value.Port == "shift_map_range" ||
+							  value.Port == "scale_mapped" || value.Port == "scale_map_range"))) {
+							const bool occlusion = node.Type == "pc.ambient_occlusion",
+								gradient = node.Type == "pc.gradient";
 							const std::string_view numericId =
-								node.Type == "pc.dither"							? "contrast"
+								gradient ? std::string_view(value.Port).substr(0, value.Port.find('_'))
+								: node.Type == "pc.dither"							? "contrast"
 								: node.Type == "pc.erode"							? "width"
 								: occlusion && value.Port.starts_with("intensity_") ? "intensity"
 																					: "height";
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
-							const int expectedIndex = node.Type == "pc.dither"			   ? 4
+							const int expectedIndex = gradient					 ? (numericId == "angle"	? 3
+																					: numericId == "radius" ? 4
+																					: numericId == "shift"	? 5
+																											: 9)
+													  : node.Type == "pc.dither" ? 4
 													  : occlusion && numericId == "height" ? 3
 																						   : 1;
-							const std::string_view expectedKind = node.Type == "pc.dither" ? "Slider"
-																  : !occlusion			   ? "Int"
-																  : numericId == "height"  ? "Float"
-																						   : "Slider";
+							const std::string_view expectedKind = gradient
+																	  ? (numericId == "angle"	 ? "Rotation"
+																		 : numericId == "radius" ? "Float"
+																								 : "Slider")
+																  : node.Type == "pc.dither" ? "Slider"
+																  : !occlusion				 ? "Int"
+																  : numericId == "height"	 ? "Float"
+																							 : "Slider";
 							if (!height || height->SourceIndex != expectedIndex ||
 								height->SourceKind != expectedKind || inputs.size() <= size_t(expectedIndex))
 								return Reject(
@@ -2437,6 +2492,8 @@ namespace engine::imagegraphio {
 								node.Id,
 								value.Port
 							);
+						if (oldNode && unmappedGradientValue(*oldNode, node, value.Port))
+							record["attri"]["mapped"] = false;
 						Json seed = record.contains("r") ? record["r"]["d"] : Json{};
 						if (std::holds_alternative<ArrayValue>(value.Data) && seed.is_null())
 							seed = Json::array();

@@ -10,6 +10,7 @@ from source_behavior import (
     choice_source_evidence,
     enum_behavior,
     node_condition_choice_source,
+    node_gradient_choice_source,
     node_math_choice_source,
     node_vector_math_choice_source,
     source_choice_map,
@@ -262,6 +263,24 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
                 allowlisted_arrays={"global.node_math_scroll": found_labels},
             )
         )
+
+    def test_gradient_type_local_menu_is_literal_and_has_one_assignment(self):
+        root = self.make_root()
+        source = root / "scripts/node_gradient/node_gradient.gml"
+        source.parent.mkdir(parents=True)
+        literal = ('function Node_Gradient() {\n'
+                   '__gradTypes = __enum_array_gen(["Linear", "Circular", "Radial", "Diamond"], s_node_gradient_type);\n'
+                   'newInput(2, nodeValue_EScroll("Type", 0, __gradTypes)).setTopbar();\n}')
+        source.write_text(literal, encoding="utf-8")
+        labels, evidence = node_gradient_choice_source(root)
+        self.assertEqual(["Linear", "Circular", "Radial", "Diamond"], labels)
+        self.assertEqual(4, evidence["count"])
+        self.assertRegex(evidence["sha256"], r"^[0-9a-f]{64}$")
+        for changed in [literal.replace('"Diamond"','unknown'),
+                        literal.replace('newInput(2','newInput(3'),
+                        literal.replace('}', '__gradTypes = []; }')]:
+            source.write_text(changed, encoding="utf-8")
+            self.assertEqual((None, None), node_gradient_choice_source(root))
 
     def test_node_condition_choices_are_verified_against_source_order_and_comparators(self):
         root = self.make_root()

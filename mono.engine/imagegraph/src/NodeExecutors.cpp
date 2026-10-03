@@ -98,6 +98,9 @@ namespace engine::imagegraph::detail {
 					(port == "object" || port == "objects" || port.starts_with("object_") ||
 					 port == "filter_object" || port == "detect_objects"))
 					return true;
+				if (type == "pc.gradient" && (port == "gradient" || port == "progress_remap" ||
+											  port == "inverse_curve" || port == "curve"))
+					return true;
 				if (type == "pc.vfx_renderer" && port.starts_with("input_1_")) return true;
 				if (type == "pc.edge_detect" && port == "attribute_filter") return true;
 				if (type == "pc.segment_filter" && port == "segment") return true;

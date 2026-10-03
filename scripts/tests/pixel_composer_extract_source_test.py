@@ -12,7 +12,7 @@ EXTRACTOR = REPOSITORY / "scripts/pixel-composer/extract-source.py"
 
 
 class PixelComposerExtractSourceTest(unittest.TestCase):
-    def extract(self, root: Path, include_condition: bool = False) -> dict:
+    def extract(self, root: Path, include_condition: bool = False, include_gradient: bool = False) -> dict:
         script_root = root / "source"
         files = {
             "scripts/scrollBox/scrollBox.gml": "",
@@ -206,7 +206,7 @@ function Node_Fn_WaveTable(_x, _y) : Node(_x, _y) constructor {
 }
 """,
         }
-        if include_condition:
+        if include_condition or include_gradient:
             files["scripts/node_value_enum_scroll/node_value_enum_scroll.gml"] = '''
 #macro nodeValue_EScroll nodeValue_Enum_Scroll
 function __NodeValue_Enum_Scroll(_name, _node, _value, _data) : NodeValue(_name, _node, CONNECT_TYPE.input, VALUE_TYPE.integer, _value, "") constructor {
@@ -252,6 +252,17 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
     }
 }
 '''
+        if include_gradient:
+            files["scripts/node_gradient/node_gradient.gml"] = '''
+function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructor {
+    __gradTypes = __enum_array_gen(["Linear", "Circular", "Radial", "Diamond"], s_node_gradient_type);
+    newInput(2, nodeValue_EScroll("Type", 0, __gradTypes)).setTopbar();
+    newInput(3, nodeValue_Rotation("Angle", 0)).setMappable(10);
+    newInput(4, nodeValue_Float("Radius", .5)).setMappable(11);
+    newInput(5, nodeValue_Slider("Shift", 0)).setMappable(12);
+    newInput(9, nodeValue_Slider("Scale", 1)).setMappable(13);
+}
+'''
         for relative, content in files.items():
             path = script_root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,6 +288,7 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
                 "Node_Noise_Simplex",
                 "Node_Scatter_Point_Fibonacci",
                 *(('Node_Condition',) if include_condition else ()),
+                *(('Node_Gradient',) if include_gradient else ()),
             ):
                 writer.writerow({"node_id": node})
 
@@ -317,6 +329,20 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
         self.assertEqual(list(range(6)), [entry["choice_index"] for entry in condition["source_choices"]["entries"]])
         self.assertEqual(6, condition["source_behavior"]["choice_clamp"]["choice_count"])
         self.assertRegex(snapshot["source_choice_generated_evidence"]["cond_array"]["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_gradient_extraction_preserves_exact_shapes_and_two_endpoint_maps(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary), include_gradient=True)
+        inputs = {item["name"]: item for item in snapshot["nodes"]["Node_Gradient"]["inputs"]}
+        shapes = inputs["Type"]
+        self.assertEqual(["Linear", "Circular", "Radial", "Diamond"], shapes["choices"])
+        self.assertEqual(list(range(4)), [item["choice_index"] for item in shapes["source_choices"]["entries"]])
+        self.assertEqual(4, shapes["source_behavior"]["choice_clamp"]["choice_count"])
+        for name in ("Angle", "Radius", "Shift", "Scale"):
+            self.assertEqual("vector2", inputs[name]["mapped_range_type"])
+            evidence = snapshot["source_constructor_evidence"]["scripts/node_gradient/node_gradient.gml"]
+            self.assertRegex(evidence["sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(4, snapshot["source_choice_generated_evidence"]["__gradTypes"]["count"])
 
     def test_inherited_constructor_default_override_reaches_light_types(self):
         with tempfile.TemporaryDirectory() as temporary:

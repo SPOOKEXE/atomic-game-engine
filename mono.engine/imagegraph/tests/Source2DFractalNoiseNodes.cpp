@@ -18,8 +18,13 @@ using namespace engine::imagegraph;
 namespace {
 	Image NoiseSolid(uint32_t width, uint32_t height, Colour c) {
 		Image image{width, height, {}, 0};
-		for (uint64_t i = 0; i < uint64_t(width) * height; i++)
-			image.Pixels.insert(image.Pixels.end(), {c.Red, c.Green, c.Blue, c.Alpha});
+		image.Pixels.resize(size_t(width) * height * 4);
+		for (size_t i = 0; i < image.Pixels.size(); i += 4) {
+			image.Pixels[i] = c.Red;
+			image.Pixels[i + 1] = c.Green;
+			image.Pixels[i + 2] = c.Blue;
+			image.Pixels[i + 3] = c.Alpha;
+		}
 		return image;
 	}
 	struct NoiseGraph {

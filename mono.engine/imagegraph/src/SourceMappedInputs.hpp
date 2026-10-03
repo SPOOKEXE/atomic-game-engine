@@ -14,6 +14,13 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "height_mapped" || input.Id == "intensity_mapped")) ||
 				 (input.SourceKind == "MapRange" &&
 				  (input.Id == "height_map_range" || input.Id == "intensity_map_range")))) ||
+			   (entry.Type == "pc.gradient" &&
+				((input.SourceKind == "MapToggle" &&
+				  (input.Id == "angle_mapped" || input.Id == "radius_mapped" || input.Id == "shift_mapped" ||
+				   input.Id == "scale_mapped")) ||
+				 (input.SourceKind == "MapRange" &&
+				  (input.Id == "angle_map_range" || input.Id == "radius_map_range" ||
+				   input.Id == "shift_map_range" || input.Id == "scale_map_range")))) ||
 			   (entry.Type == "pc.erode" &&
 				((input.SourceKind == "MapToggle" && input.Id == "width_mapped") ||
 				 (input.SourceKind == "MapRange" && input.Id == "width_map_range"))) ||
@@ -36,6 +43,9 @@ namespace engine::imagegraph::detail {
 			return context.Boolean("contrast_mapped");
 		if (context.Entry.Type == "pc.ambient_occlusion" && (port == "height" || port == "intensity"))
 			return context.Boolean(port == "height" ? "height_mapped" : "intensity_mapped");
+		if (context.Entry.Type == "pc.gradient" &&
+			(port == "angle" || port == "radius" || port == "shift" || port == "scale"))
+			return context.Boolean(std::string(port) + "_mapped");
 		if (context.Entry.Type == "pc.erode" && port == "width") return context.Boolean("width_mapped");
 		if (context.Entry.Type == "pc.bevel" && port == "height") return context.Boolean("height_mapped");
 		if (context.Entry.Type == "pc.noise_simplex" && (port == "iteration" || port == "scale"))
@@ -50,6 +60,16 @@ namespace engine::imagegraph::detail {
 		const Value *value = context.Find(port);
 		const bool simplex =
 			context.Entry.Type == "pc.noise_simplex" && (port == "iteration" || port == "scale");
+		const bool drawGradient = context.Entry.Type == "pc.gradient" &&
+								  (port == "angle" || port == "radius" || port == "shift" || port == "scale");
+		if (drawGradient && !context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+			return context.Find(
+				port == "angle"
+					? "angle_map_range"
+					: (port == "radius" ? "radius_map_range"
+										: (port == "shift" ? "shift_map_range" : "scale_map_range"))
+			);
+		if (drawGradient && value) return value;
 		const bool simplexDefault =
 			simplex && !context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false);
 		if (simplexDefault)
@@ -72,6 +92,10 @@ namespace engine::imagegraph::detail {
 	}
 	inline bool ReadSourceMappedRange(NodeContext &context, std::string_view port, Vector2 &range) {
 		const Value *value = SourceMappedRange(context, port);
+		if (!value && context.Entry.Type == "pc.gradient") {
+			range = port == "radius" ? Vector2{0, .5} : (port == "scale" ? Vector2{0, 1} : Vector2{});
+			return true;
+		}
 		if (!value && context.Entry.Type == "pc.noise_simplex") {
 			range = port == "iteration" ? Vector2{0, 1} : Vector2{0.25, 0.25};
 			return true;
@@ -83,6 +107,8 @@ namespace engine::imagegraph::detail {
 			return true;
 		}
 		if ((context.Entry.Type == "pc.dither" && port == "contrast") ||
+			(context.Entry.Type == "pc.gradient" &&
+			 (port == "angle" || port == "radius" || port == "shift" || port == "scale")) ||
 			context.Entry.Type == "pc.ambient_occlusion" ||
 			(context.Entry.Type == "pc.bevel" && port == "height") ||
 			(context.Entry.Type == "pc.erode" && port == "width") ||

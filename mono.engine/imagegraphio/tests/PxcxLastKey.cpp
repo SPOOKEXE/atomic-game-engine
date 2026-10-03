@@ -62,6 +62,8 @@ TEST_CASE(
 	CHECK(result.Graph.Keyframes.front().Data == Value{6.5});
 	CHECK_FALSE(result.Graph.Keyframes.front().SourceDriver);
 	CHECK(result.Graph.Tracks.size() == 1);
+	CHECK(result.Graph.Nodes.front().SourceStaticInputs == std::vector<std::string>{"value"});
+	CHECK(result.Graph.Nodes.front().SourceAnimatedInputs.empty());
 	Document graph = result.Graph;
 	graph.Outputs = {{"out", "number", "number"}};
 	Plan plan;
@@ -97,7 +99,7 @@ TEST_CASE(
 TEST_CASE(
 	"PXC gradient last-key reset cascades only to its animated hidden range", "[imagegraphio][pxcx_last_key]"
 ) {
-	CHECK_FALSE(HasNativeExecutor("pc.gradient"));
+	REQUIRE(HasNativeExecutor("pc.gradient"));
 	for (bool rangeAnimated : {false, true}) {
 
 		// Source Node_Gradient declares gradient1, map15, hidden range16. The entire
@@ -150,21 +152,21 @@ TEST_CASE(
 		PxcxImport source;
 		REQUIRE(ImportPxcxImageGraph(checked, source, failure));
 		REQUIRE(source.Graph.Nodes.front().Type == "pc.gradient");
-		CHECK(
-			source.Graph.Nodes.front().SourceStaticInputs ==
-			(rangeAnimated ? std::vector<std::string>{} : std::vector<std::string>{"gradient_map_range"})
-		);
-		CHECK(
-			source.Graph.Nodes.front().SourceAnimatedInputs ==
-			(rangeAnimated ? std::vector<std::string>{"gradient_map_range"} : std::vector<std::string>{})
-		);
+		const auto contains = [](const auto &modes, std::string_view port) {
+			return std::find(modes.begin(), modes.end(), port) != modes.end();
+		};
+		const auto &sourceNode = source.Graph.Nodes.front();
+		CHECK_FALSE(contains(sourceNode.SourceStaticInputs, "gradient"));
+		CHECK(contains(sourceNode.SourceAnimatedInputs, "gradient"));
+		CHECK(contains(sourceNode.SourceStaticInputs, "gradient_map_range") == !rangeAnimated);
+		CHECK(contains(sourceNode.SourceAnimatedInputs, "gradient_map_range") == rangeAnimated);
 		Document modeRoundTrip;
 		Diagnostic modeDiagnostic;
 		REQUIRE(Read(Write(source.Graph), modeRoundTrip, modeDiagnostic) == Status::Ok);
 		CHECK(modeRoundTrip == source.Graph);
 		Document invalidMode = source.Graph;
 		invalidMode.Nodes.front().SourceStaticInputs = {"gradient"};
-		invalidMode.Nodes.front().SourceAnimatedInputs.clear();
+		invalidMode.Nodes.front().SourceAnimatedInputs = {"gradient"};
 		CHECK(Migrate(invalidMode, modeDiagnostic) == Status::InvalidValue);
 		Plan invalidModePlan;
 		CHECK(Compile(invalidMode, invalidModePlan, modeDiagnostic) == Status::InvalidValue);
@@ -182,8 +184,9 @@ TEST_CASE(
 			REQUIRE(engine::bake::ReadPxcx(absentModeBytes, absentModeChecked, failure));
 			PxcxImport absentMode;
 			REQUIRE(ImportPxcxImageGraph(absentModeChecked, absentMode, failure));
-			CHECK(absentMode.Graph.Nodes.front().SourceStaticInputs.empty());
-			CHECK(absentMode.Graph.Nodes.front().SourceAnimatedInputs.empty());
+			CHECK(contains(absentMode.Graph.Nodes.front().SourceStaticInputs, "gradient_map_range"));
+			CHECK_FALSE(contains(absentMode.Graph.Nodes.front().SourceAnimatedInputs, "gradient_map_range"));
+			CHECK(contains(absentMode.Graph.Nodes.front().SourceAnimatedInputs, "gradient"));
 			std::string malformedModeGraph = archive.GraphJson;
 			const std::string validMode = R"("anim":false)";
 			const auto validModeOffset = malformedModeGraph.find(validMode);
@@ -199,9 +202,18 @@ TEST_CASE(
 			CHECK_FALSE(ImportPxcxImageGraph(malformedModeChecked, malformedMode, failure));
 		}
 		const auto result = Edited(source, PxcxKeyframeDeleteEdit{"gradient", "gradient", {}, FrameTime{3}});
-		CHECK(
-			result.Graph.Nodes.front().SourceStaticInputs == std::vector<std::string>{"gradient_map_range"}
-		);
+		CHECK(contains(result.Graph.Nodes.front().SourceStaticInputs, "gradient"));
+		CHECK(contains(result.Graph.Nodes.front().SourceStaticInputs, "gradient_map_range"));
+		for (const auto &port : sourceNode.SourceStaticInputs)
+			CHECK(contains(result.Graph.Nodes.front().SourceStaticInputs, port));
+		const auto *entry = FindCatalogueEntry("pc.gradient");
+		REQUIRE(entry);
+		std::vector<std::string> expectedModes;
+		for (const auto &input : entry->Inputs)
+			if (input.SourceIndex >= 0 && (contains(sourceNode.SourceStaticInputs, input.Id) ||
+										   input.Id == "gradient" || input.Id == "gradient_map_range"))
+				expectedModes.emplace_back(input.Id);
+		CHECK(result.Graph.Nodes.front().SourceStaticInputs == expectedModes);
 		CHECK(result.Graph.Nodes.front().SourceAnimatedInputs.empty());
 		const auto gradientKey =
 			std::find_if(result.Graph.Keyframes.begin(), result.Graph.Keyframes.end(), [](const auto &key) {
@@ -229,9 +241,7 @@ TEST_CASE(
 		EvaluationRequest clock;
 		clock.Tick = 11;
 		EvaluationSnapshot snapshot;
-		REQUIRE(
-			EvaluateNodeInputs(graph, plan, "gradient", clock, snapshot, diagnostic) == Status::Ok
-		);
+		REQUIRE(EvaluateNodeInputs(graph, plan, "gradient", clock, snapshot, diagnostic) == Status::Ok);
 		const auto resolved =
 			std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &value) {
 				return value.Port == "gradient_map_range";

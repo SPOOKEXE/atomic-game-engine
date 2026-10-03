@@ -8884,10 +8884,14 @@ S	I	inverse_axis	0
 I	inverse_curve	Inverse Curve	22	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0 -0.3333333333333333 0 1 0 0 0	
 S	I	inverse_curve	1
 A	I	inverse_curve	1
-I	type	Type	2	EScroll	enum	e 0	
+I	type	Type	2	EScroll	enum	e 0	Linear;Circular;Radial;Diamond
 S	I	type	0
-B	I	type	0	general	1	default	?
-C	I	type	unknown
+B	I	type	0	general	1	default	4
+C	I	type	resolved
+Q	I	type	0	0	s "Linear"
+Q	I	type	1	0	s "Circular"
+Q	I	type	2	0	s "Radial"
+Q	I	type	3	0	s "Diamond"
 I	angle	Angle	3	Rotation	scalar	d 0	
 S	I	angle	0
 I	angle_mapped	Angle Mapped	-1	MapToggle	boolean	b 0	

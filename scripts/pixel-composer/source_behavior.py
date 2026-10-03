@@ -353,6 +353,34 @@ def node_condition_choice_source(root: Path) -> tuple[list[str] | None, dict | N
     }
 
 
+def node_gradient_choice_source(root: Path) -> tuple[list[str] | None, dict | None]:
+    """Verify Gradient's literal local menu and the matching Type input."""
+    source_path = "scripts/node_gradient/node_gradient.gml"
+    path = root / source_path
+    if not path.is_file():
+        return None, None
+    source = _without_comments(path.read_text(encoding="utf-8"))
+    nodes = list(re.finditer(r"function\s+Node_Gradient\([^)]*\)(?:\s*:[^{]+)?\s*\{", source))
+    if len(nodes) != 1:
+        return None, None
+    opening = source.find("{", nodes[0].start())
+    end = _matching_end(source, opening)
+    if end is None:
+        return None, None
+    body = source[opening + 1:end - 1]
+    assignments = list(re.finditer(r"__gradTypes\s*=(?!=)", body))
+    labels = re.search(r'__gradTypes\s*=\s*__enum_array_gen\(\s*\[([^]]*)\]\s*,\s*s_node_gradient_type\s*\)', body)
+    declaration = re.search(r'newInput\(\s*2\s*,\s*nodeValue_EScroll\(\s*"Type"\s*,\s*0\s*,\s*__gradTypes\s*\)\s*\)\s*\.\s*setTopbar\(\s*\)\s*;', body)
+    expected = ["Linear", "Circular", "Radial", "Diamond"]
+    if len(assignments) != 1 or labels is None or declaration is None:
+        return None, None
+    expressions = _split_top_level(labels.group(1))
+    if expressions != [json.dumps(x) for x in expected]:
+        return None, None
+    return expected, {"path": source_path, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                      "count": 4, "mapping": "__gradTypes literal source order maps indices 0..3 to Linear, Circular, Radial, Diamond"}
+
+
 def _resolved_source_array(
     expression: str,
     body: str,

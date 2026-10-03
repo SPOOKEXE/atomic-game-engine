@@ -43854,7 +43854,8 @@
      "kind": "Slider",
      "mapped": "range",
      "name": "Shift",
-     "source_array_classification": false
+     "source_array_classification": false,
+     "mapped_range_type": "vector2"
     },
     {
      "array_depth": 0,
@@ -43876,7 +43877,8 @@
      "kind": "Slider",
      "mapped": "range",
      "name": "Scale",
-     "source_array_classification": false
+     "source_array_classification": false,
+     "mapped_range_type": "vector2"
     },
     {
      "array_depth": 0,
@@ -43959,7 +43961,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Linear",
+      "Circular",
+      "Radial",
+      "Diamond"
+     ],
      "default": "0",
      "extra": [
       "__gradTypes"
@@ -43971,15 +43978,32 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 4,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Linear"
+       },
+       {
+        "choice_index": 1,
+        "label": "Circular"
+       },
+       {
+        "choice_index": 2,
+        "label": "Radial"
+       },
+       {
+        "choice_index": 3,
+        "label": "Diamond"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -43990,7 +44014,8 @@
      "kind": "Rotation",
      "mapped": "range",
      "name": "Angle",
-     "source_array_classification": false
+     "source_array_classification": false,
+     "mapped_range_type": "vector2"
     },
     {
      "array_depth": 0,
@@ -44010,7 +44035,8 @@
      "kind": "Float",
      "mapped": "range",
      "name": "Radius",
-     "source_array_classification": false
+     "source_array_classification": false,
+     "mapped_range_type": "vector2"
     },
     {
      "array_depth": 0,
@@ -155723,6 +155749,12 @@
    "mapping": "node_vmath_scroll copies node_vmath_names[i] in array_create_ext index order",
    "path": "scripts/node_vector_math/node_vector_math.gml",
    "sha256": "687144814ea6a0f8c1832c116157c7a2550caee688a236fa2ef7a2fa21148f98"
+  },
+  "__gradTypes": {
+   "count": 4,
+   "mapping": "__gradTypes literal source order maps indices 0..3 to Linear, Circular, Radial, Diamond",
+   "path": "scripts/node_gradient/node_gradient.gml",
+   "sha256": "d55c626179c4ee3cf5511f140c2b83929f4dce92226daa9baec76b2bcc8fb624"
   }
  },
  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
@@ -155802,6 +155834,10 @@
   "scripts/node_points_remap/node_points_remap.gml": {
    "bytes": 2072,
    "sha256": "e0c42c1c0dcbe48efddb5808b1c6e4e03f22a991c77463fbfd471ce05dd2a356"
+  },
+  "scripts/node_gradient/node_gradient.gml": {
+   "bytes": 9083,
+   "sha256": "d55c626179c4ee3cf5511f140c2b83929f4dce92226daa9baec76b2bcc8fb624"
   }
  }
 }

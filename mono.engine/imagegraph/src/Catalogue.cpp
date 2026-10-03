@@ -358,6 +358,13 @@ namespace engine::imagegraph {
 			return (array.ElementType == ValueType::Vector2 || array.ElementType == ValueType::Scalar ||
 					array.ElementType == ValueType::Integer || array.ElementType == ValueType::Any) &&
 				   detail::ValidPayload(array, true);
+		// These compound controls are complete source values selected by the processor row.
+		if (entry.Type == "pc.gradient" &&
+			((input.Type == ValueType::Curve &&
+			  (input.Id == "progress_remap" || input.Id == "inverse_curve" || input.Id == "curve")) ||
+			 (input.Type == ValueType::Gradient && input.Id == "gradient")))
+			return array.ElementType == input.Type && array.Nested.empty() && array.Items.empty() &&
+				   detail::ValidPayload(array, false);
 		// These fields project the mapped source numeric slot, whose endpoint depth is one.
 		const bool mappedRange =
 			input.SourceKind == "MapRange" && input.Type == ValueType::Vector2 &&
@@ -365,6 +372,9 @@ namespace engine::imagegraph {
 			  (input.Id == "metalic_map_range" || input.Id == "roughness_map_range")) ||
 			 (entry.Type == "pc.bevel" && input.Id == "height_map_range") ||
 			 (entry.Type == "pc.erode" && input.Id == "width_map_range") ||
+			 (entry.Type == "pc.gradient" &&
+			  (input.Id == "angle_map_range" || input.Id == "radius_map_range" ||
+			   input.Id == "shift_map_range" || input.Id == "scale_map_range")) ||
 			 (entry.Type == "pc.noise_simplex" &&
 			  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))) &&
 			std::any_of(

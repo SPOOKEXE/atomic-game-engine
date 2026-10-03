@@ -28,6 +28,7 @@ from source_behavior import (
     choice_source_evidence,
     enum_behavior,
     node_condition_choice_source,
+    node_gradient_choice_source,
     node_math_choice_source,
     node_vector_math_choice_source,
     source_choice_map,
@@ -68,6 +69,11 @@ CONSTRUCTOR_DEFAULT_OVERRIDE_NODES = {"Node_3D_Light"}
 MAPPED_RANGE_TYPE_OVERRIDES = {
     ("Node_Noise_Simplex", "Iteration"): "vector2",
     ("Node_Noise_Simplex", "Scale"): "vector2",
+    ("Node_Gradient", "Angle"): "vector2",
+    ("Node_Gradient", "Radius"): "vector2",
+    ("Node_Gradient", "Shift"): "vector2",
+    ("Node_Gradient", "Scale"): "vector2",
+
 }
 # Dynamic assignments have only been schema-checked for Struct's key/value pair.
 DYNAMIC_ASSIGNED_INPUT_NODES = {"Node_Struct"}
@@ -324,6 +330,7 @@ source_choice_evidence = choice_source_evidence(root)
 math_choice_labels, math_choice_evidence = node_math_choice_source(root)
 vector_math_choice_labels, vector_math_choice_evidence = node_vector_math_choice_source(root)
 condition_choice_labels, condition_choice_evidence = node_condition_choice_source(root)
+gradient_choice_labels, gradient_choice_evidence = node_gradient_choice_source(root)
 source_choice_generated_evidence = {}
 generated_choice_arrays = {}
 if source_choice_evidence is not None:
@@ -337,6 +344,10 @@ if source_choice_evidence is not None:
     if condition_choice_labels is not None and condition_choice_evidence is not None:
         source_choice_generated_evidence["cond_array"] = condition_choice_evidence
         generated_choice_arrays["cond_array"] = condition_choice_labels
+
+    if gradient_choice_labels is not None and gradient_choice_evidence is not None:
+        source_choice_generated_evidence["__gradTypes"] = gradient_choice_evidence
+        generated_choice_arrays["__gradTypes"] = gradient_choice_labels
 
 
 def array_process_metadata(name):
