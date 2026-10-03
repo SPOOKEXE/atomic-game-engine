@@ -47,14 +47,24 @@ namespace engine::imagegraph::detail {
 			return sum * .7 + .6;
 		}
 		bool NoiseDimensions(NodeContext &c, uint32_t &width, uint32_t &height) {
-			if (c.Integer("dimension_unit", 1) == 2) {
+			const auto unit = c.Integer("dimension_unit", 1);
+			if (unit != 2) return ResolveDimension(c, "dimension", width, height);
+			auto size = c.Vec2("dimension", {1, 1});
+			if (!c.IsLinked("dimension")) {
 				const auto *mask = c.Input("mask");
 				if (!mask) return c.Fail(Status::InvalidValue, "Mask dimensions require a mask", "mask");
-				width = mask->Width;
-				height = mask->Height;
-				return true;
+				size.X *= mask->Width;
+				size.Y *= mask->Height;
 			}
-			return ResolveDimension(c, "dimension", width, height);
+			if (!std::isfinite(size.X) || !std::isfinite(size.Y))
+				return c.Fail(Status::InvalidValue, "dimensions must be finite", "dimension");
+			const auto x = std::max(1., DriverRoundHalfEven(size.X)),
+					   y = std::max(1., DriverRoundHalfEven(size.Y));
+			if (x > Limits::MaximumDimension || y > Limits::MaximumDimension)
+				return c.Fail(Status::LimitExceeded, "dimensions exceed native limits", "dimension");
+			width = uint32_t(x);
+			height = uint32_t(y);
+			return c.FailureCode == Status::Ok;
 		}
 		const Value *NoiseOriginal(const NodeContext &c, std::string_view port) {
 			for (auto i = c.ProcessorOriginalValues.rbegin(); i != c.ProcessorOriginalValues.rend(); ++i)
@@ -65,8 +75,8 @@ namespace engine::imagegraph::detail {
 		}
 		struct NoiseBounds {
 			double Maximum = 0, Absolute = 0, MinimumPositive = std::numeric_limits<double>::infinity();
-			double Width = 0, Height = 0;
-			bool Zero = false;
+			double Width = 0, Height = 0, Minimum = 0, MinimumWidth = 0, MinimumHeight = 0;
+			bool Zero = false, HasVectors = false;
 			uint8_t Modes = 0;
 		};
 		template <class Leaf> void NoiseBoundLeaf(const Leaf &leaf, NoiseBounds &bound) {
@@ -75,6 +85,7 @@ namespace engine::imagegraph::detail {
 				if (value == 1) bound.Modes |= 2;
 				if (value == 2) bound.Modes |= 4;
 				bound.Maximum = std::max(bound.Maximum, value);
+				bound.Minimum = std::min(bound.Minimum, value);
 				bound.Absolute = std::max(bound.Absolute, std::abs(value));
 				if (value == 0)
 					bound.Zero = true;
@@ -94,6 +105,9 @@ namespace engine::imagegraph::detail {
 				number(v->Y);
 				bound.Width = std::max(bound.Width, v->X);
 				bound.Height = std::max(bound.Height, v->Y);
+				bound.MinimumWidth = std::min(bound.MinimumWidth, v->X);
+				bound.MinimumHeight = std::min(bound.MinimumHeight, v->Y);
+				bound.HasVectors = true;
 			}
 		}
 		NoiseBounds NoiseAllBounds(const NodeContext &c, std::string_view port) {
@@ -121,42 +135,51 @@ namespace engine::imagegraph::detail {
 				NoiseBoundLeaf(*value, bound);
 			return bound;
 		}
-		void NoiseBatchDimensions(NodeContext &c, uint32_t &width, uint32_t &height) {
+		bool NoiseBatchDimensions(NodeContext &c, uint32_t &width, uint32_t &height) {
 			const auto size = NoiseAllBounds(c, "dimension");
 			const auto units = NoiseAllBounds(c, "dimension_unit");
 			const bool pixel = (units.Modes & 1) != 0, project = (units.Modes & 2) != 0,
-					   mask = (units.Modes & 4) != 0;
-			if (pixel || project) {
-				double x = size.Width > 0 ? size.Width : size.Maximum,
-					   y = size.Height > 0 ? size.Height : size.Maximum;
-				if (!c.IsLinked("dimension") && project) {
-					x = pixel ? std::max(x, x * c.Project.SurfaceWidth) : x * c.Project.SurfaceWidth;
-					y = pixel ? std::max(y, y * c.Project.SurfaceHeight) : y * c.Project.SurfaceHeight;
-				}
-				// Monotone source rounding makes component maxima bound every selected row.
-				width = uint32_t(
-					std::max(
-						double(width), std::min(double(Limits::MaximumDimension) + 1, DriverRoundHalfEven(x))
-					)
-				);
-				height = uint32_t(
-					std::max(
-						double(height), std::min(double(Limits::MaximumDimension) + 1, DriverRoundHalfEven(y))
-					)
-				);
-			}
-			if (mask) {
+					   maskUnit = (units.Modes & 4) != 0;
+			const double x = size.HasVectors ? size.Width : size.Maximum,
+						 y = size.HasVectors ? size.Height : size.Maximum,
+						 minX = size.HasVectors ? size.MinimumWidth : size.Minimum,
+						 minY = size.HasVectors ? size.MinimumHeight : size.Minimum;
+			const auto observe = [&](double rawWidth, double rawHeight) {
+				if (!std::isfinite(rawWidth) || !std::isfinite(rawHeight))
+					return c.Fail(Status::InvalidValue, "dimensions must be finite", "dimension");
+				const auto w = std::max(1., DriverRoundHalfEven(rawWidth)),
+						   h = std::max(1., DriverRoundHalfEven(rawHeight));
+				if (w > Limits::MaximumDimension || h > Limits::MaximumDimension)
+					return c.Fail(Status::LimitExceeded, "dimensions exceed native limits", "dimension");
+				width = std::max(width, uint32_t(w));
+				height = std::max(height, uint32_t(h));
+				return true;
+			};
+			const auto projected = [&](double scaleX, double scaleY) {
+				if (!std::isfinite(minX * scaleX) || !std::isfinite(minY * scaleY))
+					return c.Fail(Status::InvalidValue, "dimensions must be finite", "dimension");
+				return observe(x * scaleX, y * scaleY);
+			};
+			// Source unit conversion belongs to the originating Dimension input.
+			if (c.IsLinked("dimension")) return observe(x, y);
+			if (pixel && !observe(x, y)) return false;
+			if (project && !projected(c.Project.SurfaceWidth, c.Project.SurfaceHeight)) return false;
+			if (maskUnit) {
+				double maskWidth = 1, maskHeight = 1;
 				if (const auto *mask = c.Input("mask")) {
-					width = std::max(width, mask->Width);
-					height = std::max(height, mask->Height);
+					maskWidth = mask->Width;
+					maskHeight = mask->Height;
 				}
 				for (const auto &[port, images] : c.ImageArrays)
 					if (port == "mask" && images)
 						for (const auto &image : images->Images) {
-							width = std::max(width, image.Width);
-							height = std::max(height, image.Height);
+							maskWidth = std::max(maskWidth, double(image.Width));
+							maskHeight = std::max(maskHeight, double(image.Height));
 						}
+				// Independent maxima conservatively bound every selected dimension/mask pairing.
+				if (!projected(maskWidth, maskHeight)) return false;
 			}
+			return true;
 		}
 		bool NoiseHasMask(const NodeContext &c) {
 			if (c.Input("mask")) return true;
@@ -165,7 +188,7 @@ namespace engine::imagegraph::detail {
 			return false;
 		}
 		bool NoiseWork(NodeContext &c, uint32_t width, uint32_t height, uint64_t perPixel) {
-			NoiseBatchDimensions(c, width, height);
+			if (!NoiseBatchDimensions(c, width, height)) return false;
 			const uint64_t rows = std::max<uint64_t>(1, c.ProcessorCount), pixels = uint64_t(width) * height;
 			if (perPixel > FRACTAL_NOISE_WORK_LIMIT ||
 				rows > FRACTAL_NOISE_WORK_LIMIT / std::max<uint64_t>(1, perPixel) ||

@@ -175,6 +175,7 @@ TEST_CASE(
 	g.Input("uv_map", NoiseSolid(1, 1, {128, 128, 0, 128}));
 	g.Input("mask", NoiseSolid(3, 2, {64, 128, 192, 128}));
 	g.Set("dimension_unit", EnumValue{2});
+	g.Set("dimension", Vector2{1, 1});
 	const auto out = g.Run();
 	CHECK(out.Width == 3);
 	CHECK(out.Height == 2);
@@ -782,4 +783,173 @@ TEST_CASE(
 	CHECK(context.OutputImages.empty());
 	CHECK(context.OutputImageArrays.empty());
 	CHECK(budget.Peak() == 0);
+}
+
+TEST_CASE(
+	"Noise Mask units multiply authored components and survive persistence", "[source_noise_mask_dimension]"
+) {
+	for (const auto type : {"pc.noise_simplex", "pc.ridge_noise"}) {
+		NoiseGraph g(type);
+		g.Set("dimension", Vector2{2, .5});
+		g.Set("dimension_unit", EnumValue{2});
+		g.Input("mask", NoiseSolid(2, 2, {255, 255, 255, 255}));
+		const auto masked = g.Run();
+		REQUIRE(masked.Width == 4);
+		REQUIRE(masked.Height == 1);
+		g.Roundtrip();
+		CHECK(g.Run() == masked);
+		g.Set("dimension", Vector2{4, 1});
+		g.Set("dimension_unit", EnumValue{0});
+		CHECK(g.Run() == masked);
+	}
+}
+TEST_CASE(
+	"Noise Mask projected fractions round half to even and clamp small sides", "[source_noise_mask_dimension]"
+) {
+	for (const auto type : {"pc.noise_simplex", "pc.ridge_noise"}) {
+		for (const auto raw : {Vector2{.25, .75}, Vector2{.75, 1.25}, Vector2{.1, .1}}) {
+			NoiseGraph g(type);
+			g.Set("dimension", raw);
+			g.Set("dimension_unit", EnumValue{2});
+			g.Input("mask", NoiseSolid(2, 2, {255, 255, 255, 255}));
+			const auto out = g.Run();
+			const auto w = raw.X == .25 ? 1u : (raw.X == .75 ? 2u : 1u);
+			const auto h = raw.Y == .1 ? 1u : 2u;
+			CHECK(out.Width == w);
+			CHECK(out.Height == h);
+		}
+	}
+}
+TEST_CASE(
+	"Noise linked physical Dimension bypasses consumer Mask units without requiring a mask",
+	"[source_noise_mask_dimension]"
+) {
+	for (const auto type : {"pc.noise_simplex", "pc.ridge_noise"}) {
+		NoiseGraph g(type);
+		g.Set("dimension_unit", EnumValue{2});
+		Node dimensions{"dimensions", "pc.array", "", {}, {{"type", EnumValue{0}}}};
+		dimensions.DynamicInputs = {{"input_0", ValueType::Any, Vector2{3, 2}}};
+		g.Doc.Nodes.push_back(std::move(dimensions));
+		g.Doc.Links.push_back({"dimensions", "array", "noise", "dimension"});
+		const auto out = g.Run();
+		CHECK(out.Width == 3);
+		CHECK(out.Height == 2);
+	}
+}
+TEST_CASE(
+	"Noise heterogeneous Mask rows multiply each captured frame extent", "[source_noise_mask_dimension]"
+) {
+	NoiseGraph g("pc.noise_simplex");
+	g.Set("dimension", Vector2{2, .5});
+	g.Set("dimension_unit", EnumValue{2});
+	g.Doc.Nodes.push_back({"small", "pc.image", "", {}, {}});
+	g.Doc.Nodes.push_back({"large", "pc.image", "", {}, {}});
+	g.Sources.emplace_back("small", NoiseSolid(2, 2, {255, 255, 255, 255}));
+	g.Sources.emplace_back("large", NoiseSolid(3, 4, {255, 255, 255, 255}));
+	Node masks{"masks", "pc.array", "", {}, {{"type", EnumValue{1}}}};
+	masks.DynamicInputs = {{"input_0", ValueType::Image, {}}, {"input_1", ValueType::Image, {}}};
+	g.Doc.Nodes.push_back(std::move(masks));
+	g.Doc.Links = {
+		{"small", "surface_out", "masks", "input_0"},
+		{"large", "surface_out", "masks", "input_1"},
+		{"masks", "array", "noise", "mask"}
+	};
+	g.CompileNow();
+	ImageArray out;
+	const auto status = EvaluateArray(g.Doc, g.Compiled, "image", g.Request, out, g.Error);
+	INFO(g.Error.Message);
+	REQUIRE(status == Status::Ok);
+	REQUIRE(out.Images.size() == 2);
+	CHECK(out.Images[0].Width == 4);
+	CHECK(out.Images[0].Height == 1);
+	CHECK(out.Images[1].Width == 6);
+	CHECK(out.Images[1].Height == 2);
+}
+TEST_CASE(
+	"Noise Mask multiplier later row is work-admitted before tight-budget output allocation",
+	"[source_noise_mask_dimension]"
+) {
+	NoiseGraph g("pc.noise_simplex");
+	g.Set("dimension", Vector2{2, 2});
+	g.Set("dimension_unit", EnumValue{2});
+	g.Set("iteration", int64_t{4});
+	g.Set("color_mode", EnumValue{1});
+	g.Doc.Nodes.push_back({"small", "pc.image", "", {}, {}});
+	g.Doc.Nodes.push_back({"large", "pc.image", "", {}, {}});
+	g.Sources.emplace_back("small", NoiseSolid(1, 1, {255, 255, 255, 255}));
+	g.Sources.emplace_back("large", NoiseSolid(257, 257, {255, 255, 255, 255}));
+	Node masks{"masks", "pc.array", "", {}, {{"type", EnumValue{1}}}};
+	masks.DynamicInputs = {{"input_0", ValueType::Image, {}}, {"input_1", ValueType::Image, {}}};
+	g.Doc.Nodes.push_back(std::move(masks));
+	g.Doc.Links = {
+		{"small", "surface_out", "masks", "input_0"},
+		{"large", "surface_out", "masks", "input_1"},
+		{"masks", "array", "noise", "mask"}
+	};
+	g.CompileNow();
+	for (const auto bytes : {uint64_t{2 * 1024 * 1024}, Limits::MaximumOutputBytes}) {
+		Image out = NoiseSolid(1, 1, {9, 8, 7, 6});
+		const auto prior = out;
+		const auto status = Evaluate(g.Doc, g.Compiled, "image", g.Request, out, g.Error, bytes);
+		INFO(g.Error.Message);
+		CHECK(status == Status::LimitExceeded);
+		CHECK(g.Error.Port == "iteration");
+		CHECK(g.Error.Message.find("entire processor batch") != std::string::npos);
+		CHECK(out == prior);
+	}
+}
+TEST_CASE(
+	"Noise Mask projected later dimensions exceed native limits before allocation",
+	"[source_noise_mask_dimension]"
+) {
+	NoiseGraph g("pc.noise_simplex");
+	g.Set("dimension", ArrayValue{ValueType::Vector2, {Vector2{1, 1}, Vector2{3, 1}}});
+	g.Set("dimension_unit", EnumValue{2});
+	g.Input("mask", NoiseSolid(2048, 1, {255, 255, 255, 255}));
+	g.CompileNow();
+	Image out = NoiseSolid(1, 1, {9, 8, 7, 6});
+	const auto prior = out;
+	const auto status = Evaluate(g.Doc, g.Compiled, "image", g.Request, out, g.Error, 64 * 1024);
+	INFO(g.Error.Message);
+	CHECK(status == Status::LimitExceeded);
+	CHECK(g.Error.Port == "dimension");
+	CHECK(out == prior);
+}
+TEST_CASE(
+	"Noise Mask multiplication finite and float-byte refusals preserve the previous image",
+	"[source_noise_mask_dimension]"
+) {
+	NoiseGraph g("pc.noise_simplex");
+	g.Set("dimension", Vector2{1.e308, 1});
+	g.Set("dimension_unit", EnumValue{2});
+	g.Input("mask", NoiseSolid(2, 2, {255, 255, 255, 255}));
+	g.CompileNow();
+	Image out = NoiseSolid(1, 1, {9, 8, 7, 6});
+	const auto prior = out;
+	CHECK(Evaluate(g.Doc, g.Compiled, "image", g.Request, out, g.Error) == Status::InvalidValue);
+	CHECK(g.Error.Port == "dimension");
+	CHECK(out == prior);
+	g.Set("dimension", Vector2{128, 128});
+	g.Set("attribute_color_depth", EnumValue{5});
+	g.CompileNow();
+	CHECK(Evaluate(g.Doc, g.Compiled, "image", g.Request, out, g.Error, 64 * 1024) == Status::LimitExceeded);
+	CHECK(g.Error.Port == "surface_out");
+	CHECK(out == prior);
+}
+TEST_CASE(
+	"Noise later negative Mask projection overflow is refused before first output growth",
+	"[source_noise_mask_dimension]"
+) {
+	NoiseGraph g("pc.noise_simplex");
+	g.Set("dimension", ArrayValue{ValueType::Vector2, {Vector2{1, 1}, Vector2{-1.e308, 1}}});
+	g.Set("dimension_unit", EnumValue{2});
+	g.Input("mask", NoiseSolid(2, 2, {255, 255, 255, 255}));
+	g.CompileNow();
+	Image out = NoiseSolid(1, 1, {9, 8, 7, 6});
+	const auto prior = out;
+	const auto status = Evaluate(g.Doc, g.Compiled, "image", g.Request, out, g.Error, 64 * 1024);
+	INFO(g.Error.Message);
+	CHECK(status == Status::InvalidValue);
+	CHECK(g.Error.Port == "dimension");
+	CHECK(out == prior);
 }

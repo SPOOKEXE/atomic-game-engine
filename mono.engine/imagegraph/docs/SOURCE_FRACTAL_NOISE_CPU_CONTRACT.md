@@ -17,7 +17,12 @@ remain observation gates. Flat Ridge gradients use the explicit native
 
 ## Controls and getters
 
-Both routes resolve Dimension with the source unit choice, including Mask Size.
+Both routes resolve Dimension with the source unit choice. Unlinked Mask Size
+multiplies each authored Dimension component by the corresponding mask extent.
+Linked Dimension values remain physical and bypass the consumer unit, including
+when its Mask input is absent. Projected sides round half to even and clamp to
+at least one; nonfinite projections and native dimension limits are checked
+before allocation.
 Position's Reference mode multiplies its two components by the output dimensions
 before the shaders divide Position by Dimension. Rotation is authored in degrees.
 UV Map reads `(red, 1 - green)`, blends coordinates by UV Mix, and contributes
@@ -97,7 +102,12 @@ and image arrays once at processor row 0 before any owned noise output/scratch
 growth. These scans visit only payloads already bounded by the document/evaluation
 array limits; later rows reuse admission without rescanning whole arrays. The
 bound defensively observes Pixel, Project and Mask modes independently, applies project
-scaling only when Project occurs, and includes every Mask Size frame. It combines
+scaling only when Project occurs. It includes every Mask Size frame and multiplies
+its extent maxima by the retained authored Dimension component maxima.
+Per-axis negative extrema also detect multiplication overflow before any row
+allocates output. Linked
+physical dimensions bypass those unit projections. Projected native dimension
+limits are admitted before noise output allocation. The work bound combines
 maximum dimensions, iteration endpoints, enabled tile/color branches, absolute
 blur and minimum absolute iteration factor across all rows, then multiplies by
 the processor count. This
@@ -143,12 +153,16 @@ Pixel Composer revision `b69eca232217360cf1502ef0223523d818606652`:
 | `scripts/mask_function/mask_function.gml` | `94c22c8b1d3085c8ada6c673e5836326a8c866579b35ebb4487c343fb4f94023` |
 | `scripts/node_value/node_value.gml` | `6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd` |
 | `scripts/node_value_int/node_value_int.gml` | `75ae2d6a3df5c6d7f62e50adf0bfc1f1467c51e6519bb80011f6164536dff8d2` |
+| `scripts/node_value_dimension/node_value_dimension.gml` | `7a31f24df14a2fe19f5566ab7d2e919f792faccac83ecbdff7f59a91e93f54e9` |
 | `scripts/node_value_vec2/node_value_vec2.gml` | `c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112` |
 
-The test file contains 30 authored-graph cases and one private defensive preflight case: default/explicit seeds, tiling,
+The test file contains 38 authored-graph cases and one private defensive preflight case: default/explicit seeds, tiling,
 normalized octaves, channel offsets/ranges, transform units, levels, UV alpha,
 masks, mapped ranges and linked range arrays, float and single-channel formats,
 Ridge cell/gradient/stripe/blend/multiplier controls, Gaussian oversampling,
 animation/instance seek, processor row order, persistence and atomic work/byte
-refusals. Joined Compile/Evaluate runtime validation remains required after
+refusals. Mask-unit regressions additionally cover raw nonunit and fractional
+components, heterogeneous mask arrays, linked physical dimensions, later-row
+projection/work limits, nonfinite multiplication and tight float byte budgets.
+Joined Compile/Evaluate runtime validation remains required after
 integration; outside strict syntax validation alone is not acceptance.
