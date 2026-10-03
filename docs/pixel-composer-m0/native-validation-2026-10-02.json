@@ -6765,6 +6765,484 @@
       "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
       "assertions_passed": 2180,
       "test_cases_passed": 99
+    },
+    {
+      "name": "build-release-76-camera-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-76-camera-repaired.log",
+      "log_sha256": "b2250c9fab5720217e1ed6acecf885caa1d2f987654166cddd6e79f073ea0747",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 fixture repair SHA256 59a9ed0b0aaedb91aceeb71d2a4078fe1db690c4735bcb18848733721fd2a719. Registered cube is pc.3_d_mesh_cube; source Solid exposes a linked dimension, native image.solid.width is authored property only. Camera acceptance and GPU/live/reference gates remain open."
+    },
+    {
+      "name": "client-camera-release-76-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-camera-release-76-focused-repaired.log",
+      "log_sha256": "f21f048a6e9be86221b5d63f95ee1f9e665a24f8ac54ad4bb0d5875d29dd464b",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 fixture repair SHA256 59a9ed0b0aaedb91aceeb71d2a4078fe1db690c4735bcb18848733721fd2a719. Registered cube is pc.3_d_mesh_cube; source Solid exposes a linked dimension, native image.solid.width is authored property only. Camera acceptance and GPU/live/reference gates remain open.",
+      "assertions_passed": 31,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "client-route-release-76-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-route-release-76-focused-repaired.log",
+      "log_sha256": "93417aa896e2f3de0bd23326636f53e86ed21769f202607dc973b0fc6d5307ee",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 fixture repair SHA256 59a9ed0b0aaedb91aceeb71d2a4078fe1db690c4735bcb18848733721fd2a719. Registered cube is pc.3_d_mesh_cube; source Solid exposes a linked dimension, native image.solid.width is authored property only. Camera acceptance and GPU/live/reference gates remain open.",
+      "assertions_passed": 22,
+      "test_cases_passed": 3
+    },
+    {
+      "name": "imagegraph-payload-release-76-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-payload-release-76-focused-repaired.log",
+      "log_sha256": "35adb9a458f20ec50bd878343a0c600912c86ef73785adf0769b99a1d4366bab",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 fixture repair SHA256 59a9ed0b0aaedb91aceeb71d2a4078fe1db690c4735bcb18848733721fd2a719. Registered cube is pc.3_d_mesh_cube; source Solid exposes a linked dimension, native image.solid.width is authored property only. Camera acceptance and GPU/live/reference gates remain open.",
+      "assertions_passed": 6,
+      "test_cases_passed": 1
+    },
+    {
+      "name": "render-camera-release-76-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-camera-release-76-focused-repaired.log",
+      "log_sha256": "aa55c072883e27ef12b63dddfc75ef42f88484455c24fb558286fd1b6bd1c6f0",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 fixture repair SHA256 59a9ed0b0aaedb91aceeb71d2a4078fe1db690c4735bcb18848733721fd2a719. Registered cube is pc.3_d_mesh_cube; source Solid exposes a linked dimension, native image.solid.width is authored property only. Camera acceptance and GPU/live/reference gates remain open.",
+      "assertions_passed": 51,
+      "test_cases_passed": 3
+    },
+    {
+      "name": "studio-camera-release-76-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-camera-release-76-focused-repaired.log",
+      "log_sha256": "8d77ab8acff761fc8465e592217cce46793462d373142108966561afaf51d9ed",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 fixture repair SHA256 59a9ed0b0aaedb91aceeb71d2a4078fe1db690c4735bcb18848733721fd2a719. Registered cube is pc.3_d_mesh_cube; source Solid exposes a linked dimension, native image.solid.width is authored property only. Camera acceptance and GPU/live/reference gates remain open.",
+      "assertions_passed": 295,
+      "test_cases_passed": 9
+    },
+    {
+      "name": "build-release-76-camera-final",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-76-camera-final.log",
+      "log_sha256": "c74b567ea530ce218fac1ec5b092889827b883b638203f935b7f50c483f08564",
+      "command": [
+        "cmake",
+        "--build",
+        ".cache/build/release-tests",
+        "-j",
+        "8",
+        "--target",
+        "test_nodegraph",
+        "test_imagegraph",
+        "test_imagegraphio",
+        "test_imagegraphexport",
+        "test_imagegraphphysics",
+        "test_studio",
+        "test_client",
+        "test_render",
+        "test_server",
+        "test_assets",
+        "client",
+        "studio",
+        "server",
+        "assetc",
+        "imagegraph",
+        "test_imagegraph_runner",
+        "test_gui",
+        "test_assetc"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ]
+    },
+    {
+      "name": "client-camera-release-76-focused-final",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-camera-release-76-focused-final.log",
+      "log_sha256": "5e35bff8b0912a8a363696c0aed4d7cf31dd182be4752a71a31977834089ccbb",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+        "[client][source-camera-graph-host]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 31,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "client-route-release-76-focused-final",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-route-release-76-focused-final.log",
+      "log_sha256": "a75999c9494b0565e6918543bde27e0c0d7a2d1de06b4fdeaab6f3485777c16b",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+        "[client][camera-route]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 22,
+      "test_cases_passed": 3
+    },
+    {
+      "name": "imagegraph-camera-release-76-focused-final",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-camera-release-76-focused-final.log",
+      "log_sha256": "63ef6d35a5997fac4534da19aeb876e9559c1f21186e22360c4f91762ae800ce",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraph",
+        "[imagegraph][source-camera-host]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 118,
+      "test_cases_passed": 6
+    },
+    {
+      "name": "imagegraph-payload-release-76-focused-final",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-payload-release-76-focused-final.log",
+      "log_sha256": "9234476bedd63dadd5237dd61849e15aa88644b4e7ea4d40482fca517dde5d03",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraph",
+        "[imagegraph][payload]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 6,
+      "test_cases_passed": 1
+    },
+    {
+      "name": "render-camera-release-76-focused-final",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-camera-release-76-focused-final.log",
+      "log_sha256": "51c2fea22eb89b9b7a1ede1885b2af8802a87a2e0ca7c00674b6f011793fda0a",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+        "[render][source-camera-capture]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 51,
+      "test_cases_passed": 3
+    },
+    {
+      "name": "studio-camera-release-76-focused-final",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-camera-release-76-focused-final.log",
+      "log_sha256": "59d02e3901f2fb19190f7fe4cee3705186886f8eae6e5d7d5be90997eb38e5da",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_studio",
+        "[studio][camera_preview],[studio][preview-result]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 295,
+      "test_cases_passed": 9
+    },
+    {
+      "name": "architecture-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-76-joined-repaired.log",
+      "log_sha256": "c9cea599d23c8fd7324c7352e7b643bebef6e4ee6f2b33c9c2b475d758432416",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "architecture",
+        "--output-on-failure"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ]
+    },
+    {
+      "name": "assetc-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-76-joined-repaired.log",
+      "log_sha256": "1c16bb01c817318ee3454d2e43c1b3e5ec3f6efd8213d4758ffc804affcfe912",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 362,
+      "test_cases_passed": 42
+    },
+    {
+      "name": "assets-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-76-joined-repaired.log",
+      "log_sha256": "e28810c3b0ed87aaa3d5bd5da71e5ba0a8351e0a78e82520dc44be523a8e6b9b",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "cli-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-76-joined-repaired.log",
+      "log_sha256": "d62dd3cb6e96ac4db78c663982096c25b766cd411605d934092f6ab6cb390e73",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+        "--output-on-failure"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ]
+    },
+    {
+      "name": "client-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-76-joined-repaired.log",
+      "log_sha256": "c37f6851ab563e66c5aecc428b4b27243cf6690ca1c21b72954c88f05c0de0fe",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+        "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 7109,
+      "test_cases_passed": 68
+    },
+    {
+      "name": "export-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-76-joined-repaired.log",
+      "log_sha256": "98ad86f6a0a8edb215cd7371372aefe8dc0a675cb96afad3955d32aa0935cc7b",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 2613,
+      "test_cases_passed": 62
+    },
+    {
+      "name": "gui-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-76-joined-repaired.log",
+      "log_sha256": "c8c73db2b6aaaea9614eef72ef6de13ff7010e3e8884256f77dde90379ec1062",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 4974,
+      "test_cases_passed": 331
+    },
+    {
+      "name": "imagegraph-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-76-joined-repaired.log",
+      "log_sha256": "8fa17ba565226ddb9813e27e90ec3a793ac8e949a50913bc5e829860186c502a",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 1853878,
+      "test_cases_passed": 2560
+    },
+    {
+      "name": "io-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-76-joined-repaired.log",
+      "log_sha256": "654d3922d0428b35abba2ea793f2f9d0a2983fb087f9afd937e98a63529159e2",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 10373,
+      "test_cases_passed": 228
+    },
+    {
+      "name": "nodegraph-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-76-joined-repaired.log",
+      "log_sha256": "bcb5e242f823ca80a989fae7b06408d0b9144afe2d3e3840757cc91b5410e56f",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "physics-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-76-joined-repaired.log",
+      "log_sha256": "445dea878f2a65fd61b2bd519104314e1783ed0d615c5683c1a6bb003bbce0f1",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "render-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-76-joined-repaired.log",
+      "log_sha256": "f49b5c7987ee279fdaa5944228f8e0dfaaa97f6157444b537b8a041960124687",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+        "~[gpu]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 336654,
+      "test_cases_passed": 808
+    },
+    {
+      "name": "server-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-76-joined-repaired.log",
+      "log_sha256": "853af407d718c7f96f97026ea0ca159dd3038aa70d04c0322b793f084c6a98a2",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 2180,
+      "test_cases_passed": 99
+    },
+    {
+      "name": "studio-release-76-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-76-joined-repaired.log",
+      "log_sha256": "ed8351a40c7cda57e12c04a4a218b36d2dcc7f5961db65c8d1fb81c1c3c9d122",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_studio",
+        "[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera and Studio sequence release76 CPU integration. Two source-backed fixture repairs; prior failed runs retained. Formatting changed only one trailing blank line after final runtime checks. No new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commits": [
+        "023168a7",
+        "4c6259ed"
+      ],
+      "assertions_passed": 8648,
+      "test_cases_passed": 155
     }
   ],
   "excluded_or_failed_runs": [
@@ -8424,6 +8902,15 @@
       "exit_code": 42,
       "result": "failed; retained before native acceptance",
       "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance. 155 cases: 151 pass, 4 fail; 8412 assertions: 8408 pass, 4 fail. Known camera UnknownNode and sequence unknown-port compile failures."
+    },
+    {
+      "name": "imagegraph-camera-release-76-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-camera-release-76-focused-repaired.log",
+      "log_sha256": "7c6bd2b81cfce71da0ab9ac00ffcf7a673a84992648fb73995d48dee87f73b7a",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Camera release76 fixture repair SHA256 59a9ed0b0aaedb91aceeb71d2a4078fe1db690c4735bcb18848733721fd2a719. Registered cube is pc.3_d_mesh_cube; source Solid exposes a linked dimension, native image.solid.width is authored property only. Camera acceptance and GPU/live/reference gates remain open. 6 cases:5 passed1 failed,107 assertions:105 passed2 failed. Group ColorDepth3 explicitly selects rgba8, the same resolved format as inherited project ColorDepth1; policy remains valid. Fixture must cover equivalent resolved policy acceptance and rgba16f mismatch refusal."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -9490,6 +9977,16 @@
       "hash": "f272199f1d002939e81bfd469eab72c7f20ecc21",
       "subject": "Preserve separate Mirror X and Y animators through replay and PXC edits",
       "scope": "Five Mirror inputs with owned axes, original-writer group replay, native/capture/PXC persistence and source mode transitions. All 14 joined CPU scopes pass after fixture/diagnostic repairs. Generic separate/combine, other getter classes and Studio axis workflows remain open."
+    },
+    {
+      "hash": "023168a7",
+      "subject": "Integrate camera capture routing and source row receipts",
+      "scope": "Source camera fixed policy and explicit processor ordinal, seven-output asynchronous capture, bounded request preparation and client routing. Joined CPU passed; new device fixture compiled but not run."
+    },
+    {
+      "hash": "4c6259ed",
+      "subject": "Integrate Studio camera rows and bounded sequence previews",
+      "scope": "Actual Composer host dispatch, once-per-row retry receipts and owned source sequence preview/index selection. Focused9/295 and joined Studio155/8648 passed. Live Studio and camera GPU verification pending."
     }
   ],
   "temporary_build_storage": {
@@ -9636,8 +10133,10 @@
     "build75_release": "Refract focused36 cases/2458 assertions, actual mapped-input IO1 case/178 assertions,96 metadata tests and14 joined CPU scopes pass. Full imagegraph2553 cases/1853752 assertions; full IO228 cases/10373 assertions. Initial feather-oracle failure retained and repaired without production mask changes.",
     "build75_overall": "Selected native integration gates passed. Overall M0-M7, camera, font/axes/cache integration, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete.",
     "build76_initial": "Coherent 671-step camera ABI closure passed. Payload1/6 and render request3/51 CPU checks passed; imagegraph/client/Studio focused compile failures retained. No camera acceptance or GPU run claimed.",
-    "build76_overall": "Overall M0-M7 remains incomplete. Camera focused repairs and joined CPU closure, font/axes/cache/remaining catalogue work, GPU approval, live Studio and licensed parity remain open.",
-    "build76_initial_joined": "Fourteen joined CPU scopes executed: eleven passed; imagegraph/client/Studio failed only the retained focused camera and sequence compile cases. Full render808/336655 passed. Repairs pending; camera and overall joined acceptance not claimed."
+    "build76_overall": "Selected camera capture/row and Studio sequence CPU milestones accepted and committed. Full camera GPU verification and live Studio remain open, alongside font/axes/cache, remaining catalogue/3D/exports, source argument parity and licensed-reference gates. Overall M0-M7 remains incomplete.",
+    "build76_initial_joined": "Fourteen joined CPU scopes executed: eleven passed; imagegraph/client/Studio failed only the retained focused camera and sequence compile cases. Full render808/336655 passed. Repairs pending; camera and overall joined acceptance not claimed.",
+    "build76_fixture_repair": "Five test fixtures repaired, matching9-step closure passed. Client camera2/31, route3/22, Studio9/295, request3/51 and payload1/6 pass. Core camera5/6 cases pass; stale-policy fixture erroneously expects equivalent rgba8 to invalidate a receipt. Source-backed oracle repair pending.",
+    "build76_final": "Camera6/118, payload1/6, render request3/51, client provider2/31, client routing3/22 and Studio preview9/295 pass. All14 joined CPU scopes pass, including fullimagegraph2560/1853878, render808/336654, client68/7109 and Studio155/8648. 671-step ABI build and matching fixture repairs passed. Prior failures retained; production registration unchanged."
   },
   "pending_gates": [
     {
