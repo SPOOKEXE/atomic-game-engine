@@ -751,8 +751,12 @@ namespace engine::imagegraph::detail {
 									 ))
 							: Value{array};
 					item = NormalizeVector(std::move(item), input.Type);
+					const bool lookAtControl = context.Entry.Type == "pc.quarternion_lookat" &&
+											   (input.Port == "origin" || input.Port == "target" ||
+												input.Port == "up" || input.Port == "unit");
+					// Look At's source getters accept scalar coordinates and numeric selector leaves.
 					if (const auto kind = PayloadType(item);
-						input.Type != ValueType::Any && input.Type != ValueType::Array &&
+						!lookAtControl && input.Type != ValueType::Any && input.Type != ValueType::Array &&
 						kind != input.Type && !(kind == ValueType::Array && input.Depth > 0) &&
 						!((kind == ValueType::Scalar || kind == ValueType::Integer) &&
 						  (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
@@ -907,11 +911,14 @@ namespace engine::imagegraph::detail {
 					auto released = context.OutputCharge.Split(retained);
 					continue;
 				}
-				const bool generic = std::any_of(
-					context.Entry.Outputs.begin(), context.Entry.Outputs.end(), [&](const auto &output) {
-						return output.Id == value.Port && output.Type == ValueType::Any;
-					}
-				);
+				// Source Look At can alternate between Euler triples and quaternion tuples per row.
+				const bool generic =
+					(context.Authored.Type == "pc.quarternion_lookat" && value.Port == "rotation") ||
+					std::any_of(
+						context.Entry.Outputs.begin(), context.Entry.Outputs.end(), [&](const auto &output) {
+							return output.Id == value.Port && output.Type == ValueType::Any;
+						}
+					);
 				auto target = std::find_if(values.begin(), values.end(), [&](const auto &item) {
 					return item.Port == value.Port;
 				});

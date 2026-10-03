@@ -1,3 +1,5 @@
+#include "SourcePathShiftMemo.hpp"
+
 #include <engine/imagegraph/HostCapture.hpp>
 
 #include <algorithm>
@@ -23,6 +25,7 @@ namespace engine::imagegraph {
 		if (status != Status::Ok) return status;
 		HostNodeCapture prepared;
 		prepared.Authored = *node;
+		detail::StripSourcePathShiftIdentities(prepared.Authored);
 		prepared.Tick = request.Tick;
 		prepared.Subframe = request.Subframe;
 		prepared.NegativeFrame = request.NegativeFrame;

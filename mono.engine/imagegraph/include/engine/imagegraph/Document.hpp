@@ -18,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -257,7 +258,8 @@ namespace engine::imagegraph {
 		Redistribute,
 		Skew,
 		Transform,
-		AreaMap
+		AreaMap,
+		Shift
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
@@ -308,9 +310,75 @@ namespace engine::imagegraph {
 		Vector2 TransformPosition{}, TransformAnchor{}, TransformScale{1, 1};
 		double TransformRotation = 0;
 		Vector4 MapFrom{0, 0, 1, 1}, MapArea{0, 0, 1, 1};
+		double ShiftDistance = 0;
+		Vector2 ShiftRange{0, 1};
+		bool ShiftLoop = false;
+		// Evaluation-local memo identity is never serialized or part of semantic equality.
+		uint64_t EvaluationMemoId = 0;
 		std::vector<double> BlendLengths;
 		std::vector<std::vector<double>> BlendAccumulated;
-		bool operator==(const SourcePathData2D &) const = default;
+		bool operator==(const SourcePathData2D &other) const {
+			return std::tie(
+					   Kind,
+					   Inputs,
+					   Mesh,
+					   CachedLengths,
+					   CachedTotalLength,
+					   TrimRange,
+					   Shape,
+					   Offset,
+					   BlendAmount,
+					   ClampOffset,
+					   BlendMode,
+					   BlendInputsValid,
+					   Reversed,
+					   RedistributeMap,
+					   SkewCenter,
+					   SkewStrength,
+					   SkewAxis,
+					   TransformPosition,
+					   TransformAnchor,
+					   TransformScale,
+					   TransformRotation,
+					   MapFrom,
+					   MapArea,
+					   ShiftDistance,
+					   ShiftRange,
+					   ShiftLoop,
+					   BlendLengths,
+					   BlendAccumulated
+				   ) ==
+				   std::tie(
+					   other.Kind,
+					   other.Inputs,
+					   other.Mesh,
+					   other.CachedLengths,
+					   other.CachedTotalLength,
+					   other.TrimRange,
+					   other.Shape,
+					   other.Offset,
+					   other.BlendAmount,
+					   other.ClampOffset,
+					   other.BlendMode,
+					   other.BlendInputsValid,
+					   other.Reversed,
+					   other.RedistributeMap,
+					   other.SkewCenter,
+					   other.SkewStrength,
+					   other.SkewAxis,
+					   other.TransformPosition,
+					   other.TransformAnchor,
+					   other.TransformScale,
+					   other.TransformRotation,
+					   other.MapFrom,
+					   other.MapArea,
+					   other.ShiftDistance,
+					   other.ShiftRange,
+					   other.ShiftLoop,
+					   other.BlendLengths,
+					   other.BlendAccumulated
+				   );
+		}
 	};
 
 	// Bounded planar audio passed between nodes during one evaluation. Samples is the legacy mono shape;

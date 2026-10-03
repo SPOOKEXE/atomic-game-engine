@@ -659,6 +659,13 @@ def parse(name, seen):
             template.append(dict(entry, index=str(offset) if offset is not None else entry["index"]))
         else:
             fixed.append(entry)
+    # Look At replaces the inherited physical slots through Node.newInput's inputs[i] assignment.
+    # Other constructors retain their current extraction until their replacement semantics are audited.
+    if name == "Node_Quarternion_Lookat":
+        replaced = {item["index"] for item in fixed if item["index"].isdigit()}
+        inputs = [item for item in inputs if item["index"] not in replaced]
+        record_constructor_source(name)
+        record_constructor_source_file("scripts/node_data/node_data.gml")
     inputs += fixed
     overrides = CONSTRUCTOR_DEFAULT_OVERRIDE.finditer(body) if name in CONSTRUCTOR_DEFAULT_OVERRIDE_NODES else ()
     for match in overrides:

@@ -61,7 +61,9 @@ namespace engine::imagegraph::detail {
 								Status::LimitExceeded, "Retained area mapping exceeds bounds", "path"
 							);
 						if (!c.ReserveOutput(*bytes, "path")) return false;
-						c.SetValue("path", entry.Values.back().Data);
+						Value retained = entry.Values.back().Data;
+						StripSourcePathShiftIdentities(retained);
+						c.SetValue("path", std::move(retained));
 						return c.FailureCode == Status::Ok;
 					}
 			}
@@ -227,6 +229,7 @@ namespace engine::imagegraph::detail {
 				return c.Fail(
 					Status::InvalidValue, "Path geometry controls are nonfinite or exceed bounds", "path"
 				);
+			SourcePathShiftValidationScope validation(c);
 			PathRuntime check;
 			if (!check.Init(c, output)) return false;
 			const auto p = check.PointRatio(0);

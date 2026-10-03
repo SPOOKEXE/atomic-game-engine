@@ -63,7 +63,9 @@ namespace engine::imagegraph::detail {
 								Status::LimitExceeded, "Retained modifier payload exceeds bounds", port
 							);
 						if (!c.ReserveOutput(*bytes, port)) return false;
-						c.SetValue(port, entry.Values.back().Data);
+						Value retained = entry.Values.back().Data;
+						StripSourcePathShiftIdentities(retained);
+						c.SetValue(port, std::move(retained));
 						return c.FailureCode == Status::Ok;
 					}
 			}
@@ -193,6 +195,7 @@ namespace engine::imagegraph::detail {
 			}
 			if (!ValidSourcePath2D(output))
 				return c.Fail(Status::InvalidValue, "Path modifier controls exceed bounds", "path");
+			SourcePathShiftValidationScope validation(c, redistribute);
 			PathRuntime check;
 			if (!check.Init(c, output)) return false;
 			const auto p = check.PointDistance(0);

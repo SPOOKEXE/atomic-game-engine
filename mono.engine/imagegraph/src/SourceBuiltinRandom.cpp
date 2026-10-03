@@ -1,5 +1,6 @@
 #include "PixelBuilderPayload.hpp"
 #include "SourceInputOrigin.hpp"
+#include "SourcePathShiftMemo.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/FrameTime.hpp>
@@ -434,6 +435,7 @@ namespace engine::imagegraph {
 		}
 		SourceBuiltinRandomCapture prepared;
 		prepared.Authored = *node;
+		detail::StripSourcePathShiftIdentities(prepared.Authored);
 		prepared.Tick = request.Tick;
 		prepared.Subframe = request.Subframe;
 		prepared.NegativeFrame = request.NegativeFrame;

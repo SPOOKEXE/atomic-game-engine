@@ -7,6 +7,7 @@
 
 #include "../NodeExecutors.hpp"
 #include "../SourcePathPayload.hpp"
+#include "../SourcePathShiftMemo.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -152,6 +153,11 @@ namespace engine::imagegraph::detail {
 					replacement.HasBoundary = first.HasBoundary;
 				}
 
+				if (operation.Kind == SourcePathOperationKind::Shift && replacement.Inputs.empty()) {
+					replacement.MinX = replacement.MinY = 0;
+					replacement.MaxX = replacement.MaxY = 1;
+					replacement.HasBoundary = true;
+				}
 				if (operation.Kind == SourcePathOperationKind::Transform) {
 					if (replacement.Inputs.empty()) {
 						replacement.MinX = replacement.MinY = 0;
@@ -535,6 +541,72 @@ namespace engine::imagegraph::detail {
 			};
 		}
 
+		PathPoint ShiftPoint(double ratio, size_t line) const {
+			if (Inputs.empty()) return {};
+			if (!EvaluationContext || !EvaluationContext->PathShiftMemo) {
+				if (EvaluationContext)
+					EvaluationContext->Fail(
+						Status::UnsupportedExecution,
+						"Source Shift requires one evaluation-owned memo",
+						"path"
+					);
+				return {};
+			}
+			auto &context = *EvaluationContext;
+			auto &memo = *context.PathShiftMemo;
+			const auto key = SourceShiftRatioKey(ratio);
+			if (!key) {
+				context.Fail(
+					Status::InvalidValue, "Source Shift ratio produces a nonfinite source cache key", "path"
+				);
+				return {};
+			}
+			if (!memo.ValidationProbe)
+				if (const auto *cached = memo.Find(context, SourceData->EvaluationMemoId, *key, line))
+					return {cached->Point.X, cached->Point.Y, cached->Point.Weight};
+			if (context.FailureCode != Status::Ok) return {};
+			auto point = Inputs[0].PointRatio(ratio, line);
+			if (context.FailureCode != Status::Ok) return {};
+			if (!(ratio < SourceData->ShiftRange.X || ratio > SourceData->ShiftRange.Y)) {
+				const bool tangent = Inputs[0].HasSourceTangent();
+				const bool loop = tangent ? Inputs[0].Loop : SourceData->ShiftLoop;
+				const double step = tangent ? .001 : .01, minimum = tangent ? .001 : 0.;
+				const auto wrapped = [](double n) {
+					const double first = n * .9999 - std::trunc(n * .9999);
+					const double sum = first + 1;
+					return sum - std::trunc(sum);
+				};
+				const double r0 = loop ? wrapped(ratio - step) : std::clamp(ratio - step, minimum, .999),
+							 r1 = loop ? wrapped(ratio + step) : std::clamp(ratio + step, minimum, .999);
+				const auto a = Inputs[0].PointRatio(r0, line), b = Inputs[0].PointRatio(r1, line);
+				if (context.FailureCode != Status::Ok) return {};
+				const double dx = b.X - a.X, dy = b.Y - a.Y;
+				double direction = dx == 0 ? (dy > 0   ? 270.
+											  : dy < 0 ? 90.
+													   : 0.)
+										   : std::atan2(dy, dx) * 180 / std::numbers::pi;
+				if (dx != 0) {
+					const double scaled = direction * 1000000, floor = std::floor(scaled),
+								 fraction = scaled - floor;
+					direction =
+						(floor + (fraction > .5 || (fraction == .5 && std::fmod(floor, 2) != 0))) / 1000000;
+					direction = direction <= 0 ? -direction : 360 - direction;
+				}
+				const double angle = (direction + 90) * std::numbers::pi / 180;
+				point.X += SourceShapeLengthdirComponent(SourceData->ShiftDistance * std::cos(angle));
+				point.Y += SourceShapeLengthdirComponent(-SourceData->ShiftDistance * std::sin(angle));
+			}
+			if (!std::isfinite(point.X) || !std::isfinite(point.Y) || !std::isfinite(point.Weight)) {
+				context.Fail(Status::InvalidValue, "Source Shift produces a nonfinite sample", "path");
+				return {};
+			}
+			if (!memo.ValidationProbe &&
+				!memo.Store(
+					context, SourceData->EvaluationMemoId, *key, line, {point.X, point.Y, point.Weight}
+				))
+				return {};
+			return point;
+		}
 		PathPoint TransformPoint(PathPoint p) const {
 			const auto &op = *SourceData;
 			p.X = op.TransformAnchor.X + (p.X - op.TransformAnchor.X) * op.TransformScale.X;
@@ -556,6 +628,8 @@ namespace engine::imagegraph::detail {
 			if (Shape) return ShapePoint(SourceShapeDistance(*Shape, Lengths, LengthTotal, distance));
 			if (SourceMesh) return MeshPoint(DistanceSourceVerletPath(*SourceMesh, distance, line));
 			if (Operation) {
+				if (*Operation == SourcePathOperationKind::Shift)
+					return PointRatio(distance / Length(), line);
 				if (*Operation == SourcePathOperationKind::Join) return JoinedDistance(distance, line);
 				if (*Operation == SourcePathOperationKind::Skew) {
 					auto p = Inputs[0].PointDistance(distance, 0);
@@ -603,10 +677,18 @@ namespace engine::imagegraph::detail {
 			return out;
 		}
 
+		bool HasSourceTangent() const {
+			if (!Operation) return true;
+			return *Operation != SourcePathOperationKind::Combine &&
+				   *Operation != SourcePathOperationKind::VerletMesh &&
+				   *Operation != SourcePathOperationKind::Join &&
+				   *Operation != SourcePathOperationKind::Shift;
+		}
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
 			if (Shape) return ShapePoint(SourceShapeRatio(*Shape, Lengths, LengthTotal, ratio));
 			if (SourceMesh) return MeshPoint(SampleSourceVerletPath(*SourceMesh, ratio, line));
 			if (Operation) {
+				if (*Operation == SourcePathOperationKind::Shift) return ShiftPoint(ratio, line);
 				if (*Operation == SourcePathOperationKind::Join)
 					return JoinedDistance(ratio * Length(), line);
 				if (*Operation == SourcePathOperationKind::Blend) return BlendRatio(ratio, line);

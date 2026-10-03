@@ -57,6 +57,12 @@ namespace engine::imagegraph::detail {
 			(op.MapFrom != Vector4{0, 0, 1, 1} || op.MapArea != Vector4{0, 0, 1, 1}))
 			return false;
 
+		if (!std::isfinite(op.ShiftDistance) || !std::isfinite(op.ShiftRange.X) ||
+			!std::isfinite(op.ShiftRange.Y))
+			return false;
+		if (op.Kind != SourcePathOperationKind::Shift &&
+			(op.ShiftDistance != 0 || op.ShiftRange != Vector2{0, 1} || op.ShiftLoop || op.EvaluationMemoId))
+			return false;
 		if (!std::isfinite(op.Offset) || !std::isfinite(op.BlendAmount)) return false;
 		if (op.Kind != SourcePathOperationKind::Offset && (op.Offset != 0 || op.ClampOffset)) return false;
 		if (op.Kind != SourcePathOperationKind::Blend &&
@@ -97,7 +103,8 @@ namespace engine::imagegraph::detail {
 			op.Kind != SourcePathOperationKind::Trim && op.Kind != SourcePathOperationKind::Offset &&
 			op.Kind != SourcePathOperationKind::Blend && op.Kind != SourcePathOperationKind::Join &&
 			op.Kind != SourcePathOperationKind::Redistribute && op.Kind != SourcePathOperationKind::Skew &&
-			op.Kind != SourcePathOperationKind::Transform && op.Kind != SourcePathOperationKind::AreaMap)
+			op.Kind != SourcePathOperationKind::Transform && op.Kind != SourcePathOperationKind::AreaMap &&
+			op.Kind != SourcePathOperationKind::Shift)
 			return false;
 		if (op.Kind != SourcePathOperationKind::Combine && op.Kind != SourcePathOperationKind::Join &&
 			op.Kind != SourcePathOperationKind::Blend && op.Inputs.size() > 1)

@@ -23573,18 +23573,6 @@ O	rotation	Rotation	0	vector4
 N	pc.quarternion_lookat	Node_Quarternion_Lookat	Lookat	values	scripts/node_quarternion_lookat/node_quarternion_lookat.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
-I	position	Position	0	Vec3	vector3	3 0 0 0	
-S	I	position	1
-A	I	position	1
-I	anchor	Anchor	3	Vec3	vector3	3 0 0 0	
-S	I	anchor	1
-A	I	anchor	1
-I	rotation	Rotation	1	Quaternion	quaternion	h 0 0 0 1	
-S	I	rotation	1
-A	I	rotation	1
-I	scale	Scale	2	Vec3	vector3	3 1 1 1	
-S	I	scale	1
-A	I	scale	1
 I	origin	Origin	0	Vec3	vector3	3 0 0 0	
 S	I	origin	1
 A	I	origin	1

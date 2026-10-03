@@ -38,6 +38,7 @@
 #include "SourceInputOrigin.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourcePathShapeCodec.hpp"
+#include "SourcePathShiftMemo.hpp"
 #include "SourceRigidCodec.hpp"
 #include "SourceTilesetCodec.hpp"
 #include "SourceVerletPathCodec.hpp"
@@ -1215,6 +1216,7 @@ namespace engine::imagegraph {
 						   : operation.Kind == SourcePathOperationKind::Skew		 ? "skew"
 						   : operation.Kind == SourcePathOperationKind::Transform	 ? "transform"
 						   : operation.Kind == SourcePathOperationKind::AreaMap		 ? "area_map"
+						   : operation.Kind == SourcePathOperationKind::Shift		 ? "shift"
 																					 : "combine")
 					   << ' ' << operation.Inputs.size();
 				if (operation.Kind == SourcePathOperationKind::Trim)
@@ -1253,6 +1255,9 @@ namespace engine::imagegraph {
 						   << operation.MapFrom.Y << ' ' << operation.MapFrom.Z << ' ' << operation.MapFrom.W
 						   << ' ' << operation.MapArea.X << ' ' << operation.MapArea.Y << ' '
 						   << operation.MapArea.Z << ' ' << operation.MapArea.W;
+				if (operation.Kind == SourcePathOperationKind::Shift)
+					stream << ' ' << operation.ShiftDistance << ' ' << operation.ShiftRange.X << ' '
+						   << operation.ShiftRange.Y << ' ' << operation.ShiftLoop;
 				if (operation.Kind == SourcePathOperationKind::Join)
 					for (uint8_t reverse : operation.Reversed)
 						stream << ' ' << unsigned(reverse);
@@ -2001,7 +2006,7 @@ namespace engine::imagegraph {
 				if (!(stream >> count) || count > Limits::MaximumArrayElements ||
 					(kind != "reverse" && kind != "combine" && kind != "trim" && kind != "offset" &&
 					 kind != "blend" && kind != "join" && kind != "redistribute" && kind != "skew" &&
-					 kind != "transform" && kind != "area_map") ||
+					 kind != "transform" && kind != "area_map" && kind != "shift") ||
 					(kind == "blend" ? count != 2
 					 : (kind == "skew" || kind == "redistribute")
 						 ? count != 1
@@ -2019,6 +2024,7 @@ namespace engine::imagegraph {
 								 : kind == "skew"		  ? SourcePathOperationKind::Skew
 								 : kind == "transform"	  ? SourcePathOperationKind::Transform
 								 : kind == "area_map"	  ? SourcePathOperationKind::AreaMap
+								 : kind == "shift"		  ? SourcePathOperationKind::Shift
 														  : SourcePathOperationKind::Combine;
 				if (kind == "trim" &&
 					(!(stream >> operation.TrimRange.X >> operation.TrimRange.Y) ||
@@ -2087,6 +2093,9 @@ namespace engine::imagegraph {
 						  operation.MapArea.Z >> operation.MapArea.W))
 						return false;
 				}
+				if (kind == "shift" && !(stream >> operation.ShiftDistance >> operation.ShiftRange.X >>
+										 operation.ShiftRange.Y >> operation.ShiftLoop))
+					return false;
 				if (kind == "join") {
 					if (!admit(count * sizeof(uint8_t))) return false;
 					operation.Reversed.reserve(count);
@@ -7187,6 +7196,7 @@ namespace engine::imagegraph {
 		detail::AllocationReservation *Charge = nullptr;
 		std::vector<SnapshotImageArray> *ImageArrays = nullptr;
 		int64_t *InterpolationPolicy = nullptr;
+		bool ExternalBoundary = true;
 	};
 	struct InlineOwnerInputs {
 		detail::AllocationReservation Charge;
@@ -7597,6 +7607,9 @@ namespace engine::imagegraph {
 				return true;
 			}))
 			return false;
+		if (capture.ExternalBoundary)
+			for (auto &value : *capture.Values)
+				detail::StripSourcePathShiftIdentities(value.Data);
 		uint64_t actual = 0;
 		if (!AddArrayBytes(actual, capture.Values->capacity(), sizeof(EvaluationInputValue)) ||
 			!AddArrayBytes(actual, capture.Images->capacity(), sizeof(EvaluationInputImage)) ||
@@ -8039,6 +8052,8 @@ namespace engine::imagegraph {
 			capture.Values->push_back(
 				{std::string(row.Port), row.Projection ? Value(*row.Projection) : *row.Data}
 			);
+		for (auto &value : *capture.Values)
+			detail::StripSourcePathShiftIdentities(value.Data);
 		return true;
 	refused:
 		SetDiagnostic(
@@ -8099,6 +8114,8 @@ namespace engine::imagegraph {
 		capture.Images->reserve(images.size());
 		for (const SchemaInputValue &value : values)
 			capture.Values->push_back({std::string(value.Port), *value.Data, value.Linked, value.Source});
+		for (auto &value : *capture.Values)
+			detail::StripSourcePathShiftIdentities(value.Data);
 		for (const auto &[port, image] : images)
 			if (image) capture.Images->push_back({std::string(port), *image, std::nullopt});
 		return true;
@@ -8377,6 +8394,7 @@ namespace engine::imagegraph {
 		StatefulOutputCapture *batch = nullptr
 	) {
 
+		detail::SourcePathShiftMemo pathShiftMemo;
 		// Ordinary evaluations share a temporary journal; stateful evaluations supply
 		// their already admitted candidate. The borrowed prior is never mutated.
 		detail::AllocationReservation rigidPriorShadow, temporaryRigidCharge;
@@ -9348,6 +9366,7 @@ namespace engine::imagegraph {
 				}
 				detail::NodeContext context(node, *catalogueEntry, request, budget);
 				context.EvaluationDocument = &document;
+				context.PathShiftMemo = &pathShiftMemo;
 				if (hostReceipts) {
 					context.HostReceipts = &*hostReceipts;
 					context.ObservedHostCaptures = {
@@ -9909,6 +9928,29 @@ namespace engine::imagegraph {
 					const Value *value = nullptr;
 					if (linked) {
 						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						// Look At's source Vec3 getter resizes whole-surface dimensions to three axes.
+						const bool lookAtSurfaceVector =
+							node.Type == "pc.quarternion_lookat" && input.SourceKind == "Vec3" &&
+							(input.Id == "origin" || input.Id == "target" || input.Id == "up");
+						if (lookAtSurfaceVector && produced[sourceIndex]) {
+							const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
+							const ImageArray *surfaces =
+								surface ? nullptr
+										: FindImageArrayOutput(results[sourceIndex], link->FromPort);
+							if (surface || surfaces) {
+								// surface_get_dimension sees an entire array as a nonsurface, before
+								// batching.
+								context.Values.emplace_back(
+									input.Id,
+									Vector3{
+										surface ? double(surface->Width) : 1.,
+										surface ? double(surface->Height) : 1.,
+										0.
+									}
+								);
+								continue;
+							}
+						}
 						// Source Float/Slider surface getters return dimensions before units.
 						const bool occlusionSurfaceScalar =
 							node.Type == "pc.ambient_occlusion" &&
@@ -10360,6 +10402,10 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!detail::StampSourcePathShiftInputs(context)) {
+					diagnostic = {context.FailureCode, node.Id, context.FailurePort, context.FailureMessage};
+					return diagnostic.Code;
+				}
 				if (!detail::ResolveSimulationInputAliases(context)) {
 					SetDiagnostic(
 						diagnostic, context.FailureCode, context.FailureMessage, node.Id, context.FailurePort
@@ -10404,7 +10450,9 @@ namespace engine::imagegraph {
 						&owner.Images,
 						&owner.SurfacePolicy,
 						&owner.Charge,
-						&owner.ImageArrays
+						&owner.ImageArrays,
+						nullptr,
+						false
 					};
 					detail::SourceGetterProjection projection(context);
 					if (!projection.Prepare() ||
@@ -10611,7 +10659,9 @@ namespace engine::imagegraph {
 					}
 					return Status::Ok;
 				}
-				if (!detail::RunProcessorBatch(context, executor) || context.FailureCode != Status::Ok) {
+				if (!detail::RunProcessorBatch(context, executor) ||
+					!detail::StampSourcePathShiftProducedValues(context) ||
+					context.FailureCode != Status::Ok) {
 					if (pendingPcxRoute) {
 						if (!stagePcxDependency()) return diagnostic.Code;
 						continue;
@@ -10734,6 +10784,8 @@ namespace engine::imagegraph {
 				}
 				if (simulation && simulation->Data) {
 					for (auto &update : context.DataUpdates) {
+						for (auto &frame : update.Values)
+							detail::StripSourcePathShiftIdentities(frame.Data);
 						const uint64_t bytes = RetainedDataReplayEntryBytes(update);
 						auto admitted = context.OutputCharge.Split(bytes);
 						if (!admitted || !simulation->Charge->Merge(std::move(*admitted))) {
@@ -13410,6 +13462,8 @@ namespace engine::imagegraph {
 						FindOutputDomain(document.Nodes[index], results[index], selected->Port)
 					};
 				}
+				if (auto *value = std::get_if<EvaluatedValue>(&named.Output))
+					detail::StripSourcePathShiftIdentities(value->Data);
 				batch->Outputs->push_back(std::move(named));
 			}
 			if (!batch->Charge->Merge(std::move(*charge))) std::terminate();
@@ -13532,6 +13586,9 @@ namespace engine::imagegraph {
 			outputValue = std::move(*selected);
 		} else
 			outputValue = std::move(results[targetIndex]);
+		if (auto *values = FindValueOutputs(outputValue))
+			for (auto &value : *values)
+				detail::StripSourcePathShiftIdentities(value.Data);
 		outputCharge = std::move(resultCharges[targetIndex]);
 		diagnostic = {};
 		return Status::Ok;
@@ -14423,9 +14480,11 @@ namespace engine::imagegraph {
 		const auto resolveAlias = [&](Value &value) {
 			const DataReplayState *strandReplay = nullptr;
 			if constexpr (surfaceSupport) strandReplay = &candidate.Data;
-			return detail::ResolveSimulationValueAliases(
+			const auto status = detail::ResolveSimulationValueAliases(
 				value, candidateSimulation, budget, outputCharge, diagnostic, strandReplay
 			);
+			if (status == Status::Ok) detail::StripSourcePathShiftIdentities(value);
+			return status;
 		};
 		if constexpr (batchSupport || inputSupport) {
 			for (auto &named : candidate.Outputs)
@@ -14441,6 +14500,10 @@ namespace engine::imagegraph {
 			inputStorage->ReplayCharge = std::move(*stateCharge);
 			StatefulSnapshotAccess::Install(candidate.Inputs, std::move(inputStorage));
 		}
+		if constexpr (surfaceSupport)
+			for (auto &entry : candidate.Data.Entries)
+				for (auto &frame : entry.Values)
+					detail::StripSourcePathShiftIdentities(frame.Data);
 		result = std::move(candidate);
 		oldShadow->Reset();
 		diagnostic = {};

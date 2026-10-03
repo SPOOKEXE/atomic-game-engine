@@ -1,3 +1,4 @@
+#include "../SourcePathShiftMemo.hpp"
 #include "../SourceRandom.hpp"
 #include "../ValuePayload.hpp"
 #include "Curve.hpp"
@@ -256,7 +257,11 @@ namespace engine::imagegraph::detail {
 			state.Values.reserve(size_t(count));
 			if (previous)
 				for (const auto &frame : previous->Values)
-					if (frame.Frame != c.Request.Tick) state.Values.push_back(frame);
+					if (frame.Frame != c.Request.Tick) {
+						state.Values.push_back(frame);
+						// Previous-frame tags belong to a discarded evaluation namespace.
+						StripSourcePathShiftIdentities(state.Values.back().Data);
+					}
 			state.Values.push_back({c.Request.Tick, *input});
 			std::sort(state.Values.begin(), state.Values.end(), [](const auto &a, const auto &b) {
 				return a.Frame < b.Frame;

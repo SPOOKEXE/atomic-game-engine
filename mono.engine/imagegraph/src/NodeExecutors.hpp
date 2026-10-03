@@ -33,6 +33,7 @@
 #include <vector>
 
 namespace engine::imagegraph::detail {
+	struct SourcePathShiftMemo;
 	struct HostCaptureReceiptSink;
 	// Evaluation attributes borrow the palette; authored guide storage stays in the document.
 	struct EvaluationProjectSettings {
@@ -149,6 +150,9 @@ namespace engine::imagegraph::detail {
 		const SurfaceFrameReplayState *CurrentSurfaces = nullptr;
 		const RandomReplayState *CurrentRandom = nullptr;
 		const DataReplayState *CurrentData = nullptr;
+		SourcePathShiftMemo *PathShiftMemo = nullptr;
+		AllocationReservation PathMemoInputsCharge;
+		std::vector<std::pair<std::string_view, Value>> PathMemoInputValues;
 		// One bounded transaction journal is shared by every actor and processor row.
 		RigidReplayState *CurrentRigid = nullptr;
 		AllocationReservation *CurrentRigidCharge = nullptr;

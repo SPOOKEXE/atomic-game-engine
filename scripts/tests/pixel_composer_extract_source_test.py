@@ -206,6 +206,31 @@ function Node_Fn_WaveTable(_x, _y) : Node(_x, _y) constructor {
 }
 """,
         }
+        files["scripts/node_value_enum_button/node_value_enum_button.gml"] = ""
+        files["scripts/node_data/node_data.gml"] = "static newInput = function(i,j) { inputs[i] = j; }\n"
+        files["scripts/node_3d_object/node_3d_object.gml"] = """
+function Node_3D_Object(_x, _y, _group = noone) : Node(_x, _y, _group) constructor {
+    newInput(0, nodeValue_Vec3("Position", [0,0,0]));
+    newInput(1, nodeValue_Quaternion("Rotation", [0,0,0,1]));
+    newInput(2, nodeValue_Vec3("Scale", [1,1,1]));
+    newInput(3, nodeValue_Vec3("Anchor", [0,0,0]));
+    attributes.process = true;
+}
+"""
+        files["scripts/node_quarternion_lookat/node_quarternion_lookat.gml"] = """
+function Node_Quarternion_Lookat(_x, _y, _group = noone) : Node_3D_Object(_x, _y, _group) constructor {
+    newInput(0, nodeValue_Vec3("Origin", [0,0,0])).setVisible(true,true);
+    newInput(1, nodeValue_Vec3("Target", [1,0,0])).setVisible(true,true);
+    newInput(2, nodeValue_Vec3("Up", [0,0,-1]));
+    newInput(3, nodeValue_EButton("Unit", 0, ["Quaternion", "Euler"]));
+    newOutput(0, nodeValue_Output("Rotation", VALUE_TYPE.float, [0,0,0,1])).setDisplay(VALUE_DISPLAY.vector);
+    static processData = function(_outSurf,_data,_array_index=0) {
+        if (_for.LengthSqr()==0) return [0,0,0,1];
+        if (_unit==0) return q.ToArray();
+        return q.ToEuler(true);
+    }
+}
+"""
         if include_condition or include_gradient:
             files["scripts/node_value_enum_scroll/node_value_enum_scroll.gml"] = '''
 #macro nodeValue_EScroll nodeValue_Enum_Scroll
@@ -273,6 +298,7 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
             writer = csv.DictWriter(handle, fieldnames=["node_id"])
             writer.writeheader()
             for node in (
+                "Node_Quarternion_Lookat",
                 "Node_3D_Light_Point",
                 "Node_3D_Light_Directional",
                 "Node_Struct",
@@ -295,6 +321,24 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
         output = root / "source-inputs.json"
         subprocess.run([sys.executable, str(EXTRACTOR), str(script_root), str(matrix), str(output)], check=True)
         return json.loads(output.read_text(encoding="utf-8"))
+
+    def test_lookat_replaces_inherited_physical_slots_and_preserves_source_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+        node = snapshot["nodes"]["Node_Quarternion_Lookat"]
+        physical = [item for item in node["inputs"] if item["index"] != "-1"]
+        self.assertEqual([(item["index"], item["name"]) for item in physical],
+                         [("0", "Origin"), ("1", "Target"), ("2", "Up"), ("3", "Unit")])
+        self.assertEqual([item["default"] for item in physical],
+                         ["[0,0,0]", "[1,0,0]", "[0,0,-1]", "0"])
+        self.assertTrue(any(item["name"] == "attribute process" for item in node["inputs"]))
+        self.assertEqual(node["outputs"][0]["default"], "[0,0,0,1]")
+        self.assertEqual(node["outputs"][0]["type"], "VALUE_TYPE.float")
+        light = snapshot["nodes"]["Node_3D_Light_Point"]
+        self.assertTrue(any(item["name"] == "Position" for item in light["inputs"]))
+        for path in ("scripts/node_quarternion_lookat/node_quarternion_lookat.gml",
+                     "scripts/node_data/node_data.gml"):
+            self.assertRegex(snapshot["source_constructor_evidence"][path]["sha256"], r"^[0-9a-f]{64}$")
 
     def test_fibonacci_square_root_constructor_default_keeps_exact_source_expression(self):
         with tempfile.TemporaryDirectory() as temporary:

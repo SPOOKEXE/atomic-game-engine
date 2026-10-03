@@ -52,6 +52,8 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourcePathComposeExecutors();
 	std::span<const ExecutorEntry> SourcePathModifierExecutors();
 	std::span<const ExecutorEntry> SourcePathGeometryExecutors();
+	std::span<const ExecutorEntry> SourcePathShiftExecutors();
+	std::span<const ExecutorEntry> SourceQuaternionLookAtExecutors();
 	std::span<const ExecutorEntry> SourcePointsExecutors();
 	std::span<const ExecutorEntry> SourcePointDataExecutors();
 	std::span<const ExecutorEntry> SourceSpatialPointsExecutors();

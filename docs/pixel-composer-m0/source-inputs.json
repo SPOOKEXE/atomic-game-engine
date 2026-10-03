@@ -108770,50 +108770,6 @@
     {
      "array_depth": 1,
      "default": "[0,0,0]",
-     "extra": [
-      "{ linkable: false }"
-     ],
-     "index": "0",
-     "inherited": "Node_3D_Object",
-     "kind": "Vec3",
-     "name": "Position",
-     "source_array_classification": true
-    },
-    {
-     "array_depth": 1,
-     "default": "[0,0,0]",
-     "extra": [
-      "{ linkable: false, \n\t\t\tside_button: button(function() /*=>*/ { apply_anchor = !apply_anchor; triggerRender(); })\n\t\t\t\t.setIcon(THEME.icon_3d_anchor, [ function() /*=>*/ {return apply_anchor} ], c_white).setTooltip(\"Apply Position\") \n\t\t}"
-     ],
-     "index": "3",
-     "inherited": "Node_3D_Object",
-     "kind": "Vec3",
-     "name": "Anchor",
-     "source_array_classification": true
-    },
-    {
-     "array_depth": 1,
-     "default": "",
-     "extra": [],
-     "index": "1",
-     "inherited": "Node_3D_Object",
-     "kind": "Quaternion",
-     "name": "Rotation",
-     "source_array_classification": true
-    },
-    {
-     "array_depth": 1,
-     "default": "[1,1,1]",
-     "extra": [],
-     "index": "2",
-     "inherited": "Node_3D_Object",
-     "kind": "Vec3",
-     "name": "Scale",
-     "source_array_classification": true
-    },
-    {
-     "array_depth": 1,
-     "default": "[0,0,0]",
      "extra": [],
      "index": "0",
      "kind": "Vec3",
@@ -155838,6 +155794,14 @@
   "scripts/node_gradient/node_gradient.gml": {
    "bytes": 9083,
    "sha256": "d55c626179c4ee3cf5511f140c2b83929f4dce92226daa9baec76b2bcc8fb624"
+  },
+  "scripts/node_quarternion_lookat/node_quarternion_lookat.gml": {
+   "bytes": 2581,
+   "sha256": "be0ae81a47b55f2f112e15ed8535fcb6ad649ff4e2dfd87cdbaf399e4ddfa6bf"
+  },
+  "scripts/node_data/node_data.gml": {
+   "bytes": 119599,
+   "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d"
   }
  }
 }

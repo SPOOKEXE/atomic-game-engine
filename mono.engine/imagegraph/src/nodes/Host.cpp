@@ -1,4 +1,5 @@
 #include "../HostCaptureReceipts.hpp"
+#include "../SourcePathShiftMemo.hpp"
 #include "Families.hpp"
 #include "Processor.hpp"
 
@@ -57,6 +58,8 @@ namespace engine::imagegraph::detail {
 					if (context.Find(port) == &value) values.push_back({std::string(port), value});
 				for (const auto &[port, value] : context.ValueViews)
 					if (value && context.Find(port) == value) values.push_back({std::string(port), *value});
+				for (auto &value : values)
+					StripSourcePathShiftIdentities(value.Data);
 				for (const auto &[port, image] : context.Images)
 					images.push_back({port, image});
 				std::optional<SurfaceFormat> outputFormat = context.InheritedSurfaceFormat;
@@ -86,6 +89,11 @@ namespace engine::imagegraph::detail {
 					return context.Fail(
 						Status::UnsupportedExecution, failure.empty() ? "host capability failed" : failure
 					);
+				StripSourcePathShiftIdentities(live.Authored);
+				for (auto &value : live.Inputs)
+					StripSourcePathShiftIdentities(value.Data);
+				for (auto &value : live.Outputs)
+					StripSourcePathShiftIdentities(value.Data);
 				capture = &live;
 			}
 
@@ -184,6 +192,7 @@ namespace engine::imagegraph::detail {
 					);
 				context.SetValue(output.Port, output.Data);
 				if (context.FailureCode != Status::Ok) return false;
+				if (!StampSourcePathShiftHostOutput(context, context.OutputValues.back())) return false;
 			}
 			for (const auto &output : capture->Images) {
 				const auto type = outputType(output.Port);

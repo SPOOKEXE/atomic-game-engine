@@ -1,3 +1,4 @@
+#include "../SourcePathShiftMemo.hpp"
 #include "ArraySource.hpp"
 #include "Families.hpp"
 
@@ -141,7 +142,11 @@ namespace engine::imagegraph::detail {
 			state.Values.reserve(records);
 			if (previous)
 				for (const auto &frame : previous->Values)
-					if (!(capture && frame.Frame == c.Request.Tick)) state.Values.push_back(frame);
+					if (!(capture && frame.Frame == c.Request.Tick)) {
+						state.Values.push_back(frame);
+						// Previous-frame tags belong to a discarded evaluation namespace.
+						StripSourcePathShiftIdentities(state.Values.back().Data);
+					}
 			if (capture) {
 				if (resourceBytes)
 					state.Values.push_back({c.Request.Tick, std::move(resource)});
