@@ -2061,11 +2061,11 @@ namespace nodegraph {
 
 		// --- keys and menus ---------------------------------------------------
 		//
-		// **Guarded on the window rather than on the canvas being hovered**, so a
-		// shortcut still lands while the pointer is over the panel's own toolbar,
-		// and never while somebody is typing into the palette's search box.
+		// **Guarded on the canvas window rather than the shared dock root**, so a
+		// sibling inspector keeps its own shortcuts while the canvas still listens
+		// over its toolbar and child windows.
 		const bool listening = !bodyCaptured &&
-							   ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+							   ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
 							   !ImGui::IsAnyItemActive() && !PaletteOpen && !MenuOpen;
 
 		if (listening) {

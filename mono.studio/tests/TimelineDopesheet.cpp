@@ -36,8 +36,10 @@ namespace {
 		studio::TimelineDopesheet View;
 		Diagnostic Error;
 		uint64_t Revision = 0;
-		unsigned Changes = 0;
-		ImVec2 CanvasMin, CanvasMax;
+		unsigned Changes = 0, Attempts = 0;
+		ImVec2 CanvasMin, CanvasMax, TextCenter;
+		bool ShowText = false, OpenGatePopup = false, CloseGatePopup = false, GatePopupOpen = false;
+		char Text[32] = "editable";
 		Sheet() {
 			ImGui::SetCurrentContext(Context);
 			auto &io = ImGui::GetIO();
@@ -67,7 +69,12 @@ namespace {
 			ImGui::SetNextWindowPos({20, 20});
 			ImGui::SetNextWindowSize({900, 500});
 			ImGui::Begin("Dopesheet", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+			if (OpenGatePopup) {
+				ImGui::OpenPopup("Delete gate");
+				OpenGatePopup = false;
+			}
 			View.Draw(Doc, Revision, Keys, {}, Error, [&] {
+				++Attempts;
 				const bool accepted = studio::ApplyImageGraphDocumentEdit(Doc, History, [&](Document &doc) {
 					return View.PrepareCommit(doc, Keys, Error);
 				});
@@ -80,6 +87,20 @@ namespace {
 			});
 			CanvasMin = ImGui::GetItemRectMin();
 			CanvasMax = ImGui::GetItemRectMax();
+			if (ShowText) {
+				ImGui::InputText("Text", Text, sizeof(Text));
+				const auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+				TextCenter = {(a.x + b.x) * .5f, (a.y + b.y) * .5f};
+			}
+			GatePopupOpen = ImGui::BeginPopup("Delete gate");
+			if (GatePopupOpen) {
+				ImGui::TextUnformatted("Popup owns keyboard input");
+				if (CloseGatePopup) {
+					ImGui::CloseCurrentPopup();
+					CloseGatePopup = false;
+				}
+				ImGui::EndPopup();
+			}
 			ImGui::End();
 			ImGui::Render();
 		}
@@ -116,8 +137,7 @@ namespace {
 }
 
 TEST_CASE(
-	"dopesheet selects and restores its context when another is current",
-	"[studio][timeline_dopesheet]"
+	"dopesheet selects and restores its context when another is current", "[studio][timeline_dopesheet]"
 ) {
 	ScopedCurrentContext existing;
 	{
@@ -345,7 +365,9 @@ TEST_CASE("dopesheet history refusal retains authored key selection", "[studio][
 	CHECK_FALSE(ui.View.Dragging);
 }
 
-TEST_CASE("dopesheet staged refusal preserves gesture and retry commits one undo", "[studio][timeline_history54]") {
+TEST_CASE(
+	"dopesheet staged refusal preserves gesture and retry commits one undo", "[studio][timeline_history54]"
+) {
 	Sheet ui;
 	ui.History = studio::ImageGraphHistory(128, 1);
 	ui.Frame();
@@ -415,6 +437,205 @@ TEST_CASE("dopesheet refused Alt copy preserves redo and selection", "[studio][t
 	CHECK_FALSE(ui.View.Dragging);
 	CHECK_FALSE(ui.View.Prepared);
 	CHECK(ui.View.PreparedSelection.empty());
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.CanRedo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == priorEdit);
+}
+
+TEST_CASE(
+	"Dopesheet Delete removes the selected full identities in one undo transaction",
+	"[studio][timeline_dopesheet][dopesheet_delete]"
+) {
+	Sheet ui;
+	ui.Doc.Nodes.push_back({"other", "value.number", {}, {}, {{"value", 0.0}}});
+	ui.Doc.Keyframes[1].NodeId = "other";
+	ui.Doc.Keyframes[0].SourceKeyId = "first-source-key";
+	ui.Doc.Keyframes[1].SourceKeyId = "other-source-key";
+	ui.Doc.Keyframes[2].SourceKeyId = "untouched-source-key";
+	ui.Doc.Tracks = {{"number", "value", "hold", -1}, {"other", "value", "hold", -1}};
+	REQUIRE(studio::SetImageGraphKeyframeSourceDriver(ui.Doc, 2, KeyframeLinearDriver{2}, ui.Error));
+	const auto before = ui.Doc;
+	ui.Frame();
+	ui.Frame();
+	ui.Click(0);
+	ui.Click(1, true);
+	REQUIRE(ui.Keys.Selection.size() == 2);
+	ui.Attempts = 0;
+	ui.Changes = 0;
+	ui.Key(ImGuiKey_Delete);
+	INFO(ui.Error.Message);
+	REQUIRE(ui.Attempts == 1);
+	REQUIRE(ui.Changes == 1);
+	CHECK(ui.Keys.Selection.empty());
+	REQUIRE(ui.Doc.Keyframes.size() == 1);
+	CHECK(ui.Doc.Keyframes.front() == before.Keyframes.back());
+	CHECK(ui.Doc.Nodes == before.Nodes);
+	CHECK(ui.Doc.Tracks == before.Tracks);
+	CHECK(ui.Doc.Outputs == before.Outputs);
+	const auto deleted = ui.Doc;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == deleted);
+	CHECK_FALSE(ui.History.CanRedo());
+	Document restored;
+	REQUIRE(Read(Write(ui.Doc), restored, ui.Error) == Status::Ok);
+	CHECK(restored == deleted);
+}
+
+TEST_CASE(
+	"Dopesheet shrinking Delete fits its history budget and replaces existing redo",
+	"[studio][timeline_dopesheet][dopesheet_delete]"
+) {
+	Sheet ui;
+	const auto before = ui.Doc;
+	auto priorEdit = before;
+	priorEdit.Nodes.front().Values.front().Data = 2.0;
+	ui.History = studio::ImageGraphHistory(128, std::max(Write(before).size(), Write(priorEdit).size()));
+	REQUIRE(ui.History.TryRecord(before, priorEdit));
+	ui.Doc = priorEdit;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	REQUIRE(ui.History.CanRedo());
+	ui.Frame();
+	ui.Frame();
+	ui.Click(0);
+	ui.Click(1, true);
+	const auto selected = ui.Keys.Selection;
+	REQUIRE(selected.size() == 2);
+	ui.Attempts = 0;
+	ui.Changes = 0;
+	ui.Key(ImGuiKey_Delete);
+	REQUIRE(ui.Attempts == 1);
+	REQUIRE(ui.Changes == 1);
+	REQUIRE(ui.Doc.Keyframes.size() == 1);
+	CHECK(GetFrameTime(ui.Doc.Keyframes.front()) == FrameTime{7, 0, false});
+	CHECK(ui.Keys.Selection.empty());
+	CHECK_FALSE(ui.View.Dragging);
+	CHECK_FALSE(ui.View.Prepared);
+	CHECK(ui.View.Originals.empty());
+	CHECK_FALSE(ui.History.CanRedo());
+	const auto deleted = ui.Doc;
+	CHECK(Write(deleted).size() < Write(before).size());
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == deleted);
+}
+
+TEST_CASE("Dopesheet Delete respects input and gesture ownership", "[studio][dopesheet_delete]") {
+	Sheet ui;
+	ui.Frame();
+	ui.Frame();
+	ui.Click(0);
+	const auto before = ui.Doc;
+	const auto selected = ui.Keys.Selection;
+	ui.Attempts = ui.Changes = 0;
+	SECTION("modified Delete belongs to another shortcut") {
+		for (auto modifier : {ImGuiMod_Ctrl, ImGuiMod_Shift, ImGuiMod_Alt, ImGuiMod_Super}) {
+			ImGui::GetIO().AddKeyEvent(modifier, true);
+			ui.Frame();
+			ui.Key(ImGuiKey_Delete);
+			ImGui::GetIO().AddKeyEvent(modifier, false);
+			ui.Frame();
+		}
+	}
+	SECTION("an actual text field owns Delete while the sheet is hovered") {
+		ui.ShowText = true;
+		ui.Frame();
+		ui.Down(ui.TextCenter);
+		ui.Up();
+		ui.Mouse(ui.View.Markers[0].Position);
+		REQUIRE(ImGui::GetIO().WantTextInput);
+		ui.Key(ImGuiKey_Delete);
+		ui.Key(ImGuiKey_Escape);
+		ui.ShowText = false;
+		ui.Frame();
+		ui.Frame();
+	}
+	SECTION("an actual popup owns the key") {
+		ui.OpenGatePopup = true;
+		ui.Frame();
+		REQUIRE(ui.GatePopupOpen);
+		ui.Key(ImGuiKey_Delete);
+		ui.CloseGatePopup = true;
+		ui.Frame();
+		ui.Frame();
+	}
+	SECTION("an active key transfer owns the key") {
+		REQUIRE(ui.Keys.Begin(ui.Doc, false, {}, ui.Error));
+		ui.Key(ImGuiKey_Delete);
+		REQUIRE(ui.Keys.Active);
+		ui.Keys.Cancel();
+	}
+	SECTION("an active drag owns the key") {
+		ui.Down(ui.View.Markers[0].Position);
+		REQUIRE(ui.View.Dragging);
+		ui.Key(ImGuiKey_Delete);
+		REQUIRE(ui.View.Dragging);
+		ui.Key(ImGuiKey_Escape);
+		ui.Up();
+	}
+	CHECK(ui.Attempts == 0);
+	CHECK(ui.Changes == 0);
+	CHECK(ui.Doc == before);
+	CHECK(ui.Keys.Selection == selected);
+	CHECK_FALSE(ui.History.CanUndo());
+	ui.Mouse(ui.View.Markers[0].Position);
+	ui.Key(ImGuiKey_Delete);
+	REQUIRE(ui.Attempts == 1);
+	REQUIRE(ui.Changes == 1);
+	CHECK(ui.Keys.Selection.empty());
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+}
+
+TEST_CASE("Dopesheet deletion refuses changed pinned originals", "[studio][dopesheet_delete]") {
+	Sheet ui;
+	ui.Keys.Selection = {studio::TimelineKeyEditor::Identity(ui.Doc.Keyframes[0])};
+	const auto selected = ui.Keys.Selection;
+	REQUIRE(ui.View.BeginDeletion(ui.Doc, ui.Keys, ui.Error));
+	const auto pinned = ui.View.Originals;
+	ui.Doc.Keyframes[0].Data = 19.0;
+	const auto changed = ui.Doc;
+	CHECK_FALSE(studio::ApplyImageGraphDocumentEdit(ui.Doc, ui.History, [&](auto &document) {
+		return ui.View.PrepareCommit(document, ui.Keys, ui.Error);
+	}));
+	CHECK(ui.Error.Code == Status::InvalidValue);
+	CHECK(ui.Doc == changed);
+	CHECK(ui.Keys.Selection == selected);
+	CHECK(ui.View.Originals == pinned);
+	CHECK(ui.View.Deleting);
+	CHECK_FALSE(ui.History.CanUndo());
+	ui.View.Cancel();
+	CHECK_FALSE(ui.View.Deleting);
+	CHECK(ui.View.Originals.empty());
+}
+
+TEST_CASE("Dopesheet deletion admits work before capturing a dense selection", "[studio][dopesheet_delete]") {
+	Sheet ui;
+	ui.Doc.Keyframes.clear();
+	for (uint64_t tick = 0; tick < 10000; ++tick) {
+		ui.Doc.Keyframes.push_back({"number", "value", tick, double(tick), "linear"});
+		if (tick < 3000)
+			ui.Keys.Selection.push_back(studio::TimelineKeyEditor::Identity(ui.Doc.Keyframes.back()));
+	}
+	const auto selected = ui.Keys.Selection;
+	const auto before = ui.Doc;
+	auto priorEdit = before;
+	priorEdit.Nodes.front().Values.front().Data = 2.0;
+	REQUIRE(ui.History.TryRecord(before, priorEdit));
+	ui.Doc = priorEdit;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	REQUIRE(ui.History.CanRedo());
+	CHECK_FALSE(ui.View.BeginDeletion(ui.Doc, ui.Keys, ui.Error));
+	CHECK(ui.Error.Code == Status::LimitExceeded);
+	CHECK(ui.Doc == before);
+	CHECK(ui.Keys.Selection == selected);
+	CHECK(ui.View.Originals.empty());
+	CHECK_FALSE(ui.View.Deleting);
 	CHECK_FALSE(ui.History.CanUndo());
 	REQUIRE(ui.History.CanRedo());
 	REQUIRE(ui.History.Redo(ui.Doc));

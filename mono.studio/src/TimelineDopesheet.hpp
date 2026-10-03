@@ -6,10 +6,11 @@
 #include <cstdio>
 #include <limits>
 #include <map>
+#include <new>
 
 namespace studio {
 	// The display cache contains identities and marker geometry, never authored values.
-	// Gestures stage bounded full keys and exact clocks; release owns one host transaction.
+	// Gestures pin bounded full keys; each accepted edit owns one host transaction.
 	struct TimelineDopesheet {
 		struct Track {
 			std::string NodeId, Port;
@@ -28,7 +29,8 @@ namespace studio {
 		double PixelsPerFrame = 20, PanX = 0, PanY = 0;
 		ImVec2 BoxStart, BoxEnd;
 		engine::imagegraph::FrameTime Anchor, Fixed;
-		bool Dragging = false, Scaling = false, Copying = false, Boxing = false, TargetsValid = true;
+		bool Dragging = false, Scaling = false, Copying = false, Boxing = false, Deleting = false,
+			 TargetsValid = true;
 
 		std::optional<uint64_t> CacheBytes() const {
 			using namespace engine::imagegraph;
@@ -151,11 +153,41 @@ namespace studio {
 			return true;
 		}
 		void Cancel() {
-			Dragging = Scaling = Copying = Boxing = Prepared = false;
+			Dragging = Scaling = Copying = Boxing = Deleting = Prepared = false;
 			std::vector<engine::imagegraph::Keyframe>().swap(Originals);
 			std::vector<engine::imagegraph::FrameTime>().swap(Destinations);
 			std::vector<ImageGraphKeyframeIdentity>().swap(BoxSelection);
 			std::vector<ImageGraphKeyframeIdentity>().swap(PreparedSelection);
+		}
+		bool BeginDeletion(
+			const engine::imagegraph::Document &document,
+			const TimelineKeyEditor &editor,
+			engine::imagegraph::Diagnostic &error
+		) try {
+			using namespace engine::imagegraph;
+			if (Dragging || Boxing || Deleting || editor.Active || editor.Selection.empty()) return false;
+			const uint64_t selected = editor.Selection.size(), keys = document.Keyframes.size();
+			if (selected > Limits::MaximumKeyframes || keys > Limits::MaximumKeyframes ||
+				selected * (selected + 2 * keys) > 64'000'000) {
+				error = {Status::LimitExceeded, {}, {}, "key deletion capture exceeds the work bound"};
+				return false;
+			}
+			const auto budget = editor.Remaining(true, true), retained = CacheBytes();
+			if (!budget || !retained || *retained > *budget) {
+				error = {Status::LimitExceeded, {}, {}, "key deletion exceeds the timeline payload budget"};
+				return false;
+			}
+			if (!CaptureImageGraphKeyframes(
+					document, editor.Selection, Originals, error, *budget - *retained
+				))
+				return false;
+			Deleting = true;
+			return true;
+		} catch (const std::bad_alloc &) {
+			error = {
+				engine::imagegraph::Status::LimitExceeded, {}, {}, "key deletion capture allocation failed"
+			};
+			return false;
 		}
 		bool Begin(
 			const engine::imagegraph::Document &document,
@@ -234,7 +266,15 @@ namespace studio {
 			const auto budget = editor.Remaining(true, true);
 			uint64_t remaining = budget.value_or(0);
 			const auto retained = CacheBytes();
-			if (!Dragging || !TargetsValid || !retained || *retained > remaining) return false;
+			if ((!Dragging && !Deleting) || (!Deleting && !TargetsValid) || !retained ||
+				*retained > remaining)
+				return false;
+			if (Deleting && (Originals.empty() || document.Keyframes.size() > Limits::MaximumKeyframes ||
+							 Originals.size() > Limits::MaximumKeyframes ||
+							 uint64_t(Originals.size()) * document.Keyframes.size() * 2 > 64'000'000)) {
+				error = {Status::LimitExceeded, {}, {}, "key deletion exceeds the work bound"};
+				return false;
+			}
 			for (const auto &original : Originals)
 				if (std::find(document.Keyframes.begin(), document.Keyframes.end(), original) ==
 					document.Keyframes.end()) {
@@ -246,6 +286,17 @@ namespace studio {
 					};
 					return false;
 				}
+			if (Deleting) {
+				std::erase_if(document.Keyframes, [&](const auto &key) {
+					return std::any_of(Originals.begin(), Originals.end(), [&](const auto &original) {
+						return key.NodeId == original.NodeId && key.Port == original.Port &&
+							   GetFrameTime(key) == GetFrameTime(original);
+					});
+				});
+				std::vector<ImageGraphKeyframeIdentity>{}.swap(PreparedSelection);
+				Prepared = true;
+				return true;
+			}
 			remaining -= *retained;
 			for (const auto &original : Originals) {
 				const uint64_t bytes =
@@ -314,6 +365,11 @@ namespace studio {
 			);
 			const bool hovered = ImGui::IsItemHovered();
 			const auto &io = ImGui::GetIO();
+			const bool deleteRequested = hovered && !Dragging && !Boxing && !editor.Active &&
+										 !io.WantTextInput && !ImGui::IsAnyItemActive() &&
+										 !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) &&
+										 !io.KeyCtrl && !io.KeyShift && !io.KeyAlt && !io.KeySuper &&
+										 ImGui::IsKeyPressed(ImGuiKey_Delete, false);
 			const float labels = 140, header = 24, rowHeight = 24;
 			const double timelineX = start.x + labels;
 			if (!Dragging && !Boxing && hovered && io.MouseWheel != 0 && io.MousePos.x < start.x + 140)
@@ -471,6 +527,9 @@ namespace studio {
 				else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
 					if (!apply()) Cancel();
 				}
+			}
+			if (deleteRequested && !Dragging && !Boxing && BeginDeletion(document, editor, error)) {
+				if (!apply()) Cancel();
 			}
 			draw->PopClipRect();
 		}
