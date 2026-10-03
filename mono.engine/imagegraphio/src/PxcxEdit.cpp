@@ -2026,6 +2026,7 @@ namespace engine::imagegraphio {
 				(authored.Links.size() + imported.Graph.Links.size() + authored.Nodes.size());
 		if (comparisons > bake::PxcxLimits::MaximumLinks * 16)
 			return Reject(diagnostic, "PXC authored projection exceeds its transaction work limit");
+		uint64_t compactWorkRemaining = bake::PxcxLimits::MaximumLinks * 16 - comparisons;
 		size_t payloadBudget = Limits::MaximumArrayBytes;
 		for (const auto &node : authored.Nodes) {
 			if (node.DynamicInputs.size() > MaximumDynamicInputsForType(node.Type) ||
@@ -2428,6 +2429,102 @@ namespace engine::imagegraphio {
 			record["global_key"] = wanted->Code;
 			record["global_use"] = wanted->Enabled;
 		};
+		// Static compact keys mirror their authored literal; synchronize only the comparison copy.
+		const auto synchronizeCompact = [&](const Node &node, std::string_view port, const Value &value) {
+			const uint64_t work = uint64_t(working.Graph.Keyframes.size()) * 2 +
+								  uint64_t(desired.Keyframes.size()) * 2 + node.SourceStaticInputs.size();
+			if (work > compactWorkRemaining)
+				return Reject(
+					diagnostic,
+					"PXC compact animator synchronization exceeds transaction work limit",
+					node.Id,
+					port
+				);
+			compactWorkRemaining -= work;
+			const auto old = std::find_if(
+				working.Graph.Keyframes.begin(), working.Graph.Keyframes.end(), [&](const auto &key) {
+					return key.NodeId == node.Id && key.Port == port;
+				}
+			);
+			if (old == working.Graph.Keyframes.end()) return true;
+			const auto key =
+				std::find_if(desired.Keyframes.begin(), desired.Keyframes.end(), [&](const auto &key) {
+					return key.NodeId == node.Id && key.Port == port;
+				});
+			const auto count = [&](const auto &keys) {
+				return std::count_if(keys.begin(), keys.end(), [&](const auto &key) {
+					return key.NodeId == node.Id && key.Port == port;
+				});
+			};
+			const auto metadata = [](const Keyframe &key) {
+				return std::tie(
+					key.NodeId,
+					key.Port,
+					key.Tick,
+					key.Interpolation,
+					key.Ease,
+					key.SineDriver,
+					key.SourceDriver,
+					key.Subframe,
+					key.NegativeFrame,
+					key.Kind,
+					key.SourceKeyId
+				);
+			};
+			if (key == desired.Keyframes.end() && old->Interpolation == "source" &&
+				old->Kind == KeyframeKind::Normal && GetFrameTime(*old) == FrameTime{} &&
+				!old->SourceDriver && !old->SineDriver && old->SourceKeyId == detail::CompactSourceKeyId &&
+				count(working.Graph.Keyframes) == 1 &&
+				std::find(node.SourceStaticInputs.begin(), node.SourceStaticInputs.end(), port) !=
+					node.SourceStaticInputs.end()) {
+				const auto keyBytes = KeyframePayloadBytes(*old);
+				const auto valueBytes = ValueClonePayloadBytes(value);
+				if (!keyBytes || !valueBytes || !Spend(*keyBytes, payloadBudget) ||
+					!Spend(*valueBytes, payloadBudget) ||
+					desired.Keyframes.size() == Limits::MaximumKeyframes)
+					return Reject(
+						diagnostic, "PXC compact animator restoration exceeds payload budget", node.Id, port
+					);
+				if (desired.Keyframes.size() == desired.Keyframes.capacity()) {
+					const size_t slots = desired.Keyframes.size() + 1;
+					if (!Spend(slots * sizeof(Keyframe), payloadBudget))
+						return Reject(
+							diagnostic,
+							"PXC compact animator restoration exceeds payload budget",
+							node.Id,
+							port
+						);
+					desired.Keyframes.reserve(slots);
+					if (!Spend((desired.Keyframes.capacity() - slots) * sizeof(Keyframe), payloadBudget))
+						return Reject(
+							diagnostic,
+							"PXC compact animator restoration exceeds payload budget",
+							node.Id,
+							port
+						);
+				}
+				Keyframe restored = *old;
+				restored.Data = value;
+				desired.Keyframes.push_back(std::move(restored));
+				return true;
+			}
+			if (key == desired.Keyframes.end() || count(working.Graph.Keyframes) != 1 ||
+				count(desired.Keyframes) != 1 || old->Interpolation != "source" ||
+				old->Kind != KeyframeKind::Normal || GetFrameTime(*old) != FrameTime{} || old->SourceDriver ||
+				old->SineDriver || old->SourceKeyId != detail::CompactSourceKeyId ||
+				metadata(*key) != metadata(*old) || (key->Data != old->Data && key->Data != value))
+				return Reject(
+					diagnostic, "PXC compact animator conflicts with authored literal", node.Id, port
+				);
+			if (key->Data == value) return true;
+			const auto bytes = ValueClonePayloadBytes(value);
+			if (!bytes || !Spend(*bytes, payloadBudget))
+				return Reject(
+					diagnostic, "PXC compact animator synchronization exceeds payload budget", node.Id, port
+				);
+			key->Data = value;
+			return true;
+		};
 		try {
 			if (desired.ProjectGlobalNodeId.empty() && !working.Graph.ProjectGlobalNodeId.empty()) {
 				if (auto saved = SourceNode(root, working.Graph.ProjectGlobalNodeId))
@@ -2554,6 +2651,7 @@ namespace engine::imagegraphio {
 								return Reject(
 									diagnostic, "PXC global default has no codec", node.Id, input.Id
 								);
+							if (!synchronizeCompact(node, input.Id, *input.Default)) return false;
 							record["r"] = {{"d", std::move(*value)}};
 						}
 						records.push_back(std::move(record));
@@ -2692,6 +2790,7 @@ namespace engine::imagegraphio {
 								diagnostic, "PXC dynamic default has no inverse codec", node.Id, input.Id
 							);
 						if (!record.contains("r")) record["r"] = Json::object();
+						if (!synchronizeCompact(node, input.Id, *input.Default)) return false;
 						record["r"]["d"] = std::move(*encoded);
 					}
 					for (const auto &value : node.Values) {
@@ -2867,6 +2966,7 @@ namespace engine::imagegraphio {
 								diagnostic, "PXC authored value has no inverse codec", node.Id, value.Port
 							);
 						if (!record.contains("r")) record["r"] = Json::object();
+						if (!synchronizeCompact(node, value.Port, value.Data)) return false;
 						record["r"]["d"] = std::move(*encoded);
 					}
 				}

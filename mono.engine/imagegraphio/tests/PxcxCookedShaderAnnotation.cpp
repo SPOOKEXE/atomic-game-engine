@@ -94,7 +94,12 @@ TEST_CASE(
 	REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
 	PxcxImport replay;
 	REQUIRE(ImportPxcxImageGraph(archive, replay, failure));
-	CHECK(replay.Graph == native);
+	auto expected = native;
+	for (auto &key : expected.Keyframes)
+		if (key.NodeId == "shader" && key.Port == "main")
+			key.Data = std::string("output.color=float4(0,1,0,1);");
+	CHECK(replay.Graph == expected);
+	CHECK(native.Keyframes == imported.Graph.Keyframes);
 	const Json root = Json::parse(archive.GraphJson.begin(), archive.GraphJson.end() - 1);
 	CHECK(root["nodes"][0]["atomic_game_engine"]["future_engine"]["opaque"] == 29);
 	CHECK(root["nodes"][0]["attri"] == Json{{"future_source", 7}});

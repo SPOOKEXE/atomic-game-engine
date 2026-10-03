@@ -1,4 +1,5 @@
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/GroupReplay.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -51,7 +52,9 @@ namespace {
 		engine::bake::PxcxArchive checked;
 		REQUIRE(engine::bake::ReadPxcx(bytes, checked, failure));
 		PxcxImport result;
-		REQUIRE(ImportPxcxImageGraph(checked, result, failure));
+		const auto decoded = ImportPxcxImageGraph(checked, result, failure);
+		INFO(failure);
+		REQUIRE(decoded);
 		return result;
 	}
 	std::string Remap(std::string port, size_t removed) {
@@ -271,7 +274,10 @@ TEST_CASE(
 	const auto previous = bytes;
 	Diagnostic diagnostic;
 	CHECK_FALSE(WritePxcxProjection(limited, desired, {}, bytes, diagnostic));
-	CHECK(diagnostic.Message == "PXC new HLSL default encoding exceeds move budget");
+	CHECK(
+		diagnostic.Message == "native animator construction exceeds operation bounds: static compact "
+							  "animator storage exceeds operation bounds"
+	);
 	CHECK(bytes == previous);
 }
 TEST_CASE(
@@ -317,4 +323,169 @@ TEST_CASE(
 	const auto previous = bytes;
 	CHECK_FALSE(WritePxcxProjection(saved, dangling, {}, bytes, diagnostic));
 	CHECK(bytes == previous);
+}
+
+TEST_CASE(
+	"HLSL compact defaults synchronize inactive source keys without changing caller state",
+	"[imagegraphio][pxcx_hlsl_input_origin]"
+) {
+	const auto shader = Shader();
+	const auto imported = Import({{"nodes", Json::array({shader})}});
+	auto desired = imported.Graph;
+	desired.Nodes.front().DynamicInputs[2].Default = 4.75;
+	const auto caller = desired;
+	std::vector<std::byte> bytes;
+	const auto saved = Save(imported, desired, bytes);
+	CHECK(desired == caller);
+	CHECK(saved.Graph.Nodes.front().DynamicInputs[2].Default == std::optional<Value>{4.75});
+	const auto key =
+		std::find_if(saved.Graph.Keyframes.begin(), saved.Graph.Keyframes.end(), [](const auto &key) {
+			return key.NodeId == "shader" && key.Port == "argument_value_0";
+		});
+	REQUIRE(key != saved.Graph.Keyframes.end());
+	CHECK(key->Data == Value{4.75});
+	CHECK(key->SourceKeyId == "pxc:compact");
+	const auto json = Json::parse(saved.Source.GraphJson.c_str());
+	auto expected = shader;
+	expected["inputs"][7]["r"]["d"] = 4.75;
+	CHECK(json["nodes"][0] == expected);
+	CHECK(
+		saved.Graph.Nodes.front().DynamicInputs[2].SourceInputId ==
+		imported.Graph.Nodes.front().DynamicInputs[2].SourceInputId
+	);
+	auto conflicting = desired;
+	for (auto &key : conflicting.Keyframes)
+		if (key.NodeId == "shader" && key.Port == "argument_value_0") key.Data = 7.5;
+	Diagnostic diagnostic;
+	const auto previous = bytes;
+	CHECK_FALSE(WritePxcxProjection(imported, conflicting, {}, bytes, diagnostic));
+	CHECK(diagnostic.Port == "argument_value_0");
+	CHECK(diagnostic.Message == "PXC compact animator conflicts with authored literal");
+	CHECK(bytes == previous);
+}
+
+TEST_CASE(
+	"HLSL fixed replay projections save and reload complete source records",
+	"[imagegraphio][pxcx_hlsl_input_origin]"
+) {
+	auto shader = Shader();
+	for (size_t group = 0; group < 3; ++group)
+		shader["inputs"][5 + group * 3]["r"]["d"] = "gain" + std::to_string(group);
+	const auto imported = Import({{"nodes", Json::array({shader})}});
+	// A native fixed control need not retain its inactive compact source key.
+	auto authored = imported.Graph;
+	std::erase_if(authored.Keyframes, [](const auto &key) {
+		return key.NodeId == "shader" && key.Port == "argument_value_0";
+	});
+	GroupReplayState empty, local, bound, edited;
+	Diagnostic diagnostic;
+	REQUIRE(RebindGroupReplay(authored, empty, 1, local, diagnostic) == Status::Ok);
+	REQUIRE(BindGroupReplay(authored, {}, local, 1, bound, diagnostic) == Status::Ok);
+	const Value value = 6.25;
+	GroupRefreshEvent event;
+	event.NodeId = "shader";
+	event.Reason = GroupRefreshReason::Edit;
+	event.EditedPort = "argument_value_0";
+	event.LocalValue = &value;
+	event.LocalAnimated = false;
+	REQUIRE(ReplayGroupAnimatorEdits(authored, {&event, 1}, bound, 1, edited, diagnostic) == Status::Ok);
+	Document projected;
+	REQUIRE(ProjectGroupReplay(authored, edited, 1, projected, diagnostic) == Status::Ok);
+	CHECK(projected.Nodes.front().DynamicInputs[2].Default == std::optional<Value>{value});
+	CHECK(std::none_of(projected.Keyframes.begin(), projected.Keyframes.end(), [](const auto &key) {
+		return key.NodeId == "shader" && key.Port == "argument_value_0";
+	}));
+	const auto caller = projected;
+	auto preview = projected;
+	preview.Outputs = {{"preview", "shader", "surface"}};
+	Plan plan;
+	const auto status = Compile(preview, plan, diagnostic);
+	INFO(diagnostic.Port << ": " << diagnostic.Message);
+	REQUIRE(status == Status::Ok);
+	std::vector<std::byte> bytes;
+	const auto saved = Save(imported, projected, bytes);
+	CHECK(projected == caller);
+	CHECK(saved.Graph.Nodes.front().DynamicInputs[2].Default == std::optional<Value>{value});
+	const auto key =
+		std::find_if(saved.Graph.Keyframes.begin(), saved.Graph.Keyframes.end(), [](const auto &key) {
+			return key.NodeId == "shader" && key.Port == "argument_value_0";
+		});
+	REQUIRE(key != saved.Graph.Keyframes.end());
+	CHECK(key->Data == value);
+	CHECK(key->SourceKeyId == "pxc:compact");
+	const auto json = Json::parse(saved.Source.GraphJson.c_str());
+	auto expected = shader;
+	expected["inputs"][7]["r"]["d"] = 6.25;
+	CHECK(json["nodes"][0] == expected);
+	const auto unchanged = bytes;
+	REQUIRE(WritePxcxProjection(saved, saved.Graph, {}, bytes, diagnostic));
+	CHECK(bytes == unchanged);
+}
+
+TEST_CASE(
+	"Many static HLSL literal edits admit compact synchronization work before scanning",
+	"[imagegraphio][pxcx_hlsl_input_origin]"
+) {
+	Json nodes = Json::array();
+	for (size_t node = 0; node < 8; ++node) {
+		auto shader = Shader();
+		shader["id"] = "shader" + std::to_string(node);
+		auto &inputs = shader["inputs"];
+		inputs.erase(inputs.begin() + 5, inputs.end());
+		for (size_t group = 0; group < 21; ++group) {
+			inputs.push_back(Record("gain" + std::to_string(group), 10 + int(group * 3)));
+			inputs.push_back(Record(0, 11 + int(group * 3)));
+			inputs.push_back(Record(1.25, 12 + int(group * 3)));
+		}
+		nodes.push_back(std::move(shader));
+	}
+	// A removed source node still contributes to the original key index traversed by literal writes.
+	auto removed = Shader();
+	removed["id"] = "removed";
+	removed["inputs"].erase(removed["inputs"].begin() + 5, removed["inputs"].end());
+	auto keys = Json::array();
+	for (size_t tick = 0; tick < 20000; ++tick)
+		keys.push_back(
+			Json::array(
+				{Json::array({0, tick}),
+				 "",
+				 Json::array({0, 1}),
+				 Json::array({0, 0}),
+				 0,
+				 0,
+				 true,
+				 0,
+				 4294967295u}
+			)
+		);
+	removed["inputs"][4]["anim"] = true;
+	removed["inputs"][4]["r"] = std::move(keys);
+	nodes.push_back(std::move(removed));
+	const auto imported = Import({{"nodes", nodes}});
+	REQUIRE(imported.Graph.Nodes.size() == 9);
+	REQUIRE(imported.Graph.Keyframes.size() == 8 * 67 + 20003);
+	auto desired = imported.Graph;
+	desired.Nodes.pop_back();
+	desired.Keyframes.clear();
+	std::erase_if(desired.Tracks, [](const auto &track) { return track.NodeId == "removed"; });
+	for (auto &node : desired.Nodes)
+		for (auto &input : node.DynamicInputs) {
+			if (input.Id.starts_with("argument_name_"))
+				input.Default = std::get<std::string>(*input.Default) + "_edited";
+			if (input.Id.starts_with("argument_value_")) input.Default = 2.75;
+		}
+	auto preview = desired;
+	preview.Outputs = {{"preview", "shader0", "surface"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compiled = Compile(preview, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	const auto caller = desired;
+	std::vector<std::byte> bytes{std::byte{0x29}, std::byte{0x71}};
+	const auto previous = bytes;
+	CHECK_FALSE(WritePxcxProjection(imported, desired, {}, bytes, diagnostic));
+	CHECK(diagnostic.Message == "PXC compact animator synchronization exceeds transaction work limit");
+	CHECK(bytes == previous);
+	CHECK(desired == caller);
 }

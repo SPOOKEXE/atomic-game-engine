@@ -402,3 +402,64 @@ TEST_CASE("HLSL saved sampler links capture owned producer pixels", "[imagegraph
 	CHECK(error.Port == "argument_value_0");
 	CHECK(error.Message == "dynamic input default is invalid");
 }
+
+TEST_CASE(
+	"Explicitly static HLSL selectors retain inactive source keys across native reload",
+	"[imagegraph][hlsl_sockets][hlsl_static_selector]"
+) {
+	auto doc = Graph(0);
+	doc.Nodes.front().SourceStaticInputs = {"argument_type_0"};
+	doc.Keyframes = {{"shader", "argument_type_0", 0, EnumValue{0}, "source", KeyframeEase{}}};
+	doc.Keyframes.front().SourceKeyId = "pxc:compact";
+	doc.Tracks = {{"shader", "argument_type_0", "hold", -1}};
+	auto instance = doc.Nodes.front();
+	instance.Id = "copy";
+	instance.InstanceBase = "shader";
+	instance.SourceStaticInputs.clear();
+	doc.Nodes.push_back(std::move(instance));
+	Plan plan;
+	Diagnostic error;
+	const auto compiled = Compile(doc, plan, error);
+	INFO(error.NodeId << "/" << error.Port << ": " << error.Message);
+	REQUIRE(compiled == Status::Ok);
+	Document restored;
+	REQUIRE(Read(Write(doc), restored, error) == Status::Ok);
+	CHECK(restored == doc);
+	REQUIRE(Compile(restored, plan, error) == Status::Ok);
+	for (uint64_t tick : {0u, 11u}) {
+		EvaluationRequest request;
+		request.Tick = tick;
+		for (const auto node : {"shader", "copy"}) {
+			EvaluationSnapshot snapshot;
+			REQUIRE(EvaluateNodeInputs(restored, plan, node, request, snapshot, error) == Status::Ok);
+			const auto selector =
+				std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &value) {
+					return value.Port == "argument_type_0";
+				});
+			REQUIRE(selector != snapshot.Values().end());
+			CHECK(selector->Data == Value{EnumValue{0}});
+			const auto input =
+				std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &value) {
+					return value.Port == "argument_value_0";
+				});
+			REQUIRE(input != snapshot.Values().end());
+			CHECK(input->Data == Value{2.5});
+		}
+	}
+	auto active = restored;
+	active.Nodes.front().SourceStaticInputs.clear();
+	CHECK(Compile(active, plan, error) == Status::UnsupportedExecution);
+	CHECK(error.Port == "argument_type_0");
+	active.Nodes.front().SourceAnimatedInputs = {"argument_type_0"};
+	CHECK(Compile(active, plan, error) == Status::UnsupportedExecution);
+	CHECK(error.Port == "argument_type_0");
+	auto linked = restored;
+	linked.Nodes.push_back({"selector", "pc.number_simple", {}, {}, {{"value", 1.0}}});
+	linked.Links = {{"selector", "number", "shader", "argument_type_0"}};
+	CHECK(Compile(linked, plan, error) == Status::UnsupportedExecution);
+	CHECK(error.Port == "argument_type_0");
+	auto expression = restored;
+	expression.Nodes.front().SourceInputExpressions = {{"argument_type_0", "0", true}};
+	CHECK(Compile(expression, plan, error) == Status::UnsupportedExecution);
+	CHECK(error.Port == "argument_type_0");
+}

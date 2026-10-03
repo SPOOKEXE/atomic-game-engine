@@ -6045,7 +6045,7 @@ namespace engine::imagegraph {
 				const Node &owner = *ownerPointer;
 				const uint64_t work = effectiveLinks.size() + resolvedInputs.size() +
 									  document.Keyframes.size() + document.Nodes.size() +
-									  owner.SourceInputExpressions.size();
+									  owner.SourceInputExpressions.size() + owner.SourceStaticInputs.size();
 				if (work > 64'000'000 - hlslDeclarationWork) {
 					SetDiagnostic(
 						diagnostic,
@@ -6066,8 +6066,11 @@ namespace engine::imagegraph {
 					std::any_of(effectiveLinks.begin(), effectiveLinks.end(), [&](const auto &link) {
 						return link.ToNode == node.Id && link.ToPort == selector;
 					});
+				const bool staticSelector =
+					std::find(owner.SourceStaticInputs.begin(), owner.SourceStaticInputs.end(), selector) !=
+					owner.SourceStaticInputs.end();
 				const bool animated =
-					!resolved &&
+					!resolved && !staticSelector &&
 					std::any_of(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
 						return key.NodeId == owner.Id && key.Port == selector;
 					});
