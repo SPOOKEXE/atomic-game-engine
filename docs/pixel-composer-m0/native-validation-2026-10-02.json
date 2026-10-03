@@ -4541,6 +4541,362 @@
       "scope_note": "Incremental release68 CPU checkpoint. Overall joined acceptance remains open; prepared font/cache/thumbnail work and Mirror repair are not yet accepted together. No new GPU or profiling result is claimed.",
       "assertions_passed": 7974,
       "test_cases_passed": 134
+    },
+    {
+      "name": "architecture-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/architecture-release-68-joined-repair3.log",
+      "log_sha256": "3a6af964ca3bc013cfa522c4738f5af0e8ad2b3ef4c179150c54af53a441ec4f",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:37+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "test_cases_passed": 1
+    },
+    {
+      "name": "assets-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/assets-release-68-joined-repair3.log",
+      "log_sha256": "f058f906895fe11f319b37f6fe4edeb8410f40acd0a446ea563b0430ef359111",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:32+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "cli-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/cli-release-68-joined-repair3.log",
+      "log_sha256": "615e1521653c34834900c6e0d978ca48c002ec9e0ff863e052f3ce6ce1fced5f",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:48+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "test_cases_passed": 15
+    },
+    {
+      "name": "client-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/client-release-68-joined-repair3.log",
+      "log_sha256": "fd81be84d32092e5df5da3c0201d50641cafbd9c2d8832dca6562b61ddd8e22c",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:32+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 6677,
+      "test_cases_passed": 57
+    },
+    {
+      "name": "export-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/export-release-68-joined-repair3.log",
+      "log_sha256": "77a7d12c3ec86e0642aa4c8213a8192a9bccb85282ad921bd91ed7f6395719c4",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:38+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 2585,
+      "test_cases_passed": 58
+    },
+    {
+      "name": "gui-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/gui-release-68-joined-repair3.log",
+      "log_sha256": "d8568e0e28e9bface4c79593439513b259bc92868426492d7ce3c36f1a2390f6",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:41+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 4784,
+      "test_cases_passed": 327
+    },
+    {
+      "name": "imagegraph-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/imagegraph-release-68-joined-repair3.log",
+      "log_sha256": "70276ade5a2af1f6edaaf04b3a1dc58ed08979f1ad9b879dcbf814b5ca6fe648",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:36+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 1841076,
+      "test_cases_passed": 2368
+    },
+    {
+      "name": "io-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/io-release-68-joined-repair3.log",
+      "log_sha256": "7dd8dd72951c7121d08d4b041447aca1824d9aa4240c38dfe98286a984b33040",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:39+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 10078,
+      "test_cases_passed": 220
+    },
+    {
+      "name": "metadata-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/metadata-release-68-joined-repair3.log",
+      "log_sha256": "c3ac7f3d8c0cb363f5fe2e554e0a83c529ff6f89e21da0a72bd0ae526fbea19e",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:41+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "test_cases_passed": 89
+    },
+    {
+      "name": "nodegraph-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/nodegraph-release-68-joined-repair3.log",
+      "log_sha256": "2266fc2d332c54db8ff519ab0c1947d64e03933400a37e54cad59bd1291675b7",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:37+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "physics-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/physics-release-68-joined-repair3.log",
+      "log_sha256": "0e97a74f3ae07374bd87aff5650c5b3a65ac4713648e0ba929df299fa74e2691",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:38+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "render-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/render-release-68-joined-repair3.log",
+      "log_sha256": "d32040e02170f6cadd4167a862c01bae731f9aa562ed8e1f5b1a62acc597b02b",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:37+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 336633,
+      "test_cases_passed": 806
+    },
+    {
+      "name": "server-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/server-release-68-joined-repair3.log",
+      "log_sha256": "526416cbe5394240a58717a94d20544d67c8e71b188672229302fe91072dfc95",
+      "summary_utf8_replacement_required": true,
+      "log_mtime": "2026-10-03T20:31:50+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 5,
+      "test_cases_passed": 1
+    },
+    {
+      "name": "studio-release-68-joined-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/studio-release-68-joined-repair3.log",
+      "log_sha256": "9ebb52c3a259e6c16cebae8e8b329fdefae80b938ef72102afafc1331038aa66",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:32+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 8271,
+      "test_cases_passed": 141
+    },
+    {
+      "name": "build-release-68-caches-font-thumbnail-profile-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-68-caches-font-thumbnail-profile-initial.log",
+      "log_sha256": "91c4c8786e469e70d30eb22bd3dd6aac3ec22b005795e8dcaaa027355289ff3f",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:17:02+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "build_steps_completed": 668
+    },
+    {
+      "name": "build-release-68-capture-font-profile-repair1",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-68-capture-font-profile-repair1.log",
+      "log_sha256": "ae6918597d7c7d52dca99355381b1c827f2631183857be0db0da8740d3545cca",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:19:33+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "build_steps_completed": 23
+    },
+    {
+      "name": "build-release-68-capture-font-profile-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-68-capture-font-profile-repair2.log",
+      "log_sha256": "3a16a3813f82845553b71132448dbedfb4d1ce4074263426b5a2749f9ce39d3d",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:26:29+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "build_steps_completed": 3
+    },
+    {
+      "name": "build-release-68-studio-thumbnail-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-68-studio-thumbnail-initial.log",
+      "log_sha256": "8d4a0f572c488596e26ee3fdaa71fa31f4ef2ad03ca54c74dff8255d3dc6027b",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:27:58+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "build_steps_completed": 8
+    },
+    {
+      "name": "build-release-68-source-families-repair3",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-68-source-families-repair3.log",
+      "log_sha256": "cd09684c2401da7681774f2627ef975f8deb44396c40d475021be5f5f01ff037",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:30:16+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "build_steps_completed": 3
+    },
+    {
+      "name": "font-glyphs-release-68-repair1",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/font-glyphs-release-68-repair1.log",
+      "log_sha256": "a49660066f4b7b503077dfaf9ef38a815faccc72c78c692c44397eb5dfbd15cf",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:20:02+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 191,
+      "test_cases_passed": 8
+    },
+    {
+      "name": "cache-io-release-68-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/cache-io-release-68-initial.log",
+      "log_sha256": "f7bf68846a093f204736dd622a96f1d591d94226d4a28630d56dfffd8bb70cc1",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:16:35+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 63,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "cache-physics-release-68-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/cache-physics-release-68-initial.log",
+      "log_sha256": "be9938c75621daea272fef076addaf5d2e5e38d45fa5916e20e1389d02def8e9",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:16:35+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 26,
+      "test_cases_passed": 1
+    },
+    {
+      "name": "cache-client-release-68-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/cache-client-release-68-initial.log",
+      "log_sha256": "2bbeed2a4ef2ff7aa6c06d3a0da82060ce51c8c1d56065c7797aa4c3df8370dd",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:20:02+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 10,
+      "test_cases_passed": 1
+    },
+    {
+      "name": "cache-studio-release-68-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/cache-studio-release-68-initial.log",
+      "log_sha256": "dc49049ad036ad1e83873af58e32fb1fd52271fb76e66d121e6c70116f60bd3e",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:20:03+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 21,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "thumbnail-export-release-68-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/thumbnail-export-release-68-initial.log",
+      "log_sha256": "c727b8549ffab9434e9433e9a3998fa6bf6465524ed42c4f6d99132c5c1d86f9",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:16:35+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 270,
+      "test_cases_passed": 3
+    },
+    {
+      "name": "capture-execute-release-68-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/capture-execute-release-68-repair2.log",
+      "log_sha256": "edf76c14f6ec179ecc5fb1cb6880ed147e65a18db1979728a43a032f1eeaead8",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:26:51+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 413,
+      "test_cases_passed": 4
+    },
+    {
+      "name": "gui-release-68-font-loader",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/gui-release-68-font-loader.log",
+      "log_sha256": "9150e02fb77ce07eaf8d2b61f71b0a0226577cda1c0f07e548f35b23b58054d3",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:27:50+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 4784,
+      "test_cases_passed": 327
+    },
+    {
+      "name": "studio-thumbnail-release-68-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/studio-thumbnail-release-68-initial.log",
+      "log_sha256": "41cbd7f526fd86ef67093e71ab6e0d928b88eded138ca9dcd4df31431c61dd3d",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:28:38+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
+      "assertions_passed": 276,
+      "test_cases_passed": 5
     }
   ],
   "excluded_or_failed_runs": [
@@ -5832,6 +6188,40 @@
       "assertions_total": 1839704,
       "assertions_passed": 1839703,
       "assertions_failed": 1
+    },
+    {
+      "name": "mirror-capture-cache-profile-core-release-68-repair1",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/mirror-capture-cache-profile-core-release-68-repair1.log",
+      "log_sha256": "524b90700d5289112af31bd4987ef4bbbd28a04b5c6ca8cfc49f3579d8cb6b99",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:20:03+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Retained failure before repair: missing fixture document versions or Julia eight-iteration golden incorrectly treated as constructor default. Production default is128; benchmark now explicitly authors8.",
+      "test_cases_total": 37,
+      "test_cases_passed": 32,
+      "test_cases_failed": 5,
+      "assertions_total": 7022,
+      "assertions_passed": 7017,
+      "assertions_failed": 5
+    },
+    {
+      "name": "imagegraph-release-68-pre-profile-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/imagegraph-release-68-pre-profile-repair.log",
+      "log_sha256": "3969ed661a431e5a5b916e04de67a2403cb26db81bc68f238da908b3b135f2e3",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:29:04+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Retained failure before repair: missing fixture document versions or Julia eight-iteration golden incorrectly treated as constructor default. Production default is128; benchmark now explicitly authors8.",
+      "test_cases_total": 2368,
+      "test_cases_passed": 2367,
+      "test_cases_failed": 1,
+      "assertions_total": 1841069,
+      "assertions_passed": 1841068,
+      "assertions_failed": 1
     }
   ],
   "pinned_gml_helper_translation": {
@@ -6813,6 +7203,41 @@
       "hash": "bc3a3e86b1a433bd5b66a5c11343cb8324a3c86c",
       "subject": "Preserve quaternion display modes through PXC edits",
       "scope": "Joined release67 native CPU acceptance; device/reference and overall acceptance remain separate."
+    },
+    {
+      "hash": "4c0ffaff8b2ae3ec499b3accfa8450e2813d7d9d",
+      "subject": "Implement bounded Flow and Bubble noise generators",
+      "scope": "Release68 native implementation or roadmap checkpoint; overall acceptance remains incomplete."
+    },
+    {
+      "hash": "b02b6ce447f6c8310bc44f8884f4700673f6b2fc",
+      "subject": "Make Pixel Composer foundations individually checkable",
+      "scope": "Release68 native implementation or roadmap checkpoint; overall acceptance remains incomplete."
+    },
+    {
+      "hash": "6c1bc24650b2c8dcce55281de90d9ef48cc198c8",
+      "subject": "Decode bounded font bytes into owned glyph bitmaps",
+      "scope": "Release68 native implementation or roadmap checkpoint; overall acceptance remains incomplete."
+    },
+    {
+      "hash": "3d7e9c8b6162eb734fb9442f7629d6039cfce406",
+      "subject": "Capture and replay bounded Composer frame caches",
+      "scope": "Release68 native implementation or roadmap checkpoint; overall acceptance remains incomplete."
+    },
+    {
+      "hash": "ba962f1ac6c5782a8b7fbee2e48d867a0d59fdff",
+      "subject": "Save prepared Composer previews as PXC thumbnails",
+      "scope": "Release68 native implementation or roadmap checkpoint; overall acceptance remains incomplete."
+    },
+    {
+      "hash": "0e66b31694ad2510da4909f451b0650ece71a5ed",
+      "subject": "Sample Mirror paths and execute captured outputs safely",
+      "scope": "Release68 native implementation or roadmap checkpoint; overall acceptance remains incomplete."
+    },
+    {
+      "hash": "991addab0c57cef1beb18845961ed85f48db9c73",
+      "subject": "Profile Composer generators with verified source fixtures",
+      "scope": "Release68 native implementation or roadmap checkpoint; overall acceptance remains incomplete."
     }
   ],
   "temporary_build_storage": {
@@ -6917,7 +7342,21 @@
     "build67_release": "Thirteen final joined CPU scopes pass. Five new generators pass105 focused cases/3,280 assertions; source processor metadata, focused history and resumable exports are retained. Ten failed invocations remain immutable.",
     "build67_quaternion_mode": "PXC Quaternion display-mode save/history and dense supported source graph pass2 cases/174 assertions; blanket work charging was replaced with bounded necessary searches.",
     "build67_overall": "Native release67 CPU gates passed; overall M0-M7 acceptance remains incomplete. No new GPU run or measured performance result is claimed.",
-    "build68_in_progress": "Flow/Bubble66 cases/2451 assertions pass and are committed. Initial cache19 core cases pass. Mirror capture, font fixture and benchmark expectation repairs remain under validation; final joined acceptance is pending."
+    "build68_in_progress": "Fourteen joined CPU scopes pass after retained repairs. Core2368/1841076; GUI327/4784; Studio141/8271. Mirror paths, frame-cache capture/replay, glyph-byte decoding and prepared thumbnail saves are committed. Clean registry snapshot remains pending; no new GPU or overall M0-M7 acceptance is claimed.",
+    "build68_source_family_profile": {
+      "command": "just imagegraph-source-family-bench 1",
+      "exit_code": 0,
+      "preflight_cases": 247,
+      "preflight_assertions": 7917,
+      "preset": "bench",
+      "build_type": "RelWithDebInfo",
+      "mono_optimise_level": 3,
+      "heap_profile": true,
+      "samples": 1,
+      "warmups": 8,
+      "output_policy": "Printed to terminal; no benchmark output file written. Full terminal output was truncated by tool delivery, so no timing figures are transcribed here.",
+      "scope": "Verified source-family fixtures, hierarchy, heap attribution, counters and repeated byte hashes; one sample establishes execution, not stable comparative performance."
+    }
   },
   "pending_gates": [
     {

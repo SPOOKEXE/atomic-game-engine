@@ -71,7 +71,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Save completed image previews as PXC thumbnails with atomic publication.
 - [_] Finish remaining PXC edits, export formats and modified-project compatibility.
 - [_] Validate all integrated changes with joined CPU tests.
-- [_] Profile source-family workloads in an optimized build.
+- [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [_] Finish GPU checks, including Transform and skybox pixels.
 - [_] Verify live Studio workflows.
 - [_] Establish exact parity with a licensed reference build and matched captures.
