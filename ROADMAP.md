@@ -61,7 +61,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Finish Composer font loading, text layout and rendering.
 - [_] Add source-compatible argument handling.
 - [_] Implement remaining catalogue executors and verify controls, errors, animation and parity evidence.
-- [_] Integrate frame caches, saved-cache loading and playback.
+- [x] Capture and replay bounded frame caches across CPU, client, Studio and exports.
+- [_] Finish cache groups, selected Clear, fractional playback and saved-cache loading.
 - [_] Finish audio workflows and feedback; verify seek/reset and fractional keys.
 - [_] Integrate camera rendering and Studio previews.
 - [_] Finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback.

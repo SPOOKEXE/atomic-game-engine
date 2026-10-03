@@ -1277,7 +1277,7 @@ namespace studio {
 					state.SelectedOutput,
 					state.DocumentRevision,
 					state.EvaluationInputRevision,
-					detail::ImageGraphRigidObservation(state.Authored, state.Playback)
+					detail::ImageGraphPlaybackObservation(state.Authored, state.Playback)
 				}
 			);
 			if (state.ComposerCadence.Current != identity) CancelComposerPreview(state, renderer);
@@ -1392,7 +1392,7 @@ namespace studio {
 						previewPlayback.CurrentTick,
 						previewPlayback.Subframe,
 						previewPlayback.NegativeFrame,
-						detail::ImageGraphRigidObservation(previewDocument, previewPlayback)
+						detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
 					)) {
 					if (!UploadPreview(state, renderer, *cached)) return;
 					state.LastDiagnostic = {};
@@ -1524,7 +1524,7 @@ namespace studio {
 					*image,
 					previewPlayback.Subframe,
 					previewPlayback.NegativeFrame,
-					detail::ImageGraphRigidObservation(previewDocument, previewPlayback)
+					detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
 				);
 				state.LastDiagnostic = {};
 			}

@@ -1502,6 +1502,15 @@ namespace engine::imagegraph {
 	class SourceRigidProvider;
 	struct SliceStackReplayState;
 	struct RandomEntropyCapture;
+	// ObservedFrame captures only actual observations. NativePlayedPrefix explicitly samples a seek prefix.
+	enum class SourceCacheSampling : uint8_t { ObservedFrame, NativePlayedPrefix };
+	struct SourceCachePlaybackObservation {
+		bool Playing = false;
+		SourceCacheSampling Sampling = SourceCacheSampling::ObservedFrame;
+		// Attests a synchronous CPU producer closure, without source cache-group/loading scheduler state.
+		bool SynchronousProducer = false;
+		bool operator==(const SourceCachePlaybackObservation &) const = default;
+	};
 	// Fixed evaluation inputs. Seed is reserved for deterministic random nodes.
 	struct EvaluationRequest {
 		uint64_t Tick = 0;
@@ -1553,6 +1562,8 @@ namespace engine::imagegraph {
 		// Restart surface replay time at zero while retaining source cache entries.
 		bool ResetSurfaceReplay = false;
 		uint64_t SimulationAuthoringRevision = 0;
+		// Explicit source frame-cache observation, copied into retained recipes without a provider pointer.
+		std::optional<SourceCachePlaybackObservation> SourceCachePlayback{};
 	};
 
 	// Why parsing, compilation or evaluation failed.

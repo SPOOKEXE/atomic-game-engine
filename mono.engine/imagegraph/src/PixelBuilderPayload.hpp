@@ -45,6 +45,7 @@ namespace engine::imagegraph {
 		std::optional<RigidReplayState> RigidHistory;
 		uint64_t RigidAuthoringRevision = 0;
 		bool RigidPlaying = false, RigidFrameProgress = false;
+		std::optional<SourceCachePlaybackObservation> SourceCachePlayback;
 		std::optional<SliceStackReplayState> SliceStack;
 		uint64_t SimulationAuthoringRevision = 0;
 		std::optional<PixelBuilderGroupState> Groups;

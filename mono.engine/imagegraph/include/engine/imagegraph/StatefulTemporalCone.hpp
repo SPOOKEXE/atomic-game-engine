@@ -14,6 +14,7 @@ namespace engine::imagegraph {
 		size_t SurfaceCaches = 0;
 		size_t RandomGenerators = 0;
 		size_t DataProcessors = 0;
+		size_t SourceFrameCaches = 0;
 		size_t RigidActors = 0;
 		// First-frame curve captures require bounded replay from frame zero on a fresh seek.
 		bool FirstFrameData = false;
@@ -75,17 +76,19 @@ namespace engine::imagegraph {
 			cone.SurfaceCaches += node.Type == "pc.interlaced" || node.Type == "pc.time_remap" || node.Type == "pc.anim_loop" ||
 								  node.Type == "pc.delay" || node.Type == "pc.rate_remap" ||
 								  node.Type == "pc.revert" || node.Type == "pc.stagger";
+			cone.SourceFrameCaches += node.Type == "pc.cache" || node.Type == "pc.cache_array";
 			cone.RandomGenerators += node.Type == "pc.random";
 			cone.RigidActors += node.Type.starts_with("pc.rigid_");
 			cone.DataProcessors += node.Type.starts_with("pc.strand_") || node.Type == "pc.trigger_bool" ||
 								   node.Type == "pc.differential" || node.Type == "pc.counter" ||
 								   node.Type == "pc.delay_value" || node.Type == "pc.cache_value_array" ||
-								   node.Type == "pc.cache_results" ||
-								   node.Type == "pc.3_d_affector" || node.Type == "pc.segment_filter" ||
-								   node.Type == "pc.path_blend" || node.Type == "pc.path_to_curve" ||
-								   node.Type == "pc.path_redistribute" || node.Type == "pc.path_skew" ||
-								   node.Type == "pc.path_map_area" || node.Type == "pc.path_shape_3_d" ||
-								   node.Type == "pc.crop_content" || node.Type == "pc.smear";
+								   node.Type == "pc.cache_results" || node.Type == "pc.cache" ||
+								   node.Type == "pc.cache_array" || node.Type == "pc.3_d_affector" ||
+								   node.Type == "pc.segment_filter" || node.Type == "pc.path_blend" ||
+								   node.Type == "pc.path_to_curve" || node.Type == "pc.path_redistribute" ||
+								   node.Type == "pc.path_skew" || node.Type == "pc.path_map_area" ||
+								   node.Type == "pc.path_shape_3_d" || node.Type == "pc.crop_content" ||
+								   node.Type == "pc.smear";
 			cone.FirstFrameData |=
 				node.Type == "pc.3_d_affector" || node.Type == "pc.crop_content" || node.Type == "pc.smear";
 			cone.Simulation |= node.Type == "image.verlet_simple" ||

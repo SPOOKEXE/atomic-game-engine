@@ -80,6 +80,7 @@ namespace engine::imagegraph::detail {
 					  SourceSequenceAnimationExecutors(),
 					  SourceCacheValueExecutors(),
 					  SourceCacheResultsExecutors(),
+					  SourceFrameCacheExecutors(),
 					  SourceConversionExecutors(),
 					  SourceColourFilterExecutors()})
 					for (const ExecutorEntry &entry : family)

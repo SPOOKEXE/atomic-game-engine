@@ -72,6 +72,7 @@ namespace engine::imagegraph {
 			   DataHistory == other.DataHistory && SliceStack == other.SliceStack &&
 			   RigidHistory == other.RigidHistory && RigidAuthoringRevision == other.RigidAuthoringRevision &&
 			   RigidPlaying == other.RigidPlaying && RigidFrameProgress == other.RigidFrameProgress &&
+			   SourceCachePlayback == other.SourceCachePlayback &&
 			   SimulationAuthoringRevision == other.SimulationAuthoringRevision && Entropy == other.Entropy &&
 			   PcxObservations == other.PcxObservations && ProjectName == other.ProjectName &&
 			   SimulationCacheCaptures == other.SimulationCacheCaptures &&

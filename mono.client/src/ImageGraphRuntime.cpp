@@ -179,11 +179,28 @@ namespace client {
 
 		bool NeedsFrameSamples(const engine::imagegraph::Document &document) {
 			if (!document.Keyframes.empty()) return true;
-			return std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+			return std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
 				return !node.SourceAnimatedInputs.empty() || node.Type == "image.audio_window" ||
 					   node.Type == "image.audio_recording" || node.Type == "image.captured" ||
 					   node.Type == "pc.audio_window" || node.Type == "pc.audio_loudness" ||
 					   node.Type == "pc.interlaced" || node.Type == "pc.sequence_anim" ||
+					   node.Type == "pc.cache_array" ||
+					   (node.Type == "pc.cache" &&
+						(std::any_of(
+							 node.Values.begin(),
+							 node.Values.end(),
+							 [](const auto &v) {
+								 return v.Port == "animated" && std::get_if<bool>(&v.Data) &&
+										std::get<bool>(v.Data);
+							 }
+						 ) ||
+						 std::any_of(
+							 document.Links.begin(),
+							 document.Links.end(),
+							 [&](const auto &link) {
+								 return link.ToNode == node.Id && link.ToPort == "animated";
+							 }
+						 ))) ||
 					   node.Type == "pc.3_d_affector" || node.Type.starts_with("pc.verlet_sim_") ||
 					   node.Type.starts_with("pc.flip_") || node.Type.starts_with("pc.rigid_") ||
 					   node.Type.starts_with("pc.lua_") || node.Type.starts_with("pc.pcx_");
@@ -212,6 +229,9 @@ namespace client {
 			// Client seeks sample played frames, including fixed ticks. Repeated samples
 			// use the host cache.
 			clock.RigidPlaying = true;
+			clock.SourceCachePlayback = engine::imagegraph::SourceCachePlaybackObservation{
+				true, engine::imagegraph::SourceCacheSampling::NativePlayedPrefix, true
+			};
 			clock.RigidFrameProgress = true;
 			if (!feedback.Prepare(
 					document,

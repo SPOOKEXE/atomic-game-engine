@@ -88,6 +88,9 @@ namespace client::detail {
 		clock.RigidProvider = &rigid;
 		// Native client snapshots sample played frames, including fixed seeks.
 		clock.RigidPlaying = true;
+		clock.SourceCachePlayback = imagegraph::SourceCachePlaybackObservation{
+			true, imagegraph::SourceCacheSampling::NativePlayedPrefix, true
+		};
 		clock.RigidFrameProgress = true;
 		if (!owner.PrepareNodeInputs(
 				document,

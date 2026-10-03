@@ -279,6 +279,7 @@ namespace engine::imagegraph::detail {
 			data.RigidAuthoringRevision = context.Request.RigidAuthoringRevision;
 			data.RigidPlaying = context.Request.RigidPlaying;
 			data.RigidFrameProgress = context.Request.RigidFrameProgress;
+			data.SourceCachePlayback = context.Request.SourceCachePlayback;
 			if (context.Request.SliceStackReplay) data.SliceStack = *context.Request.SliceStackReplay;
 			data.SimulationAuthoringRevision = context.Request.SimulationAuthoringRevision;
 			if (context.Request.SimulationReplay) data.Simulation = *context.Request.SimulationReplay;

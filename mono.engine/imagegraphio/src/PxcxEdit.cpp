@@ -3199,6 +3199,59 @@ namespace engine::imagegraphio {
 						))
 						(*source)["attri"].erase("layer_visible");
 				}
+				if (node.Type == "pc.cache" || node.Type == "pc.cache_array") {
+					for (const std::string_view port : {"serialize", "cache_group", "cache"}) {
+						const Value *value = nullptr;
+						for (const auto &property : node.SourceProperties)
+							if (property.Port == port) {
+								if (value)
+									return Reject(
+										diagnostic, "duplicate frame-cache metadata", node.Id, property.Port
+									);
+								value = &property.Data;
+							}
+						if (value) {
+							const auto *ids = std::get_if<ArrayValue>(value);
+							const bool valid = port == "serialize" ? std::holds_alternative<bool>(*value)
+											   : port == "cache"
+												   ? std::holds_alternative<std::string>(*value)
+												   : ids && ids->ElementType == ValueType::Text &&
+														 ids->Items.empty() && ids->Nested.empty() &&
+														 ids->Elements.size() <= Limits::MaximumNodes;
+							if (!valid)
+								return Reject(
+									diagnostic,
+									"invalid frame-cache metadata type",
+									node.Id,
+									std::string(port)
+								);
+							const auto encoded = EncodeValue(*value, Json::array());
+							if (!encoded)
+								return Reject(
+									diagnostic,
+									"frame-cache metadata has no inverse",
+									node.Id,
+									std::string(port)
+								);
+							if (port == "cache")
+								(*source)["cache"] = *encoded;
+							else {
+								if (!source->contains("attri")) (*source)["attri"] = Json::object();
+								if (!(*source)["attri"].is_object())
+									return Reject(
+										diagnostic,
+										"frame-cache attributes are malformed",
+										node.Id,
+										std::string(port)
+									);
+								(*source)["attri"][std::string(port)] = *encoded;
+							}
+						} else if (port == "cache")
+							source->erase("cache");
+						else if (source->contains("attri") && (*source)["attri"].is_object())
+							(*source)["attri"].erase(std::string(port));
+					}
+				}
 				if (node.Type == "pc.wav_file_read") {
 					const bool *checker = nullptr;
 					for (const auto &property : node.SourceProperties) {

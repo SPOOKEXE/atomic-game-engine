@@ -1,0 +1,51 @@
+{
+  "profile": "native-source-frame-cache-observations",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "nodes": [
+    "pc.cache",
+    "pc.cache_array"
+  ],
+  "source_files": [
+    {
+      "path": "scripts/node_cache/node_cache.gml",
+      "sha256": "4f333ac660485560b57d86f99f87d767dff094a7d635e83383b155e83ebed71b"
+    },
+    {
+      "path": "scripts/node_cache_array/node_cache_array.gml",
+      "sha256": "bd90b08058183361d0349a2c16f398a053b2391720c61970e6942da54fdd630b"
+    },
+    {
+      "path": "scripts/__node_cache_base/__node_cache_base.gml",
+      "sha256": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb"
+    },
+    {
+      "path": "scripts/node_data/node_data.gml",
+      "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d"
+    },
+    {
+      "path": "scripts/surface_functions/surface_functions.gml",
+      "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2"
+    }
+  ],
+  "source_contract": {
+    "cache": "Inherited auto cache wrapper recovers before update; played misses capture whole input; paused misses cache retained output, initially source noone=-4. Animated updates scheduling on an actual miss only.",
+    "cache_array": "Start<0 maps to0, otherwise Start-1; Stop<0 maps toTOTAL_FRAMES. Invalid range uses stop<start, so equality is not invalid but cannot capture. Only played in-range observations capture. Capture every observed frame regardless Step; Step selects published positions with -1 for absent frames. Other observations retain exact previous output.",
+    "metadata": "Explicit attri.serialize bool, attri.cache_group string list and top-level cache string are roundtripped without synthetic absent fields. Constructor defaults serialize=true, empty group.",
+    "surface_cloning": "Native snapshots preserve finite bounded CPU surface formats and recursive input shape. No device handle identity, live GPU surface alias or licensed GPU clone parity claim."
+  },
+  "native_profile": {
+    "observation": "Optional by-value SourceCachePlaybackObservation with explicit Playing, ObservedFrame or NativePlayedPrefix and SynchronousProducer attestation. RigidPlaying is independent.",
+    "observed_frame": "Capture only actual observations. Pure data seeks directly; mixed noncontiguous nonzero seeks diagnose missing recorded scheduler. Same-clock Playing refresh retains current latest cache output/history and restores other frame-start journals.",
+    "played_prefix": "Caller explicitly chooses Playing=true for each admitted native prefix frame. Seeks rebuild latest-output observation from constructor while retaining frame captures. Fresh seeks create the bounded played prefix.",
+    "ownership": "DataReplay tagged node/processor rows own latest output separately from sorted frame snapshots. Preserve history across authored control revisions/restart; remove/type-change retires rows. Whole owner Clear resets them. PB retains observation by value, never caller pointers.",
+    "storage": "Integer nonnegative frames only; timeline storage capped at4094 frames plus private tag/output records, array selections4096; whole evaluation byte/work limits apply with generation overlap charged.",
+    "unsupported": "Serialized loading and enabled nonempty source cache groups require actual host scheduler/captures and diagnose. Selected Cache/Clear Cache buttons and freed GPU-handle lifecycle remain separate unimplemented source scheduler work."
+  },
+  "references": [
+    {
+      "title": "GameMaker surface_copy manual",
+      "url": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Surfaces/surface_copy.htm",
+      "scope": "Official manual distinguishes copy from source mutation and documents volatile surface existence; it is not evidence for Pixel Composer scheduler parity."
+    }
+  ]
+}

@@ -1620,6 +1620,10 @@ namespace engine::imagegraphexport::runner {
 							 : (renderRange ? FramePath(outputFile, tick) : outputFile);
 			auto request = liveRequest ? *liveRequest : engine::imagegraph::EvaluationRequest{};
 			if (!request.RigidProvider) request.RigidProvider = &rigidProvider;
+			if (!request.SourceCachePlayback)
+				request.SourceCachePlayback = engine::imagegraph::SourceCachePlaybackObservation{
+					true, engine::imagegraph::SourceCacheSampling::NativePlayedPrefix, true
+				};
 			if (!liveRequest) {
 				request.RigidPlaying = arguments.Has("rigid-playing");
 				request.RigidFrameProgress = arguments.Has("rigid-frame-progress");

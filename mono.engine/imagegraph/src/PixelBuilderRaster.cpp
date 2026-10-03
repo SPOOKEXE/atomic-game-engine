@@ -123,6 +123,7 @@ namespace engine::imagegraph::detail {
 		request.RigidAuthoringRevision = data.RigidAuthoringRevision;
 		request.RigidPlaying = data.RigidPlaying;
 		request.RigidFrameProgress = data.RigidFrameProgress;
+		request.SourceCachePlayback = data.SourceCachePlayback;
 		request.SliceStackReplay = data.SliceStack ? &*data.SliceStack : nullptr;
 		request.SimulationAuthoringRevision = data.SimulationAuthoringRevision;
 		request.GroupReplay = replayGroups ? &replayGroups->Replay : nullptr;

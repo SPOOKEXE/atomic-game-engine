@@ -43,6 +43,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceSequenceAnimationExecutors();
 	std::span<const ExecutorEntry> SourceCacheValueExecutors();
 	std::span<const ExecutorEntry> SourceCacheResultsExecutors();
+	std::span<const ExecutorEntry> SourceFrameCacheExecutors();
 	std::span<const ExecutorEntry> SceneExecutors();
 	std::span<const ExecutorEntry> SourceSdfExecutors();
 	std::span<const ExecutorEntry> SimulationExecutors();

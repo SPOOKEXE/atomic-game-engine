@@ -82,7 +82,8 @@ namespace studio {
 
 	// A small LRU of successful, bounded preview images keyed by authored revision,
 	// selected output, signed fractional frame and rigid playback observations. Failed evaluations
-	// never replace a good frame. Rigid observation bits are Playing=1 and FrameProgress=2.
+	// never replace a good frame. Observation bits are rigid Playing=1, rigid FrameProgress=2 and
+	// source-cache Playing=4.
 	class ImageGraphPreviewCache {
 	  public:
 		const engine::imagegraph::Image *Find(

@@ -5910,6 +5910,8 @@ namespace engine::imagegraph {
 						 (entry->Type == "pc.flip_render" && input->Id == "fluid_particle") ||
 						 (entry->Type == "pc.rigid_object" && input->Id == "texture") ||
 						 (entry->Type == "pc.crop_content" && input->Id == "surface_in") ||
+						 ((entry->Type == "pc.cache" || entry->Type == "pc.cache_array") &&
+						  input->Id == "surface_in") ||
 						 (entry->Type == "pc.sequence_anim" && input->Id == "surface_in" &&
 						  input->ArrayDepth == 1));
 				}
@@ -9920,9 +9922,9 @@ namespace engine::imagegraph {
 							if (const auto *values = FindValueOutputs(results[sourceIndex])) {
 								for (const auto &value : *values) {
 									if (value.Port != link->FromPort) continue;
-									if ((node.Type == "pc.sequence_anim" || node.Type == "pc.cache_results") &&
-										input.Id == "surface_in" &&
-										detail::ValidRuntimeValue(value.Data)) {
+									if ((node.Type == "pc.sequence_anim" || node.Type == "pc.cache_results" ||
+										 node.Type == "pc.cache" || node.Type == "pc.cache_array") &&
+										input.Id == "surface_in" && detail::ValidRuntimeValue(value.Data)) {
 										context.ValueViews.emplace_back(input.Id, &value.Data);
 										break;
 									}

@@ -6,14 +6,19 @@
 #include <studio/ImageGraph.hpp>
 
 namespace studio::detail {
-	inline uint8_t ImageGraphRigidObservation(
+	inline uint8_t ImageGraphPlaybackObservation(
 		const engine::imagegraph::Document &document, const ImageGraphPlayback &playback
 	) {
-		if (std::none_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
-				return node.Type.starts_with("pc.rigid_");
-			}))
-			return 0;
-		return uint8_t((playback.Playing ? 1 : 0) | (playback.FrameProgress ? 2 : 0));
+		const bool rigid = std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+			return node.Type.starts_with("pc.rigid_");
+		});
+		const bool caches = std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+			return node.Type == "pc.cache" || node.Type == "pc.cache_array";
+		});
+		return uint8_t(
+			(rigid ? ((playback.Playing ? 1 : 0) | (playback.FrameProgress ? 2 : 0)) : 0) |
+			(caches && playback.Playing ? 4 : 0)
+		);
 	}
 
 	// The caller keeps the synchronous provider alive through the entire evaluation.
@@ -24,6 +29,9 @@ namespace studio::detail {
 	) {
 		request.RigidProvider = &provider;
 		request.RigidPlaying = playback.Playing;
+		request.SourceCachePlayback = engine::imagegraph::SourceCachePlaybackObservation{
+			playback.Playing, engine::imagegraph::SourceCacheSampling::ObservedFrame, true
+		};
 		request.RigidFrameProgress = playback.FrameProgress;
 	}
 }

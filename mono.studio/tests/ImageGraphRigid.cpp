@@ -141,13 +141,13 @@ TEST_CASE(
 	CapturedFeedbackHost retained;
 	const auto paused = Preview(retained, document, plan, owner);
 	studio::ImageGraphPreviewCache cache;
-	const auto pausedObservation = studio::detail::ImageGraphRigidObservation(document, owner);
+	const auto pausedObservation = studio::detail::ImageGraphPlaybackObservation(document, owner);
 	REQUIRE(pausedObservation == 2);
 	REQUIRE(cache.Store(19, 0, 0, paused, 0, false, pausedObservation));
 	REQUIRE(cache.Find(19, 0, 0, 0, false, pausedObservation));
 	CHECK(*cache.Find(19, 0, 0, 0, false, pausedObservation) == paused);
 	owner.Playing = true;
-	const auto playedObservation = studio::detail::ImageGraphRigidObservation(document, owner);
+	const auto playedObservation = studio::detail::ImageGraphPlaybackObservation(document, owner);
 	REQUIRE(playedObservation == 3);
 	CHECK_FALSE(cache.Find(19, 0, 0, 0, false, playedObservation));
 	CapturedFeedbackHost independent;
@@ -162,12 +162,15 @@ TEST_CASE(
 	CHECK_FALSE(cache.Find(19, 0, 0, 0, false, 4));
 	CHECK(cache.HeldBytes() == bytes);
 	owner.FrameProgress = false;
-	CHECK_FALSE(cache.Find(19, 0, 0, 0, false, studio::detail::ImageGraphRigidObservation(document, owner)));
+	CHECK_FALSE(
+		cache.Find(19, 0, 0, 0, false, studio::detail::ImageGraphPlaybackObservation(document, owner))
+	);
 	owner.FrameProgress = true;
 	owner.Playing = false;
-	REQUIRE(cache.Find(19, 0, 0, 0, false, studio::detail::ImageGraphRigidObservation(document, owner)));
+	REQUIRE(cache.Find(19, 0, 0, 0, false, studio::detail::ImageGraphPlaybackObservation(document, owner)));
 	CHECK(
-		*cache.Find(19, 0, 0, 0, false, studio::detail::ImageGraphRigidObservation(document, owner)) == paused
+		*cache.Find(19, 0, 0, 0, false, studio::detail::ImageGraphPlaybackObservation(document, owner)) ==
+		paused
 	);
 	CHECK(Preview(retained, document, plan, owner) == paused);
 }
@@ -351,5 +354,5 @@ TEST_CASE(
 		REQUIRE(cache.Find(1, 0, tick, 0, false, uint8_t(tick % 4)));
 	studio::ImageGraphPlayback owner;
 	owner.Playing = owner.FrameProgress = true;
-	CHECK(studio::detail::ImageGraphRigidObservation(Document{}, owner) == 0);
+	CHECK(studio::detail::ImageGraphPlaybackObservation(Document{}, owner) == 0);
 }

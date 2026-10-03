@@ -24,7 +24,7 @@ namespace studio::detail {
 			if (!Held) return identity;
 			auto withoutPulse = identity;
 			withoutPulse.RigidObservation = Current.RigidObservation;
-			if (withoutPulse == Current && ((identity.RigidObservation ^ Current.RigidObservation) & 1) == 0)
+			if (withoutPulse == Current && ((identity.RigidObservation ^ Current.RigidObservation) & 5) == 0)
 				identity.RigidObservation = Current.RigidObservation;
 			return identity;
 		}

@@ -2,6 +2,7 @@
 
 #include <engine/imagegraph/CacheResultsReplay.hpp>
 #include <engine/imagegraph/FeedbackReplay.hpp>
+#include <engine/imagegraph/FrameCacheReplay.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/StatefulTemporalCone.hpp>
 
@@ -199,6 +200,7 @@ namespace engine::imagegraph {
 		double Subframe = 0;
 		bool NegativeFrame = false;
 		bool RigidPlaying = false, RigidFrameProgress = false;
+		std::optional<SourceCachePlaybackObservation> CacheObservation;
 		bool Configured = false, Initialized = false, Stateful = false, HaveExternalSources = false;
 
 		static uint64_t SourceBytes(const std::vector<RequestImageSource> &sources) {
@@ -454,6 +456,7 @@ namespace engine::imagegraph {
 			DocumentRevision = InputRevision = Tick = 0;
 			Subframe = 0;
 			NegativeFrame = RigidPlaying = RigidFrameProgress = false;
+			CacheObservation.reset();
 			Configured = Initialized = Stateful = HaveExternalSources = false;
 		}
 		bool Prepare(
@@ -536,7 +539,10 @@ namespace engine::imagegraph {
 					   !State.Rigid.Owners.empty();
 			const bool directData = temporal.DataProcessors != 0 && !temporal.FirstFrameData &&
 									!temporal.Simulation && !temporal.SurfaceCaches &&
-									!temporal.RandomGenerators && !temporal.RigidActors && bindings.empty();
+									!temporal.RandomGenerators && !temporal.RigidActors && bindings.empty() &&
+									(!temporal.SourceFrameCaches ||
+									 (request.SourceCachePlayback && request.SourceCachePlayback->Sampling ==
+																		 SourceCacheSampling::ObservedFrame));
 			if (!stateful && bindings.empty()) {
 				if (changed || Stateful) {
 					Clear();
@@ -621,23 +627,29 @@ namespace engine::imagegraph {
 					Status::UnsupportedExecution,
 					"Cache Results was cleared; await a fresh source observation"
 				);
+			const bool cacheObservationChanged =
+				temporal.SourceFrameCaches && Initialized && CacheObservation != request.SourceCachePlayback;
 			const bool rigidObservationChanged =
 				temporal.RigidActors && Initialized &&
 				(RigidPlaying != request.RigidPlaying || RigidFrameProgress != request.RigidFrameProgress);
-			const bool refreshFrame = !changed && Initialized && sameSelection && Tick == request.Tick &&
-									  NegativeFrame == request.NegativeFrame && temporal.RigidActors &&
-									  (rigidObservationChanged || Subframe != request.Subframe ||
-									   !request.SimulationCacheCaptures.empty());
+			const bool refreshFrame =
+				!changed && Initialized && sameSelection && Tick == request.Tick &&
+				NegativeFrame == request.NegativeFrame &&
+				(cacheObservationChanged ||
+				 (temporal.RigidActors && (rigidObservationChanged || Subframe != request.Subframe ||
+										   !request.SimulationCacheCaptures.empty())));
 			if (refreshFrame && !FrameStartValid)
-				return fail(Status::InvalidValue, "rigid refresh has no frame-start checkpoint");
+				return fail(Status::InvalidValue, "playback refresh has no frame-start checkpoint");
 			if (refreshFrame && feedback_detail::RefreshTouchesLua(
 									document, plan, outputs, selectedNode, request.SimulationCacheCaptures
 								))
 				return fail(
-					Status::UnsupportedExecution, "rigid frame refresh cannot replay Lua session side effects"
+					Status::UnsupportedExecution,
+					"playback frame refresh cannot replay Lua session side effects"
 				);
-			if (!changed && Initialized && !rigidObservationChanged && Tick == request.Tick &&
-				Subframe == request.Subframe && NegativeFrame == request.NegativeFrame && sameSelection &&
+			if (!changed && Initialized && !rigidObservationChanged && !cacheObservationChanged &&
+				Tick == request.Tick && Subframe == request.Subframe &&
+				NegativeFrame == request.NegativeFrame && sameSelection &&
 				request.SimulationCacheCaptures.empty()) {
 				if (!bindings.empty())
 					request.ImageSources = Tick || HaveExternalSources
@@ -657,9 +669,17 @@ namespace engine::imagegraph {
 				 ((Tick < Limits::MaximumTick && Tick + 1 == request.Tick) ||
 				  (Tick == request.Tick && Subframe == request.Subframe &&
 				   NegativeFrame == request.NegativeFrame &&
-				   (!request.SimulationCacheCaptures.empty() || rigidObservationChanged)) ||
+				   (!request.SimulationCacheCaptures.empty() || rigidObservationChanged ||
+					cacheObservationChanged)) ||
 				  (temporal.RandomGenerators && !temporal.Simulation && !temporal.SurfaceCaches &&
 				   bindings.empty() && Tick == request.Tick && request.Subframe > Subframe)));
+			if (!contiguous && request.Tick && temporal.SourceFrameCaches && request.SourceCachePlayback &&
+				request.SourceCachePlayback->Sampling == SourceCacheSampling::ObservedFrame)
+				return fail(
+					Status::UnsupportedExecution,
+					"mixed observed frame-cache seek needs a recorded scheduler or explicit native played "
+					"prefix"
+				);
 			if (!contiguous && request.Tick > 4096)
 				return fail(Status::LimitExceeded, "stateful seek exceeds the 4096-step bound");
 			std::string candidateNode(selectedNode);
@@ -700,6 +720,44 @@ namespace engine::imagegraph {
 				for (const auto &entry : State.Simulation.Entries)
 					if (retainCache(entry)) candidate.Simulation.Entries.push_back(entry);
 			}
+			if (!contiguous && temporal.SourceFrameCaches) {
+				const uint64_t resident = currentBytes + OutputBytes(candidate);
+				if (resident >= maximumBytes)
+					return fail(Status::LimitExceeded, "frame-cache seek overlay residency exceeds bounds");
+				if (OverlaySourceFrameCacheRows(
+						document,
+						State.Data,
+						candidate.Data,
+						FrameCacheOutputPolicy::Constructor,
+						diagnostic,
+						maximumBytes - resident
+					) != Status::Ok)
+					return false;
+			}
+			StatefulOutputEvaluationResult retiredPrior;
+			const bool retireBeforeEvaluation =
+				DocumentRevision != revision && contiguous && !refreshFrame &&
+				std::any_of(State.Data.Entries.begin(), State.Data.Entries.end(), [](const auto &row) {
+					return !SourceFrameCacheRowType(row).empty();
+				});
+			if (retireBeforeEvaluation) {
+				// Retire old typed cache rows before another node with that ID can consume their state.
+				const uint64_t copyBytes = LedgerBytes(State);
+				const uint64_t resident = currentBytes + OutputBytes(candidate);
+				if (resident >= maximumBytes || copyBytes >= maximumBytes - resident)
+					return fail(Status::LimitExceeded, "frame-cache prior retirement copy exceeds bounds");
+				CopyLedgers(State, retiredPrior);
+				const DataReplayState none;
+				if (OverlaySourceFrameCacheRows(
+						document,
+						none,
+						retiredPrior.Data,
+						FrameCacheOutputPolicy::RetainedObservation,
+						diagnostic,
+						maximumBytes - resident - copyBytes
+					) != Status::Ok)
+					return false;
+			}
 			std::vector<RequestImageSource> previous, inputs;
 			const uint64_t first = contiguous ? request.Tick : 0;
 			for (uint64_t tick = first; tick <= request.Tick; tick++) {
@@ -723,6 +781,28 @@ namespace engine::imagegraph {
 					if (copyBytes > maximumBytes - currentBytes)
 						return fail(Status::LimitExceeded, "frame-start checkpoint overlay exceeds bounds");
 					CopyLedgers(FrameStart, candidateStart);
+					if (temporal.SourceFrameCaches) {
+						const uint64_t resident = currentBytes + LedgerBytes(candidateStart);
+						if (resident >= maximumBytes)
+							return fail(
+								Status::LimitExceeded,
+								"frame-cache checkpoint overlay residency exceeds bounds"
+							);
+						const auto policy =
+							request.SourceCachePlayback && request.SourceCachePlayback->Sampling ==
+															   SourceCacheSampling::ObservedFrame
+								? FrameCacheOutputPolicy::RetainedObservation
+								: FrameCacheOutputPolicy::PreObservation;
+						if (OverlaySourceFrameCacheRows(
+								document,
+								State.Data,
+								candidateStart.Data,
+								policy,
+								diagnostic,
+								maximumBytes - resident
+							) != Status::Ok)
+							return false;
+					}
 					candidateStartInputs = FrameStartInputs;
 					candidateStart.Simulation.Entries.reserve(
 						candidateStart.Simulation.Entries.size() + overlayCount
@@ -756,7 +836,10 @@ namespace engine::imagegraph {
 					if (!OverlayClearedRows(document, data, maximumBytes - resident, diagnostic))
 						return false;
 				}
-				const auto &prior = refreshFrame ? candidateStart : contiguous ? State : candidate;
+				const auto &prior = refreshFrame			 ? candidateStart
+									: retireBeforeEvaluation ? retiredPrior
+									: contiguous			 ? State
+															 : candidate;
 				clock.SimulationReplay = &prior.Simulation;
 				clock.SurfaceReplay = &prior.Surfaces;
 				clock.RandomReplay = &prior.Random;
@@ -765,10 +848,10 @@ namespace engine::imagegraph {
 				clock.RigidAuthoringRevision = revision;
 				const auto &generation = refreshFrame ? candidateStartInputs : tick == 0 ? seeds : previous;
 				if (contiguous && !refreshFrame) {
-					const bool sameFrameAction =
-						Tick == request.Tick && Subframe == request.Subframe &&
-						NegativeFrame == request.NegativeFrame &&
-						(!request.SimulationCacheCaptures.empty() || rigidObservationChanged);
+					const bool sameFrameAction = Tick == request.Tick && Subframe == request.Subframe &&
+												 NegativeFrame == request.NegativeFrame &&
+												 (!request.SimulationCacheCaptures.empty() ||
+												  rigidObservationChanged || cacheObservationChanged);
 					const auto sourceImage = [&](const FeedbackBinding &binding) -> const Image * {
 						if (sameFrameAction) {
 							const auto source =
@@ -822,11 +905,13 @@ namespace engine::imagegraph {
 						clock.ImageSources = generation;
 				}
 				if (refreshFrame) clock.ImageSources = candidateStartInputs;
-				if (tick == request.Tick && temporal.RigidActors && !refreshFrame) {
+				if (tick == request.Tick && (temporal.RigidActors || temporal.SourceFrameCaches) &&
+					!refreshFrame) {
 					const uint64_t copyBytes = LedgerBytes(prior) + CaptureBytes(clock.ImageSources);
 					const uint64_t resident = currentBytes + OutputBytes(candidate) +
-											  candidateSnapshot.RetainedBytes() + SourceBytes(previous) +
-											  SourceBytes(captures) + SourceBytes(inputs);
+											  candidateSnapshot.RetainedBytes() + LedgerBytes(retiredPrior) +
+											  SourceBytes(previous) + SourceBytes(captures) +
+											  SourceBytes(inputs);
 					if (resident >= maximumBytes || copyBytes > maximumBytes - resident)
 						return fail(Status::LimitExceeded, "frame-start checkpoint copy exceeds bounds");
 					CopyLedgers(prior, candidateStart);
@@ -837,11 +922,12 @@ namespace engine::imagegraph {
 					candidateStartValid = true;
 					candidateStartResetSurfaces = clock.ResetSurfaceReplay;
 				}
-				const uint64_t held =
-					LedgerBytes(FrameStart) + SourceBytes(FrameStartInputs) + LedgerBytes(candidateStart) +
-					SourceBytes(candidateStartInputs) + configBytes + oldConfigBytes + externalBytes +
-					OutputBytes(State) + InputSnapshot.RetainedBytes() + candidateSnapshot.RetainedBytes() +
-					SourceBytes(Inputs) + SourceBytes(previous) + SourceBytes(captures) + SourceBytes(inputs);
+				const uint64_t held = LedgerBytes(retiredPrior) + LedgerBytes(FrameStart) +
+									  SourceBytes(FrameStartInputs) + LedgerBytes(candidateStart) +
+									  SourceBytes(candidateStartInputs) + configBytes + oldConfigBytes +
+									  externalBytes + OutputBytes(State) + InputSnapshot.RetainedBytes() +
+									  candidateSnapshot.RetainedBytes() + SourceBytes(Inputs) +
+									  SourceBytes(previous) + SourceBytes(captures) + SourceBytes(inputs);
 				if (held >= maximumBytes)
 					return fail(Status::LimitExceeded, "stateful generation overlap exceeds byte bounds");
 				if (selectedNode.empty()) {
@@ -916,6 +1002,25 @@ namespace engine::imagegraph {
 			// Admit the retained preceding generation before its final
 			// copy/publication.
 			if (request.Tick == 0 && !externalCount) inputs.clear();
+			if (DocumentRevision != revision &&
+				std::any_of(State.Data.Entries.begin(), State.Data.Entries.end(), [](const auto &row) {
+					return !SourceFrameCacheRowType(row).empty();
+				})) {
+				const uint64_t resident = currentBytes + OutputBytes(candidate) +
+										  LedgerBytes(candidateStart) + SourceBytes(candidateStartInputs);
+				if (resident >= maximumBytes)
+					return fail(Status::LimitExceeded, "frame-cache retirement residency exceeds bounds");
+				const DataReplayState none;
+				if (OverlaySourceFrameCacheRows(
+						document,
+						none,
+						candidate.Data,
+						FrameCacheOutputPolicy::RetainedObservation,
+						diagnostic,
+						maximumBytes - resident
+					) != Status::Ok)
+					return false;
+			}
 			if (changed) {
 				Bindings = std::move(declarations);
 				Seeds = std::move(blanks);
@@ -938,6 +1043,7 @@ namespace engine::imagegraph {
 				if (FrameTime{request.Tick, request.Subframe, request.NegativeFrame} != CacheClearClock)
 					CacheInvalidInputs.clear();
 			}
+
 			State = std::move(candidate);
 			FrameStart = std::move(candidateStart);
 			FrameStartInputs = std::move(candidateStartInputs);
@@ -951,6 +1057,7 @@ namespace engine::imagegraph {
 			Tick = request.Tick;
 			Subframe = request.Subframe;
 			NegativeFrame = request.NegativeFrame;
+			CacheObservation = request.SourceCachePlayback;
 			RigidPlaying = request.RigidPlaying;
 			RigidFrameProgress = request.RigidFrameProgress;
 			Stateful = stateful;

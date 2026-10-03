@@ -2437,6 +2437,49 @@ namespace engine::imagegraphio {
 					}
 				}
 			}
+			if (entry.Type == "pc.cache" || entry.Type == "pc.cache_array") {
+				for (const std::string_view port : {"serialize", "cache_group", "cache"}) {
+					std::optional<Json> raw;
+					if (port == "cache") {
+						if (source.contains("cache")) raw = source["cache"];
+					} else if (const auto *attribute = Attribute(source, port))
+						raw = *attribute;
+					if (!raw) continue;
+					imagegraph::Value value;
+					bool decoded = false;
+					if (port == "serialize" && raw->is_boolean()) {
+						value = raw->get<bool>();
+						decoded = true;
+					} else if (port == "cache" && raw->is_string()) {
+						const auto &text = raw->get_ref<const std::string &>();
+						if (AdmitNativeText(text, budget)) {
+							value = text;
+							decoded = true;
+						}
+					} else if (port == "cache_group" && raw->is_array() &&
+							   raw->size() <= imagegraph::Limits::MaximumNodes) {
+						imagegraph::ArrayValue ids{imagegraph::ValueType::Text, {}};
+						decoded = AdmitNativeSlots(ids.Elements, raw->size(), budget);
+						for (const auto &id : *raw) {
+							if (!decoded || !id.is_string() ||
+								!AdmitNativeText(id.get_ref<const std::string &>(), budget)) {
+								decoded = false;
+								break;
+							}
+							ids.Elements.push_back(id.get<std::string>());
+						}
+						if (decoded) value = std::move(ids);
+					}
+					if (!decoded ||
+						!AdmitNativeSlots(node.SourceProperties, node.SourceProperties.size() + 1, budget) ||
+						!AdmitNativeText(port, budget)) {
+						reason = "source frame-cache metadata exceeds its typed mapping or budget";
+						return false;
+					}
+					node.SourceProperties.push_back({std::string(port), std::move(value)});
+					animation.FormatVersion = 9;
+				}
+			}
 			if (entry.Type == "pc.wav_file_read")
 				if (auto raw = Attribute(source, "file_checker")) {
 					if (!raw->is_boolean() ||
