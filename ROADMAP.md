@@ -52,7 +52,7 @@ Milestone labels describe development scope, not release versions.
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
   1. Graph and Studio: finish Dopesheet gestures and remaining undo/redo and host workflows.
-  2. Nodes: finish 2D, data, array, VFX and simulation coverage; verify defaults, controls, errors and animation; update the parity matrices.
+  2. Nodes: implement the remaining 391 catalogue executors; verify defaults, controls, errors and animation; update parity evidence.
   3. Animation and audio: finish audio workflows and feedback; verify seek/reset and fractional-key semantics.
   4. 3D and outputs: finish live Transform Image 3D, mesh consumers, remaining 3D nodes, material/shader/skybox bindings and large-sequence playback.
   5. PXC and exports: finish node, link and dynamic-input edits and remaining formats; validate modified PXC compatibility.
