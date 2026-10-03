@@ -396,26 +396,6 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"Source processor literals remain serializable when execution is unavailable",
-	"[imagegraph][node_processor]"
-) {
-	Document document;
-	document.FormatVersion = 7;
-	document.Nodes = {{"project", "pc.heightmap_project_3_d", "", {}, {{"distance", Numbers({.1, .2})}}, {}}};
-	document.Outputs = {{"out", "project", "surface_out"}};
-	CHECK_FALSE(HasNativeExecutor("pc.heightmap_project_3_d"));
-	Document restored;
-	Diagnostic diagnostic;
-	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
-	CHECK(restored == document);
-	Plan plan;
-	REQUIRE(Compile(restored, plan, diagnostic) == Status::Ok);
-	Image sentinel{1, 1, {1, 2, 3, 4}, 0};
-	CHECK(Evaluate(restored, plan, "out", {}, sentinel, diagnostic) == Status::UnsupportedExecution);
-	CHECK(sentinel.Pixels == std::vector<uint8_t>{1, 2, 3, 4});
-}
-
-TEST_CASE(
 	"Legacy image arrays enter verified source processors and refuse wrong payload leaves",
 	"[imagegraph][node_processor]"
 ) {
@@ -464,12 +444,42 @@ TEST_CASE(
 	document.Outputs.back().Port = "image";
 	CHECK(Compile(document, plan, diagnostic) == Status::TypeMismatch);
 	document.Nodes.back().Type = "pc.heightmap_project_3_d";
-	document.Nodes.back().Values.clear();
+	document.Nodes.back().Values = {
+		{"dimension", Vector2{4, 4}},
+		{"dimension_unit", EnumValue{0}},
+		{"view_angle", Vector3{}},
+		{"scale", 2.},
+		{"interpolate", EnumValue{1}}
+	};
 	document.Links.back().ToPort = "heightmap";
 	document.Outputs.back().Port = "surface_out";
-	CHECK(Compile(document, plan, diagnostic) == Status::Ok);
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	const auto projected = EvaluateArray(document, plan, "out", {}, images, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(projected == Status::Ok);
+	REQUIRE(images.Images.size() == 2);
+	CHECK(images.Images[0].Pixels != images.Images[1].Pixels);
+	const std::array<std::string_view, 2> producers{"red", "green"};
+	for (size_t row = 0; row < producers.size(); ++row) {
+		// A separate scalar graph resolves one surface, without the legacy array producer edge.
+		Document scalar = document;
+		scalar.Links.back().FromNode = std::string(producers[row]);
+		scalar.Links.back().FromPort = "surface_out";
+		Plan scalarPlan;
+		REQUIRE(Compile(scalar, scalarPlan, diagnostic) == Status::Ok);
+		Image expected;
+		const auto status = Evaluate(scalar, scalarPlan, "out", {}, expected, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(status == Status::Ok);
+		CHECK(images.Images[row].Width == 4);
+		CHECK(images.Images[row].Height == 4);
+		CHECK(images.Images[row].Format == expected.Format);
+		CHECK(images.Images[row].Pixels == expected.Pixels);
+	}
+	// The image-only resolver refuses a successfully computed multi-image result.
 	Image sentinel{1, 1, {1, 2, 3, 4}, 0};
-	CHECK(Evaluate(document, plan, "out", {}, sentinel, diagnostic) == Status::UnsupportedExecution);
+	CHECK(Evaluate(document, plan, "out", {}, sentinel, diagnostic) == Status::InvalidOutput);
+	CHECK(diagnostic.Message == "single-image consumer requires exactly one top-level image");
 	CHECK(sentinel.Pixels == std::vector<uint8_t>{1, 2, 3, 4});
 	Document wrong;
 	wrong.FormatVersion = 7;

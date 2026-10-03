@@ -240,6 +240,20 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                 )
                 self.assertIn("I\tattribute_process\tattribute process\t-1\tBool\tboolean\tb 0\t", catalogue[start:end])
 
+    def test_herringbone_gabor_mapped_scale_preserves_the_two_source_components(self):
+        snapshot = json.loads((REPOSITORY / "docs/pixel-composer-m0/source-inputs.json").read_text())
+        for name, expected in (("Node_Herringbone_Tile", "v 0.25 0.25"), ("Node_Gabor_Noise", "v 4 4")):
+            node = snapshot["nodes"][name]
+            control = next(v for v in node["inputs"] if v["name"] == "Scale")
+            self.assertEqual("Vec2", control["kind"])
+            self.assertEqual("vector2", control["mapped_range_type"])
+            node["display_name"] = name
+            node["family"] = "generate"
+            with tempfile.TemporaryDirectory() as temporary:
+                lines = self.run_generator(Path(temporary), {name: node})
+            self.assertIn(f"I\tscale_map_range\tScale Map Range\t-1\tMapRange\tvector2\t{expected}\t", lines)
+            self.assertIn("A\tI\tscale\t1", lines)
+
     def test_simplex_mapped_ranges_keep_source_dimensions(self):
         source = json.loads(
             (REPOSITORY / "docs/pixel-composer-m0/source-inputs.json").read_text(encoding="utf-8")

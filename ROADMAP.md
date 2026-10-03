@@ -41,7 +41,7 @@ Milestone labels describe development scope, not release versions.
 - [x] Pixel Composer foundations:
 
   1. Retain the source licence, pinned metadata, enum choices and typed shader inputs; preserve static selectors and source records; save instance ports, graph selectors and cooked-shader references.
-  2. Evaluate bounded image, data, path and palette kernels, including polar mapping and surface/buffer conversion; preserve mapped inputs, surface formats and instance routes.
+  2. Evaluate bounded image, data, path and palette kernels, including polar mapping, surface/buffer conversion, Julia sets, Gabor noise, tile patterns and heightmap projection; preserve mapped inputs, surface formats and instance routes.
   3. Replay animation, sequences, Gradients, Time Remap, FLIP/Verlet, Strand and rigid actors with bounded history; clear and refill mixed owned image cycles, retain random state, resolve FFT windows and rasterize trails/VFX.
   4. Edit graphs, groups, keys and tiles atomically; scope Dopesheet Delete and canvas shortcuts to their panels; refresh HLSL sockets, cook shaders and retain Lua observations; preserve moved inputs, animator aliases and refused selections; insert Gradient/Matrix keys and save rigid meshes with metadata.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
@@ -52,7 +52,7 @@ Milestone labels describe development scope, not release versions.
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
   1. Graph and Studio: finish remaining Dopesheet gestures and host workflows. Selected-key easing, dynamic tracks and focused Composer Undo/Redo pass headless checks.
-  2. Nodes: implement the remaining 360 catalogue executors; verify defaults, controls, errors and animation; update parity evidence.
+  2. Nodes: implement remaining catalogue executors; verify defaults, controls, errors and animation; update parity evidence.
   3. Animation and audio: finish audio workflows and feedback; verify seek/reset and fractional-key semantics.
   4. 3D and outputs: finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback; broaden Transform and skybox raster verification.
   5. PXC and exports: finish remaining edits and formats; validate modified PXC compatibility. Processor resets preserve metadata; resumable exports retain pending work, cancel safely and publish atomically.

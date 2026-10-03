@@ -67,6 +67,8 @@ CONSTRUCTOR_DEFAULT_OVERRIDE = re.compile(
 CONSTRUCTOR_DEFAULT_OVERRIDE_NODES = {"Node_3D_Light"}
 # These mapped controls are numeric endpoint pairs in the pinned source wrapper.
 MAPPED_RANGE_TYPE_OVERRIDES = {
+    ("Node_Herringbone_Tile", "Scale"): "vector2",
+    ("Node_Gabor_Noise", "Scale"): "vector2",
     ("Node_Noise_Simplex", "Iteration"): "vector2",
     ("Node_Noise_Simplex", "Scale"): "vector2",
     ("Node_Gradient", "Angle"): "vector2",

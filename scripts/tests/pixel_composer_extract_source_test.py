@@ -180,6 +180,16 @@ function Node_Points_Triangulate(_x, _y) : Node(_x, _y) constructor {
     newInput(0, nodeValue_Vec2("Points", [0,0])).setArrayDepth(1);
 }
 """,
+            "scripts/node_herringbone_tile/node_herringbone_tile.gml": """
+function Node_Herringbone_Tile(_x, _y) : Node(_x, _y) constructor {
+    newInput(2, nodeValue_Vec2("Scale", [.25,.25])).setUnitSimple().setMappable(11);
+}
+""",
+            "scripts/node_gabor_noise/node_gabor_noise.gml": """
+function Node_Gabor_Noise(_x, _y) : Node(_x, _y) constructor {
+    newInput(2, nodeValue_Vec2("Scale", [4,4])).setShaderProp("scale").setMappable(8);
+}
+""",
             "scripts/node_noise_simplex/node_noise_simplex.gml": """
 function Node_Noise_Simplex(_x, _y) : Node(_x, _y) constructor {
     newInput(3, nodeValue_ISlider("Iteration", 1, [1,16,.1])).setMappable(9);
@@ -354,6 +364,8 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
                 "Node_Points_Remap",
                 "Node_Points_Triangulate",
                 "Node_Noise_Simplex",
+                "Node_Herringbone_Tile",
+                "Node_Gabor_Noise",
                 "Node_Scatter_Point_Fibonacci",
                 *(('Node_Condition',) if include_condition else ()),
                 *(('Node_Gradient',) if include_gradient else ()),
@@ -428,6 +440,19 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
         self.assertEqual("(1 + sqrt(5)) / 2", item["default"])
         self.assertEqual("scripts/node_scatter_point_fibo/node_scatter_point_fibo.gml",
                          snapshot["nodes"]["Node_Scatter_Point_Fibonacci"]["file"])
+
+    def test_reviewed_vec2_mapped_patterns_keep_the_existing_two_endpoint_tuple(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+        for name, default in (("Node_Herringbone_Tile", "[.25,.25]"), ("Node_Gabor_Noise", "[4,4]")):
+            item = next(v for v in snapshot["nodes"][name]["inputs"] if v["name"] == "Scale")
+            self.assertEqual("Vec2", item["kind"])
+            self.assertEqual(default, item["default"])
+            self.assertEqual("range", item["mapped"])
+            self.assertEqual("vector2", item["mapped_range_type"])
+            evidence = snapshot["source_constructor_evidence"][snapshot["nodes"][name]["file"]]
+            self.assertRegex(evidence["sha256"], r"^[0-9a-f]{64}$")
+            self.assertGreater(evidence["bytes"], 0)
 
     def test_simplex_mappable_controls_retain_two_component_range_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:

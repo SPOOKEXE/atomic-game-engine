@@ -6,6 +6,8 @@
 #include <cmath>
 
 namespace engine::imagegraph::detail {
+	bool SourceHerringboneTile(NodeContext &);
+	bool SourceHoneycombNoise(NodeContext &);
 	bool SourceMirrorPolar(NodeContext &);
 	bool SourceSmear(NodeContext &);
 	bool SourceCropContent(NodeContext &);
@@ -54,6 +56,8 @@ namespace engine::imagegraph::detail {
 	bool Zigzag(NodeContext &context);
 	bool GaussianNoise(NodeContext &context);
 	bool FoldNoise(NodeContext &context);
+	bool SourceJuliaSet(NodeContext &c);
+	bool SourceGaborNoise(NodeContext &c);
 	bool SourceSimplexNoise(NodeContext &context);
 	bool SourceRidgeNoise(NodeContext &context);
 	bool DeCorner(NodeContext &context);
@@ -400,6 +404,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.zigzag", Zigzag, true},
 			ExecutorEntry{"pc.noise_gaussian", GaussianNoise, true},
 			ExecutorEntry{"pc.fold_noise", FoldNoise, true},
+			ExecutorEntry{"pc.julia_set", SourceJuliaSet, true},
+			ExecutorEntry{"pc.gabor_noise", SourceGaborNoise, true},
 			ExecutorEntry{"pc.noise_simplex", SourceSimplexNoise, true},
 			ExecutorEntry{"pc.ridge_noise", SourceRidgeNoise, true},
 			ExecutorEntry{"pc.de_corner", DeCorner, true},
@@ -413,6 +419,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.quasicrystal", Quasicrystal, true},
 			ExecutorEntry{"pc.vignette", Vignette, true},
 			ExecutorEntry{"pc.symmetric_nn", SymmetricNearest, true},
+			ExecutorEntry{"pc.herringbone_tile", SourceHerringboneTile, true},
+			ExecutorEntry{"pc.honeycomb_noise", SourceHoneycombNoise, true},
 		};
 		return ENTRIES;
 	}

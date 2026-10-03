@@ -5944,6 +5944,31 @@ namespace engine::imagegraph {
 										  input->SourceKind == "D3Material";
 				}
 			}
+			bool heightmapColourArrayInput = false;
+			if (from != nodeIndices.end() && to != nodeIndices.end() && sourceType == ValueType::Array &&
+				targetType == ValueType::Gradient &&
+				document.Nodes[to->second].Type == "pc.heightmap_project_3_d" &&
+				link.ToPort == "height_color" && link.FromPort == "colors" &&
+				(document.Nodes[from->second].Type == "pc.gradient_sample" ||
+				 document.Nodes[from->second].Type == "pc.gradient_extract")) {
+				const auto *entry = FindCatalogueEntry(document.Nodes[to->second].Type);
+				const auto *input = entry ? FindCatalogueInput(*entry, link.ToPort) : nullptr;
+				const auto *sourceEntry = FindCatalogueEntry(document.Nodes[from->second].Type);
+				const bool sourceColourPalette =
+					sourceEntry &&
+					(sourceEntry->SourceNode == "Node_Gradient_Sample" ||
+					 sourceEntry->SourceNode == "Node_Gradient_Extract") &&
+					std::any_of(
+						sourceEntry->Outputs.begin(), sourceEntry->Outputs.end(), [](const auto &output) {
+							return output.Id == "colors" && output.SourceIndex == 0 &&
+								   output.Type == ValueType::Array;
+						}
+					);
+				// Source palettes retain a Colour domain for the Gradient getter.
+				heightmapColourArrayInput = sourceColourPalette && input &&
+											input->Type == ValueType::Gradient &&
+											input->SourceKind == "Gradient";
+			}
 			const auto dynamicBoundary = [&](std::string_view junctionId) {
 				return std::any_of(document.Groups.begin(), document.Groups.end(), [&](const Group &group) {
 					return std::any_of(group.Ports.begin(), group.Ports.end(), [&](const GroupPort &port) {
@@ -5959,7 +5984,7 @@ namespace engine::imagegraph {
 				(to != nodeIndices.end() && FindCatalogueEntry(document.Nodes[to->second].Type));
 			if (sourceType != targetType && !arrayElement && !heightBlendArrayInput &&
 				!heightBlendArrayOutput && !catalogueArrayInput && !catalogueAtlasArrayInput &&
-				!catalogueStrandArrayInput && !sourceMaterialInput &&
+				!catalogueStrandArrayInput && !sourceMaterialInput && !heightmapColourArrayInput &&
 				!((catalogueLink || boundaryLink) && JunctionCompatible(sourceType, targetType))) {
 				SetDiagnostic(
 					diagnostic,
@@ -10095,6 +10120,52 @@ namespace engine::imagegraph {
 					const Value *value = nullptr;
 					if (linked) {
 						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						const bool patternSurfaceGetter =
+							(node.Type == "pc.herringbone_tile" || node.Type == "pc.honeycomb_noise") &&
+							input.SourceKind == "Vec2" && (input.Id == "position" || input.Id == "scale");
+						if (patternSurfaceGetter && produced[sourceIndex]) {
+							const auto domain = FindOutputDomain(
+								document.Nodes[sourceIndex], results[sourceIndex], link->FromPort
+							);
+							const bool nativeSurface =
+								!domain &&
+								FindPortType(
+									document.Nodes[sourceIndex], link->FromPort, PortDirection::Output
+								) == ValueType::Image;
+							if (nativeSurface || (domain && domain->Kind == SourceSocketKind::Surface)) {
+								const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
+								const ImageArray *surfaces =
+									surface ? nullptr
+											: FindImageArrayOutput(results[sourceIndex], link->FromPort);
+								if (surface || surfaces) {
+									// The source getter sees the whole array before processor row selection.
+									context.Values.emplace_back(
+										input.Id,
+										Vector2{
+											surface ? double(surface->Width) : 1.,
+											surface ? double(surface->Height) : 1.
+										}
+									);
+									if (nativeSurface)
+										context.InputDomains.emplace_back(
+											input.Id,
+											SourceSocketDomain{
+												ValueType::Image, std::nullopt, SourceSocketKind::Surface
+											}
+										);
+									continue;
+								}
+							}
+						}
+						const bool heightmapSurfaceGetter =
+							node.Type == "pc.heightmap_project_3_d" &&
+							((input.SourceKind == "Vec3" &&
+							  (input.Id == "view_angle" || input.Id == "position")) ||
+							 (input.SourceKind == "Range" &&
+							  (input.Id == "height_range" || input.Id == "depth_range")) ||
+							 (input.SourceKind == "Slider" && (input.Id == "fov" || input.Id == "shift")) ||
+							 (input.SourceKind == "Float" &&
+							  (input.Id == "distance" || input.Id == "scale")));
 						const bool cylinderSurfaceGetter =
 							node.Type == "pc.surface_project_cylinder_3_d" &&
 							((input.SourceKind == "Vec3" &&
@@ -10104,12 +10175,18 @@ namespace engine::imagegraph {
 							 (input.SourceKind == "Slider" && input.Id == "fov") ||
 							 (input.SourceKind == "Float" &&
 							  (input.Id == "distance" || input.Id == "scale")));
-						if (cylinderSurfaceGetter && produced[sourceIndex]) {
+						if ((cylinderSurfaceGetter || heightmapSurfaceGetter) && produced[sourceIndex]) {
 							const auto domain = FindOutputDomain(
 								document.Nodes[sourceIndex], results[sourceIndex], link->FromPort
 							);
 							// Source getters test the declared Surface type, not Atlas payload shape.
-							if (!domain || domain->Kind == SourceSocketKind::Surface) {
+							const bool nativeHeightmapSurface =
+								heightmapSurfaceGetter && !domain &&
+								FindPortType(
+									document.Nodes[sourceIndex], link->FromPort, PortDirection::Output
+								) == ValueType::Image;
+							if ((!domain && cylinderSurfaceGetter) || nativeHeightmapSurface ||
+								(domain && domain->Kind == SourceSocketKind::Surface)) {
 								const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
 								const ImageArray *surfaces =
 									surface ? nullptr
@@ -10124,7 +10201,9 @@ namespace engine::imagegraph {
 											SetDiagnostic(
 												diagnostic,
 												Status::LimitExceeded,
-												"cylinder surface getter exceeds input storage budget",
+												heightmapSurfaceGetter
+													? "heightmap surface getter exceeds input storage budget"
+													: "cylinder surface getter exceeds input storage budget",
 												node.Id,
 												std::string(input.Id)
 											);
@@ -10141,7 +10220,10 @@ namespace engine::imagegraph {
 												SetDiagnostic(
 													diagnostic,
 													Status::LimitExceeded,
-													"cylinder surface getter capacity exceeds input budget",
+													heightmapSurfaceGetter ? "heightmap surface getter "
+																			 "capacity exceeds input budget"
+																		   : "cylinder surface getter "
+																			 "capacity exceeds input budget",
 													node.Id,
 													std::string(input.Id)
 												);
@@ -10200,12 +10282,18 @@ namespace engine::imagegraph {
 								continue;
 							}
 						}
-						// Source Float/Slider surface getters return dimensions before units.
-						const bool occlusionSurfaceScalar =
-							node.Type == "pc.ambient_occlusion" &&
-							((input.Id == "height" && input.SourceKind == "Float") ||
-							 (input.Id == "intensity" && input.SourceKind == "Slider"));
-						if (occlusionSurfaceScalar && produced[sourceIndex]) {
+						// Source numeric surface getters return dimensions before units.
+						const bool sourceSurfaceScalar =
+							(node.Type == "pc.ambient_occlusion" &&
+							 ((input.Id == "height" && input.SourceKind == "Float") ||
+							  (input.Id == "intensity" && input.SourceKind == "Slider"))) ||
+							(node.Type == "pc.julia_set" &&
+							 ((input.Id == "max_iteration" && input.SourceKind == "Int") ||
+							  (input.Id == "diverge_threshold" && input.SourceKind == "Float") ||
+							  (input.Id == "uv_mix" && input.SourceKind == "Slider"))) ||
+							(node.Type == "pc.gabor_noise" && input.SourceKind == "Slider" &&
+							 (input.Id == "density" || input.Id == "sharpness" || input.Id == "uv_mix"));
+						if (sourceSurfaceScalar && produced[sourceIndex]) {
 							const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
 							const ImageArray *surfaces =
 								surface ? nullptr
@@ -10216,7 +10304,7 @@ namespace engine::imagegraph {
 									SetDiagnostic(
 										diagnostic,
 										Status::LimitExceeded,
-										"AO surface getter exceeds input storage budget",
+										"source surface getter exceeds input storage budget",
 										node.Id,
 										std::string(input.Id)
 									);
@@ -10233,7 +10321,7 @@ namespace engine::imagegraph {
 										SetDiagnostic(
 											diagnostic,
 											Status::LimitExceeded,
-											"AO surface getter capacity exceeds input budget",
+											"source surface getter capacity exceeds input budget",
 											node.Id,
 											std::string(input.Id)
 										);
@@ -10396,16 +10484,44 @@ namespace engine::imagegraph {
 						const bool sourceSurfaceVec2 =
 							input.SourceKind == "Vec2" &&
 							((node.Type == "pc.padding" && input.Id == "dimension") ||
-							 (node.Type == "pc.stripe" && input.Id == "position"));
-						if ((!source || found == source->end()) && surface &&
-							(input.SourceKind == "Dimension" || sourceSurfaceVec2)) {
+							 (node.Type == "pc.stripe" && input.Id == "position") ||
+							 (node.Type == "pc.julia_set" &&
+							  (input.Id == "c" || input.Id == "position" || input.Id == "scale")) ||
+							 (node.Type == "pc.gabor_noise" &&
+							  (input.Id == "position" || input.Id == "scale" || input.Id == "augment")));
+						const bool gaborSurfaceRange = node.Type == "pc.gabor_noise" &&
+													   input.SourceKind == "SliRange" &&
+													   (input.Id == "level_in" || input.Id == "level_out");
+						const ImageArray *generatorSurfaceArray =
+							(sourceSurfaceVec2 &&
+							 (node.Type == "pc.julia_set" || node.Type == "pc.gabor_noise")) ||
+									gaborSurfaceRange
+								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
+								: nullptr;
+						if ((!source || found == source->end()) && (surface || generatorSurfaceArray) &&
+							(input.SourceKind == "Dimension" || sourceSurfaceVec2 || gaborSurfaceRange)) {
 							context.Values.emplace_back(
 								input.Id,
 								Vector2{
-									static_cast<double>(surface->Width), static_cast<double>(surface->Height)
+									surface ? static_cast<double>(surface->Width) : 1.,
+									surface ? static_cast<double>(surface->Height) : 1.
 								}
 							);
-							if (sourceSurfaceVec2) context.Images.emplace_back(input.Id, surface);
+							if (sourceSurfaceVec2 && surface) context.Images.emplace_back(input.Id, surface);
+							if (generatorSurfaceArray && sourceSurfaceVec2) {
+								const SourceSocketDomain domain{
+									ValueType::Image, std::nullopt, SourceSocketKind::Surface
+								};
+								const auto foundDomain = std::find_if(
+									context.InputDomains.begin(),
+									context.InputDomains.end(),
+									[&](const auto &item) { return item.first == input.Id; }
+								);
+								if (foundDomain == context.InputDomains.end())
+									context.InputDomains.emplace_back(input.Id, domain);
+								else
+									foundDomain->second = domain;
+							}
 							continue;
 						}
 						if (!source || found == source->end()) {
@@ -10442,6 +10558,114 @@ namespace engine::imagegraph {
 							value = &authored->Data;
 					}
 					if (value) {
+						// Heightmap's Gradient getter converts the complete declared Color value before row
+						// selection.
+						const auto colourDomain = context.InputDomain(input.Id);
+						bool heightmapJunctionColour = false;
+						if (!colourDomain && node.Type == "pc.heightmap_project_3_d" &&
+							input.Id == "height_color") {
+							// A resolved junction default has no producer result, but retains its authored
+							// socket type.
+							const auto incoming = std::find_if(
+								document.Links.begin(), document.Links.end(), [&](const Link &route) {
+									return route.ToNode == inputOwner(input.Id).Id &&
+										   route.ToPort == input.Id;
+								}
+							);
+							if (incoming != document.Links.end() && incoming->FromPort == "value") {
+								const auto junction = std::find_if(
+									document.Junctions.begin(),
+									document.Junctions.end(),
+									[&](const Junction &candidate) {
+										return candidate.Id == incoming->FromNode;
+									}
+								);
+								heightmapJunctionColour = junction != document.Junctions.end() &&
+														  junction->Type == ValueType::Colour;
+							}
+						}
+						if (context.IsLinked(input.Id) && node.Type == "pc.heightmap_project_3_d" &&
+							input.Id == "height_color" && input.SourceKind == "Gradient" &&
+							((colourDomain && colourDomain->Kind == SourceSocketKind::Colour) ||
+							 heightmapJunctionColour) &&
+							!std::holds_alternative<Gradient>(*value)) {
+							const auto *colour = std::get_if<Colour>(value);
+							const auto *colours = std::get_if<ArrayValue>(value);
+							const size_t keys = colour	  ? 1
+												: colours ? (colours->Items.empty() ? colours->Elements.size()
+																					: colours->Items.size())
+														  : 0;
+							if (!keys || keys > 64 || (colours && !colours->Nested.empty())) {
+								SetDiagnostic(
+									diagnostic,
+									Status::UnsupportedExecution,
+									"heightmap Color gradient needs one to 64 flat native colors",
+									node.Id,
+									std::string(input.Id)
+								);
+								return diagnostic.Code;
+							}
+							const auto keyColour = [&](size_t i) -> const Colour * {
+								if (colour) return colour;
+								const ElementValue *leaf =
+									colours->Items.empty()
+										? &colours->Elements[i]
+										: std::get_if<ElementValue>(&colours->Items[i].Data);
+								return leaf ? std::get_if<Colour>(leaf) : nullptr;
+							};
+							for (size_t i = 0; i < keys; ++i)
+								if (!keyColour(i)) {
+									SetDiagnostic(
+										diagnostic,
+										Status::UnsupportedExecution,
+										"heightmap Color gradient needs flat native colors",
+										node.Id,
+										std::string(input.Id)
+									);
+									return diagnostic.Code;
+								}
+							if (colours && !detail::ValidPayload(*colours, true)) {
+								SetDiagnostic(
+									diagnostic,
+									Status::InvalidValue,
+									"heightmap Color gradient payload exceeds native limits",
+									node.Id,
+									std::string(input.Id)
+								);
+								return diagnostic.Code;
+							}
+							auto projectedCharge = budget.Reserve(keys * sizeof(GradientKey));
+							if (!projectedCharge || !inputCharge->Merge(std::move(*projectedCharge))) {
+								SetDiagnostic(
+									diagnostic,
+									Status::LimitExceeded,
+									"heightmap Color gradient exceeds input storage",
+									node.Id,
+									std::string(input.Id)
+								);
+								return diagnostic.Code;
+							}
+							Gradient projected;
+							projected.Keys.reserve(keys);
+							if (projected.Keys.capacity() > keys) {
+								auto excess =
+									budget.Reserve((projected.Keys.capacity() - keys) * sizeof(GradientKey));
+								if (!excess || !inputCharge->Merge(std::move(*excess))) {
+									SetDiagnostic(
+										diagnostic,
+										Status::LimitExceeded,
+										"heightmap Color gradient capacity exceeds input storage",
+										node.Id,
+										std::string(input.Id)
+									);
+									return diagnostic.Code;
+								}
+							}
+							for (size_t i = 0; i < keys; ++i)
+								projected.Keys.push_back({colour ? 0. : double(i) / keys, *keyColour(i)});
+							context.Values.emplace_back(input.Id, std::move(projected));
+							continue;
+						}
 						if (linked ||
 							SourceQuaternionKeysPresent(document, request.GroupReplay, node.Id, input.Id)) {
 							if (const auto converted = SourceQuaternionGetterProjection(

@@ -6,6 +6,28 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.herringbone_tile" &&
+			((input.SourceKind == "ValueUnit" && (input.Id == "position_unit" || input.Id == "scale_unit")) ||
+			 (input.SourceKind == "MapToggle" &&
+			  (input.Id == "angle_mapped" || input.Id == "gap_mapped" || input.Id == "scale_mapped" ||
+			   input.Id == "tile_color_mapped")) ||
+			 (input.SourceKind == "MapRange" &&
+			  (input.Id == "angle_map_range" || input.Id == "gap_map_range" ||
+			   input.Id == "scale_map_range"))))
+			return true;
+		if ((entry.Type == "pc.julia_set" &&
+			 ((input.SourceKind == "ValueUnit" && (input.Id == "c_unit" || input.Id == "position_unit")) ||
+			  (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only"))) ||
+			(entry.Type == "pc.gabor_noise" &&
+			 ((input.SourceKind == "ValueUnit" && input.Id == "position_unit") ||
+			  (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||
+			  (input.SourceKind == "MapToggle" &&
+			   (input.Id == "density_mapped" || input.Id == "sharpness_mapped" ||
+				input.Id == "phase_mapped" || input.Id == "scale_mapped")) ||
+			  (input.SourceKind == "MapRange" &&
+			   (input.Id == "density_map_range" || input.Id == "sharpness_map_range" ||
+				input.Id == "phase_map_range" || input.Id == "scale_map_range")))))
+			return true;
 		if (entry.Type == "pc.mirror_polar" &&
 			((input.SourceKind == "ValueUnit" &&
 			  (input.Id == "position_unit" || input.Id == "center_unit")) ||
@@ -71,6 +93,12 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.herringbone_tile" &&
+			(port == "scale" || port == "angle" || port == "gap"))
+			return context.Boolean(std::string(port) + "_mapped");
+		if (context.Entry.Type == "pc.gabor_noise" &&
+			(port == "density" || port == "sharpness" || port == "phase" || port == "scale"))
+			return context.Boolean(std::string(port) + "_mapped");
 		if (context.Entry.Type == "pc.mirror_polar" && port == "spokes")
 			return context.Boolean("spokes_mapped");
 		if (context.Entry.Type == "pc.stripe" &&
@@ -99,6 +127,18 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.herringbone_tile" &&
+			(port == "scale" || port == "angle" || port == "gap")) {
+			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+				return context.Find(std::string(port) + "_map_range");
+			return value;
+		}
+		if (context.Entry.Type == "pc.gabor_noise" &&
+			(port == "density" || port == "sharpness" || port == "phase" || port == "scale")) {
+			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+				return context.Find(std::string(port) + "_map_range");
+			return value;
+		}
 		if (context.Entry.Type == "pc.mirror_polar" && port == "spokes") {
 			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
 				return context.Find("spokes_map_range");
@@ -176,7 +216,8 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if (context.Entry.Type == "pc.mirror_polar" || context.Entry.Type == "pc.stripe" ||
+		if (context.Entry.Type == "pc.herringbone_tile" || context.Entry.Type == "pc.gabor_noise" ||
+			context.Entry.Type == "pc.mirror_polar" || context.Entry.Type == "pc.stripe" ||
 			context.Entry.Type == "pc.dotted" || (context.Entry.Type == "pc.dither" && port == "contrast") ||
 			(context.Entry.Type == "pc.gradient" &&
 			 (port == "angle" || port == "radius" || port == "shift" || port == "scale")) ||

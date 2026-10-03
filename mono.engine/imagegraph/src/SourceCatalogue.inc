@@ -8686,7 +8686,7 @@ S	I	scale	1
 A	I	scale	1
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
-I	scale_map_range	Scale Map Range	-1	MapRange	vector4	w 0 0 4 4	
+I	scale_map_range	Scale Map Range	-1	MapRange	vector2	v 4 4	
 S	I	scale_map_range	?
 I	scale_map	Scale Map	8	Surface	image		
 S	I	scale_map	0
@@ -10357,7 +10357,7 @@ I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
-I	scale_map_range	Scale Map Range	-1	MapRange	vector4	w 0 0 0.25 0.25	
+I	scale_map_range	Scale Map Range	-1	MapRange	vector2	v 0.25 0.25	
 S	I	scale_map_range	?
 I	scale_map	Scale Map	11	Surface	image		
 S	I	scale_map	0

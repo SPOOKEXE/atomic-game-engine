@@ -43058,6 +43058,7 @@
      "index": "2",
      "kind": "Vec2",
      "mapped": "range",
+     "mapped_range_type": "vector2",
      "name": "Scale",
      "source_array_classification": true
     },
@@ -50242,6 +50243,7 @@
      "index": "2",
      "kind": "Vec2",
      "mapped": "range",
+     "mapped_range_type": "vector2",
      "name": "Scale",
      "source_array_classification": true,
      "unit": "reference"
@@ -155913,6 +155915,14 @@
   "scripts/node_path_shape_3d/node_path_shape_3d.gml": {
    "bytes": 12447,
    "sha256": "e779dec5d2e9b82dd1a215ef4640182653e73396ba09b9ada722d40a19f6d9a4"
+  },
+  "scripts/node_gabor_noise/node_gabor_noise.gml": {
+   "bytes": 2097,
+   "sha256": "2c77d1cffcc80336bac3ec1aff99a4111f5eb48e252612f9c5c89a2b4bfa9733"
+  },
+  "scripts/node_herringbone_tile/node_herringbone_tile.gml": {
+   "bytes": 5148,
+   "sha256": "4b9d84c09e6fd7c13dd88fe0489e9f265324073947c791a4a752511e4af8bbed"
   }
  }
 }

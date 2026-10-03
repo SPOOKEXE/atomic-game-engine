@@ -2943,7 +2943,16 @@ namespace engine::imagegraphio {
 							record["attri"]["mapped"] = *mapped;
 							continue;
 						}
-						if ((node.Type == "pc.stripe" &&
+						if ((node.Type == "pc.herringbone_tile" &&
+							 (value.Port == "scale_mapped" || value.Port == "scale_map_range" ||
+							  value.Port == "angle_mapped" || value.Port == "angle_map_range" ||
+							  value.Port == "gap_mapped" || value.Port == "gap_map_range")) ||
+							(node.Type == "pc.gabor_noise" &&
+							 (value.Port == "density_mapped" || value.Port == "density_map_range" ||
+							  value.Port == "sharpness_mapped" || value.Port == "sharpness_map_range" ||
+							  value.Port == "phase_mapped" || value.Port == "phase_map_range" ||
+							  value.Port == "scale_mapped" || value.Port == "scale_map_range")) ||
+							(node.Type == "pc.stripe" &&
 							 (value.Port == "size_mapped" || value.Port == "size_map_range" ||
 							  value.Port == "angle_mapped" || value.Port == "angle_map_range" ||
 							  value.Port == "random_mapped" || value.Port == "random_map_range" ||
@@ -2966,18 +2975,23 @@ namespace engine::imagegraphio {
 							  value.Port == "radius_mapped" || value.Port == "radius_map_range" ||
 							  value.Port == "shift_mapped" || value.Port == "shift_map_range" ||
 							  value.Port == "scale_mapped" || value.Port == "scale_map_range"))) {
-							const bool occlusion = node.Type == "pc.ambient_occlusion",
+							const bool herringbone = node.Type == "pc.herringbone_tile",
+									   occlusion = node.Type == "pc.ambient_occlusion",
 									   gradient = node.Type == "pc.gradient",
+									   gabor = node.Type == "pc.gabor_noise",
 									   dotted = node.Type == "pc.dotted", stripe = node.Type == "pc.stripe";
 							const std::string_view numericId =
-								stripe ? (value.Port.starts_with("strip_ratio_")
-											  ? std::string_view("strip_ratio")
-											  : std::string_view(value.Port).substr(0, value.Port.find('_')))
+								herringbone ? std::string_view(value.Port).substr(0, value.Port.find('_'))
+								: stripe
+									? (value.Port.starts_with("strip_ratio_")
+										   ? std::string_view("strip_ratio")
+										   : std::string_view(value.Port).substr(0, value.Port.find('_')))
 								: dotted
 									? (value.Port.starts_with("dot_size_")
 										   ? std::string_view("dot_size")
 										   : std::string_view(value.Port).substr(0, value.Port.find('_')))
-								: gradient ? std::string_view(value.Port).substr(0, value.Port.find('_'))
+								: (gradient || gabor)
+									? std::string_view(value.Port).substr(0, value.Port.find('_'))
 								: node.Type == "pc.dither"							? "contrast"
 								: node.Type == "pc.erode"							? "width"
 								: occlusion && value.Port.starts_with("intensity_") ? "intensity"
@@ -2985,9 +2999,15 @@ namespace engine::imagegraphio {
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
 							const int expectedIndex =
-								stripe	   ? (numericId == "size"
-												  ? 1
-												  : (numericId == "angle" ? 2 : (numericId == "random" ? 5 : 10)))
+								herringbone ? (numericId == "scale" ? 2 : (numericId == "angle" ? 3 : 4))
+								: stripe
+									? (numericId == "size"
+										   ? 1
+										   : (numericId == "angle" ? 2 : (numericId == "random" ? 5 : 10)))
+								: gabor
+									? (numericId == "density"
+										   ? 4
+										   : (numericId == "sharpness" ? 5 : (numericId == "phase" ? 7 : 2)))
 								: dotted   ? (numericId == "size" ? 2 : (numericId == "angle" ? 4 : 9))
 								: gradient ? (numericId == "angle"	  ? 3
 											  : numericId == "radius" ? 4
@@ -2997,7 +3017,13 @@ namespace engine::imagegraphio {
 								: occlusion && numericId == "height" ? 3
 																	 : 1;
 							const std::string_view expectedKind =
-								stripe ? (numericId == "angle" ? "Rotation" : "Slider")
+								herringbone
+									? (numericId == "scale" ? "Vec2"
+															: (numericId == "angle" ? "Rotation" : "Slider"))
+								: gabor
+									? (numericId == "scale" ? "Vec2"
+															: (numericId == "phase" ? "Rotation" : "Slider"))
+								: stripe ? (numericId == "angle" ? "Rotation" : "Slider")
 								: dotted
 									? (numericId == "size" ? "Float"
 														   : (numericId == "angle" ? "Rotation" : "Slider"))

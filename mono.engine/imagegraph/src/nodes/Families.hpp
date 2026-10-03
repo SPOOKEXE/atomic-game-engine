@@ -70,6 +70,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourcePixelBevelExecutors();
 	std::span<const ExecutorEntry> SourceVolumeProjectionExecutors();
 	std::span<const ExecutorEntry> SourceCylinderProjectionExecutors();
+	std::span<const ExecutorEntry> SourceHeightmapProjectionExecutors();
 	std::span<const ExecutorEntry> SourceAtlasExecutors();
 	std::span<const ExecutorEntry> SourceAtlasPixelExecutors();
 	std::span<const ExecutorEntry> SourcePaletteExecutors();
