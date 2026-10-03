@@ -5837,6 +5837,46 @@
       "assertions_total": 8340,
       "assertions_passed": 8340,
       "assertions_failed": 0
+    },
+    {
+      "name": "build-release-72-cube-sdf-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-72-cube-sdf-repair.log",
+      "log_sha256": "7856120314cbeef3d133a030d1fc6a20dd05c62b5398bdab18959a8540333b10",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed."
+    },
+    {
+      "name": "build-release-72-gui-sdf-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-72-gui-sdf-initial.log",
+      "log_sha256": "ad83ab13cc92e8407ad6da858ac9a698de93b3ec5f5fdfbcfc998845a789d782",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed."
+    },
+    {
+      "name": "gui-all-release-72-sdf-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-all-release-72-sdf-repair.log",
+      "log_sha256": "1d8ab5273ba330dc4ef05649d6610b1d0c6d9dd309ab363e95918cbaddd66f6f",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed.",
+      "test_cases_passed": 331,
+      "assertions_passed": 4974
+    },
+    {
+      "name": "gui-fonts-release-72-cube-sdf-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-fonts-release-72-cube-sdf-repair.log",
+      "log_sha256": "c790afd0707c487360d2a496e8b20aec578ef36e0e7fc950983da26dad66b95b",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed.",
+      "test_cases_passed": 4,
+      "assertions_passed": 148
     }
   ],
   "excluded_or_failed_runs": [
@@ -7368,6 +7408,33 @@
       "exit_code": 42,
       "result": "failed; retained before native acceptance",
       "scope_note": "Argument fixtures initially linked nonexistent image.solid.width; corrected through pc.vector2 and pc.solid.dimension. Remaining client failure used misspelled Transform type; CLI refusal diagnostic was read only from stderr. Failures retained, corrected focused and joined CPU scopes passed."
+    },
+    {
+      "name": "gradient-cube-release-72-cube-sdf-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gradient-cube-release-72-cube-sdf-repair.log",
+      "log_sha256": "242aa5e70521903eb27bd2e501771f61eacba5cb18ca2c09d2c3090261d79328",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed."
+    },
+    {
+      "name": "gui-all-release-72-sdf-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-all-release-72-sdf-initial.log",
+      "log_sha256": "71e34ba943a8020405261ff8c39615b6b347ce74aa9457c3dc80fecc69649fdd",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed."
+    },
+    {
+      "name": "gui-fonts-release-72-sdf-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-fonts-release-72-sdf-initial.log",
+      "log_sha256": "bc317f9fadcbb3e13ba6055f0f02a7fcace8eec355b6bb7cc29ec83513697e39",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed."
     }
   ],
   "pinned_gml_helper_translation": {
