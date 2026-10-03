@@ -46,4 +46,4 @@ Geometry count, source class validation, replay validation workspace, both outpu
 
 ## Verification
 
-The outside draft includes 15 registered graph fixtures covering all seven shape choices, geometry goldens, axis/rotation, source length and signed ratio behavior, native codec and malformed fields, keyframes/save, scoped general tuples and surface getters, transform/sample/instancer consumers, stateful empty transitions, zero-length distinction and atomic budget refusal. Strict syntax checks and standalone GCC/Clang layout programs are the current evidence. Joined graph execution, licensed source execution and GPU preview checks remain open until the parent integrates a coherent build.
+The joined release64 gate passes 15 graph cases covering all seven shapes, geometry goldens, axis/rotation, length and signed ratios, native codec and malformed fields, keyframes/save, general tuples and surface getters, transform/sample/instancer consumers, empty transitions and atomic refusal. Standalone GCC/Clang layout checks are retained. Licensed source execution, source GPU preview and representative profiling remain open.

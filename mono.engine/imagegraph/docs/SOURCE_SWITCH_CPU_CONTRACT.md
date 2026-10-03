@@ -87,11 +87,10 @@ caller; no replay state, ambient RNG or external callback is introduced.
 
 ## Validation status
 
-The outside draft contains real Compile/Evaluate fixtures for defaults,
+The joined release64 gate passes 20 real Compile/Evaluate cases for defaults,
 duplicates, source slot ordering, string and raw numeric equality, unsorted
 inclusive thresholds, signed subframes, downstream nested-array access,
 Struct/Undefined, owned typed images and nested image arrays, identity/operator
-refusals, quota and comparison bounds, and atomic clone refusal. Strict syntax
-uses current CMake C++20 flags. Joined engine runtime tests, sanitizers,
-profiling and licensed-runner checks have not run for this draft. Registration
-or syntax is not runtime acceptance.
+refusals, quota and comparison bounds, UTF16 ordering and atomic clone refusal.
+The validation ledger records the complete native CPU gate. Sanitizers,
+representative profiling and licensed-runner comparisons remain open.

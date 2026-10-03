@@ -88,11 +88,13 @@ nonpositive Smoothness refuses unordered/equal smoothstep edges, which GLSL
 The shared disabled-processor array boundary remains explicit; this executor
 does not invent a raw uniform upload shape for that route.
 
-The draft includes 25 core cases and one IO case covering all three mapped
-source slots. Literal Grid, Hexagonal, AA and Smooth byte goldens come from an
-independent scalar formula script. Compiled graph, linked pairs, heterogeneous
-rows, persistence, format, alpha and atomic work/byte failure fixtures require
-the joined runtime gate. Strict syntax alone is not runtime acceptance.
+The joined release64 gate passes 26 core cases and one IO case covering all three
+mapped source slots. Literal Grid, Hexagonal, AA and Smooth byte goldens come from
+an independent scalar formula script. Compiled graphs, linked pairs,
+heterogeneous rows, persistence, format, alpha and atomic failures are exercised.
+Reference-unit array controls still need source first-prepared-dimension scaling;
+the current CPU profile scales against each selected row. Licensed reference
+comparisons and representative profiling remain open.
 
 ## Pinned provenance
 

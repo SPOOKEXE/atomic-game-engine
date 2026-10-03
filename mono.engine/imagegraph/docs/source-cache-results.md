@@ -46,5 +46,6 @@ Results to Sequence Animation route verifies retained cycle selection and
 independent prior ownership. The executor
 boundary tests cover retained non-surface observations, explicit unwritten and
 Atlas refusals, and measured full-list admission with unrelated retained bytes.
-Runtime acceptance is pending a coherent joined build. Strict syntax checks do
-not establish execution correctness.
+The joined release64 CPU gate passes all nine Cache Results cases. The validation
+ledger records the complete core, product and Composer Vulkan checks. Licensed
+reference comparisons and representative profiling remain open.
