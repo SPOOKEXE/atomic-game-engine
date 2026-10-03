@@ -6573,6 +6573,37 @@
       "source_commit": "1cd244ae",
       "assertions_passed": 362,
       "test_cases_passed": 42
+    },
+    {
+      "name": "build-release-76-camera-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-76-camera-initial.log",
+      "log_sha256": "2ba438eb9cd88b6f7df96e69fe3d9ec793a4fdbb97e597b07e88fa3ed0880947",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending."
+    },
+    {
+      "name": "imagegraph-payload-release-76-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-payload-release-76-focused.log",
+      "log_sha256": "84f18e5f0ac451eaacb401b0b2ed7ecbb3a0eae93aebdc8111d1cd12bc93ab9f",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending.",
+      "assertions_passed": 6,
+      "test_cases_passed": 1
+    },
+    {
+      "name": "render-camera-release-76-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-camera-release-76-focused.log",
+      "log_sha256": "775179be51a0a03f60051d049c212f9cb1d6b341d58434eaebf417f76ce6c6a0",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending.",
+      "assertions_passed": 51,
+      "test_cases_passed": 3
     }
   ],
   "excluded_or_failed_runs": [
@@ -8158,6 +8189,42 @@
       "exit_code": 42,
       "result": "failed; retained before native acceptance",
       "scope_note": "36 cases: 35 passed, 1 failed; 2380 assertions: 2378 passed, 2 failed. The mask inversion/alpha-only/feather fixture disagrees with its full-refraction pixel oracle. Classification and repair pending; no Refract acceptance claimed."
+    },
+    {
+      "name": "imagegraph-camera-release-76-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-camera-release-76-focused.log",
+      "log_sha256": "c0556baab715776c8967e293dfa80aad4cedb9d4c7568959ff9f0ac276f970f2",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending. 6 cases: 3 pass, 3 fail; 28 assertions: 24 pass, 4 fail. Compile reports unregistered node type."
+    },
+    {
+      "name": "client-camera-release-76-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-camera-release-76-focused.log",
+      "log_sha256": "5c1690447f9308cd96206586442ba88250b7974a2ea7c9233cb7372e140446d3",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending. 2 cases: 1 pass, 1 fail; 19 assertions: 17 pass, 2 fail. Compile reports unregistered node type."
+    },
+    {
+      "name": "client-route-release-76-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-route-release-76-focused.log",
+      "log_sha256": "2e41f098ef045daeb409089051d1ce0a27dca7467cf57a0c117d7f9592da2df0",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending. 3 cases: 1 pass, 2 fail; 11 assertions: 9 pass, 2 fail. Compile returns UnknownNode."
+    },
+    {
+      "name": "studio-camera-release-76-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-camera-release-76-focused.log",
+      "log_sha256": "a279410d7a16d33a02264d94d6f585876b963fcd7fa92fc19e21be291ea65841",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending. 9 cases: 5 pass, 4 fail; 59 assertions: 55 pass, 4 fail. Three camera graphs report UnknownNode; one sequence graph reports an unknown port."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -9368,7 +9435,9 @@
     "build74_release": "Surface Project focused22 cases/1126 assertions and fifteen joined CPU scopes plus WAV inspector pass. Full imagegraph2517 cases/1851293 assertions. Retained initial fixture and defensive admission failures repaired; no new GPU run claimed.",
     "build74_overall": "Selected native integration gates passed. Overall M0-M7, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete.",
     "build75_release": "Refract focused36 cases/2458 assertions, actual mapped-input IO1 case/178 assertions,96 metadata tests and14 joined CPU scopes pass. Full imagegraph2553 cases/1853752 assertions; full IO228 cases/10373 assertions. Initial feather-oracle failure retained and repaired without production mask changes.",
-    "build75_overall": "Selected native integration gates passed. Overall M0-M7, camera, font/axes/cache integration, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete."
+    "build75_overall": "Selected native integration gates passed. Overall M0-M7, camera, font/axes/cache integration, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete.",
+    "build76_initial": "Coherent 671-step camera ABI closure passed. Payload1/6 and render request3/51 CPU checks passed; imagegraph/client/Studio focused compile failures retained. No camera acceptance or GPU run claimed.",
+    "build76_overall": "Overall M0-M7 remains incomplete. Camera focused repairs and joined CPU closure, font/axes/cache/remaining catalogue work, GPU approval, live Studio and licensed parity remain open."
   },
   "pending_gates": [
     {
