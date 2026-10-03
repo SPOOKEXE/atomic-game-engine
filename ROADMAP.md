@@ -61,18 +61,33 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate path extension, flattening and smoothing.
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [x] Save completed image previews as PXC thumbnails with atomic publication.
-- [_] Add separate X/Y animation and preserve it through groups and PXC edits.
+- [_] Add separate/combine X/Y animation controls.
+- [_] Preserve X/Y animation through groups and PXC edits.
 - [_] Add source-compatible argument handling.
 - [_] Establish exact parity with a licensed reference build and matched captures.
-- [_] Finish Composer font loading, text layout and rendering.
-- [_] Finish Dopesheet gestures and Studio host workflows.
-- [_] Finish GPU checks, including Transform and skybox pixels.
-- [_] Finish audio workflows and feedback; verify seek/reset and fractional keys.
-- [_] Finish cache groups, selected Clear, fractional playback and saved-cache loading.
-- [_] Finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback.
-- [_] Finish remaining PXC edits, export formats and modified-project compatibility.
-- [_] Implement remaining catalogue executors and verify controls, errors, animation and parity evidence.
-- [_] Integrate camera rendering and Studio previews.
+- [_] Finish Composer font loading.
+- [_] Finish text layout and rendering.
+- [_] Finish Dopesheet gestures.
+- [_] Finish Studio host workflows.
+- [_] Verify Transform GPU pixels.
+- [_] Verify skybox GPU pixels.
+- [_] Complete remaining Composer GPU checks.
+- [_] Finish audio workflows.
+- [_] Finish feedback seek/reset and fractional-key playback.
+- [_] Finish cache groups.
+- [_] Finish selected-cache Clear.
+- [_] Finish fractional cache playback.
+- [_] Load saved frame caches.
+- [_] Finish mesh consumers and bindings.
+- [_] Implement remaining 3D nodes.
+- [_] Finish large-sequence playback.
+- [_] Finish remaining PXC edits.
+- [_] Finish export formats.
+- [_] Verify modified-project compatibility.
+- [_] Implement remaining catalogue executors.
+- [_] Verify catalogue controls, errors, animation and parity evidence.
+- [_] Integrate camera rendering.
+- [_] Integrate Studio camera previews.
 - [_] Validate all integrated changes with joined CPU tests.
 - [_] Verify live Studio workflows.
 
