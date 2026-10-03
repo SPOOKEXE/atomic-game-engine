@@ -5877,6 +5877,256 @@
       "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed.",
       "test_cases_passed": 4,
       "assertions_passed": 148
+    },
+    {
+      "name": "build-release-73-wav-inspector-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-73-wav-inspector-initial.log",
+      "log_sha256": "f946a1b613f81e27b42269ea8f4ccdf29da5353fa99216b602c8e059b7b25e0b",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "WAV inspector uses the real granted-file checker setter; source default true, malformed/duplicate property refusal and actual reload scheduler checked. Focus5cases4199assertions; joined headless Studio146cases8353assertions. No audio device/live Studio or full audio/feedback acceptance claimed."
+    },
+    {
+      "name": "studio-wav-release-73-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-wav-release-73-initial.log",
+      "log_sha256": "36c30c3a91cec4aa0ef8def8cfea6842fcd326f067e8eb228188ffb0e0061598",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "WAV inspector uses the real granted-file checker setter; source default true, malformed/duplicate property refusal and actual reload scheduler checked. Focus5cases4199assertions; joined headless Studio146cases8353assertions. No audio device/live Studio or full audio/feedback acceptance claimed.",
+      "test_cases_passed": 5,
+      "assertions_passed": 4199
+    },
+    {
+      "name": "studio-release-73-wav-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-73-wav-joined.log",
+      "log_sha256": "7abaf7a150ab750282cd815decb31431aada229d4e85b05af208f693accff03b",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "WAV inspector uses the real granted-file checker setter; source default true, malformed/duplicate property refusal and actual reload scheduler checked. Focus5cases4199assertions; joined headless Studio146cases8353assertions. No audio device/live Studio or full audio/feedback acceptance claimed.",
+      "test_cases_passed": 146,
+      "assertions_passed": 8353
+    },
+    {
+      "name": "build-release-73-cube-getter-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-73-cube-getter-repair.log",
+      "log_sha256": "953224c7499b5f15e6e200b4b8804eba5a156daac23bb04a06a029316499a21f",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance."
+    },
+    {
+      "name": "gradient-cube-release-73-getter-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gradient-cube-release-73-getter-repair.log",
+      "log_sha256": "995af5ae26619f4bcdd334ec9e626c01fc40122d976f639b6675a8d4f3886550",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 1608,
+      "test_cases_passed": 35
+    },
+    {
+      "name": "build-release-73-cube-camera-fixture-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-73-cube-camera-fixture-repair.log",
+      "log_sha256": "40e74a0c317bb1112530a21cb4ac832f0bb5ebe9bde7015a51a7816320653c63",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance."
+    },
+    {
+      "name": "gradient-cube-release-73-camera-fixture-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gradient-cube-release-73-camera-fixture-repair.log",
+      "log_sha256": "2dd8d567a031d52cac758de88860ebde9b64744a680e1f71e9be52c1ae7cafac",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 1608,
+      "test_cases_passed": 35
+    },
+    {
+      "name": "build-release-73-render-device-tag-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-73-render-device-tag-repair.log",
+      "log_sha256": "081705fa0f69c51a74566914bf3b227220a9abecaf217c96d9459be215eb7be6",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance."
+    },
+    {
+      "name": "render-release-73-device-tag-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-73-device-tag-repair.log",
+      "log_sha256": "daa1c8af0c8060b059a3f8bc4128afd343d2f33fb207fd0448b2c8efbdc00836",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Corrected CPU-only renderer ~[gpu] run after tagging the actual Vulkan capture fixture. No Vulkan initialization log present; new argument device tests remain unrun.",
+      "assertions_passed": 336603,
+      "test_cases_passed": 805
+    },
+    {
+      "name": "client-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-73-joined.log",
+      "log_sha256": "0963e8f2ab0cb35203ab5789c5afbb7f0c0388fbab01d485ff40647d3d613287",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 7056,
+      "test_cases_passed": 63
+    },
+    {
+      "name": "render-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-73-joined.log",
+      "log_sha256": "d4a36753fd1c87495031cfbe285c8536629c424b2f99c41e165b4c7fc07278ff",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Initial renderer ~[gpu] filter accidentally included an untagged Vulkan fixture. All tests passed, but this is a mixed CPU/device run and is not accepted as CPU-only validation. Device-tag repair and CPU rerun are recorded separately.",
+      "assertions_passed": 336633,
+      "test_cases_passed": 806
+    },
+    {
+      "name": "studio-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-73-joined.log",
+      "log_sha256": "7c1ed9ba11375b89c0adcca00c3a3fb283db1659ddbf93d4ef1ef5b5b5238a92",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 8353,
+      "test_cases_passed": 146
+    },
+    {
+      "name": "server-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-73-joined.log",
+      "log_sha256": "4445275d45a3a30c44b8912e9756dda76976f89c8162c7bc45497e15727fb46c",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 2180,
+      "test_cases_passed": 99
+    },
+    {
+      "name": "assets-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-73-joined.log",
+      "log_sha256": "bd51e4558e9b677238bd79ca0d36118dff7a2be95be4f7832ade3bd45593d971",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "imagegraph-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-73-joined.log",
+      "log_sha256": "b3e3b7a796ea21f9692dc987276f96d7fb69fc9cca650ae4378828f78954874e",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 1850166,
+      "test_cases_passed": 2495
+    },
+    {
+      "name": "nodegraph-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-73-joined.log",
+      "log_sha256": "556ab3001713ef873eaaa79fe3b5829c39ed3805ae3e7875b2c4ae5194b3f2b1",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "architecture-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-73-joined.log",
+      "log_sha256": "3a6af964ca3bc013cfa522c4738f5af0e8ad2b3ef4c179150c54af53a441ec4f",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance."
+    },
+    {
+      "name": "io-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-73-joined.log",
+      "log_sha256": "d03f4a7f2fd262e860898613a32acd574049213260a05980be0af0e45f5a68d5",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 10195,
+      "test_cases_passed": 227
+    },
+    {
+      "name": "export-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-73-joined.log",
+      "log_sha256": "49b8c9f470e9a4834f52a50fa538067dabd5e3c5af2293997319c12faec352bf",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 2613,
+      "test_cases_passed": 62
+    },
+    {
+      "name": "physics-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-73-joined.log",
+      "log_sha256": "2f9028b9fc63a044bd4565de812f9f74e81a45fad4c6dded011e67312b83a210",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "cli-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-73-joined.log",
+      "log_sha256": "107ac422b8c04f56ebfe83e60effd89666a02d32f880ef76c7510dee7afdd046",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance."
+    },
+    {
+      "name": "metadata-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/metadata-release-73-joined.log",
+      "log_sha256": "472a68681e2b1fe100fc62cd785a3c59822b5dd29fe322365d7cc1656e82e13d",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance."
+    },
+    {
+      "name": "gui-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-73-joined.log",
+      "log_sha256": "c46ec593b9382c1f9f943b061fe2522987d3a1868ba0a5eda6a42f32d7a2728d",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 4974,
+      "test_cases_passed": 331
+    },
+    {
+      "name": "assetc-release-73-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-73-joined.log",
+      "log_sha256": "6f8162f22370934b4b7d6f698e594dd5aad5044cd10d534a13bcf20014fce4d3",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
+      "assertions_passed": 362,
+      "test_cases_passed": 42
     }
   ],
   "excluded_or_failed_runs": [
@@ -8622,7 +8872,9 @@
     },
     "build68_inventory": "Clean source/archive capability snapshot at bd2db639:536 registered,535 catalogue overlap,886 catalogue names,351 registry-missing names. Registration does not establish runtime correctness or parity.",
     "build69_release": "Coherent initial ABI build646 steps, repair builds and final closure pass. Fifty focused path cases/870 assertions and fourteen joined CPU scopes pass; full imagegraph2,387 cases/1,841,442 assertions. Three failed invocations remain retained.",
-    "build69_overall": "Native release69 CPU path gates passed. Overall M0-M7 remains incomplete; new GPU/live Studio/licensed parity and remaining roadmap work are open."
+    "build69_overall": "Native release69 CPU path gates passed. Overall M0-M7 remains incomplete; new GPU/live Studio/licensed parity and remaining roadmap work are open.",
+    "build73_release": "Gradient Cube focused35 cases/1608 assertions and fifteen joined scopes pass, including2495 imagegraph cases/1850166 assertions. Initial renderer filter included an untagged device case; corrected CPU-only rerun passes805 cases/336603 assertions. Earlier failures remain retained.",
+    "build73_overall": "Selected native integration gates passed. Overall M0-M7, GPU arguments, live Studio and licensed parity remain incomplete."
   },
   "pending_gates": [
     {
