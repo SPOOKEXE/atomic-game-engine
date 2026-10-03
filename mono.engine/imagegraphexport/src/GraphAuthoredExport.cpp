@@ -1,3 +1,5 @@
+#include "AuthoredExportInternal.hpp"
+
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
@@ -451,14 +453,16 @@ namespace engine::imagegraphexport {
 		std::filesystem::path Target, Directory, Candidate, Retained, RetainedTarget;
 		bool HadPrevious = false, Published = false, RetainedPublished = false;
 	};
-	static bool ExportBatch(
+	bool detail::ExportBatch(
 		std::span<GraphExportSettings> exports,
 		const engine::imagegraph::Document &document,
 		const engine::imagegraph::Plan &plan,
 		const engine::imagegraph::EvaluationRequest &request,
 		bool sequenceFrames,
 		std::string &failure,
-		std::vector<std::filesystem::path> *retainedDirectories
+		std::vector<std::filesystem::path> *retainedDirectories,
+		void (*selectTarget)(void *, size_t),
+		void *targetContext
 	) {
 		constexpr uint64_t maximumBatchBytes = 512ull * 1024 * 1024;
 		static std::atomic<uint64_t> sequence{0};
@@ -557,6 +561,7 @@ namespace engine::imagegraphexport {
 				frameRequest.Subframe = 0;
 				frameRequest.NegativeFrame = false;
 			}
+			if (selectTarget) selectTarget(targetContext, index);
 			if (!ExportGraph(settings, document, plan, frameRequest, failure, &files[index].Retained))
 				return false;
 			std::filesystem::recursive_directory_iterator entries(files[index].Directory, error), end;
@@ -663,6 +668,86 @@ namespace engine::imagegraphexport {
 		cleanup.KeepParents = true;
 		return true;
 	}
+	bool detail::PlanPreparedAuthoredExport(
+		const engine::imagegraph::Document &document,
+		const engine::imagegraph::Node &node,
+		const engine::imagegraph::EvaluationSnapshot &snapshot,
+		const engine::imagegraph::EvaluationRequest &request,
+		const GraphExportSettings &grants,
+		std::span<const GraphExportRegion> regions,
+		std::vector<GraphExportSettings> &exports,
+		size_t &imageCount,
+		double &exportType,
+		std::string &failure
+	) {
+		using namespace engine::imagegraph;
+
+		if (snapshot.RetainedBytes() > Limits::MaximumEvaluationBytes / 3) {
+			failure = "authored prepared inputs exceed their export budget";
+			return false;
+		}
+		std::vector<AuthoredValue> values;
+		for (const auto &value : snapshot.Values())
+			values.push_back({value.Port, value.Data});
+		std::vector<HostResolvedImage> images;
+		for (const auto &image : snapshot.Images())
+			images.push_back({image.Port, &image.Data});
+		imageCount = 1;
+		bool arraySurface = false;
+		for (const auto &array : snapshot.ImageArrays())
+			if (array.Port == "surface") {
+				arraySurface = true;
+				imageCount = array.Data.Items.size();
+				for (const auto &item : array.Data.Items)
+					if (!std::holds_alternative<size_t>(item.Data)) {
+						failure = "authored export surface array must have native flat image members";
+						return false;
+					}
+			}
+		HostNodeInvocation invocation{
+			node,
+			request,
+			values,
+			images,
+			Limits::MaximumEvaluationBytes,
+			document.Timeline ? &*document.Timeline : nullptr,
+			snapshot.InheritedSurfaceFormat()
+		};
+		std::vector<GraphExportRegion> storedRegions;
+		if (regions.empty() && document.Project) {
+			const auto *selected = Get<ArrayValue>(invocation, "export_regions");
+			const auto *enabled = Get<bool>(invocation, "render_region");
+			if (enabled && *enabled && selected) {
+				for (const auto &item : selected->Elements) {
+					const auto *label = std::get_if<std::string>(&item);
+					if (!label) continue;
+					const auto found = std::find_if(
+						document.Project->AnimationRegions.begin(),
+						document.Project->AnimationRegions.end(),
+						[&](const auto &region) { return region.Label == *label; }
+					);
+					if (found == document.Project->AnimationRegions.end()) continue;
+					if (found->Start.NegativeFrame || found->End.NegativeFrame ||
+						found->Start.Subframe != 0 || found->End.Subframe != 0) {
+						failure =
+							"Export frame range requires integral nonnegative animation region endpoints";
+						return false;
+					}
+					storedRegions.push_back({found->Label, {found->Start.Tick, found->End.Tick, 1}});
+				}
+			}
+			regions = storedRegions;
+		}
+		if (!PlanAuthoredGraphExport(invocation, grants, regions, exports, failure, imageCount)) return false;
+		for (auto &settings : exports) {
+			if (arraySurface && !settings.ArrayIndex) settings.ArrayIndex = 0;
+			settings.LinearScaling = snapshot.InheritedInterpolation() == 1;
+		}
+		exportType = 0;
+		(void)Number(invocation, "type", exportType);
+		return true;
+	}
+
 	static bool ExportAuthoredGraphImpl(
 		const engine::imagegraph::Document &document,
 		const engine::imagegraph::Plan &plan,
@@ -716,70 +801,13 @@ namespace engine::imagegraphexport {
 			}
 		}
 		const auto &snapshot = *preparedInputs;
-		if (snapshot.RetainedBytes() > Limits::MaximumEvaluationBytes / 3) {
-			failure = "authored prepared inputs exceed their export budget";
-			return false;
-		}
-		std::vector<AuthoredValue> values;
-		for (const auto &value : snapshot.Values())
-			values.push_back({value.Port, value.Data});
-		std::vector<HostResolvedImage> images;
-		for (const auto &image : snapshot.Images())
-			images.push_back({image.Port, &image.Data});
 		std::vector<GraphExportSettings> exports;
 		size_t imageCount = 1;
-		bool arraySurface = false;
-		for (const auto &array : snapshot.ImageArrays())
-			if (array.Port == "surface") {
-				arraySurface = true;
-				imageCount = array.Data.Items.size();
-				for (const auto &item : array.Data.Items)
-					if (!std::holds_alternative<size_t>(item.Data)) {
-						failure = "authored export surface array must have native flat image members";
-						return false;
-					}
-			}
-		HostNodeInvocation invocation{
-			*node,
-			request,
-			values,
-			images,
-			Limits::MaximumEvaluationBytes,
-			document.Timeline ? &*document.Timeline : nullptr,
-			snapshot.InheritedSurfaceFormat()
-		};
-		std::vector<GraphExportRegion> storedRegions;
-		if (regions.empty() && document.Project) {
-			const auto *selected = Get<ArrayValue>(invocation, "export_regions");
-			const auto *enabled = Get<bool>(invocation, "render_region");
-			if (enabled && *enabled && selected) {
-				for (const auto &item : selected->Elements) {
-					const auto *label = std::get_if<std::string>(&item);
-					if (!label) continue;
-					const auto found = std::find_if(
-						document.Project->AnimationRegions.begin(),
-						document.Project->AnimationRegions.end(),
-						[&](const auto &region) { return region.Label == *label; }
-					);
-					if (found == document.Project->AnimationRegions.end()) continue;
-					if (found->Start.NegativeFrame || found->End.NegativeFrame ||
-						found->Start.Subframe != 0 || found->End.Subframe != 0) {
-						failure =
-							"Export frame range requires integral nonnegative animation region endpoints";
-						return false;
-					}
-					storedRegions.push_back({found->Label, {found->Start.Tick, found->End.Tick, 1}});
-				}
-			}
-			regions = storedRegions;
-		}
-		if (!PlanAuthoredGraphExport(invocation, grants, regions, exports, failure, imageCount)) return false;
-		for (auto &settings : exports) {
-			if (arraySurface && !settings.ArrayIndex) settings.ArrayIndex = 0;
-			settings.LinearScaling = snapshot.InheritedInterpolation() == 1;
-		}
 		double exportType = 0;
-		(void)Number(invocation, "type", exportType);
+		if (!detail::PlanPreparedAuthoredExport(
+				document, *node, snapshot, request, grants, regions, exports, imageCount, exportType, failure
+			))
+			return false;
 		if (exportType == 0) {
 			if (imageCount > std::min(Limits::MaximumNodes, Limits::MaximumOutputs)) {
 				failure = "prepared export surface count exceeds its captured graph bound";
@@ -845,7 +873,7 @@ namespace engine::imagegraphexport {
 			(void)SetFrameTime(capturedRequest, {request.Tick, request.Subframe, request.NegativeFrame});
 			capturedRequest.MaximumImageDimension = request.MaximumImageDimension;
 			capturedRequest.ImageSources = captures;
-			return ExportBatch(
+			return detail::ExportBatch(
 				exports,
 				capturedDocument,
 				capturedPlan,
@@ -864,7 +892,7 @@ namespace engine::imagegraphexport {
 		rangeRequest.DataReplay = nullptr;
 		rangeRequest.RigidReplay = nullptr;
 		rangeRequest.ReuseSimulationFrame = false;
-		return ExportBatch(
+		return detail::ExportBatch(
 			exports, document, plan, rangeRequest, true, failure, retainedTemporaryDirectories
 		);
 	}

@@ -55,7 +55,7 @@ Milestone labels describe development scope, not release versions.
   2. Nodes: implement the remaining 360 catalogue executors; verify defaults, controls, errors and animation; update parity evidence.
   3. Animation and audio: finish audio workflows and feedback; verify seek/reset and fractional-key semantics.
   4. 3D and outputs: finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback; broaden Transform and skybox raster verification.
-  5. PXC and exports: finish remaining edits and formats; validate modified PXC compatibility. Processor attribute resets now preserve unknown metadata and roundtrip through Undo/Redo (2 cases, 130 assertions).
+  5. PXC and exports: finish remaining edits and formats; validate modified PXC compatibility. Processor resets preserve metadata; resumable exports retain pending work, cancel safely and publish atomically.
   6. Acceptance: keep joined CPU and Composer Vulkan evidence current; finish remaining GPU tests, live Studio workflows and release profiling. Exact parity requires a licensed reference build and matched captures.
 
   Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.

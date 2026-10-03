@@ -13,6 +13,7 @@ namespace studio::detail {
 		engine::core::Name Owner;
 		const engine::assets::LocalPaths &Paths;
 		std::vector<engine::core::Name> *CaptureNames = nullptr;
+		std::string_view CapturePrefix = "studio.image-composer/";
 		bool Synchronous = false;
 		bool Pending = false;
 		bool HavePendingJobs = false;
@@ -35,7 +36,7 @@ namespace studio::detail {
 			}
 			if ((invocation.Authored.Type == "pc.3_d_transform_image" ||
 				 invocation.Authored.Type == "image.transform_3d")) {
-				const core::Name name("studio.image-composer/" + invocation.Authored.Id);
+				const core::Name name(std::string(CapturePrefix) + invocation.Authored.Id);
 				if (CaptureNames &&
 					std::find(CaptureNames->begin(), CaptureNames->end(), name) == CaptureNames->end()) {
 					if (CaptureNames->size() >= 16) {
@@ -89,7 +90,7 @@ namespace studio::detail {
 				}
 			}
 			if (Synchronous) return Renderer.CaptureComposerSurface(invocation, Owner, output, failure);
-			const core::Name captureName("studio.image-composer/" + invocation.Authored.Id);
+			const core::Name captureName(std::string(CapturePrefix) + invocation.Authored.Id);
 			if (CaptureNames &&
 				std::find(CaptureNames->begin(), CaptureNames->end(), captureName) == CaptureNames->end()) {
 				if (CaptureNames->size() >= 16) {
@@ -107,6 +108,33 @@ namespace studio::detail {
 			return captured;
 		}
 	};
+	// Separate preview and export identities share the renderer's bounded receipt cache.
+	struct ImageGraphComposerExportScope {
+		ImageGraphComposerHost *Host = nullptr;
+		std::vector<engine::core::Name> *PreviousNames = nullptr;
+		std::string_view PreviousPrefix;
+		bool PreviousSynchronous = false;
+		explicit ImageGraphComposerExportScope(
+			engine::imagegraph::HostNodeProvider *provider, std::vector<engine::core::Name> &names
+		)
+			: Host(dynamic_cast<ImageGraphComposerHost *>(provider)) {
+			if (!Host) return;
+			PreviousNames = Host->CaptureNames;
+			PreviousPrefix = Host->CapturePrefix;
+			PreviousSynchronous = Host->Synchronous;
+			Host->CaptureNames = &names;
+			Host->CapturePrefix = "studio.image-composer/export/";
+			Host->Synchronous = false;
+			Host->Pending = false;
+		}
+		~ImageGraphComposerExportScope() {
+			if (!Host) return;
+			Host->CaptureNames = PreviousNames;
+			Host->CapturePrefix = PreviousPrefix;
+			Host->Synchronous = PreviousSynchronous;
+		}
+	};
+
 	struct ImageGraphComposerSynchronousScope {
 		ImageGraphComposerHost *Host = nullptr;
 		bool Previous = false;

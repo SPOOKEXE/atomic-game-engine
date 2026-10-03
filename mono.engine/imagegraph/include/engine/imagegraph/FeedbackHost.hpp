@@ -423,6 +423,13 @@ namespace engine::imagegraph {
 			diagnostic = {Status::LimitExceeded, {}, {}, "Cache Results clear allocation refused"};
 			return false;
 		}
+		// Export continuation can resume only a published clock from matching authored inputs.
+		std::optional<FrameTime> PreparedFrame(uint64_t revision, uint64_t externalRevision) const noexcept {
+			if (!Configured || !Initialized || DocumentRevision != revision ||
+				InputRevision != externalRevision)
+				return {};
+			return FrameTime{Tick, Subframe, NegativeFrame};
+		}
 		bool Active() const {
 			return Stateful || !Bindings.empty();
 		}

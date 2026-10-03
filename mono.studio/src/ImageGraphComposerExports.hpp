@@ -10,8 +10,21 @@ namespace studio::detail {
 			ImageGraphPlayback Playback;
 			ImageGraphObservations Pcx;
 			uint64_t Revision = 0, InputRevision = 0;
+			uint64_t Sequence = 0;
 		};
 		std::vector<Observation> Pending;
+		uint64_t NextSequence = 1;
+		// A terminal outcome consumes only its own event, never a later front.
+		bool CompleteFront(uint64_t sequence, uint64_t revision, uint64_t inputRevision) {
+			if (Pending.empty() || sequence == 0 || Pending.front().Sequence != sequence ||
+				Pending.front().Revision != revision || Pending.front().InputRevision != inputRevision)
+				return false;
+			Pending.erase(Pending.begin());
+			return true;
+		}
+		bool CompleteFront(const Observation &observation) {
+			return CompleteFront(observation.Sequence, observation.Revision, observation.InputRevision);
+		}
 		static constexpr size_t MaximumObservations = 64;
 		static constexpr uint64_t MaximumBytes = 1024 * 1024;
 		void Invalidate(uint64_t revision, uint64_t inputRevision) {
@@ -63,7 +76,12 @@ namespace studio::detail {
 				failure = "Automatic export observations exceed their queue byte budget";
 				return false;
 			}
+			if (NextSequence == UINT64_MAX) {
+				failure = "Automatic export observation identity limit reached";
+				return false;
+			}
 			Observation candidate = observation;
+			candidate.Sequence = NextSequence;
 			const auto candidateBytes = Bytes(candidate);
 			if (!candidateBytes || *candidateBytes > MaximumBytes - held - newBacking - *bytes) {
 				failure = "Automatic export observation clone exceeds its byte budget";
@@ -83,6 +101,7 @@ namespace studio::detail {
 				}
 			}
 			Pending.push_back(std::move(candidate));
+			++NextSequence;
 			return true;
 		} catch (const std::bad_alloc &) {
 			failure = "Automatic export observation allocation was refused";

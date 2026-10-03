@@ -11,6 +11,7 @@
 #include "ImageGraphComposerHost.hpp"
 #include "ImageGraphCookAction.hpp"
 #include "ImageGraphDocumentEdit.hpp"
+#include "ImageGraphExportIntent.hpp"
 #include "ImageGraphExportTriggers.hpp"
 #include "ImageGraphGroupHost.hpp"
 #include "ImageGraphHistoryKeys.hpp"
@@ -42,6 +43,7 @@
 #include <engine/imagegraph/WavPreview.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
+#include <engine/imagegraphexport/GraphExportSession.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scripthost/ComposerLua.hpp>
@@ -117,6 +119,9 @@ namespace studio {
 			detail::ImageGraphHost Host;
 			detail::ImageGraphComposerCadence ComposerCadence;
 			detail::ImageGraphComposerExports ComposerExports;
+			detail::ImageGraphExportIntent ExportIntent;
+			std::unique_ptr<engine::imagegraphexport::GraphExportSession> RangeExport;
+			uint64_t ExportIntentGeneration = 0;
 			std::vector<engine::core::Name> ComposerCaptureNames;
 			bool ComposerDevicePending = false;
 			std::vector<engine::imagegraphexport::GraphFileGrant> FileGrants;
@@ -553,104 +558,429 @@ namespace studio {
 			return state.ExportGrants.back();
 		}
 
+		void CancelExportIntent(State &state, engine::render::Renderer &renderer) {
+			if (state.ExportIntent.Current && state.ExportIntent.Current->Automatic &&
+				state.ExportIntent.Current->Event == detail::ImageGraphExportEvent::Update)
+				state.ComposerExports.CompleteFront(state.ExportIntent.Current->Observation);
+			if (state.ExportIntent.Current)
+				for (const auto name : state.ExportIntent.CaptureNames)
+					renderer.CancelComposerCapture(state.ExportIntent.Current->Owner, name);
+			state.RangeExport.reset();
+			state.ExportIntent.Clear();
+		}
+
+		bool ExportGrantsMatch(State &state) {
+			const auto &intent = state.ExportIntent;
+			if (!intent.Current) return false;
+			if (intent.Current->Operation == detail::ImageGraphExportIntent::Kind::HostNode) return true;
+			for (const auto &target : intent.Current->Targets) {
+				const auto grant =
+					std::find_if(state.ExportGrants.begin(), state.ExportGrants.end(), [&](const auto &item) {
+						return item.NodeId == target.NodeId;
+					});
+				if (grant == state.ExportGrants.end() || grant->Root.string() != target.Root ||
+					std::string_view(grant->ImageEncoder.data()) != target.ImageEncoder ||
+					std::string_view(grant->VideoEncoder.data()) != target.VideoEncoder)
+					return false;
+			}
+			return true;
+		}
+
+		engine::imagegraphexport::GraphExportGeneration ExportGeneration(const State &state) {
+			const auto &batch = *state.ExportIntent.Current;
+			return {
+				batch.Observation.Revision,
+				batch.Observation.InputRevision,
+				state.ExportIntentGeneration,
+				state.ExportIntentGeneration,
+				batch.Owner.Id()
+			};
+		}
+
+		void ResumeExportIntent(State &state) {
+			auto *composer = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer);
+			auto &intent = state.ExportIntent;
+			if (!composer || !intent.Current) return;
+			if (!intent.Matches(composer->Owner, state.DocumentRevision, state.EvaluationInputRevision) ||
+				!ExportGrantsMatch(state)) {
+				state.LastDiagnostic = {
+					Status::InvalidValue,
+					{},
+					"export",
+					"Export canceled because its owner, project, inputs or grants changed"
+				};
+				CancelExportIntent(state, composer->Renderer);
+				return;
+			}
+			engine::imagegraph::Plan plan;
+			Diagnostic error;
+			const auto compiled = engine::imagegraph::Compile(state.Authored, plan, error);
+			const detail::ImageGraphComposerExportScope captureScope(
+				state.Host.Composer, intent.CaptureNames
+			);
+			intent.Observations.BeginAttempt();
+			while (const auto *target = intent.Selected()) {
+				engine::imagegraphphysics::RigidProvider rigid;
+				engine::imagegraph::EvaluationRequest request;
+				const auto &batch = *intent.Current;
+				batch.Observation.Pcx.Bind(request);
+				detail::BindImageGraphRigid(request, rigid, batch.Observation.Playback);
+				if (!state.RangeExport && !intent.Preparation.Current && compiled == Status::Ok) {
+					std::vector<std::string> outputs;
+					bool feedback = false;
+					if (!state.SelectedOutput.empty()) outputs.push_back(state.SelectedOutput);
+					for (const auto &node : state.Authored.Nodes)
+						if (node.Type == "image.captured")
+							for (const auto &input : node.Values)
+								if (input.Port == "source_id")
+									if (const auto *source = std::get_if<std::string>(&input.Data);
+										source && source->starts_with("feedback:")) {
+										const auto output = std::find_if(
+											state.Authored.Outputs.begin(),
+											state.Authored.Outputs.end(),
+											[&](const auto &item) {
+												return item.Id == std::string_view(*source).substr(9);
+											}
+										);
+										if (output != state.Authored.Outputs.end() &&
+											std::find(outputs.begin(), outputs.end(), output->Id) ==
+												outputs.end())
+											outputs.push_back(output->Id);
+										feedback = true;
+									}
+					const auto cone = engine::imagegraph::AnalyzeStatefulTemporalCone(
+						state.Authored, plan, outputs, target->NodeId
+					);
+					const bool direct = cone.DataProcessors && !cone.FirstFrameData && !cone.Simulation &&
+										!cone.SurfaceCaches && !cone.RandomGenerators && !cone.RigidActors &&
+										!feedback;
+					const bool replay =
+						cone.Valid && !direct &&
+						(feedback || state.FeedbackHost.Active() || cone.Simulation || cone.SurfaceCaches ||
+						 cone.RandomGenerators || cone.RigidActors || cone.FirstFrameData);
+					std::string admission;
+					const auto final = GetImageGraphFrame(batch.Observation.Playback);
+					if (!intent.Preparation.Begin(
+							state.FeedbackHost.PreparedFrame(
+								state.DocumentRevision, state.EvaluationInputRevision
+							),
+							final,
+							replay && !((cone.FixedSimulationSteps || cone.SurfaceCaches || feedback) &&
+										final.Subframe != 0),
+							admission
+						)) {
+						state.LastDiagnostic = {
+							Status::LimitExceeded, target->NodeId, "export", std::move(admission)
+						};
+						CancelExportIntent(state, composer->Renderer);
+						return;
+					}
+				}
+				const auto frame =
+					state.RangeExport ? state.RangeExport->NextFrame() : intent.Preparation.Current;
+				if (frame) (void)engine::imagegraph::SetFrameTime(request, *frame);
+				// The matching generation above precedes every read of these caller-owned spans.
+				request.AudioFrames = state.AudioFrames;
+				request.AudioClips = state.AudioClips;
+				if (batch.Operation == detail::ImageGraphExportIntent::Kind::HostNode)
+					request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				detail::ImageGraphExportProvider provider(HostFor(state), intent, request);
+				provider.CaptureReceipts = !state.RangeExport;
+				provider.PendingFlag = &composer->Pending;
+				provider.CancelContext = &composer->Renderer;
+				provider.CancelNames = [](void *context,
+										  engine::core::Name owner,
+										  std::span<const engine::core::Name> names) noexcept {
+					auto &renderer = *static_cast<engine::render::Renderer *>(context);
+					for (const auto name : names)
+						renderer.CancelComposerCapture(owner, name);
+				};
+				request.HostProvider = &provider;
+				composer->Pending = false;
+				std::string failure;
+				bool complete = false, failed = false, skipped = false;
+				if (state.RangeExport) {
+					const auto progress =
+						state.RangeExport->Resume(request, ExportGeneration(state), provider, failure);
+					if (progress == engine::imagegraphexport::GraphExportProgress::Pending ||
+						progress == engine::imagegraphexport::GraphExportProgress::Progress) {
+						intent.Pending = true;
+						auto &grant = GrantFor(state, target->NodeId);
+						grant.Failed = false;
+						grant.Message = progress == engine::imagegraphexport::GraphExportProgress::Pending
+											? "Export waiting for surface capture."
+											: "Export collecting frames.";
+						return;
+					}
+					complete = progress == engine::imagegraphexport::GraphExportProgress::Complete;
+					failed = !complete;
+					auto &grant = GrantFor(state, target->NodeId);
+					const auto directories = state.RangeExport->RetainedDirectories();
+					grant.RetainedFrames.assign(directories.begin(), directories.end());
+				} else {
+					engine::imagegraph::EvaluationSnapshot directInputs;
+					const engine::imagegraph::EvaluationSnapshot *snapshot = nullptr;
+					if (compiled != Status::Ok)
+						failure = error.Message;
+					else if (!state.GroupHost.Prepare(
+								 state.Authored, plan, state.DocumentRevision, request, error
+							 ) ||
+							 !state.FeedbackHost.Prepare(
+								 state.Authored,
+								 plan,
+								 state.DocumentRevision,
+								 state.EvaluationInputRevision,
+								 request,
+								 error,
+								 engine::imagegraph::Limits::MaximumEvaluationBytes,
+								 state.SelectedOutput,
+								 target->NodeId
+							 ))
+						failure = error.Message;
+					else if (state.FeedbackHost.Active())
+						snapshot = &state.FeedbackHost.Snapshot();
+					else if (engine::imagegraph::EvaluateNodeInputs(
+								 state.Authored, plan, target->NodeId, request, directInputs, error
+							 ) == Status::Ok)
+						snapshot = &directInputs;
+					else
+						failure = error.Message;
+					if (snapshot && !intent.Preparation.Complete()) {
+						intent.Observations.Clear();
+						intent.Pending = true;
+						return;
+					}
+					if (!snapshot) {
+						if (provider.Pending()) {
+							intent.Finish(detail::ImageGraphExportIntent::Result::Pending);
+							if (batch.Operation == detail::ImageGraphExportIntent::Kind::Authored) {
+								auto &grant = GrantFor(state, target->NodeId);
+								grant.Message = "Export waiting for surface capture.";
+								grant.Failed = false;
+							} else {
+								const auto control = std::find_if(
+									state.FileControls.begin(),
+									state.FileControls.end(),
+									[&](const auto &item) { return item.NodeId == target->NodeId; }
+								);
+								if (control != state.FileControls.end())
+									control->Message = "File action waiting for surface capture.";
+							}
+							return;
+						}
+						failed = true;
+					} else if (batch.Operation == detail::ImageGraphExportIntent::Kind::HostNode) {
+						engine::imagegraph::HostNodeCapture captured;
+						complete = engine::imagegraphexport::ExecuteGraphHostNode(
+							state.Authored, request, target->NodeId, *snapshot, captured, failure
+						);
+						failed = !complete;
+					} else if (batch.Automatic &&
+							   !detail::SourceExportTriggered(snapshot->Values(), batch.Event)) {
+						complete = true;
+						skipped = true;
+					} else if (target->Root.empty()) {
+						failure = "Grant an export directory before running this node.";
+						failed = true;
+					} else {
+						engine::imagegraphexport::GraphExportSettings settings;
+						settings.Input = target->ProjectPath;
+						settings.Output = target->Root;
+						settings.ImageEncoder = target->ImageEncoder;
+						settings.VideoEncoder = target->VideoEncoder;
+						settings.NativeGif = true;
+						const auto type = std::find_if(
+							snapshot->Values().begin(), snapshot->Values().end(), [](const auto &input) {
+								return input.Port == "type";
+							}
+						);
+						bool animation = false;
+						if (type != snapshot->Values().end()) {
+							if (const auto *choice = std::get_if<engine::imagegraph::EnumValue>(&type->Data))
+								animation = choice->Value != 0;
+							else if (const auto *integer = std::get_if<int64_t>(&type->Data))
+								animation = *integer != 0;
+							else if (const auto *scalar = std::get_if<double>(&type->Data))
+								animation = *scalar != 0;
+						}
+						if (animation) {
+							const auto documentBytes =
+								engine::imagegraph::DocumentRetainedPayloadBytes(state.Authored);
+							const auto metadataBytes = intent.MetadataBytes();
+							const auto observationBytes = intent.Observations.RetainedPayloadBytes();
+							const std::array<uint64_t, 7> held{
+								documentBytes.value_or(UINT64_MAX),
+								metadataBytes.value_or(UINT64_MAX),
+								observationBytes.value_or(UINT64_MAX),
+								snapshot->RetainedBytes(),
+								state.Host.RetainedBytes,
+								state.Host.LuaReceipts.Bytes,
+								engine::imagegraph::Limits::MaximumEvaluationBytes
+							};
+							const bool admitted = documentBytes && metadataBytes && observationBytes &&
+												  detail::ImageGraphExportIntent::AdmitRangePayload(
+													  held,
+													  engine::imagegraphexport::GraphExportSession::
+														  MaximumPayloadReservationBytes(),
+													  failure
+												  );
+							if (!admitted && failure.empty())
+								failure = "Range export retained inputs cannot be accounted";
+							auto session =
+								admitted ? std::make_unique<engine::imagegraphexport::GraphExportSession>()
+										 : nullptr;
+							if (session && session->BeginAuthored(
+											   state.Authored,
+											   *snapshot,
+											   request,
+											   settings,
+											   target->NodeId,
+											   ExportGeneration(state),
+											   failure
+										   )) {
+								state.RangeExport = std::move(session);
+								intent.Observations.Clear();
+								intent.Pending = true;
+								auto &grant = GrantFor(state, target->NodeId);
+								grant.Message = "Export collecting frames.";
+								grant.Failed = false;
+								return;
+							}
+							failed = true;
+						} else {
+							auto &grant = GrantFor(state, target->NodeId);
+							std::vector<std::filesystem::path> retained;
+							complete = engine::imagegraphexport::ExportAuthoredGraphNode(
+								state.Authored,
+								plan,
+								request,
+								settings,
+								target->NodeId,
+								*snapshot,
+								failure,
+								&retained
+							);
+							failed = !complete;
+							grant.RetainedFrames = std::move(retained);
+						}
+					}
+				}
+				if (intent.Current->Operation == detail::ImageGraphExportIntent::Kind::Authored) {
+					auto &grant = GrantFor(state, target->NodeId);
+					grant.Message = skipped ? std::string{} : (complete ? "Export complete." : failure);
+					grant.Failed = failed;
+				} else {
+					const auto control = std::find_if(
+						state.FileControls.begin(), state.FileControls.end(), [&](const auto &item) {
+							return item.NodeId == target->NodeId;
+						}
+					);
+					if (control != state.FileControls.end())
+						control->Message = complete ? "File action complete." : failure;
+				}
+				if (state.RangeExport) {
+					state.RangeExport->Cancel(provider);
+					state.RangeExport.reset();
+				}
+				if (intent.Finish(
+						failed ? detail::ImageGraphExportIntent::Result::Failed
+							   : detail::ImageGraphExportIntent::Result::Complete
+					)) {
+					CancelExportIntent(state, composer->Renderer);
+					RequestPreview(state, true);
+					return;
+				}
+			}
+		}
+
+		bool BeginExportIntent(
+			State &state,
+			detail::ImageGraphExportIntent::Kind kind,
+			std::span<const detail::ImageGraphExportIntent::Target> targets,
+			bool automatic,
+			detail::ImageGraphExportEvent event,
+			const detail::ImageGraphComposerExports::Observation *recorded = nullptr
+		) {
+			auto *composer = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer);
+			if (!composer) return false;
+			if (state.ExportIntent.Current) CancelExportIntent(state, composer->Renderer);
+			if (!automatic) CancelComposerPreview(state, composer->Renderer);
+			engine::imagegraph::EvaluationRequest request;
+			if (!recorded) BindObservations(state, request);
+			const auto observation = recorded ? *recorded
+											  : detail::ImageGraphComposerExports::Observation{
+													state.Playback,
+													state.PcxObservations,
+													state.DocumentRevision,
+													state.EvaluationInputRevision
+												};
+			std::string failure;
+			if (!state.ExportIntent.Begin(
+					kind,
+					composer->Owner,
+					observation,
+					targets,
+					automatic,
+					failure,
+					detail::ImageGraphExportIntent::MaximumBytes,
+					event
+				)) {
+				state.LastDiagnostic = {Status::LimitExceeded, {}, "export", std::move(failure)};
+				return false;
+			}
+			if (++state.ExportIntentGeneration == 0) state.ExportIntentGeneration = 1;
+			ResumeExportIntent(state);
+			return true;
+		}
+
 		void RunAuthoredExports(
 			State &state,
 			detail::ImageGraphExportEvent event,
 			std::string_view explicitNode = {},
 			const detail::ImageGraphComposerExports::Observation *recorded = nullptr
 		) {
-			std::vector<std::string> nodes;
-			for (const auto &node : state.Authored.Nodes)
-				if (node.Type == "pc.export" && (explicitNode.empty() || node.Id == explicitNode))
-					nodes.push_back(node.Id);
-			if (nodes.empty()) return;
-			if (!recorded) CancelComposerPreview(state);
-			const detail::ImageGraphLuaReceiptScope luaReceipts(state.Host.LuaReceipts);
-			const auto &playback = recorded ? recorded->Playback : state.Playback;
-			const detail::ImageGraphComposerSynchronousScope synchronous(state.Host.Composer);
-			ENGINE_PROFILE_CAT("image composer exports", engine::core::ProfileCategory::Engine);
-			engine::imagegraph::Plan plan;
-			Diagnostic error;
-			if (engine::imagegraph::Compile(state.Authored, plan, error) != Status::Ok) {
-				for (const auto &id : nodes) {
-					auto &grant = GrantFor(state, id);
-					grant.Message = error.Message;
-					grant.Failed = true;
+			const uint64_t sequence = recorded ? recorded->Sequence : 0;
+			const uint64_t revision = recorded ? recorded->Revision : 0;
+			const uint64_t inputRevision = recorded ? recorded->InputRevision : 0;
+			const auto terminal = [&] {
+				if (sequence != 0 && explicitNode.empty() && event == detail::ImageGraphExportEvent::Update)
+					state.ComposerExports.CompleteFront(sequence, revision, inputRevision);
+			};
+			std::vector<detail::ImageGraphExportIntent::Target> targets;
+			for (const auto &node : state.Authored.Nodes) {
+				if (node.Type != "pc.export" || (!explicitNode.empty() && node.Id != explicitNode)) continue;
+				if (targets.size() == 64) {
+					state.LastDiagnostic = {
+						Status::LimitExceeded, {}, "export", "Export target count exceeds its session limit"
+					};
+					terminal();
+					return;
 				}
+				const auto &grant = GrantFor(state, node.Id);
+				targets.push_back(
+					{node.Id,
+					 grant.Root.string(),
+					 grant.ImageEncoder.data(),
+					 grant.VideoEncoder.data(),
+					 (state.PxcxPathDisplay.empty()
+						  ? std::filesystem::path(state.GraphName).replace_extension(".graph")
+						  : std::filesystem::path(state.PxcxPathDisplay))
+						 .string()}
+				);
+			}
+			if (targets.empty()) {
+				terminal();
 				return;
 			}
-			for (const auto &id : nodes) {
-				auto &grant = GrantFor(state, id);
-				engine::imagegraphphysics::RigidProvider requestRigidProvider;
-				engine::imagegraph::EvaluationRequest request;
-				request.HostProvider = &HostFor(state);
-				if (recorded)
-					recorded->Pcx.Bind(request);
-				else
-					BindObservations(state, request);
-				detail::BindImageGraphRigid(request, requestRigidProvider, playback);
-				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(playback));
-				request.AudioFrames = state.AudioFrames;
-				request.AudioClips = state.AudioClips;
-				if (!state.GroupHost.Prepare(state.Authored, plan, state.DocumentRevision, request, error) ||
-					!state.FeedbackHost.Prepare(
-						state.Authored,
-						plan,
-						state.DocumentRevision,
-						state.EvaluationInputRevision,
-						request,
-						error,
-						engine::imagegraph::Limits::MaximumEvaluationBytes,
-						state.SelectedOutput,
-						id
-					)) {
-					grant.Message = error.Message;
-					grant.Failed = true;
-					continue;
-				}
-				engine::imagegraph::EvaluationSnapshot captured;
-				const auto *snapshot = &state.FeedbackHost.Snapshot();
-				if (!state.FeedbackHost.Active()) {
-					if (engine::imagegraph::EvaluateNodeInputs(
-							state.Authored, plan, id, request, captured, error
-						) != Status::Ok) {
-						grant.Message = error.Message;
-						grant.Failed = true;
-						continue;
-					}
-					snapshot = &captured;
-				}
-				if (explicitNode.empty() && !detail::SourceExportTriggered(snapshot->Values(), event)) {
-					grant.Failed = false;
-					grant.Message.clear();
-					continue;
-				}
-				if (grant.Root.empty()) {
-					grant.Message = "Grant an export directory before running this node.";
-					grant.Failed = true;
-					continue;
-				}
-				engine::imagegraphexport::GraphExportSettings settings;
-				settings.Input = state.PxcxPathDisplay.empty()
-									 ? std::filesystem::path(state.GraphName).replace_extension(".graph")
-									 : std::filesystem::path(state.PxcxPathDisplay);
-				settings.Output = grant.Root;
-				settings.ImageEncoder = std::filesystem::path(grant.ImageEncoder.data());
-				settings.VideoEncoder = std::filesystem::path(grant.VideoEncoder.data());
-				settings.NativeGif = true;
-				std::string failure;
-				std::vector<std::filesystem::path> retained;
-				if (engine::imagegraphexport::ExportAuthoredGraphNode(
-						state.Authored, plan, request, settings, id, *snapshot, failure, &retained
-					)) {
-					grant.Message = "Export complete.";
-					grant.Failed = false;
-				} else {
-					grant.Message = std::move(failure);
-					grant.Failed = true;
-				}
-				grant.RetainedFrames = std::move(retained);
-			}
+			if (!BeginExportIntent(
+					state,
+					detail::ImageGraphExportIntent::Kind::Authored,
+					targets,
+					explicitNode.empty(),
+					event,
+					recorded
+				))
+				terminal();
 		}
 
 		bool SaveNativeGraph(State &state) {
@@ -935,6 +1265,7 @@ namespace studio {
 		}
 
 		void RefreshPreview(State &state, engine::render::Renderer &renderer) {
+			if (state.ExportIntent.Current) return;
 			if (!state.PreviewDirty || (!state.LivePreview && !state.PreviewRequested)) return;
 			ImageGraphPlayback previewPlayback = state.Playback;
 			const auto *composer = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer);
@@ -2968,53 +3299,17 @@ namespace studio {
 			}
 			ImGui::SameLine();
 			if (ImGui::Button(writing ? "Export" : "Read / refresh")) {
-				CancelComposerPreview(state);
-				const detail::ImageGraphComposerSynchronousScope synchronous(state.Host.Composer);
 				changed();
-				engine::imagegraph::Plan plan;
-				Diagnostic error;
-				engine::imagegraphphysics::RigidProvider requestRigidProvider;
-				engine::imagegraph::EvaluationRequest request;
-				request.HostProvider = &HostFor(state);
-				BindObservations(state, request);
-				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
-				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
-				request.AudioFrames = state.AudioFrames;
-				request.AudioClips = state.AudioClips;
-				request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
-				engine::imagegraph::HostNodeCapture capture;
-				if (engine::imagegraph::Compile(state.Authored, plan, error) != Status::Ok ||
-					!state.GroupHost.Prepare(state.Authored, plan, state.DocumentRevision, request, error) ||
-					!state.FeedbackHost.Prepare(
-						state.Authored,
-						plan,
-						state.DocumentRevision,
-						state.EvaluationInputRevision,
-						request,
-						error,
-						engine::imagegraph::Limits::MaximumEvaluationBytes,
-						state.SelectedOutput,
-						nodeId
-					))
-					controls.Message = error.Message;
-				else {
-					engine::imagegraph::EvaluationSnapshot directInputs;
-					const auto *snapshot = &state.FeedbackHost.Snapshot();
-					if (!state.FeedbackHost.Active()) {
-						if (engine::imagegraph::EvaluateNodeInputs(
-								state.Authored, plan, nodeId, request, directInputs, error
-							) != Status::Ok) {
-							controls.Message = error.Message;
-							snapshot = nullptr;
-						} else
-							snapshot = &directInputs;
-					}
-					if (snapshot && engine::imagegraphexport::ExecuteGraphHostNode(
-										state.Authored, request, nodeId, *snapshot, capture, controls.Message
-									))
-						controls.Message = writing ? "Export complete." : "Read captured.";
-				}
+				const detail::ImageGraphExportIntent::Target target{std::string(nodeId), {}, {}, {}};
+				BeginExportIntent(
+					state,
+					detail::ImageGraphExportIntent::Kind::HostNode,
+					std::span(&target, 1),
+					false,
+					detail::ImageGraphExportEvent::Update
+				);
 			}
+
 			if (ImGui::Button(writing ? "Revoke files" : "Revoke reads")) {
 				std::erase_if(state.FileGrants, [&](const auto &grant) { return grant.NodeId == nodeId; });
 				std::erase_if(state.DirectoryGrants, [&](const auto &grant) {
@@ -5113,6 +5408,10 @@ namespace studio {
 			CancelComposerPreview(state, renderer);
 		detail::ImageGraphComposerHost composerHost(renderer, owner, paths, &state.ComposerCaptureNames);
 		const detail::ImageGraphComposerHostScope composerScope(state.Host.Composer, composerHost);
+		if (state.ExportIntent.Current &&
+			(!open ||
+			 !state.ExportIntent.Matches(owner, state.DocumentRevision, state.EvaluationInputRevision)))
+			CancelExportIntent(state, renderer);
 		struct RetainPendingSignal {
 			State &Owner;
 			const detail::ImageGraphComposerHost &Host;
@@ -5155,6 +5454,7 @@ namespace studio {
 		RunAnimationControls(state, renderer);
 		ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 255));
 		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
+		if (open) ResumeExportIntent(state);
 		if (!ImGui::Begin("Image Composer", &open, ImGuiWindowFlags_MenuBar)) {
 			CancelComposerPreview(state, renderer);
 			state.VectorControls.FinishPointer(
@@ -5163,6 +5463,7 @@ namespace studio {
 			ImGui::End();
 			ImGui::PopStyleColor(2);
 			if (!open) {
+				CancelExportIntent(state, renderer);
 				CancelComposerPreview(state, renderer);
 				if (state.LuaHost) state.LuaHost->Reset();
 				state.Host.ResetFiles();
@@ -5284,13 +5585,13 @@ namespace studio {
 					};
 			}
 		}
-		if (!state.ComposerCadence.Held) {
-			while (!state.ComposerExports.Pending.empty()) {
-				const auto observation = std::move(state.ComposerExports.Pending.front());
-				state.ComposerExports.Pending.erase(state.ComposerExports.Pending.begin());
-				RunAuthoredExports(state, detail::ImageGraphExportEvent::Update, {}, &observation);
-			}
+		if (!state.ExportIntent.Current && !state.ComposerCadence.Held &&
+			!state.ComposerExports.Pending.empty()) {
+			RunAuthoredExports(
+				state, detail::ImageGraphExportEvent::Update, {}, &state.ComposerExports.Pending.front()
+			);
 		}
+
 		Diagnostic audioDiagnostic;
 		if (!state.WavAudio.Update(
 				state.Authored,
@@ -5310,6 +5611,7 @@ namespace studio {
 		);
 		ImGui::End();
 		if (!open) {
+			CancelExportIntent(state, renderer);
 			CancelComposerPreview(state, renderer);
 			if (state.LuaHost) state.LuaHost->Reset();
 			state.Host.ResetFiles();

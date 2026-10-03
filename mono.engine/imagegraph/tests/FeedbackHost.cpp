@@ -292,3 +292,79 @@ TEST_CASE(
 	CHECK(std::get<EvaluatedValue>(host.Value("mesh")->Output) == std::get<EvaluatedValue>(retained.Output));
 	CHECK(*request.SimulationReplay == replay);
 }
+
+TEST_CASE(
+	"Published feedback clock is generation scoped and survives failed preparation",
+	"[imagegraph][feedback][prepared_frame]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Project = ProjectSettings{};
+	document.Project->SurfaceWidth = document.Project->SurfaceHeight = 1;
+	document.Nodes = {
+		{"prior", "image.captured", "", {}, {{"source_id", std::string("feedback:out")}}},
+		{"invert", "image.invert", "", {}, {{"include_alpha", false}}}
+	};
+	document.Links = {{"prior", "image", "invert", "image"}};
+	document.Outputs = {{"out", "invert", "image"}};
+	Plan plan;
+	Diagnostic error;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	CapturedFeedbackHost host;
+	CHECK_FALSE(host.PreparedFrame(3, 4));
+	EvaluationRequest request;
+	REQUIRE(host.Prepare(document, plan, 3, 4, request, error));
+	REQUIRE(host.PreparedFrame(3, 4));
+	CHECK(*host.PreparedFrame(3, 4) == FrameTime{});
+	CHECK_FALSE(host.PreparedFrame(2, 4));
+	CHECK_FALSE(host.PreparedFrame(3, 5));
+	const auto original = *host.Output("out");
+	request = {};
+	request.Tick = 1;
+	CHECK_FALSE(host.Prepare(document, plan, 3, 4, request, error, 1));
+	CHECK(host.PreparedFrame(3, 4) == std::optional(FrameTime{}));
+	CHECK(*host.Output("out") == original);
+	for (const auto invalid : {FrameTime{1, .5}, FrameTime{1, 0, true}}) {
+		request = {};
+		REQUIRE(SetFrameTime(request, invalid));
+		CHECK_FALSE(host.Prepare(document, plan, 3, 4, request, error));
+		CHECK(host.PreparedFrame(3, 4) == std::optional(FrameTime{}));
+		CHECK(*host.Output("out") == original);
+	}
+	request = {};
+	request.Tick = 1;
+	REQUIRE(host.Prepare(document, plan, 3, 4, request, error));
+	CHECK(host.PreparedFrame(3, 4) == std::optional(FrameTime{1}));
+	host.RestartCycle();
+	CHECK_FALSE(host.PreparedFrame(3, 4));
+	request = {};
+	REQUIRE(host.Prepare(document, plan, 3, 4, request, error));
+	CHECK(host.PreparedFrame(3, 4) == std::optional(FrameTime{}));
+	CHECK(*host.Output("out") == original);
+	host.Clear();
+	CHECK_FALSE(host.PreparedFrame(3, 4));
+}
+TEST_CASE(
+	"Published direct-data clock keeps exact signed fractional observations",
+	"[imagegraph][feedback][prepared_frame]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"d", "pc.differential", "", {}, {{"value", 10.0}}}};
+	document.Outputs = {{"out", "d", "result"}};
+	Plan plan;
+	Diagnostic error;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	CapturedFeedbackHost host;
+	EvaluationRequest request;
+	const FrameTime frame{2, .25, true};
+	REQUIRE(SetFrameTime(request, frame));
+	REQUIRE(host.Prepare(document, plan, 1, 2, request, error, Limits::MaximumEvaluationBytes, "out"));
+	CHECK(host.PreparedFrame(1, 2) == std::optional(frame));
+	CHECK_FALSE(host.PreparedFrame(2, 2));
+	CHECK_FALSE(host.PreparedFrame(1, 3));
+	request = {};
+	REQUIRE(SetFrameTime(request, {3, .5}));
+	CHECK_FALSE(host.Prepare(document, plan, 1, 2, request, error, 1, "out"));
+	CHECK(host.PreparedFrame(1, 2) == std::optional(frame));
+}
