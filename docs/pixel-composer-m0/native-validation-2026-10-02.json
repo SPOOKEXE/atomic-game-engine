@@ -1,7 +1,7 @@
 {
   "recorded_date": "2026-10-03",
   "recorded_timezone": "Australia/Darwin, UTC+09:30",
-  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs. Build51 release and focused native gates, the server-headless recipe, and a fresh finalcore51 capability inventory are appended below. Two server-headless build attempts failed from temporary disk exhaustion before a RAM-object retry completed 114/114 steps; the earlier failures remain listed. A prepared CLI run failed because CTest used an old assetc binary, then the assetc rebuild and scoped 14-test rerun passed. The prepared export and Studio suites passed after export fixes. These completed scopes remain separate from any later integrated build, and licensed executable parity remains unavailable. Build52 dev and release gates executed October 3 in Darwin are appended as separate scopes. The release52 executor inventory is a capability snapshot of the archive hash recorded with its captured HEAD d3474640 and SourceCatalogue hash; later source commits do not change that snapshot. Server build, server Composer CTest, and headless runtime are separate gates. Initial Edge Detect/Bokeh Blur fixture and Atlas/Palette runs failed or were interrupted before repairs; those records remain below. Finalized build53 release checks are appended below. Initial joined release, core, physics, and Studio failures remain in excluded_or_failed_runs; logs containing \u201cfinal\u201d in the initial-run name are not accepted results. The finalized build53 inventory was captured with archive, HEAD, catalogue, and source-scope status verified before and after the query. The finalized build53 release snapshot is tied to imagegraph archive SHA-256 12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717, SourceCatalogue SHA-256 57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c, and HEAD d0611f3282e4a1358e181af621234d2ba641e1f4. Archive, HEAD, catalogue hash, and compiled-source-scope status were captured before and after the query and remained unchanged. The build53 release suites passed after repair; earlier failures remain listed. Build53 dev and server gates are now included. The two failed dev disk-exhaustion attempts remain retained below; successful RAM-backed dev gates are separate. Build54 final release gates passed after repair. Initial build54 compiler, core, CLI fixture, and architecture harness failures remain in excluded_or_failed_runs. The release54 executor inventory is tied to the captured archive SHA-256, HEAD, catalogue hash, and clean compiled-source scope in its artifact; public/private header hashes and the helper link command are retained there. Five generated cache directories were restored to workspace disk with SHA-256 and nanosecond mtime verification; this is build-support provenance. Build55 release retry completed 521/521 steps after a unity-build anonymous-helper collision was fixed. Final release gates and the focused volume result are appended below. The mixed-header volume run was withdrawn and is not counted. No new Python catalogue run is claimed; the latest remains build54. The release55 inventory includes archive, HEAD, catalogue, public/private header, and helper compile/link provenance. The root-owned imagegraph documentation update is outside the compiled code scope. An external FFT proof was withdrawn and is not landed implementation or acceptance evidence. Build56 release logs and inventory are appended with SHA-256 values. The first core run failed one stale TimelineV8 FFT diagnostic fixture; a repair suite passed, then the full core passed. Initial and repair I/O runs failed before the final complete I/O suite passed. The final build56 CLI evidence is the scoped 13-selector run; an earlier 15-selector run also passed. No build56 asset rerun is claimed; the retained 265-case asset log is unchanged. The build56 archive query was linked against the finalized release archive, with HEAD, SourceCatalogue, header hashes, and imagegraph code scope matching before and after. Registration remains capability evidence only. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build57 release checks and inventory are appended. The first core run failed four source shape cases; a first repair run still failed one source shape case; the final full core suite passed. Two incremental source shape object rebuilds each completed 2/2 steps. The remaining release suites passed their listed scopes. Source commits 55787c51e50274a6445c107d8c90c7ec43fa0b78, a44cd44c5821e4a77bb7ac03fd55e44cd32c8522, and 62e0a34a54647f52bd47fd566ff8672c5e12b88e are part of the finalized snapshot. The build57 archive query is bound to the captured archive, HEAD, SourceCatalogue, public/private header hashes, and clean imagegraph code scope. No assets or architecture suite was rerun in build57. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build58 release evidence is appended below with its exact archive inventory; it adds no assets, architecture, server, GPU, manual-scene, or profiling run. The Build57 source pipeline profile remains the latest profiling evidence. Build59 release evidence is appended below, tied to the captured release archive and HEAD. The initial Ninja run was intentionally stopped at 165/552 to raise test compile concurrency; the resumed 388/388 build and tests-only 3/3 repair passed. Initial core failures are retained separately from the repaired core pass. Build59 did not rerun profiling, server, assets, GPU, manual scene, or architecture gates. Build60 release evidence and exact inventory are appended. Initial core fixture failures and an overlapping IO log are retained separately. Production was unchanged by the tests-only repair. Profiling, server, assets, architecture, GPU and manual scenes were not rerun. Requested cache cleanup removed obsolete diagnostic binaries and stale aliases while retaining current builds and text validation artifacts. Build61 final native evidence and exact inventory are appended, with initial failed core/dither and IO runs retained. Earlier other-suite runs preceded the mapped contrast fix and are not used as final acceptance. Noise correction and ordered dither commits are recorded with the committed Draw Gradient source. Server, assets, architecture, GPU, manual scenes, licensed-reference comparisons and representative profiling were not rerun or promoted by this append. Build62 public source typing/reset, source record origins, RNG capture codec v2, cooked Composer host/artifact routing and product receipt/cadence evidence are appended only from final reviewed logs and exact source/header/archive inventory provenance. Failed initial build, client, Studio, CLI and both server resource comparisons remain retained. Summary parsing replaces invalid UTF-8 bytes in server text; evidence hashes preserve the original raw bytes. The authorized initial GPU attempt failed and is retained; any accepted GPU gate is separately checked with backend, driver and scope limitations. Native CPU gates are not GPU pixel evidence and licensed-reference acceptance remains open. Representative profiling was not promoted. Build63 appends coherent current-ABI native node/product checks and approved local Vulkan fixtures after source integration. The five-case focused failure and interrupted initial build invocation remain retained. Final repaired build completed 22/22, final closure 1/1. Inventory captures clean Composer core source at 96a7bd07 with unchanged archive/header/HEAD hashes before and after. CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed reference parity were not promoted. Build64 appends coherent current-ABI native checks for five executors and panel-scoped keyboard editing. All six failed invocations remain retained. Builds completed596/596,36/36 and4/4. Inventory captures clean Composer core at7b5a29f4 with unchanged archive/header/HEAD hashes before and after. Accepted CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed parity were not promoted. Build65 appends six executors, Clear ownership, pending observations, live Transform host adapters, easing and dynamic track policies. Eleven failed invocations remain retained. Accepted source bytes were unchanged before source commits; Studio fixture/private helper repairs were rebuilt and accepted separately. Inventory captures clean Composer core atb78c280338e59aa4bd600f8cd5a69d69f3bc5572 with stable archive/header/HEAD hashes. Representative profiling, live Studio, Transform device completion and licensed parity remain open.",
+  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs. Build51 release and focused native gates, the server-headless recipe, and a fresh finalcore51 capability inventory are appended below. Two server-headless build attempts failed from temporary disk exhaustion before a RAM-object retry completed 114/114 steps; the earlier failures remain listed. A prepared CLI run failed because CTest used an old assetc binary, then the assetc rebuild and scoped 14-test rerun passed. The prepared export and Studio suites passed after export fixes. These completed scopes remain separate from any later integrated build, and licensed executable parity remains unavailable. Build52 dev and release gates executed October 3 in Darwin are appended as separate scopes. The release52 executor inventory is a capability snapshot of the archive hash recorded with its captured HEAD d3474640 and SourceCatalogue hash; later source commits do not change that snapshot. Server build, server Composer CTest, and headless runtime are separate gates. Initial Edge Detect/Bokeh Blur fixture and Atlas/Palette runs failed or were interrupted before repairs; those records remain below. Finalized build53 release checks are appended below. Initial joined release, core, physics, and Studio failures remain in excluded_or_failed_runs; logs containing \u201cfinal\u201d in the initial-run name are not accepted results. The finalized build53 inventory was captured with archive, HEAD, catalogue, and source-scope status verified before and after the query. The finalized build53 release snapshot is tied to imagegraph archive SHA-256 12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717, SourceCatalogue SHA-256 57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c, and HEAD d0611f3282e4a1358e181af621234d2ba641e1f4. Archive, HEAD, catalogue hash, and compiled-source-scope status were captured before and after the query and remained unchanged. The build53 release suites passed after repair; earlier failures remain listed. Build53 dev and server gates are now included. The two failed dev disk-exhaustion attempts remain retained below; successful RAM-backed dev gates are separate. Build54 final release gates passed after repair. Initial build54 compiler, core, CLI fixture, and architecture harness failures remain in excluded_or_failed_runs. The release54 executor inventory is tied to the captured archive SHA-256, HEAD, catalogue hash, and clean compiled-source scope in its artifact; public/private header hashes and the helper link command are retained there. Five generated cache directories were restored to workspace disk with SHA-256 and nanosecond mtime verification; this is build-support provenance. Build55 release retry completed 521/521 steps after a unity-build anonymous-helper collision was fixed. Final release gates and the focused volume result are appended below. The mixed-header volume run was withdrawn and is not counted. No new Python catalogue run is claimed; the latest remains build54. The release55 inventory includes archive, HEAD, catalogue, public/private header, and helper compile/link provenance. The root-owned imagegraph documentation update is outside the compiled code scope. An external FFT proof was withdrawn and is not landed implementation or acceptance evidence. Build56 release logs and inventory are appended with SHA-256 values. The first core run failed one stale TimelineV8 FFT diagnostic fixture; a repair suite passed, then the full core passed. Initial and repair I/O runs failed before the final complete I/O suite passed. The final build56 CLI evidence is the scoped 13-selector run; an earlier 15-selector run also passed. No build56 asset rerun is claimed; the retained 265-case asset log is unchanged. The build56 archive query was linked against the finalized release archive, with HEAD, SourceCatalogue, header hashes, and imagegraph code scope matching before and after. Registration remains capability evidence only. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build57 release checks and inventory are appended. The first core run failed four source shape cases; a first repair run still failed one source shape case; the final full core suite passed. Two incremental source shape object rebuilds each completed 2/2 steps. The remaining release suites passed their listed scopes. Source commits 55787c51e50274a6445c107d8c90c7ec43fa0b78, a44cd44c5821e4a77bb7ac03fd55e44cd32c8522, and 62e0a34a54647f52bd47fd566ff8672c5e12b88e are part of the finalized snapshot. The build57 archive query is bound to the captured archive, HEAD, SourceCatalogue, public/private header hashes, and clean imagegraph code scope. No assets or architecture suite was rerun in build57. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build58 release evidence is appended below with its exact archive inventory; it adds no assets, architecture, server, GPU, manual-scene, or profiling run. The Build57 source pipeline profile remains the latest profiling evidence. Build59 release evidence is appended below, tied to the captured release archive and HEAD. The initial Ninja run was intentionally stopped at 165/552 to raise test compile concurrency; the resumed 388/388 build and tests-only 3/3 repair passed. Initial core failures are retained separately from the repaired core pass. Build59 did not rerun profiling, server, assets, GPU, manual scene, or architecture gates. Build60 release evidence and exact inventory are appended. Initial core fixture failures and an overlapping IO log are retained separately. Production was unchanged by the tests-only repair. Profiling, server, assets, architecture, GPU and manual scenes were not rerun. Requested cache cleanup removed obsolete diagnostic binaries and stale aliases while retaining current builds and text validation artifacts. Build61 final native evidence and exact inventory are appended, with initial failed core/dither and IO runs retained. Earlier other-suite runs preceded the mapped contrast fix and are not used as final acceptance. Noise correction and ordered dither commits are recorded with the committed Draw Gradient source. Server, assets, architecture, GPU, manual scenes, licensed-reference comparisons and representative profiling were not rerun or promoted by this append. Build62 public source typing/reset, source record origins, RNG capture codec v2, cooked Composer host/artifact routing and product receipt/cadence evidence are appended only from final reviewed logs and exact source/header/archive inventory provenance. Failed initial build, client, Studio, CLI and both server resource comparisons remain retained. Summary parsing replaces invalid UTF-8 bytes in server text; evidence hashes preserve the original raw bytes. The authorized initial GPU attempt failed and is retained; any accepted GPU gate is separately checked with backend, driver and scope limitations. Native CPU gates are not GPU pixel evidence and licensed-reference acceptance remains open. Representative profiling was not promoted. Build63 appends coherent current-ABI native node/product checks and approved local Vulkan fixtures after source integration. The five-case focused failure and interrupted initial build invocation remain retained. Final repaired build completed 22/22, final closure 1/1. Inventory captures clean Composer core source at 96a7bd07 with unchanged archive/header/HEAD hashes before and after. CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed reference parity were not promoted. Build64 appends coherent current-ABI native checks for five executors and panel-scoped keyboard editing. All six failed invocations remain retained. Builds completed596/596,36/36 and4/4. Inventory captures clean Composer core at7b5a29f4 with unchanged archive/header/HEAD hashes before and after. Accepted CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed parity were not promoted. Build65 appends six executors, Clear ownership, pending observations, live Transform host adapters, easing and dynamic track policies. Eleven failed invocations remain retained. Accepted source bytes were unchanged before source commits; Studio fixture/private helper repairs were rebuilt and accepted separately. Inventory captures clean Composer core atb78c280338e59aa4bd600f8cd5a69d69f3bc5572 with stable archive/header/HEAD hashes. Representative profiling, live Studio, Transform device completion and licensed parity remain open. Build66 appends three executors, mixed freed-slot refill transport, retained skybox face admission and Transform Vulkan completion. Three fixture failures remain retained with exact resolver/producer boundaries. Inventory captures clean Composer core atcb5900e81fbcd6f8ef15098c919a37db5d2bc406 with stable archive/header/HEAD hashes. Representative profiling, live Studio, broader device captures and licensed parity remain open.",
   "runtime_gates": [
     {
       "name": "imagegraph IO",
@@ -3509,6 +3509,272 @@
       "result": "passed",
       "executed_date": "2026-10-03",
       "scope_note": "524 registered names,523 catalogue overlaps,886 entries,363 missing executors. Registration is capability evidence, not licensed parity."
+    },
+    {
+      "name": "build-release-66-buffer-fixture-repair1 release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-66-buffer-fixture-repair1.log",
+      "log_sha256": "a029efb0df79644c2ba9d7cce3d113365a25f8fe1dc64f57169aa480b7c72431",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:47:36+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU/product build; early builds are partial and do not establish joined acceptance.",
+      "build_steps_completed": 3
+    },
+    {
+      "name": "build-release-66-buffer-skybox-initial release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-66-buffer-skybox-initial.log",
+      "log_sha256": "743cb035e4353ec4cbfdce6c8226b38123109cbc0de24d1970b69d386adfd325",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:40:05+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU/product build; early builds are partial and do not establish joined acceptance.",
+      "build_steps_completed": 67
+    },
+    {
+      "name": "build-release-66-fixture-repair2 release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-66-fixture-repair2.log",
+      "log_sha256": "f816ccf708e9f30fb9e09fa28e293bd6e06239302831ef5b39d4ba36dabf2eb2",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:55:21+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU/product build; early builds are partial and do not establish joined acceptance.",
+      "build_steps_completed": 4
+    },
+    {
+      "name": "build-release-66-mirror-cache-joined release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-66-mirror-cache-joined.log",
+      "log_sha256": "26b2bf1719653bc2d84ec0a3417075502d8b3c5ddfeb2916500335fa4286b40d",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:46:27+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU/product build; early builds are partial and do not establish joined acceptance.",
+      "build_steps_completed": 102
+    },
+    {
+      "name": "client release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/client-release-66-initial.log",
+      "log_sha256": "8c79a018b95a09e233dbe5853e645db7792a8f4d90310fb06617daa7d1afe8d1",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:48:57+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Selected Composer/client scope including actual Transform host/capacity fixtures.",
+      "test_cases_passed": 56,
+      "assertions_passed": 6667
+    },
+    {
+      "name": "render release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/render-release-66-initial.log",
+      "log_sha256": "fcafcdc50d4cdf9df14045f1beccb97f91b42a1de773c3899061bf160cef2bad",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:01+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Complete CPU suite excluding GPU.",
+      "test_cases_passed": 806,
+      "assertions_passed": 336632
+    },
+    {
+      "name": "studio release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/studio-release-66-initial.log",
+      "log_sha256": "af55013bc26314e0b25fc446b7950122c11b04245a824f6b4e603404487c1b76",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:48:57+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Selected headless Composer/host/timeline workflows, including Clear, easing and dynamic track policies. No live Studio.",
+      "test_cases_passed": 122,
+      "assertions_passed": 7477
+    },
+    {
+      "name": "server release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/server-release-66-initial.log",
+      "log_sha256": "4485ad560615a23bd2d65c38e421b150c151a9940330db7dcaa61185bf55a083",
+      "summary_utf8_replacement_required": true,
+      "log_mtime": "2026-10-03T17:50:14+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Full suite; unrelated replication work left uncommitted.",
+      "test_cases_passed": 99,
+      "assertions_passed": 2180
+    },
+    {
+      "name": "assets release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/assets-release-66-initial.log",
+      "log_sha256": "e4a19b295686f390a502e048ffa4e9a949d8c3ce4beb2a22e0dff9ab5ef94650",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:48:57+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU scope; no licensed parity claim.",
+      "test_cases_passed": 265,
+      "assertions_passed": 32488
+    },
+    {
+      "name": "imagegraph release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/imagegraph-release-66-repair2.log",
+      "log_sha256": "f7433aa2b5b760572ab8d1a55bc0a0a9d6ddbe6ed52f38159f6157708d74551b",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:56:28+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Complete current-layout core suite.",
+      "test_cases_passed": 2155,
+      "assertions_passed": 1827788
+    },
+    {
+      "name": "nodegraph release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/nodegraph-release-66-initial.log",
+      "log_sha256": "497ff433cc049c4fe2743a0bf28ac63ebd4d636da7c32a60785538c4f15ddcba",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:01+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU scope; no licensed parity claim.",
+      "test_cases_passed": 31,
+      "assertions_passed": 269
+    },
+    {
+      "name": "io release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/io-release-66-initial.log",
+      "log_sha256": "fbb1002724317a7455d68025283f60573382f2d92ce01cda8d27ffa695d707b2",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:03+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU scope; no licensed parity claim.",
+      "test_cases_passed": 208,
+      "assertions_passed": 9404
+    },
+    {
+      "name": "export release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/export-release-66-initial.log",
+      "log_sha256": "a019b0ffd21a7441a492e33ea14afbad57e953cc6ce16a2d271134c3bb3c2285",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:02+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU scope; no licensed parity claim.",
+      "test_cases_passed": 50,
+      "assertions_passed": 1959
+    },
+    {
+      "name": "physics release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/physics-release-66-initial.log",
+      "log_sha256": "44ea04dddb7adfa818ff9e95b978a61ad25c2048580bd3e33cc4b92056feed3d",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:02+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU scope; no licensed parity claim.",
+      "test_cases_passed": 42,
+      "assertions_passed": 689
+    },
+    {
+      "name": "architecture release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/architecture-release-66-initial.log",
+      "log_sha256": "5d7832a2051e982bdb3e9329d3144cc45a9007f06914ca92db8d728ddb96ba0d",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:01+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU scope; no licensed parity claim.",
+      "test_cases_passed": 1
+    },
+    {
+      "name": "cli release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/cli-release-66-initial.log",
+      "log_sha256": "9c71f3327078d0ef74a7fa4b14d26d89025ca2dba0d83b3d820ee76316650ca5",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:12+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU scope; no licensed parity claim.",
+      "test_cases_passed": 15
+    },
+    {
+      "name": "metadata release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/metadata-release-66-initial.log",
+      "log_sha256": "63c4c0842da271a6c4a8bb55d8e592d8a6fab048ed2c48df54f2626ea1425f97",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:04+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "Native CPU scope; no licensed parity claim.",
+      "test_cases_passed": 87
+    },
+    {
+      "name": "focused core release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/core-focus-release-66-repair2.log",
+      "log_sha256": "18a5fa222c3cf6a980ba2863fbe5a7fb4ae1a9525059c10726647ff2f17ddb4f",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:56:25+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 67,
+      "assertions_passed": 1321
+    },
+    {
+      "name": "focused physics release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/physics-focus-release-66-initial.log",
+      "log_sha256": "6950a75944e809424c9c7eccd9ed96613a4377414733e38a1b09fd22e0063f1a",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:48:56+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 2,
+      "assertions_passed": 37
+    },
+    {
+      "name": "focused client release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/client-focus-release-66-initial.log",
+      "log_sha256": "9c01d566bf03a8d3aec78d36d25108a115bcff48e87386077d04348d08002888",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:48:56+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "test_cases_passed": 6,
+      "assertions_passed": 4800
+    },
+    {
+      "name": "Transform Vulkan initial release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/transform-gpu-release-66-initial.log",
+      "log_sha256": "cfd3fb52c777008f6009b6940a3eec58efeffe9f11566bbe93b946a1ffd62267",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:43:34+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "backend": "Vulkan",
+      "scope_note": "Initial approved Transform front/back/depth/mesh/cancellation receipt fixture; final joined invocation below supersedes initial source revision.",
+      "test_cases_passed": 1,
+      "assertions_passed": 35
+    },
+    {
+      "name": "Composer and Transform Vulkan release66",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/composer-transform-gpu-release-66-final.log",
+      "log_sha256": "23337991a69c27b665b8e5361411822cf588cc244b0ff78bdb0afc2dc4ceb332",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:56:49+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "backend": "Vulkan",
+      "scope_note": "Authorized local Vulkan Composer and Transform pixel/binding/cancellation/replacement fixtures pass4 cases/187 assertions against coherent release66 source. The new Transform case separately passed1/35. Hardware model and driver version were not recorded. Broader Perspective/anchor/scale/array captures, live Studio, other GPU backends and licensed comparisons remain unverified.",
+      "test_cases_passed": 4,
+      "assertions_passed": 187
+    },
+    {
+      "name": "executor inventory release66",
+      "log": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory66/registered-vs-catalogue-release66.json",
+      "log_sha256": "be944fa129b2acf532bfae85c979ca8d3028d6947e8c04a7f0181a15873f98a1",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T18:05:28+09:30",
+      "result": "passed",
+      "executed_date": "2026-10-03",
+      "scope_note": "527 registered names,526 catalogue overlaps,886 entries,360 missing executors. Registration is capability evidence, not licensed parity."
     }
   ],
   "excluded_or_failed_runs": [
@@ -4497,6 +4763,54 @@
       "assertions_passed": 7454,
       "assertions_failed": 2,
       "scope_note": "Same remaining dynamic fixture errors in selected Studio scope."
+    },
+    {
+      "name": "surface-buffer-release-66-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/surface-buffer-release-66-initial.log",
+      "log_sha256": "70681b831bb880ca73079916560118f32a4c9613c6e2d8df4156153d07da776c",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:40:24+09:30",
+      "result": "failed; retained before native acceptance",
+      "exit_code": 42,
+      "test_cases_total": 20,
+      "test_cases_passed": 19,
+      "test_cases_failed": 1,
+      "assertions_total": 296,
+      "assertions_passed": 294,
+      "assertions_failed": 2,
+      "scope_note": "Mixed Scalar fixtures were rejected by the upstream Array producer before conversion. Repaired with actual owned Any.Items transport and distinct boundary assertions."
+    },
+    {
+      "name": "core-focus-release-66-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/core-focus-release-66-initial.log",
+      "log_sha256": "9d07b0d482dd84550aea476fbfcb537ac7d13b15e22780566eb0ff3ed3ed14cf",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:48:56+09:30",
+      "result": "failed; retained before native acceptance",
+      "exit_code": 42,
+      "test_cases_total": 67,
+      "test_cases_passed": 65,
+      "test_cases_failed": 2,
+      "assertions_total": 1306,
+      "assertions_passed": 1304,
+      "assertions_failed": 2,
+      "scope_note": "Public Image resolver refused an array before the encode kernel; separated resolver diagnostic from borrowed native kernel preflight. Mirror private fixture left ByteBudget at zero; set the normal bounded allocation budget. No producer policy change."
+    },
+    {
+      "name": "imagegraph-release-66-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/imagegraph-release-66-initial.log",
+      "log_sha256": "5d7e04af007dd08fb037d63b3de3cf36a72ee78cbc6349deb185a10d4cee87d0",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T17:49:00+09:30",
+      "result": "failed; retained before native acceptance",
+      "exit_code": 42,
+      "test_cases_total": 2155,
+      "test_cases_passed": 2153,
+      "test_cases_failed": 2,
+      "assertions_total": 1827773,
+      "assertions_passed": 1827771,
+      "assertions_failed": 2,
+      "scope_note": "Same Buffer public-resolver diagnostic and Mirror zero-budget fixture failures in full core."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -4614,16 +4928,16 @@
     "acceptance_status": "All seven named scene files are present; manual and GPU acceptance remain pending. File presence and CPU filtered tests do not establish scene acceptance."
   },
   "executor_inventory": {
-    "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory65/registered-vs-catalogue-release65.json",
-    "archive_sha256": "d7af5b0f64d97245e01ca77766abad945d9aead1aae3183c7cece571066a4c07",
-    "archive_size_bytes": 743386438,
-    "archive_mtime_local": "2026-10-03T17:10:27.999191+09:30",
-    "repo_head": "b78c280338e59aa4bd600f8cd5a69d69f3bc5572",
+    "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory66/registered-vs-catalogue-release66.json",
+    "archive_sha256": "81372f8a0db720cdd1688c7612582852a5562ee1b942f68d252a83f300d96f27",
+    "archive_size_bytes": 741470224,
+    "archive_mtime_local": "2026-10-03T17:45:15.416199+09:30",
+    "repo_head": "cb5900e81fbcd6f8ef15098c919a37db5d2bc406",
     "catalogue_source_sha256": "04d24ca097f9eb8ad9799af15da831ff52929339be01f06d01a749c4051d7daa",
-    "registered_pc_count": 524,
-    "registered_catalogue_overlap_count": 523,
+    "registered_pc_count": 527,
+    "registered_catalogue_overlap_count": 526,
     "catalogue_pc_count": 886,
-    "catalogue_missing_executor_count": 363,
+    "catalogue_missing_executor_count": 360,
     "registered_only_pc": [
       "pc.global_scope"
     ],
@@ -4633,149 +4947,156 @@
       "mono.engine/imagegraph/src/NodeExecutors.hpp": "bd2dd7a3d8deb2847b552033d0df72ab6772a996502e1057b472a04a04a44666",
       "mono.engine/imagegraph/src/SourcePathPayload.hpp": "e619d88f149ebdc35015662249a35653170d937acbac9f0aa71f85d0053a2dde",
       "mono.engine/imagegraph/src/SourcePathPayload3D.hpp": "e4730fb8da0ebf9de21afde225c4b6d681aff2e65a0491f03b7f8fed89812a6a",
-      "mono.engine/imagegraph/src/nodes/Path3D.hpp": "e49388e8908777c5c2f233ab77e4a952e4914724468b3b465c48260963cfa63b"
+      "mono.engine/imagegraph/src/nodes/Path3D.hpp": "e49388e8908777c5c2f233ab77e4a952e4914724468b3b465c48260963cfa63b",
+      "mono.engine/imagegraph/include/engine/imagegraph/CacheResultsReplay.hpp": "01806177ade96617b33a880789a7e37f8fd67bbea7170ebc5f488243ed0d8950",
+      "mono.engine/imagegraph/src/CacheResultsSlots.hpp": "dab540be15e717d37e13c7da9d9f704447c897c839b4b35a522007d6364f228c"
     },
-    "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory65/helper-command.json",
+    "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory66/helper-command.json",
     "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, headers, and compiled source scope matched before and after capture.",
-    "new_registered_since_release64": [
-      "pc.3_d_transform_image",
-      "pc.path_weight_adjust",
-      "pc.pin",
-      "pc.shape_map",
-      "pc.stripe",
-      "pc.surface_project_cylinder_3_d"
+    "new_registered_since_release65": [
+      "pc.mirror_polar",
+      "pc.surface_from_buffer",
+      "pc.surface_to_buffer"
     ],
-    "final_product_source_commit": "b78c280338e59aa4bd600f8cd5a69d69f3bc5572",
+    "final_product_source_commit": "cb5900e81fbcd6f8ef15098c919a37db5d2bc406",
     "captured_core_source_unchanged_at_final_product_commit": true,
-    "previous_build64_snapshot": {
-      "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory64/registered-vs-catalogue-release64.json",
-      "archive_sha256": "49e5d6bc56a7d65dce653138256b82432e254f8b88f98130456605b526c69b8b",
-      "archive_size_bytes": 705029080,
-      "archive_mtime_local": "2026-10-03T16:11:01.205029+09:30",
-      "repo_head": "7b5a29f42d7169810e9b62038b26202cfb56c862",
+    "previous_build65_snapshot": {
+      "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory65/registered-vs-catalogue-release65.json",
+      "archive_sha256": "d7af5b0f64d97245e01ca77766abad945d9aead1aae3183c7cece571066a4c07",
+      "archive_size_bytes": 743386438,
+      "archive_mtime_local": "2026-10-03T17:10:27.999191+09:30",
+      "repo_head": "b78c280338e59aa4bd600f8cd5a69d69f3bc5572",
       "catalogue_source_sha256": "04d24ca097f9eb8ad9799af15da831ff52929339be01f06d01a749c4051d7daa",
-      "registered_pc_count": 518,
-      "registered_catalogue_overlap_count": 517,
+      "registered_pc_count": 524,
+      "registered_catalogue_overlap_count": 523,
       "catalogue_pc_count": 886,
-      "catalogue_missing_executor_count": 369,
+      "catalogue_missing_executor_count": 363,
       "registered_only_pc": [
         "pc.global_scope"
       ],
       "header_sha256": {
-        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "5f39cfbbd3cc98219c6aaada039d6434b574ab3e919349843f99abe16367fdb3",
+        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "309868777eae8293d8278b3dcd31404f8a051492ae0bdd65037502dcec87b180",
         "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp": "a477e824ead305069bc623b5061b6579f5fa8df72e2022bec8891e33c2a583b4",
         "mono.engine/imagegraph/src/NodeExecutors.hpp": "bd2dd7a3d8deb2847b552033d0df72ab6772a996502e1057b472a04a04a44666",
-        "mono.engine/imagegraph/src/SourcePathPayload.hpp": "162e703adcf5d24a040bcbd42c80a3fafb58557d66699f74ab81c961a8e5696b",
-        "mono.engine/imagegraph/src/SourcePathPayload3D.hpp": "12aed51936828103a5633969a5e6029dc116d574d10a82a9be0396077b4f84da",
-        "mono.engine/imagegraph/src/nodes/Path3D.hpp": "e79dc96ffc377e92818d15ace49cf35d5df7e90e9cf19db40feedef697c8a7d3"
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp": "e619d88f149ebdc35015662249a35653170d937acbac9f0aa71f85d0053a2dde",
+        "mono.engine/imagegraph/src/SourcePathPayload3D.hpp": "e4730fb8da0ebf9de21afde225c4b6d681aff2e65a0491f03b7f8fed89812a6a",
+        "mono.engine/imagegraph/src/nodes/Path3D.hpp": "e49388e8908777c5c2f233ab77e4a952e4914724468b3b465c48260963cfa63b"
       },
-      "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory64/helper-command.json",
+      "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory65/helper-command.json",
       "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, headers, and compiled source scope matched before and after capture.",
-      "new_registered_since_release63": [
-        "pc.cache_results",
-        "pc.dotted",
-        "pc.path_shape_3_d",
-        "pc.switch",
-        "pc.threshold_switch"
+      "new_registered_since_release64": [
+        "pc.3_d_transform_image",
+        "pc.path_weight_adjust",
+        "pc.pin",
+        "pc.shape_map",
+        "pc.stripe",
+        "pc.surface_project_cylinder_3_d"
       ],
-      "final_product_source_commit": "7b5a29f42d7169810e9b62038b26202cfb56c862",
+      "final_product_source_commit": "b78c280338e59aa4bd600f8cd5a69d69f3bc5572",
       "captured_core_source_unchanged_at_final_product_commit": true,
-      "previous_build63_snapshot": {
-        "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory63/registered-vs-catalogue-release63.json",
-        "archive_sha256": "d269c55acae985a76b7374f0dcf5c93a0a5375b9d103fa02f0aabc109b27a74a",
-        "archive_size_bytes": 693595184,
-        "archive_mtime_local": "2026-10-03T15:22:19.764606+09:30",
-        "repo_head": "96a7bd078eb62ced6ff63f5b2f0cbeacabc37280",
-        "catalogue_source_sha256": "c695394043d3a96cad3373b060cf93e9a7444682107a071f9c1fe14ab7a8ebaa",
-        "registered_pc_count": 513,
-        "registered_catalogue_overlap_count": 512,
+      "previous_build64_snapshot": {
+        "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory64/registered-vs-catalogue-release64.json",
+        "archive_sha256": "49e5d6bc56a7d65dce653138256b82432e254f8b88f98130456605b526c69b8b",
+        "archive_size_bytes": 705029080,
+        "archive_mtime_local": "2026-10-03T16:11:01.205029+09:30",
+        "repo_head": "7b5a29f42d7169810e9b62038b26202cfb56c862",
+        "catalogue_source_sha256": "04d24ca097f9eb8ad9799af15da831ff52929339be01f06d01a749c4051d7daa",
+        "registered_pc_count": 518,
+        "registered_catalogue_overlap_count": 517,
         "catalogue_pc_count": 886,
-        "catalogue_missing_executor_count": 374,
+        "catalogue_missing_executor_count": 369,
         "registered_only_pc": [
           "pc.global_scope"
         ],
         "header_sha256": {
-          "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "ee4e006a90f783288f69fe82165d143722dd29e7c96888ea3b7cc1c1fa27324a",
+          "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "5f39cfbbd3cc98219c6aaada039d6434b574ab3e919349843f99abe16367fdb3",
           "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp": "a477e824ead305069bc623b5061b6579f5fa8df72e2022bec8891e33c2a583b4",
           "mono.engine/imagegraph/src/NodeExecutors.hpp": "bd2dd7a3d8deb2847b552033d0df72ab6772a996502e1057b472a04a04a44666",
-          "mono.engine/imagegraph/src/SourcePathPayload.hpp": "162e703adcf5d24a040bcbd42c80a3fafb58557d66699f74ab81c961a8e5696b"
+          "mono.engine/imagegraph/src/SourcePathPayload.hpp": "162e703adcf5d24a040bcbd42c80a3fafb58557d66699f74ab81c961a8e5696b",
+          "mono.engine/imagegraph/src/SourcePathPayload3D.hpp": "12aed51936828103a5633969a5e6029dc116d574d10a82a9be0396077b4f84da",
+          "mono.engine/imagegraph/src/nodes/Path3D.hpp": "e79dc96ffc377e92818d15ace49cf35d5df7e90e9cf19db40feedef697c8a7d3"
         },
-        "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory63/helper-command.json",
+        "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory64/helper-command.json",
         "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, headers, and compiled source scope matched before and after capture.",
-        "new_registered_since_release62": [
-          "pc.crop_content",
-          "pc.path_shift",
-          "pc.quarternion_lookat",
-          "pc.sequence_anim",
-          "pc.smear",
-          "pc.surface_replace"
+        "new_registered_since_release63": [
+          "pc.cache_results",
+          "pc.dotted",
+          "pc.path_shape_3_d",
+          "pc.switch",
+          "pc.threshold_switch"
         ],
-        "final_product_source_commit": "96a7bd078eb62ced6ff63f5b2f0cbeacabc37280",
+        "final_product_source_commit": "7b5a29f42d7169810e9b62038b26202cfb56c862",
         "captured_core_source_unchanged_at_final_product_commit": true,
-        "previous_build62_snapshot": {
-          "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory62-final-v2/registered-vs-catalogue-release62.json",
-          "archive_sha256": "aadec74ab830d7ddbc41a5fdba649a9ec99e36d38c450507d1066fc93957dee6",
-          "archive_size_bytes": 670968922,
-          "archive_mtime_local": "2026-10-03T14:46:50.073591+09:30",
-          "repo_head": "e12d011a37747cf9195c00d27f3a11a1df503c33",
-          "catalogue_source_sha256": "e5d0b1710f856c7ae7bb10fcdb153091d460fa312c8b282305cc3a78b770fa04",
-          "registered_pc_count": 507,
-          "registered_catalogue_overlap_count": 506,
+        "previous_build63_snapshot": {
+          "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory63/registered-vs-catalogue-release63.json",
+          "archive_sha256": "d269c55acae985a76b7374f0dcf5c93a0a5375b9d103fa02f0aabc109b27a74a",
+          "archive_size_bytes": 693595184,
+          "archive_mtime_local": "2026-10-03T15:22:19.764606+09:30",
+          "repo_head": "96a7bd078eb62ced6ff63f5b2f0cbeacabc37280",
+          "catalogue_source_sha256": "c695394043d3a96cad3373b060cf93e9a7444682107a071f9c1fe14ab7a8ebaa",
+          "registered_pc_count": 513,
+          "registered_catalogue_overlap_count": 512,
           "catalogue_pc_count": 886,
-          "catalogue_missing_executor_count": 380,
+          "catalogue_missing_executor_count": 374,
           "registered_only_pc": [
             "pc.global_scope"
           ],
           "header_sha256": {
-            "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "7c24ca11f6a51f76601bd3f0838af5616303503cd4c9649f50da7be9247bfeb9",
+            "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "ee4e006a90f783288f69fe82165d143722dd29e7c96888ea3b7cc1c1fa27324a",
             "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp": "a477e824ead305069bc623b5061b6579f5fa8df72e2022bec8891e33c2a583b4",
-            "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
-            "mono.engine/imagegraph/src/SourcePathPayload.hpp": "d36062196838bab07ec124e2724d798644c339e73a2d66d5323b13e084494274"
+            "mono.engine/imagegraph/src/NodeExecutors.hpp": "bd2dd7a3d8deb2847b552033d0df72ab6772a996502e1057b472a04a04a44666",
+            "mono.engine/imagegraph/src/SourcePathPayload.hpp": "162e703adcf5d24a040bcbd42c80a3fafb58557d66699f74ab81c961a8e5696b"
           },
-          "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory62-final-v2/helper-command.json",
+          "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-03/executor-inventory63/helper-command.json",
           "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, headers, and compiled source scope matched before and after capture.",
-          "new_registered_since_release61": [
-            "pc.hlsl"
+          "new_registered_since_release62": [
+            "pc.crop_content",
+            "pc.path_shift",
+            "pc.quarternion_lookat",
+            "pc.sequence_anim",
+            "pc.smear",
+            "pc.surface_replace"
           ],
-          "final_product_source_commit": "e12d011a37747cf9195c00d27f3a11a1df503c33",
+          "final_product_source_commit": "96a7bd078eb62ced6ff63f5b2f0cbeacabc37280",
           "captured_core_source_unchanged_at_final_product_commit": true,
-          "previous_build61_snapshot": {
-            "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory61/registered-vs-catalogue-release61.json",
-            "archive_sha256": "44d131109bcdd107ab75421ac4798922f1667d12947e6be6e79968a8d11a2e00",
-            "archive_size_bytes": 652635870,
-            "archive_mtime_local": "2026-10-03T13:02:18.783221+09:30",
-            "repo_head": "3637e03ab4da639935eced44c93023676b8be569",
+          "previous_build62_snapshot": {
+            "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory62-final-v2/registered-vs-catalogue-release62.json",
+            "archive_sha256": "aadec74ab830d7ddbc41a5fdba649a9ec99e36d38c450507d1066fc93957dee6",
+            "archive_size_bytes": 670968922,
+            "archive_mtime_local": "2026-10-03T14:46:50.073591+09:30",
+            "repo_head": "e12d011a37747cf9195c00d27f3a11a1df503c33",
             "catalogue_source_sha256": "e5d0b1710f856c7ae7bb10fcdb153091d460fa312c8b282305cc3a78b770fa04",
-            "registered_pc_count": 506,
-            "registered_catalogue_overlap_count": 505,
+            "registered_pc_count": 507,
+            "registered_catalogue_overlap_count": 506,
             "catalogue_pc_count": 886,
-            "catalogue_missing_executor_count": 381,
+            "catalogue_missing_executor_count": 380,
             "registered_only_pc": [
               "pc.global_scope"
             ],
             "header_sha256": {
-              "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "89025103209d5eb972c36e011dd2c03d8e80451cfebac00e6bac3f182afd42d7",
+              "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "7c24ca11f6a51f76601bd3f0838af5616303503cd4c9649f50da7be9247bfeb9",
               "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp": "a477e824ead305069bc623b5061b6579f5fa8df72e2022bec8891e33c2a583b4",
               "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
               "mono.engine/imagegraph/src/SourcePathPayload.hpp": "d36062196838bab07ec124e2724d798644c339e73a2d66d5323b13e084494274"
             },
-            "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory61/helper-command.json",
+            "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory62-final-v2/helper-command.json",
             "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, headers, and compiled source scope matched before and after capture.",
-            "new_registered_since_release60": [
-              "pc.dither",
-              "pc.gradient"
+            "new_registered_since_release61": [
+              "pc.hlsl"
             ],
-            "previous_build60_snapshot": {
-              "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory60/registered-vs-catalogue-release60.json",
-              "archive_sha256": "04d01a10d5e2d07e7e6b9d2e0bf7b20d8a5f419f08400e6e7dc17780c96288d9",
-              "archive_size_bytes": 655012880,
-              "archive_mtime_local": "2026-10-03T12:25:16.477128+09:30",
-              "repo_head": "59320aa6221b8a9c6e9abd255b02390e94065974",
-              "catalogue_source_sha256": "aec13f3cec1b6b015ee52ce6408c182f2b3e503d54445ad0631d7b3fb2cb574f",
-              "registered_pc_count": 504,
-              "registered_catalogue_overlap_count": 503,
+            "final_product_source_commit": "e12d011a37747cf9195c00d27f3a11a1df503c33",
+            "captured_core_source_unchanged_at_final_product_commit": true,
+            "previous_build61_snapshot": {
+              "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory61/registered-vs-catalogue-release61.json",
+              "archive_sha256": "44d131109bcdd107ab75421ac4798922f1667d12947e6be6e79968a8d11a2e00",
+              "archive_size_bytes": 652635870,
+              "archive_mtime_local": "2026-10-03T13:02:18.783221+09:30",
+              "repo_head": "3637e03ab4da639935eced44c93023676b8be569",
+              "catalogue_source_sha256": "e5d0b1710f856c7ae7bb10fcdb153091d460fa312c8b282305cc3a78b770fa04",
+              "registered_pc_count": 506,
+              "registered_catalogue_overlap_count": 505,
               "catalogue_pc_count": 886,
-              "catalogue_missing_executor_count": 383,
+              "catalogue_missing_executor_count": 381,
               "registered_only_pc": [
                 "pc.global_scope"
               ],
@@ -4785,22 +5106,23 @@
                 "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
                 "mono.engine/imagegraph/src/SourcePathPayload.hpp": "d36062196838bab07ec124e2724d798644c339e73a2d66d5323b13e084494274"
               },
-              "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory60/helper-command.json",
+              "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory61/helper-command.json",
               "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, headers, and compiled source scope matched before and after capture.",
-              "new_registered_since_release59": [
-                "pc.ambient_occlusion"
+              "new_registered_since_release60": [
+                "pc.dither",
+                "pc.gradient"
               ],
-              "previous_build59_snapshot": {
-                "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory59/registered-vs-catalogue-release59.json",
-                "archive_sha256": "6515fc6010637220a822edc9eb8bc646a9f2b435257a9ce76c232db7d1352815",
-                "archive_size_bytes": 648856208,
-                "archive_mtime_local": "2026-10-03T11:54:10.018798+09:30",
-                "repo_head": "2039d88ea735ed33c3d549dc17423b82a30b2123",
+              "previous_build60_snapshot": {
+                "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory60/registered-vs-catalogue-release60.json",
+                "archive_sha256": "04d01a10d5e2d07e7e6b9d2e0bf7b20d8a5f419f08400e6e7dc17780c96288d9",
+                "archive_size_bytes": 655012880,
+                "archive_mtime_local": "2026-10-03T12:25:16.477128+09:30",
+                "repo_head": "59320aa6221b8a9c6e9abd255b02390e94065974",
                 "catalogue_source_sha256": "aec13f3cec1b6b015ee52ce6408c182f2b3e503d54445ad0631d7b3fb2cb574f",
-                "registered_pc_count": 503,
-                "registered_catalogue_overlap_count": 502,
+                "registered_pc_count": 504,
+                "registered_catalogue_overlap_count": 503,
                 "catalogue_pc_count": 886,
-                "catalogue_missing_executor_count": 384,
+                "catalogue_missing_executor_count": 383,
                 "registered_only_pc": [
                   "pc.global_scope"
                 ],
@@ -4810,41 +5132,44 @@
                   "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
                   "mono.engine/imagegraph/src/SourcePathPayload.hpp": "d36062196838bab07ec124e2724d798644c339e73a2d66d5323b13e084494274"
                 },
-                "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory59/helper-command.json",
+                "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory60/helper-command.json",
                 "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, headers, and compiled source scope matched before and after capture.",
-                "previous_build58_snapshot": {
-                  "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory58/registered-vs-catalogue-release58.json",
-                  "archive_sha256": "b14c219650e66ada41ee4eee99851439df291e4932af15fc35ab97e37251c635",
-                  "archive_size_bytes": 644148644,
-                  "archive_mtime_local": "2026-10-03T11:22:05+09:30",
-                  "repo_head": "ac3813a5cea9c451a7b5f7249003c4befee896da",
+                "new_registered_since_release59": [
+                  "pc.ambient_occlusion"
+                ],
+                "previous_build59_snapshot": {
+                  "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory59/registered-vs-catalogue-release59.json",
+                  "archive_sha256": "6515fc6010637220a822edc9eb8bc646a9f2b435257a9ce76c232db7d1352815",
+                  "archive_size_bytes": 648856208,
+                  "archive_mtime_local": "2026-10-03T11:54:10.018798+09:30",
+                  "repo_head": "2039d88ea735ed33c3d549dc17423b82a30b2123",
                   "catalogue_source_sha256": "aec13f3cec1b6b015ee52ce6408c182f2b3e503d54445ad0631d7b3fb2cb574f",
-                  "registered_pc_count": 501,
-                  "registered_catalogue_overlap_count": 500,
+                  "registered_pc_count": 503,
+                  "registered_catalogue_overlap_count": 502,
                   "catalogue_pc_count": 886,
-                  "catalogue_missing_executor_count": 386,
+                  "catalogue_missing_executor_count": 384,
                   "registered_only_pc": [
                     "pc.global_scope"
                   ],
                   "header_sha256": {
-                    "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "7adff85d71e3d96571bafb1254ea1ef789b2948c1e1bc265f6262ca71aef383d",
+                    "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "89025103209d5eb972c36e011dd2c03d8e80451cfebac00e6bac3f182afd42d7",
                     "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp": "a477e824ead305069bc623b5061b6579f5fa8df72e2022bec8891e33c2a583b4",
                     "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
                     "mono.engine/imagegraph/src/SourcePathPayload.hpp": "d36062196838bab07ec124e2724d798644c339e73a2d66d5323b13e084494274"
                   },
-                  "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory58/helper-command.json",
-                  "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, header hashes, and compiled source-scope status matched before and after capture.",
-                  "previous_build57_snapshot": {
-                    "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory57/registered-vs-catalogue-release57.json",
-                    "archive_sha256": "7694e9818b685c92aa4d389078304f8a29787d5f45b358f368b7611613dba5e1",
-                    "archive_size_bytes": 624254414,
-                    "archive_mtime_local": "2026-10-03T10:16:18+09:30",
-                    "repo_head": "62e0a34a54647f52bd47fd566ff8672c5e12b88e",
-                    "catalogue_source_sha256": "08399ae2e9df40acba7dc6d9e710e242bfb690d3a6c8aaf39b7df86e3fe97956",
-                    "registered_pc_count": 496,
-                    "registered_catalogue_overlap_count": 495,
+                  "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory59/helper-command.json",
+                  "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, headers, and compiled source scope matched before and after capture.",
+                  "previous_build58_snapshot": {
+                    "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory58/registered-vs-catalogue-release58.json",
+                    "archive_sha256": "b14c219650e66ada41ee4eee99851439df291e4932af15fc35ab97e37251c635",
+                    "archive_size_bytes": 644148644,
+                    "archive_mtime_local": "2026-10-03T11:22:05+09:30",
+                    "repo_head": "ac3813a5cea9c451a7b5f7249003c4befee896da",
+                    "catalogue_source_sha256": "aec13f3cec1b6b015ee52ce6408c182f2b3e503d54445ad0631d7b3fb2cb574f",
+                    "registered_pc_count": 501,
+                    "registered_catalogue_overlap_count": 500,
                     "catalogue_pc_count": 886,
-                    "catalogue_missing_executor_count": 391,
+                    "catalogue_missing_executor_count": 386,
                     "registered_only_pc": [
                       "pc.global_scope"
                     ],
@@ -4854,19 +5179,19 @@
                       "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
                       "mono.engine/imagegraph/src/SourcePathPayload.hpp": "d36062196838bab07ec124e2724d798644c339e73a2d66d5323b13e084494274"
                     },
-                    "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory57/helper-command.json",
-                    "scope_limit": "Temporary C++ helper called detail::ExecutorTypes() and Catalogue() directly from finalized build57 release imagegraph archive. Archive, HEAD, SourceCatalogue, public/private header hashes, and compiled imagegraph source scope were checked before and after capture. Helper was linked into /dev/shm and removed after capture. Registration measures capability only, not correctness or parity. Product adapter routes outside the graph executor registry are excluded.",
-                    "previous_build56_snapshot": {
-                      "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory56/registered-vs-catalogue-release56.json",
-                      "archive_sha256": "c98047169c4f75d4bd30a1978045de26f46e2321b722462251955b8b8db0e529",
-                      "archive_size_bytes": 632395072,
-                      "archive_mtime_local": "2026-10-03T10:06:01+09:30",
-                      "repo_head": "ff4de44e04adb300bb1c0673ec4229d44c705d10",
-                      "catalogue_source_sha256": "fcc09e9b7dc4026faa4afd65ad00774c29ef53e1e8e741a6fd25289f46f16d96",
-                      "registered_pc_count": 490,
-                      "registered_catalogue_overlap_count": 489,
+                    "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory58/helper-command.json",
+                    "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, header hashes, and compiled source-scope status matched before and after capture.",
+                    "previous_build57_snapshot": {
+                      "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory57/registered-vs-catalogue-release57.json",
+                      "archive_sha256": "7694e9818b685c92aa4d389078304f8a29787d5f45b358f368b7611613dba5e1",
+                      "archive_size_bytes": 624254414,
+                      "archive_mtime_local": "2026-10-03T10:16:18+09:30",
+                      "repo_head": "62e0a34a54647f52bd47fd566ff8672c5e12b88e",
+                      "catalogue_source_sha256": "08399ae2e9df40acba7dc6d9e710e242bfb690d3a6c8aaf39b7df86e3fe97956",
+                      "registered_pc_count": 496,
+                      "registered_catalogue_overlap_count": 495,
                       "catalogue_pc_count": 886,
-                      "catalogue_missing_executor_count": 397,
+                      "catalogue_missing_executor_count": 391,
                       "registered_only_pc": [
                         "pc.global_scope"
                       ],
@@ -4876,78 +5201,101 @@
                         "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
                         "mono.engine/imagegraph/src/SourcePathPayload.hpp": "d36062196838bab07ec124e2724d798644c339e73a2d66d5323b13e084494274"
                       },
-                      "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory56/helper-command.json",
-                      "scope_limit": "Temporary C++ helper called detail::ExecutorTypes() and Catalogue() directly from finalized build56 release imagegraph archive. Archive, HEAD, SourceCatalogue, public/private header hashes, and compiled imagegraph source scope were checked before and after capture. Helper was linked into /dev/shm and removed after capture. Registration measures capability only, not correctness or parity. Product adapter routes outside the graph executor registry are excluded.",
-                      "previous_build55_snapshot": {
-                        "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory55/registered-vs-catalogue-release55.json",
-                        "archive_sha256": "f3481a9eb74ae061a4d1d1e10d5c75e8ed7370a103dd7d71f36b034bcd12cd3f",
-                        "archive_size_bytes": 595165990,
-                        "archive_mtime_local": "2026-10-03T08:30:50.776775+09:30",
-                        "repo_head": "ebad11c8c18f4837948ca921a025882d3de2e0ac",
+                      "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory57/helper-command.json",
+                      "scope_limit": "Temporary C++ helper called detail::ExecutorTypes() and Catalogue() directly from finalized build57 release imagegraph archive. Archive, HEAD, SourceCatalogue, public/private header hashes, and compiled imagegraph source scope were checked before and after capture. Helper was linked into /dev/shm and removed after capture. Registration measures capability only, not correctness or parity. Product adapter routes outside the graph executor registry are excluded.",
+                      "previous_build56_snapshot": {
+                        "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory56/registered-vs-catalogue-release56.json",
+                        "archive_sha256": "c98047169c4f75d4bd30a1978045de26f46e2321b722462251955b8b8db0e529",
+                        "archive_size_bytes": 632395072,
+                        "archive_mtime_local": "2026-10-03T10:06:01+09:30",
+                        "repo_head": "ff4de44e04adb300bb1c0673ec4229d44c705d10",
                         "catalogue_source_sha256": "fcc09e9b7dc4026faa4afd65ad00774c29ef53e1e8e741a6fd25289f46f16d96",
-                        "registered_pc_count": 484,
-                        "registered_catalogue_overlap_count": 483,
+                        "registered_pc_count": 490,
+                        "registered_catalogue_overlap_count": 489,
                         "catalogue_pc_count": 886,
-                        "catalogue_missing_executor_count": 403,
+                        "catalogue_missing_executor_count": 397,
                         "registered_only_pc": [
                           "pc.global_scope"
                         ],
                         "header_sha256": {
-                          "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "5047c72c97f098a68a6c6b2c716b84a2cd8b05ff11937d46fc8a8b669a6333de",
-                          "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
+                          "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "7adff85d71e3d96571bafb1254ea1ef789b2948c1e1bc265f6262ca71aef383d",
                           "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp": "a477e824ead305069bc623b5061b6579f5fa8df72e2022bec8891e33c2a583b4",
-                          "mono.engine/imagegraph/src/SourcePathPayload.hpp": "e120ea3aa4c8b6c5bfbd5d50ba751e701026fef9c3e04328b9e7783c3e3d81ab"
+                          "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
+                          "mono.engine/imagegraph/src/SourcePathPayload.hpp": "d36062196838bab07ec124e2724d798644c339e73a2d66d5323b13e084494274"
                         },
-                        "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory55/helper-command.json",
-                        "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, and relevant header hashes were captured against the release55 snapshot; compiled code scope is clean. A root-owned imagegraph documentation edit is outside compiled code scope.",
-                        "previous_build54_snapshot": {
-                          "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory54/registered-vs-catalogue-release54.json",
-                          "archive_sha256": "b461ffc3a04f4095409c875df5508480e99e0b9a8b71cceb35b6a22b349782c1",
-                          "archive_size_bytes": 585340902,
-                          "archive_mtime_local": "2026-10-03T08:06:49.038714+09:30",
-                          "repo_head": "3e5af15eb20224bad687d8638bf274d33a440967",
+                        "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory56/helper-command.json",
+                        "scope_limit": "Temporary C++ helper called detail::ExecutorTypes() and Catalogue() directly from finalized build56 release imagegraph archive. Archive, HEAD, SourceCatalogue, public/private header hashes, and compiled imagegraph source scope were checked before and after capture. Helper was linked into /dev/shm and removed after capture. Registration measures capability only, not correctness or parity. Product adapter routes outside the graph executor registry are excluded.",
+                        "previous_build55_snapshot": {
+                          "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory55/registered-vs-catalogue-release55.json",
+                          "archive_sha256": "f3481a9eb74ae061a4d1d1e10d5c75e8ed7370a103dd7d71f36b034bcd12cd3f",
+                          "archive_size_bytes": 595165990,
+                          "archive_mtime_local": "2026-10-03T08:30:50.776775+09:30",
+                          "repo_head": "ebad11c8c18f4837948ca921a025882d3de2e0ac",
                           "catalogue_source_sha256": "fcc09e9b7dc4026faa4afd65ad00774c29ef53e1e8e741a6fd25289f46f16d96",
-                          "registered_pc_count": 478,
-                          "registered_catalogue_overlap_count": 477,
+                          "registered_pc_count": 484,
+                          "registered_catalogue_overlap_count": 483,
                           "catalogue_pc_count": 886,
-                          "catalogue_missing_executor_count": 409,
+                          "catalogue_missing_executor_count": 403,
                           "registered_only_pc": [
                             "pc.global_scope"
                           ],
                           "header_sha256": {
-                            "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "66e6fddddab87054a595bcffc712dfc58869c04c19255644a8b926b6e211a60d",
+                            "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "5047c72c97f098a68a6c6b2c716b84a2cd8b05ff11937d46fc8a8b669a6333de",
                             "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
                             "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp": "a477e824ead305069bc623b5061b6579f5fa8df72e2022bec8891e33c2a583b4",
-                            "mono.engine/imagegraph/src/SourcePathPayload.hpp": "0668f92b1a6a386514b5c6f96e02b423b0902802ffb8a1aa856576614ee9c36b"
+                            "mono.engine/imagegraph/src/SourcePathPayload.hpp": "e120ea3aa4c8b6c5bfbd5d50ba751e701026fef9c3e04328b9e7783c3e3d81ab"
                           },
-                          "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory54/helper-command.json",
-                          "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue hash, and compiled-source-scope status matched before and after the query.",
-                          "previous_build53_snapshot": {
-                            "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory53/registered-vs-catalogue-release53.json",
-                            "archive_sha256": "12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717",
-                            "archive_size_bytes": 550359324,
-                            "archive_mtime_local": "2026-10-03T06:46:24.899397+09:30",
-                            "repo_head": "d0611f3282e4a1358e181af621234d2ba641e1f4",
-                            "catalogue_source_sha256": "57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c",
-                            "registered_pc_count": 466,
-                            "registered_catalogue_overlap_count": 465,
+                          "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory55/helper-command.json",
+                          "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue, and relevant header hashes were captured against the release55 snapshot; compiled code scope is clean. A root-owned imagegraph documentation edit is outside compiled code scope.",
+                          "previous_build54_snapshot": {
+                            "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory54/registered-vs-catalogue-release54.json",
+                            "archive_sha256": "b461ffc3a04f4095409c875df5508480e99e0b9a8b71cceb35b6a22b349782c1",
+                            "archive_size_bytes": 585340902,
+                            "archive_mtime_local": "2026-10-03T08:06:49.038714+09:30",
+                            "repo_head": "3e5af15eb20224bad687d8638bf274d33a440967",
+                            "catalogue_source_sha256": "fcc09e9b7dc4026faa4afd65ad00774c29ef53e1e8e741a6fd25289f46f16d96",
+                            "registered_pc_count": 478,
+                            "registered_catalogue_overlap_count": 477,
                             "catalogue_pc_count": 886,
-                            "catalogue_missing_executor_count": 421,
+                            "catalogue_missing_executor_count": 409,
                             "registered_only_pc": [
                               "pc.global_scope"
                             ],
-                            "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue hash, and source-scope status matched before and after the query."
-                          },
-                          "previous_build52_snapshot": {
-                            "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory52/registered-vs-catalogue-release52.json",
-                            "archive_sha256": "1449aace11118a7b6fbd10bba2123f31eec3a88e7539d24ef2828cf557ca19fb",
-                            "archive_size_bytes": 541669018,
-                            "repo_head": "d347464098dbbaf3cfe9b6e3a01cd59ea4930d0b",
-                            "registered_pc_count": 443,
-                            "registered_catalogue_overlap_count": 442,
-                            "catalogue_pc_count": 886,
-                            "catalogue_missing_executor_count": 444,
-                            "scope_limit": "Historical build52 capability snapshot. It is superseded by the finalized build53 archive inventory above."
+                            "header_sha256": {
+                              "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "66e6fddddab87054a595bcffc712dfc58869c04c19255644a8b926b6e211a60d",
+                              "mono.engine/imagegraph/src/NodeExecutors.hpp": "59cd0531dd3e4666a4476b4521060158e40abb5af9c13c42056985d766d69386",
+                              "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp": "a477e824ead305069bc623b5061b6579f5fa8df72e2022bec8891e33c2a583b4",
+                              "mono.engine/imagegraph/src/SourcePathPayload.hpp": "0668f92b1a6a386514b5c6f96e02b423b0902802ffb8a1aa856576614ee9c36b"
+                            },
+                            "helper_compile_link_command_file": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory54/helper-command.json",
+                            "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue hash, and compiled-source-scope status matched before and after the query.",
+                            "previous_build53_snapshot": {
+                              "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory53/registered-vs-catalogue-release53.json",
+                              "archive_sha256": "12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717",
+                              "archive_size_bytes": 550359324,
+                              "archive_mtime_local": "2026-10-03T06:46:24.899397+09:30",
+                              "repo_head": "d0611f3282e4a1358e181af621234d2ba641e1f4",
+                              "catalogue_source_sha256": "57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c",
+                              "registered_pc_count": 466,
+                              "registered_catalogue_overlap_count": 465,
+                              "catalogue_pc_count": 886,
+                              "catalogue_missing_executor_count": 421,
+                              "registered_only_pc": [
+                                "pc.global_scope"
+                              ],
+                              "scope_limit": "Registration is capability evidence only, not runtime correctness or parity. Product adapter routes outside the graph executor registry are excluded. Archive, HEAD, catalogue hash, and source-scope status matched before and after the query."
+                            },
+                            "previous_build52_snapshot": {
+                              "evidence": ".cache/build/release-tests/evidence/pixel-composer-2026-10-02/executor-inventory52/registered-vs-catalogue-release52.json",
+                              "archive_sha256": "1449aace11118a7b6fbd10bba2123f31eec3a88e7539d24ef2828cf557ca19fb",
+                              "archive_size_bytes": 541669018,
+                              "repo_head": "d347464098dbbaf3cfe9b6e3a01cd59ea4930d0b",
+                              "registered_pc_count": 443,
+                              "registered_catalogue_overlap_count": 442,
+                              "catalogue_pc_count": 886,
+                              "catalogue_missing_executor_count": 444,
+                              "scope_limit": "Historical build52 capability snapshot. It is superseded by the finalized build53 archive inventory above."
+                            }
                           }
                         }
                       }
@@ -5371,6 +5719,16 @@
       "hash": "b78c280338e59aa4bd600f8cd5a69d69f3bc5572",
       "subject": "Edit Composer key easing and dynamic track policies through history",
       "scope": "Studio Clear action, selected key easing and dynamic track policies. Joined release65 native CPU evidence; device/reference and overall acceptance remain separate."
+    },
+    {
+      "hash": "6e449c7ded3a3a5bccac3280aeff8ea3cd9f21d4",
+      "subject": "Retain partial Composer skyboxes and verify Transform Vulkan receipts",
+      "scope": "Retained skybox face admission, animated retry lifecycle and real Transform Vulkan fixtures. Joined release66 native CPU evidence; device/reference and overall acceptance remain separate."
+    },
+    {
+      "hash": "cb5900e81fbcd6f8ef15098c919a37db5d2bc406",
+      "subject": "Add polar and surface buffer kernels with mixed cache refill transport",
+      "scope": "Polar mapping, typed surface/buffer conversion and mixed owned cache clear/refill transport. Joined release66 native CPU evidence; device/reference and overall acceptance remain separate."
     }
   ],
   "temporary_build_storage": {
@@ -5431,9 +5789,9 @@
   "acceptance_status": {
     "m0_m7": "incomplete",
     "latest_dev_core": "build53 dev passed 1,395 cases / 1,812,864 assertions",
-    "latest_release_core": "build65 release passed2,098 cases/1,826,683 assertions",
+    "latest_release_core": "build66 release passed2,155 cases/1,827,788 assertions",
     "build53_release": "selected coherent release suites passed after repair; full M0-M7, GPU, manual scene, and licensed parity gates remain open",
-    "latest_inventory": "build65 release snapshot:524 registered/523 overlap/886 catalogue/363 missing",
+    "latest_inventory": "build66 release snapshot:527 registered/526 overlap/886 catalogue/360 missing",
     "licensed_executable_parity": "open and unavailable",
     "gpu_acceptance": "open",
     "manual_scene_acceptance": "open",
@@ -5468,7 +5826,10 @@
     "build64_overall": "Native release64 gates passed; overall M0-M7 acceptance remains incomplete.",
     "build65_release": "Thirteen joined CPU scopes and155 focused core cases pass after eleven retained failures. Public owned-path layout changes were rebuilt coherently.",
     "build65_gpu": "Authorized local Vulkan Composer pixel/binding/cancellation/replacement fixtures pass3 cases/152 assertions against coherent release65 source. Hardware model and driver version were not recorded. New Transform device fixtures, live Studio, other GPU backends and licensed comparisons remain unverified.",
-    "build65_overall": "Native release65 gates passed; overall M0-M7 acceptance remains incomplete."
+    "build65_overall": "Native release65 gates passed; overall M0-M7 acceptance remains incomplete.",
+    "build66_release": "Thirteen joined CPU scopes and67 focused core cases pass after three retained failed invocations. Mixed cache slots preserve owned checkpoints.",
+    "build66_gpu": "Authorized local Vulkan Composer and Transform pixel/binding/cancellation/replacement fixtures pass4 cases/187 assertions against coherent release66 source. The new Transform case separately passed1/35. Hardware model and driver version were not recorded. Broader Perspective/anchor/scale/array captures, live Studio, other GPU backends and licensed comparisons remain unverified.",
+    "build66_overall": "Native release66 gates passed; overall M0-M7 acceptance remains incomplete."
   },
   "pending_gates": [
     {
