@@ -13,6 +13,7 @@
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphExportTriggers.hpp"
 #include "ImageGraphGroupHost.hpp"
+#include "ImageGraphHistoryKeys.hpp"
 #include "ImageGraphHlslGroups.hpp"
 #include "ImageGraphHost.hpp"
 #include "ImageGraphInputs.hpp"
@@ -5255,6 +5256,7 @@ namespace studio {
 			}
 		}
 		ImGui::EndChild();
+		detail::ApplyImageGraphHistoryKey([&](bool redo) { ApplyHistory(state, redo); });
 		RefreshPreview(state, renderer);
 		state.ComposerExports.Invalidate(state.DocumentRevision, state.EvaluationInputRevision);
 		if (!state.Playback.Rendering &&
