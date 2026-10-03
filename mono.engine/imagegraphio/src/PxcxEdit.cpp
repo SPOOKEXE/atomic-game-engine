@@ -1,3 +1,4 @@
+#include "CookedShaderAnnotation.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "TileProperties.hpp"
 
@@ -2159,6 +2160,8 @@ namespace engine::imagegraphio {
 					);
 					source = &root["nodes"].back();
 				}
+				if (!detail::WriteCookedAnnotation(*source, node, failure))
+					return Reject(diagnostic, failure, node.Id, detail::CookedSelector);
 				source->at("x") = node.Position.X;
 				source->at("y") = node.Position.Y;
 				const auto *oldMembership = NativeNode(working.Graph, node.Id);

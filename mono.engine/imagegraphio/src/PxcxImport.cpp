@@ -1,3 +1,4 @@
+#include "CookedShaderAnnotation.hpp"
 #include "GroupInstances.hpp"
 #include "InlineCollections.hpp"
 #include "PxcxKeyProvenance.hpp"
@@ -3829,6 +3830,23 @@ namespace engine::imagegraphio {
 			} else if (mapped) {
 				native[index] = true;
 				result.NativeNodes++;
+			}
+			std::optional<std::string_view> cookedSelector;
+			if (!detail::ReadCookedAnnotation(source, node.Type, cookedSelector, failure)) return false;
+			if (node.Type == "pc.hlsl" && source.contains("atomic_game_engine"))
+				result.Graph.FormatVersion = 9;
+			if (cookedSelector) {
+				if (node.SourceProperties.size() >= imagegraph::Limits::MaximumPropertiesPerNode ||
+					!AdmitNativeSlots(
+						node.SourceProperties, node.SourceProperties.size() + 1, &operationBudget
+					) ||
+					!AdmitNativeText(detail::CookedSelector, &operationBudget) ||
+					!AdmitNativeText(*cookedSelector, &operationBudget))
+					return Fail(failure, "cooked shader annotation exceeds native import bounds");
+				node.SourceProperties.push_back(
+					{std::string(detail::CookedSelector), std::string(*cookedSelector)}
+				);
+				result.Graph.FormatVersion = 9;
 			}
 			indexById.emplace(fact.Id, index);
 			result.Graph.Nodes.push_back(std::move(node));
