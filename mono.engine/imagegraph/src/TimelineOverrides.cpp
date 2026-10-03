@@ -643,6 +643,7 @@ namespace engine::imagegraph::detail {
 					sourceEnum || left->SourceDriver ||
 					(configured != configuredTracks.end() && configured->second->QuaternionMode) ||
 					std::holds_alternative<ArrayValue>(left->Data) ||
+					std::holds_alternative<Gradient>(left->Data) ||
 					std::holds_alternative<int64_t>(left->Data) ||
 					std::holds_alternative<Vector3>(left->Data) ||
 					std::holds_alternative<Vector4>(left->Data) || std::holds_alternative<Area>(left->Data);
@@ -707,6 +708,38 @@ namespace engine::imagegraph::detail {
 							left->Port
 						);
 						return diagnostic.Code;
+					}
+					if (const auto *gradient = std::get_if<Gradient>(&left->Data);
+						gradient && right && (suppressDriver || beforeFirst || !left->SourceDriver)) {
+						const auto *target = std::get_if<Gradient>(&right->Data);
+						size_t count = 0;
+						const Status admitted =
+							target ? detail::SourceGradientLerpCount(*gradient, *target, ease, count)
+								   : Status::TypeMismatch;
+						if (admitted != Status::Ok) {
+							SetDiagnostic(
+								diagnostic,
+								admitted,
+								"source gradient interpolation is undefined or "
+								"exceeds its key limit",
+								left->NodeId,
+								left->Port
+							);
+							return diagnostic.Code;
+						}
+						const uint64_t workspace =
+							3 * std::max(maximumValue, uint64_t(count) * sizeof(GradientKey)) +
+							keys.size() * sizeof(FrameTime);
+						if (!valueCharge->Resize(workspace)) {
+							SetDiagnostic(
+								diagnostic,
+								Status::LimitExceeded,
+								"source gradient workspace exceeds the live byte budget",
+								left->NodeId,
+								left->Port
+							);
+							return diagnostic.Code;
+						}
 					}
 					const Status status = detail::ApplySourceDriver(
 						!suppressDriver && !beforeFirst && left->SourceDriver ? &*left->SourceDriver

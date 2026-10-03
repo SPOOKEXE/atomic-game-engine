@@ -4,6 +4,7 @@
 
 #include "AudioKeyDriver.hpp"
 #include "ValuePayload.hpp"
+#include "SourceGradientValue.hpp"
 #include "nodes/Curve.hpp"
 
 #include <array>
@@ -397,6 +398,27 @@ namespace engine::imagegraph::detail {
 		bool rawSourceQuaternion = false,
 		const EvaluationRequest *request = nullptr
 	) {
+		if (const auto *gradient = std::get_if<Gradient>(&from)) {
+			const auto *target = std::get_if<Gradient>(&to);
+			if (!target) return Status::TypeMismatch;
+			if (driver) {
+				if (!ValidSourceDriver(*driver)) return Status::InvalidValue;
+				const bool endpointRemap = std::holds_alternative<KeyframeBounceDriver>(*driver) ||
+										   std::holds_alternative<KeyframeElasticDriver>(*driver) ||
+										   std::holds_alternative<KeyframeCurveDriver>(*driver);
+				// Numeric struct operations in active source drivers have no defined
+				// gradient result.
+				if (interval || !endpointRemap) return Status::UnsupportedExecution;
+			}
+			if (!interval) {
+				result = *gradient;
+				return Status::Ok;
+			}
+			Gradient candidate;
+			const Status status = LerpSourceGradient(*gradient, *target, ease, candidate);
+			if (status == Status::Ok) result = std::move(candidate);
+			return status;
+		}
 		double audioOffset = 0;
 		if (driver)
 			if (const auto *audio = std::get_if<KeyframeAudioDriver>(driver)) {

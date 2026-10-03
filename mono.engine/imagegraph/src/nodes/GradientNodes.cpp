@@ -1,22 +1,14 @@
 // CPU gradient objects retain all 128 keys. The shader sampler has a separate 64-slot contract.
 
 #include "Families.hpp"
-#include "Gradient.hpp"
+#include "../SourceGradientValue.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <string>
 
 namespace engine::imagegraph::detail {
 	namespace {
-		uint8_t Byte(double value) {
-			value = std::clamp(value, 0.0, 255.0);
-			const double lower = std::floor(value), fraction = value - lower;
-			return static_cast<uint8_t>(
-				lower + (fraction > .5 || (fraction == .5 && std::fmod(lower, 2.0) != 0))
-			);
-		}
 
 		bool ReserveGradientOutput(NodeContext &context, size_t count, size_t stride, std::string_view port) {
 			const uint64_t nameBytes = std::max<uint64_t>(port.size(), std::string{}.capacity());
@@ -67,105 +59,12 @@ namespace engine::imagegraph::detail {
 			return true;
 		}
 
-		Rgb3 CpuOklabMix(const Rgb3 &a, const Rgb3 &b, double amount) {
-			constexpr std::array<Rgb3, 3> TO{
-				{{.4121656120, .2118591070, .0883097947},
-				 {.5362752080, .6807189584, .2818474174},
-				 {.0514575653, .1074065790, .6302613616}}
-			};
-			constexpr std::array<Rgb3, 3> FROM{
-				{{4.0767245293, -1.2681437731, -.0041119885},
-				 {-3.3072168827, 2.6093323231, -.7034763098},
-				 {.2307590544, -.3411344290, 1.7068625689}}
-			};
-			Rgb3 mixed{}, result{};
-			for (size_t row = 0; row < 3; row++) {
-				double x = 0, y = 0;
-				for (size_t channel = 0; channel < 3; channel++) {
-					x += TO[row][channel] * std::pow(a[channel], 2.2);
-					y += TO[row][channel] * std::pow(b[channel], 2.2);
-				}
-				mixed[row] = std::pow(x, 1.0 / 3) + (std::pow(y, 1.0 / 3) - std::pow(x, 1.0 / 3)) * amount;
-			}
-			for (size_t row = 0; row < 3; row++) {
-				double linear = 0;
-				for (size_t channel = 0; channel < 3; channel++)
-					linear += FROM[row][channel] * std::pow(mixed[channel], 3);
-				result[row] = std::pow(std::max(0.0, linear), 1.0 / 2.2);
-			}
-			return result;
-		}
-
 		bool Sample(NodeContext &context, const Gradient &gradient, double position, Colour &output) {
-			if (!std::isfinite(position))
-				return context.Fail(Status::InvalidValue, "gradient sample must be finite", "sample");
-			const auto &keys = gradient.Keys;
-			if (keys.empty()) {
-				output = {0, 0, 0, 0};
-				return true;
-			}
-			if (keys.size() == 1 || position <= keys.front().Time) {
-				output = keys.front().Color;
-				return true;
-			}
-			if (position >= keys.back().Time) {
-				output = keys.back().Color;
-				return true;
-			}
-			for (size_t index = 1; index < keys.size(); index++) {
-				const auto &before = keys[index - 1], &after = keys[index];
-				if (after.Time < position) continue;
-				if (after.Time == position) {
-					output = after.Color;
-					return true;
-				}
-				if (gradient.Mode == 1) {
-					output = before.Color;
-					return true;
-				}
-				const double amount = (position - before.Time) / (after.Time - before.Time);
-				if (!std::isfinite(amount))
-					return context.Fail(
-						Status::InvalidValue, "gradient interpolation is not finite", "gradient"
-					);
-				const Colour &a = before.Color, &b = after.Color;
-				Rgb3 c0{a.Red / 255.0, a.Green / 255.0, a.Blue / 255.0};
-				Rgb3 c1{b.Red / 255.0, b.Green / 255.0, b.Blue / 255.0};
-				Rgb3 mixed;
-				if (gradient.Mode == 2 || gradient.Mode == 5) {
-					// GML hue/saturation/value getters quantize to bytes before interpolation.
-					auto h0 = ShaderRgbToHsv(c0), h1 = ShaderRgbToHsv(c1);
-					for (size_t channel = 0; channel < 3; channel++) {
-						h0[channel] = Byte(h0[channel] * 255) / 255.0;
-						h1[channel] = Byte(h1[channel] * 255) / 255.0;
-					}
-					// GML frac preserves the sign of its input, unlike GLSL fract.
-					const double delta = std::fmod(h1[0] - h0[0], 1.0);
-					double distance = std::fmod(2 * delta, 1.0) - delta;
-					if (gradient.Mode == 5) distance -= (distance > 0) - (distance < 0);
-					mixed = ShaderHsvToRgb(
-						{Byte((h0[0] + distance * amount) * 255) / 255.0,
-						 Byte((h0[1] + (h1[1] - h0[1]) * amount) * 255) / 255.0,
-						 Byte((h0[2] + (h1[2] - h0[2]) * amount) * 255) / 255.0}
-					);
-				} else if (gradient.Mode == 3)
-					mixed = CpuOklabMix(c0, c1, amount);
-				else
-					mixed = GradientMix(c0, c1, amount, gradient.Mode);
-				for (double value : mixed)
-					if (!std::isfinite(value))
-						return context.Fail(
-							Status::InvalidValue, "gradient colour blend is not finite", "gradient"
-						);
-				uint8_t alpha = Byte(a.Alpha + (b.Alpha - a.Alpha) * amount);
-				// The pinned Oklab and CMYK helpers multiply an already-byte alpha by 255.
-				if (gradient.Mode == 3 || gradient.Mode == 6)
-					alpha = static_cast<uint8_t>(uint32_t(alpha) * 255);
-				output = {Byte(mixed[0] * 255), Byte(mixed[1] * 255), Byte(mixed[2] * 255), alpha};
-				return true;
-			}
-			output = keys.back().Color;
-			return true;
+			std::string_view failure;
+			if (SampleSourceGradient(gradient, position, output, failure)) return true;
+			return context.Fail(
+				Status::InvalidValue, std::string(failure), !std::isfinite(position) ? "sample" : "gradient"
+			);
 		}
 
 		bool GradientOut(NodeContext &context) {

@@ -5330,6 +5330,7 @@ namespace engine::imagegraph {
 					std::holds_alternative<Vector4>(keyframe.Data) ||
 					std::holds_alternative<Quaternion>(keyframe.Data) ||
 					std::holds_alternative<Area>(keyframe.Data) ||
+					std::holds_alternative<Gradient>(keyframe.Data) ||
 					(array && array->Nested.empty() &&
 					 (array->ElementType == ValueType::Scalar || array->ElementType == ValueType::Integer));
 				if (!numeric) {
