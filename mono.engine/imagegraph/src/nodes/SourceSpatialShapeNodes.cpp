@@ -169,6 +169,9 @@ namespace engine::imagegraph::detail {
 			PathValue3D value;
 			auto &data = value.Data.emplace();
 			data.SourcePolyline = true;
+			data.SourceBounds2D =
+				count ? Vector4{pos.X - half.X, pos.Y - half.Y, pos.X + half.X, pos.Y + half.Y}
+					  : Vector4{-4, -4, -4, -4};
 			data.Loop = loop;
 			data.Resolution = 1;
 			data.Anchors.reserve(total);
@@ -196,16 +199,29 @@ namespace engine::imagegraph::detail {
 						if (!prior || !prior->Data || !prior->Data->SourcePolyline)
 							return c.Fail(
 								Status::InvalidValue,
-								"Shape Path 3D replay does not contain its source path class",
+								"Shape Path 3D replay "
+								"does not contain its "
+								"source path class",
 								"path_data"
 							);
-						if (prior->Data->SourceEmptyCache)
+						data.SourceBounds2D = prior->Data->SourceBounds2D;
+						if (prior->Data->SourceEmptyCache) {
+							if (!c.ReserveOutput(
+									2 * prior->Data->SourceEmptyCache->Accumulated.size() * sizeof(double),
+									"path_data"
+								))
+								return false;
 							data.SourceEmptyCache = prior->Data->SourceEmptyCache;
-						else if (!prior->Data->Anchors.empty()) {
+						} else if (!prior->Data->Anchors.empty()) {
 							PathRuntime3D previous(*prior->Data);
 							data.SourceEmptyCache = SourcePolylineEmptyCache3D{
-								previous.Length(), uint32_t(prior->Data->Anchors.size())
+								previous.Length(), uint32_t(prior->Data->Anchors.size()), {}
 							};
+							const size_t samples = previous.SourceAccumulatedCount();
+							if (!c.ReserveOutput(2 * samples * sizeof(double), "path_data")) return false;
+							data.SourceEmptyCache->Accumulated.reserve(samples);
+							for (size_t i = 0; i < samples; ++i)
+								data.SourceEmptyCache->Accumulated.push_back(previous.SourceAccumulatedAt(i));
 						}
 						break;
 					}

@@ -551,3 +551,69 @@ TEST_CASE(
 	REQUIRE(Evaluate(valid, plan, "out", {}, output, diagnostic) == Status::Ok);
 	CHECK(output == prior);
 }
+
+TEST_CASE(
+	"Dotted batched Reference Size and Position resolve before Dimension row selection", "[source_dotted]"
+) {
+	auto d = DottedGraph({8, 4});
+	DottedSet(d, "size", .5);
+	DottedSet(d, "size_unit", EnumValue{1});
+	DottedSet(d, "position", Vector2{.25, .5});
+	DottedSet(d, "position_unit", EnumValue{1});
+	Node dimensions{"dimensions", "pc.array", "", {}, {}, {}};
+	dimensions.DynamicInputs = {
+		{"input_0", ValueType::Vector2, Vector2{8, 4}}, {"input_1", ValueType::Vector2, Vector2{4, 2}}
+	};
+	d.Nodes.push_back(std::move(dimensions));
+	d.Links = {{"dimensions", "array", "dots", "dimension"}};
+	for (int64_t mode = 0; mode <= 3; ++mode) {
+		DottedSet(d, "attribute_array_process", EnumValue{mode});
+		Plan p;
+		Diagnostic diag;
+		REQUIRE(Compile(d, p, diag) == Status::Ok);
+		ImageArray images;
+		const auto status = EvaluateArray(d, p, "out", {}, images, diag);
+		INFO(diag.Message);
+		REQUIRE(status == Status::Ok);
+		REQUIRE(images.Images.size() == 2);
+		auto first = DottedGraph({8, 4}), second = DottedGraph({4, 2});
+		DottedSet(first, "position", Vector2{2, 2});
+		DottedSet(second, "position", Vector2{2, 2});
+		DottedSet(first, "position_unit", EnumValue{0});
+		DottedSet(second, "position_unit", EnumValue{0});
+		CHECK(images.Images[0] == DottedEvaluate(first));
+		CHECK(images.Images[1] == DottedEvaluate(second));
+	}
+}
+TEST_CASE("Dotted first narrow Reference canvas cannot hide later wide row work", "[source_dotted]") {
+	auto d = DottedGraph({1, 1});
+	DottedSet(d, "size", .25);
+	DottedSet(d, "size_unit", EnumValue{1});
+	Node dimensions{"dimensions", "pc.array", "", {}, {}, {}};
+	dimensions.DynamicInputs = {
+		{"input_0", ValueType::Vector2, Vector2{1, 1}}, {"input_1", ValueType::Vector2, Vector2{1000, 100}}
+	};
+	d.Nodes.push_back(std::move(dimensions));
+	d.Links = {{"dimensions", "array", "dots", "dimension"}};
+	Plan p;
+	Diagnostic diag;
+	REQUIRE(Compile(d, p, diag) == Status::Ok);
+	Image image{1, 1, {9, 8, 7, 6}, 0};
+	const auto prior = image;
+	CHECK(Evaluate(d, p, "out", {}, image, diag, 100000) == Status::LimitExceeded);
+	CHECK(diag.NodeId == "dots");
+	CHECK(diag.Message.find("whole-array work") != std::string::npos);
+	CHECK(image == prior);
+}
+TEST_CASE("Dotted Project Reference admission uses its physical reference exactly once", "[source_dotted]") {
+	auto d = DottedGraph({1, 1});
+	d.Project = ProjectSettings{.SurfaceWidth = 256, .SurfaceHeight = 256};
+	DottedSet(d, "dimension_unit", EnumValue{1});
+	DottedSet(d, "size", .25);
+	DottedSet(d, "size_unit", EnumValue{1});
+	const auto image = DottedEvaluate(d);
+	CHECK(image.Width == 256);
+	CHECK(image.Height == 256);
+	CHECK(image.Pixels[0] == 0);
+	CHECK(image.Pixels[(32 * 256 + 32) * 4] == 255);
+}

@@ -51,6 +51,7 @@
 #include "ValueNodeSchemas.hpp"
 #include "ValuePayload.hpp"
 #include "ValueText.hpp"
+#include "nodes/Families.hpp"
 
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
@@ -1041,6 +1042,12 @@ namespace engine::imagegraph {
 					if (const auto *input =
 							FindCatalogueInput(*entry, id.substr(0, id.size() - BYPASS_SUFFIX.size())))
 						return input->Type;
+					// HLSL source input bypasses also identify authored dynamic argument records.
+					if (node.Type == "pc.hlsl") {
+						const auto inputId = id.substr(0, id.size() - BYPASS_SUFFIX.size());
+						for (const auto &input : node.DynamicInputs)
+							if (input.Id == inputId) return input.Type;
+					}
 				}
 			}
 			if (side == PortDirection::Output) {
@@ -1196,6 +1203,7 @@ namespace engine::imagegraph {
 		bool ReadQuoted(std::istream &stream, std::string &text);
 		bool ReadQuoted(std::istream &stream, std::string &text, size_t maximum);
 
+		void WriteValue(std::ostream &stream, const Value &value);
 		void WritePathPayload(std::ostream &stream, const Path2D &path) {
 			if (path.SourceOperation) {
 				const auto &operation = *path.SourceOperation;
@@ -1219,6 +1227,7 @@ namespace engine::imagegraph {
 						   : operation.Kind == SourcePathOperationKind::Transform	 ? "transform"
 						   : operation.Kind == SourcePathOperationKind::AreaMap		 ? "area_map"
 						   : operation.Kind == SourcePathOperationKind::Shift		 ? "shift"
+						   : operation.Kind == SourcePathOperationKind::WeightAdjust ? "weight_adjust"
 																					 : "combine")
 					   << ' ' << operation.Inputs.size();
 				if (operation.Kind == SourcePathOperationKind::Trim)
@@ -1257,6 +1266,22 @@ namespace engine::imagegraph {
 						   << operation.MapFrom.Y << ' ' << operation.MapFrom.Z << ' ' << operation.MapFrom.W
 						   << ' ' << operation.MapArea.X << ' ' << operation.MapArea.Y << ' '
 						   << operation.MapArea.Z << ' ' << operation.MapArea.W;
+				if (operation.Kind == SourcePathOperationKind::WeightAdjust) {
+					stream << ' ' << unsigned(operation.WeightType) << ' ' << unsigned(operation.WeightMode)
+						   << ' ' << std::setprecision(17) << operation.WeightValue << ' '
+						   << operation.WeightDirection << ' ' << operation.WeightRange.X << ' '
+						   << operation.WeightRange.Y << ' ' << operation.WeightLoop << ' '
+						   << operation.WeightCurve.size();
+					for (double value : operation.WeightCurve)
+						stream << ' ' << value;
+					stream << ' ' << bool(operation.WeightInput3D);
+					if (operation.WeightInput3D) {
+						stream << ' ';
+						PathValue3D child;
+						child.Data = operation.WeightInput3D;
+						WriteValue(stream, Value{std::move(child)});
+					}
+				}
 				if (operation.Kind == SourcePathOperationKind::Shift)
 					stream << ' ' << operation.ShiftDistance << ' ' << operation.ShiftRange.X << ' '
 						   << operation.ShiftRange.Y << ' ' << operation.ShiftLoop;
@@ -1392,6 +1417,15 @@ namespace engine::imagegraph {
 						if (path.SourceEmptyCache)
 							stream << ' ' << path.SourceEmptyCache->Length << ' '
 								   << path.SourceEmptyCache->SegmentCount;
+						stream << " source_metadata 1 " << bool(path.SourceBounds2D);
+						if (path.SourceBounds2D)
+							stream << ' ' << path.SourceBounds2D->X << ' ' << path.SourceBounds2D->Y << ' '
+								   << path.SourceBounds2D->Z << ' ' << path.SourceBounds2D->W;
+						stream << ' '
+							   << (path.SourceEmptyCache ? path.SourceEmptyCache->Accumulated.size() : 0);
+						if (path.SourceEmptyCache)
+							for (double value : path.SourceEmptyCache->Accumulated)
+								stream << ' ' << value;
 					}
 					stream << ' ' << path.Loop << ' ' << path.Resolution << ' ' << path.Anchors.size() << ' '
 						   << path.SourcePresent << ' ' << bool(path.Source2D) << ' '
@@ -1871,6 +1905,7 @@ namespace engine::imagegraph {
 				if (!(stream >> present) || present > 1) return false;
 				PathValue3D path;
 				std::optional<SourcePolylineEmptyCache3D> emptyCache;
+				std::optional<Vector4> sourceBounds;
 				if (present) {
 					if (tag == "p3s") {
 						stream >> std::ws;
@@ -1900,6 +1935,41 @@ namespace engine::imagegraph {
 							emptyCache = cache;
 						}
 					}
+					if (tag == "p3s") {
+						stream >> std::ws;
+						if (stream.peek() == 's') {
+							for (char expected : std::string_view{"source_metadata"})
+								if (stream.get() != expected) return false;
+							const int separator = stream.peek();
+							if (separator == std::char_traits<char>::eof() ||
+								!std::isspace(static_cast<unsigned char>(separator)))
+								return false;
+							unsigned revision = 0, presentBounds = 0;
+							size_t accumulated = 0;
+							if (!(stream >> revision >> presentBounds) || revision != 1 || presentBounds > 1)
+								return false;
+							if (presentBounds) {
+								Vector4 bounds;
+								if (!(stream >> bounds.X >> bounds.Y >> bounds.Z >> bounds.W) ||
+									(!std::isfinite(bounds.X) || !std::isfinite(bounds.Y) ||
+									 !std::isfinite(bounds.Z) || !std::isfinite(bounds.W)))
+									return false;
+								sourceBounds = bounds;
+							}
+							if (!(stream >> accumulated) || accumulated > Limits::MaximumArrayElements ||
+								(accumulated && (!emptyCache || accumulated != emptyCache->SegmentCount)) ||
+								!admit(accumulated * sizeof(double)))
+								return false;
+							if (emptyCache) {
+								emptyCache->Accumulated.reserve(accumulated);
+								for (size_t i = 0; i < accumulated; ++i) {
+									double length = 0;
+									if (!(stream >> length) || !std::isfinite(length)) return false;
+									emptyCache->Accumulated.push_back(length);
+								}
+							}
+						}
+					}
 					if (!(stream >> loop >> resolution >> count >> sourcePresent >> source2d >> transforms) ||
 						loop > 1 || resolution == 0 || resolution > Limits::MaximumArrayElements ||
 						count > Limits::MaximumPathAnchors || sourcePresent > 1 || source2d > 1 ||
@@ -1914,7 +1984,8 @@ namespace engine::imagegraph {
 					data.Loop = bool(loop);
 					data.SourcePresent = bool(sourcePresent);
 					data.SourcePolyline = tag == "p3s";
-					data.SourceEmptyCache = emptyCache;
+					data.SourceEmptyCache = std::move(emptyCache);
+					data.SourceBounds2D = sourceBounds;
 					data.Resolution = resolution;
 					data.Anchors.reserve(count);
 					for (size_t i = 0; i < count; ++i) {
@@ -2045,7 +2116,8 @@ namespace engine::imagegraph {
 				if (!(stream >> count) || count > Limits::MaximumArrayElements ||
 					(kind != "reverse" && kind != "combine" && kind != "trim" && kind != "offset" &&
 					 kind != "blend" && kind != "join" && kind != "redistribute" && kind != "skew" &&
-					 kind != "transform" && kind != "area_map" && kind != "shift") ||
+					 kind != "transform" && kind != "area_map" && kind != "shift" &&
+					 kind != "weight_adjust") ||
 					(kind == "blend" ? count != 2
 					 : (kind == "skew" || kind == "redistribute")
 						 ? count != 1
@@ -2054,17 +2126,18 @@ namespace engine::imagegraph {
 				if (!admit(sizeof(SourcePathData2D) + count * sizeof(Path2D))) return false;
 				Path2D path;
 				auto &operation = path.SourceOperation.emplace();
-				operation.Kind = kind == "reverse"		  ? SourcePathOperationKind::Reverse
-								 : kind == "trim"		  ? SourcePathOperationKind::Trim
-								 : kind == "offset"		  ? SourcePathOperationKind::Offset
-								 : kind == "blend"		  ? SourcePathOperationKind::Blend
-								 : kind == "join"		  ? SourcePathOperationKind::Join
-								 : kind == "redistribute" ? SourcePathOperationKind::Redistribute
-								 : kind == "skew"		  ? SourcePathOperationKind::Skew
-								 : kind == "transform"	  ? SourcePathOperationKind::Transform
-								 : kind == "area_map"	  ? SourcePathOperationKind::AreaMap
-								 : kind == "shift"		  ? SourcePathOperationKind::Shift
-														  : SourcePathOperationKind::Combine;
+				operation.Kind = kind == "reverse"		   ? SourcePathOperationKind::Reverse
+								 : kind == "trim"		   ? SourcePathOperationKind::Trim
+								 : kind == "offset"		   ? SourcePathOperationKind::Offset
+								 : kind == "blend"		   ? SourcePathOperationKind::Blend
+								 : kind == "join"		   ? SourcePathOperationKind::Join
+								 : kind == "redistribute"  ? SourcePathOperationKind::Redistribute
+								 : kind == "skew"		   ? SourcePathOperationKind::Skew
+								 : kind == "transform"	   ? SourcePathOperationKind::Transform
+								 : kind == "area_map"	   ? SourcePathOperationKind::AreaMap
+								 : kind == "shift"		   ? SourcePathOperationKind::Shift
+								 : kind == "weight_adjust" ? SourcePathOperationKind::WeightAdjust
+														   : SourcePathOperationKind::Combine;
 				if (kind == "trim" &&
 					(!(stream >> operation.TrimRange.X >> operation.TrimRange.Y) ||
 					 !std::isfinite(operation.TrimRange.X) || !std::isfinite(operation.TrimRange.Y)))
@@ -2131,6 +2204,44 @@ namespace engine::imagegraph {
 						  operation.MapFrom.W >> operation.MapArea.X >> operation.MapArea.Y >>
 						  operation.MapArea.Z >> operation.MapArea.W))
 						return false;
+				}
+				if (kind == "weight_adjust") {
+					unsigned type = 0, mode = 0;
+					size_t samples = 0;
+					if (!(stream >> type >> mode >> operation.WeightValue >> operation.WeightDirection >>
+						  operation.WeightRange.X >> operation.WeightRange.Y >> operation.WeightLoop >>
+						  samples) ||
+						type > 2 || mode > 2 || samples < 2 || samples > Limits::MaximumArrayElements ||
+						!admit(samples * sizeof(double)))
+						return false;
+					operation.WeightType = uint8_t(type);
+					operation.WeightMode = uint8_t(mode);
+					operation.WeightCurve.reserve(samples);
+					for (size_t i = 0; i < samples; ++i) {
+						double value = 0;
+						if (!(stream >> value) || !std::isfinite(value)) return false;
+						operation.WeightCurve.push_back(value);
+					}
+					unsigned spatial = 0;
+					if (!(stream >> spatial) || spatial > 1 || (spatial && count)) return false;
+					if (spatial) {
+						Value child;
+						if (!ReadValue(
+								stream,
+								child,
+								version,
+								false,
+								budget,
+								outputCharge,
+								allocationRefused,
+								depth + 1,
+								arrayCount
+							))
+							return false;
+						auto *path3d = std::get_if<PathValue3D>(&child);
+						if (!path3d || !path3d->Data) return false;
+						operation.WeightInput3D = std::move(path3d->Data);
+					}
 				}
 				if (kind == "shift" && !(stream >> operation.ShiftDistance >> operation.ShiftRange.X >>
 										 operation.ShiftRange.Y >> operation.ShiftLoop))
@@ -9210,7 +9321,8 @@ namespace engine::imagegraph {
 			// Legacy arithmetic is still byte based; pure collectors and copies
 			// preserve raw formats.
 			if (!FindCatalogueEntry(node.Type) && node.Type != "value.array" &&
-				node.Type != "value.array_get" && node.Type != "image.passthrough") {
+				node.Type != "value.array_get" && node.Type != "image.passthrough" &&
+				node.Type != "image.transform_3d") {
 				for (const Link &link : plan.EffectiveLinks) {
 					if (link.ToNode != node.Id) continue;
 					const NodeResult &source = results[nodeIndices.at(link.FromNode)];
@@ -9283,7 +9395,8 @@ namespace engine::imagegraph {
 				}
 				return true;
 			};
-			if (nodeInputs && node.Id == nodeInputs->NodeId && !FindCatalogueEntry(node.Type)) {
+			if (nodeInputs && node.Id == nodeInputs->NodeId && !FindCatalogueEntry(node.Type) &&
+				node.Type != "image.transform_3d") {
 				const NodeSchema *schema = FindSchema(node.Type);
 				if (!schema) {
 					SetDiagnostic(
@@ -9385,8 +9498,14 @@ namespace engine::imagegraph {
 				if (!batch) return Status::Ok;
 				continue;
 			}
-			if (const CatalogueEntry *catalogueEntry = FindCatalogueEntry(node.Type)) {
-				const detail::Executor executor = detail::FindExecutor(node.Type);
+			// The native fixed-plane schema shares the borrowed host ports, while the
+			// renderer keeps its raster profile distinct from the source node.
+			const CatalogueEntry *hostEntry = FindCatalogueEntry(node.Type);
+			if (node.Type == "image.transform_3d") hostEntry = FindCatalogueEntry("pc.3_d_transform_image");
+			if (const CatalogueEntry *catalogueEntry = hostEntry) {
+				const detail::Executor executor = node.Type == "image.transform_3d"
+													  ? detail::ReplayRecordedHostOutputs
+													  : detail::FindExecutor(node.Type);
 				const size_t inputCount = catalogueEntry->Inputs.size() + node.DynamicInputs.size();
 				const uint64_t inputBytes =
 					inputCount *
@@ -9976,6 +10095,70 @@ namespace engine::imagegraph {
 					const Value *value = nullptr;
 					if (linked) {
 						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						const bool cylinderSurfaceGetter =
+							node.Type == "pc.surface_project_cylinder_3_d" &&
+							((input.SourceKind == "Vec3" &&
+							  (input.Id == "view_angle" || input.Id == "position")) ||
+							 (input.SourceKind == "Range" && input.Id == "depth_range") ||
+							 (input.SourceKind == "RotRange" && input.Id == "angle_range") ||
+							 (input.SourceKind == "Slider" && input.Id == "fov") ||
+							 (input.SourceKind == "Float" &&
+							  (input.Id == "distance" || input.Id == "scale")));
+						if (cylinderSurfaceGetter && produced[sourceIndex]) {
+							const auto domain = FindOutputDomain(
+								document.Nodes[sourceIndex], results[sourceIndex], link->FromPort
+							);
+							// Source getters test the declared Surface type, not Atlas payload shape.
+							if (!domain || domain->Kind == SourceSocketKind::Surface) {
+								const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
+								const ImageArray *surfaces =
+									surface ? nullptr
+											: FindImageArrayOutput(results[sourceIndex], link->FromPort);
+								if (surface || surfaces) {
+									const double width = surface ? double(surface->Width) : 1.;
+									const double height = surface ? double(surface->Height) : 1.;
+									if (input.SourceKind == "Float" || input.SourceKind == "Slider") {
+										auto projectionCharge = budget.Reserve(2 * sizeof(ElementValue));
+										if (!projectionCharge ||
+											!inputCharge->Merge(std::move(*projectionCharge))) {
+											SetDiagnostic(
+												diagnostic,
+												Status::LimitExceeded,
+												"cylinder surface getter exceeds input storage budget",
+												node.Id,
+												std::string(input.Id)
+											);
+											return diagnostic.Code;
+										}
+										ArrayValue dimensions;
+										dimensions.ElementType = ValueType::Scalar;
+										dimensions.Elements.reserve(2);
+										if (dimensions.Elements.capacity() > 2) {
+											auto excess = budget.Reserve(
+												(dimensions.Elements.capacity() - 2) * sizeof(ElementValue)
+											);
+											if (!excess || !inputCharge->Merge(std::move(*excess))) {
+												SetDiagnostic(
+													diagnostic,
+													Status::LimitExceeded,
+													"cylinder surface getter capacity exceeds input budget",
+													node.Id,
+													std::string(input.Id)
+												);
+												return diagnostic.Code;
+											}
+										}
+										dimensions.Elements.emplace_back(width);
+										dimensions.Elements.emplace_back(height);
+										context.Values.emplace_back(input.Id, std::move(dimensions));
+									} else if (input.SourceKind == "Vec3")
+										context.Values.emplace_back(input.Id, Vector3{width, height, 0.});
+									else
+										context.Values.emplace_back(input.Id, Vector2{width, height});
+									continue;
+								}
+							}
+						}
 						// Look At's source Vec3 getter resizes whole-surface dimensions to three axes.
 						const bool lookAtSurfaceVector =
 							node.Type == "pc.quarternion_lookat" && input.SourceKind == "Vec3" &&
@@ -10205,22 +10388,23 @@ namespace engine::imagegraph {
 									  [&](const AuthoredValue &entry) { return entry.Port == link->FromPort; }
 								  )
 								: ValueOutputs::const_iterator{};
-						// Dimension and Padding Vec2 getters return linked surface pixel dimensions.
+						// These source getters return surface dimensions before Vec2 unit conversion.
 						const Image *surface = produced[sourceIndex]
 												   ? FindImageOutput(results[sourceIndex], link->FromPort)
 												   : nullptr;
-						const bool paddingSurfaceDimension = node.Type == "pc.padding" &&
-															 input.Id == "dimension" &&
-															 input.SourceKind == "Vec2";
+						const bool sourceSurfaceVec2 =
+							input.SourceKind == "Vec2" &&
+							((node.Type == "pc.padding" && input.Id == "dimension") ||
+							 (node.Type == "pc.stripe" && input.Id == "position"));
 						if ((!source || found == source->end()) && surface &&
-							(input.SourceKind == "Dimension" || paddingSurfaceDimension)) {
+							(input.SourceKind == "Dimension" || sourceSurfaceVec2)) {
 							context.Values.emplace_back(
 								input.Id,
 								Vector2{
 									static_cast<double>(surface->Width), static_cast<double>(surface->Height)
 								}
 							);
-							if (paddingSurfaceDimension) context.Images.emplace_back(input.Id, surface);
+							if (sourceSurfaceVec2) context.Images.emplace_back(input.Id, surface);
 							continue;
 						}
 						if (!source || found == source->end()) {

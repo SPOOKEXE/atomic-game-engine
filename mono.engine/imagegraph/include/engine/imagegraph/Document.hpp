@@ -259,7 +259,8 @@ namespace engine::imagegraph {
 		Skew,
 		Transform,
 		AreaMap,
-		Shift
+		Shift,
+		WeightAdjust
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
@@ -290,6 +291,7 @@ namespace engine::imagegraph {
 		bool operator==(const SourcePathShapeData2D &) const = default;
 	};
 	struct MeshData2D;
+	struct PathData3D;
 	struct SourcePathData2D {
 		SourcePathOperationKind Kind = SourcePathOperationKind::Reverse;
 		std::vector<Path2D> Inputs;
@@ -310,6 +312,13 @@ namespace engine::imagegraph {
 		Vector2 TransformPosition{}, TransformAnchor{}, TransformScale{1, 1};
 		double TransformRotation = 0;
 		Vector4 MapFrom{0, 0, 1, 1}, MapArea{0, 0, 1, 1};
+		// Source curveMap table uses TOTAL_FRAMES precision.
+		OwnedPayload3D<PathData3D> WeightInput3D;
+		std::vector<double> WeightCurve;
+		double WeightValue = 0, WeightDirection = 0;
+		Vector2 WeightRange{0, 1};
+		uint8_t WeightType = 0, WeightMode = 0;
+		bool WeightLoop = false;
 		double ShiftDistance = 0;
 		Vector2 ShiftRange{0, 1};
 		bool ShiftLoop = false;
@@ -342,6 +351,14 @@ namespace engine::imagegraph {
 					   TransformRotation,
 					   MapFrom,
 					   MapArea,
+					   WeightInput3D,
+					   WeightCurve,
+					   WeightValue,
+					   WeightDirection,
+					   WeightRange,
+					   WeightType,
+					   WeightMode,
+					   WeightLoop,
 					   ShiftDistance,
 					   ShiftRange,
 					   ShiftLoop,
@@ -372,6 +389,14 @@ namespace engine::imagegraph {
 					   other.TransformRotation,
 					   other.MapFrom,
 					   other.MapArea,
+					   other.WeightInput3D,
+					   other.WeightCurve,
+					   other.WeightValue,
+					   other.WeightDirection,
+					   other.WeightRange,
+					   other.WeightType,
+					   other.WeightMode,
+					   other.WeightLoop,
 					   other.ShiftDistance,
 					   other.ShiftRange,
 					   other.ShiftLoop,
@@ -678,6 +703,7 @@ namespace engine::imagegraph {
 	struct SourcePolylineEmptyCache3D {
 		double Length = 0;
 		uint32_t SegmentCount = 0;
+		std::vector<double> Accumulated{};
 		bool operator==(const SourcePolylineEmptyCache3D &) const = default;
 	};
 	struct PathData3D {
@@ -690,6 +716,8 @@ namespace engine::imagegraph {
 		// Sampling applies inner wrappers first without changing source length or weight.
 		std::vector<PathTransform3D> Transforms;
 		std::optional<SourcePolylineEmptyCache3D> SourceEmptyCache;
+		// Shape Path 3D constructor bounds differ from sampled extrema.
+		std::optional<Vector4> SourceBounds2D;
 		bool operator==(const PathData3D &) const = default;
 	};
 	struct PathValue3D {

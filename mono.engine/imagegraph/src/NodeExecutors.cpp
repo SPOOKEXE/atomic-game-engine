@@ -51,6 +51,7 @@ namespace engine::imagegraph::detail {
 					  SourcePathModifierExecutors(),
 					  SourcePathGeometryExecutors(),
 					  SourcePathShiftExecutors(),
+					  SourcePathWeightExecutors(),
 					  SourceQuaternionLookAtExecutors(),
 					  SourcePointsExecutors(),
 					  SourcePointDataExecutors(),
@@ -62,6 +63,7 @@ namespace engine::imagegraph::detail {
 					  SourceBevelExecutors(),
 					  SourcePixelBevelExecutors(),
 					  SourceVolumeProjectionExecutors(),
+					  SourceCylinderProjectionExecutors(),
 					  SourceAtlasExecutors(),
 					  SourceAtlasPixelExecutors(),
 					  SourcePaletteExecutors(),
@@ -72,6 +74,7 @@ namespace engine::imagegraph::detail {
 					  SourceAnimationExecutors(),
 					  SourceRoutingExecutors(),
 					  SourceSwitchExecutors(),
+					  SourceMiscExecutors(),
 					  SourceSequenceAnimationExecutors(),
 					  SourceCacheValueExecutors(),
 					  SourceCacheResultsExecutors(),
@@ -92,6 +95,11 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if (type == "pc.pin" && port == "in") return true;
+				if (type == "pc.surface_project_cylinder_3_d" &&
+					(port == "dimension" || port == "view_angle" || port == "position" ||
+					 port == "angle_range" || port == "depth_range"))
+					return true;
 				if (type == "pc.path_shape_3_d" && (port == "position" || port == "half_size"))
 					return true;
 				if (type == "pc.cache_results" && port == "surface_in") return true;

@@ -1,0 +1,44 @@
+{
+  "profile": "native-cache-results-clear",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_files": [
+    {
+      "path": "scripts/node_cache_results/node_cache_results.gml",
+      "sha256": "135a4a623ec85df80acee5d6f58f611a4b5f562059fbf9e558940a348e84eb09"
+    },
+    {
+      "path": "scripts/surface_functions/surface_functions.gml",
+      "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2"
+    },
+    {
+      "path": "scripts/__node_cache/__node_cache.gml",
+      "sha256": "527e8382130fd91f0040607b0d209585a0543d4156350a12180b46615515d2d9"
+    },
+    {
+      "path": "scripts/node_data/node_data.gml",
+      "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d"
+    }
+  ],
+  "observed_button": "Recursively free surfaces, retain list length/positions, reset surfaceIndex=0, clear input and ordinary cache flags. No update call in callback.",
+  "owned_slot_profile": "Existing Struct/Array payload carries native.cache-results.freed-slot=true for a freed position. It owns no pixels/device handle and is not a source numeric handle or source undefined. Runtime replay metadata only. A cleared flat Elements list is uniformly ElementType=Struct, matching actual runtime array validation. This does not widen flat Any array validity.",
+  "owner_transaction": "Explicit ClearCacheResults validates prepared authored/input revisions and exact durable node ID. Changes matching processor rows in current and pre-frame Data ledgers; retains count and observation timestamp, sets current index0. Bounded reverse dependencies mark outputs/snapshots unavailable, without executing a provider/node or changing other journals/generations/clocks.",
+  "native_scheduler": "At identical signed clock a dependent preview receives UnsupportedExecution until a distinct observation. Unaffected cached output remains readable/reusable. Fresh observations perform normal compiled evaluation. Clear overlays enter reconstructed seeks once at the first replay step and current-frame checkpoint refresh, preventing restoration of freed slots. Authored control revisions retain the overlay for exact surviving Cache Results node ID/type; successful removal/type change or whole-owner Clear retires it, so a readded ID starts a fresh source instance. Direct compiled kernels cover signed fractional observations; Cache Results host reconstruction rejects negative frames, and feedback-bound hosts require integer clocks. The host backward-seek fixture checks refusal atomically before an admitted integer seek.",
+  "limits": "Existing maximum nodes/links/rows/payloads; reverse graph and row traversal bounded; current/candidate journals, retained old output, complete freed-slot metadata, validation workspace and copied invalidation names admitted before allocation/commit. Before scans, dependency ID lookup, name/unique/retirement comparisons and overlay tracked-row membership are admitted in conservative 64-million character/visit work units. Refusal preserves the prepared owner.",
+  "open_gates": [
+    "Invalid output slots are not representable as image pixels or exact source numeric handles. A kernel output retaining such slots explicitly refuses with preserved cleared ledger, instead of publishing transparent images or dropping cycles. This diagnostic does not claim source invalid-handle transport/update parity.",
+    "Source scheduler, onion-skin cache storage and licensed desktop/device handle reuse parity are not claimed. The tested/native scheduler is explicit.",
+    "Clear requires a currently prepared replay owner and unchanged authored/input revisions. A new or stale graph must obtain its own preview ownership first.",
+    "No live UI mouse/device run, ASan/UBSan or performance measurement. Joined release65 CPU core, physics and headless Studio action checks pass."
+  ],
+  "profiling": "ClearCacheResultsReplay owns meaningful imagegraph.cache_results.clear ENGINE_PROFILE span; no timing/heap claim has been made.",
+  "official_surface_context": {
+    "surface_free": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Surfaces/surface_free.htm",
+    "surface_exists": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Surfaces/surface_exists.htm",
+    "scope": "Documentation confirms free/existence operations only; pinned source code establishes callback order and array shape."
+  },
+  "validation": {
+    "strict_syntax": "Seven formatted C++ translation units passed -Wall -Wextra -Wpedantic -Werror -fsyntax-only using the outside include overlay and current live dependencies, including Studio ImageComposer.cpp. Runtime not exercised. See syntax.json and syntax-composer-command.json.",
+    "runtime": "Joined release65 coherent owner/header build and core/physics/headless Studio action checks pass.",
+    "carrier_correction": "Uniform Struct freed-slot carrier passes joined CPU checks; flat Any validity was not widened."
+  }
+}

@@ -364,7 +364,10 @@ TEST_CASE(
 	CHECK(empty.Data->SourceEmptyCache->Length == priorLength);
 	CHECK(empty.Data->SourceEmptyCache->SegmentCount == 4);
 	CHECK(detail::PathRuntime3D(*empty.Data).Length() == priorLength);
-	CHECK(ValueClonePayloadBytes(Value{empty}) == sizeof(Value) + sizeof(PathData3D));
+	CHECK(
+		ValueClonePayloadBytes(Value{empty}) ==
+		sizeof(Value) + sizeof(PathData3D) + empty.Data->SourceEmptyCache->Accumulated.size() * sizeof(double)
+	);
 	CHECK_FALSE(std::isfinite(detail::PathRuntime3D(*empty.Data).Ratio(.5).Position.X));
 	request.Tick = 3;
 	CHECK(evaluate() == empty);

@@ -16,6 +16,17 @@ namespace engine::imagegraph::detail {
 		double Total = 0;
 		std::optional<PathRuntime> Runtime2D;
 		bool Ready = true;
+		std::optional<Vector4> SourceBounds;
+		void AddSourceBounds(const Vector3 &p) {
+			if (!SourceBounds)
+				SourceBounds = Vector4{p.X, p.Y, p.X, p.Y};
+			else {
+				SourceBounds->X = std::min(SourceBounds->X, p.X);
+				SourceBounds->Y = std::min(SourceBounds->Y, p.Y);
+				SourceBounds->Z = std::max(SourceBounds->Z, p.X);
+				SourceBounds->W = std::max(SourceBounds->W, p.Y);
+			}
+		}
 		PathPoint3D Apply(PathPoint3D point) const {
 			for (const auto &transform : Data.Transforms) {
 				if (transform.Projective) {
@@ -145,8 +156,10 @@ namespace engine::imagegraph::detail {
 				double length = 0;
 				for (uint32_t sample = 0; sample <= data.Resolution; ++sample) {
 					const Vector3 point = Segment(i, double(sample) / data.Resolution);
+					AddSourceBounds(point);
 					if (sample) length += std::hypot(point.X - previous.X, point.Y - previous.Y, point.Z);
-					// Source updateLength never updates its previous Z coordinate.
+					// Source updateLength never updates its
+					// previous Z coordinate.
 					previous.X = point.X;
 					previous.Y = point.Y;
 				}
@@ -179,6 +192,72 @@ namespace engine::imagegraph::detail {
 						   : 0;
 			}
 			return Runtime2D ? Runtime2D->Length(line) : Total;
+		}
+		size_t SourceSegmentCount(size_t line = 0) const {
+			if (Data.SourceOperation) {
+				const auto *child = Child(line);
+				return child ? child->SourceSegmentCount(line) : 0;
+			}
+			return Runtime2D ? Runtime2D->SegmentCount(line) : SegmentCount;
+		}
+		size_t SourceAccumulatedCount(size_t line = 0) const {
+			if (Data.SourceOperation) {
+				const auto *child = Child(line);
+				return child ? child->SourceAccumulatedCount(line) : 0;
+			}
+			return Runtime2D ? Runtime2D->AccumulatedCount(line) : SegmentCount;
+		}
+		double SourceAccumulatedAt(size_t index, size_t line = 0) const {
+			if (Data.SourceOperation) {
+				const auto *child = Child(line);
+				if (!child) return 0;
+				if (Data.SourceOperation->Kind == SourcePathOperationKind::Reverse) {
+					const size_t count = child->SourceAccumulatedCount(line);
+					return index < count ? child->SourceAccumulatedAt(count - index - 1, line) : 0;
+				}
+				return child->SourceAccumulatedAt(index, line);
+			}
+			if (Runtime2D) return Runtime2D->AccumulatedAt(index, line);
+			if (Data.SourceEmptyCache)
+				return index < Data.SourceEmptyCache->Accumulated.size()
+						   ? Data.SourceEmptyCache->Accumulated[index]
+						   : NAN;
+			if (index >= SegmentCount) return 0;
+			double length = 0;
+			for (size_t i = 0; i <= index; ++i)
+				length += Lengths[i];
+			return length;
+		}
+		std::optional<Vector4> SourceBoundary(size_t line = 0) const {
+			if (!Data.SourcePresent) return Vector4{0, 0, 1, 1};
+			std::optional<Vector4> bounds;
+			if (Data.SourceOperation) {
+				const auto *child = Child(line);
+				const auto kind = Data.SourceOperation->Kind;
+				bounds = child ? child->SourceBoundary(line)
+						 : kind == SourcePathOperationKind::Reverse || kind == SourcePathOperationKind::Trim
+							 ? Vector4{0, 0, 1, 1}
+							 : Vector4{-4, -4, -4, -4};
+			} else if (Runtime2D) {
+				bounds = Runtime2D->HasBoundary
+							 ? Vector4{Runtime2D->MinX, Runtime2D->MinY, Runtime2D->MaxX, Runtime2D->MaxY}
+							 : Vector4{-4, -4, -4, -4};
+			} else if (Data.SourcePolyline)
+				bounds = Data.SourceBounds2D;
+			else
+				bounds = SourceBounds.value_or(Vector4{-4, -4, -4, -4});
+			if (!bounds) return std::nullopt;
+			for (const auto &t : Data.Transforms) {
+				// Source 3D Transform's bbox ignores quaternion rotation;
+				// camera leaves bbox unchanged.
+				if (t.Projective) continue;
+				const double x0 = t.Anchor.X + (bounds->X - t.Anchor.X) * t.Scale.X + t.Position.X,
+							 y0 = t.Anchor.Y + (bounds->Y - t.Anchor.Y) * t.Scale.Y + t.Position.Y,
+							 x1 = t.Anchor.X + (bounds->Z - t.Anchor.X) * t.Scale.X + t.Position.X,
+							 y1 = t.Anchor.Y + (bounds->W - t.Anchor.Y) * t.Scale.Y + t.Position.Y;
+				bounds = Vector4{std::min(x0, x1), std::min(y0, y1), std::max(x0, x1), std::max(y0, y1)};
+			}
+			return bounds;
 		}
 		bool SpatialLine(size_t line = 0) const {
 			if (!Data.Transforms.empty()) return !Data.Transforms.back().Projective;
@@ -245,4 +324,4 @@ namespace engine::imagegraph::detail {
 			return {Segment(size_t(std::floor(ratio)), ratio - std::floor(ratio)), 1};
 		}
 	};
-}
+} // namespace engine::imagegraph::detail

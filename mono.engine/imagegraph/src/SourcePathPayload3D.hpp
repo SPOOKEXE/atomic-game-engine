@@ -14,6 +14,11 @@ namespace engine::imagegraph::detail {
 		if (path.SourcePolyline &&
 			(!path.SourcePresent || path.Source2D || path.SourceOperation || path.Resolution != 1))
 			return false;
+		if (path.SourceBounds2D &&
+			(!path.SourcePolyline ||
+			 (!std::isfinite(path.SourceBounds2D->X) || !std::isfinite(path.SourceBounds2D->Y) ||
+			  !std::isfinite(path.SourceBounds2D->Z) || !std::isfinite(path.SourceBounds2D->W))))
+			return false;
 		if (path.SourceEmptyCache &&
 			(!path.SourcePolyline || !path.Anchors.empty() || !std::isfinite(path.SourceEmptyCache->Length) ||
 			 path.SourceEmptyCache->Length < 0 || !path.SourceEmptyCache->SegmentCount ||
@@ -23,6 +28,19 @@ namespace engine::imagegraph::detail {
 			if (path.Anchors.size() < 2) return false;
 			for (size_t i = 0; i < 3; ++i)
 				if (path.Anchors.front().Controls[i] != path.Anchors.back().Controls[i]) return false;
+		}
+		if (path.SourceEmptyCache) {
+			const auto &cache = *path.SourceEmptyCache;
+			if ((!cache.Accumulated.empty() && cache.Accumulated.size() != cache.SegmentCount) ||
+				cache.Accumulated.size() > Limits::MaximumArrayElements - *count)
+				return false;
+			*count += cache.Accumulated.size();
+			double previous = 0;
+			for (double length : cache.Accumulated) {
+				if (!std::isfinite(length) || length < previous) return false;
+				previous = length;
+			}
+			if (!cache.Accumulated.empty() && cache.Accumulated.back() != cache.Length) return false;
 		}
 		for (const auto &a : path.Anchors) {
 			if (!std::isfinite(a.Index)) return false;
@@ -58,6 +76,8 @@ namespace engine::imagegraph::detail {
 		if (depth > Limits::MaximumArrayDepth) return UINT64_MAX;
 		uint64_t bytes = MeshAddBytes(sizeof(path), MeshVectorBytes<Retained>(path.Anchors));
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(path.Transforms));
+		if (path.SourceEmptyCache)
+			bytes = MeshAddBytes(bytes, MeshVectorBytes<Retained>(path.SourceEmptyCache->Accumulated));
 		if (path.Source2D)
 			bytes = MeshAddBytes(bytes, SourcePath2DBytes<Retained>(*path.Source2D, depth + 1));
 		if (path.SourceOperation) {

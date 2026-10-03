@@ -1,7 +1,7 @@
 #include "../SourceMappedInputs.hpp"
 #include "../SourceSafeDraw.hpp"
 #include "Gradient.hpp"
-#include "Source2DGenerator.hpp"
+#include "Source2DReferenceUnits.hpp"
 
 #include <numbers>
 #include <type_traits>
@@ -128,12 +128,15 @@ namespace engine::imagegraph::detail {
 				const double divisor = minimum * spacing.Minimum * spacing.Minimum;
 				double ratioX = pixelSize ? width : 0, ratioY = pixelSize ? height : 0;
 				if (referenceScalar) {
-					// Reference Size uses the unrounded canvas width, including fractional canvases.
-					ratioX = std::max(ratioX, 1.);
-					const double lowerWidth = dimensions.HasValue ? dimensions.WidthMinimum : 1.;
-					ratioY = lowerWidth > 0 ? std::max(ratioY, height / lowerWidth)
-											: std::numeric_limits<double>::infinity();
+					Vector2 reference;
+					if (!source2d::ResolveFirstReferenceDimension(c, reference)) return false;
+					// Every row uses the first prepared reference, not its own canvas width.
+					ratioX = reference.X > 0 ? std::max(ratioX, width / reference.X)
+											 : std::numeric_limits<double>::infinity();
+					ratioY = reference.X > 0 ? std::max(ratioY, height / reference.X)
+											 : std::numeric_limits<double>::infinity();
 				}
+
 				extentX = std::clamp(std::ceil(ratioX / divisor), 0., 16.);
 				extentY = std::clamp(std::ceil(ratioY / divisor), 0., 16.);
 			}
@@ -226,14 +229,17 @@ namespace engine::imagegraph::detail {
 		// Float arrays do not enter nodeValueUnit's vector-display conversion branch.
 		const bool syntheticPair = SourceRangeMapped(c, "size") && !c.IsLinked("size") &&
 								   c.IsCatalogueDefault("size").value_or(false);
+		Vector2 reference = dimension;
+		if ((unit == 1 && originalScalar && !syntheticPair) || (positionUnit == 1 && !c.Input("position")))
+			if (!source2d::ResolveReferenceDimension(c, dimension, reference)) return false;
 		if (unit == 1 && originalScalar && !syntheticPair) {
-			size.Range.X *= dimension.X;
-			size.Range.Y *= dimension.X;
+			size.Range.X *= reference.X;
+			size.Range.Y *= reference.X;
 		}
 		auto position = c.Vec2("position");
 		if (positionUnit == 1 && !c.Input("position")) {
-			position.X *= dimension.X;
-			position.Y *= dimension.Y;
+			position.X *= reference.X;
+			position.Y *= reference.Y;
 		}
 		const auto spacing = c.Vec2("spacing", {1, 1});
 		if (spacing.X == 0 || spacing.Y == 0)

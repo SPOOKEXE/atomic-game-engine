@@ -1,5 +1,6 @@
 #pragma once
 
+#include <engine/imagegraph/CacheResultsReplay.hpp>
 #include <engine/imagegraph/FeedbackReplay.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/StatefulTemporalCone.hpp>
@@ -81,6 +82,110 @@ namespace engine::imagegraph {
 	// or cached processor executes once.
 	class CapturedFeedbackHost {
 		std::vector<FeedbackBinding> Bindings;
+		std::vector<std::string> CacheClearNodes, CacheInvalidOutputs, CacheInvalidInputs;
+		FrameTime CacheClearClock{};
+		static uint64_t NamesBytes(const std::vector<std::string> &names) {
+			uint64_t bytes = names.capacity() * sizeof(std::string);
+			for (const auto &name : names)
+				bytes += name.capacity();
+			return bytes;
+		}
+		uint64_t ClearMetadataBytes() const {
+			return NamesBytes(CacheClearNodes) + NamesBytes(CacheInvalidOutputs) +
+				   NamesBytes(CacheInvalidInputs);
+		}
+		static constexpr uint64_t CLEAR_WORK_LIMIT = 64ull * 1024 * 1024;
+		static bool AdmitClearWork(uint64_t &remaining, uint64_t count, uint64_t perItem) {
+			if (count && perItem > remaining / count) return false;
+			remaining -= count * perItem;
+			return true;
+		}
+		template <class Items, class Name> static uint64_t ClearNameScanWork(const Items &items, Name name) {
+			uint64_t remaining = CLEAR_WORK_LIMIT;
+			for (const auto &item : items) {
+				const auto &text = name(item);
+				if (text.size() >= remaining) return UINT64_MAX;
+				remaining -= text.size() + 1;
+			}
+			return CLEAR_WORK_LIMIT - remaining;
+		}
+		static uint64_t ClearNamesScanWork(const std::vector<std::string> &names) {
+			return ClearNameScanWork(names, [](const auto &name) -> const auto & { return name; });
+		}
+		bool OverlayClearedRows(
+			const Document &document, DataReplayState &target, uint64_t maximumBytes, Diagnostic &diagnostic
+		) const {
+			const auto failWork = [&] {
+				diagnostic = {
+					Status::LimitExceeded, {}, {}, "Cache Results clear overlay exceeds work bounds"
+				};
+				return false;
+			};
+			uint64_t work = CLEAR_WORK_LIMIT;
+			const uint64_t names = ClearNamesScanWork(CacheClearNodes);
+			// Admit membership scans before the first tracked-row comparison.
+			if (!AdmitClearWork(work, State.Data.Entries.size(), names)) return failWork();
+			const auto tracked = [&](const auto &entry) {
+				return std::find(CacheClearNodes.begin(), CacheClearNodes.end(), entry.NodeId) !=
+					   CacheClearNodes.end();
+			};
+			const uint64_t matching =
+				std::count_if(State.Data.Entries.begin(), State.Data.Entries.end(), tracked);
+			const uint64_t documentNames =
+				ClearNameScanWork(document.Nodes, [](const auto &node) -> const auto & { return node.Id; });
+			const uint64_t targetNames =
+				ClearNameScanWork(target.Entries, [](const auto &entry) -> const auto & {
+					return entry.NodeId;
+				});
+			const uint64_t sourceNames =
+				ClearNameScanWork(State.Data.Entries, [](const auto &entry) -> const auto & {
+					return entry.NodeId;
+				});
+			if (!AdmitClearWork(work, State.Data.Entries.size() * 2, names) ||
+				!AdmitClearWork(work, matching * 2, documentNames) ||
+				!AdmitClearWork(work, matching * 2, sizeof("pc.cache_results")) ||
+				!AdmitClearWork(work, matching * 2, targetNames) ||
+				!AdmitClearWork(work, matching * 2, sourceNames))
+				return failWork();
+			const auto retainedNode = [&](const auto &entry) {
+				return tracked(entry) &&
+					   std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+						   return node.Id == entry.NodeId && node.Type == "pc.cache_results";
+					   });
+			};
+			size_t count = 0;
+			uint64_t copies = 0;
+			for (const auto &entry : State.Data.Entries)
+				if (retainedNode(entry)) {
+					if (std::none_of(target.Entries.begin(), target.Entries.end(), [&](const auto &item) {
+							return item.NodeId == entry.NodeId && item.ProcessorRow == entry.ProcessorRow;
+						}))
+						++count;
+					copies += RetainedDataReplayEntryBytes(entry);
+				}
+			const uint64_t retained = RetainedDataReplayBytes(target);
+			const uint64_t slots = (target.Entries.size() + count) * sizeof(DataReplayEntry);
+			if (count + target.Entries.size() > Limits::MaximumArrayElements || retained > maximumBytes ||
+				copies > maximumBytes - retained || slots > maximumBytes - retained - copies) {
+				diagnostic = {
+					Status::LimitExceeded, {}, {}, "Cache Results clear overlay exceeds byte bounds"
+				};
+				return false;
+			}
+			target.Entries.reserve(target.Entries.size() + count);
+			for (const auto &entry : State.Data.Entries) {
+				if (!retainedNode(entry)) continue;
+				const auto old =
+					std::find_if(target.Entries.begin(), target.Entries.end(), [&](const auto &item) {
+						return item.NodeId == entry.NodeId && item.ProcessorRow == entry.ProcessorRow;
+					});
+				if (old == target.Entries.end())
+					target.Entries.push_back(entry);
+				else
+					*old = entry;
+			}
+			return true;
+		}
 		std::vector<RequestImageSource> Seeds, Inputs;
 		StatefulOutputEvaluationResult State;
 		// The immutable journal before the current frame; current pixels are never
@@ -154,6 +259,170 @@ namespace engine::imagegraph {
 		}
 
 	  public:
+		// The observed source button frees slots without evaluating the graph. A fresh
+		// observation owns the next update; same-clock dependent previews are unavailable.
+		bool ClearCacheResults(
+			const Document &document,
+			const Plan &plan,
+			std::string_view nodeId,
+			uint64_t revision,
+			uint64_t externalRevision,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) try {
+			const auto fail = [&](Status status, const char *message) {
+				diagnostic = {status, std::string(nodeId), {}, message};
+				return false;
+			};
+			if (!Configured || DocumentRevision != revision || InputRevision != externalRevision)
+				return fail(
+					Status::InvalidValue, "Cache Results clear requires the current prepared document"
+				);
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+				document.Nodes.size() > Limits::MaximumNodes ||
+				document.Outputs.size() > Limits::MaximumOutputs ||
+				plan.EffectiveLinks.size() > Limits::MaximumLinks)
+				return fail(Status::LimitExceeded, "Cache Results clear graph or byte bound exceeded");
+			const uint64_t edges = plan.GroupSurfaceDependencies.size() +
+								   plan.InlineOwnerDependencies.size() +
+								   plan.InlineControlDependencies.size() + plan.PcxNamedDependencies.size();
+			if (edges > Limits::MaximumLinks || CacheClearNodes.size() > Limits::MaximumNodes ||
+				CacheInvalidInputs.size() > Limits::MaximumNodes ||
+				CacheInvalidOutputs.size() > Limits::MaximumOutputs)
+				return fail(
+					Status::LimitExceeded, "Cache Results clear dependency or name count exceeds bounds"
+				);
+			const uint64_t nodeNames =
+				ClearNameScanWork(document.Nodes, [](const auto &n) -> const auto & { return n.Id; });
+			const uint64_t outputNames =
+				ClearNameScanWork(document.Outputs, [](const auto &o) -> const auto & { return o.Id; });
+			const uint64_t linkNames =
+				ClearNameScanWork(plan.EffectiveLinks, [](const auto &l) -> const auto & {
+					return l.FromNode;
+				});
+			uint64_t work = CLEAR_WORK_LIMIT;
+			// Each discovered link may perform a complete ID search. Charge the conservative
+			// node-times-link bound, including string lengths, before entering the walk.
+			if (!AdmitClearWork(work, 1, nodeNames) ||
+				!AdmitClearWork(work, document.Nodes.size(), linkNames) ||
+				!AdmitClearWork(work, document.Nodes.size() * plan.EffectiveLinks.size(), nodeNames) ||
+				!AdmitClearWork(work, document.Nodes.size(), edges) ||
+				!AdmitClearWork(work, 1, ClearNamesScanWork(CacheClearNodes)) ||
+				!AdmitClearWork(work, document.Nodes.size() + 1, ClearNamesScanWork(CacheInvalidInputs)) ||
+				!AdmitClearWork(work, document.Nodes.size() + 1, nodeNames) ||
+				!AdmitClearWork(work, document.Outputs.size(), ClearNamesScanWork(CacheInvalidOutputs)) ||
+				!AdmitClearWork(work, document.Outputs.size(), outputNames) ||
+				!AdmitClearWork(work, document.Outputs.size(), ClearNamesScanWork(CacheInvalidInputs)) ||
+				!AdmitClearWork(work, document.Outputs.size(), nodeNames))
+				return fail(Status::LimitExceeded, "Cache Results clear dependency/name work exceeds bounds");
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &item) {
+					return item.Id == nodeId;
+				});
+			if (node == document.Nodes.end() || node->Type != "pc.cache_results")
+				return fail(Status::UnknownNode, "Clear cache requires an authored Cache Results node");
+			std::array<bool, Limits::MaximumNodes> affected{};
+			std::array<size_t, Limits::MaximumNodes> pending{};
+			size_t count = 0;
+			bool invalid = false;
+			const auto add = [&](size_t index) {
+				if (index >= document.Nodes.size()) {
+					invalid = true;
+					return;
+				}
+				if (!affected[index]) {
+					affected[index] = true;
+					pending[count++] = index;
+				}
+			};
+			const auto addId = [&](std::string_view id) {
+				const auto item =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &n) {
+						return n.Id == id;
+					});
+				if (item == document.Nodes.end())
+					invalid = true;
+				else
+					add(size_t(item - document.Nodes.begin()));
+			};
+			add(size_t(node - document.Nodes.begin()));
+			while (count && !invalid) {
+				const size_t current = pending[--count];
+				for (const auto &link : plan.EffectiveLinks)
+					if (link.FromNode == document.Nodes[current].Id) addId(link.ToNode);
+				for (const auto &edge : plan.GroupSurfaceDependencies)
+					if (edge.Producer == current) add(edge.Consumer);
+				for (const auto &edge : plan.InlineOwnerDependencies)
+					if (!edge.ControlsOnly && edge.Owner == current) add(edge.Consumer);
+				for (const auto &edge : plan.InlineControlDependencies)
+					if (edge.Producer == current) add(edge.Consumer);
+				for (const auto &edge : plan.PcxNamedDependencies)
+					if (edge.Producer == current) add(edge.Consumer);
+			}
+			if (invalid) return fail(Status::InvalidValue, "Cache Results clear dependencies are invalid");
+			uint64_t names = (CacheClearNodes.size() + document.Nodes.size() + CacheInvalidInputs.size() +
+							  CacheInvalidOutputs.size() + document.Outputs.size() + 1) *
+							 sizeof(std::string);
+			for (const auto &n : document.Nodes)
+				names += std::max(n.Id.size(), std::string{}.capacity());
+			for (const auto &out : document.Outputs)
+				names += std::max(out.Id.size(), std::string{}.capacity());
+			names += ClearMetadataBytes() + std::max(nodeId.size(), std::string{}.capacity());
+			uint64_t live = OutputBytes(State) + LedgerBytes(FrameStart) + SourceBytes(FrameStartInputs) +
+							SourceBytes(Seeds) + SourceBytes(Inputs) + InputSnapshot.RetainedBytes() +
+							ClearMetadataBytes() + InputNode.capacity();
+			live += Bindings.capacity() * sizeof(FeedbackBinding);
+			for (const auto &binding : Bindings)
+				live += binding.SourceId.capacity() + binding.OutputId.capacity();
+			const uint64_t stateCopy = ClearedCacheResultsReplayBytes(State.Data, nodeId);
+			const uint64_t startCopy = ClearedCacheResultsReplayBytes(FrameStart.Data, nodeId);
+			const uint64_t validation =
+				std::max(State.Data.Entries.size(), FrameStart.Data.Entries.size()) * sizeof(size_t);
+			if (stateCopy == UINT64_MAX || startCopy == UINT64_MAX)
+				return fail(Status::InvalidValue, "Cache Results clear slot ledger is invalid");
+			if (live > maximumBytes || names > maximumBytes - live ||
+				stateCopy > maximumBytes - live - names ||
+				startCopy > maximumBytes - live - names - stateCopy ||
+				validation > maximumBytes - live - names - stateCopy - startCopy)
+				return fail(
+					Status::LimitExceeded, "Cache Results clear transaction exceeds live byte bounds"
+				);
+			DataReplayState cleared, start;
+			const auto clear = [&](const DataReplayState &source, DataReplayState &output) {
+				const uint64_t bytes = RetainedDataReplayBytes(source) +
+									   ClearedCacheResultsReplayBytes(source, nodeId) +
+									   source.Entries.size() * sizeof(size_t);
+				return ClearCacheResultsReplay(source, nodeId, output, diagnostic, bytes) == Status::Ok;
+			};
+			if (!clear(State.Data, cleared) || !clear(FrameStart.Data, start)) return false;
+			auto nodes = CacheClearNodes, outputs = CacheInvalidOutputs, inputs = CacheInvalidInputs;
+			nodes.reserve(nodes.size() + 1);
+			outputs.reserve(outputs.size() + document.Outputs.size());
+			inputs.reserve(inputs.size() + document.Nodes.size());
+			const auto unique = [](auto &list, std::string_view id) {
+				if (std::find(list.begin(), list.end(), id) == list.end()) list.emplace_back(id);
+			};
+			unique(nodes, nodeId);
+			for (size_t i = 0; i < document.Nodes.size(); ++i)
+				if (affected[i]) unique(inputs, document.Nodes[i].Id);
+			for (const auto &out : document.Outputs)
+				if (std::find(inputs.begin(), inputs.end(), out.NodeId) != inputs.end())
+					unique(outputs, out.Id);
+			State.Data = std::move(cleared);
+			FrameStart.Data = std::move(start);
+			CacheClearNodes = std::move(nodes);
+			CacheInvalidOutputs = std::move(outputs);
+			CacheInvalidInputs = std::move(inputs);
+			CacheClearClock = {Tick, Subframe, NegativeFrame};
+			if (std::find(CacheInvalidInputs.begin(), CacheInvalidInputs.end(), InputNode) !=
+				CacheInvalidInputs.end())
+				InputSnapshot = {};
+			diagnostic = {};
+			return true;
+		} catch (const std::bad_alloc &) {
+			diagnostic = {Status::LimitExceeded, {}, {}, "Cache Results clear allocation refused"};
+			return false;
+		}
 		bool Active() const {
 			return Stateful || !Bindings.empty();
 		}
@@ -164,6 +433,8 @@ namespace engine::imagegraph {
 			Initialized = false;
 		}
 		void Clear() {
+			CacheClearNodes = CacheInvalidOutputs = CacheInvalidInputs = {};
+			CacheClearClock = {};
 			Bindings = {};
 			Seeds = {};
 			Inputs = {};
@@ -309,9 +580,40 @@ namespace engine::imagegraph {
 			const uint64_t currentBytes = OutputBytes(State) + InputSnapshot.RetainedBytes() +
 										  InputNode.capacity() + SourceBytes(Inputs) + configBytes +
 										  oldConfigBytes + externalBytes + LedgerBytes(FrameStart) +
-										  SourceBytes(FrameStartInputs);
+										  SourceBytes(FrameStartInputs) + ClearMetadataBytes();
 			if (currentBytes >= maximumBytes)
 				return fail(Status::LimitExceeded, "stateful host residency exceeds byte bounds");
+			if (!CacheClearNodes.empty() || !CacheInvalidOutputs.empty() || !CacheInvalidInputs.empty()) {
+				uint64_t work = CLEAR_WORK_LIMIT;
+				const uint64_t nodeNames =
+					ClearNameScanWork(document.Nodes, [](const auto &n) -> const auto & { return n.Id; });
+				const uint64_t outputNames = ClearNamesScanWork(outputs);
+				if (!AdmitClearWork(work, CacheClearNodes.size(), nodeNames) ||
+					!AdmitClearWork(work, CacheClearNodes.size(), sizeof("pc.cache_results")) ||
+					!AdmitClearWork(work, CacheInvalidOutputs.size(), outputNames) ||
+					!AdmitClearWork(work, outputs.size() + 1, ClearNamesScanWork(CacheInvalidOutputs)) ||
+					!AdmitClearWork(work, 1, ClearNamesScanWork(CacheInvalidInputs)))
+					return fail(
+						Status::LimitExceeded, "Cache Results clear retirement/name work exceeds bounds"
+					);
+			}
+			const auto clearedOutput = [&](std::string_view id) {
+				return std::find(CacheInvalidOutputs.begin(), CacheInvalidOutputs.end(), id) !=
+					   CacheInvalidOutputs.end();
+			};
+			const bool clearSelection =
+				!selectedOutput.empty() ? clearedOutput(selectedOutput)
+				: !selectedNode.empty()
+					? std::find(CacheInvalidInputs.begin(), CacheInvalidInputs.end(), selectedNode) !=
+						  CacheInvalidInputs.end()
+					: std::any_of(outputs.begin(), outputs.end(), clearedOutput);
+			if (!changed &&
+				FrameTime{request.Tick, request.Subframe, request.NegativeFrame} == CacheClearClock &&
+				clearSelection)
+				return fail(
+					Status::UnsupportedExecution,
+					"Cache Results was cleared; await a fresh source observation"
+				);
 			const bool rigidObservationChanged =
 				temporal.RigidActors && Initialized &&
 				(RigidPlaying != request.RigidPlaying || RigidFrameProgress != request.RigidFrameProgress);
@@ -435,6 +737,17 @@ namespace engine::imagegraph {
 						}
 					candidateStartValid = true;
 					candidateStartResetSurfaces = FrameStartResetSurfaces;
+				}
+				if (((!contiguous && tick == first) || refreshFrame) && !CacheClearNodes.empty()) {
+					auto &data = refreshFrame ? candidateStart.Data : candidate.Data;
+					const uint64_t resident = currentBytes + OutputBytes(candidate) +
+											  LedgerBytes(candidateStart) + SourceBytes(candidateStartInputs);
+					if (resident >= maximumBytes)
+						return fail(
+							Status::LimitExceeded, "Cache Results clear overlay residency exceeds bounds"
+						);
+					if (!OverlayClearedRows(document, data, maximumBytes - resident, diagnostic))
+						return false;
 				}
 				const auto &prior = refreshFrame ? candidateStart : contiguous ? State : candidate;
 				clock.SimulationReplay = &prior.Simulation;
@@ -600,6 +913,24 @@ namespace engine::imagegraph {
 				Bindings = std::move(declarations);
 				Seeds = std::move(blanks);
 			}
+			if (DocumentRevision != revision) {
+				std::erase_if(CacheClearNodes, [&](const auto &id) {
+					return std::none_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+						return node.Id == id && node.Type == "pc.cache_results";
+					});
+				});
+				CacheInvalidOutputs = CacheInvalidInputs = {};
+			} else {
+				std::erase_if(CacheInvalidOutputs, [&](const auto &id) {
+					return std::any_of(
+						candidate.Outputs.begin(), candidate.Outputs.end(), [&](const auto &out) {
+							return out.Id == id;
+						}
+					);
+				});
+				if (FrameTime{request.Tick, request.Subframe, request.NegativeFrame} != CacheClearClock)
+					CacheInvalidInputs.clear();
+			}
 			State = std::move(candidate);
 			FrameStart = std::move(candidateStart);
 			FrameStartInputs = std::move(candidateStartInputs);
@@ -647,10 +978,16 @@ namespace engine::imagegraph {
 				document, plan, revision, externalRevision, request, diagnostic, maximumBytes, {}, nodeId
 			);
 		}
+		std::span<const std::string> CacheResultsInvalidatedOutputs() const {
+			return CacheInvalidOutputs;
+		}
 		const EvaluationSnapshot &Snapshot() const {
 			return InputSnapshot;
 		}
 		const StatefulNamedOutput *Value(std::string_view outputId) const {
+			if (std::find(CacheInvalidOutputs.begin(), CacheInvalidOutputs.end(), outputId) !=
+				CacheInvalidOutputs.end())
+				return nullptr;
 			for (const auto &output : State.Outputs)
 				if (output.Id == outputId) return &output;
 			return nullptr;

@@ -1,5 +1,6 @@
 #include "ArraySource.hpp"
 
+#include <engine/imagegraph/CacheResultsReplay.hpp>
 #include <engine/imagegraph/DataReplay.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 
@@ -36,11 +37,12 @@ namespace engine::imagegraph::detail {
 					return c.Fail(Status::InvalidValue, "Cache Results replay index or list is invalid");
 				old = std::get_if<ArrayValue>(&previous->Values[0].Data);
 				if (!old || !old->Nested.empty() || !old->Items.empty() ||
-					old->ElementType != ValueType::Image)
+					(old->ElementType != ValueType::Image && old->ElementType != ValueType::Struct))
 					return c.Fail(
 						Status::InvalidValue, "Cache Results replay requires a flat owned surface list"
 					);
 				for (const auto &element : old->Elements) {
+					if (IsFreedCacheResultsSlot(element)) continue;
 					const auto *surface = std::get_if<SurfaceValue>(&element);
 					if (!surface || surface->Data.Format != SurfaceFormat::RGBA8Unorm ||
 						!ValidSurfaceLayout(
@@ -105,6 +107,17 @@ namespace engine::imagegraph::detail {
 			const size_t count = input ? std::max(retained, index + 1) : retained;
 			if (count > Limits::MaximumArrayElements)
 				return c.Fail(Status::LimitExceeded, "Cache Results surface count exceeds bounds");
+			// A clear frees handles but retains array positions. Invalid positions are not pixels.
+			for (size_t slot = 0; slot < count; ++slot) {
+				if (input && slot == index) continue;
+				if (old && slot + begin < old->Elements.size() &&
+					IsFreedCacheResultsSlot(old->Elements[slot + begin]))
+					return c.Fail(
+						Status::UnsupportedExecution,
+						"Cache Results output retains freed source surface slots",
+						"cache_surfaces"
+					);
+			}
 			uint64_t inputBytes = 0;
 			if (input) {
 				const auto layout = CheckedSurfaceLayout(

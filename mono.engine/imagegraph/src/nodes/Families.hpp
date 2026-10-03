@@ -39,6 +39,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceAnimationExecutors();
 	std::span<const ExecutorEntry> SourceRoutingExecutors();
 	std::span<const ExecutorEntry> SourceSwitchExecutors();
+	std::span<const ExecutorEntry> SourceMiscExecutors();
 	std::span<const ExecutorEntry> SourceSequenceAnimationExecutors();
 	std::span<const ExecutorEntry> SourceCacheValueExecutors();
 	std::span<const ExecutorEntry> SourceCacheResultsExecutors();
@@ -56,6 +57,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourcePathModifierExecutors();
 	std::span<const ExecutorEntry> SourcePathGeometryExecutors();
 	std::span<const ExecutorEntry> SourcePathShiftExecutors();
+	std::span<const ExecutorEntry> SourcePathWeightExecutors();
 	std::span<const ExecutorEntry> SourceQuaternionLookAtExecutors();
 	std::span<const ExecutorEntry> SourcePointsExecutors();
 	std::span<const ExecutorEntry> SourcePointDataExecutors();
@@ -67,6 +69,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceBevelExecutors();
 	std::span<const ExecutorEntry> SourcePixelBevelExecutors();
 	std::span<const ExecutorEntry> SourceVolumeProjectionExecutors();
+	std::span<const ExecutorEntry> SourceCylinderProjectionExecutors();
 	std::span<const ExecutorEntry> SourceAtlasExecutors();
 	std::span<const ExecutorEntry> SourceAtlasPixelExecutors();
 	std::span<const ExecutorEntry> SourcePaletteExecutors();

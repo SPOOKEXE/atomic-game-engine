@@ -337,10 +337,7 @@ namespace engine::imagegraph::detail {
 		} else if constexpr (std::is_same_v<T, MeshValue2D>)
 			return Mesh2DStorageBytes<true>(item);
 		else if constexpr (std::is_same_v<T, PathValue3D>)
-			return item.Data ? sizeof(PathData3D) + item.Data->Anchors.capacity() * sizeof(PathAnchor3D) +
-								   item.Data->Transforms.capacity() * sizeof(PathTransform3D) +
-								   (item.Data->Source2D ? RetainedPayloadBytes(*item.Data->Source2D) : 0)
-							 : 0;
+			return item.Data ? SourcePath3DBytes<true>(*item.Data) : 0;
 		else if constexpr (std::is_same_v<T, MeshValue3D>)
 			return MeshStorageBytes<true>(item);
 		else if constexpr (std::is_same_v<T, MaterialValue3D>)

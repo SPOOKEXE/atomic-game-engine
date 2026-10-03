@@ -17,7 +17,7 @@ GameMaker execution is claimed by these CPU fixtures.
 | 14 | `position`, `position_unit` | Pixel or Reference translation, then normalized rotation around zero. |
 | 4, 5 | `angle`, `angle_mapped`, `angle_map_range`, `angle_map` | Degrees; a mapped read uses original pixel coordinates and mean RGB. |
 | 13 | `pattern` | Grid or Hexagonal. Hexagonal adjusts row spacing and alternates half-column offsets. |
-| 2, 3 | `size`, `size_unit`, `size_mapped`, `size_map_range`, `size_map` | Scalar Reference Size multiplies by raw canvas width. Float arrays remain unscaled by the pinned unit getter. |
+| 2, 3 | `size`, `size_unit`, `size_mapped`, `size_map_range`, `size_map` | Scalar Reference Size multiplies by the first prepared raw canvas width. Float arrays remain unscaled by the pinned unit getter. |
 | 15 | `spacing` | Anisotropic spacing appears twice in the search-extent calculation. |
 | 9, 10 | `dot_size`, `dot_size_mapped`, `dot_size_map_range`, `dot_size_map` | Dot threshold reads at cell origin plus Position, not the original pixel. Numeric maps ignore alpha. |
 | 6, 12 | `render_mode`, `smoothness` | Pixel step, AA smoothstep or Smooth distance ramp. Smoothness only affects AA. |
@@ -32,8 +32,12 @@ linked `pc.array` endpoint pairs retain depth one. Explicit scalar values are
 duplicated. Numeric endpoint pairs use linked source arrays or static synthetic
 range fields; a `Vector2` authored on the numeric scalar property is rejected. This differs from interpreting a fixed range as processor rows.
 The source Float unit conversion leaves depth-one Float arrays unchanged,
-whereas a scalar uses the reference vector's first component. Position follows
-the source vector conversion and uses both reference dimensions.
+whereas a scalar uses the reference vector's first component. Source getters
+resolve units once with arrIndex0 before processor rows: scalar Reference Size
+and Reference Position retain the first prepared physical Dimension across
+later rows. Position follows the source vector conversion and uses both first
+reference dimensions. Numeric Position links still apply units; surface links
+return dimensions directly.
 
 ## Kernel and source quirks
 
@@ -74,7 +78,10 @@ and the resolved static/inherited output format. Color Depth is a synthetic
 attribute with no processor source index; authored arrays are rejected, and
 linked depth requires conditional format routing that this graph contract
 rejects. It is not a later-row numeric control. Conservative independent extrema admit at most 64 million
-neighbour/key visits across the whole processor batch. They also admit every
+neighbour/key visits across the whole processor batch. The Reference Size X
+extent uses maximum width divided by the actual first prepared physical
+reference width, covering narrow first references followed by wider canvases
+without multiplying a Project unit factor twice. They also admit every
 output row at the largest row layout. Input payloads remain charged by the
 shared evaluator. Actual images use the existing capacity-aware `NewImage`
 reservation. No per-pixel vector or palette/gradient clone is allocated.
@@ -92,9 +99,10 @@ The joined release64 gate passes 26 core cases and one IO case covering all thre
 mapped source slots. Literal Grid, Hexagonal, AA and Smooth byte goldens come from
 an independent scalar formula script. Compiled graphs, linked pairs,
 heterogeneous rows, persistence, format, alpha and atomic failures are exercised.
-Reference-unit array controls still need source first-prepared-dimension scaling;
-the current CPU profile scales against each selected row. Licensed reference
-comparisons and representative profiling remain open.
+The additional three batch65 fixtures cover first-prepared Reference units,
+wide later-row work admission and a Project reference applied exactly once.
+Their joined runtime acceptance is pending. Licensed reference comparisons and
+representative profiling remain open.
 
 ## Pinned provenance
 

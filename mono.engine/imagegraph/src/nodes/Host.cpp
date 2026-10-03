@@ -406,6 +406,7 @@ namespace engine::imagegraph::detail {
 			{"pc.lua_global", RecordedHost, true},
 			{"pc.lua_surface", RecordedHost, true},
 			{"pc.hlsl", RecordedHost, true},
+			{"pc.3_d_transform_image", RecordedHost, true},
 			{"pc.image_mp4", RecordedHost, true},
 			{"pc.image_gif", RecordedHost, true},
 			{"pc.3_d_mesh_obj", RecordedHost, true},

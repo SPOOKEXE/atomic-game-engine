@@ -117,7 +117,13 @@ namespace engine::imagegraph::detail {
 				if (op.Kind == SourcePathOperationKind::Shift && !callback(op, route)) return false;
 				for (size_t i = 0; i < op.Inputs.size(); ++i)
 					if (!descend(op.Inputs[i], 'p', i)) return false;
+				if (op.WeightInput3D && !descend(*op.WeightInput3D, 'w', 0)) return false;
 			}
+		} else if constexpr (std::is_same_v<Leaf, PathData3D>) {
+			if (value.Source2D && !descend(*value.Source2D, 's', 0)) return false;
+			if (value.SourceOperation)
+				for (size_t i = 0; i < value.SourceOperation->Inputs.size(); ++i)
+					if (!descend(value.SourceOperation->Inputs[i], 't', i)) return false;
 		} else if constexpr (std::is_same_v<Leaf, PathValue3D>) {
 			if (value.Data) {
 				if (value.Data->Source2D && !descend(*value.Data->Source2D, 's', 0)) return false;

@@ -8,6 +8,7 @@
 #include "../NodeExecutors.hpp"
 #include "../SourcePathPayload.hpp"
 #include "../SourcePathShiftMemo.hpp"
+#include "../SourcePathWeight.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -43,6 +44,7 @@ namespace engine::imagegraph::detail {
 		std::optional<SourcePathOperationKind> Operation;
 		Vector2 TrimRange{0, 1};
 		std::vector<PathRuntime> Inputs;
+		std::optional<SourcePathWeightRuntime3D> WeightSpatial;
 		const SourcePathData2D *SourceMesh = nullptr;
 		const SourcePathData2D *SourceData = nullptr;
 		std::vector<Vector2> JoinTranslations;
@@ -143,6 +145,23 @@ namespace engine::imagegraph::detail {
 							);
 					}
 				}
+				if (operation.WeightInput3D) {
+					replacement.WeightSpatial.emplace(context, *operation.WeightInput3D);
+					if (!replacement.WeightSpatial->Valid()) return false;
+					const auto bounds = replacement.WeightSpatial->Boundary();
+					if (!bounds)
+						return context.Fail(
+							Status::UnsupportedExecution,
+							"Source spatial shape bounds are "
+							"absent from this saved path",
+							"path"
+						);
+					replacement.MinX = bounds->X;
+					replacement.MinY = bounds->Y;
+					replacement.MaxX = bounds->Z;
+					replacement.MaxY = bounds->W;
+					replacement.HasBoundary = true;
+				}
 				if (!replacement.Shape) replacement.LengthTotal = replacement.Length();
 				if (!replacement.Inputs.empty()) {
 					const auto &first = replacement.Inputs[0];
@@ -153,7 +172,9 @@ namespace engine::imagegraph::detail {
 					replacement.HasBoundary = first.HasBoundary;
 				}
 
-				if (operation.Kind == SourcePathOperationKind::Shift && replacement.Inputs.empty()) {
+				if ((operation.Kind == SourcePathOperationKind::Shift ||
+					 operation.Kind == SourcePathOperationKind::WeightAdjust) &&
+					replacement.Inputs.empty() && !replacement.WeightSpatial) {
 					replacement.MinX = replacement.MinY = 0;
 					replacement.MaxX = replacement.MaxY = 1;
 					replacement.HasBoundary = true;
@@ -266,6 +287,7 @@ namespace engine::imagegraph::detail {
 			swap(Operation, other.Operation);
 			swap(TrimRange, other.TrimRange);
 			Inputs.swap(other.Inputs);
+			std::swap(WeightSpatial, other.WeightSpatial);
 			swap(SourceMesh, other.SourceMesh);
 			swap(SourceData, other.SourceData);
 			JoinTranslations.swap(other.JoinTranslations);
@@ -321,6 +343,7 @@ namespace engine::imagegraph::detail {
 			return nullptr;
 		}
 		size_t LineCount() const {
+			if (WeightSpatial) return WeightSpatial->LineCount();
 			if (SourceMesh) return LineCountSourceVerletPath(*SourceMesh);
 			if (!Operation) return 1;
 			if (*Operation == SourcePathOperationKind::Blend)
@@ -333,6 +356,7 @@ namespace engine::imagegraph::detail {
 			return count;
 		}
 		double Length(size_t line = 0) const {
+			if (WeightSpatial) return WeightSpatial->Length(line);
 			if (Shape) return LengthTotal;
 			if (SourceMesh) return LengthSourceVerletPath(*SourceMesh, line);
 			if (!Operation) return LengthTotal;
@@ -353,6 +377,7 @@ namespace engine::imagegraph::detail {
 						 : 0;
 		}
 		size_t SegmentCount(size_t line = 0) const {
+			if (WeightSpatial) return WeightSpatial->SegmentCount(line);
 			if (Shape) return Lengths.size();
 			if (SourceMesh) return SourceMesh->CachedLengths.size();
 			if (Operation) {
@@ -450,6 +475,7 @@ namespace engine::imagegraph::detail {
 		}
 
 		size_t AccumulatedCount(size_t line = 0) const {
+			if (WeightSpatial) return WeightSpatial->AccumulatedCount(line);
 			if (SourceMesh) {
 				size_t n = SourceMesh->CachedLengths.size();
 				while (n && !SourceMesh->CachedLengths[n - 1])
@@ -470,6 +496,7 @@ namespace engine::imagegraph::detail {
 			return child ? child->AccumulatedCount(line) : 0;
 		}
 		double AccumulatedAt(size_t index, size_t line = 0) const {
+			if (WeightSpatial) return WeightSpatial->AccumulatedAt(index, line);
 			if (SourceMesh) {
 				if (index >= AccumulatedCount() || !SourceMesh->CachedLengths[index]) return 0;
 				double total = 0;
@@ -541,6 +568,41 @@ namespace engine::imagegraph::detail {
 			};
 		}
 
+		PathPoint WeightPoint(double ratio, size_t line) const {
+			if (Inputs.empty() && !WeightSpatial) return {};
+			const auto sample = [&](double r) {
+				if (!WeightSpatial) return Inputs[0].PointRatio(r, line);
+				const auto p = WeightSpatial->Ratio(r, line);
+				return PathPoint{p[0], p[1], p[2]};
+			};
+			const auto &op = *SourceData;
+			auto point = sample(ratio);
+			double weight = point.Weight, value = op.WeightValue;
+			if (op.WeightType == 1) {
+				const double amount = SourceWeightCurve(op.WeightCurve, ratio);
+				value = op.WeightRange.X + (op.WeightRange.Y - op.WeightRange.X) * amount;
+			} else if (op.WeightType == 2) {
+				const auto wrapped = [](double n) {
+					const double first = n * .9999 - std::trunc(n * .9999), sum = first + 1;
+					return sum - std::trunc(sum);
+				};
+				const double r0 = op.WeightLoop ? wrapped(ratio - .001) : std::clamp(ratio - .001, 0., .999),
+							 r1 = op.WeightLoop ? wrapped(ratio + .001) : std::clamp(ratio + .001, 0., .999);
+				const auto a = sample(r0), b = sample(r1);
+				// Source temp_p is overwritten by the forward probe before
+				// its weight is applied.
+				weight = b.Weight;
+				const double direction = SourceWeightDirection(b.X - a.X, b.Y - a.Y);
+				const double difference =
+					std::fmod(std::fmod(direction - op.WeightDirection, 360.) + 540., 360.) - 180.;
+				value =
+					op.WeightRange.X + (op.WeightRange.Y - op.WeightRange.X) * std::abs(difference) / 180.;
+			}
+			point.Weight = op.WeightMode == 0	? std::max(0., weight + value)
+						   : op.WeightMode == 1 ? weight * value
+												: value;
+			return point;
+		}
 		PathPoint ShiftPoint(double ratio, size_t line) const {
 			if (Inputs.empty()) return {};
 			if (!EvaluationContext || !EvaluationContext->PathShiftMemo) {
@@ -557,7 +619,10 @@ namespace engine::imagegraph::detail {
 			const auto key = SourceShiftRatioKey(ratio);
 			if (!key) {
 				context.Fail(
-					Status::InvalidValue, "Source Shift ratio produces a nonfinite source cache key", "path"
+					Status::InvalidValue,
+					"Source Shift ratio produces a nonfinite "
+					"source cache key",
+					"path"
 				);
 				return {};
 			}
@@ -628,7 +693,8 @@ namespace engine::imagegraph::detail {
 			if (Shape) return ShapePoint(SourceShapeDistance(*Shape, Lengths, LengthTotal, distance));
 			if (SourceMesh) return MeshPoint(DistanceSourceVerletPath(*SourceMesh, distance, line));
 			if (Operation) {
-				if (*Operation == SourcePathOperationKind::Shift)
+				if (*Operation == SourcePathOperationKind::Shift ||
+					*Operation == SourcePathOperationKind::WeightAdjust)
 					return PointRatio(distance / Length(), line);
 				if (*Operation == SourcePathOperationKind::Join) return JoinedDistance(distance, line);
 				if (*Operation == SourcePathOperationKind::Skew) {
@@ -682,13 +748,15 @@ namespace engine::imagegraph::detail {
 			return *Operation != SourcePathOperationKind::Combine &&
 				   *Operation != SourcePathOperationKind::VerletMesh &&
 				   *Operation != SourcePathOperationKind::Join &&
-				   *Operation != SourcePathOperationKind::Shift;
+				   *Operation != SourcePathOperationKind::Shift &&
+				   *Operation != SourcePathOperationKind::WeightAdjust;
 		}
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
 			if (Shape) return ShapePoint(SourceShapeRatio(*Shape, Lengths, LengthTotal, ratio));
 			if (SourceMesh) return MeshPoint(SampleSourceVerletPath(*SourceMesh, ratio, line));
 			if (Operation) {
 				if (*Operation == SourcePathOperationKind::Shift) return ShiftPoint(ratio, line);
+				if (*Operation == SourcePathOperationKind::WeightAdjust) return WeightPoint(ratio, line);
 				if (*Operation == SourcePathOperationKind::Join)
 					return JoinedDistance(ratio * Length(), line);
 				if (*Operation == SourcePathOperationKind::Blend) return BlendRatio(ratio, line);
