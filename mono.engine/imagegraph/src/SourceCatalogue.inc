@@ -6342,6 +6342,8 @@ A	I	padding	1
 O	surface_out	Surface Out	0	image
 O	crop_distance	Crop distance	1	vector4
 O	atlas	Atlas	2	atlas
+I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
+S	I	attribute_color_depth	?
 N	pc.cross_section	Node_Cross_Section	Draw Cross Section	generate	scripts/node_cross_section/node_cross_section.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0

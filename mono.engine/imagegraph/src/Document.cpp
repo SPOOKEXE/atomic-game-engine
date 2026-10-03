@@ -5758,7 +5758,8 @@ namespace engine::imagegraph {
 						input->Type == ValueType::Image &&
 						(FindCatalogueInput(*entry, "attribute_process") ||
 						 (entry->Type == "pc.flip_render" && input->Id == "fluid_particle") ||
-						 (entry->Type == "pc.rigid_object" && input->Id == "texture"));
+						 (entry->Type == "pc.rigid_object" && input->Id == "texture") ||
+						 (entry->Type == "pc.crop_content" && input->Id == "surface_in"));
 				}
 			}
 			const bool catalogueStrandArrayInput =
@@ -13405,7 +13406,10 @@ namespace engine::imagegraph {
 				uint64_t payload = 0;
 				if (const auto *array = FindImageArrayOutput(results[index], selected->Port))
 					payload = RetainedImageArrayBytes(*array);
-				else if (const auto *image = FindImageOutput(results[index], selected->Port))
+				else if (const auto *image = FindImageOutput(results[index], selected->Port);
+						 image &&
+						 FindPortType(document.Nodes[index], selected->Port, PortDirection::Output) !=
+							 ValueType::Atlas)
 					payload = image->Pixels.capacity();
 				else {
 					const auto *values = FindValueOutputs(results[index]);
@@ -13449,7 +13453,10 @@ namespace engine::imagegraph {
 				named.Id = selected->Id;
 				if (const auto *array = FindImageArrayOutput(results[index], selected->Port))
 					named.Output = *array;
-				else if (const auto *image = FindImageOutput(results[index], selected->Port))
+				else if (const auto *image = FindImageOutput(results[index], selected->Port);
+						 image &&
+						 FindPortType(document.Nodes[index], selected->Port, PortDirection::Output) !=
+							 ValueType::Atlas)
 					named.Output = *image;
 				else {
 					const auto *values = FindValueOutputs(results[index]);

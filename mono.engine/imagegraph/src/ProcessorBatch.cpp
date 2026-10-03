@@ -5,6 +5,7 @@
 #include "SourceGetterProjection.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourceMappedInputs.hpp"
+#include "SourceRetainedImageOutputs.hpp"
 #include "ValuePayload.hpp"
 
 #include <algorithm>
@@ -195,6 +196,9 @@ namespace engine::imagegraph::detail {
 				return context.Fail(
 					Status::UnsupportedExecution, "source input array depth is dynamic", port
 				);
+			if (selected.Images && context.Entry.Type == "pc.surface_replace" &&
+				(port == "target_image" || port == "replacement_image"))
+				return true;
 			if (selected.Images) {
 				selected.Count = selected.Images->Items.size();
 				selected.Batch = true;
@@ -540,6 +544,12 @@ namespace engine::imagegraph::detail {
 				context.Fail(Status::UnsupportedExecution, "processor observer refused the selected row");
 			return false;
 		};
+		bool retainedInactive = false;
+		if (!SourceRetainedProcessorInactive(context, retainedInactive)) return false;
+		if (retainedInactive) {
+			pending.Committed = observe() && CheckOutputs(context, budget);
+			return pending.Committed;
+		}
 		const bool processor = FindCatalogueInput(context.Entry, "attribute_process") != nullptr;
 		if (!processor) {
 			pending.Committed = Execute(context, executor) && context.FailureCode == Status::Ok &&
@@ -786,6 +796,7 @@ namespace engine::imagegraph::detail {
 				);
 			if (count == 1) {
 				selected.clear();
+				if (!CaptureSourceRetainedProcessorOutputs(context)) return false;
 				pending.Committed = true;
 				return true;
 			}
@@ -1041,6 +1052,7 @@ namespace engine::imagegraph::detail {
 				return context.Fail(
 					Status::LimitExceeded, "processor typed array exceeds payload limits", value.Port
 				);
+		if (!CaptureSourceRetainedProcessorOutputs(context)) return false;
 		context.ByteBudget = budget - accumulated;
 		pending.Committed = true;
 		return true;

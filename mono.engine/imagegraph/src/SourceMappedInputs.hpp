@@ -6,7 +6,12 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
-		return (entry.Type == "pc.dither" &&
+		return (entry.Type == "pc.smear" &&
+				((input.SourceKind == "MapToggle" &&
+				  (input.Id == "strength_mapped" || input.Id == "direction_mapped")) ||
+				 (input.SourceKind == "MapRange" &&
+				  (input.Id == "strength_map_range" || input.Id == "direction_map_range")))) ||
+			   (entry.Type == "pc.dither" &&
 				((input.SourceKind == "MapToggle" && input.Id == "contrast_mapped") ||
 				 (input.SourceKind == "MapRange" && input.Id == "contrast_map_range"))) ||
 			   (entry.Type == "pc.ambient_occlusion" &&
@@ -39,6 +44,8 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.smear" && (port == "strength" || port == "direction"))
+			return context.Boolean(port == "strength" ? "strength_mapped" : "direction_mapped");
 		if (context.Entry.Type == "pc.dither" && port == "contrast")
 			return context.Boolean("contrast_mapped");
 		if (context.Entry.Type == "pc.ambient_occlusion" && (port == "height" || port == "intensity"))
@@ -60,6 +67,10 @@ namespace engine::imagegraph::detail {
 		const Value *value = context.Find(port);
 		const bool simplex =
 			context.Entry.Type == "pc.noise_simplex" && (port == "iteration" || port == "scale");
+		const bool smearDefault = context.Entry.Type == "pc.smear" && !context.IsLinked(port) &&
+								  context.IsCatalogueDefault(port).value_or(false);
+		if (smearDefault)
+			return context.Find(port == "strength" ? "strength_map_range" : "direction_map_range");
 		const bool drawGradient = context.Entry.Type == "pc.gradient" &&
 								  (port == "angle" || port == "radius" || port == "shift" || port == "scale");
 		if (drawGradient && !context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
@@ -81,6 +92,8 @@ namespace engine::imagegraph::detail {
 			!context.IsCatalogueDefault(port).value_or(false) &&
 			(std::holds_alternative<int64_t>(*value) || std::holds_alternative<double>(*value)))
 			return value;
+		if (context.Entry.Type == "pc.smear")
+			return context.Find(port == "strength" ? "strength_map_range" : "direction_map_range");
 		if (context.Entry.Type == "pc.dither" && port == "contrast")
 			return context.Find("contrast_map_range");
 		if (context.Entry.Type == "pc.ambient_occlusion")

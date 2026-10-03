@@ -6,6 +6,8 @@
 #include <cmath>
 
 namespace engine::imagegraph::detail {
+	bool SourceSmear(NodeContext &);
+	bool SourceCropContent(NodeContext &);
 	bool SourceGradientGrid(NodeContext &);
 	bool SourceGradientPoints(NodeContext &);
 	bool SourceGradientPointsN(NodeContext &);
@@ -302,8 +304,11 @@ namespace engine::imagegraph::detail {
 	bool SourceAlignContent(NodeContext &context);
 	bool SourceDitherDiffuse(NodeContext &context);
 	bool SourceOrderedDither(NodeContext &context);
+	bool SourceSurfaceReplace(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
+			ExecutorEntry{"pc.smear", SourceSmear, true},
+			ExecutorEntry{"pc.crop_content", SourceCropContent, true},
 			ExecutorEntry{"pc.gradient_grid", SourceGradientGrid, true},
 			ExecutorEntry{"pc.gradient_points", SourceGradientPoints, true},
 			ExecutorEntry{"pc.gradient_points_n", SourceGradientPointsN, true},
@@ -347,6 +352,7 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.align_content", SourceAlignContent, true},
 			ExecutorEntry{"pc.dither_diffuse", SourceDitherDiffuse, true},
 			ExecutorEntry{"pc.dither", SourceOrderedDither, true},
+			ExecutorEntry{"pc.surface_replace", SourceSurfaceReplace, true},
 			ExecutorEntry{"pc.padding", SourcePadding, true},
 			ExecutorEntry{"pc.9_slice", SourceNineSlice, true},
 			ExecutorEntry{"pc.de_stray", DeStray, true},

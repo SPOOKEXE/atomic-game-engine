@@ -50,6 +50,17 @@ class SurfaceDepthTest(unittest.TestCase):
         nested = "function Node_Time_Remap() : Node() constructor { static late = function() { attribute_surface_depth(); } }"
         self.assertIsNone(depth_attribute(name, {name: nested}, {name: "Node"}, [], [], self.index, 1))
 
+    def test_crop_content_explicit_surface_attribute_uses_the_real_plain_node_input(self):
+        name = "Node_Crop_Content"
+        body = "function Node_Crop_Content() : Node() constructor { newInput(0, nodeValue_Surface()); attribute_surface_depth(); }"
+        value = depth_attribute(name, {name: body}, {name: "Node"}, [],
+                                [(body.index("newInput"), {"index": "0", "kind": "Surface"})], self.index, 1)
+        self.assertEqual("0", value["default"])
+        self.assertEqual("color_depth", value["attribute"])
+        self.assertTrue(value["source_depth_input_enabled"])
+        self.assertEqual(0, value["array_depth"])
+        self.assertIsNone(self.attribute(body, bases={"Node_Test": "Node"}))
+
     def test_unverified_ancestry_nested_calls_and_comments_do_not_declare_depth(self):
         body = "function Node_Test() constructor { attribute_surface_depth(); }"
         self.assertIsNone(self.attribute(body, bases={"Node_Test": "Node_Value"}))
