@@ -48,6 +48,9 @@ Pixel Composer foundations:
 - [x] Run bounded Lua and recorded-random export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
 - [x] Evaluate bounded volume projection; bind rigid/3D outputs, mesh availability and skyboxes; render Composer shaders from cooked binaries and queue camera/SDF jobs. Keep live ShaderScript compilation. Cooked Composer Vulkan tests pass; broader GPU verification remains open.
 - [x] Package source projects and authored scenes; profile scene, simulation, atlas, palette, filter, FFT, path and Strand CPU workloads. Visual acceptance remains open.
+- [x] Add typed physics, replication and portal observations with optional trace IDs, bounded per-world records and server JSONL export (physics and replication: `1dd7743d`).
+- [x] Finish the measured engine stress pass and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. The recovery candidate was rejected without a demonstrated gain. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
+- [x] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`). Passed native dev/Vulkan validation on 2026-10-04: 32 presentation cases, the 64-frame tunnel sweep and 5 portal GPU cases.
 
 Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
@@ -104,9 +107,6 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
 Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
-- [x] Finish the measured engine stress pass and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. The recovery candidate was rejected without a demonstrated gain. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
-- [_] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`).
-
 ### v0.26
 
 - [_] Remove dead engine code and obsolete compatibility paths.
@@ -117,8 +117,6 @@ Isolated passes do not establish combined acceptance. See the [native validation
   1. Verify exact pipeline, revision, world, view, snapshot and node identity, including cancellation and stale requests.
   2. Keep stable names, typed immutable contexts and bounded nonblocking readback. `view.camera` remains the explicit typed pre-view mutation exception.
   3. Add a second real consumer; profile bytes, allocations, GPU work, readback latency and dropped records in release.
-
-- [x] Add typed physics, replication and portal observations with optional trace IDs, bounded per-world records and server JSONL export (physics and replication: `1dd7743d`).
 
 ### v0.27
 
