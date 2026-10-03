@@ -6385,6 +6385,194 @@
       "result": "passed",
       "scope_note": "All 96 metadata/extractor unittest cases pass. Out-of-date matrix output is an intentional refusal fixture; no regenerated matrix freshness claim.",
       "unittest_cases_passed": 96
+    },
+    {
+      "name": "build-release-75-refract-fixture-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-75-refract-fixture-repair.log",
+      "log_sha256": "145ee70ea199a85af232ad6d14957cd8eea0fd14930e9119e31ebf9d706262bd",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Test-only independent feather oracle repair rebuilt after coherent initial44-step release-tests closure; production source unchanged.",
+      "source_commit": "1cd244ae"
+    },
+    {
+      "name": "refract-release-75-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/refract-release-75-repaired.log",
+      "log_sha256": "720352cdc44dcfd5ab4bdd70e9161faa6a320a687c4eafd566ce7ed258b1be95",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 2458,
+      "test_cases_passed": 36
+    },
+    {
+      "name": "client-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-75-joined.log",
+      "log_sha256": "371c70266a7c42b64b7125483b8459a5c72f088b2a8cb77741eeed5cea863f5f",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 7056,
+      "test_cases_passed": 63
+    },
+    {
+      "name": "render-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-75-joined.log",
+      "log_sha256": "9dec3bf902a49f888b9fde80b20a8eaebc72e7d5c6b759cad282e2113a6490ce",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 336604,
+      "test_cases_passed": 805
+    },
+    {
+      "name": "studio-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-75-joined.log",
+      "log_sha256": "227184289793077e57bbd47c8c62e3ab0dde07fc17ba813a68a7acb660d1ff6a",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 8353,
+      "test_cases_passed": 146
+    },
+    {
+      "name": "server-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-75-joined.log",
+      "log_sha256": "e88cbda0aa0b8c7f979d63e8b07875e3b3dc449400b07d255575fbe9d21859c7",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 2180,
+      "test_cases_passed": 99
+    },
+    {
+      "name": "assets-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-75-joined.log",
+      "log_sha256": "28e935a6824ccd30be3a40e5e862132dd15c0abeae19cfca963cac156c40efaf",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "imagegraph-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-75-joined.log",
+      "log_sha256": "de5d52d15502012a45610802fe9287e305746424e2fc6d2e80b3a95c6dcea130",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 1853752,
+      "test_cases_passed": 2553
+    },
+    {
+      "name": "nodegraph-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-75-joined.log",
+      "log_sha256": "8caaa971c2547e2c6e618b81a3ad22f35d722a9e078c012593792725b20f04e0",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "architecture-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-75-joined.log",
+      "log_sha256": "c12c04219632472f8b5c9bac36873ecc08262048ffcacccfc734c97d7600195f",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "ctest_cases_passed": 1
+    },
+    {
+      "name": "io-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-75-joined.log",
+      "log_sha256": "68f2a1e79766d45c1d4ad4783ef144f1e25e07e1a8a93c312a3b0b2d66b5050c",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 10373,
+      "test_cases_passed": 228
+    },
+    {
+      "name": "export-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-75-joined.log",
+      "log_sha256": "e644186cef2559624d56dea0cc2d9e520dabb39c37ee63bcb88372290c408509",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 2613,
+      "test_cases_passed": 62
+    },
+    {
+      "name": "physics-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-75-joined.log",
+      "log_sha256": "65a25a354ea0328fca4855a5a8692df6942082e408e5078ba9cdf801e90781da",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "cli-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-75-joined.log",
+      "log_sha256": "987e4bc86ff5b48975203d22625e3d721946e3a3363a32577e9e91747fbc7771",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "ctest_cases_passed": 16
+    },
+    {
+      "name": "gui-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-75-joined.log",
+      "log_sha256": "08b5322e230db3f3b7d3acfdd47db5be7f60c0d16f6ab3ddd6d27e718577bdeb",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 4974,
+      "test_cases_passed": 331
+    },
+    {
+      "name": "assetc-release-75-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-75-joined.log",
+      "log_sha256": "94ca413d896996080c38dccb67c232cd8cdf61cd10574c4d2b06eb68e7283ec1",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Refract release75 integration. Native CPU scope only; no GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "source_commit": "1cd244ae",
+      "assertions_passed": 362,
+      "test_cases_passed": 42
     }
   ],
   "excluded_or_failed_runs": [
@@ -9178,7 +9366,9 @@
     "build73_release": "Gradient Cube focused35 cases/1608 assertions and fifteen joined scopes pass, including2495 imagegraph cases/1850166 assertions. Initial renderer filter included an untagged device case; corrected CPU-only rerun passes805 cases/336603 assertions. Earlier failures remain retained.",
     "build73_overall": "Selected native integration gates passed. Overall M0-M7, GPU arguments, live Studio and licensed parity remain incomplete.",
     "build74_release": "Surface Project focused22 cases/1126 assertions and fifteen joined CPU scopes plus WAV inspector pass. Full imagegraph2517 cases/1851293 assertions. Retained initial fixture and defensive admission failures repaired; no new GPU run claimed.",
-    "build74_overall": "Selected native integration gates passed. Overall M0-M7, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete."
+    "build74_overall": "Selected native integration gates passed. Overall M0-M7, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete.",
+    "build75_release": "Refract focused36 cases/2458 assertions, actual mapped-input IO1 case/178 assertions,96 metadata tests and14 joined CPU scopes pass. Full imagegraph2553 cases/1853752 assertions; full IO228 cases/10373 assertions. Initial feather-oracle failure retained and repaired without production mask changes.",
+    "build75_overall": "Selected native integration gates passed. Overall M0-M7, camera, font/axes/cache integration, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete."
   },
   "pending_gates": [
     {
