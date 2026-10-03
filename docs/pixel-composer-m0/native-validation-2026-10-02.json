@@ -6136,6 +6136,225 @@
       "exit_code": 0,
       "result": "passed build only",
       "scope_note": "Coherent 44-step release-tests build with Surface Project draft. Build success only; runtime acceptance not established."
+    },
+    {
+      "name": "build-release-74-surface-fixture-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-74-surface-fixture-repair.log",
+      "log_sha256": "1ae126768565d0f661e98806ab0116b35abd8467c30fcb5e5c7292927aa062e8",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Coherent release-tests build with matching current source. Build success only; runtime acceptance separately recorded."
+    },
+    {
+      "name": "build-release-74-surface-admission-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-74-surface-admission-repair.log",
+      "log_sha256": "eb77ab97a72a243a1af80c948d4dac244a7627725d056f1dff213929d625719f",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Coherent release-tests build with matching current source. Build success only; runtime acceptance separately recorded."
+    },
+    {
+      "name": "surface-project-release-74-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/surface-project-release-74-repaired.log",
+      "log_sha256": "7efaa592290f046fcdec8ea9869c33c6b451d6e9fb4051849e38fa505b96c199",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 1126,
+      "test_cases_passed": 22,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "client-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-74-joined.log",
+      "log_sha256": "95fbd93219029388512e2b38030e4b3e4d07e3c5104f19f1e6bec45c400a093f",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 7056,
+      "test_cases_passed": 63,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "render-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-74-joined.log",
+      "log_sha256": "0ac983361b90a6cd9327833c6f7a6bebd23e772fd7670eb0e1faa521cf93e852",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 336604,
+      "test_cases_passed": 805,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "studio-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-74-joined.log",
+      "log_sha256": "3a01fc1c026b5be6da6b2278f64603188c7e22ecf02a99091f875b7befd3783b",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 8342,
+      "test_cases_passed": 145,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "server-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-74-joined.log",
+      "log_sha256": "942582c42a0de1e0c7c5b9d14ed4b8fa0602f17a872d01f9421ec3e3391a3a1d",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 2180,
+      "test_cases_passed": 99,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "assets-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-74-joined.log",
+      "log_sha256": "5f918a69eec0351d3011320fdd5eccb0b1b3e5e4a819232a060342e0fb6ff35c",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "imagegraph-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-74-joined.log",
+      "log_sha256": "804462595474eaa730e0f4c825e7640b51d559c9faf27faf4026f35fb99183f2",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 1851293,
+      "test_cases_passed": 2517,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "nodegraph-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-74-joined.log",
+      "log_sha256": "277c91306c03a1779768475e3871515203de35440998b3ad59bdf173dc954633",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 269,
+      "test_cases_passed": 31,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "architecture-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-74-joined.log",
+      "log_sha256": "1dc290445375d7828649a59e06bb21d7de0c24a206e3bb90b1987e38601fbf2d",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "ctest_cases_passed": 1,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "io-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-74-joined.log",
+      "log_sha256": "24c3af5d7e92825b79168d9dddf533f2676218462255ae79fc851e2a86a00f90",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 10195,
+      "test_cases_passed": 227,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "export-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-74-joined.log",
+      "log_sha256": "a8b74881dab0778963c1d213a9882d142e8162a652c15babd6c02bff38e904e0",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 2613,
+      "test_cases_passed": 62,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "physics-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-74-joined.log",
+      "log_sha256": "8b15ee50c298a96097876be6ac9a5dd44f42421dfef5bb5c10362b0c784c18a8",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 715,
+      "test_cases_passed": 43,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "cli-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-74-joined.log",
+      "log_sha256": "7e629ab51d1aa7a05e93692fdb74dcbb9dc8e06166d8810d1affc10a475e2c01",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "ctest_cases_passed": 16,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "metadata-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/metadata-release-74-joined.log",
+      "log_sha256": "de490cf01ef1e41658964e4fbd30eed5f617818621034bfcbec56b0af9bf2207",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance. The out-of-date matrix message comes from an intentional refusal fixture; this does not prove regeneration freshness.",
+      "unittest_cases_passed": 89,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "gui-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-74-joined.log",
+      "log_sha256": "3cf40c3865f5836bc7bc901f16e792bacbc3e710e1ab19e865129199ec75e20e",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 4974,
+      "test_cases_passed": 331,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "assetc-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-74-joined.log",
+      "log_sha256": "274347f6b9454ab0153752eb1bed0edc1013ffd3ba9d09177af1c3e15c886cca",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 362,
+      "test_cases_passed": 42,
+      "source_commit": "f273119f"
+    },
+    {
+      "name": "studio-wav-release-74-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-wav-release-74-joined.log",
+      "log_sha256": "e6e7f5d9739dc0e96f9921333035fd2189248684d9e37106c31ed5a9c12d8108",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Surface Project release74 integration. Native CPU scope only; no new GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 11,
+      "test_cases_passed": 1,
+      "source_commit": "f273119f"
     }
   ],
   "excluded_or_failed_runs": [
@@ -7703,6 +7922,15 @@
       "exit_code": 42,
       "result": "failed; retained before native acceptance",
       "scope_note": "22 cases:19 passed,3 failed;1114 assertions:1109 passed,5 failed. Numeric dimension fixtures used image-only value.array; linked array dimension_unit is scalar-control refusal; private admission fixture omitted selected white Colour palette. This run does not establish an allocation defect or Surface Project acceptance."
+    },
+    {
+      "name": "surface-project-release-74-fixture-repair-baseline",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/surface-project-release-74-fixture-repair-baseline.log",
+      "log_sha256": "c8ef4ee1c62154fbae7a967786ff7557a75ca972c77648e3f757102e53e78bba",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Corrected source-valid numeric-array fixtures pass. Private original-unit admission fixture fails4 assertions: executor succeeds and publishes output with allocator peak1293 bytes rather than refusing before allocation. This defensive private-context gap is not source scalar-unit processor batching.22 cases:21 passed,1 failed;1126 assertions:1122 passed,4 failed."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -8909,7 +9137,9 @@
     "build69_release": "Coherent initial ABI build646 steps, repair builds and final closure pass. Fifty focused path cases/870 assertions and fourteen joined CPU scopes pass; full imagegraph2,387 cases/1,841,442 assertions. Three failed invocations remain retained.",
     "build69_overall": "Native release69 CPU path gates passed. Overall M0-M7 remains incomplete; new GPU/live Studio/licensed parity and remaining roadmap work are open.",
     "build73_release": "Gradient Cube focused35 cases/1608 assertions and fifteen joined scopes pass, including2495 imagegraph cases/1850166 assertions. Initial renderer filter included an untagged device case; corrected CPU-only rerun passes805 cases/336603 assertions. Earlier failures remain retained.",
-    "build73_overall": "Selected native integration gates passed. Overall M0-M7, GPU arguments, live Studio and licensed parity remain incomplete."
+    "build73_overall": "Selected native integration gates passed. Overall M0-M7, GPU arguments, live Studio and licensed parity remain incomplete.",
+    "build74_release": "Surface Project focused22 cases/1126 assertions and fifteen joined CPU scopes plus WAV inspector pass. Full imagegraph2517 cases/1851293 assertions. Retained initial fixture and defensive admission failures repaired; no new GPU run claimed.",
+    "build74_overall": "Selected native integration gates passed. Overall M0-M7, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete."
   },
   "pending_gates": [
     {
