@@ -3259,3 +3259,104 @@ Across the four repeat/order combinations, the 2 m cell size had lower pile owne
 Raw benchmark stdout and detailed printed grid, memory, and span rows were consumed in RAM and are not retained. The owner-delta summaries and drop counts are retained. The independent Sol review passed its retained-evidence checks, but it reviewed parser-reported owner medians and did not independently recompute them from raw pair rows, which were not retained.
 
 Root qualification: `/tmp/physics-stress-root-native-2026-10-02-u3ez3fem/source/.cache/build/evidence/physics-stress-root-gate-attempt3/root-qualification.json` (SHA-256 `8a2d9212f58ebbca525ec37a4e52ba568ae925a8b10f4d7e6b3a16d0bfcf32e6`). Independent Sol retained-evidence review: `/tmp/physics-stress-root-native-sol-review-a3485ea00935406e9d2c6d66dcff9a0d.json` (SHA-256 `d2669aaec4c0fe8c917a54cde232eeb3e56c4adab696dfe84e1b154c8262ada4`). Six-path application audit: `/tmp/physics-stress-owned-application-root-2026-10-02-uvsxv3r8/application-audit.json` (SHA-256 `dac6eb77e4a89cac1e0c3c6e2cdd77f9800b059544fa16d332cbd160f412c88d`). Two-file format application audit: `/tmp/physics-stress-format-application-root-2026-10-02-887t8kwj/application-audit.json` (SHA-256 `baa65815a753a22b51dec80a3f4b775b802f2ce1d5327537e22a8ccf1cd0dbe7`).
+
+## Matched 200-client recovery pass closure, 2026-10-02
+
+TCP and UDP loopback binding now succeeds. Twelve fresh connected runs completed:
+eight with Tracy unattached and four separate direct Tracy captures. Every run
+admitted 200 clients and ended with 200 Playing, zero streaming and zero timeouts.
+Two candidate serial runs reported 199 moving characters; the other ten reported
+200. Submitted headings use seed 1 and change every 30 input ticks. Network
+feedback, completed ticks and delivered deltas differ across runs; this is a
+matched configuration, not an identical internal replay.
+
+The candidate removed the recovery walk's explicit `Store::Alive` call because
+`GetComponent` already validates the entity's live flag and generation. It was
+rejected without a demonstrated stable gain. `Authority.cpp` is restored exactly
+to its frozen baseline. Eager encoding remains, and the header's stale description
+of packing-time deferral is corrected. Existing accepted stress changes remain;
+the scene-dependent cell-size results still support retaining the 4 m default.
+
+Both frozen servers used GCC 13.3, `release-tests`, first-party `-O3`, Tracy
+enabled, assertions and heap hooks disabled. At freeze, all 50 linked archive
+hashes matched except `libengine_replication.a`. Both stages used the same frozen
+baseline loadtest and `Stress.luau`. Each run used QUIC, 200 clients, a 45-second
+harness, a 57-second server, 30 Hz ticks/input and 30-tick profile windows.
+Serial mode passed `--force-serial-compute`; parallel mode used the default.
+Archive pins and source variants establish this scoped isolation, not a complete
+historical compiler/header/object reproduction bundle. Subsequent independent
+source work and final verification builds changed some live build archives;
+the frozen executable copies remain unchanged.
+
+The unattached sequence was baseline serial/parallel, candidate parallel/serial,
+candidate serial/parallel, then baseline serial/parallel. Thus each compute mode
+has an ABBA sequence, with separately launched processes:
+
+| Mode | Variant / pass | Ticks | Tick p50 / p95 / p99 ms | Recovery p95 ms | Pack p95 ms | FrameGraph drops |
+| --- | --- | ---: | --- | ---: | ---: | ---: |
+| Serial | Baseline / first | 497 | 125.863 / 152.214 / 165.029 | 27.713 | 6.463 | 0 |
+| Serial | Candidate / first | 491 | 125.615 / 164.051 / 179.111 | 34.214 | 6.927 | 0 |
+| Serial | Candidate / repeat | 484 | 135.226 / 153.453 / 160.041 | 27.696 | 6.815 | 0 |
+| Serial | Baseline / repeat | 512 | 118.470 / 152.906 / 164.778 | 27.952 | 7.064 | 0 |
+| Parallel | Baseline / first | 1,071 | 32.650 / 93.192 / 112.047 | 577.883 | 10.695 | 67,712 |
+| Parallel | Candidate / first | 746 | 83.639 / 103.653 / 119.588 | 624.775 | 10.879 | 44,008 |
+| Parallel | Candidate / repeat | 901 | 66.375 / 102.198 / 120.602 | 737.275 | 8.034 | 51,194 |
+| Parallel | Baseline / repeat | 709 | 87.621 / 108.574 / 121.178 | 754.961 | 9.175 | 41,846 |
+
+Recovery and packing histograms sum producer elapsed durations across lanes.
+They are not owner wall time or CPU utilization. Parallel producers can overlap
+and be descheduled. Parallel folded captures remain incomplete and cannot
+establish complete-frame cost shares.
+
+Direct Tracy captures ran baseline serial/parallel and candidate parallel/serial.
+Streaming every recovery event into per-thread sums reconciled both counts and
+nanoseconds against independent aggregate inclusive and self exports. Raw event
+CSV was not persisted; the `.tracy` files and numeric per-thread records remain.
+
+| Mode | Variant | Recovery zones | Observed threads | Summed recovery duration, seconds | Tick p95 ms | FrameGraph drops |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Serial | Baseline | 8,697,900 | 1 | 10.306864 | 161.002 | 0 |
+| Serial | Candidate | 7,736,100 | 1 | 9.779230 | 180.097 | 0 |
+| Parallel | Baseline | 20,957,700 | 24 | 188.222991 | 104.447 | 62,378 |
+| Parallel | Candidate | 13,936,800 | 24 | 274.066573 | 118.807 | 41,218 |
+
+Inclusive and self totals match for these scopes. Whole-run zone totals include
+joining, empty component recovery selections and disconnects, and differ with
+completed work; their reduction is not a speedup. Saved traces directly observe
+worker scopes despite FrameGraph drops. Successful capture and reconciliation do
+not independently prove zero Tracy event loss or capture every startup/shutdown
+frame. Traced timing remains diagnostic rather than shipped-cost evidence.
+
+Host contention varied. Compiler processes were observed during the first
+candidate pair; the one-second repeat sampler observed at most one compiler
+process during each baseline repeat and none during candidate repeats. Both
+candidate Tracy runs observed up to ten compilation processes. Measured total
+machine busy load includes the server, harness, recorder and background work;
+it ranged from 2.74 to 17.04 busy cores across sampled runs. The first serial
+baseline has no CPU sampler. Desktop/game processes remained active. No load
+subtraction or timing correction was applied. These data justify withholding
+the candidate, not attributing a slowdown to its source change.
+
+The added public-API recovery fixture withholds acknowledgements, removes a
+component while another keeps the entity visible, destroys another entity and
+checks continuing survivor/replacement delivery. It rejects absent-component
+and destroyed-handle delta rows; it does not inspect private outstanding entries
+or assert recycled-slot coverage. The final restored-runtime replication suite
+passed 22,991 assertions in 285 cases, including exact priority packet/retry and
+serial/parallel wire tests. Owned C++ formatting and diff checks pass.
+
+`just preset=release-tests test-architecture` failed: `assetc` has unexpected
+`imagegraph_runner` and `parallel` links, and Studio's module/program have an
+unexpected `imagegraph_runner` link relative to `expected_graph.json`. This
+pass changes no dependency declarations. The repository-wide gate is not green.
+No GPU/live Studio check or sanitizer run was performed. Heap hooks were disabled,
+so no allocation, residency or leak conclusion is made.
+
+This closes the measured stress pass and the current-source matched recovery
+profiling requirement. Remaining audit opportunities need their own evidence;
+none is promoted by these captures. Evidence, commands, frozen binaries, source
+variants, archive pins, trace accounting, test output and independent review are
+under `.cache/build/release-tests/evidence/recoverrows-current-20261002/`.
+Server/client logs, folded stacks and whole/window SVGs use labels
+`recoverrows-current-{baseline,candidate}-{serial,parallel}-20261002`, with
+`-repeat` or `-tracy` suffixes, under `.cache/stress/`.
