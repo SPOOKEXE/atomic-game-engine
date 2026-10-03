@@ -1202,6 +1202,8 @@ namespace engine::imagegraph {
 						   : operation.Kind == SourcePathOperationKind::Join		 ? "join"
 						   : operation.Kind == SourcePathOperationKind::Redistribute ? "redistribute"
 						   : operation.Kind == SourcePathOperationKind::Skew		 ? "skew"
+						   : operation.Kind == SourcePathOperationKind::Transform	 ? "transform"
+						   : operation.Kind == SourcePathOperationKind::AreaMap		 ? "area_map"
 																					 : "combine")
 					   << ' ' << operation.Inputs.size();
 				if (operation.Kind == SourcePathOperationKind::Trim)
@@ -1230,6 +1232,16 @@ namespace engine::imagegraph {
 					stream << ' ' << unsigned(operation.SkewAxis) << ' ' << std::setprecision(17)
 						   << operation.SkewStrength << ' ' << operation.SkewCenter.X << ' '
 						   << operation.SkewCenter.Y;
+				if (operation.Kind == SourcePathOperationKind::Transform)
+					stream << ' ' << std::setprecision(17) << operation.TransformPosition.X << ' '
+						   << operation.TransformPosition.Y << ' ' << operation.TransformAnchor.X << ' '
+						   << operation.TransformAnchor.Y << ' ' << operation.TransformScale.X << ' '
+						   << operation.TransformScale.Y << ' ' << operation.TransformRotation;
+				if (operation.Kind == SourcePathOperationKind::AreaMap)
+					stream << ' ' << std::setprecision(17) << operation.MapFrom.X << ' '
+						   << operation.MapFrom.Y << ' ' << operation.MapFrom.Z << ' ' << operation.MapFrom.W
+						   << ' ' << operation.MapArea.X << ' ' << operation.MapArea.Y << ' '
+						   << operation.MapArea.Z << ' ' << operation.MapArea.W;
 				if (operation.Kind == SourcePathOperationKind::Join)
 					for (uint8_t reverse : operation.Reversed)
 						stream << ' ' << unsigned(reverse);
@@ -1963,7 +1975,8 @@ namespace engine::imagegraph {
 				}
 				if (!(stream >> count) || count > Limits::MaximumArrayElements ||
 					(kind != "reverse" && kind != "combine" && kind != "trim" && kind != "offset" &&
-					 kind != "blend" && kind != "join" && kind != "redistribute" && kind != "skew") ||
+					 kind != "blend" && kind != "join" && kind != "redistribute" && kind != "skew" &&
+					 kind != "transform" && kind != "area_map") ||
 					(kind == "blend" ? count != 2
 					 : (kind == "skew" || kind == "redistribute")
 						 ? count != 1
@@ -1979,6 +1992,8 @@ namespace engine::imagegraph {
 								 : kind == "join"		  ? SourcePathOperationKind::Join
 								 : kind == "redistribute" ? SourcePathOperationKind::Redistribute
 								 : kind == "skew"		  ? SourcePathOperationKind::Skew
+								 : kind == "transform"	  ? SourcePathOperationKind::Transform
+								 : kind == "area_map"	  ? SourcePathOperationKind::AreaMap
 														  : SourcePathOperationKind::Combine;
 				if (kind == "trim" &&
 					(!(stream >> operation.TrimRange.X >> operation.TrimRange.Y) ||
@@ -2033,6 +2048,19 @@ namespace engine::imagegraph {
 						!std::isfinite(operation.SkewCenter.X) || !std::isfinite(operation.SkewCenter.Y))
 						return false;
 					operation.SkewAxis = uint8_t(axis);
+				}
+				if (kind == "transform") {
+					if (!(stream >> operation.TransformPosition.X >> operation.TransformPosition.Y >>
+						  operation.TransformAnchor.X >> operation.TransformAnchor.Y >>
+						  operation.TransformScale.X >> operation.TransformScale.Y >>
+						  operation.TransformRotation))
+						return false;
+				}
+				if (kind == "area_map") {
+					if (!(stream >> operation.MapFrom.X >> operation.MapFrom.Y >> operation.MapFrom.Z >>
+						  operation.MapFrom.W >> operation.MapArea.X >> operation.MapArea.Y >>
+						  operation.MapArea.Z >> operation.MapArea.W))
+						return false;
 				}
 				if (kind == "join") {
 					if (!admit(count * sizeof(uint8_t))) return false;

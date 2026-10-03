@@ -82,7 +82,7 @@ namespace engine::imagegraph {
 								   node.Type == "pc.cache_value_array" || node.Type == "pc.3_d_affector" ||
 								   node.Type == "pc.segment_filter" || node.Type == "pc.path_blend" ||
 								   node.Type == "pc.path_to_curve" || node.Type == "pc.path_redistribute" ||
-								   node.Type == "pc.path_skew";
+								   node.Type == "pc.path_skew" || node.Type == "pc.path_map_area";
 			cone.FirstFrameData |= node.Type == "pc.3_d_affector";
 			cone.Simulation |= node.Type == "image.verlet_simple" ||
 							   (node.Type.starts_with("pc.verlet_") || node.Type.starts_with("pc.flip_"));

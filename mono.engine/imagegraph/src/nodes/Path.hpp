@@ -152,6 +152,27 @@ namespace engine::imagegraph::detail {
 					replacement.HasBoundary = first.HasBoundary;
 				}
 
+				if (operation.Kind == SourcePathOperationKind::Transform) {
+					if (replacement.Inputs.empty()) {
+						replacement.MinX = replacement.MinY = 0;
+						replacement.MaxX = replacement.MaxY = 1;
+					} else {
+						const auto a = replacement.TransformPoint({replacement.MinX, replacement.MinY, 1});
+						const auto b = replacement.TransformPoint({replacement.MaxX, replacement.MaxY, 1});
+						replacement.MinX = std::min(a.X, b.X);
+						replacement.MinY = std::min(a.Y, b.Y);
+						replacement.MaxX = std::max(a.X, b.X);
+						replacement.MaxY = std::max(a.Y, b.Y);
+					}
+					replacement.HasBoundary = true;
+				}
+				if (operation.Kind == SourcePathOperationKind::AreaMap) {
+					replacement.MinX = operation.MapArea.X - operation.MapArea.Z;
+					replacement.MinY = operation.MapArea.Y - operation.MapArea.W;
+					replacement.MaxX = operation.MapArea.X + operation.MapArea.Z;
+					replacement.MaxY = operation.MapArea.Y + operation.MapArea.W;
+					replacement.HasBoundary = true;
+				}
 				if (operation.Kind == SourcePathOperationKind::Offset && !replacement.Inputs.empty() &&
 					!replacement.Inputs[0].HasBoundary) {
 					replacement.MinX = replacement.MinY = replacement.MaxX = replacement.MaxY = -4;
@@ -513,6 +534,24 @@ namespace engine::imagegraph::detail {
 				a.Weight + (b.Weight - a.Weight) * amount
 			};
 		}
+
+		PathPoint TransformPoint(PathPoint p) const {
+			const auto &op = *SourceData;
+			p.X = op.TransformAnchor.X + (p.X - op.TransformAnchor.X) * op.TransformScale.X;
+			p.Y = op.TransformAnchor.Y + (p.Y - op.TransformAnchor.Y) * op.TransformScale.Y;
+			if (op.TransformRotation == 180) {
+				p.X = op.TransformAnchor.X + (op.TransformAnchor.X - p.X);
+				p.Y = op.TransformAnchor.Y + (op.TransformAnchor.Y - p.Y);
+			} else if (op.TransformRotation != 0) {
+				const double x = p.X - op.TransformAnchor.X, y = p.Y - op.TransformAnchor.Y,
+							 angle = -op.TransformRotation * std::numbers::pi / 180;
+				p.X = op.TransformAnchor.X + x * std::cos(angle) - y * std::sin(angle);
+				p.Y = op.TransformAnchor.Y + x * std::sin(angle) + y * std::cos(angle);
+			}
+			p.X += op.TransformPosition.X;
+			p.Y += op.TransformPosition.Y;
+			return p;
+		}
 		PathPoint PointDistance(double distance, size_t line = 0) const {
 			if (Shape) return ShapePoint(SourceShapeDistance(*Shape, Lengths, LengthTotal, distance));
 			if (SourceMesh) return MeshPoint(DistanceSourceVerletPath(*SourceMesh, distance, line));
@@ -527,6 +566,9 @@ namespace engine::imagegraph::detail {
 					return p;
 				}
 				if (*Operation == SourcePathOperationKind::Redistribute)
+					return PointRatio(distance / Length(), line);
+				if (*Operation == SourcePathOperationKind::Transform ||
+					*Operation == SourcePathOperationKind::AreaMap)
 					return PointRatio(distance / Length(), line);
 
 				if (*Operation == SourcePathOperationKind::Reverse ||
@@ -575,6 +617,18 @@ namespace engine::imagegraph::detail {
 					const size_t lo = size_t(std::floor(position)), hi = size_t(std::ceil(position));
 					const auto &table = *SourceData->RedistributeMap;
 					return Inputs[0].PointRatio(table[lo] + (table[hi] - table[lo]) * (position - lo), line);
+				}
+				if (*Operation == SourcePathOperationKind::Transform ||
+					*Operation == SourcePathOperationKind::AreaMap) {
+					if (Inputs.empty()) return {};
+					auto p = Inputs[0].PointRatio(ratio, line);
+					if (*Operation == SourcePathOperationKind::Transform) return TransformPoint(p);
+					const auto &op = *SourceData;
+					p.X = (op.MapArea.X - op.MapArea.Z) +
+						  (p.X - op.MapFrom.X) / op.MapFrom.Z * op.MapArea.Z * 2;
+					p.Y = (op.MapArea.Y - op.MapArea.W) +
+						  (p.Y - op.MapFrom.Y) / op.MapFrom.W * op.MapArea.W * 2;
+					return p;
 				}
 
 				if (*Operation == SourcePathOperationKind::Offset) {

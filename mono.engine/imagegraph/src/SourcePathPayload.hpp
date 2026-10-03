@@ -40,6 +40,22 @@ namespace engine::imagegraph::detail {
 			if (op.SkewAxis > 1 || op.Inputs.size() != 1) return false;
 		} else if (op.SkewAxis != 0 || op.SkewStrength != 0 || op.SkewCenter != Vector2{})
 			return false;
+		if (!std::isfinite(op.TransformPosition.X) || !std::isfinite(op.TransformPosition.Y) ||
+			!std::isfinite(op.TransformAnchor.X) || !std::isfinite(op.TransformAnchor.Y) ||
+			!std::isfinite(op.TransformScale.X) || !std::isfinite(op.TransformScale.Y) ||
+			!std::isfinite(op.TransformRotation))
+			return false;
+		if (op.Kind != SourcePathOperationKind::Transform &&
+			(op.TransformPosition != Vector2{} || op.TransformAnchor != Vector2{} ||
+			 op.TransformScale != Vector2{1, 1} || op.TransformRotation != 0))
+			return false;
+		if (!std::isfinite(op.MapFrom.X) || !std::isfinite(op.MapFrom.Y) || !std::isfinite(op.MapFrom.Z) ||
+			!std::isfinite(op.MapFrom.W) || !std::isfinite(op.MapArea.X) || !std::isfinite(op.MapArea.Y) ||
+			!std::isfinite(op.MapArea.Z) || !std::isfinite(op.MapArea.W))
+			return false;
+		if (op.Kind != SourcePathOperationKind::AreaMap &&
+			(op.MapFrom != Vector4{0, 0, 1, 1} || op.MapArea != Vector4{0, 0, 1, 1}))
+			return false;
 
 		if (!std::isfinite(op.Offset) || !std::isfinite(op.BlendAmount)) return false;
 		if (op.Kind != SourcePathOperationKind::Offset && (op.Offset != 0 || op.ClampOffset)) return false;
@@ -80,7 +96,8 @@ namespace engine::imagegraph::detail {
 		if (op.Kind != SourcePathOperationKind::Reverse && op.Kind != SourcePathOperationKind::Combine &&
 			op.Kind != SourcePathOperationKind::Trim && op.Kind != SourcePathOperationKind::Offset &&
 			op.Kind != SourcePathOperationKind::Blend && op.Kind != SourcePathOperationKind::Join &&
-			op.Kind != SourcePathOperationKind::Redistribute && op.Kind != SourcePathOperationKind::Skew)
+			op.Kind != SourcePathOperationKind::Redistribute && op.Kind != SourcePathOperationKind::Skew &&
+			op.Kind != SourcePathOperationKind::Transform && op.Kind != SourcePathOperationKind::AreaMap)
 			return false;
 		if (op.Kind != SourcePathOperationKind::Combine && op.Kind != SourcePathOperationKind::Join &&
 			op.Kind != SourcePathOperationKind::Blend && op.Inputs.size() > 1)

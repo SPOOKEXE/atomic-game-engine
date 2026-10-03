@@ -46,6 +46,7 @@ namespace engine::imagegraph::detail {
 					  SourcePathExecutors(),
 					  SourcePathComposeExecutors(),
 					  SourcePathModifierExecutors(),
+					  SourcePathGeometryExecutors(),
 					  SourcePointsExecutors(),
 					  SourcePointDataExecutors(),
 					  SourceSpatialPointsExecutors(),

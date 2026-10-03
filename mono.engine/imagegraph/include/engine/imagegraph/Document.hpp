@@ -254,7 +254,9 @@ namespace engine::imagegraph {
 		Blend,
 		Join,
 		Redistribute,
-		Skew
+		Skew,
+		Transform,
+		AreaMap
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
@@ -302,6 +304,9 @@ namespace engine::imagegraph {
 		Vector2 SkewCenter{};
 		double SkewStrength = 0;
 		uint8_t SkewAxis = 0;
+		Vector2 TransformPosition{}, TransformAnchor{}, TransformScale{1, 1};
+		double TransformRotation = 0;
+		Vector4 MapFrom{0, 0, 1, 1}, MapArea{0, 0, 1, 1};
 		std::vector<double> BlendLengths;
 		std::vector<std::vector<double>> BlendAccumulated;
 		bool operator==(const SourcePathData2D &) const = default;
