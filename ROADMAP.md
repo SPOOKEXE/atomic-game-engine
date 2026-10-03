@@ -56,6 +56,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Resume pending exports, cancel safely and publish atomically.
 - [x] Sample Mirror paths with source-compatible local animator ratios and input capture.
 - [x] Capture and replay bounded frame caches across CPU, client, Studio and exports.
+- [x] Expose the granted WAV File Watcher control and validate reloads and refused edits.
 - [x] Decode bounded font bytes into glyph bitmaps and metrics.
 - [x] Decode real outline and bitmap font distance fields with bounded tracked storage.
 - [x] Integrate Flow and Bubble noise generators.

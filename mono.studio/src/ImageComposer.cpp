@@ -31,6 +31,7 @@
 #include "TimelineKeyEditor.hpp"
 #include "Vector2Panel.hpp"
 #include "WavExport.hpp"
+#include "WavFileChecker.hpp"
 #include "WavTimelinePanel.hpp"
 
 #include <engine/assets/Texture.hpp>
@@ -3856,7 +3857,22 @@ namespace studio {
 					node = FindNode(state.Authored, nodeId);
 					if (!node) return;
 				}
-				ImGui::TextWrapped("File watching is unavailable.");
+				bool fileChecker = true;
+				Diagnostic checkerError;
+				if (detail::ReadWavFileCheckerEnabled(*node, fileChecker, checkerError)) {
+					if (ImGui::Checkbox("File Watcher", &fileChecker)) {
+						ApplyDocumentEdit(state, [&](Document &document) {
+							auto *edited = FindNode(document, nodeId);
+							return edited && detail::SetWavFileCheckerEnabled(
+												 *edited, fileChecker, state.LastDiagnostic
+											 );
+						});
+						node = FindNode(state.Authored, nodeId);
+						if (!node) return;
+					}
+					ImGui::TextWrapped("Watches only a successfully loaded WAV file.");
+				} else
+					ImGui::TextWrapped("%s", checkerError.Message.c_str());
 				engine::imagegraphphysics::RigidProvider waveformRequestRigidProvider;
 				engine::imagegraph::EvaluationRequest waveformRequest;
 				waveformRequest.HostProvider = &HostFor(state);

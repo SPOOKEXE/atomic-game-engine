@@ -149,7 +149,7 @@ TEST_CASE("Granted WAV reload invalidates previews without opening a device", "[
 	CHECK(reloaded == 0);
 	CHECK(sources.front().SourceId == retained.SourceId);
 	CHECK(sources.front().Data == retained.Data);
-	document.Nodes.front().SourceProperties = {{"file_checker", false}};
+	REQUIRE(studio::detail::SetWavFileCheckerEnabled(document.Nodes.front(), false, diagnostic));
 	file.Write(192);
 	file.Stamp(20);
 	REQUIRE(preview.CheckFiles(document, request, 3, sources, cache, reloaded, diagnostic));
@@ -157,7 +157,7 @@ TEST_CASE("Granted WAV reload invalidates previews without opening a device", "[
 	CHECK(reloaded == 0);
 	CHECK(sources.front().SourceId == retained.SourceId);
 	CHECK(sources.front().Data == retained.Data);
-	document.Nodes.front().SourceProperties = {{"file_checker", true}};
+	REQUIRE(studio::detail::SetWavFileCheckerEnabled(document.Nodes.front(), true, diagnostic));
 	REQUIRE(preview.CheckFiles(document, request, 6, sources, cache, reloaded, diagnostic));
 	REQUIRE(preview.CheckFiles(document, request, 8, sources, cache, reloaded, diagnostic));
 	CHECK(reloaded == 1);
@@ -248,4 +248,30 @@ TEST_CASE("WAV watcher binding cannot grow or replace authority on refusal", "[s
 	CHECK(watches.Files.front()->SourceId == "clip");
 	watches.Remove("clip");
 	CHECK_FALSE(watches.Files.front());
+}
+
+TEST_CASE(
+	"WAV watcher inspector default and malformed controls preserve authoring", "[studio][wav_watcher]"
+) {
+	using namespace engine::imagegraph;
+	Node node;
+	node.Id = "reader";
+	node.Type = "pc.wav_file_read";
+	Diagnostic diagnostic;
+	bool enabled = false;
+	REQUIRE(studio::detail::ReadWavFileCheckerEnabled(node, enabled, diagnostic));
+	CHECK(enabled);
+	REQUIRE(studio::detail::SetWavFileCheckerEnabled(node, true, diagnostic));
+	CHECK(node.SourceProperties.empty());
+	REQUIRE(studio::detail::SetWavFileCheckerEnabled(node, false, diagnostic));
+	REQUIRE(node.SourceProperties.size() == 1);
+	CHECK(std::get<bool>(node.SourceProperties.front().Data) == false);
+	node.SourceProperties.push_back({"file_checker", true});
+	const auto prior = node;
+	CHECK_FALSE(studio::detail::SetWavFileCheckerEnabled(node, true, diagnostic));
+	CHECK(node == prior);
+	node.SourceProperties = {{"file_checker", double{1}}};
+	const auto malformed = node;
+	CHECK_FALSE(studio::detail::SetWavFileCheckerEnabled(node, true, diagnostic));
+	CHECK(node == malformed);
 }

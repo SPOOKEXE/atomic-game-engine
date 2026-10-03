@@ -530,22 +530,8 @@ namespace studio {
 		request.AudioClips = sources;
 		for (const auto &node : document.Nodes) {
 			if (node.Type != "pc.wav_file_read") continue;
-			bool checker = true, found = false;
-			for (const auto &property : node.SourceProperties)
-				if (property.Port == "file_checker") {
-					const auto *value = std::get_if<bool>(&property.Data);
-					if (!value || found) {
-						diagnostic = {
-							Status::InvalidValue,
-							node.Id,
-							"file_checker",
-							"WAV checker requires one boolean source property"
-						};
-						return false;
-					}
-					found = true;
-					checker = *value;
-				}
+			bool checker = true;
+			if (!detail::ReadWavFileCheckerEnabled(node, checker, diagnostic)) return false;
 			if (!checker) continue;
 			WavPreviewControls controls;
 			if (ResolveWavPreviewControls(document, node.Id, request, controls, diagnostic) != Status::Ok)

@@ -9,6 +9,64 @@
 #include <optional>
 
 namespace studio::detail {
+	// Missing source attributes retain the verified WAV constructor default.
+	inline bool ReadWavFileCheckerEnabled(
+		const engine::imagegraph::Node &node, bool &enabled, engine::imagegraph::Diagnostic &diagnostic
+	) {
+		using namespace engine::imagegraph;
+		if (node.Type != "pc.wav_file_read" ||
+			node.SourceProperties.size() > Limits::MaximumPropertiesPerNode) {
+			diagnostic = {
+				Status::InvalidValue, node.Id, "file_checker", "File Watcher requires a bounded WAV Read node"
+			};
+			return false;
+		}
+		bool value = true, found = false;
+		for (const auto &property : node.SourceProperties)
+			if (property.Port == "file_checker") {
+				const auto *flag = std::get_if<bool>(&property.Data);
+				if (!flag || found) {
+					diagnostic = {
+						Status::InvalidValue,
+						node.Id,
+						"file_checker",
+						"WAV checker requires one boolean source property"
+					};
+					return false;
+				}
+				found = true;
+				value = *flag;
+			}
+		enabled = value;
+		diagnostic = {};
+		return true;
+	}
+	inline bool SetWavFileCheckerEnabled(
+		engine::imagegraph::Node &node, bool enabled, engine::imagegraph::Diagnostic &diagnostic
+	) {
+		using namespace engine::imagegraph;
+		bool current = false;
+		if (!ReadWavFileCheckerEnabled(node, current, diagnostic)) return false;
+		for (auto &property : node.SourceProperties)
+			if (property.Port == "file_checker") {
+				property.Data = enabled;
+				diagnostic = {};
+				return true;
+			}
+		if (enabled) {
+			diagnostic = {};
+			return true;
+		}
+		if (node.SourceProperties.size() == Limits::MaximumPropertiesPerNode) {
+			diagnostic = {
+				Status::LimitExceeded, node.Id, "file_checker", "WAV source property count exceeds its bound"
+			};
+			return false;
+		}
+		node.SourceProperties.push_back({"file_checker", false});
+		diagnostic = {};
+		return true;
+	}
 	struct WavFileCheckerState {
 		int64_t EditSecond = 0;
 		std::array<uint64_t, 2> DueFrames{};
