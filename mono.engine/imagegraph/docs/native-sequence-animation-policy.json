@@ -1,0 +1,40 @@
+{
+  "profile": "native-source-sequence-animation",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_files": [
+    {
+      "path": "scripts/node_sequence_anim/node_sequence_anim.gml",
+      "sha256": "be326b715cd989d969ba7dca474aa7a642585d00952534ead3e28021e1e22bc7"
+    },
+    {
+      "path": "scripts/array_functions/array_functions.gml",
+      "sha256": "02b928bd2c3e0c94192aec6e0ccd3fcac0734e0a5bb1ad588117fde674018581"
+    }
+  ],
+  "source_node": "pc.sequence_anim",
+  "controls": {
+    "surface_in": "required, outer surface array depth 1; nonarray forwarded",
+    "sequence": "flat numeric array, empty generates ordinary indices",
+    "overflow": "0 Hold, 1 Loop, 2 Ping Pong, 3 Empty",
+    "speed": "scalar, default 1; floor(signed frame * speed)"
+  },
+  "native_index_profile": "nonnegative real in-range frame indices truncate toward zero only after source real-bounds check; same bounded profile as ArrayEditNodes.cpp Index",
+  "sentinels": {
+    "noone": -4,
+    "array_safe_get_fast_default": 0
+  },
+  "limits": "existing shared evaluation admission and array depth/count/byte limits; full temporary source tree and selected owned output overlap charged before construction",
+  "ownership": "pure request clock, no ledger, wall clock or RNG; output copies retained storage",
+  "open_gates": [
+    "Licensed desktop fractional index coercion has not been measured.",
+    "Single-frame Ping Pong source modulo-zero is UnsupportedExecution pending runtime evidence.",
+    "ArrayObject source helper extensions are not represented by ordinary native arrays.",
+    "Source Inspector sequence editing and timeline preview drawing are not implemented by this executor."
+  ],
+  "verification": {
+    "source_audit": "pinned GML update and ordinary array helper branches read",
+    "strict_syntax": "production executor plus six core cases and one CPU client case: -Wall -Wextra -Wpedantic -Werror -fsyntax-only passed against current headers without PCH",
+    "runtime": "pending coherent joined build, no mixed archive evidence"
+  },
+  "manual_context": "https://manual.gamemaker.io/beta/en/GameMaker_Language/GML_Reference/Variable_Functions/array_get.htm describes Real index and bounds, not the licensed desktop fractional conversion rule"
+}

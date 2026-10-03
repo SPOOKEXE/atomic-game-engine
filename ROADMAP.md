@@ -42,7 +42,7 @@ Milestone labels describe development scope, not release versions.
 
   1. Retain the source licence, pinned metadata, enum choices and typed shader inputs; preserve static selectors and source records; save instance ports, graph selectors and cooked-shader references.
   2. Evaluate bounded image, data, path and palette kernels, including mapped inputs, mask-aware generators, Shift, Look At, Surface Replace and retained Smear/Crop outputs; inherit instance routes.
-  3. Replay animation, persisted Gradients, Time Remap, FLIP/Verlet, Strand and rigid actors with bounded history; retain random state, resolve FFT windows and rasterize trails/VFX.
+  3. Replay animation, image sequences, persisted Gradients, Time Remap, FLIP/Verlet, Strand and rigid actors with bounded history; retain random state, resolve FFT windows and rasterize trails/VFX.
   4. Edit graphs, groups, keys and tiles atomically; refresh HLSL sockets, cook shaders and retain Lua observations; preserve moved inputs, animator aliases and refused timeline selections; insert Gradient/Matrix keys and save rigid meshes with metadata.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
   6. Run bounded Lua and recorded-random export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.

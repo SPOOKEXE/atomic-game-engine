@@ -70,6 +70,7 @@ namespace engine::imagegraph::detail {
 					  TemporalExecutors(),
 					  SourceAnimationExecutors(),
 					  SourceRoutingExecutors(),
+					  SourceSequenceAnimationExecutors(),
 					  SourceCacheValueExecutors(),
 					  SourceConversionExecutors(),
 					  SourceColourFilterExecutors()})
@@ -88,6 +89,7 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if (type == "pc.sequence_anim" && (port == "surface_in" || port == "sequence")) return true;
 				if (type == "pc.quarternion_lookat" &&
 					(port == "origin" || port == "target" || port == "up" || port == "unit"))
 					return true;

@@ -5759,7 +5759,9 @@ namespace engine::imagegraph {
 						(FindCatalogueInput(*entry, "attribute_process") ||
 						 (entry->Type == "pc.flip_render" && input->Id == "fluid_particle") ||
 						 (entry->Type == "pc.rigid_object" && input->Id == "texture") ||
-						 (entry->Type == "pc.crop_content" && input->Id == "surface_in"));
+						 (entry->Type == "pc.crop_content" && input->Id == "surface_in") ||
+						 (entry->Type == "pc.sequence_anim" && input->Id == "surface_in" &&
+						  input->ArrayDepth == 1));
 				}
 			}
 			const bool catalogueStrandArrayInput =
@@ -9735,6 +9737,11 @@ namespace engine::imagegraph {
 							if (const auto *values = FindValueOutputs(results[sourceIndex])) {
 								for (const auto &value : *values) {
 									if (value.Port != link->FromPort) continue;
+									if (node.Type == "pc.sequence_anim" && input.Id == "surface_in" &&
+										detail::ValidRuntimeValue(value.Data)) {
+										context.ValueViews.emplace_back(input.Id, &value.Data);
+										break;
+									}
 									const auto *array = std::get_if<ArrayValue>(&value.Data);
 									// Draw Surface can synchronously rasterize a retained Builder recipe.
 									const bool dynamicBuilder = node.Type == "pc.pb_draw_surface" &&

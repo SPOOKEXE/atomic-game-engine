@@ -183,10 +183,10 @@ namespace client {
 				return !node.SourceAnimatedInputs.empty() || node.Type == "image.audio_window" ||
 					   node.Type == "image.audio_recording" || node.Type == "image.captured" ||
 					   node.Type == "pc.audio_window" || node.Type == "pc.audio_loudness" ||
-					   node.Type == "pc.interlaced" || node.Type == "pc.3_d_affector" ||
-					   node.Type.starts_with("pc.verlet_sim_") || node.Type.starts_with("pc.flip_") ||
-					   node.Type.starts_with("pc.rigid_") || node.Type.starts_with("pc.lua_") ||
-					   node.Type.starts_with("pc.pcx_");
+					   node.Type == "pc.interlaced" || node.Type == "pc.sequence_anim" ||
+					   node.Type == "pc.3_d_affector" || node.Type.starts_with("pc.verlet_sim_") ||
+					   node.Type.starts_with("pc.flip_") || node.Type.starts_with("pc.rigid_") ||
+					   node.Type.starts_with("pc.lua_") || node.Type.starts_with("pc.pcx_");
 			});
 		}
 		ImageGraphFrameResult EvaluateCompiled(
