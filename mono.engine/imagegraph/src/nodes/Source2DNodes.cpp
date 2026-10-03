@@ -47,6 +47,8 @@ namespace engine::imagegraph::detail {
 	bool Zigzag(NodeContext &context);
 	bool GaussianNoise(NodeContext &context);
 	bool FoldNoise(NodeContext &context);
+	bool SourceSimplexNoise(NodeContext &context);
+	bool SourceRidgeNoise(NodeContext &context);
 	bool DeCorner(NodeContext &context);
 	bool ShapeBlur(NodeContext &context);
 	bool LinearBrush(NodeContext &context);
@@ -372,6 +374,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.zigzag", Zigzag, true},
 			ExecutorEntry{"pc.noise_gaussian", GaussianNoise, true},
 			ExecutorEntry{"pc.fold_noise", FoldNoise, true},
+			ExecutorEntry{"pc.noise_simplex", SourceSimplexNoise, true},
+			ExecutorEntry{"pc.ridge_noise", SourceRidgeNoise, true},
 			ExecutorEntry{"pc.de_corner", DeCorner, true},
 			ExecutorEntry{"pc.blur_shape", ShapeBlur, true},
 			ExecutorEntry{"pc.brush_linear", LinearBrush, true},

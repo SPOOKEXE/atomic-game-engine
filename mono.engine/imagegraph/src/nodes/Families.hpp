@@ -24,6 +24,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> VectorExecutors();
 	std::span<const ExecutorEntry> OutlineExecutors();
 	std::span<const ExecutorEntry> BlurExecutors();
+	std::span<const ExecutorEntry> SourceErodeExecutors();
 	std::span<const ExecutorEntry> TransformExecutors();
 	std::span<const ExecutorEntry> PathExecutors();
 	std::span<const ExecutorEntry> PointExecutors();

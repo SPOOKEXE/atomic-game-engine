@@ -2298,14 +2298,19 @@ namespace engine::imagegraphio {
 								return old == value;
 							}))
 							continue;
-						if (node.Type == "pc.bevel" &&
-							(value.Port == "height_mapped" || value.Port == "height_map_range")) {
-							const auto *height = FindCatalogueInput(*entry, "height");
+						if ((node.Type == "pc.bevel" &&
+							 (value.Port == "height_mapped" || value.Port == "height_map_range")) ||
+							(node.Type == "pc.erode" &&
+							 (value.Port == "width_mapped" || value.Port == "width_map_range"))) {
+							const std::string_view numericId = node.Type == "pc.erode" ? "width" : "height";
+							const std::string_view toggleId =
+								node.Type == "pc.erode" ? "width_mapped" : "height_mapped";
+							const auto *height = FindCatalogueInput(*entry, numericId);
 							if (!height || height->SourceIndex != 1 || height->SourceKind != "Int" ||
 								inputs.size() <= 1)
 								return Reject(
 									diagnostic,
-									"PXC Bevel mapped Height has no source slot",
+									"PXC mapped numeric control has no source slot",
 									node.Id,
 									value.Port
 								);
@@ -2316,16 +2321,16 @@ namespace engine::imagegraphio {
 								 (!record["r"].is_object() || !record["r"].contains("d"))))
 								return Reject(
 									diagnostic,
-									"PXC Bevel mapped Height needs a static local source value",
+									"PXC mapped numeric control needs a static local source value",
 									node.Id,
 									value.Port
 								);
-							if (value.Port == "height_mapped") {
+							if (value.Port == toggleId) {
 								const auto *mapped = std::get_if<bool>(&value.Data);
 								if (!mapped)
 									return Reject(
 										diagnostic,
-										"PXC Bevel map toggle needs a boolean",
+										"PXC mapped numeric toggle needs a boolean",
 										node.Id,
 										value.Port
 									);
@@ -2333,7 +2338,7 @@ namespace engine::imagegraphio {
 								if (!record["attri"].is_object())
 									return Reject(
 										diagnostic,
-										"PXC Bevel input attributes are malformed",
+										"PXC mapped numeric input attributes are malformed",
 										node.Id,
 										value.Port
 									);
@@ -2341,9 +2346,9 @@ namespace engine::imagegraphio {
 							} else {
 								const auto *range = FindCatalogueInput(*entry, value.Port);
 								const auto toggle = std::find_if(
-									node.Values.begin(), node.Values.end(), [](const AuthoredValue &item) {
-										return item.Port == "height_mapped";
-									}
+									node.Values.begin(),
+									node.Values.end(),
+									[toggleId](const AuthoredValue &item) { return item.Port == toggleId; }
 								);
 								const auto *mapped =
 									toggle != node.Values.end() ? std::get_if<bool>(&toggle->Data) : nullptr;
@@ -2351,7 +2356,7 @@ namespace engine::imagegraphio {
 									range->Type != ValueType::Vector2 || !mapped || !*mapped)
 									return Reject(
 										diagnostic,
-										"PXC Bevel endpoint pair requires its mapped source mode",
+										"PXC mapped numeric endpoint pair requires its mapped source mode",
 										node.Id,
 										value.Port
 									);
@@ -2360,7 +2365,7 @@ namespace engine::imagegraphio {
 									!(*encoded)[0].is_number() || !(*encoded)[1].is_number())
 									return Reject(
 										diagnostic,
-										"PXC Bevel map range needs two numeric endpoints",
+										"PXC mapped numeric range needs two numeric endpoints",
 										node.Id,
 										value.Port
 									);

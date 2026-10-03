@@ -17834,6 +17834,8 @@ I	iteration	Iteration	3	ISlider	integer	i 1
 S	I	iteration	0
 I	iteration_mapped	Iteration Mapped	-1	MapToggle	boolean	b 0	
 S	I	iteration_mapped	?
+I	iteration_map_range	Iteration Map Range	-1	MapRange	vector2	v 0 1	
+S	I	iteration_map_range	?
 I	iteration_map	Iteration Map	9	Surface	image		
 S	I	iteration_map	0
 I	tile	Tile	17	Bool	boolean	b 1	
@@ -17852,7 +17854,7 @@ I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
-I	scale_map_range	Scale Map Range	-1	MapRange	vector4	w 0 0 0.25 0.25	
+I	scale_map_range	Scale Map Range	-1	MapRange	vector2	v 0.25 0.25	
 S	I	scale_map_range	?
 I	scale_map	Scale Map	8	Surface	image		
 S	I	scale_map	0

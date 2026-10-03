@@ -64,6 +64,11 @@ CONSTRUCTOR_DEFAULT_OVERRIDE = re.compile(
 )
 # Only this inherited default has reviewed source evidence in the current pin.
 CONSTRUCTOR_DEFAULT_OVERRIDE_NODES = {"Node_3D_Light"}
+# These mapped controls are numeric endpoint pairs in the pinned source wrapper.
+MAPPED_RANGE_TYPE_OVERRIDES = {
+    ("Node_Noise_Simplex", "Iteration"): "vector2",
+    ("Node_Noise_Simplex", "Scale"): "vector2",
+}
 # Dynamic assignments have only been schema-checked for Struct's key/value pair.
 DYNAMIC_ASSIGNED_INPUT_NODES = {"Node_Struct"}
 SCALAR_DEPTH_SOURCE_FILES = (
@@ -507,6 +512,10 @@ def parse(name, seen):
             suffix = lambda at, fallback: chain_args[at].strip('"') if len(chain_args) > at and chain_args[at].startswith('"') else fallback
             if helper == "setMappable":
                 entry["mapped"] = "range"
+                mapped_range_type = MAPPED_RANGE_TYPE_OVERRIDES.get((name, entry["name"]))
+                if mapped_range_type is not None:
+                    entry["mapped_range_type"] = mapped_range_type
+                    record_constructor_source(name)
                 declared.append((position, {"index": index, "kind": "Surface", "name": f"{entry['name']} Map", "default": "", "extra": [], "map_of": entry["name"], "array_depth": 0}))
                 if entry["kind"] == "Gradient":
                     declared.append((position + 0.5, {"index": f"({index})+1", "kind": "Vec4", "name": f"{entry['name']} Map Range", "default": "[0,0,1,0]", "extra": [], "map_of": entry["name"], "array_depth": 1}))

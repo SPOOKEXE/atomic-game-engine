@@ -240,6 +240,30 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                 )
                 self.assertIn("I\tattribute_process\tattribute process\t-1\tBool\tboolean\tb 0\t", catalogue[start:end])
 
+    def test_simplex_mapped_ranges_keep_source_dimensions(self):
+        source = json.loads(
+            (REPOSITORY / "docs/pixel-composer-m0/source-inputs.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual("b69eca232217360cf1502ef0223523d818606652", source["source_commit"])
+        simplex = source["nodes"]["Node_Noise_Simplex"]
+        mapped_types = {
+            item["name"]: item.get("mapped_range_type")
+            for item in simplex["inputs"]
+            if item.get("mapped")
+        }
+        self.assertEqual({"Iteration": "vector2", "Scale": "vector2"}, mapped_types)
+        simplex["display_name"] = "Simplex Noise"
+        simplex["family"] = "generate"
+        with tempfile.TemporaryDirectory() as temporary:
+            lines = self.run_generator(Path(temporary), {"Node_Noise_Simplex": simplex})
+
+        self.assertIn("I\titeration_mapped\tIteration Mapped\t-1\tMapToggle\tboolean\tb 0\t", lines)
+        self.assertIn("I\titeration_map\tIteration Map\t9\tSurface\timage\t\t", lines)
+        self.assertIn("I\titeration_map_range\tIteration Map Range\t-1\tMapRange\tvector2\tv 0 1\t", lines)
+        self.assertIn("I\tscale_mapped\tScale Mapped\t-1\tMapToggle\tboolean\tb 0\t", lines)
+        self.assertIn("I\tscale_map\tScale Map\t8\tSurface\timage\t\t", lines)
+        self.assertIn("I\tscale_map_range\tScale Map Range\t-1\tMapRange\tvector2\tv 0.25 0.25\t", lines)
+
     def test_source_only_constructor_records_preserve_values_and_dynamic_templates(self):
         extra_nodes = {
             "Node_3D_Light_Point": {

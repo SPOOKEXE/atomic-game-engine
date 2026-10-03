@@ -180,6 +180,12 @@ function Node_Points_Triangulate(_x, _y) : Node(_x, _y) constructor {
     newInput(0, nodeValue_Vec2("Points", [0,0])).setArrayDepth(1);
 }
 """,
+            "scripts/node_noise_simplex/node_noise_simplex.gml": """
+function Node_Noise_Simplex(_x, _y) : Node(_x, _y) constructor {
+    newInput(3, nodeValue_ISlider("Iteration", 1, [1,16,.1])).setMappable(9);
+    newInput(2, nodeValue_Vec2("Scale", [.25,.25])).setUnitSimple().setMappable(8);
+}
+""",
             "scripts/node_fn_wave_table/node_fn_wave_table.gml": """
 enum WAVETABLE_FN { sine, square, tri, saw }
 function Node_Fn_WaveTable(_x, _y) : Node(_x, _y) constructor {
@@ -268,6 +274,7 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
                 "Node_Fn_WaveTable",
                 "Node_Points_Remap",
                 "Node_Points_Triangulate",
+                "Node_Noise_Simplex",
                 "Node_Scatter_Point_Fibonacci",
                 *(('Node_Condition',) if include_condition else ()),
             ):
@@ -286,6 +293,21 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
         self.assertEqual("(1 + sqrt(5)) / 2", item["default"])
         self.assertEqual("scripts/node_scatter_point_fibo/node_scatter_point_fibo.gml",
                          snapshot["nodes"]["Node_Scatter_Point_Fibonacci"]["file"])
+
+    def test_simplex_mappable_controls_retain_two_component_range_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+
+        inputs = {item["name"]: item for item in snapshot["nodes"]["Node_Noise_Simplex"]["inputs"]}
+        self.assertEqual(
+            ("range", "vector2"), (inputs["Iteration"]["mapped"], inputs["Iteration"]["mapped_range_type"])
+        )
+        self.assertEqual(
+            ("range", "vector2"), (inputs["Scale"]["mapped"], inputs["Scale"]["mapped_range_type"])
+        )
+        evidence = snapshot["source_constructor_evidence"]["scripts/node_noise_simplex/node_noise_simplex.gml"]
+        self.assertRegex(evidence["sha256"], r"^[0-9a-f]{64}$")
+        self.assertGreater(evidence["bytes"], 0)
 
     def test_condition_extraction_recovers_exact_six_source_choices(self):
         with tempfile.TemporaryDirectory() as temporary:

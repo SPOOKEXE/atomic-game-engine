@@ -28,6 +28,7 @@ namespace engine::imagegraph::detail {
 					  OutlineExecutors(),
 					  BlurExecutors(),
 					  TransformExecutors(),
+					  SourceErodeExecutors(),
 					  PathExecutors(),
 					  PointExecutors(),
 					  MeshExecutors(),

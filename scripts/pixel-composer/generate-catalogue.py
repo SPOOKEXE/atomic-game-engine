@@ -570,9 +570,17 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
             # Bevel Height uses the source Int getter but maps the same two numeric endpoints.
             if source_node == "Node_Bevel" and identifier == "height" and item["index"] == "1" and item["kind"] == "Int":
                 ranged = ("vector2", "v")
+            mapped_range_type = item.get("mapped_range_type")
+            if mapped_range_type is not None:
+                markers = {"vector2": "v", "vector4": "w"}
+                marker = markers.get(mapped_range_type)
+                if marker is None:
+                    raise ValueError(f"invalid mapped range type: {source_node}.{item['name']}")
+                ranged = (mapped_range_type, marker)
             if ranged and item["mapped"] == "range":
                 current = (default or "").split(" ")[1:]
-                span = ["0"] * len(current) + current if current else []
+                endpoint_count = {"vector2": 2, "vector4": 4}[ranged[0]]
+                span = ["0"] * max(0, endpoint_count - len(current)) + current if current else []
                 range_default = f"{ranged[1]} " + " ".join(span) if span else ""
                 seen.add(identifier + "_map_range")
                 lines.append("\t".join(["I", identifier + "_map_range", clean(item["name"]) + " Map Range", "-1", "MapRange", ranged[0], range_default, ""]))

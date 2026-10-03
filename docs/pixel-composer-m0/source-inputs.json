@@ -82508,6 +82508,7 @@
      "index": "3",
      "kind": "ISlider",
      "mapped": "range",
+     "mapped_range_type": "vector2",
      "name": "Iteration",
      "source_array_classification": false
     },
@@ -82556,6 +82557,7 @@
      "index": "2",
      "kind": "Vec2",
      "mapped": "range",
+     "mapped_range_type": "vector2",
      "name": "Scale",
      "source_array_classification": true,
      "unit": "reference"
@@ -155725,6 +155727,10 @@
  },
  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
  "source_constructor_evidence": {
+  "scripts/node_noise_simplex/node_noise_simplex.gml": {
+   "bytes": 4196,
+   "sha256": "65046db95e059408cf28e5cabe8eca76673bfea5eabb917b4a516f0d111a0657"
+  },
   "scripts/__node_3d_light/__node_3d_light.gml": {
    "bytes": 1123,
    "sha256": "bd0a4c937aed35270f3ff99469d9f2904626cfcb96683ea034d29f51baa8f68f"

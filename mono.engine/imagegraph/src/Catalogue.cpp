@@ -200,6 +200,17 @@ namespace engine::imagegraph {
 						 "e 0",
 						 "Bit;Second;Progress"}
 					);
+				// A native projection of the endpoint pair stored in source Width slot 1.
+				if (heads[index].Type == "pc.erode")
+					node.Inputs.push_back(
+						{"width_map_range",
+						 "Width Map Range",
+						 -1,
+						 "MapRange",
+						 ValueType::Vector2,
+						 "v 0 1",
+						 ""}
+					);
 				if (heads[index].Type == "pc.solid") {
 					for (CatalogueInput &input : node.Inputs)
 						if (input.Id == "dimension_unit") input.Choices = "Pixel;Project";
@@ -352,7 +363,10 @@ namespace engine::imagegraph {
 			input.SourceKind == "MapRange" && input.Type == ValueType::Vector2 &&
 			((entry.Type == "pc.3_d_material" &&
 			  (input.Id == "metalic_map_range" || input.Id == "roughness_map_range")) ||
-			 (entry.Type == "pc.bevel" && input.Id == "height_map_range")) &&
+			 (entry.Type == "pc.bevel" && input.Id == "height_map_range") ||
+			 (entry.Type == "pc.erode" && input.Id == "width_map_range") ||
+			 (entry.Type == "pc.noise_simplex" &&
+			  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))) &&
 			std::any_of(
 				entry.Schema.Properties.begin(), entry.Schema.Properties.end(), [&](const auto &property) {
 					return property.Id == input.Id && property.Type == ValueType::Vector2;
