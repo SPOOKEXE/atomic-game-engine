@@ -49,14 +49,29 @@ Milestone labels describe development scope, not release versions.
   7. Evaluate bounded volume projection; bind rigid/3D outputs, mesh availability and skyboxes; render Composer shaders from cooked binaries and queue camera/SDF jobs. Keep live ShaderScript compilation. Cooked Composer Vulkan tests pass; broader GPU verification remains open.
   8. Package source projects and authored scenes; profile scene, simulation, atlas, palette, filter, FFT, path and Strand CPU workloads. Visual acceptance remains open.
 
-- [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
+Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
-  1. Graph and Studio: finish Dopesheet gestures, host workflows and thumbnail saving. Selected-key easing, dynamic tracks and focused Undo/Redo pass headless checks.
-  2. Nodes: finish Mirror path sampling and separate X/Y animation; integrate Flow, Bubble and path modifiers; finish fonts, text, arguments and remaining catalogue executors. Verify controls, errors, animation and parity evidence.
-  3. Animation and audio: finish frame caches, saved-cache loading, playback and audio workflows; verify feedback, seek/reset and fractional keys.
-  4. 3D and outputs: integrate camera rendering and previews; finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback; broaden Transform and skybox pixel checks.
-  5. PXC and exports: finish remaining edits, formats and modified-project compatibility. Processor resets, quaternion display modes and resumable exports pass joined CPU checks.
-  6. Acceptance: validate prepared implementations together, profile source-family workloads, and finish GPU and live Studio checks. Exact parity requires a licensed reference build and matched captures.
+- [x] Add selected-key easing, dynamic tracks and focused Composer Undo/Redo.
+- [x] Preserve source keys and metadata through processor resets and quaternion display-mode edits.
+- [x] Resume pending exports, cancel safely and publish atomically.
+- [_] Finish Mirror path sampling and separate X/Y animation.
+- [_] Integrate Flow and Bubble noise generators.
+- [_] Integrate path extension, flattening and smoothing.
+- [_] Finish font loading, text layout and rendering.
+- [_] Add source-compatible argument handling.
+- [_] Implement remaining catalogue executors and verify controls, errors, animation and parity evidence.
+- [_] Integrate frame caches, saved-cache loading and playback.
+- [_] Finish audio workflows and feedback; verify seek/reset and fractional keys.
+- [_] Integrate camera rendering and Studio previews.
+- [_] Finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback.
+- [_] Finish Dopesheet gestures and Studio host workflows.
+- [_] Add prepared thumbnails to PXC saving.
+- [_] Finish remaining PXC edits, export formats and modified-project compatibility.
+- [_] Validate all integrated changes with joined CPU tests.
+- [_] Profile source-family workloads in an optimized build.
+- [_] Finish GPU checks, including Transform and skybox pixels.
+- [_] Verify live Studio workflows.
+- [_] Establish exact parity with a licensed reference build and matched captures.
 
   Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
