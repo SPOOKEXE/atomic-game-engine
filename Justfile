@@ -474,6 +474,14 @@ imagegraph-pixel-kernel-bench samples="5":
     ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][pixel_kernel_workloads]'
     ATOMIC_IMAGEGRAPH_PIXEL_PRESET=release-tests ./.cache/build/release-tests/bench/bench_imagegraph --suite engine.imagegraph.bench.pixel-kernels --samples {{samples}}
 
+# Source FFT conversion, path affine/remapping and captured Strand replay. Results stdout only.
+imagegraph-source-pipeline-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset release-tests --target test_imagegraph bench_imagegraph
+    ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][source_pipeline_workloads]'
+    ATOMIC_IMAGEGRAPH_PIPELINE_PRESET=release-tests ./.cache/build/release-tests/bench/bench_imagegraph --suite engine.imagegraph.bench.source-pipelines --samples {{samples}}
+
 # Native rigid CPU seek cost with contact and exact replay checks. Results stay on stdout.
 imagegraph-rigid-replay-bench samples="5":
     test "{{samples}}" -ge 1 -a "{{samples}}" -le 5

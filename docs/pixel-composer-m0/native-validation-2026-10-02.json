@@ -2970,7 +2970,7 @@
     "licensed_executable_parity": "open and unavailable",
     "gpu_acceptance": "open",
     "manual_scene_acceptance": "open",
-    "profiling": "no accepted build57 performance profile",
+    "profiling": "build57 bounded FFT, path and Strand CPU profiles passed; overall representative release profiling remains open",
     "build53_overall": "selected release, dev, and server gates passed after repair; M0-M7 acceptance remains incomplete",
     "build53_dev": "RAM-backed dev build and core, physics, I/O, export, and architecture gates passed",
     "build53_server": "headless build 437/437, CTest 19/19, unpaced run 10 ticks / 16 entities, server architecture passed",
@@ -2989,5 +2989,37 @@
       "status": "open",
       "scope_note": "Build57 bounded native suites and capability inventory do not satisfy GPU acceptance, manual scene acceptance, licensed executable comparison, representative release profiles, or overall M0-M7 completion."
     }
-  ]
+  ],
+  "build57_source_pipeline_profile": {
+    "preset": "release-tests",
+    "backend": "cpu",
+    "workloads": [
+      "FFT 256 samples, 129 bins, three conversion choices",
+      "Path transform/remap/redistribute, nine modes and 64 samples each",
+      "Strand 64 hairs, one segment, ordered gravity and eight ticks from fresh replay"
+    ],
+    "fixture_cases_passed": 1,
+    "fixture_assertions_passed": 15,
+    "fixture_log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/source-pipeline-workloads-release-57-repaired.log",
+    "fixture_log_sha256": "b9649129b3539cf060a558336a2faf3212df255077074fa90e30143529bf9b54",
+    "benchmark_command": "ATOMIC_IMAGEGRAPH_PIPELINE_PRESET=release-tests ./.cache/build/release-tests/bench/bench_imagegraph --suite engine.imagegraph.bench.source-pipelines",
+    "benchmark_exit_code": 0,
+    "measured_samples_per_workload": 7,
+    "warmups_per_workload": 8,
+    "output_destination": "stdout only; no benchmark output file",
+    "checks": "Independent element tolerance and full-output binary-grid hashes; retained hierarchy and actual processor/family scopes; no dropped scopes; fresh replay each sample.",
+    "heap_hooks": "unavailable in release-tests; logical retained output/replay bytes reported separately",
+    "scope": "Three bounded CPU workloads only. No GPU, licensed parity, live Studio, or optimization speedup claim.",
+    "failed_attempts": [
+      {
+        "fixture_log": ".cache/build/dev/evidence/pixel-composer-2026-10-02/source-pipeline-workloads-release-57.log",
+        "reason": "Decimal hash quantization put exact Path coordinates on half ties; repaired binary-grid hash retains element tolerance."
+      },
+      {
+        "benchmark_exit_code": 134,
+        "output_destination": "stdout/stderr only",
+        "reason": "Required public imagegraph.evaluate scope absent from actual stateful execution path; repaired check requires actual whole workload root, processors and family kernels."
+      }
+    ]
+  }
 }
