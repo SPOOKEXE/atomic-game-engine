@@ -57,7 +57,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Finish Mirror path sampling and separate X/Y animation.
 - [x] Integrate Flow and Bubble noise generators.
 - [_] Integrate path extension, flattening and smoothing.
-- [_] Finish font loading, text layout and rendering.
+- [x] Decode bounded font bytes into glyph bitmaps and metrics.
+- [_] Finish Composer font loading, text layout and rendering.
 - [_] Add source-compatible argument handling.
 - [_] Implement remaining catalogue executors and verify controls, errors, animation and parity evidence.
 - [_] Integrate frame caches, saved-cache loading and playback.
