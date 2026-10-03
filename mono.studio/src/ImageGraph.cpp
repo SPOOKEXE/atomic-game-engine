@@ -2,6 +2,7 @@
 #include "ImageGraphInputs.hpp"
 #include "ImageGraphPorts.hpp"
 #include "ImageGraphPreview.hpp"
+#include "ImageGraphPreviewResult.hpp"
 
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
@@ -632,6 +633,16 @@ namespace studio {
 		size_t bytes = 0;
 		for (const Entry &entry : Entries)
 			bytes += entry.Image.Pixels.capacity();
+		return bytes;
+	}
+
+	uint64_t ImageGraphPreviewCache::RetainedBytes() const noexcept {
+		if (Entries.capacity() > (UINT64_MAX - sizeof(*this)) / sizeof(Entry)) return UINT64_MAX;
+		uint64_t bytes = sizeof(*this) + Entries.capacity() * sizeof(Entry);
+		for (const auto &entry : Entries) {
+			if (entry.Image.Pixels.capacity() > UINT64_MAX - bytes) return UINT64_MAX;
+			bytes += entry.Image.Pixels.capacity();
+		}
 		return bytes;
 	}
 
@@ -1323,8 +1334,9 @@ namespace studio {
 		std::string_view outputId,
 		const engine::imagegraph::EvaluationRequest &request,
 		ImageGraphPreviewValue &preview,
-		engine::imagegraph::Diagnostic &diagnostic
-	) {
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
 		using namespace engine::imagegraph;
 		if (request.MaximumImageDimension == 0 || request.MaximumImageDimension > Limits::MaximumDimension) {
 			diagnostic = {
@@ -1367,14 +1379,7 @@ namespace studio {
 		EvaluationRequest boundedRequest = request;
 		boundedRequest.MaximumImageDimension =
 			std::min(request.MaximumImageDimension, IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION);
-		if (port->Type == ValueType::Image) {
-			Image image;
-			const Status status =
-				Evaluate(document, plan, std::string(outputId), boundedRequest, image, diagnostic);
-			if (status == Status::Ok) preview = std::move(image);
-			return status;
-		}
-		if (!detail::ImageGraphValuePreviewSupported(port->Type)) {
+		if (port->Type != ValueType::Image && !detail::ImageGraphValuePreviewSupported(port->Type)) {
 			diagnostic = {
 				Status::UnsupportedExecution,
 				output->NodeId,
@@ -1383,55 +1388,42 @@ namespace studio {
 			};
 			return diagnostic.Code;
 		}
-		EvaluatedValue value;
-		Status status;
-		if (port->Type == ValueType::Any) {
-			StatefulEvaluationResult result;
-			status =
-				EvaluateStateful(document, plan, std::string(outputId), boundedRequest, result, diagnostic);
-			if (status == Status::Ok) {
-				if (auto *image = std::get_if<Image>(&result.Output)) {
-					preview = std::move(*image);
-					return Status::Ok;
-				}
-				if (auto *typed = std::get_if<EvaluatedValue>(&result.Output))
-					value = std::move(*typed);
-				else {
-					diagnostic = {
-						Status::InvalidOutput,
-						output->NodeId,
-						output->Port,
-						"selected output is an image array; select one element for preview"
-					};
-					return diagnostic.Code;
-				}
-			}
-		} else {
-			status = EvaluateValue(document, plan, std::string(outputId), boundedRequest, value, diagnostic);
+		const uint64_t previous = detail::ImageGraphPreviewBytes(preview);
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || previous >= maximumBytes) {
+			diagnostic = {
+				Status::LimitExceeded,
+				output->NodeId,
+				output->Port,
+				"preview replacement exceeds caller byte allowance"
+			};
+			return diagnostic.Code;
 		}
-		if (status == Status::Ok) {
-			if (const auto *vector = std::get_if<Vector2>(&value.Data);
-				vector && (!std::isfinite(vector->X) || !std::isfinite(vector->Y))) {
-				diagnostic = {
-					Status::InvalidValue,
-					output->NodeId,
-					output->Port,
-					"vector preview requires finite coordinates"
-				};
-				return diagnostic.Code;
-			}
-			if (const auto *array = std::get_if<ArrayValue>(&value.Data);
-				array &&
-				(array->ElementType == ValueType::Scalar || array->ElementType == ValueType::Integer) &&
-				!CheckImageGraphArrayPreview(*array, diagnostic)) {
-				diagnostic.NodeId = output->NodeId;
-				diagnostic.Port = output->Port;
-				return diagnostic.Code;
-			}
-			preview = std::move(value);
+		StatefulEvaluationResult result;
+		const auto status = EvaluateStateful(
+			document, plan, std::string(outputId), boundedRequest, result, diagnostic, maximumBytes - previous
+		);
+		if (status != Status::Ok) return status;
+		ImageGraphPreviewValue candidate =
+			std::visit([](auto &value) -> ImageGraphPreviewValue { return std::move(value); }, result.Output);
+		if (detail::ImageGraphPreviewBytes(candidate) > maximumBytes - previous) {
+			diagnostic = {
+				Status::LimitExceeded,
+				output->NodeId,
+				output->Port,
+				"preview retained capacities exceed caller byte allowance"
+			};
+			return diagnostic.Code;
 		}
-
-		return status;
+		if (!detail::ValidateImageGraphPreview(candidate, diagnostic)) {
+			diagnostic.NodeId = output->NodeId;
+			diagnostic.Port = output->Port;
+			return diagnostic.Code;
+		}
+		preview = std::move(candidate);
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {engine::imagegraph::Status::LimitExceeded, {}, {}, "preview allocation refused"};
+		return diagnostic.Code;
 	}
 
 	bool CheckImageGraphArrayPreview(

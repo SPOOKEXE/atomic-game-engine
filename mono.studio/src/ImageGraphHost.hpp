@@ -151,7 +151,8 @@ namespace studio::detail {
 			}
 			HostNodeInvocation invocation = originalInvocation;
 			invocation.MaximumOperationBytes -= argumentBytes;
-			if (invocation.Authored.Type == "pc.hlsl" ||
+			if (invocation.Authored.Type == "pc.hlsl" || invocation.Authored.Type == "pc.3_d_camera" ||
+				invocation.Authored.Type == "pc.3_d_camera_set" ||
 				(invocation.Authored.Type == "pc.3_d_transform_image" ||
 				 invocation.Authored.Type == "image.transform_3d")) {
 				if (!Composer) {

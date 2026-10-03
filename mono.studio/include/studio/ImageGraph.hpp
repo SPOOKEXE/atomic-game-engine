@@ -107,6 +107,8 @@ namespace studio {
 		void InvalidateOutput(size_t outputIndex);
 		void Clear();
 		size_t HeldBytes() const;
+		// Includes retained entry metadata and pixel capacities.
+		uint64_t RetainedBytes() const noexcept;
 
 	  private:
 		struct Entry {
@@ -225,17 +227,20 @@ namespace studio {
 		const engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &diagnostic
 	);
 
-	using ImageGraphPreviewValue =
-		std::variant<engine::imagegraph::Image, engine::imagegraph::EvaluatedValue>;
+	using ImageGraphPreviewValue = std::variant<
+		engine::imagegraph::Image,
+		engine::imagegraph::EvaluatedValue,
+		engine::imagegraph::ImageArray>;
 
-	// Evaluates a selected image, scalar or bounded numeric array with one explicit fixed request.
+	// Evaluates a selected image, image sequence or typed value with one explicit fixed request.
 	engine::imagegraph::Status EvaluateImageGraphPreview(
 		const engine::imagegraph::Document &document,
 		const engine::imagegraph::Plan &plan,
 		std::string_view outputId,
 		const engine::imagegraph::EvaluationRequest &request,
 		ImageGraphPreviewValue &preview,
-		engine::imagegraph::Diagnostic &diagnostic
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Checks finite numeric samples and bounds before a flat or per-channel array enters the UI.

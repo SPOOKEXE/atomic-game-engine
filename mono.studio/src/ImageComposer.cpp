@@ -22,6 +22,9 @@
 #include "ImageGraphObservations.hpp"
 #include "ImageGraphPorts.hpp"
 #include "ImageGraphPreview.hpp"
+#include "ImageGraphPreviewProvider.hpp"
+#include "ImageGraphPreviewResult.hpp"
+#include "ImageGraphPreviewSequence.hpp"
 #include "ImageGraphRigid.hpp"
 #include "ImageGraphRigidMeshAction.hpp"
 #include "ImageGraphSourceEdit.hpp"
@@ -121,6 +124,8 @@ namespace studio {
 				engine::script::MakeComposerLuaHost();
 			detail::ImageGraphHost Host;
 			detail::ImageGraphComposerCadence ComposerCadence;
+			detail::ImageGraphPreviewObservations PreviewObservations;
+			detail::ImageGraphPreviewSequence PreviewSequence;
 			detail::ImageGraphComposerExports ComposerExports;
 			detail::ImageGraphExportIntent ExportIntent;
 			std::unique_ptr<engine::imagegraphexport::GraphExportSession> RangeExport;
@@ -273,6 +278,7 @@ namespace studio {
 			if (state.DocumentRevision == std::numeric_limits<uint64_t>::max()) {
 				state.DocumentRevision = 1;
 				state.PreviewCache.Clear();
+				state.PreviewSequence.Invalidate();
 			} else {
 				state.DocumentRevision++;
 			}
@@ -328,7 +334,9 @@ namespace studio {
 				renderer.CancelComposerCapture(state.ComposerCadence.Current.Owner, name);
 			state.ComposerCaptureNames.clear();
 			state.ComposerCadence.Cancel();
+			state.PreviewSequence.Invalidate();
 			state.Host.LuaReceipts.Clear();
+			state.PreviewObservations.Clear();
 			state.ComposerDevicePending = false;
 			if (auto *host = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer))
 				host->Pending = host->HavePendingJobs = false;
@@ -1205,7 +1213,7 @@ namespace studio {
 				state.SinkMessage = "preview exceeds the 128 by 128 texture budget";
 				return false;
 			}
-			if (state.HaveGoodPreview && state.PreviewHash == image.Hash &&
+			if (state.HaveGoodPreview && state.PreviewHash == engine::imagegraph::SurfaceHash(image) &&
 				state.PreviewWidth == image.Width && state.PreviewHeight == image.Height &&
 				state.PreviewSourceFormat == image.Format && state.PreviewPixelBytes == image.Pixels.size()) {
 				return true;
@@ -1234,7 +1242,7 @@ namespace studio {
 			state.CurrentTexture = name;
 			state.RetiredTexture = old;
 			state.TextureSlot = state.TextureSlot == 1 ? 2 : 1;
-			state.PreviewHash = image.Hash;
+			state.PreviewHash = engine::imagegraph::SurfaceHash(image);
 			state.PreviewWidth = image.Width;
 			state.PreviewHeight = image.Height;
 			state.PreviewPixelBytes = image.Pixels.size();
@@ -1282,6 +1290,7 @@ namespace studio {
 			if (!state.PreviewDirty || (!state.LivePreview && !state.PreviewRequested)) return;
 			if (state.PxcxPreviewCacheInputRevision != state.EvaluationInputRevision) {
 				state.PreviewCache.Clear();
+				state.PreviewSequence.Invalidate();
 				state.PxcxCompletedPreview.reset();
 				state.PxcxPreviewCacheInputRevision = state.EvaluationInputRevision;
 			}
@@ -1310,6 +1319,7 @@ namespace studio {
 			previewPlayback.Playing = state.ComposerCadence.Playing;
 			previewPlayback.FrameProgress = state.ComposerCadence.FrameProgress;
 			state.Host.LuaReceipts.Begin(previewFrame);
+			state.PreviewObservations.Begin(previewFrame);
 			const detail::ImageGraphLuaReceiptScope luaReceipts(state.Host.LuaReceipts);
 			if (auto *host = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer))
 				host->Pending = false;
@@ -1390,6 +1400,44 @@ namespace studio {
 				return;
 			}
 			const bool imageOutput = outputPort->Type == engine::imagegraph::ValueType::Image;
+			const uint64_t sequenceHeld = state.PreviewSequence.RetainedBytes();
+			const auto valueHeld = engine::imagegraph::ValueClonePayloadBytes(state.ValuePreview);
+			const auto arrayHeld = engine::imagegraph::ValueClonePayloadBytes(state.ArrayPreview);
+			const uint64_t cacheBytes = state.PreviewCache.RetainedBytes();
+			if (!valueHeld || !arrayHeld || *valueHeld > UINT64_MAX - *arrayHeld ||
+				cacheBytes > UINT64_MAX - *valueHeld - *arrayHeld) {
+				state.LastDiagnostic = {
+					Status::LimitExceeded, {}, {}, "Retained typed preview storage exceeds bounds"
+				};
+				return;
+			}
+			const uint64_t cacheHeld = cacheBytes + *valueHeld + *arrayHeld;
+			const uint64_t keyHeld = sizeof(detail::ImageGraphPreviewSequence::Key) +
+									 identity.Output.capacity() +
+									 IMAGE_COMPOSER_PREVIEW_DISPLAY_MAXIMUM_BYTES +
+									 sizeof(engine::assets::TextureData) + 2 * sizeof(std::vector<std::byte>);
+			const uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes;
+			if (sequenceHeld > maximumBytes || cacheHeld > maximumBytes - sequenceHeld ||
+				keyHeld >= maximumBytes - sequenceHeld - cacheHeld) {
+				state.LastDiagnostic = {
+					Status::LimitExceeded, {}, {}, "Retained preview leaves no result allowance"
+				};
+				return;
+			}
+			const uint64_t previewAllowance = maximumBytes - sequenceHeld - cacheHeld - keyHeld;
+			detail::ImageGraphPreviewSequence::Key sequenceKey{
+				identity,
+				previewFrame,
+				detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
+			};
+			if (state.PreviewSequence.Matches(sequenceKey)) {
+				const auto selected = state.PreviewSequence.Selected();
+				if (selected.Image && !UploadPreview(state, renderer, *selected.Image)) return;
+				if (!selected.Image) state.HaveGoodPreview = false;
+				state.LastDiagnostic = {};
+				return;
+			}
+
 			const PxcxPreviewIdentity completedPreview{
 				state.DocumentRevision,
 				state.EvaluationInputRevision,
@@ -1420,12 +1468,12 @@ namespace studio {
 						detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
 					)) {
 					if (!UploadPreview(state, renderer, *cached)) return;
+					state.PreviewSequence.Clear();
 					state.PxcxCompletedPreview = completedPreview;
 					state.LastDiagnostic = {};
 					return;
 				}
 			} else {
-				state.HaveGoodPreview = false;
 				state.HaveScalarPreview = false;
 				state.HaveArrayPreview = false;
 			}
@@ -1445,7 +1493,11 @@ namespace studio {
 				}
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
-				request.HostProvider = &HostFor(state);
+				detail::ImageGraphPreviewProvider previewProvider(
+					HostFor(state), state.PreviewObservations, request
+				);
+				request.HostProvider = &previewProvider;
+				request.MaximumImageDimension = IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION;
 				state.ComposerCadence.Observations.Bind(request);
 				detail::BindImageGraphRigid(request, requestRigidProvider, previewPlayback);
 				(void)engine::imagegraph::SetFrameTime(request, previewFrame);
@@ -1458,40 +1510,20 @@ namespace studio {
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
 				}
-				if (!state.FeedbackHost.Prepare(
-						previewDocument,
-						plan,
-						state.DocumentRevision,
-						state.EvaluationInputRevision,
-						request,
-						diagnostic,
-						engine::imagegraph::Limits::MaximumEvaluationBytes,
-						state.SelectedOutput
-					)) {
-					state.LastDiagnostic = std::move(diagnostic);
-					return;
-				}
 				studio::ImageGraphPreviewValue preview;
-				const auto *feedbackOutput = state.FeedbackHost.Value(state.SelectedOutput);
-				if (feedbackOutput) {
-					if (const auto *image = state.FeedbackHost.Output(state.SelectedOutput))
-						preview = *image;
-					else if (const auto *value =
-								 std::get_if<engine::imagegraph::EvaluatedValue>(&feedbackOutput->Output))
-						preview = *value;
-					else {
-						state.LastDiagnostic = {
-							Status::InvalidOutput, {}, {}, "preview requires a single image"
-						};
-						return;
-					}
-				}
-				const auto status =
-					feedbackOutput
-						? Status::Ok
-						: studio::EvaluateImageGraphPreview(
-							  previewDocument, plan, state.SelectedOutput, request, preview, diagnostic
-						  );
+				const auto status = detail::PrepareImageGraphPreviewResult(
+					previewDocument,
+					plan,
+					state.SelectedOutput,
+					request,
+					state.FeedbackHost,
+					state.DocumentRevision,
+					state.EvaluationInputRevision,
+					preview,
+					diagnostic,
+					previewAllowance
+				);
+
 				if (state.LuaHost) {
 					auto messages = state.LuaHost->TakeMessages();
 					if (!messages.empty()) state.LuaMessages = std::move(messages);
@@ -1500,7 +1532,34 @@ namespace studio {
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
 				}
+				if (auto *sequence = std::get_if<engine::imagegraph::ImageArray>(&preview)) {
+					const uint64_t feedbackHeld = state.FeedbackHost.RetainedBytes();
+					if (feedbackHeld > maximumBytes - cacheHeld - keyHeld ||
+						!state.PreviewSequence.Admit(
+							*sequence,
+							sequenceKey,
+							maximumBytes - cacheHeld - keyHeld - feedbackHeld,
+							diagnostic
+						)) {
+						state.LastDiagnostic =
+							diagnostic.Code == Status::Ok
+								? Diagnostic{Status::LimitExceeded, {}, {}, "Retained feedback leaves no sequence allowance"}
+								: std::move(diagnostic);
+						return;
+					}
+					const auto selected = state.PreviewSequence.SelectReplacement(*sequence, sequenceKey);
+					if (selected.Image && !UploadPreview(state, renderer, *selected.Image)) return;
+					state.PreviewSequence.Publish(std::move(*sequence), std::move(sequenceKey));
+					state.HaveScalarPreview = state.HaveArrayPreview = false;
+					if (!selected.Image) state.HaveGoodPreview = false;
+					state.PxcxCompletedPreview = completedPreview;
+					state.LastDiagnostic = {};
+					return;
+				}
+
 				if (auto *value = std::get_if<engine::imagegraph::EvaluatedValue>(&preview)) {
+					state.PreviewSequence.Clear();
+					state.HaveGoodPreview = false;
 					if (auto *array = std::get_if<engine::imagegraph::ArrayValue>(&value->Data)) {
 						if (array->ElementType == engine::imagegraph::ValueType::Scalar ||
 							array->ElementType == engine::imagegraph::ValueType::Integer) {
@@ -1543,6 +1602,7 @@ namespace studio {
 					return;
 				}
 				if (!UploadPreview(state, renderer, *image)) return;
+				state.PreviewSequence.Clear();
 				const bool retainedPreview = state.PreviewCache.Store(
 					state.DocumentRevision,
 					outputIndex,
@@ -1694,10 +1754,13 @@ namespace studio {
 						result,
 						[&](auto effect) {
 							using Kind = engine::imagegraph::AnimationControlEffectKind;
-							if (effect == Kind::AnimationStart)
+							if (effect == Kind::AnimationStart) {
 								detail::RestartAnimationReplay(state.FeedbackHost, state.PreviewCache);
+								state.PreviewSequence.Invalidate();
+							}
 							if (effect == Kind::RenderAll) {
 								state.PreviewCache.Clear();
+								state.PreviewSequence.Invalidate();
 								RequestPreview(state, true);
 								RefreshPreview(state, renderer);
 							}
@@ -3255,6 +3318,7 @@ namespace studio {
 			const auto changed = [&] {
 				state.Host.RefreshFile(nodeId);
 				state.PreviewCache.Clear();
+				state.PreviewSequence.Invalidate();
 				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
 				RequestPreview(state, true);
 			};
@@ -3627,6 +3691,7 @@ namespace studio {
 					[&] {
 						AuthoredDocumentChanged(state);
 						state.PreviewCache.Clear();
+						state.PreviewSequence.Invalidate();
 						RequestPreview(state, true);
 					},
 					state.LastDiagnostic
@@ -3752,6 +3817,7 @@ namespace studio {
 					)) {
 					AuthoredDocumentChanged(state);
 					state.PreviewCache.Clear();
+					state.PreviewSequence.Invalidate();
 					RequestPreview(state, true);
 				}
 				node = FindNode(state.Authored, nodeId);
@@ -3772,8 +3838,10 @@ namespace studio {
 						state.DocumentRevision,
 						state.EvaluationInputRevision,
 						state.LastDiagnostic
-					))
+					)) {
+					state.PreviewSequence.Invalidate();
 					RequestPreview(state, true);
+				}
 			}
 			if (node->Type == "pc.verlet_sim_mesh_cache" && ImGui::Button("Cache Mesh")) {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
@@ -4019,6 +4087,7 @@ namespace studio {
 			if (state.FeedbackHost.Active() && ImGui::Button("Reset feedback preview")) {
 				state.FeedbackHost.Clear();
 				state.PreviewCache.Clear();
+				state.PreviewSequence.Invalidate();
 				RequestPreview(state, true);
 			}
 
@@ -5320,7 +5389,7 @@ namespace studio {
 			);
 			ImGui::Text(
 				"Evaluation: deterministic CPU, preview cache %zu / %zu bytes",
-				state.PreviewCache.HeldBytes(),
+				state.PreviewCache.RetainedBytes(),
 				IMAGE_COMPOSER_PREVIEW_CACHE_MAXIMUM_BYTES
 			);
 			ImGui::TextUnformatted("Profiling: image composer preview appears in the F5 frame graph.");
@@ -5435,6 +5504,54 @@ namespace studio {
 				}
 				return;
 			}
+			if (state.PreviewSequence.HaveSequence) {
+				auto selection = state.PreviewSequence.Selected();
+				ImGui::Text(
+					"Sequence %s (%zu members)  displayed frame %.20Lg",
+					state.PreviewSequence.Completed.Identity.Output.c_str(),
+					selection.Count,
+					engine::imagegraph::FrameTimeToReal(state.PreviewSequence.Completed.Frame)
+				);
+				for (size_t depth = 0; depth < state.PreviewSequence.Levels; ++depth) {
+					ImGui::PushID(static_cast<int>(depth));
+					uint64_t index = state.PreviewSequence.Indices[depth];
+					if (ImGui::InputScalar(depth ? "Nested index" : "Index", ImGuiDataType_U64, &index)) {
+						auto indices = state.PreviewSequence.Indices;
+						indices[depth] = index;
+						const auto candidate = detail::ImageGraphPreviewSequence::Select(
+							state.PreviewSequence.Data, {indices.data(), depth + 1}
+						);
+						if (!candidate.Image || UploadPreview(state, renderer, *candidate.Image)) {
+							state.PreviewSequence.Indices = indices;
+							state.PreviewSequence.Levels = depth + 1;
+							if (!candidate.Image) state.HaveGoodPreview = false;
+							selection = candidate;
+						}
+					}
+					ImGui::PopID();
+				}
+				if (selection.Branch && state.PreviewSequence.Levels < state.PreviewSequence.Indices.size() &&
+					ImGui::Button("Open nested sequence")) {
+					const size_t levels = state.PreviewSequence.Levels + 1;
+					auto indices = state.PreviewSequence.Indices;
+					indices[levels - 1] = 0;
+					const auto candidate = detail::ImageGraphPreviewSequence::Select(
+						state.PreviewSequence.Data, {indices.data(), levels}
+					);
+					if (!candidate.Image || UploadPreview(state, renderer, *candidate.Image)) {
+						state.PreviewSequence.Indices = indices;
+						state.PreviewSequence.Levels = levels;
+						selection = candidate;
+						if (!candidate.Image) state.HaveGoodPreview = false;
+					}
+				}
+				if (!selection.Image)
+					ImGui::TextUnformatted(
+						selection.Branch ? "Selected member is a nested sequence."
+										 : "Selected sequence is empty."
+					);
+			}
+
 			if (!state.HaveGoodPreview || !state.CurrentTexture.IsValid()) {
 				ImGui::TextDisabled("No successful preview yet.");
 				if (state.LastDiagnostic.Code != Status::Ok)
@@ -5538,6 +5655,7 @@ namespace studio {
 				state.ComposerExports.Pending.clear();
 				state.ExportUpdate = {};
 				state.PreviewCache.Clear();
+				state.PreviewSequence.Invalidate();
 				state.PxcxCompletedPreview.reset();
 				state.PcxObservations.Captured = false;
 				RequestPreview(state, true);
@@ -5617,6 +5735,7 @@ namespace studio {
 			ImGui::End();
 			ImGui::PopStyleColor(2);
 			if (!open) {
+				state.PreviewSequence.Clear();
 				CancelExportIntent(state, renderer);
 				CancelComposerPreview(state, renderer);
 				if (state.LuaHost) state.LuaHost->Reset();
