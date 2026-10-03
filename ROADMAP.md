@@ -38,16 +38,16 @@ Milestone labels describe development scope, not release versions.
 
 ### v0.25
 
-- [x] Pixel Composer foundations:
+Pixel Composer foundations:
 
-  1. Retain the source licence, pinned metadata, enum choices and typed shader inputs; preserve static selectors and source records; save instance ports, graph selectors and cooked-shader references.
-  2. Evaluate bounded image, data, path and palette kernels, including polar mapping, surface/buffer conversion, Julia sets, Gabor noise, tile patterns and heightmap projection; preserve mapped inputs, surface formats and instance routes.
-  3. Replay animation, sequences, Gradients, Time Remap, FLIP/Verlet, Strand and rigid actors with bounded history; clear and refill mixed owned image cycles, retain random state, resolve FFT windows and rasterize trails/VFX.
-  4. Edit graphs, groups, keys and tiles atomically; scope Dopesheet Delete and canvas shortcuts to their panels; refresh HLSL sockets, cook shaders and retain Lua observations; preserve moved inputs, animator aliases and refused selections; insert Gradient/Matrix keys and save rigid meshes with metadata.
-  5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
-  6. Run bounded Lua and recorded-random export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
-  7. Evaluate bounded volume projection; bind rigid/3D outputs, mesh availability and skyboxes; render Composer shaders from cooked binaries and queue camera/SDF jobs. Keep live ShaderScript compilation. Cooked Composer Vulkan tests pass; broader GPU verification remains open.
-  8. Package source projects and authored scenes; profile scene, simulation, atlas, palette, filter, FFT, path and Strand CPU workloads. Visual acceptance remains open.
+- [x] Retain the source licence, pinned metadata, enum choices and typed shader inputs; preserve static selectors and source records; save instance ports, graph selectors and cooked-shader references.
+- [x] Evaluate bounded image, data, path and palette kernels, including polar mapping, surface/buffer conversion, Julia sets, Gabor noise, tile patterns and heightmap projection; preserve mapped inputs, surface formats and instance routes.
+- [x] Replay animation, sequences, Gradients, Time Remap, FLIP/Verlet, Strand and rigid actors with bounded history; clear and refill mixed owned image cycles, retain random state, resolve FFT windows and rasterize trails/VFX.
+- [x] Edit graphs, groups, keys and tiles atomically; scope Dopesheet Delete and canvas shortcuts to their panels; refresh HLSL sockets, cook shaders and retain Lua observations; preserve moved inputs, animator aliases and refused selections; insert Gradient/Matrix keys and save rigid meshes with metadata.
+- [x] Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
+- [x] Run bounded Lua and recorded-random export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
+- [x] Evaluate bounded volume projection; bind rigid/3D outputs, mesh availability and skyboxes; render Composer shaders from cooked binaries and queue camera/SDF jobs. Keep live ShaderScript compilation. Cooked Composer Vulkan tests pass; broader GPU verification remains open.
+- [x] Package source projects and authored scenes; profile scene, simulation, atlas, palette, filter, FFT, path and Strand CPU workloads. Visual acceptance remains open.
 
 Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
@@ -73,7 +73,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Verify live Studio workflows.
 - [_] Establish exact parity with a licensed reference build and matched captures.
 
-  Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
+Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
 - [_] Finish measured engine stress optimizations and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
 - [_] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`).
