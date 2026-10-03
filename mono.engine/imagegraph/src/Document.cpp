@@ -10292,7 +10292,12 @@ namespace engine::imagegraph {
 							  (input.Id == "diverge_threshold" && input.SourceKind == "Float") ||
 							  (input.Id == "uv_mix" && input.SourceKind == "Slider"))) ||
 							(node.Type == "pc.gabor_noise" && input.SourceKind == "Slider" &&
-							 (input.Id == "density" || input.Id == "sharpness" || input.Id == "uv_mix"));
+							 (input.Id == "density" || input.Id == "sharpness" || input.Id == "uv_mix")) ||
+							(node.Type == "pc.flow_noise" &&
+							 ((input.Id == "progress" && input.SourceKind == "Float") ||
+							  (input.Id == "uv_mix" && input.SourceKind == "Slider"))) ||
+							(node.Type == "pc.noise_bubble" && input.SourceKind == "Slider" &&
+							 (input.Id == "density" || input.Id == "thickness" || input.Id == "uv_mix"));
 						if (sourceSurfaceScalar && produced[sourceIndex]) {
 							const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
 							const ImageArray *surfaces =
@@ -10356,7 +10361,8 @@ namespace engine::imagegraph {
 							(node.Type == "pc.mirror_polar" ||
 							 (simpleShape && (input.Id == "center" || input.Id == "half_size")));
 						// Dimension projects surfaces before processor selection. Equal sizes collapse.
-						if (simpleShape && input.Id == "dimension" && input.SourceKind == "Dimension" &&
+						if ((simpleShape || node.Type == "pc.flow_noise" || node.Type == "pc.noise_bubble") &&
+							input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {
 							if (const ImageArray *images =
 									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
@@ -10488,13 +10494,21 @@ namespace engine::imagegraph {
 							 (node.Type == "pc.julia_set" &&
 							  (input.Id == "c" || input.Id == "position" || input.Id == "scale")) ||
 							 (node.Type == "pc.gabor_noise" &&
-							  (input.Id == "position" || input.Id == "scale" || input.Id == "augment")));
-						const bool gaborSurfaceRange = node.Type == "pc.gabor_noise" &&
-													   input.SourceKind == "SliRange" &&
-													   (input.Id == "level_in" || input.Id == "level_out");
+							  (input.Id == "position" || input.Id == "scale" || input.Id == "augment")) ||
+							 (node.Type == "pc.flow_noise" &&
+							  (input.Id == "position" || input.Id == "scale")));
+						const bool gaborSurfaceRange =
+							(node.Type == "pc.gabor_noise" || node.Type == "pc.flow_noise" ||
+							 node.Type == "pc.noise_bubble") &&
+							input.SourceKind == "SliRange" &&
+							(input.Id == "level_in" || input.Id == "level_out" ||
+							 (node.Type == "pc.flow_noise" && input.Id == "detail") ||
+							 (node.Type == "pc.noise_bubble" &&
+							  (input.Id == "scale" || input.Id == "opacity")));
 						const ImageArray *generatorSurfaceArray =
 							(sourceSurfaceVec2 &&
-							 (node.Type == "pc.julia_set" || node.Type == "pc.gabor_noise")) ||
+							 (node.Type == "pc.julia_set" || node.Type == "pc.gabor_noise" ||
+							  node.Type == "pc.flow_noise")) ||
 									gaborSurfaceRange
 								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
 								: nullptr;

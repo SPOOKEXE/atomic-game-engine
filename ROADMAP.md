@@ -55,7 +55,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Preserve source keys and metadata through processor resets and quaternion display-mode edits.
 - [x] Resume pending exports, cancel safely and publish atomically.
 - [_] Finish Mirror path sampling and separate X/Y animation.
-- [_] Integrate Flow and Bubble noise generators.
+- [x] Integrate Flow and Bubble noise generators.
 - [_] Integrate path extension, flattening and smoothing.
 - [_] Finish font loading, text layout and rendering.
 - [_] Add source-compatible argument handling.
