@@ -674,14 +674,22 @@ namespace engine::imagegraph {
 	};
 
 	struct SourcePathData3D;
+	// An empty source shape replaces points but preserves prior length getters.
+	struct SourcePolylineEmptyCache3D {
+		double Length = 0;
+		uint32_t SegmentCount = 0;
+		bool operator==(const SourcePolylineEmptyCache3D &) const = default;
+	};
 	struct PathData3D {
-		bool Loop = false, SourcePresent = true;
+		// Shape Path 3D uses a polyline sampler rather than Node_Path_3D length sampling.
+		bool Loop = false, SourcePresent = true, SourcePolyline = false;
 		uint32_t Resolution = 32;
 		std::vector<PathAnchor3D> Anchors;
 		std::optional<Path2D> Source2D;
 		OwnedPayload3D<SourcePathData3D> SourceOperation;
 		// Sampling applies inner wrappers first without changing source length or weight.
 		std::vector<PathTransform3D> Transforms;
+		std::optional<SourcePolylineEmptyCache3D> SourceEmptyCache;
 		bool operator==(const PathData3D &) const = default;
 	};
 	struct PathValue3D {

@@ -1,0 +1,60 @@
+{
+  "profile": "native-source-cache-results",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_files": [
+    {
+      "path": "scripts/node_cache_results/node_cache_results.gml",
+      "sha256": "135a4a623ec85df80acee5d6f58f611a4b5f562059fbf9e558940a348e84eb09"
+    },
+    {
+      "path": "scripts/shader_functions/shader_functions.gml",
+      "sha256": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7"
+    },
+    {
+      "path": "scripts/surface_functions/surface_functions.gml",
+      "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2"
+    },
+    {
+      "path": "scripts/_draw_defines/_draw_defines.gml",
+      "sha256": "f4702dd2337ca20635d699456b6ef27c11ff1aa890f91610629b4d91b94eb51c"
+    },
+    {
+      "path": "shaders/sh_sample/sh_sample.fsh",
+      "sha256": "0d6db62ad161cba387e90f3a652e6d13e052ec7cefd338f32dd8f3e21449d924"
+    }
+  ],
+  "node": "pc.cache_results",
+  "source_contract": {
+    "amount": "Truncate surface list first; at exact first frame drop first slot only when list count equals Amount, then append new cycle slot. Later source index is retained even after shrink.",
+    "clock": "Exact signed Tick/Subframe first-frame equality with authored Timeline.First; direct caller observation ordering, no invented intermediate source calls.",
+    "draw": "surface_set_shader defaults clear=true and BLEND.alpha. DRAW_CLEAR clears RGBA; BLEND_ALPHA uses RGB source factor one and alpha source factor one. Same-size RGBA8 copies exact pixels. surface_verify defaults destination RGBA8.",
+    "nonsurface": "Later non-surface observations publish truncated retained list without replacing a slot. First-frame raw surface_create(1,1) without a valid input is source-unwritten storage and explicitly refused."
+  },
+  "ledger": "One latest complete owned surface-list record at storage key zero; Entry Tick/Subframe/NegativeFrame and PreviousFrame carry actual observation timestamp. PreviousValue carries source surfaceIndex. Immutable borrowed prior, updates published transactionally.",
+  "runtime_context": {
+    "repository": "https://github.com/YoYoGames/GameMaker-HTML5",
+    "commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+    "url": "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/yyVariable.js",
+    "sha256": "da5d6a2fba34a237e563de92df55a3db96999f34b762d59dbae969b6bd08deb0",
+    "observed": "Standalone pinned array_delete helper leaves an empty list empty and deletes the first element of ordinary dense arrays. This does not establish the preceding source surfaces[0] read when Amount is zero.",
+    "proof": "outside reference/array-delete-proof.json; not a source-node runtime or licensed desktop proof"
+  },
+  "defined_native_formats": "RGBA8, RGBA4, RGBA16Float, RGBA32Float, R8, R16Float and R32Float convert through existing finite LoadSurfacePixel/StoreSurfacePixel profile to owned RGBA8. RGBA8 copies preserve stored RGB even at partial alpha.",
+  "limits": "Existing 4096 array element/depth/byte limits; validate borrowed replay using preadmitted validation workspace; admit complete candidate/journal/export list residency before cloning; output publication uses bounded source-array admission.",
+  "explicit_refusals": [
+    "Amount zero at first frame reads a nonexistent first source slot (InvalidValue).",
+    "Source-unwritten fresh 1x1 surface without valid input (UnsupportedExecution).",
+    "Sparse extension after source stale index exceeds truncated count (UnsupportedExecution).",
+    "Atlas-backed source drawing without an exact atlas observation (UnsupportedExecution).",
+    "Malformed or over-budget prior/source storage, nonfinite surface words and over-bound Amount."
+  ],
+  "open_gates": [
+    "Licensed GPU sampling, normalized conversion rounding and single-channel device swizzle parity are not claimed.",
+    "Source Cache Clear button and source scheduler/cache serialization lifecycle are not implemented by this CPU executor. Caller resets are explicit native replay ownership operations.",
+    "No partial diagnostic evidence is represented as full source parity."
+  ],
+  "verification": {
+    "strict_syntax": "Source executor, nine-case core fixture and executor map: -Wall -Wextra -Wpedantic -Werror -fsyntax-only pass, current headers and outside temporal predicate, no PCH/archive.",
+    "runtime": "Pending fresh joined build. No hybrid archive or timings used."
+  }
+}

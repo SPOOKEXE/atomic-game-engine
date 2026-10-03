@@ -6339,11 +6339,11 @@ S	I	background	0
 I	padding	Padding	3	IPadding	vector4	w 0 0 0 0	
 S	I	padding	1
 A	I	padding	1
+I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
+S	I	attribute_color_depth	?
 O	surface_out	Surface Out	0	image
 O	crop_distance	Crop distance	1	vector4
 O	atlas	Atlas	2	atlas
-I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
-S	I	attribute_color_depth	?
 N	pc.cross_section	Node_Cross_Section	Draw Cross Section	generate	scripts/node_cross_section/node_cross_section.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22271,8 +22271,17 @@ I	rotation	Rotation	4	Rotation	scalar	d 0
 S	I	rotation	0
 I	shape	Shape	2	EScroll	enum	e 0	
 S	I	shape	0
-B	I	shape	0	general	1	default	?
-C	I	shape	unknown
+B	I	shape	0	general	1	default	9
+C	I	shape	resolved
+Q	I	shape	0	0	s "Rectangle"
+Q	I	shape	1	0	s "Ellipse"
+Q	I	shape	2	0	s "Regular Polygon"
+Q	I	shape	3	1	s ""
+Q	I	shape	4	0	s "Star"
+Q	I	shape	5	1	s ""
+Q	I	shape	6	0	s "Spring"
+Q	I	shape	7	0	s "Spring Sphere"
+Q	I	shape	8	0	s "Spiral"
 I	sides	Sides	5	Int	integer	i 6	
 S	I	sides	0
 I	revolution	Revolution	6	Float	scalar	d 4	
@@ -22285,7 +22294,7 @@ I	inner_radius	Inner Radius	8	Slider	scalar	d 0.5
 S	I	inner_radius	0
 I	resolution	Resolution	10	Int	integer	i 64	
 S	I	resolution	0
-O	path_data	Path data	0	path2d
+O	path_data	Path data	0	path3d
 N	pc.path_shift	Node_Path_Shift	Shift Path	values	scripts/node_path_shift/node_path_shift.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -29030,6 +29039,10 @@ S	I	index	?
 I	default_value	Default value	1	Generic_any	any		
 S	I	default_value	?
 D	2	2
+T	case	Case	0	Text	text	s ""	
+S	T	case	0
+T	value	Value	1	Generic_any	any		
+S	T	value	0
 O	result	Result	0	any
 N	pc.symmetric_nn	Node_Symmetric_NN	Symmetric NN	filter	scripts/node_symmetric_nn/node_symmetric_nn.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
@@ -29347,6 +29360,10 @@ S	I	index	?
 I	default_value	Default Value	1	Generic_any	any		
 S	I	default_value	?
 D	3	2
+T	value	Value	0	Float	scalar	d 0	
+S	T	value	0
+T	value_2	Value	1	Generic_any	any		
+S	T	value_2	0
 O	result	Result	0	any
 N	pc.tile	Node_Tile	Tile	transform	scripts/node_tile/node_tile.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	

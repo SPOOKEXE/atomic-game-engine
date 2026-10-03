@@ -6,7 +6,14 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
-		return (entry.Type == "pc.smear" &&
+		return (entry.Type == "pc.dotted" &&
+				((input.SourceKind == "MapToggle" &&
+				  (input.Id == "size_mapped" || input.Id == "angle_mapped" ||
+				   input.Id == "dot_size_mapped")) ||
+				 (input.SourceKind == "MapRange" &&
+				  (input.Id == "size_map_range" || input.Id == "angle_map_range" ||
+				   input.Id == "dot_size_map_range")))) ||
+			   (entry.Type == "pc.smear" &&
 				((input.SourceKind == "MapToggle" &&
 				  (input.Id == "strength_mapped" || input.Id == "direction_mapped")) ||
 				 (input.SourceKind == "MapRange" &&
@@ -44,6 +51,8 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.dotted" && (port == "size" || port == "angle" || port == "dot_size"))
+			return context.Boolean(std::string(port) + "_mapped");
 		if (context.Entry.Type == "pc.smear" && (port == "strength" || port == "direction"))
 			return context.Boolean(port == "strength" ? "strength_mapped" : "direction_mapped");
 		if (context.Entry.Type == "pc.dither" && port == "contrast")
@@ -65,6 +74,14 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.dotted" && (port == "size" || port == "angle" || port == "dot_size")) {
+			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+				return context.Find(
+					port == "size" ? "size_map_range"
+								   : (port == "angle" ? "angle_map_range" : "dot_size_map_range")
+				);
+			return value;
+		}
 		const bool simplex =
 			context.Entry.Type == "pc.noise_simplex" && (port == "iteration" || port == "scale");
 		const bool smearDefault = context.Entry.Type == "pc.smear" && !context.IsLinked(port) &&
@@ -119,7 +136,7 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if ((context.Entry.Type == "pc.dither" && port == "contrast") ||
+		if (context.Entry.Type == "pc.dotted" || (context.Entry.Type == "pc.dither" && port == "contrast") ||
 			(context.Entry.Type == "pc.gradient" &&
 			 (port == "angle" || port == "radius" || port == "shift" || port == "scale")) ||
 			context.Entry.Type == "pc.ambient_occlusion" ||

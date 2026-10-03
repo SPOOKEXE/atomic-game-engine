@@ -123,7 +123,7 @@ def _without_comments(text: str) -> str:
 
 
 def _local_source_array(expression: str, body: str) -> str | None:
-    assignment = re.search(r"\b" + re.escape(expression) + r"\s*=\s*(\[|__enum_array_gen\s*\()", body)
+    assignment = re.search(r"\b" + re.escape(expression) + r"\s*=\s*(\[|(?:__enum_array_gen|array_map)\s*\()", body)
     if assignment is None:
         return None
     opening = assignment.end() - 1
@@ -131,6 +131,19 @@ def _local_source_array(expression: str, body: str) -> str | None:
     if end is None or re.search(r"\b" + re.escape(expression) + r"\s*(?:\[[^]]*\]\s*)?=|array_push\(\s*" + re.escape(expression) + r"\b", body[end:]):
         return None
     return body[assignment.start(1):end]
+
+
+def _scroll_item_map_input(arguments: list[str]) -> str | None:
+    """Recognize the source map that preserves labels and separator positions."""
+    if len(arguments) != 2:
+        return None
+    mapper = _without_comments(arguments[1]).strip()
+    match = re.fullmatch(
+        r"function\s*\(\s*([A-Za-z_]\w*)\s*,\s*[A-Za-z_]\w*\s*\)\s*\{\s*return\s+"
+        r"\1\s*==\s*-1\s*\?\s*-1\s*:\s*new\s+scrollItem\s*\(\s*\1\s*,\s*"
+        r"[A-Za-z_]\w*\s*,\s*[A-Za-z_]\w*\s*\+\+\s*\)\s*;?\s*\}", mapper
+    )
+    return arguments[0] if match else None
 
 
 def _array_count(expression: str, body: str, global_arrays: dict[str, str], seen: set[str]) -> int | None:
@@ -149,6 +162,9 @@ def _array_count(expression: str, body: str, global_arrays: dict[str, str], seen
             return None
         function = call.group(1)
         arguments = _split_top_level(expression[opening + 1:end - 1])
+        if function == "array_map":
+            mapped = _scroll_item_map_input(arguments)
+            return _array_count(mapped, body, global_arrays, seen) if mapped is not None else None
         if function not in {"__enum_array_gen", "array_create"}:
             return None
         if arguments:
@@ -399,6 +415,9 @@ def _resolved_source_array(
         function, arguments = call
         if function == "__enum_array_gen" and array_map_verified and arguments:
             return _resolved_source_array(arguments[0], body, global_arrays, seen, array_map_verified)
+        if function == "array_map" and array_map_verified:
+            mapped = _scroll_item_map_input(arguments)
+            return _resolved_source_array(mapped, body, global_arrays, seen, array_map_verified) if mapped is not None else None
         return None
 
     if expression.startswith("["):

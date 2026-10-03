@@ -303,6 +303,7 @@ namespace engine::imagegraph::detail {
 	bool SourceGapContract(NodeContext &context);
 	bool SourceAlignContent(NodeContext &context);
 	bool SourceDitherDiffuse(NodeContext &context);
+	bool SourceDotted(NodeContext &context);
 	bool SourceOrderedDither(NodeContext &context);
 	bool SourceSurfaceReplace(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
@@ -352,6 +353,7 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.align_content", SourceAlignContent, true},
 			ExecutorEntry{"pc.dither_diffuse", SourceDitherDiffuse, true},
 			ExecutorEntry{"pc.dither", SourceOrderedDither, true},
+			ExecutorEntry{"pc.dotted", SourceDotted, true},
 			ExecutorEntry{"pc.surface_replace", SourceSurfaceReplace, true},
 			ExecutorEntry{"pc.padding", SourcePadding, true},
 			ExecutorEntry{"pc.9_slice", SourceNineSlice, true},

@@ -95,6 +95,19 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
         self.assertEqual("unknown", conditional["choice_clamp"]["mode"])
         self.assertEqual("unknown", later_mutation["choice_clamp"]["mode"])
 
+    def test_shape_scroll_sprite_counter_preserves_physical_selector_separators(self):
+        body = 'shape_types = ["Rectangle","Ellipse","Regular Polygon",-1,"Star",-1,"Spring","Spring Sphere","Spiral"]; __ind=0; shapeScroll=array_map(shape_types,function(v,i) { return v == -1 ? -1 : new scrollItem(v,s_node_path_3d_shape,__ind++) });'
+        self.assertEqual(choice_count('{data:shapeScroll,horizontal:1}', body, {}), 9)
+        flags = dict(array_map_verified=True, scroll_item_verified=True, separator_verified=True)
+        mapped = source_choice_map('{data:shapeScroll,horizontal:1}', body, {}, **flags)
+        self.assertEqual([entry["choice_index"] for entry in mapped], list(range(9)))
+        self.assertEqual([entry["choice_index"] for entry in mapped if "separator" in entry], [3, 5])
+        self.assertEqual([entry["label"] for entry in mapped if "label" in entry],
+                         ["Rectangle", "Ellipse", "Regular Polygon", "Star", "Spring", "Spring Sphere", "Spiral"])
+        self.assertIsNone(source_choice_map('shapeScroll', body, {}, **(flags | {"array_map_verified": False})))
+        self.assertIsNone(source_choice_map('shapeScroll', body.replace('v == -1 ? -1', 'v == -1 ? "separator"'), {}, **flags))
+        self.assertIsNone(source_choice_map('shapeScroll', body + ' shapeScroll=[];', {}, **flags))
+
     def test_local_enum_helper_alias_retains_source_positions_and_count(self):
         body = 'var __gradTypes = __enum_array_gen(["Linear", "Circular", "Radial", "Diamond"], s_node_gradient_type);'
         self.assertEqual(4, choice_count("__gradTypes", body, {}))

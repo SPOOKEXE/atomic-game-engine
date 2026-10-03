@@ -31958,6 +31958,29 @@
      "kind": "IPadding",
      "name": "Padding",
      "source_array_classification": true
+    },
+    {
+     "array_depth": 0,
+     "attribute": "color_depth",
+     "choices": [
+      "Input",
+      "Inherited",
+      "4 bit RGBA",
+      "8 bit RGBA",
+      "16 bit RGBA",
+      "32 bit RGBA",
+      "8 bit Greyscale",
+      "16 bit Greyscale",
+      "32 bit Greyscale"
+     ],
+     "default": "0",
+     "display_name": "Color Depth",
+     "extra": [],
+     "index": "-1",
+     "kind": "Attribute",
+     "name": "attribute color_depth",
+     "source_array_classification": null,
+     "source_depth_input_enabled": true
     }
    ],
    "outputs": [
@@ -102956,15 +102979,52 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 9,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Rectangle"
+       },
+       {
+        "choice_index": 1,
+        "label": "Ellipse"
+       },
+       {
+        "choice_index": 2,
+        "label": "Regular Polygon"
+       },
+       {
+        "choice_index": 3,
+        "separator": -1
+       },
+       {
+        "choice_index": 4,
+        "label": "Star"
+       },
+       {
+        "choice_index": 5,
+        "separator": -1
+       },
+       {
+        "choice_index": 6,
+        "label": "Spring"
+       },
+       {
+        "choice_index": 7,
+        "label": "Spring Sphere"
+       },
+       {
+        "choice_index": 8,
+        "label": "Spiral"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -103027,7 +103087,8 @@
      "default": "self",
      "index": "0",
      "name": "Path data",
-     "type": "VALUE_TYPE.pathnode"
+     "type": "VALUE_TYPE.pathnode",
+     "effective_type": "path3d"
     }
    ]
   },
@@ -133533,7 +133594,26 @@
    "dynamic": {
     "data_length": 2,
     "fixed_length": 2,
-    "template": []
+    "template": [
+     {
+      "array_depth": 0,
+      "default": "",
+      "extra": [],
+      "index": "0",
+      "kind": "Text",
+      "name": "Case",
+      "source_array_classification": false
+     },
+     {
+      "array_depth": 0,
+      "default": "0",
+      "extra": [],
+      "index": "1",
+      "kind": "Generic_any",
+      "name": "Value",
+      "source_array_classification": false
+     }
+    ]
    },
    "file": "scripts/node_switch/node_switch.gml",
    "inputs": [
@@ -135093,7 +135173,26 @@
    "dynamic": {
     "data_length": 2,
     "fixed_length": 3,
-    "template": []
+    "template": [
+     {
+      "array_depth": 0,
+      "default": "0",
+      "extra": [],
+      "index": "0",
+      "kind": "Float",
+      "name": "Value",
+      "source_array_classification": false
+     },
+     {
+      "array_depth": 0,
+      "default": "0",
+      "extra": [],
+      "index": "1",
+      "kind": "Generic_any",
+      "name": "Value",
+      "source_array_classification": false
+     }
+    ]
    },
    "file": "scripts/node_threshold_switch/node_threshold_switch.gml",
    "inputs": [
@@ -155802,6 +155901,18 @@
   "scripts/node_data/node_data.gml": {
    "bytes": 119599,
    "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d"
+  },
+  "scripts/node_switch/node_switch.gml": {
+   "bytes": 6589,
+   "sha256": "0088c238b35068b4bdf6dcb9413f45a8b2ea0350ff5328f0ddd38e692392ebfe"
+  },
+  "scripts/node_threshold_switch/node_threshold_switch.gml": {
+   "bytes": 8858,
+   "sha256": "92436e09dc75b8b2d30b395078eb1b276f5ac2022bb0f3f732234a434e7f4e16"
+  },
+  "scripts/node_path_shape_3d/node_path_shape_3d.gml": {
+   "bytes": 12447,
+   "sha256": "e779dec5d2e9b82dd1a215ef4640182653e73396ba09b9ada722d40a19f6d9a4"
   }
  }
 }

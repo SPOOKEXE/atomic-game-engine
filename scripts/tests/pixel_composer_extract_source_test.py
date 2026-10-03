@@ -231,6 +231,45 @@ function Node_Quarternion_Lookat(_x, _y, _group = noone) : Node_3D_Object(_x, _y
     }
 }
 """
+        files["scripts/node_switch/node_switch.gml"] = """
+function Node_Switch(_x, _y, _group = noone) : Node(_x, _y, _group) constructor {
+    newInput(0, nodeValue_Text("Index")).rejectArray();
+    newInput(1, nodeValue("Default value", self, CONNECT_TYPE.input, VALUE_TYPE.any, 0));
+    function createNewInput(index = array_length(inputs)) {
+        inputs[index + 0] = nodeValue_Text("Case").setDisplay(VALUE_DISPLAY.text_box, { side_button : bDel }).setAnimable(false);
+        inputs[index + 1] = nodeValue("Value", self, CONNECT_TYPE.input, VALUE_TYPE.any, 0).setVisible(false, false);
+        postCreateNewInput(index);
+    }
+    setDynamicInput(2, false);
+    newOutput(0, nodeValue_Output("Result", VALUE_TYPE.any, 0));
+}
+"""
+        files["scripts/node_threshold_switch/node_threshold_switch.gml"] = """
+function Node_Threshold_Switch(_x, _y, _group = noone) : Node(_x, _y, _group) constructor {
+    newInput(2, nodeValue_EButton("Type", 0, ["Number", "Frame"]));
+    newInput(0, nodeValue_Float("Index")).rejectArray();
+    newInput(1, nodeValue("Default Value", self, CONNECT_TYPE.input, VALUE_TYPE.any, 0));
+    function createNewInput(index = array_length(inputs)) {
+        inputs[index + 0] = nodeValue_Float("Value", 0).setSideButton(bDel).setAnimable(false);
+        inputs[index + 1] = nodeValue("Value", self, CONNECT_TYPE.input, VALUE_TYPE.any, 0).setVisible(false, false);
+        postCreateNewInput(index);
+    }
+    setDynamicInput(2, false);
+    newOutput(0, nodeValue_Output("Result", VALUE_TYPE.any, 0));
+}
+"""
+        files["scripts/node_value_enum_scroll/node_value_enum_scroll.gml"] = ""
+        files["scripts/node_path_shape_3d/node_path_shape_3d.gml"] = """
+function Node_Path_Shape_3D(_x, _y, _group=noone) : Node(_x, _y, _group) constructor {
+    shape_types=["Rectangle","Ellipse","Regular Polygon",-1,"Star",-1,"Spring","Spring Sphere","Spiral"];
+    __ind=0; shapeScroll=array_map(shape_types,function(v,i) { return v==-1 ? -1 : new scrollItem(v,s_node_path_3d_shape,__ind++); });
+    newInput(0,nodeValue_Vec3("Position",[0,0,0]));
+    newInput(1,nodeValue_Vec3("Half Size",[.5,.5,.5]));
+    newInput(2,nodeValue_EScroll("Shape",0,{data:shapeScroll,horizontal:1,text_pad:ui(8)}));
+    newOutput(0,nodeValue_Output("Path data",VALUE_TYPE.pathnode,self));
+    static getPointRatio=function(_rat,_ind=0,out=undefined) { if(!is(out,__vec3P)) out=new __vec3P(); return out; }
+}
+"""
         if include_condition or include_gradient:
             files["scripts/node_value_enum_scroll/node_value_enum_scroll.gml"] = '''
 #macro nodeValue_EScroll nodeValue_Enum_Scroll
@@ -301,6 +340,9 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
                 "Node_Quarternion_Lookat",
                 "Node_3D_Light_Point",
                 "Node_3D_Light_Directional",
+                "Node_Switch",
+                "Node_Threshold_Switch",
+                "Node_Path_Shape_3D",
                 "Node_Struct",
                 "Node_String_Insert",
                 "Node_Array_Shift",
@@ -339,6 +381,43 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
         for path in ("scripts/node_quarternion_lookat/node_quarternion_lookat.gml",
                      "scripts/node_data/node_data.gml"):
             self.assertRegex(snapshot["source_constructor_evidence"][path]["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_switch_direct_assignments_preserve_dynamic_pair_order_and_duplicate_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+        for name, fixed, selector_kind, selector_name, selector_default in (
+            ("Node_Switch", 2, "Text", "Case", ""),
+            ("Node_Threshold_Switch", 3, "Float", "Value", "0"),
+        ):
+            node = snapshot["nodes"][name]
+            self.assertEqual(node["dynamic"]["fixed_length"], fixed)
+            self.assertEqual(node["dynamic"]["data_length"], 2)
+            template = node["dynamic"]["template"]
+            self.assertEqual([(item["index"], item["kind"], item["name"]) for item in template],
+                             [("0", selector_kind, selector_name), ("1", "Generic_any", "Value")])
+            self.assertEqual([item["default"] for item in template], [selector_default, "0"])
+            self.assertEqual(template[1]["array_depth"], 0)
+            self.assertEqual(len([item for item in node["inputs"] if item["index"] != "-1"]), fixed)
+            self.assertEqual(node["outputs"][0]["type"], "VALUE_TYPE.any")
+            evidence = snapshot["source_constructor_evidence"][node["file"]]
+            self.assertRegex(evidence["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_path_shape_spatial_output_and_physical_menu_positions_are_source_backed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary), include_gradient=True)
+        node = snapshot["nodes"]["Node_Path_Shape_3D"]
+        self.assertEqual(node["base"], "Node")
+        self.assertNotIn("array_process", node)
+        shape = next(item for item in node["inputs"] if item["name"] == "Shape")
+        self.assertEqual(shape["default"], "0")
+        self.assertEqual(shape["source_choices"]["status"], "resolved")
+        self.assertEqual([x["choice_index"] for x in shape["source_choices"]["entries"]], list(range(9)))
+        self.assertEqual([x["choice_index"] for x in shape["source_choices"]["entries"] if "separator" in x], [3,5])
+        self.assertEqual(shape["source_behavior"]["choice_clamp"], {"mode":"default", "choice_count":9})
+        self.assertEqual(node["outputs"][0]["effective_type"], "path3d")
+        self.assertEqual(node["outputs"][0]["type"], "VALUE_TYPE.pathnode")
+        self.assertEqual(node["outputs"][0]["default"], "self")
+        self.assertRegex(snapshot["source_constructor_evidence"][node["file"]]["sha256"], r"^[0-9a-f]{64}$")
 
     def test_fibonacci_square_root_constructor_default_keeps_exact_source_expression(self):
         with tempfile.TemporaryDirectory() as temporary:

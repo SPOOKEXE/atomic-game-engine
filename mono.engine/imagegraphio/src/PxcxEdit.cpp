@@ -2801,7 +2801,11 @@ namespace engine::imagegraphio {
 								return old == value;
 							}))
 							continue;
-						if ((node.Type == "pc.dither" &&
+						if ((node.Type == "pc.dotted" &&
+							 (value.Port == "size_mapped" || value.Port == "size_map_range" ||
+							  value.Port == "angle_mapped" || value.Port == "angle_map_range" ||
+							  value.Port == "dot_size_mapped" || value.Port == "dot_size_map_range")) ||
+							(node.Type == "pc.dither" &&
 							 (value.Port == "contrast_mapped" || value.Port == "contrast_map_range")) ||
 							(node.Type == "pc.bevel" &&
 							 (value.Port == "height_mapped" || value.Port == "height_map_range")) ||
@@ -2816,30 +2820,39 @@ namespace engine::imagegraphio {
 							  value.Port == "shift_mapped" || value.Port == "shift_map_range" ||
 							  value.Port == "scale_mapped" || value.Port == "scale_map_range"))) {
 							const bool occlusion = node.Type == "pc.ambient_occlusion",
-								gradient = node.Type == "pc.gradient";
+									   gradient = node.Type == "pc.gradient",
+									   dotted = node.Type == "pc.dotted";
 							const std::string_view numericId =
-								gradient ? std::string_view(value.Port).substr(0, value.Port.find('_'))
+								dotted	   ? (value.Port.starts_with("dot_size_")
+												  ? std::string_view("dot_size")
+												  : std::string_view(value.Port).substr(0, value.Port.find('_')))
+								: gradient ? std::string_view(value.Port).substr(0, value.Port.find('_'))
 								: node.Type == "pc.dither"							? "contrast"
 								: node.Type == "pc.erode"							? "width"
 								: occlusion && value.Port.starts_with("intensity_") ? "intensity"
 																					: "height";
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
-							const int expectedIndex = gradient					 ? (numericId == "angle"	? 3
-																					: numericId == "radius" ? 4
-																					: numericId == "shift"	? 5
-																											: 9)
-													  : node.Type == "pc.dither" ? 4
-													  : occlusion && numericId == "height" ? 3
-																						   : 1;
-							const std::string_view expectedKind = gradient
-																	  ? (numericId == "angle"	 ? "Rotation"
-																		 : numericId == "radius" ? "Float"
-																								 : "Slider")
-																  : node.Type == "pc.dither" ? "Slider"
-																  : !occlusion				 ? "Int"
-																  : numericId == "height"	 ? "Float"
-																							 : "Slider";
+							const int expectedIndex =
+								dotted	   ? (numericId == "size" ? 2 : (numericId == "angle" ? 4 : 9))
+								: gradient ? (numericId == "angle"	  ? 3
+											  : numericId == "radius" ? 4
+											  : numericId == "shift"  ? 5
+																	  : 9)
+								: node.Type == "pc.dither"			 ? 4
+								: occlusion && numericId == "height" ? 3
+																	 : 1;
+							const std::string_view expectedKind =
+								dotted
+									? (numericId == "size" ? "Float"
+														   : (numericId == "angle" ? "Rotation" : "Slider"))
+								: gradient				   ? (numericId == "angle"	  ? "Rotation"
+															  : numericId == "radius" ? "Float"
+																					  : "Slider")
+								: node.Type == "pc.dither" ? "Slider"
+								: !occlusion			   ? "Int"
+								: numericId == "height"	   ? "Float"
+														   : "Slider";
 							if (!height || height->SourceIndex != expectedIndex ||
 								height->SourceKind != expectedKind || inputs.size() <= size_t(expectedIndex))
 								return Reject(

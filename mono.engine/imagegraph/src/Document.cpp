@@ -1143,7 +1143,9 @@ namespace engine::imagegraph {
 
 		std::string ValueTag(const Value &value) {
 			if (const auto *path = std::get_if<PathValue3D>(&value))
-				return path->Data && path->Data->SourceOperation ? "p3o" : "p3";
+				return path->Data && path->Data->SourceOperation
+						   ? "p3o"
+						   : (path->Data && path->Data->SourcePolyline ? "p3s" : "p3");
 			if (std::holds_alternative<PixelBoxValue>(value)) return "pb";
 			if (std::holds_alternative<ParticleValue>(value)) return "particle2";
 			if (std::holds_alternative<StrandValue>(value)) return "strand2";
@@ -1385,6 +1387,12 @@ namespace engine::imagegraph {
 				stream << bool(storedPath->Data);
 				if (storedPath->Data) {
 					const auto &path = *storedPath->Data;
+					if (path.SourcePolyline) {
+						stream << " source_polyline 1 source_empty_cache " << bool(path.SourceEmptyCache);
+						if (path.SourceEmptyCache)
+							stream << ' ' << path.SourceEmptyCache->Length << ' '
+								   << path.SourceEmptyCache->SegmentCount;
+					}
 					stream << ' ' << path.Loop << ' ' << path.Resolution << ' ' << path.Anchors.size() << ' '
 						   << path.SourcePresent << ' ' << bool(path.Source2D) << ' '
 						   << path.Transforms.size();
@@ -1856,13 +1864,42 @@ namespace engine::imagegraph {
 				value = std::move(stored);
 				return true;
 			}
-			if ((tag == "p3" || tag == "p3o") && version >= 9) {
+			if ((tag == "p3" || tag == "p3o" || tag == "p3s") && version >= 9) {
 				unsigned present = 0, loop = 0, sourcePresent = 1, source2d = 0;
 				uint32_t resolution = 32;
 				size_t count = 0, transforms = 0;
 				if (!(stream >> present) || present > 1) return false;
 				PathValue3D path;
+				std::optional<SourcePolylineEmptyCache3D> emptyCache;
 				if (present) {
+					if (tag == "p3s") {
+						stream >> std::ws;
+						for (char expected : std::string_view{"source_polyline"})
+							if (stream.get() != expected) return false;
+						const int next = stream.peek();
+						if (next == std::char_traits<char>::eof() ||
+							!std::isspace(static_cast<unsigned char>(next)))
+							return false;
+						unsigned marker = 0;
+						if (!(stream >> marker) || marker != 1) return false;
+						stream >> std::ws;
+						for (char expected : std::string_view{"source_empty_cache"})
+							if (stream.get() != expected) return false;
+						const int boundary = stream.peek();
+						if (boundary == std::char_traits<char>::eof() ||
+							!std::isspace(static_cast<unsigned char>(boundary)))
+							return false;
+						unsigned cached = 0;
+						if (!(stream >> cached) || cached > 1) return false;
+						if (cached) {
+							SourcePolylineEmptyCache3D cache;
+							if (!(stream >> cache.Length >> cache.SegmentCount) ||
+								!std::isfinite(cache.Length) || cache.Length < 0 || !cache.SegmentCount ||
+								cache.SegmentCount > Limits::MaximumPathAnchors)
+								return false;
+							emptyCache = cache;
+						}
+					}
 					if (!(stream >> loop >> resolution >> count >> sourcePresent >> source2d >> transforms) ||
 						loop > 1 || resolution == 0 || resolution > Limits::MaximumArrayElements ||
 						count > Limits::MaximumPathAnchors || sourcePresent > 1 || source2d > 1 ||
@@ -1876,6 +1913,8 @@ namespace engine::imagegraph {
 					auto &data = path.Data.emplace();
 					data.Loop = bool(loop);
 					data.SourcePresent = bool(sourcePresent);
+					data.SourcePolyline = tag == "p3s";
+					data.SourceEmptyCache = emptyCache;
 					data.Resolution = resolution;
 					data.Anchors.reserve(count);
 					for (size_t i = 0; i < count; ++i) {
@@ -1975,7 +2014,7 @@ namespace engine::imagegraph {
 						}
 					}
 					if (!detail::ValidSourcePath3D(data)) return false;
-				} else if (tag == "p3o")
+				} else if (tag == "p3o" || tag == "p3s")
 					return false;
 				value = std::move(path);
 				return true;
@@ -9737,7 +9776,8 @@ namespace engine::imagegraph {
 							if (const auto *values = FindValueOutputs(results[sourceIndex])) {
 								for (const auto &value : *values) {
 									if (value.Port != link->FromPort) continue;
-									if (node.Type == "pc.sequence_anim" && input.Id == "surface_in" &&
+									if ((node.Type == "pc.sequence_anim" || node.Type == "pc.cache_results") &&
+										input.Id == "surface_in" &&
 										detail::ValidRuntimeValue(value.Data)) {
 										context.ValueViews.emplace_back(input.Id, &value.Data);
 										break;
@@ -9948,6 +9988,24 @@ namespace engine::imagegraph {
 							if (surface || surfaces) {
 								// surface_get_dimension sees an entire array as a nonsurface, before
 								// batching.
+								context.Values.emplace_back(
+									input.Id,
+									Vector3{
+										surface ? double(surface->Width) : 1.,
+										surface ? double(surface->Height) : 1.,
+										0.
+									}
+								);
+								continue;
+							}
+						}
+						if (node.Type == "pc.path_shape_3_d" && input.SourceKind == "Vec3" &&
+							(input.Id == "position" || input.Id == "half_size") && produced[sourceIndex]) {
+							const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
+							const ImageArray *surfaces =
+								surface ? nullptr
+										: FindImageArrayOutput(results[sourceIndex], link->FromPort);
+							if (surface || surfaces) {
 								context.Values.emplace_back(
 									input.Id,
 									Vector3{

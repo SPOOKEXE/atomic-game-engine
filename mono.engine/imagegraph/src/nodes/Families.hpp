@@ -38,8 +38,10 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourcePcxExecutors();
 	std::span<const ExecutorEntry> SourceAnimationExecutors();
 	std::span<const ExecutorEntry> SourceRoutingExecutors();
+	std::span<const ExecutorEntry> SourceSwitchExecutors();
 	std::span<const ExecutorEntry> SourceSequenceAnimationExecutors();
 	std::span<const ExecutorEntry> SourceCacheValueExecutors();
+	std::span<const ExecutorEntry> SourceCacheResultsExecutors();
 	std::span<const ExecutorEntry> SceneExecutors();
 	std::span<const ExecutorEntry> SourceSdfExecutors();
 	std::span<const ExecutorEntry> SimulationExecutors();
@@ -58,6 +60,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourcePointsExecutors();
 	std::span<const ExecutorEntry> SourcePointDataExecutors();
 	std::span<const ExecutorEntry> SourceSpatialPointsExecutors();
+	std::span<const ExecutorEntry> SourceSpatialShapeExecutors();
 	std::span<const ExecutorEntry> SourceTileExecutors();
 	std::span<const ExecutorEntry> SourceSpriteStackExecutors();
 	std::span<const ExecutorEntry> SourceNormalMapExecutors();

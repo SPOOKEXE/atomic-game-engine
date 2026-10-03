@@ -11,10 +11,26 @@ namespace engine::imagegraph::detail {
 			path.Resolution > Limits::MaximumArrayElements ||
 			path.Transforms.size() > Limits::MaximumArrayDepth)
 			return false;
+		if (path.SourcePolyline &&
+			(!path.SourcePresent || path.Source2D || path.SourceOperation || path.Resolution != 1))
+			return false;
+		if (path.SourceEmptyCache &&
+			(!path.SourcePolyline || !path.Anchors.empty() || !std::isfinite(path.SourceEmptyCache->Length) ||
+			 path.SourceEmptyCache->Length < 0 || !path.SourceEmptyCache->SegmentCount ||
+			 path.SourceEmptyCache->SegmentCount > Limits::MaximumPathAnchors))
+			return false;
+		if (path.SourcePolyline && path.Loop && !path.Anchors.empty()) {
+			if (path.Anchors.size() < 2) return false;
+			for (size_t i = 0; i < 3; ++i)
+				if (path.Anchors.front().Controls[i] != path.Anchors.back().Controls[i]) return false;
+		}
 		for (const auto &a : path.Anchors) {
 			if (!std::isfinite(a.Index)) return false;
 			for (double n : a.Controls)
 				if (!std::isfinite(n)) return false;
+			if (path.SourcePolyline)
+				for (size_t i = 3; i < 9; ++i)
+					if (a.Controls[i] != 0) return false;
 		}
 		for (const auto &t : path.Transforms) {
 			if (!MeshFinite(t.Position) || !MeshFinite(t.Anchor) || !MeshFinite(t.Scale) ||

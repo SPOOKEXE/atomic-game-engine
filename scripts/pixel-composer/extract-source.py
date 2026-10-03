@@ -75,8 +75,8 @@ MAPPED_RANGE_TYPE_OVERRIDES = {
     ("Node_Gradient", "Scale"): "vector2",
 
 }
-# Dynamic assignments have only been schema-checked for Struct's key/value pair.
-DYNAMIC_ASSIGNED_INPUT_NODES = {"Node_Struct"}
+# These direct-assignment dynamic pairs have reviewed pinned constructor evidence.
+DYNAMIC_ASSIGNED_INPUT_NODES = {"Node_Struct", "Node_Switch", "Node_Threshold_Switch"}
 SCALAR_DEPTH_SOURCE_FILES = (
     "scripts/node_value/node_value.gml",
     "scripts/node_value_float/node_value_float.gml",
@@ -471,6 +471,8 @@ def parse(name, seen):
             else:
                 choice_expression = choice_args[0]
         source_choices = None
+        if name == "Node_Path_Shape_3D":
+            record_constructor_source(name)
         if entry["kind"] in ("EScroll", "EButton", "Enum_Scroll", "Enum_Button"):
             if choice_expression and not dynamic_choices:
                 source_choices = source_choice_map(
@@ -744,6 +746,11 @@ def parse(name, seen):
             "type": args[1] if len(args) > 1 else "",
             "default": args[2] if len(args) > 2 else "",
         })
+    if name == "Node_Path_Shape_3D" and "new __vec3P()" in body:
+        for output in outputs:
+            if output["index"] == "0" and output["type"] == "VALUE_TYPE.pathnode":
+                output["effective_type"] = "path3d"
+                record_constructor_source(name)
     for match in SURFACE_OUTPUT.finditer(body):
         record_constructor_source(name)
         args = call_args(body, match.end() - 1)

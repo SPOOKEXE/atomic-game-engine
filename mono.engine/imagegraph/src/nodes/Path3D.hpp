@@ -117,6 +117,25 @@ namespace engine::imagegraph::detail {
 				if (Ready) Total = Runtime2D->LengthTotal;
 				return;
 			}
+			if (data.SourcePolyline) {
+				if (data.Anchors.size() > Limits::MaximumPathAnchors) {
+					Ready = false;
+					return;
+				}
+				if (data.SourceEmptyCache) {
+					Total = data.SourceEmptyCache->Length;
+					SegmentCount = data.SourceEmptyCache->SegmentCount;
+					return;
+				}
+				SegmentCount = data.Anchors.size();
+				for (size_t i = 1; i < SegmentCount; ++i) {
+					const auto &a = data.Anchors[i - 1].Controls, &b = data.Anchors[i].Controls;
+					const double dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+					Lengths[i - 1] = std::sqrt(dx * dx + dy * dy + dz * dz);
+					Total += Lengths[i - 1];
+				}
+				return;
+			}
 			if (data.Anchors.size() < 2 || data.Anchors.size() > Limits::MaximumPathAnchors ||
 				!data.Resolution || data.Resolution > Limits::MaximumArrayElements)
 				return;
@@ -183,7 +202,20 @@ namespace engine::imagegraph::detail {
 				const auto point = Runtime2D->PointRatio(ratio, line);
 				return Apply({{point.X, point.Y, 0}, point.Weight});
 			}
+			if (Data.SourceEmptyCache) return {{NAN, NAN, NAN}, 1};
 			if (!SegmentCount) return Data.SourcePresent ? Apply({}) : PathPoint3D{};
+			if (Data.SourcePolyline) {
+				const double fraction = ratio - std::trunc(ratio);
+				double remaining = Total == 0 ? 0 : std::fmod(fraction * Total, Total);
+				for (size_t i = 0; i < SegmentCount; ++i) {
+					if (remaining > Lengths[i]) {
+						remaining -= Lengths[i];
+						continue;
+					}
+					return Apply({Segment(i, remaining / Lengths[i]), 1});
+				}
+				return Apply({});
+			}
 			if (ratio < 0) ratio = 1 + std::fmod(ratio, 1);
 			const double distance = (Data.Loop ? std::fmod(ratio, 1) : std::clamp(ratio, 0.0, .99)) * Total;
 			double remaining = distance;
@@ -197,7 +229,7 @@ namespace engine::imagegraph::detail {
 			return {};
 		}
 		PathPoint3D BySegment(double ratio) const {
-			if (Data.SourceOperation || !Data.Transforms.empty() ||
+			if (Data.SourcePolyline || Data.SourceOperation || !Data.Transforms.empty() ||
 				(Data.Source2D && Data.Source2D->SourceOperation))
 				return {{NAN, NAN, NAN}, 1};
 			if (Runtime2D) {

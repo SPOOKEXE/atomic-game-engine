@@ -55,6 +55,7 @@ namespace engine::imagegraph::detail {
 					  SourcePointsExecutors(),
 					  SourcePointDataExecutors(),
 					  SourceSpatialPointsExecutors(),
+					  SourceSpatialShapeExecutors(),
 					  SourceTileExecutors(),
 					  SourceSpriteStackExecutors(),
 					  SourceNormalMapExecutors(),
@@ -70,8 +71,10 @@ namespace engine::imagegraph::detail {
 					  TemporalExecutors(),
 					  SourceAnimationExecutors(),
 					  SourceRoutingExecutors(),
+					  SourceSwitchExecutors(),
 					  SourceSequenceAnimationExecutors(),
 					  SourceCacheValueExecutors(),
+					  SourceCacheResultsExecutors(),
 					  SourceConversionExecutors(),
 					  SourceColourFilterExecutors()})
 					for (const ExecutorEntry &entry : family)
@@ -89,6 +92,16 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if (type == "pc.path_shape_3_d" && (port == "position" || port == "half_size"))
+					return true;
+				if (type == "pc.cache_results" && port == "surface_in") return true;
+				if (type == "pc.switch" || type == "pc.threshold_switch") {
+					if (port == "default_value" || port == "index") return true;
+					const auto *entry = FindCatalogueEntry(type);
+					size_t group = 0;
+					const auto *slot = entry ? FindDynamicTemplate(*entry, port, group) : nullptr;
+					return slot && (slot->SourceIndex == 0 || slot->SourceIndex == 1);
+				}
 				if (type == "pc.sequence_anim" && (port == "surface_in" || port == "sequence")) return true;
 				if (type == "pc.quarternion_lookat" &&
 					(port == "origin" || port == "target" || port == "up" || port == "unit"))
