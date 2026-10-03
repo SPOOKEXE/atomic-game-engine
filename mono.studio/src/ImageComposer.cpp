@@ -2,6 +2,7 @@
 #include "AudioWindowPanel.hpp"
 #include "ImageComposerInternal.hpp"
 #include "ImageGraphAnimationControl.hpp"
+#include "ImageGraphArguments.hpp"
 #include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphCacheClearAction.hpp"
 #include "ImageGraphCanvasInputs.hpp"
@@ -67,6 +68,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <studio/ImageComposerArguments.hpp>
 #include <studio/ImageGraph.hpp>
 #include <studio/PxcxSave.hpp>
 #include <studio/WavPreview.hpp>
@@ -817,7 +819,7 @@ namespace studio {
 								metadataBytes.value_or(UINT64_MAX),
 								observationBytes.value_or(UINT64_MAX),
 								snapshot->RetainedBytes(),
-								state.Host.RetainedBytes,
+								state.Host.RetainedObservationBytes(),
 								state.Host.LuaReceipts.Bytes,
 								engine::imagegraph::Limits::MaximumEvaluationBytes
 							};
@@ -5475,6 +5477,58 @@ namespace studio {
 		state.Playback.LastTime = 0;
 		state.WavAudio.Close();
 		state.WavAudioMessage.clear();
+	}
+
+	bool PrepareImageComposerArguments(
+		const engine::imagegraph::SourceArgumentOptions &options,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		State &state = Composer();
+		if (state.Initialized) {
+			diagnostic = {
+				Status::InvalidValue,
+				{},
+				"arguments",
+				"Running Composer argument replacement requires its renderer"
+			};
+			return false;
+		}
+		return detail::PrepareImageGraphArguments(
+			state.Host.SourceArguments,
+			options,
+			state.EvaluationInputRevision,
+			[] {},
+			diagnostic,
+			maximumBytes
+		);
+	}
+	bool PrepareImageComposerArguments(
+		const engine::imagegraph::SourceArgumentOptions &options,
+		engine::render::Renderer &renderer,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		State &state = Composer();
+		return detail::PrepareImageGraphArguments(
+			state.Host.SourceArguments,
+			options,
+			state.EvaluationInputRevision,
+			[&] {
+				CancelExportIntent(state, renderer);
+				CancelComposerPreview(state, renderer);
+				state.FeedbackHost.Clear();
+				state.Host.ResetFiles();
+				state.ComposerExports.Pending.clear();
+				state.ExportUpdate = {};
+				state.PreviewCache.Clear();
+				state.PxcxCompletedPreview.reset();
+				state.PcxObservations.Captured = false;
+				RequestPreview(state, true);
+			},
+			diagnostic,
+			maximumBytes
+		);
 	}
 
 	bool ImageComposerHasPendingCapture() {

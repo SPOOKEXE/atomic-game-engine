@@ -1,0 +1,16 @@
+imagegraph 9
+node "argument" "pc.argument" "" 0 0
+value 0 "argument" "tag" s "width"
+value 0 "argument" "type" e 1
+value 0 "argument" "default_value" d 2
+node "dimension" "pc.vector2" "" 0 0
+value 1 "dimension" "x" d 2
+value 1 "dimension" "y" d 1
+node "solid" "pc.solid" "" 0 0
+value 2 "solid" "dimension" v 2 1
+value 2 "solid" "dimension_unit" e 0
+value 2 "solid" "color" c 31 47 59 255
+value 2 "solid" "attribute_color_depth" e 3
+link "argument" "value" "dimension" "x"
+link "dimension" "vector" "solid" "dimension"
+output "image" "solid" "surface_out"

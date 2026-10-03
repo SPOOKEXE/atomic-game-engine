@@ -4,6 +4,7 @@
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/imagegraph/SourceArgumentHost.hpp>
 #include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/GraphDirectoryHost.hpp>
 
@@ -39,6 +40,20 @@ int main(int argc, char **argv) {
 		"assetc", "Bake a directory of source art into one a content origin can publish."
 	);
 	engine::core::Config::DeclareOptions(arguments);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION, "NAME=VALUE", "Text graph argument; repeatable"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION, "NAME=VALUE", "Boolean graph argument; repeatable"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_INTEGER_OPTION, "NAME=VALUE", "Int64 graph argument; repeatable"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_REAL_OPTION,
+		"NAME=VALUE",
+		"Finite real graph argument; repeatable"
+	);
 	arguments.Value("input", "DIR", "The directory of source art to bake");
 	arguments.Value("output", "DIR", "Where the baked tree goes");
 	arguments.Value(
@@ -171,6 +186,24 @@ int main(int argc, char **argv) {
 			"a single graph tick\n",
 			stderr
 		);
+		return 2;
+	}
+	const auto argumentText = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION);
+	const auto argumentBoolean = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION);
+	const auto argumentInteger = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_INTEGER_OPTION);
+	const auto argumentReal = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_REAL_OPTION);
+	engine::imagegraph::SourceArgumentOptions argumentOptions{
+		argumentText,
+		argumentBoolean,
+		argumentInteger,
+		argumentReal,
+	};
+	engine::imagegraph::SourceArgumentHost argumentHost;
+	engine::imagegraph::Diagnostic argumentDiagnostic;
+	if (argumentHost.PrepareOptions(
+			argumentOptions, engine::imagegraph::Limits::MaximumEvaluationBytes, argumentDiagnostic
+		) != engine::imagegraph::Status::Ok) {
+		ENGINE_ERROR("assetc: invalid graph arguments {}", argumentDiagnostic.Message);
 		return 2;
 	}
 	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
@@ -368,6 +401,7 @@ int main(int argc, char **argv) {
 		}
 		assetc::GraphCommandHost commands(processGrants, httpGrants, exportSettings.Content, clockGrants);
 		class Host final : public engine::imagegraph::HostNodeProvider {
+			engine::imagegraph::SourceArgumentHost &Arguments;
 			assetc::GraphFileHost &Files;
 			assetc::GraphVideoHost &Videos;
 			assetc::GraphCommandHost &Commands;
@@ -375,18 +409,22 @@ int main(int argc, char **argv) {
 
 		  public:
 			Host(
+				engine::imagegraph::SourceArgumentHost &arguments,
 				assetc::GraphFileHost &files,
 				assetc::GraphVideoHost &videos,
 				assetc::GraphCommandHost &commands,
 				engine::imagegraphexport::GraphDirectoryHost &directories
 			)
-				: Files(files), Videos(videos), Commands(commands), Directories(directories) {}
+				: Arguments(arguments), Files(files), Videos(videos), Commands(commands),
+				  Directories(directories) {}
 
 			bool Capture(
 				const engine::imagegraph::HostNodeInvocation &invocation,
 				engine::imagegraph::HostNodeCapture &output,
 				std::string &failure
 			) override {
+				if (invocation.Authored.Type == "pc.argument")
+					return Arguments.Capture(invocation, output, failure);
 				if (invocation.Authored.Type == "pc.directory_search")
 					return Directories.Capture(invocation, output, failure);
 				if (invocation.Authored.Type == "pc.image_mp4" || invocation.Authored.Type == "pc.image_gif")
@@ -397,10 +435,8 @@ int main(int argc, char **argv) {
 					return Commands.Capture(invocation, output, failure);
 				return Files.Capture(invocation, output, failure);
 			}
-		} host(fileHost, videoHost, commands, directoryHost);
-		if (!directoryGrants.empty() || !fileGrants.empty() || !videoGrants.empty() ||
-			!processGrants.empty() || !httpGrants.empty() || !clockGrants.empty())
-			exportSettings.HostProvider = &host;
+		} host(argumentHost, fileHost, videoHost, commands, directoryHost);
+		exportSettings.HostProvider = &host;
 		std::string failure;
 		if (const auto node = arguments.Get("prepare-builtin-random")) {
 			std::vector<engine::imagegraph::SourceBuiltinRandomDraw> draws;
@@ -501,7 +537,7 @@ int main(int argc, char **argv) {
 	settings.FlipbookFrames = static_cast<uint16_t>(flipbookFrames);
 
 	std::string failure;
-	const assetc::Report report = assetc::Bake(settings, failure);
+	const assetc::Report report = assetc::Bake(settings, failure, &argumentHost);
 	if (!failure.empty()) {
 		ENGINE_ERROR("{}", failure);
 		return EXIT_FAILURE;

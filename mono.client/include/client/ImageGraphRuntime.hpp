@@ -8,6 +8,7 @@
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/PendingHostObservations.hpp>
+#include <engine/imagegraph/SourceArgumentHost.hpp>
 #include <engine/render/ImageGraphTransform3D.hpp>
 #include <engine/render/LiveImagePublisher.hpp>
 #include <engine/render/SourceSkyboxGroup.hpp>
@@ -59,7 +60,8 @@ namespace client {
 		engine::core::Name graph,
 		engine::core::Name output,
 		uint64_t tick,
-		uint64_t seed = 0
+		uint64_t seed = 0,
+		engine::imagegraph::SourceArgumentHost *arguments = nullptr
 	);
 
 	// Evaluates one authored graph through the renderer-owned synchronous export
@@ -71,7 +73,8 @@ namespace client {
 		engine::core::Name output,
 		engine::render::Renderer &renderer,
 		uint64_t tick,
-		uint64_t seed = 0
+		uint64_t seed = 0,
+		engine::imagegraph::SourceArgumentHost *arguments = nullptr
 	);
 
 	// Owns live publication generations for one client presentation loop.
@@ -81,6 +84,17 @@ namespace client {
 		static constexpr size_t MAXIMUM_CACHED_DOCUMENTS = 8;
 		static constexpr size_t MAXIMUM_CACHED_DOCUMENT_BYTES = 8u * 1024u * 1024u;
 		static constexpr size_t MAXIMUM_SINK_REFERENCES = 16u * 1024u;
+
+		// Replaces copied arguments on the renderer thread and retires cached observations only on success.
+		engine::imagegraph::Status PrepareArguments(
+			const engine::imagegraph::SourceArgumentOptions &,
+			engine::render::Renderer &,
+			engine::imagegraph::Diagnostic &,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		);
+		uint64_t ArgumentGeneration() const {
+			return ArgumentsGeneration;
+		}
 
 		// Starts a presentation budget shared by every world's binding scan.
 		void BeginFrame();
@@ -131,6 +145,8 @@ namespace client {
 		}
 
 	  private:
+		engine::imagegraph::SourceArgumentHost Arguments;
+		uint64_t ArgumentsGeneration = 1;
 		struct Entry {
 			engine::imagegraph::CapturedFeedbackHost Feedback;
 			std::unique_ptr<engine::imagegraph::ComposerLuaHost> LuaHost;

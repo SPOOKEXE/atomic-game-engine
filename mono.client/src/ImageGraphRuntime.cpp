@@ -206,6 +206,37 @@ namespace client {
 					   node.Type.starts_with("pc.lua_") || node.Type.starts_with("pc.pcx_");
 			});
 		}
+		class ArgumentProvider final : public engine::imagegraph::HostNodeProvider {
+			engine::imagegraph::SourceArgumentHost &Arguments;
+			engine::imagegraph::HostNodeProvider *Fallback;
+
+		  public:
+			ArgumentProvider(
+				engine::imagegraph::SourceArgumentHost &arguments,
+				engine::imagegraph::HostNodeProvider *fallback
+			)
+				: Arguments(arguments), Fallback(fallback) {}
+			bool Capture(
+				const engine::imagegraph::HostNodeInvocation &invocation,
+				engine::imagegraph::HostNodeCapture &output,
+				std::string &failure
+			) override {
+				if (invocation.Authored.Type == "pc.argument")
+					return Arguments.Capture(invocation, output, failure);
+				if (Fallback) return Fallback->Capture(invocation, output, failure);
+				failure = "Client has no provider for this host node";
+				return false;
+			}
+			bool PcxMessages(
+				std::string_view node,
+				std::span<const engine::imagegraph::PcxMessage> messages,
+				std::string &failure
+			) override {
+				if (Fallback) return Fallback->PcxMessages(node, messages, failure);
+				failure = "Client has no PCX message provider";
+				return false;
+			}
+		};
 		ImageGraphFrameResult EvaluateCompiled(
 			const engine::imagegraph::Document &document,
 			const engine::imagegraph::Plan &plan,
@@ -213,7 +244,8 @@ namespace client {
 			uint64_t tick,
 			uint64_t seed,
 			engine::imagegraph::CapturedFeedbackHost *feedbackOwner = nullptr,
-			engine::imagegraph::HostNodeProvider *hostProvider = nullptr
+			engine::imagegraph::HostNodeProvider *hostProvider = nullptr,
+			engine::imagegraph::SourceArgumentHost *arguments = nullptr
 		) {
 			ImageGraphFrameResult result;
 			result.Animated = NeedsFrameSamples(document);
@@ -221,9 +253,11 @@ namespace client {
 			auto &feedback = feedbackOwner ? *feedbackOwner : localFeedback;
 			auto localLua = hostProvider ? nullptr : LuaHostFor(document);
 			LuaMessageDrain drain{localLua.get()};
+			engine::imagegraph::SourceArgumentHost emptyArguments;
+			ArgumentProvider argumentProvider(arguments ? *arguments : emptyArguments, localLua.get());
 			engine::imagegraphphysics::RigidProvider rigid;
 			engine::imagegraph::EvaluationRequest clock{
-				.Tick = tick, .Seed = seed, .HostProvider = hostProvider ? hostProvider : localLua.get()
+				.Tick = tick, .Seed = seed, .HostProvider = hostProvider ? hostProvider : &argumentProvider
 			};
 			clock.RigidProvider = &rigid;
 			// Client seeks sample played frames, including fixed ticks. Repeated samples
@@ -342,7 +376,8 @@ namespace client {
 			std::string_view outputPort,
 			engine::render::Renderer &renderer,
 			uint64_t tick,
-			uint64_t seed
+			uint64_t seed,
+			engine::imagegraph::SourceArgumentHost *arguments
 		) {
 			using namespace engine;
 			ImageGraphFrameResult result;
@@ -356,9 +391,19 @@ namespace client {
 			}
 			auto lua = LuaHostFor(document);
 			LuaMessageDrain drain{lua.get()};
+			engine::imagegraph::SourceArgumentHost emptyArguments;
+			ArgumentProvider argumentProvider(arguments ? *arguments : emptyArguments, lua.get());
 			render::imagegraph::TransformImage3DRequest request;
 			if (!detail::BuildTransformRequest(
-					document, plan, transform, tick, seed, false, request, result.Diagnostic, lua.get()
+					document,
+					plan,
+					transform,
+					tick,
+					seed,
+					false,
+					request,
+					result.Diagnostic,
+					&argumentProvider
 				)) {
 				result.Status = result.Diagnostic.Code;
 				return result;
@@ -415,15 +460,27 @@ namespace client {
 			std::string_view port,
 			engine::render::Renderer &renderer,
 			uint64_t tick,
-			uint64_t seed
+			uint64_t seed,
+			engine::imagegraph::SourceArgumentHost *arguments
 		) {
 			ImageGraphFrameResult result;
 			result.Animated = NeedsFrameSamples(document);
 			auto lua = LuaHostFor(document);
 			LuaMessageDrain drain{lua.get()};
+			engine::imagegraph::SourceArgumentHost emptyArguments;
+			ArgumentProvider argumentProvider(arguments ? *arguments : emptyArguments, lua.get());
 			engine::render::imagegraph::SourceCamera3DRequest request;
 			if (!detail::BuildCameraRequest(
-					document, plan, node, port, tick, seed, false, request, result.Diagnostic, lua.get()
+					document,
+					plan,
+					node,
+					port,
+					tick,
+					seed,
+					false,
+					request,
+					result.Diagnostic,
+					&argumentProvider
 				)) {
 				result.Status = result.Diagnostic.Code;
 				return result;
@@ -463,15 +520,27 @@ namespace client {
 			std::string_view port,
 			engine::render::Renderer &renderer,
 			uint64_t tick,
-			uint64_t seed
+			uint64_t seed,
+			engine::imagegraph::SourceArgumentHost *arguments
 		) {
 			ImageGraphFrameResult result;
 			result.Animated = NeedsFrameSamples(document);
 			auto lua = LuaHostFor(document);
 			LuaMessageDrain drain{lua.get()};
+			engine::imagegraph::SourceArgumentHost emptyArguments;
+			ArgumentProvider argumentProvider(arguments ? *arguments : emptyArguments, lua.get());
 			engine::render::imagegraph::SourceSdfRequest request;
 			if (!detail::BuildSdfRequest(
-					document, plan, node, port, tick, seed, false, request, result.Diagnostic, lua.get()
+					document,
+					plan,
+					node,
+					port,
+					tick,
+					seed,
+					false,
+					request,
+					result.Diagnostic,
+					&argumentProvider
 				)) {
 				result.Status = result.Diagnostic.Code;
 				return result;
@@ -508,19 +577,20 @@ namespace client {
 			engine::core::Name output,
 			engine::render::Renderer &renderer,
 			uint64_t tick,
-			uint64_t seed
+			uint64_t seed,
+			engine::imagegraph::SourceArgumentHost *arguments
 		) {
 			std::string_view port;
 			const auto *node = OutputNode(document, output, port);
 			if (node != nullptr && node->Type == "image.transform_3d")
-				return EvaluateTransform(document, plan, *node, port, renderer, tick, seed);
+				return EvaluateTransform(document, plan, *node, port, renderer, tick, seed, arguments);
 			if (node && (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set"))
-				return EvaluateCamera(document, plan, *node, port, renderer, tick, seed);
+				return EvaluateCamera(document, plan, *node, port, renderer, tick, seed, arguments);
 			if (node && (node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
 						 node->Type == "pc.rm_cloud" || node->Type == "pc.rm_terrain" ||
 						 node->Type == "pc.rm_primitive" || node->Type == "pc.rm_combine"))
-				return EvaluateSdf(document, plan, *node, port, renderer, tick, seed);
-			return EvaluateCompiled(document, plan, output, tick, seed);
+				return EvaluateSdf(document, plan, *node, port, renderer, tick, seed, arguments);
+			return EvaluateCompiled(document, plan, output, tick, seed, nullptr, nullptr, arguments);
 		}
 	} // namespace
 
@@ -535,7 +605,8 @@ namespace client {
 		engine::core::Name graph,
 		engine::core::Name output,
 		uint64_t tick,
-		uint64_t seed
+		uint64_t seed,
+		engine::imagegraph::SourceArgumentHost *arguments
 	) {
 		ImageGraphFrameResult result;
 		const std::filesystem::path path = ImageGraphDocumentPath(directory, graph);
@@ -550,7 +621,7 @@ namespace client {
 		engine::imagegraph::Plan plan;
 		result.Status = ReadCompiled(path, document, plan, result.Diagnostic);
 		if (result.Status != engine::imagegraph::Status::Ok) return result;
-		return EvaluateCompiled(document, plan, output, tick, seed);
+		return EvaluateCompiled(document, plan, output, tick, seed, nullptr, nullptr, arguments);
 	}
 
 	ImageGraphFrameResult LoadImageGraphRenderExportFrame(
@@ -559,7 +630,8 @@ namespace client {
 		engine::core::Name output,
 		engine::render::Renderer &renderer,
 		uint64_t tick,
-		uint64_t seed
+		uint64_t seed,
+		engine::imagegraph::SourceArgumentHost *arguments
 	) {
 		ImageGraphFrameResult result;
 		const std::filesystem::path path = ImageGraphDocumentPath(directory, graph);
@@ -574,7 +646,7 @@ namespace client {
 		engine::imagegraph::Plan plan;
 		result.Status = ReadCompiled(path, document, plan, result.Diagnostic);
 		if (result.Status != engine::imagegraph::Status::Ok) return result;
-		return EvaluateForRenderer(document, plan, output, renderer, tick, seed);
+		return EvaluateForRenderer(document, plan, output, renderer, tick, seed, arguments);
 	}
 
 	bool ImageGraphRuntime::CollectWantedComposerShaders(
@@ -656,6 +728,27 @@ namespace client {
 		} catch (const std::bad_alloc &) {
 			return false;
 		}
+	}
+
+	engine::imagegraph::Status ImageGraphRuntime::PrepareArguments(
+		const engine::imagegraph::SourceArgumentOptions &options,
+		engine::render::Renderer &renderer,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		if (ArgumentsGeneration == UINT64_MAX) {
+			diagnostic = {
+				engine::imagegraph::Status::LimitExceeded, {}, {}, "Client argument generation is exhausted"
+			};
+			return diagnostic.Code;
+		}
+		const auto status = Arguments.PrepareOptions(options, maximumBytes, diagnostic);
+		if (status != engine::imagegraph::Status::Ok) return status;
+		const auto transformGeneration = NextTransformGeneration;
+		Clear(renderer);
+		NextTransformGeneration = transformGeneration;
+		++ArgumentsGeneration;
+		return status;
 	}
 
 	void ImageGraphRuntime::BeginFrame() {
@@ -1066,10 +1159,11 @@ namespace client {
 							}
 							if (!entry.LuaHost) entry.LuaHost = LuaHostFor(document->Authored);
 							LuaMessageDrain drain{entry.LuaHost.get()};
+							ArgumentProvider argumentProvider(Arguments, entry.LuaHost.get());
 							detail::ComposerProvider composerProvider(
 								renderer,
 								owner,
-								entry.LuaHost.get(),
+								&argumentProvider,
 								engine::core::Name(
 									"client.imagegraph/" + std::string(skyNames[index].Text())
 								),
@@ -1491,10 +1585,11 @@ namespace client {
 				entry.LuaHost = LuaHostFor(cached->Authored);
 			LuaMessageDrain drain{entry.LuaHost.get()};
 			const uint64_t evaluationTick = entry.PendingHostTick.value_or(tick);
+			ArgumentProvider argumentProvider(Arguments, entry.LuaHost.get());
 			detail::ComposerProvider composerProvider(
 				renderer,
 				owner,
-				entry.LuaHost.get(),
+				&argumentProvider,
 				engine::core::Name("client.imagegraph/" + std::string(selector.Texture.Text())),
 				&entry.HostCaptures,
 				&entry.HostObservations

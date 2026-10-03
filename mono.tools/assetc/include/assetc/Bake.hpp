@@ -13,6 +13,10 @@
 #include <string>
 #include <vector>
 
+namespace engine::imagegraph {
+	class SourceArgumentHost;
+}
+
 namespace assetc {
 
 	// What to bake, and how.
@@ -283,5 +287,9 @@ namespace assetc {
 	//                 directory, an output that cannot be created. A file that
 	//                 failed on its own is a row in the report instead.
 	// @return What happened, one row per source file.
-	Report Bake(const Settings &settings, std::string &failure);
+	Report Bake(
+		const Settings &settings,
+		std::string &failure,
+		engine::imagegraph::SourceArgumentHost *arguments = nullptr
+	);
 }

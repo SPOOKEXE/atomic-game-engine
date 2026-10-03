@@ -305,6 +305,12 @@ namespace client {
 		Shutdown();
 	}
 
+	engine::imagegraph::Status Client::PrepareImageGraphArguments(
+		const engine::imagegraph::SourceArgumentOptions &options, engine::imagegraph::Diagnostic &diagnostic
+	) {
+		return LiveImageGraphs.PrepareArguments(options, Renderer, diagnostic);
+	}
+
 	bool Client::Initialise(const Options &options) {
 		Settings = options;
 		SubmittedMoveTick = 0;

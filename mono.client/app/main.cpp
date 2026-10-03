@@ -70,6 +70,20 @@ int main(int argc, char **argv) {
 	engine::core::Arguments arguments("client", "atomic - runs a game.");
 	engine::core::Config::DeclareOptions(arguments);
 
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION, "NAME=VALUE", "Text graph argument; repeatable"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION, "NAME=VALUE", "Boolean graph argument; repeatable"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_INTEGER_OPTION, "NAME=VALUE", "Int64 graph argument; repeatable"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_REAL_OPTION,
+		"NAME=VALUE",
+		"Finite real graph argument; repeatable"
+	);
 	arguments.Flag("stats", "Open the F3 statistics panel at startup");
 	arguments.Flag("net", "Open the F4 network panel at startup (needs --connect)");
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
@@ -483,6 +497,17 @@ int main(int argc, char **argv) {
 	}
 
 	client::Client client;
+	engine::imagegraph::Diagnostic argumentDiagnostic;
+	if (client.PrepareImageGraphArguments(
+			{arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION),
+			 arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION),
+			 arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_INTEGER_OPTION),
+			 arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_REAL_OPTION)},
+			argumentDiagnostic
+		) != engine::imagegraph::Status::Ok) {
+		ENGINE_ERROR("client: invalid graph arguments {}", argumentDiagnostic.Message);
+		return 2;
+	}
 	if (!client.Initialise(options)) {
 		ENGINE_ERROR("client failed to start");
 		return 1;

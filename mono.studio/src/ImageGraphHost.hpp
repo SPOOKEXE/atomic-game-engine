@@ -3,6 +3,7 @@
 
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/ComposerLuaHost.hpp>
+#include <engine/imagegraph/SourceArgumentHost.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraphexport/GraphDirectoryHost.hpp>
 #include <engine/imagegraphexport/GraphFileHost.hpp>
@@ -99,6 +100,11 @@ namespace studio::detail {
 		std::array<std::optional<CachedFile>, 64> Files;
 		uint64_t RetainedBytes = sizeof(Files);
 		ImageGraphLuaReceipts LuaReceipts;
+		engine::imagegraph::SourceArgumentHost SourceArguments;
+		uint64_t RetainedObservationBytes() const {
+			const uint64_t arguments = SourceArguments.RetainedBytes();
+			return arguments > UINT64_MAX - RetainedBytes ? UINT64_MAX : RetainedBytes + arguments;
+		}
 
 		void ResetFiles() {
 			for (auto &file : Files)
@@ -122,11 +128,29 @@ namespace studio::detail {
 			return false;
 		}
 		bool Capture(
-			const engine::imagegraph::HostNodeInvocation &invocation,
+			const engine::imagegraph::HostNodeInvocation &originalInvocation,
 			CaptureRecord &output,
 			std::string &failure
 		) override try {
 			using namespace engine::imagegraph;
+			if (originalInvocation.Authored.Type == "pc.argument") {
+				const auto maximum = originalInvocation.MaximumOperationBytes;
+				const auto held = RetainedObservationBytes();
+				if (held >= maximum || LuaReceipts.Bytes >= maximum - held) {
+					failure = "Studio observations leave no argument capture budget";
+					return false;
+				}
+				HostNodeInvocation bounded = originalInvocation;
+				bounded.MaximumOperationBytes -= held + LuaReceipts.Bytes;
+				return SourceArguments.Capture(bounded, output, failure);
+			}
+			const uint64_t argumentBytes = SourceArguments.RetainedBytes();
+			if (argumentBytes >= originalInvocation.MaximumOperationBytes) {
+				failure = "Prepared source arguments leave no capability budget";
+				return false;
+			}
+			HostNodeInvocation invocation = originalInvocation;
+			invocation.MaximumOperationBytes -= argumentBytes;
 			if (invocation.Authored.Type == "pc.hlsl" ||
 				(invocation.Authored.Type == "pc.3_d_transform_image" ||
 				 invocation.Authored.Type == "image.transform_3d")) {

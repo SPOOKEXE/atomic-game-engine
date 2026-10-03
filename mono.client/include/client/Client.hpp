@@ -108,6 +108,12 @@ namespace client {
 		//         way to say anything more useful about it than that.
 		bool Initialise(const Options &options);
 
+		// Copies graph arguments before startup or replaces the live host table atomically.
+		engine::imagegraph::Status PrepareImageGraphArguments(
+			const engine::imagegraph::SourceArgumentOptions &options,
+			engine::imagegraph::Diagnostic &diagnostic
+		);
+
 		// Tears the window and renderer down, in that order for a reason the
 		// implementation explains, and stops the job system. Safe to call
 		// whether or not Initialise got as far as opening anything.

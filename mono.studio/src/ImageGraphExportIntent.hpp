@@ -227,8 +227,8 @@ namespace studio::detail {
 				return false;
 			}
 			const auto maximum = engine::imagegraph::Limits::MaximumEvaluationBytes;
-			if (Host.RetainedBytes >= maximum - *metadata ||
-				Host.LuaReceipts.Bytes >= maximum - *metadata - Host.RetainedBytes) {
+			if (Host.RetainedObservationBytes() >= maximum - *metadata ||
+				Host.LuaReceipts.Bytes >= maximum - *metadata - Host.RetainedObservationBytes()) {
 				failure = "Retained Studio observations leave no export message budget";
 				return false;
 			}
@@ -237,7 +237,7 @@ namespace studio::detail {
 				node,
 				messages,
 				Host,
-				maximum - *metadata - Host.RetainedBytes - Host.LuaReceipts.Bytes,
+				maximum - *metadata - Host.RetainedObservationBytes() - Host.LuaReceipts.Bytes,
 				failure
 			);
 		}

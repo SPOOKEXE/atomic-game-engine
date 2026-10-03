@@ -22,6 +22,15 @@ set_target_properties(assetc PROPERTIES
 
 if(MONO_BUILD_TESTS)
 	add_test(
+		NAME assetc_cli_source_arguments
+		COMMAND "${CMAKE_COMMAND}"
+			-DASSETC=$<TARGET_FILE:assetc>
+			-DIMAGEGRAPH=$<TARGET_FILE:imagegraph>
+			-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/argument.graph
+			-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-tests/source-arguments
+			-P "${CMAKE_CURRENT_SOURCE_DIR}/tests/SourceArgumentsCli.cmake")
+	set_tests_properties(assetc_cli_source_arguments PROPERTIES TIMEOUT 180)
+	add_test(
 		NAME assetc_cli_rigid_observations
 		COMMAND "${CMAKE_COMMAND}"
 			-DASSETC=$<TARGET_FILE:assetc>

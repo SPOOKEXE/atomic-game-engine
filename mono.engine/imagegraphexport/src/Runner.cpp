@@ -5,6 +5,7 @@
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/SourceArgumentHost.hpp>
 #include <engine/imagegraph/WavClip.hpp>
 #include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
@@ -1232,6 +1233,24 @@ namespace engine::imagegraphexport::runner {
 			"deterministic "
 			"PNG, BMP, EXR and APNG images or numeric scalar and array previews."
 		);
+		arguments.Value(
+			engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION, "NAME=VALUE", "Text graph argument; repeatable"
+		);
+		arguments.Value(
+			engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION,
+			"NAME=VALUE",
+			"Boolean graph argument; repeatable"
+		);
+		arguments.Value(
+			engine::imagegraph::SOURCE_ARGUMENT_INTEGER_OPTION,
+			"NAME=VALUE",
+			"Int64 graph argument; repeatable"
+		);
+		arguments.Value(
+			engine::imagegraph::SOURCE_ARGUMENT_REAL_OPTION,
+			"NAME=VALUE",
+			"Finite real graph argument; repeatable"
+		);
 		arguments.Value("input", "PATH", "Authored imagegraph text document");
 		arguments.Value("output-id", "ID", "Durable output ID to evaluate");
 		arguments.Value("output", "PATH", "PNG, BMP or EXR path, or JSON image-array manifest path");
@@ -1284,6 +1303,64 @@ namespace engine::imagegraphexport::runner {
 			errors << "error status=Arguments message=" << std::quoted(parsed.Error) << '\n';
 			return 2;
 		}
+		const auto argumentText = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION);
+		const auto argumentBoolean = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION);
+		const auto argumentInteger = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_INTEGER_OPTION);
+		const auto argumentReal = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_REAL_OPTION);
+		engine::imagegraph::SourceArgumentOptions argumentOptions{
+			argumentText,
+			argumentBoolean,
+			argumentInteger,
+			argumentReal,
+		};
+		const bool explicitArguments = !argumentOptions.Text.empty() || !argumentOptions.Boolean.empty() ||
+									   !argumentOptions.Integer.empty() || !argumentOptions.Real.empty();
+		if (liveDocument && explicitArguments) {
+			errors << "error status=Arguments message=\"frozen document arguments cannot be replaced\"\n";
+			return 2;
+		}
+		engine::imagegraph::SourceArgumentHost argumentHost;
+		Diagnostic argumentDiagnostic;
+		if (argumentHost.PrepareOptions(
+				argumentOptions, Limits::MaximumEvaluationBytes, argumentDiagnostic
+			) != Status::Ok) {
+			PrintDiagnostic(errors, argumentDiagnostic);
+			return 2;
+		}
+		class ArgumentProvider final : public engine::imagegraph::HostNodeProvider {
+			engine::imagegraph::SourceArgumentHost &Arguments;
+			engine::imagegraph::HostNodeProvider *Fallback;
+			bool UseTable;
+
+		  public:
+			ArgumentProvider(
+				engine::imagegraph::SourceArgumentHost &arguments,
+				engine::imagegraph::HostNodeProvider *fallback,
+				bool useTable
+			)
+				: Arguments(arguments), Fallback(fallback), UseTable(useTable) {}
+			bool Capture(
+				const engine::imagegraph::HostNodeInvocation &invocation,
+				engine::imagegraph::HostNodeCapture &capture,
+				std::string &failure
+			) override {
+				if (UseTable && invocation.Authored.Type == "pc.argument")
+					return Arguments.Capture(invocation, capture, failure);
+				if (Fallback) return Fallback->Capture(invocation, capture, failure);
+				failure = "No host provider for this source node";
+				return false;
+			}
+			bool PcxMessages(
+				std::string_view node,
+				std::span<const engine::imagegraph::PcxMessage> messages,
+				std::string &failure
+			) override {
+				if (Fallback) return Fallback->PcxMessages(node, messages, failure);
+				failure = "No host PCX message provider";
+				return false;
+			}
+		} argumentProvider(argumentHost, provider, explicitArguments || (!provider && !liveDocument));
+		if (!liveDocument) provider = &argumentProvider;
 		if (!arguments.Positional().empty()) {
 			errors << "error status=Arguments message=\"unexpected positional argument\"\n";
 			return 2;

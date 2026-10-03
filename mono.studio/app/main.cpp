@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <studio/ImageComposerArguments.hpp>
 #include <studio/RobloxImport.hpp>
 
 int main(int argc, char **argv) {
@@ -100,6 +101,26 @@ int main(int argc, char **argv) {
 			std::to_string(engine::control::DEFAULT_PORT) + ")"
 	);
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION,
+		"NAME=VALUE",
+		"Composer source text argument (repeatable)"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION,
+		"NAME=true|false",
+		"Composer source boolean argument (repeatable)"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_INTEGER_OPTION,
+		"NAME=INT",
+		"Composer source integer argument (repeatable)"
+	);
+	arguments.Value(
+		engine::imagegraph::SOURCE_ARGUMENT_REAL_OPTION,
+		"NAME=REAL",
+		"Composer source finite real argument (repeatable)"
+	);
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -324,6 +345,18 @@ int main(int argc, char **argv) {
 		static_cast<float>(arguments.GetNumber("idle-close", options.IdleCloseSeconds));
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.Assets = std::filesystem::path(*assets);
+	}
+
+	const auto argumentText = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION);
+	const auto argumentBoolean = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION);
+	const auto argumentInteger = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_INTEGER_OPTION);
+	const auto argumentReal = arguments.GetAll(engine::imagegraph::SOURCE_ARGUMENT_REAL_OPTION);
+	engine::imagegraph::Diagnostic argumentDiagnostic;
+	if (!studio::PrepareImageComposerArguments(
+			{argumentText, argumentBoolean, argumentInteger, argumentReal}, argumentDiagnostic
+		)) {
+		std::fprintf(stderr, "%s\n", argumentDiagnostic.Message.c_str());
+		return 2;
 	}
 
 	studio::Editor editor;

@@ -8,6 +8,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/SourceArgumentHost.hpp>
 
 #include <algorithm>
 #include <array>
@@ -471,7 +472,9 @@ namespace assetc {
 		return std::string(path);
 	}
 
-	Report Bake(const Settings &settings, std::string &failure) {
+	Report
+	Bake(const Settings &settings, std::string &failure, engine::imagegraph::SourceArgumentHost *arguments) {
+		engine::imagegraph::SourceArgumentHost emptyArguments;
 		Report report;
 
 		const bool staticFlipbook = settings.FlipbookSide != 0 || settings.FlipbookFrames != 0;
@@ -659,7 +662,9 @@ namespace assetc {
 							);
 						}
 						const engine::imagegraph::EvaluationRequest request{
-							.Tick = settings.GraphTick, .Seed = settings.GraphSeed
+							.Tick = settings.GraphTick,
+							.Seed = settings.GraphSeed,
+							.HostProvider = arguments ? arguments : &emptyArguments
 						};
 						engine::assets::TextureData texture;
 						engine::assets::TextureSequenceData sequence;

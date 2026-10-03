@@ -63,6 +63,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [x] Save completed image previews as PXC thumbnails with atomic publication.
 - [x] Preserve separate Mirror X/Y animators through group replay and PXC edits.
+- [x] Integrate typed arguments across client, Studio and exports; pass joined CPU validation.
 - [x] Select adjacent Dopesheet keys by double-clicking their gap, with one-step undo.
 - [_] Add separate/combine X/Y animation controls.
 - [_] Preserve X/Y animation through groups and PXC edits.
