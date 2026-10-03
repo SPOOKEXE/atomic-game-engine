@@ -55,26 +55,26 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Preserve source keys and metadata through processor resets and quaternion display-mode edits.
 - [x] Resume pending exports, cancel safely and publish atomically.
 - [x] Sample Mirror paths with source-compatible local animator ratios and input capture.
-- [_] Add separate X/Y animation and preserve it through groups and PXC edits.
+- [x] Capture and replay bounded frame caches across CPU, client, Studio and exports.
+- [x] Decode bounded font bytes into glyph bitmaps and metrics.
 - [x] Integrate Flow and Bubble noise generators.
 - [x] Integrate path extension, flattening and smoothing.
-- [x] Decode bounded font bytes into glyph bitmaps and metrics.
-- [_] Finish Composer font loading, text layout and rendering.
-- [_] Add source-compatible argument handling.
-- [_] Implement remaining catalogue executors and verify controls, errors, animation and parity evidence.
-- [x] Capture and replay bounded frame caches across CPU, client, Studio and exports.
-- [_] Finish cache groups, selected Clear, fractional playback and saved-cache loading.
-- [_] Finish audio workflows and feedback; verify seek/reset and fractional keys.
-- [_] Integrate camera rendering and Studio previews.
-- [_] Finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback.
-- [_] Finish Dopesheet gestures and Studio host workflows.
-- [x] Save completed image previews as PXC thumbnails with atomic publication.
-- [_] Finish remaining PXC edits, export formats and modified-project compatibility.
-- [_] Validate all integrated changes with joined CPU tests.
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
-- [_] Finish GPU checks, including Transform and skybox pixels.
-- [_] Verify live Studio workflows.
+- [x] Save completed image previews as PXC thumbnails with atomic publication.
+- [_] Add separate X/Y animation and preserve it through groups and PXC edits.
+- [_] Add source-compatible argument handling.
 - [_] Establish exact parity with a licensed reference build and matched captures.
+- [_] Finish Composer font loading, text layout and rendering.
+- [_] Finish Dopesheet gestures and Studio host workflows.
+- [_] Finish GPU checks, including Transform and skybox pixels.
+- [_] Finish audio workflows and feedback; verify seek/reset and fractional keys.
+- [_] Finish cache groups, selected Clear, fractional playback and saved-cache loading.
+- [_] Finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback.
+- [_] Finish remaining PXC edits, export formats and modified-project compatibility.
+- [_] Implement remaining catalogue executors and verify controls, errors, animation and parity evidence.
+- [_] Integrate camera rendering and Studio previews.
+- [_] Validate all integrated changes with joined CPU tests.
+- [_] Verify live Studio workflows.
 
 Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
