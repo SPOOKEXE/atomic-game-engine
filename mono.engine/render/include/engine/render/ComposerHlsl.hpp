@@ -74,9 +74,12 @@ namespace engine::render::hlsl {
 	};
 	// All failures preserve the caller's previous output.
 	// Uses the source fixed vertex program, library assembly order and generated Data block.
-	std::optional<std::string> Assemble(const Definition &, std::span<const Library>, Source &);
+	std::optional<std::string> Assemble(
+		const Definition &, std::span<const Library>, Source &, uint64_t maximumBytes = 128ull * 1024 * 1024
+	);
 	// Local HLSL compiler options leave the existing GLSL compiler configuration untouched.
-	std::optional<std::string> Cook(const Definition &, const Source &, Program &);
+	std::optional<std::string>
+	Cook(const Definition &, const Source &, Program &, uint64_t maximumBytes = 128ull * 1024 * 1024);
 	// Validates stage interfaces, descriptor families, authored argument kinds and stored metadata.
 	std::optional<std::string> Admit(const Program &);
 	// MSL compacts active resources; SPIR-V preserves declared descriptor slots.
@@ -86,8 +89,12 @@ namespace engine::render::hlsl {
 	std::optional<std::string> Pack(const Program &, std::span<const Value>, std::vector<std::byte> &);
 	// Writes explicit hlsl.vertex/hlsl.fragment ASH1 variants with caller-supplied compiler provenance.
 	// This is transport metadata, not a device-compatibility or source-pixel-parity certificate.
-	std::optional<std::string>
-	BuildContainer(const Program &, std::string_view compilerIdentity, assets::ShaderData &);
+	std::optional<std::string> BuildContainer(
+		const Program &,
+		std::string_view compilerIdentity,
+		assets::ShaderData &,
+		uint64_t maximumBytes = 128ull * 1024 * 1024
+	);
 	inline constexpr uint32_t MAXIMUM_ARGUMENTS = 64, MAXIMUM_SAMPLERS = 16;
 	inline constexpr size_t MAXIMUM_SOURCE_BYTES = 1024 * 1024;
 } // namespace engine::render::hlsl

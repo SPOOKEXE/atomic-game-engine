@@ -1,3 +1,5 @@
+#include "ComposerCookResidency.hpp"
+
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/render/ComposerHlsl.hpp>
@@ -6,6 +8,7 @@
 #include <bit>
 #include <cmath>
 #include <limits>
+#include <new>
 #include <shaderc/shaderc.hpp>
 #include <spirv_cross.hpp>
 namespace engine::render::hlsl {
@@ -96,9 +99,10 @@ struct PixelShaderOutput {
 		}
 		// HLSL anonymous cbuffer instances have an empty OpName. Give authoring
 		// reflection and the independent MSL checker a shared stable debug name.
-		void NameAnonymousBuffers(std::vector<uint32_t> &words) {
+		bool NameAnonymousBuffers(std::vector<uint32_t> &words) {
 			spirv_cross::Compiler compiler(words.data(), words.size());
 			const auto resources = compiler.get_shader_resources();
+			if (resources.uniform_buffers.size() > MAXIMUM_ARGUMENTS) return false;
 			for (const auto &resource : resources.uniform_buffers) {
 				if (!compiler.get_name(resource.id).empty()) continue;
 				const std::string name = "composer_" + resource.name;
@@ -110,7 +114,7 @@ struct PixelShaderOutput {
 					instruction[2 + index / 4] |= uint32_t(uint8_t(name[index])) << (8 * (index % 4));
 				for (size_t at = 5; at < words.size();) {
 					const uint32_t count = words[at] >> 16, op = words[at] & 65535;
-					if (!count || count > words.size() - at) return;
+					if (!count || count > words.size() - at) return false;
 					if (op == spv::OpName && count >= 3 && words[at + 1] == resource.id) {
 						words.erase(words.begin() + at, words.begin() + at + count);
 						words.insert(words.begin() + at, instruction.begin(), instruction.end());
@@ -119,6 +123,7 @@ struct PixelShaderOutput {
 					at += count;
 				}
 			}
+			return true;
 		}
 		bool Shape(
 			const spirv_cross::SPIRType &type, uint32_t vectors, uint32_t columns = 1, bool integer = false
@@ -275,9 +280,22 @@ struct PixelShaderOutput {
 			return {};
 		}
 	} // namespace
-	std::optional<std::string>
-	Assemble(const Definition &definition, std::span<const Library> libraries, Source &output) {
+	std::optional<std::string> Assemble(
+		const Definition &definition,
+		std::span<const Library> libraries,
+		Source &output,
+		uint64_t maximumBytes
+	) {
 		ENGINE_PROFILE_CAT("composer HLSL assembly", core::ProfileCategory::Assets);
+		if (definition.Libraries.size() > MAXIMUM_SOURCE_BYTES)
+			return "HLSL library selectors exceed source budget";
+		const uint64_t previousBytes = detail::SourceRetainedBytes(output);
+		// Selector normalization, missing-name copies and bounded declaration scratch overlap assembly.
+		const uint64_t scratch =
+			MAXIMUM_ARGUMENTS * (sizeof(std::string) + 512) + 4 * (definition.Libraries.size() + 1);
+		if (previousBytes > maximumBytes || scratch > maximumBytes - previousBytes ||
+			sizeof(Source) + 2 * VERTEX.size() + 32 > maximumBytes - previousBytes - scratch)
+			return "HLSL assembly replacement exceeds operation budget";
 		if (const auto failure = ArgumentsValid(definition.Arguments)) return failure;
 		if (libraries.size() > 64) return "too many HLSL libraries";
 		for (size_t index = 0; index < libraries.size(); ++index) {
@@ -301,8 +319,13 @@ struct PixelShaderOutput {
 		candidate.Fragment = "\n";
 		const auto append = [&](std::string_view text) {
 			if (text.size() > MAXIMUM_SOURCE_BYTES - candidate.Fragment.size()) return false;
+			const uint64_t held = detail::SourceRetainedBytes(candidate);
+			const uint64_t growth = 2 * (candidate.Fragment.size() + text.size() + 1);
+			if (held > maximumBytes - previousBytes - scratch ||
+				growth > maximumBytes - previousBytes - scratch - held)
+				return false;
 			candidate.Fragment.append(text);
-			return true;
+			return detail::SourceRetainedBytes(candidate) <= maximumBytes - previousBytes - scratch;
 		};
 		std::string selectors(definition.Libraries);
 		Replace(selectors, "\n");
@@ -326,8 +349,8 @@ struct PixelShaderOutput {
 					if (candidate.Fragment.size() >= MAXIMUM_SOURCE_BYTES ||
 						found->Source.size() > MAXIMUM_SOURCE_BYTES - candidate.Fragment.size() - 1)
 						return "HLSL selected libraries exceed source budget";
-					candidate.Fragment.append(found->Source);
-					candidate.Fragment += '\n';
+					if (!append(found->Source) || !append("\n"))
+						return "HLSL assembly exceeds operation budget";
 				}
 			}
 			if (delimiter == std::string::npos) break;
@@ -362,13 +385,21 @@ struct PixelShaderOutput {
 		output = std::move(candidate);
 		return {};
 	}
-	std::optional<std::string> Cook(const Definition &definition, const Source &source, Program &output) {
+	std::optional<std::string>
+	Cook(const Definition &definition, const Source &source, Program &output, uint64_t maximumBytes) {
 		ENGINE_PROFILE_CAT("composer HLSL cook", core::ProfileCategory::Assets);
+		const uint64_t previousBytes = detail::ProgramRetainedBytes(output);
+		const uint64_t metadata =
+			sizeof(Program) + MAXIMUM_ARGUMENTS * (sizeof(Argument) + sizeof(Member) + 512);
+		if (previousBytes > maximumBytes || metadata > maximumBytes - previousBytes)
+			return "HLSL program replacement exceeds operation budget";
 		if (const auto failure = ArgumentsValid(definition.Arguments)) return failure;
 		if (source.Vertex != VERTEX || source.Fragment.size() > MAXIMUM_SOURCE_BYTES)
 			return "HLSL source pair is not bounded fixed-vertex source";
 		shaderc::Compiler compiler;
 		Program candidate;
+		candidate.Arguments.reserve(definition.Arguments.size());
+		candidate.Members.reserve(MAXIMUM_ARGUMENTS);
 		candidate.Arguments.assign(definition.Arguments.begin(), definition.Arguments.end());
 		for (uint32_t stage = 0; stage < 2; ++stage) {
 			const auto kind = stage ? shaderc_glsl_fragment_shader : shaderc_glsl_vertex_shader;
@@ -393,12 +424,22 @@ struct PixelShaderOutput {
 			auto &words = stage ? candidate.Fragment.SpirV : candidate.Vertex.SpirV;
 			if (size_t(result.cend() - result.cbegin()) > 4 * 1024 * 1024)
 				return "HLSL compiled payload exceeds budget";
+			const uint64_t held = detail::ProgramRetainedBytes(candidate);
+			const uint64_t reservedWords = uint64_t(result.cend() - result.cbegin()) + MAXIMUM_ARGUMENTS * 35;
+			if (held > maximumBytes - previousBytes || metadata > maximumBytes - previousBytes - held ||
+				reservedWords > (maximumBytes - previousBytes - held - metadata) / sizeof(uint32_t))
+				return "HLSL compiled stage copy exceeds operation budget";
+			words.reserve(size_t(reservedWords));
+			if (detail::ProgramRetainedBytes(candidate) > maximumBytes - previousBytes - metadata)
+				return "HLSL actual stage capacity exceeds operation budget";
 			words.assign(result.cbegin(), result.cend());
-			NameAnonymousBuffers(words);
+			if (!NameAnonymousBuffers(words)) return "HLSL anonymous buffer metadata exceeds budget";
 		}
 		if (const auto failure =
 				Reflect(candidate, candidate.Members, candidate.UniformBytes, candidate.SamplerCount))
 			return failure;
+		if (detail::ProgramRetainedBytes(candidate) > maximumBytes - previousBytes)
+			return "HLSL reflected program exceeds operation budget";
 		core::Metrics::Count(
 			"shader.composer.cooked_spirv_bytes",
 			(candidate.Vertex.SpirV.size() + candidate.Fragment.SpirV.size()) * sizeof(uint32_t)

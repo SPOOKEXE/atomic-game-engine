@@ -1,4 +1,5 @@
 #include "ImageGraphCameraAdapter.hpp"
+#include "ImageGraphComposerAdapter.hpp"
 #include "ImageGraphSdfAdapter.hpp"
 #include "ImageGraphSkyboxCache.hpp"
 #include "ImageGraphSurfaceFormat.hpp"
@@ -6,6 +7,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
@@ -552,6 +554,86 @@ namespace client {
 		return EvaluateForRenderer(document, plan, output, renderer, tick, seed);
 	}
 
+	bool ImageGraphRuntime::CollectWantedComposerShaders(
+		engine::ecs::Store &store,
+		engine::core::Name owner,
+		const std::filesystem::path &directory,
+		std::vector<engine::core::Name> &output
+	) {
+		ENGINE_PROFILE("composer artifact demand");
+		if (!owner.IsValid() || output.size() > MAXIMUM_SINK_REFERENCES || directory.native().size() > 4096)
+			return false;
+		store.Observe<engine::scene::ImageGraphBinding>();
+		const auto version = store.ComponentChangeVersion<engine::scene::ImageGraphBinding>();
+		const auto rows = store.CountMatching<engine::scene::ImageGraphBinding>();
+		if (rows > MAXIMUM_SINK_REFERENCES) return false;
+		auto scan =
+			std::find_if(ComposerDemandScans.begin(), ComposerDemandScans.end(), [&](const auto &value) {
+				return value.Owner == owner;
+			});
+		if (scan != ComposerDemandScans.end() && scan->StoreIdentity == store.Identity() &&
+			scan->Directory == directory && scan->BindingVersion == version && scan->BindingRows == rows &&
+			scan->DocumentRevision == ComposerDocumentRevision)
+			return true;
+		if (scan == ComposerDemandScans.end()) {
+			scan =
+				std::find_if(ComposerDemandScans.begin(), ComposerDemandScans.end(), [](const auto &value) {
+					return value.StoreIdentity == 0;
+				});
+			if (scan == ComposerDemandScans.end()) return false;
+		}
+		std::array<const CachedDocument *, MAXIMUM_CACHED_DOCUMENTS> seen{};
+		size_t documentCount = 0, appended = 0;
+		bool valid = true;
+		try {
+			store.Each<const engine::scene::ImageGraphBinding>([&](engine::ecs::Entity, const auto &binding) {
+				if (!valid) return;
+				if (!engine::scene::IsValidImageGraphBinding(binding)) {
+					valid = false;
+					return;
+				}
+				const auto path = ImageGraphDocumentPath(directory, binding.Graph);
+				const auto found = Documents.find(path.string());
+				// A missing or refused graph must be retried after Refresh, never stamped as complete.
+				if (found == Documents.end()) {
+					valid = false;
+					return;
+				}
+				const auto *cached = &found->second;
+				if (std::find(seen.begin(), seen.begin() + documentCount, cached) !=
+					seen.begin() + documentCount)
+					return;
+				if (documentCount == seen.size()) {
+					valid = false;
+					return;
+				}
+				seen[documentCount++] = cached;
+				for (const auto &node : cached->Authored.Nodes) {
+					if (node.Type != "pc.hlsl") continue;
+					const auto artifact = detail::ComposerAsset(node);
+					if (!artifact.IsValid() ||
+						std::find(output.begin(), output.end(), artifact) != output.end())
+						continue;
+					if (appended == engine::render::hlsl::MAXIMUM_OWNER_PROGRAMS ||
+						output.size() == MAXIMUM_SINK_REFERENCES) {
+						valid = false;
+						return;
+					}
+					output.push_back(artifact);
+					++appended;
+				}
+			});
+			if (!valid) return false;
+			ComposerDemandScan prepared{
+				store.Identity(), owner, directory, version, rows, ComposerDocumentRevision
+			};
+			*scan = std::move(prepared);
+			return true;
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+	}
+
 	void ImageGraphRuntime::BeginFrame() {
 		ChecksRemaining = MAXIMUM_CHECKS_PER_FRAME;
 		Error.clear();
@@ -663,6 +745,7 @@ namespace client {
 				(cached->second.Modified != modified || cached->second.FileBytes != fileBytes)) {
 				CachedDocumentBytes -= static_cast<size_t>(cached->second.FileBytes);
 				Documents.erase(cached);
+				++ComposerDocumentRevision;
 				cached = Documents.end();
 			}
 			if (cached == Documents.end()) {
@@ -687,11 +770,24 @@ namespace client {
 					);
 					CachedDocumentBytes -= static_cast<size_t>(oldest->second.FileBytes);
 					Documents.erase(oldest);
+					++ComposerDocumentRevision;
 				}
 				CachedDocumentBytes += static_cast<size_t>(fileBytes);
 				cached = Documents.emplace(pathKey, std::move(prepared)).first;
+				++ComposerDocumentRevision;
 			} else {
 				cached->second.LastUse = ++CacheClock;
+			}
+			for (const auto &node : cached->second.Authored.Nodes) {
+				if (node.Type != "pc.hlsl") continue;
+				const auto artifactName = detail::ComposerAsset(node);
+				if (!artifactName.IsValid() || renderer.ComposerShaderRevision(owner, artifactName) != 0)
+					continue;
+				engine::assets::ShaderData artifact;
+				if (!engine::render::hlsl::ReadArtifact(directory, artifactName, artifact)) {
+					if (const auto failure = renderer.InstallComposerShader(owner, artifactName, artifact))
+						Error = *failure;
+				}
 			}
 			return &cached->second;
 		};
@@ -903,6 +999,9 @@ namespace client {
 								}
 								if (!entry.LuaHost) entry.LuaHost = LuaHostFor(document->Authored);
 								LuaMessageDrain drain{entry.LuaHost.get()};
+								detail::ComposerProvider composerProvider(
+									renderer, owner, entry.LuaHost.get()
+								);
 								std::string_view port;
 								const auto *node =
 									OutputNode(document->Authored, skyFaces[index].Selector.Output, port);
@@ -926,7 +1025,7 @@ namespace client {
 										true,
 										face,
 										diagnostic,
-										entry.LuaHost.get(),
+										&composerProvider,
 										&entry.Feedback,
 										1
 									);
@@ -964,7 +1063,7 @@ namespace client {
 										true,
 										face,
 										diagnostic,
-										entry.LuaHost.get(),
+										&composerProvider,
 										&entry.Feedback,
 										1
 									);
@@ -998,7 +1097,7 @@ namespace client {
 										ticks[index],
 										skyFaces[index].Selector.Seed,
 										&entry.Feedback,
-										entry.LuaHost.get()
+										&composerProvider
 									);
 									const auto format = detail::TextureFormatForSurface(frame.Image.Format);
 									valid = frame.Status == engine::imagegraph::Status::Ok &&
@@ -1292,10 +1391,25 @@ namespace client {
 			else if (!entry.LuaHost)
 				entry.LuaHost = LuaHostFor(cached->Authored);
 			LuaMessageDrain drain{entry.LuaHost.get()};
-			const bool sampleChanged = changed || entry.Modified != modified ||
-									   entry.FileBytes != fileBytes || (entry.Animated && entry.Tick != tick);
+			detail::ComposerProvider composerProvider(renderer, owner, entry.LuaHost.get());
+			bool sampleChanged = changed || entry.Modified != modified || entry.FileBytes != fileBytes ||
+								 (entry.Animated && entry.Tick != tick);
 			std::string_view outputPort;
 			const auto *outputNode = OutputNode(cached->Authored, selector.Output, outputPort);
+			const bool sourceComposer = outputNode && outputNode->Type == "pc.hlsl";
+			if (sourceComposer &&
+				renderer.ComposerShaderRevision(owner, detail::ComposerAsset(*outputNode)) == 0) {
+				engine::assets::ShaderData artifact;
+				const auto asset = detail::ComposerAsset(*outputNode);
+				if (!engine::render::hlsl::ReadArtifact(directory, asset, artifact)) {
+					if (const auto failure = renderer.InstallComposerShader(owner, asset, artifact))
+						Error = *failure;
+				}
+			}
+			const uint64_t composerRevision =
+				sourceComposer ? renderer.ComposerShaderRevision(owner, detail::ComposerAsset(*outputNode))
+							   : 0;
+			sampleChanged = sampleChanged || (sourceComposer && entry.ComposerRevision != composerRevision);
 			const bool sourceCamera = outputNode && (outputNode->Type == "pc.3_d_camera" ||
 													 outputNode->Type == "pc.3_d_camera_set");
 			const bool sourceSdf =
@@ -1304,9 +1418,11 @@ namespace client {
 				 outputNode->Type == "pc.rm_cloud" || outputNode->Type == "pc.rm_terrain" ||
 				 outputNode->Type == "pc.rm_primitive" || outputNode->Type == "pc.rm_combine");
 			if (outputNode != nullptr &&
-				(outputNode->Type == "image.transform_3d" || sourceCamera || sourceSdf)) {
-				if ((!sourceCamera && !sourceSdf && outputPort != "rendered" && outputPort != "depth") ||
-					(sourceSdf && outputPort != "surface_out")) {
+				(outputNode->Type == "image.transform_3d" || sourceCamera || sourceSdf || sourceComposer)) {
+				if ((!sourceCamera && !sourceSdf && !sourceComposer && outputPort != "rendered" &&
+					 outputPort != "depth") ||
+					(sourceSdf && outputPort != "surface_out") ||
+					(sourceComposer && outputPort != "surface")) {
 					Error = "live Transform Image 3D texture bindings require rendered or depth output";
 					if (entry.TransformAdmitted) {
 						(void)renderer.CancelTransformImage3D(
@@ -1340,22 +1456,38 @@ namespace client {
 				engine::render::imagegraph::TransformImage3DRequest request;
 				engine::render::imagegraph::SourceCamera3DRequest cameraRequest;
 				engine::render::imagegraph::SourceSdfRequest sdfRequest;
+				engine::render::hlsl::SurfaceRequest composerRequest;
 				engine::imagegraph::Diagnostic diagnostic;
 				const bool built =
-					sourceSdf ? detail::BuildSdfRequest(
-									cached->Authored,
-									cached->Compiled,
-									*outputNode,
-									outputPort,
-									tick,
-									selector.Seed,
-									selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
-									sdfRequest,
-									diagnostic,
-									entry.LuaHost.get(),
-									&entry.Feedback,
-									1
-								)
+					sourceComposer ? detail::BuildComposerRequest(
+										 cached->Authored,
+										 cached->Compiled,
+										 *outputNode,
+										 renderer,
+										 owner,
+										 tick,
+										 selector.Seed,
+										 selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
+										 composerRequest,
+										 diagnostic,
+										 &composerProvider,
+										 &entry.Feedback,
+										 1
+									 )
+					: sourceSdf ? detail::BuildSdfRequest(
+									  cached->Authored,
+									  cached->Compiled,
+									  *outputNode,
+									  outputPort,
+									  tick,
+									  selector.Seed,
+									  selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
+									  sdfRequest,
+									  diagnostic,
+									  &composerProvider,
+									  &entry.Feedback,
+									  1
+								  )
 					: sourceCamera ? detail::BuildCameraRequest(
 										 cached->Authored,
 										 cached->Compiled,
@@ -1366,7 +1498,7 @@ namespace client {
 										 selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
 										 cameraRequest,
 										 diagnostic,
-										 entry.LuaHost.get(),
+										 &composerProvider,
 										 &entry.Feedback,
 										 1
 									 )
@@ -1379,7 +1511,7 @@ namespace client {
 										 selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
 										 request,
 										 diagnostic,
-										 entry.LuaHost.get(),
+										 &composerProvider,
 										 &entry.Feedback,
 										 1
 									 );
@@ -1411,12 +1543,18 @@ namespace client {
 				}
 				const uint64_t generation = NextTransformGeneration;
 				const auto queueStatus =
-					sourceSdf ? renderer.QueueSourceSdf(
-									{.Owner = owner,
-									 .Name = selector.Texture,
-									 .Generation = generation,
-									 .Request = std::move(sdfRequest)}
-								)
+					sourceComposer ? renderer.QueueComposerSurface(
+										 {.Owner = owner,
+										  .Name = selector.Texture,
+										  .Generation = generation,
+										  .Request = std::move(composerRequest)}
+									 )
+					: sourceSdf ? renderer.QueueSourceSdf(
+									  {.Owner = owner,
+									   .Name = selector.Texture,
+									   .Generation = generation,
+									   .Request = std::move(sdfRequest)}
+								  )
 					: sourceCamera
 						? renderer.QueueSourceCamera3D(
 							  {.Owner = owner,
@@ -1476,6 +1614,7 @@ namespace client {
 				entry.Animated = NeedsFrameSamples(cached->Authored);
 				entry.TransformAdmitted = true;
 				entry.TransformGeneration = generation;
+				entry.ComposerRevision = composerRevision;
 				++updated;
 				return;
 			}
@@ -1517,7 +1656,7 @@ namespace client {
 				tick,
 				selector.Seed,
 				&entry.Feedback,
-				entry.LuaHost.get()
+				&composerProvider
 			);
 			if (frame.Status != engine::imagegraph::Status::Ok) {
 				Error = frame.Diagnostic.Message;
@@ -1610,6 +1749,8 @@ namespace client {
 			renderer.DropTransformImage3DOwner(transformOwner->second);
 			transformOwner = TransformOwners.erase(transformOwner);
 		}
+		for (auto &scan : ComposerDemandScans)
+			if (std::find(owners.begin(), owners.end(), scan.Owner) == owners.end()) scan = {};
 		for (auto cursor = NextBindingByOwner.begin(); cursor != NextBindingByOwner.end();) {
 			if (std::find_if(owners.begin(), owners.end(), [&](engine::core::Name owner) {
 					return owner.Id() == cursor->first;
@@ -1649,6 +1790,8 @@ namespace client {
 			(void)Publisher.Retire(renderer, entry.Publication);
 		Entries.clear();
 		Documents.clear();
+		++ComposerDocumentRevision;
+		ComposerDemandScans = {};
 		SinkUsages.clear();
 		SkyboxGroups.clear();
 		SkyboxOwners.clear();

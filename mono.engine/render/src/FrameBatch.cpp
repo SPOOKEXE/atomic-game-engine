@@ -236,6 +236,8 @@ namespace engine::render {
 			}
 		}
 		Render.State->BatchSubmit = {command, Renderer::Impl::BatchSubmitStatus::NotAttempted};
+		// Composer image jobs record before views; completed prior fences were adopted above.
+		Render.State->RecordTransform3D(command, true);
 
 		const SceneTarget *finalTarget = views[order.back()].Target;
 		if (swapchain == nullptr && (finalTarget == nullptr || !finalTarget->IsValid())) {

@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -219,4 +220,58 @@ TEST_CASE(
 	CHECK_FALSE(accepted);
 	CHECK(status == Status::InvalidValue);
 	CHECK(port == "tilemap");
+}
+
+TEST_CASE("Composer HLSL invokes the explicit host with already resolved pixels", "[imagegraph][host]") {
+	using namespace engine::imagegraph;
+	struct Provider final : HostNodeProvider {
+		size_t Calls = 0;
+		bool Capture(const HostNodeInvocation &invocation, HostNodeCapture &, std::string &failure) override {
+			++Calls;
+			CHECK(invocation.Authored.Id == "shader");
+			const auto base =
+				std::find_if(invocation.Images.begin(), invocation.Images.end(), [](const auto &image) {
+					return image.Port == "base_texture";
+				});
+			REQUIRE(base != invocation.Images.end());
+			REQUIRE(base->Data);
+			CHECK(base->Data->Pixels == std::vector<uint8_t>{12, 34, 56, 255});
+			failure = "explicit cooked render host refusal";
+			return false;
+		}
+	} provider;
+	Document document;
+	document.Nodes = {
+		{"base",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t(1)}, {"height", int64_t(1)}, {"colour", Colour{12, 34, 56, 255}}}},
+		{"shader",
+		 "pc.hlsl",
+		 "",
+		 {},
+		 {{"main", std::string("output.color=gm_BaseTextureObject.Sample(gm_BaseTexture,input.uv);")},
+		  {"vertex", std::string{}},
+		  {"global", std::string{}},
+		  {"libraries", std::string{}}}}
+	};
+	document.Links = {{"base", "image", "shader", "base_texture"}};
+	document.Outputs = {{"result", "shader", "surface"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	EvaluatedValue result;
+	CHECK(
+		EvaluateValue(document, plan, "result", {.HostProvider = &provider}, result, diagnostic) ==
+		Status::UnsupportedExecution
+	);
+	INFO(diagnostic.Message);
+	CHECK(provider.Calls == 1);
+	CHECK(diagnostic.NodeId == "shader");
+	CHECK(diagnostic.Message == "explicit cooked render host refusal");
+	CHECK(EvaluateValue(document, plan, "result", {}, result, diagnostic) == Status::UnsupportedExecution);
+	INFO(diagnostic.Message);
+	CHECK(provider.Calls == 1);
+	CHECK(diagnostic.Message.find("explicit host capability") != std::string::npos);
 }

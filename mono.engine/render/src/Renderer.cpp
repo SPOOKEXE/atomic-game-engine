@@ -1147,10 +1147,18 @@ namespace engine::render {
 	}
 
 	void Renderer::ForgetWorld(uint64_t world, core::Name name) {
-		if (State == nullptr || State->Device == nullptr) {
-			return;
-		}
+		if (State == nullptr) return;
 		RequireOwningThread("ForgetWorld");
+		State->ComposerShaders.RemoveOwner(name);
+		std::erase_if(State->ComposerCaptures, [&](const auto &entry) { return entry.Owner == name; });
+		for (auto &slot : State->GraphResources.Transform3D)
+			if (slot.Owner == name && slot.ComposerRequest) {
+				if (slot.Phase == Impl::GraphResourceCache::Transform3DPhase::Queued)
+					State->ReleaseTransform3D(slot);
+				else
+					slot.Cancelled = true;
+			}
+		if (State->Device == nullptr) return;
 		SDL_WaitForGPUIdle(State->Device);
 		for (auto &tree : State->ImportedPortalTrees)
 			if (!tree.Nodes.empty() && tree.Nodes.front().Binding.World == world &&

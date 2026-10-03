@@ -433,15 +433,91 @@ namespace engine::render {
 				);
 				const bool obsolete = published != GraphResources.PublishedTransform3DOutputs.end() &&
 									  published->Generation >= slot.Generation;
+				if (slot.ComposerRequest) {
+					uint64_t revision = 0;
+					const auto *installed =
+						ComposerShaders.Find(slot.Owner, slot.ComposerRequest->Shader, revision);
+					if (!installed || revision != slot.ComposerRequest->ShaderRevision) slot.Cancelled = true;
+				}
+				if (slot.ComposerCaptureReadback) {
+					auto capture = std::find_if(
+						ComposerCaptures.begin(), ComposerCaptures.end(), [&](const auto &entry) {
+							return entry.Owner == slot.Owner && entry.Name == slot.Name &&
+								   entry.Generation == slot.Generation;
+						}
+					);
+					if (capture != ComposerCaptures.end() && slot.Succeeded && !slot.Cancelled &&
+						!superseded && !obsolete) {
+						void *mapped =
+							slot.ComposerDisplayDownload
+								? SDL_MapGPUTransferBuffer(Device, slot.ComposerDisplayDownload, false)
+								: nullptr;
+						if (mapped) {
+							try {
+								engine::imagegraph::Image image{slot.Width, slot.Height, {}, 0};
+								const auto bytes = uint64_t(slot.Width) * slot.Height * 4;
+								const auto *pixels = static_cast<const uint8_t *>(mapped);
+								image.Pixels.assign(pixels, pixels + bytes);
+								image.Hash = engine::imagegraph::SurfaceHash(image);
+								capture->Receipt.Images.reserve(1);
+								capture->Receipt.Images.push_back({"surface", std::move(image)});
+								const auto retained =
+									engine::imagegraph::HostCaptureRetainedPayloadBytes(capture->Receipt);
+								if (retained && *retained <= capture->MaximumBytes)
+									capture->Complete = true;
+								else
+									capture->Receipt.Images.clear();
+								core::Metrics::Count("render.composer.preview_readback_bytes", bytes);
+								core::Metrics::Count("render.composer.preview_readbacks", 1);
+							} catch (const std::bad_alloc &) {
+								capture->Receipt.Images.clear();
+							}
+							SDL_UnmapGPUTransferBuffer(Device, slot.ComposerDisplayDownload);
+						}
+					}
+					ReleaseTransform3D(slot);
+					continue;
+				}
 				if (slot.Succeeded && !slot.Cancelled && !superseded && !obsolete) {
+					if (slot.ComposerRequest &&
+						slot.ComposerRequest->Format == assets::TextureFormat::RGBA8 &&
+						!slot.ComposerDisplayUploaded) {
+						// SDL forbids mixed-format texture copies. The first completed fence grants raw-byte
+						// staging; a second tracked upload/fence publishes the display interpretation without
+						// changing pixels.
+						void *mapped =
+							slot.ComposerDisplayDownload
+								? SDL_MapGPUTransferBuffer(Device, slot.ComposerDisplayDownload, false)
+								: nullptr;
+						if (!mapped) {
+							ReleaseTransform3D(slot);
+							continue;
+						}
+						const auto bytes = uint64_t(slot.Width) * slot.Height * 4;
+						try {
+							const auto *pixels = static_cast<const uint8_t *>(mapped);
+							slot.ComposerDisplayPixels.assign(pixels, pixels + bytes);
+						} catch (const std::bad_alloc &) {
+							SDL_UnmapGPUTransferBuffer(Device, slot.ComposerDisplayDownload);
+							ReleaseTransform3D(slot);
+							continue;
+						}
+						SDL_UnmapGPUTransferBuffer(Device, slot.ComposerDisplayDownload);
+						core::Metrics::Count("render.composer.display_staging_bytes", bytes);
+						core::Metrics::Count("render.composer.display_stages", 1);
+						slot.Phase = GraphResourceCache::Transform3DPhase::Queued;
+						continue;
+					}
 					SDL_GPUTexture *retired = nullptr;
 					const bool depthOutput = slot.Output == imagegraph::TransformImage3DOutput::Depth;
-					SDL_GPUTexture *&outputTexture = (slot.CameraRequest || slot.SdfRequest)
-														 ? slot.CameraResources.Output
-													 : depthOutput ? slot.Resources.EncodedDepth
-																   : slot.Resources.Rendered;
+					SDL_GPUTexture *&outputTexture =
+						(slot.CameraRequest || slot.SdfRequest || slot.ComposerRequest)
+							? slot.CameraResources.Output
+						: depthOutput ? slot.Resources.EncodedDepth
+									  : slot.Resources.Rendered;
 					const uint32_t bytesPerPixel =
-						slot.SdfRequest
+						slot.ComposerRequest ? 4
+						: slot.SdfRequest
 							? imagegraph::detail::TransformImage3DBytesPerPixel(
 								  slot.SdfRequest->Format, imagegraph::TransformImage3DColorSpace::Linear
 							  )
@@ -460,7 +536,8 @@ namespace engine::render {
 					}
 					const size_t bytes = static_cast<size_t>(bytes64);
 					const assets::TextureFormat renderedFormat =
-						slot.SdfRequest		 ? slot.SdfRequest->Format
+						slot.ComposerRequest ? slot.ComposerRequest->Format
+						: slot.SdfRequest	 ? slot.SdfRequest->Format
 						: slot.CameraRequest ? slot.CameraRequest->Format
 						: depthOutput		 ? assets::TextureFormat::RGBA8_LINEAR
 											 : imagegraph::detail::ResolveTransformImage3DFormat(
@@ -476,7 +553,8 @@ namespace engine::render {
 							retired,
 							renderedFormat
 						)) {
-						if (slot.SdfRequest) std::erase(slot.CameraResources.Textures, outputTexture);
+						if (slot.SdfRequest || slot.ComposerRequest)
+							std::erase(slot.CameraResources.Textures, outputTexture);
 						outputTexture = nullptr;
 						if (retired != nullptr) GraphResources.RetiredTextures.push_back(retired);
 						if (published == GraphResources.PublishedTransform3DOutputs.end()) {

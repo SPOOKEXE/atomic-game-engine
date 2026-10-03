@@ -1,5 +1,7 @@
 #pragma once
 
+#include <engine/render/ComposerSurface.hpp>
+
 // Client renderer. GPU types remain private to the implementation.
 //
 // @tier L12 · client
@@ -2740,6 +2742,46 @@ namespace engine::render {
 		// @return The handles, both empty before Initialise.
 		BackendHandles Backend() const;
 
+		// Owner-scoped Composer paired binaries keep the live ShaderScript/material ABI separate.
+		std::optional<std::string>
+		InstallComposerShader(core::Name owner, core::Name name, const assets::ShaderData &);
+		// Rolls back only the newly installed revision named by an authoring transaction.
+		bool RemoveComposerShader(core::Name owner, core::Name name, uint64_t installedRevision);
+		uint64_t ComposerShaderRevision(core::Name owner, core::Name name) const;
+		std::optional<std::string> BuildComposerSurface(
+			const engine::imagegraph::Node &,
+			const engine::imagegraph::EvaluationSnapshot &,
+			core::Name owner,
+			bool displayColorSpace,
+			hlsl::SurfaceRequest &
+		) const;
+		imagegraph::TransformImage3DQueueResult QueueComposerSurface(hlsl::SurfaceLiveRequest);
+		std::optional<std::string> BuildComposerSurface(
+			const engine::imagegraph::HostNodeInvocation &,
+			core::Name owner,
+			bool displayColorSpace,
+			hlsl::SurfaceRequest &
+		) const;
+		// Captures one cooked stage from already resolved host inputs, using the common receipt budget.
+		// Preview queues an exact capture once and retries completed raw-byte receipts without waiting.
+		bool CaptureComposerSurfaceAsync(
+			const engine::imagegraph::HostNodeInvocation &,
+			core::Name owner,
+			core::Name captureName,
+			engine::imagegraph::HostNodeCapture &,
+			std::string &failure,
+			bool *pending = nullptr
+		);
+		void CancelComposerCapture(core::Name owner, core::Name captureName);
+		bool CaptureComposerSurface(
+			const engine::imagegraph::HostNodeInvocation &,
+			core::Name owner,
+			engine::imagegraph::HostNodeCapture &,
+			std::string &failure
+		);
+		// Explicit authoring readback uses existing source fence ownership and requires an idle device.
+		std::optional<std::string>
+		ExecuteComposerSurface(core::Name owner, const hlsl::SurfaceRequest &, engine::imagegraph::Image &);
 		// Queues bounded source image work for render-thread recording.
 		imagegraph::TransformImage3DQueueResult
 		QueueSourceCamera3D(imagegraph::SourceCamera3DLiveRequest request);

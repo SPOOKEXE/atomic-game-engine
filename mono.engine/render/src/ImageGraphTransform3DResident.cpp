@@ -2,6 +2,7 @@
 
 #include "ImageGraphTransform3DFormats.hpp"
 #include "RendererState.hpp"
+#include "nodes/ComposerNodes.hpp"
 
 #include <engine/render/Renderer.hpp>
 
@@ -19,24 +20,56 @@ namespace engine::render {
 		slot = {};
 	}
 
-	void Renderer::Impl::RecordTransform3D(SDL_GPUCommandBuffer *command) {
+	void Renderer::Impl::RecordTransform3D(SDL_GPUCommandBuffer *command, bool composerOnly) {
 		if (Device == nullptr || command == nullptr) return;
 		for (GraphResourceCache::Transform3DSlot &slot : GraphResources.Transform3D) {
-			if (slot.Phase != GraphResourceCache::Transform3DPhase::Queued) continue;
-			const uint64_t scratch = slot.SdfRequest ? imagegraph::SourceSdfScratchBytes(*slot.SdfRequest)
-									 : slot.CameraRequest
-										 ? imagegraph::SourceCamera3DScratchBytes(*slot.CameraRequest)
-										 : imagegraph::TransformImage3DLiveScratchBytes(slot.Request);
+			if (slot.Phase != GraphResourceCache::Transform3DPhase::Queued ||
+				(composerOnly && !slot.ComposerRequest))
+				continue;
+			const uint64_t scratch =
+				slot.ComposerRequest
+					? hlsl::SurfaceScratchBytes(*slot.ComposerRequest) +
+						  (slot.ComposerCaptureReadback ? uint64_t(slot.Width) * slot.Height * 8 : 0)
+				: slot.SdfRequest	 ? imagegraph::SourceSdfScratchBytes(*slot.SdfRequest)
+				: slot.CameraRequest ? imagegraph::SourceCamera3DScratchBytes(*slot.CameraRequest)
+									 : imagegraph::TransformImage3DLiveScratchBytes(slot.Request);
 			if (scratch > imagegraph::MAXIMUM_TRANSFORM_IMAGE_3D_SCRATCH_BYTES ||
-				GraphResources.Transform3DScratchBytes >
+				(GraphResources.Transform3DScratchBytes -
+				 std::min(GraphResources.Transform3DScratchBytes, slot.ScratchBytes)) >
 					imagegraph::MAXIMUM_TRANSFORM_IMAGE_3D_SCRATCH_BYTES - scratch) {
 				// Admission fails before any command references this request, so its old
 				// table entry remains available while the new request is discarded.
 				ReleaseTransform3D(slot);
 				continue;
 			}
+			if (slot.ComposerRequest) {
+				uint64_t revision = 0;
+				const auto *installed =
+					ComposerShaders.Find(slot.Owner, slot.ComposerRequest->Shader, revision);
+				if (!installed || revision != slot.ComposerRequest->ShaderRevision) {
+					ReleaseTransform3D(slot);
+					continue;
+				}
+			}
 			const bool succeeded =
-				slot.SdfRequest
+				slot.ComposerRequest
+					? (!slot.ComposerDisplayPixels.empty() ? hlsl::RecordComposerDisplayUpload(
+																 Device,
+																 command,
+																 slot.Width,
+																 slot.Height,
+																 slot.ComposerDisplayPixels,
+																 slot.CameraResources
+															 )
+														   : hlsl::RecordComposerSurface(
+																 Device,
+																 command,
+																 *slot.ComposerRequest,
+																 slot.CameraResources,
+																 slot.ComposerDisplayDownload,
+																 slot.ComposerCaptureReadback
+															 ))
+				: slot.SdfRequest
 					? imagegraph::RecordSourceSdf(Device, command, *slot.SdfRequest, slot.CameraResources)
 				: slot.CameraRequest
 					? imagegraph::RecordSourceCamera3D(
@@ -50,15 +83,21 @@ namespace engine::render {
 				}
 				// A copy already references this slot in the shared command buffer. Keep
 				// its reservation through the fence, including when a later pass fails.
+				GraphResources.Transform3DScratchBytes -=
+					std::min(GraphResources.Transform3DScratchBytes, slot.ScratchBytes);
 				slot.ScratchBytes = scratch;
 				GraphResources.Transform3DScratchBytes += scratch;
 				slot.Succeeded = false;
 				slot.Phase = GraphResourceCache::Transform3DPhase::Recorded;
 				continue;
 			}
+			GraphResources.Transform3DScratchBytes -=
+				std::min(GraphResources.Transform3DScratchBytes, slot.ScratchBytes);
 			slot.ScratchBytes = scratch;
 			GraphResources.Transform3DScratchBytes += scratch;
 			slot.Succeeded = true;
+			if (slot.ComposerRequest && !slot.ComposerDisplayPixels.empty())
+				slot.ComposerDisplayUploaded = true;
 			slot.Phase = GraphResourceCache::Transform3DPhase::Recorded;
 		}
 	}

@@ -95,6 +95,40 @@ if(TARGET test_render)
 	target_link_libraries(test_render PRIVATE Engine::examples)
 endif()
 
+# Cook artifacts record pinned source provenance, never a fabricated compiler release number.
+# Source archives without Git retain an empty identity and must supply provenance explicitly.
+find_package(Git QUIET)
+set(composer_cooker_identity "")
+if(GIT_FOUND)
+	set(composer_cooker_identity "composer-hlsl-v1")
+	foreach(component IN ITEMS shaderc shaderc/third_party/glslang shaderc/third_party/spirv-tools)
+		file(REAL_PATH "${CMAKE_SOURCE_DIR}/mono.vendor/${component}" composer_component_root)
+		execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${composer_component_root}" rev-parse --show-toplevel
+			OUTPUT_VARIABLE composer_repository_root OUTPUT_STRIP_TRAILING_WHITESPACE
+			RESULT_VARIABLE composer_repository_result ERROR_QUIET)
+		if(NOT composer_repository_result EQUAL 0)
+			set(composer_cooker_identity "")
+			break()
+		endif()
+		file(REAL_PATH "${composer_repository_root}" composer_repository_root)
+		if(NOT composer_repository_root STREQUAL composer_component_root)
+			set(composer_cooker_identity "")
+			break()
+		endif()
+		execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}/mono.vendor/${component}" rev-parse HEAD
+			OUTPUT_VARIABLE composer_revision OUTPUT_STRIP_TRAILING_WHITESPACE
+			RESULT_VARIABLE composer_revision_result ERROR_QUIET)
+		string(LENGTH "${composer_revision}" composer_revision_length)
+		if(NOT composer_revision_result EQUAL 0 OR NOT composer_revision_length EQUAL 40 OR
+			NOT composer_revision MATCHES "^[0-9a-f]+$")
+			set(composer_cooker_identity "")
+			break()
+		endif()
+		string(APPEND composer_cooker_identity "|${component}:${composer_revision}")
+	endforeach()
+endif()
+target_compile_definitions(engine_render PRIVATE "ATOMIC_COMPOSER_COOKER_IDENTITY=\"${composer_cooker_identity}\"")
+
 # The atlas experiment owns a real headless SDL device. Benchmarks normally
 # measure renderer CPU preparation only, so keep this backend dependency on the
 # one opt-in GPU suite rather than widening the render library's public API.

@@ -82,6 +82,16 @@ namespace client {
 		// Starts a presentation budget shared by every world's binding scan.
 		void BeginFrame();
 
+		// Scans current ECS bindings when their version, row count, root or cached
+		// documents change. An unchanged scan appends nothing. Refusal leaves the
+		// stamp unchanged; already appended names remain requestable.
+		bool CollectWantedComposerShaders(
+			engine::ecs::Store &store,
+			engine::core::Name owner,
+			const std::filesystem::path &directory,
+			std::vector<engine::core::Name> &output
+		);
+
 		// Runs on the renderer thread after simulation. Successful synchronous
 		// publications and admitted Transform Image 3D jobs count toward the return
 		// value. Transform outputs become visible only after renderer fence adoption.
@@ -133,6 +143,7 @@ namespace client {
 			bool Animated = false;
 			bool TransformAdmitted = false;
 			uint64_t TransformGeneration = 0;
+			uint64_t ComposerRevision = 0;
 		};
 		struct CachedDocument {
 			engine::imagegraph::Document Authored;
@@ -141,6 +152,16 @@ namespace client {
 			uintmax_t FileBytes = 0;
 			uint64_t LastUse = 0;
 		};
+		struct ComposerDemandScan {
+			uint64_t StoreIdentity = 0;
+			engine::core::Name Owner;
+			std::filesystem::path Directory;
+			uint64_t BindingVersion = 0;
+			size_t BindingRows = 0;
+			uint64_t DocumentRevision = 0;
+		};
+		std::array<ComposerDemandScan, 64> ComposerDemandScans;
+		uint64_t ComposerDocumentRevision = 1;
 		struct SinkUsage {
 			std::unordered_map<uint32_t, uint8_t> Flags;
 			uint64_t Revision = 0;

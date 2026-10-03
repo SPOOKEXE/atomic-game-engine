@@ -777,6 +777,11 @@ namespace engine::render {
 				std::vector<CameraBinding> CameraBindings;
 				std::optional<imagegraph::SourceCamera3DRequest> CameraRequest;
 				std::optional<imagegraph::SourceSdfRequest> SdfRequest;
+				std::optional<hlsl::SurfaceRequest> ComposerRequest;
+				SDL_GPUTransferBuffer *ComposerDisplayDownload = nullptr;
+				std::vector<uint8_t> ComposerDisplayPixels;
+				bool ComposerDisplayUploaded = false;
+				bool ComposerCaptureReadback = false;
 				imagegraph::SourceCamera3DResources CameraResources;
 				uint32_t Width = 0, Height = 0;
 				uint64_t SourceBytes = 0;
@@ -861,6 +866,16 @@ namespace engine::render {
 		using ResidentImagePair = GraphResourceCache::ResidentImagePair;
 		static constexpr size_t RESOURCE_IMAGE_CAPACITY = GraphResourceCache::RESOURCE_IMAGE_CAPACITY;
 		GraphResourceCache GraphResources;
+		hlsl::CookedComposerLibrary ComposerShaders;
+		struct ComposerCaptureEntry {
+			core::Name Owner, Name, Shader;
+			uint64_t Generation = 0, ShaderRevision = 0, MaximumBytes = 0;
+			engine::imagegraph::HostNodeCapture Receipt;
+			bool Complete = false;
+			int64_t Interpolation = 1;
+		};
+		std::vector<ComposerCaptureEntry> ComposerCaptures;
+		uint64_t NextComposerCaptureGeneration = 1;
 
 		// Authored buffers are transient scratch. These caps bound a document before
 		// one unchecked width, height and stride turn into an unbounded allocation.
@@ -2152,7 +2167,7 @@ namespace engine::render {
 		void CollectResourceImage(uint32_t slot);
 		void ReleaseResidentImage(ResourceImageSlot &slot);
 		void ReleaseTransform3D(GraphResourceCache::Transform3DSlot &slot);
-		void RecordTransform3D(SDL_GPUCommandBuffer *command);
+		void RecordTransform3D(SDL_GPUCommandBuffer *command, bool composerOnly = false);
 		uint64_t NextSceneSequence = 1;
 
 		// The slot the frame in progress is drawing into.

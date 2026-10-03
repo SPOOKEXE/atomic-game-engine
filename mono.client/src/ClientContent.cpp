@@ -608,7 +608,9 @@ namespace client {
 				}
 				// Material names select the declared material variant, never collection order.
 				for (const auto owner : content.Owners) {
-					if (const auto error = Shaders.InstallCooked(name, shader, "material", owner))
+					if (const auto error = shader.ShaderAbi == engine::render::hlsl::COOKED_ABI
+											   ? Renderer.InstallComposerShader(owner, name, shader)
+											   : Shaders.InstallCooked(name, shader, "material", owner))
 						ENGINE_WARN("content: shader {} refused: {}", asset->Name, *error);
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
@@ -781,6 +783,15 @@ namespace client {
 		for (const engine::world::WorldId id : worlds) {
 			content.Wanted.clear();
 			ScanWantedContent(content, id);
+			Universe_->Enter(id, [&](engine::ecs::Store &store) {
+				if (!LiveImageGraphs.CollectWantedComposerShaders(
+						store, Universe_->NameOf(id), engine::core::Paths::Assets(), content.Wanted
+					))
+					ENGINE_WARN(
+						"content: owner {} Composer artifact demand is incomplete or exceeds native limits",
+						Universe_->NameOf(id).Text()
+					);
+			});
 			for (const engine::core::Name &name : content.Wanted) {
 				RequestAsset(content, name, Universe_->NameOf(id));
 			}

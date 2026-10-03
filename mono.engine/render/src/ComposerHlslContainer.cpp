@@ -15,13 +15,23 @@ namespace engine::render::hlsl {
 			return type.vecsize == 1 ? "float" : "float" + std::to_string(type.vecsize);
 		}
 	} // namespace
-	std::optional<std::string>
-	BuildContainer(const Program &program, std::string_view compilerIdentity, assets::ShaderData &output) {
+	std::optional<std::string> BuildContainer(
+		const Program &program,
+		std::string_view compilerIdentity,
+		assets::ShaderData &output,
+		uint64_t maximumBytes
+	) {
 		ENGINE_PROFILE_CAT("composer HLSL container", core::ProfileCategory::Assets);
 		if (const auto failure = Admit(program)) return failure;
 		if (compilerIdentity.empty() || compilerIdentity.size() > assets::Shader::MAXIMUM_NAME)
 			return "HLSL compiler identity missing";
+		const auto previousBytes = assets::ShaderRetainedPayloadBytes(output, maximumBytes);
 		assets::ShaderData candidate;
+		const auto baselineBytes = assets::ShaderRetainedPayloadBytes(candidate, maximumBytes);
+		if (!previousBytes || !baselineBytes || *previousBytes > maximumBytes - *baselineBytes ||
+			compilerIdentity.size() * 2 + 256 > maximumBytes - *previousBytes - *baselineBytes)
+			return "HLSL container metadata exceeds operation budget";
+		candidate.Variants.reserve(2);
 		candidate.CompilerVersion = compilerIdentity;
 		candidate.OptimizerVersion = "none";
 		candidate.TranslatorVersion = "none";
@@ -34,7 +44,46 @@ namespace engine::render::hlsl {
 			const auto &words = stage ? program.Fragment.SpirV : program.Vertex.SpirV;
 			spirv_cross::Compiler compiler(words.data(), words.size());
 			const auto resources = compiler.get_shader_resources();
+			uint64_t stageBytes =
+				sizeof(assets::ShaderVariant) + sizeof(assets::ShaderPayload) + words.size() * 4ull + 256;
+			const auto add = [&](uint64_t bytes) {
+				if (bytes > maximumBytes || stageBytes > maximumBytes - bytes) return false;
+				stageBytes += bytes;
+				return true;
+			};
+			const auto text = [&](std::string_view name) {
+				return name.size() <= assets::Shader::MAXIMUM_NAME && add(2 * name.size() + 32);
+			};
+			for (const auto &image : resources.sampled_images)
+				if (!add(sizeof(assets::ShaderResource) + 128) || !text(image.name))
+					return "HLSL texture metadata exceeds operation budget";
+			size_t memberCount = 0;
+			for (const auto &buffer : resources.uniform_buffers) {
+				if (!add(sizeof(assets::ShaderResource) + 128) || !text(buffer.name))
+					return "HLSL block metadata exceeds operation budget";
+				const auto &block = compiler.get_type(buffer.base_type_id);
+				memberCount += block.member_types.size();
+				for (uint32_t index = 0; index < block.member_types.size(); ++index)
+					if (!add(sizeof(assets::ShaderParameter) + 64) ||
+						!text(compiler.get_member_name(block.self, index)) || !text(buffer.name))
+						return "HLSL parameter metadata exceeds operation budget";
+			}
+			for (const auto &value : resources.stage_inputs)
+				if (!add(sizeof(assets::ShaderInterfaceVariable) + 32) || !text(value.name))
+					return "HLSL input metadata exceeds operation budget";
+			for (const auto &value : resources.stage_outputs)
+				if (!add(sizeof(assets::ShaderInterfaceVariable) + 32) || !text(value.name))
+					return "HLSL output metadata exceeds operation budget";
+			const auto heldBytes = assets::ShaderRetainedPayloadBytes(candidate, maximumBytes);
+			if (!heldBytes || *heldBytes > maximumBytes - *previousBytes ||
+				stageBytes > maximumBytes - *previousBytes - *heldBytes)
+				return "HLSL reflected stage exceeds operation budget";
 			assets::ShaderVariant variant;
+			variant.Resources.reserve(resources.sampled_images.size() + resources.uniform_buffers.size());
+			variant.Parameters.reserve(memberCount);
+			variant.Inputs.reserve(resources.stage_inputs.size());
+			variant.Outputs.reserve(resources.stage_outputs.size());
+			variant.Payloads.reserve(1);
 			variant.Name = stage ? "hlsl.fragment" : "hlsl.vertex";
 			variant.Stage = stage ? "fragment" : "vertex";
 			for (const auto &image : resources.sampled_images) {
@@ -110,6 +159,9 @@ namespace engine::render::hlsl {
 					payload.Bytes[index * 4 + byte] = std::byte((words[index] >> (8 * byte)) & 255);
 			variant.Payloads.push_back(std::move(payload));
 			candidate.Variants.push_back(std::move(variant));
+			const auto actualBytes = assets::ShaderRetainedPayloadBytes(candidate, maximumBytes);
+			if (!actualBytes || *actualBytes > maximumBytes - *previousBytes)
+				return "HLSL container retained capacities exceed operation budget";
 		}
 		std::sort(candidate.Variants.begin(), candidate.Variants.end(), [](const auto &a, const auto &b) {
 			return a.Name < b.Name;
