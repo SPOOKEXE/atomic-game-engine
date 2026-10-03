@@ -1247,3 +1247,92 @@ TEST_CASE(
 		CHECK(Graph(original) == json);
 	}
 }
+
+TEST_CASE(
+	"PXC processor attribute resets roundtrip through native history without deleting unknown metadata",
+	"[imagegraphio][pxcx_structure][pxcx_processor_reset]"
+) {
+	const auto imported = Imported(
+		R"({"nodes":[{"id":"replace","type":"Node_String_Regex_Replace","x":1,"y":2,"inputs":[{"r":{"d":"hello"},"future":{"socket":[1,null,false]}},{"r":{"d":"e"}},{"r":{"d":"a"}}],"attri":{"process":false,"array_process":2,"future":{"nested":["unchanged",{"n":17}]}},"future":{"node":"keep"}},{"id":"opaque","type":"vendor.future","x":0,"y":0,"inputs":[],"future":{"opaque":[3,4]}}],"future":{"project":"retain"}})"
+	);
+	Document before = imported.Graph;
+	Diagnostic diagnostic;
+	REQUIRE(Migrate(before, diagnostic) == Status::Ok);
+	REQUIRE(before.Nodes.front().Type == "pc.string_regex_replace");
+	Document after = before;
+	std::vector<std::string_view> removed;
+	SECTION("Boolean constructor default") {
+		removed = {"attribute_process"};
+	}
+	SECTION("Enum constructor default") {
+		removed = {"attribute_array_process"};
+	}
+	SECTION("Both constructor defaults") {
+		removed = {"attribute_process", "attribute_array_process"};
+	}
+	std::erase_if(after.Nodes.front().Values, [&](const auto &value) {
+		return std::find(removed.begin(), removed.end(), value.Port) != removed.end();
+	});
+	Document durable;
+	REQUIRE(Read(Write(after), durable, diagnostic) == Status::Ok);
+	REQUIRE(durable == after);
+	const auto project = [&](const PxcxImport &baseline, const Document &wanted) {
+		std::vector<std::byte> bytes;
+		const bool written = WritePxcxProjection(baseline, wanted, {}, bytes, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(written);
+		engine::bake::PxcxArchive archive;
+		std::string failure;
+		REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+		PxcxImport result;
+		REQUIRE(ImportPxcxImageGraph(archive, result, failure));
+		REQUIRE(Migrate(result.Graph, diagnostic) == Status::Ok);
+		CHECK(result.Graph == wanted);
+		CHECK(result.Source.MetadataPayload == imported.Source.MetadataPayload);
+		CHECK(result.Source.ThumbnailRgba == imported.Source.ThumbnailRgba);
+		return result;
+	};
+	const auto reset = project(imported, durable);
+	const auto originalJson = Graph(imported);
+	const auto resetJson = Graph(reset);
+	CHECK(resetJson["future"] == originalJson["future"]);
+	CHECK(resetJson["nodes"][1] == originalJson["nodes"][1]);
+	CHECK(resetJson["nodes"][0]["inputs"] == originalJson["nodes"][0]["inputs"]);
+	CHECK(resetJson["nodes"][0]["future"] == originalJson["nodes"][0]["future"]);
+	CHECK(resetJson["nodes"][0]["attri"]["future"] == originalJson["nodes"][0]["attri"]["future"]);
+	for (auto port : removed)
+		CHECK_FALSE(resetJson["nodes"][0]["attri"].contains(std::string(port.substr(10))));
+	// History can replay against either the original retained archive or a freshly saved baseline.
+	std::vector<std::byte> undone;
+	REQUIRE(WritePxcxProjection(imported, before, {}, undone, diagnostic));
+	CHECK(undone == imported.Source.OriginalBytes);
+	const auto restored = project(reset, before);
+	const auto redone = project(restored, after);
+	CHECK(Graph(redone) == resetJson);
+	std::vector<std::byte> unchanged;
+	REQUIRE(WritePxcxProjection(reset, after, {}, unchanged, diagnostic));
+	CHECK(unchanged == reset.Source.OriginalBytes);
+}
+
+TEST_CASE(
+	"PXC processor resets leave unrelated authored removal and invalid enums rejected",
+	"[imagegraphio][pxcx_structure][pxcx_processor_reset]"
+) {
+	const auto imported = Imported(
+		R"({"nodes":[{"id":"replace","type":"Node_String_Regex_Replace","x":0,"y":0,"inputs":[{"r":{"d":"hello"}},{"r":{"d":"e"}},{"r":{"d":"a"}}],"attri":{"process":false,"array_process":2,"future":"keep"}}]})"
+	);
+	Document edited = imported.Graph;
+	Diagnostic diagnostic;
+	REQUIRE(Migrate(edited, diagnostic) == Status::Ok);
+	SECTION("A fixed text value has no source default reset") {
+		std::erase_if(edited.Nodes.front().Values, [](const auto &value) { return value.Port == "text"; });
+	}
+	SECTION("An invalid process enum has no source meaning") {
+		for (auto &value : edited.Nodes.front().Values)
+			if (value.Port == "attribute_array_process") value.Data = EnumValue{4};
+	}
+	const std::vector<std::byte> sentinel{std::byte{17}, std::byte{9}};
+	auto out = sentinel;
+	CHECK_FALSE(WritePxcxProjection(imported, edited, {}, out, diagnostic));
+	CHECK(out == sentinel);
+}

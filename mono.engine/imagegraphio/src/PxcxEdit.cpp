@@ -2881,6 +2881,29 @@ namespace engine::imagegraphio {
 						if (!synchronizeCompact(node, input.Id, *input.Default)) return false;
 						record["r"]["d"] = std::move(*encoded);
 					}
+					// Resetting an optional processor attribute restores its source constructor default.
+					for (std::string_view port : {"attribute_process", "attribute_array_process"}) {
+						const auto *attribute = FindCatalogueInput(*entry, port);
+						if (!oldMembership || !attribute || attribute->SourceIndex >= 0) continue;
+						const uint64_t resetWork = oldMembership->Values.size() + node.Values.size();
+						if (resetWork > compactWorkRemaining)
+							return Reject(
+								diagnostic, "PXC attribute reset exceeds its work limit", node.Id, port
+							);
+						compactWorkRemaining -= resetWork;
+						const auto hasAttribute = [port](const auto &values) {
+							return std::any_of(values.begin(), values.end(), [port](const auto &value) {
+								return value.Port == port;
+							});
+						};
+						if (!hasAttribute(oldMembership->Values) || hasAttribute(node.Values)) continue;
+						auto attributes = source->find("attri");
+						if (attributes == source->end() || !attributes->is_object() ||
+							attributes->erase(std::string(port.substr(10))) != 1)
+							return Reject(
+								diagnostic, "PXC attribute reset has no retained source field", node.Id, port
+							);
+					}
 					for (const auto &value : node.Values) {
 						if (node.Type == "pc.group_input" && value.Port == "parent_value") continue;
 						const auto *oldNode = NativeNode(working.Graph, node.Id);
