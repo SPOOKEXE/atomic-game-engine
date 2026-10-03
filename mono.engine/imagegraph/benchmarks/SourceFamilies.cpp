@@ -527,7 +527,7 @@ BENCH("80x80 authored Heightmap three-output projection, normal selected, voxel-
 	fixture.Measure();
 }
 
-BENCH("128x128 authored Flow default detail 1..8, nine steps per pixel", 1) {
+BENCH("128x128 authored Flow detail 1..8, eight iterations and nine-step admission bound", 1) {
 	static ProfileFixture fixture(Fixture::Family::Flow128DefaultDetail);
 	fixture.Measure();
 }
