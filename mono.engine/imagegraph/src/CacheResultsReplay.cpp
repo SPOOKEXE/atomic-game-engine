@@ -1,3 +1,4 @@
+#include "CacheResultsSlots.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/core/Profiling.hpp>
@@ -19,19 +20,7 @@ namespace engine::imagegraph {
 				std::floor(entry.PreviousValue) != entry.PreviousValue)
 				return false;
 			const auto *array = std::get_if<ArrayValue>(&entry.Values[0].Data);
-			if (!array || array->Elements.size() > Limits::MaximumArrayElements || !array->Nested.empty() ||
-				!array->Items.empty() ||
-				(array->ElementType != ValueType::Image && array->ElementType != ValueType::Struct))
-				return false;
-			return std::all_of(array->Elements.begin(), array->Elements.end(), [](const auto &slot) {
-				if (IsFreedCacheResultsSlot(slot)) return true;
-				const auto *surface = std::get_if<SurfaceValue>(&slot);
-				return surface && surface->Data.Format == SurfaceFormat::RGBA8Unorm &&
-					   ValidSurfaceLayout(
-						   surface->Data, Limits::MaximumDimension, Limits::MaximumArrayBytes
-					   ) &&
-					   FiniteSurfaceSamples(surface->Data);
-			});
+			return detail::CacheResultsSlots{array}.Valid();
 		}
 		ElementValue FreedSlot() {
 			StructValue slot;
@@ -40,13 +29,18 @@ namespace engine::imagegraph {
 			slot.Data->Fields.emplace_back(std::string(FREED), true);
 			return slot;
 		}
+		bool FreedRecord(const StructValue *record) {
+			if (!record || !record->Data || record->Data->Fields.size() != 1) return false;
+			const auto &field = record->Data->Fields.front();
+			const auto *freed = std::get_if<bool>(&field.second);
+			return field.first == FREED && freed && *freed;
+		}
 	}
 	bool IsFreedCacheResultsSlot(const ElementValue &slot) {
-		const auto *record = std::get_if<StructValue>(&slot);
-		if (!record || !record->Data || record->Data->Fields.size() != 1) return false;
-		const auto &field = record->Data->Fields.front();
-		const auto *freed = std::get_if<bool>(&field.second);
-		return field.first == FREED && freed && *freed;
+		return FreedRecord(std::get_if<StructValue>(&slot));
+	}
+	bool IsFreedCacheResultsSlot(const Value &slot) {
+		return FreedRecord(std::get_if<StructValue>(&slot));
 	}
 	uint64_t ClearedCacheResultsReplayBytes(const DataReplayState &source, std::string_view nodeId) {
 		if (source.Entries.size() > Limits::MaximumArrayElements) return UINT64_MAX;
@@ -56,8 +50,9 @@ namespace engine::imagegraph {
 			if (entry.NodeId != nodeId) continue;
 			if (!SourceList(entry)) return UINT64_MAX;
 			const auto &array = std::get<ArrayValue>(entry.Values[0].Data);
-			if (array.Elements.size() > (UINT64_MAX - bytes) / MARKER_BYTES) return UINT64_MAX;
-			bytes += array.Elements.size() * MARKER_BYTES;
+			const size_t count = detail::CacheResultsSlots{&array}.Count();
+			if (count > (UINT64_MAX - bytes) / MARKER_BYTES) return UINT64_MAX;
+			bytes += count * MARKER_BYTES;
 		}
 		return bytes;
 	}
@@ -94,8 +89,13 @@ namespace engine::imagegraph {
 		for (auto &entry : candidate.Entries) {
 			if (entry.NodeId != nodeId) continue;
 			auto &array = std::get<ArrayValue>(entry.Values[0].Data);
-			for (auto &slot : array.Elements)
-				slot = FreedSlot();
+			const size_t count = detail::CacheResultsSlots{&array}.Count();
+			std::vector<ElementValue> freed;
+			freed.reserve(count);
+			for (size_t index = 0; index < count; ++index)
+				freed.push_back(FreedSlot());
+			array.Elements = std::move(freed);
+			std::vector<SourceArrayItem>{}.swap(array.Items);
 			array.ElementType = ValueType::Struct;
 			entry.PreviousValue = 0;
 		}

@@ -10263,9 +10263,10 @@ namespace engine::imagegraph {
 												 node.Type == "pc.shape_rectangle" ||
 												 node.Type == "pc.shape_half";
 						// Source Vec2 surface getters bypass numeric unit conversion.
-						const bool shapeSurfaceVector = simpleShape &&
-														(input.Id == "center" || input.Id == "half_size") &&
-														input.SourceKind == "Vec2";
+						const bool shapeSurfaceVector =
+							input.SourceKind == "Vec2" &&
+							(node.Type == "pc.mirror_polar" ||
+							 (simpleShape && (input.Id == "center" || input.Id == "half_size")));
 						// Dimension projects surfaces before processor selection. Equal sizes collapse.
 						if (simpleShape && input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {

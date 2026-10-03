@@ -152,7 +152,7 @@ TEST_CASE(
 	CHECK(*request.DataReplay == before);
 }
 TEST_CASE(
-	"Cache Results freed list retains length and explicit invalid-slot diagnostic", "[cache_results_clear]"
+	"Cache Results freed list retains length and transports unselected invalid slots", "[cache_results_clear]"
 ) {
 	auto d = Scene(2);
 	// Direct DataReplay observations allow two exact first-frame source calls.
@@ -175,11 +175,13 @@ TEST_CASE(
 	request.Subframe = .5;
 	request.NegativeFrame = true;
 	request.DataReplay = &cleared;
-	const auto pixels = std::get<ImageArray>(result.Output).Images;
-	CHECK(EvaluateStateful(d, p, "out", request, result, diagnostic) == Status::UnsupportedExecution);
-	CHECK(diagnostic.Port == "cache_surfaces");
+	REQUIRE(EvaluateStateful(d, p, "out", request, result, diagnostic) == Status::Ok);
+	const auto &mixed = std::get<ArrayValue>(std::get<EvaluatedValue>(result.Output).Data);
+	REQUIRE(mixed.Items.size() == 2);
+	CHECK(mixed.ElementType == ValueType::Any);
+	CHECK(std::get<SurfaceValue>(std::get<ElementValue>(mixed.Items[0].Data)).Data.Pixels[0] == 10);
+	CHECK(IsFreedCacheResultsSlot(std::get<ElementValue>(mixed.Items[1].Data)));
 	CHECK(cleared == retained);
-	CHECK(std::get<ImageArray>(result.Output).Images == pixels);
 	// Shrink then rotate an exact full one-slot list removes the invalid position.
 	d.Nodes[1].Values[0].Data = int64_t{1};
 	request.Tick = 0;

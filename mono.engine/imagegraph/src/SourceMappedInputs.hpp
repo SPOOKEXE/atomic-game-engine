@@ -6,6 +6,12 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.mirror_polar" &&
+			((input.SourceKind == "ValueUnit" &&
+			  (input.Id == "position_unit" || input.Id == "center_unit")) ||
+			 (input.SourceKind == "MapToggle" && input.Id == "spokes_mapped") ||
+			 (input.SourceKind == "MapRange" && input.Id == "spokes_map_range")))
+			return true;
 		if (entry.Type == "pc.dotted" &&
 			((input.SourceKind == "ValueUnit" && (input.Id == "size_unit" || input.Id == "position_unit")) ||
 			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only")))
@@ -65,6 +71,8 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.mirror_polar" && port == "spokes")
+			return context.Boolean("spokes_mapped");
 		if (context.Entry.Type == "pc.stripe" &&
 			(port == "size" || port == "angle" || port == "random" || port == "strip_ratio"))
 			return context.Boolean(std::string(port) + "_mapped");
@@ -91,6 +99,11 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.mirror_polar" && port == "spokes") {
+			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+				return context.Find("spokes_map_range");
+			return value;
+		}
 		if (context.Entry.Type == "pc.stripe" &&
 			(port == "size" || port == "angle" || port == "random" || port == "strip_ratio")) {
 			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
@@ -145,6 +158,10 @@ namespace engine::imagegraph::detail {
 	}
 	inline bool ReadSourceMappedRange(NodeContext &context, std::string_view port, Vector2 &range) {
 		const Value *value = SourceMappedRange(context, port);
+		if (!value && context.Entry.Type == "pc.mirror_polar" && port == "spokes") {
+			range = {0, 4};
+			return true;
+		}
 		if (!value && context.Entry.Type == "pc.gradient") {
 			range = port == "radius" ? Vector2{0, .5} : (port == "scale" ? Vector2{0, 1} : Vector2{});
 			return true;
@@ -159,8 +176,8 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if (context.Entry.Type == "pc.stripe" || context.Entry.Type == "pc.dotted" ||
-			(context.Entry.Type == "pc.dither" && port == "contrast") ||
+		if (context.Entry.Type == "pc.mirror_polar" || context.Entry.Type == "pc.stripe" ||
+			context.Entry.Type == "pc.dotted" || (context.Entry.Type == "pc.dither" && port == "contrast") ||
 			(context.Entry.Type == "pc.gradient" &&
 			 (port == "angle" || port == "radius" || port == "shift" || port == "scale")) ||
 			context.Entry.Type == "pc.ambient_occlusion" ||

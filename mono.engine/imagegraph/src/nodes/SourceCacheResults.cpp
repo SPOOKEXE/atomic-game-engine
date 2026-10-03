@@ -1,3 +1,4 @@
+#include "../CacheResultsSlots.hpp"
 #include "ArraySource.hpp"
 
 #include <engine/imagegraph/CacheResultsReplay.hpp>
@@ -36,21 +37,10 @@ namespace engine::imagegraph::detail {
 					std::floor(previous->PreviousValue) != previous->PreviousValue)
 					return c.Fail(Status::InvalidValue, "Cache Results replay index or list is invalid");
 				old = std::get_if<ArrayValue>(&previous->Values[0].Data);
-				if (!old || !old->Nested.empty() || !old->Items.empty() ||
-					(old->ElementType != ValueType::Image && old->ElementType != ValueType::Struct))
+				if (!CacheResultsSlots{old}.Valid(c.Request.MaximumImageDimension))
 					return c.Fail(
-						Status::InvalidValue, "Cache Results replay requires a flat owned surface list"
+						Status::InvalidValue, "Cache Results replay requires a valid flat owned slot list"
 					);
-				for (const auto &element : old->Elements) {
-					if (IsFreedCacheResultsSlot(element)) continue;
-					const auto *surface = std::get_if<SurfaceValue>(&element);
-					if (!surface || surface->Data.Format != SurfaceFormat::RGBA8Unorm ||
-						!ValidSurfaceLayout(
-							surface->Data, c.Request.MaximumImageDimension, Limits::MaximumArrayBytes
-						) ||
-						!FiniteSurfaceSamples(surface->Data))
-						return c.Fail(Status::InvalidValue, "Cache Results replay surface is invalid");
-				}
 				index = size_t(previous->PreviousValue);
 				oldBytes = RetainedPayloadBytes(*old);
 			}
@@ -63,7 +53,7 @@ namespace engine::imagegraph::detail {
 			const bool first =
 				FrameTimeToReal({c.Request.Tick, c.Request.Subframe, c.Request.NegativeFrame}) ==
 				static_cast<long double>(c.Timeline ? c.Timeline->First : 0);
-			size_t retained = std::min(old ? old->Elements.size() : 0, size_t(amount));
+			size_t retained = std::min(CacheResultsSlots{old}.Count(), size_t(amount));
 			size_t begin = 0;
 			if (first) {
 				if (retained == size_t(amount)) {
@@ -107,17 +97,6 @@ namespace engine::imagegraph::detail {
 			const size_t count = input ? std::max(retained, index + 1) : retained;
 			if (count > Limits::MaximumArrayElements)
 				return c.Fail(Status::LimitExceeded, "Cache Results surface count exceeds bounds");
-			// A clear frees handles but retains array positions. Invalid positions are not pixels.
-			for (size_t slot = 0; slot < count; ++slot) {
-				if (input && slot == index) continue;
-				if (old && slot + begin < old->Elements.size() &&
-					IsFreedCacheResultsSlot(old->Elements[slot + begin]))
-					return c.Fail(
-						Status::UnsupportedExecution,
-						"Cache Results output retains freed source surface slots",
-						"cache_surfaces"
-					);
-			}
 			uint64_t inputBytes = 0;
 			if (input) {
 				const auto layout = CheckedSurfaceLayout(
@@ -129,12 +108,12 @@ namespace engine::imagegraph::detail {
 					);
 				inputBytes = layout->Bytes;
 			}
-			// Candidate surfaces, their immutable journal copy and the exported surface list coexist.
-			const uint64_t slots = std::max(count, old ? old->Elements.size() : 0);
+			// Candidate Elements/Items normalization, the immutable journal and publication coexist.
+			const uint64_t slots = std::max(count, CacheResultsSlots{old}.Count());
 			const uint64_t fixed = sizeof(DataReplayEntry) + sizeof(DataReplayValueFrame) +
 								   std::max(c.Authored.Id.size(), std::string{}.capacity()) +
-								   slots * (sizeof(ElementValue) + sizeof(SourceArrayItem) + sizeof(Image) +
-											sizeof(ImageArrayItem));
+								   slots * (sizeof(ElementValue) + 2 * sizeof(SourceArrayItem) +
+											sizeof(Image) + sizeof(ImageArrayItem));
 			if (fixed > Limits::MaximumEvaluationBytes ||
 				oldBytes > (Limits::MaximumEvaluationBytes - fixed) / 3 ||
 				inputBytes > (Limits::MaximumEvaluationBytes - fixed - oldBytes * 3) / 3)
@@ -162,9 +141,28 @@ namespace engine::imagegraph::detail {
 					image.Hash = SurfaceHash(image);
 					surfaces.Elements.push_back(SurfaceValue{std::move(image)});
 				} else {
-					if (!old || slot + begin >= old->Elements.size())
+					if (!old || slot + begin >= CacheResultsSlots{old}.Count())
 						return c.Fail(Status::InvalidValue, "Cache Results retained surface slot is missing");
-					surfaces.Elements.push_back(old->Elements[slot + begin]);
+					surfaces.Elements.push_back(CacheResultsSlots{old}.Copy(slot + begin));
+				}
+			}
+			const bool freed =
+				std::any_of(surfaces.Elements.begin(), surfaces.Elements.end(), [](const auto &slot) {
+					return IsFreedCacheResultsSlot(slot);
+				});
+			if (freed) {
+				const bool onlyFreed =
+					std::all_of(surfaces.Elements.begin(), surfaces.Elements.end(), [](const auto &slot) {
+						return IsFreedCacheResultsSlot(slot);
+					});
+				if (onlyFreed)
+					surfaces.ElementType = ValueType::Struct;
+				else {
+					surfaces.ElementType = ValueType::Any;
+					surfaces.Items.reserve(count);
+					for (auto &slot : surfaces.Elements)
+						surfaces.Items.push_back({std::move(slot)});
+					std::vector<ElementValue>{}.swap(surfaces.Elements);
 				}
 			}
 			DataReplayEntry state;
@@ -180,8 +178,17 @@ namespace engine::imagegraph::detail {
 			state.Values.push_back({0, surfaces});
 			source_array::Items output;
 			output.reserve(count);
-			for (auto &surface : surfaces.Elements)
-				output.push_back({std::move(std::get<SurfaceValue>(surface).Data)});
+			if (!surfaces.Items.empty()) {
+				for (auto &slot : surfaces.Items)
+					output.push_back(std::move(slot));
+			} else {
+				for (auto &slot : surfaces.Elements) {
+					if (auto *surface = std::get_if<SurfaceValue>(&slot))
+						output.push_back({std::move(surface->Data)});
+					else
+						output.push_back({std::move(slot)});
+				}
+			}
 			if (!source_array::Publish(c, std::move(output), "cache_surfaces", ValueType::Image))
 				return false;
 			c.DataUpdates.push_back(std::move(state));

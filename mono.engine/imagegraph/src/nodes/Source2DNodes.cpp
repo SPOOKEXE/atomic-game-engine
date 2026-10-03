@@ -6,6 +6,7 @@
 #include <cmath>
 
 namespace engine::imagegraph::detail {
+	bool SourceMirrorPolar(NodeContext &);
 	bool SourceSmear(NodeContext &);
 	bool SourceCropContent(NodeContext &);
 	bool SourceGradientGrid(NodeContext &);
@@ -310,6 +311,7 @@ namespace engine::imagegraph::detail {
 	bool SourceShapeMap(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
+			ExecutorEntry{"pc.mirror_polar", SourceMirrorPolar, true},
 			ExecutorEntry{"pc.shape_map", SourceShapeMap, true},
 			ExecutorEntry{"pc.smear", SourceSmear, true},
 			ExecutorEntry{"pc.crop_content", SourceCropContent, true},

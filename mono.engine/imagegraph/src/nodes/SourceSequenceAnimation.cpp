@@ -1,5 +1,6 @@
 #include "ArraySource.hpp"
 
+#include <engine/imagegraph/CacheResultsReplay.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 
 #include <cmath>
@@ -18,6 +19,12 @@ namespace engine::imagegraph::detail {
 			return true;
 		}
 		bool CopySequenceValue(NodeContext &c, const Value &value) {
+			if (IsFreedCacheResultsSlot(value))
+				return c.Fail(
+					Status::UnsupportedExecution,
+					"Sequence selected a freed Cache Results surface slot",
+					"surface_in"
+				);
 			if (const auto *surface = std::get_if<SurfaceValue>(&value))
 				return CopySequenceImage(c, surface->Data);
 			const auto bytes = ValueClonePayloadBytes(value);
@@ -40,6 +47,12 @@ namespace engine::imagegraph::detail {
 				return Publish(c, Items(*children), "surface_out", ValueType::Image);
 			}
 			const auto &leaf = std::get<ElementValue>(item.Data);
+			if (IsFreedCacheResultsSlot(leaf))
+				return c.Fail(
+					Status::UnsupportedExecution,
+					"Sequence selected a freed Cache Results surface slot",
+					"surface_in"
+				);
 			return std::visit(
 				[&](const auto &value) {
 					using T = std::decay_t<decltype(value)>;

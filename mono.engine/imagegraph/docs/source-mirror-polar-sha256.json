@@ -1,0 +1,16 @@
+{
+  "revision": "b69eca232217360cf1502ef0223523d818606652",
+  "paths": {
+    "scripts/node_mirror_polar/node_mirror_polar.gml": "cceddc871081734c16255e458edb2ec9afa4fa8e2dd6c46833f18d98005c0fd0",
+    "shaders/sh_mirror_polar/sh_mirror_polar.fsh": "5acd38d6c052c7087e63b2d8e0f76ed4052b3acbafffb41ba7071bb91c81bc6f",
+    "shaders/sh_mirror_polar/sh_mirror_polar.vsh": "accd9b00f5fbd555c11caf31b9ba511e38165fb19c9cfd9685511a1a04cbb813",
+    "scripts/node_value_vec2/node_value_vec2.gml": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112",
+    "scripts/node_value_types/node_value_types.gml": "9574e5f50450dd94cfc682a346f586880271a8985b9cc3205da697811884fddf",
+    "scripts/node_value/node_value.gml": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+    "scripts/node_processor/node_processor.gml": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc",
+    "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+    "scripts/surface_functions/surface_functions.gml": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+    "scripts/surface_draw_functions/surface_draw_functions.gml": "c0519138b9a9022d3b5ffeaf90242cf9106253991a5ecea2f3e4d001e9ceb720",
+    "shaders/sh_draw_r8/sh_draw_r8.fsh": "8a1357e2c2752a4bf507eebfb351b29daf5457f87a755607a14d5608cf1e6c67"
+  }
+}

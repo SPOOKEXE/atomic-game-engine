@@ -1,0 +1,36 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_files": [
+    {
+      "path": "scripts/node_cache_results/node_cache_results.gml",
+      "sha256": "135a4a623ec85df80acee5d6f58f611a4b5f562059fbf9e558940a348e84eb09"
+    },
+    {
+      "path": "scripts/node_sequence_anim/node_sequence_anim.gml",
+      "sha256": "be326b715cd989d969ba7dca474aa7a642585d00952534ead3e28021e1e22bc7"
+    },
+    {
+      "path": "scripts/surface_functions/surface_functions.gml",
+      "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2"
+    }
+  ],
+  "reviewed_clear65_patch_sha256": "8d1bd744deb2f4afef5a07dad35ee3c5577a7915614c84d3eee725f017846592",
+  "status": "Joined release66 CPU core transport and native rigid checkpoint cases pass; reference/device gates remain open.",
+  "profile": "native-cache-results-mixed-slot-transport",
+  "carriers": {
+    "valid": "ArrayValue Image Elements; existing ImageArray output normalization",
+    "freed": "ArrayValue Struct Elements with exact native.cache-results.freed-slot=true",
+    "mixed": "ArrayValue Any.Items, one owned flat image/marker leaf per slot"
+  },
+  "selected_slot": "Sequence diagnoses only the exact selected freed leaf, including nonarray Value forwarding; valid pixels are copied.",
+  "timing": "Only current source index redraws. First frame rotates/truncates according to Amount. Button no-update and native same-clock scheduler boundary retained.",
+  "bounds": "Existing array/byte limits; complete candidate/journal/output representation overlap admitted before allocation; no general Value validator widening.",
+  "gates": [
+    "Live UI, sanitizers and measured profiling remain unverified",
+    "Source/device numeric handle and scheduler parity",
+    "Raw unwritten/sparse source storage",
+    "Exact desktop drawing/blending",
+    "Generic invalid surface consumers outside the scoped Cache/Sequence route"
+  ],
+  "review_base_head": "f20966cdc1ce525cfd5825712fd2e967a9b094bc"
+}

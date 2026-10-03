@@ -68,6 +68,7 @@ namespace engine::imagegraph::detail {
 					  SourceAtlasPixelExecutors(),
 					  SourcePaletteExecutors(),
 					  SourceSurfaceDataExecutors(),
+					  SourceSurfaceBufferExecutors(),
 					  HostExecutors(),
 					  TriggerExecutors(),
 					  TemporalExecutors(),
@@ -95,6 +96,9 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if ((type == "pc.surface_to_buffer" && port == "surface") ||
+					(type == "pc.surface_from_buffer" && port == "input_0"))
+					return true;
 				if (type == "pc.pin" && port == "in") return true;
 				if (type == "pc.surface_project_cylinder_3_d" &&
 					(port == "dimension" || port == "view_angle" || port == "position" ||

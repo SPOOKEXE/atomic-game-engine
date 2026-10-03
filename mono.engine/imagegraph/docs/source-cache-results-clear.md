@@ -29,11 +29,13 @@ the node or changing its type retires the overlay; readding that ID creates a
 new source instance. Whole-owner Clear also retires it. A rigid refresh overlays it onto the immutable
 pre-frame journal. Neither path can restore freed pixels. Source first-frame
 rotation and Amount shrink/growth still determine the next count/current slot.
-A new one-slot surface can recover when every output position is valid. Output
-with remaining freed positions receives UnsupportedExecution and leaves the
-cleared journal unchanged. No transparent pixels, numeric handles or source
-undefined values are substituted. This refusal does not complete source
-invalid-handle output/update transport.
+A new one-slot surface can recover when every output position is valid. Mixed
+lists preserve valid images and freed records in the existing Any.Items carrier.
+A valid Sequence selection returns pixels; a selected freed position receives
+UnsupportedExecution with preceding journals and output unchanged. No transparent
+pixels, numeric handles or source undefined values are substituted. This owned
+metadata does not claim exact source numeric-handle transport. See
+`source-cache-results-transport.md` for the bounded refill lifecycle.
 
 Before any dependency/name walk, the action admits conservative complete
 node-ID lookup and name-comparison work, including unique-table insertion and
