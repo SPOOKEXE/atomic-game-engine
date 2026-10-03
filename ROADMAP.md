@@ -61,6 +61,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Decode real outline and bitmap font distance fields with bounded tracked storage.
 - [x] Integrate Flow and Bubble noise generators.
 - [x] Integrate bounded Cristal noise generation and typed input projection.
+- [x] Integrate bounded Gradient Cube image and cross-section outputs; pass joined CPU validation.
 - [x] Integrate path extension, flattening and smoothing.
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [x] Save completed image previews as PXC thumbnails with atomic publication.

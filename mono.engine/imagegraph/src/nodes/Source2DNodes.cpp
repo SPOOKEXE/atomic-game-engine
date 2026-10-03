@@ -61,6 +61,7 @@ namespace engine::imagegraph::detail {
 	bool SourceFlowNoise(NodeContext &c);
 	bool SourceBubbleNoise(NodeContext &c);
 	bool SourceCristalNoise(NodeContext &c);
+	bool SourceGradientCube(NodeContext &c);
 	bool SourceSimplexNoise(NodeContext &context);
 	bool SourceRidgeNoise(NodeContext &context);
 	bool DeCorner(NodeContext &context);
@@ -412,6 +413,7 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.flow_noise", SourceFlowNoise, true},
 			ExecutorEntry{"pc.noise_bubble", SourceBubbleNoise, true},
 			ExecutorEntry{"pc.noise_cristal", SourceCristalNoise, true},
+			ExecutorEntry{"pc.gradient_cube", SourceGradientCube, true},
 			ExecutorEntry{"pc.noise_simplex", SourceSimplexNoise, true},
 			ExecutorEntry{"pc.ridge_noise", SourceRidgeNoise, true},
 			ExecutorEntry{"pc.de_corner", DeCorner, true},

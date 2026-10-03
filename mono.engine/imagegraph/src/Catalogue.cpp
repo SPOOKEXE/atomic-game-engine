@@ -369,6 +369,14 @@ namespace engine::imagegraph {
 			return (array.ElementType == ValueType::Vector2 || array.ElementType == ValueType::Scalar ||
 					array.ElementType == ValueType::Integer || array.ElementType == ValueType::Any) &&
 				   detail::ValidPayload(array, true);
+		// The source fixed-length Vec3 getter pads or truncates these numeric component arrays.
+		if (entry.Type == "pc.gradient_cube" && input.SourceKind == "Vec3" &&
+			input.Type == ValueType::Vector3 && input.ArrayDepthKnown && input.ArrayDepth == 1 &&
+			((input.Id == "rotation" && input.SourceIndex == 1) ||
+			 (input.Id == "rotation_2" && input.SourceIndex == 8) ||
+			 (input.Id == "scale_2" && input.SourceIndex == 9)))
+			return (array.ElementType == ValueType::Scalar || array.ElementType == ValueType::Integer) &&
+				   array.Nested.empty() && array.Items.empty() && detail::ValidPayload(array, false);
 		// These compound controls are complete source values selected by the processor row.
 		if (entry.Type == "pc.gradient" &&
 			((input.Type == ValueType::Curve &&

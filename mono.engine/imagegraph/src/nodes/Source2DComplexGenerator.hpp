@@ -37,7 +37,11 @@ namespace engine::imagegraph::detail::source2d {
 			   c.Fail(Status::UnsupportedExecution, "Generator raw canvas divides by zero", "dimension");
 	}
 	inline bool ComplexBatchAdmission(
-		NodeContext &c, uint64_t perPixel, std::string_view output, std::string_view workPort
+		NodeContext &c,
+		uint64_t perPixel,
+		std::string_view output,
+		std::string_view workPort,
+		size_t outputCount = 1
 	) {
 		if (c.ProcessorRow != 0) return true;
 		if (!PreflightGeneratorDimensions(c)) return false;
@@ -92,7 +96,15 @@ namespace engine::imagegraph::detail::source2d {
 			return c.Fail(
 				Status::LimitExceeded, "Generator whole-array work exceeds the native CPU limit", workPort
 			);
-		const uint64_t bytes = rows * (pixels * COMPLEX_GENERATOR_PIXEL_BYTES + COMPLEX_GENERATOR_ROW_BYTES);
+		// All declared targets remain live together, including processor row publication.
+		if (outputCount == 0 || outputCount > Limits::MaximumArrayElements)
+			return c.Fail(Status::LimitExceeded, "Generator output count exceeds native bounds", output);
+		const uint64_t rowBytes = pixels * COMPLEX_GENERATOR_PIXEL_BYTES + COMPLEX_GENERATOR_ROW_BYTES;
+		if (rows > Limits::MaximumEvaluationBytes / rowBytes / outputCount)
+			return c.Fail(
+				Status::LimitExceeded, "Generator whole-array targets exceed native byte bounds", output
+			);
+		const uint64_t bytes = rows * rowBytes * outputCount;
 		auto charge = c.ReserveWorkspace(bytes, output);
 		return bool(charge);
 	}

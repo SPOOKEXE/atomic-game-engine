@@ -10388,11 +10388,14 @@ namespace engine::imagegraph {
 								}
 							}
 						}
-						// Look At's source Vec3 getter resizes whole-surface dimensions to three axes.
-						const bool lookAtSurfaceVector =
-							node.Type == "pc.quarternion_lookat" && input.SourceKind == "Vec3" &&
-							(input.Id == "origin" || input.Id == "target" || input.Id == "up");
-						if (lookAtSurfaceVector && produced[sourceIndex]) {
+						// These source Vec3 getters resize whole-surface dimensions to three axes.
+						const bool sourceSurfaceVec3 =
+							input.SourceKind == "Vec3" &&
+							((node.Type == "pc.quarternion_lookat" &&
+							  (input.Id == "origin" || input.Id == "target" || input.Id == "up")) ||
+							 (node.Type == "pc.gradient_cube" &&
+							  (input.Id == "rotation" || input.Id == "rotation_2" || input.Id == "scale_2")));
+						if (sourceSurfaceVec3 && produced[sourceIndex]) {
 							const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
 							const ImageArray *surfaces =
 								surface ? nullptr
@@ -10448,7 +10451,10 @@ namespace engine::imagegraph {
 							(node.Type == "pc.noise_cristal" &&
 							 ((input.Id == "iteration" && input.SourceKind == "Int") ||
 							  ((input.Id == "gamma" || input.Id == "uv_mix") &&
-							   input.SourceKind == "Slider")));
+							   input.SourceKind == "Slider"))) ||
+							(node.Type == "pc.gradient_cube" &&
+							 ((input.Id == "scale" && input.SourceKind == "Float") ||
+							  (input.Id == "position" && input.SourceKind == "Slider")));
 						if (sourceSurfaceScalar && produced[sourceIndex]) {
 							const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
 							const ImageArray *surfaces =
@@ -10513,7 +10519,7 @@ namespace engine::imagegraph {
 							 (simpleShape && (input.Id == "center" || input.Id == "half_size")));
 						// Dimension projects surfaces before processor selection. Equal sizes collapse.
 						if ((simpleShape || node.Type == "pc.flow_noise" || node.Type == "pc.noise_bubble" ||
-							 node.Type == "pc.noise_cristal") &&
+							 node.Type == "pc.noise_cristal" || node.Type == "pc.gradient_cube") &&
 							input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {
 							if (const ImageArray *images =
