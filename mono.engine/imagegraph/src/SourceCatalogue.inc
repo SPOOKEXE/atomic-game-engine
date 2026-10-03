@@ -26741,7 +26741,7 @@ O	surface_out	Surface Out	0	image
 O	depth	Depth	1	image
 O	rim_normal	Rim Normal	2	image
 N	pc.shape_ellipse	Node_Shape_Ellipse	Draw Ellipse	generate	scripts/node_shape_ellipse/node_shape_ellipse.gml
-I	attribute_process	attribute process	-1	Bool	boolean	b 1	
+I	attribute_process	attribute process	-1	Bool	boolean	b 0	
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -26905,7 +26905,7 @@ O	colored	Colored	0	image
 O	mask	Mask	1	image
 O	height	Height	2	image
 N	pc.shape_half	Node_Shape_Half	Draw Half	generate	scripts/node_shape_half/node_shape_half.gml
-I	attribute_process	attribute process	-1	Bool	boolean	b 1	
+I	attribute_process	attribute process	-1	Bool	boolean	b 0	
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -27089,7 +27089,7 @@ O	surface_out	Surface Out	0	image
 O	mesh	Mesh	1	mesh2d
 O	path	Path	2	path2d
 N	pc.shape_rectangle	Node_Shape_Rectangle	Draw Rectangle	generate	scripts/node_shape_rectangle/node_shape_rectangle.gml
-I	attribute_process	attribute process	-1	Bool	boolean	b 1	
+I	attribute_process	attribute process	-1	Bool	boolean	b 0	
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1

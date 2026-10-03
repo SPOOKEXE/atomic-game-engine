@@ -1,0 +1,81 @@
+{
+  "commit": "b69eca232217360cf1502ef0223523d818606652",
+  "files": [
+    {
+      "path": "scripts/node_shape_single/node_shape_single.gml",
+      "sha256": "a6bfd915ad4b4f0871cd10b0ddb4b5242e8a6810c7fa2706e9fd70f2f3f1e61e"
+    },
+    {
+      "path": "scripts/node_processor/node_processor.gml",
+      "sha256": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc"
+    },
+    {
+      "path": "scripts/node_value_vec2/node_value_vec2.gml",
+      "sha256": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112"
+    },
+    {
+      "path": "scripts/node_value_types/node_value_types.gml",
+      "sha256": "9574e5f50450dd94cfc682a346f586880271a8985b9cc3205da697811884fddf"
+    },
+    {
+      "path": "scripts/node_value_dimension/node_value_dimension.gml",
+      "sha256": "7a31f24df14a2fe19f5566ab7d2e919f792faccac83ecbdff7f59a91e93f54e9"
+    },
+    {
+      "path": "scripts/node_value/node_value.gml",
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd"
+    },
+    {
+      "path": "scripts/shader_functions/shader_functions.gml",
+      "sha256": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7"
+    },
+    {
+      "path": "scripts/surface_functions/surface_functions.gml",
+      "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2"
+    },
+    {
+      "path": "scripts/_draw_defines/_draw_defines.gml",
+      "sha256": "f4702dd2337ca20635d699456b6ef27c11ff1aa890f91610629b4d91b94eb51c"
+    },
+    {
+      "path": "scripts/draw_sprite_ext_override/draw_sprite_ext_override.gml",
+      "sha256": "82ab54767e1b3b9ecfc1221489658e328a227d5b8cdde53c8f8c964c9db05f36"
+    },
+    {
+      "path": "scripts/node_shape_ellipse/node_shape_ellipse.gml",
+      "sha256": "a42082703a971408c2b20585496021d0109556cd5c0320f8f020f7ead103fe18"
+    },
+    {
+      "path": "shaders/sh_shape_ellipse/sh_shape_ellipse.fsh",
+      "sha256": "a49eb3611d80bcf55b0bbe7d9c7eb5aa0d141763ef8452eaec8fbaa808fc24e4"
+    },
+    {
+      "path": "shaders/sh_shape_ellipse/sh_shape_ellipse.vsh",
+      "sha256": "accd9b00f5fbd555c11caf31b9ba511e38165fb19c9cfd9685511a1a04cbb813"
+    },
+    {
+      "path": "scripts/node_shape_rectangle/node_shape_rectangle.gml",
+      "sha256": "438d437bac0c7e69fbf66ef05eaf43a796904864fb06bbd57efa076c41dec4c6"
+    },
+    {
+      "path": "shaders/sh_shape_rectangle/sh_shape_rectangle.fsh",
+      "sha256": "d4377c0a0a319bc1392449c5e6baa7ec3d143b971b388b9e707956d4aa52d58a"
+    },
+    {
+      "path": "shaders/sh_shape_rectangle/sh_shape_rectangle.vsh",
+      "sha256": "accd9b00f5fbd555c11caf31b9ba511e38165fb19c9cfd9685511a1a04cbb813"
+    },
+    {
+      "path": "scripts/node_shape_half/node_shape_half.gml",
+      "sha256": "1fa9628903353c9f8da0873d46cdd6b93efa6c0aa5c2b3e3614c01c8ab7bcb56"
+    },
+    {
+      "path": "shaders/sh_shape_half/sh_shape_half.fsh",
+      "sha256": "86d709fb933009b6ae3b45c70fa230dd20d891cff78f6414abea4cb3843cc1a4"
+    },
+    {
+      "path": "shaders/sh_shape_half/sh_shape_half.vsh",
+      "sha256": "accd9b00f5fbd555c11caf31b9ba511e38165fb19c9cfd9685511a1a04cbb813"
+    }
+  ]
+}

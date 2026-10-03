@@ -201,6 +201,45 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
         self.assertEqual(sum(line.startswith(("I\t", "T\t")) for line in lines),
                          sum(line.startswith("S\t") for line in lines))
 
+    def test_pinned_single_shapes_keep_process_disabled_in_catalogue(self):
+        source_path = REPOSITORY / "docs/pixel-composer-m0/source-inputs.json"
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        self.assertEqual("b69eca232217360cf1502ef0223523d818606652", source["source_commit"])
+        shapes = {node_id: source["nodes"][node_id] for node_id in (
+            "Node_Shape_Ellipse", "Node_Shape_Rectangle", "Node_Shape_Half",
+        )}
+        for node in shapes.values():
+            process = next(item for item in node["inputs"] if item.get("attribute") == "process")
+            self.assertEqual("false", process["default"])
+
+        fixture = {
+            "display_name": "Process fixture", "family": "fixture",
+            "file": "scripts/node_process_fixture/node_process_fixture.gml",
+            "base": None, "outputs": [],
+            "inputs": [{
+                "index": "-1", "kind": "Bool", "name": "attribute process", "attribute": "process",
+                "default": "false", "extra": [], "array_depth": 0, "source_array_classification": False,
+            }],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            lines = self.run_generator(Path(temporary), {"Node_Shape_Process_Fixture": fixture})
+        self.assertIn("I\tattribute_process\tattribute process\t-1\tBool\tboolean\tb 0\t", lines)
+
+        catalogue_path = REPOSITORY / "mono.engine/imagegraph/src/SourceCatalogue.inc"
+        catalogue = catalogue_path.read_text(encoding="utf-8").splitlines()
+        for node_id, catalogue_id in (
+            ("Node_Shape_Ellipse", "pc.shape_ellipse"),
+            ("Node_Shape_Rectangle", "pc.shape_rectangle"),
+            ("Node_Shape_Half", "pc.shape_half"),
+        ):
+            with self.subTest(node=node_id):
+                start = catalogue.index(next(line for line in catalogue if line.startswith(f"N\t{catalogue_id}\t")))
+                end = next(
+                    (index for index in range(start + 1, len(catalogue)) if catalogue[index].startswith("N\t")),
+                    len(catalogue),
+                )
+                self.assertIn("I\tattribute_process\tattribute process\t-1\tBool\tboolean\tb 0\t", catalogue[start:end])
+
     def test_source_only_constructor_records_preserve_values_and_dynamic_templates(self):
         extra_nodes = {
             "Node_3D_Light_Point": {

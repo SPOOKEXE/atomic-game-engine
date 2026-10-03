@@ -9708,11 +9708,115 @@ namespace engine::imagegraph {
 					const Value *value = nullptr;
 					if (linked) {
 						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						const bool simpleShape = node.Type == "pc.shape_ellipse" ||
+												 node.Type == "pc.shape_rectangle" ||
+												 node.Type == "pc.shape_half";
+						// Source Vec2 surface getters bypass numeric unit conversion.
+						const bool shapeSurfaceVector = simpleShape &&
+														(input.Id == "center" || input.Id == "half_size") &&
+														input.SourceKind == "Vec2";
+						// Dimension projects surfaces before processor selection. Equal sizes collapse.
+						if (simpleShape && input.Id == "dimension" && input.SourceKind == "Dimension" &&
+							produced[sourceIndex]) {
+							if (const ImageArray *images =
+									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
+								if (images->Items.size() > Limits::MaximumArrayElements) {
+									SetDiagnostic(
+										diagnostic,
+										Status::LimitExceeded,
+										"source dimension surface rows exceed element budget",
+										node.Id,
+										std::string(input.Id)
+									);
+									return diagnostic.Code;
+								}
+								Vector2 first{};
+								size_t count = 0;
+								size_t sourceRow = 0;
+								bool equal = true;
+								for (const auto &item : images->Items) {
+									const size_t row = sourceRow++;
+									const auto *index = std::get_if<size_t>(&item.Data);
+									if (!index)
+										continue; // Source is_surface skips nested non-surface entries.
+									if (*index >= images->Images.size()) {
+										SetDiagnostic(
+											diagnostic,
+											Status::InvalidValue,
+											"source dimension surface index is invalid",
+											node.Id,
+											std::string(input.Id)
+										);
+										return diagnostic.Code;
+									}
+									const auto &image = images->Images[*index];
+									const Vector2 size{double(image.Width), double(image.Height)};
+									if (row && (!count || size != first)) equal = false;
+									if (!count) first = size;
+									++count;
+								}
+								if (!count || count > Limits::MaximumArrayElements) {
+									SetDiagnostic(
+										diagnostic,
+										Status::UnsupportedExecution,
+										"source dimension needs bounded observed surface rows",
+										node.Id,
+										std::string(input.Id)
+									);
+									return diagnostic.Code;
+								}
+								if (equal)
+									context.Values.emplace_back(input.Id, first);
+								else {
+									auto projectionCharge = budget.Reserve(count * sizeof(ElementValue));
+									if (!projectionCharge ||
+										!inputCharge->Merge(std::move(*projectionCharge))) {
+										SetDiagnostic(
+											diagnostic,
+											Status::LimitExceeded,
+											"source dimension projection exceeds live byte budget",
+											node.Id,
+											std::string(input.Id)
+										);
+										return diagnostic.Code;
+									}
+									ArrayValue dimensions;
+									dimensions.ElementType = ValueType::Vector2;
+									dimensions.Elements.reserve(count);
+									const size_t capacity = dimensions.Elements.capacity();
+									if (capacity > count) {
+										auto excess =
+											budget.Reserve((capacity - count) * sizeof(ElementValue));
+										if (!excess || !inputCharge->Merge(std::move(*excess))) {
+											SetDiagnostic(
+												diagnostic,
+												Status::LimitExceeded,
+												"source dimension capacity exceeds live byte budget",
+												node.Id,
+												std::string(input.Id)
+											);
+											return diagnostic.Code;
+										}
+									}
+									for (const auto &item : images->Items) {
+										const auto *index = std::get_if<size_t>(&item.Data);
+										if (!index) continue;
+										const auto &image = images->Images[*index];
+										dimensions.Elements.emplace_back(
+											Vector2{double(image.Width), double(image.Height)}
+										);
+									}
+									context.Values.emplace_back(input.Id, std::move(dimensions));
+								}
+								continue;
+							}
+						}
 						// Rearrange's Int-array getter reads source surfaces as dimensions.
 						const bool rearrangeOrders = node.Type == "pc.array_rearrange" &&
 													 input.Id == "orders" && input.Type == ValueType::Array &&
 													 input.SourceKind == "Int";
-						if ((input.Type == ValueType::Any || rearrangeOrders) && produced[sourceIndex]) {
+						if ((input.Type == ValueType::Any || rearrangeOrders || shapeSurfaceVector) &&
+							produced[sourceIndex]) {
 							if (const ImageArray *array =
 									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
 								context.ImageArrays.emplace_back(input.Id, array);
