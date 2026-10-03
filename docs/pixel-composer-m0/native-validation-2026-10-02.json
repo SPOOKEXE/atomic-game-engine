@@ -6355,6 +6355,36 @@
       "assertions_passed": 11,
       "test_cases_passed": 1,
       "source_commit": "f273119f"
+    },
+    {
+      "name": "build-release-75-refract-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-75-refract-initial.log",
+      "log_sha256": "a7dff9b6408960e1a9dcd33565941de8448d59241355e3267695039d126126cb",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Coherent 44-step release-tests build with reviewed Refract draft; runtime acceptance separately recorded."
+    },
+    {
+      "name": "refract-io-release-75-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/refract-io-release-75-focused.log",
+      "log_sha256": "8e3cf6fdc0f75d2cffc8a2092f3336e95c6c9f690cbf7ac5ec9d3538a0227db3",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Corrected fixture covers actual pc.refract/Node_Refract mapped Float inputs 9/10/11 and Surface maps 12/13/14, native persistence, source-byte identity, unknown fields and refused edits. Focused IO only.",
+      "assertions_passed": 178,
+      "test_cases_passed": 1
+    },
+    {
+      "name": "metadata-release-75-refract",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/metadata-release-75-refract.log",
+      "log_sha256": "98c5f1be1e1a3d27385661a42a0b5adffca42fcac80e525bf47505b252aaf02d",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "All 96 metadata/extractor unittest cases pass. Out-of-date matrix output is an intentional refusal fixture; no regenerated matrix freshness claim.",
+      "unittest_cases_passed": 96
     }
   ],
   "excluded_or_failed_runs": [
@@ -7931,6 +7961,15 @@
       "exit_code": 42,
       "result": "failed; retained before native acceptance",
       "scope_note": "Corrected source-valid numeric-array fixtures pass. Private original-unit admission fixture fails4 assertions: executor succeeds and publishes output with allocator peak1293 bytes rather than refusing before allocation. This defensive private-context gap is not source scalar-unit processor batching.22 cases:21 passed,1 failed;1126 assertions:1122 passed,4 failed."
+    },
+    {
+      "name": "refract-release-75-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/refract-release-75-focused.log",
+      "log_sha256": "1ba1be2b0c3999ec209108e919331e99d182c8b117595c795d58648643cab0e4",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "36 cases: 35 passed, 1 failed; 2380 assertions: 2378 passed, 2 failed. The mask inversion/alpha-only/feather fixture disagrees with its full-refraction pixel oracle. Classification and repair pending; no Refract acceptance claimed."
     }
   ],
   "pinned_gml_helper_translation": {
