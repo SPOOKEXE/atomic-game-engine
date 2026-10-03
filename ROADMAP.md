@@ -67,7 +67,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Integrate camera rendering and Studio previews.
 - [_] Finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback.
 - [_] Finish Dopesheet gestures and Studio host workflows.
-- [_] Add prepared thumbnails to PXC saving.
+- [x] Save completed image previews as PXC thumbnails with atomic publication.
 - [_] Finish remaining PXC edits, export formats and modified-project compatibility.
 - [_] Validate all integrated changes with joined CPU tests.
 - [_] Profile source-family workloads in an optimized build.

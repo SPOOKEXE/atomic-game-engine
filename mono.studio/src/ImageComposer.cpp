@@ -195,6 +195,9 @@ namespace studio {
 			Document Authored;
 			Document PxcxProjection;
 			std::optional<engine::bake::PxcxArchive> ImportedPxcx;
+			PxcxPublishedSave PublishedPxcx;
+			std::optional<PxcxPreviewIdentity> PxcxCompletedPreview;
+			uint64_t PxcxPreviewCacheInputRevision = 0;
 			std::vector<Diagnostic> PxcxDiagnostics;
 			double ScalarPreviewValue = 0.0;
 			std::vector<engine::imagegraph::AudioCaptureFrame> AudioFrames;
@@ -228,6 +231,7 @@ namespace studio {
 		}
 
 		void AuthoredDocumentChanged(State &state) {
+			state.PxcxCompletedPreview.reset();
 			std::erase_if(state.DirectoryGrants, [&](const auto &grant) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
@@ -1057,6 +1061,8 @@ namespace studio {
 			state.GroupHost.Clear();
 			AuthoredDocumentChanged(state);
 			state.ImportedPxcx.reset();
+			state.PublishedPxcx = {};
+			state.PxcxCompletedPreview.reset();
 			state.PxcxProjection = {};
 			state.PxcxDiagnostics.clear();
 			state.PxcxPathDisplay.clear();
@@ -1136,6 +1142,8 @@ namespace studio {
 			}
 			RegisterPxcxCanvasNodeTypes(imported.Source);
 			state.ImportedPxcx = std::move(imported.Source);
+			state.PublishedPxcx = {};
+			state.PxcxCompletedPreview.reset();
 			state.PxcxReferenceThumbnail = std::move(sourceThumbnail);
 			state.RetiredPxcxThumbnailTexture = state.CurrentPxcxThumbnailTexture;
 			state.CurrentPxcxThumbnailTexture = engine::core::Name{};
@@ -1234,7 +1242,9 @@ namespace studio {
 		}
 
 		bool UploadPxcxReferenceThumbnail(State &state, engine::render::Renderer &renderer) {
-			const Image &image = state.PxcxReferenceThumbnail;
+			const Image &image = state.PublishedPxcx.Archive.OriginalBytes.empty()
+									 ? state.PxcxReferenceThumbnail
+									 : state.PublishedPxcx.ReferencePreview;
 			constexpr size_t MaximumBytes = engine::bake::PxcxLimits::ThumbnailRgbaBytes;
 			if (image.Width != 256 || image.Height != 256 || image.Pixels.size() != MaximumBytes) {
 				state.PxcxThumbnailMessage = "PXCX source thumbnail has invalid RGBA8 dimensions";
@@ -1267,6 +1277,11 @@ namespace studio {
 		void RefreshPreview(State &state, engine::render::Renderer &renderer) {
 			if (state.ExportIntent.Current) return;
 			if (!state.PreviewDirty || (!state.LivePreview && !state.PreviewRequested)) return;
+			if (state.PxcxPreviewCacheInputRevision != state.EvaluationInputRevision) {
+				state.PreviewCache.Clear();
+				state.PxcxCompletedPreview.reset();
+				state.PxcxPreviewCacheInputRevision = state.EvaluationInputRevision;
+			}
 			ImageGraphPlayback previewPlayback = state.Playback;
 			const auto *composer = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer);
 			engine::imagegraph::EvaluationRequest observations;
@@ -1372,6 +1387,13 @@ namespace studio {
 				return;
 			}
 			const bool imageOutput = outputPort->Type == engine::imagegraph::ValueType::Image;
+			const PxcxPreviewIdentity completedPreview{
+				state.DocumentRevision,
+				state.EvaluationInputRevision,
+				*selectedOutput,
+				previewFrame,
+				detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
+			};
 			if (!imageOutput && !detail::ImageGraphValuePreviewSupported(outputPort->Type)) {
 				state.HaveScalarPreview = false;
 				state.HaveArrayPreview = false;
@@ -1395,6 +1417,7 @@ namespace studio {
 						detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
 					)) {
 					if (!UploadPreview(state, renderer, *cached)) return;
+					state.PxcxCompletedPreview = completedPreview;
 					state.LastDiagnostic = {};
 					return;
 				}
@@ -1517,7 +1540,7 @@ namespace studio {
 					return;
 				}
 				if (!UploadPreview(state, renderer, *image)) return;
-				(void)state.PreviewCache.Store(
+				const bool retainedPreview = state.PreviewCache.Store(
 					state.DocumentRevision,
 					outputIndex,
 					previewPlayback.CurrentTick,
@@ -1526,8 +1549,77 @@ namespace studio {
 					previewPlayback.NegativeFrame,
 					detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
 				);
+				if (retainedPreview)
+					state.PxcxCompletedPreview = completedPreview;
+				else
+					state.PxcxCompletedPreview.reset();
 				state.LastDiagnostic = {};
 			}
+		}
+
+		bool SavePxcx(State &state, bool withPreview) {
+			Diagnostic diagnostic;
+			if (!withPreview && state.PublishedPxcx.Archive.OriginalBytes.empty()) {
+				const bool saved = SavePxcxProjection(
+					std::filesystem::path(state.PxcxPath),
+					*state.ImportedPxcx,
+					state.Authored,
+					GetImageGraphFrame(state.Playback),
+					diagnostic
+				);
+				state.PxcxOpenError = saved ? std::string{} : diagnostic.Message;
+				return saved;
+			}
+			std::optional<PxcxPreviewIdentity> current;
+			const Image *pixels = nullptr;
+			if (withPreview) {
+				const auto selected = std::find_if(
+					state.Authored.Outputs.begin(), state.Authored.Outputs.end(), [&](const Output &output) {
+						return output.Id == state.SelectedOutput;
+					}
+				);
+				if (selected != state.Authored.Outputs.end()) {
+					current = PxcxPreviewIdentity{
+						state.DocumentRevision,
+						state.EvaluationInputRevision,
+						*selected,
+						GetImageGraphFrame(state.Playback),
+						detail::ImageGraphPlaybackObservation(state.Authored, state.Playback)
+					};
+					if (state.PxcxCompletedPreview == current && !state.PreviewDirty &&
+						state.LastDiagnostic.Code == Status::Ok) {
+						pixels = state.PreviewCache.Find(
+							state.DocumentRevision,
+							size_t(selected - state.Authored.Outputs.begin()),
+							current->Frame.Tick,
+							current->Frame.Subframe,
+							current->Frame.NegativeFrame,
+							current->PlaybackObservation
+						);
+					}
+				}
+				if (!pixels) {
+					state.PxcxOpenError = "Refresh the selected image preview before saving its thumbnail.";
+					return false;
+				}
+			}
+			std::optional<PxcxPreparedSavePreview> prepared;
+			if (pixels) prepared.emplace(*pixels, *state.PxcxCompletedPreview, *current);
+			if (!SavePxcxProjectionAndAdopt(
+					std::filesystem::path(state.PxcxPath),
+					*state.ImportedPxcx,
+					state.Authored,
+					GetImageGraphFrame(state.Playback),
+					state.PublishedPxcx,
+					prepared ? &*prepared : nullptr,
+					diagnostic
+				)) {
+				state.PxcxOpenError = diagnostic.Message;
+				return false;
+			}
+			state.PxcxReferenceThumbnail = {};
+			state.PxcxOpenError.clear();
+			return true;
 		}
 
 		void RunAnimationControls(State &state, engine::render::Renderer &renderer) {
@@ -5075,21 +5167,11 @@ namespace studio {
 			if (ImGui::Button("Open PXCX")) OpenPxcx(state);
 			if (state.ImportedPxcx) {
 				ImGui::SameLine();
-				if (ImGui::Button("Save PXCX")) {
-					Diagnostic diagnostic;
-					if (!SavePxcxProjection(
-							std::filesystem::path(state.PxcxPath),
-							*state.ImportedPxcx,
-							state.Authored,
-							GetImageGraphFrame(state.Playback),
-							diagnostic
-						))
-						state.PxcxOpenError = diagnostic.Message;
-					else {
-						state.PxcxOpenError.clear();
-						RunAuthoredExports(state, detail::ImageGraphExportEvent::Save);
-					}
-				}
+				if (ImGui::Button("Save PXCX") && SavePxcx(state, false))
+					RunAuthoredExports(state, detail::ImageGraphExportEvent::Save);
+				ImGui::SameLine();
+				if (ImGui::Button("Save PXCX with preview") && SavePxcx(state, true))
+					RunAuthoredExports(state, detail::ImageGraphExportEvent::Save);
 			}
 			if (!state.PxcxOpenError.empty()) ImGui::TextWrapped("PXCX: %s", state.PxcxOpenError.c_str());
 			if (state.ImportedPxcx.has_value()) {
@@ -5102,11 +5184,13 @@ namespace studio {
 					archive.Nodes.size(),
 					archive.Links.size()
 				);
-				if (state.PxcxReferenceThumbnail.Pixels.empty()) {
+				if ((state.PublishedPxcx.Archive.OriginalBytes.empty() ? state.PxcxReferenceThumbnail
+																	   : state.PublishedPxcx.ReferencePreview)
+						.Pixels.empty()) {
 					ImGui::TextDisabled("This archive has no decoded embedded thumbnail.");
 				} else {
 					ImGui::TextUnformatted(
-						"Embedded PXCX source thumbnail, reference only, not a graph render."
+						"Embedded PXCX thumbnail, reference only, not a live graph render."
 					);
 					if (UploadPxcxReferenceThumbnail(state, renderer)) {
 						void *handle = renderer.TextureHandle(state.CurrentPxcxThumbnailTexture);
