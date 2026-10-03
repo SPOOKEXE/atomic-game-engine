@@ -1,4 +1,5 @@
 #pragma once
+#include "SourceNineSlice.hpp"
 
 #include <engine/imagegraph/DataReplay.hpp>
 #include <engine/imagegraph/Document.hpp>
@@ -52,6 +53,7 @@ namespace engine::imagegraph {
 		std::vector<AuthoredValue> PcxObservations;
 		std::string ProjectName;
 		std::vector<std::string> SimulationCacheCaptures;
+		std::optional<SourceNineSliceRecipe> NineSlice;
 		bool operator==(const PixelBuilderData &other) const;
 	};
 }

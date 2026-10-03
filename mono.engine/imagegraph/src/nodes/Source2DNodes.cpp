@@ -6,6 +6,8 @@
 #include <cmath>
 
 namespace engine::imagegraph::detail {
+	bool SourcePadding(NodeContext &context);
+	bool SourceNineSlice(NodeContext &context);
 	bool PixelDrawSurface(NodeContext &context);
 	bool PixelBoxPolar(NodeContext &context);
 	bool PixelDrawShape(NodeContext &context);
@@ -331,6 +333,8 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.blend", SourceComposeBlend, true},
 			ExecutorEntry{"pc.gap_contract", SourceGapContract, true},
 			ExecutorEntry{"pc.align_content", SourceAlignContent, true},
+			ExecutorEntry{"pc.padding", SourcePadding, true},
+			ExecutorEntry{"pc.9_slice", SourceNineSlice, true},
 			ExecutorEntry{"pc.de_stray", DeStray, true},
 			ExecutorEntry{"pc.color_select", ColorSelect, true},
 			ExecutorEntry{"pc.corner", RoundCorner, true},

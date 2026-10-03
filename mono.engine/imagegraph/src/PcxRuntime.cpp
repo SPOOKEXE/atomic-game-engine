@@ -22,6 +22,7 @@ namespace engine::imagegraph {
 			std::unordered_map<std::string, Value> Variables;
 			uint64_t Work = 0, Bytes = 0;
 			SourceRandom Random;
+			PcxDrawBlend ActiveBlend = PcxDrawBlend::SourceNormal;
 			bool Fail(std::string text, Status status = Status::InvalidValue) {
 				if (Error.Code == Status::Ok) Error = {status, {}, "equation", std::move(text)};
 				return false;
@@ -518,23 +519,48 @@ namespace engine::imagegraph {
 					SurfaceValue rendered;
 					const auto *builder = std::get_if<DynamicSurfaceValue>(&v(0));
 					double scaleX = n(3, 1), scaleY = n(4, 1);
+					const bool nineSlice = builder && builder->Data && builder->Data->NineSlice;
+					if (nineSlice && Context.Request.RequireSourceGpuRasterCoverage) {
+						Error = {
+							Status::UnsupportedExecution,
+							builder->Data->OwnerNodeId,
+							"dyna_surf",
+							"Nine Slice exact GPU draw coverage requires a licensed renderer observation"
+						};
+						return false;
+					}
+					const auto color = Bits(n(6, 0xffffff));
+					const double alpha = std::clamp(n(7, 1), 0., 1.);
 					if (builder && builder->Data) {
 						const Vector2 requested{
 							builder->Data->BaseDimension.X * scaleX, builder->Data->BaseDimension.Y * scaleY
 						};
 						Diagnostic diagnostic;
-						const auto status = RasterizePixelBuilder(
-							*builder,
-							requested,
-							rendered.Data,
-							diagnostic,
-							Context.MaximumBytes,
-							Context.Request.RigidProvider
-						);
+						const auto status =
+							nineSlice ? RasterizeSourceNineSlice(
+											*builder,
+											requested,
+											{double(color & 255) / 255,
+											 double((color >> 8) & 255) / 255,
+											 double((color >> 16) & 255) / 255,
+											 alpha},
+											rendered.Data,
+											diagnostic,
+											Context.MaximumBytes - std::min(Bytes, Context.MaximumBytes)
+										)
+									  : RasterizePixelBuilder(
+											*builder,
+											requested,
+											rendered.Data,
+											diagnostic,
+											Context.MaximumBytes,
+											Context.Request.RigidProvider
+										);
 						if (status != Status::Ok) {
 							Error = std::move(diagnostic);
 							return false;
 						}
+						if (nineSlice) ActiveBlend = PcxDrawBlend::SourceNormal;
 						surface = &rendered;
 						scaleX = 1;
 						scaleY = 1;
@@ -548,9 +574,7 @@ namespace engine::imagegraph {
 					auto &target = *Context.Target;
 					const double sx = scaleX, sy = scaleY, angle = n(5) * std::numbers::pi / 180;
 					if (sx == 0 || sy == 0) return true;
-					const auto color = Bits(n(6, 0xffffff));
-					const double alpha = std::clamp(n(7, 1), 0., 1.), cosine = std::cos(angle),
-								 sine = std::sin(angle);
+					const double cosine = std::cos(angle), sine = std::sin(angle);
 					for (uint32_t y = 0; y < target.Height && Error.Code == Status::Ok; ++y)
 						for (uint32_t x = 0; x < target.Width; ++x) {
 							if (!Step()) break;
@@ -563,15 +587,17 @@ namespace engine::imagegraph {
 							if (DescribeSurfaceFormat(source.Format)->Channels == 1)
 								p = {p[0], p[0], p[0], 1};
 							LoadSurfacePixel(target, x, y, previous);
-							p[0] *= double(color & 255) / 255;
-							p[1] *= double((color >> 8) & 255) / 255;
-							p[2] *= double((color >> 16) & 255) / 255;
-							p[3] *= alpha;
+							if (!nineSlice) {
+								p[0] *= double(color & 255) / 255;
+								p[1] *= double((color >> 8) & 255) / 255;
+								p[2] *= double((color >> 16) & 255) / 255;
+								p[3] *= alpha;
+							}
 							const double sourceAlpha = p[3];
-							if (Context.DrawBlend == PcxDrawBlend::SourceNormal) {
+							if (ActiveBlend == PcxDrawBlend::SourceNormal) {
 								for (size_t c = 0; c < 4; ++c)
 									p[c] = p[c] * sourceAlpha + previous[c] * (1 - sourceAlpha);
-							} else if (Context.DrawBlend == PcxDrawBlend::SourceAlphaAdd) {
+							} else if (ActiveBlend == PcxDrawBlend::SourceAlphaAdd) {
 								for (size_t c = 0; c < 3; ++c)
 									p[c] = p[c] + previous[c] * (1 - sourceAlpha);
 								p[3] += previous[3];
@@ -915,7 +941,9 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 		}
-		Runtime runtime{context, {}, {}, {}, 0, 0, SourceRandom(uint32_t(context.Request.Seed))};
+		Runtime runtime{
+			context, {}, {}, {}, 0, 0, SourceRandom(uint32_t(context.Request.Seed)), context.DrawBlend
+		};
 		for (const auto &[key, value] : expression.Data->Bindings) {
 			if (!runtime.Admit(value)) break;
 			runtime.Variables.insert_or_assign(key, value);

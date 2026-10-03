@@ -33,6 +33,8 @@ namespace engine::imagegraph::detail {
 			return diagnostic.Code;
 		}
 		const auto &data = *value.Data;
+		if (data.NineSlice)
+			return RasterizeSourceNineSlice(value, dimension, {1, 1, 1, 1}, image, diagnostic, maximumBytes);
 		const uint64_t retained = PixelBuilderStorageBytes(value, true);
 		if (retained > maximumBytes / 2) {
 			diagnostic = {

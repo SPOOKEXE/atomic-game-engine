@@ -174,6 +174,12 @@ namespace engine::imagegraph::detail {
 				dynamic = std::get_if<DynamicSurfaceValue>(value);
 		if (!surface && (!dynamic || !dynamic->Data))
 			return context.Fail(Status::InvalidValue, "PB Draw Surface requires an owned surface", "surface");
+		if (dynamic && dynamic->Data->NineSlice && context.Request.RequireSourceGpuRasterCoverage)
+			return context.Fail(
+				Status::UnsupportedExecution,
+				"Nine Slice exact GPU draw coverage requires a licensed renderer observation",
+				"surface"
+			);
 		const Vector2 sourceDimension =
 			surface ? Vector2{double(surface->Width), double(surface->Height)} : dynamic->Data->BaseDimension;
 		auto box = ReadBox(context, "pbbox");
@@ -243,9 +249,13 @@ namespace engine::imagegraph::detail {
 				const double sourceX = x - bounds[0], sourceY = y - bounds[1];
 				if (sourceX < 0 || sourceY < 0 || sourceX >= surface->Width || sourceY >= surface->Height)
 					continue;
-				if (!WritePixel(
-						*output, x, y, SourceSafeDrawPixel(*surface, uint32_t(sourceX), uint32_t(sourceY))
-					))
+				auto pixel = SourceSafeDrawPixel(*surface, uint32_t(sourceX), uint32_t(sourceY));
+				if (dynamic && dynamic->Data->NineSlice) {
+					const double alpha = pixel[3];
+					for (double &channel : pixel)
+						channel *= alpha;
+				}
+				if (!WritePixel(*output, x, y, pixel))
 					return context.Fail(Status::InvalidValue, "PB surface sample is nonfinite", "surface");
 			}
 		return context.FailureCode == Status::Ok;

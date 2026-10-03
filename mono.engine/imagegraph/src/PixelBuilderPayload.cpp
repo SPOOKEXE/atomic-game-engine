@@ -59,10 +59,10 @@ namespace engine::imagegraph {
 		}
 	}
 	bool PixelBuilderData::operator==(const PixelBuilderData &other) const {
-		return Authored == other.Authored && OwnerNodeId == other.OwnerNodeId &&
-			   BaseDimension == other.BaseDimension && Tick == other.Tick && Seed == other.Seed &&
-			   Subframe == other.Subframe && NegativeFrame == other.NegativeFrame &&
-			   ResetSurfaceReplay == other.ResetSurfaceReplay &&
+		return NineSlice == other.NineSlice && Authored == other.Authored &&
+			   OwnerNodeId == other.OwnerNodeId && BaseDimension == other.BaseDimension &&
+			   Tick == other.Tick && Seed == other.Seed && Subframe == other.Subframe &&
+			   NegativeFrame == other.NegativeFrame && ResetSurfaceReplay == other.ResetSurfaceReplay &&
 			   BuiltinRandomCaptures == other.BuiltinRandomCaptures &&
 			   RequireSourceGpuRasterCoverage == other.RequireSourceGpuRasterCoverage &&
 			   MaximumImageDimension == other.MaximumImageDimension &&
@@ -262,6 +262,7 @@ namespace engine::imagegraph::detail {
 					bytes = Add(bytes, input.Port.capacity() + RetainedPayloadBytes(input.Data));
 			}
 		}
+		if (data.NineSlice) bytes = Add(bytes, ImageBytes(data.NineSlice->Source, retained));
 		bytes = Add(bytes, Text(data.OwnerNodeId, retained));
 		if (data.Groups) bytes = Add(bytes, data.Groups->Replay.RetainedBytes());
 		if (data.DataHistory) bytes = Add(bytes, RetainedDataReplayBytes(*data.DataHistory));
@@ -358,6 +359,29 @@ namespace engine::imagegraph::detail {
 			data.HostCaptures.size() > Limits::MaximumNodes ||
 			data.Entropy.size() > Limits::MaximumArrayElements)
 			return false;
+		if (data.NineSlice) {
+			const auto &recipe = *data.NineSlice;
+			if (data.Authored != Document{} || !data.AudioFrames.empty() || !data.AudioClips.empty() ||
+				!data.ImageSources.empty() || !data.HostCaptures.empty() ||
+				!data.BuiltinRandomCaptures.empty() || data.Simulation || data.Surfaces || data.Random ||
+				data.DataHistory || data.RigidHistory || data.SliceStack || data.Groups ||
+				!data.Entropy.empty() || !data.PcxObservations.empty() ||
+				!data.SimulationCacheCaptures.empty() || !data.ProjectName.empty() ||
+				!ValidSurfaceLayout(recipe.Source, data.MaximumImageDimension, Limits::MaximumArrayBytes) ||
+				!FiniteSurfaceSamples(recipe.Source) || recipe.Source.Width == 0 ||
+				recipe.Source.Height == 0 ||
+				data.BaseDimension != Vector2{double(recipe.Source.Width), double(recipe.Source.Height)} ||
+				recipe.FillingMode < 0 || recipe.FillingMode > 1 || recipe.Interpolation < 1 ||
+				recipe.Interpolation > 4 ||
+				!(recipe.Oversample >= 1 && recipe.Oversample <= 12 && recipe.Oversample != 5 &&
+				  recipe.Oversample != 9))
+				return false;
+			for (double component : {recipe.Splice.X, recipe.Splice.Y, recipe.Splice.Z, recipe.Splice.W})
+				if (!std::isfinite(component) || std::abs(component) > Limits::MaximumDimension * 4 ||
+					std::floor(component) != component)
+					return false;
+			return PixelBuilderStorageBytes(value, true) <= Limits::MaximumEvaluationBytes;
+		}
 		const auto owner =
 			std::find_if(data.Authored.Nodes.begin(), data.Authored.Nodes.end(), [&](const Node &node) {
 				return node.Id == data.OwnerNodeId && node.Type == "pc.pixel_builder";

@@ -68,10 +68,13 @@ namespace engine::imagegraph::detail {
 	}
 
 	// texture2Dintp. The bicubic and Lanczos3 branches reuse filtered reads exactly as the shader does.
-	inline Rgba TextureInterpolated(const Image &image, double u, double v, const SamplerSettings &settings) {
+	inline Rgba TextureInterpolated(
+		const Image &image, double u, double v, const SamplerSettings &settings, Vector2 dimension = {}
+	) {
 		const bool filtered = Filtered(settings);
 		if (settings.Interpolation == 3) {
-			const double width = image.Width, height = image.Height;
+			const double width = dimension.X > 0 ? dimension.X : image.Width,
+						 height = dimension.Y > 0 ? dimension.Y : image.Height;
 			double x = u * width + 0.5, y = v * height + 0.5;
 			const double ix = std::floor(x), iy = std::floor(y);
 			const double fx = x - ix, fy = y - iy;
@@ -80,7 +83,8 @@ namespace engine::imagegraph::detail {
 			return Texture(image, (x - 0.5) / width, (y - 0.5) / height, filtered);
 		}
 		if (settings.Interpolation == 4) {
-			const double width = image.Width, height = image.Height;
+			const double width = dimension.X > 0 ? dimension.X : image.Width,
+						 height = dimension.Y > 0 ? dimension.Y : image.Height;
 			const double centerU = u - (Fract(u * width) - 0.5) / width;
 			const double centerV = v - (Fract(v * height) - 0.5) / height;
 			const double offsetX = (u - centerU) * width, offsetY = (v - centerV) * height;

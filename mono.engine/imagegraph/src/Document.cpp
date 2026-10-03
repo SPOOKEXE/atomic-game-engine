@@ -9837,18 +9837,22 @@ namespace engine::imagegraph {
 									  [&](const AuthoredValue &entry) { return entry.Port == link->FromPort; }
 								  )
 								: ValueOutputs::const_iterator{};
-						// __NodeValue_Dimension reads a linked surface as its pixel size.
+						// Dimension and Padding Vec2 getters return linked surface pixel dimensions.
 						const Image *surface = produced[sourceIndex]
 												   ? FindImageOutput(results[sourceIndex], link->FromPort)
 												   : nullptr;
+						const bool paddingSurfaceDimension = node.Type == "pc.padding" &&
+															 input.Id == "dimension" &&
+															 input.SourceKind == "Vec2";
 						if ((!source || found == source->end()) && surface &&
-							input.SourceKind == "Dimension") {
+							(input.SourceKind == "Dimension" || paddingSurfaceDimension)) {
 							context.Values.emplace_back(
 								input.Id,
 								Vector2{
 									static_cast<double>(surface->Width), static_cast<double>(surface->Height)
 								}
 							);
+							if (paddingSurfaceDimension) context.Images.emplace_back(input.Id, surface);
 							continue;
 						}
 						if (!source || found == source->end()) {
