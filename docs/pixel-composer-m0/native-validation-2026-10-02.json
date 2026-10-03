@@ -6127,6 +6127,15 @@
       "scope_note": "Native release73 Gradient Cube and WAV inspector integration; retained earlier failures repaired. CPU scope only; no live Studio, licensed-reference parity or full M0-M7 acceptance.",
       "assertions_passed": 362,
       "test_cases_passed": 42
+    },
+    {
+      "name": "build-release-74-surface-before-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-74-surface-before-repair.log",
+      "log_sha256": "02fd6dc90637b61080a7fb990048fab48f57be9a1ff7edeed07e9425311c7daa",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed build only",
+      "scope_note": "Coherent 44-step release-tests build with Surface Project draft. Build success only; runtime acceptance not established."
     }
   ],
   "excluded_or_failed_runs": [
@@ -7685,6 +7694,15 @@
       "exit_code": 42,
       "result": "failed; retained before native acceptance",
       "scope_note": "Release72 GUI SDF and Gradient Cube integration. GUI bitmap conversion repaired with tracked FT_GlyphSlot_Own_Bitmap after debugger observed FT_Render_Glyph return6. Full331-case GUI passes. Gradient Cube has two unresolved focused failures; no Cube acceptance, upper font product completion, GPU or licensed parity claimed."
+    },
+    {
+      "name": "surface-project-release-74-before-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/surface-project-release-74-before-repair.log",
+      "log_sha256": "7371bfff39a4b1fe7624317274a1e171cd087cf50271b0e4d784fb1162fc7c6f",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "22 cases:19 passed,3 failed;1114 assertions:1109 passed,5 failed. Numeric dimension fixtures used image-only value.array; linked array dimension_unit is scalar-control refusal; private admission fixture omitted selected white Colour palette. This run does not establish an allocation defect or Surface Project acceptance."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -8806,6 +8824,23 @@
       "removed_binary_bytes": 110958468874,
       "removed_stale_alias_count": 1099,
       "scope_note": "User-requested cleanup of obsolete ELF/ar binaries modified before 2026-10-03 under dev/evidence, excluding both root Pixel Composer evidence directories. All configured builds, source snapshots, logs, JSON, manifests and vendor caches were preserved. No candidate was open or mapped by a process. All 12 accepted build59 log/inventory hashes were checked again after deletion. Prior storage entries are historical records."
+    },
+    "unused_preset_cleanup74": {
+      "executed_date": "2026-10-04",
+      "removed_directories": [
+        {
+          "path": ".cache/build/ci",
+          "reclaimed_allocated_bytes": 23708659712,
+          "reason": "Unused rebuildable preset; CMake source verified, no process cwd/executable/open-file references and no evidence directories."
+        },
+        {
+          "path": ".cache/build/cdn",
+          "reclaimed_allocated_bytes": 15105105920,
+          "reason": "Unused rebuildable preset; CMake source verified, no process cwd/executable/open-file references and no evidence directories."
+        }
+      ],
+      "reclaimed_allocated_bytes": 38813765632,
+      "scope_note": "Only unused ci and cdn rebuildable preset trees removed after source-root, process-reference and evidence-directory checks. dev, release, release-tests, bench, server, vendor caches and retained validation evidence preserved."
     }
   },
   "acceptance_status": {
