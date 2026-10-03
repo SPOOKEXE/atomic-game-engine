@@ -56,7 +56,7 @@ Milestone labels describe development scope, not release versions.
   3. Animation and audio: finish audio workflows and feedback; verify seek/reset and fractional-key semantics.
   4. 3D and outputs: finish live Transform Image 3D, mesh consumers, remaining 3D nodes, material/shader/skybox bindings and large-sequence playback.
   5. PXC and exports: finish node, link and dynamic-input edits and remaining formats; validate modified PXC compatibility.
-  6. Acceptance: run C++ and GPU tests, live Studio workflows and release profiling. Exact executable parity requires a licensed reference build and matched captures.
+  6. Acceptance: keep joined CPU evidence current; finish GPU tests, live Studio workflows and release profiling. Exact parity requires a licensed reference build and matched captures.
 
   Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
