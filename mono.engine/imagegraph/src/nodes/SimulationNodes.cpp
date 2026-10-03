@@ -1,5 +1,6 @@
 #include "Families.hpp"
 #include "FlipNodes.hpp"
+#include "SourceStrandNodes.hpp"
 #include "VerletNodes.hpp"
 #include "VfxNodes.hpp"
 
@@ -319,6 +320,10 @@ namespace engine::imagegraph::detail {
 	}
 	std::span<const ExecutorEntry> SimulationExecutors() {
 		static constexpr std::array entries{
+			ExecutorEntry{"pc.strand_create", StrandCreate},
+			ExecutorEntry{"pc.strand_gravity", StrandGravity},
+			ExecutorEntry{"pc.strand_update", StrandUpdate},
+			ExecutorEntry{"pc.strand_group_inline", Inline},
 			ExecutorEntry{"pc.vfx_group_inline", VfxInlineScope},
 			ExecutorEntry{"pc.vfx_renderer", VfxRenderer},
 			ExecutorEntry{"pc.flip_group_inline", Inline},

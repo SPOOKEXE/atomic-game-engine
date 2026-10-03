@@ -7,7 +7,8 @@
 namespace engine::imagegraphio::detail {
 	namespace {
 		bool SupportedInlineCollection(std::string_view type) {
-			return type == "pc.verlet_sim_inline" || type == "pc.flip_group_inline";
+			return type == "pc.verlet_sim_inline" || type == "pc.flip_group_inline" ||
+				   type == "pc.strand_group_inline";
 		}
 	}
 	bool ProjectInlineCollections(
@@ -58,7 +59,8 @@ namespace engine::imagegraphio::detail {
 		try {
 			for (const auto &source : sources) {
 				if (source.at("type") != "Node_VerletSim_Inline" &&
-					source.at("type") != "Node_FLIP_Group_Inline")
+					source.at("type") != "Node_FLIP_Group_Inline" &&
+					source.at("type") != "Node_Strand_Group_Inline")
 					continue;
 				const auto &id = source.at("id").get_ref<const std::string &>();
 				const auto *node = nativeNode(id);
@@ -154,8 +156,9 @@ namespace engine::imagegraphio::detail {
 					return fail("inline collection name is not bounded text");
 				const std::string_view title =
 					name == source.end()
-						? (ownerNode.Type == "pc.flip_group_inline" ? std::string_view("FLIP Fluid")
-																	: std::string_view("VerletSim"))
+						? (ownerNode.Type == "pc.flip_group_inline"		? std::string_view("FLIP Fluid")
+						   : ownerNode.Type == "pc.strand_group_inline" ? std::string_view("StrandSim")
+																		: std::string_view("VerletSim"))
 						: std::string_view(name->get_ref<const std::string &>());
 				if (!budget.Hold(title.size() + 16))
 					return fail("inline collection name exceeds import budget");

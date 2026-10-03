@@ -2741,3 +2741,142 @@ TEST_CASE(
 	REQUIRE(route != plan.InlineOwnerDependencies.end());
 	CHECK(route->Owner == 2);
 }
+
+TEST_CASE(
+	"Inline Strand collection retains source membership and nested group "
+	"topology",
+	"[imagegraphio][groups][inline]"
+) {
+	auto graph = Graph();
+	auto owner = Node("simulation", "Node_Strand_Group_Inline");
+	owner["attri"] = {{"members", Json::array({"group"})}, {"shape", 1}};
+	graph["nodes"].push_back(owner);
+	for (auto &node : graph["nodes"])
+		if (node["id"] == "root") node["ictx"] = "simulation";
+	const auto archive = Archive(graph);
+	PxcxImport imported;
+	std::string failure;
+	const bool accepted = ImportPxcxImageGraph(archive, imported, failure);
+	INFO(failure);
+	REQUIRE(accepted);
+	CHECK(imported.Source.OriginalBytes == archive.OriginalBytes);
+	const auto wrapper =
+		std::find_if(imported.Graph.Nodes.begin(), imported.Graph.Nodes.end(), [](const auto &node) {
+			return node.Id == "simulation";
+		});
+	REQUIRE(wrapper != imported.Graph.Nodes.end());
+	CHECK(wrapper->Type == "pc.strand_group_inline");
+	CHECK(wrapper->GroupId.empty());
+	REQUIRE(wrapper->Values.size() == 2);
+	const auto members = std::find_if(wrapper->Values.begin(), wrapper->Values.end(), [](const auto &value) {
+		return value.Port == "attribute_members";
+	});
+	const auto shape = std::find_if(wrapper->Values.begin(), wrapper->Values.end(), [](const auto &value) {
+		return value.Port == "attribute_shape";
+	});
+	REQUIRE(members != wrapper->Values.end());
+	REQUIRE(shape != wrapper->Values.end());
+	CHECK(shape->Data == engine::imagegraph::Value{1.});
+	const auto &memberArray = std::get<engine::imagegraph::ArrayValue>(members->Data);
+	CHECK(memberArray.ElementType == engine::imagegraph::ValueType::Text);
+	REQUIRE(memberArray.Elements.size() == 1);
+	CHECK(std::get<std::string>(memberArray.Elements.front()) == "group");
+
+	const auto collection =
+		std::find_if(imported.Graph.Groups.begin(), imported.Graph.Groups.end(), [](const auto &group) {
+			return group.OwnerNodeId == "simulation";
+		});
+	REQUIRE(collection != imported.Graph.Groups.end());
+	CHECK(collection->Id == "simulation/inline");
+	CHECK(collection->Name == "StrandSim");
+	CHECK(collection->Ports.empty());
+	const auto nested =
+		std::find_if(imported.Graph.Groups.begin(), imported.Graph.Groups.end(), [](const auto &group) {
+			return group.Id == "group";
+		});
+	REQUIRE(nested != imported.Graph.Groups.end());
+	CHECK(nested->ParentId == collection->Id);
+	CHECK(nested->Ports.size() == 2);
+	const auto root =
+		std::find_if(imported.Graph.Nodes.begin(), imported.Graph.Nodes.end(), [](const auto &node) {
+			return node.Id == "root";
+		});
+	REQUIRE(root != imported.Graph.Nodes.end());
+	CHECK(root->GroupId == collection->Id);
+	engine::imagegraph::Document restored;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(
+		engine::imagegraph::Read(engine::imagegraph::Write(imported.Graph), restored, diagnostic) ==
+		engine::imagegraph::Status::Ok
+	);
+	CHECK(restored.Groups == imported.Graph.Groups);
+	CHECK(restored.Links == imported.Graph.Links);
+	PxcxImportOptions bounded;
+	bounded.MaximumOperationBytes = 1;
+	const auto priorNodes = imported.Graph.Nodes;
+	const auto priorGroups = imported.Graph.Groups;
+	const auto priorSource = imported.Source.OriginalBytes;
+	CHECK_FALSE(ImportPxcxImageGraph(archive, imported, failure, bounded));
+	CHECK(imported.Graph.Nodes == priorNodes);
+	CHECK(imported.Graph.Groups == priorGroups);
+	CHECK(imported.Source.OriginalBytes == priorSource);
+	engine::imagegraph::Plan plan;
+	REQUIRE(engine::imagegraph::Compile(restored, plan, diagnostic) == engine::imagegraph::Status::Ok);
+}
+
+TEST_CASE("Conflicting Strand and Verlet inline owners fail atomically", "[imagegraphio][groups][inline]") {
+	auto graph = Graph();
+	for (const std::string ownerId : {"a", "b"}) {
+		auto owner = Node(ownerId, ownerId == "a" ? "Node_Strand_Group_Inline" : "Node_VerletSim_Inline");
+		owner["attri"] = {{"members", Json::array({"root"})}};
+		graph["nodes"].push_back(owner);
+	}
+	PxcxImport sentinel;
+	sentinel.Graph.Nodes.push_back({"sentinel", "image.solid", "", {}, {}});
+	std::string failure;
+	CHECK_FALSE(ImportPxcxImageGraph(Archive(graph), sentinel, failure));
+	CHECK(failure.find("conflicting") != std::string::npos);
+	REQUIRE(sentinel.Graph.Nodes.size() == 1);
+	CHECK(sentinel.Graph.Nodes.front().Id == "sentinel");
+}
+
+TEST_CASE(
+	"Strand Inline owner relation follows renamed group instance children", "[imagegraphio][groups][inline]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 9;
+	document.Groups = {{"base", "base"}, {"copy", "copy"}};
+	document.Nodes = {
+		{"owner", "pc.strand_group_inline", "base", {}, {}},
+		{"member", "pc.vector2", "base", {}, {}},
+		{"copy-owner", "pc.strand_group_inline", "copy", {}, {}},
+		{"copy-member", "pc.vector2", "copy", {}, {}}
+	};
+	document.Nodes[2].InstanceBase = "owner";
+	document.Nodes[3].InstanceBase = "member";
+	document.Outputs = {{"vector", "copy-member", "vector"}};
+	auto owner = ::Node("owner", "Node_Strand_Group_Inline");
+	owner["attri"] = {{"members", Json::array({"member"})}};
+	Json root = {{"nodes", Json::array({owner, ::Node("member", "Node_Vector2")})}};
+	engine::imagegraphio::detail::ImportBudget budget(Limits::MaximumEvaluationBytes);
+	std::string failure;
+	REQUIRE(engine::imagegraphio::detail::ProjectInlineCollections(root, document, budget, failure));
+	CHECK(document.Nodes[1].GroupId == "owner/inline");
+	CHECK(document.Nodes[3].GroupId == "copy-owner/inline");
+	const auto copy = std::find_if(document.Groups.begin(), document.Groups.end(), [](const Group &group) {
+		return group.OwnerNodeId == "copy-owner";
+	});
+	REQUIRE(copy != document.Groups.end());
+	CHECK(copy->ParentId == "copy");
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	const auto route = std::find_if(
+		plan.InlineOwnerDependencies.begin(), plan.InlineOwnerDependencies.end(), [](const auto &dependency) {
+			return dependency.Consumer == 3;
+		}
+	);
+	REQUIRE(route != plan.InlineOwnerDependencies.end());
+	CHECK(route->Owner == 2);
+}

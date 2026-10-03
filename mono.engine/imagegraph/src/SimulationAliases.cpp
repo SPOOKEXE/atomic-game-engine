@@ -3,6 +3,7 @@
 #include "FluidPayload.hpp"
 #include "Mesh2DPayload.hpp"
 #include "SourceFlipObstacle.hpp"
+#include "StrandReplayInternal.hpp"
 
 namespace engine::imagegraph::detail {
 	const SimulationReplayEntry *
@@ -46,7 +47,11 @@ namespace engine::imagegraph::detail {
 				context.Fail(Status::LimitExceeded, "simulation alias nesting exceeds budget");
 				return std::numeric_limits<uint64_t>::max();
 			}
-			if constexpr (std::is_same_v<T, FluidDomainValue>) {
+			if constexpr (std::is_same_v<T, StrandValue>) {
+				if (const auto *current = FindStrandReplayValue(context, item))
+					return StrandStorageBytes<true>(*current);
+				return 0;
+			} else if constexpr (std::is_same_v<T, FluidDomainValue>) {
 				if (item.Data)
 					if (const auto *entry = FindFluidSimulationOrigin(
 							context, item.Data->OriginNodeId, item.Data->OriginProcessorRow
@@ -149,7 +154,9 @@ namespace engine::imagegraph::detail {
 				return 0;
 		}
 		template <class T> void ReplaceAliases(T &item, NodeContext &context) {
-			if constexpr (std::is_same_v<T, FluidDomainValue>) {
+			if constexpr (std::is_same_v<T, StrandValue>) {
+				if (const auto *current = FindStrandReplayValue(context, item)) item = *current;
+			} else if constexpr (std::is_same_v<T, FluidDomainValue>) {
 				if (item.Data)
 					if (const auto *entry = FindFluidSimulationOrigin(
 							context, item.Data->OriginNodeId, item.Data->OriginProcessorRow
@@ -231,7 +238,8 @@ namespace engine::imagegraph::detail {
 	}
 	bool ResolveSimulationInputAliases(NodeContext &context) {
 		if (context.PendingSimulationRows.empty() &&
-			(!context.CurrentSimulation || context.CurrentSimulation->Entries.empty()))
+			(!context.CurrentSimulation || context.CurrentSimulation->Entries.empty()) &&
+			(!context.CurrentData || context.CurrentData->Entries.empty()))
 			return true;
 		const uint64_t slots = context.Values.size() + context.ValueViews.size();
 		uint64_t bytes =
@@ -286,15 +294,17 @@ namespace engine::imagegraph::detail {
 		const SimulationReplayState &replay,
 		EvaluationBudget &budget,
 		AllocationReservation &outputCharge,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		const DataReplayState *data
 	) {
-		if (replay.Entries.empty()) return Status::Ok;
+		if (replay.Entries.empty() && (!data || data->Entries.empty())) return Status::Ok;
 		const Node owner;
 		const CatalogueEntry entry;
 		const EvaluationRequest request;
 		NodeContext context(owner, entry, request, budget);
 		context.ByteBudget = budget.Available();
 		context.CurrentSimulation = &replay;
+		context.CurrentData = data;
 		const auto refuse = [&](Status status, std::string message) {
 			diagnostic = {status, {}, {}, std::move(message)};
 			return status;

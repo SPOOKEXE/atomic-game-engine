@@ -1,4 +1,5 @@
 #pragma once
+#include "AtlasPayload.hpp"
 #include "AudioPayload.hpp"
 #include "FluidPayload.hpp"
 #include "Mesh2DPayload.hpp"
@@ -9,9 +10,9 @@
 #include "SdfPayload.hpp"
 #include "SourcePathPayload.hpp"
 #include "SourcePathPayload3D.hpp"
-#include "SourceTilesetPayload.hpp"
 #include "SourceRigidPayload.hpp"
-#include "AtlasPayload.hpp"
+#include "SourceTilesetPayload.hpp"
+#include "StrandPayload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -31,10 +32,10 @@ namespace engine::imagegraph::detail {
 		ValueType::Image,	ValueType::Buffer,		ValueType::NodeRef,		   ValueType::Path3D,
 		ValueType::PcxNode, ValueType::PixelBox,	ValueType::DynamicSurface, ValueType::Array,
 		ValueType::Sdf,		ValueType::FluidDomain, ValueType::Particle,	   ValueType::Tileset,
-		ValueType::Rigid, ValueType::Atlas
+		ValueType::Rigid,	ValueType::Atlas,		ValueType::Strand
 	};
 	static_assert(std::size(VALUE_PAYLOAD_TYPES) == std::variant_size_v<Value>);
-	static_assert(std::variant_size_v<Value> == 38 && std::variant_size_v<ElementValue> == 37);
+	static_assert(std::variant_size_v<Value> == 39 && std::variant_size_v<ElementValue> == 38);
 	static_assert(std::is_same_v<std::variant_alternative_t<34, Value>, ParticleValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<33, ElementValue>, ParticleValue>);
 	static_assert(sizeof(ParticleValue) == 8 && sizeof(TilesetValue) == 8 && sizeof(Value) == 88);
@@ -45,6 +46,9 @@ namespace engine::imagegraph::detail {
 	static_assert(std::is_same_v<std::variant_alternative_t<37, Value>, AtlasValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<35, ElementValue>, RigidValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<36, ElementValue>, AtlasValue>);
+	static_assert(sizeof(StrandValue) == 8 && sizeof(Value) == 88);
+	static_assert(std::is_same_v<std::variant_alternative_t<38, Value>, StrandValue>);
+	static_assert(std::is_same_v<std::variant_alternative_t<37, ElementValue>, StrandValue>);
 	inline ValueType PayloadType(const Value &value) {
 		return VALUE_PAYLOAD_TYPES[value.index()];
 	}
@@ -147,6 +151,8 @@ namespace engine::imagegraph::detail {
 			return ValueType::FluidDomain;
 		else if constexpr (std::is_same_v<T, ParticleValue>)
 			return ValueType::Particle;
+		else if constexpr (std::is_same_v<T, StrandValue>)
+			return ValueType::Strand;
 		else if constexpr (std::is_same_v<T, TilesetValue>)
 			return ValueType::Tileset;
 		else if constexpr (std::is_same_v<T, RigidValue>)
@@ -232,6 +238,8 @@ namespace engine::imagegraph::detail {
 			return FluidStorageBytes<false>(item);
 		else if constexpr (std::is_same_v<T, ParticleValue>)
 			return ParticleStorageBytes<false>(item);
+		else if constexpr (std::is_same_v<T, StrandValue>)
+			return StrandStorageBytes<false>(item);
 		else if constexpr (std::is_same_v<T, TilesetValue>)
 			return TilesetStorageBytes<false>(item);
 		else if constexpr (std::is_same_v<T, RigidValue>)
@@ -347,6 +355,8 @@ namespace engine::imagegraph::detail {
 			return FluidStorageBytes<true>(item);
 		else if constexpr (std::is_same_v<T, ParticleValue>)
 			return ParticleStorageBytes<true>(item);
+		else if constexpr (std::is_same_v<T, StrandValue>)
+			return StrandStorageBytes<true>(item);
 		else if constexpr (std::is_same_v<T, TilesetValue>)
 			return TilesetStorageBytes<true>(item);
 		else if constexpr (std::is_same_v<T, RigidValue>)
@@ -456,6 +466,8 @@ namespace engine::imagegraph::detail {
 			return runtime && ValidFluidPayload(item);
 		else if constexpr (std::is_same_v<T, ParticleValue>)
 			return ValidParticlePayload(item);
+		else if constexpr (std::is_same_v<T, StrandValue>)
+			return ValidStrandPayload(item);
 		else if constexpr (std::is_same_v<T, TilesetValue>)
 			return ValidTilesetPayload(item);
 		else if constexpr (std::is_same_v<T, RigidValue>)

@@ -7,6 +7,7 @@
 
 #include <engine/imagegraph/FluidDomain.hpp>
 #include <engine/imagegraph/Particle.hpp>
+#include <engine/imagegraph/Strand.hpp>
 #include <engine/imagegraph/Surface.hpp>
 
 #include <array>
@@ -478,6 +479,10 @@ namespace engine::imagegraph {
 		OwnedPayload3D<MeshData2D> Data;
 		bool operator==(const MeshValue2D &) const = default;
 	};
+	struct StrandValue {
+		OwnedPayload3D<StrandData2D> Data;
+		bool operator==(const StrandValue &) const = default;
+	};
 	struct ParticleValue {
 		OwnedPayload3D<ParticleData2D> Data;
 		bool operator==(const ParticleValue &) const = default;
@@ -723,7 +728,8 @@ namespace engine::imagegraph {
 		ParticleValue,
 		TilesetValue,
 		RigidValue,
-		AtlasValue>;
+		AtlasValue,
+		StrandValue>;
 
 	// Source arrays may mix leaves, nested arrays and owned surfaces. No pointer survives evaluation.
 	struct SourceArrayItem {
@@ -790,7 +796,8 @@ namespace engine::imagegraph {
 		ParticleValue,
 		TilesetValue,
 		RigidValue,
-		AtlasValue>;
+		AtlasValue,
+		StrandValue>;
 
 	// Fields retain owned runtime values; nesting never creates shared mutable references.
 	struct StructData {

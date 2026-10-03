@@ -29,16 +29,17 @@
 #include "PixelOpsWarp.hpp"
 #include "ProcessorBatch.hpp"
 #include "PuppetControl.hpp"
+#include "RigidSchedule.hpp"
 #include "SimulationAliases.hpp"
 #include "SnapshotAudioMoves.hpp"
+#include "SourceAtlasCodec.hpp"
 #include "SourceGetterProjection.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourcePathShapeCodec.hpp"
-#include "SourceTilesetCodec.hpp"
 #include "SourceRigidCodec.hpp"
-#include "SourceAtlasCodec.hpp"
-#include "RigidSchedule.hpp"
+#include "SourceTilesetCodec.hpp"
 #include "SourceVerletPathCodec.hpp"
+#include "StrandCodec.hpp"
 #include "Timeline.hpp"
 #include "TimelineDrivers.hpp"
 #include "TimelineOverrides.hpp"
@@ -881,7 +882,9 @@ namespace engine::imagegraph {
 				return array->ElementType != ValueType::Image && array->ElementType != ValueType::Array &&
 					   (array->ElementType < ValueType::Gradient ||
 						(array->ElementType == ValueType::Particle ||
-						 array->ElementType == ValueType::Tileset || array->ElementType == ValueType::Rigid || array->ElementType == ValueType::Atlas)) &&
+						 array->ElementType == ValueType::Strand ||
+						 array->ElementType == ValueType::Tileset || array->ElementType == ValueType::Rigid ||
+						 array->ElementType == ValueType::Atlas)) &&
 					   detail::ValidPayload(*array, true);
 			return detail::ValidValuePayload(value, false);
 		}
@@ -1053,7 +1056,9 @@ namespace engine::imagegraph {
 		}
 
 		bool WithinArrayBudget(const ArrayValue &array) {
-			if (array.ElementType == ValueType::Particle || array.ElementType == ValueType::Tileset || array.ElementType == ValueType::Rigid || array.ElementType == ValueType::Atlas)
+			if (array.ElementType == ValueType::Particle || array.ElementType == ValueType::Tileset ||
+				array.ElementType == ValueType::Rigid || array.ElementType == ValueType::Atlas ||
+				array.ElementType == ValueType::Strand)
 				return detail::ValidPayload(array, true);
 			if (!array.Nested.empty()) {
 				if (array.Nested.size() > Limits::MaximumArrayElements) return false;
@@ -1099,14 +1104,16 @@ namespace engine::imagegraph {
 				return array.ElementType != ValueType::Image && array.ElementType != ValueType::Array &&
 					   (array.ElementType < ValueType::Gradient ||
 						(array.ElementType == ValueType::Particle ||
-						 array.ElementType == ValueType::Tileset || array.ElementType == ValueType::Rigid || array.ElementType == ValueType::Atlas)) &&
+						 array.ElementType == ValueType::Tileset || array.ElementType == ValueType::Rigid ||
+						 array.ElementType == ValueType::Atlas || array.ElementType == ValueType::Strand)) &&
 					   detail::ValidPayload(array, true);
 			if (array.ElementType == ValueType::Any || !array.Items.empty())
 				return detail::ValidPayload(array, false);
 			if (!array.Nested.empty() || !WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
 				array.ElementType == ValueType::Array ||
 				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Particle &&
-				 array.ElementType != ValueType::Tileset && array.ElementType != ValueType::Rigid && array.ElementType != ValueType::Atlas) ||
+				 array.ElementType != ValueType::Tileset && array.ElementType != ValueType::Rigid &&
+				 array.ElementType != ValueType::Atlas && array.ElementType != ValueType::Strand) ||
 				TypeName(array.ElementType).empty())
 				return false;
 			for (const ElementValue &element : array.Elements)
@@ -1135,6 +1142,7 @@ namespace engine::imagegraph {
 				return path->Data && path->Data->SourceOperation ? "p3o" : "p3";
 			if (std::holds_alternative<PixelBoxValue>(value)) return "pb";
 			if (std::holds_alternative<ParticleValue>(value)) return "particle2";
+			if (std::holds_alternative<StrandValue>(value)) return "strand2";
 			if (std::holds_alternative<TilesetValue>(value)) return "tileset";
 			if (std::holds_alternative<RigidValue>(value)) return "rg";
 			if (std::holds_alternative<AtlasValue>(value)) return "at";
@@ -1263,6 +1271,11 @@ namespace engine::imagegraph {
 
 		void WriteValue(std::ostream &stream, const Value &value) {
 			stream << ValueTag(value) << ' ';
+			if (const auto *strand = std::get_if<StrandValue>(&value)) {
+				stream << std::setprecision(17);
+				detail::WriteStrandValue(stream, *strand);
+				return;
+			}
 			if (const auto *particle = std::get_if<ParticleValue>(&value)) {
 				stream << std::setprecision(17);
 				detail::WriteParticleValue(stream, *particle);
@@ -1620,7 +1633,9 @@ namespace engine::imagegraph {
 				const auto type = ParseType(typeName);
 				if (!type || *type == ValueType::Image || *type == ValueType::Array ||
 					(*type >= ValueType::Gradient &&
-					 !(version >= 9 && (*type == ValueType::Particle || *type == ValueType::Tileset || *type == ValueType::Rigid || *type == ValueType::Atlas))))
+					 !(version >= 9 && (*type == ValueType::Particle || *type == ValueType::Tileset ||
+										*type == ValueType::Rigid || *type == ValueType::Atlas ||
+										*type == ValueType::Strand))))
 					return false;
 				ArrayValue array{*type, {}};
 				if (!admit(count * sizeof(ElementValue))) return false;
@@ -1750,6 +1765,13 @@ namespace engine::imagegraph {
 					audio.Samples.push_back(sample);
 				}
 				value = std::move(audio);
+				return true;
+			}
+			if (tag == "strand2") {
+				if (version < 9) return false;
+				StrandValue strand;
+				if (!detail::ReadStrandValue(stream, strand, admit)) return false;
+				value = std::move(strand);
 				return true;
 			}
 			if (tag == "particle2") {
@@ -3603,11 +3625,16 @@ namespace engine::imagegraph {
 				}
 				return std::holds_alternative<PathValue3D>(value) ||
 					   std::holds_alternative<ParticleValue>(value) ||
-					   std::holds_alternative<TilesetValue>(value) || std::holds_alternative<RigidValue>(value) || std::holds_alternative<AtlasValue>(value) ||
+					   std::holds_alternative<StrandValue>(value) ||
+					   std::holds_alternative<TilesetValue>(value) ||
+					   std::holds_alternative<RigidValue>(value) ||
+					   std::holds_alternative<AtlasValue>(value) ||
 					   (array &&
 						(array->ElementType == ValueType::Any || array->ElementType == ValueType::Path3D ||
 						 array->ElementType == ValueType::Particle ||
-						 array->ElementType == ValueType::Tileset || array->ElementType == ValueType::Rigid || array->ElementType == ValueType::Atlas || !array->Items.empty()));
+						 array->ElementType == ValueType::Strand ||
+						 array->ElementType == ValueType::Tileset || array->ElementType == ValueType::Rigid ||
+						 array->ElementType == ValueType::Atlas || !array->Items.empty()));
 			};
 			for (const auto &node : document.Nodes) {
 				for (const auto &value : node.Values)
@@ -5658,6 +5685,11 @@ namespace engine::imagegraph {
 						 (entry->Type == "pc.rigid_object" && input->Id == "texture"));
 				}
 			}
+			const bool catalogueStrandArrayInput =
+				to != nodeIndices.end() && sourceType == ValueType::Array &&
+				targetType == ValueType::Strand && link.ToPort == "input_0" &&
+				(document.Nodes[to->second].Type == "pc.strand_gravity" ||
+				 document.Nodes[to->second].Type == "pc.strand_update");
 			bool catalogueAtlasArrayInput = false;
 			if (to != nodeIndices.end() && sourceType == ValueType::Array && targetType == ValueType::Atlas) {
 				if (const auto *entry = FindCatalogueEntry(document.Nodes[to->second].Type)) {
@@ -5698,7 +5730,7 @@ namespace engine::imagegraph {
 				(to != nodeIndices.end() && FindCatalogueEntry(document.Nodes[to->second].Type));
 			if (sourceType != targetType && !arrayElement && !heightBlendArrayInput &&
 				!heightBlendArrayOutput && !catalogueArrayInput && !catalogueAtlasArrayInput &&
-				!sourceMaterialInput &&
+				!catalogueStrandArrayInput && !sourceMaterialInput &&
 				!((catalogueLink || boundaryLink) && JunctionCompatible(sourceType, targetType))) {
 				SetDiagnostic(
 					diagnostic,
@@ -9603,9 +9635,10 @@ namespace engine::imagegraph {
 							 input.Type == ValueType::Buffer || input.Type == ValueType::Struct ||
 							 input.Type == ValueType::Object || input.Type == ValueType::PcxNode ||
 							 input.Type == ValueType::NodeRef || input.Type == ValueType::FluidDomain ||
-							 input.Type == ValueType::Particle || input.Type == ValueType::Tileset || input.Type == ValueType::Rigid || input.Type == ValueType::Atlas ||
-							 input.Type == ValueType::PixelBox || input.Type == ValueType::DynamicSurface ||
-							 input.Type == ValueType::Path3D)) {
+							 input.Type == ValueType::Particle || input.Type == ValueType::Tileset ||
+							 input.Type == ValueType::Rigid || input.Type == ValueType::Atlas ||
+							 input.Type == ValueType::Strand || input.Type == ValueType::PixelBox ||
+							 input.Type == ValueType::DynamicSurface || input.Type == ValueType::Path3D)) {
 							const size_t sourceIndex = nodeIndices.at(link->FromNode);
 							const auto *source =
 								produced[sourceIndex] ? FindValueOutputs(results[sourceIndex]) : nullptr;
@@ -13951,8 +13984,10 @@ namespace engine::imagegraph {
 		// Source mesh outputs share their constructor identity, including mutations performed later in
 		// the union closure. Publish every selected view against the final candidate owner.
 		const auto resolveAlias = [&](Value &value) {
+			const DataReplayState *strandReplay = nullptr;
+			if constexpr (surfaceSupport) strandReplay = &candidate.Data;
 			return detail::ResolveSimulationValueAliases(
-				value, candidateSimulation, budget, outputCharge, diagnostic
+				value, candidateSimulation, budget, outputCharge, diagnostic, strandReplay
 			);
 		};
 		if constexpr (batchSupport || inputSupport) {

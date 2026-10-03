@@ -10,7 +10,8 @@ namespace engine::imagegraph::detail {
 		const SimulationReplayState &replay,
 		EvaluationBudget &budget,
 		AllocationReservation &outputCharge,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		const DataReplayState *data = nullptr
 	);
 	bool PublishSimulationMeshUpdate(NodeContext &context, const MeshValue2D &mesh);
 	bool PublishSimulationFluidUpdate(NodeContext &context, const FluidDomainValue &domain);

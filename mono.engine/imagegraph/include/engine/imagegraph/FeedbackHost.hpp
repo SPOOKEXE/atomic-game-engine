@@ -149,7 +149,8 @@ namespace engine::imagegraph {
 		}
 		static bool StateNode(const Node &node) {
 			return node.Type == "pc.interlaced" || node.Type == "image.verlet_simple" ||
-				   node.Type.starts_with("pc.verlet_") || node.Type.starts_with("pc.flip_");
+				   node.Type.starts_with("pc.strand_") || node.Type.starts_with("pc.verlet_") ||
+				   node.Type.starts_with("pc.flip_");
 		}
 
 	  public:

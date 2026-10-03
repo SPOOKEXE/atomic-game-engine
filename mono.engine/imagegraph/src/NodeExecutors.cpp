@@ -83,6 +83,8 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if ((type == "pc.strand_gravity" || type == "pc.strand_update") && port == "input_0")
+					return true;
 				if (type == "pc.rigid_object" && (port == "attribute_mesh" || port == "texture")) return true;
 				if (type == "pc.rigid_override" &&
 					(port == "surfaces" || port == "positions" || port == "rotations" || port == "scales" ||
