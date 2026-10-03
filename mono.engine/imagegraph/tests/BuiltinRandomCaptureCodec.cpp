@@ -101,7 +101,7 @@ TEST_CASE(
 	const auto status = WriteBuiltinRandomCapture(captures, text, d);
 	INFO(d.Message);
 	REQUIRE(status == Status::Ok);
-	CHECK(text.starts_with("imagegraph-builtin-random 2\n"));
+	CHECK(text.starts_with("imagegraph-builtin-random 3\n"));
 	CHECK(text.find("random_get_seed") != std::string::npos);
 	CHECK(text.find("random_range") != std::string::npos);
 	std::vector<SourceBuiltinRandomCapture> restored;
@@ -247,9 +247,7 @@ TEST_CASE(
 	CHECK(diagnostic.Port == "seed");
 }
 
-TEST_CASE(
-	"Builtin capture version two retains canonical dynamic input origin metadata", "[builtin_random_codec]"
-) {
+TEST_CASE("Builtin captures retain canonical dynamic input origin metadata", "[builtin_random_codec]") {
 	auto c = Fixture();
 	c.Authored.DynamicInputs[0].SourceInputId = "pxc:input:17";
 	c.Authored.DynamicInputs.push_back(
@@ -259,7 +257,7 @@ TEST_CASE(
 	std::string text;
 	Diagnostic d;
 	REQUIRE(WriteBuiltinRandomCapture(captures, text, d) == Status::Ok);
-	CHECK(text.starts_with("imagegraph-builtin-random 2\n"));
+	CHECK(text.starts_with("imagegraph-builtin-random 3\n"));
 	CHECK(text.find("pxc:input:17") != std::string::npos);
 	REQUIRE(ReadBuiltinRandomCapture(text, restored, d) == Status::Ok);
 	CHECK(restored == captures);
@@ -278,8 +276,7 @@ TEST_CASE(
 	CHECK(withOrigins > withoutOrigins);
 }
 TEST_CASE(
-	"Legacy builtin capture version one reads full dynamic defaults and empty origin metadata",
-	"[builtin_random_codec]"
+	"Legacy builtin capture versions one and two retain complete dynamic defaults", "[builtin_random_codec]"
 ) {
 	std::vector<SourceBuiltinRandomCapture> source{Fixture()}, restored;
 	std::string v2;
@@ -287,16 +284,35 @@ TEST_CASE(
 	REQUIRE(WriteBuiltinRandomCapture(source, v2, d) == Status::Ok);
 	const auto layer = v2.find("12:source layer\n0:\n");
 	REQUIRE(layer != std::string::npos);
-	// Removing the appended version-two origin token reproduces the exact prior writer's field order.
+	// Strip the version-three absent-axis marker after the complete authored mesh property.
+	const auto meshName = v2.find("14:attribute_mesh\n");
+	REQUIRE(meshName != std::string::npos);
+	const auto payload = meshName + std::string_view("14:attribute_mesh\n").size();
+	const auto colon = v2.find(':', payload);
+	REQUIRE(colon != std::string::npos);
+	const auto length = std::stoull(v2.substr(payload, colon - payload));
+	const auto axes = colon + 1 + length + 1;
+	REQUIRE(v2.substr(axes, 8) == "5:false\n");
+	v2.erase(axes, 8);
+	auto legacyTwo = v2;
+	legacyTwo.replace(
+		0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 2\n"
+	);
+	REQUIRE(ReadBuiltinRandomCapture(legacyTwo, restored, d) == Status::Ok);
+	CHECK(restored == source);
+	// Removing the appended version-two origin token reproduces the prior writer's field order.
 	auto v1 = v2;
 	v1.erase(layer + std::string_view("12:source layer\n").size(), 3);
-	v1.replace(0, std::string_view("imagegraph-builtin-random 2\n").size(), "imagegraph-builtin-random 1\n");
+	v1.replace(0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 1\n");
 	REQUIRE(ReadBuiltinRandomCapture(v1, restored, d) == Status::Ok);
 	CHECK(restored == source);
 	CHECK(restored[0].Authored.DynamicInputs[0].SourceInputId.empty());
 	std::string upgraded;
 	REQUIRE(WriteBuiltinRandomCapture(restored, upgraded, d) == Status::Ok);
-	CHECK(upgraded == v2);
+	CHECK(upgraded.starts_with("imagegraph-builtin-random 3\n"));
+	std::vector<SourceBuiltinRandomCapture> upgradedOwned;
+	REQUIRE(ReadBuiltinRandomCapture(upgraded, upgradedOwned, d) == Status::Ok);
+	CHECK(upgradedOwned == source);
 }
 TEST_CASE(
 	"Malformed origin capture fields preserve prior text and copied observations", "[builtin_random_codec]"
@@ -423,7 +439,7 @@ TEST_CASE(
 	CHECK(prior == before);
 	auto future = text;
 	future.replace(
-		0, std::string_view("imagegraph-builtin-random 2\n").size(), "imagegraph-builtin-random 3\n"
+		0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 4\n"
 	);
 	CHECK(ReadBuiltinRandomCapture(future, prior, d) == Status::UnsupportedVersion);
 	CHECK(prior == before);

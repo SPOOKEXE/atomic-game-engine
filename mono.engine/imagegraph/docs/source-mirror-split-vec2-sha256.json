@@ -1,0 +1,35 @@
+{
+  "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+  "files": [
+    {
+      "path": "scripts/node_value_vec2/node_value_vec2.gml",
+      "local_path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/node_value_vec2/node_value_vec2.gml",
+      "sha256": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112"
+    },
+    {
+      "path": "scripts/node_value/node_value.gml",
+      "local_path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/node_value/node_value.gml",
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd"
+    },
+    {
+      "path": "scripts/node_keyframe/node_keyframe.gml",
+      "local_path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/node_keyframe/node_keyframe.gml",
+      "sha256": "73a7fe4c85562db01192ae88c7ab35ebd16684f9d3831641e53a572b1480a49b"
+    },
+    {
+      "path": "scripts/array_functions/array_functions.gml",
+      "local_path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/array_functions/array_functions.gml",
+      "sha256": "02b928bd2c3e0c94192aec6e0ccd3fcac0734e0a5bb1ad588117fde674018581"
+    },
+    {
+      "path": "scripts/safe_operation/safe_operation.gml",
+      "local_path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/safe_operation/safe_operation.gml",
+      "sha256": "b3c744deeb5cba1541313e4a407c1099603bce6f27b456636f1619c87b45b332"
+    },
+    {
+      "path": "scripts/node_mirror_polar/node_mirror_polar.gml",
+      "local_path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/node_mirror_polar/node_mirror_polar.gml",
+      "sha256": "cceddc871081734c16255e458edb2ec9afa4fa8e2dd6c46833f18d98005c0fd0"
+    }
+  ]
+}

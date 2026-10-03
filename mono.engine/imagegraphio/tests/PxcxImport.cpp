@@ -2598,7 +2598,7 @@ TEST_CASE(
 	sentinel.Diagnostics = {{Status::InvalidValue, "sentinel", "value", "kept diagnostic"}};
 	const PxcxImport before = sentinel;
 	CHECK_FALSE(ImportPxcxImageGraph(combined, sentinel, failure));
-	CHECK(failure == "pxcx import exceeds native keyframe limit");
+	CHECK(failure == "PXC ordinary and separated axes exceed aggregate key bounds");
 	CHECK(sentinel.Graph == before.Graph);
 	CHECK(sentinel.Source.MetadataText == before.Source.MetadataText);
 	CHECK(sentinel.Source.GraphJson == before.Source.GraphJson);

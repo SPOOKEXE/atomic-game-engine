@@ -72,6 +72,8 @@ namespace engine::imagegraph {
 		std::optional<Value> Fixed;
 		std::vector<Keyframe> Keys;
 		std::string Port = "subtype";
+		// Split axes share this original writer; delegated inputs never duplicate its keys.
+		OwnedPayload3D<SourceSeparatedVec2Animator> SeparatedVec2{};
 	};
 	// The host owns this immutable replay result. It never mutates the authored
 	// document.
@@ -155,6 +157,7 @@ namespace engine::imagegraph {
 		std::string_view Port;
 	};
 	// Rebinds the staged document while retiring only matching physical SharedSubtype effects.
+	// Dormant unsplit replacement preserves separate-axis edits.
 	// Boundary Entry animators use their existing distinct refresh operations.
 	// Failed replacement preserves previous and result, including when they alias.
 	Status RebindGroupReplayWithAnimatorReplacements(

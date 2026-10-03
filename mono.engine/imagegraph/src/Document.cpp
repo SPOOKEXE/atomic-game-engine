@@ -5,6 +5,7 @@
 #include "GroupReplayInternal.hpp"
 #include "HostCaptureReceipts.hpp"
 #include "ImageArrayCollector.hpp"
+#include "KeyframeText.hpp"
 #include "NodeExecutors.hpp"
 #include "PaletteOps.hpp"
 #include "ParticleCodec.hpp"
@@ -42,6 +43,7 @@
 #include "SourcePathShapeCodec.hpp"
 #include "SourcePathShiftMemo.hpp"
 #include "SourceRigidCodec.hpp"
+#include "SourceSeparatedVec2.hpp"
 #include "SourceTilesetCodec.hpp"
 #include "SourceVerletPathCodec.hpp"
 #include "StrandCodec.hpp"
@@ -2531,6 +2533,114 @@ namespace engine::imagegraph {
 		return Status::Ok;
 	}
 
+	bool detail::WriteKeyframeText(std::ostream &stream, std::span<const Keyframe> keys, uint32_t version) {
+		for (const Keyframe &keyframe : keys) {
+			if (keyframe.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes ||
+				(version < 9 && !keyframe.SourceKeyId.empty()))
+				return false;
+			stream << "keyframe ";
+			WriteQuoted(stream, keyframe.NodeId);
+			stream << ' ';
+			WriteQuoted(stream, keyframe.Port);
+			stream << ' ' << keyframe.Tick << ' ';
+			WriteQuoted(stream, keyframe.Interpolation);
+			stream << ' ';
+			WriteValue(stream, keyframe.Data);
+			stream << '\n';
+			if (!keyframe.SourceKeyId.empty()) {
+				stream << "key_source_id ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' ';
+				WriteQuoted(stream, keyframe.SourceKeyId);
+				stream << '\n';
+			}
+			if (version >= 9 && (keyframe.Subframe != 0 || keyframe.NegativeFrame)) {
+				stream << "key_time ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' ' << (keyframe.NegativeFrame ? "negative" : "positive")
+					   << ' ' << keyframe.Subframe << '\n';
+			}
+			if (version >= 9 && keyframe.Kind != KeyframeKind::Normal) {
+				stream << "key_kind ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' '
+					   << (keyframe.Kind == KeyframeKind::Adder ? "adder" : "invalid") << '\n';
+			}
+			if (version >= 4 && keyframe.Ease) {
+				stream << "key_ease ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' ';
+				WriteQuoted(stream, keyframe.Ease->InType);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Ease->OutType);
+				stream << ' ' << std::setprecision(17) << keyframe.Ease->In.X << ' ' << keyframe.Ease->In.Y
+					   << ' ' << keyframe.Ease->Out.X << ' ' << keyframe.Ease->Out.Y << '\n';
+			}
+			if (version >= 6 && keyframe.SineDriver) {
+				stream << "key_driver ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' ';
+				WriteQuoted(stream, "sine");
+				stream << ' ' << std::setprecision(17) << keyframe.SineDriver->Frequency << ' '
+					   << keyframe.SineDriver->Amplitude << ' ' << keyframe.SineDriver->Phase << ' '
+					   << keyframe.SineDriver->Smooth << '\n';
+			}
+			if (version >= 8 && keyframe.SourceDriver) {
+				stream << "key_source_driver ";
+				WriteQuoted(stream, keyframe.NodeId);
+				stream << ' ';
+				WriteQuoted(stream, keyframe.Port);
+				stream << ' ' << keyframe.Tick << ' ';
+				std::visit(
+					[&](const auto &driver) {
+						using T = std::decay_t<decltype(driver)>;
+						stream << std::setprecision(17);
+						if constexpr (std::is_same_v<T, KeyframeLinearDriver>) {
+							WriteQuoted(stream, "linear");
+							stream << ' ' << driver.Speed;
+						} else if constexpr (std::is_same_v<T, KeyframeSnapDriver>) {
+							WriteQuoted(stream, "snap");
+							stream << ' ' << driver.Size;
+						} else if constexpr (std::is_same_v<T, KeyframeSineDriver>) {
+							WriteQuoted(stream, "sine");
+							stream << ' ' << driver.Frequency << ' ' << driver.Amplitude << ' '
+								   << driver.Phase << ' ' << driver.Smooth;
+						} else if constexpr (std::is_same_v<T, KeyframeAudioDriver>) {
+							WriteQuoted(stream, "native_audio");
+							stream << ' ';
+							WriteQuoted(stream, driver.SourceId);
+							stream << ' ';
+							WriteQuoted(stream, driver.Metric);
+							stream << ' ' << driver.Channel << ' ' << driver.Gain << ' ' << driver.Bias;
+						} else if constexpr (std::is_same_v<T, KeyframeCurveDriver>) {
+							WriteQuoted(stream, "curve");
+							stream << ' ';
+							WriteValue(stream, driver.Data);
+						} else {
+							WriteQuoted(
+								stream, std::is_same_v<T, KeyframeBounceDriver> ? "bounce" : "elastic"
+							);
+							stream << ' ' << driver.Amount << ' ' << driver.Spacing << ' ' << driver.Curve;
+						}
+					},
+					*keyframe.SourceDriver
+				);
+				stream << '\n';
+			}
+		}
+		return true;
+	}
+
 	std::string Write(const Document &document) {
 		if (document.Project && (!ValidProjectAnimationRegions(*document.Project) ||
 								 (document.FormatVersion < 9 && !document.Project->AnimationRegions.empty())))
@@ -2763,110 +2873,28 @@ namespace engine::imagegraph {
 			WriteQuoted(stream, output.Port);
 			stream << '\n';
 		}
-		for (const Keyframe &keyframe : document.Keyframes) {
-			if (keyframe.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes ||
-				(document.FormatVersion < 9 && !keyframe.SourceKeyId.empty()))
+
+		if (!detail::WriteKeyframeText(stream, document.Keyframes, document.FormatVersion)) return {};
+		size_t aggregateKeys = document.Keyframes.size();
+		Diagnostic axesDiagnostic;
+		for (const auto &node : document.Nodes) {
+			if (!node.SourceSeparatedVec2Animators) continue;
+			if (document.FormatVersion < 9 ||
+				detail::ValidateSeparatedVec2(node, aggregateKeys, axesDiagnostic) != Status::Ok)
 				return {};
-			stream << "keyframe ";
-			WriteQuoted(stream, keyframe.NodeId);
-			stream << ' ';
-			WriteQuoted(stream, keyframe.Port);
-			stream << ' ' << keyframe.Tick << ' ';
-			WriteQuoted(stream, keyframe.Interpolation);
-			stream << ' ';
-			WriteValue(stream, keyframe.Data);
-			stream << '\n';
-			if (!keyframe.SourceKeyId.empty()) {
-				stream << "key_source_id ";
-				WriteQuoted(stream, keyframe.NodeId);
-				stream << ' ';
-				WriteQuoted(stream, keyframe.Port);
-				stream << ' ' << keyframe.Tick << ' ';
-				WriteQuoted(stream, keyframe.SourceKeyId);
-				stream << '\n';
-			}
-			if (document.FormatVersion >= 9 && (keyframe.Subframe != 0 || keyframe.NegativeFrame)) {
-				stream << "key_time ";
-				WriteQuoted(stream, keyframe.NodeId);
-				stream << ' ';
-				WriteQuoted(stream, keyframe.Port);
-				stream << ' ' << keyframe.Tick << ' ' << (keyframe.NegativeFrame ? "negative" : "positive")
-					   << ' ' << keyframe.Subframe << '\n';
-			}
-			if (document.FormatVersion >= 9 && keyframe.Kind != KeyframeKind::Normal) {
-				stream << "key_kind ";
-				WriteQuoted(stream, keyframe.NodeId);
-				stream << ' ';
-				WriteQuoted(stream, keyframe.Port);
-				stream << ' ' << keyframe.Tick << ' '
-					   << (keyframe.Kind == KeyframeKind::Adder ? "adder" : "invalid") << '\n';
-			}
-			if (document.FormatVersion >= 4 && keyframe.Ease) {
-				stream << "key_ease ";
-				WriteQuoted(stream, keyframe.NodeId);
-				stream << ' ';
-				WriteQuoted(stream, keyframe.Port);
-				stream << ' ' << keyframe.Tick << ' ';
-				WriteQuoted(stream, keyframe.Ease->InType);
-				stream << ' ';
-				WriteQuoted(stream, keyframe.Ease->OutType);
-				stream << ' ' << std::setprecision(17) << keyframe.Ease->In.X << ' ' << keyframe.Ease->In.Y
-					   << ' ' << keyframe.Ease->Out.X << ' ' << keyframe.Ease->Out.Y << '\n';
-			}
-			if (document.FormatVersion >= 6 && keyframe.SineDriver) {
-				stream << "key_driver ";
-				WriteQuoted(stream, keyframe.NodeId);
-				stream << ' ';
-				WriteQuoted(stream, keyframe.Port);
-				stream << ' ' << keyframe.Tick << ' ';
-				WriteQuoted(stream, "sine");
-				stream << ' ' << std::setprecision(17) << keyframe.SineDriver->Frequency << ' '
-					   << keyframe.SineDriver->Amplitude << ' ' << keyframe.SineDriver->Phase << ' '
-					   << keyframe.SineDriver->Smooth << '\n';
-			}
-			if (document.FormatVersion >= 8 && keyframe.SourceDriver) {
-				stream << "key_source_driver ";
-				WriteQuoted(stream, keyframe.NodeId);
-				stream << ' ';
-				WriteQuoted(stream, keyframe.Port);
-				stream << ' ' << keyframe.Tick << ' ';
-				std::visit(
-					[&](const auto &driver) {
-						using T = std::decay_t<decltype(driver)>;
-						stream << std::setprecision(17);
-						if constexpr (std::is_same_v<T, KeyframeLinearDriver>) {
-							WriteQuoted(stream, "linear");
-							stream << ' ' << driver.Speed;
-						} else if constexpr (std::is_same_v<T, KeyframeSnapDriver>) {
-							WriteQuoted(stream, "snap");
-							stream << ' ' << driver.Size;
-						} else if constexpr (std::is_same_v<T, KeyframeSineDriver>) {
-							WriteQuoted(stream, "sine");
-							stream << ' ' << driver.Frequency << ' ' << driver.Amplitude << ' '
-								   << driver.Phase << ' ' << driver.Smooth;
-						} else if constexpr (std::is_same_v<T, KeyframeAudioDriver>) {
-							WriteQuoted(stream, "native_audio");
-							stream << ' ';
-							WriteQuoted(stream, driver.SourceId);
-							stream << ' ';
-							WriteQuoted(stream, driver.Metric);
-							stream << ' ' << driver.Channel << ' ' << driver.Gain << ' ' << driver.Bias;
-						} else if constexpr (std::is_same_v<T, KeyframeCurveDriver>) {
-							WriteQuoted(stream, "curve");
-							stream << ' ';
-							WriteValue(stream, driver.Data);
-						} else {
-							WriteQuoted(
-								stream, std::is_same_v<T, KeyframeBounceDriver> ? "bounce" : "elastic"
-							);
-							stream << ' ' << driver.Amount << ' ' << driver.Spacing << ' ' << driver.Curve;
-						}
-					},
-					*keyframe.SourceDriver
-				);
-				stream << '\n';
-			}
+			for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
+				for (size_t axis = 0; axis < 2; ++axis) {
+					stream << "source_vec2_axis ";
+					WriteQuoted(stream, node.Id);
+					stream << ' ';
+					WriteQuoted(stream, input.Port);
+					stream << ' ' << (axis == 0 ? "x" : "y") << '\n';
+					if (!detail::WriteKeyframeText(stream, input.Axes[axis].Keys, document.FormatVersion))
+						return {};
+					stream << "source_vec2_axis_end\n";
+				}
 		}
+
 		if (!document.ProjectGlobalNodeId.empty()) {
 			stream << "project_global_node ";
 			WriteQuoted(stream, document.ProjectGlobalNodeId);
@@ -2982,6 +3010,13 @@ namespace engine::imagegraph {
 		std::optional<std::pair<bool, std::vector<PreviewRulerGuide>>> previewRulers;
 		std::optional<size_t> projectRegionCount;
 		size_t projectRegionTextBytes = 0;
+		std::vector<Keyframe> *axisKeys = nullptr;
+		std::string axisNode, axisPort;
+		std::set<std::tuple<std::string, std::string, std::string>> axesSeen;
+		size_t totalKeys = 0;
+		const auto keyframes = [&]() -> std::vector<Keyframe> & {
+			return axisKeys ? *axisKeys : parsed.Keyframes;
+		};
 		size_t lineNumber = 1;
 		while (std::getline(input, line)) {
 			lineNumber++;
@@ -2989,6 +3024,10 @@ namespace engine::imagegraph {
 			std::istringstream row(line);
 			row.imbue(std::locale::classic());
 			if (!(row >> marker)) continue;
+			if (axisKeys && marker != "source_vec2_axis_end" && marker != "keyframe" &&
+				marker != "key_source_id" && marker != "key_time" && marker != "key_kind" &&
+				marker != "key_ease" && marker != "key_driver" && marker != "key_source_driver")
+				goto malformed;
 			if (marker == "node") {
 				Node node;
 				if (!ReadQuoted(row, node.Id) || !ReadQuoted(row, node.Type) ||
@@ -3345,6 +3384,31 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				parsed.Outputs.push_back(std::move(output));
+			} else if (marker == "source_vec2_axis" && parsed.FormatVersion >= 9) {
+				std::string nodeId, port, axis;
+				if (axisKeys || !ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> axis) ||
+					HasTrailing(row) || (axis != "x" && axis != "y") ||
+					!detail::SourceMirrorVectorIndex(port) || !axesSeen.emplace(nodeId, port, axis).second)
+					goto malformed;
+				auto found = std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const auto &node) {
+					return node.Id == nodeId;
+				});
+				if (found == parsed.Nodes.end() || found->Type != "pc.mirror_polar") goto malformed;
+				if (!found->SourceSeparatedVec2Animators) found->SourceSeparatedVec2Animators.emplace();
+				auto &inputs = found->SourceSeparatedVec2Animators->Inputs;
+				auto input = std::find_if(inputs.begin(), inputs.end(), [&](const auto &value) {
+					return value.Port == port;
+				});
+				if (input == inputs.end()) {
+					inputs.push_back({port, {}});
+					input = inputs.end() - 1;
+				}
+				axisKeys = &input->Axes[axis == "x" ? 0 : 1].Keys;
+				axisNode = std::move(nodeId);
+				axisPort = std::move(port);
+			} else if (marker == "source_vec2_axis_end" && parsed.FormatVersion >= 9) {
+				if (!axisKeys || HasTrailing(row)) goto malformed;
+				axisKeys = nullptr;
 			} else if (marker == "keyframe") {
 				Keyframe keyframe;
 				if (!ReadQuoted(row, keyframe.NodeId) || !ReadQuoted(row, keyframe.Port) ||
@@ -3361,7 +3425,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
-				if (parsed.Keyframes.size() == Limits::MaximumKeyframes) {
+				if (totalKeys == Limits::MaximumKeyframes) {
 					SetDiagnostic(
 						diagnostic,
 						Status::LimitExceeded,
@@ -3371,17 +3435,19 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
-				parsed.Keyframes.push_back(std::move(keyframe));
+				if (axisKeys && (keyframe.NodeId != axisNode || keyframe.Port != axisPort)) goto malformed;
+				keyframes().push_back(std::move(keyframe));
+				++totalKeys;
 			} else if (marker == "key_source_id" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, id;
 				uint64_t tick = 0;
 				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick) ||
 					!ReadQuoted(row, id, Limits::MaximumSourceKeyIdBytes) || id.empty() || HasTrailing(row) ||
-					parsed.Keyframes.empty())
+					keyframes().empty())
 					goto malformed;
-				auto &key = parsed.Keyframes.back();
+				auto &key = keyframes().back();
 				if (key.NodeId != nodeId || key.Port != port || key.Tick != tick ||
-					!keySourceIds.emplace(parsed.Keyframes.size() - 1).second)
+					!keySourceIds.emplace(totalKeys - 1).second)
 					goto malformed;
 				key.SourceKeyId = std::move(id);
 			} else if (marker == "key_time" && parsed.FormatVersion >= 9) {
@@ -3389,23 +3455,23 @@ namespace engine::imagegraph {
 				FrameTime time;
 				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) ||
 					!(row >> time.Tick >> sign >> time.Subframe) || HasTrailing(row) ||
-					(sign != "positive" && sign != "negative") || parsed.Keyframes.empty())
+					(sign != "positive" && sign != "negative") || keyframes().empty())
 					goto malformed;
 				time.NegativeFrame = sign == "negative";
-				auto &key = parsed.Keyframes.back();
+				auto &key = keyframes().back();
 				if (key.NodeId != nodeId || key.Port != port || key.Tick != time.Tick ||
-					!ValidFrameTime(time) || !keyTimes.emplace(parsed.Keyframes.size() - 1).second)
+					!ValidFrameTime(time) || !keyTimes.emplace(totalKeys - 1).second)
 					goto malformed;
 				SetFrameTime(key, time);
 			} else if (marker == "key_kind" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, kind;
 				uint64_t tick = 0;
 				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick >> kind) ||
-					HasTrailing(row) || parsed.Keyframes.empty() || (kind != "normal" && kind != "adder"))
+					HasTrailing(row) || keyframes().empty() || (kind != "normal" && kind != "adder"))
 					goto malformed;
-				auto &key = parsed.Keyframes.back();
+				auto &key = keyframes().back();
 				if (key.NodeId != nodeId || key.Port != port || key.Tick != tick ||
-					!keyKinds.emplace(parsed.Keyframes.size() - 1).second)
+					!keyKinds.emplace(totalKeys - 1).second)
 					goto malformed;
 				key.Kind = kind == "adder" ? KeyframeKind::Adder : KeyframeKind::Normal;
 			} else if (marker == "key_ease" && parsed.FormatVersion >= 4) {
@@ -3416,14 +3482,14 @@ namespace engine::imagegraph {
 					!ReadQuoted(row, ease.InType) || !ReadQuoted(row, ease.OutType) ||
 					!(row >> ease.In.X >> ease.In.Y >> ease.Out.X >> ease.Out.Y) || HasTrailing(row))
 					goto malformed;
-				if (parsed.Keyframes.empty() || parsed.Keyframes.back().NodeId != nodeId ||
-					parsed.Keyframes.back().Port != port || parsed.Keyframes.back().Tick != tick ||
-					parsed.Keyframes.back().Ease)
+				if (keyframes().empty() || keyframes().back().NodeId != nodeId ||
+					keyframes().back().Port != port || keyframes().back().Tick != tick ||
+					keyframes().back().Ease)
 					goto malformed;
 				if (!std::isfinite(ease.In.X) || !std::isfinite(ease.In.Y) || !std::isfinite(ease.Out.X) ||
 					!std::isfinite(ease.Out.Y))
 					goto malformed;
-				parsed.Keyframes.back().Ease = std::move(ease);
+				keyframes().back().Ease = std::move(ease);
 			} else if ((marker == "key_driver" && parsed.FormatVersion >= 6) ||
 					   (marker == "key_source_driver" && parsed.FormatVersion >= 8)) {
 				std::string nodeId, port, type;
@@ -3431,11 +3497,11 @@ namespace engine::imagegraph {
 				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick) ||
 					!ReadQuoted(row, type))
 					goto malformed;
-				if (parsed.Keyframes.empty() || parsed.Keyframes.back().NodeId != nodeId ||
-					parsed.Keyframes.back().Port != port || parsed.Keyframes.back().Tick != tick ||
-					parsed.Keyframes.back().SineDriver || parsed.Keyframes.back().SourceDriver)
+				if (keyframes().empty() || keyframes().back().NodeId != nodeId ||
+					keyframes().back().Port != port || keyframes().back().Tick != tick ||
+					keyframes().back().SineDriver || keyframes().back().SourceDriver)
 					goto malformed;
-				auto &key = parsed.Keyframes.back();
+				auto &key = keyframes().back();
 				if (type == "sine") {
 					KeyframeSineDriver driver;
 					if (!(row >> driver.Frequency >> driver.Amplitude >> driver.Phase >> driver.Smooth) ||
@@ -3670,6 +3736,19 @@ namespace engine::imagegraph {
 				if (detail::ValidateSourceInputOrigins(node.DynamicInputs, origins, failedPort) != Status::Ok)
 					goto malformed;
 		}
+		if (axisKeys) goto malformed;
+		{
+			size_t aggregateKeys = parsed.Keyframes.size();
+			for (const auto &node : parsed.Nodes) {
+				if (node.SourceSeparatedVec2Animators)
+					for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
+						if (!axesSeen.contains({node.Id, input.Port, "x"}) ||
+							!axesSeen.contains({node.Id, input.Port, "y"}))
+							goto malformed;
+				const Status status = detail::ValidateSeparatedVec2(node, aggregateKeys, diagnostic);
+				if (status != Status::Ok) return status;
+			}
+		}
 		document = std::move(parsed);
 		diagnostic = {};
 		return Status::Ok;
@@ -3818,6 +3897,22 @@ namespace engine::imagegraph {
 			document.Tracks.size() > Limits::MaximumTracks) {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "document exceeds a graph count limit");
 			return diagnostic.Code;
+		}
+		{
+			size_t aggregateKeys = document.Keyframes.size();
+			for (const auto &node : document.Nodes) {
+				if (node.SourceSeparatedVec2Animators && document.FormatVersion < 9) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedVersion,
+						"separated Vec2 animators require document version 9",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				const Status status = detail::ValidateSeparatedVec2(node, aggregateKeys, diagnostic);
+				if (status != Status::Ok) return status;
+			}
 		}
 		if (document.SliceStackActions.size() > Limits::MaximumNodes) {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "slice actions exceed node cap");
@@ -5361,6 +5456,13 @@ namespace engine::imagegraph {
 			detail::MakeEvaluationSet<std::tuple<std::string_view, std::string_view, std::string_view>>(
 				budget
 			);
+		for (const auto &node : document.Nodes)
+			if (node.SourceSeparatedVec2Animators)
+				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
+					for (const auto &axis : input.Axes)
+						for (const auto &key : axis.Keys)
+							if (!key.SourceKeyId.empty())
+								sourceKeyIds.emplace(node.Id, input.Port, key.SourceKeyId);
 		for (const Keyframe &keyframe : document.Keyframes) {
 			if (keyframe.SourceKeyId.size() > Limits::MaximumSourceKeyIdBytes) {
 				SetDiagnostic(
@@ -10939,6 +11041,7 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				std::array<Value, 5> mirrorAxisSamples{};
 				if (node.Type == "pc.mirror_polar") {
 					for (size_t i = 0; i < detail::SourceMirrorVectorPorts.size(); ++i) {
 						const auto port = detail::SourceMirrorVectorPorts[i];
@@ -10968,6 +11071,54 @@ namespace engine::imagegraph {
 								}
 						if (!raw)
 							if (const auto *value = FindValue(rawNode, rawPort)) raw = &value->Data;
+						const auto *sharedAxes = request.GroupReplay
+													 ? request.GroupReplay->SharedSubtype(rawNode.Id, rawPort)
+													 : nullptr;
+						const auto *axes = sharedAxes && sharedAxes->SeparatedVec2
+											   ? &*sharedAxes->SeparatedVec2
+											   : detail::FindSeparatedVec2(rawNode, rawPort);
+						if (axes) {
+							const AnimationTrack *track = nullptr;
+							for (const auto &candidate : document.Tracks)
+								if (candidate.NodeId == rawNode.Id && candidate.Port == rawPort) {
+									track = &candidate;
+									break;
+								}
+							const bool writerAnimated =
+								binding ? binding->Writer == GroupSubtypeAnimator::Animated
+										: std::find(
+											  rawNode.SourceAnimatedInputs.begin(),
+											  rawNode.SourceAnimatedInputs.end(),
+											  rawPort
+										  ) != rawNode.SourceAnimatedInputs.end();
+							Vector2 pair;
+							for (size_t axis = 0; axis < 2; ++axis) {
+								double value = 0;
+								const Status status = detail::SampleSeparatedScalar(
+									axes->Axes[axis],
+									track,
+									document.Timeline ? &*document.Timeline : nullptr,
+									request,
+									mode.value_or(false),
+									writerAnimated,
+									budget,
+									value,
+									diagnostic
+								);
+								if (status != Status::Ok) return status;
+								if (axis == 0)
+									pair.X = value;
+								else
+									pair.Y = value;
+							}
+							mirrorAxisSamples[i] = pair;
+							raw = &mirrorAxisSamples[i];
+							if (!context.IsLinked(port)) {
+								// The separated animator replaces local raw storage, never a linked producer.
+								for (auto &view : context.ValueViews)
+									if (view.first == port) view.second = raw;
+							}
+						}
 						context.MirrorRawAnimators[i] = raw;
 					}
 				}

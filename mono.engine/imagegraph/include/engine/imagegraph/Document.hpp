@@ -1056,6 +1056,8 @@ namespace engine::imagegraph {
 		bool operator==(const SourceInputExpression &) const = default;
 	};
 
+	struct SourceSeparatedVec2Data;
+
 	// One authored node instance. Id remains stable when nodes are reordered.
 	struct Node {
 		// Durable instance identifier.
@@ -1088,6 +1090,8 @@ namespace engine::imagegraph {
 		std::vector<SourceInputExpression> SourceInputExpressions{};
 		// Verified source attributes that are not input sockets.
 		std::vector<AuthoredValue> SourceProperties{};
+		// Source separated Vec2 axes retain independent scalar keys and the dormant ordinary animator.
+		OwnedPayload3D<SourceSeparatedVec2Data> SourceSeparatedVec2Animators{};
 		// Compares all authored node fields.
 		bool operator==(const Node &) const = default;
 	};
@@ -1261,6 +1265,21 @@ namespace engine::imagegraph {
 		std::string SourceKeyId = {};
 		// Compares all authored keyframe fields.
 		bool operator==(const Keyframe &) const = default;
+	};
+
+	struct SourceScalarAnimator {
+		std::vector<Keyframe> Keys;
+		bool operator==(const SourceScalarAnimator &) const = default;
+	};
+	// The original Vec2 property supplies the shared animation flag and end controls.
+	struct SourceSeparatedVec2Animator {
+		std::string Port;
+		std::array<SourceScalarAnimator, 2> Axes;
+		bool operator==(const SourceSeparatedVec2Animator &) const = default;
+	};
+	struct SourceSeparatedVec2Data {
+		std::vector<SourceSeparatedVec2Animator> Inputs;
+		bool operator==(const SourceSeparatedVec2Data &) const = default;
 	};
 
 	// Logical copy footprint: fixed key storage, owned values/text and optional driver curve anchors.

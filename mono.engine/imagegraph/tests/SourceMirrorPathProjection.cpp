@@ -1,5 +1,7 @@
 #include "../src/SourceMirrorPathProjection.hpp"
 
+#include "../src/SourceSeparatedVec2.hpp"
+
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/testing/Suite.hpp>
@@ -360,4 +362,292 @@ TEST_CASE("Mirror path getter preadmits replacement views before growing them", 
 	CHECK(context.ValueViews == before);
 	CHECK(context.ValueViews.capacity() == capacity);
 	CHECK_FALSE(context.MirrorPathSamples[3]);
+}
+
+TEST_CASE("Mirror separated X drives Any Path independently of dormant tuple and Y", "[mirror_axes]") {
+	auto document = Graph();
+	auto &node = document.Nodes.back();
+	node.SourceStaticInputs = {"center"};
+	node.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	auto &axes = node.SourceSeparatedVec2Animators->Inputs.front().Axes;
+	axes[0].Keys = {{"mirror", "center", 0, .75, "source", KeyframeEase{}}};
+	axes[1].Keys = {{"mirror", "center", 0, -.123, "source", KeyframeEase{}}};
+	SolidPixel(Sample(document), 120, 40);
+	axes[1].Keys[0].Data = 1000.;
+	SolidPixel(Sample(document), 120, 40);
+	Document restored;
+	Diagnostic diagnostic;
+	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
+	CHECK(restored == document);
+	SolidPixel(Sample(restored), 120, 40);
+}
+TEST_CASE("Mirror separated animated axes seek while snapshots own physical Path samples", "[mirror_axes]") {
+	auto document = Graph();
+	auto &node = document.Nodes.back();
+	node.SourceAnimatedInputs = {"center"};
+	node.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	auto &axes = node.SourceSeparatedVec2Animators->Inputs.front().Axes;
+	axes[0].Keys = {
+		{"mirror", "center", 0, .25, "source", KeyframeEase{}},
+		{"mirror", "center", 10, .75, "source", KeyframeEase{}}
+	};
+	axes[1].Keys = {
+		{"mirror", "center", 0, .9, "source", KeyframeEase{}},
+		{"mirror", "center", 10, .1, "source", KeyframeEase{}}
+	};
+	SolidPixel(Sample(document, 0), 40, 40);
+	SolidPixel(Sample(document, 5), 80, 40);
+	SolidPixel(Sample(document, 10), 120, 40);
+	SolidPixel(Sample(document, 0), 40, 40);
+	const auto source = Coordinates();
+	const std::array sources{RequestImageSource{"source", source}};
+	EvaluationRequest request;
+	request.Tick = 5;
+	request.ImageSources = sources;
+	EvaluationSnapshot snapshot;
+	Diagnostic diagnostic;
+	REQUIRE(
+		EvaluateNodeInputs(document, Compiled(document), "mirror", request, snapshot, diagnostic) ==
+		Status::Ok
+	);
+	const auto found =
+		std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &input) {
+			return input.Port == "center";
+		});
+	REQUIRE(found != snapshot.Values().end());
+	CHECK(std::get<Vector2>(found->Data) == Vector2{4, 2});
+	REQUIRE(found->Domain);
+	CHECK(found->Domain->Type == ValueType::Any);
+	CHECK(found->Domain->Kind == SourceSocketKind::Any);
+	document.Nodes.back().SourceSeparatedVec2Animators->Inputs[0].Axes[0].Keys[0].Data = .9;
+	CHECK(std::get<Vector2>(found->Data) == Vector2{4, 2});
+}
+TEST_CASE("Mirror unlinked separated numeric axes retain Reference units", "[mirror_axes]") {
+	auto document = Graph();
+	document.Links.erase(document.Links.begin() + 1);
+	auto &node = document.Nodes.back();
+	node.SourceStaticInputs = {"center"};
+	node.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	auto &axes = node.SourceSeparatedVec2Animators->Inputs.front().Axes;
+	axes[0].Keys = {{"mirror", "center", 0, .25, "source", KeyframeEase{}}};
+	axes[1].Keys = {{"mirror", "center", 0, .5, "source", KeyframeEase{}}};
+	SolidPixel(Sample(document), 40, 80);
+}
+TEST_CASE(
+	"Split GroupReplay edits share one original writer and project both axes without changing dormant "
+	"storage",
+	"[mirror_axes]"
+) {
+	auto d = Graph();
+	auto &original = d.Nodes.back();
+	original.SourceStaticInputs = {"center"};
+	original.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	auto &axes = original.SourceSeparatedVec2Animators->Inputs[0].Axes;
+	axes[0].Keys = {
+		{"mirror", "center", 0, .25, "source", KeyframeEase{}},
+		{"mirror", "center", 10, .5, "source", KeyframeEase{}}
+	};
+	axes[1].Keys = {{"mirror", "center", 0, 8., "source", KeyframeEase{}}};
+	d.Keyframes = {{"mirror", "center", 0, Vector2{.123, .456}, "source", KeyframeEase{}}};
+	d.Tracks = {{"mirror", "center", "hold"}};
+	const Node prototype = original;
+	for (const char *id : {"copy", "sibling"}) {
+		Node copy = prototype;
+		copy.Id = id;
+		copy.InstanceBase = "mirror";
+		for (auto &input : copy.SourceSeparatedVec2Animators->Inputs)
+			for (auto &axis : input.Axes)
+				for (auto &key : axis.Keys)
+					key.NodeId = id;
+		d.Nodes.push_back(std::move(copy));
+	}
+	d.Outputs[0].NodeId = "copy";
+	GroupReplayState empty, local, bound;
+	Diagnostic diagnostic;
+	REQUIRE(RebindGroupReplay(d, empty, 1, local, diagnostic) == Status::Ok);
+	const std::array bindings{
+		GroupSubtypeBinding{
+			"copy", "mirror", GroupSubtypeAnimator::Static, GroupSubtypeAnimator::Static, "center"
+		},
+		GroupSubtypeBinding{
+			"sibling", "mirror", GroupSubtypeAnimator::Static, GroupSubtypeAnimator::Static, "center"
+		}
+	};
+	REQUIRE(BindGroupReplay(d, bindings, local, 1, bound, diagnostic) == Status::Ok);
+	SolidPixel(Sample(d, 10, 0, &bound), 40, 40);
+	const Value edited = Vector2{.75, -100.};
+	GroupRefreshEvent event;
+	event.NodeId = "copy";
+	event.EditedPort = "center";
+	event.LocalValue = &edited;
+	event.LocalAnimated = true;
+	event.At.Tick = 5;
+	GroupReplayState next;
+	REQUIRE(ReplayGroupAnimatorEdits(d, {&event, 1}, bound, 1, next, diagnostic) == Status::Ok);
+	REQUIRE(next.SharedSubtypes().size() == 1);
+	const auto *shared = next.SharedSubtype("mirror", "center");
+	REQUIRE(shared);
+	REQUIRE(shared->SeparatedVec2);
+	CHECK(shared->SeparatedVec2->Axes[0].Keys.size() == 2);
+	CHECK(shared->SeparatedVec2->Axes[0].Keys[0].Data == Value{.75});
+	CHECK(shared->SeparatedVec2->Axes[0].Keys[1].Data == Value{.5});
+	CHECK(shared->SeparatedVec2->Axes[1].Keys[0].Data == Value{-100.});
+	SolidPixel(Sample(d, 10, 0, &next), 120, 40);
+	d.Outputs[0].NodeId = "sibling";
+	SolidPixel(Sample(d, 10, 0, &next), 120, 40);
+	Document projected;
+	REQUIRE(ProjectGroupReplay(d, next, 1, projected, diagnostic) == Status::Ok);
+	CHECK(projected.Keyframes == d.Keyframes);
+	CHECK(projected.Nodes[2].Values == d.Nodes[2].Values);
+	CHECK(projected.Nodes[2].SourceSeparatedVec2Animators->Inputs[0] == *shared->SeparatedVec2);
+	GroupReplayState rebound;
+	REQUIRE(RebindProjectedGroupReplay(projected, next, 1, rebound, diagnostic) == Status::Ok);
+	CHECK(rebound.SharedSubtypes().empty());
+	SolidPixel(Sample(projected, 10, 0, &rebound), 120, 40);
+	Document restored;
+	REQUIRE(Read(Write(projected), restored, diagnostic) == Status::Ok);
+	CHECK(restored == projected);
+	SolidPixel(Sample(restored, 10, 0, &rebound), 120, 40);
+	Document dormantReplacement = d;
+	dormantReplacement.Keyframes[0].Data = Vector2{.01, .02};
+	const SourceAnimatorReplacement target{"mirror", "center"};
+	GroupReplayState kept;
+	REQUIRE(
+		RebindGroupReplayWithAnimatorReplacements(
+			dormantReplacement, {&target, 1}, next, 1, kept, diagnostic
+		) == Status::Ok
+	);
+	REQUIRE(kept.SharedSubtype("mirror", "center"));
+	REQUIRE(kept.SharedSubtype("mirror", "center")->SeparatedVec2);
+	CHECK(*kept.SharedSubtype("mirror", "center")->SeparatedVec2 == *shared->SeparatedVec2);
+	SolidPixel(Sample(dormantReplacement, 10, 0, &kept), 120, 40);
+	Document keptProjection;
+	REQUIRE(ProjectGroupReplay(dormantReplacement, kept, 1, keptProjection, diagnostic) == Status::Ok);
+	CHECK(keptProjection.Keyframes == dormantReplacement.Keyframes);
+	CHECK(keptProjection.Nodes[2].SourceSeparatedVec2Animators->Inputs[0] == *shared->SeparatedVec2);
+	const auto priorBytes = next.RetainedBytes();
+	CHECK(ReplayGroupAnimatorEdits(d, {&event, 1}, next, 1, next, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(next.RetainedBytes() == priorBytes);
+	SolidPixel(Sample(d, 10, 0, &next), 120, 40);
+}
+TEST_CASE(
+	"Split aliases keep independent getter flags and shared static lone-driver ownership", "[mirror_axes]"
+) {
+	auto d = Graph();
+	auto &node = d.Nodes.back();
+	node.SourceStaticInputs = {"center"};
+	node.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	auto &axes = node.SourceSeparatedVec2Animators->Inputs[0].Axes;
+	axes[0].Keys = {{"mirror", "center", 0, .25, "source", KeyframeEase{}}};
+	axes[0].Keys[0].SourceDriver = KeyframeLinearDriver{.1};
+	axes[1].Keys = {{"mirror", "center", 0, 0., "source", KeyframeEase{}}};
+	Node copy = node;
+	copy.Id = "copy";
+	copy.InstanceBase = "mirror";
+	copy.SourceSeparatedVec2Animators = {};
+	d.Nodes.push_back(std::move(copy));
+	d.Outputs[0].NodeId = "copy";
+	GroupReplayState empty, local, bound;
+	Diagnostic diagnostic;
+	REQUIRE(RebindGroupReplay(d, empty, 1, local, diagnostic) == Status::Ok);
+	const std::array bindings{GroupSubtypeBinding{
+		"copy", "mirror", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Static, "center"
+	}};
+	REQUIRE(BindGroupReplay(d, bindings, local, 1, bound, diagnostic) == Status::Ok);
+	SolidPixel(Sample(d, 5, 0, &bound), 120, 40);
+	SolidPixel(Sample(d, 0, 0, &bound), 40, 40);
+	d.Outputs[0].NodeId = "mirror";
+	SolidPixel(Sample(d, 5, 0, &bound), 40, 40);
+}
+
+TEST_CASE(
+	"Split Mirror feedback owns both axes through selected-output replay and backseek", "[mirror_axes]"
+) {
+	auto d = Graph();
+	d.Nodes[1].Values[0].Data = std::string("feedback:out");
+	d.Nodes.back().SourceAnimatedInputs = {"center"};
+	d.Nodes.back().SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	auto &axes = d.Nodes.back().SourceSeparatedVec2Animators->Inputs[0].Axes;
+	axes[0].Keys = {
+		{"mirror", "center", 0, .25, "source", KeyframeEase{}},
+		{"mirror", "center", 2, .75, "source", KeyframeEase{}}
+	};
+	axes[1].Keys = {{"mirror", "center", 0, -99., "source", KeyframeEase{}}};
+	d.Tracks = {{"mirror", "center", "hold"}};
+	const auto p = Compiled(d);
+	CapturedFeedbackHost host;
+	Diagnostic diagnostic;
+	const auto center = [&]() -> const EvaluationInputValue & {
+		const auto values = host.Snapshot().Values();
+		const auto found =
+			std::find_if(values.begin(), values.end(), [](const auto &v) { return v.Port == "center"; });
+		REQUIRE(found != values.end());
+		return *found;
+	};
+	EvaluationRequest request;
+	REQUIRE(host.PrepareNodeInputs(d, p, 1, 0, "mirror", request, diagnostic));
+	CHECK(center().Data == Value{Vector2{2, 2}});
+	request = {};
+	request.Tick = 1;
+	REQUIRE(host.PrepareNodeInputs(d, p, 1, 0, "mirror", request, diagnostic));
+	CHECK(center().Data == Value{Vector2{4, 2}});
+	const auto before = center();
+	const auto bytes = host.Snapshot().RetainedBytes();
+	request = {};
+	request.Tick = 2;
+	CHECK_FALSE(host.PrepareNodeInputs(d, p, 1, 0, "mirror", request, diagnostic, 1));
+	CHECK(center().Data == before.Data);
+	CHECK(center().Linked == before.Linked);
+	CHECK(center().Domain == before.Domain);
+	CHECK(host.Snapshot().RetainedBytes() == bytes);
+	request = {};
+	REQUIRE(host.PrepareNodeInputs(d, p, 1, 0, "mirror", request, diagnostic));
+	CHECK(center().Data == Value{Vector2{2, 2}});
+}
+
+TEST_CASE(
+	"Animated split edits canonicalize stored duplicate times in the bounded native profile", "[mirror_axes]"
+) {
+	auto d = Graph();
+	auto &node = d.Nodes.back();
+	node.SourceAnimatedInputs = {"center"};
+	node.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	auto &axes = node.SourceSeparatedVec2Animators->Inputs[0].Axes;
+	axes[0].Keys = {
+		{"mirror", "center", 0, .25, "source", KeyframeEase{}},
+		{"mirror", "center", 0, .9, "source", KeyframeEase{}}
+	};
+	axes[0].Keys[0].SourceKeyId = "first-x";
+	axes[0].Keys[1].SourceKeyId = "second-x";
+	axes[1].Keys = {{"mirror", "center", 0, 8., "source", KeyframeEase{}}};
+	d.Tracks = {{"mirror", "center", "hold"}};
+	GroupReplayState empty, local, prior, next;
+	Diagnostic diagnostic;
+	REQUIRE(RebindGroupReplay(d, empty, 1, local, diagnostic) == Status::Ok);
+	REQUIRE(BindGroupReplay(d, {}, local, 1, prior, diagnostic) == Status::Ok);
+	REQUIRE(prior.InstancesBound());
+	const Value edited = Vector2{.75, -99.};
+	GroupRefreshEvent event;
+	event.NodeId = "mirror";
+	event.EditedPort = "center";
+	event.LocalAnimated = true;
+	event.LocalValue = &edited;
+	event.At.Tick = 5;
+	REQUIRE(ReplayGroupAnimatorEdits(d, {&event, 1}, prior, 1, next, diagnostic) == Status::Ok);
+	const auto *shared = next.SharedSubtype("mirror", "center");
+	REQUIRE(shared);
+	REQUIRE(shared->SeparatedVec2);
+	const auto &keys = shared->SeparatedVec2->Axes[0].Keys;
+	REQUIRE(keys.size() == 2);
+	CHECK(keys[0].SourceKeyId == "first-x");
+	CHECK(keys[0].Data == Value{.25});
+	CHECK(keys[1].Tick == 5);
+	CHECK(keys[1].Data == Value{.75});
+	SolidPixel(Sample(d, 0, 0, &next), 40, 40);
+	SolidPixel(Sample(d, 5, 0, &next), 120, 40);
+	Document projected;
+	REQUIRE(ProjectGroupReplay(d, next, 1, projected, diagnostic) == Status::Ok);
+	Document restored;
+	REQUIRE(Read(Write(projected), restored, diagnostic) == Status::Ok);
+	CHECK(restored == projected);
 }

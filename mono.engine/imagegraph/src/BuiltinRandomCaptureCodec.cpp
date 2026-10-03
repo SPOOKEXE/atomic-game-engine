@@ -1,4 +1,6 @@
 #include "EvaluationBudget.hpp"
+#include "KeyframeText.hpp"
+#include "SourceSeparatedVec2.hpp"
 #include "ValueText.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -9,13 +11,16 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <iomanip>
 #include <locale>
 #include <ostream>
+#include <sstream>
 #include <streambuf>
 #include <type_traits>
 namespace engine::imagegraph {
 	namespace {
-		constexpr std::string_view Header = "imagegraph-builtin-random 2\n";
+		constexpr std::string_view Header = "imagegraph-builtin-random 3\n";
+		constexpr std::string_view PreviousHeader = "imagegraph-builtin-random 2\n";
 		constexpr std::string_view LegacyHeader = "imagegraph-builtin-random 1\n";
 		constexpr std::array<std::string_view, 6> Operations{
 			"random", "irandom", "irandom_range", "crand", "random_get_seed", "random_range"
@@ -154,6 +159,19 @@ namespace engine::imagegraph {
 			void Strings(const std::vector<std::string> &values) {
 				List(values, [&](const auto &value) { Text(value); });
 			}
+			void ScalarKeys(const SourceScalarAnimator &axis) {
+				Number(axis.Keys.size());
+				CountBuffer count(Limits::MaximumDocumentBytes);
+				std::ostream measured(&count);
+				measured.imbue(std::locale::classic());
+				if (!detail::WriteKeyframeText(measured, axis.Keys, 9) || !measured) {
+					Valid = false;
+					return;
+				}
+				Out << count.Bytes << ':';
+				if (!detail::WriteKeyframeText(Out, axis.Keys, 9)) Valid = false;
+				Out.put('\n');
+			}
 			void NodeData(const Node &n) {
 				Text(n.Id);
 				Text(n.Type);
@@ -188,6 +206,13 @@ namespace engine::imagegraph {
 					Bool(expression.Enabled);
 				});
 				Values(n.SourceProperties);
+				Bool(bool(n.SourceSeparatedVec2Animators));
+				if (n.SourceSeparatedVec2Animators)
+					List(n.SourceSeparatedVec2Animators->Inputs, [&](const auto &input) {
+						Text(input.Port);
+						for (const auto &axis : input.Axes)
+							ScalarKeys(axis);
+					});
 			}
 			void Capture(const SourceBuiltinRandomCapture &c) {
 				Text("capture");
@@ -237,7 +262,8 @@ namespace engine::imagegraph {
 			detail::EvaluationBudget &Budget;
 			detail::AllocationReservation &Charge;
 			Status Failure = Status::Malformed;
-			uint8_t Version = 2;
+			uint8_t Version = 3;
+			size_t AxisKeyCount = 0;
 			bool Admit(uint64_t bytes) {
 				if (bytes > Budget.Available()) {
 					Failure = Status::LimitExceeded;
@@ -332,7 +358,62 @@ namespace engine::imagegraph {
 				type = *parsed;
 				return true;
 			}
+			bool ScalarKeys(SourceScalarAnimator &axis) {
+				size_t count = 0;
+				std::string_view token;
+				if (!Number(count) || !Token(token)) return false;
+				if (count > Limits::MaximumKeyframes - AxisKeyCount ||
+					token.size() > Limits::MaximumDocumentBytes) {
+					Failure = Status::LimitExceeded;
+					return false;
+				}
+				AxisKeyCount += count;
+				// Stream text, lexical strings, parsed keys and driver curves coexist before adoption.
+				const uint64_t bytes = 32 * token.size() + count * sizeof(Keyframe) + 2 * sizeof(Document);
+				auto workspace = Budget.Reserve(bytes);
+				if (!workspace) {
+					Failure = Status::LimitExceeded;
+					return false;
+				}
+				std::istringstream lines{std::string(token)};
+				lines.imbue(std::locale::classic());
+				std::string line;
+				size_t observed = 0;
+				while (std::getline(lines, line)) {
+					std::istringstream row(line);
+					row.imbue(std::locale::classic());
+					std::string marker, node, port, type;
+					uint64_t tick = 0;
+					if (!(row >> marker >> std::quoted(node) >> std::quoted(port) >> tick)) return false;
+					if (marker == "keyframe") {
+						std::string tag;
+						if (!(row >> std::quoted(type) >> tag) || tag != "d" || ++observed > count)
+							return false;
+					} else if (marker == "key_source_driver") {
+						if (!(row >> std::quoted(type))) return false;
+						if (type == "curve") {
+							std::string tag;
+							if (!(row >> tag) || tag != "q") return false;
+						}
+					} else if (marker != "key_source_id" && marker != "key_time" && marker != "key_kind" &&
+							   marker != "key_ease" && marker != "key_driver")
+						return false;
+				}
+				if (observed != count) return false;
+				Document parsed;
+				Diagnostic diagnostic;
+				const Status status = Read("imagegraph 9\n" + std::string(token), parsed, diagnostic);
+				if (status != Status::Ok) {
+					Failure = status;
+					return false;
+				}
+				axis.Keys = std::move(parsed.Keyframes);
+				const auto retained = detail::SeparatedScalarBytes(axis, true);
+				if (!retained) return false;
+				return Admit(*retained);
+			}
 			bool NodeData(Node &n) {
+				AxisKeyCount = 0;
 				if (!Text(n.Id) || !Text(n.Type) || !Text(n.GroupId) || !Number(n.Position.X) ||
 					!Number(n.Position.Y) || !Values(n.Values))
 					return false;
@@ -363,7 +444,16 @@ namespace engine::imagegraph {
 						}
 					))
 					return false;
-				return Values(n.SourceProperties);
+				if (!Values(n.SourceProperties)) return false;
+				if (Version < 3) return true;
+				bool present = false;
+				if (!Bool(present)) return false;
+				if (!present) return true;
+				if (!Admit(sizeof(SourceSeparatedVec2Data))) return false;
+				auto &data = n.SourceSeparatedVec2Animators.emplace();
+				return List(data.Inputs, 5, [&](auto &input) {
+					return Text(input.Port) && ScalarKeys(input.Axes[0]) && ScalarKeys(input.Axes[1]);
+				});
 			}
 			bool Capture(SourceBuiltinRandomCapture &c) {
 				std::string_view kind;
@@ -530,7 +620,10 @@ namespace engine::imagegraph {
 			if (prior > budget.Available() || !charge->Resize(prior) || text.size() > budget.Available() ||
 				!charge->Resize(prior + text.size()))
 				return Fail(diagnostic, Status::LimitExceeded, "Builtin RNG replacement exceeds residency");
-			const uint8_t version = text.starts_with(Header) ? 2 : text.starts_with(LegacyHeader) ? 1 : 0;
+			const uint8_t version = text.starts_with(Header)		   ? 3
+									: text.starts_with(PreviousHeader) ? 2
+									: text.starts_with(LegacyHeader)   ? 1
+																	   : 0;
 			if (!version)
 				return Fail(
 					diagnostic, Status::UnsupportedVersion, "Builtin RNG capture header is unsupported"

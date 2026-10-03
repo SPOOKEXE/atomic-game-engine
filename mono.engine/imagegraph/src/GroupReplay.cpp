@@ -133,6 +133,7 @@ namespace engine::imagegraph {
 				released += std::max(effect->NodeId.size(), std::string{}.capacity()) + 1 +
 							std::max(effect->Port.size(), std::string{}.capacity()) + 1;
 				if (effect->Fixed) released += detail::RetainedPayloadBytes(*effect->Fixed);
+				released += detail::SeparatedOverlayBytes(*effect);
 				released += effect->Keys.capacity() * sizeof(Keyframe);
 				for (const auto &key : effect->Keys)
 					released += *KeyframePayloadBytes(key) - sizeof(Keyframe);
@@ -453,6 +454,7 @@ namespace engine::imagegraph {
 			removedBytes += std::max(overlay.NodeId.size(), std::string{}.capacity()) + 1;
 			removedBytes += std::max(overlay.Port.size(), std::string{}.capacity()) + 1;
 			if (overlay.Fixed) removedBytes += detail::RetainedPayloadBytes(*overlay.Fixed);
+			removedBytes += detail::SeparatedOverlayBytes(overlay);
 			for (const auto &key : overlay.Keys)
 				removedBytes += *KeyframePayloadBytes(key);
 		}
@@ -919,15 +921,21 @@ namespace engine::imagegraph {
 			const uint64_t selectionWork = 2 * uint64_t(owner->SharedSubtypes.size()) * replacements.size();
 			if (selectionWork > 64'000'000 - work)
 				return refuse(Status::LimitExceeded, "source animator replacement exceeds work bound");
-			for (const auto &overlay : owner->SharedSubtypes) {
+			for (auto &overlay : owner->SharedSubtypes) {
 				if (!selected(overlay)) continue;
-				removed += overlay.NodeId.capacity() + 1 + overlay.Port.capacity() + 1;
+				if (!overlay.SeparatedVec2)
+					removed += overlay.NodeId.capacity() + 1 + overlay.Port.capacity() + 1;
 				if (overlay.Fixed) removed += detail::RetainedPayloadBytes(*overlay.Fixed);
 				removed += overlay.Keys.capacity() * sizeof(Keyframe);
 				for (const auto &key : overlay.Keys)
 					removed += *KeyframePayloadBytes(key) - sizeof(Keyframe);
+				overlay.Fixed.reset();
+				std::vector<Keyframe>{}.swap(overlay.Keys);
 			}
-			std::erase_if(owner->SharedSubtypes, selected);
+			// The replaced unsplit animator is dormant while separate axes are enabled.
+			std::erase_if(owner->SharedSubtypes, [&](const auto &overlay) {
+				return selected(overlay) && !overlay.SeparatedVec2;
+			});
 			// The overlay-vector capacity survives erasure; only destroyed payloads leave its charge.
 			if (!owner->Charge.Resize(owner->Charge.Bytes() - removed)) std::terminate();
 		}
@@ -1178,8 +1186,19 @@ namespace engine::imagegraph {
 				const Value &value,
 				bool animated,
 				bool preserveStaticKeys = false,
-				bool trigger = false
+				bool trigger = false,
+				bool ignoreDocumentKeys = false
 			) {
+
+				const auto retainedKeys = [&]() -> uint64_t {
+					if (!ignoreDocumentKeys) return KeyBytes(keys);
+					uint64_t bytes = keys.capacity() * sizeof(Keyframe);
+					for (const auto &key : keys) {
+						const auto owned = SeparatedKeyBytes(key, true);
+						if (!owned || !Add(bytes, *owned - sizeof(Keyframe))) return UINT64_MAX;
+					}
+					return bytes;
+				};
 				if (!ValidRuntimeValue(value))
 					return context.Fail(
 						Status::InvalidValue, "group local edit requires a represented finite value", port
@@ -1192,7 +1211,7 @@ namespace engine::imagegraph {
 						source.reserve(keys.size());
 						for (const auto &key : keys)
 							source.push_back(&key);
-					} else {
+					} else if (!ignoreDocumentKeys) {
 						const auto count = std::count_if(
 							document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
 								return key.NodeId == nodeId && key.Port == port;
@@ -1205,7 +1224,8 @@ namespace engine::imagegraph {
 					if (!source.empty()) {
 						uint64_t bytes = source.size() * sizeof(Keyframe);
 						for (const auto *key : source) {
-							const auto size = KeyframePayloadBytes(*key);
+							const auto size = ignoreDocumentKeys ? SeparatedKeyBytes(*key, false)
+																 : KeyframePayloadBytes(*key);
 							if (!size || !Add(bytes, *size - sizeof(Keyframe)))
 								return context.Fail(
 									Status::LimitExceeded,
@@ -1228,7 +1248,7 @@ namespace engine::imagegraph {
 						for (const auto *key : source)
 							replacement.push_back(*key);
 						replacement.front().Data = std::move(replacementValue);
-						const uint64_t old = KeyBytes(keys);
+						const uint64_t old = retainedKeys();
 						keys.swap(replacement);
 						std::vector<Keyframe>{}.swap(replacement);
 						if (!owner.Charge.Merge(std::move(*lease)) ||
@@ -1244,7 +1264,7 @@ namespace engine::imagegraph {
 							Status::LimitExceeded, "group local edit exceeds the live operation budget", port
 						);
 					Value replacement = value;
-					const uint64_t old = KeyBytes(keys) + (fixed ? RetainedPayloadBytes(*fixed) : 0);
+					const uint64_t old = retainedKeys() + (fixed ? RetainedPayloadBytes(*fixed) : 0);
 					fixed = std::move(replacement);
 					std::vector<Keyframe>{}.swap(keys);
 					if (!owner.Charge.Merge(std::move(*lease)) ||
@@ -1279,7 +1299,7 @@ namespace engine::imagegraph {
 					source.reserve(keys.size());
 					for (const auto &key : keys)
 						source.push_back(&key);
-				} else if (!fixed) {
+				} else if (!fixed && !ignoreDocumentKeys) {
 					const auto count = std::count_if(
 						document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
 							return key.NodeId == nodeId && key.Port == port;
@@ -1301,7 +1321,8 @@ namespace engine::imagegraph {
 					);
 				uint64_t bytes = count * sizeof(Keyframe);
 				for (const auto *key : source) {
-					const auto cloneBytes = KeyframePayloadBytes(*key);
+					const auto cloneBytes =
+						ignoreDocumentKeys ? SeparatedKeyBytes(*key, false) : KeyframePayloadBytes(*key);
 					if (!cloneBytes || !Add(bytes, *cloneBytes - sizeof(Keyframe)))
 						return context.Fail(
 							Status::LimitExceeded, "group local key payload exceeds bounds", port
@@ -1324,6 +1345,11 @@ namespace engine::imagegraph {
 						"group local replacement exceeds the live operation budget",
 						port
 					);
+				// The scalar source setter sorts and removes equal-time records. The bounded
+				// native profile preserves physical order for ties; source runner tie order is unverified.
+				auto sorting = owner.Budget.Reserve(ignoreDocumentKeys ? count * sizeof(Keyframe) : 0);
+				if (!sorting)
+					return context.Fail(Status::LimitExceeded, "split key sorting exceeds live budget", port);
 				Value edited = value;
 				std::vector<Keyframe> replacement;
 				replacement.reserve(count);
@@ -1345,10 +1371,24 @@ namespace engine::imagegraph {
 						);
 					replacement.push_back(std::move(key));
 				}
-				std::sort(replacement.begin(), replacement.end(), [](const auto &left, const auto &right) {
+				const auto beforeKey = [](const auto &left, const auto &right) {
 					return CompareFrameTime(GetFrameTime(left), GetFrameTime(right)) < 0;
-				});
-				const uint64_t oldBytes = KeyBytes(keys) + (fixed ? RetainedPayloadBytes(*fixed) : 0);
+				};
+				if (ignoreDocumentKeys) {
+					std::stable_sort(replacement.begin(), replacement.end(), beforeKey);
+					replacement.erase(
+						std::unique(
+							replacement.begin(),
+							replacement.end(),
+							[](const auto &left, const auto &right) {
+								return GetFrameTime(left) == GetFrameTime(right);
+							}
+						),
+						replacement.end()
+					);
+				} else
+					std::sort(replacement.begin(), replacement.end(), beforeKey);
+				const uint64_t oldBytes = retainedKeys() + (fixed ? RetainedPayloadBytes(*fixed) : 0);
 				keys.swap(replacement);
 				replacement.clear();
 				std::vector<Keyframe>{}.swap(replacement);
@@ -1516,6 +1556,14 @@ namespace engine::imagegraph {
 					!Add(bytes, TextBytes(binding.Port)) || !Add(bytes, TextBytes(binding.AnimatorPort)))
 					return refuse();
 			for (const auto &overlay : previous.SharedSubtypes()) {
+				if (overlay.SeparatedVec2) {
+					const auto payload = SeparatedAnimatorBytes(*overlay.SeparatedVec2, false);
+					if (!payload || !Add(bytes, *payload) || overlay.SeparatedVec2->Port != overlay.Port)
+						return refuse();
+					for (const auto &axis : overlay.SeparatedVec2->Axes)
+						for (const auto &key : axis.Keys)
+							if (key.NodeId != overlay.NodeId || key.Port != overlay.Port) return refuse();
+				}
 				if (!Add(bytes, TextBytes(overlay.NodeId)) || !Add(bytes, TextBytes(overlay.Port)) ||
 					(overlay.Fixed && !Add(bytes, RetainedPayloadBytes(*overlay.Fixed))) ||
 					!Add(bytes, overlay.Keys.size() * sizeof(Keyframe)))
@@ -1734,12 +1782,146 @@ namespace engine::imagegraph {
 			entry.Domain = domain;
 			return true;
 		}
+		bool EditSeparatedAnimator(
+			NodeContext &context,
+			const GroupRefreshEvent &event,
+			GroupReplayAccess::Owner &owner,
+			const Document &document,
+			bool &handled
+		) {
+			handled = false;
+			std::string_view ownerId = event.NodeId, port = event.EditedPort;
+			bool animated = event.LocalAnimated;
+			for (const auto &binding : owner.Bindings)
+				if (binding.NodeId == event.NodeId && binding.Port == event.EditedPort) {
+					ownerId = binding.OwnerId;
+					port = BindingAnimatorPort(binding);
+					animated = binding.Writer == GroupSubtypeAnimator::Animated;
+					break;
+				}
+			for (const auto &binding : owner.Bindings)
+				if (binding.OwnerId == ownerId && BindingAnimatorPort(binding) == port) {
+					animated = binding.Writer == GroupSubtypeAnimator::Animated;
+					break;
+				}
+			const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
+				return n.Id == ownerId;
+			});
+			const auto *authored = node == document.Nodes.end() ? nullptr : FindSeparatedVec2(*node, port);
+			auto found = std::find_if(
+				owner.SharedSubtypes.begin(), owner.SharedSubtypes.end(), [&](const auto &overlay) {
+					return overlay.NodeId == ownerId && overlay.Port == port;
+				}
+			);
+			const auto *axes = found != owner.SharedSubtypes.end() && found->SeparatedVec2
+								   ? &*found->SeparatedVec2
+								   : authored;
+			if (!axes) return true;
+			handled = true;
+			const auto *pair = std::get_if<Vector2>(event.LocalValue);
+			if (!pair || !std::isfinite(pair->X) || !std::isfinite(pair->Y))
+				return context.Fail(Status::TypeMismatch, "split animator edits require a finite Vec2", port);
+			// Admission covers the final logical document before either axis grows.
+			size_t total = document.Keyframes.size();
+			for (const auto &n : document.Nodes)
+				if (n.SourceSeparatedVec2Animators)
+					for (const auto &input : n.SourceSeparatedVec2Animators->Inputs) {
+						const auto replacement = std::find_if(
+							owner.SharedSubtypes.begin(), owner.SharedSubtypes.end(), [&](const auto &o) {
+								return o.NodeId == n.Id && o.Port == input.Port && o.SeparatedVec2;
+							}
+						);
+						const auto &stored =
+							replacement == owner.SharedSubtypes.end() ? input : *replacement->SeparatedVec2;
+						for (const auto &axis : stored.Axes)
+							total += axis.Keys.size();
+					}
+			const auto time = GetFrameTime(event.At);
+			for (const auto &axis : axes->Axes) {
+				const bool existing = std::any_of(axis.Keys.begin(), axis.Keys.end(), [&](const auto &key) {
+					return GetFrameTime(key) == time;
+				});
+				if ((animated && !existing) || (!animated && axis.Keys.empty())) ++total;
+			}
+			if (total > Limits::MaximumKeyframes)
+				return context.Fail(
+					Status::LimitExceeded, "split animator edits exceed aggregate key bounds", port
+				);
+			if (found == owner.SharedSubtypes.end()) {
+				auto names = owner.Budget.Reserve(TextBytes(ownerId) + TextBytes(port));
+				if (!names || owner.SharedSubtypes.size() == owner.SharedSubtypes.capacity())
+					return context.Fail(
+						Status::LimitExceeded, "split animator owner exceeds operation budget", port
+					);
+				GroupSubtypeOverlay overlay;
+				overlay.NodeId = std::string(ownerId);
+				overlay.Port = std::string(port);
+				owner.SharedSubtypes.push_back(std::move(overlay));
+				if (!owner.Charge.Merge(std::move(*names))) std::terminate();
+				found = std::prev(owner.SharedSubtypes.end());
+			}
+			if (!found->SeparatedVec2) {
+				const auto bytes = SeparatedAnimatorBytes(*axes, false);
+				auto copy = bytes ? owner.Budget.Reserve(*bytes) : std::nullopt;
+				if (!copy)
+					return context.Fail(
+						Status::LimitExceeded, "split animator copy exceeds operation budget", port
+					);
+				found->SeparatedVec2.emplace() = *axes;
+				if (!owner.Charge.Merge(std::move(*copy))) std::terminate();
+			}
+			for (size_t index = 0; index < 2; ++index) {
+				auto &axis = found->SeparatedVec2->Axes[index];
+				std::optional<Value> fixed;
+				if (!EditAnimator(
+						context,
+						event,
+						owner,
+						ownerId,
+						axis.Keys,
+						fixed,
+						document,
+						port,
+						Value{index == 0 ? pair->X : pair->Y},
+						animated,
+						true,
+						false,
+						true
+					))
+					return false;
+				if (fixed) {
+					auto names = owner.Budget.Reserve(
+						sizeof(Keyframe) + TextBytes(ownerId) + TextBytes(port) + TextBytes("source") +
+						2 * TextBytes("linear")
+					);
+					if (!names)
+						return context.Fail(
+							Status::LimitExceeded, "split static key exceeds operation budget", port
+						);
+					Keyframe key;
+					key.NodeId = std::string(ownerId);
+					key.Port = std::string(port);
+					key.Data = std::move(*fixed);
+					key.Interpolation = "source";
+					key.Ease = KeyframeEase{};
+					axis.Keys.reserve(1);
+					axis.Keys.push_back(std::move(key));
+					if (!owner.Charge.Merge(std::move(*names))) std::terminate();
+				}
+			}
+			return true;
+		}
+
 		bool ApplySourceAnimatorEdit(
 			NodeContext &context,
 			const GroupRefreshEvent &event,
 			GroupReplayAccess::Owner &owner,
 			const Document &document
 		) {
+			bool separated = false;
+			if (!EditSeparatedAnimator(context, event, owner, document, separated)) return false;
+			if (separated) return true;
+
 			if (context.Authored.Type == "pc.group_input" && event.EditedPort == "parent_value") {
 				auto parent =
 					std::find_if(owner.Entries.begin(), owner.Entries.end(), [&](const auto &entry) {
@@ -2175,6 +2357,46 @@ namespace engine::imagegraph {
 				!add(std::max(track.Port.size(), std::string{}.capacity()) + 1) ||
 				!add(std::max(track.End.size(), std::string{}.capacity()) + 1))
 				return fail(Status::LimitExceeded, "Group authored track clone exceeds bounds");
+		size_t combinedKeys = keyCount;
+		for (const auto &node : authored.Nodes)
+			if (node.SourceSeparatedVec2Animators)
+				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+					const auto *effect = replay.SharedSubtype(node.Id, input.Port);
+					const auto &physical = effect && effect->SeparatedVec2 ? *effect->SeparatedVec2 : input;
+					for (const auto &axis : physical.Axes) {
+						if (axis.Keys.size() > Limits::MaximumKeyframes - combinedKeys)
+							return fail(
+								Status::LimitExceeded,
+								"Group projection ordinary and split keys exceed aggregate bounds",
+								node.Id,
+								input.Port
+							);
+						combinedKeys += axis.Keys.size();
+					}
+				}
+		for (const auto &overlay : replay.SharedSubtypes())
+			if (overlay.SeparatedVec2) {
+				const auto node =
+					std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [&](const auto &n) {
+						return n.Id == overlay.NodeId;
+					});
+				if (node == authored.Nodes.end() || !detail::FindSeparatedVec2(*node, overlay.Port))
+					return fail(
+						Status::InvalidGroup,
+						"split projection original writer is absent",
+						overlay.NodeId,
+						overlay.Port
+					);
+				const auto bytes = detail::SeparatedAnimatorBytes(*overlay.SeparatedVec2, false);
+				if (!bytes || !add(*bytes))
+					return fail(
+						Status::LimitExceeded,
+						"split projection overlap exceeds bounds",
+						overlay.NodeId,
+						overlay.Port
+					);
+			}
+
 		auto additionalAdmission = budget.Reserve(admitted - preadmitted);
 		if (!additionalAdmission || !reservation->Merge(std::move(*additionalAdmission)))
 			return fail(Status::LimitExceeded, "Group authored projection admission failed");
@@ -2183,6 +2405,18 @@ namespace engine::imagegraph {
 		);
 		core::Metrics::Count("imagegraph.group_projection.operations", 1);
 		Document candidate = authored;
+		for (const auto &overlay : replay.SharedSubtypes())
+			if (overlay.SeparatedVec2) {
+				auto node = std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const auto &n) {
+					return n.Id == overlay.NodeId;
+				});
+				for (auto &input : node->SourceSeparatedVec2Animators->Inputs)
+					if (input.Port == overlay.Port) {
+						input = *overlay.SeparatedVec2;
+						break;
+					}
+			}
+
 		std::vector<Keyframe> finalKeys;
 		finalKeys.reserve(keyCount);
 		for (const auto &key : authored.Keyframes)
@@ -2351,6 +2585,24 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 		for (const auto &shared : previous.SharedSubtypes()) {
+			if (shared.SeparatedVec2) {
+				const auto node =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
+						return n.Id == shared.NodeId;
+					});
+				const auto *axes =
+					node == document.Nodes.end() ? nullptr : detail::FindSeparatedVec2(*node, shared.Port);
+				if (!axes || *axes != *shared.SeparatedVec2) {
+					diagnostic = {
+						Status::InvalidValue,
+						shared.NodeId,
+						shared.Port,
+						"split animator effect has not been projected"
+					};
+					return diagnostic.Code;
+				}
+			}
+
 			bool represented = true;
 			if (previous.DetachedAnimator(shared.NodeId, shared.Port)) {
 				for (const auto &binding : previous.Bindings())
@@ -2399,6 +2651,8 @@ namespace engine::imagegraph {
 			removed += std::max(shared.Port.size(), std::string{}.capacity()) + 1;
 			clearKeys(shared.Keys);
 			clearFixed(shared.Fixed);
+			removed += detail::SeparatedOverlayBytes(shared);
+			shared.SeparatedVec2 = {};
 		}
 		if (retainedDetached)
 			std::erase_if(owner->SharedSubtypes, [&](const auto &shared) {

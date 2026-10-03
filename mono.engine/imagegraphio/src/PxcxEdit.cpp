@@ -773,52 +773,66 @@ namespace engine::imagegraphio {
 			const Node &node,
 			std::string_view port,
 			Json &record,
-			Diagnostic &diagnostic
+			Diagnostic &diagnostic,
+			const SourceScalarAnimator *axis = nullptr,
+			Json *axisStorage = nullptr,
+			std::string_view identityPrefix = {}
 		) {
 			const auto fail = [&](std::string reason) {
 				return Reject(diagnostic, std::move(reason), node.Id, port);
 			};
 			const auto *entry = FindCatalogueEntry(node.Type);
 			const auto *input = entry ? FindCatalogueInput(*entry, port) : nullptr;
-			const bool localMirrorVector = node.Type == "pc.mirror_polar" && input &&
-										   input->SourceKind == "Vec2" && !record.value("sep_axis", false);
+			const bool localMirrorVector =
+				node.Type == "pc.mirror_polar" && input && input->SourceKind == "Vec2";
 			if ((record.contains("from_node") && !localMirrorVector) || record.value("global_use", false))
 				return true;
+			const auto identity = [&](const Keyframe &key) -> std::string_view {
+				const std::string_view id = key.SourceKeyId;
+				return !identityPrefix.empty() && id.starts_with(identityPrefix)
+						   ? id.substr(identityPrefix.size())
+						   : id;
+			};
+			const auto hasStorage = [&] {
+				return axisStorage ? !axisStorage->is_null() : record.contains("r");
+			};
+			const auto storage = [&]() -> Json & { return axisStorage ? *axisStorage : record["r"]; };
 			std::vector<const Keyframe *> keys;
-			for (const auto &key : document.Keyframes)
+			for (const auto &key : axis ? axis->Keys : document.Keyframes)
 				if (key.NodeId == node.Id && key.Port == port) keys.push_back(&key);
 			const bool animated =
 				std::find(node.SourceAnimatedInputs.begin(), node.SourceAnimatedInputs.end(), port) !=
 				node.SourceAnimatedInputs.end();
+			if (keys.empty() && axis) return fail("PXC empty live scalar axis reloads its constructor key");
 			if (keys.empty()) {
 				const auto value = std::find_if(node.Values.begin(), node.Values.end(), [&](const auto &v) {
 					return v.Port == port;
 				});
 				if (value == node.Values.end()) return true;
 				const Json old =
-					record.contains("r") && record["r"].is_object() ? record["r"].value("d", Json{}) : Json{};
+					hasStorage() && storage().is_object() ? storage().value("d", Json{}) : Json{};
 				auto encoded = EncodeValue(value->Data, old);
 				if (!encoded) return fail("PXC group parent has no inverse raw codec");
-				if (!record.contains("r") || !record["r"].is_object()) record["r"] = Json::object();
-				record["r"]["d"] = std::move(*encoded);
+				if (!hasStorage() || !storage().is_object()) storage() = Json::object();
+				storage()["d"] = std::move(*encoded);
 				record["anim"] = animated;
 				return true;
 			}
-			if (record.contains("r") && record["r"].is_object() &&
-				std::any_of(keys.begin(), keys.end(), [](const auto *key) {
-					return !key->SourceKeyId.empty() && key->SourceKeyId != detail::CompactSourceKeyId;
+			if (hasStorage() && storage().is_object() &&
+				std::any_of(keys.begin(), keys.end(), [&](const auto *key) {
+					return !identity(*key).empty() && identity(*key) != detail::CompactSourceKeyId;
 				}))
 				return fail("PXC source key identity does not belong to this compact archive input");
 			if (!animated && keys.size() == 1 && GetFrameTime(*keys.front()) == FrameTime{} &&
-				keys.front()->Kind == KeyframeKind::Normal && !keys.front()->SourceDriver &&
-				record.contains("r") && record["r"].is_object()) {
-				auto encoded = EncodeValue(keys.front()->Data, record["r"].value("d", Json{}));
+				keys.front()->Kind == KeyframeKind::Normal && !keys.front()->SourceDriver && hasStorage() &&
+				storage().is_object()) {
+				auto encoded = EncodeValue(keys.front()->Data, storage().value("d", Json{}));
 				if (!encoded) return fail("PXC group parent has no inverse compact codec");
-				record["r"]["d"] = std::move(*encoded);
+				storage()["d"] = std::move(*encoded);
 				record["anim"] = false;
 				return true;
 			}
-			const Json previous = record.value("r", Json{});
+			const Json previous = (hasStorage() ? storage() : Json{});
 			if (previous.is_object() && (previous.size() != 1 || !previous.contains("d")))
 				return fail("PXC group animation expansion would discard compact source fields");
 			const auto sourceTime = [](const Json &candidate) -> std::optional<FrameTime> {
@@ -862,20 +876,20 @@ namespace engine::imagegraphio {
 					return fail("PXC group key clock is not exactly representable");
 				Json old;
 				std::optional<size_t> recordIndex;
-				if (previous.is_array() && !key->SourceKeyId.empty()) {
+				if (previous.is_array() && !identity(*key).empty()) {
 					const auto found = std::lower_bound(
 						records.begin(),
 						records.end(),
-						key->SourceKeyId,
+						identity(*key),
 						[](const auto &record, std::string_view id) { return record.Identity.View() < id; }
 					);
-					if (found == records.end() || found->Identity.View() != key->SourceKeyId)
+					if (found == records.end() || found->Identity.View() != identity(*key))
 						return fail("PXC group source key identity does not belong to this archive input");
 					if (found->Consumed) return fail("PXC group source key identity is duplicated");
 					found->Consumed = true;
 					recordIndex = found->Index;
 					old = previous[*recordIndex];
-				} else if (!key->SourceKeyId.empty() && key->SourceKeyId != detail::CompactSourceKeyId)
+				} else if (!identity(*key).empty() && identity(*key) != detail::CompactSourceKeyId)
 					return fail("PXC group source key identity does not belong to this archive input");
 				if (!old.is_array())
 					old = Json::array(
@@ -903,7 +917,7 @@ namespace engine::imagegraphio {
 				old[7] = std::move(*driver);
 				expanded.push_back(std::move(old));
 			}
-			record["r"] = std::move(expanded);
+			storage() = std::move(expanded);
 			record["anim"] = animated;
 			const auto track =
 				std::find_if(document.Tracks.begin(), document.Tracks.end(), [&](const auto &t) {
@@ -1390,8 +1404,7 @@ namespace engine::imagegraphio {
 						Json *input = SourceInput(root, *source, *entry, operation.Port);
 						const auto *schema = FindCatalogueInput(*entry, operation.Port);
 						const bool localMirrorVector = node->Type == "pc.mirror_polar" && schema &&
-													   schema->SourceKind == "Vec2" && input &&
-													   !input->value("sep_axis", false);
+													   schema->SourceKind == "Vec2" && input;
 						if (!input || !input->contains("r") ||
 							(input->contains("from_node") && !localMirrorVector) ||
 							input->value("global_use", false))
@@ -2168,6 +2181,75 @@ namespace engine::imagegraphio {
 						input.Id
 					);
 		}
+		size_t axisCount = authored.Keyframes.size();
+		for (const auto &node : authored.Nodes)
+			if (node.SourceSeparatedVec2Animators) {
+				const auto &inputs = node.SourceSeparatedVec2Animators->Inputs;
+				if (inputs.size() > 5 ||
+					!Spend(
+						sizeof(SourceSeparatedVec2Data) + inputs.size() * sizeof(SourceSeparatedVec2Animator),
+						payloadBudget
+					))
+					return Reject(diagnostic, "PXC split animator count or bytes exceed limits", node.Id);
+				for (const auto &input : inputs) {
+					if (!Spend(input.Port.size(), payloadBudget))
+						return Reject(
+							diagnostic, "PXC split animator names exceed budget", node.Id, input.Port
+						);
+					for (const auto &axis : input.Axes) {
+						if (axisCount > Limits::MaximumKeyframes ||
+							axis.Keys.size() > Limits::MaximumKeyframes - axisCount ||
+							!Spend(axis.Keys.size() * sizeof(Keyframe), payloadBudget))
+							return Reject(
+								diagnostic,
+								"PXC split animator keys exceed aggregate limits",
+								node.Id,
+								input.Port
+							);
+						axisCount += axis.Keys.size();
+						for (const auto &key : axis.Keys) {
+							if (!Spend(
+									key.NodeId.size() + key.Port.size() + key.Interpolation.size() +
+										key.SourceKeyId.size(),
+									payloadBudget
+								) ||
+								!BoundedValue(key.Data, payloadBudget))
+								return Reject(
+									diagnostic,
+									"PXC split animator payload exceeds budget",
+									node.Id,
+									input.Port
+								);
+							if (key.Ease &&
+								!Spend(key.Ease->InType.size() + key.Ease->OutType.size(), payloadBudget))
+								return Reject(
+									diagnostic, "PXC split easing exceeds budget", node.Id, input.Port
+								);
+							if (key.SourceDriver &&
+								!std::visit(
+									[&](const auto &driver) {
+										using D = std::decay_t<decltype(driver)>;
+										if constexpr (std::is_same_v<D, KeyframeCurveDriver>)
+											return Bounded(driver.Data, payloadBudget);
+										else if constexpr (std::is_same_v<D, KeyframeAudioDriver>)
+											return Spend(
+												driver.SourceId.size() + driver.Metric.size(), payloadBudget
+											);
+										else
+											return Spend(sizeof(D), payloadBudget);
+									},
+									*key.SourceDriver
+								))
+								return Reject(
+									diagnostic, "PXC split driver exceeds budget", node.Id, input.Port
+								);
+						}
+					}
+				}
+			}
+		if (!Spend(axisCount * sizeof(const Keyframe *), payloadBudget))
+			return Reject(diagnostic, "PXC split provenance scratch exceeds budget");
+
 		for (const auto &group : authored.Groups) {
 			if (group.Ports.size() > Limits::MaximumGroupPorts ||
 				!Spend(group.Id.size() + group.Name.size() + group.ParentId.size(), payloadBudget))
@@ -3548,6 +3630,78 @@ namespace engine::imagegraphio {
 						return false;
 				}
 			}
+			for (const auto &old : working.Graph.Nodes)
+				if (old.SourceSeparatedVec2Animators) {
+					const auto *node = NativeNode(desired, old.Id);
+					if (!node) continue;
+					const auto *entry = FindCatalogueEntry(node->Type);
+					auto *source = SourceNode(root, node->Id);
+					if (!entry || !source) continue;
+					for (const auto &input : old.SourceSeparatedVec2Animators->Inputs) {
+						const bool retained = node->SourceSeparatedVec2Animators &&
+											  std::any_of(
+												  node->SourceSeparatedVec2Animators->Inputs.begin(),
+												  node->SourceSeparatedVec2Animators->Inputs.end(),
+												  [&](const auto &i) { return i.Port == input.Port; }
+											  );
+						if (retained) continue;
+						auto *record = SourceInput(root, *source, *entry, input.Port);
+						if (!record)
+							return Reject(
+								diagnostic,
+								"PXC disabled split animator lost its physical input",
+								node->Id,
+								input.Port
+							);
+						(*record)["sep_axis"] = false;
+					}
+				}
+
+			for (const auto &node : desired.Nodes) {
+				if (!node.SourceSeparatedVec2Animators) continue;
+				const auto *entry = FindCatalogueEntry(node.Type);
+				auto *source = SourceNode(root, node.Id);
+				if (!entry || !source)
+					return Reject(diagnostic, "PXC separated animator has no source node", node.Id);
+				const auto *previousNode = NativeNode(working.Graph, node.Id);
+				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+					const SourceSeparatedVec2Animator *before = nullptr;
+					if (previousNode && previousNode->SourceSeparatedVec2Animators)
+						for (const auto &candidate : previousNode->SourceSeparatedVec2Animators->Inputs)
+							if (candidate.Port == input.Port) before = &candidate;
+					auto *record = SourceInput(root, *source, *entry, input.Port);
+					if (!record)
+						return Reject(
+							diagnostic, "PXC separated animator has no physical input", node.Id, input.Port
+						);
+					(*record)["sep_axis"] = true;
+					if (before && *before == input) continue;
+					if (!record->contains("animators")) (*record)["animators"] = Json::array();
+					auto &saved = (*record)["animators"];
+					if (!saved.is_array())
+						return Reject(
+							diagnostic, "PXC separated animator storage is malformed", node.Id, input.Port
+						);
+					for (size_t axis = 0; axis < 2; ++axis) {
+						if (before && before->Axes[axis] == input.Axes[axis]) continue;
+						while (saved.size() <= axis)
+							saved.push_back(Json::array());
+						const std::string_view prefix = axis == 0 ? "animators/0/" : "animators/1/";
+						if (!AuthoredKeyRecord(
+								desired,
+								node,
+								input.Port,
+								*record,
+								diagnostic,
+								&input.Axes[axis],
+								&saved[axis],
+								prefix
+							))
+							return false;
+					}
+				}
+			}
+
 			const auto boundaryPort = [&](
 										  const Document &document, std::string_view junction
 									  ) -> std::pair<const Group *, const GroupPort *> {

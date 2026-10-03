@@ -1,6 +1,7 @@
 #include "EvaluationAllocator.hpp"
 #include "GroupReplayInternal.hpp"
 #include "SourceAnimatorIdentity.hpp"
+#include "SourceSeparatedVec2.hpp"
 #include "TimelineOverrides.hpp"
 #include "ValuePayload.hpp"
 
@@ -228,6 +229,137 @@ namespace engine::imagegraph {
 		addedModes.push_back(std::string(transition.Port));
 		std::erase(removedModes, transition.Port);
 		if (owner == target) ownerAnimated = transition.Animated;
+		if (const auto *separated = detail::FindSeparatedVec2(*owner, animatorPort)) {
+			if (detached)
+				return fail(
+					Status::UnsupportedExecution, "fixed Mirror axes cannot have a detached dynamic animator"
+				);
+			size_t aggregate = candidate.Keyframes.size();
+			for (const auto &node : candidate.Nodes)
+				if (node.SourceSeparatedVec2Animators)
+					for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
+						for (const auto &axis : input.Axes)
+							aggregate += axis.Keys.size();
+			uint64_t required = sizeof(SourceSeparatedVec2Animator) + TextBytes(animatorPort);
+			for (const auto &axis : separated->Axes) {
+				if (transition.Animated) {
+					if (axis.Keys.empty())
+						return fail(
+							Status::UnsupportedExecution, "source split enable has no first key to retime"
+						);
+					if (aggregate == Limits::MaximumKeyframes)
+						return fail(Status::LimitExceeded, "source split mode keys exceed aggregate bound");
+					++aggregate;
+					const auto bytes = detail::SeparatedScalarBytes(axis, false);
+					if (!bytes || !AddTransitionBytes(required, *bytes))
+						return fail(Status::LimitExceeded, "source split mode snapshot exceeds bounds");
+				} else
+					aggregate = aggregate - axis.Keys.size() + 1;
+				if (!AddTransitionBytes(
+						required,
+						sizeof(Keyframe) + TextBytes(ownerId) + TextBytes(animatorPort) +
+							TextBytes("source") + 2 * TextBytes("linear")
+					))
+					return fail(Status::LimitExceeded, "source split mode key allocation overflows");
+			}
+			if (aggregate > Limits::MaximumKeyframes)
+				return fail(Status::LimitExceeded, "source split mode keys exceed aggregate bound");
+			auto keysCharge = budget.Reserve(required);
+			if (!keysCharge)
+				return fail(Status::LimitExceeded, "source split mode replacement exceeds live budget");
+			EvaluationRequest at;
+			if (!SetFrameTime(at, transition.Time))
+				return fail(Status::InvalidValue, "source split mode clock is invalid");
+			const auto track =
+				std::find_if(candidate.Tracks.begin(), candidate.Tracks.end(), [&](const auto &t) {
+					return t.NodeId == ownerId && t.Port == animatorPort;
+				});
+			std::array<double, 2> samples{};
+			for (size_t index = 0; index < 2; ++index) {
+				status = detail::SampleSeparatedScalar(
+					separated->Axes[index],
+					track == candidate.Tracks.end() ? nullptr : &*track,
+					candidate.Timeline ? &*candidate.Timeline : nullptr,
+					at,
+					true,
+					ownerAnimated,
+					budget,
+					samples[index],
+					diagnostic
+				);
+				if (status != Status::Ok) return status;
+			}
+			SourceSeparatedVec2Animator replacement;
+			replacement.Port = std::string(animatorPort);
+			for (size_t index = 0; index < 2; ++index) {
+				auto &keys = replacement.Axes[index].Keys;
+				const auto &old = separated->Axes[index].Keys;
+				keys.reserve(transition.Animated ? old.size() + 1 : 1);
+				if (transition.Animated)
+					for (const auto &key : old)
+						keys.push_back(key);
+				Keyframe added{
+					std::string(ownerId),
+					std::string(animatorPort),
+					0,
+					samples[index],
+					"source",
+					KeyframeEase{}
+				};
+				if (transition.Animated && !SetFrameTime(added, transition.Time))
+					return fail(Status::InvalidValue, "source split append clock is invalid");
+				keys.push_back(std::move(added));
+				if (transition.Animated && !SetFrameTime(keys.front(), transition.Time))
+					return fail(Status::InvalidValue, "source split retime clock is invalid");
+			}
+			for (auto &input : owner->SourceSeparatedVec2Animators->Inputs)
+				if (input.Port == animatorPort) {
+					input = std::move(replacement);
+					break;
+				}
+			candidate.FormatVersion = 9;
+			if (!DocumentRetainedPayloadBytes(candidate))
+				return fail(Status::LimitExceeded, "source split mode retained candidate exceeds bounds");
+			if (replayResult) {
+				auto next = detail::CloneGroupReplay(
+					replay,
+					0,
+					authoringRevision,
+					budget.Available() + replay.RetainedBytes() + priorReplayBytes,
+					priorReplayBytes,
+					diagnostic
+				);
+				if (!next) return diagnostic.Code;
+				uint64_t retired = 0;
+				for (auto it = next->SharedSubtypes.begin(); it != next->SharedSubtypes.end();) {
+					if (it->NodeId != ownerId || it->Port != animatorPort) {
+						++it;
+						continue;
+					}
+					retired += TextBytes(it->NodeId) + TextBytes(it->Port) +
+							   it->Keys.capacity() * sizeof(Keyframe) + detail::SeparatedOverlayBytes(*it);
+					if (it->Fixed) retired += detail::RetainedPayloadBytes(*it->Fixed);
+					for (const auto &key : it->Keys)
+						retired += *KeyframePayloadBytes(key) - sizeof(Keyframe);
+					it = next->SharedSubtypes.erase(it);
+				}
+				if (!next->Charge.Resize(next->Charge.Bytes() - retired)) std::terminate();
+				for (auto &binding : next->Bindings) {
+					if (binding.NodeId == transition.NodeId && binding.Port == transition.Port)
+						binding.Getter = transition.Animated ? GroupSubtypeAnimator::Animated
+															 : GroupSubtypeAnimator::Static;
+					if (owner == target && binding.OwnerId == ownerId &&
+						detail::BindingAnimatorPort(binding) == animatorPort)
+						binding.Writer = transition.Animated ? GroupSubtypeAnimator::Animated
+															 : GroupSubtypeAnimator::Static;
+				}
+				detail::GroupReplayAccess::Install(*replayResult, std::move(next));
+			}
+			result = std::move(candidate);
+			diagnostic = {};
+			return Status::Ok;
+		}
+
 		const auto *detachedEffect = detached ? replay.SharedSubtype(ownerId, animatorPort) : nullptr;
 		if (detached && !detachedEffect)
 			return fail(Status::InvalidValue, "retained source animator effect is absent");
@@ -516,6 +648,7 @@ namespace engine::imagegraph {
 				retiredBytes +=
 					TextBytes(it->NodeId) + TextBytes(it->Port) + it->Keys.capacity() * sizeof(Keyframe);
 				if (it->Fixed) retiredBytes += detail::RetainedPayloadBytes(*it->Fixed);
+				retiredBytes += detail::SeparatedOverlayBytes(*it);
 				for (const auto &key : it->Keys)
 					retiredBytes += *KeyframePayloadBytes(key) - sizeof(Keyframe);
 				it = next->SharedSubtypes.erase(it);

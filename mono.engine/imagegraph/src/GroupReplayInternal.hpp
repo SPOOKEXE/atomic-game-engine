@@ -3,6 +3,7 @@
 #include "EvaluationBudget.hpp"
 #include "NodeExecutors.hpp"
 #include "SourceAnimatorIdentity.hpp"
+#include "SourceSeparatedVec2.hpp"
 
 #include <engine/imagegraph/GroupReplay.hpp>
 
@@ -60,6 +61,11 @@ namespace engine::imagegraph {
 			if (value.Track)
 				bytes += text(value.Track->NodeId) + text(value.Track->Port) + text(value.Track->End);
 			return bytes;
+		}
+		inline uint64_t SeparatedOverlayBytes(const GroupSubtypeOverlay &overlay) {
+			return overlay.SeparatedVec2
+					   ? SeparatedAnimatorBytes(*overlay.SeparatedVec2, true).value_or(UINT64_MAX)
+					   : 0;
 		}
 		std::unique_ptr<GroupReplayAccess::Owner> CloneGroupReplay(
 			const GroupReplayState &previous,

@@ -55,7 +55,14 @@ namespace engine::imagegraphio::detail {
 				   std::tie(b.NodeId, b.Port, b.NegativeFrame, b.Tick, b.Subframe, b.Kind);
 		};
 		std::vector<const imagegraph::Keyframe *> index;
-		index.reserve(saved.Keyframes.size());
+		size_t count = saved.Keyframes.size();
+		for (const auto &node : saved.Nodes)
+			if (node.SourceSeparatedVec2Animators)
+				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
+					for (const auto &axis : input.Axes)
+						count += axis.Keys.size();
+		if (count > imagegraph::Limits::MaximumKeyframes) return;
+		index.reserve(count);
 		for (const auto &key : saved.Keyframes)
 			index.push_back(&key);
 		std::sort(index.begin(), index.end(), [&](const auto *a, const auto *b) { return before(*a, *b); });
@@ -67,5 +74,29 @@ namespace engine::imagegraphio::detail {
 			);
 			if (found != index.end() && !before(key, **found)) key.SourceKeyId = (*found)->SourceKeyId;
 		}
+		for (auto &node : comparison.Nodes)
+			if (node.SourceSeparatedVec2Animators) {
+				const auto source = std::find_if(saved.Nodes.begin(), saved.Nodes.end(), [&](const auto &n) {
+					return n.Id == node.Id;
+				});
+				if (source == saved.Nodes.end() || !source->SourceSeparatedVec2Animators) continue;
+				for (auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+					const auto physical = std::find_if(
+						source->SourceSeparatedVec2Animators->Inputs.begin(),
+						source->SourceSeparatedVec2Animators->Inputs.end(),
+						[&](const auto &i) { return i.Port == input.Port; }
+					);
+					if (physical == source->SourceSeparatedVec2Animators->Inputs.end()) continue;
+					for (size_t axis = 0; axis < 2; ++axis) {
+						auto &keys = input.Axes[axis].Keys;
+						const auto &savedKeys = physical->Axes[axis].Keys;
+						if (keys.size() != savedKeys.size()) continue;
+						for (size_t i = 0; i < keys.size(); ++i)
+							if (imagegraph::GetFrameTime(keys[i]) == imagegraph::GetFrameTime(savedKeys[i]) &&
+								keys[i].Kind == savedKeys[i].Kind)
+								keys[i].SourceKeyId = savedKeys[i].SourceKeyId;
+					}
+				}
+			}
 	}
 }

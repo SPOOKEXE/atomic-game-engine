@@ -1,6 +1,7 @@
 #include "PixelBuilderPayload.hpp"
 #include "SourceInputOrigin.hpp"
 #include "SourcePathShiftMemo.hpp"
+#include "SourceSeparatedVec2.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/FrameTime.hpp>
@@ -35,6 +36,10 @@ namespace engine::imagegraph {
 			for (const auto &input : node.DynamicInputs)
 				if (input.Default && !detail::ValidPixelBuilderRecordingValue(*input.Default))
 					return Status::InvalidValue;
+			size_t axisKeys = 0;
+			Diagnostic axesDiagnostic;
+			const Status axesStatus = detail::ValidateSeparatedVec2(node, axisKeys, axesDiagnostic);
+			if (axesStatus != Status::Ok) return axesStatus;
 			return std::isfinite(node.Position.X) && std::isfinite(node.Position.Y) ? Status::Ok
 																					: Status::InvalidValue;
 		}
@@ -57,6 +62,11 @@ namespace engine::imagegraph {
 				!add(capture.InputImages.capacity() * sizeof(SourceBuiltinRandomInputImage)))
 				return std::nullopt;
 			const auto &node = capture.Authored;
+			const auto axisClone = detail::SeparatedVec2Bytes(node, false);
+			const auto axisRetained = detail::SeparatedVec2Bytes(node, true);
+			if (!axisClone || !axisRetained ||
+				(*axisRetained > *axisClone && !add(*axisRetained - *axisClone)))
+				return std::nullopt;
 			const auto slack = [&](const auto &items) {
 				return add(
 					(items.capacity() - items.size()) *

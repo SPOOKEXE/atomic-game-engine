@@ -180,11 +180,11 @@ namespace client {
 		bool NeedsFrameSamples(const engine::imagegraph::Document &document) {
 			if (!document.Keyframes.empty()) return true;
 			return std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
-				return !node.SourceAnimatedInputs.empty() || node.Type == "image.audio_window" ||
-					   node.Type == "image.audio_recording" || node.Type == "image.captured" ||
-					   node.Type == "pc.audio_window" || node.Type == "pc.audio_loudness" ||
-					   node.Type == "pc.interlaced" || node.Type == "pc.sequence_anim" ||
-					   node.Type == "pc.cache_array" ||
+				return bool(node.SourceSeparatedVec2Animators) || !node.SourceAnimatedInputs.empty() ||
+					   node.Type == "image.audio_window" || node.Type == "image.audio_recording" ||
+					   node.Type == "image.captured" || node.Type == "pc.audio_window" ||
+					   node.Type == "pc.audio_loudness" || node.Type == "pc.interlaced" ||
+					   node.Type == "pc.sequence_anim" || node.Type == "pc.cache_array" ||
 					   (node.Type == "pc.cache" &&
 						(std::any_of(
 							 node.Values.begin(),

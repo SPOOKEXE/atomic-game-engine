@@ -1,3 +1,4 @@
+#include "SourceSeparatedVec2.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
@@ -70,6 +71,8 @@ namespace engine::imagegraph {
 				if (!size || !add(*size - sizeof(Value))) return std::nullopt;
 			}
 		}
+		const auto axes = detail::SeparatedVec2Bytes(node, false);
+		if (!axes || !add(*axes)) return std::nullopt;
 		return bytes;
 	}
 	std::optional<uint64_t> DocumentRetainedPayloadBytes(const Document &document) {
@@ -109,7 +112,13 @@ namespace engine::imagegraph {
 			if (!text(action.NodeId) || !ValidFrameTime(action.Time) ||
 				action.WorkPixels > Limits::MaximumArrayElements)
 				return std::nullopt;
+		size_t aggregateKeys = document.Keyframes.size();
+		Diagnostic axesDiagnostic;
 		for (const auto &node : document.Nodes) {
+			if (detail::ValidateSeparatedVec2(node, aggregateKeys, axesDiagnostic) != Status::Ok)
+				return std::nullopt;
+			const auto axes = detail::SeparatedVec2Bytes(node, true);
+			if (!axes || !add(*axes)) return std::nullopt;
 			if (node.DynamicOutputs.size() > Limits::MaximumDynamicOutputsPerNode) return std::nullopt;
 			if (node.Values.size() > Limits::MaximumArrayElements ||
 				node.SourceProperties.size() > Limits::MaximumPropertiesPerNode ||
