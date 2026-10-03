@@ -2665,6 +2665,12 @@
         "name": "AGENTS.md (engine/audio)",
         "uri": "atomic://agents/engine/audio"
       },
+      "atomic://agents/engine/audiocodec": {
+        "description": "The invariants specific to engine/audiocodec. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/audiocodec)",
+        "uri": "atomic://agents/engine/audiocodec"
+      },
       "atomic://agents/engine/bake": {
         "description": "The invariants specific to engine/bake. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -2743,11 +2749,23 @@
         "name": "AGENTS.md (engine/imagegraph)",
         "uri": "atomic://agents/engine/imagegraph"
       },
+      "atomic://agents/engine/imagegraphexport": {
+        "description": "The invariants specific to engine/imagegraphexport. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphexport)",
+        "uri": "atomic://agents/engine/imagegraphexport"
+      },
       "atomic://agents/engine/imagegraphio": {
         "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
         "name": "AGENTS.md (engine/imagegraphio)",
         "uri": "atomic://agents/engine/imagegraphio"
+      },
+      "atomic://agents/engine/imagegraphphysics": {
+        "description": "The invariants specific to engine/imagegraphphysics. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphphysics)",
+        "uri": "atomic://agents/engine/imagegraphphysics"
       },
       "atomic://agents/engine/input": {
         "description": "The invariants specific to engine/input. AGENTS.md rule: read this before changing anything in it.",
@@ -6105,6 +6123,12 @@
         "name": "AGENTS.md (engine/audio)",
         "uri": "atomic://agents/engine/audio"
       },
+      "atomic://agents/engine/audiocodec": {
+        "description": "The invariants specific to engine/audiocodec. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/audiocodec)",
+        "uri": "atomic://agents/engine/audiocodec"
+      },
       "atomic://agents/engine/bake": {
         "description": "The invariants specific to engine/bake. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -6183,11 +6207,23 @@
         "name": "AGENTS.md (engine/imagegraph)",
         "uri": "atomic://agents/engine/imagegraph"
       },
+      "atomic://agents/engine/imagegraphexport": {
+        "description": "The invariants specific to engine/imagegraphexport. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphexport)",
+        "uri": "atomic://agents/engine/imagegraphexport"
+      },
       "atomic://agents/engine/imagegraphio": {
         "description": "The invariants specific to engine/imagegraphio. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
         "name": "AGENTS.md (engine/imagegraphio)",
         "uri": "atomic://agents/engine/imagegraphio"
+      },
+      "atomic://agents/engine/imagegraphphysics": {
+        "description": "The invariants specific to engine/imagegraphphysics. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphphysics)",
+        "uri": "atomic://agents/engine/imagegraphphysics"
       },
       "atomic://agents/engine/input": {
         "description": "The invariants specific to engine/input. AGENTS.md rule: read this before changing anything in it.",
