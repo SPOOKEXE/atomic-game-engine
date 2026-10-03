@@ -102,6 +102,8 @@ namespace studio {
 			bool negativeFrame = false,
 			uint8_t rigidObservation = 0
 		);
+		// Invalidates one derived output across retained frames, preserving unrelated previews.
+		void InvalidateOutput(size_t outputIndex);
 		void Clear();
 		size_t HeldBytes() const;
 

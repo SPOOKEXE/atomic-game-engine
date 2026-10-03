@@ -619,6 +619,10 @@ namespace studio {
 		}
 	}
 
+	void ImageGraphPreviewCache::InvalidateOutput(size_t outputIndex) {
+		std::erase_if(Entries, [&](const Entry &entry) { return entry.OutputIndex == outputIndex; });
+	}
+
 	void ImageGraphPreviewCache::Clear() {
 		Entries.clear();
 		UseSerial = 0;
@@ -2739,9 +2743,15 @@ namespace studio {
 		if (node == nullptr) return fail(engine::imagegraph::Status::UnknownNode, "node does not exist");
 		const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(node->Type);
 		if (schema == nullptr) return fail(engine::imagegraph::Status::UnknownNode, "node type is unknown");
-		if (std::none_of(schema->Properties.begin(), schema->Properties.end(), [&](const auto &entry) {
-				return entry.Id == property;
-			}))
+		if (std::none_of(
+				schema->Properties.begin(),
+				schema->Properties.end(),
+				[&](const auto &entry) { return entry.Id == property; }
+			) &&
+			(!schema->DynamicInputs ||
+			 std::none_of(node->DynamicInputs.begin(), node->DynamicInputs.end(), [&](const auto &entry) {
+				 return entry.Id == property;
+			 })))
 			return fail(engine::imagegraph::Status::UnknownPort, "property is not declared");
 		if (end != "hold" && end != "loop" && end != "ping" && end != "wrap")
 			return fail(engine::imagegraph::Status::InvalidValue, "unsupported animation track end policy");

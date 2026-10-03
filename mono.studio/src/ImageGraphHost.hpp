@@ -127,7 +127,9 @@ namespace studio::detail {
 			std::string &failure
 		) override try {
 			using namespace engine::imagegraph;
-			if (invocation.Authored.Type == "pc.hlsl") {
+			if (invocation.Authored.Type == "pc.hlsl" ||
+				(invocation.Authored.Type == "pc.3_d_transform_image" ||
+				 invocation.Authored.Type == "image.transform_3d")) {
 				if (!Composer) {
 					failure = "Studio renderer owner is unavailable";
 					return false;

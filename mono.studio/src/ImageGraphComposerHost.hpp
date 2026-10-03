@@ -33,6 +33,24 @@ namespace studio::detail {
 				failure = "Composer shader evaluation requires an active world owner";
 				return false;
 			}
+			if ((invocation.Authored.Type == "pc.3_d_transform_image" ||
+				 invocation.Authored.Type == "image.transform_3d")) {
+				const core::Name name("studio.image-composer/" + invocation.Authored.Id);
+				if (CaptureNames &&
+					std::find(CaptureNames->begin(), CaptureNames->end(), name) == CaptureNames->end()) {
+					if (CaptureNames->size() >= 16) {
+						failure = "Transform preview exceeds capture limit";
+						return false;
+					}
+					CaptureNames->push_back(name);
+				}
+				bool pending = false;
+				const bool captured =
+					Renderer.CaptureTransformImage3DAsync(invocation, Owner, name, output, failure, &pending);
+				Pending = Pending || pending;
+				HavePendingJobs = HavePendingJobs || pending;
+				return captured;
+			}
 			if (invocation.Authored.Type != "pc.hlsl") {
 				failure = "Composer renderer host accepts HLSL nodes only";
 				return false;

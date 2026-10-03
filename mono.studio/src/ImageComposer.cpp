@@ -1,7 +1,9 @@
+#include "AnimationTrackPolicyEditor.hpp"
 #include "AudioWindowPanel.hpp"
 #include "ImageComposerInternal.hpp"
 #include "ImageGraphAnimationControl.hpp"
 #include "ImageGraphArrayEditor.hpp"
+#include "ImageGraphCacheClearAction.hpp"
 #include "ImageGraphCanvasInputs.hpp"
 #include "ImageGraphChoices.hpp"
 #include "ImageGraphComposerCadence.hpp"
@@ -22,6 +24,7 @@
 #include "ImageGraphSourceEdit.hpp"
 #include "KeyframeKindEditor.hpp"
 #include "TimelineDopesheet.hpp"
+#include "TimelineEaseEditor.hpp"
 #include "TimelineKeyEditor.hpp"
 #include "Vector2Panel.hpp"
 #include "WavExport.hpp"
@@ -145,6 +148,7 @@ namespace studio {
 			ImageGraphPlayback Playback;
 			KeyframeKindEditor KeyKind;
 			TimelineKeyEditor Keys;
+			TimelineEaseEditor EaseKeys;
 			TimelineDopesheet Dopesheet;
 			uint8_t TextureSlot = 1;
 			engine::imagegraph::PortDirection GroupPortDirection = engine::imagegraph::PortDirection::Input;
@@ -2430,6 +2434,8 @@ namespace studio {
 			}
 		}
 
+		void DrawAnimationTrackControls(State &state, const Node &node, std::string_view property);
+
 		void DrawDynamicInputs(State &state, Node &node, const engine::imagegraph::NodeSchema &schema) {
 			if (!schema.DynamicInputs) return;
 			ImGui::Separator();
@@ -2618,6 +2624,13 @@ namespace studio {
 					ImGui::PopID();
 					return;
 				}
+				const uint64_t trackRevision = state.DocumentRevision;
+				if (input.Default && FindValue(node, input.Id) == nullptr)
+					DrawAnimationTrackControls(state, node, input.Id);
+				if (state.DocumentRevision != trackRevision) {
+					ImGui::PopID();
+					return;
+				}
 				ImGui::SameLine();
 				ImGui::BeginDisabled(grouped || node.DynamicInputs.size() <= 1);
 				const bool remove = ImGui::SmallButton("Remove");
@@ -2778,92 +2791,11 @@ namespace studio {
 		}
 
 		void DrawAnimationTrackControls(State &state, const Node &node, std::string_view property) {
-			const size_t keyCount = static_cast<size_t>(std::count_if(
-				state.Authored.Keyframes.begin(),
-				state.Authored.Keyframes.end(),
-				[&](const Keyframe &keyframe) {
-					return keyframe.NodeId == node.Id && keyframe.Port == property;
-				}
-			));
-			if (keyCount == 0) return;
-
-			const auto track = std::find_if(
-				state.Authored.Tracks.begin(), state.Authored.Tracks.end(), [&](const auto &candidate) {
-					return candidate.NodeId == node.Id && candidate.Port == property;
+			detail::DrawAnimationTrackPolicy(
+				state.Authored, node, property, state.LastDiagnostic, [&](const auto &edit) {
+					return ApplyDocumentEdit(state, edit);
 				}
 			);
-			const bool hasTrack = track != state.Authored.Tracks.end();
-			const auto quaternionMode = hasTrack ? track->QuaternionMode : std::optional<int64_t>{};
-			std::string end = hasTrack ? track->End : "hold";
-			int64_t loopRange = hasTrack ? track->LoopRange : -1;
-			const std::string section = "Animation (" + std::to_string(keyCount) + " keys)";
-			if (!ImGui::TreeNode(section.c_str())) return;
-
-			bool policyChanged = false;
-			if (ImGui::BeginCombo("End", end.c_str())) {
-				for (const char *choice : {"hold", "loop", "ping", "wrap"}) {
-					const bool selected = end == choice;
-					if (ImGui::Selectable(choice, selected)) {
-						end = choice;
-						policyChanged = true;
-					}
-					if (selected) ImGui::SetItemDefaultFocus();
-				}
-				ImGui::EndCombo();
-			}
-			ImGui::SetNextItemWidth(120.0f);
-			if (ImGui::InputScalar("Loop tail (-1 = all)", ImGuiDataType_S64, &loopRange)) {
-				loopRange = std::clamp(loopRange, int64_t{-1}, static_cast<int64_t>(keyCount) - 1);
-				policyChanged = true;
-			}
-
-			const std::string nodeId = node.Id;
-			const std::string propertyId(property);
-			const bool quaternionKeys = std::any_of(
-				state.Authored.Keyframes.begin(), state.Authored.Keyframes.end(), [&](const auto &key) {
-					return key.NodeId == nodeId && key.Port == propertyId &&
-						   std::holds_alternative<engine::imagegraph::Quaternion>(key.Data);
-				}
-			);
-			if (quaternionKeys) {
-				static constexpr const char *modes[]{"Unspecified", "Raw", "Euler degrees"};
-				const int selected = quaternionMode ? static_cast<int>(*quaternionMode) + 1 : 0;
-				if (ImGui::BeginCombo("Quaternion", modes[std::clamp(selected, 0, 2)])) {
-					for (int choice = 0; choice < 3; choice++) {
-						if (ImGui::Selectable(modes[choice], choice == selected)) {
-							ApplyDocumentEdit(state, [&](Document &document) {
-								SetImageGraphTrackQuaternionMode(
-									document,
-									nodeId,
-									propertyId,
-									choice == 0 ? std::nullopt : std::optional<int64_t>{choice - 1},
-									state.LastDiagnostic
-								);
-							});
-						}
-					}
-					ImGui::EndCombo();
-				}
-			}
-			const auto savePolicy = [&] {
-				ApplyDocumentEdit(state, [&](Document &document) {
-					if (SetImageGraphAnimationTrack(
-							document, nodeId, propertyId, end, loopRange, state.LastDiagnostic
-						))
-						state.LastDiagnostic = {};
-				});
-			};
-			if (hasTrack && policyChanged) savePolicy();
-			if (!hasTrack) {
-				ImGui::TextDisabled("No track override. Preview holds the final keyed value.");
-				if (ImGui::SmallButton("Add track policy")) savePolicy();
-			} else if (ImGui::SmallButton("Remove track policy")) {
-				ApplyDocumentEdit(state, [&](Document &document) {
-					if (RemoveImageGraphAnimationTrack(document, nodeId, propertyId, state.LastDiagnostic))
-						state.LastDiagnostic = {};
-				});
-			}
-			ImGui::TreePop();
 		}
 
 		void DrawFileGrants(State &state, std::string_view nodeId) {
@@ -3435,6 +3367,22 @@ namespace studio {
 				if (!node) return;
 				schema = engine::imagegraph::FindSchema(node->Type);
 				if (!schema) return;
+			}
+			if (node->Type == "pc.cache_results" && ImGui::Button("Clear cache")) {
+				engine::imagegraph::Plan plan;
+				if (engine::imagegraph::Compile(state.Authored, plan, state.LastDiagnostic) == Status::Ok &&
+					detail::ApplyImageGraphCacheResultsClear(
+						state.Authored,
+						plan,
+						state.FeedbackHost,
+						state.PreviewCache,
+						nodeId,
+						SelectedNodeId(state),
+						state.DocumentRevision,
+						state.EvaluationInputRevision,
+						state.LastDiagnostic
+					))
+					RequestPreview(state, true);
 			}
 			if (node->Type == "pc.verlet_sim_mesh_cache" && ImGui::Button("Cache Mesh")) {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
@@ -4632,6 +4580,19 @@ namespace studio {
 				if (accepted || unchanged) state.Keys.PublishCommit();
 				return accepted || unchanged;
 			});
+			state.EaseKeys.Draw(
+				state.Authored, state.DocumentRevision, state.Keys, state.LastDiagnostic, [&] {
+					bool unchanged = false;
+					const bool accepted = ApplyDocumentEdit(
+						state,
+						[&](Document &document) {
+							return state.EaseKeys.PrepareCommit(document, state.LastDiagnostic);
+						},
+						&unchanged
+					);
+					return accepted || unchanged;
+				}
+			);
 			if (ImGui::BeginTable("##keyframes", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
 				ImGui::TableSetupColumn("Property");
 				ImGui::TableSetupColumn("Frame");
