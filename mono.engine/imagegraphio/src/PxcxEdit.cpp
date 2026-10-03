@@ -1742,6 +1742,73 @@ namespace engine::imagegraphio {
 			input.erase("from_index");
 			input.erase("from_tag");
 		};
+		const auto wholeEndpoint = [](const Json &value, int64_t &out) {
+			if (!value.is_number_integer() ||
+				(value.is_number_unsigned() && value.get<uint64_t>() > uint64_t(INT64_MAX)))
+				return false;
+			out = value.get<int64_t>();
+			return true;
+		};
+		// Source input bypasses use the physical input ordinal, so whole-record edits move their edges.
+		const auto moveBypasses = [&](std::string_view producer,
+									  size_t oldCount,
+									  size_t offset,
+									  size_t amount,
+									  bool insert) {
+			ENGINE_PROFILE("imagegraphio.structural_bypass_edges");
+			// Admit both container walks and the complete input walk before touching any endpoint.
+			const size_t containers = root["nodes"].size() + 2;
+			if (!Spend(containers, work))
+				return Reject(diagnostic, "PXC dynamic bypass retargeting exceeds transaction work limit");
+			const auto visitContainers = [&](const auto &visit) {
+				for (auto &node : root["nodes"])
+					if (!visit(node)) return false;
+				for (const auto *key : {"global_node", "global"}) {
+					const auto global = root.find(key);
+					if (global != root.end() && !visit(*global)) return false;
+				}
+				return true;
+			};
+			size_t visits = containers;
+			if (visits > work || !visitContainers([&](const Json &node) {
+					const auto inputs = node.find("inputs");
+					if (inputs == node.end() || !inputs->is_array()) return true;
+					if (inputs->size() > work - visits) return false;
+					visits += inputs->size();
+					return true;
+				}) ||
+				!Spend(visits, work))
+				return Reject(diagnostic, "PXC dynamic bypass retargeting exceeds transaction work limit");
+			core::Metrics::Count("imagegraphio.structural_bypass_input_visits", visits - containers);
+			return visitContainers([&](Json &node) {
+				auto inputs = node.find("inputs");
+				if (inputs == node.end() || !inputs->is_array()) return true;
+				for (auto &record : *inputs) {
+					const auto from = record.find("from_node");
+					if (from == record.end() || !from->is_string() ||
+						from->get_ref<const std::string &>() != producer)
+						continue;
+					int64_t index = 0, tag = 0;
+					const auto ordinal = record.find("from_index");
+					const auto tagged = record.find("from_tag");
+					if (ordinal == record.end() || !wholeEndpoint(*ordinal, index) || index < 0 ||
+						index > UINT32_MAX || (tagged != record.end() && !wholeEndpoint(*tagged, tag)))
+						return Reject(diagnostic, "PXC dynamic bypass endpoint is malformed");
+					// These source tags select their own endpoint before the ordinary index branch.
+					if (index < 1000 || tag == -2 || tag == -3 || tag == -4) continue;
+					const size_t physical = size_t(index - 1000);
+					if (physical >= oldCount)
+						return Reject(diagnostic, "PXC dynamic bypass source input is missing");
+					if (physical < offset) continue;
+					if (!insert && physical - offset < amount)
+						disconnect(record);
+					else
+						record["from_index"] =
+							uint32_t(1000 + (insert ? physical + amount : physical - amount));
+				}
+				return true;
+			});
+		};
 		try {
 			for (const auto &edit : edits) {
 				if (!Spend(root["nodes"].size(), work))
@@ -1882,8 +1949,17 @@ namespace engine::imagegraphio {
 									return Reject(diagnostic, "PXC link source identity is invalid");
 								const Json *producer = SourceNode(root, operation.From->NodeId);
 								if (!producer) return Reject(diagnostic, "PXC link source node is missing");
-								if (const auto *entry = FindCatalogueSource(producer->value("type", ""));
-									entry &&
+								const auto *producerEntry = FindCatalogueSource(producer->value("type", ""));
+								const auto tag = operation.From->Tag.value_or(0);
+								const bool bypass = producerEntry && operation.From->OutputIndex >= 1000 &&
+													tag != -2 && tag != -3 && tag != -4;
+								if (bypass &&
+									(!producer->contains("inputs") || !(*producer)["inputs"].is_array() ||
+									 operation.From->OutputIndex - 1000 >= (*producer)["inputs"].size() ||
+									 !(*producer)["inputs"][operation.From->OutputIndex - 1000].is_object()))
+									return Reject(diagnostic, "PXC link bypass source input is missing");
+								if (const auto *entry = producerEntry;
+									entry && !bypass &&
 									!(entry->SourceNode == "Node_Array_Split" &&
 									  producer->contains("attri") && (*producer)["attri"].is_object() &&
 									  (*producer)["attri"].contains("output_amount") &&
@@ -1950,11 +2026,23 @@ namespace engine::imagegraphio {
 											diagnostic,
 											"PXC inserted dynamic groups are invalid or exceed limits"
 										);
+									if (!moveBypasses(
+											operation.NodeId, inputs.size(), offset, records->size(), true
+										))
+										return false;
 									inputs.insert(inputs.begin() + offset, records->begin(), records->end());
 								} else {
 									if (!operation.GroupCount ||
 										operation.GroupCount > groups - operation.GroupIndex)
 										return Reject(diagnostic, "PXC dynamic deletion range is invalid");
+									if (!moveBypasses(
+											operation.NodeId,
+											inputs.size(),
+											offset,
+											size_t(operation.GroupCount) * stride,
+											false
+										))
+										return false;
 									inputs.erase(
 										inputs.begin() + offset,
 										inputs.begin() + offset + size_t(operation.GroupCount) * stride
@@ -2801,7 +2889,43 @@ namespace engine::imagegraphio {
 								return old == value;
 							}))
 							continue;
-						if ((node.Type == "pc.dotted" &&
+						if (node.Type == "pc.stripe" && value.Port == "colors_mapped") {
+							const auto *gradientInput = FindCatalogueInput(*entry, "colors");
+							const auto *mapped = std::get_if<bool>(&value.Data);
+							if (!mapped || !gradientInput || gradientInput->SourceIndex != 7 ||
+								gradientInput->SourceKind != "Gradient" || inputs.size() <= 7)
+								return Reject(
+									diagnostic,
+									"PXC Stripe gradient toggle has no source slot",
+									node.Id,
+									value.Port
+								);
+							Json &record = inputs[7];
+							if (!record.is_object() || record.value("anim", false) ||
+								record.contains("from_node"))
+								return Reject(
+									diagnostic,
+									"PXC Stripe gradient toggle needs a static local source value",
+									node.Id,
+									value.Port
+								);
+							if (!record.contains("attri")) record["attri"] = Json::object();
+							if (!record["attri"].is_object())
+								return Reject(
+									diagnostic,
+									"PXC Stripe gradient attributes are malformed",
+									node.Id,
+									value.Port
+								);
+							record["attri"]["mapped"] = *mapped;
+							continue;
+						}
+						if ((node.Type == "pc.stripe" &&
+							 (value.Port == "size_mapped" || value.Port == "size_map_range" ||
+							  value.Port == "angle_mapped" || value.Port == "angle_map_range" ||
+							  value.Port == "random_mapped" || value.Port == "random_map_range" ||
+							  value.Port == "strip_ratio_mapped" || value.Port == "strip_ratio_map_range")) ||
+							(node.Type == "pc.dotted" &&
 							 (value.Port == "size_mapped" || value.Port == "size_map_range" ||
 							  value.Port == "angle_mapped" || value.Port == "angle_map_range" ||
 							  value.Port == "dot_size_mapped" || value.Port == "dot_size_map_range")) ||
@@ -2821,11 +2945,15 @@ namespace engine::imagegraphio {
 							  value.Port == "scale_mapped" || value.Port == "scale_map_range"))) {
 							const bool occlusion = node.Type == "pc.ambient_occlusion",
 									   gradient = node.Type == "pc.gradient",
-									   dotted = node.Type == "pc.dotted";
+									   dotted = node.Type == "pc.dotted", stripe = node.Type == "pc.stripe";
 							const std::string_view numericId =
-								dotted	   ? (value.Port.starts_with("dot_size_")
-												  ? std::string_view("dot_size")
-												  : std::string_view(value.Port).substr(0, value.Port.find('_')))
+								stripe ? (value.Port.starts_with("strip_ratio_")
+											  ? std::string_view("strip_ratio")
+											  : std::string_view(value.Port).substr(0, value.Port.find('_')))
+								: dotted
+									? (value.Port.starts_with("dot_size_")
+										   ? std::string_view("dot_size")
+										   : std::string_view(value.Port).substr(0, value.Port.find('_')))
 								: gradient ? std::string_view(value.Port).substr(0, value.Port.find('_'))
 								: node.Type == "pc.dither"							? "contrast"
 								: node.Type == "pc.erode"							? "width"
@@ -2834,7 +2962,10 @@ namespace engine::imagegraphio {
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
 							const int expectedIndex =
-								dotted	   ? (numericId == "size" ? 2 : (numericId == "angle" ? 4 : 9))
+								stripe	   ? (numericId == "size"
+												  ? 1
+												  : (numericId == "angle" ? 2 : (numericId == "random" ? 5 : 10)))
+								: dotted   ? (numericId == "size" ? 2 : (numericId == "angle" ? 4 : 9))
 								: gradient ? (numericId == "angle"	  ? 3
 											  : numericId == "radius" ? 4
 											  : numericId == "shift"  ? 5
@@ -2843,7 +2974,8 @@ namespace engine::imagegraphio {
 								: occlusion && numericId == "height" ? 3
 																	 : 1;
 							const std::string_view expectedKind =
-								dotted
+								stripe ? (numericId == "angle" ? "Rotation" : "Slider")
+								: dotted
 									? (numericId == "size" ? "Float"
 														   : (numericId == "angle" ? "Rotation" : "Slider"))
 								: gradient				   ? (numericId == "angle"	  ? "Rotation"

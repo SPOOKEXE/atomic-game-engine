@@ -1,15 +1,20 @@
 #include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/HostCapture.hpp>
 #include <engine/imagegraphio/PxcxEdit.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <string>
+#include <string_view>
+#include <vector>
 
 TEST_SUITE_ID("engine.imagegraphio.pxcxstructureedit")
 
@@ -1008,4 +1013,237 @@ TEST_CASE(
 	CHECK(Graph(result)["nodes"][0]["attri"]["layer_visible"][0] == true);
 	CHECK(Graph(result)["nodes"][0]["attri"]["layer_loop"][0] == true);
 	CHECK(Graph(result)["nodes"][0]["attri"]["future"] == 5);
+}
+
+namespace {
+	Json BypassShader(std::string id) {
+		return {
+			{"id", id},
+			{"type", "Node_HLSL"},
+			{"x", 0},
+			{"y", 0},
+			{"inputs",
+			 Json::array(
+				 {Json{{"r", {{"d", ""}}}},
+				  Json{{"r", {{"d", "output.color=float4(1,0,0,1);"}}}},
+				  Json::object(),
+				  Json{{"r", {{"d", "fallback"}}}},
+				  Json{{"r", {{"d", ""}}}}}
+			 )},
+			{"future", {{"node", id}}}
+		};
+	}
+	PxcxImport BypassSource(bool specialTag = false) {
+		auto shader = BypassShader("producer");
+		for (auto name : {"left", "middle", "right"}) {
+			shader["inputs"].push_back(Json{{"r", {{"d", name}}}, {"bypass", true}, {"future", name}});
+			shader["inputs"].push_back(Json{{"r", {{"d", 0}}}});
+			shader["inputs"].push_back(Json{{"r", {{"d", 1.25}}}});
+		}
+		Json nodes = Json::array({shader});
+		for (size_t group = 0; group < 3; ++group) {
+			auto consumer = BypassShader("consumer" + std::to_string(group));
+			consumer["inputs"][3]["from_node"] = "producer";
+			consumer["inputs"][3]["from_index"] = 1005 + group * 3;
+			consumer["inputs"][3]["from_tag"] = 0;
+			consumer["inputs"][3]["future"] = {{"edge", group}};
+			nodes.push_back(std::move(consumer));
+		}
+		// The special tag selects its own junction before the ordinary bypass ordinal branch.
+		if (specialTag) {
+			auto tagged = BypassShader("tagged");
+			tagged["inputs"][3]["from_node"] = "producer";
+			tagged["inputs"][3]["from_index"] = 1008;
+			tagged["inputs"][3]["from_tag"] = -2;
+			nodes.push_back(std::move(tagged));
+		}
+		return Imported(Json{{"nodes", nodes}, {"future", {{"project", 23}}}}.dump());
+	}
+	void CapturedLibraries(const PxcxImport &source, std::string_view node, std::string_view expected) {
+		auto graph = source.Graph;
+		graph.Outputs = {{"preview", std::string(node), "surface"}};
+		Plan plan;
+		Diagnostic diagnostic;
+		std::string ports;
+		for (const auto &owner : graph.Nodes) {
+			ports += owner.Id + ":" + owner.Type;
+			for (const auto &input : owner.DynamicInputs)
+				ports += " " + input.Id + ":" + std::to_string(unsigned(input.Type));
+			ports += "\n";
+		}
+		for (const auto &link : graph.Links)
+			ports += link.FromNode + "." + link.FromPort + " -> " + link.ToNode + "." + link.ToPort + "\n";
+		INFO(ports);
+		const auto compiled = Compile(graph, plan, diagnostic);
+		INFO(diagnostic.NodeId);
+		INFO(diagnostic.Port);
+		INFO(diagnostic.Message);
+		REQUIRE(compiled == Status::Ok);
+		HostNodeCapture producer;
+		EvaluationRequest request;
+		const auto prepared = PrepareHostCapture(graph, plan, "producer", request, producer, diagnostic);
+		INFO(diagnostic.NodeId);
+		INFO(diagnostic.Port);
+		INFO(diagnostic.Message);
+		REQUIRE(prepared == Status::Ok);
+		// An explicit native host fixture output lets the upstream HLSL update complete.
+		// Only its source-controlled bypass is observed; this receipt claims no shader parity.
+		producer.Images = {{"surface", Image{1, 1, {255, 0, 0, 255}}}};
+		request.HostCaptures = std::span<const HostNodeCapture>(&producer, 1);
+		EvaluationSnapshot inputs;
+		const auto sampled = EvaluateNodeInputs(graph, plan, node, request, inputs, diagnostic);
+		INFO(diagnostic.NodeId);
+		INFO(diagnostic.Port);
+		INFO(diagnostic.Message);
+		REQUIRE(sampled == Status::Ok);
+		const auto value =
+			std::find_if(inputs.Values().begin(), inputs.Values().end(), [](const auto &value) {
+				return value.Port == "libraries";
+			});
+		REQUIRE(value != inputs.Values().end());
+		CHECK(value->Data == Value{std::string(expected)});
+	}
+}
+TEST_CASE(
+	"Raw PXC dynamic edits move surviving bypass records and disconnect deleted slots",
+	"[imagegraphio][pxcx_structure][pxcx_dynamic_bypass]"
+) {
+	const auto original = BypassSource();
+	const auto before = Graph(original);
+	const std::array<PxcxStructureEdit, 1> insert{PxcxDynamicInputInsert{
+		"producer", 1, R"([{"r":{"d":"inserted"},"future":{"new":7}},{"r":{"d":0}},{"r":{"d":2.5}}])"
+	}};
+	const auto inserted = Edited(original, insert);
+	const auto json = Graph(inserted);
+	CHECK(json["nodes"][1] == before["nodes"][1]);
+	CHECK(json["nodes"][2]["inputs"][3]["from_index"] == 1011);
+	CHECK(json["nodes"][3]["inputs"][3]["from_index"] == 1014);
+	CHECK(json["nodes"][0]["inputs"][11] == before["nodes"][0]["inputs"][8]);
+	CHECK(json["nodes"][0]["inputs"][14] == before["nodes"][0]["inputs"][11]);
+	CHECK(json["future"] == before["future"]);
+	CapturedLibraries(inserted, "consumer2", "right");
+	const std::array<PxcxStructureEdit, 1> remove{PxcxDynamicInputDelete{"producer", 1, 2}};
+	const auto deleted = Edited(inserted, remove);
+	const auto removed = Graph(deleted);
+	CHECK(removed["nodes"][3]["inputs"][3]["from_index"] == 1008);
+	auto disconnected = before["nodes"][2]["inputs"][3];
+	disconnected.erase("from_node");
+	disconnected.erase("from_index");
+	disconnected.erase("from_tag");
+	CHECK(removed["nodes"][2]["inputs"][3] == disconnected);
+	CHECK(removed["nodes"][0]["inputs"][8] == before["nodes"][0]["inputs"][11]);
+	CapturedLibraries(deleted, "consumer1", "fallback");
+	CapturedLibraries(deleted, "consumer2", "right");
+	const std::array<PxcxStructureEdit, 2> noChange{insert[0], PxcxDynamicInputDelete{"producer", 1, 1}};
+	std::vector<std::byte> bytes;
+	Diagnostic diagnostic;
+	REQUIRE(WritePxcxStructureEdits(original, original.Source.OriginalBytes, noChange, bytes, diagnostic));
+	CHECK(bytes == original.Source.OriginalBytes);
+}
+TEST_CASE(
+	"Raw PXC links admit real input bypasses and refuse missing or stale endpoints atomically",
+	"[imagegraphio][pxcx_structure][pxcx_dynamic_bypass]"
+) {
+	const auto original = BypassSource();
+	const std::array<PxcxStructureEdit, 1> link{
+		PxcxLinkEdit{"consumer0", 3, PxcxSourceConnection{"producer", 1011, 0}}
+	};
+	const auto edited = Edited(original, link);
+	CapturedLibraries(edited, "consumer0", "right");
+	auto expected = Graph(original);
+	expected["nodes"][1]["inputs"][3]["from_index"] = 1011;
+	CHECK(Graph(edited) == expected);
+	const std::array<PxcxStructureEdit, 1> missing{
+		PxcxLinkEdit{"consumer0", 3, PxcxSourceConnection{"producer", 1014, 0}}
+	};
+	std::vector<std::byte> bytes{std::byte{0x42}};
+	const auto previous = bytes;
+	Diagnostic diagnostic;
+	CHECK_FALSE(WritePxcxStructureEdits(original, original.Source.OriginalBytes, missing, bytes, diagnostic));
+	CHECK(diagnostic.Message == "PXC link bypass source input is missing");
+	CHECK(bytes == previous);
+	auto stale = original.Source.OriginalBytes;
+	stale.back() ^= std::byte{1};
+	CHECK_FALSE(WritePxcxStructureEdits(original, stale, link, bytes, diagnostic));
+	CHECK(diagnostic.Message == "PXC structural edit source identity is stale");
+	CHECK(bytes == previous);
+}
+
+TEST_CASE(
+	"Raw PXC dynamic edits preserve tagged junctions and bound repeated endpoint scans",
+	"[imagegraphio][pxcx_structure][pxcx_dynamic_bypass]"
+) {
+	SECTION("source tags retain their own endpoint selection") {
+		const auto original = BypassSource(true);
+		const std::array<PxcxStructureEdit, 1> remove{PxcxDynamicInputDelete{"producer", 1, 1}};
+		const auto result = Edited(original, remove);
+		CHECK(Graph(result)["nodes"][4] == Graph(original)["nodes"][4]);
+	}
+	SECTION("global input records follow the same source bypass ordinal") {
+		auto json = Graph(BypassSource());
+		json["global_node"] = {
+			{"inputs",
+			 Json::array({Json{
+				 {"global_name", "gain"},
+				 {"global_type", 1},
+				 {"global_disp", 0},
+				 {"r", {{"d", 3}}},
+				 {"from_node", "producer"},
+				 {"from_index", 1013},
+				 {"from_tag", 0},
+				 {"future", 17}
+			 }})}
+		};
+		const auto original = Imported(json.dump());
+		const std::array<PxcxStructureEdit, 1> insert{
+			PxcxDynamicInputInsert{"producer", 1, R"([{"r":{"d":"inserted"}},{"r":{"d":0}},{"r":{"d":2.5}}])"}
+		};
+		const auto result = Edited(original, insert);
+		json["global_node"]["inputs"][0]["from_index"] = 1016;
+		CHECK(Graph(result)["global_node"] == json["global_node"]);
+	}
+	SECTION("dangling original bypasses refuse before publication") {
+		auto json = Graph(BypassSource());
+		json["nodes"][1]["inputs"][3]["from_index"] = 1014;
+		const auto original = Imported(json.dump());
+		const std::array<PxcxStructureEdit, 1> remove{PxcxDynamicInputDelete{"producer", 1, 1}};
+		std::vector<std::byte> bytes{std::byte{0x42}};
+		const auto previous = bytes;
+		Diagnostic diagnostic;
+		CHECK_FALSE(
+			WritePxcxStructureEdits(original, original.Source.OriginalBytes, remove, bytes, diagnostic)
+		);
+		CHECK(diagnostic.Message == "PXC dynamic bypass source input is missing");
+		CHECK(bytes == previous);
+		CHECK(Graph(original) == json);
+	}
+	SECTION("valid repeated edits refuse excessive cumulative endpoint work atomically") {
+		auto json = Graph(BypassSource());
+		// Unknown source records retain their full input payload without native execution.
+		Json inputs = Json::array();
+		for (size_t i = 0; i < 1000; ++i)
+			inputs.push_back(Json{{"r", {{"d", i}}}});
+		json["nodes"].push_back(
+			Json{{"id", "future"}, {"type", "vendor.future"}, {"x", 0}, {"y", 0}, {"inputs", inputs}}
+		);
+		const auto original = Imported(json.dump());
+		std::vector<PxcxStructureEdit> edits;
+		for (size_t i = 0; i < 2100; ++i) {
+			edits.push_back(
+				PxcxDynamicInputInsert{
+					"producer", 1, R"([{"r":{"d":"inserted"}},{"r":{"d":0}},{"r":{"d":2.5}}])"
+				}
+			);
+			edits.push_back(PxcxDynamicInputDelete{"producer", 1, 1});
+		}
+		std::vector<std::byte> bytes{std::byte{0x42}};
+		const auto previous = bytes;
+		Diagnostic diagnostic;
+		CHECK_FALSE(
+			WritePxcxStructureEdits(original, original.Source.OriginalBytes, edits, bytes, diagnostic)
+		);
+		CHECK(diagnostic.Message == "PXC dynamic bypass retargeting exceeds transaction work limit");
+		CHECK(bytes == previous);
+		CHECK(Graph(original) == json);
+	}
 }

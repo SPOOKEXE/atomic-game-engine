@@ -45,8 +45,10 @@ namespace engine::imagegraphio {
 		std::string NodeId;
 		uint32_t GroupIndex = 0;
 		// One or more complete source input groups, as a JSON array of input records.
+		// Existing input-bypass connections follow their original records when ordinals move.
 		std::string RecordsJson;
 	};
+	// Consumers of deleted input bypasses disconnect; surviving bypasses keep their source record.
 	struct PxcxDynamicInputDelete {
 		std::string NodeId;
 		uint32_t GroupIndex = 0;
