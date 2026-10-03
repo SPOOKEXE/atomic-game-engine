@@ -222,6 +222,13 @@ namespace engine::imagegraph {
 				}
 				if (heads[index].Type == "pc.group_output")
 					node.Outputs.push_back({"value", "Value", 0, ValueType::Any});
+				// Argument Type changes only source junction metadata; String mode retains raw values.
+				if (heads[index].Type == "pc.argument") {
+					for (CatalogueInput &input : node.Inputs)
+						if (input.Id == "default_value") input.Type = ValueType::Any;
+					for (CatalogueOutput &output : node.Outputs)
+						if (output.Id == "value") output.Type = ValueType::Any;
+				}
 				// These source colour junctions emit palettes despite declaring VALUE_TYPE.color.
 				if (heads[index].Type == "pc.gradient_extract" || heads[index].Type == "pc.gradient_sample")
 					for (CatalogueOutput &output : node.Outputs)
@@ -237,7 +244,8 @@ namespace engine::imagegraph {
 				for (const CatalogueInput &input : node.Inputs) {
 					node.Ports.push_back({input.Id, input.Type, PortDirection::Input});
 					if (IsAuthoredValueType(input.Type) ||
-						(heads[index].Type == "pc.group_input" && input.Id == "parent_value"))
+						(heads[index].Type == "pc.group_input" && input.Id == "parent_value") ||
+						(heads[index].Type == "pc.argument" && input.Id == "default_value"))
 						node.Properties.push_back({input.Id, input.Type});
 				}
 				for (const CatalogueOutput &output : node.Outputs)
@@ -344,6 +352,9 @@ namespace engine::imagegraph {
 	bool CatalogueAuthoredArray(
 		const CatalogueEntry &entry, const CatalogueInput &input, const ArrayValue &array
 	) {
+		if (entry.Type == "pc.argument" && input.Id == "default_value" && input.SourceIndex == 2 &&
+			input.SourceKind == "Text" && input.Type == ValueType::Any)
+			return detail::ValidPayload(array, false);
 		// The source WAV sink consumes [channel][sample] itself and starts with [[]].
 		if (entry.Type == "pc.wav_file_write" && input.Id == "audio_data" && input.SourceIndex == 1 &&
 			input.SourceKind == "Float" && input.Type == ValueType::Scalar && input.ArrayDepthKnown &&

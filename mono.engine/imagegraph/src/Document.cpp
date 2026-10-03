@@ -34,6 +34,7 @@
 #include "SimulationAliases.hpp"
 #include "SnapshotAudioMoves.hpp"
 #include "SourceAnimatorIdentity.hpp"
+#include "SourceArgumentTransport.hpp"
 #include "SourceAtlasCodec.hpp"
 #include "SourceGetterProjection.hpp"
 #include "SourceInputOrigin.hpp"
@@ -4577,9 +4578,10 @@ namespace engine::imagegraph {
 					  sourceArray->Items.empty() &&
 					  (sourceInput->SourceKind == "Range" || sourceInput->SourceKind == "Vec2")));
 				if (TypeOf(value.Data) != property->Type &&
-					!(node.Type == "pc.group_input" && value.Port == "parent_value") && !sourceArrayMatches &&
-					!sourceEnumMatches && !sourceEmptyMatches && !sourceEmptyKeyMatches &&
-					!sourceStaticEmptyVector &&
+					!(node.Type == "pc.group_input" && value.Port == "parent_value") &&
+					!detail::SourceArgumentAuthoredDefault(node, value.Port, value.Data) &&
+					!sourceArrayMatches && !sourceEnumMatches && !sourceEmptyMatches &&
+					!sourceEmptyKeyMatches && !sourceStaticEmptyVector &&
 					!(sourceInput && CatalogueSourceRawValue(*sourceInput, value.Data))) {
 					SetDiagnostic(
 						diagnostic,
@@ -5582,6 +5584,11 @@ namespace engine::imagegraph {
 			const PropertySchema *property = FindProperty(document.Nodes[node->second].Type, keyframe.Port);
 			// A dynamic input with an authored type animates like a property.
 			std::optional<ValueType> keyedType = property ? std::optional{property->Type} : std::nullopt;
+			if (document.FormatVersion >= 9 && keyframe.Interpolation == "source" &&
+				detail::SourceArgumentAuthoredDefault(
+					document.Nodes[node->second], keyframe.Port, keyframe.Data
+				))
+				keyedType = TypeOf(keyframe.Data);
 			for (const DynamicInput &input : document.Nodes[node->second].DynamicInputs)
 				if (!property && input.Id == keyframe.Port) {
 					const auto *source = detail::AliasedSourceInput(document.Nodes[node->second], input.Id);

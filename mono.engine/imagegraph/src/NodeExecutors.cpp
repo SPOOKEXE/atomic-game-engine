@@ -45,6 +45,7 @@ namespace engine::imagegraph::detail {
 					  SourceRigidExecutors(),
 					  SourceValueExecutors(),
 					  SourceDataExecutors(),
+					  SourceArgumentExecutors(),
 					  SourceMatrixExecutors(),
 					  SourcePathExecutors(),
 					  SourcePathComposeExecutors(),
@@ -99,6 +100,7 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if (type == "pc.argument" && port == "default_value") return true;
 				if ((type == "pc.path_sample" || type == "pc.path_smoothen") && port == "path") return true;
 				if ((type == "pc.surface_to_buffer" && port == "surface") ||
 					(type == "pc.surface_from_buffer" && port == "input_0"))

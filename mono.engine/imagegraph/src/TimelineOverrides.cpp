@@ -3,6 +3,7 @@
 #include "EvaluationAllocator.hpp"
 #include "PuppetControl.hpp"
 #include "SourceAnimatorIdentity.hpp"
+#include "SourceArgumentTransport.hpp"
 #include "SourceMirrorAnimator.hpp"
 #include "SourceSeparatedVec2.hpp"
 #include "Timeline.hpp"
@@ -647,6 +648,12 @@ namespace engine::imagegraph::detail {
 				!(left->SourceDriver && std::holds_alternative<KeyframeAudioDriver>(*left->SourceDriver)))
 				suppressDriver = true;
 			if (document.FormatVersion >= 8 && left->Interpolation == "source") {
+				// Source returns an undriven lone raw key before numeric interpolation.
+				if (keys.size() == 1 && !left->SourceDriver && !left->SineDriver &&
+					SourceArgumentDefault(sampled, property.second)) {
+					value = left->Data;
+					goto resolved_track_value;
+				}
 				const auto *sourceCatalogue = FindCatalogueEntry(sampled.Type);
 				const auto *sourceInput =
 					sourceCatalogue ? FindCatalogueInput(*sourceCatalogue, property.second) : nullptr;

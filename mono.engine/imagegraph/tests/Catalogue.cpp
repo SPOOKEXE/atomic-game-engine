@@ -65,7 +65,9 @@ TEST_CASE("Catalogue covers reviewed selected pinned source declarations", "[ima
 			REQUIRE(value);
 			CHECK((
 				IsAuthoredValueType(input.Type) ||
-				(entry.Type == "pc.group_input" && input.Id == "parent_value" && input.Type == ValueType::Any)
+				(entry.Type == "pc.group_input" && input.Id == "parent_value" && input.Type == ValueType::Any) ||
+				(entry.Type == "pc.argument" && input.Id == "default_value" && input.SourceIndex == 2 &&
+				 input.SourceKind == "Text" && input.Type == ValueType::Any)
 			));
 		}
 		for (const CatalogueOutput &output : entry.Outputs)
