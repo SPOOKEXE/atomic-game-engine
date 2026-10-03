@@ -126,6 +126,12 @@ namespace {
 			ImGui::GetIO().AddKeyEvent(ImGuiMod_Shift, false);
 			Frame();
 		}
+		void DoubleClick(ImVec2 point) {
+			Down(point);
+			Up();
+			Down(point);
+			Up();
+		}
 		void Key(ImGuiKey key) {
 			auto &io = ImGui::GetIO();
 			io.AddKeyEvent(key, true);
@@ -180,6 +186,74 @@ TEST_CASE(
 	CHECK_FALSE(ui.History.CanUndo());
 	REQUIRE(ui.History.Redo(ui.Doc));
 	CHECK(ui.Doc.Keyframes.size() == 2);
+}
+
+TEST_CASE(
+	"dopesheet double-clicking between keys selects and moves the adjacent pair in one undo",
+	"[studio][timeline_dopesheet]"
+) {
+	Sheet ui;
+	ui.Frame();
+	ui.Frame();
+	const auto before = ui.Doc;
+	const auto first = ui.View.Markers[0].Position, second = ui.View.Markers[1].Position;
+	ui.Click(2);
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Shift, true);
+	ui.Frame();
+	ui.DoubleClick({(first.x + second.x) * .5f, first.y});
+	REQUIRE(ui.Keys.Selection.size() == 2);
+	CHECK(ui.Keys.Selected(ui.Doc.Keyframes[0]));
+	CHECK(ui.Keys.Selected(ui.Doc.Keyframes[1]));
+	CHECK_FALSE(ui.Keys.Selected(ui.Doc.Keyframes[2]));
+	CHECK(ui.Changes == 0);
+	CHECK_FALSE(ui.History.CanUndo());
+	io.AddKeyEvent(ImGuiMod_Shift, false);
+	ui.Frame();
+
+	const auto point = ui.View.Markers[0].Position;
+	ui.Down(point);
+	REQUIRE(ui.View.Dragging);
+	ui.Mouse({point.x + float(ui.View.PixelsPerFrame), point.y});
+	ui.Up();
+	INFO(ui.Error.Message);
+	REQUIRE(ui.Changes == 1);
+	CHECK(GetFrameTime(ui.Doc.Keyframes[0]) == FrameTime{2, 0, false});
+	CHECK(GetFrameTime(ui.Doc.Keyframes[1]) == FrameTime{4, 0, false});
+	CHECK(GetFrameTime(ui.Doc.Keyframes[2]) == FrameTime{7, 0, false});
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(GetFrameTime(ui.Doc.Keyframes[0]) == FrameTime{2, 0, false});
+	CHECK(GetFrameTime(ui.Doc.Keyframes[1]) == FrameTime{4, 0, false});
+	CHECK_FALSE(ui.History.CanRedo());
+}
+
+TEST_CASE(
+	"dopesheet gap double-click ignores brackets under the labels and clipped header",
+	"[studio][timeline_dopesheet]"
+) {
+	Sheet ui;
+	ui.Frame();
+	ui.Frame();
+	const auto row = ui.View.Markers[0].Position.y;
+	ui.View.PanX = -140;
+	ui.Frame();
+	ui.DoubleClick({ui.CanvasMin.x + 60, row});
+	CHECK(ui.Keys.Selection.empty());
+	CHECK(ui.Changes == 0);
+	CHECK_FALSE(ui.History.CanUndo());
+
+	ui.View.PanX = 0;
+	ui.View.PanY = -24;
+	ui.Frame();
+	const float headerPoint = ui.CanvasMin.y + 20;
+	const float frameGap = ui.CanvasMin.x + 140 + 60;
+	ui.DoubleClick({frameGap, headerPoint});
+	CHECK(ui.Keys.Selection.empty());
+	CHECK(ui.Changes == 0);
+	CHECK_FALSE(ui.History.CanUndo());
 }
 
 TEST_CASE(

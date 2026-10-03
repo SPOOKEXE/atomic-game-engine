@@ -490,6 +490,33 @@ namespace studio {
 						const bool copy = io.KeyAlt && !io.KeyCtrl && !io.KeySuper;
 						if (!io.KeyCtrl || scale) (void)Begin(document, editor, *hit, scale, copy, error);
 					}
+				} else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && io.MousePos.x >= timelineX &&
+						   io.MousePos.x < start.x + size.x && io.MousePos.y >= start.y + header &&
+						   io.MousePos.y < start.y + size.y) {
+					const Marker *left = nullptr, *right = nullptr;
+					for (const auto &marker : Markers) {
+						if (marker.Key >= document.Keyframes.size() ||
+							std::abs(io.MousePos.y - marker.Position.y) > 8)
+							continue;
+						if (marker.Position.x < io.MousePos.x &&
+							(!left || marker.Position.x > left->Position.x))
+							left = &marker;
+						if (marker.Position.x > io.MousePos.x &&
+							(!right || marker.Position.x < right->Position.x))
+							right = &marker;
+					}
+					if (left && right && left->Row == right->Row && io.MousePos.x > left->Position.x + 8 &&
+						io.MousePos.x < right->Position.x - 8) {
+						editor.Selection = {
+							TimelineKeyEditor::Identity(document.Keyframes[left->Key]),
+							TimelineKeyEditor::Identity(document.Keyframes[right->Key])
+						};
+					} else if (io.MousePos.x >= timelineX && io.MousePos.y >= start.y + header) {
+						if (!io.KeyShift) editor.Selection.clear();
+						BoxSelection = std::move(editor.Selection);
+						BoxStart = BoxEnd = io.MousePos;
+						Boxing = true;
+					}
 				} else if (io.MousePos.x >= timelineX && io.MousePos.y >= start.y + header) {
 					if (!io.KeyShift) editor.Selection.clear();
 					BoxSelection = std::move(editor.Selection);
