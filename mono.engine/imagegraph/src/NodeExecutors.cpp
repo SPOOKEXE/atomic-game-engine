@@ -35,6 +35,7 @@ namespace engine::imagegraph::detail {
 					  MeshModifyExecutors(),
 					  SourceMesh2DExecutors(),
 					  Source2DExecutors(),
+					  SourceAmbientOcclusionExecutors(),
 					  SourceSimpleShapeExecutors(),
 					  SourceTextExecutors(),
 					  SourcePcxExecutors(),

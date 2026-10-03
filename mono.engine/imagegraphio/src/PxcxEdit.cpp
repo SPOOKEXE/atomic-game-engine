@@ -2301,20 +2301,30 @@ namespace engine::imagegraphio {
 						if ((node.Type == "pc.bevel" &&
 							 (value.Port == "height_mapped" || value.Port == "height_map_range")) ||
 							(node.Type == "pc.erode" &&
-							 (value.Port == "width_mapped" || value.Port == "width_map_range"))) {
-							const std::string_view numericId = node.Type == "pc.erode" ? "width" : "height";
-							const std::string_view toggleId =
-								node.Type == "pc.erode" ? "width_mapped" : "height_mapped";
+							 (value.Port == "width_mapped" || value.Port == "width_map_range")) ||
+							(node.Type == "pc.ambient_occlusion" &&
+							 (value.Port == "height_mapped" || value.Port == "height_map_range" ||
+							  value.Port == "intensity_mapped" || value.Port == "intensity_map_range"))) {
+							const bool occlusion = node.Type == "pc.ambient_occlusion";
+							const std::string_view numericId =
+								node.Type == "pc.erode"								? "width"
+								: occlusion && value.Port.starts_with("intensity_") ? "intensity"
+																					: "height";
+							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
-							if (!height || height->SourceIndex != 1 || height->SourceKind != "Int" ||
-								inputs.size() <= 1)
+							const int expectedIndex = occlusion && numericId == "height" ? 3 : 1;
+							const std::string_view expectedKind = !occlusion			  ? "Int"
+																  : numericId == "height" ? "Float"
+																						  : "Slider";
+							if (!height || height->SourceIndex != expectedIndex ||
+								height->SourceKind != expectedKind || inputs.size() <= size_t(expectedIndex))
 								return Reject(
 									diagnostic,
 									"PXC mapped numeric control has no source slot",
 									node.Id,
 									value.Port
 								);
-							Json &record = inputs[1];
+							Json &record = inputs[size_t(expectedIndex)];
 							if (!record.is_object() || record.value("anim", false) ||
 								record.contains("from_node") ||
 								(record.contains("r") &&

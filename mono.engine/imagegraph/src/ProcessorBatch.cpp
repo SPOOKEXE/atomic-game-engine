@@ -138,6 +138,28 @@ namespace engine::imagegraph::detail {
 			const Value *value = mapped ? SourceMappedRange(context, port) : context.Find(port);
 			selected.Values = value ? std::get_if<ArrayValue>(value) : nullptr;
 			if (!selected.Images && !selected.Values) return true;
+			const bool occlusionUniformPair = context.Entry.Type == "pc.ambient_occlusion" &&
+											  ((port == "height" && input.SourceKind == "Float") ||
+											   (port == "intensity" && input.SourceKind == "Slider")) &&
+											  !context.Boolean("attribute_process", true);
+			if (occlusionUniformPair && selected.Values) {
+				// With processing disabled, shader_set_f_map uploads
+				// the original two-element array. Admit both controls
+				// before execution, including inactive copies.
+				const auto &pair = *selected.Values;
+				if (!pair.Items.empty() || !pair.Nested.empty() || pair.Elements.size() != 2 ||
+					(pair.ElementType != ValueType::Scalar && pair.ElementType != ValueType::Integer) ||
+					!std::all_of(pair.Elements.begin(), pair.Elements.end(), [](const ElementValue &item) {
+						return std::holds_alternative<double>(item) || std::holds_alternative<int64_t>(item);
+					}))
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"AO disabled processing needs an exact "
+						"two-number shader uniform",
+						port
+					);
+				selected.Depth = 1;
+			}
 			const bool spriteShape = context.Entry.Type == "pc.sprite_stack" && port == "base_shape";
 			if (spriteShape) {
 				const auto *selector = context.Find("array_process");
@@ -168,7 +190,8 @@ namespace engine::imagegraph::detail {
 			if (input.ArrayDepth >= Limits::MaximumArrayDepth) return true;
 			if (context.Entry.Type == "pc.3_d_mesh_plane" && port == "both_side")
 				return context.Fail(Status::UnsupportedExecution, "source Both Side rejects arrays", port);
-			if (!mapped && !spriteShape && !atlasDraw && !hlslTuple && !input.ArrayDepthKnown)
+			if (!mapped && !spriteShape && !atlasDraw && !hlslTuple && !occlusionUniformPair &&
+				!input.ArrayDepthKnown)
 				return context.Fail(
 					Status::UnsupportedExecution, "source input array depth is dynamic", port
 				);

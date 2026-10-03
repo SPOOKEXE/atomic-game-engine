@@ -9824,6 +9824,65 @@ namespace engine::imagegraph {
 					const Value *value = nullptr;
 					if (linked) {
 						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						// Source Float/Slider surface getters return dimensions before units.
+						const bool occlusionSurfaceScalar =
+							node.Type == "pc.ambient_occlusion" &&
+							((input.Id == "height" && input.SourceKind == "Float") ||
+							 (input.Id == "intensity" && input.SourceKind == "Slider"));
+						if (occlusionSurfaceScalar && produced[sourceIndex]) {
+							const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
+							const ImageArray *surfaces =
+								surface ? nullptr
+										: FindImageArrayOutput(results[sourceIndex], link->FromPort);
+							if (surface || surfaces) {
+								auto projectionCharge = budget.Reserve(2 * sizeof(ElementValue));
+								if (!projectionCharge || !inputCharge->Merge(std::move(*projectionCharge))) {
+									SetDiagnostic(
+										diagnostic,
+										Status::LimitExceeded,
+										"AO surface getter exceeds input storage budget",
+										node.Id,
+										std::string(input.Id)
+									);
+									return diagnostic.Code;
+								}
+								ArrayValue dimensions;
+								dimensions.ElementType = ValueType::Scalar;
+								dimensions.Elements.reserve(2);
+								if (dimensions.Elements.capacity() > 2) {
+									auto excess = budget.Reserve(
+										(dimensions.Elements.capacity() - 2) * sizeof(ElementValue)
+									);
+									if (!excess || !inputCharge->Merge(std::move(*excess))) {
+										SetDiagnostic(
+											diagnostic,
+											Status::LimitExceeded,
+											"AO surface getter capacity exceeds input budget",
+											node.Id,
+											std::string(input.Id)
+										);
+										return diagnostic.Code;
+									}
+								}
+								// surface_get_dimension takes a whole surface array as a nonsurface.
+								dimensions.Elements.emplace_back(surface ? double(surface->Width) : 1.);
+								dimensions.Elements.emplace_back(surface ? double(surface->Height) : 1.);
+								context.Values.emplace_back(input.Id, std::move(dimensions));
+								const SourceSocketDomain domain{
+									ValueType::Image, std::nullopt, SourceSocketKind::Surface
+								};
+								const auto foundDomain = std::find_if(
+									context.InputDomains.begin(),
+									context.InputDomains.end(),
+									[&](const auto &entry) { return entry.first == input.Id; }
+								);
+								if (foundDomain == context.InputDomains.end())
+									context.InputDomains.emplace_back(input.Id, domain);
+								else
+									foundDomain->second = domain;
+								continue;
+							}
+						}
 						const bool simpleShape = node.Type == "pc.shape_ellipse" ||
 												 node.Type == "pc.shape_rectangle" ||
 												 node.Type == "pc.shape_half";

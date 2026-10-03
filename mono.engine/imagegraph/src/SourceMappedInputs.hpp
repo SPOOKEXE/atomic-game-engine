@@ -6,7 +6,12 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
-		return (entry.Type == "pc.erode" &&
+		return (entry.Type == "pc.ambient_occlusion" &&
+				((input.SourceKind == "MapToggle" &&
+				  (input.Id == "height_mapped" || input.Id == "intensity_mapped")) ||
+				 (input.SourceKind == "MapRange" &&
+				  (input.Id == "height_map_range" || input.Id == "intensity_map_range")))) ||
+			   (entry.Type == "pc.erode" &&
 				((input.SourceKind == "MapToggle" && input.Id == "width_mapped") ||
 				 (input.SourceKind == "MapRange" && input.Id == "width_map_range"))) ||
 			   (entry.Type == "pc.bevel" &&
@@ -24,6 +29,8 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.ambient_occlusion" && (port == "height" || port == "intensity"))
+			return context.Boolean(port == "height" ? "height_mapped" : "intensity_mapped");
 		if (context.Entry.Type == "pc.erode" && port == "width") return context.Boolean("width_mapped");
 		if (context.Entry.Type == "pc.bevel" && port == "height") return context.Boolean("height_mapped");
 		if (context.Entry.Type == "pc.noise_simplex" && (port == "iteration" || port == "scale"))
@@ -49,6 +56,8 @@ namespace engine::imagegraph::detail {
 			!context.IsCatalogueDefault(port).value_or(false) &&
 			(std::holds_alternative<int64_t>(*value) || std::holds_alternative<double>(*value)))
 			return value;
+		if (context.Entry.Type == "pc.ambient_occlusion")
+			return context.Find(port == "height" ? "height_map_range" : "intensity_map_range");
 		if (context.Entry.Type == "pc.erode" && port == "width") return context.Find("width_map_range");
 		if (context.Entry.Type == "pc.bevel" && port == "height") return context.Find("height_map_range");
 		if (simplex) return context.Find(port == "iteration" ? "iteration_map_range" : "scale_map_range");
@@ -66,7 +75,8 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if ((context.Entry.Type == "pc.bevel" && port == "height") ||
+		if (context.Entry.Type == "pc.ambient_occlusion" ||
+			(context.Entry.Type == "pc.bevel" && port == "height") ||
 			(context.Entry.Type == "pc.erode" && port == "width") ||
 			(context.Entry.Type == "pc.noise_simplex" && port == "iteration")) {
 			if (const auto *integer = std::get_if<int64_t>(value)) {

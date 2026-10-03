@@ -401,9 +401,9 @@ TEST_CASE(
 ) {
 	Document document;
 	document.FormatVersion = 7;
-	document.Nodes = {{"ambient", "pc.ambient_occlusion", "", {}, {{"height", Numbers({.1, .2})}}, {}}};
-	document.Outputs = {{"out", "ambient", "surface_out"}};
-	CHECK_FALSE(HasNativeExecutor("pc.ambient_occlusion"));
+	document.Nodes = {{"project", "pc.heightmap_project_3_d", "", {}, {{"distance", Numbers({.1, .2})}}, {}}};
+	document.Outputs = {{"out", "project", "surface_out"}};
+	CHECK_FALSE(HasNativeExecutor("pc.heightmap_project_3_d"));
 	Document restored;
 	Diagnostic diagnostic;
 	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
@@ -463,9 +463,9 @@ TEST_CASE(
 	document.Links.back().ToPort = "image";
 	document.Outputs.back().Port = "image";
 	CHECK(Compile(document, plan, diagnostic) == Status::TypeMismatch);
-	document.Nodes.back().Type = "pc.ambient_occlusion";
+	document.Nodes.back().Type = "pc.heightmap_project_3_d";
 	document.Nodes.back().Values.clear();
-	document.Links.back().ToPort = "height_map";
+	document.Links.back().ToPort = "heightmap";
 	document.Outputs.back().Port = "surface_out";
 	CHECK(Compile(document, plan, diagnostic) == Status::Ok);
 	Image sentinel{1, 1, {1, 2, 3, 4}, 0};
