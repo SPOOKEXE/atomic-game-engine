@@ -1,6 +1,8 @@
 #include "ComposerCaptureIdentity.hpp"
 
 #include <engine/render/ComposerSurface.hpp>
+#include <engine/render/Renderer.hpp>
+#include <engine/render/SourceSkyboxGroup.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -170,12 +172,12 @@ TEST_CASE(
 	CHECK(columns[5] == 20);
 	CHECK(columns[32] == 2);
 	CHECK(columns[37] == -2);
-	CHECK(columns[44] == -1);
-	CHECK(columns[45] == 1);
+	CHECK(columns[35] == -1);
+	CHECK(columns[39] == 1);
 	pair.VertexRowMajor = true;
 	const auto rows = VertexMatrices(pair, 30, 20);
-	CHECK(rows[35] == -1);
-	CHECK(rows[39] == 1);
+	CHECK(rows[44] == -1);
+	CHECK(rows[45] == 1);
 	CHECK(rows[47] == 1);
 }
 TEST_CASE(
@@ -585,4 +587,45 @@ TEST_CASE(
 	CHECK(failure->find("document candidate") != std::string::npos);
 	CHECK(previous.Nodes == originalNodes);
 	CHECK(shader.Variants.empty());
+}
+
+TEST_CASE(
+	"Composer fixed HLSL vertex matrices cover the unit surface under reflected SPIR-V layout",
+	"[render][composer-surface]"
+) {
+	Fixture fixture;
+	const auto matrices = VertexMatrices(fixture.Request.Pair, 3, 2);
+	const auto project = [&](float x, float y) {
+		const std::array<float, 4> position{x, y, 0, 1};
+		std::array<float, 4> clip{};
+		for (size_t column = 0; column < 4; ++column)
+			for (size_t row = 0; row < 4; ++row) {
+				const auto index =
+					32 + (fixture.Request.Pair.VertexRowMajor ? row * 4 + column : column * 4 + row);
+				clip[column] += position[row] * matrices[index];
+			}
+		return clip;
+	};
+	CHECK(project(0, 0) == std::array<float, 4>{-1, 1, 0, 1});
+	CHECK(project(1, 0) == std::array<float, 4>{1, 1, 0, 1});
+	CHECK(project(0, 1) == std::array<float, 4>{-1, -1, 0, 1});
+	CHECK(project(1, 1) == std::array<float, 4>{1, -1, 0, 1});
+}
+TEST_CASE(
+	"Composer world teardown retires queued source work with no device and preserves other owners",
+	"[render][composer-surface]"
+) {
+	Fixture fixture;
+	engine::render::Renderer renderer;
+	const engine::core::Name other("composer.retained.other"), name("composer.retired.output");
+	Accepted(renderer.InstallComposerShader(fixture.Owner, fixture.Asset, fixture.Shader));
+	Accepted(renderer.InstallComposerShader(other, fixture.Asset, fixture.Shader));
+	using Queue = engine::render::imagegraph::TransformImage3DQueueResult;
+	REQUIRE(renderer.QueueComposerSurface({fixture.Owner, name, 1, fixture.Request}) == Queue::Queued);
+	REQUIRE(renderer.QueueComposerSurface({other, name, 1, fixture.Request}) == Queue::Queued);
+	renderer.ForgetWorld(7, fixture.Owner);
+	CHECK(renderer.SourceOutputStatus(fixture.Owner, name, 1) == engine::render::SourceTextureStatus::Absent);
+	CHECK(renderer.SourceOutputStatus(other, name, 1) == engine::render::SourceTextureStatus::Pending);
+	CHECK(renderer.ComposerShaderRevision(fixture.Owner, fixture.Asset) == 0);
+	CHECK(renderer.ComposerShaderRevision(other, fixture.Asset) == 1);
 }

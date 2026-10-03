@@ -155,6 +155,7 @@ struct PixelShaderOutput {
 						return "HLSL surface pass does not bind this resource family";
 					const auto interface = [&](const auto &values, bool inputs) {
 						if (stage) {
+							if (inputs && values.empty()) return true;
 							if (values.size() != 1) return false;
 							const auto &value = values[0];
 							return compiler.get_decoration(value.id, spv::DecorationLocation) == 0 &&
@@ -515,10 +516,12 @@ struct PixelShaderOutput {
 						(std::trunc(value) != value || value < std::numeric_limits<int32_t>::min() ||
 						 value > std::numeric_limits<int32_t>::max()))
 						return "HLSL integer argument is outside int32";
+					// Glslang stores HLSL matrices transposed in SPIR-V; reflected major
+					// order describes that representation, not the source matrix.
 					const uint32_t offset =
 						member.Offset + (columns == 1	   ? row * 4
-										 : member.RowMajor ? row * member.MatrixStride + column * 4
-														   : column * member.MatrixStride + row * 4);
+										 : member.RowMajor ? column * member.MatrixStride + row * 4
+														   : row * member.MatrixStride + column * 4);
 					if (offset > candidate.size() || candidate.size() - offset < 4)
 						return "HLSL runtime uniform member exceeds block";
 					const uint32_t word =

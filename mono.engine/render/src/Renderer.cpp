@@ -1151,15 +1151,10 @@ namespace engine::render {
 		RequireOwningThread("ForgetWorld");
 		State->ComposerShaders.RemoveOwner(name);
 		std::erase_if(State->ComposerCaptures, [&](const auto &entry) { return entry.Owner == name; });
-		for (auto &slot : State->GraphResources.Transform3D)
-			if (slot.Owner == name && slot.ComposerRequest) {
-				if (slot.Phase == Impl::GraphResourceCache::Transform3DPhase::Queued)
-					State->ReleaseTransform3D(slot);
-				else
-					slot.Cancelled = true;
-			}
+		if (name.IsValid()) DropTransformImage3DOwner(name);
 		if (State->Device == nullptr) return;
 		SDL_WaitForGPUIdle(State->Device);
+		if (State->Textures.DropOwner(name) != 0) ++State->ResourceEpoch;
 		for (auto &tree : State->ImportedPortalTrees)
 			if (!tree.Nodes.empty() && tree.Nodes.front().Binding.World == world &&
 				tree.Nodes.front().Binding.WorldName == name)

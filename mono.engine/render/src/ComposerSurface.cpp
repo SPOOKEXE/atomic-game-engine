@@ -334,10 +334,12 @@ namespace engine::render::hlsl {
 		return bytes <= UINT64_MAX - 160 ? bytes + 160 : UINT64_MAX;
 	}
 	std::array<float, 48> VertexMatrices(const CookedPair &pair, uint32_t width, uint32_t height) {
+		// The fixed HLSL mul(matrix, position) compiles to SPIR-V
+		// vector-times-transposed-matrix, including its reflected major layout.
 		std::array<float, 48> matrices{};
 		for (size_t matrix = 0; matrix < 3; ++matrix) {
 			const auto put = [&](size_t row, size_t column, float value) {
-				matrices[matrix * 16 + (pair.VertexRowMajor ? row * 4 + column : column * 4 + row)] = value;
+				matrices[matrix * 16 + (pair.VertexRowMajor ? column * 4 + row : row * 4 + column)] = value;
 			};
 			put(0, 0, matrix < 2 ? float(width) : 2.f);
 			put(1, 1, matrix < 2 ? float(height) : -2.f);

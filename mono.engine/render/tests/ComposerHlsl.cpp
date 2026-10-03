@@ -171,8 +171,8 @@ TEST_CASE(
 			for (uint32_t column = 0; column < width; ++column)
 				for (uint32_t row = 0; row < width; ++row) {
 					const auto offset =
-						member.Offset + (member.RowMajor ? row * member.MatrixStride + column * 4
-														 : column * member.MatrixStride + row * 4);
+						member.Offset + (member.RowMajor ? column * member.MatrixStride + row * 4
+														 : row * member.MatrixStride + column * 4);
 					CHECK(
 						std::bit_cast<float>(Word(packed, offset)) ==
 						float(authored->Numbers[column * width + row])
@@ -359,4 +359,32 @@ TEST_CASE(
 	const auto identity = Admit(program);
 	REQUIRE(identity.has_value());
 	CHECK(identity->find("duplicate uniform member") != std::string::npos);
+}
+
+TEST_CASE(
+	"HLSL constant fragment admits optimized UV omission and packs asymmetric source matrix",
+	"[render][composer-hlsl]"
+) {
+	using namespace engine::render::hlsl;
+	const std::array<Argument, 1> arguments{{{"matrixArg", ArgumentKind::Mat3}}};
+	Definition definition{"", "output.color=float4(mul(matrixArg,float3(1,0,0)),1);", "", "", arguments};
+	Source source;
+	Accepted(Assemble(definition, {}, source));
+	Program program;
+	Accepted(Cook(definition, source, program));
+	Accepted(Admit(program));
+	REQUIRE(program.Members.size() == 1);
+	const auto &member = program.Members.front();
+	const std::array<double, 9> components{0, 1, 0, 0, 0, 1, 1, 0, 0};
+	const std::array<Value, 1> values{{{"matrixArg", components}}};
+	std::vector<std::byte> bytes;
+	Accepted(Pack(program, values, bytes));
+	// Evaluate SPIR-V vector-times-matrix with its actual memory layout.
+	// HLSL mul(matrix, unitX) must select the source first column, green.
+	std::array<float, 3> transformed{};
+	for (size_t column = 0; column < 3; ++column) {
+		const auto offset = member.Offset + (member.RowMajor ? column * 4 : column * member.MatrixStride);
+		transformed[column] = std::bit_cast<float>(Word(bytes, offset));
+	}
+	CHECK(transformed == std::array<float, 3>{0, 1, 0});
 }

@@ -403,8 +403,7 @@ namespace engine::render {
 		for (auto &slot : State->GraphResources.Transform3D)
 			if (slot.Owner == owner) {
 				if (slot.Phase == Impl::GraphResourceCache::Transform3DPhase::Queued) {
-					State->GraphResources.Transform3DSourceBytes -= slot.SourceBytes;
-					slot = {};
+					State->ReleaseTransform3D(slot);
 				} else
 					slot.Cancelled = true;
 			}

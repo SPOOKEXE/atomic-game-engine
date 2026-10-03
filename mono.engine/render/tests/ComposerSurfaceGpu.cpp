@@ -347,4 +347,5 @@ TEST_CASE(
 	device.Render.ForgetWorld(0, program.Owner);
 	CHECK(device.Render.ComposerShaderRevision(program.Owner, program.Shader) == 0);
 	CHECK(device.Render.SourceOutputStatus(program.Owner, name, 4) == SourceTextureStatus::Absent);
+	CHECK(Access::PublishedTexture(device.Render, program.Owner, name) == nullptr);
 }
