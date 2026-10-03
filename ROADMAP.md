@@ -86,6 +86,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Verify Transform GPU pixels.
 - [_] Verify skybox GPU pixels.
 - [_] Complete remaining Composer GPU checks.
+- [_] Preserve source timeline endpoints through native saves, PXC edits and exports.
+- [_] Integrate source timeline normalization, seeking and WAV length edits in Studio.
 - [_] Finish audio workflows.
 - [_] Finish feedback seek/reset and fractional-key playback.
 - [_] Finish cache groups.
