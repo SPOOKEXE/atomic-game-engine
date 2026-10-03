@@ -58,6 +58,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Capture and replay bounded frame caches across CPU, client, Studio and exports.
 - [x] Decode bounded font bytes into glyph bitmaps and metrics.
 - [x] Integrate Flow and Bubble noise generators.
+- [x] Integrate bounded Cristal noise generation and typed input projection.
 - [x] Integrate path extension, flattening and smoothing.
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [x] Save completed image previews as PXC thumbnails with atomic publication.
