@@ -54,7 +54,7 @@ Milestone labels describe development scope, not release versions.
   1. Graph and Studio: finish remaining Dopesheet gestures, undo/redo and host workflows; selected-key easing and dynamic track policies pass headless checks.
   2. Nodes: implement the remaining 363 catalogue executors; verify defaults, controls, errors and animation; update parity evidence.
   3. Animation and audio: finish audio workflows and feedback; verify seek/reset and fractional-key semantics.
-  4. 3D and outputs: verify live Transform Image 3D raster output; finish mesh consumers, remaining 3D nodes, material/shader/skybox bindings and large-sequence playback.
+  4. 3D and outputs: finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback; broaden Transform and skybox raster verification.
   5. PXC and exports: finish remaining edits and formats; preserve dynamic-input bypass links and validate modified PXC compatibility.
   6. Acceptance: keep joined CPU and Composer Vulkan evidence current; finish remaining GPU tests, live Studio workflows and release profiling. Exact parity requires a licensed reference build and matched captures.
 

@@ -39,7 +39,8 @@ namespace client {
 		engine::imagegraph::Image Image;
 		uint8_t FlipbookSide = 0;
 		std::vector<float> FrameDurations;
-		// Present only when a headless Transform Image 3D export selects its mesh output.
+		// Present only when a headless Transform Image 3D export selects its mesh
+		// output.
 		std::optional<engine::render::imagegraph::TransformImage3DMesh> Mesh;
 		// Whether authored keyframes require evaluation at each selected tick.
 		bool Animated = false;
@@ -61,8 +62,9 @@ namespace client {
 		uint64_t seed = 0
 	);
 
-	// Evaluates one authored graph through the renderer-owned synchronous export pass.
-	// This is a headless export API. Live bindings keep GPU-resident work with the frame scheduler.
+	// Evaluates one authored graph through the renderer-owned synchronous export
+	// pass. This is a headless export API. Live bindings keep GPU-resident work
+	// with the frame scheduler.
 	ImageGraphFrameResult LoadImageGraphRenderExportFrame(
 		const std::filesystem::path &directory,
 		engine::core::Name graph,
@@ -179,6 +181,9 @@ namespace client {
 
 		struct PendingSkyboxGroup {
 			engine::render::imagegraph::SourceSkyboxGroup Work;
+			std::optional<engine::render::imagegraph::SourceSkyboxRequest> Admission;
+			size_t PreparedFaces = 0;
+			uint64_t RetainedFaceBytes = 0, OutputFaceBytes = 0;
 			std::array<engine::scene::ImageGraphBinding, 6> Selectors;
 			std::array<engine::ecs::Entity, 6> Entities;
 			std::array<std::filesystem::file_time_type, 6> Modified;
@@ -207,4 +212,4 @@ namespace client {
 		size_t ChecksRemaining = MAXIMUM_CHECKS_PER_FRAME;
 		std::string Error;
 	};
-}
+} // namespace client

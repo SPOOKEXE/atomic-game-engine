@@ -64,7 +64,15 @@ and the selected client suite. They do not claim source raster parity. Source
 image arrays require selected processor-row recordings, matching the existing
 host boundary; unresolved array inputs refuse explicitly.
 
-The new Transform GPU checks and backend shader compilation must pass in a
-fresh matching build before device completion or source parity is claimed.
-Approval for the previous three Composer GPU fixtures does not establish this
-new Transform raster gate.
+The authorized release66 Vulkan Transform fixture passes 35 assertions. It
+checks orthographic front/back pixels with independent sampler dimensions,
+both receipt image channels, typed mesh materials and submitted cancellation.
+This local device check is not a licensed source reference capture. Perspective,
+anchor, nonuniform scale, processor arrays and other GPU backends remain raster
+comparison gates. Hardware model and driver version were not recorded.
+
+Skybox admission retains completed faces while a later Transform capture is
+pending, freezes all six observation ticks and cancels incomplete cohorts on
+binding or owner changes. A failed animated face is classified before evaluation
+so a later world tick can retry it. Headless client fixtures verify no partial
+publication, retry and retirement; full skybox device parity remains open.

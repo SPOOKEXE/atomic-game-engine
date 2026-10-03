@@ -458,3 +458,180 @@ TEST_CASE(
 ) {
 	RuntimeCaller();
 }
+
+TEST_CASE(
+	"skybox partial preparation stays private when a late Transform host refuses", "[client][source-skybox]"
+) {
+	using namespace engine;
+	scene::RegisterSceneComponents();
+	scene::RegisterSceneClasses();
+	ecs::Store store("transform-skybox-admission");
+	scene::InstallServices(store);
+	const auto sky = store.CreateInstance(ecs::Classes::Find(core::Name("SkyboxTextures")), "GraphSky");
+	REQUIRE(store.SetParent(sky, store.FindFirstRoot("Lighting")));
+	const std::array<core::Name, 6> names{
+		core::Name("front"),
+		core::Name("back"),
+		core::Name("left"),
+		core::Name("right"),
+		core::Name("up"),
+		core::Name("down")
+	};
+	auto *textures = store.GetMutable<scene::SkyboxTextures>(sky);
+	REQUIRE(textures);
+	textures->Front = names[0];
+	textures->Back = names[1];
+	textures->Left = names[2];
+	textures->Right = names[3];
+	textures->Up = names[4];
+	textures->Down = names[5];
+	const core::Name graph("transform-skybox"), owner("transform-skybox-owner");
+	const auto directory = std::filesystem::temp_directory_path() / "pc-transform-skybox66";
+	std::filesystem::create_directories(directory / "imagegraphs");
+	struct Cleanup {
+		std::filesystem::path Path;
+		~Cleanup() {
+			std::filesystem::remove_all(Path);
+		}
+	} cleanup{directory};
+	auto document = Camera();
+	document.Nodes.push_back(
+		{"image",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t(64)}, {"height", int64_t(64)}, {"colour", imagegraph::Colour{255, 0, 0, 255}}}}
+	);
+	document.Nodes.push_back({"transform", "pc.3_d_transform_image", "", {}, {}});
+	document.Links.push_back({"image", "image", "transform", "surface"});
+	document.Outputs.push_back({"transform", "transform", "rendered"});
+	{
+		std::ofstream file(client::ImageGraphDocumentPath(directory, graph));
+		file << imagegraph::Write(document);
+	}
+	std::array<ecs::Entity, 6> entities;
+	for (size_t i = 0; i < 6; ++i) {
+		entities[i] = store.Create();
+		scene::ImageGraphBinding selector;
+		selector.Graph = graph;
+		selector.Output = core::Name(i == 5 ? "transform" : "out");
+		selector.Texture = names[i];
+		REQUIRE(scene::SetImageGraphBinding(store, entities[i], selector));
+	}
+	render::Renderer renderer;
+	client::ImageGraphRuntime runtime;
+	REQUIRE(runtime.Refresh(store, renderer, owner, directory) == 0);
+	INFO(runtime.LastError());
+	CHECK(runtime.LastError().find("renderer device") != std::string::npos);
+	CHECK(runtime.DocumentParses() == 1);
+	const core::Name staging("engine.imagegraph.skybox.staging." + std::to_string(owner.Id()));
+	for (const auto name : names) {
+		CHECK(renderer.SourceOutputStatus(staging, name, 1) == render::SourceTextureStatus::Absent);
+		CHECK(renderer.SourceOutputStatus(owner, name, 1) == render::SourceTextureStatus::Absent);
+	}
+	store.Remove<scene::ImageGraphBinding>(entities[5]);
+	runtime.BeginFrame();
+	REQUIRE(runtime.Refresh(store, renderer, owner, directory) == 0);
+	CHECK(runtime.LastError().find("six distinct") != std::string::npos);
+	runtime.Clear(renderer);
+}
+
+TEST_CASE(
+	"failed animated skybox preparation retries on its own advancing world clock", "[client][source-skybox]"
+) {
+	using namespace engine;
+	scene::RegisterSceneComponents();
+	scene::RegisterSceneClasses();
+	ecs::Store store("animated-transform-skybox-admission");
+	scene::InstallServices(store);
+	const auto sky = store.CreateInstance(ecs::Classes::Find(core::Name("SkyboxTextures")), "GraphSky");
+	REQUIRE(store.SetParent(sky, store.FindFirstRoot("Lighting")));
+	const std::array<core::Name, 6> names{
+		core::Name("front"),
+		core::Name("back"),
+		core::Name("left"),
+		core::Name("right"),
+		core::Name("up"),
+		core::Name("down")
+	};
+	auto *textures = store.GetMutable<scene::SkyboxTextures>(sky);
+	REQUIRE(textures);
+	textures->Front = names[0];
+	textures->Back = names[1];
+	textures->Left = names[2];
+	textures->Right = names[3];
+	textures->Up = names[4];
+	textures->Down = names[5];
+	const core::Name graph("transform-skybox"), owner("animated-transform-skybox-owner");
+	const auto directory = std::filesystem::temp_directory_path() / "pc-animated-transform-skybox66";
+	std::filesystem::create_directories(directory / "imagegraphs");
+	struct Cleanup {
+		std::filesystem::path Path;
+		~Cleanup() {
+			std::filesystem::remove_all(Path);
+		}
+	} cleanup{directory};
+	auto document = Camera();
+	imagegraph::Document transformDocument;
+	transformDocument.FormatVersion = 9;
+	const core::Name transformGraph("animated-transform-face");
+	transformDocument.Nodes.push_back(
+		{"image",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t(64)}, {"height", int64_t(64)}, {"colour", imagegraph::Colour{255, 0, 0, 255}}}}
+	);
+	transformDocument.Nodes.push_back({"transform", "pc.3_d_transform_image", "", {}, {}});
+	transformDocument.Links.push_back({"image", "image", "transform", "surface"});
+	transformDocument.Outputs.push_back({"transform", "transform", "rendered"});
+	{
+		std::ofstream file(client::ImageGraphDocumentPath(directory, graph));
+		file << imagegraph::Write(document);
+	}
+	transformDocument.Keyframes = {
+		{"image", "width", 0, int64_t{0}, "step"}, {"image", "width", 1, int64_t{64}, "step"}
+	};
+	{
+		std::ofstream file(client::ImageGraphDocumentPath(directory, transformGraph));
+		file << imagegraph::Write(transformDocument);
+	}
+	std::array<ecs::Entity, 6> entities;
+	for (size_t i = 0; i < 6; ++i) {
+		entities[i] = store.Create();
+		scene::ImageGraphBinding selector;
+		selector.Graph = i == 5 ? transformGraph : graph;
+		selector.Output = core::Name(i == 5 ? "transform" : "out");
+		selector.Texture = names[i];
+		selector.TickPolicy = scene::ImageGraphTickPolicy::World;
+		REQUIRE(scene::SetImageGraphBinding(store, entities[i], selector));
+	}
+	render::Renderer renderer;
+	client::ImageGraphRuntime runtime;
+	REQUIRE(runtime.Refresh(store, renderer, owner, directory) == 0);
+	INFO(runtime.LastError());
+	CHECK(runtime.LastError().find("solid dimensions") != std::string::npos);
+	CHECK(runtime.DocumentParses() == 2);
+	store.AdvanceTick(1.f / 60.f);
+	runtime.BeginFrame();
+	REQUIRE(runtime.Refresh(store, renderer, owner, directory) == 0);
+	INFO(runtime.LastError());
+	CHECK(runtime.LastError().find("renderer device") != std::string::npos);
+	CHECK(runtime.DocumentParses() == 2);
+	// Retiring a partial owner erases its failed admission and every entry before
+	// the owner is later presented again.
+	runtime.RetireInactiveOwners(renderer, {});
+	runtime.BeginFrame();
+	REQUIRE(runtime.Refresh(store, renderer, owner, directory) == 0);
+	CHECK(runtime.LastError().find("renderer device") != std::string::npos);
+	const core::Name staging("engine.imagegraph.skybox.staging." + std::to_string(owner.Id()));
+	for (const auto name : names) {
+		CHECK(renderer.SourceOutputStatus(staging, name, 1) == render::SourceTextureStatus::Absent);
+		CHECK(renderer.SourceOutputStatus(owner, name, 1) == render::SourceTextureStatus::Absent);
+	}
+	store.Remove<scene::ImageGraphBinding>(entities[5]);
+	runtime.BeginFrame();
+	REQUIRE(runtime.Refresh(store, renderer, owner, directory) == 0);
+	CHECK(runtime.LastError().find("six distinct") != std::string::npos);
+	runtime.Clear(renderer);
+}

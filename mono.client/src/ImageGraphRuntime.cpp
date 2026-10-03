@@ -209,7 +209,8 @@ namespace client {
 				.Tick = tick, .Seed = seed, .HostProvider = hostProvider ? hostProvider : localLua.get()
 			};
 			clock.RigidProvider = &rigid;
-			// Client seeks sample played frames, including fixed ticks. Repeated samples use the host cache.
+			// Client seeks sample played frames, including fixed ticks. Repeated samples
+			// use the host cache.
 			clock.RigidPlaying = true;
 			clock.RigidFrameProgress = true;
 			if (!feedback.Prepare(
@@ -270,7 +271,8 @@ namespace client {
 					return result;
 				}
 			}
-			// Inspect the owned result after one execution, because live host nodes can have side effects.
+			// Inspect the owned result after one execution, because live host nodes can
+			// have side effects.
 			engine::imagegraph::StatefulEvaluationResult evaluated;
 			result.Status = engine::imagegraph::EvaluateStateful(
 				document, plan, std::string(output.Text()), clock, evaluated, result.Diagnostic
@@ -286,7 +288,8 @@ namespace client {
 						result.Status,
 						{},
 						{},
-						"image array cannot fit the native atlas size, format or frame limits"
+						"image array cannot fit the native atlas size, "
+						"format or frame limits"
 					};
 				}
 			} else {
@@ -499,7 +502,7 @@ namespace client {
 				return EvaluateSdf(document, plan, *node, port, renderer, tick, seed);
 			return EvaluateCompiled(document, plan, output, tick, seed);
 		}
-	}
+	} // namespace
 
 	std::filesystem::path
 	ImageGraphDocumentPath(const std::filesystem::path &assetsDirectory, engine::core::Name graph) {
@@ -594,7 +597,8 @@ namespace client {
 				}
 				const auto path = ImageGraphDocumentPath(directory, binding.Graph);
 				const auto found = Documents.find(path.string());
-				// A missing or refused graph must be retried after Refresh, never stamped as complete.
+				// A missing or refused graph must be retried after Refresh, never
+				// stamped as complete.
 				if (found == Documents.end()) {
 					valid = false;
 					return;
@@ -831,6 +835,18 @@ namespace client {
 				}
 			);
 		}
+		const auto cancelSkyboxCaptures = [&](PendingSkyboxGroup &group) {
+			for (const auto &selector : group.Selectors) {
+				const auto found = Entries.find(Key(owner, selector.Texture));
+				if (found == Entries.end()) continue;
+				auto &entry = found->second;
+				for (const auto name : entry.HostCaptures)
+					renderer.CancelComposerCapture(owner, name);
+				entry.HostCaptures.clear();
+				entry.PendingHostTick.reset();
+				entry.HostObservations.Clear();
+			}
+		};
 		bool completeSky = sixFaces;
 		bool anySkyBinding = false;
 		for (const SkyFace &face : skyFaces)
@@ -844,6 +860,8 @@ namespace client {
 			for (const engine::core::Name name : priorSky->second.Names) {
 				const auto held = Entries.find(Key(owner, name));
 				if (held != Entries.end()) {
+					for (const auto name : held->second.HostCaptures)
+						renderer.CancelComposerCapture(owner, name);
 					(void)Publisher.Retire(renderer, held->second.Publication);
 					Entries.erase(held);
 				}
@@ -863,6 +881,7 @@ namespace client {
 		if (!completeSky) {
 			auto pending = PendingSkyboxes.find(owner.Id());
 			if (pending != PendingSkyboxes.end()) {
+				cancelSkyboxCaptures(pending->second);
 				engine::render::imagegraph::CancelSourceSkybox(renderer, pending->second.Work);
 				PendingSkyboxes.erase(pending);
 			}
@@ -924,10 +943,18 @@ namespace client {
 					std::string_view port;
 					const auto *node = OutputNode(document->Authored, skyFaces[index].Selector.Output, port);
 					sourceSkybox =
-						node && (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set" ||
-								 node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
-								 node->Type == "pc.rm_cloud" || node->Type == "pc.rm_terrain" ||
-								 node->Type == "pc.rm_primitive" || node->Type == "pc.rm_combine");
+						std::any_of(
+							document->Authored.Nodes.begin(),
+							document->Authored.Nodes.end(),
+							[](const auto &authored) {
+								return authored.Type == "pc.3_d_transform_image" ||
+									   authored.Type == "image.transform_3d";
+							}
+						) ||
+						(node && (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set" ||
+								  node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
+								  node->Type == "pc.rm_cloud" || node->Type == "pc.rm_terrain" ||
+								  node->Type == "pc.rm_primitive" || node->Type == "pc.rm_combine"));
 				}
 				if (sourceSkybox) {
 					auto pending = PendingSkyboxes.find(owner.Id());
@@ -954,6 +981,7 @@ namespace client {
 									pending->second.Ticks[index] != ticks[index])
 									same = false;
 						if (!same) {
+							cancelSkyboxCaptures(pending->second);
 							engine::render::imagegraph::CancelSourceSkybox(renderer, pending->second.Work);
 							PendingSkyboxes.erase(pending);
 							pending = PendingSkyboxes.end();
@@ -971,232 +999,278 @@ namespace client {
 							valid = false;
 						}
 						if (valid) {
-							Error.clear();
 							PendingSkyboxGroup candidate;
 							candidate.StoreIdentity = store.Identity();
-							engine::render::imagegraph::SourceSkyboxRequest request;
-							uint64_t retainedBytes = 0, outputBytes = 0;
-							request.Owner = owner;
-							// One stable, process-local staging namespace per presented owner, not per graph
-							// generation.
-							request.StagingOwner = engine::core::Name(
-								std::string("engine.imagegraph.skybox.staging.") + std::to_string(owner.Id())
-							);
-							for (size_t index = 0; index < 6 && valid; ++index) {
-								CachedDocument *document =
-									compiledDocument(paths[index], modified[index], fileBytes[index]);
-								if (!document) {
-									valid = false;
-									break;
-								}
-								Entry &entry = Entries[Key(owner, skyNames[index])];
-								if (entry.StoreIdentity != store.Identity() ||
-									entry.Modified != modified[index] ||
-									entry.FileBytes != fileBytes[index] ||
-									!SameSelector(entry.Selector, skyFaces[index].Selector)) {
-									entry.Feedback.Clear();
-									if (entry.LuaHost) entry.LuaHost->Reset();
-								}
-								if (!entry.LuaHost) entry.LuaHost = LuaHostFor(document->Authored);
-								LuaMessageDrain drain{entry.LuaHost.get()};
-								detail::ComposerProvider composerProvider(
-									renderer, owner, entry.LuaHost.get()
-								);
-								std::string_view port;
-								const auto *node =
-									OutputNode(document->Authored, skyFaces[index].Selector.Output, port);
-								engine::imagegraph::Diagnostic diagnostic;
-								const bool camera = node && (node->Type == "pc.3_d_camera" ||
-															 node->Type == "pc.3_d_camera_set");
-								const bool sdf =
-									node &&
-									(node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
-									 node->Type == "pc.rm_cloud" || node->Type == "pc.rm_terrain" ||
-									 node->Type == "pc.rm_primitive" || node->Type == "pc.rm_combine");
-								if (camera) {
-									engine::render::imagegraph::SourceCamera3DRequest face;
-									valid = detail::BuildCameraRequest(
-										document->Authored,
-										document->Compiled,
-										*node,
-										port,
-										ticks[index],
-										skyFaces[index].Selector.Seed,
-										true,
-										face,
-										diagnostic,
-										&composerProvider,
-										&entry.Feedback,
-										1
-									);
-									if (valid) {
-										engine::render::imagegraph::SourceSkyboxFace pendingFace =
-											std::move(face);
-										engine::render::imagegraph::SourceSkyboxFaceInfo info;
-										valid =
-											engine::render::imagegraph::InspectSourceSkyboxFace(
-												pendingFace, info, Error
-											) == engine::render::imagegraph::SourceSkyboxStatus::Pending &&
-											info.RetainedBytes <=
-												engine::render::imagegraph::
-														MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES -
-													retainedBytes &&
-											info.OutputBytes <= engine::render::imagegraph::
-																		MAXIMUM_SOURCE_SKYBOX_OUTPUT_BYTES -
-																	outputBytes;
-										if (valid) {
-											retainedBytes += info.RetainedBytes;
-											outputBytes += info.OutputBytes;
-											request.Faces[index] = std::move(pendingFace);
-										} else if (Error.empty())
-											Error = "skybox group exceeds source or output byte cap";
-									}
-								} else if (sdf) {
-									engine::render::imagegraph::SourceSdfRequest face;
-									valid = detail::BuildSdfRequest(
-										document->Authored,
-										document->Compiled,
-										*node,
-										port,
-										ticks[index],
-										skyFaces[index].Selector.Seed,
-										true,
-										face,
-										diagnostic,
-										&composerProvider,
-										&entry.Feedback,
-										1
-									);
-									if (valid) {
-										engine::render::imagegraph::SourceSkyboxFace pendingFace =
-											std::move(face);
-										engine::render::imagegraph::SourceSkyboxFaceInfo info;
-										valid =
-											engine::render::imagegraph::InspectSourceSkyboxFace(
-												pendingFace, info, Error
-											) == engine::render::imagegraph::SourceSkyboxStatus::Pending &&
-											info.RetainedBytes <=
-												engine::render::imagegraph::
-														MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES -
-													retainedBytes &&
-											info.OutputBytes <= engine::render::imagegraph::
-																		MAXIMUM_SOURCE_SKYBOX_OUTPUT_BYTES -
-																	outputBytes;
-										if (valid) {
-											retainedBytes += info.RetainedBytes;
-											outputBytes += info.OutputBytes;
-											request.Faces[index] = std::move(pendingFace);
-										} else if (Error.empty())
-											Error = "skybox group exceeds source or output byte cap";
-									}
-								} else {
-									auto frame = EvaluateCompiled(
-										document->Authored,
-										document->Compiled,
-										skyFaces[index].Selector.Output,
-										ticks[index],
-										skyFaces[index].Selector.Seed,
-										&entry.Feedback,
-										&composerProvider
-									);
-									const auto format = detail::TextureFormatForSurface(frame.Image.Format);
-									valid = frame.Status == engine::imagegraph::Status::Ok &&
-											frame.FlipbookSide == 0 && format &&
-											engine::imagegraph::FiniteSurfaceSamples(frame.Image);
-									if (valid) {
-										engine::assets::TextureData face;
-										face.Width = frame.Image.Width;
-										face.Height = frame.Image.Height;
-										face.Format = *format == engine::assets::TextureFormat::RGBA4_UNORM
-														  ? engine::assets::TextureFormat::RGBA4_SRGB
-														  : *format;
-										if (frame.Image.Pixels.size() >
-											engine::render::imagegraph::
-												MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES) {
-											valid = false;
-											Error = "skybox CPU face exceeds source byte cap";
-											break;
-										}
-										const auto stride =
-											detail::TextureUploadBytesPerPixel(frame.Image.Format);
-										const uint64_t sourceBytes = frame.Image.Pixels.size(),
-													   uploadBytes =
-														   uint64_t(face.Width) * face.Height * stride;
-										if (!stride ||
-											sourceBytes > engine::render::imagegraph::
-																  MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES -
-															  retainedBytes ||
-											uploadBytes > engine::render::imagegraph::
-																  MAXIMUM_SOURCE_SKYBOX_OUTPUT_BYTES -
-															  outputBytes) {
-											valid = false;
-											Error = "skybox group exceeds source or output byte cap";
-											break;
-										}
-										retainedBytes += sourceBytes;
-										outputBytes += uploadBytes;
-										face.Pixels.assign(
-											reinterpret_cast<const std::byte *>(frame.Image.Pixels.data()),
-											reinterpret_cast<const std::byte *>(
-												frame.Image.Pixels.data() + frame.Image.Pixels.size()
-											)
-										);
-										engine::core::Metrics::Count(
-											"imagegraph.skybox CPU copied bytes", sourceBytes
-										);
-										request.Faces[index] = std::move(face);
-									}
-									diagnostic = frame.Diagnostic;
-								}
-								if (!valid) {
-									if (!diagnostic.Message.empty())
-										Error = diagnostic.Message;
-									else if (Error.empty())
-										Error = "skybox selected output is not a supported still image";
-									break;
-								}
-								const auto binding = Publisher.BeginBinding(owner, skyNames[index]);
-								if (!binding) {
-									Error = "skybox binding generation unavailable";
-									valid = false;
-									break;
-								}
-								entry.Publication = *binding;
-								entry.Owner = owner;
-								if (NextTransformGeneration == 0) {
-									valid = false;
-									Error = "skybox source generation space exhausted";
-									break;
-								}
-								const uint64_t generation = NextTransformGeneration;
-								NextTransformGeneration =
-									generation == std::numeric_limits<uint64_t>::max() ? 0 : generation + 1;
-								request.Targets[index] = {skyNames[index], generation};
-								if (entry.TransformAdmitted) {
-									(void)renderer.CancelTransformImage3D(
-										owner, skyNames[index], entry.TransformGeneration
-									);
-									entry.TransformAdmitted = false;
-								}
-
+							candidate.Admission.emplace();
+							for (size_t index = 0; index < 6; ++index) {
 								candidate.Selectors[index] = skyFaces[index].Selector;
 								candidate.Entities[index] = skyFaces[index].Entity;
 								candidate.Modified[index] = modified[index];
 								candidate.FileBytes[index] = fileBytes[index];
 								candidate.Ticks[index] = ticks[index];
-								candidate.Animated[index] = NeedsFrameSamples(document->Authored);
 							}
-							if (valid && engine::render::imagegraph::BeginSourceSkybox(
-											 renderer, candidate.Work, std::move(request), Error
-										 ) == engine::render::imagegraph::SourceSkyboxStatus::Pending) {
-								TransformOwners.try_emplace(owner.Id(), owner);
-								pending = PendingSkyboxes.emplace(owner.Id(), std::move(candidate)).first;
-							}
+							pending = PendingSkyboxes.emplace(owner.Id(), std::move(candidate)).first;
 						}
 					}
-					if (valid && pending != PendingSkyboxes.end()) {
-						// Ignore advancing world ticks while this frozen six-face cohort finishes, avoiding
-						// perpetual cancellation.
+					if (valid && pending != PendingSkyboxes.end() && pending->second.Admission) {
+						Error.clear();
+						auto &candidate = pending->second;
+						auto &request = *candidate.Admission;
+						auto &retainedBytes = candidate.RetainedFaceBytes;
+						auto &outputBytes = candidate.OutputFaceBytes;
+						request.Owner = owner;
+						// One stable, process-local staging namespace per presented owner,
+						// not per graph generation.
+						request.StagingOwner = engine::core::Name(
+							std::string("engine.imagegraph.skybox.staging.") + std::to_string(owner.Id())
+						);
+						bool waitingForCapture = false;
+						for (size_t index = candidate.PreparedFaces; index < 6 && valid; ++index) {
+							CachedDocument *document =
+								compiledDocument(paths[index], modified[index], fileBytes[index]);
+							if (!document) {
+								valid = false;
+								break;
+							}
+							candidate.Animated[index] = NeedsFrameSamples(document->Authored);
+							Entry &entry = Entries[Key(owner, skyNames[index])];
+							if (entry.StoreIdentity != store.Identity() ||
+								entry.Modified != modified[index] || entry.FileBytes != fileBytes[index] ||
+								!SameSelector(entry.Selector, skyFaces[index].Selector)) {
+								for (const auto name : entry.HostCaptures)
+									renderer.CancelComposerCapture(owner, name);
+								entry.HostCaptures.clear();
+								entry.HostObservations.Clear();
+								entry.Feedback.Clear();
+								if (entry.LuaHost) entry.LuaHost->Reset();
+							}
+							if (!entry.LuaHost) entry.LuaHost = LuaHostFor(document->Authored);
+							LuaMessageDrain drain{entry.LuaHost.get()};
+							detail::ComposerProvider composerProvider(
+								renderer,
+								owner,
+								entry.LuaHost.get(),
+								engine::core::Name(
+									"client.imagegraph/" + std::string(skyNames[index].Text())
+								),
+								&entry.HostCaptures,
+								&entry.HostObservations
+							);
+							entry.Owner = owner;
+							entry.StoreIdentity = store.Identity();
+							entry.Selector = candidate.Selectors[index];
+							entry.Modified = candidate.Modified[index];
+							entry.FileBytes = candidate.FileBytes[index];
+							std::string_view port;
+							const auto *node =
+								OutputNode(document->Authored, skyFaces[index].Selector.Output, port);
+							engine::imagegraph::Diagnostic diagnostic;
+							const bool camera =
+								node && (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set");
+							const bool sdf =
+								node &&
+								(node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
+								 node->Type == "pc.rm_cloud" || node->Type == "pc.rm_terrain" ||
+								 node->Type == "pc.rm_primitive" || node->Type == "pc.rm_combine");
+							if (camera) {
+								engine::render::imagegraph::SourceCamera3DRequest face;
+								valid = detail::BuildCameraRequest(
+									document->Authored,
+									document->Compiled,
+									*node,
+									port,
+									candidate.Ticks[index],
+									skyFaces[index].Selector.Seed,
+									true,
+									face,
+									diagnostic,
+									&composerProvider,
+									&entry.Feedback,
+									1
+								);
+								if (valid) {
+									engine::render::imagegraph::SourceSkyboxFace pendingFace =
+										std::move(face);
+									engine::render::imagegraph::SourceSkyboxFaceInfo info;
+									valid =
+										engine::render::imagegraph::InspectSourceSkyboxFace(
+											pendingFace, info, Error
+										) == engine::render::imagegraph::SourceSkyboxStatus::Pending &&
+										info.RetainedBytes <=
+											engine::render::imagegraph::
+													MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES -
+												retainedBytes &&
+										info.OutputBytes <=
+											engine::render::imagegraph::MAXIMUM_SOURCE_SKYBOX_OUTPUT_BYTES -
+												outputBytes;
+									if (valid) {
+										retainedBytes += info.RetainedBytes;
+										outputBytes += info.OutputBytes;
+										request.Faces[index] = std::move(pendingFace);
+									} else if (Error.empty())
+										Error = "skybox group exceeds source or output byte cap";
+								}
+							} else if (sdf) {
+								engine::render::imagegraph::SourceSdfRequest face;
+								valid = detail::BuildSdfRequest(
+									document->Authored,
+									document->Compiled,
+									*node,
+									port,
+									candidate.Ticks[index],
+									skyFaces[index].Selector.Seed,
+									true,
+									face,
+									diagnostic,
+									&composerProvider,
+									&entry.Feedback,
+									1
+								);
+								if (valid) {
+									engine::render::imagegraph::SourceSkyboxFace pendingFace =
+										std::move(face);
+									engine::render::imagegraph::SourceSkyboxFaceInfo info;
+									valid =
+										engine::render::imagegraph::InspectSourceSkyboxFace(
+											pendingFace, info, Error
+										) == engine::render::imagegraph::SourceSkyboxStatus::Pending &&
+										info.RetainedBytes <=
+											engine::render::imagegraph::
+													MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES -
+												retainedBytes &&
+										info.OutputBytes <=
+											engine::render::imagegraph::MAXIMUM_SOURCE_SKYBOX_OUTPUT_BYTES -
+												outputBytes;
+									if (valid) {
+										retainedBytes += info.RetainedBytes;
+										outputBytes += info.OutputBytes;
+										request.Faces[index] = std::move(pendingFace);
+									} else if (Error.empty())
+										Error = "skybox group exceeds source or output byte cap";
+								}
+							} else {
+								auto frame = EvaluateCompiled(
+									document->Authored,
+									document->Compiled,
+									skyFaces[index].Selector.Output,
+									candidate.Ticks[index],
+									skyFaces[index].Selector.Seed,
+									&entry.Feedback,
+									&composerProvider
+								);
+								const auto format = detail::TextureFormatForSurface(frame.Image.Format);
+								valid = frame.Status == engine::imagegraph::Status::Ok &&
+										frame.FlipbookSide == 0 && format &&
+										engine::imagegraph::FiniteSurfaceSamples(frame.Image);
+								if (valid) {
+									engine::assets::TextureData face;
+									face.Width = frame.Image.Width;
+									face.Height = frame.Image.Height;
+									face.Format = *format == engine::assets::TextureFormat::RGBA4_UNORM
+													  ? engine::assets::TextureFormat::RGBA4_SRGB
+													  : *format;
+									if (frame.Image.Pixels.size() >
+										engine::render::imagegraph::MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES) {
+										valid = false;
+										Error = "skybox CPU face exceeds source byte cap";
+										break;
+									}
+									const auto stride =
+										detail::TextureUploadBytesPerPixel(frame.Image.Format);
+									const uint64_t sourceBytes = frame.Image.Pixels.size(),
+												   uploadBytes = uint64_t(face.Width) * face.Height * stride;
+									if (!stride ||
+										sourceBytes > engine::render::imagegraph::
+															  MAXIMUM_TRANSFORM_IMAGE_3D_OUTPUT_BYTES -
+														  retainedBytes ||
+										uploadBytes >
+											engine::render::imagegraph::MAXIMUM_SOURCE_SKYBOX_OUTPUT_BYTES -
+												outputBytes) {
+										valid = false;
+										Error = "skybox group exceeds source or output byte cap";
+										break;
+									}
+									retainedBytes += sourceBytes;
+									outputBytes += uploadBytes;
+									face.Pixels.assign(
+										reinterpret_cast<const std::byte *>(frame.Image.Pixels.data()),
+										reinterpret_cast<const std::byte *>(
+											frame.Image.Pixels.data() + frame.Image.Pixels.size()
+										)
+									);
+									engine::core::Metrics::Count(
+										"imagegraph.skybox CPU copied bytes", sourceBytes
+									);
+									request.Faces[index] = std::move(face);
+								}
+								diagnostic = frame.Diagnostic;
+							}
+							if (!valid) {
+								waitingForCapture = composerProvider.Pending;
+								if (!waitingForCapture) {
+									cancelSkyboxCaptures(candidate);
+									candidate.Work.Failed = true;
+									candidate.Admission.reset();
+								}
+								if (!diagnostic.Message.empty())
+									Error = diagnostic.Message;
+								else if (Error.empty())
+									Error = "skybox selected output is not a supported still image";
+								break;
+							}
+							const auto binding = Publisher.BeginBinding(owner, skyNames[index]);
+							if (!binding) {
+								Error = "skybox binding generation unavailable";
+								valid = false;
+								break;
+							}
+							entry.Publication = *binding;
+							entry.Owner = owner;
+							if (NextTransformGeneration == 0) {
+								valid = false;
+								Error = "skybox source generation space exhausted";
+								break;
+							}
+							const uint64_t generation = NextTransformGeneration;
+							NextTransformGeneration =
+								generation == std::numeric_limits<uint64_t>::max() ? 0 : generation + 1;
+							request.Targets[index] = {skyNames[index], generation};
+							if (entry.TransformAdmitted) {
+								(void)renderer.CancelTransformImage3D(
+									owner, skyNames[index], entry.TransformGeneration
+								);
+								entry.TransformAdmitted = false;
+							}
+
+							candidate.Selectors[index] = skyFaces[index].Selector;
+							candidate.Entities[index] = skyFaces[index].Entity;
+							candidate.Modified[index] = modified[index];
+							candidate.FileBytes[index] = fileBytes[index];
+							entry.HostObservations.Clear();
+							for (const auto name : entry.HostCaptures)
+								renderer.CancelComposerCapture(owner, name);
+							entry.HostCaptures.clear();
+							candidate.PreparedFaces = index + 1;
+						}
+						if (valid && engine::render::imagegraph::BeginSourceSkybox(
+										 renderer, candidate.Work, std::move(request), Error
+									 ) == engine::render::imagegraph::SourceSkyboxStatus::Pending) {
+							TransformOwners.try_emplace(owner.Id(), owner);
+						} else if (valid) {
+							cancelSkyboxCaptures(candidate);
+							candidate.Work.Failed = true;
+							valid = false;
+						}
+						if (!valid && candidate.Admission && !waitingForCapture) {
+							cancelSkyboxCaptures(candidate);
+							candidate.Work.Failed = true;
+						}
+						if (candidate.PreparedFaces == 6 || candidate.Work.Failed)
+							candidate.Admission.reset();
+					}
+					if (valid && pending != PendingSkyboxes.end() && !pending->second.Admission) {
+						// Ignore advancing world ticks while this frozen six-face cohort
+						// finishes, avoiding perpetual cancellation.
 						const auto status = engine::render::imagegraph::RefreshSourceSkybox(
 							renderer, pending->second.Work, Error
 						);
@@ -1475,7 +1549,8 @@ namespace client {
 					 outputPort != "depth") ||
 					(sourceSdf && outputPort != "surface_out") ||
 					(sourceComposer && outputPort != "surface")) {
-					Error = "live Transform Image 3D texture bindings require rendered or depth output";
+					Error = "live Transform Image 3D texture bindings require rendered or "
+							"depth output";
 					if (entry.TransformAdmitted) {
 						(void)renderer.CancelTransformImage3D(
 							owner, selector.Texture, entry.TransformGeneration
@@ -1639,7 +1714,8 @@ namespace client {
 					if (!Publisher.ReleaseBinding(entry.Publication)) {
 						(void)renderer.CancelTransformImage3D(owner, selector.Texture, generation);
 						if (ownerInserted) TransformOwners.erase(owner.Id());
-						Error = "live image publisher binding became stale during transform handoff";
+						Error = "live image publisher binding became stale during transform "
+								"handoff";
 						return;
 					}
 					entry.Publication = {};
@@ -1865,4 +1941,4 @@ namespace client {
 		NextBindingByOwner.clear();
 		Error.clear();
 	}
-}
+} // namespace client
