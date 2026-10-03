@@ -300,6 +300,7 @@ namespace engine::imagegraph::detail {
 	bool SourceGapContract(NodeContext &context);
 	bool SourceAlignContent(NodeContext &context);
 	bool SourceDitherDiffuse(NodeContext &context);
+	bool SourceOrderedDither(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.gradient_grid", SourceGradientGrid, true},
@@ -343,6 +344,7 @@ namespace engine::imagegraph::detail {
 			ExecutorEntry{"pc.gap_contract", SourceGapContract, true},
 			ExecutorEntry{"pc.align_content", SourceAlignContent, true},
 			ExecutorEntry{"pc.dither_diffuse", SourceDitherDiffuse, true},
+			ExecutorEntry{"pc.dither", SourceOrderedDither, true},
 			ExecutorEntry{"pc.padding", SourcePadding, true},
 			ExecutorEntry{"pc.9_slice", SourceNineSlice, true},
 			ExecutorEntry{"pc.de_stray", DeStray, true},

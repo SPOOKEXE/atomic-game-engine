@@ -2298,7 +2298,9 @@ namespace engine::imagegraphio {
 								return old == value;
 							}))
 							continue;
-						if ((node.Type == "pc.bevel" &&
+						if ((node.Type == "pc.dither" &&
+							 (value.Port == "contrast_mapped" || value.Port == "contrast_map_range")) ||
+							(node.Type == "pc.bevel" &&
 							 (value.Port == "height_mapped" || value.Port == "height_map_range")) ||
 							(node.Type == "pc.erode" &&
 							 (value.Port == "width_mapped" || value.Port == "width_map_range")) ||
@@ -2307,15 +2309,19 @@ namespace engine::imagegraphio {
 							  value.Port == "intensity_mapped" || value.Port == "intensity_map_range"))) {
 							const bool occlusion = node.Type == "pc.ambient_occlusion";
 							const std::string_view numericId =
-								node.Type == "pc.erode"								? "width"
+								node.Type == "pc.dither"							? "contrast"
+								: node.Type == "pc.erode"							? "width"
 								: occlusion && value.Port.starts_with("intensity_") ? "intensity"
 																					: "height";
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
-							const int expectedIndex = occlusion && numericId == "height" ? 3 : 1;
-							const std::string_view expectedKind = !occlusion			  ? "Int"
-																  : numericId == "height" ? "Float"
-																						  : "Slider";
+							const int expectedIndex = node.Type == "pc.dither"			   ? 4
+													  : occlusion && numericId == "height" ? 3
+																						   : 1;
+							const std::string_view expectedKind = node.Type == "pc.dither" ? "Slider"
+																  : !occlusion			   ? "Int"
+																  : numericId == "height"  ? "Float"
+																						   : "Slider";
 							if (!height || height->SourceIndex != expectedIndex ||
 								height->SourceKind != expectedKind || inputs.size() <= size_t(expectedIndex))
 								return Reject(
