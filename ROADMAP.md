@@ -78,7 +78,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
 Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
-- [_] Finish measured engine stress optimizations and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
+- [x] Finish the measured engine stress pass and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. The recovery candidate was rejected without a demonstrated gain. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
 - [_] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`).
 
 ### v0.26

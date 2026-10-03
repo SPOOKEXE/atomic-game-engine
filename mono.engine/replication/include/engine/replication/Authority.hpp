@@ -88,8 +88,8 @@ namespace engine::replication {
 		// while a client is keeping up and is the whole world once it is not:
 		// at two hundred clients the measured link took about forty rows a tick
 		// while the recovery walk considered two thousand rows per component.
-		// Fixed width values can wait until packing chooses rows; dynamic writers
-		// still have to run here to learn their exact lengths.
+		// Each offered value is encoded once here; both packing passes reuse
+		// those bytes and their exact lengths.
 		//
 		// Large enough that a healthy connection never reaches it, so this
 		// changes nothing until a client is far behind - which is exactly when a
