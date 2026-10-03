@@ -1,6 +1,7 @@
 #pragma once
 
 // Fixed headless workloads with analytical expected outputs. No external source parity is claimed.
+#include "../../src/nodes/Processor.hpp"
 #include "AudioWindowObservation.hpp"
 
 #include <engine/imagegraph/Document.hpp>
@@ -58,7 +59,16 @@ namespace engine::imagegraph::testing {
 			AudioWindow4096,
 			AudioWindow65536,
 			IcosphereDefault1,
-			IcosphereSmooth3
+			IcosphereSmooth3,
+			Julia128,
+			Gabor128,
+			Herringbone128,
+			Honeycomb128,
+			Heightmap80,
+			Julia128EightIterations,
+			Gabor128Seeded,
+			Flow128DefaultDetail,
+			Bubble64SeededDefaultDensity
 		};
 		static_assert(static_cast<int>(Family::CylinderProfile) == 14);
 		static_assert(static_cast<int>(Family::ConeDefault8) == 15);
@@ -73,6 +83,15 @@ namespace engine::imagegraph::testing {
 		std::array<AudioWindowPresentation, 4> AudioWindows;
 		static_assert(static_cast<int>(Family::IcosphereDefault1) == 23);
 		static_assert(static_cast<int>(Family::IcosphereSmooth3) == 24);
+		static_assert(static_cast<int>(Family::Julia128) == 25);
+		static_assert(static_cast<int>(Family::Gabor128) == 26);
+		static_assert(static_cast<int>(Family::Herringbone128) == 27);
+		static_assert(static_cast<int>(Family::Honeycomb128) == 28);
+		static_assert(static_cast<int>(Family::Heightmap80) == 29);
+		static_assert(static_cast<int>(Family::Julia128EightIterations) == 30);
+		static_assert(static_cast<int>(Family::Gabor128Seeded) == 31);
+		static_assert(static_cast<int>(Family::Flow128DefaultDetail) == 32);
+		static_assert(static_cast<int>(Family::Bubble64SeededDefaultDensity) == 33);
 		Family Kind;
 		Document Authored;
 		Plan Compiled;
@@ -80,6 +99,8 @@ namespace engine::imagegraph::testing {
 		std::vector<AudioClipSource> Clips;
 		std::vector<RequestImageSource> ImageSources;
 		Image HdrOutput;
+		Image SourceOutput;
+		std::string SourceOutputName = "output";
 		WavPreviewControls Controls;
 		std::array<WavTimelinePresentation, 3> Waveforms;
 		Diagnostic Failure;
@@ -566,6 +587,120 @@ namespace engine::imagegraph::testing {
 					}
 					Clips.push_back({file == 0 ? "a.wav" : "b.wav", std::move(clip)});
 				}
+			} else if (IsSourceImage()) {
+				Authored.FormatVersion = 9;
+				if (family == Family::Flow128DefaultDetail) {
+					Authored.Nodes = {
+						{"generator",
+						 "pc.flow_noise",
+						 "",
+						 {},
+						 {{"dimension", Vector2{128, 128}},
+						  {"dimension_unit", EnumValue{0}},
+						  {"attribute_color_depth", EnumValue{3}}}}
+					};
+					Authored.Outputs = {{"output", "generator", "surface_out"}};
+				} else if (family == Family::Bubble64SeededDefaultDensity) {
+					Authored.Nodes = {
+						{"generator",
+						 "pc.noise_bubble",
+						 "",
+						 {},
+						 {{"dimension", Vector2{64, 64}},
+						  {"dimension_unit", EnumValue{0}},
+						  {"seed", 17.0},
+						  {"attribute_color_depth", EnumValue{3}}}}
+					};
+					Authored.Outputs = {{"output", "generator", "surface_out"}};
+				} else if (family == Family::Julia128 || family == Family::Julia128EightIterations) {
+					Authored.Nodes = {
+						{"generator",
+						 "pc.julia_set",
+						 "",
+						 {},
+						 {{"dimension", Vector2{128, 128}}, {"dimension_unit", EnumValue{0}}}}
+					};
+					if (family == Family::Julia128)
+						Authored.Nodes[0].Values.emplace_back("max_iteration", int64_t{1});
+					else
+						Authored.Nodes[0].Values.emplace_back("max_iteration", int64_t{8});
+					Authored.Outputs = {{"output", "generator", "surface"}};
+				} else if (family == Family::Gabor128 || family == Family::Gabor128Seeded) {
+					Authored.Nodes = {
+						{"generator",
+						 "pc.gabor_noise",
+						 "",
+						 {},
+						 {{"dimension", Vector2{128, 128}},
+						  {"dimension_unit", EnumValue{0}},
+						  {"seed", 17.0},
+						  {"attribute_color_depth", EnumValue{3}}}}
+					};
+					if (family == Family::Gabor128) Authored.Nodes[0].Values.emplace_back("density", 0.0);
+					Authored.Outputs = {{"output", "generator", "surface_out"}};
+				} else if (family == Family::Herringbone128) {
+					Authored.Nodes = {
+						{"pattern",
+						 "pc.herringbone_tile",
+						 "",
+						 {},
+						 {{"dimension", Vector2{128, 128}},
+						  {"dimension_unit", EnumValue{0}},
+						  {"position_unit", EnumValue{0}},
+						  {"position", Vector2{0, 0}},
+						  {"seed", 17.0},
+						  {"scale_unit", EnumValue{0}},
+						  {"scale", Vector2{4, 4}},
+						  {"tile_length", 1.0},
+						  {"render_type", EnumValue{1}},
+						  {"level_out", Vector2{.5, .5}},
+						  {"attribute_color_depth", EnumValue{3}}}}
+					};
+					Authored.Outputs = {{"output", "pattern", "surface_out"}};
+				} else if (family == Family::Honeycomb128) {
+					Authored.Nodes = {
+						{"pattern",
+						 "pc.honeycomb_noise",
+						 "",
+						 {},
+						 {{"dimension", Vector2{128, 128}},
+						  {"dimension_unit", EnumValue{0}},
+						  {"position_unit", EnumValue{0}},
+						  {"position", Vector2{0, 0}},
+						  {"seed", 17.0},
+						  {"iteration", int64_t{4}},
+						  {"level_out", Vector2{.5, .5}},
+						  {"attribute_color_depth", EnumValue{3}}}}
+					};
+					Authored.Outputs = {{"output", "pattern", "surface_out"}};
+				} else {
+					Authored.Nodes = {
+						{"profile",
+						 "image.solid",
+						 "",
+						 {},
+						 {{"width", int64_t{2}},
+						  {"height", int64_t{2}},
+						  {"colour", Colour{255, 255, 255, 255}}}},
+						{"heightmap",
+						 "pc.heightmap_project_3_d",
+						 "",
+						 {},
+						 {{"dimension", Vector2{80, 80}},
+						  {"dimension_unit", EnumValue{0}},
+						  {"view_angle", Vector3{}},
+						  {"scale", 2.0},
+						  {"attribute_color_depth", EnumValue{5}},
+						  {"interpolate", EnumValue{1}}}}
+					};
+					Authored.Links = {{"profile", "image", "heightmap", "heightmap"}};
+					Authored.Outputs = {
+						{"colour", "heightmap", "surface_out"},
+						{"depth", "heightmap", "depth_pass"},
+						{"normal", "heightmap", "normal_pass"}
+					};
+					SourceOutputName = "normal";
+				}
 			} else if (family == Family::WavControls) {
 				Authored.FormatVersion = 8;
 				Authored.Nodes = {
@@ -602,8 +737,8 @@ namespace engine::imagegraph::testing {
 				Authored.Links.push_back({"batch", "array", "invert", "surface_in"});
 				Authored.Outputs = {{"output", "invert", "surface_out"}};
 			}
-			if (family == Family::Vector || family == Family::WavTimeline || IsHdr() || IsCube() ||
-				IsCylinder() || IsCone() || IsTorus() || IsUVSphere() || IsIcosphere()) {
+			if (family == Family::Vector || family == Family::WavTimeline || IsHdr() || IsSourceImage() ||
+				IsCube() || IsCylinder() || IsCone() || IsTorus() || IsUVSphere() || IsIcosphere()) {
 				Document persisted;
 				if (Read(Write(Authored), persisted, Failure) != Status::Ok) Fail("persisted vector graph");
 				Authored = std::move(persisted);
@@ -634,6 +769,9 @@ namespace engine::imagegraph::testing {
 					InputHash = HashBytes(InputHash, std::bit_cast<uint64_t>(sample), 8);
 			}
 			if (Kind == Family::WavTimeline) InputHash = WavTimelineInputHash();
+			if (Kind == Family::Julia128EightIterations || Kind == Family::Gabor128Seeded ||
+				Kind == Family::Flow128DefaultDetail || Kind == Family::Bubble64SeededDefaultDensity)
+				VerifyPinnedSourceGolden();
 			if (Compile(Authored, Compiled, Failure) != Status::Ok) Fail("compile");
 			Evaluate();
 			OutputHash = Verify();
@@ -665,7 +803,77 @@ namespace engine::imagegraph::testing {
 		bool IsHdr() const {
 			return Kind == Family::HdrDirectional || Kind == Family::HdrZoom;
 		}
+		bool IsSourceImage() const {
+			return Kind == Family::Julia128 || Kind == Family::Gabor128 || Kind == Family::Julia128EightIterations ||
+				   Kind == Family::Gabor128Seeded || Kind == Family::Flow128DefaultDetail ||
+				   Kind == Family::Bubble64SeededDefaultDensity || Kind == Family::Herringbone128 ||
+				   Kind == Family::Honeycomb128 || Kind == Family::Heightmap80;
+		}
+		std::string_view SourceNodeName() const {
+			switch (Kind) {
+			case Family::Julia128:
+			case Family::Julia128EightIterations:
+				return "julia_set";
+			case Family::Gabor128:
+			case Family::Gabor128Seeded:
+				return "gabor_noise";
+			case Family::Flow128DefaultDetail:
+				return "flow_noise";
+			case Family::Bubble64SeededDefaultDensity:
+				return "bubble_noise";
+			case Family::Herringbone128:
+				return "herringbone_tile";
+			case Family::Honeycomb128:
+				return "honeycomb_noise";
+			case Family::Heightmap80:
+				return "heightmap_projection";
+			default:
+				return {};
+			}
+		}
 
+		void VerifyPinnedSourceGolden() const {
+			Document golden = Authored;
+			for (auto &[name, value] : golden.Nodes[0].Values)
+				if (name == "dimension")
+					value = Kind == Family::Julia128EightIterations ? Value{Vector2{4, 4}} : Value{Vector2{4, 3}};
+			Plan plan;
+			Diagnostic diagnostic;
+			if (Compile(golden, plan, diagnostic) != Status::Ok) Fail("pinned source golden compile");
+			Image actual;
+			if (engine::imagegraph::Evaluate(golden, plan, "output", {}, actual, diagnostic) != Status::Ok)
+				Fail("pinned source golden evaluate");
+			constexpr std::array<std::array<uint8_t, 4>, 4> julia{
+				{{{0, 32, 32, 0}}, {{64, 96, 96, 64}}, {{64, 96, 96, 64}}, {{0, 32, 32, 0}}}
+			};
+			constexpr std::array<std::array<uint8_t, 4>, 3> gabor{
+				{{{145, 93, 162, 106}}, {{236, 136, 91, 214}}, {{143, 185, 197, 43}}}
+			};
+			constexpr std::array<std::array<uint8_t, 4>, 3> flow{
+				{{{239, 254, 253, 242}}, {{153, 238, 253, 240}}, {{156, 203, 220, 255}}}
+			};
+			constexpr std::array<std::array<uint8_t, 4>, 3> bubble{
+				{{{154, 0, 38, 0}}, {{32, 0, 32, 0}}, {{77, 32, 0, 0}}}
+			};
+			constexpr uint32_t width = 4;
+			const bool isJulia = Kind == Family::Julia128EightIterations;
+			const uint32_t height = isJulia ? 4 : 3;
+			if (actual.Width != width || actual.Height != height ||
+				actual.Format != SurfaceFormat::RGBA8Unorm ||
+				actual.Pixels.size() != size_t(width) * height * 4)
+				Fail("pinned source golden shape");
+			for (size_t pixel = 0; pixel < size_t(width) * height; ++pixel) {
+				const auto expected = isJulia ? julia[pixel / width][pixel % width]
+						: Kind == Family::Gabor128Seeded ? gabor[pixel / width][pixel % width]
+						: Kind == Family::Flow128DefaultDetail ? flow[pixel / width][pixel % width]
+						: bubble[pixel / width][pixel % width];
+				for (size_t channel = 0; channel < 4; ++channel) {
+					const uint8_t expectedChannel = channel < 3 ? expected : 255;
+					if (actual.Pixels[pixel * 4 + channel] != expectedChannel)
+						Fail("pinned source golden bytes");
+				}
+			}
+		}
 		[[noreturn]] void Fail(const char *stage) const {
 			throw std::runtime_error(
 				std::string("source-family fixture ") + stage +
@@ -708,6 +916,13 @@ namespace engine::imagegraph::testing {
 				if (engine::imagegraph::Evaluate(Authored, Compiled, "output", request, HdrOutput, Failure) !=
 					Status::Ok)
 					Fail("HDR evaluate");
+				return;
+			}
+			if (IsSourceImage()) {
+				if (engine::imagegraph::Evaluate(
+						Authored, Compiled, SourceOutputName, request, SourceOutput, Failure
+					) != Status::Ok)
+					Fail("source image evaluate");
 				return;
 			}
 			if (Kind == Family::WavTimeline) {
@@ -1962,6 +2177,42 @@ namespace engine::imagegraph::testing {
 				hash = HashBytes(hash, HdrOutput.Width, 4);
 				hash = HashBytes(hash, HdrOutput.Height, 4);
 				for (uint8_t byte : HdrOutput.Pixels)
+					hash = HashBytes(hash, byte, 1);
+			} else if (IsSourceImage()) {
+				const uint32_t side = Kind == Family::Heightmap80 ? 80
+							 : Kind == Family::Bubble64SeededDefaultDensity ? 64
+							 : 128;
+				if (SourceOutput.Width != side || SourceOutput.Height != side || SourceOutput.Pixels.empty())
+					Fail("source image output shape");
+				if (Kind == Family::Julia128) {
+					for (uint32_t y = 0; y < side; ++y)
+						for (uint32_t x = 0; x < side; ++x) {
+							const double u = (double(x) + .5) / side - .5;
+							const double v = (double(y) + .5) / side - .5;
+							const uint8_t expected = u * u + v * v > .25 ? 0 : 255;
+							const size_t byte = (size_t(y) * side + x) * 4;
+							if (SourceOutput.Pixels[byte] != expected ||
+								SourceOutput.Pixels[byte + 1] != expected ||
+								SourceOutput.Pixels[byte + 2] != expected ||
+								SourceOutput.Pixels[byte + 3] != 255)
+								Fail("Julia one-iteration analytical field");
+						}
+				} else if (Kind == Family::Gabor128 || Kind == Family::Herringbone128 ||
+						   Kind == Family::Honeycomb128) {
+					const uint8_t expected = Kind == Family::Gabor128 ? 255 : 128;
+					for (size_t byte = 0; byte < SourceOutput.Pixels.size(); byte += 4)
+						if (SourceOutput.Pixels[byte] != expected ||
+							SourceOutput.Pixels[byte + 1] != expected ||
+							SourceOutput.Pixels[byte + 2] != expected || SourceOutput.Pixels[byte + 3] != 255)
+							Fail("source pattern analytical constant field");
+				} else if (Kind == Family::Heightmap80 &&
+						   engine::imagegraph::detail::ReadPixel(SourceOutput, side / 2, side / 2) !=
+							   engine::imagegraph::detail::Rgba{0, 0, 1, 1})
+					Fail("heightmap normal center");
+				hash = HashBytes(hash, static_cast<uint8_t>(SourceOutput.Format), 1);
+				hash = HashBytes(hash, SourceOutput.Width, 4);
+				hash = HashBytes(hash, SourceOutput.Height, 4);
+				for (uint8_t byte : SourceOutput.Pixels)
 					hash = HashBytes(hash, byte, 1);
 			} else if (Kind == Family::Vector) {
 				const auto &vectors = std::get<ArrayValue>(CreatorOutput.Data);

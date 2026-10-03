@@ -202,6 +202,9 @@ namespace {
 				(Graph.IsHdr() &&
 				 (!required("imagegraph.node.other") || !required("imagegraph.surface.scratch") ||
 				  !required("imagegraph.image.allocate"))) ||
+				(Graph.IsSourceImage() &&
+				 (!required("imagegraph.source." + std::string(Graph.SourceNodeName())) ||
+				  !required("imagegraph.image.allocate"))) ||
 				(Graph.Kind == Fixture::Family::Solid &&
 				 (!required("imagegraph.node.generate") || !required("imagegraph.node.filter") ||
 				  !required("imagegraph.image.allocate")))) {
@@ -307,6 +310,24 @@ namespace {
 					counterValue("imagegraph.image.allocated_payload_bytes") != 2 * outputBytes ||
 					counterValue("imagegraph.image.allocations") != 2)
 					throw std::runtime_error("HDR blur actual payload/operation counters mismatch");
+			}
+			if (Graph.IsSourceImage()) {
+				const auto counterValue = [&](std::string_view name) {
+					const auto found = std::find_if(
+						record.Counters.begin(), record.Counters.end(), [&](const auto &counter) {
+							return counter.Name.Text() == name;
+						}
+					);
+					if (found == record.Counters.end())
+						throw std::runtime_error(
+							"source image profile missed an allocation boundary counter"
+						);
+					return found->Value;
+				};
+				if (counterValue("imagegraph.image.allocated_payload_bytes") <
+						Graph.SourceOutput.Pixels.size() ||
+					counterValue("imagegraph.image.allocations") < 1)
+					throw std::runtime_error("source image profile missed real output payload allocations");
 			}
 			if (Graph.IsCube() || Graph.IsCylinder() || Graph.IsCone() || Graph.IsTorus() ||
 				Graph.IsUVSphere() || Graph.IsIcosphere()) {
@@ -474,5 +495,43 @@ BENCH("Persisted Material Icosphere default level1 flat Transform GetData, three
 }
 BENCH("Persisted Material Icosphere bounded level3 smooth Transform GetData, three traversals", 1) {
 	static ProfileFixture fixture(Fixture::Family::IcosphereSmooth3);
+	fixture.Measure();
+}
+
+BENCH("128x128 authored Julia one-iteration field", 1) {
+	static ProfileFixture fixture(Fixture::Family::Julia128);
+	fixture.Measure();
+}
+BENCH("128x128 authored Gabor fixed 25-cell kernel field, density-zero baseline", 1) {
+	static ProfileFixture fixture(Fixture::Family::Gabor128);
+	fixture.Measure();
+}
+BENCH("128x128 authored Julia eight-iteration field, matching pinned fixture", 1) {
+	static ProfileFixture fixture(Fixture::Family::Julia128EightIterations);
+	fixture.Measure();
+}
+BENCH("128x128 authored Gabor seeded default-density 25-cell field", 1) {
+	static ProfileFixture fixture(Fixture::Family::Gabor128Seeded);
+	fixture.Measure();
+}
+BENCH("128x128 authored Herringbone height field", 1) {
+	static ProfileFixture fixture(Fixture::Family::Herringbone128);
+	fixture.Measure();
+}
+BENCH("128x128 authored Honeycomb four-octave field", 1) {
+	static ProfileFixture fixture(Fixture::Family::Honeycomb128);
+	fixture.Measure();
+}
+BENCH("80x80 authored Heightmap three-output projection, normal selected, voxel-work bounded", 1) {
+	static ProfileFixture fixture(Fixture::Family::Heightmap80);
+	fixture.Measure();
+}
+
+BENCH("128x128 authored Flow default detail 1..8, nine steps per pixel", 1) {
+	static ProfileFixture fixture(Fixture::Family::Flow128DefaultDetail);
+	fixture.Measure();
+}
+BENCH("64x64 authored Bubble seed 17 default density 0.5, 32 samples per pixel", 1) {
+	static ProfileFixture fixture(Fixture::Family::Bubble64SeededDefaultDensity);
 	fixture.Measure();
 }

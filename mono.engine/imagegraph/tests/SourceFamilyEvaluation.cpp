@@ -34,7 +34,16 @@ TEST_CASE(
 		  Fixture::Family::AudioWindow4096,
 		  Fixture::Family::AudioWindow65536,
 		  Fixture::Family::IcosphereDefault1,
-		  Fixture::Family::IcosphereSmooth3}) {
+		  Fixture::Family::IcosphereSmooth3,
+		  Fixture::Family::Julia128,
+		  Fixture::Family::Gabor128,
+		  Fixture::Family::Herringbone128,
+		  Fixture::Family::Honeycomb128,
+		  Fixture::Family::Heightmap80,
+		  Fixture::Family::Julia128EightIterations,
+		  Fixture::Family::Gabor128Seeded,
+		  Fixture::Family::Flow128DefaultDetail,
+		  Fixture::Family::Bubble64SeededDefaultDensity}) {
 		CAPTURE(static_cast<int>(family));
 		Fixture fixture(family);
 		const auto hash = fixture.Verify();

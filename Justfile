@@ -506,7 +506,7 @@ imagegraph-source-family-bench samples="5":
     test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
     cmake --preset release-tests > /dev/null
     cmake --build --preset release-tests --target test_imagegraph
-    ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][source_family],[imagegraph][array_structure],[imagegraph][array_edit],[imagegraph][array_unique],[imagegraph][array_uniform],[imagegraph][array_rearrange]'
+    ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][source_family],[source_julia_set],[source_gabor_noise],[source_patterns],[source_heightmap_projection],[source_flow_noise],[source_bubble_noise],[imagegraph][array_structure],[imagegraph][array_edit],[imagegraph][array_unique],[imagegraph][array_uniform],[imagegraph][array_rearrange]'
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_imagegraph
     ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.source-families --samples {{samples}}
