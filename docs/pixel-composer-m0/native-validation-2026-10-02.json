@@ -4897,6 +4897,250 @@
       "scope_note": "Release68 native CPU validation. No new GPU, live Studio or licensed-reference verification is claimed.",
       "assertions_passed": 276,
       "test_cases_passed": 5
+    },
+    {
+      "name": "architecture-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/architecture-release-69-joined-repair2.log",
+      "log_sha256": "1dc290445375d7828649a59e06bb21d7de0c24a206e3bb90b1987e38601fbf2d",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:42+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
+    },
+    {
+      "name": "assets-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/assets-release-69-joined-repair2.log",
+      "log_sha256": "b5e4cdd27db4740f105926597241f727db20a4b0c9f8b5f155d3cb49e73aa1bf",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:38+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "cli-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/cli-release-69-joined-repair2.log",
+      "log_sha256": "0496ffed77ca52f8f51b8c587ccdd974e359f352d31cd92a90ace4ddefbd21de",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:53+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
+    },
+    {
+      "name": "client-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/client-release-69-joined-repair2.log",
+      "log_sha256": "1d0b78a1be7329755176784fa151ff40b98f073a4dda93fe9ae6df481b5d7a08",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:37+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 6677,
+      "test_cases_passed": 57
+    },
+    {
+      "name": "export-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/export-release-69-joined-repair2.log",
+      "log_sha256": "931deb2431f70414b82a388bb8848a33fef5e9f4625d1b19b383e5ed90f0e7dc",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:43+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 2585,
+      "test_cases_passed": 58
+    },
+    {
+      "name": "gui-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/gui-release-69-joined-repair2.log",
+      "log_sha256": "fdbb163a4da818e12380fe532a24dc3e1464fb1e34d1da85e9f76281fbf9e221",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:45+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 4784,
+      "test_cases_passed": 327
+    },
+    {
+      "name": "imagegraph-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/imagegraph-release-69-joined-repair2.log",
+      "log_sha256": "37651aa5429dc0bc1dada0b8da403abf1459ae649ecc45b9b5a93f82af40a1e0",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:41+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 1841442,
+      "test_cases_passed": 2387
+    },
+    {
+      "name": "io-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/io-release-69-joined-repair2.log",
+      "log_sha256": "aeff4cfa6d8aa099bf2bd711bea4686704a9c1b07eb2e6f9f6e3171a592a2fdb",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:44+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 10078,
+      "test_cases_passed": 220
+    },
+    {
+      "name": "metadata-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/metadata-release-69-joined-repair2.log",
+      "log_sha256": "cfa343584405788142434c19b07098767e659a7e4d8ed7cb42173aebad335d30",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:45+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
+    },
+    {
+      "name": "nodegraph-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/nodegraph-release-69-joined-repair2.log",
+      "log_sha256": "7bcbaebe3a3585575191464b063a983dfdffa9a2b874f1c282c8f8077d6b58bf",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:42+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "physics-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/physics-release-69-joined-repair2.log",
+      "log_sha256": "3e0a2935a3a8e0dc397b97ffe1271ae5f7560c54032834eb43fee95524e24492",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:43+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "render-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/render-release-69-joined-repair2.log",
+      "log_sha256": "325e47c77501bcf1a92839961ca7bc0ac3973edb3533f2c78f4ae7b26b687fec",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:41+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 336633,
+      "test_cases_passed": 806
+    },
+    {
+      "name": "server-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/server-release-69-joined-repair2.log",
+      "log_sha256": "c4fe92bfea5404287214688f792ef59f03f639c16a9ba3db9a737d8f9dd932fc",
+      "summary_utf8_replacement_required": true,
+      "log_mtime": "2026-10-03T21:15:55+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 5,
+      "test_cases_passed": 1
+    },
+    {
+      "name": "studio-release-69-joined-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/studio-release-69-joined-repair2.log",
+      "log_sha256": "b44f7469f1d14c82d8ddf46db5d3a5f14dc2533188fb397eb0cb6bc58a36bdbf",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:37+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 8271,
+      "test_cases_passed": 141
+    },
+    {
+      "name": "path-sequential-core-release-69-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/path-sequential-core-release-69-repair2.log",
+      "log_sha256": "0834a7bf0de3f752b1a09b509382320498f6867ad2e232a510c47f58206c67af",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:14:25+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed.",
+      "assertions_passed": 870,
+      "test_cases_passed": 50
+    },
+    {
+      "name": "build-release-69-path-sequential-closure",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-69-path-sequential-closure.log",
+      "log_sha256": "5e0c6e88bc39ed046a5ac4ae8b36f9cd991b75adf454f8b82360e64f273eeaae",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:18:54+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
+    },
+    {
+      "name": "build-release-69-path-sequential-diagnostics",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-69-path-sequential-diagnostics.log",
+      "log_sha256": "8ca95c54535f41f8e5a039d08e27634822dddfd625e26f45e2823a68bf60a321",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:00:24+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
+    },
+    {
+      "name": "build-release-69-path-sequential-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-69-path-sequential-initial.log",
+      "log_sha256": "b6288197042af6192cad367685f73aa4013443a70c28145bdd22d1980c814b9e",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:59:28+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
+    },
+    {
+      "name": "build-release-69-path-sequential-repair1",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-69-path-sequential-repair1.log",
+      "log_sha256": "4e5fc0cac589f658ba28c7d71a32de71da70b59e16a65686c6dffd4346470d98",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:07:16+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
+    },
+    {
+      "name": "build-release-69-path-sequential-repair2",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/build-release-69-path-sequential-repair2.log",
+      "log_sha256": "c43df2ac7449636606b0078b934359e95dac168c83e7b0429e609cb0978dca3f",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:13:55+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
     }
   ],
   "excluded_or_failed_runs": [
@@ -6222,6 +6466,57 @@
       "assertions_total": 1841069,
       "assertions_passed": 1841068,
       "assertions_failed": 1
+    },
+    {
+      "name": "path-sequential-core-release-69-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/path-sequential-core-release-69-initial.log",
+      "log_sha256": "2881ceeddc116f68c4bbe441428ea642ba847a12f0ff31237c40608e15c4ab36",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T20:59:06+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Initial retained path failures: missing Path3D batch route, two invalid authored array fixtures, and older owner-count/point-class expectations. Repairs preserve geometry and immutable prior owners.",
+      "test_cases_total": 19,
+      "test_cases_passed": 16,
+      "test_cases_failed": 3,
+      "assertions_total": 300,
+      "assertions_passed": 297,
+      "assertions_failed": 3
+    },
+    {
+      "name": "path-sequential-core-release-69-diagnostics",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/path-sequential-core-release-69-diagnostics.log",
+      "log_sha256": "b73f82a6bf175637d68b2a1737a22835819a4cff37d6543c3aafd3b70a1092f6",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:02:01+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Initial retained path failures: missing Path3D batch route, two invalid authored array fixtures, and older owner-count/point-class expectations. Repairs preserve geometry and immutable prior owners.",
+      "test_cases_total": 19,
+      "test_cases_passed": 16,
+      "test_cases_failed": 3,
+      "assertions_total": 300,
+      "assertions_passed": 297,
+      "assertions_failed": 3
+    },
+    {
+      "name": "imagegraph-release-69-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-03/imagegraph-release-69-initial.log",
+      "log_sha256": "6c4a759beb3732ee4d1ba4807b9e6854732a5794a43a11bbf031eaf23a8ca2e9",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-03T21:04:34+09:30",
+      "executed_date": "2026-10-03",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Initial retained path failures: missing Path3D batch route, two invalid authored array fixtures, and older owner-count/point-class expectations. Repairs preserve geometry and immutable prior owners.",
+      "test_cases_total": 2387,
+      "test_cases_passed": 2381,
+      "test_cases_failed": 6,
+      "assertions_total": 1841363,
+      "assertions_passed": 1841357,
+      "assertions_failed": 6
     }
   ],
   "pinned_gml_helper_translation": {
@@ -7278,6 +7573,11 @@
       "hash": "991addab0c57cef1beb18845961ed85f48db9c73",
       "subject": "Profile Composer generators with verified source fixtures",
       "scope": "Release68 native implementation or roadmap checkpoint; overall acceptance remains incomplete."
+    },
+    {
+      "hash": "9b2a024529339317c235c11c53f76bf940d65d43",
+      "subject": "Extend, flatten and smooth owned Composer paths",
+      "scope": "Release69 sequential path implementation, native persistence, sampler owners and narrow Path3D processor routing; native CPU acceptance only."
     }
   ],
   "temporary_build_storage": {
@@ -7338,7 +7638,7 @@
   "acceptance_status": {
     "m0_m7": "incomplete",
     "latest_dev_core": "build53 dev passed 1,395 cases / 1,812,864 assertions",
-    "latest_release_core": "build67 release passed2,266 cases/1,831,233 assertions",
+    "latest_release_core": "build69 release passed2,387 cases/1,841,442 assertions",
     "build53_release": "selected coherent release suites passed after repair; full M0-M7, GPU, manual scene, and licensed parity gates remain open",
     "latest_inventory": "build67 release snapshot:532 registered/531 overlap/886 catalogue/355 registry-missing",
     "licensed_executable_parity": "open and unavailable",
@@ -7397,7 +7697,9 @@
       "output_policy": "Printed to terminal; no benchmark output file written. Full terminal output was truncated by tool delivery, so no timing figures are transcribed here.",
       "scope": "Verified source-family fixtures, hierarchy, heap attribution, counters and repeated byte hashes; one sample establishes execution, not stable comparative performance."
     },
-    "build68_inventory": "Clean source/archive capability snapshot at bd2db639:536 registered,535 catalogue overlap,886 catalogue names,351 registry-missing names. Registration does not establish runtime correctness or parity."
+    "build68_inventory": "Clean source/archive capability snapshot at bd2db639:536 registered,535 catalogue overlap,886 catalogue names,351 registry-missing names. Registration does not establish runtime correctness or parity.",
+    "build69_release": "Coherent initial ABI build646 steps, repair builds and final closure pass. Fifty focused path cases/870 assertions and fourteen joined CPU scopes pass; full imagegraph2,387 cases/1,841,442 assertions. Three failed invocations remain retained.",
+    "build69_overall": "Native release69 CPU path gates passed. Overall M0-M7 remains incomplete; new GPU/live Studio/licensed parity and remaining roadmap work are open."
   },
   "pending_gates": [
     {
