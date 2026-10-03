@@ -67,6 +67,7 @@ namespace engine::imagegraph::detail {
 					  SourceVolumeProjectionExecutors(),
 					  SourceCylinderProjectionExecutors(),
 					  SourceHeightmapProjectionExecutors(),
+					  SourceSurfaceProjectionExecutors(),
 					  SourceAtlasExecutors(),
 					  SourceAtlasPixelExecutors(),
 					  SourcePaletteExecutors(),
@@ -109,6 +110,10 @@ namespace engine::imagegraph::detail {
 				if (type == "pc.surface_project_cylinder_3_d" &&
 					(port == "dimension" || port == "view_angle" || port == "position" ||
 					 port == "angle_range" || port == "depth_range"))
+					return true;
+				if (type == "pc.surface_project_3_d" &&
+					(port == "dimension" || port == "view_angle" || port == "position" ||
+					 port == "depth_range" || port == "face_blending"))
 					return true;
 				if (type == "pc.heightmap_project_3_d" &&
 					(port == "dimension" || port == "view_angle" || port == "position" ||

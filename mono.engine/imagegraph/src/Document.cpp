@@ -10322,17 +10322,26 @@ namespace engine::imagegraph {
 							 (input.SourceKind == "Slider" && input.Id == "fov") ||
 							 (input.SourceKind == "Float" &&
 							  (input.Id == "distance" || input.Id == "scale")));
-						if ((cylinderSurfaceGetter || heightmapSurfaceGetter) && produced[sourceIndex]) {
+						const bool surfaceProjectGetter =
+							node.Type == "pc.surface_project_3_d" &&
+							((input.SourceKind == "Vec3" &&
+							  (input.Id == "view_angle" || input.Id == "position")) ||
+							 (input.SourceKind == "Range" && input.Id == "depth_range") ||
+							 (input.SourceKind == "Slider" && (input.Id == "fov" || input.Id == "threshold")) ||
+							 (input.SourceKind == "Float" &&
+							  (input.Id == "distance" || input.Id == "scale")));
+						if ((cylinderSurfaceGetter || heightmapSurfaceGetter || surfaceProjectGetter) &&
+							produced[sourceIndex]) {
 							const auto domain = FindOutputDomain(
 								document.Nodes[sourceIndex], results[sourceIndex], link->FromPort
 							);
 							// Source getters test the declared Surface type, not Atlas payload shape.
-							const bool nativeHeightmapSurface =
-								heightmapSurfaceGetter && !domain &&
+							const bool nativeProjectorSurface =
+								(heightmapSurfaceGetter || surfaceProjectGetter) && !domain &&
 								FindPortType(
 									document.Nodes[sourceIndex], link->FromPort, PortDirection::Output
 								) == ValueType::Image;
-							if ((!domain && cylinderSurfaceGetter) || nativeHeightmapSurface ||
+							if ((!domain && cylinderSurfaceGetter) || nativeProjectorSurface ||
 								(domain && domain->Kind == SourceSocketKind::Surface)) {
 								const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
 								const ImageArray *surfaces =
@@ -10348,7 +10357,9 @@ namespace engine::imagegraph {
 											SetDiagnostic(
 												diagnostic,
 												Status::LimitExceeded,
-												heightmapSurfaceGetter
+												surfaceProjectGetter
+													? "surface projection getter exceeds input storage budget"
+												: heightmapSurfaceGetter
 													? "heightmap surface getter exceeds input storage budget"
 													: "cylinder surface getter exceeds input storage budget",
 												node.Id,
