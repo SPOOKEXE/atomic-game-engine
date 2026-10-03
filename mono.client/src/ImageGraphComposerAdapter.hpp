@@ -1,5 +1,6 @@
 #pragma once
 #include <engine/imagegraph/FeedbackHost.hpp>
+#include <engine/imagegraph/PendingHostObservations.hpp>
 #include <engine/render/Renderer.hpp>
 namespace client::detail {
 	// Stack-owned composition keeps Lua/file capability ownership with its caller.
@@ -8,9 +9,14 @@ namespace client::detail {
 		ComposerProvider(
 			engine::render::Renderer &renderer,
 			engine::core::Name owner,
-			engine::imagegraph::HostNodeProvider *fallback
+			engine::imagegraph::HostNodeProvider *fallback,
+			engine::core::Name captureNamespace = {},
+			std::vector<engine::core::Name> *captures = nullptr,
+			engine::imagegraph::PendingHostObservations *observations = nullptr
 		)
-			: Render(renderer), Owner(owner), Fallback(fallback) {}
+			: Render(renderer), Owner(owner), Fallback(fallback), CaptureNamespace(captureNamespace),
+			  Captures(captures), Observations(observations) {}
+		bool Pending = false;
 		bool Capture(
 			const engine::imagegraph::HostNodeInvocation &,
 			engine::imagegraph::HostNodeCapture &,
@@ -24,6 +30,9 @@ namespace client::detail {
 		engine::render::Renderer &Render;
 		engine::core::Name Owner;
 		engine::imagegraph::HostNodeProvider *Fallback;
+		engine::core::Name CaptureNamespace;
+		std::vector<engine::core::Name> *Captures = nullptr;
+		engine::imagegraph::PendingHostObservations *Observations = nullptr;
 	};
 	bool BuildComposerRequest(
 		const engine::imagegraph::Document &,

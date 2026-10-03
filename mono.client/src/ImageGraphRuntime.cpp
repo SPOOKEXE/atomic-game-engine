@@ -259,7 +259,7 @@ namespace client {
 					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
 						return item.Id == selected->NodeId;
 					});
-				if (node != document.Nodes.end() && node->Type == "image.transform_3d") {
+				if (node != document.Nodes.end() && node->Type == "image.transform_3d" && !hostProvider) {
 					result.Status = engine::imagegraph::Status::UnsupportedExecution;
 					result.Diagnostic = {
 						result.Status,
@@ -1383,6 +1383,11 @@ namespace client {
 								 entry.Entity != entity || !SameSelector(entry.Selector, selector);
 			const bool sourceChanged = changed || entry.Modified != modified || entry.FileBytes != fileBytes;
 			if (sourceChanged) {
+				for (const auto name : entry.HostCaptures)
+					renderer.CancelComposerCapture(entry.Owner, name);
+				entry.HostCaptures.clear();
+				entry.PendingHostTick.reset();
+				entry.HostObservations.Clear();
 				entry.Feedback.Clear();
 				if (entry.LuaHost) entry.LuaHost->Reset();
 			}
@@ -1391,9 +1396,56 @@ namespace client {
 			else if (!entry.LuaHost)
 				entry.LuaHost = LuaHostFor(cached->Authored);
 			LuaMessageDrain drain{entry.LuaHost.get()};
-			detail::ComposerProvider composerProvider(renderer, owner, entry.LuaHost.get());
+			const uint64_t evaluationTick = entry.PendingHostTick.value_or(tick);
+			detail::ComposerProvider composerProvider(
+				renderer,
+				owner,
+				entry.LuaHost.get(),
+				engine::core::Name("client.imagegraph/" + std::string(selector.Texture.Text())),
+				&entry.HostCaptures,
+				&entry.HostObservations
+			);
+			struct HostCadence {
+				Entry *Target;
+				detail::ComposerProvider &Provider;
+				uint64_t Tick;
+				std::filesystem::file_time_type Modified;
+				uintmax_t FileBytes;
+				engine::core::Name Owner;
+				engine::ecs::Entity Entity;
+				uint64_t StoreIdentity;
+				const engine::scene::ImageGraphBinding &Selector;
+				void Disarm() {
+					Target = nullptr;
+				}
+				~HostCadence() {
+					if (!Target) return;
+					if (Provider.Pending) {
+						Target->PendingHostTick = Tick;
+						Target->Modified = Modified;
+						Target->FileBytes = FileBytes;
+						Target->Owner = Owner;
+						Target->Entity = Entity;
+						Target->StoreIdentity = StoreIdentity;
+						Target->Selector = Selector;
+					} else {
+						Target->PendingHostTick.reset();
+						Target->HostObservations.Clear();
+					}
+				}
+			} cadence{
+				&entry,
+				composerProvider,
+				evaluationTick,
+				modified,
+				fileBytes,
+				owner,
+				entity,
+				store.Identity(),
+				selector
+			};
 			bool sampleChanged = changed || entry.Modified != modified || entry.FileBytes != fileBytes ||
-								 (entry.Animated && entry.Tick != tick);
+								 (entry.Animated && entry.Tick != tick) || entry.PendingHostTick.has_value();
 			std::string_view outputPort;
 			const auto *outputNode = OutputNode(cached->Authored, selector.Output, outputPort);
 			const bool sourceComposer = outputNode && outputNode->Type == "pc.hlsl";
@@ -1465,7 +1517,7 @@ namespace client {
 										 *outputNode,
 										 renderer,
 										 owner,
-										 tick,
+										 evaluationTick,
 										 selector.Seed,
 										 selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
 										 composerRequest,
@@ -1479,7 +1531,7 @@ namespace client {
 									  cached->Compiled,
 									  *outputNode,
 									  outputPort,
-									  tick,
+									  evaluationTick,
 									  selector.Seed,
 									  selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
 									  sdfRequest,
@@ -1493,7 +1545,7 @@ namespace client {
 										 cached->Compiled,
 										 *outputNode,
 										 outputPort,
-										 tick,
+										 evaluationTick,
 										 selector.Seed,
 										 selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
 										 cameraRequest,
@@ -1506,7 +1558,7 @@ namespace client {
 										 cached->Authored,
 										 cached->Compiled,
 										 *outputNode,
-										 tick,
+										 evaluationTick,
 										 selector.Seed,
 										 selector.ColorSpace == engine::scene::ImageGraphColorSpace::Display,
 										 request,
@@ -1522,7 +1574,7 @@ namespace client {
 
 				if (sourceSdf && !sdfRequest.Render && !changed && entry.TransformGeneration != 0) {
 					// Source preview render switches retain the last completed surface.
-					entry.Tick = tick;
+					entry.Tick = evaluationTick;
 					entry.Modified = modified;
 					entry.FileBytes = fileBytes;
 					entry.Animated = NeedsFrameSamples(cached->Authored);
@@ -1607,7 +1659,7 @@ namespace client {
 				entry.Entity = entity;
 				entry.StoreIdentity = store.Identity();
 				entry.Selector = selector;
-				entry.Tick = tick;
+				entry.Tick = evaluationTick;
 				entry.Modified = modified;
 				entry.FileBytes = fileBytes;
 				entry.Published = false;
@@ -1639,7 +1691,10 @@ namespace client {
 				const auto binding = Publisher.BeginBinding(owner, selector.Texture);
 				if (!binding) {
 					Error = "live image publisher has no binding capacity";
-					if (inserted) Entries.erase(position);
+					if (inserted) {
+						cadence.Disarm();
+						Entries.erase(position);
+					}
 					return;
 				}
 				entry.Publication = *binding;
@@ -1653,7 +1708,7 @@ namespace client {
 				cached->Authored,
 				cached->Compiled,
 				selector.Output,
-				tick,
+				evaluationTick,
 				selector.Seed,
 				&entry.Feedback,
 				&composerProvider
@@ -1694,7 +1749,7 @@ namespace client {
 				facts.FrameDurations = frame.FrameDurations;
 				(void)engine::scene::RecordTexture(store, selector.Texture, facts);
 			}
-			entry.Tick = tick;
+			entry.Tick = evaluationTick;
 			entry.Modified = modified;
 			entry.FileBytes = fileBytes;
 			entry.Published = true;
@@ -1709,6 +1764,8 @@ namespace client {
 			nextBinding = 0;
 		for (auto entry = Entries.begin(); entry != Entries.end();) {
 			if (entry->second.Owner == owner && !seen.contains(entry->first)) {
+				for (const auto name : entry->second.HostCaptures)
+					renderer.CancelComposerCapture(owner, name);
 				if (entry->second.TransformAdmitted)
 					(void)renderer.CancelTransformImage3D(
 						owner, entry->second.Selector.Texture, entry->second.TransformGeneration
@@ -1732,6 +1789,8 @@ namespace client {
 				++entry;
 				continue;
 			}
+			for (const auto name : entry->second.HostCaptures)
+				renderer.CancelComposerCapture(entry->second.Owner, name);
 			if (entry->second.TransformAdmitted)
 				(void)renderer.CancelTransformImage3D(
 					entry->second.Owner, entry->second.Selector.Texture, entry->second.TransformGeneration
@@ -1786,8 +1845,11 @@ namespace client {
 			renderer.DropTransformImage3DOwner(owner);
 		TransformOwners.clear();
 		NextTransformGeneration = 1;
-		for (const auto &[key, entry] : Entries)
+		for (const auto &[key, entry] : Entries) {
+			for (const auto name : entry.HostCaptures)
+				renderer.CancelComposerCapture(entry.Owner, name);
 			(void)Publisher.Retire(renderer, entry.Publication);
+		}
 		Entries.clear();
 		Documents.clear();
 		++ComposerDocumentRevision;

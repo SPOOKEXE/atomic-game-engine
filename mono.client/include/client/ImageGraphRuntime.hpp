@@ -7,6 +7,7 @@
 #include <engine/imagegraph/ComposerLuaHost.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
+#include <engine/imagegraph/PendingHostObservations.hpp>
 #include <engine/render/ImageGraphTransform3D.hpp>
 #include <engine/render/LiveImagePublisher.hpp>
 #include <engine/render/SourceSkyboxGroup.hpp>
@@ -144,6 +145,9 @@ namespace client {
 			bool TransformAdmitted = false;
 			uint64_t TransformGeneration = 0;
 			uint64_t ComposerRevision = 0;
+			std::optional<uint64_t> PendingHostTick;
+			std::vector<engine::core::Name> HostCaptures;
+			engine::imagegraph::PendingHostObservations HostObservations;
 		};
 		struct CachedDocument {
 			engine::imagegraph::Document Authored;

@@ -4,12 +4,15 @@
 #include "ImageGraphTransform3DFormats.hpp"
 #include "ShaderBinary.hpp"
 
+#include <engine/core/Metrics.hpp>
+#include <engine/imagegraph/SourceCamera3D.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/resources/Shaders.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include <array>
 #include <cstring>
@@ -59,7 +62,9 @@ namespace engine::render::imagegraph {
 		}
 
 		SDL_GPUTextureFormat ColourFormat(const TransformImage3DRequest &request) {
-			return *detail::TransformImage3DFormat(request.Front.Format, request.ColorSpace);
+			return request.SourcePlane
+					   ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+					   : *detail::TransformImage3DFormat(request.Front.Format, request.ColorSpace);
 		}
 
 		bool SupportsColourFormat(SDL_GPUDevice *device, const TransformImage3DRequest &request) {
@@ -68,7 +73,8 @@ namespace engine::render::imagegraph {
 				request.Front.Format,
 				request.Back.Format,
 				!request.Back.Pixels.empty(),
-				request.ColorSpace
+				request.ColorSpace,
+				request.SourcePlane
 			);
 		}
 
@@ -142,6 +148,26 @@ namespace engine::render::imagegraph {
 			// Pixel Composer applies anchor before scale and rotation, then translates.
 			model =
 				glm::translate(model, glm::vec3(-request.Anchor[0], -request.Anchor[1], -request.Anchor[2]));
+			if (request.SourcePlane) {
+				engine::imagegraph::SourceCameraPose pose;
+				pose.Position = {0, 0, 1};
+				pose.Target = {0, 0, 0};
+				pose.Up = {1, 0, 0};
+				pose.Projection = request.Projection == TransformImage3DProjection::Perspective
+									  ? engine::imagegraph::SourceCameraProjection::Perspective
+									  : engine::imagegraph::SourceCameraProjection::Orthographic;
+				pose.FieldOfViewDegrees = request.FieldOfViewDegrees;
+				pose.ClippingDistance = {request.ViewRange[0], request.ViewRange[1]};
+				pose.OrthographicViewSize = {1, 1};
+				std::array<double, 16> view{}, projection{};
+				engine::imagegraph::Diagnostic diagnostic;
+				if (engine::imagegraph::ResolveSourceCameraMatrices(
+						pose, request.Front.Width, request.Front.Height, view, projection, diagnostic
+					) != engine::imagegraph::Status::Ok)
+					return glm::mat4(0);
+				return glm::mat4(glm::make_mat4(projection.data())) * glm::mat4(glm::make_mat4(view.data())) *
+					   model;
+			}
 			if (request.Projection == TransformImage3DProjection::Orthographic)
 				return glm::orthoRH_ZO(-1.f, 1.f, -1.f, 1.f, request.ViewRange[0], request.ViewRange[1]) *
 					   model;
@@ -175,17 +201,28 @@ namespace engine::render::imagegraph {
 		}};
 	}
 
+	static std::array<Vertex, 6> VerticesFor(const TransformImage3DRequest &request) {
+		if (!request.SourcePlane) return QUAD;
+		return {
+			{{{-.5, -.5, 0}, {0, 0}},
+			 {{.5, .5, 0}, {1, 1}},
+			 {{.5, -.5, 0}, {0, 1}},
+			 {{-.5, -.5, 0}, {0, 0}},
+			 {{-.5, .5, 0}, {1, 0}},
+			 {{.5, .5, 0}, {1, 1}}}
+		};
+	}
 	uint64_t TransformImage3DLiveScratchBytes(const TransformImage3DRequest &request) {
 		if (ValidateTransformImage3D(request) != TransformImage3DStatus::Ok) return 0;
 		const uint64_t pixels = uint64_t(request.Front.Width) * request.Front.Height;
 		const uint64_t frontBytes =
 			pixels * detail::TransformImage3DBytesPerPixel(request.Front.Format, request.ColorSpace);
 		const uint64_t backBytes =
-			pixels *
+			(request.Back.Pixels.empty() ? pixels : uint64_t(request.Back.Width) * request.Back.Height) *
 			detail::TransformImage3DBytesPerPixel(
 				request.Back.Pixels.empty() ? request.Front.Format : request.Back.Format, request.ColorSpace
 			);
-		const uint64_t outputBytes = frontBytes;
+		const uint64_t outputBytes = request.SourcePlane ? pixels * 4 : frontBytes;
 		// Count each input texture and upload copy, output target and download,
 		// plus encoded and floating depth targets with their transfer buffers.
 		return 2 * (frontBytes + backBytes + outputBytes + 8 * pixels) + sizeof(QUAD) * 2;
@@ -197,6 +234,8 @@ namespace engine::render::imagegraph {
 		if (resources.VertexShader) SDL_ReleaseGPUShader(device, resources.VertexShader);
 		if (resources.FragmentShader) SDL_ReleaseGPUShader(device, resources.FragmentShader);
 		if (resources.Sampler) SDL_ReleaseGPUSampler(device, resources.Sampler);
+		gpu::ReleaseTransferBuffer(device, resources.RenderedDownload);
+		gpu::ReleaseTransferBuffer(device, resources.EncodedDepthDownload);
 		gpu::ReleaseTransferBuffer(device, resources.VertexUpload);
 		gpu::ReleaseTransferBuffer(device, resources.BackUpload);
 		gpu::ReleaseTransferBuffer(device, resources.FrontUpload);
@@ -213,7 +252,8 @@ namespace engine::render::imagegraph {
 		SDL_GPUDevice *device,
 		SDL_GPUCommandBuffer *command,
 		const TransformImage3DRequest &request,
-		TransformImage3DLiveResources &resources
+		TransformImage3DLiveResources &resources,
+		bool capture
 	) {
 		if (device == nullptr || command == nullptr ||
 			ValidateTransformImage3D(request) != TransformImage3DStatus::Ok ||
@@ -283,8 +323,8 @@ namespace engine::render::imagegraph {
 		);
 		resources.Back = Texture(
 			device,
-			request.Front.Width,
-			request.Front.Height,
+			back.Width,
+			back.Height,
 			SDL_GPU_TEXTUREUSAGE_SAMPLER,
 			*detail::TransformImage3DFormat(back.Format, request.ColorSpace)
 		);
@@ -316,21 +356,33 @@ namespace engine::render::imagegraph {
 		vertexInfoBuffer.size = sizeof(QUAD);
 		resources.Vertices = gpu::CreateBuffer(device, &vertexInfoBuffer);
 		resources.VertexUpload = Transfer(device, sizeof(QUAD), SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
+		if (capture) {
+			resources.RenderedDownload = Transfer(
+				device,
+				request.SourcePlane ? request.Front.Width * request.Front.Height * 4 : frontBytes,
+				SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD
+			);
+			resources.EncodedDepthDownload = Transfer(
+				device, request.Front.Width * request.Front.Height * 4, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD
+			);
+		}
 		SDL_GPUSamplerCreateInfo sampler{};
-		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
-		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.min_filter = request.LinearFilter ? SDL_GPU_FILTER_LINEAR : SDL_GPU_FILTER_NEAREST;
+		sampler.mag_filter = request.LinearFilter ? SDL_GPU_FILTER_LINEAR : SDL_GPU_FILTER_NEAREST;
 		sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
 		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 		resources.Sampler = SDL_CreateGPUSampler(device, &sampler);
-		if (!resources.VertexShader || !resources.FragmentShader || !resources.Pipeline || !resources.Front ||
+		const auto vertices = VerticesFor(request);
+		if ((capture && (!resources.RenderedDownload || !resources.EncodedDepthDownload)) ||
+			!resources.VertexShader || !resources.FragmentShader || !resources.Pipeline || !resources.Front ||
 			!resources.Back || !resources.Rendered || !resources.EncodedDepth || !resources.Depth ||
 			!resources.FrontUpload || !resources.BackUpload || !resources.Vertices ||
 			!resources.VertexUpload || !resources.Sampler ||
 			!CopySurfaceToTransfer(device, resources.FrontUpload, request.Front, request.ColorSpace) ||
 			!CopySurfaceToTransfer(device, resources.BackUpload, back, request.ColorSpace) ||
-			!CopyToTransfer(device, resources.VertexUpload, std::as_bytes(std::span(QUAD)))) {
+			!CopyToTransfer(device, resources.VertexUpload, std::as_bytes(std::span(vertices)))) {
 			ReleaseTransformImage3DLive(device, resources);
 			return false;
 		}
@@ -340,20 +392,24 @@ namespace engine::render::imagegraph {
 			ReleaseTransformImage3DLive(device, resources);
 			return false;
 		}
-		const auto upload = [copy, &request](SDL_GPUTransferBuffer *source, SDL_GPUTexture *destination) {
+		const auto upload = [copy](
+								SDL_GPUTransferBuffer *source,
+								SDL_GPUTexture *destination,
+								const TransformImage3DSurface &surface
+							) {
 			SDL_GPUTextureTransferInfo from{};
 			from.transfer_buffer = source;
-			from.pixels_per_row = request.Front.Width;
-			from.rows_per_layer = request.Front.Height;
+			from.pixels_per_row = surface.Width;
+			from.rows_per_layer = surface.Height;
 			SDL_GPUTextureRegion to{};
 			to.texture = destination;
-			to.w = request.Front.Width;
-			to.h = request.Front.Height;
+			to.w = surface.Width;
+			to.h = surface.Height;
 			to.d = 1;
 			SDL_UploadToGPUTexture(copy, &from, &to, false);
 		};
-		upload(resources.FrontUpload, resources.Front);
-		upload(resources.BackUpload, resources.Back);
+		upload(resources.FrontUpload, resources.Front, request.Front);
+		upload(resources.BackUpload, resources.Back, back);
 		SDL_GPUTransferBufferLocation vertexSource{};
 		vertexSource.transfer_buffer = resources.VertexUpload;
 		SDL_GPUBufferRegion vertexTarget{};
@@ -390,12 +446,39 @@ namespace engine::render::imagegraph {
 		const FragmentUniforms uniforms{
 			{request.TextureTiling[0], request.TextureTiling[1]},
 			{request.DepthRange[0], request.DepthRange[1]},
-			request.Back.Pixels.empty() ? 0u : 1u
+			request.SourcePlane			  ? 2u
+			: request.Back.Pixels.empty() ? 0u
+										  : 1u
 		};
 		SDL_PushGPUVertexUniformData(command, 0, &matrix, sizeof(matrix));
 		SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
 		SDL_EndGPURenderPass(pass);
+		if (capture) {
+			SDL_GPUCopyPass *download = SDL_BeginGPUCopyPass(command);
+			if (!download) return false;
+			const auto read = [&](SDL_GPUTexture *texture, SDL_GPUTransferBuffer *buffer) {
+				SDL_GPUTextureRegion from{};
+				from.texture = texture;
+				from.w = request.Front.Width;
+				from.h = request.Front.Height;
+				from.d = 1;
+				SDL_GPUTextureTransferInfo to{};
+				to.transfer_buffer = buffer;
+				to.pixels_per_row = from.w;
+				to.rows_per_layer = from.h;
+				SDL_DownloadFromGPUTexture(download, &from, &to);
+			};
+			read(resources.Rendered, resources.RenderedDownload);
+			read(resources.EncodedDepth, resources.EncodedDepthDownload);
+			SDL_EndGPUCopyPass(download);
+			core::Metrics::Count(
+				"render.transform.host_download_bytes",
+				uint64_t(request.SourcePlane ? request.Front.Width * request.Front.Height * 4 : frontBytes) +
+					uint64_t(request.Front.Width) * request.Front.Height * 4
+			);
+			core::Metrics::Count("render.transform.host_downloads", 2);
+		}
 		return true;
 	}
 
@@ -460,7 +543,8 @@ namespace engine::render::imagegraph {
 		const TransformImage3DSurface &back = request.Back.Pixels.empty() ? request.Front : request.Back;
 		const uint32_t frontBytes = InputBytes(request.Front, request.ColorSpace);
 		const uint32_t backBytes = InputBytes(back, request.ColorSpace);
-		const uint32_t outputBytes = frontBytes;
+		const uint32_t outputBytes =
+			request.SourcePlane ? request.Front.Width * request.Front.Height * 4 : frontBytes;
 		const uint32_t depthBytes = request.Front.Width * request.Front.Height * 4;
 		Front = Texture(
 			Device,
@@ -471,8 +555,8 @@ namespace engine::render::imagegraph {
 		);
 		Back = Texture(
 			Device,
-			request.Front.Width,
-			request.Front.Height,
+			back.Width,
+			back.Height,
 			SDL_GPU_TEXTUREUSAGE_SAMPLER,
 			*detail::TransformImage3DFormat(back.Format, request.ColorSpace)
 		);
@@ -506,8 +590,8 @@ namespace engine::render::imagegraph {
 		EncodedDepthDownload = Transfer(Device, depthBytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
 		DepthDownload = Transfer(Device, depthBytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
 		SDL_GPUSamplerCreateInfo sampler{};
-		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
-		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.min_filter = request.LinearFilter ? SDL_GPU_FILTER_LINEAR : SDL_GPU_FILTER_NEAREST;
+		sampler.mag_filter = request.LinearFilter ? SDL_GPU_FILTER_LINEAR : SDL_GPU_FILTER_NEAREST;
 		sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
 		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
@@ -521,7 +605,8 @@ namespace engine::render::imagegraph {
 		const TransformImage3DSurface &back = request.Back.Pixels.empty() ? request.Front : request.Back;
 		if (!CopySurfaceToTransfer(Device, FrontUpload, request.Front, request.ColorSpace)) return false;
 		if (!CopySurfaceToTransfer(Device, BackUpload, back, request.ColorSpace)) return false;
-		if (!CopyToTransfer(Device, VertexUpload, std::as_bytes(std::span(QUAD)))) return false;
+		const auto vertices = VerticesFor(request);
+		if (!CopyToTransfer(Device, VertexUpload, std::as_bytes(std::span(vertices)))) return false;
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		if (command == nullptr) return false;
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
@@ -529,20 +614,24 @@ namespace engine::render::imagegraph {
 			SDL_CancelGPUCommandBuffer(command);
 			return false;
 		}
-		const auto upload = [copy, &request](SDL_GPUTransferBuffer *source, SDL_GPUTexture *destination) {
+		const auto upload = [copy](
+								SDL_GPUTransferBuffer *source,
+								SDL_GPUTexture *destination,
+								const TransformImage3DSurface &surface
+							) {
 			SDL_GPUTextureTransferInfo from{};
 			from.transfer_buffer = source;
-			from.pixels_per_row = request.Front.Width;
-			from.rows_per_layer = request.Front.Height;
+			from.pixels_per_row = surface.Width;
+			from.rows_per_layer = surface.Height;
 			SDL_GPUTextureRegion to{};
 			to.texture = destination;
-			to.w = request.Front.Width;
-			to.h = request.Front.Height;
+			to.w = surface.Width;
+			to.h = surface.Height;
 			to.d = 1;
 			SDL_UploadToGPUTexture(copy, &from, &to, false);
 		};
-		upload(FrontUpload, Front);
-		upload(BackUpload, Back);
+		upload(FrontUpload, Front, request.Front);
+		upload(BackUpload, Back, back);
 		SDL_GPUTransferBufferLocation vertexSource{};
 		vertexSource.transfer_buffer = VertexUpload;
 		SDL_GPUBufferRegion vertexTarget{};
@@ -579,7 +668,9 @@ namespace engine::render::imagegraph {
 		const FragmentUniforms uniforms{
 			{request.TextureTiling[0], request.TextureTiling[1]},
 			{request.DepthRange[0], request.DepthRange[1]},
-			request.Back.Pixels.empty() ? 0u : 1u
+			request.SourcePlane			  ? 2u
+			: request.Back.Pixels.empty() ? 0u
+										  : 1u
 		};
 		SDL_PushGPUVertexUniformData(command, 0, &matrix, sizeof(matrix));
 		SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
@@ -616,7 +707,9 @@ namespace engine::render::imagegraph {
 		if (!SDL_WaitForGPUFences(Device, true, &Fence, 1)) return false;
 		const size_t pixels = static_cast<size_t>(request.Front.Width) * request.Front.Height;
 		const size_t colourBytes =
-			pixels * detail::TransformImage3DBytesPerPixel(request.Front.Format, request.ColorSpace);
+			pixels * (request.SourcePlane
+						  ? 4
+						  : detail::TransformImage3DBytesPerPixel(request.Front.Format, request.ColorSpace));
 		const size_t depthBytes = pixels * 4;
 		const auto read =
 			[this](SDL_GPUTransferBuffer *transfer, std::vector<std::byte> &destination, size_t bytes) {
@@ -630,10 +723,12 @@ namespace engine::render::imagegraph {
 		const void *colourMapped = SDL_MapGPUTransferBuffer(Device, ColourDownload, false);
 		if (colourMapped == nullptr) return false;
 		const std::span<const std::byte> gpuColour(static_cast<const std::byte *>(colourMapped), colourBytes);
-		const size_t resultBytes = pixels * assets::BytesPerPixel(request.Front.Format);
+		const size_t resultBytes =
+			pixels * (request.SourcePlane ? 4 : assets::BytesPerPixel(request.Front.Format));
 		result.RenderedPixels.resize(resultBytes);
-		const bool rgba4 = request.Front.Format == assets::TextureFormat::RGBA4_UNORM ||
-						   request.Front.Format == assets::TextureFormat::RGBA4_SRGB;
+		const bool rgba4 =
+			!request.SourcePlane && (request.Front.Format == assets::TextureFormat::RGBA4_UNORM ||
+									 request.Front.Format == assets::TextureFormat::RGBA4_SRGB);
 		const bool copied =
 			rgba4 ? engine::render::detail::CopyRgba8ToRgba4(gpuColour, result.RenderedPixels)
 				  : gpuColour.size() == result.RenderedPixels.size() &&
@@ -648,7 +743,9 @@ namespace engine::render::imagegraph {
 		result.Width = request.Front.Width;
 		result.Height = request.Front.Height;
 		result.RenderedFormat =
-			detail::ResolveTransformImage3DFormat(request.Front.Format, request.ColorSpace);
+			request.SourcePlane
+				? assets::TextureFormat::RGBA8_LINEAR
+				: detail::ResolveTransformImage3DFormat(request.Front.Format, request.ColorSpace);
 		return true;
 	}
 
@@ -677,6 +774,17 @@ namespace engine::render::imagegraph {
 		if (status != TransformImage3DStatus::Ok) return status;
 		result.Mesh.Positions = {-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, -1, 0, 1, 1, 0, -1, 1, 0};
 		result.Mesh.TextureCoordinates = {0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0};
+		if (request.SourcePlane) {
+			const auto vertices = VerticesFor(request);
+			for (size_t i = 0; i < vertices.size(); ++i) {
+				const auto &v = vertices[i];
+				result.Mesh.Positions[i * 3] = v.Position.x;
+				result.Mesh.Positions[i * 3 + 1] = v.Position.y;
+				result.Mesh.Positions[i * 3 + 2] = v.Position.z;
+				result.Mesh.TextureCoordinates[i * 2] = v.Uv.x;
+				result.Mesh.TextureCoordinates[i * 2 + 1] = v.Uv.y;
+			}
+		}
 		return status;
 	}
 

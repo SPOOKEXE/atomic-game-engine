@@ -2764,6 +2764,14 @@ namespace engine::render {
 		) const;
 		// Captures one cooked stage from already resolved host inputs, using the common receipt budget.
 		// Preview queues an exact capture once and retries completed raw-byte receipts without waiting.
+		bool CaptureTransformImage3DAsync(
+			const engine::imagegraph::HostNodeInvocation &,
+			core::Name owner,
+			core::Name captureName,
+			engine::imagegraph::HostNodeCapture &,
+			std::string &failure,
+			bool *pending = nullptr
+		);
 		bool CaptureComposerSurfaceAsync(
 			const engine::imagegraph::HostNodeInvocation &,
 			core::Name owner,
@@ -2852,6 +2860,14 @@ namespace engine::render {
 		// Rebuilds the unnamed fallback from the selected capability tier.
 		bool InstallEngineDefault(const graph::PipelineDocument &document);
 
+		bool CaptureResolvedSurfaceAsync(
+			const engine::imagegraph::HostNodeInvocation &,
+			core::Name,
+			core::Name,
+			engine::imagegraph::HostNodeCapture &,
+			std::string &,
+			bool *
+		);
 		struct Impl;
 		std::unique_ptr<Impl> State;
 		std::unique_ptr<DataFactoryHookBind> HookBind;

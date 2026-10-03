@@ -439,6 +439,97 @@ namespace engine::render {
 						ComposerShaders.Find(slot.Owner, slot.ComposerRequest->Shader, revision);
 					if (!installed || revision != slot.ComposerRequest->ShaderRevision) slot.Cancelled = true;
 				}
+				if (slot.TransformCaptureReadback) {
+					auto capture = std::find_if(
+						ComposerCaptures.begin(), ComposerCaptures.end(), [&](const auto &entry) {
+							return entry.Owner == slot.Owner && entry.Name == slot.Name &&
+								   entry.Generation == slot.Generation;
+						}
+					);
+					if (capture != ComposerCaptures.end() && slot.Succeeded && !slot.Cancelled &&
+						!superseded && !obsolete) {
+						void *rendered =
+							SDL_MapGPUTransferBuffer(Device, slot.Resources.RenderedDownload, false);
+						void *depth =
+							SDL_MapGPUTransferBuffer(Device, slot.Resources.EncodedDepthDownload, false);
+						if (rendered && depth) try {
+								using namespace engine::imagegraph;
+								SurfaceFormat format = SurfaceFormat::RGBA8Unorm;
+								if (!slot.Request.SourcePlane) switch (slot.Request.Front.Format) {
+									case assets::TextureFormat::RGBA4_UNORM:
+										format = SurfaceFormat::RGBA4Unorm;
+										break;
+									case assets::TextureFormat::RGBA16_FLOAT:
+										format = SurfaceFormat::RGBA16Float;
+										break;
+									case assets::TextureFormat::RGBA32_FLOAT:
+										format = SurfaceFormat::RGBA32Float;
+										break;
+									case assets::TextureFormat::R8:
+										format = SurfaceFormat::R8Unorm;
+										break;
+									case assets::TextureFormat::R16_FLOAT:
+										format = SurfaceFormat::R16Float;
+										break;
+									case assets::TextureFormat::R32_FLOAT:
+										format = SurfaceFormat::R32Float;
+										break;
+									default:
+										break;
+									}
+								const uint64_t pixels = uint64_t(slot.Width) * slot.Height;
+								Image colour{slot.Width, slot.Height, {}, 0, format},
+									encoded{slot.Width, slot.Height, {}, 0};
+								colour.Pixels.resize(
+									pixels * (slot.Request.SourcePlane
+												  ? 4
+												  : assets::BytesPerPixel(slot.Request.Front.Format))
+								);
+								if (format == SurfaceFormat::RGBA4Unorm) {
+									const auto packed = detail::CopyRgba8ToRgba4(
+										{static_cast<const std::byte *>(rendered), size_t(pixels * 4)},
+										{reinterpret_cast<std::byte *>(colour.Pixels.data()),
+										 colour.Pixels.size()}
+									);
+									if (!packed) colour.Pixels.clear();
+								} else
+									std::memcpy(colour.Pixels.data(), rendered, colour.Pixels.size());
+								encoded.Pixels.assign(
+									static_cast<const uint8_t *>(depth),
+									static_cast<const uint8_t *>(depth) + pixels * 4
+								);
+								colour.Hash = SurfaceHash(colour);
+								encoded.Hash = SurfaceHash(encoded);
+								std::vector<HostCapturedImage> images;
+								images.reserve(2);
+								images.push_back({"rendered", std::move(colour)});
+								images.push_back({"depth", std::move(encoded)});
+								capture->Receipt.Images = std::move(images);
+								const auto retained = HostCaptureRetainedPayloadBytes(capture->Receipt);
+								if (retained && *retained <= capture->MaximumBytes &&
+									ValidSurfaceLayout(
+										capture->Receipt.Images[0].Data, 4096, capture->MaximumBytes
+									))
+									capture->Complete = true;
+								else
+									capture->Receipt.Images.clear();
+								core::Metrics::Count(
+									"render.transform.host_readback_bytes",
+									pixels * ((slot.Request.SourcePlane
+												   ? 4
+												   : assets::BytesPerPixel(slot.Request.Front.Format)) +
+											  4)
+								);
+								core::Metrics::Count("render.transform.host_readbacks", 2);
+							} catch (const std::bad_alloc &) {
+								capture->Receipt.Images.clear();
+							}
+						if (rendered) SDL_UnmapGPUTransferBuffer(Device, slot.Resources.RenderedDownload);
+						if (depth) SDL_UnmapGPUTransferBuffer(Device, slot.Resources.EncodedDepthDownload);
+					}
+					ReleaseTransform3D(slot);
+					continue;
+				}
 				if (slot.ComposerCaptureReadback) {
 					auto capture = std::find_if(
 						ComposerCaptures.begin(), ComposerCaptures.end(), [&](const auto &entry) {
@@ -525,10 +616,11 @@ namespace engine::render {
 							? imagegraph::detail::TransformImage3DBytesPerPixel(
 								  slot.CameraRequest->Format, imagegraph::TransformImage3DColorSpace::Linear
 							  )
-						: depthOutput ? 4
-									  : imagegraph::detail::TransformImage3DBytesPerPixel(
-											slot.Request.Front.Format, slot.Request.ColorSpace
-										);
+						: (depthOutput || slot.Request.SourcePlane)
+							? 4
+							: imagegraph::detail::TransformImage3DBytesPerPixel(
+								  slot.Request.Front.Format, slot.Request.ColorSpace
+							  );
 					const uint64_t bytes64 = uint64_t(slot.Width) * slot.Height * bytesPerPixel;
 					if (bytesPerPixel == 0 || bytes64 > std::numeric_limits<size_t>::max()) {
 						ReleaseTransform3D(slot);
@@ -539,10 +631,11 @@ namespace engine::render {
 						slot.ComposerRequest ? slot.ComposerRequest->Format
 						: slot.SdfRequest	 ? slot.SdfRequest->Format
 						: slot.CameraRequest ? slot.CameraRequest->Format
-						: depthOutput		 ? assets::TextureFormat::RGBA8_LINEAR
-											 : imagegraph::detail::ResolveTransformImage3DFormat(
-											   slot.Request.Front.Format, slot.Request.ColorSpace
-										   );
+						: (depthOutput || slot.Request.SourcePlane)
+							? assets::TextureFormat::RGBA8_LINEAR
+							: imagegraph::detail::ResolveTransformImage3DFormat(
+								  slot.Request.Front.Format, slot.Request.ColorSpace
+							  );
 					if (Textures.ReplaceAdopt(
 							slot.Name,
 							outputTexture,

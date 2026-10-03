@@ -5,6 +5,7 @@
 
 #include <engine/core/Profiling.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/SourceTransformImage3D.hpp>
 
 #include <algorithm>
 #include <new>
@@ -153,7 +154,8 @@ namespace engine::render {
 			return entry.Owner == owner && entry.Name == name;
 		});
 		for (auto &slot : State->GraphResources.Transform3D)
-			if (slot.Owner == owner && slot.Name == name && slot.ComposerCaptureReadback) {
+			if (slot.Owner == owner && slot.Name == name &&
+				(slot.ComposerCaptureReadback || slot.TransformCaptureReadback)) {
 				if (slot.Phase == Impl::GraphResourceCache::Transform3DPhase::Queued)
 					State->ReleaseTransform3D(slot);
 				else
@@ -161,6 +163,32 @@ namespace engine::render {
 			}
 	}
 	bool Renderer::CaptureComposerSurfaceAsync(
+		const engine::imagegraph::HostNodeInvocation &invocation,
+		core::Name owner,
+		core::Name name,
+		engine::imagegraph::HostNodeCapture &output,
+		std::string &failure,
+		bool *pending
+	) {
+		return CaptureResolvedSurfaceAsync(invocation, owner, name, output, failure, pending);
+	}
+	bool Renderer::CaptureTransformImage3DAsync(
+		const engine::imagegraph::HostNodeInvocation &invocation,
+		core::Name owner,
+		core::Name name,
+		engine::imagegraph::HostNodeCapture &output,
+		std::string &failure,
+		bool *pending
+	) {
+		if (pending) *pending = false;
+		if (invocation.Authored.Type != "pc.3_d_transform_image" &&
+			invocation.Authored.Type != "image.transform_3d") {
+			failure = "Source Transform host requires pc.3_d_transform_image";
+			return false;
+		}
+		return CaptureResolvedSurfaceAsync(invocation, owner, name, output, failure, pending);
+	}
+	bool Renderer::CaptureResolvedSurfaceAsync(
 		const engine::imagegraph::HostNodeInvocation &invocation,
 		core::Name owner,
 		core::Name name,
@@ -177,6 +205,8 @@ namespace engine::render {
 			return false;
 		}
 		using namespace engine::imagegraph;
+		const bool transform = invocation.Authored.Type == "pc.3_d_transform_image" ||
+							   invocation.Authored.Type == "image.transform_3d";
 		const uint64_t maximum = std::min(invocation.MaximumOperationBytes, hlsl::MAXIMUM_SURFACE_JOB_BYTES);
 		const auto previousBytes = HostCaptureRetainedPayloadBytes(output);
 		uint64_t held = sizeof(State->ComposerCaptures) +
@@ -211,7 +241,8 @@ namespace engine::render {
 			detail::SameComposerCaptureInputs(
 				found->Receipt, receipt, found->Interpolation, invocation.Interpolation
 			) &&
-			ComposerShaderRevision(owner, found->Shader) == found->ShaderRevision) {
+			(!found->Shader.IsValid() ||
+			 ComposerShaderRevision(owner, found->Shader) == found->ShaderRevision)) {
 			if (found->Complete) {
 				const auto bytes = HostCaptureRetainedPayloadBytes(found->Receipt);
 				if (!bytes || *bytes > maximum - *previousBytes - held - receiptBytes) {
@@ -228,7 +259,7 @@ namespace engine::render {
 				State->GraphResources.Transform3D.end(),
 				[&](const auto &slot) {
 					return slot.Owner == owner && slot.Name == name && slot.Generation == found->Generation &&
-						   slot.ComposerCaptureReadback && !slot.Cancelled;
+						   (slot.ComposerCaptureReadback || slot.TransformCaptureReadback) && !slot.Cancelled;
 				}
 			);
 			if (queued) {
@@ -251,25 +282,59 @@ namespace engine::render {
 		}
 		bounded.MaximumOperationBytes = maximum - *previousBytes - held - receiptBytes;
 		hlsl::SurfaceRequest request;
-		if (const auto error = BuildComposerSurface(bounded, owner, false, request)) {
+		imagegraph::TransformImage3DRequest transformRequest;
+		MeshValue3D mesh;
+		if (transform) {
+			if (!imagegraph::BuildSourceTransformImage3DRequest(bounded, transformRequest, mesh, failure))
+				return false;
+		} else if (const auto error = BuildComposerSurface(bounded, owner, false, request)) {
 			failure = *error;
 			return false;
 		}
-		const uint64_t pixels = uint64_t(request.Textures[0].Width) * request.Textures[0].Height * 4;
-		const uint64_t completionBytes = pixels + sizeof(HostCapturedImage) + 16;
+		const uint64_t pixels = transform
+									? uint64_t(transformRequest.Front.Width) * transformRequest.Front.Height
+									: uint64_t(request.Textures[0].Width) * request.Textures[0].Height;
+		const uint64_t completionBytes =
+			transform ? pixels * ((transformRequest.SourcePlane
+									   ? 4
+									   : assets::BytesPerPixel(transformRequest.Front.Format)) +
+								  4) +
+							2 * sizeof(HostCapturedImage) + 32
+					  : pixels * 4 + sizeof(HostCapturedImage) + 16;
+		if (transform) {
+			receipt.Outputs.push_back({"mesh", std::move(mesh)});
+			const auto bytes = HostCaptureRetainedPayloadBytes(receipt);
+			if (!bytes || *bytes > maximum - *previousBytes - held) {
+				failure = "Transform mesh receipt exceeds operation budget";
+				return false;
+			}
+			receiptBytes = *bytes;
+		}
+		const uint64_t ownedRequest = transform ? sizeof(transformRequest) +
+													  transformRequest.Front.Pixels.capacity() +
+													  transformRequest.Back.Pixels.capacity()
+												: hlsl::SurfaceSourceBytes(request);
+		if (ownedRequest > maximum - *previousBytes - held - receiptBytes ||
+			completionBytes > maximum - *previousBytes - held - receiptBytes - ownedRequest) {
+			failure = "Source preview request, receipt and output reservation exceed operation budget";
+			return false;
+		}
 		if (completionBytes > hlsl::MAXIMUM_SURFACE_JOB_BYTES - held ||
 			receiptBytes > hlsl::MAXIMUM_SURFACE_JOB_BYTES - held - completionBytes) {
 			failure = "Composer preview output reservation exceeds cache budget";
 			return false;
 		}
-		const auto shader = request.Shader;
-		const auto revision = request.ShaderRevision;
+		const auto shader = transform ? core::Name{} : request.Shader;
+		const auto revision = transform ? 0 : request.ShaderRevision;
 		const size_t wanted = State->ComposerCaptures.size() + (found == State->ComposerCaptures.end());
 		std::vector<Impl::ComposerCaptureEntry> grown;
 		if (wanted > State->ComposerCaptures.capacity()) {
 			const uint64_t oldBacking =
 				State->ComposerCaptures.capacity() * sizeof(Impl::ComposerCaptureEntry);
-			const uint64_t sourceBytes = hlsl::SurfaceSourceBytes(request);
+			const uint64_t sourceBytes = transform ? sizeof(transformRequest) +
+														 transformRequest.Front.Pixels.capacity() +
+														 transformRequest.Back.Pixels.capacity()
+												   : hlsl::SurfaceSourceBytes(request);
 			if (sourceBytes > maximum || receiptBytes > maximum - sourceBytes ||
 				*previousBytes > maximum - sourceBytes - receiptBytes) {
 				failure = "Composer preview vector growth scratch exceeds budget";
@@ -300,7 +365,14 @@ namespace engine::render {
 		}
 		static_assert(std::is_nothrow_move_constructible_v<Impl::ComposerCaptureEntry>);
 		static_assert(std::is_nothrow_move_assignable_v<Impl::ComposerCaptureEntry>);
-		const auto result = QueueComposerSurface({owner, name, generation, std::move(request)});
+		const auto result = transform ? QueueTransformImage3D(
+											{owner,
+											 name,
+											 generation,
+											 imagegraph::TransformImage3DOutput::Rendered,
+											 std::move(transformRequest)}
+										)
+									  : QueueComposerSurface({owner, name, generation, std::move(request)});
 		using Result = imagegraph::TransformImage3DQueueResult;
 		if (result != Result::Queued && result != Result::Replaced) {
 			failure = "Composer preview source queue refused capture";
@@ -333,8 +405,12 @@ namespace engine::render {
 		else
 			*found = std::move(entry);
 		for (auto &slot : State->GraphResources.Transform3D)
-			if (slot.Owner == owner && slot.Name == name && slot.Generation == generation)
-				slot.ComposerCaptureReadback = true;
+			if (slot.Owner == owner && slot.Name == name && slot.Generation == generation) {
+				if (transform)
+					slot.TransformCaptureReadback = true;
+				else
+					slot.ComposerCaptureReadback = true;
+			}
 		if (pending) *pending = true;
 		failure = "Composer preview capture is pending";
 		return false;

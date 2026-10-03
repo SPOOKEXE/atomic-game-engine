@@ -24,7 +24,7 @@ namespace engine::render {
 		if (Device == nullptr || command == nullptr) return;
 		for (GraphResourceCache::Transform3DSlot &slot : GraphResources.Transform3D) {
 			if (slot.Phase != GraphResourceCache::Transform3DPhase::Queued ||
-				(composerOnly && !slot.ComposerRequest))
+				(composerOnly && !slot.ComposerRequest && !slot.TransformCaptureReadback))
 				continue;
 			const uint64_t scratch =
 				slot.ComposerRequest
@@ -75,7 +75,9 @@ namespace engine::render {
 					? imagegraph::RecordSourceCamera3D(
 						  Device, command, *slot.CameraRequest, slot.CameraResources
 					  )
-					: imagegraph::RecordTransformImage3DLive(Device, command, slot.Request, slot.Resources);
+					: imagegraph::RecordTransformImage3DLive(
+						  Device, command, slot.Request, slot.Resources, slot.TransformCaptureReadback
+					  );
 			if (!succeeded) {
 				if (!slot.Resources.CommandReferenced && !slot.CameraResources.CommandReferenced) {
 					ReleaseTransform3D(slot);
@@ -115,7 +117,8 @@ namespace engine::render {
 											request.Request.Front.Format,
 											request.Request.Back.Format,
 											!request.Request.Back.Pixels.empty(),
-											request.Request.ColorSpace
+											request.Request.ColorSpace,
+											request.Request.SourcePlane
 										))
 			return imagegraph::TransformImage3DQueueResult::Invalid;
 		const uint64_t frontBytes = request.Request.Front.Pixels.size();

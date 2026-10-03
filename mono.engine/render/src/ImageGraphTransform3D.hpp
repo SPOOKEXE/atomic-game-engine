@@ -20,6 +20,7 @@ namespace engine::render::imagegraph {
 		SDL_GPUTransferBuffer *FrontUpload = nullptr;
 		SDL_GPUTransferBuffer *BackUpload = nullptr;
 		SDL_GPUTransferBuffer *VertexUpload = nullptr;
+		SDL_GPUTransferBuffer *RenderedDownload = nullptr, *EncodedDepthDownload = nullptr;
 		SDL_GPUBuffer *Vertices = nullptr;
 		SDL_GPUSampler *Sampler = nullptr;
 		SDL_GPUShader *VertexShader = nullptr;
@@ -33,7 +34,8 @@ namespace engine::render::imagegraph {
 		SDL_GPUDevice *device,
 		SDL_GPUCommandBuffer *command,
 		const TransformImage3DRequest &request,
-		TransformImage3DLiveResources &resources
+		TransformImage3DLiveResources &resources,
+		bool capture = false
 	);
 	void ReleaseTransformImage3DLive(SDL_GPUDevice *device, TransformImage3DLiveResources &resources);
 

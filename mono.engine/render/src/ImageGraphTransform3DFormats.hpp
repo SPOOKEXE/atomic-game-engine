@@ -69,7 +69,8 @@ namespace engine::render::imagegraph::detail {
 		assets::TextureFormat front,
 		assets::TextureFormat back,
 		bool hasBack,
-		TransformImage3DColorSpace colorSpace
+		TransformImage3DColorSpace colorSpace,
+		bool sourcePlane = false
 	) {
 		if (device == nullptr || !ValidTransformImage3DColorSpace(colorSpace)) return false;
 		const auto frontFormat = TransformImage3DFormat(front, colorSpace);
@@ -80,7 +81,10 @@ namespace engine::render::imagegraph::detail {
 		};
 		return supports(*frontFormat, SDL_GPU_TEXTUREUSAGE_SAMPLER) &&
 			   (!hasBack || supports(*backFormat, SDL_GPU_TEXTUREUSAGE_SAMPLER)) &&
-			   supports(*frontFormat, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER) &&
+			   supports(
+				   sourcePlane ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM : *frontFormat,
+				   SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
+			   ) &&
 			   supports(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET) &&
 			   supports(SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET);
 	}

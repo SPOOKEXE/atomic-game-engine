@@ -18,13 +18,15 @@ namespace engine::render::imagegraph {
 		if (!validSurface(request.Front)) return TransformImage3DStatus::InvalidSurface;
 		if (!request.Back.Pixels.empty() && !validSurface(request.Back))
 			return TransformImage3DStatus::InvalidSurface;
-		if (!request.Back.Pixels.empty() &&
+		if (!request.SourcePlane && !request.Back.Pixels.empty() &&
 			(request.Back.Width != request.Front.Width || request.Back.Height != request.Front.Height))
 			return TransformImage3DStatus::InvalidSurface;
-		if (request.Front.Width > 4096 || request.Front.Height > 4096)
+		if (request.Front.Width > 4096 || request.Front.Height > 4096 || request.Back.Width > 4096 ||
+			request.Back.Height > 4096)
 			return TransformImage3DStatus::OutputLimit;
-		if (request.ColorSpace != TransformImage3DColorSpace::Linear &&
-			request.ColorSpace != TransformImage3DColorSpace::Display)
+		if ((request.SourcePlane && request.ColorSpace != TransformImage3DColorSpace::Linear) ||
+			(request.ColorSpace != TransformImage3DColorSpace::Linear &&
+			 request.ColorSpace != TransformImage3DColorSpace::Display))
 			return TransformImage3DStatus::InvalidControl;
 		const uint64_t pixels = uint64_t(request.Front.Width) * request.Front.Height;
 		const uint32_t frontBytesPerPixel =
@@ -32,10 +34,13 @@ namespace engine::render::imagegraph {
 		const uint32_t backBytesPerPixel = detail::TransformImage3DBytesPerPixel(
 			request.Back.Pixels.empty() ? request.Front.Format : request.Back.Format, request.ColorSpace
 		);
-		const uint64_t outputBytes = pixels * assets::BytesPerPixel(request.Front.Format);
+		const uint64_t outputBytes =
+			pixels * (request.SourcePlane ? 4 : assets::BytesPerPixel(request.Front.Format));
 		const uint64_t frontTransferBytes = pixels * frontBytesPerPixel;
-		const uint64_t backTransferBytes = pixels * backBytesPerPixel;
-		const uint64_t outputTransferBytes = pixels * frontBytesPerPixel;
+		const uint64_t backPixels =
+			request.Back.Pixels.empty() ? pixels : uint64_t(request.Back.Width) * request.Back.Height;
+		const uint64_t backTransferBytes = backPixels * backBytesPerPixel;
+		const uint64_t outputTransferBytes = pixels * (request.SourcePlane ? 4 : frontBytesPerPixel);
 		const uint64_t depthBytes = pixels * 4;
 		const uint64_t scratchBytes =
 			2 * (frontTransferBytes + backTransferBytes + outputTransferBytes + 2 * depthBytes);

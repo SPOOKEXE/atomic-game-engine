@@ -52,6 +52,8 @@ namespace engine::render::imagegraph {
 		TransformImage3DProjection Projection = TransformImage3DProjection::Orthographic;
 		TransformImage3DColorSpace ColorSpace = TransformImage3DColorSpace::Linear;
 		float FieldOfViewDegrees = 45;
+		// Source two-sided half-unit plane and fixed source camera; native profile remains distinct.
+		bool SourcePlane = false, LinearFilter = false;
 	};
 
 	struct TransformImage3DResult {
