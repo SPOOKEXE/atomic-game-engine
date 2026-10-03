@@ -6604,6 +6604,167 @@
       "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending.",
       "assertions_passed": 51,
       "test_cases_passed": 3
+    },
+    {
+      "name": "architecture-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-76-joined.log",
+      "log_sha256": "429cb145146bf45fd5dcd5b3bbcc58514c7dfa4071eaf9d3a8c56a8acd601432",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "architecture",
+        "--output-on-failure"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance."
+    },
+    {
+      "name": "assetc-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-76-joined.log",
+      "log_sha256": "046cd58e74df9b6de3c3bb89bdc1970632102c86873e7aefd9d9f8e3a1ee9d29",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 362,
+      "test_cases_passed": 42
+    },
+    {
+      "name": "assets-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-76-joined.log",
+      "log_sha256": "aac8f007d41a1aa696797bfbde42bb09da3238bed973babf423a6135cbbb0e6d",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "cli-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-76-joined.log",
+      "log_sha256": "44b2376278f259565f8bbd74c015100bc804ba0bcf8434371220209f3a00ff27",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+        "--output-on-failure"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance."
+    },
+    {
+      "name": "export-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-76-joined.log",
+      "log_sha256": "5c9e7de30f544c1a9aafa4d052f7537b387e3a5fe301fefa572f1ab0d25ac1bf",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 2613,
+      "test_cases_passed": 62
+    },
+    {
+      "name": "gui-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-76-joined.log",
+      "log_sha256": "8bf74fc9ee9559f2c5466d531459155d4018b23453b56e01ee1c6caaa033d943",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 4974,
+      "test_cases_passed": 331
+    },
+    {
+      "name": "io-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-76-joined.log",
+      "log_sha256": "440d931962981868545279a010d43a935c8dde60ae619e854c654c23ad94dae9",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 10373,
+      "test_cases_passed": 228
+    },
+    {
+      "name": "nodegraph-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-76-joined.log",
+      "log_sha256": "aa0df085d46c003603af08add026869d3cc26be3e89c1cc9257c85c8a0141cf6",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "physics-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-76-joined.log",
+      "log_sha256": "37aee5b53021887a9cec873941aa93f29f550615c0f6ae40670db1268c4ef45e",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "render-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-76-joined.log",
+      "log_sha256": "74b9f0b10879ba8acd2294a102d73d4daafd3b911ff2111fc8a79309471cebf8",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+        "~[gpu]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 336655,
+      "test_cases_passed": 808
+    },
+    {
+      "name": "server-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-76-joined.log",
+      "log_sha256": "6e0f4654bf22488135ec41354da6d54a31e65ce68d1d4e10b40bbaeb9de8bce1",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance.",
+      "assertions_passed": 2180,
+      "test_cases_passed": 99
     }
   ],
   "excluded_or_failed_runs": [
@@ -8225,6 +8386,44 @@
       "exit_code": 42,
       "result": "failed; retained before native acceptance",
       "scope_note": "Camera release76 initial integration, ordered four-patch manifest SHA256 1d7822b3332cc3f7be6331dc46589c299b4d08989ccb486686bd556d0e4336fc. Native CPU only; camera acceptance, joined closure and GPU verification pending. 9 cases: 5 pass, 4 fail; 59 assertions: 55 pass, 4 fail. Three camera graphs report UnknownNode; one sequence graph reports an unknown port."
+    },
+    {
+      "name": "client-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-76-joined.log",
+      "log_sha256": "64ce00d74533e23b43d8e2be1df4ecec88a41ebfbf088c0f1c76819aa4c26ca5",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+        "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance. 68 cases: 65 pass, 3 fail; 7086 assertions: 7082 pass, 4 fail. Known camera graph UnknownNode compile failures."
+    },
+    {
+      "name": "imagegraph-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-76-joined.log",
+      "log_sha256": "a6da54daecd6cbb6cf0a3dd4713dcbb3ac020cfc67e974983a7648380b234436",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance. 2560 cases: 2557 pass, 3 fail; 1853788 assertions: 1853784 pass, 4 fail. Known camera graph UnknownNode compile failures."
+    },
+    {
+      "name": "studio-release-76-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-76-joined.log",
+      "log_sha256": "00ca83568e33f841d9925e21fad311194823bfdebc554324fbacd5df8fb99a7d",
+      "command": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_studio",
+        "[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result]"
+      ],
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Camera release76 initial joined CPU run. No GPU, live Studio, licensed parity or overall M0-M7 acceptance. 155 cases: 151 pass, 4 fail; 8412 assertions: 8408 pass, 4 fail. Known camera UnknownNode and sequence unknown-port compile failures."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -9437,7 +9636,8 @@
     "build75_release": "Refract focused36 cases/2458 assertions, actual mapped-input IO1 case/178 assertions,96 metadata tests and14 joined CPU scopes pass. Full imagegraph2553 cases/1853752 assertions; full IO228 cases/10373 assertions. Initial feather-oracle failure retained and repaired without production mask changes.",
     "build75_overall": "Selected native integration gates passed. Overall M0-M7, camera, font/axes/cache integration, remaining catalogue/3D nodes, GPU arguments, live Studio and licensed parity remain incomplete.",
     "build76_initial": "Coherent 671-step camera ABI closure passed. Payload1/6 and render request3/51 CPU checks passed; imagegraph/client/Studio focused compile failures retained. No camera acceptance or GPU run claimed.",
-    "build76_overall": "Overall M0-M7 remains incomplete. Camera focused repairs and joined CPU closure, font/axes/cache/remaining catalogue work, GPU approval, live Studio and licensed parity remain open."
+    "build76_overall": "Overall M0-M7 remains incomplete. Camera focused repairs and joined CPU closure, font/axes/cache/remaining catalogue work, GPU approval, live Studio and licensed parity remain open.",
+    "build76_initial_joined": "Fourteen joined CPU scopes executed: eleven passed; imagegraph/client/Studio failed only the retained focused camera and sequence compile cases. Full render808/336655 passed. Repairs pending; camera and overall joined acceptance not claimed."
   },
   "pending_gates": [
     {
