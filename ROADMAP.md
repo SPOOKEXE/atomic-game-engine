@@ -51,12 +51,12 @@ Milestone labels describe development scope, not release versions.
 
 - [_] Complete Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 
-  1. Graph and Studio: finish remaining Dopesheet gestures and host workflows. Selected-key easing, dynamic tracks and focused Composer Undo/Redo pass headless checks.
-  2. Nodes: implement remaining catalogue executors; verify defaults, controls, errors and animation; update parity evidence.
-  3. Animation and audio: finish audio workflows and feedback; verify seek/reset and fractional-key semantics.
-  4. 3D and outputs: finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback; broaden Transform and skybox raster verification.
-  5. PXC and exports: finish remaining edits and formats; validate modified PXC compatibility. Processor resets and quaternion display-mode edits preserve source keys and metadata; resumable exports retain pending work, cancel safely and publish atomically.
-  6. Acceptance: keep joined CPU and Composer Vulkan evidence current; finish remaining GPU tests, live Studio workflows and release profiling. Exact parity requires a licensed reference build and matched captures.
+  1. Graph and Studio: finish Dopesheet gestures, host workflows and thumbnail saving. Selected-key easing, dynamic tracks and focused Undo/Redo pass headless checks.
+  2. Nodes: finish Mirror path sampling and separate X/Y animation; integrate Flow, Bubble and path modifiers; finish fonts, text, arguments and remaining catalogue executors. Verify controls, errors, animation and parity evidence.
+  3. Animation and audio: finish frame caches, saved-cache loading, playback and audio workflows; verify feedback, seek/reset and fractional keys.
+  4. 3D and outputs: integrate camera rendering and previews; finish mesh consumers, remaining 3D nodes, bindings and large-sequence playback; broaden Transform and skybox pixel checks.
+  5. PXC and exports: finish remaining edits, formats and modified-project compatibility. Processor resets, quaternion display modes and resumable exports pass joined CPU checks.
+  6. Acceptance: validate prepared implementations together, profile source-family workloads, and finish GPU and live Studio checks. Exact parity requires a licensed reference build and matched captures.
 
   Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
