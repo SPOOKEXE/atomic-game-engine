@@ -9,6 +9,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -235,6 +237,14 @@ namespace engine::assets {
 		bool operator==(const ShaderData &) const = default;
 	};
 
+	// Conservative owned residency: includes sizeof(ShaderData), all nested vector capacities
+	// and string capacities (including their terminators). Inline string storage is counted
+	// conservatively again. Does not validate the shader or allocate. Exceeding the supplied
+	// cap returns no value; callers must not add fixed object storage a second time.
+	std::optional<uint64_t> ShaderRetainedPayloadBytes(
+		const ShaderData &, uint64_t maximumBytes = std::numeric_limits<uint64_t>::max()
+	);
+
 	// Canonical ASH1 container. Limits bound both serialized bytes and parsed collection sizes.
 	class Shader {
 	  public:
@@ -257,11 +267,18 @@ namespace engine::assets {
 		// Maximum bytes in any metadata string.
 		static constexpr size_t MAXIMUM_NAME = 1024;
 
+		// Exact canonical ASH1 serialized length, including the header. Invalid data refuses.
+		// This is a size measure, not writer capacity or a peak-memory accounting claim.
+		static std::optional<uint64_t> EncodedBytes(const ShaderData &data);
+
 		// Appends one complete container; invalid input leaves the writer unchanged.
 		static bool Write(core::ByteWriter &writer, const ShaderData &data);
 
 		// Reads exactly one length-delimited container. Refusal leaves output unchanged and fails the reader.
+		// The decoded cap includes fixed storage and nested owned growth. Input bytes and the
+		// previous destination are separate caller-owned residency and must be reserved by the caller.
 		static bool Read(core::ByteReader &reader, ShaderData &out);
+		static bool Read(core::ByteReader &reader, ShaderData &out, uint64_t maximumBytes);
 
 		// Hashes canonical stage/resource/member/input/output/local-size metadata, not code or labels.
 		// Invalid interface structure returns the zero sentinel.
