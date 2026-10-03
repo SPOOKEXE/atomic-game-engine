@@ -10136,7 +10136,8 @@
     "build76_overall": "Selected camera capture/row and Studio sequence CPU milestones accepted and committed. Full camera GPU verification and live Studio remain open, alongside font/axes/cache, remaining catalogue/3D/exports, source argument parity and licensed-reference gates. Overall M0-M7 remains incomplete.",
     "build76_initial_joined": "Fourteen joined CPU scopes executed: eleven passed; imagegraph/client/Studio failed only the retained focused camera and sequence compile cases. Full render808/336655 passed. Repairs pending; camera and overall joined acceptance not claimed.",
     "build76_fixture_repair": "Five test fixtures repaired, matching9-step closure passed. Client camera2/31, route3/22, Studio9/295, request3/51 and payload1/6 pass. Core camera5/6 cases pass; stale-policy fixture erroneously expects equivalent rgba8 to invalidate a receipt. Source-backed oracle repair pending.",
-    "build76_final": "Camera6/118, payload1/6, render request3/51, client provider2/31, client routing3/22 and Studio preview9/295 pass. All14 joined CPU scopes pass, including fullimagegraph2560/1853878, render808/336654, client68/7109 and Studio155/8648. 671-step ABI build and matching fixture repairs passed. Prior failures retained; production registration unchanged."
+    "build76_final": "Camera6/118, payload1/6, render request3/51, client provider2/31, client routing3/22 and Studio preview9/295 pass. All14 joined CPU scopes pass, including fullimagegraph2560/1853878, render808/336654, client68/7109 and Studio155/8648. 671-step ABI build and matching fixture repairs passed. Prior failures retained; production registration unchanged.",
+    "build77_in_progress": "Source timeline foundation15 paths and corrected Studio8 paths applied with exact preimages and resulting hashes. Matching673-step release ABI build started; build and runtime acceptance pending. Changed/new C++ format check21/22 passed; one new Studio test requires formatting after build. Source review identified double first-frame conversion in Animation Control adapter; test-first reproduction and correction pending. No completed roadmap task, GPU, live Studio or licensed parity acceptance claimed."
   },
   "pending_gates": [
     {
@@ -10174,6 +10175,129 @@
         "benchmark_exit_code": 134,
         "output_destination": "stdout/stderr only",
         "reason": "Required public imagegraph.evaluate scope absent from actual stateful execution path; repaired check requires actual whole workload root, processors and family kernels."
+      }
+    ]
+  },
+  "source_timeline_integration_77": {
+    "status": "applied; matching build and runtime checks pending",
+    "foundation_patch_sha256": "7cced402e8153510bb217f0668cbb50a9212fdebb7ce2d2eafc07cfb675c812f",
+    "studio_patch_sha256": "9bc2f86ad1db8e34762fa8e021383f34f266e71cdd03a15656fd5bde8b4a41c3",
+    "build_log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-77-source-bounds.log",
+    "paths": [
+      {
+        "path": "mono.engine/imagegraph/docs/source-timeline-bounds.md",
+        "preimage": null,
+        "integrated_sha256": "e945fb7601377ba70f0c4c025519c12622a50438eaae859fe1f267f0a484e402"
+      },
+      {
+        "path": "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+        "preimage": "a3ce16e4147ca6a2ec8bba7f316bab48c8f612fce901381d3b747868ae85320d",
+        "integrated_sha256": "1e2da044715ab34f3efea2d9c41f76f1ff725c3c93e3532d084f123074ac4edf"
+      },
+      {
+        "path": "mono.engine/imagegraph/include/engine/imagegraph/SourceTimeline.hpp",
+        "preimage": null,
+        "integrated_sha256": "0650a37c04fc576bd5a032533002c79df5c739fb0662a06f9e9e23a3f2b72e0d"
+      },
+      {
+        "path": "mono.engine/imagegraph/src/Document.cpp",
+        "preimage": "f15a9fa5a8e64f116efaaee4a351ea54a0d76423ec9f9b51e7ef8c760aebf2ec",
+        "integrated_sha256": "a79b4c8234c269d8df1bc9ffce6f61282b3349dd1205da8fbaf0e92e29c6c1cf"
+      },
+      {
+        "path": "mono.engine/imagegraph/src/GroupClonePayload.cpp",
+        "preimage": "da659f6f3f102b6bf57b50cc4aeae5604a2e0bccddfc98a02c49964e13915e84",
+        "integrated_sha256": "aedbc604ce0443cb58dece620a15b4a2c558a345f0433f648e2a6be425ee42b9"
+      },
+      {
+        "path": "mono.engine/imagegraph/src/nodes/RandomNodes.cpp",
+        "preimage": "d44cc9e0f0bc0796b693e4c976dac8a6cbee2f7e6a41a7a798f81cb28045bc1f",
+        "integrated_sha256": "8cce0401894c04693b5d15e6b8a76757c166067970c5569209e631c810dc7a04"
+      },
+      {
+        "path": "mono.engine/imagegraph/src/nodes/SourceCacheResults.cpp",
+        "preimage": "dc7ec4bfb488b424cd16a2b121a92fc0fc2e4d474c35cf3217987ae59943c847",
+        "integrated_sha256": "cad208ae5fabc8f14e1cb7c078ed4af46d5f35c9fdd7802b46dbdf9f6c9d1da7"
+      },
+      {
+        "path": "mono.engine/imagegraph/tests/SourceTimeline.cpp",
+        "preimage": null,
+        "integrated_sha256": "51d9b1305f322043bb663db2fc580ba82a588ef582285fed065031f2f9d629f5"
+      },
+      {
+        "path": "mono.engine/imagegraphexport/src/GraphAuthoredExport.cpp",
+        "preimage": "523a84a068966226c9cd09933f99346df9cbeac5234bf1a98304b94475b4e9b1",
+        "integrated_sha256": "8bc658a72d91a7cd281c7a31c448d7fa3e03869c0f935536f86c9755d6e9169b"
+      },
+      {
+        "path": "mono.engine/imagegraphexport/tests/GraphAuthoredExport.cpp",
+        "preimage": "2821f11d22e740739141efb3819b84a9ee748ec50479f798ebd9bb86dd1c8b7e",
+        "integrated_sha256": "469a876ebc740929ee38df7c93982e527a03577c41b421b5e37c95ec9d28ad4e"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "preimage": "d7b34d1bdf59d3983917aefe0a29071991408427885be8a965f3c081572a5e5b",
+        "integrated_sha256": "31745d3c2f0bc45b36527844c611e3ad0f6a3af6e494c5cc366f6278e1ebba95"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "preimage": "f297e3099b53502c84fbed496cbfbbee34171096981dd1c85a24eb3dab9b11e6",
+        "integrated_sha256": "eb405e77aeb8237dcac00dee4753e43d1b9e5453d625180147819f893e485784"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/SourceTimelineProjection.hpp",
+        "preimage": null,
+        "integrated_sha256": "1ecd79008739a0253b99a6645ad6dc2cdf4134cafc85bee2774cc6996612ab37"
+      },
+      {
+        "path": "mono.engine/imagegraphio/tests/PxcxImport.cpp",
+        "preimage": "bd8c36c3e71be1580aabed05ab30a61d4c38742136bdb9907865516277d889e4",
+        "integrated_sha256": "5edda77a0885f38e910c7d1ae482e96ab9b44d581aa12b97bd1082d87988740b"
+      },
+      {
+        "path": "mono.engine/imagegraphio/tests/PxcxTimelineEdit.cpp",
+        "preimage": null,
+        "integrated_sha256": "b1e35a68b7b299f4fb9a64c7751e07ac17ab5324f5b5a06c895674ae6d3b3d38"
+      },
+      {
+        "path": "mono.studio/include/studio/ImageGraph.hpp",
+        "preimage": "bee9a8ecbeec8173a1ce7a776e26009a7d85cf241490b69120ad9afe2034b33c",
+        "integrated_sha256": "ec7a31b35971045bfdd8b231e8ed73386f8327bc4829d572a4a6acf4a7ca0c4e"
+      },
+      {
+        "path": "mono.studio/src/ImageComposer.cpp",
+        "preimage": "ea5325b8be9ea4de46c19a9df26f067291da3b7c13f3cefeea953169edec71fc",
+        "integrated_sha256": "33a575a616fefa470672b8e13d269ead581d08649e50e4492f2f31a73cd1b1f9"
+      },
+      {
+        "path": "mono.studio/src/ImageGraph.cpp",
+        "preimage": "86dd8ce1c56a082443dfd769f8902f29ae94b85af24455335c624077ea681141",
+        "integrated_sha256": "3444552614df8e072c37bbb3f0168213541483c57f3cf4a969a69cf08a66324f"
+      },
+      {
+        "path": "mono.studio/src/ImageGraphAnimationControl.hpp",
+        "preimage": "c2057c73be7bd6d49805c82524ccebce9cb5e38ca1c9857d3ff686d86f907257",
+        "integrated_sha256": "cec04881edc289962bfb16741557e15f3e9e04625a405b94ae00bfe39c07d35b"
+      },
+      {
+        "path": "mono.studio/src/WavPreview.cpp",
+        "preimage": "822e1eef826da79ca2b1aadf4e2b57b623d8431bc2c0994f2061c5aebf90e5d8",
+        "integrated_sha256": "cb49132b0052ee0e7cbd17944c2cfe81c6d75b289c39554ba96283a0ab27cdf2"
+      },
+      {
+        "path": "mono.studio/tests/ImageGraph.cpp",
+        "preimage": "e7383e28277838ebec7857f966ceb11937db02f155b62065295d6af410bd5588",
+        "integrated_sha256": "f8d8b66129a4b63f155d232feec46761e27cbaa52a4b7633fd65c9d57c7b4bb4"
+      },
+      {
+        "path": "mono.studio/tests/WavPreview.cpp",
+        "preimage": "99bad756b63901d0486422fee11e04ea15b9e486dc65bc5ca54c750b99de8577",
+        "integrated_sha256": "cf816dd567d095f54d87879ae056459d704cf8c12d2d4d5654a1a533002fe2fa"
+      },
+      {
+        "path": "mono.studio/src/ImageGraphSourceTimelineTransition.hpp",
+        "preimage": null,
+        "integrated_sha256": "459f9f0a6d5c276a9b9b04cce47edf88623ff1899664f6cb9954c31df27ee4a1"
       }
     ]
   }
