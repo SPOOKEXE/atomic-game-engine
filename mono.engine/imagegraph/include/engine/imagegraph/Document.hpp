@@ -1272,6 +1272,10 @@ namespace engine::imagegraph {
 		static constexpr size_t MaximumGroupPorts = 64;
 		static constexpr size_t MaximumJunctions = 8192;
 		static constexpr size_t MaximumDynamicInputsPerNode = 64;
+		// The N-point shader has 64 slots, each with Point, Color, Influence and a Point unit.
+		static constexpr size_t MaximumGradientPointsNPoints = 64;
+		static constexpr size_t MaximumGradientPointsNDynamicInputsPerNode =
+			MaximumGradientPointsNPoints * (3 + 1);
 		// Pixel Builder groups retain twenty-six source slots and two authored unit controls.
 		static constexpr size_t MaximumPixelBuilderEffectGroups = 64;
 		static constexpr size_t PixelBuilderEffectInputsPerGroup = 26;
@@ -1332,6 +1336,7 @@ namespace engine::imagegraph {
 	};
 
 	inline size_t MaximumDynamicInputsForType(std::string_view type) {
+		if (type == "pc.gradient_points_n") return Limits::MaximumGradientPointsNDynamicInputsPerNode;
 		return type.starts_with("pc.pb_draw_") ? Limits::MaximumPixelBuilderDynamicInputsPerNode
 											   : Limits::MaximumDynamicInputsPerNode;
 	}
