@@ -27,6 +27,11 @@ namespace client::detail {
 		) override;
 
 	  private:
+		bool CaptureDevice(
+			const engine::imagegraph::HostNodeInvocation &,
+			engine::imagegraph::HostNodeCapture &,
+			std::string &
+		);
 		engine::render::Renderer &Render;
 		engine::core::Name Owner;
 		engine::imagegraph::HostNodeProvider *Fallback;

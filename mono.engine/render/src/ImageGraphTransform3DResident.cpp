@@ -24,15 +24,18 @@ namespace engine::render {
 		if (Device == nullptr || command == nullptr) return;
 		for (GraphResourceCache::Transform3DSlot &slot : GraphResources.Transform3D) {
 			if (slot.Phase != GraphResourceCache::Transform3DPhase::Queued ||
-				(composerOnly && !slot.ComposerRequest && !slot.TransformCaptureReadback))
+				(composerOnly && !slot.ComposerRequest && !slot.TransformCaptureReadback &&
+				 !slot.CameraCaptureReadback))
 				continue;
 			const uint64_t scratch =
 				slot.ComposerRequest
 					? hlsl::SurfaceScratchBytes(*slot.ComposerRequest) +
 						  (slot.ComposerCaptureReadback ? uint64_t(slot.Width) * slot.Height * 8 : 0)
-				: slot.SdfRequest	 ? imagegraph::SourceSdfScratchBytes(*slot.SdfRequest)
-				: slot.CameraRequest ? imagegraph::SourceCamera3DScratchBytes(*slot.CameraRequest)
-									 : imagegraph::TransformImage3DLiveScratchBytes(slot.Request);
+				: slot.SdfRequest ? imagegraph::SourceSdfScratchBytes(*slot.SdfRequest)
+				: slot.CameraRequest
+					? imagegraph::SourceCamera3DScratchBytes(*slot.CameraRequest) +
+						  (slot.CameraCaptureReadback ? uint64_t(slot.Width) * slot.Height * 7 * 16 : 0)
+					: imagegraph::TransformImage3DLiveScratchBytes(slot.Request);
 			if (scratch > imagegraph::MAXIMUM_TRANSFORM_IMAGE_3D_SCRATCH_BYTES ||
 				(GraphResources.Transform3DScratchBytes -
 				 std::min(GraphResources.Transform3DScratchBytes, slot.ScratchBytes)) >
@@ -73,7 +76,11 @@ namespace engine::render {
 					? imagegraph::RecordSourceSdf(Device, command, *slot.SdfRequest, slot.CameraResources)
 				: slot.CameraRequest
 					? imagegraph::RecordSourceCamera3D(
-						  Device, command, *slot.CameraRequest, slot.CameraResources
+						  Device,
+						  command,
+						  *slot.CameraRequest,
+						  slot.CameraResources,
+						  slot.CameraCaptureReadback
 					  )
 					: imagegraph::RecordTransformImage3DLive(
 						  Device, command, slot.Request, slot.Resources, slot.TransformCaptureReadback
@@ -211,6 +218,10 @@ namespace engine::render {
 
 	imagegraph::TransformImage3DQueueResult
 	Renderer::QueueSourceCamera3D(imagegraph::SourceCamera3DLiveRequest request) {
+		return QueueCameraResolved(std::move(request), false);
+	}
+	imagegraph::TransformImage3DQueueResult
+	Renderer::QueueCameraResolved(imagegraph::SourceCamera3DLiveRequest request, bool captureReadback) {
 		RequireOwningThread("QueueSourceCamera3D");
 		using Result = imagegraph::TransformImage3DQueueResult;
 		if (!State || !request.Owner.IsValid() || !request.Name.IsValid() || request.Generation == 0 ||
@@ -239,8 +250,8 @@ namespace engine::render {
 						return !binding.Cancelled && binding.Output == output && binding.Name != request.Name;
 					}
 				);
-				if (slot.Phase == Phase::Queued && !slot.Cancelled && availableOutput &&
-					*slot.CameraRequest == request.Request)
+				if (slot.Phase == Phase::Queued && !slot.Cancelled && !slot.CameraCaptureReadback &&
+					!captureReadback && availableOutput && *slot.CameraRequest == request.Request)
 					merged = &slot;
 				if (slot.Phase == Phase::Queued && slot.CameraBindings.size() == 1 &&
 					slot.CameraBindings[0].Name == request.Name)
@@ -289,6 +300,7 @@ namespace engine::render {
 			destination->Height = request.Request.Height;
 			destination->SourceBytes = bytes;
 			destination->CameraRequest = std::move(request.Request);
+			destination->CameraCaptureReadback = captureReadback;
 			destination->CameraBindings.push_back({request.Name, request.Generation, output, false});
 			State->GraphResources.Transform3DSourceBytes += bytes;
 		}

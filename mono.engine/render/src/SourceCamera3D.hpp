@@ -9,6 +9,7 @@ namespace engine::render::imagegraph {
 	struct SourceCamera3DResources {
 		SDL_GPUTexture *Output = nullptr;
 		std::array<SDL_GPUTexture *, 7> Outputs{};
+		std::array<SDL_GPUTransferBuffer *, 7> Downloads{};
 		std::vector<SDL_GPUTexture *> Textures;
 		std::vector<SDL_GPUBuffer *> Buffers;
 		std::vector<SDL_GPUTransferBuffer *> Transfers;
@@ -23,7 +24,8 @@ namespace engine::render::imagegraph {
 		SDL_GPUDevice *device,
 		SDL_GPUCommandBuffer *command,
 		const SourceCamera3DRequest &request,
-		SourceCamera3DResources &resources
+		SourceCamera3DResources &resources,
+		bool captureReadback = false
 	);
 	void ReleaseSourceCamera3D(SDL_GPUDevice *device, SourceCamera3DResources &resources);
 }

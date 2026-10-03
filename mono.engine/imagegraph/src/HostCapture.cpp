@@ -29,6 +29,19 @@ namespace engine::imagegraph {
 		prepared.Tick = request.Tick;
 		prepared.Subframe = request.Subframe;
 		prepared.NegativeFrame = request.NegativeFrame;
+		if (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set") {
+			prepared.CameraRow = 0;
+			auto &policy = prepared.CameraPolicy.emplace();
+			policy.InheritedSurfaceFormat = snapshot.InheritedSurfaceFormat();
+			if (document.Project) {
+				policy.ProjectWidth = document.Project->SurfaceWidth;
+				policy.ProjectHeight = document.Project->SurfaceHeight;
+				policy.ProjectColorDepth = document.Project->ColorDepth;
+				policy.ProjectShader3D = document.Project->Shader3D;
+			}
+			for (const auto &value : snapshot.Values())
+				if (value.Port == "dimension") policy.DimensionLinked = value.Linked;
+		}
 		prepared.Inputs.reserve(snapshot.Values().size());
 		for (const auto &value : snapshot.Values())
 			prepared.Inputs.push_back({value.Port, value.Data});

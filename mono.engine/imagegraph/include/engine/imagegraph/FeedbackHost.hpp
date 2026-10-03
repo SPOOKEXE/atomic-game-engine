@@ -432,6 +432,41 @@ namespace engine::imagegraph {
 				return {};
 			return FrameTime{Tick, Subframe, NegativeFrame};
 		}
+		// Owned capacities, including the immutable preframe journal. This excludes
+		// borrowed request captures and provider sessions charged by their owners.
+		uint64_t RetainedBytes() const noexcept {
+			uint64_t bytes = sizeof(*this);
+			const auto add = [&](uint64_t value) {
+				if (value > UINT64_MAX - bytes) return false;
+				bytes += value;
+				return true;
+			};
+			const auto rows = [&](size_t count, size_t stride) {
+				return !count || (stride <= UINT64_MAX / count && add(count * stride));
+			};
+			const auto sources = [&](const auto &values) {
+				if (!rows(values.capacity(), sizeof(RequestImageSource))) return false;
+				for (const auto &source : values)
+					if (!add(source.SourceId.capacity()) || !add(source.Data.Pixels.capacity())) return false;
+				return true;
+			};
+			for (const auto *state : {&State, &FrameStart}) {
+				if (!add(RetainedStatefulOutputBytes(*state)) || !add(LedgerBytes(*state))) return UINT64_MAX;
+			}
+			if (!sources(Seeds) || !sources(Inputs) || !sources(FrameStartInputs) ||
+				!add(InputSnapshot.RetainedBytes()) || !add(InputNode.capacity()) ||
+				!rows(Bindings.capacity(), sizeof(FeedbackBinding)))
+				return UINT64_MAX;
+			for (const auto &binding : Bindings)
+				if (!add(binding.SourceId.capacity()) || !add(binding.OutputId.capacity())) return UINT64_MAX;
+			for (const auto *names : {&CacheClearNodes, &CacheInvalidOutputs, &CacheInvalidInputs}) {
+				if (!rows(names->capacity(), sizeof(std::string))) return UINT64_MAX;
+				for (const auto &name : *names)
+					if (!add(name.capacity())) return UINT64_MAX;
+			}
+			return bytes;
+		}
+
 		bool Active() const {
 			return Stateful || !Bindings.empty();
 		}

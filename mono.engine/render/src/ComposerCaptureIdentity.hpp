@@ -14,7 +14,8 @@ namespace engine::render::detail {
 		if (cachedInterpolation != requestedInterpolation || cached.Authored != requested.Authored ||
 			cached.Tick != requested.Tick || cached.Subframe != requested.Subframe ||
 			cached.NegativeFrame != requested.NegativeFrame || cached.Inputs != requested.Inputs ||
-			cached.InputImages.size() != requested.InputImages.size())
+			cached.InputImages.size() != requested.InputImages.size() ||
+			cached.CameraPolicy != requested.CameraPolicy || cached.CameraRow != requested.CameraRow)
 			return false;
 		for (size_t index = 0; index < cached.InputImages.size(); ++index)
 			if (cached.InputImages[index].Port != requested.InputImages[index].Port ||

@@ -1,4 +1,5 @@
 #include "ImageGraphCameraAdapter.hpp"
+#include "ImageGraphCameraRoute.hpp"
 #include "ImageGraphComposerAdapter.hpp"
 #include "ImageGraphSdfAdapter.hpp"
 #include "ImageGraphSkyboxCache.hpp"
@@ -1160,6 +1161,7 @@ namespace client {
 							if (!entry.LuaHost) entry.LuaHost = LuaHostFor(document->Authored);
 							LuaMessageDrain drain{entry.LuaHost.get()};
 							ArgumentProvider argumentProvider(Arguments, entry.LuaHost.get());
+							entry.HostObservations.BeginAttempt();
 							detail::ComposerProvider composerProvider(
 								renderer,
 								owner,
@@ -1180,7 +1182,7 @@ namespace client {
 								OutputNode(document->Authored, skyFaces[index].Selector.Output, port);
 							engine::imagegraph::Diagnostic diagnostic;
 							const bool camera =
-								node && (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set");
+								node && detail::SourceCameraSingletonCone(document->Authored, *node);
 							const bool sdf =
 								node &&
 								(node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
@@ -1586,6 +1588,7 @@ namespace client {
 			LuaMessageDrain drain{entry.LuaHost.get()};
 			const uint64_t evaluationTick = entry.PendingHostTick.value_or(tick);
 			ArgumentProvider argumentProvider(Arguments, entry.LuaHost.get());
+			entry.HostObservations.BeginAttempt();
 			detail::ComposerProvider composerProvider(
 				renderer,
 				owner,
@@ -1651,8 +1654,19 @@ namespace client {
 				sourceComposer ? renderer.ComposerShaderRevision(owner, detail::ComposerAsset(*outputNode))
 							   : 0;
 			sampleChanged = sampleChanged || (sourceComposer && entry.ComposerRevision != composerRevision);
-			const bool sourceCamera = outputNode && (outputNode->Type == "pc.3_d_camera" ||
+			const bool cameraOutput = outputNode && (outputNode->Type == "pc.3_d_camera" ||
 													 outputNode->Type == "pc.3_d_camera_set");
+			const bool sourceCamera =
+				cameraOutput && detail::SourceCameraSingletonCone(cached->Authored, *outputNode);
+			if (cameraOutput && !sourceCamera && outputPort != "rendered" && outputPort != "diffuse" &&
+				selector.ColorSpace != engine::scene::ImageGraphColorSpace::Linear) {
+				Error = "source camera numeric output requires linear colour space";
+				if (entry.TransformAdmitted) {
+					(void)renderer.CancelTransformImage3D(owner, selector.Texture, entry.TransformGeneration);
+					entry.TransformAdmitted = false;
+				}
+				return;
+			}
 			const bool sourceSdf =
 				outputNode &&
 				(outputNode->Type == "pc.rm_render" || outputNode->Type == "pc.rm_render_scatter" ||

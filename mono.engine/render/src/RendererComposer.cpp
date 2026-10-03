@@ -155,7 +155,8 @@ namespace engine::render {
 		});
 		for (auto &slot : State->GraphResources.Transform3D)
 			if (slot.Owner == owner && slot.Name == name &&
-				(slot.ComposerCaptureReadback || slot.TransformCaptureReadback)) {
+				(slot.ComposerCaptureReadback || slot.TransformCaptureReadback ||
+				 slot.CameraCaptureReadback)) {
 				if (slot.Phase == Impl::GraphResourceCache::Transform3DPhase::Queued)
 					State->ReleaseTransform3D(slot);
 				else
@@ -170,6 +171,21 @@ namespace engine::render {
 		std::string &failure,
 		bool *pending
 	) {
+		return CaptureResolvedSurfaceAsync(invocation, owner, name, output, failure, pending);
+	}
+	bool Renderer::CaptureSourceCamera3DAsync(
+		const engine::imagegraph::HostNodeInvocation &invocation,
+		core::Name owner,
+		core::Name name,
+		engine::imagegraph::HostNodeCapture &output,
+		std::string &failure,
+		bool *pending
+	) {
+		if (pending) *pending = false;
+		if (invocation.Authored.Type != "pc.3_d_camera" && invocation.Authored.Type != "pc.3_d_camera_set") {
+			failure = "camera host requires an explicit source camera node";
+			return false;
+		}
 		return CaptureResolvedSurfaceAsync(invocation, owner, name, output, failure, pending);
 	}
 	bool Renderer::CaptureTransformImage3DAsync(
@@ -207,6 +223,8 @@ namespace engine::render {
 		using namespace engine::imagegraph;
 		const bool transform = invocation.Authored.Type == "pc.3_d_transform_image" ||
 							   invocation.Authored.Type == "image.transform_3d";
+		const bool camera =
+			invocation.Authored.Type == "pc.3_d_camera" || invocation.Authored.Type == "pc.3_d_camera_set";
 		const uint64_t maximum = std::min(invocation.MaximumOperationBytes, hlsl::MAXIMUM_SURFACE_JOB_BYTES);
 		const auto previousBytes = HostCaptureRetainedPayloadBytes(output);
 		uint64_t held = sizeof(State->ComposerCaptures) +
@@ -259,7 +277,9 @@ namespace engine::render {
 				State->GraphResources.Transform3D.end(),
 				[&](const auto &slot) {
 					return slot.Owner == owner && slot.Name == name && slot.Generation == found->Generation &&
-						   (slot.ComposerCaptureReadback || slot.TransformCaptureReadback) && !slot.Cancelled;
+						   (slot.ComposerCaptureReadback || slot.TransformCaptureReadback ||
+							slot.CameraCaptureReadback) &&
+						   !slot.Cancelled;
 				}
 			);
 			if (queued) {
@@ -283,24 +303,31 @@ namespace engine::render {
 		bounded.MaximumOperationBytes = maximum - *previousBytes - held - receiptBytes;
 		hlsl::SurfaceRequest request;
 		imagegraph::TransformImage3DRequest transformRequest;
+		imagegraph::SourceCamera3DRequest cameraRequest;
 		MeshValue3D mesh;
-		if (transform) {
+		if (camera) {
+			if (!imagegraph::BuildSourceCamera3DRequest(bounded, "rendered", false, cameraRequest, failure))
+				return false;
+		} else if (transform) {
 			if (!imagegraph::BuildSourceTransformImage3DRequest(bounded, transformRequest, mesh, failure))
 				return false;
 		} else if (const auto error = BuildComposerSurface(bounded, owner, false, request)) {
 			failure = *error;
 			return false;
 		}
-		const uint64_t pixels = transform
+		const uint64_t pixels = camera ? uint64_t(cameraRequest.Width) * cameraRequest.Height
+								: transform
 									? uint64_t(transformRequest.Front.Width) * transformRequest.Front.Height
 									: uint64_t(request.Textures[0].Width) * request.Textures[0].Height;
 		const uint64_t completionBytes =
-			transform ? pixels * ((transformRequest.SourcePlane
-									   ? 4
-									   : assets::BytesPerPixel(transformRequest.Front.Format)) +
-								  4) +
-							2 * sizeof(HostCapturedImage) + 32
-					  : pixels * 4 + sizeof(HostCapturedImage) + 16;
+			camera ? pixels * 7 * assets::BytesPerPixel(cameraRequest.Format) +
+						 7 * sizeof(HostCapturedImage) + 256
+			: transform ? pixels * ((transformRequest.SourcePlane
+										 ? 4
+										 : assets::BytesPerPixel(transformRequest.Front.Format)) +
+									4) +
+							  2 * sizeof(HostCapturedImage) + 32
+						: pixels * 4 + sizeof(HostCapturedImage) + 16;
 		if (transform) {
 			receipt.Outputs.push_back({"mesh", std::move(mesh)});
 			const auto bytes = HostCaptureRetainedPayloadBytes(receipt);
@@ -310,10 +337,13 @@ namespace engine::render {
 			}
 			receiptBytes = *bytes;
 		}
-		const uint64_t ownedRequest = transform ? sizeof(transformRequest) +
-													  transformRequest.Front.Pixels.capacity() +
-													  transformRequest.Back.Pixels.capacity()
-												: hlsl::SurfaceSourceBytes(request);
+		const uint64_t cameraBytes =
+			camera ? imagegraph::SourceCamera3DRetainedBytes(cameraRequest).value_or(UINT64_MAX) : 0;
+		const uint64_t ownedRequest = camera	  ? cameraBytes
+									  : transform ? sizeof(transformRequest) +
+														transformRequest.Front.Pixels.capacity() +
+														transformRequest.Back.Pixels.capacity()
+												  : hlsl::SurfaceSourceBytes(request);
 		if (ownedRequest > maximum - *previousBytes - held - receiptBytes ||
 			completionBytes > maximum - *previousBytes - held - receiptBytes - ownedRequest) {
 			failure = "Source preview request, receipt and output reservation exceed operation budget";
@@ -324,17 +354,14 @@ namespace engine::render {
 			failure = "Composer preview output reservation exceeds cache budget";
 			return false;
 		}
-		const auto shader = transform ? core::Name{} : request.Shader;
-		const auto revision = transform ? 0 : request.ShaderRevision;
+		const auto shader = (camera || transform) ? core::Name{} : request.Shader;
+		const auto revision = (camera || transform) ? 0 : request.ShaderRevision;
 		const size_t wanted = State->ComposerCaptures.size() + (found == State->ComposerCaptures.end());
 		std::vector<Impl::ComposerCaptureEntry> grown;
 		if (wanted > State->ComposerCaptures.capacity()) {
 			const uint64_t oldBacking =
 				State->ComposerCaptures.capacity() * sizeof(Impl::ComposerCaptureEntry);
-			const uint64_t sourceBytes = transform ? sizeof(transformRequest) +
-														 transformRequest.Front.Pixels.capacity() +
-														 transformRequest.Back.Pixels.capacity()
-												   : hlsl::SurfaceSourceBytes(request);
+			const uint64_t sourceBytes = ownedRequest;
 			if (sourceBytes > maximum || receiptBytes > maximum - sourceBytes ||
 				*previousBytes > maximum - sourceBytes - receiptBytes) {
 				failure = "Composer preview vector growth scratch exceeds budget";
@@ -365,14 +392,16 @@ namespace engine::render {
 		}
 		static_assert(std::is_nothrow_move_constructible_v<Impl::ComposerCaptureEntry>);
 		static_assert(std::is_nothrow_move_assignable_v<Impl::ComposerCaptureEntry>);
-		const auto result = transform ? QueueTransformImage3D(
-											{owner,
-											 name,
-											 generation,
-											 imagegraph::TransformImage3DOutput::Rendered,
-											 std::move(transformRequest)}
-										)
-									  : QueueComposerSurface({owner, name, generation, std::move(request)});
+		const auto result =
+			camera		? QueueCameraResolved({owner, name, generation, std::move(cameraRequest)}, true)
+			: transform ? QueueTransformImage3D(
+							  {owner,
+							   name,
+							   generation,
+							   imagegraph::TransformImage3DOutput::Rendered,
+							   std::move(transformRequest)}
+						  )
+						: QueueComposerSurface({owner, name, generation, std::move(request)});
 		using Result = imagegraph::TransformImage3DQueueResult;
 		if (result != Result::Queued && result != Result::Replaced) {
 			failure = "Composer preview source queue refused capture";
@@ -406,7 +435,9 @@ namespace engine::render {
 			*found = std::move(entry);
 		for (auto &slot : State->GraphResources.Transform3D)
 			if (slot.Owner == owner && slot.Name == name && slot.Generation == generation) {
-				if (transform)
+				if (camera)
+					slot.CameraCaptureReadback = true;
+				else if (transform)
 					slot.TransformCaptureReadback = true;
 				else
 					slot.ComposerCaptureReadback = true;

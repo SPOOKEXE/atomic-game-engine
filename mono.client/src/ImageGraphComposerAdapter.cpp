@@ -10,21 +10,50 @@ namespace client::detail {
 		engine::imagegraph::HostNodeCapture &output,
 		std::string &failure
 	) {
+		const bool raster = invocation.Authored.Type == "pc.3_d_camera" ||
+							invocation.Authored.Type == "pc.3_d_camera_set" ||
+							invocation.Authored.Type == "pc.3_d_transform_image" ||
+							invocation.Authored.Type == "image.transform_3d";
+		if (raster && Observations && CaptureNamespace.IsValid()) {
+			struct DeviceProvider final : engine::imagegraph::HostNodeProvider {
+				ComposerProvider &Host;
+				explicit DeviceProvider(ComposerProvider &host) : Host(host) {}
+				bool Capture(
+					const engine::imagegraph::HostNodeInvocation &input,
+					engine::imagegraph::HostNodeCapture &result,
+					std::string &error
+				) override {
+					return Host.CaptureDevice(input, result, error);
+				}
+			} device(*this);
+			// Earlier processor rows replay while the device retains the current pending row.
+			return Observations->CaptureSequenced(invocation, device, output, failure);
+		}
+		return CaptureDevice(invocation, output, failure);
+	}
+	bool ComposerProvider::CaptureDevice(
+		const engine::imagegraph::HostNodeInvocation &invocation,
+		engine::imagegraph::HostNodeCapture &output,
+		std::string &failure
+	) {
+		const bool camera =
+			invocation.Authored.Type == "pc.3_d_camera" || invocation.Authored.Type == "pc.3_d_camera_set";
 		engine::imagegraph::HostNodeInvocation rendererInvocation = invocation;
-		if (Observations && ((invocation.Authored.Type == "pc.3_d_transform_image" ||
-							  invocation.Authored.Type == "image.transform_3d") ||
-							 invocation.Authored.Type == "pc.hlsl")) {
-			const uint64_t bytes =
-				sizeof(*Observations) + Observations->Bytes +
-				Observations->Captures.capacity() * sizeof(engine::imagegraph::HostNodeCapture);
+		if (Observations && invocation.Authored.Type == "pc.hlsl") {
+			const auto held = Observations->RetainedPayloadBytes();
+			if (!held) {
+				failure = "Pending host observation residency is invalid";
+				return false;
+			}
+			const uint64_t bytes = *held;
 			if (bytes >= rendererInvocation.MaximumOperationBytes) {
 				failure = "Pending host observations leave no renderer capture budget";
 				return false;
 			}
 			rendererInvocation.MaximumOperationBytes -= bytes;
 		}
-		if ((invocation.Authored.Type == "pc.3_d_transform_image" ||
-			 invocation.Authored.Type == "image.transform_3d")) {
+		if (camera || (invocation.Authored.Type == "pc.3_d_transform_image" ||
+					   invocation.Authored.Type == "image.transform_3d")) {
 			if (!CaptureNamespace.IsValid() && Fallback)
 				return Fallback->Capture(invocation, output, failure);
 			if (!CaptureNamespace.IsValid()) {
@@ -42,16 +71,19 @@ namespace client::detail {
 				Captures->push_back(name);
 			}
 			bool pending = false;
-			const bool captured = Render.CaptureTransformImage3DAsync(
-				rendererInvocation, Owner, name, output, failure, &pending
-			);
+			const bool captured = camera ? Render.CaptureSourceCamera3DAsync(
+											   rendererInvocation, Owner, name, output, failure, &pending
+										   )
+										 : Render.CaptureTransformImage3DAsync(
+											   rendererInvocation, Owner, name, output, failure, &pending
+										   );
 			Pending = Pending || pending;
 			return captured;
 		}
 		if (invocation.Authored.Type == "pc.hlsl")
 			return Render.CaptureComposerSurface(rendererInvocation, Owner, output, failure);
 		if (Fallback && Observations && invocation.Authored.Type.starts_with("pc.lua_"))
-			return Observations->Capture(invocation, *Fallback, output, failure);
+			return Observations->CaptureSequenced(invocation, *Fallback, output, failure);
 		if (Fallback) return Fallback->Capture(invocation, output, failure);
 		failure = "Client has no provider for this host node";
 		return false;

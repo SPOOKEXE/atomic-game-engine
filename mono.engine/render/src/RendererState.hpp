@@ -781,7 +781,8 @@ namespace engine::render {
 				SDL_GPUTransferBuffer *ComposerDisplayDownload = nullptr;
 				std::vector<uint8_t> ComposerDisplayPixels;
 				bool ComposerDisplayUploaded = false;
-				bool ComposerCaptureReadback = false, TransformCaptureReadback = false;
+				bool ComposerCaptureReadback = false, TransformCaptureReadback = false,
+					 CameraCaptureReadback = false;
 				imagegraph::SourceCamera3DResources CameraResources;
 				uint32_t Width = 0, Height = 0;
 				uint64_t SourceBytes = 0;

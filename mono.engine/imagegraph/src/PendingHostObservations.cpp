@@ -75,6 +75,7 @@ namespace engine::imagegraph {
 		if (found != Captures.end()) {
 			if (!sameContext(CaptureContexts[static_cast<size_t>(&*found - Captures.data())]) ||
 				found->Authored != expected.Authored || found->Inputs != expected.Inputs ||
+				found->CameraPolicy != expected.CameraPolicy || found->CameraRow != expected.CameraRow ||
 				!sameImages(found->InputImages, expected.InputImages)) {
 				failure = "Pending host inputs changed within an immutable observation frame";
 				return false;
@@ -97,6 +98,8 @@ namespace engine::imagegraph {
 		if (sequence && PendingInput && PendingSequence == sequence &&
 			(!PendingContext || !sameContext(*PendingContext) ||
 			 PendingInput->Authored != expected.Authored || PendingInput->Inputs != expected.Inputs ||
+			 PendingInput->CameraPolicy != expected.CameraPolicy ||
+			 PendingInput->CameraRow != expected.CameraRow ||
 			 !sameImages(PendingInput->InputImages, expected.InputImages))) {
 			failure = "Pending host callback invocation changed before completion";
 			return false;
@@ -154,9 +157,10 @@ namespace engine::imagegraph {
 		}
 		const auto bytes = HostCaptureRetainedPayloadBytes(observed);
 		if (!bytes || *bytes > bounded.MaximumOperationBytes || observed.Authored != expected.Authored ||
-			observed.Inputs != expected.Inputs || !sameImages(observed.InputImages, expected.InputImages) ||
-			observed.Tick != request.Tick || observed.Subframe != request.Subframe ||
-			observed.NegativeFrame != request.NegativeFrame) {
+			observed.Inputs != expected.Inputs || observed.CameraPolicy != expected.CameraPolicy ||
+			observed.CameraRow != expected.CameraRow ||
+			!sameImages(observed.InputImages, expected.InputImages) || observed.Tick != request.Tick ||
+			observed.Subframe != request.Subframe || observed.NegativeFrame != request.NegativeFrame) {
 			failure = "Pending host result exceeds budget or differs from its resolved receipt";
 			return false;
 		}

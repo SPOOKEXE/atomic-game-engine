@@ -9879,6 +9879,7 @@ namespace engine::imagegraph {
 					context.Project.Interpolation = project.Interpolation;
 					context.Project.Oversample = project.Oversample;
 					context.Project.ColorDepth = project.ColorDepth;
+					context.Project.Shader3D = project.Shader3D;
 					context.Project.Palette = project.Palette;
 				}
 				const auto inheritedInterpolation =

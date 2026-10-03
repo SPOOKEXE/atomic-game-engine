@@ -13,6 +13,13 @@ namespace engine::imagegraph {
 		if (owned > UINT64_MAX - sizeof(Value)) return std::nullopt;
 		return sizeof(Value) + owned;
 	}
+	std::optional<uint64_t> ValueClonePayloadBytes(const ArrayValue &value) {
+		if (!detail::ValidPayload(value, true)) return std::nullopt;
+		const auto owned = detail::RetainedPayloadBytes(value);
+		if (owned > UINT64_MAX - sizeof(ArrayValue)) return std::nullopt;
+		return sizeof(ArrayValue) + owned;
+	}
+
 	std::optional<uint64_t> NodeClonePayloadBytes(const Node &node) {
 		if (node.Values.size() > UINT64_MAX / sizeof(AuthoredValue) ||
 			node.SourceProperties.size() > Limits::MaximumPropertiesPerNode ||

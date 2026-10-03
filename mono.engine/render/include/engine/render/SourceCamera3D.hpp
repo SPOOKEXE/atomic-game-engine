@@ -2,7 +2,7 @@
 
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Name.hpp>
-#include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/HostCapture.hpp>
 
 #include <array>
 #include <cstdint>
@@ -49,12 +49,33 @@ namespace engine::render::imagegraph {
 		SourceCamera3DOutput Output = SourceCamera3DOutput::Rendered;
 		bool operator==(const SourceCamera3DRequest &) const = default;
 	};
+	inline constexpr uint64_t MAXIMUM_CAMERA_HOST_BYTES = 64ull * 1024 * 1024;
+	std::optional<uint64_t> SourceCamera3DRetainedBytes(const SourceCamera3DRequest &);
+	bool BuildSourceCamera3DRequest(
+		const engine::imagegraph::HostNodeInvocation &,
+		std::string_view outputPort,
+		bool displayColorSpace,
+		SourceCamera3DRequest &,
+		std::string &failure
+	);
+	bool BuildSourceCamera3DRequest(
+		const engine::imagegraph::Node &,
+		const engine::imagegraph::EvaluationSnapshot &,
+		const engine::imagegraph::SourceCameraEvaluationPolicy &,
+		std::string_view outputPort,
+		bool displayColorSpace,
+		SourceCamera3DRequest &,
+		engine::imagegraph::Diagnostic &,
+		uint64_t maximumBytes = MAXIMUM_CAMERA_HOST_BYTES
+	);
 	struct SourceCamera3DResult {
 		uint32_t Width = 0, Height = 0;
 		assets::TextureFormat Format = assets::TextureFormat::RGBA8_LINEAR;
 		std::vector<std::byte> Pixels;
 	};
-	SourceCamera3DStatus ValidateSourceCamera3D(const SourceCamera3DRequest &request);
+	SourceCamera3DStatus ValidateSourceCamera3D(
+		const SourceCamera3DRequest &request, uint64_t maximumPreparationBytes = 128ull * 1024 * 1024
+	);
 	SourceCamera3DStatus ExecuteSourceCamera3D(
 		Renderer &renderer, const SourceCamera3DRequest &request, SourceCamera3DResult &result
 	);

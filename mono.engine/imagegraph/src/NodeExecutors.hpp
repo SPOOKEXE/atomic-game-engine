@@ -39,7 +39,7 @@ namespace engine::imagegraph::detail {
 	struct EvaluationProjectSettings {
 		inline static constexpr Colour DefaultPalette[]{{255, 255, 255, 255}, {0, 0, 0, 255}};
 		uint32_t SurfaceWidth = 32, SurfaceHeight = 32;
-		int64_t Interpolation = 0, Oversample = 3, ColorDepth = 1;
+		int64_t Interpolation = 0, Oversample = 3, ColorDepth = 1, Shader3D = 0;
 		std::span<const Colour> Palette = DefaultPalette;
 	};
 	struct PixelBuilderDrawState {

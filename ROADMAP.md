@@ -64,6 +64,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate bounded Gradient Cube image and cross-section outputs; pass joined CPU validation.
 - [x] Integrate bounded Surface Project 3D outputs and source getters; pass joined CPU validation.
 - [x] Integrate bounded Refract controls, sampling and PXC edits; pass joined CPU validation.
+- [x] Integrate camera capture routing and row receipts; pass joined CPU validation.
 - [x] Integrate path extension, flattening and smoothing.
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [x] Save completed image previews as PXC thumbnails with atomic publication.

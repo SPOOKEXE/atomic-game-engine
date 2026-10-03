@@ -1,3 +1,5 @@
+#include "SourceCamera3DCapture.hpp"
+#include "TextureFormatSupport.hpp"
 // Every texture this module allocates, and when it lets one go.
 //
 // **The sizes are decided elsewhere and the allocation is decided here.**
@@ -353,6 +355,48 @@ namespace engine::render {
 			SDL_ReleaseGPUFence(Device, submission.Fence);
 			for (uint32_t transform = 0; transform < submission.Transform3DCount; transform++) {
 				auto &slot = GraphResources.Transform3D[submission.Transform3DSlots[transform]];
+				if (slot.CameraCaptureReadback) {
+					auto capture = std::find_if(
+						ComposerCaptures.begin(), ComposerCaptures.end(), [&](const auto &entry) {
+							return entry.Owner == slot.Owner && entry.Name == slot.Name &&
+								   entry.Generation == slot.Generation;
+						}
+					);
+					if (capture != ComposerCaptures.end() && slot.Succeeded && !slot.Cancelled &&
+						slot.CameraRequest) {
+						std::array<const void *, 7> mapped{};
+						std::array<std::span<const std::byte>, 7> downloads{};
+						const auto support = detail::TextureFormatForUpload(slot.CameraRequest->Format);
+						bool valid = support.has_value();
+						const uint64_t bytes =
+							valid ? uint64_t(slot.Width) * slot.Height * support->UploadBytesPerPixel : 0;
+						for (size_t index = 0; index < 7; ++index) {
+							mapped[index] = slot.CameraResources.Downloads[index]
+												? SDL_MapGPUTransferBuffer(
+													  Device, slot.CameraResources.Downloads[index], false
+												  )
+												: nullptr;
+							valid = valid && mapped[index];
+							if (mapped[index])
+								downloads[index] = {
+									static_cast<const std::byte *>(mapped[index]), size_t(bytes)
+								};
+						}
+						if (valid &&
+							imagegraph::CompleteSourceCamera3DCapture(
+								*slot.CameraRequest, downloads, capture->MaximumBytes, capture->Receipt
+							)) {
+							capture->Complete = true;
+							core::Metrics::Count("render.camera.host_readback_bytes", bytes * 7);
+							core::Metrics::Count("render.camera.host_readbacks", 7);
+						}
+						for (size_t index = 0; index < 7; ++index)
+							if (mapped[index])
+								SDL_UnmapGPUTransferBuffer(Device, slot.CameraResources.Downloads[index]);
+					}
+					ReleaseTransform3D(slot);
+					continue;
+				}
 				if (slot.CameraRequest) {
 					if (slot.Succeeded && !slot.Cancelled)
 						for (const auto &binding : slot.CameraBindings) {

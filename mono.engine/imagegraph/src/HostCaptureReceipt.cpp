@@ -89,6 +89,8 @@ namespace engine::imagegraph {
 			std::min({maximumBytes, invocation.MaximumOperationBytes, Limits::MaximumEvaluationBytes});
 		if (invocation.Inputs.size() > Limits::MaximumLinks ||
 			invocation.Images.size() > Limits::MaximumLinks ||
+			(invocation.CameraPolicy && !ValidSourceCameraEvaluationPolicy(*invocation.CameraPolicy)) ||
+			(invocation.CameraRow && *invocation.CameraRow >= Limits::MaximumArrayElements) ||
 			invocation.Request.Tick > Limits::MaximumTick || !std::isfinite(invocation.Request.Subframe) ||
 			invocation.Request.Subframe < 0 || invocation.Request.Subframe >= 1)
 			return fail(Status::InvalidValue, "host receipt controls or clock are invalid");
@@ -147,6 +149,8 @@ namespace engine::imagegraph {
 		candidate.Tick = invocation.Request.Tick;
 		candidate.Subframe = invocation.Request.Subframe;
 		candidate.NegativeFrame = invocation.Request.NegativeFrame;
+		candidate.CameraPolicy = invocation.CameraPolicy;
+		candidate.CameraRow = invocation.CameraRow;
 		candidate.Inputs.assign(invocation.Inputs.begin(), invocation.Inputs.end());
 		candidate.InputImages.reserve(invocation.Images.size());
 		for (const auto &image : invocation.Images)

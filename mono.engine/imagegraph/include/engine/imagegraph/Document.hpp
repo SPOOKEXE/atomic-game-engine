@@ -1288,6 +1288,7 @@ namespace engine::imagegraph {
 	// Bounded admission for imported instance clones, before copying any owned payload.
 	std::optional<uint64_t> NodeClonePayloadBytes(const Node &node);
 	std::optional<uint64_t> ValueClonePayloadBytes(const Value &value);
+	std::optional<uint64_t> ValueClonePayloadBytes(const ArrayValue &value);
 
 	// A signed timeline coordinate with an exact whole frame and fractional remainder.
 	struct FrameTime {

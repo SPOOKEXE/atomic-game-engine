@@ -7,6 +7,22 @@
 #include <vector>
 
 namespace engine::imagegraph {
+	// Fixed source camera observations derived from project settings and resolved links.
+	struct SourceCameraEvaluationPolicy {
+		uint32_t ProjectWidth = 32, ProjectHeight = 32;
+		int64_t ProjectColorDepth = 1, ProjectShader3D = 0;
+		bool DimensionLinked = false;
+		std::optional<SurfaceFormat> InheritedSurfaceFormat = SurfaceFormat::RGBA8Unorm;
+		bool operator==(const SourceCameraEvaluationPolicy &) const = default;
+	};
+	constexpr bool ValidSourceCameraEvaluationPolicy(const SourceCameraEvaluationPolicy &policy) {
+		return policy.ProjectWidth > 0 && policy.ProjectHeight > 0 &&
+			   policy.ProjectWidth <= Limits::MaximumDimension &&
+			   policy.ProjectHeight <= Limits::MaximumDimension && policy.ProjectColorDepth >= 0 &&
+			   policy.ProjectColorDepth <= 6 && policy.ProjectShader3D >= 0 && policy.ProjectShader3D <= 1 &&
+			   (!policy.InheritedSurfaceFormat ||
+				uint8_t(*policy.InheritedSurfaceFormat) <= uint8_t(SurfaceFormat::R32Float));
+	}
 	struct HostCapturedImage {
 		std::string Port;
 		Image Data;
@@ -34,6 +50,8 @@ namespace engine::imagegraph {
 		std::vector<HostCapturedImageArray> ImageArrays;
 		HostCaptureState State = HostCaptureState::Recorded;
 		std::string Failure;
+		std::optional<SourceCameraEvaluationPolicy> CameraPolicy{};
+		std::optional<uint32_t> CameraRow{};
 	};
 	// Resolve controls before host work, without executing the selected capability node.
 	// Failed preparation leaves the previous capture unchanged.
@@ -60,6 +78,8 @@ namespace engine::imagegraph {
 		std::optional<SurfaceFormat> OutputFormat = SurfaceFormat::RGBA8Unorm;
 		// Resolved source interpolation policy; 1 Pixel disables device filtering.
 		int64_t Interpolation = 1;
+		std::optional<SourceCameraEvaluationPolicy> CameraPolicy{};
+		std::optional<uint32_t> CameraRow{};
 	};
 	// Owned receipt payload and capacities, excluding allocator bookkeeping.
 	std::optional<uint64_t> HostCaptureRetainedPayloadBytes(const HostNodeCapture &);

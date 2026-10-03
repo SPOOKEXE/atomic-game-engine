@@ -26,16 +26,39 @@ namespace engine::imagegraph::detail {
 		bool RecordedHost(NodeContext &context) {
 			if (context.Request.HostCaptures.size() > Limits::MaximumNodes)
 				return context.Fail(Status::LimitExceeded, "host recording count exceeds its budget");
+			std::optional<uint32_t> cameraRow;
+			if (context.Authored.Type == "pc.3_d_camera" || context.Authored.Type == "pc.3_d_camera_set") {
+				if (context.ProcessorRow >= Limits::MaximumArrayElements || context.ProcessorRow > UINT32_MAX)
+					return context.Fail(
+						Status::LimitExceeded, "camera processor row exceeds its receipt bound"
+					);
+				cameraRow = static_cast<uint32_t>(context.ProcessorRow);
+			}
 			const HostNodeCapture *capture = nullptr;
 			for (const auto &record : context.Request.HostCaptures) {
 				if (record.Authored.Id != context.Authored.Id || record.Tick != context.Request.Tick ||
 					record.Subframe != context.Request.Subframe ||
 					record.NegativeFrame != context.Request.NegativeFrame)
 					continue;
+				if (cameraRow && (!record.CameraRow || *record.CameraRow >= Limits::MaximumArrayElements))
+					return context.Fail(
+						Status::InvalidValue, "camera recording processor row is missing or invalid"
+					);
+				if (record.CameraRow != cameraRow) continue;
 				if (capture)
 					return context.Fail(Status::DuplicateId, "host recording node and time are duplicated");
 				capture = &record;
 			}
+			std::optional<SourceCameraEvaluationPolicy> cameraPolicy;
+			if (context.Authored.Type == "pc.3_d_camera" || context.Authored.Type == "pc.3_d_camera_set")
+				cameraPolicy = SourceCameraEvaluationPolicy{
+					context.Project.SurfaceWidth,
+					context.Project.SurfaceHeight,
+					context.Project.ColorDepth,
+					context.Project.Shader3D,
+					context.IsLinked("dimension"),
+					context.InheritedSurfaceFormat
+				};
 			HostNodeCapture live;
 			AllocationReservation liveInputs;
 			if (!capture && context.Request.HostProvider) {
@@ -82,7 +105,9 @@ namespace engine::imagegraph::detail {
 						 context.AvailableBytes(),
 						 context.Timeline,
 						 outputFormat,
-						 context.InheritedInterpolation},
+						 context.InheritedInterpolation,
+						 cameraPolicy,
+						 cameraRow},
 						live,
 						failure
 					))
@@ -103,6 +128,8 @@ namespace engine::imagegraph::detail {
 					"node needs explicit host capability input or a recorded host result; ambient execution "
 					"is unavailable"
 				);
+			if (capture->CameraPolicy != cameraPolicy || capture->CameraRow != cameraRow)
+				return context.Fail(Status::InvalidValue, "host camera project or link policy is stale");
 			if (capture->Authored != context.Authored)
 				return context.Fail(Status::InvalidValue, "host recording authored node is stale");
 			if (capture->Tick != context.Request.Tick || capture->Subframe != context.Request.Subframe ||
@@ -365,7 +392,9 @@ namespace engine::imagegraph::detail {
 			return CopyImage(context, "preview", *source->second);
 		}
 	}
-	bool ReplayRecordedHostOutputs(NodeContext &context) { return RecordedHost(context); }
+	bool ReplayRecordedHostOutputs(NodeContext &context) {
+		return RecordedHost(context);
+	}
 
 	std::span<const ExecutorEntry> HostExecutors() {
 		static constexpr ExecutorEntry entries[]{
@@ -406,6 +435,8 @@ namespace engine::imagegraph::detail {
 			{"pc.lua_global", RecordedHost, true},
 			{"pc.lua_surface", RecordedHost, true},
 			{"pc.hlsl", RecordedHost, true},
+			{"pc.3_d_camera", RecordedHost, true},
+			{"pc.3_d_camera_set", RecordedHost, true},
 			{"pc.3_d_transform_image", RecordedHost, true},
 			{"pc.image_mp4", RecordedHost, true},
 			{"pc.image_gif", RecordedHost, true},

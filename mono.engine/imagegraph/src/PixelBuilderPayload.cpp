@@ -30,7 +30,9 @@ namespace engine::imagegraph {
 					left.Inputs,
 					left.Outputs,
 					left.State,
-					left.Failure
+					left.Failure,
+					left.CameraPolicy,
+					left.CameraRow
 				) !=
 				std::tie(
 					right.Authored,
@@ -40,7 +42,9 @@ namespace engine::imagegraph {
 					right.Inputs,
 					right.Outputs,
 					right.State,
-					right.Failure
+					right.Failure,
+					right.CameraPolicy,
+					right.CameraRow
 				))
 				return false;
 			return SameSequence(
@@ -195,6 +199,8 @@ namespace engine::imagegraph::detail {
 		bool FrozenCapture(const HostNodeCapture &capture) {
 			if (!std::isfinite(capture.Subframe) || capture.Subframe < 0 || capture.Subframe >= 1 ||
 				uint8_t(capture.State) > uint8_t(HostCaptureState::Failed) ||
+				(capture.CameraPolicy && !ValidSourceCameraEvaluationPolicy(*capture.CameraPolicy)) ||
+				(capture.CameraRow && *capture.CameraRow >= Limits::MaximumArrayElements) ||
 				capture.Inputs.size() > Limits::MaximumArrayElements ||
 				capture.Outputs.size() > Limits::MaximumArrayElements ||
 				capture.Images.size() > Limits::MaximumArrayElements ||

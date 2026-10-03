@@ -66,7 +66,27 @@ namespace engine::render::imagegraph {
 			std::vector<Light> Lights;
 			uint64_t SourceBytes = 0;
 			uint64_t ShadowBytes = 0;
+			uint64_t MaximumPreparationBytes = 128ull * 1024 * 1024;
+			// Fixed mirror stack and the bounded recursive scene matrix chain coexist with both roots.
+			uint64_t PreparationBytes = 2 * sizeof(Prepared) + 128 * sizeof(glm::mat4);
+			size_t VertexCount = 0, PartCount = 0, LightCount = 0;
+			uint32_t Directional = 0, Point = 0, DirectionalShadow = 0, PointShadow = 0;
+			bool Counting = false, LimitExceeded = false;
 		};
+		template <class T> bool Emit(Prepared &out, std::vector<T> &storage, size_t &count, T value) {
+			if (sizeof(T) > out.MaximumPreparationBytes ||
+				out.PreparationBytes > out.MaximumPreparationBytes - sizeof(T)) {
+				out.LimitExceeded = true;
+				return false;
+			}
+			out.PreparationBytes += sizeof(T);
+			++count;
+			if (!out.Counting) {
+				if (storage.size() >= storage.capacity()) return false;
+				storage.push_back(std::move(value));
+			}
+			return true;
+		}
 		glm::vec3 Vec(source::Vector3 v) {
 			return {v.X, v.Y, v.Z};
 		}
@@ -119,7 +139,9 @@ namespace engine::render::imagegraph {
 			if (shadow && mesh.Instanced) return true;
 			if (mesh.LocalTransforms.empty() || mesh.LocalTransforms.size() > 64 || mesh.Parts.size() > 1024)
 				return false;
-			std::vector<glm::mat4> transforms{parent};
+			std::array<glm::mat4, 64> transforms{};
+			size_t transformCount = 1;
+			transforms[0] = parent;
 			for (size_t transformIndex = 0; transformIndex < mesh.LocalTransforms.size(); ++transformIndex) {
 				const auto &local = mesh.LocalTransforms[transformIndex];
 				if (shadow && transformIndex + 1 != mesh.LocalTransforms.size()) continue;
@@ -127,14 +149,15 @@ namespace engine::render::imagegraph {
 				if (!Finite(m)) return false;
 				if (shadow && local.Mirror) continue;
 				if (!shadow && local.Mirror && local.ShowOriginal) {
-					const auto original = transforms;
-					for (auto &world : transforms)
-						world *= m;
-					transforms.insert(transforms.end(), original.begin(), original.end());
-					if (transforms.size() > 64) return false;
+					if (transformCount > transforms.size() / 2) return false;
+					for (size_t i = 0; i < transformCount; ++i) {
+						transforms[transformCount + i] = transforms[i];
+						transforms[i] *= m;
+					}
+					transformCount *= 2;
 				} else
-					for (auto &world : transforms)
-						world *= m;
+					for (size_t i = 0; i < transformCount; ++i)
+						transforms[i] *= m;
 			}
 			for (const auto &material : mesh.Materials) {
 				const auto bytes = MaterialBytes(material.Get());
@@ -151,12 +174,39 @@ namespace engine::render::imagegraph {
 				out.SourceBytes += part.Vertices.capacity() * sizeof(source::MeshVertex3D);
 			const glm::mat4 objectTransform = Matrix(mesh.InstanceObjectTransform);
 			if (mesh.Instanced && !Finite(objectTransform)) return false;
-			for (const auto &world : transforms) {
+			uint64_t verticesPerCopy = 0;
+			for (const auto &part : mesh.Parts) {
+				if (part.Vertices.size() > source::Limits::MaximumArrayElements - verticesPerCopy)
+					return false;
+				verticesPerCopy += part.Vertices.size();
+			}
+			const uint64_t instances = mesh.Instanced ? mesh.Instances.size() : 1;
+			if (instances > UINT64_MAX / transformCount) return false;
+			const uint64_t copies = instances * transformCount;
+			const auto expansion = [&](uint64_t count, uint64_t bytes) {
+				if (count && copies > UINT64_MAX / count) return false;
+				const uint64_t total = copies * count;
+				if (total > UINT64_MAX / bytes ||
+					total * bytes > out.MaximumPreparationBytes - out.PreparationBytes)
+					return false;
+				return true;
+			};
+			if (!expansion(verticesPerCopy, sizeof(Vertex)) || !expansion(mesh.Parts.size(), sizeof(Part))) {
+				out.LimitExceeded = true;
+				return false;
+			}
+			if (verticesPerCopy &&
+				copies > (source::Limits::MaximumArrayElements - out.VertexCount) / verticesPerCopy)
+				return false;
+			if (out.SourceBytes > 64ull * 1024 * 1024) return false;
+
+			for (size_t transform = 0; transform < transformCount; ++transform) {
+				const auto &world = transforms[transform];
 				for (size_t instanceIndex = 0; instanceIndex < (mesh.Instanced ? mesh.Instances.size() : 1);
 					 ++instanceIndex) {
 					for (const auto &part : mesh.Parts) {
 						if (part.MaterialIndex >= mesh.Materials.size() || part.Vertices.size() % 3 ||
-							part.Vertices.size() > source::Limits::MaximumArrayElements - out.Vertices.size())
+							part.Vertices.size() > source::Limits::MaximumArrayElements - out.VertexCount)
 							return false;
 						glm::mat4 partWorld = world;
 						if (part.LocalMatrix && !mesh.Instanced) {
@@ -164,7 +214,7 @@ namespace engine::render::imagegraph {
 							partWorld *= glm::mat4(local);
 							if (!Finite(partWorld)) return false;
 						}
-						const uint32_t first = out.Vertices.size();
+						const uint32_t first = out.VertexCount;
 						for (size_t i = 0; i < part.Vertices.size(); ++i) {
 							const auto &v = part.Vertices[i];
 							glm::vec3 localPosition = Vec(v.Position), localNormal = Vec(v.Normal);
@@ -192,36 +242,52 @@ namespace engine::render::imagegraph {
 								  vertex.UV.x,
 								  vertex.UV.y})
 								if (!std::isfinite(n)) return false;
-							out.Vertices.push_back(vertex);
+							if (!Emit(out, out.Vertices, out.VertexCount, vertex)) return false;
 						}
-						out.Parts.push_back(
-							{first,
-							 uint32_t(part.Vertices.size()),
-							 &mesh.Materials[part.MaterialIndex].Get(),
-							 false,
-							 glm::determinant(partWorld) < 0,
-							 shadow,
-							 mesh.Instanced}
-						);
+						if (!Emit(
+								out,
+								out.Parts,
+								out.PartCount,
+								Part{
+									first,
+									uint32_t(part.Vertices.size()),
+									&mesh.Materials[part.MaterialIndex].Get(),
+									false,
+									glm::determinant(partWorld) < 0,
+									shadow,
+									mesh.Instanced
+								}
+							))
+							return false;
 					}
 				}
 				if (mesh.Instanced) continue;
 				if (mesh.Edges.size() > source::Limits::MaximumArrayElements / 2 ||
-					mesh.Edges.size() * 2 > source::Limits::MaximumArrayElements - out.Vertices.size())
+					mesh.Edges.size() * 2 > source::Limits::MaximumArrayElements - out.VertexCount)
 					return false;
-				const uint32_t first = out.Vertices.size();
+				const uint32_t first = out.VertexCount;
 				for (const auto &edge : mesh.Edges)
 					for (const auto point : {edge.From, edge.To}) {
 						glm::vec3 position = glm::vec3(world * glm::vec4(Vec(point), 1));
 						if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
 							!std::isfinite(position.z))
 							return false;
-						out.Vertices.push_back({position, {0, 0, 1}, {0, 0}, {1, 1, 1, 1}, {1, 0, 0}});
+						if (!Emit(
+								out,
+								out.Vertices,
+								out.VertexCount,
+								Vertex{position, {0, 0, 1}, {0, 0}, {1, 1, 1, 1}, {1, 0, 0}}
+							))
+							return false;
 					}
 				if (!mesh.Edges.empty())
-					out.Parts.push_back(
-						{first, uint32_t(mesh.Edges.size() * 2), nullptr, true, false, shadow}
-					);
+					if (!Emit(
+							out,
+							out.Parts,
+							out.PartCount,
+							Part{first, uint32_t(mesh.Edges.size() * 2), nullptr, true, false, shadow}
+						))
+						return false;
 			}
 			return out.SourceBytes <= 64ull * 1024 * 1024;
 		}
@@ -258,7 +324,12 @@ namespace engine::render::imagegraph {
 					if (data.Kind != source::LightKind3D::Point &&
 						data.Kind != source::LightKind3D::Directional)
 						return false;
-					out.Lights.push_back({&data, position});
+					if (data.Kind == source::LightKind3D::Directional) {
+						if (++out.Directional > 8 || (data.CastShadow && ++out.DirectionalShadow > 2))
+							return false;
+					} else if (++out.Point > 8 || (data.CastShadow && ++out.PointShadow > 2))
+						return false;
+					if (!Emit(out, out.Lights, out.LightCount, Light{&data, position})) return false;
 					out.SourceBytes += sizeof(data);
 					if (data.CastShadow)
 						out.ShadowBytes += uint64_t(data.ShadowMapSize) * data.ShadowMapSize * 8 *
@@ -272,7 +343,7 @@ namespace engine::render::imagegraph {
 				if (!Scene(scene, parent, out, depth + 1, objects, shadow, true)) return false;
 			return out.SourceBytes <= 64ull * 1024 * 1024;
 		}
-		bool Prepare(const SourceCamera3DRequest &request, Prepared &out) {
+		bool Traverse(const SourceCamera3DRequest &request, Prepared &out) {
 			size_t objects = 0;
 			if (request.Scene.Data && !Scene(*request.Scene.Data, glm::mat4(1), out, 0, objects, false))
 				return false;
@@ -281,17 +352,33 @@ namespace engine::render::imagegraph {
 			if (request.Scene.Data && !Scene(*request.Scene.Data, glm::mat4(1), out, 0, objects, true))
 				return false;
 			out.SourceBytes = sourceBytes;
-			uint32_t directional = 0, point = 0, dirShadow = 0, pointShadow = 0;
-			for (const auto &light : out.Lights) {
-				if (light.Data->Kind == source::LightKind3D::Directional) {
-					++directional;
-					dirShadow += light.Data->CastShadow;
-				} else {
-					++point;
-					pointShadow += light.Data->CastShadow;
-				}
+			return true;
+		}
+		bool Measure(
+			const SourceCamera3DRequest &request, Prepared &out, uint64_t maximumBytes = 128ull * 1024 * 1024
+		) {
+			out.Counting = true;
+			out.MaximumPreparationBytes = maximumBytes;
+			if (out.PreparationBytes > maximumBytes) {
+				out.LimitExceeded = true;
+				return false;
 			}
-			return directional <= 8 && point <= 8 && dirShadow <= 2 && pointShadow <= 2;
+			return Traverse(request, out);
+		}
+		bool Prepare(const SourceCamera3DRequest &request, Prepared &out) {
+			Prepared measured;
+			if (!Measure(request, measured)) return false;
+			// The measured vectors and result coexist during publication; both fixed roots are admitted.
+			out.MaximumPreparationBytes = measured.MaximumPreparationBytes;
+			out.Vertices.reserve(measured.VertexCount);
+			out.Parts.reserve(measured.PartCount);
+			out.Lights.reserve(measured.LightCount);
+			const uint64_t actual = out.PreparationBytes + out.Vertices.capacity() * sizeof(Vertex) +
+									out.Parts.capacity() * sizeof(Part) +
+									out.Lights.capacity() * sizeof(Light);
+			if (actual > out.MaximumPreparationBytes) return false;
+			return Traverse(request, out) && out.VertexCount == measured.VertexCount &&
+				   out.PartCount == measured.PartCount && out.LightCount == measured.LightCount;
 		}
 		using namespace gpu_helpers;
 		SDL_GPUGraphicsPipeline *Pipeline(
@@ -378,7 +465,8 @@ namespace engine::render::imagegraph {
 			return SDL_BeginGPURenderPass(command, colors.data(), textures.size(), depth ? &d : nullptr);
 		}
 	}
-	SourceCamera3DStatus ValidateSourceCamera3D(const SourceCamera3DRequest &request) try {
+	SourceCamera3DStatus
+	ValidateSourceCamera3D(const SourceCamera3DRequest &request, uint64_t maximumPreparationBytes) try {
 		if (request.Width == 0 || request.Height == 0 || request.Width > 4096 || request.Height > 4096)
 			return SourceCamera3DStatus::OutputLimit;
 		if (request.Shader > 1 || request.CullMode > 2 || request.BlendMode > 1 || request.WireMode > 2 ||
@@ -413,7 +501,9 @@ namespace engine::render::imagegraph {
 		if (glm::determinant(view) == 0 || glm::determinant(projection) == 0)
 			return SourceCamera3DStatus::InvalidControl;
 		Prepared prepared;
-		if (!Prepare(request, prepared)) return SourceCamera3DStatus::InvalidScene;
+		if (!Measure(request, prepared, maximumPreparationBytes))
+			return prepared.LimitExceeded ? SourceCamera3DStatus::OutputLimit
+										  : SourceCamera3DStatus::InvalidScene;
 		const uint64_t pixels = uint64_t(request.Width) * request.Height;
 		const auto support = detail::TextureFormatForUpload(request.Format);
 		const uint64_t scratch =
@@ -423,7 +513,7 @@ namespace engine::render::imagegraph {
 						   ? 16
 						   : 9) *
 						  support->UploadBytesPerPixel) +
-			2 * prepared.Vertices.size() * sizeof(Vertex) +
+			2 * prepared.VertexCount * sizeof(Vertex) +
 			2 * (prepared.SourceBytes + (request.Environment ? request.Environment->Pixels.capacity() : 0)) +
 			prepared.ShadowBytes;
 		if (pixels * support->UploadBytesPerPixel > 64ull * 1024 * 1024 || scratch > 128ull * 1024 * 1024)
@@ -434,7 +524,7 @@ namespace engine::render::imagegraph {
 	}
 	uint64_t SourceCamera3DSourceBytes(const SourceCamera3DRequest &request) try {
 		Prepared prepared;
-		if (!Prepare(request, prepared)) return UINT64_MAX;
+		if (!Measure(request, prepared)) return UINT64_MAX;
 		return prepared.SourceBytes + (request.Environment ? request.Environment->Pixels.capacity() : 0) +
 			   sizeof(request);
 	} catch (const std::bad_alloc &) {
@@ -442,7 +532,7 @@ namespace engine::render::imagegraph {
 	}
 	uint64_t SourceCamera3DScratchBytes(const SourceCamera3DRequest &request) try {
 		Prepared prepared;
-		if (!Prepare(request, prepared)) return UINT64_MAX;
+		if (!Measure(request, prepared)) return UINT64_MAX;
 		const auto support = detail::TextureFormatForUpload(request.Format);
 		if (!support) return UINT64_MAX;
 		return uint64_t(request.Width) * request.Height *
@@ -452,7 +542,7 @@ namespace engine::render::imagegraph {
 						 ? 16
 						 : 9) *
 						support->UploadBytesPerPixel) +
-			   2 * prepared.Vertices.size() * sizeof(Vertex) +
+			   2 * prepared.VertexCount * sizeof(Vertex) +
 			   2 * (prepared.SourceBytes +
 					(request.Environment ? request.Environment->Pixels.capacity() : 0)) +
 			   prepared.ShadowBytes;
@@ -481,7 +571,8 @@ namespace engine::render::imagegraph {
 		SDL_GPUDevice *device,
 		SDL_GPUCommandBuffer *command,
 		const SourceCamera3DRequest &request,
-		SourceCamera3DResources &resources
+		SourceCamera3DResources &resources,
+		bool captureReadback
 	) try {
 		ENGINE_PROFILE("imagegraph source camera record");
 		if (!device || !command || ValidateSourceCamera3D(request) != SourceCamera3DStatus::Ok) return false;
@@ -545,7 +636,7 @@ namespace engine::render::imagegraph {
 			return false;
 		SDL_GPUBuffer *vertices = nullptr;
 		if (!prepared.Vertices.empty()) {
-			const uint32_t bytes = prepared.Vertices.size() * sizeof(Vertex);
+			const uint32_t bytes = prepared.VertexCount * sizeof(Vertex);
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 			info.size = bytes;
@@ -917,6 +1008,32 @@ namespace engine::render::imagegraph {
 		resources.Output = resources.Outputs[size_t(request.Output)];
 		for (auto *texture : resources.Outputs)
 			std::erase(resources.Textures, texture);
+		if (captureReadback) {
+			const uint64_t bytes = uint64_t(width) * height * support->UploadBytesPerPixel;
+			if (bytes > UINT32_MAX) return false;
+			for (auto &download : resources.Downloads) {
+				download = Transfer(device, uint32_t(bytes), SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, resources);
+				if (!download) return false;
+			}
+			auto *copy = SDL_BeginGPUCopyPass(command);
+			if (!copy) return false;
+			resources.CommandReferenced = true;
+			for (size_t index = 0; index < resources.Outputs.size(); ++index) {
+				SDL_GPUTextureRegion from{};
+				from.texture = resources.Outputs[index];
+				from.w = width;
+				from.h = height;
+				from.d = 1;
+				SDL_GPUTextureTransferInfo to{};
+				to.transfer_buffer = resources.Downloads[index];
+				to.pixels_per_row = width;
+				to.rows_per_layer = height;
+				SDL_DownloadFromGPUTexture(copy, &from, &to);
+			}
+			SDL_EndGPUCopyPass(copy);
+			core::Metrics::Count("render.camera.host_download_bytes", bytes * 7);
+			core::Metrics::Count("render.camera.host_downloads", 7);
+		}
 		return resources.Output != nullptr;
 	} catch (const std::bad_alloc &) {
 		return false;

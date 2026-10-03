@@ -1,8 +1,9 @@
 #pragma once
 
-#include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/HostCapture.hpp>
 
 namespace engine::imagegraph {
+	std::optional<uint64_t> SourceCameraSceneRetainedBytes(const SceneValue3D &);
 	enum class SourceCameraProjection : uint8_t { Perspective, Orthographic, Custom };
 	struct SourceCameraPose {
 		Vector3 Position{}, Target{}, Up{0, 0, -1};
@@ -56,5 +57,51 @@ namespace engine::imagegraph {
 		std::span<const EvaluationInputValue> values,
 		uint32_t &shader,
 		Diagnostic &diagnostic
+	);
+
+	Status ResolveSourceCameraPose(
+		std::span<const AuthoredValue>, uint32_t width, uint32_t height, SourceCameraPose &, Diagnostic &
+	);
+	Status ResolveSourceCameraDimensions(
+		const Node &,
+		const SourceCameraEvaluationPolicy &,
+		std::span<const AuthoredValue>,
+		uint32_t &width,
+		uint32_t &height,
+		Diagnostic &
+	);
+	Status ResolveSourceCameraSurfaceFormat(
+		const Node &,
+		const SourceCameraEvaluationPolicy &,
+		std::span<const AuthoredValue>,
+		std::optional<SurfaceFormat> inherited,
+		SurfaceFormat &,
+		Diagnostic &
+	);
+	Status ResolveSourceCameraShader(
+		const SourceCameraEvaluationPolicy &, std::span<const AuthoredValue>, uint32_t &shader, Diagnostic &
+	);
+
+	Status ResolveSourceCameraDimensions(
+		const Node &,
+		const SourceCameraEvaluationPolicy &,
+		std::span<const EvaluationInputValue>,
+		uint32_t &width,
+		uint32_t &height,
+		Diagnostic &
+	);
+	Status ResolveSourceCameraSurfaceFormat(
+		const Node &,
+		const SourceCameraEvaluationPolicy &,
+		std::span<const EvaluationInputValue>,
+		std::optional<SurfaceFormat> inherited,
+		SurfaceFormat &,
+		Diagnostic &
+	);
+	Status ResolveSourceCameraShader(
+		const SourceCameraEvaluationPolicy &,
+		std::span<const EvaluationInputValue>,
+		uint32_t &shader,
+		Diagnostic &
 	);
 }
