@@ -3035,7 +3035,11 @@ namespace engine::imagegraphio {
 							record["attri"]["mapped"] = *mapped;
 							continue;
 						}
-						if ((node.Type == "pc.herringbone_tile" &&
+						if ((node.Type == "pc.refract" &&
+							 (value.Port == "height_mapped" || value.Port == "height_map_range" ||
+							  value.Port == "distance_mapped" || value.Port == "distance_map_range" ||
+							  value.Port == "ior_mapped" || value.Port == "ior_map_range")) ||
+							(node.Type == "pc.herringbone_tile" &&
 							 (value.Port == "scale_mapped" || value.Port == "scale_map_range" ||
 							  value.Port == "angle_mapped" || value.Port == "angle_map_range" ||
 							  value.Port == "gap_mapped" || value.Port == "gap_map_range")) ||
@@ -3071,7 +3075,8 @@ namespace engine::imagegraphio {
 									   occlusion = node.Type == "pc.ambient_occlusion",
 									   gradient = node.Type == "pc.gradient",
 									   gabor = node.Type == "pc.gabor_noise",
-									   dotted = node.Type == "pc.dotted", stripe = node.Type == "pc.stripe";
+									   refract = node.Type == "pc.refract", dotted = node.Type == "pc.dotted",
+									   stripe = node.Type == "pc.stripe";
 							const std::string_view numericId =
 								herringbone ? std::string_view(value.Port).substr(0, value.Port.find('_'))
 								: stripe
@@ -3082,7 +3087,7 @@ namespace engine::imagegraphio {
 									? (value.Port.starts_with("dot_size_")
 										   ? std::string_view("dot_size")
 										   : std::string_view(value.Port).substr(0, value.Port.find('_')))
-								: (gradient || gabor)
+								: (gradient || gabor || refract)
 									? std::string_view(value.Port).substr(0, value.Port.find('_'))
 								: node.Type == "pc.dither"							? "contrast"
 								: node.Type == "pc.erode"							? "width"
@@ -3091,7 +3096,10 @@ namespace engine::imagegraphio {
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
 							const int expectedIndex =
-								herringbone ? (numericId == "scale" ? 2 : (numericId == "angle" ? 3 : 4))
+								refract		  ? (numericId == "height"	   ? 9
+												 : numericId == "distance" ? 10
+																		   : 11)
+								: herringbone ? (numericId == "scale" ? 2 : (numericId == "angle" ? 3 : 4))
 								: stripe
 									? (numericId == "size"
 										   ? 1
@@ -3109,7 +3117,8 @@ namespace engine::imagegraphio {
 								: occlusion && numericId == "height" ? 3
 																	 : 1;
 							const std::string_view expectedKind =
-								herringbone
+								refract ? "Float"
+								: herringbone
 									? (numericId == "scale" ? "Vec2"
 															: (numericId == "angle" ? "Rotation" : "Slider"))
 								: gabor

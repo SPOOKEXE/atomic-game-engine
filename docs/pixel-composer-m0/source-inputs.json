@@ -113234,7 +113234,9 @@
       "Pixel",
       "Bilinear",
       "Bicubic",
-      "Lanczos3"
+      "Lanczos3",
+      "",
+      "CleanEdge"
      ],
      "default": "0",
      "extra": [],
@@ -113260,7 +113262,7 @@
       "Repeat Y Black X",
       "Repeat Y Clamp X"
      ],
-     "default": "0",
+     "default": "3",
      "extra": [],
      "index": "-1",
      "kind": "Attribute",
@@ -155923,6 +155925,14 @@
   "scripts/node_herringbone_tile/node_herringbone_tile.gml": {
    "bytes": 5148,
    "sha256": "4b9d84c09e6fd7c13dd88fe0489e9f265324073947c791a4a752511e4af8bbed"
+  },
+  "scripts/node_attributes/node_attributes.gml": {
+   "bytes": 8476,
+   "sha256": "eb8d437db17f4df6904fba562b7ac1ce4f0a89dc001c507724ff0d3e31e23721"
+  },
+  "scripts/node_refract/node_refract.gml": {
+   "bytes": 2533,
+   "sha256": "08008f6a73b08ca9f3687e06089f186e1a637ba919a1a518b86e9d8cc4359011"
   }
  }
 }

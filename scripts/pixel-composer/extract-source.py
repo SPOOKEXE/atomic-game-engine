@@ -151,6 +151,35 @@ def record_constructor_source_file(path):
     }
 
 
+def refract_sampling(body):
+    """Prove the final Refract constructor's sampling choices and literal override."""
+    def top_level(match):
+        prefix = body[:match.start()]
+        return prefix.count("{") - prefix.count("}") == 1
+
+    interpolation = [
+        match for match in re.finditer(r"\battribute_interpolation\(([^)]*)\)", body)
+        if top_level(match)
+    ]
+    oversample = [
+        match for match in NODE_ATTRIBUTE.finditer(body)
+        if top_level(match) and match.group(1) == "oversample"
+    ]
+    if len(interpolation) != 1 or call_args(
+        body, body.index("(", interpolation[0].start())
+    ) != ["false", "true"]:
+        raise ValueError("Refract sampling requires the reviewed constructor interpolation(false, true)")
+    if len(oversample) != 1 or oversample[0].group(2).strip() != "3":
+        raise ValueError("Refract sampling requires the reviewed literal oversample=3 override")
+    factories = [
+        match for match in re.finditer(r"\battribute_(?:interpolation|oversample)\(([^)]*)\)", body)
+        if top_level(match)
+    ]
+    if oversample[0].start() < max(match.end() for match in factories):
+        raise ValueError("Refract oversample override must follow sampling initialization")
+    return True, "3"
+
+
 def unquote(text):
     """Remove one matching string delimiter pair without trimming escaped quotes."""
     text = text.strip()
@@ -735,11 +764,16 @@ def parse(name, seen):
     sampling = re.search(r"attribute_(?:oversample|interpolation)\(([^)]*)\)", body)
     if sampling and not any(item["name"] == "Interpolate" for item in inputs):
         extended = "true" in sampling.group(1).split(",")[-1] if "," in sampling.group(1) else False
+        oversample_default = "0"
+        if name == "Node_Refract":
+            extended, oversample_default = refract_sampling(body)
+            record_constructor_source(name)
+            record_constructor_source_file("scripts/node_attributes/node_attributes.gml")
         interpolation = ["Inherited", "Pixel", "Bilinear", "Bicubic", "Lanczos3"] + (["", "CleanEdge"] if extended else [])
         oversample = ["Inherited", "Empty", "Black", "Clamp", "Repeat XY", "", "Repeat X Empty Y", "Repeat X Black Y",
                       "Repeat X Clamp Y", "", "Repeat Y Empty X", "Repeat Y Black X", "Repeat Y Clamp X"]
         inputs.append({"index": "-1", "kind": "Attribute", "name": "Interpolate", "default": "0", "extra": [], "choices": interpolation, "array_depth": 0})
-        inputs.append({"index": "-1", "kind": "Attribute", "name": "Oversample", "default": "0", "extra": [], "choices": oversample, "array_depth": 0})
+        inputs.append({"index": "-1", "kind": "Attribute", "name": "Oversample", "default": oversample_default, "extra": [], "choices": oversample, "array_depth": 0})
     for match in OUTPUT.finditer(body):
         args = call_args(body, match.end() - 1)
         outputs.append({

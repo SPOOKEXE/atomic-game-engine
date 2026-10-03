@@ -24618,9 +24618,9 @@ I	ior_map	IOR Map	14	Surface	image
 S	I	ior_map	0
 I	perspective	Perspective	15	Float	scalar	d 0	
 S	I	perspective	0
-I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
+I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3;;CleanEdge
 S	I	interpolate	?
-I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat XY;;Repeat X Empty Y;Repeat X Black Y;Repeat X Clamp Y;;Repeat Y Empty X;Repeat Y Black X;Repeat Y Clamp X
+I	oversample	Oversample	-1	Attribute	enum	e 3	Inherited;Empty;Black;Clamp;Repeat XY;;Repeat X Empty Y;Repeat X Black Y;Repeat X Clamp Y;;Repeat Y Empty X;Repeat Y Black X;Repeat Y Clamp X
 S	I	oversample	?
 I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
 S	I	attribute_color_depth	?
