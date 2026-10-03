@@ -659,7 +659,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"FFT preserves unknown fractional buffer coercion and clamps verified whole choices",
+	"FFT clamps scalar source choices before unsigned buffer conversion",
 	"[imagegraph][node_audio][source_choice]"
 ) {
 	const auto data = Samples({.2, -.7, .9, .3, -.1});
@@ -678,16 +678,21 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"fractional FFT choice remains explicit until native buffer coercion is known",
+	"fractional FFT choices truncate through the pinned unsigned buffer profile",
 	"[imagegraph][node_audio][source_choice]"
 ) {
-	for (double choice : {.5, 1.5}) {
-		const auto run =
-			RunNode("pc.fft", {}, {{"data", Samples({1, 0, -1, 0})}, {"preprocess_function", choice}});
-		CHECK_FALSE(run.Ok);
-		CHECK(run.Code == Status::UnsupportedExecution);
-		CHECK(run.Port == "preprocess_function");
-		CHECK(run.Message == "fractional FFT buffer_u32 choice coercion is unverified");
+	const auto data = Samples({1, 0, -1, 0});
+	for (const auto &[choice, window] :
+		 std::array<std::pair<double, int>, 3>{{{.5, 0}, {1.5, 1}, {1.999999999, 1}}}) {
+		const auto run = RunNode("pc.fft", {}, {{"data", data}, {"preprocess_function", choice}});
+		REQUIRE(run.Ok);
+		const auto &actual = std::get<ArrayValue>(*run.OutputValue("array"));
+		const auto expected = DirectSpectrum(data, window);
+		REQUIRE(actual.Elements.size() == expected.Elements.size());
+		for (size_t i = 0; i < actual.Elements.size(); ++i)
+			CHECK(
+				std::abs(std::get<double>(actual.Elements[i]) - std::get<double>(expected.Elements[i])) < 1e-6
+			);
 		const auto ignored = RunNode("pc.fft", {}, {{"data", Samples({1})}, {"preprocess_function", choice}});
 		REQUIRE(ignored.Ok);
 		CHECK(std::get<ArrayValue>(*ignored.OutputValue("array")).Elements.empty());

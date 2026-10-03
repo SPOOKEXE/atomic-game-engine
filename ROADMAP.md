@@ -42,7 +42,7 @@ Milestone labels describe development scope, not release versions.
 
   1. Retain the source licence, pinned metadata and generated enum choices; save instance ports and reflected graph selectors.
   2. Evaluate bounded image/data kernels, path transforms and remapping, palettes, atlases and image filters; inherit instance routes.
-  3. Replay animation, Time Remap, FLIP/Verlet collections and rigid actors with bounded history; retain recorded random state and rasterize trails/VFX.
+  3. Replay animation, Time Remap, FLIP/Verlet and rigid actors with bounded history; retain random state, resolve FFT windows and rasterize trails/VFX.
   4. Edit graphs, groups, keys and tiles atomically; preserve timeline selection on refused edits and save rigid meshes with metadata.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
   6. Run bounded Lua and recorded-random export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.

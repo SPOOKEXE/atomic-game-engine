@@ -1,0 +1,53 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_files": [
+    {
+      "path": "scripts/node_FFT/node_FFT.gml",
+      "sha256": "2f1003b1427e5a8f674a34337ecfc4e4720a9a8e2bb8a4ec0e88279a741b7089"
+    },
+    {
+      "path": "scripts/node_audio_window/node_audio_window.gml",
+      "sha256": "6de89eb41e320b448cd89d6ad3eeebf8ecd6e429b9725168cc9afc6a2a14b3af"
+    },
+    {
+      "path": "scripts/node_value_enum_scroll/node_value_enum_scroll.gml",
+      "sha256": "7b246ede5c631e9e255e9457bc3323bd72a8d92e25fda84ed542f5b382645c96"
+    }
+  ],
+  "runtime_repository": "https://github.com/YoYoGames/GameMaker-HTML5",
+  "runtime_commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+  "runtime_source_url": "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/yyBuffer.js",
+  "runtime_sha256": "8e9ba50edbb1e2e3062e333d9e0365385a260fc1d1a6a9511dbbfc31bf6734b9",
+  "runtime_code_references": [
+    "yyBuffer.prototype.yyb_write:1310",
+    "eBuffer_U32 DataView.setUint32:1405",
+    "buffer_write:2114"
+  ],
+  "observed_unsigned_write": {
+    "0.5": 0,
+    "1.5": 1,
+    "1.999999999": 1,
+    "-1.5": 4294967295,
+    "4294967296.5": 0,
+    "DBL_MAX": 0,
+    "NaN": 0,
+    "Infinity": 0,
+    "-Infinity": 0
+  },
+  "native_profile": [
+    "FFT alone uses finite ToUint32: truncate toward zero, then modulo2^32.",
+    "Source scalar EScroll getter clamps to0..2 first; selected array controls preserve the source clamp bypass.",
+    "Nonfinite native authored/linked controls remain refused by graph validation rather than adopting HTML5 zero conversion.",
+    "Default source FFT extension path preserves its periodic windows, padded reversed half spectrum, and float magnitude output.",
+    "No persisted runtime/provider pointer, wall clock, or new replay state."
+  ],
+  "open_gates": [
+    "Licensed desktop runner fractional buffer coercion comparison.",
+    "The alternate GML FFT path (__use_ext=false) is not selected by this native profile."
+  ],
+  "runtime_probe": {
+    "engine": "Node.js v24.15.0",
+    "execution": "complete pinned yyBuffer.js executed in a VM, invoking actual buffer_write and yyb_write",
+    "scaffolding": "g_BufferStorage lookup, numeric id/type conversion, Math min/max buffer bookkeeping; sample values forwarded unchanged"
+  }
+}

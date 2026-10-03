@@ -387,7 +387,7 @@ TEST_CASE(
 ) {
 	Document graph;
 	graph.FormatVersion = 8;
-	graph.Nodes = {{"fft", "pc.fft", "", {}, {{"data", ArrayValue{ValueType::Scalar, {1., 0., -1., 0.}}}}}};
+	graph.Nodes = {{"fft", "pc.fft", "", {}, {{"data", ArrayValue{ValueType::Scalar, {0., 1., 0., 0.}}}}}};
 	graph.Outputs = {{"out", "fft", "array"}};
 	graph.Keyframes = {
 		{"fft",
@@ -412,8 +412,9 @@ TEST_CASE(
 	EvaluationRequest request;
 	request.Tick = 2;
 	EvaluatedValue output;
-	CHECK(EvaluateValue(parsed, plan, "out", request, output, diagnostic) == Status::UnsupportedExecution);
-	CHECK(diagnostic.Message == "fractional FFT buffer_u32 choice coercion is unverified");
+	REQUIRE(EvaluateValue(parsed, plan, "out", request, output, diagnostic) == Status::Ok);
+	// The quarter-period impulse distinguishes truncation to None/Hann from rounded Blackman.
+	CHECK((output.Data == Value{ArrayValue{ValueType::Scalar, {}, {{1., 1., 1.}, {.5, .5, .5}}}}));
 	std::vector<AuthoredValue> values;
 	REQUIRE(ResolveNodeValues(parsed, plan, "out", "fft", request, values, diagnostic) == Status::Ok);
 	const auto choice = std::find_if(values.begin(), values.end(), [](const auto &value) {
@@ -426,5 +427,9 @@ TEST_CASE(
 	REQUIRE(Read(Write(parsed), whole, diagnostic) == Status::Ok);
 	REQUIRE(Compile(whole, plan, diagnostic) == Status::Ok);
 	REQUIRE(EvaluateValue(whole, plan, "out", request, output, diagnostic) == Status::Ok);
-	CHECK((output.Data == Value{ArrayValue{ValueType::Scalar, {}, {{0., 2., 0.}, {1., 1., 1.}}}}));
+	const double blackman = double(float(.34));
+	CHECK(
+		(output.Data ==
+		 Value{ArrayValue{ValueType::Scalar, {}, {{1., 1., 1.}, {blackman, blackman, blackman}}}})
+	);
 }

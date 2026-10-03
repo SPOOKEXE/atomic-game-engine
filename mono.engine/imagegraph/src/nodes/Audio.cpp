@@ -81,21 +81,13 @@ namespace engine::imagegraph::detail {
 			}
 			const double choice = context.SourceChoice("preprocess_function");
 			if (context.FailureCode != Status::Ok) return false;
-			if (!std::isfinite(choice) || choice < 0 || choice > UINT32_MAX)
+			if (!std::isfinite(choice))
 				return context.Fail(
-					Status::UnsupportedExecution,
-					"FFT preprocess choice is outside source uint32 range",
-					"preprocess_function"
+					Status::InvalidValue, "FFT preprocess choice must be finite", "preprocess_function"
 				);
-			// Fractional buffer_u32 coercion is outside the pinned source; do not guess its rounding.
-			if (choice != std::trunc(choice))
-				return context.Fail(
-					Status::UnsupportedExecution,
-					"fractional FFT buffer_u32 choice coercion is unverified",
-					"preprocess_function"
-				);
-			// The source extension reads the whole control as uint32 before its window switch.
-			const uint32_t window = static_cast<uint32_t>(choice);
+			// The pinned HTML5 buffer_u32 write truncates then wraps; the extension reads that unsigned word.
+			const double remainder = std::fmod(std::trunc(choice), 0x1p32);
+			const uint32_t window = static_cast<uint32_t>(remainder < 0 ? remainder + 0x1p32 : remainder);
 			const size_t paddedCount = std::bit_ceil(count);
 			if (!context.ReserveOutput(
 					(paddedCount / 2 + 1) * sizeof(ElementValue) +
