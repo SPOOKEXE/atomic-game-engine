@@ -3032,7 +3032,9 @@ namespace studio {
 		view.Damage = damage;
 		const bool visualChanged = damage.Any();
 		const bool particleDeviceStep = particleLayerPresent && frameSeconds > 0.0f;
-		if (!visualChanged && !particleDeviceStep) {
+		// Pending source readback advances through FrameBatch even when retained layers are unchanged.
+		const bool composerDeviceStep = ImageComposerHasPendingCapture();
+		if (!visualChanged && !particleDeviceStep && !composerDeviceStep) {
 			return;
 		}
 		if (!visualChanged) {

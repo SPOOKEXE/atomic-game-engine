@@ -2217,3 +2217,98 @@ TEST_CASE(
 	CHECK(document == unchanged);
 	CHECK(loaded.Find("input")->ParentKeys == std::vector<Keyframe>{bootstrapKey});
 }
+
+TEST_CASE(
+	"Static source projection preserves dynamic declarations through native reload and rebind",
+	"[imagegraph][groups][group_replay][dynamic_projection]"
+) {
+	Document authored;
+	authored.FormatVersion = 9;
+	authored.Nodes = {{"lua", "pc.lua_compute", {}, {}, {}}, {"invert", "pc.invert", {}, {}, {{"mix", .5}}}};
+	authored.Nodes.front().DynamicInputs = {
+		{"argument_name_0", ValueType::Text, Value{std::string("gain")}},
+		{"argument_type_0", ValueType::Enum, Value{EnumValue{0}}},
+		{"argument_value_0", ValueType::Scalar, Value{9.5}},
+		{"argument_name_1", ValueType::Text, Value{std::string("keyed_gain")}},
+		{"argument_type_1", ValueType::Enum, Value{EnumValue{0}}},
+		{"argument_value_1", ValueType::Scalar, Value{19.5}}
+	};
+	authored.Nodes.front().DynamicInputs[1].SourceInputId = "pxc:input:4";
+	authored.Nodes.front().DynamicInputs[2].SourceInputId = "pxc:input:5";
+	authored.Nodes.front().DynamicInputs[5].SourceInputId = "pxc:input:8";
+	authored.Nodes.front().SourceStaticInputs = {"argument_value_0", "argument_value_1"};
+	authored.Keyframes = {{"lua", "argument_value_1", 0, 19.5, "source", KeyframeEase{}}};
+	authored.Keyframes.front().SourceKeyId = "original-value";
+	authored.Tracks = {{"lua", "argument_value_1", "hold", -1}};
+	authored.Outputs = {{"result", "invert", "surface_out"}};
+	const auto unchanged = authored;
+	Checked(authored);
+	Diagnostic diagnostic;
+	GroupReplayState empty, local, loaded, edited;
+	REQUIRE(RebindGroupReplay(authored, empty, 1, local, diagnostic) == Status::Ok);
+	const auto bindStatus = BindGroupReplay(authored, {}, local, 1, loaded, diagnostic);
+	INFO(diagnostic.NodeId << "/" << diagnostic.Port << ": " << diagnostic.Message);
+	REQUIRE(bindStatus == Status::Ok);
+	const Value dynamicValue = 12.5, keyedValue = 22.5, fixedValue = .75, selector = EnumValue{0};
+	GroupRefreshEvent edits[4];
+	edits[0] = Event("lua", GroupRefreshReason::Edit);
+	edits[0].EditedPort = "argument_value_0";
+	edits[0].LocalValue = &dynamicValue;
+	edits[1] = Event("invert", GroupRefreshReason::Edit);
+	edits[1].EditedPort = "mix";
+	edits[1].LocalValue = &fixedValue;
+	edits[2] = Event("lua", GroupRefreshReason::Edit);
+	edits[2].EditedPort = "argument_type_0";
+	edits[2].LocalValue = &selector;
+	edits[3] = Event("lua", GroupRefreshReason::Edit);
+	edits[3].EditedPort = "argument_value_1";
+	edits[3].LocalValue = &keyedValue;
+	for (auto &edit : edits)
+		edit.LocalAnimated = false;
+	REQUIRE(ReplayGroupAnimatorEdits(authored, edits, loaded, 1, edited, diagnostic) == Status::Ok);
+	Document projected, restored;
+	REQUIRE(ProjectGroupReplay(authored, edited, 1, projected, diagnostic) == Status::Ok);
+	CHECK(authored == unchanged);
+	CHECK(projected.Nodes.front().Values.empty());
+	CHECK(projected.Nodes.front().DynamicInputs[1].Default == std::optional<Value>{selector});
+	CHECK(projected.Nodes.front().DynamicInputs[2].Default == std::optional<Value>{dynamicValue});
+	CHECK(projected.Nodes.front().DynamicInputs[1].SourceInputId == "pxc:input:4");
+	CHECK(projected.Nodes.front().DynamicInputs[2].SourceInputId == "pxc:input:5");
+	CHECK(projected.Nodes.back().Values == std::vector<AuthoredValue>{{"mix", fixedValue}});
+	auto expectedKey = authored.Keyframes.front();
+	expectedKey.Data = keyedValue;
+	CHECK(projected.Keyframes == std::vector<Keyframe>{expectedKey});
+	CHECK(
+		projected.Nodes.front().DynamicInputs[5].Default == authored.Nodes.front().DynamicInputs[5].Default
+	);
+	CHECK(projected.Nodes.front().DynamicInputs[5].SourceInputId == "pxc:input:8");
+	CHECK(projected.Tracks == authored.Tracks);
+	REQUIRE(Read(Write(projected), restored, diagnostic) == Status::Ok);
+	CHECK(restored == projected);
+	const auto plan = Checked(restored);
+	GroupReplayState rebound;
+	REQUIRE(RebindProjectedGroupReplay(restored, edited, 2, rebound, diagnostic) == Status::Ok);
+	CHECK(rebound.SharedSubtypes().empty());
+	EvaluationRequest request;
+	request.GroupReplay = &rebound;
+	request.GroupAuthoringRevision = 2;
+	EvaluationSnapshot inputs;
+	REQUIRE(EvaluateNodeInputs(restored, plan, "lua", request, inputs, diagnostic) == Status::Ok);
+	const auto input = std::find_if(inputs.Values().begin(), inputs.Values().end(), [](const auto &value) {
+		return value.Port == "argument_value_0";
+	});
+	REQUIRE(input != inputs.Values().end());
+	CHECK(input->Data == dynamicValue);
+	const auto keyedInput =
+		std::find_if(inputs.Values().begin(), inputs.Values().end(), [](const auto &value) {
+			return value.Port == "argument_value_1";
+		});
+	REQUIRE(keyedInput != inputs.Values().end());
+	CHECK(keyedInput->Data == keyedValue);
+	auto mismatched = restored;
+	mismatched.Nodes.front().DynamicInputs[2].Default = Value{13.5};
+	const auto priorBytes = rebound.RetainedBytes();
+	CHECK(RebindProjectedGroupReplay(mismatched, edited, 3, rebound, diagnostic) != Status::Ok);
+	CHECK(rebound.AuthoringRevision() == 2);
+	CHECK(rebound.RetainedBytes() == priorBytes);
+}

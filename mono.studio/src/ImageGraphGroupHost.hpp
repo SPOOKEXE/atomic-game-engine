@@ -308,7 +308,7 @@ namespace studio {
 				return false;
 			GroupReplayState animatorEdited, controlState, edited, projectedState;
 			Document controls, projected, modeDocument, transitioned;
-			GroupReplayState modeReplay, transitionedReplay;
+			GroupReplayState modeReplay, modeTransitionReplay, transitionedReplay;
 			const Document *source = &document;
 			const GroupReplayState *sourceReplay = &Replay;
 			const auto node =
@@ -345,16 +345,17 @@ namespace studio {
 						revision,
 						{event.NodeId, event.EditedPort, true, GetFrameTime(event.At)},
 						transitioned,
+						modeTransitionReplay,
 						error,
 						Budget(error, {&document}, {&Replay})
 					) != Status::Ok ||
 					RebindProjectedGroupReplay(
 						transitioned,
-						modeReplay,
+						modeTransitionReplay,
 						revision,
 						transitionedReplay,
 						error,
-						Budget(error, {&document, &modeDocument}, {&Replay})
+						Budget(error, {&document, &modeDocument}, {&Replay, &modeTransitionReplay})
 					) != Status::Ok)
 					return false;
 				source = &transitioned;

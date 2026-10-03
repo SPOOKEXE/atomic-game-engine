@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ImageGraphHlslInputs.hpp"
+
 #include <engine/imagegraph/Document.hpp>
 
 #include <cmath>
@@ -48,5 +50,42 @@ namespace studio::detail {
 		default:
 			return std::nullopt;
 		}
+	}
+	inline std::optional<engine::imagegraph::ValueType>
+	SourceHlslArgumentType(const engine::imagegraph::Node &node, std::string_view port) {
+		using namespace engine::imagegraph;
+		constexpr std::string_view prefix = "argument_value_";
+		if (node.Type != "pc.hlsl" || !port.starts_with(prefix)) return {};
+		const std::string selector = "argument_type_" + std::string(port.substr(prefix.size()));
+		const Value *value = nullptr;
+		for (const auto &held : node.Values)
+			if (held.Port == selector) {
+				value = &held.Data;
+				break;
+			}
+		if (!value)
+			for (const auto &held : node.DynamicInputs)
+				if (held.Id == selector && held.Default) {
+					value = &*held.Default;
+					break;
+				}
+		const auto kind = value ? HlslArgumentKind(*value) : std::optional<int64_t>{0};
+		return kind ? HlslArgumentType(*kind) : std::nullopt;
+	}
+	inline std::optional<engine::imagegraph::ValueType>
+	SourceArgumentType(const engine::imagegraph::Node &node, std::string_view port) {
+		if (node.Type == "pc.hlsl") return SourceHlslArgumentType(node, port);
+		return SourceLuaArgumentType(node, port);
+	}
+	inline bool HlslRawArgumentValue(
+		const engine::imagegraph::Node &node, std::string_view port, const engine::imagegraph::Value &value
+	) {
+		using namespace engine::imagegraph;
+		const auto type = SourceHlslArgumentType(node, port);
+		if (!type || *type == ValueType::Array) return false;
+		if (const auto *number = std::get_if<double>(&value)) return std::isfinite(*number);
+		if (std::holds_alternative<int64_t>(value)) return true;
+		return (*type == ValueType::Colour && std::holds_alternative<Colour>(value)) ||
+			   (*type == ValueType::Image && std::holds_alternative<SurfaceValue>(value));
 	}
 }

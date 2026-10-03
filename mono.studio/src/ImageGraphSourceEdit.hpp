@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ImageGraphGroupHost.hpp"
+#include "ImageGraphHlslInputs.hpp"
 
 namespace studio {
 	// Authoring and the cached callback declarations commit together after undo
@@ -15,13 +16,15 @@ namespace studio {
 		const engine::imagegraph::DynamicInput &replacement,
 		engine::imagegraph::EvaluationRequest request,
 		engine::imagegraph::Diagnostic &error,
-		const BeforeCommit &beforeCommit
+		const BeforeCommit &beforeCommit,
+		const engine::imagegraph::EvaluationSnapshot *preparedInputs = nullptr
 	) try {
 		using namespace engine::imagegraph;
 		const auto originalBytes = DocumentRetainedPayloadBytes(document);
 		const auto valueBytes =
 			replacement.Default ? ValueClonePayloadBytes(*replacement.Default) : std::optional<uint64_t>{0};
-		const uint64_t names = nodeId.size() + replacement.Id.size() + replacement.SourceLayerName.size();
+		const uint64_t names = nodeId.size() + replacement.Id.size() + replacement.SourceLayerName.size() +
+							   replacement.SourceInputId.size();
 		const auto refuse = [&] {
 			error = {
 				Status::LimitExceeded,
@@ -45,6 +48,43 @@ namespace studio {
 		stagedHost.Revision = host.Revision;
 		if (host.Replay.RetainedBytes() > maximum - stagedHost.BorrowedBytes) return refuse();
 		stagedHost.BorrowedBytes += host.Replay.RetainedBytes();
+		const auto originalNode =
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+				return node.Id == nodeId;
+			});
+		std::vector<SourceAnimatorReplacement> replacedAnimators;
+		if (originalNode != document.Nodes.end() && originalNode->Type == "pc.hlsl" &&
+			detail::HlslRefreshControl(replacement.Id)) {
+			if (!preparedInputs) {
+				error = {
+					Status::InvalidValue,
+					std::string(nodeId),
+					replacement.Id,
+					"Shader refresh requires the prepared current input generation"
+				};
+				return false;
+			}
+			if (preparedInputs->RetainedBytes() > maximum - stagedHost.BorrowedBytes) return refuse();
+			stagedHost.BorrowedBytes += preparedInputs->RetainedBytes();
+			if (!detail::StageHlslArgumentRefresh(
+					staged, nodeId, replacement, *preparedInputs, error, &replacedAnimators
+				))
+				return false;
+		}
+		if (!replacedAnimators.empty()) {
+			GroupReplayState replacementReplay;
+			if (RebindGroupReplayWithAnimatorReplacements(
+					staged,
+					replacedAnimators,
+					stagedHost.Replay,
+					revision,
+					replacementReplay,
+					error,
+					stagedHost.Budget(error)
+				) != Status::Ok)
+				return false;
+			stagedHost.Replay = std::move(replacementReplay);
+		}
 		if (!SetImageGraphDynamicInput(staged, nodeId, replacement, error)) return false;
 		const auto node = std::find_if(staged.Nodes.begin(), staged.Nodes.end(), [&](const auto &item) {
 			return item.Id == nodeId;

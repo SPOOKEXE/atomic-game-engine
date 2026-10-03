@@ -1,4 +1,5 @@
 #pragma once
+#include "ImageGraphLuaReceipts.hpp"
 
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/ComposerLuaHost.hpp>
@@ -92,10 +93,12 @@ namespace studio::detail {
 			std::optional<engine::imagegraphexport::GraphDirectoryGrant> Directory;
 		};
 		engine::imagegraph::ComposerLuaHost *Lua = nullptr;
+		engine::imagegraph::HostNodeProvider *Composer = nullptr;
 		std::span<const engine::imagegraphexport::GraphFileGrant> Grants;
 		std::span<const engine::imagegraphexport::GraphDirectoryGrant> Directories;
 		std::array<std::optional<CachedFile>, 64> Files;
 		uint64_t RetainedBytes = sizeof(Files);
+		ImageGraphLuaReceipts LuaReceipts;
 
 		void ResetFiles() {
 			for (auto &file : Files)
@@ -124,6 +127,24 @@ namespace studio::detail {
 			std::string &failure
 		) override try {
 			using namespace engine::imagegraph;
+			if (invocation.Authored.Type == "pc.hlsl") {
+				if (!Composer) {
+					failure = "Studio renderer owner is unavailable";
+					return false;
+				}
+				if (RetainedBytes >= invocation.MaximumOperationBytes) {
+					failure = "Studio observations leave no Composer renderer budget";
+					return false;
+				}
+				HostNodeInvocation bounded = invocation;
+				bounded.MaximumOperationBytes -= RetainedBytes;
+				if (LuaReceipts.Bytes >= bounded.MaximumOperationBytes) {
+					failure = "Pending Lua observations leave no renderer budget";
+					return false;
+				}
+				bounded.MaximumOperationBytes -= LuaReceipts.Bytes;
+				return Composer->Capture(bounded, output, failure);
+			}
 			if (invocation.Authored.Type == "pc.lua_compute" ||
 				invocation.Authored.Type == "pc.lua_surface") {
 				if (Lua) {
@@ -133,6 +154,15 @@ namespace studio::detail {
 					}
 					HostNodeInvocation bounded = invocation;
 					bounded.MaximumOperationBytes -= RetainedBytes;
+					if (LuaReceipts.Applies(invocation.Request))
+						return LuaReceipts.Capture(
+							bounded, *Lua, output, failure, ImageGraphCaptureCloneBytes
+						);
+					if (LuaReceipts.Bytes >= bounded.MaximumOperationBytes) {
+						failure = "Pending Lua observations leave no evaluation budget";
+						return false;
+					}
+					bounded.MaximumOperationBytes -= LuaReceipts.Bytes;
 					return Lua->Capture(bounded, output, failure);
 				}
 				failure = "Studio Lua host is unavailable";

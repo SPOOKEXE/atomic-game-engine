@@ -43,7 +43,7 @@ Milestone labels describe development scope, not release versions.
   1. Retain the source licence, pinned metadata, enum choices and typed shader inputs; save instance ports, graph selectors and cooked-shader references.
   2. Evaluate bounded image, data, path and palette kernels, including shapes, layout, erosion, mask-aware noise, mapped gradients, ordered and error-diffusion dithering and ambient occlusion; inherit instance routes.
   3. Replay animation, persisted Gradients, Time Remap, FLIP/Verlet, Strand and rigid actors with bounded history; retain random state, resolve FFT windows and rasterize trails/VFX.
-  4. Edit graphs, groups, keys and tiles atomically; preserve moved shader inputs, animator aliases and refused timeline selections; insert source Gradient/Matrix keys and save rigid meshes with metadata.
+  4. Edit graphs, groups, keys and tiles atomically; refresh HLSL sockets, cook shaders and retain Lua observations; preserve moved inputs, animator aliases and refused timeline selections; insert Gradient/Matrix keys and save rigid meshes with metadata.
   5. Read granted assets through bounded hosts; reload changed WAV files on the host frame clock.
   6. Run bounded Lua and recorded-random export helpers; publish prepared image, sequence, WAV, CSV and tilemap outputs with rollback.
   7. Evaluate bounded volume projection; bind rigid/3D outputs, mesh availability and skyboxes; render Composer shaders from cooked binaries and queue camera/SDF jobs. Keep live ShaderScript compilation. Cooked Composer Vulkan tests pass; broader GPU verification remains open.

@@ -244,6 +244,7 @@ namespace studio {
 						required = std::max(required, *type >= ValueType::Vector3 ? 6u : 3u);
 				}
 				for (const engine::imagegraph::DynamicInput &input : node.DynamicInputs) {
+					if (!input.SourceInputId.empty()) required = std::max(required, 9u);
 					if (input.Type >= ValueType::Gradient ||
 						(input.Default && TypeOf(*input.Default) >= ValueType::Gradient))
 						required = std::max(required, input.Type >= ValueType::Vector3 ? 6u : 3u);
@@ -1615,14 +1616,16 @@ namespace studio {
 			sourceEntry ? engine::imagegraph::FindDynamicTemplate(*sourceEntry, input.Id, sourceGroup)
 						: nullptr;
 		if (sourceInput &&
-			input.Type != detail::SourceLuaArgumentType(*node, input.Id).value_or(sourceInput->Type))
+			input.Type != detail::SourceArgumentType(*node, input.Id).value_or(sourceInput->Type))
 			return fail(
 				engine::imagegraph::Status::TypeMismatch, "source input type is fixed by its template"
 			);
 		if (input.Default) {
 			const auto valueType = TypeOf(*input.Default);
 			if (input.Type != engine::imagegraph::ValueType::Any &&
-				!detail::SourceLuaArgumentType(*node, input.Id) && (!valueType || *valueType != input.Type) &&
+				!detail::SourceLuaArgumentType(*node, input.Id) &&
+				!detail::HlslRawArgumentValue(*node, input.Id, *input.Default) &&
+				(!valueType || *valueType != input.Type) &&
 				!(sourceInput &&
 				  (engine::imagegraph::CatalogueSourceRawValue(*sourceInput, *input.Default) ||
 				   engine::imagegraph::CatalogueSourceEnumValue(*sourceInput, *input.Default) ||
@@ -1675,9 +1678,9 @@ namespace studio {
 			}
 			*existing = std::move(input);
 		}
-		if (node->Type.starts_with("pc.lua_")) {
+		if (node->Type.starts_with("pc.lua_") || node->Type == "pc.hlsl") {
 			for (auto &argument : node->DynamicInputs) {
-				const auto type = detail::SourceLuaArgumentType(*node, argument.Id);
+				const auto type = detail::SourceArgumentType(*node, argument.Id);
 				if (!type || argument.Type == *type) continue;
 				argument.Type = *type;
 				std::erase_if(document.Links, [&](const auto &link) {

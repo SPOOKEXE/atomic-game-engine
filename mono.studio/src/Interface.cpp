@@ -461,7 +461,13 @@ namespace studio {
 			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
 			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
 			if (ShowImageComposer) {
-				Skinned("Image Composer", [&] { DrawImageComposer(Renderer, ShowImageComposer); });
+				Skinned("Image Composer", [&] {
+					DrawImageComposer(
+						Renderer,
+						Universe && Active.IsValid() ? Universe->NameOf(Active) : engine::core::Name{},
+						ShowImageComposer
+					);
+				});
 			}
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
 			// TODO(asset-pipeline): draw the asset processing graph beside its catalogue.

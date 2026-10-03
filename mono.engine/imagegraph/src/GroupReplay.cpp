@@ -2198,18 +2198,28 @@ namespace engine::imagegraph {
 					std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const auto &node) {
 						return node.Id == id;
 					});
-				std::vector<AuthoredValue> values;
-				values.reserve(node->Values.size() + 1);
-				bool replaced = false;
-				for (const auto &value : node->Values) {
-					if (value.Port == port) {
-						values.push_back({std::string(port), *replacement});
-						replaced = true;
-					} else
-						values.push_back(value);
+				const auto dynamic = std::find_if(
+					node->DynamicInputs.begin(), node->DynamicInputs.end(), [&](const auto &input) {
+						return input.Id == port;
+					}
+				);
+				if (dynamic != node->DynamicInputs.end()) {
+					// Dynamic controls serialize their authored value in the socket declaration.
+					dynamic->Default = *replacement;
+				} else {
+					std::vector<AuthoredValue> values;
+					values.reserve(node->Values.size() + 1);
+					bool replaced = false;
+					for (const auto &value : node->Values) {
+						if (value.Port == port) {
+							values.push_back({std::string(port), *replacement});
+							replaced = true;
+						} else
+							values.push_back(value);
+					}
+					if (!replaced) values.push_back({std::string(port), *replacement});
+					node->Values.swap(values);
 				}
-				if (!replaced) values.push_back({std::string(port), *replacement});
-				node->Values.swap(values);
 			}
 			for (const auto &key : keys) {
 				finalKeys.push_back(key);
@@ -2282,6 +2292,13 @@ namespace engine::imagegraph {
 						return key.NodeId == id && key.Port == port;
 					}))
 					return false;
+				const auto dynamic = std::find_if(
+					node->DynamicInputs.begin(), node->DynamicInputs.end(), [&](const auto &input) {
+						return input.Id == port;
+					}
+				);
+				if (dynamic != node->DynamicInputs.end())
+					return dynamic->Default && *dynamic->Default == *fixed;
 				const auto value =
 					std::find_if(node->Values.begin(), node->Values.end(), [&](const auto &value) {
 						return value.Port == port;

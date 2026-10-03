@@ -4,9 +4,14 @@
 #include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphCanvasInputs.hpp"
 #include "ImageGraphChoices.hpp"
+#include "ImageGraphComposerCadence.hpp"
+#include "ImageGraphComposerExports.hpp"
+#include "ImageGraphComposerHost.hpp"
+#include "ImageGraphCookAction.hpp"
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphExportTriggers.hpp"
 #include "ImageGraphGroupHost.hpp"
+#include "ImageGraphHlslGroups.hpp"
 #include "ImageGraphHost.hpp"
 #include "ImageGraphInputs.hpp"
 #include "ImageGraphObservations.hpp"
@@ -106,6 +111,10 @@ namespace studio {
 			std::unique_ptr<engine::imagegraph::ComposerLuaHost> LuaHost =
 				engine::script::MakeComposerLuaHost();
 			detail::ImageGraphHost Host;
+			detail::ImageGraphComposerCadence ComposerCadence;
+			detail::ImageGraphComposerExports ComposerExports;
+			std::vector<engine::core::Name> ComposerCaptureNames;
+			bool ComposerDevicePending = false;
 			std::vector<engine::imagegraphexport::GraphFileGrant> FileGrants;
 			std::vector<engine::imagegraphexport::GraphDirectoryGrant> DirectoryGrants;
 			std::vector<FileReadControls> FileControls;
@@ -219,16 +228,18 @@ namespace studio {
 			std::erase_if(state.FileGrants, [&](const auto &grant) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
-						return node.Id == grant.NodeId && (detail::ImageGraphFileReadType(node.Type) ||
-														   detail::ImageGraphFileWriteType(node.Type));
+						return node.Id == grant.NodeId &&
+							   (node.Type == "pc.hlsl" || detail::ImageGraphFileReadType(node.Type) ||
+								detail::ImageGraphFileWriteType(node.Type));
 					}
 				);
 			});
 			std::erase_if(state.FileControls, [&](const auto &control) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
-						return node.Id == control.NodeId && (detail::ImageGraphFileReadType(node.Type) ||
-															 detail::ImageGraphFileWriteType(node.Type));
+						return node.Id == control.NodeId &&
+							   (node.Type == "pc.hlsl" || detail::ImageGraphFileReadType(node.Type) ||
+								detail::ImageGraphFileWriteType(node.Type));
 					}
 				);
 			});
@@ -293,6 +304,21 @@ namespace studio {
 			state.Host.Grants = state.FileGrants;
 			state.Host.Directories = state.DirectoryGrants;
 			return state.Host;
+		}
+
+		void CancelComposerPreview(State &state, engine::render::Renderer &renderer) {
+			for (const auto name : state.ComposerCaptureNames)
+				renderer.CancelComposerCapture(state.ComposerCadence.Current.Owner, name);
+			state.ComposerCaptureNames.clear();
+			state.ComposerCadence.Cancel();
+			state.Host.LuaReceipts.Clear();
+			state.ComposerDevicePending = false;
+			if (auto *host = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer))
+				host->Pending = host->HavePendingJobs = false;
+		}
+		void CancelComposerPreview(State &state) {
+			if (const auto *host = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer))
+				CancelComposerPreview(state, host->Renderer);
 		}
 
 		void BindObservations(State &state, engine::imagegraph::EvaluationRequest &request) {
@@ -523,13 +549,20 @@ namespace studio {
 		}
 
 		void RunAuthoredExports(
-			State &state, detail::ImageGraphExportEvent event, std::string_view explicitNode = {}
+			State &state,
+			detail::ImageGraphExportEvent event,
+			std::string_view explicitNode = {},
+			const detail::ImageGraphComposerExports::Observation *recorded = nullptr
 		) {
 			std::vector<std::string> nodes;
 			for (const auto &node : state.Authored.Nodes)
 				if (node.Type == "pc.export" && (explicitNode.empty() || node.Id == explicitNode))
 					nodes.push_back(node.Id);
 			if (nodes.empty()) return;
+			if (!recorded) CancelComposerPreview(state);
+			const detail::ImageGraphLuaReceiptScope luaReceipts(state.Host.LuaReceipts);
+			const auto &playback = recorded ? recorded->Playback : state.Playback;
+			const detail::ImageGraphComposerSynchronousScope synchronous(state.Host.Composer);
 			ENGINE_PROFILE_CAT("image composer exports", engine::core::ProfileCategory::Engine);
 			engine::imagegraph::Plan plan;
 			Diagnostic error;
@@ -546,9 +579,12 @@ namespace studio {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
-				BindObservations(state, request);
-				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
-				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				if (recorded)
+					recorded->Pcx.Bind(request);
+				else
+					BindObservations(state, request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, playback);
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(playback));
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
 				if (!state.GroupHost.Prepare(state.Authored, plan, state.DocumentRevision, request, error) ||
@@ -708,8 +744,10 @@ namespace studio {
 				state.AudioCaptureMessage = diagnostic.Message;
 				return false;
 			}
+			CancelComposerPreview(state);
 			state.AudioCapturePathDisplay = path.string();
 			++state.EvaluationInputRevision;
+			state.ComposerExports.Invalidate(state.DocumentRevision, state.EvaluationInputRevision);
 			state.AudioCaptureMessage =
 				"loaded " + std::to_string(state.AudioFrames.size()) + " recorded frames";
 			state.LastDiagnostic = {};
@@ -893,6 +931,51 @@ namespace studio {
 
 		void RefreshPreview(State &state, engine::render::Renderer &renderer) {
 			if (!state.PreviewDirty || (!state.LivePreview && !state.PreviewRequested)) return;
+			ImageGraphPlayback previewPlayback = state.Playback;
+			const auto *composer = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer);
+			engine::imagegraph::EvaluationRequest observations;
+			BindObservations(state, observations);
+			const auto identity = state.ComposerCadence.RetainProgressPulse(
+				detail::ImageGraphComposerCadence::Identity{
+					composer ? composer->Owner : engine::core::Name{},
+					state.SelectedOutput,
+					state.DocumentRevision,
+					state.EvaluationInputRevision,
+					detail::ImageGraphRigidObservation(state.Authored, state.Playback)
+				}
+			);
+			if (state.ComposerCadence.Current != identity) CancelComposerPreview(state, renderer);
+			const auto previewFrame = state.ComposerCadence.Begin(
+				identity,
+				GetImageGraphFrame(state.Playback),
+				state.PcxObservations,
+				state.Playback.Playing,
+				state.Playback.FrameProgress
+			);
+			(void)SetImageGraphAuthorFrame(previewPlayback, previewFrame);
+			previewPlayback.Playing = state.ComposerCadence.Playing;
+			previewPlayback.FrameProgress = state.ComposerCadence.FrameProgress;
+			state.Host.LuaReceipts.Begin(previewFrame);
+			const detail::ImageGraphLuaReceiptScope luaReceipts(state.Host.LuaReceipts);
+			if (auto *host = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer))
+				host->Pending = false;
+			struct FinishCapture {
+				State &StateRef;
+				engine::render::Renderer &Renderer;
+				engine::imagegraph::FrameTime Frame;
+				~FinishCapture() {
+					const auto *host = dynamic_cast<detail::ImageGraphComposerHost *>(StateRef.Host.Composer);
+					if (host && host->Pending) {
+						StateRef.ComposerCadence.Pending();
+						StateRef.PreviewDirty = StateRef.PreviewRequested = true;
+					} else if (StateRef.LastDiagnostic.Code == Status::Ok) {
+						StateRef.ComposerCadence.Complete(Frame);
+						if (Frame != GetImageGraphFrame(StateRef.Playback))
+							StateRef.PreviewDirty = StateRef.PreviewRequested = true;
+					} else
+						CancelComposerPreview(StateRef, Renderer);
+				}
+			} finish{state, renderer, previewFrame};
 			state.PreviewDirty = false;
 			state.PreviewRequested = false;
 			state.HaveVector2Preview = false;
@@ -970,10 +1053,10 @@ namespace studio {
 				if (const Image *cached = state.PreviewCache.Find(
 						state.DocumentRevision,
 						outputIndex,
-						state.Playback.CurrentTick,
-						state.Playback.Subframe,
-						state.Playback.NegativeFrame,
-						detail::ImageGraphRigidObservation(previewDocument, state.Playback)
+						previewPlayback.CurrentTick,
+						previewPlayback.Subframe,
+						previewPlayback.NegativeFrame,
+						detail::ImageGraphRigidObservation(previewDocument, previewPlayback)
 					)) {
 					if (!UploadPreview(state, renderer, *cached)) return;
 					state.LastDiagnostic = {};
@@ -1001,9 +1084,9 @@ namespace studio {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
-				BindObservations(state, request);
-				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
-				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				state.ComposerCadence.Observations.Bind(request);
+				detail::BindImageGraphRigid(request, requestRigidProvider, previewPlayback);
+				(void)engine::imagegraph::SetFrameTime(request, previewFrame);
 				request.AudioFrames =
 					std::span<const engine::imagegraph::AudioCaptureFrame>(state.AudioFrames);
 				request.AudioClips = state.AudioClips;
@@ -1101,11 +1184,11 @@ namespace studio {
 				(void)state.PreviewCache.Store(
 					state.DocumentRevision,
 					outputIndex,
-					state.Playback.CurrentTick,
+					previewPlayback.CurrentTick,
 					*image,
-					state.Playback.Subframe,
-					state.Playback.NegativeFrame,
-					detail::ImageGraphRigidObservation(previewDocument, state.Playback)
+					previewPlayback.Subframe,
+					previewPlayback.NegativeFrame,
+					detail::ImageGraphRigidObservation(previewDocument, previewPlayback)
 				);
 				state.LastDiagnostic = {};
 			}
@@ -1328,6 +1411,13 @@ namespace studio {
 			ImGui::Text(
 				"frame %.20Lg", engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))
 			);
+			if (state.ComposerCadence.Displayed &&
+				*state.ComposerCadence.Displayed != GetImageGraphFrame(state.Playback)) {
+				ImGui::SameLine();
+				ImGui::Text(
+					"preview %.20Lg", engine::imagegraph::FrameTimeToReal(*state.ComposerCadence.Displayed)
+				);
+			}
 		}
 
 		void DrawPalette(State &state) {
@@ -2354,8 +2444,28 @@ namespace studio {
 					if (engine::imagegraph::FindDynamicTemplate(*catalogue, input.Id, group))
 						count = std::max(count, int(group + 1));
 				}
+				const size_t originalCount = size_t(count);
 				if (ImGui::InputInt("Input groups", &count)) {
 					const std::string nodeId = node.Id;
+					if (node.Type == "pc.hlsl" && count >= 0 && size_t(count) < originalCount) {
+						CancelComposerPreview(state);
+						if (detail::ApplyHlslGroupRangeRemoval(
+								state.Authored,
+								state.History,
+								state.GroupHost,
+								state.DocumentRevision,
+								nodeId,
+								size_t(count),
+								originalCount - size_t(count),
+								state.LastDiagnostic,
+								[&](Document &document, ImageGraphGroupHost &host) {
+									return ReconcileSplitOutputs(state, document, &host.Replay);
+								}
+							))
+							AuthoredDocumentChanged(state);
+						ReloadCanvas(state);
+						return;
+					}
 					ApplyDocumentEdit(state, [&](Document &document) {
 						return count >= 0 && SetSourceImageGraphDynamicGroupCount(
 												 document, nodeId, size_t(count), state.LastDiagnostic
@@ -2522,19 +2632,105 @@ namespace studio {
 					BindObservations(state, request);
 					detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
-					if (ApplyImageGraphSourceDynamicInput(
-							state.Authored,
-							state.History,
-							state.GroupHost,
-							state.DocumentRevision,
-							nodeId,
-							input,
-							request,
-							state.LastDiagnostic,
-							[&](Document &document, ImageGraphGroupHost &host) {
-								return ReconcileSplitOutputs(state, document, &host.Replay);
-							}
-						))
+					engine::imagegraph::EvaluationSnapshot directInputs;
+					const engine::imagegraph::EvaluationSnapshot *preparedInputs = nullptr;
+					bool ready = true;
+					std::optional<detail::ImageGraphComposerSynchronousScope> synchronous;
+					if (node.Type == "pc.hlsl" && detail::HlslRefreshControl(input.Id)) {
+						CancelComposerPreview(state);
+						synchronous.emplace(state.Host.Composer);
+						const uint64_t revision = state.DocumentRevision;
+						const uint64_t inputRevision = state.EvaluationInputRevision;
+						const auto frame = GetImageGraphFrame(state.Playback);
+						engine::imagegraph::Plan plan;
+						ready = Compile(state.Authored, plan, state.LastDiagnostic) == Status::Ok &&
+								state.GroupHost.Prepare(
+									state.Authored, plan, revision, request, state.LastDiagnostic
+								) &&
+								state.FeedbackHost.PrepareNodeInputs(
+									state.Authored,
+									plan,
+									revision,
+									inputRevision,
+									nodeId,
+									request,
+									state.LastDiagnostic
+								);
+						if (ready && state.FeedbackHost.Active())
+							preparedInputs = &state.FeedbackHost.Snapshot();
+						else if (ready) {
+							ready =
+								EvaluateNodeInputs(
+									state.Authored, plan, nodeId, request, directInputs, state.LastDiagnostic
+								) == Status::Ok;
+							if (ready) preparedInputs = &directInputs;
+						}
+						if (ready && (state.DocumentRevision != revision ||
+									  state.EvaluationInputRevision != inputRevision ||
+									  SelectedNodeId(state) != nodeId ||
+									  GetImageGraphFrame(state.Playback) != frame)) {
+							state.LastDiagnostic = {
+								Status::InvalidValue,
+								nodeId,
+								input.Id,
+								"Shader edit selection or current input generation changed"
+							};
+							ready = false;
+						}
+					}
+					const auto address = detail::HlslInputPort(input.Id);
+					const auto *name = input.Default ? std::get_if<std::string>(&*input.Default) : nullptr;
+					bool removeEmptyGroup = false;
+					if (ready && node.Type == "pc.hlsl" && address && address->Field == 0 && name &&
+						name->empty()) {
+						const engine::imagegraph::EvaluationInputValue *resolved = nullptr;
+						if (preparedInputs)
+							for (const auto &value : preparedInputs->Values())
+								if (value.Port == input.Id) resolved = &value;
+						if (!resolved) {
+							state.LastDiagnostic = {
+								Status::InvalidValue,
+								nodeId,
+								input.Id,
+								"Shader group removal requires the current resolved name input"
+							};
+							ready = false;
+						} else
+							removeEmptyGroup = !resolved->Linked;
+					}
+					if (removeEmptyGroup) {
+						CancelComposerPreview(state);
+						if (detail::ApplyHlslGroupRemoval(
+								state.Authored,
+								state.History,
+								state.GroupHost,
+								state.DocumentRevision,
+								nodeId,
+								address->Group,
+								state.LastDiagnostic,
+								[&](Document &document, ImageGraphGroupHost &host) {
+									return ReconcileSplitOutputs(state, document, &host.Replay);
+								}
+							))
+							AuthoredDocumentChanged(state);
+						ReloadCanvas(state);
+						ImGui::PopID();
+						return;
+					}
+					if (ready && ApplyImageGraphSourceDynamicInput(
+									 state.Authored,
+									 state.History,
+									 state.GroupHost,
+									 state.DocumentRevision,
+									 nodeId,
+									 input,
+									 request,
+									 state.LastDiagnostic,
+									 [&](Document &document, ImageGraphGroupHost &host) {
+										 return ReconcileSplitOutputs(state, document, &host.Replay);
+									 },
+									 preparedInputs
+								 ))
 						AuthoredDocumentChanged(state);
 					ReloadCanvas(state);
 					ImGui::PopID();
@@ -2839,6 +3035,8 @@ namespace studio {
 			}
 			ImGui::SameLine();
 			if (ImGui::Button(writing ? "Export" : "Read / refresh")) {
+				CancelComposerPreview(state);
+				const detail::ImageGraphComposerSynchronousScope synchronous(state.Host.Composer);
 				changed();
 				engine::imagegraph::Plan plan;
 				Diagnostic error;
@@ -2960,7 +3158,72 @@ namespace studio {
 				ImGui::TextWrapped("Retained frames: %s", path.string().c_str());
 		}
 
-		void DrawInspector(State &state) {
+		void DrawCookLibraryGrants(State &state, std::string_view nodeId) {
+			auto found =
+				std::find_if(state.FileControls.begin(), state.FileControls.end(), [&](const auto &held) {
+					return held.NodeId == nodeId;
+				});
+			if (found == state.FileControls.end()) {
+				FileReadControls controls;
+				controls.NodeId = nodeId;
+				state.FileControls.push_back(std::move(controls));
+				found = std::prev(state.FileControls.end());
+			}
+			auto &controls = *found;
+			ImGui::InputTextWithHint(
+				"##shader-library-name", "Library name", controls.Resource.data(), controls.Resource.size()
+			);
+			ImGui::InputTextWithHint(
+				"##shader-library-file",
+				"Exact library source path",
+				controls.File.data(),
+				controls.File.size()
+			);
+			if (ImGui::Button("Grant library")) {
+				const std::filesystem::path file(controls.File.data());
+				const std::string name(controls.Resource.data());
+				if (name.empty() || name.size() > 1024 || !file.is_absolute() ||
+					file.lexically_normal() != file)
+					controls.Message = "Enter a library name and exact absolute source path.";
+				else if (!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)
+							  .AllowsName(file.string()))
+					controls.Message = "Library source is disabled by content policy.";
+				else {
+					auto grant =
+						std::find_if(state.FileGrants.begin(), state.FileGrants.end(), [&](const auto &held) {
+							return held.NodeId == nodeId && held.Resource == name;
+						});
+					if (grant != state.FileGrants.end()) {
+						grant->File = file;
+						grant->Write = false;
+						controls.Message.clear();
+					} else if (state.FileGrants.size() == 256 ||
+							   std::count_if(
+								   state.FileGrants.begin(), state.FileGrants.end(), [&](const auto &held) {
+									   return held.NodeId == nodeId;
+								   }
+							   ) == 64)
+						controls.Message = "Library grants exceed the session limit.";
+					else {
+						state.FileGrants.push_back({std::string(nodeId), file, false, name});
+						controls.Message.clear();
+					}
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Revoke libraries")) {
+				std::erase_if(state.FileGrants, [&](const auto &held) { return held.NodeId == nodeId; });
+				controls.Message.clear();
+			}
+			if (!controls.Message.empty()) ImGui::TextWrapped("%s", controls.Message.c_str());
+		}
+
+		void DrawInspector(
+			State &state,
+			engine::render::Renderer &renderer,
+			engine::core::Name owner,
+			const engine::assets::LocalPaths &paths
+		) {
 			const std::string nodeId = SelectedNodeId(state);
 			Node *node = FindNode(state.Authored, nodeId);
 			if (node == nullptr) {
@@ -3045,6 +3308,129 @@ namespace studio {
 					},
 					state.LastDiagnostic
 				);
+				node = FindNode(state.Authored, nodeId);
+				if (!node) return;
+				schema = engine::imagegraph::FindSchema(node->Type);
+				if (!schema) return;
+			}
+			if (node->Type == "pc.hlsl") DrawCookLibraryGrants(state, nodeId);
+			if (node->Type == "pc.hlsl" && ImGui::Button("Cook Shader")) {
+				CancelComposerPreview(state);
+				const detail::ImageGraphComposerSynchronousScope synchronous(state.Host.Composer);
+				engine::imagegraph::EvaluationSnapshot directInputs;
+				detail::ImageGraphCookCapture captured;
+				const auto capture =
+					[&](Diagnostic &error) -> const engine::imagegraph::EvaluationSnapshot * {
+					FinishInactiveEdit(state);
+					const auto *target = FindNode(state.Authored, nodeId);
+					if (SelectedNodeId(state) != nodeId || !target || target->Type != "pc.hlsl") {
+						error = {
+							Status::InvalidValue,
+							nodeId,
+							"composer_cooked_shader",
+							"Cook Shader selection changed"
+						};
+						return nullptr;
+					}
+					const uint64_t revision = state.DocumentRevision;
+					const uint64_t inputRevision = state.EvaluationInputRevision;
+					captured = {nodeId, owner, revision, inputRevision};
+					const auto current = [&] {
+						if (detail::ImageGraphCookCaptureCurrent(
+								state.Authored,
+								captured,
+								SelectedNodeId(state),
+								owner,
+								state.DocumentRevision,
+								state.EvaluationInputRevision
+							))
+							return true;
+						error = {
+							Status::InvalidValue,
+							nodeId,
+							"composer_cooked_shader",
+							"Cook selection, owner or inputs changed during capture"
+						};
+						return false;
+					};
+					engine::imagegraphphysics::RigidProvider requestRigidProvider;
+					engine::imagegraph::EvaluationRequest request;
+					request.HostProvider = &HostFor(state);
+					BindObservations(state, request);
+					detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
+					(void)SetFrameTime(request, GetImageGraphFrame(state.Playback));
+					request.AudioFrames = state.AudioFrames;
+					request.AudioClips = state.AudioClips;
+					request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+					engine::imagegraph::Plan plan;
+					if (Compile(state.Authored, plan, error) != Status::Ok ||
+						!state.GroupHost.Prepare(
+							state.Authored, plan, state.DocumentRevision, request, error
+						) ||
+						!state.FeedbackHost.PrepareNodeInputs(
+							state.Authored,
+							plan,
+							state.DocumentRevision,
+							state.EvaluationInputRevision,
+							nodeId,
+							request,
+							error
+						))
+						return nullptr;
+					if (!current()) return nullptr;
+					if (state.FeedbackHost.Active()) return &state.FeedbackHost.Snapshot();
+					if (EvaluateNodeInputs(state.Authored, plan, nodeId, request, directInputs, error) !=
+						Status::Ok)
+						return nullptr;
+					return current() ? &directInputs : nullptr;
+				};
+				const auto *inputs = capture(state.LastDiagnostic);
+				detail::ImageGraphCookLibraries libraries;
+				std::string libraryFailure;
+				const auto documentBytes = DocumentRetainedPayloadBytes(state.Authored);
+				const uint64_t maximumCookBytes = engine::imagegraph::Limits::MaximumEvaluationBytes;
+				const bool captureAdmitted = inputs && documentBytes &&
+											 *documentBytes <= maximumCookBytes / 2 &&
+											 inputs->RetainedBytes() <= maximumCookBytes - 2 * *documentBytes;
+				if (inputs && !captureAdmitted)
+					libraryFailure = "Cook capture exceeds the operation byte budget";
+				const bool librariesRead =
+					captureAdmitted && detail::ReadImageGraphCookLibraries(
+										   state.FileGrants,
+										   nodeId,
+										   libraries,
+										   libraryFailure,
+										   maximumCookBytes - 2 * *documentBytes - inputs->RetainedBytes()
+									   );
+				if (inputs && !librariesRead)
+					state.LastDiagnostic = {Status::InvalidValue, nodeId, "libraries", libraryFailure};
+				if (librariesRead &&
+					detail::ApplyImageGraphCookAction(
+						state.Authored,
+						state.History,
+						captured,
+						SelectedNodeId(state),
+						owner,
+						state.DocumentRevision,
+						state.EvaluationInputRevision,
+						*inputs,
+						paths,
+						libraries.Views,
+						engine::render::hlsl::CookerIdentity(),
+						[&](auto world, auto asset) { return renderer.ComposerShaderRevision(world, asset); },
+						[&](auto world, auto asset, const auto &artifact) {
+							return renderer.InstallComposerShader(world, asset, artifact);
+						},
+						[&](auto world, auto asset, auto revision) {
+							return renderer.RemoveComposerShader(world, asset, revision);
+						},
+						state.LastDiagnostic,
+						engine::imagegraph::Limits::MaximumEvaluationBytes - libraries.Bytes
+					)) {
+					AuthoredDocumentChanged(state);
+					state.PreviewCache.Clear();
+					RequestPreview(state, true);
+				}
 				node = FindNode(state.Authored, nodeId);
 				if (!node) return;
 				schema = engine::imagegraph::FindSchema(node->Type);
@@ -4750,9 +5136,29 @@ namespace studio {
 		state.WavAudioMessage.clear();
 	}
 
-	void DrawImageComposer(engine::render::Renderer &renderer, bool &open) {
+	bool ImageComposerHasPendingCapture() {
+		return Composer().ComposerDevicePending;
+	}
+
+	void DrawImageComposer(engine::render::Renderer &renderer, engine::core::Name owner, bool &open) {
 		State &state = Composer();
 		Initialize(state);
+		const auto paths = engine::assets::DefaultLocalPaths();
+		if (!state.ComposerCaptureNames.empty() &&
+			(state.ComposerCadence.Current.Owner != owner || !open ||
+			 state.ComposerCadence.Current.Revision != state.DocumentRevision ||
+			 state.ComposerCadence.Current.InputRevision != state.EvaluationInputRevision))
+			CancelComposerPreview(state, renderer);
+		detail::ImageGraphComposerHost composerHost(renderer, owner, paths, &state.ComposerCaptureNames);
+		const detail::ImageGraphComposerHostScope composerScope(state.Host.Composer, composerHost);
+		struct RetainPendingSignal {
+			State &Owner;
+			const detail::ImageGraphComposerHost &Host;
+			~RetainPendingSignal() {
+				Owner.ComposerDevicePending = Host.HavePendingJobs;
+			}
+		} pendingSignal{state, composerHost};
+
 		if (state.WavCheckerHostFrame != std::numeric_limits<uint64_t>::max()) {
 			engine::imagegraphphysics::RigidProvider checkerRigidProvider;
 			engine::imagegraph::EvaluationRequest checkerRequest;
@@ -4773,6 +5179,7 @@ namespace studio {
 				diagnostic
 			);
 			if (reloaded) {
+				CancelComposerPreview(state, renderer);
 				state.WavSourceMessage.clear();
 				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
 				RequestPreview(state, true);
@@ -4787,12 +5194,14 @@ namespace studio {
 		ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 255));
 		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
 		if (!ImGui::Begin("Image Composer", &open, ImGuiWindowFlags_MenuBar)) {
+			CancelComposerPreview(state, renderer);
 			state.VectorControls.FinishPointer(
 				ImGui::IsMouseDown(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Middle)
 			);
 			ImGui::End();
 			ImGui::PopStyleColor(2);
 			if (!open) {
+				CancelComposerPreview(state, renderer);
 				if (state.LuaHost) state.LuaHost->Reset();
 				state.Host.ResetFiles();
 				state.ExportUpdate = {};
@@ -4850,7 +5259,7 @@ namespace studio {
 					ImGui::EndTabItem();
 				}
 				if (ImGui::BeginTabItem("Inspector")) {
-					DrawInspector(state);
+					DrawInspector(state, renderer, owner, paths);
 					ImGui::EndTabItem();
 				}
 				if (ImGui::BeginTabItem("Project")) {
@@ -4886,11 +5295,39 @@ namespace studio {
 		}
 		ImGui::EndChild();
 		RefreshPreview(state, renderer);
+		state.ComposerExports.Invalidate(state.DocumentRevision, state.EvaluationInputRevision);
 		if (!state.Playback.Rendering &&
-			state.ExportUpdate.Accept(
-				state.DocumentRevision, state.EvaluationInputRevision, GetImageGraphFrame(state.Playback)
-			))
-			RunAuthoredExports(state, detail::ImageGraphExportEvent::Update);
+			std::any_of(state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [](const auto &node) {
+				return node.Type == "pc.export";
+			})) {
+			auto update = state.ExportUpdate;
+			if (update.Accept(
+					state.DocumentRevision, state.EvaluationInputRevision, GetImageGraphFrame(state.Playback)
+				)) {
+				engine::imagegraph::EvaluationRequest captured;
+				BindObservations(state, captured);
+				std::string failure;
+				if (state.ComposerExports.Admit(
+						{state.Playback,
+						 state.PcxObservations,
+						 state.DocumentRevision,
+						 state.EvaluationInputRevision},
+						failure
+					))
+					state.ExportUpdate = update;
+				else
+					state.LastDiagnostic = {
+						Status::LimitExceeded, {}, "export_on_update", std::move(failure)
+					};
+			}
+		}
+		if (!state.ComposerCadence.Held) {
+			while (!state.ComposerExports.Pending.empty()) {
+				const auto observation = std::move(state.ComposerExports.Pending.front());
+				state.ComposerExports.Pending.erase(state.ComposerExports.Pending.begin());
+				RunAuthoredExports(state, detail::ImageGraphExportEvent::Update, {}, &observation);
+			}
+		}
 		Diagnostic audioDiagnostic;
 		if (!state.WavAudio.Update(
 				state.Authored,
@@ -4910,6 +5347,7 @@ namespace studio {
 		);
 		ImGui::End();
 		if (!open) {
+			CancelComposerPreview(state, renderer);
 			if (state.LuaHost) state.LuaHost->Reset();
 			state.Host.ResetFiles();
 			state.ExportUpdate = {};
