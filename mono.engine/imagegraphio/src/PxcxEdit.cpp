@@ -778,7 +778,12 @@ namespace engine::imagegraphio {
 			const auto fail = [&](std::string reason) {
 				return Reject(diagnostic, std::move(reason), node.Id, port);
 			};
-			if (record.contains("from_node") || record.value("global_use", false)) return true;
+			const auto *entry = FindCatalogueEntry(node.Type);
+			const auto *input = entry ? FindCatalogueInput(*entry, port) : nullptr;
+			const bool localMirrorVector = node.Type == "pc.mirror_polar" && input &&
+										   input->SourceKind == "Vec2" && !record.value("sep_axis", false);
+			if ((record.contains("from_node") && !localMirrorVector) || record.value("global_use", false))
+				return true;
 			std::vector<const Keyframe *> keys;
 			for (const auto &key : document.Keyframes)
 				if (key.NodeId == node.Id && key.Port == port) keys.push_back(&key);
@@ -1383,7 +1388,12 @@ namespace engine::imagegraphio {
 								operation.Port
 							);
 						Json *input = SourceInput(root, *source, *entry, operation.Port);
-						if (!input || !input->contains("r") || input->contains("from_node") ||
+						const auto *schema = FindCatalogueInput(*entry, operation.Port);
+						const bool localMirrorVector = node->Type == "pc.mirror_polar" && schema &&
+													   schema->SourceKind == "Vec2" && input &&
+													   !input->value("sep_axis", false);
+						if (!input || !input->contains("r") ||
+							(input->contains("from_node") && !localMirrorVector) ||
 							input->value("global_use", false))
 							return Reject(
 								diagnostic,

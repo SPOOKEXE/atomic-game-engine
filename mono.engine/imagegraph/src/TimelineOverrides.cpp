@@ -3,6 +3,7 @@
 #include "EvaluationAllocator.hpp"
 #include "PuppetControl.hpp"
 #include "SourceAnimatorIdentity.hpp"
+#include "SourceMirrorAnimator.hpp"
 #include "Timeline.hpp"
 #include "TimelineDrivers.hpp"
 #include "TimelineSchedule.hpp"
@@ -122,6 +123,9 @@ namespace engine::imagegraph::detail {
 					return node.Id == key.NodeId;
 				});
 			if (node == document.Nodes.end()) return false;
+			const auto mirrorMode =
+				SourceMirrorGetterAnimated(document, *node, key.Port, request.GroupReplay);
+			if (mirrorMode && !*mirrorMode) return true;
 			bool originalStatic =
 				std::find(node->SourceStaticInputs.begin(), node->SourceStaticInputs.end(), key.Port) !=
 				node->SourceStaticInputs.end();
@@ -141,6 +145,7 @@ namespace engine::imagegraph::detail {
 				for (const auto &stored : document.Keyframes)
 					keyCount += stored.NodeId == key.NodeId && stored.Port == key.Port;
 			if (keyCount != 1) return true;
+			if (mirrorMode && *mirrorMode) return false;
 			// An overridden animated getter still invokes the original shared animator's one-key driver.
 			if (request.GroupReplay && request.GroupReplay->InstancesBound())
 				for (const auto &binding : request.GroupReplay->Bindings())

@@ -37,6 +37,7 @@
 #include "SourceGetterProjection.hpp"
 #include "SourceInputOrigin.hpp"
 #include "SourceLuaSockets.hpp"
+#include "SourceMirrorPathProjection.hpp"
 #include "SourcePathShapeCodec.hpp"
 #include "SourcePathShiftMemo.hpp"
 #include "SourceRigidCodec.hpp"
@@ -8751,16 +8752,6 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
-				if (nodeInputs && selected->NodeId == targetNodeId) {
-					SetDiagnostic(
-						diagnostic,
-						Status::InvalidOutput,
-						"input snapshot cannot also execute its selected host output",
-						selected->NodeId,
-						selected->Port
-					);
-					return diagnostic.Code;
-				}
 				selectedOutputs.push_back(&*selected);
 				retainedTargets[nodeIndices.at(selected->NodeId)] = 1;
 			}
@@ -9523,7 +9514,7 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				inputsCaptured = true;
 				if (!batch) return Status::Ok;
-				continue;
+				if (!retainedTargets[index] && remainingConsumers[index] == 0) continue;
 			}
 			// The native fixed-plane schema shares the borrowed host ports, while the
 			// renderer keeps its raster profile distinct from the source node.
@@ -10903,6 +10894,43 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (node.Type == "pc.mirror_polar") {
+					for (size_t i = 0; i < detail::SourceMirrorVectorPorts.size(); ++i) {
+						const auto port = detail::SourceMirrorVectorPorts[i];
+						const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
+												  ? request.GroupReplay->Binding(node.Id, port)
+												  : nullptr;
+						if (detail::InheritedMovedSourceGetter(node, port, binding)) binding = nullptr;
+						const auto rawPort = detail::SourceGetterPort(node, port, binding);
+						const Node &rawNode = binding ? timelineOverrides.Find(
+															nodeIndices.at(binding->OwnerId),
+															document.Nodes[nodeIndices.at(binding->OwnerId)]
+														)
+													  : node;
+						const Value *raw =
+							binding ? SharedGroupInputView(document, request.GroupReplay, node, port)
+									: nullptr;
+						const auto mode = detail::SourceMirrorGetterAnimated(
+							document, document.Nodes[index], port, request.GroupReplay
+						);
+						if (!raw && (!mode || *mode))
+							if (const auto *value = FindValue(rawNode, rawPort)) raw = &value->Data;
+						if (!raw)
+							for (const auto &key : document.Keyframes)
+								if (key.NodeId == rawNode.Id && key.Port == rawPort) {
+									raw = &key.Data;
+									break;
+								}
+						if (!raw)
+							if (const auto *value = FindValue(rawNode, rawPort)) raw = &value->Data;
+						context.MirrorRawAnimators[i] = raw;
+					}
+				}
+				detail::SourceMirrorPathProjection mirrorPaths(context);
+				if (!mirrorPaths.Prepare()) {
+					diagnostic = {context.FailureCode, node.Id, context.FailurePort, context.FailureMessage};
+					return diagnostic.Code;
+				}
 				if (groupRefresh && node.Id == groupRefresh->Event->NodeId) {
 					if (!detail::ApplyGroupRefreshContext(
 							context, *groupRefresh->Event, *groupRefresh->Owner, document
@@ -10993,29 +11021,42 @@ namespace engine::imagegraph {
 					owner.Captured = true;
 				}
 				if (nodeInputs && node.Id == nodeInputs->NodeId) {
-					detail::SourceGetterProjection projection(context);
-					if (!projection.Prepare() ||
-						!CaptureNodeInputs(context, *nodeInputs, results, resultCharges)) {
-						SetDiagnostic(
-							diagnostic,
-							context.FailureCode,
-							context.FailureMessage,
-							node.Id,
-							context.FailurePort
-						);
-						return diagnostic.Code;
+					const bool executeCaptured =
+						batch && (retainedTargets[index] || remainingConsumers[index] != 0);
+					{
+						detail::SourceGetterProjection projection(context);
+						// Execution still borrows upstream payloads, so capture must copy rather than
+						// transfer them.
+						const auto captureResults =
+							executeCaptured ? std::span<NodeResult>{} : std::span<NodeResult>{results};
+						const auto captureCharges =
+							executeCaptured ? std::span<detail::AllocationReservation>{}
+											: std::span<detail::AllocationReservation>{resultCharges};
+						if (!projection.Prepare() ||
+							!CaptureNodeInputs(context, *nodeInputs, captureResults, captureCharges)) {
+							SetDiagnostic(
+								diagnostic,
+								context.FailureCode,
+								context.FailureMessage,
+								node.Id,
+								context.FailurePort
+							);
+							return diagnostic.Code;
+						}
 					}
 					inputsCaptured = true;
 					if (!batch) return Status::Ok;
-					for (const size_t source : upstream[index]) {
-						if (!dynamicPcx && --remainingConsumers[source] == 0 && source != targetIndex &&
-							!retainedTargets[source]) {
-							evaluationBytes -= ResultBytes(results[source]);
-							results[source] = Image{};
-							resultCharges[source].Reset();
+					if (!executeCaptured) {
+						for (const size_t source : upstream[index]) {
+							if (!dynamicPcx && --remainingConsumers[source] == 0 && source != targetIndex &&
+								!retainedTargets[source]) {
+								evaluationBytes -= ResultBytes(results[source]);
+								results[source] = Image{};
+								resultCharges[source].Reset();
+							}
 						}
+						continue;
 					}
-					continue;
 				}
 				if (!executor) {
 					SetDiagnostic(

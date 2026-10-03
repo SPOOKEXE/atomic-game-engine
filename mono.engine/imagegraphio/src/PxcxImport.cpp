@@ -1724,6 +1724,19 @@ namespace engine::imagegraphio {
 				return false;
 			}
 			const std::string id(input.Id);
+			// A linked Vec2 path getter reads this consumer's local raw animator X.
+			if (entry.Type == "pc.mirror_polar" && input.SourceKind == "Vec2") {
+				parseLinkedLocalAnimator = true;
+				const auto separated = record.find("sep_axis");
+				if (separated != record.end() && !separated->is_boolean()) {
+					reason = "Polar Mirror separated axis flag is malformed";
+					return false;
+				}
+				if (separated != record.end() && separated->get<bool>()) {
+					reason = "Polar Mirror separated Vec2 animator needs owned axis storage";
+					return false;
+				}
+			}
 			const auto appendValue = [&](std::string_view port, imagegraph::Value data) {
 				if (!AdmitNativeSlots(node.Values, node.Values.size() + 1, budget) ||
 					!AdmitNativeText(port, budget)) {
@@ -1897,6 +1910,15 @@ namespace engine::imagegraphio {
 			}
 			const auto stored = record.find("r");
 			if (stored == record.end()) return true;
+			// Reloading an empty list leaves valueAnimator's constructor key intact.
+			if (entry.Type == "pc.mirror_polar" && input.SourceKind == "Vec2" && stored->is_array() &&
+				stored->empty()) {
+				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget)) {
+					reason = "empty Mirror constructor animator settings are not representable";
+					return false;
+				}
+				return true;
+			}
 			// Empty scalar HLSL animators return numeric zero in valueAnimator.getValue.
 			if (entry.Type == "pc.hlsl" && input.Id.starts_with("argument_value_") &&
 				input.Type != imagegraph::ValueType::Array && stored->is_array() && stored->empty()) {

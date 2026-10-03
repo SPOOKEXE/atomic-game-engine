@@ -54,7 +54,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Add selected-key easing, dynamic tracks and focused Composer Undo/Redo.
 - [x] Preserve source keys and metadata through processor resets and quaternion display-mode edits.
 - [x] Resume pending exports, cancel safely and publish atomically.
-- [_] Finish Mirror path sampling and separate X/Y animation.
+- [x] Sample Mirror paths with source-compatible local animator ratios and input capture.
+- [_] Add separate X/Y animation and preserve it through groups and PXC edits.
 - [x] Integrate Flow and Bubble noise generators.
 - [_] Integrate path extension, flattening and smoothing.
 - [x] Decode bounded font bytes into glyph bitmaps and metrics.

@@ -1,4 +1,5 @@
 #include "../SourceMappedInputs.hpp"
+#include "../SourceMirrorPathProjection.hpp"
 #include "Curve.hpp"
 #include "Sampler.hpp"
 
@@ -337,11 +338,11 @@ namespace engine::imagegraph::detail {
 		Vector2 position = PolarVector(c, "position", {}), center = PolarVector(c, "center", {.5, .5}),
 				scale = PolarVector(c, "scale", {1, 1});
 		const auto positionUnit = c.Integer("position_unit", 1), centerUnit = c.Integer("center_unit", 1);
-		if (!c.Input("position") && positionUnit == 1) {
+		if (!c.Input("position") && !SourceMirrorPathSampled(c, "position") && positionUnit == 1) {
 			position.X *= reference.X;
 			position.Y *= reference.Y;
 		}
-		if (!c.Input("center") && centerUnit == 1) {
+		if (!c.Input("center") && !SourceMirrorPathSampled(c, "center") && centerUnit == 1) {
 			center.X *= reference.X;
 			center.Y *= reference.Y;
 		}
