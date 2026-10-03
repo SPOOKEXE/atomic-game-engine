@@ -40,7 +40,7 @@ Milestone labels describe development scope, not release versions.
 
 - [x] Pixel Composer foundations:
 
-  1. Retain the source licence, pinned metadata and enum choices; save instance ports, graph selectors and cooked-shader references.
+  1. Retain the source licence, pinned metadata, enum choices and typed shader inputs; save instance ports, graph selectors and cooked-shader references.
   2. Evaluate bounded image/data, path, palette and image kernels, including shapes, Nine Slice and Padding; inherit instance routes.
   3. Replay animation, persisted Gradients, Time Remap, FLIP/Verlet, Strand and rigid actors with bounded history; retain random state, resolve FFT windows and rasterize trails/VFX.
   4. Edit graphs, groups, keys and tiles atomically; insert source Gradient/Matrix keys, preserve refused timeline selections and save rigid meshes with metadata.

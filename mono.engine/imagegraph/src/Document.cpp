@@ -1047,7 +1047,8 @@ namespace engine::imagegraph {
 			if (side == PortDirection::Input) {
 				for (const DynamicInput &input : node.DynamicInputs) {
 					if (input.Id == id) {
-						if (const auto selected = detail::SourceLuaArgumentType(node, id)) return selected;
+						if (node.Type != "pc.hlsl")
+							if (const auto selected = detail::SourceArgumentType(node, id)) return selected;
 						return input.Type;
 					}
 				}
@@ -4029,6 +4030,7 @@ namespace engine::imagegraph {
 						  CatalogueAuthoredArray(*dynamicCatalogue, *dynamicTemplate, *dynamicArray)));
 					if (input.Type != ValueType::Any && TypeOf(*input.Default) != input.Type &&
 						!detail::SourceLuaArgumentType(node, input.Id) &&
+						!(node.Type == "pc.hlsl" && detail::SourceArgumentType(node, input.Id)) &&
 						!detail::PuppetControlValue(node, input.Id, input.Type, *input.Default) &&
 						!sourceDefault) {
 						SetDiagnostic(
@@ -5218,7 +5220,9 @@ namespace engine::imagegraph {
 						document.FormatVersion >= 9 && keyframe.Interpolation == "source" &&
 						input.Type == ValueType::Any && source && source->Type == ValueType::Any;
 					if ((physicalAny ||
-						 detail::SourceLuaArgumentType(document.Nodes[node->second], input.Id)) &&
+						 detail::SourceLuaArgumentType(document.Nodes[node->second], input.Id) ||
+						 (document.Nodes[node->second].Type == "pc.hlsl" &&
+						  input.Id.starts_with("argument_value_"))) &&
 						IsAuthoredValueType(TypeOf(keyframe.Data)))
 						keyedType = TypeOf(keyframe.Data);
 					else if (IsAuthoredValueType(input.Type))
@@ -5956,6 +5960,118 @@ namespace engine::imagegraph {
 				const auto input = junctionInputs.find(current);
 				if (input == junctionInputs.end()) break;
 				current = input->second->FromNode;
+			}
+		}
+		uint64_t hlslDeclarationWork = 0;
+		for (const auto &node : document.Nodes) {
+			if (node.Type != "pc.hlsl") continue;
+			for (const auto &input : node.DynamicInputs) {
+				if (!input.Id.starts_with("argument_value_")) continue;
+				const std::string selector =
+					"argument_type_" + input.Id.substr(std::string_view("argument_value_").size());
+				const Node *ownerPointer = inputRouteOwner(node, selector);
+				if (!ownerPointer) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"HLSL selector owner resolution exceeds bounded work",
+						node.Id,
+						selector
+					);
+					return diagnostic.Code;
+				}
+				const Node &owner = *ownerPointer;
+				const uint64_t work = effectiveLinks.size() + resolvedInputs.size() +
+									  document.Keyframes.size() + document.Nodes.size() +
+									  owner.SourceInputExpressions.size();
+				if (work > 64'000'000 - hlslDeclarationWork) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"HLSL declaration validation exceeds work bound",
+						node.Id,
+						selector
+					);
+					return diagnostic.Code;
+				}
+				hlslDeclarationWork += work;
+				const auto literal =
+					std::find_if(resolvedInputs.begin(), resolvedInputs.end(), [&](const auto &value) {
+						return value.NodeId == node.Id && value.Port == selector;
+					});
+				const Value *resolved = literal == resolvedInputs.end() ? nullptr : &literal->Data;
+				const bool linked =
+					std::any_of(effectiveLinks.begin(), effectiveLinks.end(), [&](const auto &link) {
+						return link.ToNode == node.Id && link.ToPort == selector;
+					});
+				const bool animated =
+					!resolved &&
+					std::any_of(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
+						return key.NodeId == owner.Id && key.Port == selector;
+					});
+				const bool expression =
+					!resolved &&
+					std::any_of(
+						owner.SourceInputExpressions.begin(),
+						owner.SourceInputExpressions.end(),
+						[&](const auto &program) { return program.Enabled && program.Port == selector; }
+					);
+				if (linked || animated || expression) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedExecution,
+						"dynamic HLSL argument type requires a matching native cooked schema",
+						node.Id,
+						selector
+					);
+					return diagnostic.Code;
+				}
+				const auto type = detail::SourceArgumentType(owner, input.Id, resolved);
+				if (!type || *type != input.Type) {
+					SetDiagnostic(
+						diagnostic,
+						Status::TypeMismatch,
+						"HLSL argument declaration differs from its resolved type selector",
+						node.Id,
+						input.Id
+					);
+					return diagnostic.Code;
+				}
+				const Node *valueOwner = inputRouteOwner(node, input.Id);
+				if (!valueOwner) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"HLSL value owner resolution exceeds bounded work",
+						node.Id,
+						input.Id
+					);
+					return diagnostic.Code;
+				}
+				if (input.Default && valueOwner == &node &&
+					!detail::SourceHlslArgumentValue(owner, input.Id, *input.Default, resolved)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::TypeMismatch,
+						"HLSL argument value does not match its declared source shape",
+						node.Id,
+						input.Id
+					);
+					return diagnostic.Code;
+				}
+				for (const auto &key : document.Keyframes) {
+					if (key.NodeId != valueOwner->Id || key.Port != input.Id) continue;
+					if (!detail::SourceHlslArgumentValue(owner, input.Id, key.Data, resolved)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::TypeMismatch,
+							"HLSL argument key does not match its declared source shape",
+							node.Id,
+							input.Id
+						);
+						return diagnostic.Code;
+					}
+				}
 			}
 		}
 		for (const auto &node : document.Nodes) {
@@ -9930,6 +10046,30 @@ namespace engine::imagegraph {
 						}
 					);
 					if (input.Type == ValueType::Image) {
+						if (node.Type == "pc.hlsl" && link == plan.EffectiveLinks.end()) {
+							const Node &owner = inputOwner(input.Id);
+							const auto declared = std::find_if(
+								owner.DynamicInputs.begin(),
+								owner.DynamicInputs.end(),
+								[&](const auto &candidate) { return candidate.Id == input.Id; }
+							);
+							if (declared != owner.DynamicInputs.end() && declared->Default &&
+								detail::SourceHlslArgumentValue(
+									node,
+									input.Id,
+									*declared->Default,
+									context.Find(
+										"argument_type_" +
+										input.Id.substr(std::string_view("argument_value_").size())
+									)
+								)) {
+								if (const auto *surface = std::get_if<SurfaceValue>(&*declared->Default))
+									context.Images.emplace_back(input.Id, &surface->Data);
+								else
+									context.ValueViews.emplace_back(input.Id, &*declared->Default);
+								continue;
+							}
+						}
 						if (link == plan.EffectiveLinks.end() && input.Default &&
 							detail::SourceLuaArgumentType(node, input.Id)) {
 							context.ValueViews.emplace_back(input.Id, &*input.Default);
@@ -9981,6 +10121,25 @@ namespace engine::imagegraph {
 						}
 						context.ValueViews.emplace_back(input.Id, &found->Data);
 					} else {
+						if (node.Type == "pc.hlsl" && input.Id.starts_with("argument_type_")) {
+							const auto resolvedAt = [&](std::string_view ownerId) {
+								return std::find_if(
+									plan.ResolvedInputs.begin(),
+									plan.ResolvedInputs.end(),
+									[&](const auto &value) {
+										return value.NodeId == ownerId && value.Port == input.Id;
+									}
+								);
+							};
+							auto resolved = resolvedAt(node.Id);
+							if (resolved == plan.ResolvedInputs.end())
+								resolved = resolvedAt(inputOwner(input.Id).Id);
+							if (resolved != plan.ResolvedInputs.end()) {
+								context.LinkedValues.emplace_back(input.Id);
+								context.ValueViews.emplace_back(input.Id, &resolved->Data);
+								continue;
+							}
+						}
 						std::optional<Quaternion> projection;
 						if (const auto *view = SharedGroupInputView(
 								document, request.GroupReplay, node, input.Id, &projection

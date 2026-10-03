@@ -1236,6 +1236,7 @@ namespace engine::imagegraph {
 			const auto *array = std::get_if<ArrayValue>(edit.LocalValue);
 			if (input->Type != ValueType::Any && detail::PayloadType(*edit.LocalValue) != input->Type &&
 				!detail::SourceLuaArgumentType(*node, edit.EditedPort) &&
+				!detail::SourceHlslArgumentValue(*node, edit.EditedPort, *edit.LocalValue) &&
 				!CatalogueSourceRawValue(*input, *edit.LocalValue) &&
 				!CatalogueSourceEnumValue(*input, *edit.LocalValue) &&
 				!(array && CatalogueAuthoredArray(*FindCatalogueEntry(node->Type), *input, *array)))

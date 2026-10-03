@@ -3,6 +3,7 @@
 #include "ArrayOps.hpp"
 #include "SimulationAliases.hpp"
 #include "SourceGetterProjection.hpp"
+#include "SourceLuaSockets.hpp"
 #include "SourceMappedInputs.hpp"
 #include "ValuePayload.hpp"
 
@@ -115,9 +116,23 @@ namespace engine::imagegraph::detail {
 		) {
 			if (SourceMappedSynthetic(context.Entry, input)) return true;
 			const bool mapped = SourceRangeMapped(context, port);
+			const bool hlslTuple =
+				context.Entry.Type == "pc.hlsl" && port.starts_with("argument_value_") &&
+				SourceArgumentType(
+					context.Authored,
+					port,
+					context.Find(
+						"argument_type_" +
+						std::string(port.substr(std::string_view("argument_value_").size()))
+					)
+				) == ValueType::Array;
 			InputRows selected{
 				port, mapped ? ValueType::Any : input.Type, index, uint8_t(mapped ? 1 : input.ArrayDepth)
 			};
+			if (hlslTuple) {
+				selected.Depth = 1;
+				selected.Type = ValueType::Array;
+			}
 			for (const auto &[id, array] : context.ImageArrays)
 				if (id == port) selected.Images = array;
 			const Value *value = mapped ? SourceMappedRange(context, port) : context.Find(port);
@@ -153,7 +168,7 @@ namespace engine::imagegraph::detail {
 			if (input.ArrayDepth >= Limits::MaximumArrayDepth) return true;
 			if (context.Entry.Type == "pc.3_d_mesh_plane" && port == "both_side")
 				return context.Fail(Status::UnsupportedExecution, "source Both Side rejects arrays", port);
-			if (!mapped && !spriteShape && !atlasDraw && !input.ArrayDepthKnown)
+			if (!mapped && !spriteShape && !atlasDraw && !hlslTuple && !input.ArrayDepthKnown)
 				return context.Fail(
 					Status::UnsupportedExecution, "source input array depth is dynamic", port
 				);

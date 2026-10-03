@@ -1,5 +1,6 @@
 #include "SourceGetterProjection.hpp"
 
+#include "SourceLuaSockets.hpp"
 #include "SourceMappedInputs.hpp"
 #include "TimelineDrivers.hpp"
 #include "ValuePayload.hpp"
@@ -267,6 +268,35 @@ namespace engine::imagegraph::detail {
 			for (const auto &input : Context.Authored.DynamicInputs) {
 				size_t group = 0;
 				const auto *source = FindDynamicTemplate(Context.Entry, input.Id, group);
+				if (source && Context.Authored.Type == "pc.hlsl" &&
+					SourceArgumentType(Context.Authored, input.Id)) {
+					const std::string selector =
+						"argument_type_" + input.Id.substr(std::string_view("argument_value_").size());
+					const auto declaredType =
+						SourceArgumentType(Context.Authored, input.Id, Context.Find(selector));
+					if (!declaredType || *declaredType != input.Type)
+						return Context.Fail(
+							Status::UnsupportedExecution,
+							"resolved HLSL argument type differs from its native cooked schema",
+							selector
+						);
+					const auto *value = Context.Find(input.Id);
+					if (value &&
+						!SourceHlslArgumentValue(
+							Context.Authored,
+							input.Id,
+							*value,
+							Context.Find(
+								"argument_type_" + input.Id.substr(std::string_view("argument_value_").size())
+							),
+							true
+						))
+						return Context.Fail(
+							Status::TypeMismatch,
+							"HLSL argument value does not match its declared source shape",
+							input.Id
+						);
+				}
 				if (source && !visit(*source, input.Id)) return false;
 			}
 			return true;
@@ -274,6 +304,14 @@ namespace engine::imagegraph::detail {
 		size_t count = 0;
 		uint64_t payloadBytes = 0;
 		if (!inputs([&](const CatalogueInput &input, std::string_view port) {
+				if (Context.Authored.Type == "pc.hlsl" && SourceArgumentType(Context.Authored, port) &&
+					Context.Find(port)) {
+					if (const auto tuple = Components(*Context.Find(port), false)) {
+						++count;
+						payloadBytes += tuple->Count * sizeof(ElementValue);
+						return true;
+					}
+				}
 				if (!CatalogueSourceRawValue(input, Value{0.})) return true;
 				const auto *value =
 					SourceRangeMapped(Context, port) ? SourceMappedRange(Context, port) : Context.Find(port);
@@ -338,6 +376,18 @@ namespace engine::imagegraph::detail {
 		try {
 			Projected.reserve(count);
 			if (!inputs([&](const CatalogueInput &input, std::string_view port) {
+					if (Context.Authored.Type == "pc.hlsl" && SourceArgumentType(Context.Authored, port) &&
+						Context.Find(port)) {
+						if (const auto tuple = Components(*Context.Find(port), false)) {
+							ArrayValue array;
+							array.ElementType = ValueType::Scalar;
+							array.Elements.reserve(tuple->Count);
+							for (size_t i = 0; i < tuple->Count; ++i)
+								array.Elements.emplace_back(tuple->At(i));
+							Projected.emplace_back(port, std::move(array));
+							return true;
+						}
+					}
 					if (!CatalogueSourceRawValue(input, Value{0.})) return true;
 					const auto *value = SourceRangeMapped(Context, port) ? SourceMappedRange(Context, port)
 																		 : Context.Find(port);
