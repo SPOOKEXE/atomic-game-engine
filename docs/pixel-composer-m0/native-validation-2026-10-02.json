@@ -5141,6 +5141,23 @@
       "exit_code": 0,
       "result": "passed",
       "scope_note": "Release69 native CPU path validation. No new GPU, live Studio, timing or licensed-reference verification is claimed."
+    },
+    {
+      "name": "core-random-codec-release-70-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/core-random-codec-release-70-initial.log",
+      "log_sha256": "34355c85ffa94fbad3d64e9fb41d93a4e069835332e8c423664bb1860a8caf65",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-04T06:51:41+09:30",
+      "executed_date": "2026-10-04",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Focused capture codec validation passed. This is neither joined X/Y acceptance nor generic separate/combine control acceptance.",
+      "test_cases_total": 11,
+      "test_cases_passed": 11,
+      "test_cases_failed": 0,
+      "assertions_total": 162,
+      "assertions_passed": 162,
+      "assertions_failed": 0
     }
   ],
   "excluded_or_failed_runs": [
@@ -6517,6 +6534,40 @@
       "assertions_total": 1841363,
       "assertions_passed": 1841357,
       "assertions_failed": 6
+    },
+    {
+      "name": "core-mirror-axes-release-70-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/core-mirror-axes-release-70-initial.log",
+      "log_sha256": "9e1bb089d12528117edc1b788f73bbfc94c194451c1d1881cf2b74768b5cb0c6",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-04T06:51:41+09:30",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Focused X/Y group-edit validation failed at ReplayGroupAnimatorEdits; cause and repair remain under investigation.",
+      "test_cases_total": 17,
+      "test_cases_passed": 16,
+      "test_cases_failed": 1,
+      "assertions_total": 4833,
+      "assertions_passed": 4832,
+      "assertions_failed": 1
+    },
+    {
+      "name": "io-mirror-axes-release-70-initial",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-mirror-axes-release-70-initial.log",
+      "log_sha256": "14ad437ea83c6af072e068468b17a9eb53d9fb87c23f21b7455e2d471933b129",
+      "summary_utf8_replacement_required": false,
+      "log_mtime": "2026-10-04T06:51:42+09:30",
+      "executed_date": "2026-10-04",
+      "exit_code": 42,
+      "result": "failed; retained before native acceptance",
+      "scope_note": "Focused PXC validation failed at archive fixture preparation and dormant-key count expectation; cause and repair remain under investigation.",
+      "test_cases_total": 7,
+      "test_cases_passed": 5,
+      "test_cases_failed": 2,
+      "assertions_total": 108,
+      "assertions_passed": 106,
+      "assertions_failed": 2
     }
   ],
   "pinned_gml_helper_translation": {
