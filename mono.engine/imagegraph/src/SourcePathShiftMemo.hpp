@@ -10,12 +10,15 @@ namespace engine::imagegraph::detail {
 	struct SourcePathShiftMemo {
 		struct Owner {
 			std::string NodeId, Port, Route;
+			std::array<SourcePathPointBuffer, 2> SequentialBuffers{};
+			bool SequentialInitialized = false;
 		};
 		struct Entry {
 			uint64_t OwnerId = 0;
 			size_t Line = 0;
 			SourcePathShiftKey Ratio;
 			SourcePathShiftSample Point;
+			double Coordinate = 0;
 		};
 		AllocationReservation Charge;
 		std::vector<Owner> Owners;
@@ -84,6 +87,42 @@ namespace engine::imagegraph::detail {
 			if (!Charge.Merge(std::move(*admission))) std::terminate();
 			return Owners.size();
 		}
+		bool Step(NodeContext &context) {
+			if (++LookupWork <= MAXIMUM_LOOKUP_WORK) return true;
+			return context.Fail(
+				Status::LimitExceeded, "Source sequential path sampling work exceeds bounds", "path"
+			);
+		}
+		Owner *SequentialOwner(NodeContext &context, const SourcePathData2D &operation) {
+			if (!operation.EvaluationMemoId || operation.EvaluationMemoId > Owners.size()) {
+				context.Fail(
+					Status::InvalidValue, "Source sequential path lacks its evaluation identity", "path"
+				);
+				return nullptr;
+			}
+			auto &owner = Owners[operation.EvaluationMemoId - 1];
+			if (!owner.SequentialInitialized) {
+				owner.SequentialBuffers = {
+					operation.Sequential->SmoothPoint, operation.Sequential->SmoothProbe
+				};
+				for (const auto &sample : operation.Sequential->Cache) {
+					const auto key = operation.Kind == SourcePathOperationKind::Smoothen
+										 ? SourceShiftRatioKey(sample.Coordinate)
+										 : SourcePathDistanceKey(sample.Coordinate);
+					if (!key || !Store(
+									context,
+									operation.EvaluationMemoId,
+									*key,
+									sample.Line,
+									{sample.Point.Position.X, sample.Point.Position.Y, sample.Point.Weight},
+									sample.Coordinate
+								))
+						return nullptr;
+				}
+				owner.SequentialInitialized = true;
+			}
+			return &owner;
+		}
 		const Entry *Find(NodeContext &context, uint64_t owner, const SourcePathShiftKey &key, size_t line) {
 			if (!owner || owner > Owners.size()) {
 				context.Fail(
@@ -107,10 +146,11 @@ namespace engine::imagegraph::detail {
 			uint64_t owner,
 			const SourcePathShiftKey &key,
 			size_t line,
-			SourcePathShiftSample point
+			SourcePathShiftSample point,
+			double coordinate = 0
 		) {
 			if (!Grow(context, Entries)) return false;
-			Entries.push_back({owner, line, key, point});
+			Entries.push_back({owner, line, key, point, coordinate});
 			return true;
 		}
 	};
@@ -135,6 +175,9 @@ namespace engine::imagegraph::detail {
 	bool StampSourcePathShiftInputs(NodeContext &context);
 	bool StampSourcePathShiftProducedValues(NodeContext &context);
 	bool StampSourcePathShiftOutput(NodeContext &context, Path2D &path);
+	bool SyncSourcePathSequentialValue(
+		SourcePathShiftMemo &, Value &, EvaluationBudget &, AllocationReservation &, Diagnostic &
+	);
 	void StripSourcePathShiftIdentities(Value &value);
 	void StripSourcePathShiftIdentities(Node &node);
 	bool StampSourcePathShiftHostOutput(NodeContext &context, AuthoredValue &value);

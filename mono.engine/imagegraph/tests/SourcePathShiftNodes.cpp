@@ -13,6 +13,14 @@
 TEST_SUITE_ID("engine.imagegraph.source_path_shift")
 using namespace engine::imagegraph;
 namespace {
+	const DataReplayEntry &ShiftReplayOwner(const DataReplayState &state, std::string_view id) {
+		const auto matches = [&](const auto &entry) { return entry.NodeId == id && entry.ProcessorRow == 0; };
+		REQUIRE(std::count_if(state.Entries.begin(), state.Entries.end(), matches) == 1);
+		const auto &entry = *std::find_if(state.Entries.begin(), state.Entries.end(), matches);
+		REQUIRE(entry.Initialized);
+		REQUIRE(entry.Values.size() == 1);
+		return entry;
+	}
 	Path2D ShiftLine() {
 		Path2D path;
 		path.Anchors = {{{0, 0, 0, 0, 0, 0}, 0}, {{10, 0, 0, 0, 0, 0}, 0}};
@@ -427,8 +435,15 @@ TEST_CASE(
 	const auto status = EvaluateStateful(document, ShiftCompile(document), "points", request, result, error);
 	INFO(error.Message);
 	REQUIRE(status == Status::Ok);
-	REQUIRE(result.Data.Entries.size() == 1);
-	CHECK(std::get<Path2D>(result.Data.Entries[0].Values[0].Data).SourceOperation->EvaluationMemoId == 0);
+	const auto &unused = ShiftReplayOwner(result.Data, "unused");
+	CHECK(std::get<Path2D>(unused.Values[0].Data).SourceOperation->EvaluationMemoId == 0);
+	for (const auto id : {"first", "second"}) {
+		const auto &sampler = ShiftReplayOwner(result.Data, id);
+		const auto &buffers = std::get<ArrayValue>(sampler.Values[0].Data);
+		CHECK(buffers.ElementType == ValueType::Vector4);
+		REQUIRE(buffers.Elements.size() == 6);
+	}
+
 	CHECK(std::get<Path2D>(prior.Entries[0].Values[0].Data).SourceOperation->EvaluationMemoId == 124);
 }
 
@@ -494,8 +509,12 @@ TEST_CASE(
 	request.DataReplay = nullptr;
 	REQUIRE(EvaluateStateful(document, plan, "point", request, fresh, error) == Status::Ok);
 	CHECK(std::get<EvaluatedValue>(next.Output) == std::get<EvaluatedValue>(fresh.Output));
-	REQUIRE(next.Data.Entries.size() == 1);
-	const auto &path = std::get<Path2D>(next.Data.Entries[0].Values[0].Data);
+	const auto &redistribute = ShiftReplayOwner(next.Data, "redistribute");
+	const auto &path = std::get<Path2D>(redistribute.Values[0].Data);
+	const auto &sampler = ShiftReplayOwner(next.Data, "sample");
+	const auto &buffers = std::get<ArrayValue>(sampler.Values[0].Data);
+	CHECK(buffers.ElementType == ValueType::Vector4);
+	REQUIRE(buffers.Elements.size() == 6);
 	REQUIRE(path.SourceOperation);
 	REQUIRE(path.SourceOperation->Inputs[0].SourceOperation);
 	CHECK(path.SourceOperation->Inputs[0].SourceOperation->EvaluationMemoId == 0);

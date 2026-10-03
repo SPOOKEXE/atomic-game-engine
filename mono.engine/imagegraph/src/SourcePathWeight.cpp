@@ -74,6 +74,35 @@ namespace engine::imagegraph::detail {
 		const auto point = Data->Runtime.Ratio(ratio, line);
 		return {point.Position.X, point.Position.Y, point.Weight};
 	}
+	SourcePathPointBuffer
+	SourcePathWeightRuntime3D::RatioInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
+		return Data->Runtime.RatioInto(ratio, line, out);
+	}
+	SourcePathPointBuffer
+	SourcePathWeightRuntime3D::DistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+		return Data->Runtime.DistanceInto(distance, line, out);
+	}
+	size_t SourcePathWeightRuntime3D::OriginalChildCount() const {
+		return Data->Runtime.OriginalChildCount();
+	}
+	size_t SourcePathWeightRuntime3D::OriginalChildLineCount(size_t index) const {
+		const auto *child = Data->Runtime.OriginalChild(index);
+		return child ? child->LineCount() : 0;
+	}
+	double SourcePathWeightRuntime3D::OriginalChildLength(size_t index) const {
+		const auto *child = Data->Runtime.OriginalChild(index);
+		return child ? child->Length() : 0;
+	}
+	size_t SourcePathWeightRuntime3D::OriginalChildSegmentCount(size_t index) const {
+		const auto *child = Data->Runtime.OriginalChild(index);
+		return child ? child->SourceSegmentCount() : 0;
+	}
+	SourcePathPointBuffer SourcePathWeightRuntime3D::OriginalChildDistanceInto(
+		size_t index, double distance, size_t line, SourcePathPointBuffer &out
+	) const {
+		const auto *child = Data->Runtime.OriginalChild(index);
+		return child ? child->DistanceInto(distance, line, out) : out;
+	}
 	size_t SourcePathWeightRuntime3D::LineCount() const {
 		return Data->Runtime.LineCount();
 	}

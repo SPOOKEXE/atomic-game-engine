@@ -29,6 +29,15 @@ namespace engine::imagegraph::detail {
 		SourcePathWeightRuntime3D &operator=(SourcePathWeightRuntime3D &&) noexcept;
 		bool Valid() const;
 		std::array<double, 3> Ratio(double ratio, size_t line) const;
+		SourcePathPointBuffer RatioInto(double ratio, size_t line, SourcePathPointBuffer &out) const;
+		SourcePathPointBuffer DistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const;
+		size_t OriginalChildCount() const;
+		size_t OriginalChildLineCount(size_t child) const;
+		double OriginalChildLength(size_t child) const;
+		size_t OriginalChildSegmentCount(size_t child) const;
+		SourcePathPointBuffer OriginalChildDistanceInto(
+			size_t child, double distance, size_t line, SourcePathPointBuffer &out
+		) const;
 		size_t LineCount() const;
 		double Length(size_t line) const;
 		size_t SegmentCount(size_t line) const;

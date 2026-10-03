@@ -221,7 +221,10 @@ namespace engine::imagegraph::detail {
 				const bool numeric = leaf == ValueType::Scalar || leaf == ValueType::Integer;
 				const bool supported =
 					mapped || input.Type == ValueType::Any || input.Type == ValueType::Array ||
-					leaf == input.Type || (leaf == ValueType::Atlas && input.Type == ValueType::Image) ||
+					leaf == input.Type ||
+					(leaf == ValueType::Path3D && port == "path" &&
+					 (context.Entry.Type == "pc.path_sample" || context.Entry.Type == "pc.path_smoothen")) ||
+					(leaf == ValueType::Atlas && input.Type == ValueType::Image) ||
 					(numeric && (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
 								 input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
 								 input.Type == ValueType::Vector2 || input.Type == ValueType::Vector3 ||
@@ -768,6 +771,9 @@ namespace engine::imagegraph::detail {
 					if (const auto kind = PayloadType(item);
 						!lookAtControl && input.Type != ValueType::Any && input.Type != ValueType::Array &&
 						kind != input.Type && !(kind == ValueType::Array && input.Depth > 0) &&
+						!(kind == ValueType::Path3D && input.Port == "path" &&
+						  (context.Entry.Type == "pc.path_sample" ||
+						   context.Entry.Type == "pc.path_smoothen")) &&
 						!((kind == ValueType::Scalar || kind == ValueType::Integer) &&
 						  (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
 						   input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||

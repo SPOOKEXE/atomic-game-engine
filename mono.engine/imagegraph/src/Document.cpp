@@ -38,6 +38,7 @@
 #include "SourceInputOrigin.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourceMirrorPathProjection.hpp"
+#include "SourcePathSequentialCodec.hpp"
 #include "SourcePathShapeCodec.hpp"
 #include "SourcePathShiftMemo.hpp"
 #include "SourceRigidCodec.hpp"
@@ -1228,6 +1229,9 @@ namespace engine::imagegraph {
 						   : operation.Kind == SourcePathOperationKind::Transform	 ? "transform"
 						   : operation.Kind == SourcePathOperationKind::AreaMap		 ? "area_map"
 						   : operation.Kind == SourcePathOperationKind::Shift		 ? "shift"
+						   : operation.Kind == SourcePathOperationKind::Extends		 ? "extends"
+						   : operation.Kind == SourcePathOperationKind::Flatten		 ? "flatten"
+						   : operation.Kind == SourcePathOperationKind::Smoothen	 ? "smoothen"
 						   : operation.Kind == SourcePathOperationKind::WeightAdjust ? "weight_adjust"
 																					 : "combine")
 					   << ' ' << operation.Inputs.size();
@@ -1275,6 +1279,16 @@ namespace engine::imagegraph {
 						   << operation.WeightCurve.size();
 					for (double value : operation.WeightCurve)
 						stream << ' ' << value;
+					stream << ' ' << bool(operation.WeightInput3D);
+					if (operation.WeightInput3D) {
+						stream << ' ';
+						PathValue3D child;
+						child.Data = operation.WeightInput3D;
+						WriteValue(stream, Value{std::move(child)});
+					}
+				}
+				if (detail::SourceSequentialKind(operation.Kind)) {
+					detail::WriteSourceSequential(stream, *operation.Sequential);
 					stream << ' ' << bool(operation.WeightInput3D);
 					if (operation.WeightInput3D) {
 						stream << ' ';
@@ -2118,7 +2132,8 @@ namespace engine::imagegraph {
 					(kind != "reverse" && kind != "combine" && kind != "trim" && kind != "offset" &&
 					 kind != "blend" && kind != "join" && kind != "redistribute" && kind != "skew" &&
 					 kind != "transform" && kind != "area_map" && kind != "shift" &&
-					 kind != "weight_adjust") ||
+					 kind != "weight_adjust" && kind != "extends" && kind != "flatten" &&
+					 kind != "smoothen") ||
 					(kind == "blend" ? count != 2
 					 : (kind == "skew" || kind == "redistribute")
 						 ? count != 1
@@ -2137,6 +2152,9 @@ namespace engine::imagegraph {
 								 : kind == "transform"	   ? SourcePathOperationKind::Transform
 								 : kind == "area_map"	   ? SourcePathOperationKind::AreaMap
 								 : kind == "shift"		   ? SourcePathOperationKind::Shift
+								 : kind == "extends"	   ? SourcePathOperationKind::Extends
+								 : kind == "flatten"	   ? SourcePathOperationKind::Flatten
+								 : kind == "smoothen"	   ? SourcePathOperationKind::Smoothen
 								 : kind == "weight_adjust" ? SourcePathOperationKind::WeightAdjust
 														   : SourcePathOperationKind::Combine;
 				if (kind == "trim" &&
@@ -2242,6 +2260,33 @@ namespace engine::imagegraph {
 						auto *path3d = std::get_if<PathValue3D>(&child);
 						if (!path3d || !path3d->Data) return false;
 						operation.WeightInput3D = std::move(path3d->Data);
+					}
+				}
+				if (detail::SourceSequentialKind(operation.Kind)) {
+					if (count || !admit(sizeof(SourcePathSequentialData2D)) ||
+						!detail::ReadSourceSequential(
+							stream, operation.Sequential.emplace(), operation.Kind, admit
+						))
+						return false;
+					unsigned present = 0;
+					if (!(stream >> present) || present > 1) return false;
+					if (present) {
+						Value child;
+						if (!ReadValue(
+								stream,
+								child,
+								version,
+								false,
+								budget,
+								outputCharge,
+								allocationRefused,
+								depth + 1,
+								arrayCount
+							))
+							return false;
+						auto *spatial = std::get_if<PathValue3D>(&child);
+						if (!spatial || !spatial->Data) return false;
+						operation.WeightInput3D = std::move(spatial->Data);
 					}
 				}
 				if (kind == "shift" && !(stream >> operation.ShiftDistance >> operation.ShiftRange.X >>
@@ -11316,8 +11361,8 @@ namespace engine::imagegraph {
 				}
 				if (simulation && simulation->Data) {
 					for (auto &update : context.DataUpdates) {
-						for (auto &frame : update.Values)
-							detail::StripSourcePathShiftIdentities(frame.Data);
+						// Current evaluation tags remain private until the complete source
+						// sampling journal is synchronized into owned candidate receipts.
 						const uint64_t bytes = RetainedDataReplayEntryBytes(update);
 						auto admitted = context.OutputCharge.Split(bytes);
 						if (!admitted || !simulation->Charge->Merge(std::move(*admitted))) {
@@ -13903,6 +13948,24 @@ namespace engine::imagegraph {
 				}
 			}
 		}
+		if (simulation && simulation->Data) {
+			for (auto &entry : simulation->Data->Entries)
+				for (auto &frame : entry.Values) {
+					if (!detail::SyncSourcePathSequentialValue(
+							pathShiftMemo, frame.Data, budget, *simulation->Charge, diagnostic
+						))
+						return diagnostic.Code;
+					detail::StripSourcePathShiftIdentities(frame.Data);
+				}
+		}
+		for (size_t i = 0; i < results.size(); ++i)
+			if (produced[i])
+				if (auto *values = FindValueOutputs(results[i]))
+					for (auto &value : *values)
+						if (!detail::SyncSourcePathSequentialValue(
+								pathShiftMemo, value.Data, budget, resultCharges[i], diagnostic
+							))
+							return diagnostic.Code;
 		if (batch && nodeInputs && !inputsCaptured) {
 			SetDiagnostic(
 				diagnostic,
@@ -14928,8 +14991,11 @@ namespace engine::imagegraph {
 				for (const auto &entry : request.DataReplay->Entries)
 					if (std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
 							return node.Id == entry.NodeId;
-						}))
+						})) {
 						candidate.Data.Entries.push_back(entry);
+						for (auto &frame : candidate.Data.Entries.back().Values)
+							detail::StripSourcePathShiftIdentities(frame.Data);
+					}
 			capture.Data = &candidate.Data;
 		}
 

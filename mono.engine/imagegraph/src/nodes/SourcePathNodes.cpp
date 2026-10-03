@@ -1,3 +1,4 @@
+#include "../SourcePathSequentialState.hpp"
 #include "Families.hpp"
 #include "Path.hpp"
 
@@ -192,21 +193,14 @@ namespace engine::imagegraph::detail {
 				return context.Fail(
 					Status::InvalidValue, "path sample line index is undefined", "path_index"
 				);
-			const auto point = runtime.PointRatio(ratio, size_t(index)),
-					   before = runtime.PointRatio(std::clamp(ratio - .0001, 0.0, 1.0), size_t(index)),
-					   after = runtime.PointRatio(std::clamp(ratio + .0001, 0.0, 1.0), size_t(index));
-			if (context.FailureCode != Status::Ok) return false;
-			const double dx = (after.X - before.X) * (inverted ? -1 : 1),
-						 dy = (after.Y - before.Y) * (inverted ? -1 : 1);
-			double direction = std::atan2(-dy, dx) * 180 / std::numbers::pi;
-			if (direction < 0) direction += 360;
-			if (!std::isfinite(point.X) || !std::isfinite(point.Y) || !std::isfinite(point.Weight) ||
-				!std::isfinite(direction))
-				return context.Fail(Status::InvalidValue, "path sample geometry is undefined", "path");
-			context.SetValue("position", Vector2{point.X, point.Y});
-			context.SetValue("direction", direction);
-			context.SetValue("weight", point.Weight);
-			return context.FailureCode == Status::Ok;
+			if (!LoadSourceSamplerBuffers(context)) return false;
+			auto &buffers = *context.SourceSamplerBuffers;
+			buffers[0] = runtime.PointRatioInto(ratio, size_t(index), buffers[0]);
+			buffers[1] = runtime.PointRatioInto(std::clamp(ratio - .0001, 0., 1.), size_t(index), buffers[1]);
+			buffers[2] = runtime.PointRatioInto(std::clamp(ratio + .0001, 0., 1.), size_t(index), buffers[2]);
+			if (context.FailureCode != Status::Ok || !SetSourceSamplerOutputs(context, inverted))
+				return false;
+			return context.FailureCode == Status::Ok && PublishSourceSamplerBuffers(context);
 		}
 	}
 	std::span<const ExecutorEntry> SourcePathExecutors() {

@@ -1,4 +1,5 @@
 #pragma once
+#include "SourcePathSequentialPayload.hpp"
 #include "SourcePathShape.hpp"
 #include "SourceVerletPath.hpp"
 
@@ -27,6 +28,23 @@ namespace engine::imagegraph::detail {
 		if (path.Loop || path.Segmented || !path.Anchors.empty() || !path.Weights.empty()) return false;
 		const auto &op = *path.SourceOperation;
 		if (op.Shape && op.Kind != SourcePathOperationKind::Shape) return false;
+		const bool sequential = SourceSequentialKind(op.Kind);
+		if (sequential) {
+			if (!op.Sequential || !op.Inputs.empty() ||
+				!ValidSourceSequential(*op.Sequential, op.Kind, count))
+				return false;
+			if (op.Kind != SourcePathOperationKind::Smoothen && !op.WeightInput3D) return false;
+			if (op.WeightInput3D && !ValidSourceWeightInput3D(*op.WeightInput3D, depth + 1, count))
+				return false;
+			if (op.Kind == SourcePathOperationKind::Flatten && op.WeightInput3D) {
+				if (!op.WeightInput3D->SourceOperation ||
+					op.WeightInput3D->SourceOperation->Kind != SourcePathOperationKind::Combine)
+					return false;
+				for (uint32_t owner : op.Sequential->FlattenOwners)
+					if (owner >= op.WeightInput3D->SourceOperation->Inputs.size()) return false;
+			}
+		} else if (op.Sequential)
+			return false;
 		if (op.Kind == SourcePathOperationKind::Redistribute) {
 			if (!op.RedistributeMap || op.Inputs.size() != 1 || 33 > Limits::MaximumArrayElements - *count)
 				return false;
@@ -71,15 +89,16 @@ namespace engine::imagegraph::detail {
 				return false;
 			for (double value : op.WeightCurve)
 				if (!std::isfinite(value)) return false;
-		} else if (op.WeightInput3D || !op.WeightCurve.empty() || op.WeightType || op.WeightMode ||
-				   op.WeightLoop || op.WeightValue != 0 || op.WeightDirection != 0 ||
+		} else if ((!sequential && op.WeightInput3D) || !op.WeightCurve.empty() || op.WeightType ||
+				   op.WeightMode || op.WeightLoop || op.WeightValue != 0 || op.WeightDirection != 0 ||
 				   op.WeightRange != Vector2{0, 1})
 			return false;
 		if (!std::isfinite(op.ShiftDistance) || !std::isfinite(op.ShiftRange.X) ||
 			!std::isfinite(op.ShiftRange.Y))
 			return false;
 		if (op.Kind != SourcePathOperationKind::Shift &&
-			(op.ShiftDistance != 0 || op.ShiftRange != Vector2{0, 1} || op.ShiftLoop || op.EvaluationMemoId))
+			(op.ShiftDistance != 0 || op.ShiftRange != Vector2{0, 1} || op.ShiftLoop ||
+			 (!sequential && op.EvaluationMemoId)))
 			return false;
 		if (!std::isfinite(op.Offset) || !std::isfinite(op.BlendAmount)) return false;
 		if (op.Kind != SourcePathOperationKind::Offset && (op.Offset != 0 || op.ClampOffset)) return false;
@@ -122,7 +141,8 @@ namespace engine::imagegraph::detail {
 			op.Kind != SourcePathOperationKind::Blend && op.Kind != SourcePathOperationKind::Join &&
 			op.Kind != SourcePathOperationKind::Redistribute && op.Kind != SourcePathOperationKind::Skew &&
 			op.Kind != SourcePathOperationKind::Transform && op.Kind != SourcePathOperationKind::AreaMap &&
-			op.Kind != SourcePathOperationKind::Shift && op.Kind != SourcePathOperationKind::WeightAdjust)
+			op.Kind != SourcePathOperationKind::Shift && op.Kind != SourcePathOperationKind::WeightAdjust &&
+			!sequential)
 			return false;
 		if (op.Kind != SourcePathOperationKind::Combine && op.Kind != SourcePathOperationKind::Join &&
 			op.Kind != SourcePathOperationKind::Blend && op.Inputs.size() > 1)
@@ -149,6 +169,7 @@ namespace engine::imagegraph::detail {
 				bytes += value;
 				return true;
 			};
+			if (op.Sequential && !add(SourceSequentialBytes<Retained>(*op.Sequential))) return UINT64_MAX;
 			if (op.WeightInput3D && !add(SourceWeightInput3DBytes(*op.WeightInput3D, Retained, depth + 1)))
 				return std::numeric_limits<uint64_t>::max();
 			if (!add((Retained ? op.WeightCurve.capacity() : op.WeightCurve.size()) * sizeof(double)))

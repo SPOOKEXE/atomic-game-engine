@@ -1,0 +1,32 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "sha256": {
+    "scripts/node_path_extends/node_path_extends.gml": "0b951947539dcf87d521d2bb8dbf989c1fa9ff5b8def18b408e5dbc2193a7963",
+    "scripts/node_path_flattern/node_path_flattern.gml": "34eb6b1ed9518b1e7fa3bf84b84935bb1455b92baaaf9ef5707b9a53ab197051",
+    "scripts/node_path_smoothen/node_path_smoothen.gml": "9cfbcdc6b443f2d5414bb6f7392ada461befdb365c929f41b7139cde56db81ab",
+    "scripts/__path/__path.gml": "5a3243e1bac128dfd342e6f4488d9e82e46ce4cada72e15677cd9b3cf4c7945d",
+    "scripts/node_path_sample/node_path_sample.gml": "3417410f84a90e767789bec8b180d746207b04d385664af9d75b402e743379cd",
+    "scripts/node_path_3d/node_path_3d.gml": "0472ae043ef0b71e5c59699a5104803a4f29fb665fcbeb6d64310066788a01b2",
+    "scripts/node_path_shape_3d/node_path_shape_3d.gml": "e779dec5d2e9b82dd1a215ef4640182653e73396ba09b9ada722d40a19f6d9a4",
+    "scripts/node_path_3d_transform/node_path_3d_transform.gml": "8b6405b339109bdc90fd9133013808cc3f1830d6192071e679ddae7b64c11d34",
+    "scripts/node_path_3d_camera/node_path_3d_camera.gml": "85d218b4ad62cd9219e1521ff4cf1abe235c46c32b950431df053a805575bcd1",
+    "scripts/globals/globals.gml": "833bfc44078933cac824a5cd48d6eebb2c06d85590de4775af5dd6d053afd3e3",
+    "scripts/__vec2/__vec2.gml": "d5dd0c328683d9d87a923206006ed4f85810f88418a4a2f6a546b9918f2fda5e",
+    "scripts/__vec3/__vec3.gml": "d643268a9145655df2774d57e580d523185bf1ce850d9ff1dd0e8ab337a480a1"
+  },
+  "official_html5_runtime": {
+    "scripts/functions/Function_String.js": {
+      "sha256": "8fea0cea0d55e9e6b1ba07aae1502d9f4e75aa4b6ccaffc66d047a8d5d2f9fd3",
+      "bytes": 42833
+    },
+    "scripts/yyVariable.js": {
+      "sha256": "da5d6a2fba34a237e563de92df55a3db96999f34b762d59dbae969b6bd08deb0",
+      "bytes": 102322
+    },
+    "scripts/yyTypes.js": {
+      "sha256": "10afe81c766f2cf932a37b3745f67f130acc919b67d60b096133fb8e99f153a1",
+      "bytes": 19679
+    }
+  },
+  "official_html5_base_url": "https://github.com/YoYoGames/GameMaker-HTML5/blob/develop/"
+}

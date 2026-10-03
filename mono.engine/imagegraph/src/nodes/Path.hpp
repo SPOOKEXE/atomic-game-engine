@@ -7,6 +7,7 @@
 
 #include "../NodeExecutors.hpp"
 #include "../SourcePathPayload.hpp"
+#include "../SourcePathSequentialMath.hpp"
 #include "../SourcePathShiftMemo.hpp"
 #include "../SourcePathWeight.hpp"
 
@@ -86,6 +87,8 @@ namespace engine::imagegraph::detail {
 				replacement.StorageCharge = std::move(*charge);
 				replacement.Operation = operation.Kind;
 				replacement.SourceData = &operation;
+				if (operation.Kind == SourcePathOperationKind::Smoothen)
+					replacement.Loop = operation.Sequential->SmoothLoop;
 				replacement.TrimRange = operation.TrimRange;
 				replacement.EvaluationContext = &context;
 				if (operation.Kind == SourcePathOperationKind::VerletMesh)
@@ -162,6 +165,14 @@ namespace engine::imagegraph::detail {
 					replacement.MaxY = bounds->W;
 					replacement.HasBoundary = true;
 				}
+				if (operation.Sequential && operation.Kind != SourcePathOperationKind::Smoothen) {
+					const auto bounds = operation.Sequential->CachedBounds;
+					replacement.MinX = bounds.X;
+					replacement.MinY = bounds.Y;
+					replacement.MaxX = bounds.Z;
+					replacement.MaxY = bounds.W;
+					replacement.HasBoundary = true;
+				}
 				if (!replacement.Shape) replacement.LengthTotal = replacement.Length();
 				if (!replacement.Inputs.empty()) {
 					const auto &first = replacement.Inputs[0];
@@ -173,7 +184,8 @@ namespace engine::imagegraph::detail {
 				}
 
 				if ((operation.Kind == SourcePathOperationKind::Shift ||
-					 operation.Kind == SourcePathOperationKind::WeightAdjust) &&
+					 operation.Kind == SourcePathOperationKind::WeightAdjust ||
+					 operation.Kind == SourcePathOperationKind::Smoothen) &&
 					replacement.Inputs.empty() && !replacement.WeightSpatial) {
 					replacement.MinX = replacement.MinY = 0;
 					replacement.MaxX = replacement.MaxY = 1;
@@ -343,6 +355,8 @@ namespace engine::imagegraph::detail {
 			return nullptr;
 		}
 		size_t LineCount() const {
+			if (SourceData && SourceData->Sequential && *Operation != SourcePathOperationKind::Smoothen)
+				return 1;
 			if (WeightSpatial) return WeightSpatial->LineCount();
 			if (SourceMesh) return LineCountSourceVerletPath(*SourceMesh);
 			if (!Operation) return 1;
@@ -356,6 +370,10 @@ namespace engine::imagegraph::detail {
 			return count;
 		}
 		double Length(size_t line = 0) const {
+			if (SourceData && SourceData->Sequential && *Operation != SourcePathOperationKind::Smoothen)
+				return SourceData->Sequential->CachedLength + (*Operation == SourcePathOperationKind::Extends
+																   ? SourceData->Sequential->ExtendLength
+																   : 0);
 			if (WeightSpatial) return WeightSpatial->Length(line);
 			if (Shape) return LengthTotal;
 			if (SourceMesh) return LengthSourceVerletPath(*SourceMesh, line);
@@ -377,6 +395,8 @@ namespace engine::imagegraph::detail {
 						 : 0;
 		}
 		size_t SegmentCount(size_t line = 0) const {
+			if (SourceData && SourceData->Sequential && *Operation != SourcePathOperationKind::Smoothen)
+				return SourceData->Sequential->CachedSegments;
 			if (WeightSpatial) return WeightSpatial->SegmentCount(line);
 			if (Shape) return Lengths.size();
 			if (SourceMesh) return SourceMesh->CachedLengths.size();
@@ -475,6 +495,7 @@ namespace engine::imagegraph::detail {
 		}
 
 		size_t AccumulatedCount(size_t line = 0) const {
+			if (SourceData && SourceData->Sequential) return SourceData->Sequential->Accumulated.size();
 			if (WeightSpatial) return WeightSpatial->AccumulatedCount(line);
 			if (SourceMesh) {
 				size_t n = SourceMesh->CachedLengths.size();
@@ -496,6 +517,10 @@ namespace engine::imagegraph::detail {
 			return child ? child->AccumulatedCount(line) : 0;
 		}
 		double AccumulatedAt(size_t index, size_t line = 0) const {
+			if (SourceData && SourceData->Sequential)
+				return index < SourceData->Sequential->Accumulated.size()
+						   ? SourceData->Sequential->Accumulated[index]
+						   : 0;
 			if (WeightSpatial) return WeightSpatial->AccumulatedAt(index, line);
 			if (SourceMesh) {
 				if (index >= AccumulatedCount() || !SourceMesh->CachedLengths[index]) return 0;
@@ -566,6 +591,156 @@ namespace engine::imagegraph::detail {
 				a.Y - dist * std::sin(dir),
 				a.Weight + (b.Weight - a.Weight) * amount
 			};
+		}
+
+		SourcePathPointBuffer
+		SequentialPoint(double coordinate, size_t line, bool distance, SourcePathPointBuffer &out) const {
+			const auto &operation = *SourceData;
+			const auto &controls = *operation.Sequential;
+			SourceSequentialResetPoint(out);
+			if (!WeightSpatial) return out;
+			if (!EvaluationContext || !EvaluationContext->PathShiftMemo) {
+				if (EvaluationContext)
+					EvaluationContext->Fail(
+						Status::UnsupportedExecution,
+						"Source sequential path requires one evaluation-owned memo",
+						"path"
+					);
+				return out;
+			}
+			auto &context = *EvaluationContext;
+			auto &memo = *context.PathShiftMemo;
+			const bool smooth = operation.Kind == SourcePathOperationKind::Smoothen;
+			if (smooth && distance) coordinate /= Length();
+			if (!smooth && !distance) coordinate *= Length();
+			const auto key = smooth ? SourceShiftRatioKey(coordinate) : SourcePathDistanceKey(coordinate);
+			if (!key) {
+				context.Fail(Status::InvalidValue, "Source sequential path cache key is nonfinite", "path");
+				return out;
+			}
+			if (line > Limits::MaximumArrayElements) {
+				context.Fail(Status::LimitExceeded, "Source sequential path line exceeds bounds", "path");
+				return out;
+			}
+			auto *sequentialOwner = memo.SequentialOwner(context, operation);
+			if (!sequentialOwner) return out;
+			const size_t cacheLine = smooth ? line : 0;
+			if (!memo.ValidationProbe)
+				if (const auto *cached = memo.Find(context, operation.EvaluationMemoId, *key, cacheLine)) {
+					out.Position = {cached->Point.X, cached->Point.Y};
+					out.Weight = cached->Point.Weight;
+					return out;
+				}
+			if (context.FailureCode != Status::Ok) return out;
+			if (smooth) {
+				auto *owner = sequentialOwner;
+				// Native validation may inspect samples but cannot advance the source buffers.
+				auto temporary = owner->SequentialBuffers;
+				auto &buffers = memo.ValidationProbe ? temporary : owner->SequentialBuffers;
+				SourceSequentialSmooth(
+					coordinate,
+					line,
+					controls,
+					buffers[0],
+					buffers[1],
+					out,
+					[&](double ratio, size_t childLine, SourcePathPointBuffer &target) {
+						if (!memo.Step(context)) return target;
+						return WeightSpatial->RatioInto(ratio, childLine, target);
+					}
+				);
+			} else if (operation.Kind == SourcePathOperationKind::Extends)
+				SourceSequentialExtend(
+					coordinate,
+					controls,
+					out,
+					[&](double ratio, size_t childLine, SourcePathPointBuffer &target) {
+						if (!memo.Step(context)) return target;
+						return WeightSpatial->RatioInto(ratio, childLine, target);
+					}
+				);
+			else
+				SourceSequentialFlatten(
+					coordinate,
+					controls,
+					WeightSpatial->OriginalChildCount(),
+					out,
+					[&](size_t child, double childDistance, size_t childLine, SourcePathPointBuffer &target) {
+						if (!memo.Step(context)) return target;
+						return WeightSpatial->OriginalChildDistanceInto(
+							child, childDistance, childLine, target
+						);
+					}
+				);
+			if (context.FailureCode != Status::Ok) return out;
+			if (!SourceSequentialFinitePoint(out)) {
+				context.Fail(Status::InvalidValue, "Source sequential path geometry is nonfinite", "path");
+				return out;
+			}
+			if (!memo.ValidationProbe)
+				(void)memo.Store(
+					context,
+					operation.EvaluationMemoId,
+					*key,
+					cacheLine,
+					{out.Position.X, out.Position.Y, out.Weight},
+					coordinate
+				);
+			return out;
+		}
+		SourcePathPointBuffer PointRatioInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
+			if (SourceData && SourceData->Sequential) return SequentialPoint(ratio, line, false, out);
+			if (Shape) {
+				const auto point = PointRatio(ratio, line);
+				out.Position = {point.X, point.Y};
+				return out;
+			}
+			if (Operation && (*Operation == SourcePathOperationKind::Combine ||
+							  *Operation == SourcePathOperationKind::Reverse ||
+							  *Operation == SourcePathOperationKind::Offset ||
+							  *Operation == SourcePathOperationKind::Trim)) {
+				if (*Operation == SourcePathOperationKind::Offset) {
+					const double sum = ratio + SourceData->Offset;
+					ratio = SourceData->ClampOffset ? std::clamp(sum, 0., 1.) : sum - std::floor(sum);
+				}
+				const auto *child = SelectLine(line);
+				return child ? child->PointRatioInto(
+								   *Operation == SourcePathOperationKind::Reverse ? 1 - ratio
+								   : *Operation == SourcePathOperationKind::Trim
+									   ? TrimRange.X + (TrimRange.Y - TrimRange.X) * ratio
+									   : ratio,
+								   line,
+								   out
+							   )
+							 : out;
+			}
+			const auto point = PointRatio(ratio, line);
+			out.Position = {point.X, point.Y};
+			if (Operation || !Lengths.empty()) out.Weight = point.Weight;
+			return out;
+		}
+		SourcePathPointBuffer
+		PointDistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			if (SourceData && SourceData->Sequential) return SequentialPoint(distance, line, true, out);
+			if (Shape) {
+				if (LengthTotal != 0) {
+					const auto point = PointDistance(distance, line);
+					out.Position = {point.X, point.Y};
+				}
+				return out;
+			}
+			if (Operation && *Operation == SourcePathOperationKind::Combine) {
+				const auto *child = SelectLine(line);
+				return child ? child->PointDistanceInto(distance, line, out) : out;
+			}
+			if (Operation && *Operation != SourcePathOperationKind::Join &&
+				*Operation != SourcePathOperationKind::Skew)
+				return PointRatioInto(distance / Length(), line, out);
+			SourceSequentialResetPoint(out);
+			const auto point = PointDistance(distance, line);
+			out.Position = {point.X, point.Y};
+			if (Operation || !Lengths.empty()) out.Weight = point.Weight;
+			return out;
 		}
 
 		PathPoint WeightPoint(double ratio, size_t line) const {
@@ -690,6 +865,11 @@ namespace engine::imagegraph::detail {
 			return p;
 		}
 		PathPoint PointDistance(double distance, size_t line = 0) const {
+			if (SourceData && SourceData->Sequential) {
+				SourcePathPointBuffer out;
+				SequentialPoint(distance, line, true, out);
+				return {out.Position.X, out.Position.Y, out.Weight};
+			}
 			if (Shape) return ShapePoint(SourceShapeDistance(*Shape, Lengths, LengthTotal, distance));
 			if (SourceMesh) return MeshPoint(DistanceSourceVerletPath(*SourceMesh, distance, line));
 			if (Operation) {
@@ -752,6 +932,11 @@ namespace engine::imagegraph::detail {
 				   *Operation != SourcePathOperationKind::WeightAdjust;
 		}
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
+			if (SourceData && SourceData->Sequential) {
+				SourcePathPointBuffer out;
+				SequentialPoint(ratio, line, false, out);
+				return {out.Position.X, out.Position.Y, out.Weight};
+			}
 			if (Shape) return ShapePoint(SourceShapeRatio(*Shape, Lengths, LengthTotal, ratio));
 			if (SourceMesh) return MeshPoint(SampleSourceVerletPath(*SourceMesh, ratio, line));
 			if (Operation) {

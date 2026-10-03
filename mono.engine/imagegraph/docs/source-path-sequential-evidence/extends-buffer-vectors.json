@@ -1,0 +1,33 @@
+{
+  "profile": "source-equations, fresh and reused caller out buffer",
+  "constructor": {
+    "pathLength": 10,
+    "segments": 2,
+    "accumulated": [
+      0,
+      10
+    ],
+    "bbox": [
+      0,
+      0,
+      10,
+      0
+    ],
+    "endX": 9.99
+  },
+  "first": {
+    "x": 7.5,
+    "y": 0,
+    "weight": 3
+  },
+  "second": {
+    "x": 13.49,
+    "y": 0,
+    "weight": 3
+  },
+  "fresh": {
+    "x": 13.99,
+    "y": 0,
+    "weight": 1
+  }
+}

@@ -260,7 +260,10 @@ namespace engine::imagegraph {
 		Transform,
 		AreaMap,
 		Shift,
-		WeightAdjust
+		WeightAdjust,
+		Extends,
+		Flatten,
+		Smoothen
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
@@ -291,6 +294,44 @@ namespace engine::imagegraph {
 		bool operator==(const SourcePathShapeData2D &) const = default;
 	};
 	struct MeshData2D;
+	enum class SourcePathPointClass { Planar, Spatial };
+	struct SourcePathPointBuffer {
+		SourcePathPointClass Class = SourcePathPointClass::Planar;
+		Vector2 Position{};
+		std::optional<double> Z;
+		double Weight = 1;
+		bool operator==(const SourcePathPointBuffer &) const = default;
+	};
+	struct SourcePathEndpoint2D {
+		Vector2 Position{};
+		double Weight = 1;
+		bool operator==(const SourcePathEndpoint2D &) const = default;
+	};
+	struct SourcePathSequentialCachePoint {
+		double Coordinate = 0;
+		uint32_t Line = 0;
+		SourcePathEndpoint2D Point;
+		bool operator==(const SourcePathSequentialCachePoint &) const = default;
+	};
+	struct SourcePathSequentialData2D {
+		uint8_t ExtendSide = 0;
+		double ExtendLength = 16;
+		bool FlattenReverse = false, FlattenPingPong = false;
+		Vector2 SmoothRange{0, 1};
+		bool SmoothClampCurve = false, SmoothLoop = false;
+		double SmoothSpan = .02, SmoothBlend = 1;
+		int64_t SmoothSteps = 1;
+		double CachedLength = 0;
+		uint32_t CachedSegments = 0;
+		Vector4 CachedBounds{0, 0, 1, 1};
+		SourcePathEndpoint2D ExtendStartPoint, ExtendEndPoint;
+		double ExtendStartDirection = 0, ExtendEndDirection = 0;
+		std::vector<double> Accumulated, FlattenLengths;
+		std::vector<uint32_t> FlattenOwners;
+		SourcePathPointBuffer SmoothPoint, SmoothProbe;
+		std::vector<SourcePathSequentialCachePoint> Cache;
+		bool operator==(const SourcePathSequentialData2D &) const = default;
+	};
 	struct PathData3D;
 	struct SourcePathData2D {
 		SourcePathOperationKind Kind = SourcePathOperationKind::Reverse;
@@ -314,6 +355,7 @@ namespace engine::imagegraph {
 		Vector4 MapFrom{0, 0, 1, 1}, MapArea{0, 0, 1, 1};
 		// Source curveMap table uses TOTAL_FRAMES precision.
 		OwnedPayload3D<PathData3D> WeightInput3D;
+		OwnedPayload3D<SourcePathSequentialData2D> Sequential;
 		std::vector<double> WeightCurve;
 		double WeightValue = 0, WeightDirection = 0;
 		Vector2 WeightRange{0, 1};
@@ -352,6 +394,7 @@ namespace engine::imagegraph {
 					   MapFrom,
 					   MapArea,
 					   WeightInput3D,
+					   Sequential,
 					   WeightCurve,
 					   WeightValue,
 					   WeightDirection,
@@ -390,6 +433,7 @@ namespace engine::imagegraph {
 					   other.MapFrom,
 					   other.MapArea,
 					   other.WeightInput3D,
+					   other.Sequential,
 					   other.WeightCurve,
 					   other.WeightValue,
 					   other.WeightDirection,

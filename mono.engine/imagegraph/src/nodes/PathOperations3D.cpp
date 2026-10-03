@@ -1,3 +1,4 @@
+#include "../SourcePathSequentialState.hpp"
 #include "Path3D.hpp"
 
 #include <numbers>
@@ -39,31 +40,13 @@ namespace engine::imagegraph::detail {
 		if (context.FailureCode != Status::Ok) return false;
 		if (index < 0)
 			return context.Fail(Status::InvalidValue, "spatial sample line index is undefined", "path_index");
-		const auto point = runtime.Ratio(ratio, size_t(index)),
-				   before = runtime.Ratio(std::clamp(ratio - .0001, 0.0, 1.0), size_t(index)),
-				   after = runtime.Ratio(std::clamp(ratio + .0001, 0.0, 1.0), size_t(index));
-		if (!MeshFinite(point.Position) || !MeshFinite(before.Position) || !MeshFinite(after.Position) ||
-			!std::isfinite(point.Weight))
-			return context.Fail(Status::InvalidValue, "spatial sample geometry is undefined", "path");
-		if (runtime.SpatialLine(size_t(index))) {
-			const double sign = inverse ? -1 : 1;
-			const Vector3 direction{
-				(before.Position.X - after.Position.X) * sign,
-				(before.Position.Y - after.Position.Y) * sign,
-				(before.Position.Z - after.Position.Z) * sign
-			};
-			context.SetValue("position", point.Position);
-			context.SetValue("direction", direction);
-		} else {
-			const double sign = inverse ? -1 : 1, dx = (after.Position.X - before.Position.X) * sign,
-						 dy = (after.Position.Y - before.Position.Y) * sign;
-			double direction = std::atan2(-dy, dx) * 180 / std::numbers::pi;
-			if (direction < 0) direction += 360;
-			context.SetValue("position", Vector2{point.Position.X, point.Position.Y});
-			context.SetValue("direction", direction);
-		}
-		context.SetValue("weight", point.Weight);
-		return context.FailureCode == Status::Ok;
+		if (!LoadSourceSamplerBuffers(context)) return false;
+		auto &buffers = *context.SourceSamplerBuffers;
+		buffers[0] = runtime.RatioInto(ratio, size_t(index), buffers[0]);
+		buffers[1] = runtime.RatioInto(std::clamp(ratio - .0001, 0., 1.), size_t(index), buffers[1]);
+		buffers[2] = runtime.RatioInto(std::clamp(ratio + .0001, 0., 1.), size_t(index), buffers[2]);
+		if (context.FailureCode != Status::Ok || !SetSourceSamplerOutputs(context, inverse)) return false;
+		return context.FailureCode == Status::Ok && PublishSourceSamplerBuffers(context);
 	}
 	bool SourceSpatialPathOperation(NodeContext &context) {
 		const bool combine = context.Authored.Type == "pc.path_array";

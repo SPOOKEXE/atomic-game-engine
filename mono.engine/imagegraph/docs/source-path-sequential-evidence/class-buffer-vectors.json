@@ -1,0 +1,49 @@
+{
+  "profile": "source-equation object admission/replacement; not licensed capture",
+  "extendsFresh2": {
+    "class": "vec2p",
+    "position": [
+      0,
+      0
+    ],
+    "zProperty": null,
+    "weight": 1
+  },
+  "flattenFresh2": {
+    "class": "vec2p",
+    "position": [
+      0,
+      0
+    ],
+    "zProperty": null,
+    "weight": 1
+  },
+  "smoothFresh2": {
+    "class": "vec2p",
+    "position": [
+      1,
+      0
+    ],
+    "zProperty": null,
+    "weight": 1
+  },
+  "transformInto2": {
+    "class": "vec2p",
+    "position": [
+      2,
+      0
+    ],
+    "zProperty": 3,
+    "weight": 1
+  },
+  "extendsInto3": {
+    "class": "vec3p",
+    "position": [
+      1,
+      0,
+      3
+    ],
+    "zProperty": 3,
+    "weight": 4
+  }
+}

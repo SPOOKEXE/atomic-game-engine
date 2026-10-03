@@ -9,6 +9,7 @@ namespace engine::imagegraph::detail {
 	};
 	class PathRuntime3D {
 		const PathData3D &Data;
+		NodeContext *Context = nullptr;
 		AllocationReservation ChildCharge;
 		std::vector<PathRuntime3D> Children;
 		std::array<double, Limits::MaximumPathAnchors> Lengths{};
@@ -89,7 +90,8 @@ namespace engine::imagegraph::detail {
 		}
 
 	  public:
-		explicit PathRuntime3D(const PathData3D &data, NodeContext *context = nullptr) : Data(data) {
+		explicit PathRuntime3D(const PathData3D &data, NodeContext *context = nullptr)
+			: Data(data), Context(context) {
 			if (!data.SourcePresent) return;
 			if (data.SourceOperation) {
 				if (!context) {
@@ -307,6 +309,105 @@ namespace engine::imagegraph::detail {
 			}
 			return {};
 		}
+		size_t OriginalChildCount() const {
+			return Children.size();
+		}
+		const PathRuntime3D *OriginalChild(size_t index) const {
+			return index < Children.size() ? &Children[index] : nullptr;
+		}
+		bool FreshHasZ(size_t line) const {
+			if (!Data.Transforms.empty()) return !Data.Transforms.back().Projective;
+			if (Data.SourceOperation) {
+				const auto *child = Child(line);
+				return child && child->FreshHasZ(line);
+			}
+			return !Runtime2D.has_value();
+		}
+		SourcePathPointBuffer RatioInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
+			if (!Data.Transforms.empty()) {
+				// Transform and Camera create a fresh child point, while retaining
+				// the supplied output object's class. A planar fresh child has no Z.
+				bool childHasZ = !Runtime2D.has_value();
+				if (Data.SourceOperation) {
+					size_t childLine = line;
+					const auto *child = Child(childLine);
+					childHasZ = child && child->FreshHasZ(childLine);
+				}
+				for (const auto &transform : Data.Transforms) {
+					if (!childHasZ) {
+						if (Context)
+							Context->Fail(
+								Status::InvalidValue,
+								"Source 3D path transform reads an absent point Z",
+								"path"
+							);
+						out.Position = {NAN, NAN};
+						return out;
+					}
+					childHasZ = !transform.Projective;
+				}
+				const auto point = Ratio(ratio, line);
+				out.Position = {point.Position.X, point.Position.Y};
+				out.Weight = point.Weight;
+				if (!Data.Transforms.back().Projective) out.Z = point.Position.Z;
+				return out;
+			}
+			if (Data.SourceOperation) {
+				const auto &operation = *Data.SourceOperation;
+				if (operation.Kind == SourcePathOperationKind::Reverse)
+					ratio = 1 - ratio;
+				else if (operation.Kind == SourcePathOperationKind::Trim)
+					ratio = operation.TrimRange.X + (operation.TrimRange.Y - operation.TrimRange.X) * ratio;
+				const auto *child = Child(line);
+				return child ? child->RatioInto(ratio, line, out) : out;
+			}
+			if (Runtime2D) return Runtime2D->PointRatioInto(ratio, line, out);
+			if (Data.SourcePolyline) return DistanceInto((ratio - std::trunc(ratio)) * Total, line, out);
+			if (ratio < 0) ratio = 1 + std::fmod(ratio, 1);
+			return DistanceInto(
+				(Data.Loop ? std::fmod(ratio, 1) : std::clamp(ratio, 0., .99)) * Total, line, out
+			);
+		}
+		SourcePathPointBuffer DistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			if (!Data.Transforms.empty()) return RatioInto(distance / Length(), line, out);
+			if (Data.SourceOperation) {
+				if (Data.SourceOperation->Kind != SourcePathOperationKind::Combine)
+					return RatioInto(distance / Length(), line, out);
+				const auto *child = Child(line);
+				return child ? child->DistanceInto(distance, line, out) : out;
+			}
+			if (Runtime2D) return Runtime2D->PointDistanceInto(distance, line, out);
+			const bool replacement = out.Class != SourcePathPointClass::Spatial;
+			SourcePathPointBuffer fresh;
+			fresh.Class = SourcePathPointClass::Spatial;
+			fresh.Z = 0;
+			auto &target = replacement ? fresh : out;
+			if (!Data.SourcePolyline) {
+				target.Position = {};
+				target.Z = 0;
+			}
+			if (Data.SourceEmptyCache) {
+				target.Position = {NAN, NAN};
+				target.Z = NAN;
+				return target;
+			}
+			if (!SegmentCount) return target;
+			if (distance < 0 && !Data.SourcePolyline) distance = Total + std::fmod(distance, Total);
+			if (Data.SourcePolyline || Data.Loop)
+				distance = Total == 0 ? 0 : std::fmod(distance, Total) + (distance < 0 ? Total : 0);
+			for (size_t i = 0; i < SegmentCount; ++i) {
+				if (distance > Lengths[i]) {
+					distance -= Lengths[i];
+					continue;
+				}
+				const auto point = Segment(i, distance / Lengths[i]);
+				target.Position = {point.X, point.Y};
+				target.Z = point.Z;
+				break;
+			}
+			return target;
+		}
+
 		PathPoint3D BySegment(double ratio) const {
 			if (Data.SourcePolyline || Data.SourceOperation || !Data.Transforms.empty() ||
 				(Data.Source2D && Data.Source2D->SourceOperation))

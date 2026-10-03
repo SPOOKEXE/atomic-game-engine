@@ -105,6 +105,7 @@ namespace engine::imagegraph::detail {
 		if (!Route(context, route, "path", 'o', context.ProcessorRow)) return false;
 		path.SourceOperation->EvaluationMemoId =
 			context.PathShiftMemo->OwnerId(context, route.View(), "path");
+
 		return path.SourceOperation->EvaluationMemoId != 0;
 	}
 	bool StampSourcePathShiftHostOutput(NodeContext &context, AuthoredValue &value) {

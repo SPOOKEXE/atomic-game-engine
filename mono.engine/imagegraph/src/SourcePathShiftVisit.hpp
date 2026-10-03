@@ -114,7 +114,9 @@ namespace engine::imagegraph::detail {
 		} else if constexpr (std::is_same_v<Leaf, Path2D>) {
 			if (value.SourceOperation) {
 				auto &op = *value.SourceOperation;
-				if (op.Kind == SourcePathOperationKind::Shift && !callback(op, route)) return false;
+				if ((op.Kind == SourcePathOperationKind::Shift || SourceSequentialKind(op.Kind)) &&
+					!callback(op, route))
+					return false;
 				for (size_t i = 0; i < op.Inputs.size(); ++i)
 					if (!descend(op.Inputs[i], 'p', i)) return false;
 				if (op.WeightInput3D && !descend(*op.WeightInput3D, 'w', 0)) return false;

@@ -237,7 +237,28 @@ TEST_CASE(
 	const auto evaluated = EvaluateValue(d, plan, "point", {}, point, diagnostic);
 	INFO(diagnostic.Message);
 	REQUIRE(evaluated == Status::Ok);
-	ShapeClose(std::get<Vector3>(point.Data), {.75, 1.75, 3.075});
+	// Source Transform reuses the fresh planar sampler object, adding Z without changing its class.
+	REQUIRE(std::holds_alternative<Vector2>(point.Data));
+	StatefulEvaluationResult state;
+	const auto stateful = EvaluateStateful(d, plan, "point", {}, state, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(stateful == Status::Ok);
+	CHECK(std::get<EvaluatedValue>(state.Output).Data == point.Data);
+	const auto sampler =
+		std::find_if(state.Data.Entries.begin(), state.Data.Entries.end(), [](const auto &entry) {
+			return entry.NodeId == "sample" && entry.ProcessorRow == 0;
+		});
+	REQUIRE(sampler != state.Data.Entries.end());
+	REQUIRE(sampler->Values.size() == 1);
+	const auto &buffers = std::get<ArrayValue>(sampler->Values[0].Data);
+	REQUIRE(buffers.ElementType == ValueType::Vector4);
+	REQUIRE(buffers.Elements.size() == 6);
+	const auto coordinates = std::get<Vector4>(buffers.Elements[0]);
+	const auto extra = std::get<Vector4>(buffers.Elements[1]);
+	CHECK(coordinates.W == 0);
+	CHECK(extra.Y == 1);
+	const auto xy = std::get<Vector2>(point.Data);
+	ShapeClose(Vector3{xy.X, xy.Y, extra.X}, {.75, 1.75, 3.075});
 	d.Nodes.resize(1);
 	d.Nodes.push_back({"cube", "pc.3_d_mesh_cube", "", {}, {}});
 	d.Nodes.push_back(

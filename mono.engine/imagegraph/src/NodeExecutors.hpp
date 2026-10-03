@@ -164,6 +164,7 @@ namespace engine::imagegraph::detail {
 		std::vector<SurfaceFrameReplayEntry> SurfaceUpdates;
 		size_t ProcessorRow = 0;
 		size_t ProcessorCount = 1;
+		std::optional<std::array<SourcePathPointBuffer, 3>> SourceSamplerBuffers;
 		AllocationReservation SimulationAliasCharge;
 		std::vector<std::pair<std::string_view, Value>> SimulationAliasValues;
 
