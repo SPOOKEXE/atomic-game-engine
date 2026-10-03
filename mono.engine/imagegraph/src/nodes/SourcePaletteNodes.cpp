@@ -3,6 +3,8 @@
 #include "Families.hpp"
 #include "SourceInterpret.hpp"
 
+#include <map>
+
 namespace engine::imagegraph::detail {
 	namespace {
 		constexpr uint64_t PALETTE_COMPARISON_LIMIT = 1u << 24;
@@ -469,13 +471,251 @@ namespace engine::imagegraph::detail {
 			c.SetValue("palette", std::move(output));
 			return c.FailureCode == Status::Ok;
 		}
+
+		// Native readback uses RGBA bytes and an unfiltered draw at texel centers. Source
+		// desktop draw/readback and unparenthesized alpha-expression parity remain external gates.
+		// A mask first copies the source into the default RGBA8 temporary target.
+		Colour ExtractTexel(const Image &source, const Image *mask, uint32_t x, uint32_t y) {
+			auto pixel = ReadPixel(source, x, y);
+			if (mask)
+				for (auto &channel : pixel)
+					channel = Quantize(channel) / 255.;
+			if (mask && x < mask->Width && y < mask->Height) {
+				const auto factor = ReadPixel(*mask, x, y);
+				for (size_t k = 0; k < 4; ++k)
+					pixel[k] = std::clamp(pixel[k] * factor[k], 0., 1.);
+			}
+			return {Quantize(pixel[0]), Quantize(pixel[1]), Quantize(pixel[2]), Quantize(pixel[3])};
+		}
+		uint32_t ExtractKey(Colour c) {
+			return uint32_t(c.Red) | (uint32_t(c.Green) << 8) | (uint32_t(c.Blue) << 16) |
+				   (uint32_t(c.Alpha) << 24);
+		}
+		bool SourceExtractPalette(NodeContext &c) {
+			for (const auto &input : c.Entry.Inputs) {
+				if (input.SourceIndex <= 0) continue;
+				const Value *value = c.Find(input.Id);
+				for (const auto &[port, original] : c.ProcessorOriginalValues)
+					if (port == input.Id) value = original;
+				if (value && std::holds_alternative<ArrayValue>(*value))
+					return c.Fail(
+						Status::UnsupportedExecution,
+						"Palette Extract source control rejects arrays",
+						input.Id
+					);
+				for (const auto &[port, array] : c.ImageArrays)
+					if (port == input.Id && array)
+						return c.Fail(
+							Status::UnsupportedExecution,
+							"Palette Extract source control rejects image arrays",
+							input.Id
+						);
+			}
+			const auto *source = c.Input("surface_in"), *mask = c.Input("mask");
+			if (!source)
+				return c.Fail(
+					Status::UnsupportedExecution,
+					"Palette Extract has no source surface to update",
+					"surface_in"
+				);
+			const int64_t algorithm = c.Integer("algorithm"), space = c.Integer("color_space", 1);
+			const int64_t requested = c.Integer("max_colors", 5);
+			if (c.FailureCode != Status::Ok) return false;
+			ArrayValue output;
+			output.ElementType = ValueType::Colour;
+			if (algorithm < 0 || algorithm > 2)
+				return c.Fail(
+					Status::UnsupportedExecution,
+					"Palette Extract algorithm is outside its exposed source selector",
+					"algorithm"
+				);
+			const size_t count = size_t(std::max<int64_t>(1, requested));
+			if (algorithm != 2 && count > Limits::MaximumArrayElements)
+				return c.Fail(
+					Status::LimitExceeded,
+					"Palette Extract color count exceeds bounded elements",
+					"max_colors"
+				);
+			if (algorithm == 0 && (space < 0 || space > 1))
+				return c.Fail(
+					Status::UnsupportedExecution,
+					"Palette Extract color space has no exposed source branch",
+					"color_space"
+				);
+			const uint32_t width =
+				algorithm == 2 ? source->Width : std::min(source->Width, algorithm == 0 ? 32u : 128u);
+			const uint32_t height =
+				algorithm == 2 ? source->Height : std::min(source->Height, algorithm == 0 ? 32u : 128u);
+			const size_t pixels = size_t(width) * height;
+			if (pixels > (1u << 26) / std::max<size_t>(1, c.ProcessorCount))
+				return c.Fail(
+					Status::LimitExceeded,
+					"Palette Extract exceeds its whole-batch pixel work bound",
+					"surface_in"
+				);
+			const auto at = [&](size_t i) {
+				const uint32_t x = uint32_t((double(i % width) + .5) * source->Width / width),
+							   y = uint32_t((double(i / width) + .5) * source->Height / height);
+				return ExtractTexel(*source, mask, x, y);
+			};
+			if (algorithm != 0) {
+				struct Frequency {
+					Colour Color;
+					size_t Count = 0, First = 0;
+				};
+				const size_t capacity =
+					std::min(pixels, algorithm == 2 ? size_t(Limits::MaximumArrayElements) : pixels);
+				// Balanced-tree nodes plus candidate rows coexist; 96 bytes covers each
+				// map node, including links and alignment, on the supported native ABIs.
+				auto charge = c.ReserveWorkspace(capacity * (96 + sizeof(Frequency)), "surface_in");
+				if (!charge) return false;
+				std::map<uint32_t, size_t> indices;
+				std::vector<Frequency> colors;
+				colors.reserve(capacity);
+				for (size_t i = 0; i < pixels; ++i) {
+					const auto color = at(i);
+					if (!color.Alpha) continue;
+					const auto key = ExtractKey(color);
+					const auto found = indices.find(key);
+					if (found != indices.end()) {
+						++colors[found->second].Count;
+						continue;
+					}
+					if (colors.size() == capacity)
+						return c.Fail(
+							Status::LimitExceeded,
+							"Palette Extract unique colors exceed bounded elements",
+							"palette"
+						);
+					indices.emplace(key, colors.size());
+					colors.push_back({color, 1, i});
+				}
+				if (algorithm == 1)
+					std::sort(colors.begin(), colors.end(), [](const auto &a, const auto &b) {
+						// Official HTML5 priority insertion appends equal priorities;
+						// delete_max removes the last entry, reversing encounter-order ties.
+						return a.Count > b.Count || (a.Count == b.Count && a.First > b.First);
+					});
+				const size_t length = algorithm == 2 ? colors.size() : std::min(count, colors.size());
+				if (!SourceReservePalette(c, length, "palette", output)) return false;
+				for (size_t i = 0; i < length; ++i)
+					output.Elements.emplace_back(colors[i].Color);
+			} else {
+				const auto format = ResolveProcessorSurfaceFormat(c, source);
+				if (!format) return false;
+				if (*format != SurfaceFormat::RGBA8Unorm)
+					return c.Fail(
+						Status::UnsupportedExecution,
+						"Palette Extract K-mean source byte readback requires RGBA8 depth",
+						"attribute_color_depth"
+					);
+				if (pixels &&
+					count > PALETTE_COMPARISON_LIMIT / std::max<size_t>(1, c.ProcessorCount) / 10 / pixels)
+					return c.Fail(
+						Status::LimitExceeded,
+						"Palette Extract clustering exceeds whole-batch comparison bound",
+						"max_colors"
+					);
+				const SourceBuiltinRandomCapture *capture = nullptr;
+				if (!FindSourceBuiltinRandomCapture(c, capture)) return false;
+				if (capture->Draws.size() != count * 3)
+					return c.Fail(
+						Status::InvalidValue,
+						"Palette Extract initialization requires three recorded random calls per center",
+						"seed"
+					);
+				auto charge = c.ReserveWorkspace(
+					pixels * (sizeof(Rgb3) + sizeof(Colour) + sizeof(size_t)) +
+						count * (2 * sizeof(SourcePaletteCluster) + sizeof(Colour)),
+					"surface_in"
+				);
+				if (!charge) return false;
+				std::vector<Rgb3> points;
+				points.reserve(pixels);
+				for (size_t i = 0; i < pixels; ++i) {
+					const auto color = at(i);
+					if (color.Alpha)
+						points.push_back(space ? SourcePaletteHsv(color) : SourcePaletteRgb(color));
+				}
+				if (points.empty())
+					return c.Fail(
+						Status::UnsupportedExecution,
+						"Palette Extract K-mean dereferences an empty source color list",
+						"surface_in"
+					);
+				std::vector<SourcePaletteCluster> centers(count), sums(count);
+				for (size_t i = 0; i < count; ++i)
+					for (size_t k = 0; k < 3; ++k) {
+						const auto &draw = capture->Draws[i * 3 + k];
+						if (draw.Operation != SourceBuiltinRandomOperation::Random || draw.Lower != 0 ||
+							draw.Upper != 1 || !std::isfinite(draw.Result) || draw.Result < 0 ||
+							draw.Result >= 1)
+							return c.Fail(
+								Status::InvalidValue,
+								"Palette Extract random observation differs from its source call",
+								"seed"
+							);
+						centers[i].Value[k] = draw.Result;
+					}
+				for (size_t iteration = 0; iteration < 8; ++iteration) {
+					std::fill(sums.begin(), sums.end(), SourcePaletteCluster{});
+					for (const auto &point : points) {
+						double distance = 999;
+						size_t nearest = 0;
+						for (size_t j = 0; j < count; ++j) {
+							const double d = SourcePaletteDistance(point, centers[j].Value);
+							if (d < distance) {
+								distance = d;
+								nearest = j;
+							}
+						}
+						for (size_t k = 0; k < 3; ++k)
+							sums[nearest].Value[k] += point[k];
+						++sums[nearest].Count;
+					}
+					for (size_t j = 0; j < count; ++j)
+						for (size_t k = 0; k < 3; ++k)
+							centers[j].Value[k] = sums[j].Count ? sums[j].Value[k] / sums[j].Count : 0;
+				}
+				if (!SourceReservePalette(c, count, "palette", output)) return false;
+				for (const auto &center : centers) {
+					double distance = 999;
+					size_t nearest = 0;
+					for (size_t j = 0; j < points.size(); ++j) {
+						const double d = SourcePaletteDistance(center.Value, points[j]);
+						if (d < distance) {
+							distance = d;
+							nearest = j;
+						}
+					}
+					const auto &rgb = points[nearest];
+					const auto color = space ? SourcePaletteHsvColour(rgb)
+											 : Colour{
+												   SourcePaletteByte(rgb[0] * 255),
+												   SourcePaletteByte(rgb[1] * 255),
+												   SourcePaletteByte(rgb[2] * 255),
+												   255
+											   };
+					if (std::none_of(output.Elements.begin(), output.Elements.end(), [&](const auto &entry) {
+							return std::get<Colour>(entry) == color;
+						}))
+						output.Elements.emplace_back(color);
+				}
+				// The source's bool-only comparator does not reorder this palette in
+				// the verified V8 HTML5 profile. Desktop runtime ordering is unverified.
+			}
+			c.SetValue("palette", std::move(output));
+			return c.FailureCode == Status::Ok;
+		}
+
 	}
 	std::span<const ExecutorEntry> SourcePaletteExecutors() {
 		static constexpr ExecutorEntry entries[] = {
 			{"pc.palette", SourceTrimPalette, true},
 			{"pc.palette_sort", SourceSortPalette, true},
 			{"pc.palette_replace", SourceReplacePalette, true},
-			{"pc.palette_shrink", SourceShrinkPalette, true}
+			{"pc.palette_shrink", SourceShrinkPalette, true},
+			{"pc.palette_extract", SourceExtractPalette, true}
 		};
 		return entries;
 	}
