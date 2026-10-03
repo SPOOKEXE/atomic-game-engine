@@ -6,6 +6,8 @@
 #include <cmath>
 
 namespace engine::imagegraph::detail {
+	bool SourceGradientGrid(NodeContext &);
+	bool SourceGradientPoints(NodeContext &);
 	bool SourcePadding(NodeContext &context);
 	bool SourceNineSlice(NodeContext &context);
 	bool PixelDrawSurface(NodeContext &context);
@@ -298,6 +300,8 @@ namespace engine::imagegraph::detail {
 	bool SourceAlignContent(NodeContext &context);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
+			ExecutorEntry{"pc.gradient_grid", SourceGradientGrid, true},
+			ExecutorEntry{"pc.gradient_points", SourceGradientPoints, true},
 			ExecutorEntry{"pc.pb_draw_surface", PixelDrawSurface, true},
 			ExecutorEntry{"pc.pb_draw_rectangle", PixelDrawShape, true},
 			ExecutorEntry{"pc.pb_draw_diamond", PixelDrawShape, true},
