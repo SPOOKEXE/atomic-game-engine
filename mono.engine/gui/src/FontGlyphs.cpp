@@ -7,6 +7,8 @@
 #include FT_FREETYPE_H
 #include FT_FONT_FORMATS_H
 #include FT_MODULE_H
+#include FT_OUTLINE_H
+#include FT_BITMAP_H
 
 #include <algorithm>
 #include <array>
@@ -99,18 +101,76 @@ namespace engine::gui {
 		bool UnicodeScalar(uint32_t character) {
 			return character <= 0x10ffff && (character < 0xd800 || character > 0xdfff);
 		}
-		FontGlyphStatus LoadGlyphCoverage(FT_Face face, uint32_t index, bool antialias) {
+		// Conservative pixel/segment visits for both rendering passes, not a wall-clock estimate.
+		// The pinned sdf subdivides cubics at most32 times and conics by control-box deviation.
+		FontGlyphStatus AdmitDistanceGlyph(const FT_GlyphSlotRec &slot, uint8_t spread, uint64_t &remaining) {
+			uint64_t width = slot.bitmap.width, height = slot.bitmap.rows, edges = 64;
+			if (slot.format == FT_GLYPH_FORMAT_OUTLINE) {
+				if (slot.outline.n_points > 2048 || slot.outline.n_contours > 256)
+					return FontGlyphStatus::LimitExceeded;
+				if (!slot.outline.n_points) return FontGlyphStatus::Ok;
+				FT_BBox box{};
+				FT_Outline_Get_CBox(&slot.outline, &box);
+				// Limit coordinates before the vendor's signed fixed-point subdivision arithmetic.
+				constexpr int64_t coordinateLimit = 4096 * 64;
+				if (box.xMin < -coordinateLimit || box.yMin < -coordinateLimit ||
+					box.xMax > coordinateLimit || box.yMax > coordinateLimit)
+					return FontGlyphStatus::LimitExceeded;
+				const uint64_t span = std::max(int64_t(box.xMax) - box.xMin, int64_t(box.yMax) - box.yMin);
+				uint64_t deviation = 2 * span, splits = 1;
+				while (deviation > 8) {
+					deviation >>= 2;
+					splits <<= 1;
+				}
+				edges = uint64_t(slot.outline.n_points) * std::max(uint64_t(32), splits);
+				// Two extra pixels conservatively cover independent floor/ceil bbox rounding.
+				width = (uint64_t(int64_t(box.xMax) - box.xMin) + 63) / 64 + 2;
+				height = (uint64_t(int64_t(box.yMax) - box.yMin) + 63) / 64 + 2;
+			} else if (slot.format != FT_GLYPH_FORMAT_BITMAP)
+				return FontGlyphStatus::UnsupportedCoverage;
+			if (!width || !height) return FontGlyphStatus::Ok;
+			width += 2 * spread;
+			height += 2 * spread;
+			if (width > 8194 || height > 8194 || width * height > MAXIMUM_FONT_GLYPH_PAYLOAD_BYTES)
+				return FontGlyphStatus::LimitExceeded;
+			const uint64_t pixels = width * height;
+			if (edges > remaining / pixels) return FontGlyphStatus::LimitExceeded;
+			remaining -= pixels * edges;
+			return FontGlyphStatus::Ok;
+		}
+		FontGlyphStatus LoadGlyphCoverage(
+			FT_Face face, uint32_t index, const FontGlyphRequest &request, uint64_t &remainingWork
+		) {
+			const bool distance = request.Raster == FontGlyphRaster::SignedDistance;
+			const bool antialias = request.Antialias;
 			FT_Int32 flags = FT_LOAD_NO_AUTOHINT | (antialias ? FT_LOAD_TARGET_NORMAL : FT_LOAD_TARGET_MONO);
 			// PNG/color bitmap codecs can allocate outside FreeType's memory callbacks.
 			if (FT_IS_SCALABLE(face)) flags |= FT_LOAD_NO_BITMAP;
+			if (distance)
+				flags =
+					FT_LOAD_NO_HINTING | FT_LOAD_NO_AUTOHINT | (FT_IS_SCALABLE(face) ? FT_LOAD_NO_BITMAP : 0);
 			if (FT_Load_Glyph(face, index, flags) != 0) return FontGlyphStatus::DecodeFailed;
-			if (face->glyph->format != FT_GLYPH_FORMAT_BITMAP &&
-				FT_Render_Glyph(face->glyph, antialias ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO) != 0)
+			if (distance) {
+				const auto admission =
+					AdmitDistanceGlyph(*face->glyph, request.DistanceSpread, remainingWork);
+				if (admission != FontGlyphStatus::Ok) return admission;
+				// Bitmap strikes can borrow face storage; bsdf requires a slot-owned source.
+				if (face->glyph->format == FT_GLYPH_FORMAT_BITMAP &&
+					FT_GlyphSlot_Own_Bitmap(face->glyph) != 0)
+					return FontGlyphStatus::DecodeFailed;
+				if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_SDF) != 0)
+					return FontGlyphStatus::DecodeFailed;
+			} else if (face->glyph->format != FT_GLYPH_FORMAT_BITMAP &&
+					   FT_Render_Glyph(
+						   face->glyph, antialias ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO
+					   ) != 0)
 				return FontGlyphStatus::DecodeFailed;
 			const FT_Bitmap &bitmap = face->glyph->bitmap;
 			if (face->glyph->bitmap_top == std::numeric_limits<int>::min())
 				return FontGlyphStatus::UnsupportedCoverage;
 			if (!bitmap.width || !bitmap.rows) return FontGlyphStatus::Ok;
+			if (distance && bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
+				return FontGlyphStatus::UnsupportedCoverage;
 			if (bitmap.pixel_mode != FT_PIXEL_MODE_MONO && bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
 				return FontGlyphStatus::UnsupportedCoverage;
 			const uint64_t pitch =
@@ -124,7 +184,13 @@ namespace engine::gui {
 				return FontGlyphStatus::UnsupportedCoverage;
 			return FontGlyphStatus::Ok;
 		}
-		FontGlyphStatus DecodeGlyphBatch(const FontGlyphRequest &request, FontGlyphBatch &output) {
+		FontGlyphStatus
+		DecodeGlyphBatch(const FontGlyphRequest &request, FontGlyphBatch &output, size_t priorBytes) {
+			if ((request.Raster != FontGlyphRaster::Coverage &&
+				 request.Raster != FontGlyphRaster::SignedDistance) ||
+				(request.Raster == FontGlyphRaster::SignedDistance &&
+				 (request.DistanceSpread < 2 || request.DistanceSpread > 32)))
+				return FontGlyphStatus::InvalidRequest;
 			if (request.FontBytes.empty() || request.PixelSize == 0 ||
 				request.PixelSize > MAXIMUM_FONT_GLYPH_PIXEL_SIZE || request.MaximumOperationBytes == 0 ||
 				request.MaximumOperationBytes > MAXIMUM_FONT_GLYPH_OPERATION_BYTES)
@@ -149,8 +215,8 @@ namespace engine::gui {
 				characters.begin() + request.Characters.size())
 				return FontGlyphStatus::InvalidRequest;
 			GlyphOperationBudget budget{request.MaximumOperationBytes};
-			if (!budget.Charge(request.FontBytes.size()) || !budget.Charge(request.Characters.size_bytes()) ||
-				!budget.Charge(sizeof(characters)))
+			if (!budget.Charge(priorBytes) || !budget.Charge(request.FontBytes.size()) ||
+				!budget.Charge(request.Characters.size_bytes()) || !budget.Charge(sizeof(characters)))
 				return FontGlyphStatus::LimitExceeded;
 			FT_MemoryRec_ memory{&budget, AllocateGlyphMemory, FreeGlyphMemory, ReallocateGlyphMemory};
 			GlyphLibrary library;
@@ -159,6 +225,12 @@ namespace engine::gui {
 			FT_Add_Default_Modules(library.Handle);
 			if (budget.LimitHit || budget.AllocationFailed)
 				return GlyphFailure(budget, FontGlyphStatus::DecodeFailed);
+			if (request.Raster == FontGlyphRaster::SignedDistance) {
+				const FT_Int spread = request.DistanceSpread;
+				if (FT_Property_Set(library.Handle, "sdf", "spread", &spread) != 0 ||
+					FT_Property_Set(library.Handle, "bsdf", "spread", &spread) != 0)
+					return GlyphFailure(budget, FontGlyphStatus::UnsupportedCoverage);
+			}
 			GlyphFace face;
 			if (FT_New_Memory_Face(
 					library.Handle,
@@ -177,13 +249,14 @@ namespace engine::gui {
 				return FontGlyphStatus::UnsupportedFont;
 			if (FT_Set_Pixel_Sizes(face.Handle, 0, request.PixelSize) != 0)
 				return GlyphFailure(budget, FontGlyphStatus::DecodeFailed);
+			uint64_t remainingWork = 256 * 1024 * 1024;
 			// Count every requested bitmap before allocating any copied glyph coverage.
 			size_t retained = request.Characters.size() * sizeof(FontGlyphCoverage);
 			if (retained > MAXIMUM_FONT_GLYPH_PAYLOAD_BYTES) return FontGlyphStatus::LimitExceeded;
 			for (uint32_t character : request.Characters) {
 				const FT_UInt index = FT_Get_Char_Index(face.Handle, character);
 				if (!index) continue;
-				const auto status = LoadGlyphCoverage(face.Handle, index, request.Antialias);
+				const auto status = LoadGlyphCoverage(face.Handle, index, request, remainingWork);
 				if (status != FontGlyphStatus::Ok || budget.LimitHit || budget.AllocationFailed)
 					return GlyphFailure(budget, status);
 				const size_t pixels =
@@ -195,6 +268,9 @@ namespace engine::gui {
 			if (!budget.Charge(retained)) return FontGlyphStatus::LimitExceeded;
 			size_t remainingPixels = retained - request.Characters.size() * sizeof(FontGlyphCoverage);
 			FontGlyphBatch candidate;
+			candidate.Raster = request.Raster;
+			candidate.DistanceSpread =
+				request.Raster == FontGlyphRaster::SignedDistance ? request.DistanceSpread : 0;
 			candidate.Glyphs.reserve(request.Characters.size());
 			const size_t metadataExcess =
 				(candidate.Glyphs.capacity() - request.Characters.size()) * sizeof(FontGlyphCoverage);
@@ -212,7 +288,8 @@ namespace engine::gui {
 				glyph.GlyphIndex = FT_Get_Char_Index(face.Handle, character);
 				glyph.Present = glyph.GlyphIndex != 0;
 				if (glyph.Present) {
-					const auto status = LoadGlyphCoverage(face.Handle, glyph.GlyphIndex, request.Antialias);
+					const auto status =
+						LoadGlyphCoverage(face.Handle, glyph.GlyphIndex, request, remainingWork);
 					if (status != FontGlyphStatus::Ok || budget.LimitHit || budget.AllocationFailed)
 						return GlyphFailure(budget, status);
 					const auto &slot = *face.Handle->glyph;
@@ -223,6 +300,7 @@ namespace engine::gui {
 					glyph.Width = slot.bitmap.width;
 					glyph.Height = slot.bitmap.rows;
 					const size_t pixels = size_t(glyph.Width) * glyph.Height;
+					glyph.DistancePaddingPixels = pixels ? candidate.DistanceSpread : 0;
 					if (pixels > remainingPixels) return FontGlyphStatus::LimitExceeded;
 					remainingPixels -= pixels;
 					glyph.Coverage.reserve(pixels);
@@ -240,7 +318,8 @@ namespace engine::gui {
 									   glyph.Height,
 									   slot.bitmap.pitch,
 									   slot.bitmap.num_grays,
-									   slot.bitmap.pixel_mode == FT_PIXEL_MODE_MONO},
+									   slot.bitmap.pixel_mode == FT_PIXEL_MODE_MONO,
+									   request.Raster == FontGlyphRaster::SignedDistance},
 									  glyph.Coverage
 								  ))
 						return FontGlyphStatus::UnsupportedCoverage;
@@ -259,7 +338,18 @@ namespace engine::gui {
 		ENGINE_PROFILE("gui.font_glyphs.decode");
 		try {
 			FontGlyphBatch candidate;
-			const auto status = DecodeGlyphBatch(request, candidate);
+			size_t priorBytes = 0;
+			if (request.Raster == FontGlyphRaster::SignedDistance) {
+				if (output.Glyphs.capacity() > request.MaximumOperationBytes / sizeof(FontGlyphCoverage))
+					return FontGlyphStatus::LimitExceeded;
+				priorBytes = output.Glyphs.capacity() * sizeof(FontGlyphCoverage);
+				for (const auto &glyph : output.Glyphs) {
+					if (glyph.Coverage.capacity() > request.MaximumOperationBytes - priorBytes)
+						return FontGlyphStatus::LimitExceeded;
+					priorBytes += glyph.Coverage.capacity();
+				}
+			}
+			const auto status = DecodeGlyphBatch(request, candidate, priorBytes);
 			// Release FreeType's borrowed input before replacement, even when input aliases old output.
 			if (status == FontGlyphStatus::Ok) output = std::move(candidate);
 			return status;

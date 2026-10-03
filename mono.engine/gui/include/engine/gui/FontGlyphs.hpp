@@ -1,6 +1,6 @@
 #pragma once
 
-// Headless character coverage from exact caller-provided font bytes.
+// Headless character coverage or signed distance from exact caller-provided font bytes.
 // @tier L7 · shared
 
 #include <cstddef>
@@ -14,6 +14,8 @@ namespace engine::gui {
 	constexpr uint16_t MAXIMUM_FONT_GLYPH_PIXEL_SIZE = 512;
 	constexpr size_t MAXIMUM_FONT_GLYPH_PAYLOAD_BYTES = 4 * 1024 * 1024;
 	constexpr size_t MAXIMUM_FONT_GLYPH_OPERATION_BYTES = 64 * 1024 * 1024;
+
+	enum class FontGlyphRaster : uint8_t { Coverage, SignedDistance };
 
 	enum class FontGlyphStatus : uint8_t {
 		Ok,
@@ -34,6 +36,9 @@ namespace engine::gui {
 		bool Antialias = true;
 		// Includes supplied font/request bytes, fixed validation scratch, vendor allocations and output.
 		size_t MaximumOperationBytes = MAXIMUM_FONT_GLYPH_OPERATION_BYTES;
+		FontGlyphRaster Raster = FontGlyphRaster::Coverage;
+		// Native distance profile: spread2..32 pixels. Antialias applies only to Coverage.
+		uint8_t DistanceSpread = 8;
 	};
 
 	struct FontGlyphCoverage {
@@ -48,8 +53,11 @@ namespace engine::gui {
 		int32_t OffsetYPixels = 0;
 		uint32_t Width = 0;
 		uint32_t Height = 0;
-		// Top-to-bottom rows, one coverage byte per pixel, with no padding.
+		// Packed top-down bytes: coverage, or raw FreeType distance (128 contour, positive inside).
+		// Distance in pixels is (byte - 128) * batch.DistanceSpread / 128.
 		std::vector<uint8_t> Coverage;
+		// Real distance-renderer border; zero for coverage and empty/missing glyphs.
+		uint8_t DistancePaddingPixels = 0;
 	};
 
 	struct FontGlyphBatch {
@@ -59,12 +67,16 @@ namespace engine::gui {
 		double LineHeightPixels = 0;
 		// Owned vector capacities, excluding this fixed-size value and any prior caller-owned result.
 		size_t RetainedBytes = 0;
-		// Peak accounted operation storage, excluding allocator implementation overhead and call stacks.
+		// Peak charged operation storage, including prior SDF output, excluding allocator overhead/stacks.
 		size_t PeakOperationBytes = 0;
+		FontGlyphRaster Raster = FontGlyphRaster::Coverage;
+		uint8_t DistanceSpread = 0;
 	};
 
 	// Opens face zero with its Unicode charmap. Scalable outlines and BDF/PCF mono/gray strikes are
 	// supported. WOFF2 and embedded color/bitmap font codecs are refused to retain bounded allocation.
-	// No shaping, kerning, fallback, SDF conversion or filesystem access. Failure preserves output.
+	// SignedDistance uses real sdf/bsdf rendering, with unhinted scalable outlines. No shaping,
+	// kerning, fallback or filesystem access. SDF charges prior output residency; Coverage retains
+	// its existing independent-result ceiling. Failure preserves output.
 	[[nodiscard]] FontGlyphStatus DecodeFontGlyphs(const FontGlyphRequest &request, FontGlyphBatch &output);
 }

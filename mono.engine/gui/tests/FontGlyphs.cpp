@@ -72,6 +72,9 @@ ENDFONT
 		CHECK(output.LineHeightPixels == 9);
 		CHECK(output.RetainedBytes == 27);
 		CHECK(output.PeakOperationBytes == 28);
+		CHECK(output.Raster == FontGlyphRaster::Coverage);
+		CHECK(output.DistanceSpread == 0);
+		CHECK(output.Glyphs[0].DistancePaddingPixels == 0);
 	}
 	std::vector<std::byte> DeliveredFont() {
 		const auto path = engine::core::Paths::Base() / "fonts" / "Inter.ttf";
@@ -286,4 +289,118 @@ TEST_CASE("font input can borrow the prior output until atomic replacement", "[g
 	CHECK(output.Glyphs[0].Character == 65);
 	CHECK(output.Glyphs[0].AdvanceXPixels == 8);
 	CHECK(output.Glyphs[0].Coverage.size() == 35);
+}
+
+TEST_CASE("Real bitmap SDF preserves distance bytes, padding and advances", "[gui][fontglyphs][sdf]") {
+	const std::array<uint32_t, 3> characters{'A', ' ', 0x10ffff};
+	FontGlyphRequest request{FontBytes(BITMAP_FONT), characters, 10};
+	request.Raster = FontGlyphRaster::SignedDistance;
+	for (uint8_t spread : std::array<uint8_t, 3>{2, 8, 32}) {
+		request.DistanceSpread = spread;
+		FontGlyphBatch distance;
+		REQUIRE(DecodeFontGlyphs(request, distance) == FontGlyphStatus::Ok);
+		CHECK(distance.Raster == FontGlyphRaster::SignedDistance);
+		CHECK(distance.DistanceSpread == spread);
+		REQUIRE(distance.Glyphs.size() == 3);
+		const auto &a = distance.Glyphs[0];
+		CHECK(a.Width == 5 + 2u * spread);
+		CHECK(a.Height == 7 + 2u * spread);
+		CHECK(a.OffsetXPixels == -1 - int(spread));
+		CHECK(a.OffsetYPixels == -5 - int(spread));
+		CHECK(a.AdvanceXPixels == 8);
+		CHECK(a.DistancePaddingPixels == spread);
+		CHECK(a.Coverage.size() == size_t(a.Width) * a.Height);
+		CHECK(std::any_of(a.Coverage.begin(), a.Coverage.end(), [](uint8_t d) { return d > 128; }));
+		CHECK(std::any_of(a.Coverage.begin(), a.Coverage.end(), [](uint8_t d) { return d < 128; }));
+		CHECK(distance.Glyphs[1].Present);
+		CHECK(distance.Glyphs[1].AdvanceXPixels == 4);
+		CHECK(distance.Glyphs[1].Coverage.empty());
+		CHECK(distance.Glyphs[1].DistancePaddingPixels == 0);
+		CHECK_FALSE(distance.Glyphs[2].Present);
+		CHECK(distance.Glyphs[2].DistancePaddingPixels == 0);
+		request.Antialias = false;
+		FontGlyphBatch binaryPreference;
+		REQUIRE(DecodeFontGlyphs(request, binaryPreference) == FontGlyphStatus::Ok);
+		CHECK(binaryPreference.Glyphs[0].Coverage == a.Coverage);
+		request.Antialias = true;
+	}
+}
+
+TEST_CASE("Real outline SDF uses explicit spread with unhinted metrics", "[gui][fontglyphs][sdf]") {
+	const auto font = DeliveredFont();
+	const std::array<uint32_t, 3> characters{'W', ' ', 'i'};
+	FontGlyphRequest request{font, characters, 64};
+	request.Raster = FontGlyphRaster::SignedDistance;
+	request.DistanceSpread = 2;
+	FontGlyphBatch small;
+	REQUIRE(DecodeFontGlyphs(request, small) == FontGlyphStatus::Ok);
+	request.DistanceSpread = 8;
+	FontGlyphBatch wide;
+	REQUIRE(DecodeFontGlyphs(request, wide) == FontGlyphStatus::Ok);
+	for (size_t i : std::array<size_t, 2>{0, 2}) {
+		const auto &a = small.Glyphs[i], &b = wide.Glyphs[i];
+		CHECK(b.Width == a.Width + 12);
+		CHECK(b.Height == a.Height + 12);
+		CHECK(b.OffsetXPixels == a.OffsetXPixels - 6);
+		CHECK(b.OffsetYPixels == a.OffsetYPixels - 6);
+		CHECK(b.AdvanceXPixels == a.AdvanceXPixels);
+		CHECK(b.AdvanceYPixels == a.AdvanceYPixels);
+		CHECK(a.DistancePaddingPixels == 2);
+		CHECK(b.DistancePaddingPixels == 8);
+		CHECK(std::any_of(a.Coverage.begin(), a.Coverage.end(), [](uint8_t d) { return d == 255; }));
+		CHECK(a.Coverage != b.Coverage);
+	}
+	CHECK(small.Glyphs[1].Coverage.empty());
+	CHECK(wide.Glyphs[1].Coverage.empty());
+	CHECK(wide.Glyphs[1].AdvanceXPixels == small.Glyphs[1].AdvanceXPixels);
+	CHECK(wide.AscentPixels == small.AscentPixels);
+	CHECK(wide.DescentPixels == small.DescentPixels);
+	CHECK(wide.RetainedBytes <= MAXIMUM_FONT_GLYPH_PAYLOAD_BYTES);
+	CHECK(wide.PeakOperationBytes <= request.MaximumOperationBytes);
+}
+
+TEST_CASE(
+	"SDF malformed profile and operation/work refusal preserve the prior batch", "[gui][fontglyphs][sdf]"
+) {
+	const std::array<uint32_t, 1> characters{'A'};
+	FontGlyphRequest request{FontBytes(BITMAP_FONT), characters, 10};
+	request.Raster = FontGlyphRaster::SignedDistance;
+	for (uint8_t spread : std::array<uint8_t, 2>{1, 33}) {
+		request.DistanceSpread = spread;
+		auto output = Sentinel();
+		CHECK(DecodeFontGlyphs(request, output) == FontGlyphStatus::InvalidRequest);
+		CheckSentinel(output);
+	}
+	request.DistanceSpread = 8;
+	request.Raster = static_cast<FontGlyphRaster>(255);
+	auto invalid = Sentinel();
+	CHECK(DecodeFontGlyphs(request, invalid) == FontGlyphStatus::InvalidRequest);
+	CheckSentinel(invalid);
+	request.Raster = FontGlyphRaster::SignedDistance;
+	FontGlyphBatch output;
+	REQUIRE(DecodeFontGlyphs(request, output) == FontGlyphStatus::Ok);
+	const auto pixels = output.Glyphs[0].Coverage;
+	const auto peak = output.PeakOperationBytes;
+	request.MaximumOperationBytes = peak;
+	CHECK(DecodeFontGlyphs(request, output) == FontGlyphStatus::LimitExceeded);
+	CHECK(output.Glyphs[0].Coverage == pixels);
+	CHECK(output.PeakOperationBytes == peak);
+	CHECK(output.DistanceSpread == 8);
+	const auto font = DeliveredFont();
+	const std::array<uint32_t, 8> expensive{'W', 'M', 'B', '@', 'Q', 'O', 'G', 'D'};
+	request = {font, expensive, 512};
+	request.Raster = FontGlyphRaster::SignedDistance;
+	auto workRefused = Sentinel();
+	CHECK(DecodeFontGlyphs(request, workRefused) == FontGlyphStatus::LimitExceeded);
+	CheckSentinel(workRefused);
+}
+
+TEST_CASE(
+	"Distance bitmap copy retains contour and saturated bytes with signed pitch", "[gui][fontglyphs][sdf]"
+) {
+	const std::array<uint8_t, 6> bytes{0, 128, 255, 23, 127, 254};
+	std::array<uint8_t, 6> output{};
+	REQUIRE(detail::CopyFontGlyphBitmap({bytes, 3, 2, -3, 255, false, true}, output));
+	CHECK(output == std::array<uint8_t, 6>{23, 127, 254, 0, 128, 255});
+	CHECK_FALSE(detail::CopyFontGlyphBitmap({bytes, 3, 2, -3, 255, false}, output));
 }

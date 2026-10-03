@@ -57,6 +57,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Sample Mirror paths with source-compatible local animator ratios and input capture.
 - [x] Capture and replay bounded frame caches across CPU, client, Studio and exports.
 - [x] Decode bounded font bytes into glyph bitmaps and metrics.
+- [x] Decode real outline and bitmap font distance fields with bounded tracked storage.
 - [x] Integrate Flow and Bubble noise generators.
 - [x] Integrate bounded Cristal noise generation and typed input projection.
 - [x] Integrate path extension, flattening and smoothing.
