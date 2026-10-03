@@ -63,7 +63,8 @@ namespace engine::imagegraph {
 			if (!size || !text(property.Port) || !add(*size - sizeof(Value))) return std::nullopt;
 		}
 		for (const auto &input : node.DynamicInputs) {
-			if (!text(input.Id) || !text(input.SourceLayerName)) return std::nullopt;
+			if (!text(input.Id) || !text(input.SourceLayerName) || !text(input.SourceInputId))
+				return std::nullopt;
 			if (input.Default) {
 				const auto size = ValueClonePayloadBytes(*input.Default);
 				if (!size || !add(*size - sizeof(Value))) return std::nullopt;
@@ -144,7 +145,7 @@ namespace engine::imagegraph {
 			for (const auto &entry : node.SourceProperties)
 				if (!text(entry.Port) || !value(entry.Data)) return std::nullopt;
 			for (const auto &input : node.DynamicInputs)
-				if (!text(input.Id) || !text(input.SourceLayerName) ||
+				if (!text(input.Id) || !text(input.SourceLayerName) || !text(input.SourceInputId) ||
 					(input.Default && !value(*input.Default)))
 					return std::nullopt;
 		}

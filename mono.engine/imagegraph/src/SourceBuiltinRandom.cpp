@@ -1,10 +1,12 @@
 #include "PixelBuilderPayload.hpp"
+#include "SourceInputOrigin.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/SourceBuiltinRandom.hpp>
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 
@@ -23,6 +25,12 @@ namespace engine::imagegraph {
 			for (const auto *values : {&node.Values, &node.SourceProperties})
 				for (const auto &input : *values)
 					if (!detail::ValidPixelBuilderRecordingValue(input.Data)) return Status::InvalidValue;
+			std::array<uint64_t, Limits::MaximumPixelBuilderDynamicInputsPerNode> origins{};
+			static_assert(Limits::MaximumDynamicInputsPerNode <= origins.size());
+			std::string_view failedPort;
+			const auto originStatus =
+				detail::ValidateSourceInputOrigins(node.DynamicInputs, origins, failedPort);
+			if (originStatus != Status::Ok) return originStatus;
 			for (const auto &input : node.DynamicInputs)
 				if (input.Default && !detail::ValidPixelBuilderRecordingValue(*input.Default))
 					return Status::InvalidValue;
@@ -79,7 +87,9 @@ namespace engine::imagegraph {
 				for (const auto &port : *ports)
 					if (!textSlack(port)) return std::nullopt;
 			for (const auto &input : node.DynamicInputs)
-				if (!textSlack(input.Id) || !textSlack(input.SourceLayerName)) return std::nullopt;
+				if (!textSlack(input.Id) || !textSlack(input.SourceLayerName) ||
+					!textSlack(input.SourceInputId))
+					return std::nullopt;
 			for (const auto &output : node.DynamicOutputs)
 				if (!textSlack(output.Id)) return std::nullopt;
 			for (const auto &expression : node.SourceInputExpressions)

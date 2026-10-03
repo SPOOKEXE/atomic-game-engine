@@ -62,6 +62,11 @@ namespace engine::imagegraph {
 		return Replay.AuthoringRevision() == other.Replay.AuthoringRevision() &&
 			   Replay.InstancesBound() == other.Replay.InstancesBound() &&
 			   equal(
+				   Replay.DetachedAnimators(),
+				   other.Replay.DetachedAnimators(),
+				   [](const auto &a, const auto &b) { return a == b; }
+			   ) &&
+			   equal(
 				   Replay.Entries(),
 				   other.Replay.Entries(),
 				   [](const auto &a, const auto &b) {
@@ -76,7 +81,7 @@ namespace engine::imagegraph {
 				   other.Replay.Bindings(),
 				   [](const auto &a, const auto &b) {
 					   return a.NodeId == b.NodeId && a.OwnerId == b.OwnerId && a.Getter == b.Getter &&
-							  a.Writer == b.Writer && a.Port == b.Port;
+							  a.Writer == b.Writer && a.Port == b.Port && a.AnimatorPort == b.AnimatorPort;
 				   }
 			   ) &&
 			   equal(

@@ -1,5 +1,6 @@
 #include "CookedShaderAnnotation.hpp"
 #include "GroupInstances.hpp"
+#include "HlslSourceArguments.hpp"
 #include "InlineCollections.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "TileProperties.hpp"
@@ -1415,6 +1416,66 @@ namespace engine::imagegraphio {
 			return true;
 		}
 
+		bool CatalogueHlslValue(
+			const Json &value,
+			const imagegraph::CatalogueEntry *entry,
+			const imagegraph::CatalogueInput *input,
+			imagegraph::Value &out,
+			detail::ImportBudget *budget
+		) {
+			using imagegraph::ValueType;
+			if (!entry || entry->Type != "pc.hlsl" || !input || !input->Id.starts_with("argument_value_"))
+				return false;
+			if (input->Type == ValueType::Scalar || input->Type == ValueType::Integer ||
+				input->Type == ValueType::Image || input->Type == ValueType::Colour) {
+				if (value.is_number_float() && std::isfinite(value.get<double>())) {
+					out = value.get<double>();
+					return true;
+				}
+				if (!value.is_number_integer() ||
+					(value.is_number_unsigned() && value.get<uint64_t>() > uint64_t(INT64_MAX)))
+					return false;
+				out = value.get<int64_t>();
+				return true;
+			}
+			if (input->Type != ValueType::Array || !value.is_array()) return false;
+			const auto integer = [](const Json &item) { return item.is_number_integer(); };
+			const bool nested = !value.empty() && value.front().is_array();
+			const bool integers = std::all_of(value.begin(), value.end(), [&](const Json &item) {
+				return nested ? item.is_array() && std::all_of(item.begin(), item.end(), integer)
+							  : integer(item);
+			});
+			imagegraph::ArrayValue array{integers ? ValueType::Integer : ValueType::Scalar, {}};
+			const auto row = [&](const Json &source, auto &destination) {
+				if (source.size() > imagegraph::Limits::MaximumArrayElements ||
+					!AdmitNativeSlots(destination, source.size(), budget))
+					return false;
+				for (const auto &item : source) {
+					if (item.is_number_integer()) {
+						if (item.is_number_unsigned() && item.get<uint64_t>() > uint64_t(INT64_MAX))
+							return false;
+						destination.emplace_back(item.get<int64_t>());
+					} else if (item.is_number_float() && std::isfinite(item.get<double>()))
+						destination.emplace_back(item.get<double>());
+					else
+						return false;
+				}
+				return true;
+			};
+			if (nested) {
+				if (value.size() > imagegraph::Limits::MaximumArrayElements ||
+					!AdmitNativeSlots(array.Nested, value.size(), budget))
+					return false;
+				for (const auto &source : value) {
+					if (!source.is_array()) return false;
+					array.Nested.emplace_back();
+					if (!row(source, array.Nested.back())) return false;
+				}
+			} else if (!row(value, array.Elements))
+				return false;
+			out = std::move(array);
+			return true;
+		}
 		bool CatalogueRawValue(
 			const Json &value,
 			const imagegraph::CatalogueInput *input,
@@ -1467,7 +1528,8 @@ namespace engine::imagegraphio {
 					!AdmitNativeText(port, budget))
 					return false;
 				imagegraph::Value data;
-				if (!CatalogueRawValue(*stored, input, data, true) &&
+				if (!CatalogueHlslValue(*stored, entry, input, data, budget) &&
+					!CatalogueRawValue(*stored, input, data, true) &&
 					!CatalogueValue(*stored, type, choices, data, element, budget) &&
 					!CatalogueSourceChoice(*stored, input, data) &&
 					!CatalogueRawValue(*stored, input, data) &&
@@ -1502,7 +1564,8 @@ namespace engine::imagegraphio {
 					return false;
 				if (!AdmitNativeText(nodeId, budget) || !AdmitNativeText(port, budget)) return false;
 				imagegraph::Value data;
-				if (!CatalogueRawValue(record[1], input, data, true) &&
+				if (!CatalogueHlslValue(record[1], entry, input, data, budget) &&
+					!CatalogueRawValue(record[1], input, data, true) &&
 					!CatalogueValue(record[1], type, choices, data, element, budget) &&
 					!CatalogueSourceChoice(record[1], input, data) &&
 					!CatalogueRawValue(record[1], input, data) &&
@@ -1819,8 +1882,10 @@ namespace engine::imagegraphio {
 				return true;
 			}
 			if ((record.contains("from_node") && !parseLinkedLocalAnimator) ||
-				input.Type == imagegraph::ValueType::Image ||
+				(input.Type == imagegraph::ValueType::Image &&
+				 !(entry.Type == "pc.hlsl" && input.Id.starts_with("argument_value_"))) ||
 				(!imagegraph::IsAuthoredValueType(input.Type) &&
+				 !(entry.Type == "pc.hlsl" && input.Id.starts_with("argument_value_")) &&
 				 !(entry.Type == "pc.group_input" && input.Id == "parent_value")))
 				return true;
 			const bool opaqueGradientRange =
@@ -1832,6 +1897,15 @@ namespace engine::imagegraphio {
 			}
 			const auto stored = record.find("r");
 			if (stored == record.end()) return true;
+			// Empty scalar HLSL animators return numeric zero in valueAnimator.getValue.
+			if (entry.Type == "pc.hlsl" && input.Id.starts_with("argument_value_") &&
+				input.Type != imagegraph::ValueType::Array && stored->is_array() && stored->empty()) {
+				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget)) {
+					reason = "empty HLSL animator settings are not representable";
+					return false;
+				}
+				return appendValue(id, imagegraph::Value{0.0});
+			}
 			const size_t choices = imagegraph::CatalogueChoiceCount(input);
 			if (record.value("anim", false) || (stored->is_array() && !stored->empty())) {
 				if ((entry.Type == "pc.group_input" || entry.Type == "pc.group_output") &&
@@ -1916,7 +1990,8 @@ namespace engine::imagegraphio {
 					return true;
 				}
 			}
-			if (!CatalogueRawValue(value, &input, converted, true) &&
+			if (!CatalogueHlslValue(value, &entry, &input, converted, budget) &&
+				!CatalogueRawValue(value, &input, converted, true) &&
 				!CatalogueValue(value, input.Type, choices, converted, ArrayElement(input), budget) &&
 				!CatalogueSourceChoice(value, &input, converted) &&
 				!CatalogueRawValue(value, &input, converted) &&
@@ -2110,6 +2185,19 @@ namespace engine::imagegraphio {
 			return true;
 		}
 		// Projects a node with a source catalogue entry, keeping every source input index and value.
+		std::optional<int64_t> StaticHlslChoice(const Json &record) {
+			if (record.contains("from_node") || record.value("anim", false) ||
+				record.value("global_use", false))
+				return std::nullopt;
+			const auto stored = record.find("r");
+			if (stored == record.end() || (stored->is_array() && stored->empty())) return int64_t{0};
+			if (!stored->is_object() || !stored->contains("d")) return std::nullopt;
+			int64_t choice = 0;
+			return WholeNumber((*stored)["d"], choice) && detail::HlslArgumentType(choice)
+					   ? std::optional{choice}
+					   : std::nullopt;
+		}
+
 		bool CatalogueNode(
 			const Json &source,
 			const imagegraph::CatalogueEntry &entry,
@@ -2182,6 +2270,30 @@ namespace engine::imagegraphio {
 				dynamicId[templateInput->Id.size()] = '_';
 				std::copy(suffix.begin(), suffix.end(), dynamicId.begin() + templateInput->Id.size() + 1);
 				imagegraph::DynamicInput dynamic{std::move(dynamicId), templateInput->Type, std::nullopt};
+				if (entry.Type == "pc.hlsl") {
+					const std::string origin = "pxc:input:" + std::to_string(index);
+					if (!AdmitNativeText(origin, budget)) {
+						reason = "HLSL source input origin exceeds native operation bounds";
+						return false;
+					}
+					dynamic.SourceInputId = origin;
+					animation.FormatVersion = 9;
+				}
+
+				std::optional<int64_t> hlslMode;
+				if (entry.Type == "pc.hlsl" && templateInput->Id == "argument_value") {
+					const Json *selectorRecord = Input(source, index - 1);
+					const auto choice = selectorRecord ? StaticHlslChoice(*selectorRecord) : std::nullopt;
+					const auto type = choice ? detail::HlslArgumentType(*choice) : std::nullopt;
+					if (!type) {
+						reason = "HLSL argument typing requires a proven static literal selector";
+						return false;
+					}
+
+					hlslMode = *choice;
+					dynamic.Type = *type;
+				}
+
 				if ((entry.Type == "pc.lua_compute" || entry.Type == "pc.lua_surface") &&
 					templateInput->Id == "argument_value") {
 					int64_t selection = 0;
@@ -2206,7 +2318,20 @@ namespace engine::imagegraphio {
 					};
 					dynamic.Type = types[selection];
 				}
-				if (imagegraph::IsAuthoredValueType(dynamic.Type)) {
+				if (hlslMode) {
+					if (const auto count = detail::HlslArgumentLength(*hlslMode)) {
+						imagegraph::ArrayValue value{imagegraph::ValueType::Integer, {}};
+						if (!AdmitNativeSlots(value.Elements, count, budget)) {
+							reason = "HLSL default exceeds import bounds";
+							return false;
+						}
+						value.Elements.assign(count, int64_t{0});
+						dynamic.Default = std::move(value);
+					} else
+						dynamic.Default = *hlslMode == 0
+											  ? imagegraph::Value{0.0}
+											  : imagegraph::Value{int64_t{*hlslMode == 7 ? -4 : 0}};
+				} else if (imagegraph::IsAuthoredValueType(dynamic.Type)) {
 					if (dynamic.Type == templateInput->Type)
 						dynamic.Default = imagegraph::CatalogueDefault(*templateInput);
 					else if (dynamic.Type == imagegraph::ValueType::Text)
@@ -2219,7 +2344,15 @@ namespace engine::imagegraphio {
 					represented.Type = imagegraph::ValueType::Array;
 				const size_t valuesBefore = node.Values.size();
 				if (!CatalogueInputValue(
-						record, entry, represented, nodeId, node, animation, reason, false, budget
+						record,
+						entry,
+						represented,
+						nodeId,
+						node,
+						animation,
+						reason,
+						hlslMode.has_value(),
+						budget
 					))
 					return false;
 				for (size_t value = valuesBefore; value < node.Values.size(); ++value) {
@@ -2228,6 +2361,17 @@ namespace engine::imagegraphio {
 						return false;
 					}
 					dynamic.Default = std::move(node.Values[value].Data);
+				}
+				if (hlslMode &&
+					((dynamic.Default && !detail::HlslArgumentValue(*hlslMode, *dynamic.Default)) ||
+					 std::any_of(
+						 animation.Keyframes.begin(), animation.Keyframes.end(), [&](const auto &key) {
+							 return key.NodeId == nodeId && key.Port == dynamic.Id &&
+									!detail::HlslArgumentValue(*hlslMode, key.Data);
+						 }
+					 ))) {
+					reason = "HLSL argument value does not match its source selector shape";
+					return false;
 				}
 				if (entry.Type == "pc.mesh_warp" && templateInput->SourceKind == "Puppet") {
 					const auto valid = [](const imagegraph::Value &value) {
@@ -3280,8 +3424,11 @@ namespace engine::imagegraphio {
 			const bake::PxcxArchive &archive,
 			const bake::PxcxNodeFact &node,
 			const imagegraph::CatalogueEntry &entry,
-			std::string &reason
+			std::string &reason,
+			const imagegraph::Node *mappedNode
 		);
+
+		std::string CatalogueInputPort(const imagegraph::CatalogueEntry &entry, uint32_t index);
 
 		// Output and input ports for a link end on a catalogue node.
 		std::string CatalogueOutputPort(const imagegraph::CatalogueEntry &entry, uint32_t index) {
@@ -3295,6 +3442,13 @@ namespace engine::imagegraphio {
 				if (output.SourceIndex == static_cast<int32_t>(index)) return std::string(output.Id);
 			// node_data.gml getOutputIndex: 1000 + n connects the bypass junction of input n.
 			if (index >= 1000) {
+				const uint32_t physical = index - 1000;
+				if (entry.Type == "pc.hlsl" && physical >= uint32_t(entry.DynamicFixedLength) &&
+					physical - uint32_t(entry.DynamicFixedLength) <
+						imagegraph::MaximumDynamicInputsForType(entry.Type)) {
+					const auto port = CatalogueInputPort(entry, physical);
+					if (!port.empty()) return port + ".bypass";
+				}
 				if (const auto *input =
 						imagegraph::FindCatalogueInputIndex(entry, static_cast<int32_t>(index - 1000)))
 					return std::string(input->Id) + ".bypass";
@@ -3322,9 +3476,25 @@ namespace engine::imagegraphio {
 			const bake::PxcxArchive &archive,
 			const bake::PxcxNodeFact &node,
 			const imagegraph::CatalogueEntry &entry,
-			std::string &reason
+			std::string &reason,
+			const imagegraph::Node *mappedNode
 		) {
+			const auto declared = [&](uint32_t physical) {
+				if (entry.Type != "pc.hlsl" || physical < uint32_t(entry.DynamicFixedLength)) return true;
+				const auto port = CatalogueInputPort(entry, physical);
+				return mappedNode && std::any_of(
+										 mappedNode->DynamicInputs.begin(),
+										 mappedNode->DynamicInputs.end(),
+										 [&](const auto &input) { return input.Id == port; }
+									 );
+			};
 			for (const bake::PxcxLinkFact &link : archive.Links) {
+				if ((link.FromNode == node.Id && link.FromIndex >= 1000 &&
+					 !declared(link.FromIndex - 1000)) ||
+					(link.ToNode == node.Id && !declared(link.ToInputIndex))) {
+					reason = "HLSL link refers to an undeclared dynamic source input";
+					return false;
+				}
 				if (link.FromNode == node.Id && CatalogueOutputPort(entry, link.FromIndex).empty()) {
 					reason =
 						"output index " + std::to_string(link.FromIndex) + " is not in the source catalogue";
@@ -3764,7 +3934,7 @@ namespace engine::imagegraphio {
 			if (entry) {
 				imagegraph::Document animation;
 				if (CatalogueNode(source, *entry, fact.Id, node, animation, reason, &operationBudget) &&
-					CatalogueLinksRepresentable(archive, fact, *entry, reason) &&
+					CatalogueLinksRepresentable(archive, fact, *entry, reason, &node) &&
 					(entry->SourceNode != "Node_Array_Split" ||
 					 std::all_of(archive.Links.begin(), archive.Links.end(), [&](const auto &link) {
 						 return link.FromNode != fact.Id || link.FromIndex <= node.DynamicOutputs.size();
@@ -3773,7 +3943,7 @@ namespace engine::imagegraphio {
 						!node.DynamicOutputs.empty() ||
 						std::any_of(
 							node.DynamicInputs.begin(), node.DynamicInputs.end(), [](const auto &input) {
-								return !input.SourceLayerName.empty();
+								return !input.SourceLayerName.empty() || !input.SourceInputId.empty();
 							}
 						))
 						result.Graph.FormatVersion = 9;
@@ -3830,6 +4000,15 @@ namespace engine::imagegraphio {
 			} else if (mapped) {
 				native[index] = true;
 				result.NativeNodes++;
+			}
+			if (node.Type == "pc.hlsl" && source.contains("instanceBase")) {
+				const auto &base = source.at("instanceBase");
+				if (!base.is_string() ||
+					base.get_ref<const std::string &>().size() > bake::PxcxLimits::MaximumNodeTextBytes ||
+					!AdmitNativeText(base.get_ref<const std::string &>(), &operationBudget))
+					return Fail(failure, "HLSL instance base is not a bounded durable name");
+				node.InstanceBase = base.get<std::string>();
+				result.Graph.FormatVersion = 9;
 			}
 			std::optional<std::string_view> cookedSelector;
 			if (!detail::ReadCookedAnnotation(source, node.Type, cookedSelector, failure)) return false;
@@ -3897,7 +4076,7 @@ namespace engine::imagegraphio {
 						return record.at("id").template get_ref<const std::string &>() == node.Id;
 					});
 				if (saved == root.at("nodes").end()) continue;
-				if (!imagegraph::HasNativeExecutor(node.Type)) {
+				if (!imagegraph::HasNativeExecutor(node.Type) && node.Type != "pc.hlsl") {
 					if (node.Type != "pc.gradient") continue;
 					const auto *range = imagegraph::FindCatalogueInput(*entry, "gradient_map_range");
 					if (!range || range->SourceIndex != 16 || range->SourceKind != "Vec4" ||

@@ -26,4 +26,16 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
 	);
+	// Publishes the mode's authored flags and retained animator replay together.
+	// Required when the original physical input was removed while an alias survived.
+	Status ToggleSourceInputMode(
+		const Document &document,
+		const GroupReplayState &replay,
+		uint64_t authoringRevision,
+		const SourceModeTransition &transition,
+		Document &result,
+		GroupReplayState &replayResult,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
 }

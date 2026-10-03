@@ -35,11 +35,18 @@ Schema provenance is engine-owned. Foreign node identity and controls are
 pinned to Pixel Composer source commit
 `b69eca232217360cf1502ef0223523d818606652`,
 `scripts/node_hlsl/node_hlsl.gml`: constructor line 41, fixed inputs lines 48..52,
-argument definitions lines 59..64. Dynamic HLSL argument type projection is a separate
-known importer seam and is not widened by this envelope change.
+argument definitions lines 59..64. Dynamic HLSL typing and source input record
+identity remain separate contracts. The envelope only retains the selector.
 
 Checked archive edit/reimport/native-save tests cover
 insertion, replacement, removal, unrelated shader edits, unknown field retention,
 malformed selectors, incompatible versions, conflicting namespaces and preserved
 caller outputs. Joined release56 verifies 72 assertions in both annotation cases.
 Official-application compatibility and rendered shader execution remain open.
+
+The source input record identity adapter can compact complete HLSL argument
+triples while editing this envelope. Its checked reimport rebases record origins
+without changing the selector string or unknown envelope members. A saved import
+can then be adopted for another typed input edit and selector replacement. The
+coexistence test is an in-memory archive/native-document check, not proof of
+shader asset availability or renderer execution.

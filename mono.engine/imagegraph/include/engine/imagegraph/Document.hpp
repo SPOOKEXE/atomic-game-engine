@@ -888,6 +888,8 @@ namespace engine::imagegraph {
 		std::optional<Value> Default;
 		// Source room controls bind to this exact saved layer name, independently of socket order.
 		std::string SourceLayerName{};
+		// Original retained source record, independent of the current positional socket name.
+		std::string SourceInputId{};
 		bool operator==(const DynamicInput &) const = default;
 	};
 
@@ -1306,6 +1308,7 @@ namespace engine::imagegraph {
 		// Maximum keyframe count.
 		static constexpr size_t MaximumKeyframes = 65536;
 		static constexpr size_t MaximumSourceKeyIdBytes = 64;
+		static constexpr size_t MaximumSourceInputIdBytes = 64;
 		static constexpr size_t MaximumTracks = 65536;
 		// Maximum properties recorded on one node. The largest catalogue node, Particle, declares 94 inputs.
 		static constexpr size_t MaximumPropertiesPerNode = 128;

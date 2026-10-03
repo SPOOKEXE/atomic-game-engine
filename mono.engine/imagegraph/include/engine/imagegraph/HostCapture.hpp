@@ -61,6 +61,16 @@ namespace engine::imagegraph {
 		// Resolved source interpolation policy; 1 Pixel disables device filtering.
 		int64_t Interpolation = 1;
 	};
+	// Owned receipt payload and capacities, excluding allocator bookkeeping.
+	std::optional<uint64_t> HostCaptureRetainedPayloadBytes(const HostNodeCapture &);
+	// Copies already resolved receipt metadata within an explicit budget; no producers execute.
+	Status PrepareResolvedHostCapture(
+		const HostNodeInvocation &,
+		uint64_t maximumBytes,
+		HostNodeCapture &,
+		uint64_t &retainedBytes,
+		Diagnostic &
+	);
 	// Process-local host capability. Durable graphs and copied recordings contain no provider pointer.
 	struct PcxMessage;
 	class HostNodeProvider {

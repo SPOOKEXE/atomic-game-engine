@@ -2,6 +2,7 @@
 
 #include "EvaluationAllocator.hpp"
 #include "PuppetControl.hpp"
+#include "SourceAnimatorIdentity.hpp"
 #include "Timeline.hpp"
 #include "TimelineDrivers.hpp"
 #include "TimelineSchedule.hpp"
@@ -126,7 +127,7 @@ namespace engine::imagegraph::detail {
 				node->SourceStaticInputs.end();
 			if (request.GroupReplay && request.GroupReplay->InstancesBound())
 				for (const auto &binding : request.GroupReplay->Bindings())
-					if (binding.OwnerId == key.NodeId && binding.Port == key.Port) {
+					if (binding.OwnerId == key.NodeId && BindingAnimatorPort(binding) == key.Port) {
 						originalStatic = binding.Writer == GroupSubtypeAnimator::Static;
 						break;
 					}
@@ -143,7 +144,7 @@ namespace engine::imagegraph::detail {
 			// An overridden animated getter still invokes the original shared animator's one-key driver.
 			if (request.GroupReplay && request.GroupReplay->InstancesBound())
 				for (const auto &binding : request.GroupReplay->Bindings())
-					if (binding.OwnerId == key.NodeId && binding.Port == key.Port &&
+					if (binding.OwnerId == key.NodeId && BindingAnimatorPort(binding) == key.Port &&
 						binding.Getter == GroupSubtypeAnimator::Animated)
 						return false;
 			return true;
@@ -266,6 +267,9 @@ namespace engine::imagegraph::detail {
 		auto configuredTracks = MakeEvaluationMap<ConfiguredKey, const AnimationTrack *>(budget);
 		for (const auto &track : document.Tracks)
 			configuredTracks[{track.NodeId, track.Port}] = &track;
+		if (request.GroupReplay)
+			for (const auto &animator : request.GroupReplay->DetachedAnimators())
+				if (animator.Track) configuredTracks[{animator.OwnerId, animator.Id}] = &*animator.Track;
 		size_t nodeCount = 0, previousIndex = document.Nodes.size();
 		for (const auto &[property, track] : tracks)
 			if (property.first != previousIndex) {
@@ -308,6 +312,7 @@ namespace engine::imagegraph::detail {
 				for (const auto &input : node.DynamicInputs)
 					if (!add(
 							CloneOwnedBytes(input.Id) + CloneOwnedBytes(input.SourceLayerName) +
+							CloneOwnedBytes(input.SourceInputId) +
 							(input.Default ? CloneOwnedBytes(*input.Default) : 0)
 						))
 						goto clone_refused;

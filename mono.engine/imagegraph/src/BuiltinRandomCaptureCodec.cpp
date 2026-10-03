@@ -15,7 +15,8 @@
 #include <type_traits>
 namespace engine::imagegraph {
 	namespace {
-		constexpr std::string_view Header = "imagegraph-builtin-random 1\n";
+		constexpr std::string_view Header = "imagegraph-builtin-random 2\n";
+		constexpr std::string_view LegacyHeader = "imagegraph-builtin-random 1\n";
 		constexpr std::array<std::string_view, 6> Operations{
 			"random", "irandom", "irandom_range", "crand", "random_get_seed", "random_range"
 		};
@@ -169,6 +170,7 @@ namespace engine::imagegraph {
 						Typed(*input.Default);
 					}
 					Text(input.SourceLayerName);
+					Text(input.SourceInputId);
 				});
 				Text(n.InstanceBase);
 				Strings(n.InstanceOverrides);
@@ -235,6 +237,7 @@ namespace engine::imagegraph {
 			detail::EvaluationBudget &Budget;
 			detail::AllocationReservation &Charge;
 			Status Failure = Status::Malformed;
+			uint8_t Version = 2;
 			bool Admit(uint64_t bytes) {
 				if (bytes > Budget.Available()) {
 					Failure = Status::LimitExceeded;
@@ -256,10 +259,10 @@ namespace engine::imagegraph {
 				Rest.remove_prefix(size + 1);
 				return true;
 			}
-			bool Text(std::string &value) {
+			bool Text(std::string &value, size_t maximum = Limits::MaximumTextBytes) {
 				std::string_view token;
 				if (!Token(token)) return false;
-				if (token.size() > Limits::MaximumTextBytes) {
+				if (token.size() > maximum) {
 					Failure = Status::LimitExceeded;
 					return false;
 				}
@@ -340,7 +343,8 @@ namespace engine::imagegraph {
 							input.Default.emplace();
 							if (!Typed(*input.Default)) return false;
 						}
-						return Text(input.SourceLayerName);
+						return Text(input.SourceLayerName) &&
+							   (Version == 1 || Text(input.SourceInputId, Limits::MaximumSourceInputIdBytes));
 					}))
 					return false;
 				if (!Text(n.InstanceBase) || !Strings(n.InstanceOverrides) ||
@@ -526,11 +530,12 @@ namespace engine::imagegraph {
 			if (prior > budget.Available() || !charge->Resize(prior) || text.size() > budget.Available() ||
 				!charge->Resize(prior + text.size()))
 				return Fail(diagnostic, Status::LimitExceeded, "Builtin RNG replacement exceeds residency");
-			if (!text.starts_with(Header))
+			const uint8_t version = text.starts_with(Header) ? 2 : text.starts_with(LegacyHeader) ? 1 : 0;
+			if (!version)
 				return Fail(
 					diagnostic, Status::UnsupportedVersion, "Builtin RNG capture header is unsupported"
 				);
-			Reader reader{text.substr(Header.size()), budget, *charge};
+			Reader reader{text.substr(Header.size()), budget, *charge, Status::Malformed, version};
 			std::vector<SourceBuiltinRandomCapture> candidate;
 			if (!reader.List(
 					candidate, Limits::MaximumNodes, [&](auto &capture) { return reader.Capture(capture); }

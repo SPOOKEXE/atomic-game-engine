@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
 
 TEST_SUITE_ID("engine.imagegraphio.pxcx_cooked_shader_annotation")
@@ -155,4 +156,98 @@ TEST_CASE(
 		Archive(Source(Json{{"version", 1}, {"composer_cooked_shader", Name('a')}})), old, failure, options
 	));
 	CHECK(old.Graph == imported.Graph);
+}
+
+TEST_CASE(
+	"Cooked annotations coexist with complete source input record moves and saved-import adoption",
+	"[imagegraphio][cooked_annotation][cooked_origin_coexistence]"
+) {
+	auto root = Source(
+		Json{{"version", 1}, {"composer_cooked_shader", Name('a')}, {"future_engine", Json{{"opaque", 29}}}}
+	);
+	auto &inputs = root["nodes"][0]["inputs"];
+	for (int group = 0; group < 2; ++group) {
+		inputs.push_back(
+			Json{{"r", {{"d", group ? "survivor" : "removed"}}}, {"future_input", 101 + group * 3}}
+		);
+		inputs.push_back(Json{{"r", {{"d", group}}}, {"future_input", 102 + group * 3}});
+		inputs.push_back(Json{{"r", {{"d", group ? 2.75 : 1.25}}}, {"future_input", 103 + group * 3}});
+	}
+	const auto retained = root["nodes"][0]["inputs"][10];
+	const auto imported = Import(root);
+	REQUIRE(imported.Graph.FormatVersion == 9);
+	REQUIRE(imported.Graph.Nodes[0].DynamicInputs.size() == 6);
+	CHECK(imported.Graph.Nodes[0].DynamicInputs[5].SourceInputId == "pxc:input:10");
+	auto desired = imported.Graph;
+	auto &node = desired.Nodes[0];
+	node.DynamicInputs.erase(node.DynamicInputs.begin(), node.DynamicInputs.begin() + 3);
+	const auto compact = [](std::string &port) {
+		if (port.starts_with("argument_") && port.ends_with("_1")) port.back() = '0';
+	};
+	const auto deleted = [](std::string_view port) {
+		return port.starts_with("argument_") && port.ends_with("_0");
+	};
+	for (auto &input : node.DynamicInputs)
+		compact(input.Id);
+	for (auto *ports : {&node.SourceStaticInputs, &node.SourceAnimatedInputs, &node.InstanceOverrides}) {
+		std::erase_if(*ports, deleted);
+		for (auto &port : *ports)
+			compact(port);
+	}
+	std::erase_if(desired.Keyframes, [&](const auto &key) {
+		return key.NodeId == "shader" && deleted(key.Port);
+	});
+	for (auto &key : desired.Keyframes)
+		if (key.NodeId == "shader") compact(key.Port);
+	std::erase_if(desired.Tracks, [&](const auto &track) {
+		return track.NodeId == "shader" && deleted(track.Port);
+	});
+	for (auto &track : desired.Tracks)
+		if (track.NodeId == "shader") compact(track.Port);
+	node.Position.Y = 23;
+	node.SourceProperties[0].Data = Name('b');
+	for (auto &value : node.Values)
+		if (value.Port == "main") value.Data = std::string("output.color=float4(0,1,0,1);");
+	const auto untouched = desired;
+	Document native;
+	Diagnostic diagnostic;
+	REQUIRE(Read(Write(desired), native, diagnostic) == Status::Ok);
+	CHECK(native == desired);
+	std::vector<std::byte> bytes;
+	const bool written = WritePxcxProjection(imported, desired, {}, bytes, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(written);
+	CHECK(desired == untouched);
+	engine::bake::PxcxArchive archive;
+	std::string failure;
+	REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+	PxcxImport adopted;
+	REQUIRE(ImportPxcxImageGraph(archive, adopted, failure));
+	REQUIRE(adopted.Graph.Nodes[0].DynamicInputs.size() == 3);
+	CHECK(adopted.Graph.Nodes[0].DynamicInputs[2].SourceInputId == "pxc:input:7");
+	CHECK(adopted.Graph.Nodes[0].SourceProperties[0].Data == Value{Name('b')});
+	auto saved = Json::parse(archive.GraphJson.c_str());
+	CHECK(saved["nodes"][0]["inputs"][7] == retained);
+	CHECK(saved["nodes"][0]["atomic_game_engine"]["future_engine"]["opaque"] == 29);
+	CHECK(saved["nodes"][0]["attri"] == Json{{"future_source", 7}});
+	CHECK(saved["future_project"] == 11);
+	auto second = adopted.Graph;
+	second.Nodes[0].SourceProperties[0].Data = Name('c');
+	second.Nodes[0].DynamicInputs[2].Default = 4.75;
+	for (auto &key : second.Keyframes)
+		if (key.NodeId == "shader" && key.Port == "argument_value_0") key.Data = 4.75;
+	REQUIRE(WritePxcxProjection(adopted, second, {}, bytes, diagnostic));
+	REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+	PxcxImport reloaded;
+	REQUIRE(ImportPxcxImageGraph(archive, reloaded, failure));
+	CHECK(reloaded.Graph.Nodes[0].DynamicInputs[2].Default == std::optional<Value>{4.75});
+	CHECK(reloaded.Graph.Nodes[0].SourceProperties[0].Data == Value{Name('c')});
+	saved = Json::parse(archive.GraphJson.c_str());
+	CHECK(saved["nodes"][0]["inputs"][7]["future_input"] == 106);
+	CHECK(saved["nodes"][0]["atomic_game_engine"]["future_engine"]["opaque"] == 29);
+	const auto previous = bytes;
+	auto invalid = second;
+	invalid.Nodes[0].SourceProperties[0].Data = Name('G');
+	CHECK_FALSE(WritePxcxProjection(adopted, invalid, {}, bytes, diagnostic));
+	CHECK(bytes == previous);
 }

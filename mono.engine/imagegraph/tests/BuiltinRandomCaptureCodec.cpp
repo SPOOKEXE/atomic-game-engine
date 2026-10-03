@@ -1,4 +1,5 @@
 #include <engine/imagegraph/BuiltinRandomCaptureCodec.hpp>
+#include <engine/imagegraph/Catalogue.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -100,7 +101,7 @@ TEST_CASE(
 	const auto status = WriteBuiltinRandomCapture(captures, text, d);
 	INFO(d.Message);
 	REQUIRE(status == Status::Ok);
-	CHECK(text.starts_with("imagegraph-builtin-random 1\n"));
+	CHECK(text.starts_with("imagegraph-builtin-random 2\n"));
 	CHECK(text.find("random_get_seed") != std::string::npos);
 	CHECK(text.find("random_range") != std::string::npos);
 	std::vector<SourceBuiltinRandomCapture> restored;
@@ -244,4 +245,241 @@ TEST_CASE(
 	CHECK(Evaluate(document, plan, "image", request, after, diagnostic) == Status::InvalidValue);
 	CHECK(after == before);
 	CHECK(diagnostic.Port == "seed");
+}
+
+TEST_CASE(
+	"Builtin capture version two retains canonical dynamic input origin metadata", "[builtin_random_codec]"
+) {
+	auto c = Fixture();
+	c.Authored.DynamicInputs[0].SourceInputId = "pxc:input:17";
+	c.Authored.DynamicInputs.push_back(
+		{"second", ValueType::Scalar, Value{.5}, "other layer", "pxc:input:18446744073709551615"}
+	);
+	std::vector<SourceBuiltinRandomCapture> captures{c}, restored;
+	std::string text;
+	Diagnostic d;
+	REQUIRE(WriteBuiltinRandomCapture(captures, text, d) == Status::Ok);
+	CHECK(text.starts_with("imagegraph-builtin-random 2\n"));
+	CHECK(text.find("pxc:input:17") != std::string::npos);
+	REQUIRE(ReadBuiltinRandomCapture(text, restored, d) == Status::Ok);
+	CHECK(restored == captures);
+	auto reference = c;
+	std::string{}.swap(reference.Authored.DynamicInputs[0].SourceInputId);
+	std::string{}.swap(reference.Authored.DynamicInputs[1].SourceInputId);
+	uint64_t withOrigins = 0, withoutOrigins = 0;
+	REQUIRE(
+		ValidateBuiltinRandomCaptures(captures, Limits::MaximumEvaluationBytes, withOrigins, d) == Status::Ok
+	);
+	REQUIRE(
+		ValidateBuiltinRandomCaptures(
+			std::span{&reference, size_t{1}}, Limits::MaximumEvaluationBytes, withoutOrigins, d
+		) == Status::Ok
+	);
+	CHECK(withOrigins > withoutOrigins);
+}
+TEST_CASE(
+	"Legacy builtin capture version one reads full dynamic defaults and empty origin metadata",
+	"[builtin_random_codec]"
+) {
+	std::vector<SourceBuiltinRandomCapture> source{Fixture()}, restored;
+	std::string v2;
+	Diagnostic d;
+	REQUIRE(WriteBuiltinRandomCapture(source, v2, d) == Status::Ok);
+	const auto layer = v2.find("12:source layer\n0:\n");
+	REQUIRE(layer != std::string::npos);
+	// Removing the appended version-two origin token reproduces the exact prior writer's field order.
+	auto v1 = v2;
+	v1.erase(layer + std::string_view("12:source layer\n").size(), 3);
+	v1.replace(0, std::string_view("imagegraph-builtin-random 2\n").size(), "imagegraph-builtin-random 1\n");
+	REQUIRE(ReadBuiltinRandomCapture(v1, restored, d) == Status::Ok);
+	CHECK(restored == source);
+	CHECK(restored[0].Authored.DynamicInputs[0].SourceInputId.empty());
+	std::string upgraded;
+	REQUIRE(WriteBuiltinRandomCapture(restored, upgraded, d) == Status::Ok);
+	CHECK(upgraded == v2);
+}
+TEST_CASE(
+	"Malformed origin capture fields preserve prior text and copied observations", "[builtin_random_codec]"
+) {
+	auto c = Fixture();
+	c.Authored.DynamicInputs[0].SourceInputId = "pxc:input:17";
+	std::vector<SourceBuiltinRandomCapture> source{c}, restored{Fixture()};
+	const auto prior = restored;
+	std::string good;
+	Diagnostic d;
+	REQUIRE(WriteBuiltinRandomCapture(source, good, d) == Status::Ok);
+	for (const auto invalid :
+		 {"pxc:input:017",
+		  "pxc:input:-1",
+		  "pxc:input:18446744073709551616",
+		  "pxc:input:",
+		  "17",
+		  "pxc:input:17x"}) {
+		auto bad = good;
+		const auto token = bad.find("12:source layer\n12:pxc:input:17\n");
+		REQUIRE(token != std::string::npos);
+		const auto offset = token + std::string_view("12:source layer\n").size();
+		bad.replace(
+			offset,
+			std::string_view("12:pxc:input:17\n").size(),
+			std::to_string(std::string_view(invalid).size()) + ":" + invalid + "\n"
+		);
+		CHECK(ReadBuiltinRandomCapture(bad, restored, d) == Status::InvalidValue);
+		CHECK(restored == prior);
+		auto invalidSource = source;
+		invalidSource[0].Authored.DynamicInputs[0].SourceInputId = invalid;
+		auto text = good;
+		CHECK(WriteBuiltinRandomCapture(invalidSource, text, d) == Status::InvalidValue);
+		CHECK(text == good);
+	}
+	auto duplicate = source;
+	duplicate[0].Authored.DynamicInputs.push_back(
+		{"duplicate", ValueType::Scalar, Value{1.}, "", "pxc:input:17"}
+	);
+	auto text = good;
+	CHECK(WriteBuiltinRandomCapture(duplicate, text, d) == Status::DuplicateId);
+	CHECK(text == good);
+	auto oversize = good;
+	const auto token = oversize.find("12:pxc:input:17\n");
+	REQUIRE(token != std::string::npos);
+	oversize.replace(
+		token, std::string_view("12:pxc:input:17\n").size(), "65:" + std::string(65, 'x') + "\n"
+	);
+	CHECK(ReadBuiltinRandomCapture(oversize, restored, d) == Status::LimitExceeded);
+	CHECK(restored == prior);
+}
+
+TEST_CASE(
+	"Origin strings with retained spare capacity obey capture replacement residency", "[builtin_random_codec]"
+) {
+	auto c = Fixture();
+	c.Authored.DynamicInputs[0].SourceInputId = "pxc:input:17";
+	std::vector<SourceBuiltinRandomCapture> source{c};
+	Diagnostic d;
+	uint64_t bytes = 0;
+	REQUIRE(ValidateBuiltinRandomCaptures(source, Limits::MaximumEvaluationBytes, bytes, d) == Status::Ok);
+	source[0].Authored.DynamicInputs[0].SourceInputId.reserve(65536);
+	uint64_t retained = 0;
+	REQUIRE(ValidateBuiltinRandomCaptures(source, Limits::MaximumEvaluationBytes, retained, d) == Status::Ok);
+	CHECK(retained >= bytes + 65000);
+	std::string text = "prior text";
+	CHECK(WriteBuiltinRandomCapture(source, text, d, 32768) == Status::LimitExceeded);
+	CHECK(text == "prior text");
+}
+TEST_CASE(
+	"Native input origins survive actual authored-node capture preparation and durable reload",
+	"[builtin_random_codec]"
+) {
+	Document doc;
+	doc.FormatVersion = 9;
+	doc.Nodes = {{"merge", "pc.string_merge", "", {}, {}}};
+	doc.Nodes[0].DynamicInputs = {
+		{"text_0", ValueType::Text, std::string("a"), {}, "pxc:input:0"},
+		{"text_1", ValueType::Text, std::string("b"), {}, "pxc:input:1"}
+	};
+	doc.Outputs = {{"out", "merge", "text"}};
+	Plan plan;
+	Diagnostic d;
+	const auto compiled = Compile(doc, plan, d);
+	INFO(d.Message);
+	REQUIRE(compiled == Status::Ok);
+	SourceBuiltinRandomCapture capture;
+	const auto prepared = PrepareSourceBuiltinRandomCapture(doc, plan, "merge", {}, capture, d);
+	INFO(d.Message);
+	REQUIRE(prepared == Status::Ok);
+	CHECK(capture.Authored == doc.Nodes[0]);
+	CHECK(capture.Draws.empty());
+	std::string text;
+	REQUIRE(WriteBuiltinRandomCapture(std::span{&capture, size_t{1}}, text, d) == Status::Ok);
+	std::vector<SourceBuiltinRandomCapture> restored;
+	REQUIRE(ReadBuiltinRandomCapture(text, restored, d) == Status::Ok);
+	REQUIRE(restored.size() == 1);
+	CHECK(restored[0] == capture);
+	Document native;
+	native.FormatVersion = 9;
+	native.Nodes = {restored[0].Authored};
+	native.Outputs = doc.Outputs;
+	Document roundtrip;
+	REQUIRE(Read(Write(native), roundtrip, d) == Status::Ok);
+	CHECK(roundtrip == doc);
+}
+TEST_CASE(
+	"Duplicate durable origins and unsupported envelope versions preserve previous captures",
+	"[builtin_random_codec]"
+) {
+	auto c = Fixture();
+	c.Authored.DynamicInputs[0].SourceInputId = "pxc:input:17";
+	c.Authored.DynamicInputs.push_back({"second", ValueType::Scalar, Value{1.}, {}, "pxc:input:18"});
+	std::vector<SourceBuiltinRandomCapture> source{c}, prior{Fixture()};
+	const auto before = prior;
+	std::string text;
+	Diagnostic d;
+	REQUIRE(WriteBuiltinRandomCapture(source, text, d) == Status::Ok);
+	auto duplicate = text;
+	const auto position = duplicate.find("12:pxc:input:18\n");
+	REQUIRE(position != std::string::npos);
+	duplicate[position + std::string_view("12:pxc:input:1").size()] = '7';
+	CHECK(ReadBuiltinRandomCapture(duplicate, prior, d) == Status::DuplicateId);
+	CHECK(prior == before);
+	auto future = text;
+	future.replace(
+		0, std::string_view("imagegraph-builtin-random 2\n").size(), "imagegraph-builtin-random 3\n"
+	);
+	CHECK(ReadBuiltinRandomCapture(future, prior, d) == Status::UnsupportedVersion);
+	CHECK(prior == before);
+}
+
+TEST_CASE(
+	"Builtin capture origin validation handles all complete PB groups and a final duplicate",
+	"[builtin_random_codec]"
+) {
+	SourceBuiltinRandomCapture capture;
+	capture.Authored = {"rectangle", "pc.pb_draw_rectangle", "", {}, {}};
+	const auto *entry = FindCatalogueEntry(capture.Authored.Type);
+	REQUIRE(entry);
+	REQUIRE(
+		entry->DynamicTemplate.size() ==
+		Limits::PixelBuilderEffectInputsPerGroup + Limits::PixelBuilderAuthoredMetadataInputsPerGroup
+	);
+	for (size_t group = 0; group < Limits::MaximumPixelBuilderEffectGroups; ++group)
+		for (const auto &input : entry->DynamicTemplate) {
+			DynamicInput port{
+				std::string(input.Id) + "_" + std::to_string(group), input.Type, CatalogueDefault(input)
+			};
+			port.SourceInputId = "pxc:input:" + std::to_string(capture.Authored.DynamicInputs.size());
+			capture.Authored.DynamicInputs.push_back(std::move(port));
+		}
+	REQUIRE(capture.Authored.DynamicInputs.size() == Limits::MaximumPixelBuilderDynamicInputsPerNode);
+	capture.Authored.DynamicInputs.back().SourceInputId = "pxc:input:18446744073709551615";
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes.push_back(capture.Authored);
+	const auto imagePort = std::find_if(entry->Outputs.begin(), entry->Outputs.end(), [](const auto &port) {
+		return port.Type == ValueType::Image;
+	});
+	REQUIRE(imagePort != entry->Outputs.end());
+	document.Outputs = {{"image", capture.Authored.Id, std::string(imagePort->Id)}};
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compiled = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(compiled == Status::Ok);
+	std::string text;
+	REQUIRE(WriteBuiltinRandomCapture({&capture, 1}, text, diagnostic) == Status::Ok);
+	std::vector<SourceBuiltinRandomCapture> restored;
+	REQUIRE(ReadBuiltinRandomCapture(text, restored, diagnostic) == Status::Ok);
+	CHECK(restored == std::vector<SourceBuiltinRandomCapture>{capture});
+	const auto prior = restored;
+	const std::string last = capture.Authored.DynamicInputs.back().SourceInputId;
+	const std::string token = std::to_string(last.size()) + ":" + last + "\n";
+	const auto position = text.find(token);
+	REQUIRE(position != std::string::npos);
+	text.replace(position, token.size(), "11:pxc:input:0\n");
+	CHECK(ReadBuiltinRandomCapture(text, restored, diagnostic) == Status::DuplicateId);
+	CHECK(restored == prior);
+	capture.Authored.DynamicInputs.back().SourceInputId =
+		capture.Authored.DynamicInputs.front().SourceInputId;
+	text = "prior publication";
+	CHECK(WriteBuiltinRandomCapture({&capture, 1}, text, diagnostic) == Status::DuplicateId);
+	CHECK(text == "prior publication");
 }

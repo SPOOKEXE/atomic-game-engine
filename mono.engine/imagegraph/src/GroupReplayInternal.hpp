@@ -2,6 +2,7 @@
 
 #include "EvaluationBudget.hpp"
 #include "NodeExecutors.hpp"
+#include "SourceAnimatorIdentity.hpp"
 
 #include <engine/imagegraph/GroupReplay.hpp>
 
@@ -17,6 +18,8 @@ namespace engine::imagegraph {
 		bool Bound = false;
 		std::vector<GroupSubtypeBinding> Bindings;
 		std::vector<GroupSubtypeOverlay> SharedSubtypes;
+		std::vector<DetachedSourceAnimator> DetachedAnimators;
+		uint64_t NextAnimatorId = 0;
 		explicit Storage(uint64_t maximumBytes) : Budget(maximumBytes) {}
 	};
 	namespace detail {
@@ -36,7 +39,8 @@ namespace engine::imagegraph {
 		inline const CatalogueInput *AliasedSourceInput(const Node &node, std::string_view port) {
 			if (node.Type == "pc.group_input" && port == "parent_value") return nullptr;
 			const auto *entry = FindCatalogueEntry(node.Type);
-			if (!entry || !HasNativeExecutor(node.Type)) return nullptr;
+			// Cooked HLSL retains source input animators through its renderer host route.
+			if (!entry || (!HasNativeExecutor(node.Type) && node.Type != "pc.hlsl")) return nullptr;
 			const auto *input = FindCatalogueInput(*entry, port);
 			if (!input) {
 				size_t group;
@@ -48,13 +52,23 @@ namespace engine::imagegraph {
 			}
 			return input && input->SourceIndex >= 0 ? input : nullptr;
 		}
+		inline uint64_t DetachedAnimatorBytes(const DetachedSourceAnimator &value) {
+			const auto text = [](std::string_view s) {
+				return std::max(s.size(), std::string{}.capacity()) + 1;
+			};
+			uint64_t bytes = text(value.Id) + text(value.OwnerId) + text(value.OriginalPort);
+			if (value.Track)
+				bytes += text(value.Track->NodeId) + text(value.Track->Port) + text(value.Track->End);
+			return bytes;
+		}
 		std::unique_ptr<GroupReplayAccess::Owner> CloneGroupReplay(
 			const GroupReplayState &previous,
 			size_t extraSlots,
 			uint64_t authoringRevision,
 			uint64_t maximumBytes,
 			uint64_t destinationBytes,
-			Diagnostic &diagnostic
+			Diagnostic &diagnostic,
+			size_t extraDetachedSlots = 0
 		);
 		bool ApplyGroupRefreshContext(
 			NodeContext &context,

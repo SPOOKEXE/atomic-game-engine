@@ -1,5 +1,6 @@
 #include "EvaluationAllocator.hpp"
 #include "GroupReplayInternal.hpp"
+#include "SourceAnimatorIdentity.hpp"
 #include "TimelineOverrides.hpp"
 #include "ValuePayload.hpp"
 
@@ -85,12 +86,13 @@ namespace engine::imagegraph {
 			return nullptr;
 		}
 	}
-	Status ToggleSourceInputMode(
+	static Status ToggleSourceInputModeImpl(
 		const Document &document,
 		const GroupReplayState &replay,
 		uint64_t authoringRevision,
 		const SourceModeTransition &transition,
 		Document &result,
+		GroupReplayState *replayResult,
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes
 	) try {
@@ -116,9 +118,12 @@ namespace engine::imagegraph {
 		const auto oldBytes = DocumentRetainedPayloadBytes(document);
 		const auto priorBytes =
 			&document == &result ? std::optional<uint64_t>{0} : DocumentRetainedPayloadBytes(result);
+		const uint64_t priorReplayBytes =
+			replayResult && replayResult != &replay ? replayResult->RetainedBytes() : 0;
 		uint64_t borrowed = oldBytes.value_or(0);
 		if (!oldBytes || !priorBytes || !AddTransitionBytes(borrowed, *priorBytes) ||
-			!AddTransitionBytes(borrowed, replay.RetainedBytes()))
+			!AddTransitionBytes(borrowed, replay.RetainedBytes()) ||
+			!AddTransitionBytes(borrowed, priorReplayBytes))
 			return fail(Status::LimitExceeded, "source mode document payload exceeds bounds");
 		detail::EvaluationBudget budget(maximumBytes);
 		auto held = budget.Reserve(borrowed);
@@ -169,6 +174,18 @@ namespace engine::imagegraph {
 		if (!candidateBytes || !AddTransitionBytes(live, *candidateBytes) || !held->Resize(live))
 			return fail(Status::LimitExceeded, "source mode live document overlap exceeds bounds");
 		if (wasAnimated == transition.Animated) {
+			if (replayResult) {
+				auto next = detail::CloneGroupReplay(
+					replay,
+					0,
+					authoringRevision,
+					budget.Available() + replay.RetainedBytes() + priorReplayBytes,
+					priorReplayBytes,
+					diagnostic
+				);
+				if (!next) return diagnostic.Code;
+				detail::GroupReplayAccess::Install(*replayResult, std::move(next));
+			}
 			result = std::move(candidate);
 			diagnostic = {};
 			return Status::Ok;
@@ -177,17 +194,24 @@ namespace engine::imagegraph {
 			return node.Id == transition.NodeId;
 		});
 		std::string_view ownerId = target->Id;
-		if (const auto *binding = replay.Binding(transition.NodeId, transition.Port))
+		std::string_view animatorPort = transition.Port;
+		if (const auto *binding = replay.Binding(transition.NodeId, transition.Port)) {
 			ownerId = binding->OwnerId;
-		else if (!target->InstanceBase.empty() && transition.Port != "parent_value")
+			animatorPort = detail::BindingAnimatorPort(*binding);
+		} else if (!target->InstanceBase.empty() && transition.Port != "parent_value")
 			return fail(Status::InvalidValue, "source instance mode requires its original animator binding");
 		auto owner = std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const Node &node) {
 			return node.Id == ownerId;
 		});
 		if (owner == candidate.Nodes.end())
 			return fail(Status::UnknownNode, "source animator owner is absent");
-		bool ownerAnimated;
-		if (!Mode(*owner, transition.Port, ownerAnimated))
+		const auto *detached = replay.DetachedAnimator(ownerId, animatorPort);
+		if (detached && !replayResult)
+			return fail(
+				Status::UnsupportedExecution, "retained source animator mode requires a paired replay result"
+			);
+		bool ownerAnimated = detached && detached->Writer == GroupSubtypeAnimator::Animated;
+		if (!detached && !Mode(*owner, animatorPort, ownerAnimated))
 			return fail(Status::InvalidValue, "source animator owner needs explicit provenance");
 		const bool ownerWasAnimated = ownerAnimated;
 		auto &removedModes = transition.Animated ? target->SourceStaticInputs : target->SourceAnimatedInputs;
@@ -204,10 +228,14 @@ namespace engine::imagegraph {
 		addedModes.push_back(std::string(transition.Port));
 		std::erase(removedModes, transition.Port);
 		if (owner == target) ownerAnimated = transition.Animated;
+		const auto *detachedEffect = detached ? replay.SharedSubtype(ownerId, animatorPort) : nullptr;
+		if (detached && !detachedEffect)
+			return fail(Status::InvalidValue, "retained source animator effect is absent");
+		const auto &originalKeys = detachedEffect ? detachedEffect->Keys : candidate.Keyframes;
 		size_t count = 0;
 		uint64_t sourceBytes = 0;
-		for (const auto &key : candidate.Keyframes)
-			if (key.NodeId == ownerId && key.Port == transition.Port) {
+		for (const auto &key : originalKeys)
+			if (key.NodeId == ownerId && key.Port == animatorPort) {
 				if (key.Interpolation != "source")
 					return fail(
 						Status::UnsupportedExecution, "source mode transition requires source animator keys"
@@ -221,8 +249,8 @@ namespace engine::imagegraph {
 		if (!sourceCharge) return fail(Status::LimitExceeded, "source animator snapshot exceeds budget");
 		std::vector<Keyframe> keys;
 		keys.reserve(count);
-		for (const auto &key : candidate.Keyframes)
-			if (key.NodeId == ownerId && key.Port == transition.Port) keys.push_back(key);
+		for (const auto &key : originalKeys)
+			if (key.NodeId == ownerId && key.Port == animatorPort) keys.push_back(key);
 		for (size_t index = 1; index < keys.size(); ++index)
 			if (CompareFrameTime(GetFrameTime(keys[index - 1]), GetFrameTime(keys[index])) >= 0)
 				return fail(
@@ -237,11 +265,13 @@ namespace engine::imagegraph {
 			sampled = false;
 		} else if (!transition.Animated || keys.empty()) {
 			if (keys.empty()) {
-				const bool configured = std::any_of(
-					candidate.Tracks.begin(), candidate.Tracks.end(), [&](const AnimationTrack &track) {
-						return track.NodeId == ownerId && track.Port == transition.Port;
-					}
-				);
+				const bool configured =
+					(detached && detached->Track) ||
+					std::any_of(
+						candidate.Tracks.begin(), candidate.Tracks.end(), [&](const AnimationTrack &track) {
+							return track.NodeId == ownerId && track.Port == animatorPort;
+						}
+					);
 				if (!ownerWasAnimated && !configured)
 					return fail(
 						Status::UnsupportedExecution,
@@ -250,12 +280,13 @@ namespace engine::imagegraph {
 				const auto *ownerCatalogue = FindCatalogueEntry(owner->Type);
 				size_t ownerGroup = 0;
 				const auto *ownerInput =
-					ownerCatalogue ? FindCatalogueInput(*ownerCatalogue, transition.Port) : nullptr;
+					ownerCatalogue ? FindCatalogueInput(*ownerCatalogue, animatorPort) : nullptr;
 				if (!ownerInput && ownerCatalogue)
-					ownerInput = FindDynamicTemplate(*ownerCatalogue, transition.Port, ownerGroup);
-				const auto classified =
-					ownerInput ? ArrayClassification(*owner, transition.Port, *ownerInput, replay)
-							   : std::nullopt;
+					ownerInput = FindDynamicTemplate(*ownerCatalogue, animatorPort, ownerGroup);
+				const auto classified = detached ? detached->ArrayClassification
+										: ownerInput
+											? ArrayClassification(*owner, animatorPort, *ownerInput, replay)
+											: std::nullopt;
 				if (!classified)
 					return fail(
 						Status::UnsupportedExecution,
@@ -268,8 +299,8 @@ namespace engine::imagegraph {
 						ownerInput->Type == ValueType::Vector2 &&
 						(ownerInput->SourceKind == "Range" || ownerInput->SourceKind == "Vec2");
 					emptyGroupVector = groupVector;
-					if (ownerInput->Type != ValueType::Array &&
-						!(owner->Type == "pc.group_input" && transition.Port == "parent_value") &&
+					if (!detached && ownerInput->Type != ValueType::Array &&
+						!(owner->Type == "pc.group_input" && animatorPort == "parent_value") &&
 						!groupVector && !CatalogueAuthoredArray(*ownerCatalogue, *ownerInput, empty))
 						return fail(
 							Status::UnsupportedExecution,
@@ -318,15 +349,16 @@ namespace engine::imagegraph {
 				std::vector<uint8_t> needed(candidate.Nodes.size(), 0);
 				needed[size_t(owner - candidate.Nodes.begin())] = 1;
 				EvaluationRequest clock;
+				if (detached) clock.GroupReplay = &replay;
 				if (!SetFrameTime(clock, transition.Time))
 					return fail(Status::InvalidValue, "source sampler clock is invalid");
 				detail::TimelineOverrides values;
 				status = detail::ResolveTimelineOverrides(
-					candidate, needed, clock, budget, values, diagnostic, transition.Port, true
+					candidate, needed, clock, budget, values, diagnostic, animatorPort, true
 				);
 				if (status != Status::Ok) return status;
 				const Node &resolved = values.Find(size_t(owner - candidate.Nodes.begin()), *owner);
-				const auto *raw = Authored(resolved, transition.Port);
+				const auto *raw = Authored(resolved, animatorPort);
 				if (!raw) return fail(Status::UnsupportedExecution, "source animator raw sample is absent");
 				const auto bytes = ValueClonePayloadBytes(*raw);
 				auto charge = bytes ? budget.Reserve(*bytes) : std::nullopt;
@@ -340,7 +372,7 @@ namespace engine::imagegraph {
 		uint64_t replacementBytes = 0;
 		const bool fresh = !transition.Animated || keys.empty();
 		if (fresh) {
-			replacementBytes = sizeof(Keyframe) + TextBytes(ownerId) + TextBytes(transition.Port) +
+			replacementBytes = sizeof(Keyframe) + TextBytes(ownerId) + TextBytes(animatorPort) +
 							   TextBytes("source") + 2 * TextBytes("linear");
 		} else
 			replacementBytes = sourceBytes;
@@ -351,7 +383,7 @@ namespace engine::imagegraph {
 		if (fresh) {
 			Keyframe key;
 			key.NodeId = std::string(ownerId);
-			key.Port = std::string(transition.Port);
+			key.Port = std::string(animatorPort);
 			key.Interpolation = "source";
 			key.Ease = KeyframeEase{};
 			key.Data = std::move(sampled);
@@ -369,15 +401,71 @@ namespace engine::imagegraph {
 			if (!SetFrameTime(replacement.front(), transition.Time))
 				return fail(Status::InvalidValue, "source first key time is invalid");
 		}
+		if (detached) {
+			auto next = detail::CloneGroupReplay(
+				replay,
+				0,
+				authoringRevision,
+				budget.Available() + replay.RetainedBytes() + priorReplayBytes,
+				priorReplayBytes,
+				diagnostic
+			);
+			if (!next) return diagnostic.Code;
+			auto effect =
+				std::find_if(next->SharedSubtypes.begin(), next->SharedSubtypes.end(), [&](const auto &item) {
+					return item.NodeId == ownerId && item.Port == animatorPort;
+				});
+			uint64_t oldPayload = effect->Keys.capacity() * sizeof(Keyframe);
+			for (const auto &key : effect->Keys)
+				oldPayload += *KeyframePayloadBytes(key) - sizeof(Keyframe);
+			if (effect->Fixed) oldPayload += detail::RetainedPayloadBytes(*effect->Fixed);
+			uint64_t newPayload = replacement.capacity() * sizeof(Keyframe);
+			for (const auto &key : replacement)
+				newPayload += *KeyframePayloadBytes(key) - sizeof(Keyframe);
+			auto replayKeys = next->Budget.Reserve(newPayload);
+			if (!replayKeys)
+				return fail(Status::LimitExceeded, "retained source animator mode keys exceed budget");
+			{
+				auto old = std::move(effect->Keys);
+				effect->Keys = std::move(replacement);
+				effect->Fixed.reset();
+			}
+			if (!next->Charge.Merge(std::move(*replayKeys)) ||
+				!next->Charge.Resize(next->Charge.Bytes() - oldPayload))
+				std::terminate();
+			for (auto &binding : next->Bindings)
+				if (binding.NodeId == transition.NodeId && binding.Port == transition.Port)
+					binding.Getter =
+						transition.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+			GroupReplayState replayCandidate;
+			detail::GroupReplayAccess::Install(replayCandidate, std::move(next));
+			auto stateCharge = budget.Reserve(replayCandidate.RetainedBytes());
+			if (!stateCharge)
+				return fail(Status::LimitExceeded, "retained source mode candidate exceeds budget");
+			Document projected;
+			status = ProjectGroupReplay(
+				candidate,
+				replayCandidate,
+				authoringRevision,
+				projected,
+				diagnostic,
+				budget.Available() + *candidateBytes + replayCandidate.RetainedBytes()
+			);
+			if (status != Status::Ok) return status;
+			result = std::move(projected);
+			*replayResult = std::move(replayCandidate);
+			diagnostic = {};
+			return Status::Ok;
+		}
 		if (emptyGroupVector)
 			for (auto &value : owner->Values)
-				if (value.Port == transition.Port) value.Data = ArrayValue{ValueType::Scalar, {}};
+				if (value.Port == animatorPort) value.Data = ArrayValue{ValueType::Scalar, {}};
 		const size_t finalCount = candidate.Keyframes.size() - count + replacement.size();
 		if (finalCount > Limits::MaximumKeyframes)
 			return fail(Status::LimitExceeded, "source mode replacement key count exceeds bounds");
 		uint64_t finalBytes = finalCount * sizeof(Keyframe);
 		for (const auto &key : candidate.Keyframes)
-			if (key.NodeId != ownerId || key.Port != transition.Port) {
+			if (key.NodeId != ownerId || key.Port != animatorPort) {
 				const auto bytes = KeyframePayloadBytes(key);
 				if (!bytes || !AddTransitionBytes(finalBytes, *bytes - sizeof(Keyframe)))
 					return fail(Status::LimitExceeded, "source mode retained keys exceed bounds");
@@ -387,15 +475,15 @@ namespace engine::imagegraph {
 		std::vector<Keyframe> finalKeys;
 		finalKeys.reserve(finalCount);
 		for (const auto &key : candidate.Keyframes)
-			if (key.NodeId != ownerId || key.Port != transition.Port) finalKeys.push_back(key);
+			if (key.NodeId != ownerId || key.Port != animatorPort) finalKeys.push_back(key);
 		for (auto &key : replacement)
 			finalKeys.push_back(std::move(key));
 		if (std::none_of(candidate.Tracks.begin(), candidate.Tracks.end(), [&](const AnimationTrack &track) {
-				return track.NodeId == ownerId && track.Port == transition.Port;
+				return track.NodeId == ownerId && track.Port == animatorPort;
 			})) {
 			if (candidate.Tracks.size() == Limits::MaximumTracks)
 				return fail(Status::LimitExceeded, "source mode track count exceeds bounds");
-			uint64_t trackBytes = TextBytes(ownerId) + TextBytes(transition.Port) + TextBytes("hold");
+			uint64_t trackBytes = TextBytes(ownerId) + TextBytes(animatorPort) + TextBytes("hold");
 			if (candidate.Tracks.size() == candidate.Tracks.capacity() &&
 				!AddTransitionBytes(trackBytes, (candidate.Tracks.size() + 1) * sizeof(AnimationTrack)))
 				return fail(Status::LimitExceeded, "source mode track allocation overflows");
@@ -403,17 +491,79 @@ namespace engine::imagegraph {
 			if (!trackCharge) return fail(Status::LimitExceeded, "source mode track exceeds budget");
 			if (candidate.Tracks.size() == candidate.Tracks.capacity())
 				candidate.Tracks.reserve(candidate.Tracks.size() + 1);
-			candidate.Tracks.push_back({std::string(ownerId), std::string(transition.Port), "hold", -1});
+			candidate.Tracks.push_back({std::string(ownerId), std::string(animatorPort), "hold", -1});
 			// This admission lives until the transaction ends, alongside the candidate.
 			if (!held->Merge(std::move(*trackCharge))) std::terminate();
 		}
 		candidate.Keyframes.swap(finalKeys);
 		candidate.FormatVersion = 9;
+		if (replayResult) {
+			auto next = detail::CloneGroupReplay(
+				replay,
+				0,
+				authoringRevision,
+				budget.Available() + replay.RetainedBytes() + priorReplayBytes,
+				priorReplayBytes,
+				diagnostic
+			);
+			if (!next) return diagnostic.Code;
+			uint64_t retiredBytes = 0;
+			for (auto it = next->SharedSubtypes.begin(); it != next->SharedSubtypes.end();) {
+				if (it->NodeId != ownerId || it->Port != animatorPort) {
+					++it;
+					continue;
+				}
+				retiredBytes +=
+					TextBytes(it->NodeId) + TextBytes(it->Port) + it->Keys.capacity() * sizeof(Keyframe);
+				if (it->Fixed) retiredBytes += detail::RetainedPayloadBytes(*it->Fixed);
+				for (const auto &key : it->Keys)
+					retiredBytes += *KeyframePayloadBytes(key) - sizeof(Keyframe);
+				it = next->SharedSubtypes.erase(it);
+			}
+			if (!next->Charge.Resize(next->Charge.Bytes() - retiredBytes)) std::terminate();
+			for (auto &binding : next->Bindings) {
+				if (binding.NodeId == transition.NodeId && binding.Port == transition.Port)
+					binding.Getter =
+						transition.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+				if (owner == target && binding.OwnerId == ownerId &&
+					detail::BindingAnimatorPort(binding) == animatorPort)
+					binding.Writer =
+						transition.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+			}
+			detail::GroupReplayAccess::Install(*replayResult, std::move(next));
+		}
 		result = std::move(candidate);
 		diagnostic = {};
 		return Status::Ok;
 	} catch (const std::bad_alloc &) {
 		diagnostic = {Status::LimitExceeded, {}, {}, "source mode transaction allocation failed"};
 		return diagnostic.Code;
+	}
+	Status ToggleSourceInputMode(
+		const Document &document,
+		const GroupReplayState &replay,
+		uint64_t revision,
+		const SourceModeTransition &transition,
+		Document &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		return ToggleSourceInputModeImpl(
+			document, replay, revision, transition, result, nullptr, diagnostic, maximumBytes
+		);
+	}
+	Status ToggleSourceInputMode(
+		const Document &document,
+		const GroupReplayState &replay,
+		uint64_t revision,
+		const SourceModeTransition &transition,
+		Document &result,
+		GroupReplayState &replayResult,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		return ToggleSourceInputModeImpl(
+			document, replay, revision, transition, result, &replayResult, diagnostic, maximumBytes
+		);
 	}
 }

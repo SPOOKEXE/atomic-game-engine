@@ -32,8 +32,10 @@
 #include "RigidSchedule.hpp"
 #include "SimulationAliases.hpp"
 #include "SnapshotAudioMoves.hpp"
+#include "SourceAnimatorIdentity.hpp"
 #include "SourceAtlasCodec.hpp"
 #include "SourceGetterProjection.hpp"
+#include "SourceInputOrigin.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourcePathShapeCodec.hpp"
 #include "SourceRigidCodec.hpp"
@@ -2420,6 +2422,9 @@ namespace engine::imagegraph {
 				}
 			if (document.FormatVersion >= 2) {
 				for (const DynamicInput &input : node.DynamicInputs) {
+					if (!input.SourceInputId.empty() &&
+						(document.FormatVersion < 9 || !detail::SourceInputOrdinal(input.SourceInputId)))
+						return {};
 					stream << "dynamic " << nodeIndex << ' ';
 					WriteQuoted(stream, node.Id);
 					stream << ' ';
@@ -2430,6 +2435,15 @@ namespace engine::imagegraph {
 						WriteValue(stream, *input.Default);
 					}
 					stream << '\n';
+					if (!input.SourceInputId.empty()) {
+						stream << "source_input_origin " << nodeIndex << ' ';
+						WriteQuoted(stream, node.Id);
+						stream << ' ';
+						WriteQuoted(stream, input.Id);
+						stream << ' ';
+						WriteQuoted(stream, input.SourceInputId);
+						stream << '\n';
+					}
 					if (document.FormatVersion >= 9 && !input.SourceLayerName.empty()) {
 						stream << "dynamic_layer " << nodeIndex << ' ';
 						WriteQuoted(stream, node.Id);
@@ -2874,6 +2888,23 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				parsed.Nodes[nodeIndex].DynamicInputs.push_back(std::move(dynamic));
+			} else if (marker == "source_input_origin" && parsed.FormatVersion >= 9) {
+				size_t nodeIndex = 0;
+				std::string nodeId, inputId, origin;
+				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId) || !ReadQuoted(row, inputId) ||
+					!ReadQuoted(row, origin, Limits::MaximumSourceInputIdBytes) ||
+					!detail::SourceInputOrdinal(origin) || HasTrailing(row) ||
+					nodeIndex >= parsed.Nodes.size() || parsed.Nodes[nodeIndex].Id != nodeId)
+					goto malformed;
+				auto &inputs = parsed.Nodes[nodeIndex].DynamicInputs;
+				// Canonical writers put origin metadata directly after its dynamic declaration.
+				auto found = inputs.empty() ? inputs.end() : inputs.end() - 1;
+				if (found == inputs.end() || found->Id != inputId)
+					found = std::find_if(inputs.begin(), inputs.end(), [&](const auto &input) {
+						return input.Id == inputId;
+					});
+				if (found == inputs.end() || !found->SourceInputId.empty()) goto malformed;
+				found->SourceInputId = std::move(origin);
 			} else if (marker == "dynamic_layer" && parsed.FormatVersion >= 9) {
 				size_t nodeIndex = 0;
 				std::string nodeId, inputId, name;
@@ -3426,6 +3457,14 @@ namespace engine::imagegraph {
 			parsed.Project->ShowPreviewRulers = previewRulers->first;
 			parsed.Project->PreviewRulers = std::move(previewRulers->second);
 		}
+		{
+			// One fixed bounded scratch array validates all nodes without per-origin allocation.
+			std::array<uint64_t, Limits::MaximumPixelBuilderDynamicInputsPerNode> origins{};
+			std::string_view failedPort;
+			for (const auto &node : parsed.Nodes)
+				if (detail::ValidateSourceInputOrigins(node.DynamicInputs, origins, failedPort) != Status::Ok)
+					goto malformed;
+		}
 		document = std::move(parsed);
 		diagnostic = {};
 		return Status::Ok;
@@ -3954,6 +3993,7 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 			auto portIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
+			auto sourceInputIds = detail::MakeEvaluationHashSet<std::string_view>(budget);
 			for (const PortSchema &port : FindSchema(node.Type)->Ports)
 				portIds.insert(port.Id);
 			for (const DynamicInput &input : node.DynamicInputs) {
@@ -3983,6 +4023,28 @@ namespace engine::imagegraph {
 						input.Id
 					);
 					return diagnostic.Code;
+				}
+				if (!input.SourceInputId.empty()) {
+					if (document.FormatVersion < 9 || !detail::SourceInputOrdinal(input.SourceInputId)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidValue,
+							"source input origin needs a bounded canonical v9 name",
+							node.Id,
+							input.Id
+						);
+						return diagnostic.Code;
+					}
+					if (!sourceInputIds.insert(input.SourceInputId).second) {
+						SetDiagnostic(
+							diagnostic,
+							Status::DuplicateId,
+							"source input origin is duplicated within its node",
+							node.Id,
+							input.Id
+						);
+						return diagnostic.Code;
+					}
 				}
 				if (input.SourceLayerName.size() > Limits::MaximumTextBytes ||
 					(document.FormatVersion < 9 && !input.SourceLayerName.empty())) {
@@ -7704,6 +7766,8 @@ namespace engine::imagegraph {
 	) {
 		const std::string_view nodeId = target.Id;
 		const auto *binding = replay && replay->InstancesBound() ? replay->Binding(nodeId, port) : nullptr;
+		if (detail::InheritedMovedSourceGetter(target, port, binding)) binding = nullptr;
+		const std::string_view ownerPort = detail::SourceGetterPort(target, port, binding);
 		const Node *owner = nullptr;
 		if (binding) {
 			const auto found =
@@ -7717,10 +7781,10 @@ namespace engine::imagegraph {
 		if (!owner) return nullptr;
 		const std::string_view ownerId = owner->Id;
 		const bool sourceStatic =
-			std::find(owner->SourceStaticInputs.begin(), owner->SourceStaticInputs.end(), port) !=
+			std::find(owner->SourceStaticInputs.begin(), owner->SourceStaticInputs.end(), ownerPort) !=
 			owner->SourceStaticInputs.end();
 		const auto *overlay =
-			replay && replay->InstancesBound() ? replay->SharedSubtype(ownerId, port) : nullptr;
+			replay && replay->InstancesBound() ? replay->SharedSubtype(ownerId, ownerPort) : nullptr;
 		const auto *entry = replay ? replay->Find(ownerId) : nullptr;
 		const std::optional<Value> *fixed = overlay ? &overlay->Fixed : nullptr;
 		const std::vector<Keyframe> *keys = overlay ? &overlay->Keys : nullptr;
@@ -7750,7 +7814,7 @@ namespace engine::imagegraph {
 		const Keyframe *first = nullptr;
 		size_t count = 0;
 		const auto consider = [&](const Keyframe &key) {
-			if (key.NodeId != ownerId || key.Port != port) return;
+			if (key.NodeId != ownerId || key.Port != ownerPort) return;
 			if (!first) first = &key;
 			++count;
 		};
@@ -7766,7 +7830,7 @@ namespace engine::imagegraph {
 			raw = true;
 		if (!binding && replay && replay->InstancesBound()) {
 			for (const auto &target : replay->Bindings())
-				if (target.OwnerId == nodeId && target.Port == port &&
+				if (target.OwnerId == nodeId && detail::BindingAnimatorPort(target) == ownerPort &&
 					target.Writer == GroupSubtypeAnimator::Static) {
 					raw = true;
 					break;
@@ -7775,7 +7839,7 @@ namespace engine::imagegraph {
 		if (!raw) return nullptr;
 		if (first) return getterView(&first->Data, true);
 		for (const auto &value : owner->Values)
-			if (value.Port == port) return getterView(&value.Data);
+			if (value.Port == ownerPort) return getterView(&value.Data);
 		return nullptr;
 	}
 
@@ -7890,6 +7954,8 @@ namespace engine::imagegraph {
 				const auto *binding = replayState && replayState->InstancesBound()
 										  ? replayState->Binding(local.Id, port)
 										  : nullptr;
+				if (detail::InheritedMovedSourceGetter(local, port, binding)) binding = nullptr;
+				const auto ownerPort = detail::SourceGetterPort(local, port, binding);
 				const auto canonical =
 					std::find_if(document->Nodes.begin(), document->Nodes.end(), [&](const auto &node) {
 						return node.Id == local.Id;
@@ -7916,18 +7982,26 @@ namespace engine::imagegraph {
 						owner = &timelineOverrides->Find(ownerIndex, *foundOwner);
 					}
 				}
-				const auto *authored = owner ? FindValue(*owner, port) : nullptr;
+				const auto *authored = owner ? FindValue(*owner, ownerPort) : nullptr;
 				if (!value && authored)
-					value = SourceEmptyGroupVectorView(document, *owner, port, &authored->Data);
+					value = SourceEmptyGroupVectorView(document, *owner, ownerPort, &authored->Data);
+				if (!value && owner) {
+					const auto dynamic = std::find_if(
+						owner->DynamicInputs.begin(), owner->DynamicInputs.end(), [&](const auto &input) {
+							return input.Id == ownerPort;
+						}
+					);
+					if (dynamic != owner->DynamicInputs.end() && dynamic->Default) value = &*dynamic->Default;
+				}
 				const std::string_view ownerId = owner ? std::string_view(owner->Id) : local.Id;
 				if (value && rawSourceQuaternions && !projection &&
-					SourceQuaternionKeysPresent(*document, replayState, ownerId, port))
+					SourceQuaternionKeysPresent(*document, replayState, ownerId, ownerPort))
 					projection = SourceQuaternionGetterProjection(*document, local.Id, port, *value);
 				const auto found =
 					std::find_if(rows.begin(), rows.end(), [&](const auto &row) { return row.Port == port; });
 				if (!value) {
 					if (rawSourceQuaternions && found != rows.end() &&
-						SourceQuaternionKeysPresent(*document, replayState, ownerId, port))
+						SourceQuaternionKeysPresent(*document, replayState, ownerId, ownerPort))
 						found->Projection =
 							SourceQuaternionGetterProjection(*document, local.Id, port, *found->Data);
 					return;
@@ -8854,12 +8928,14 @@ namespace engine::imagegraph {
 				const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
 										  ? request.GroupReplay->Binding(ownerNode.Id, port)
 										  : nullptr;
+				if (detail::InheritedMovedSourceGetter(ownerNode, port, binding)) binding = nullptr;
+				const auto ownerPort = detail::SourceGetterPort(ownerNode, port, binding);
 				const Node *authoredOwner = binding ? &document.Nodes[nodeIndices.at(binding->OwnerId)]
 													: EffectiveInputOwner(document, ownerNode, port);
 				if (authoredOwner)
 					authoredOwner =
 						&timelineOverrides.Find(nodeIndices.at(authoredOwner->Id), *authoredOwner);
-				if (const auto *value = authoredOwner ? FindValue(*authoredOwner, port) : nullptr)
+				if (const auto *value = authoredOwner ? FindValue(*authoredOwner, ownerPort) : nullptr)
 					controls.ValueViews.emplace_back(port, &value->Data);
 				else if (input && !input->Default.empty()) {
 					Value fallback;
@@ -8990,7 +9066,7 @@ namespace engine::imagegraph {
 				const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
 										  ? request.GroupReplay->Binding(node.Id, port)
 										  : nullptr;
-				if (binding) {
+				if (binding && !detail::InheritedMovedSourceGetter(node, port, binding)) {
 					const size_t ownerIndex = nodeIndices.at(binding->OwnerId);
 					return timelineOverrides.Find(ownerIndex, document.Nodes[ownerIndex]);
 				}
@@ -8998,6 +9074,12 @@ namespace engine::imagegraph {
 				if (!owner) return valueNode;
 				const size_t ownerIndex = nodeIndices.at(owner->Id);
 				return timelineOverrides.Find(ownerIndex, document.Nodes[ownerIndex]);
+			};
+			const auto inputAnimatorPort = [&](std::string_view port) {
+				const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
+										  ? request.GroupReplay->Binding(node.Id, port)
+										  : nullptr;
+				return detail::SourceGetterPort(node, port, binding);
 			};
 			// Every connected input is resolved before executing this node, including animator aliases.
 			for (const auto &link : plan.EffectiveLinks) {
@@ -10110,7 +10192,9 @@ namespace engine::imagegraph {
 							const auto declared = std::find_if(
 								owner.DynamicInputs.begin(),
 								owner.DynamicInputs.end(),
-								[&](const auto &candidate) { return candidate.Id == input.Id; }
+								[&](const auto &candidate) {
+									return candidate.Id == inputAnimatorPort(input.Id);
+								}
 							);
 							if (declared != owner.DynamicInputs.end() && declared->Default &&
 								detail::SourceHlslArgumentValue(
@@ -10180,7 +10264,7 @@ namespace engine::imagegraph {
 						}
 						context.ValueViews.emplace_back(input.Id, &found->Data);
 					} else {
-						if (node.Type == "pc.hlsl" && input.Id.starts_with("argument_type_")) {
+						{
 							const auto resolvedAt = [&](std::string_view ownerId) {
 								return std::find_if(
 									plan.ResolvedInputs.begin(),
@@ -10209,13 +10293,15 @@ namespace engine::imagegraph {
 								context.ValueViews.emplace_back(input.Id, view);
 							continue;
 						}
-						const bool aliased =
-							request.GroupReplay && request.GroupReplay->Binding(node.Id, input.Id);
-						const Node &defaultsNode = aliased ? valueNode : inputOwner(input.Id);
+						const Node &defaultsNode = inputOwner(input.Id);
+						if (const auto *sampled = FindValue(defaultsNode, inputAnimatorPort(input.Id))) {
+							context.ValueViews.emplace_back(input.Id, &sampled->Data);
+							continue;
+						}
 						const auto selected = std::find_if(
 							defaultsNode.DynamicInputs.begin(),
 							defaultsNode.DynamicInputs.end(),
-							[&](const auto &candidate) { return candidate.Id == input.Id; }
+							[&](const auto &candidate) { return candidate.Id == inputAnimatorPort(input.Id); }
 						);
 						if (selected != defaultsNode.DynamicInputs.end() && selected->Default)
 							context.ValueViews.emplace_back(input.Id, &*selected->Default);
@@ -10226,7 +10312,28 @@ namespace engine::imagegraph {
 				};
 				pcxPrograms.reserve(inputCount);
 				const auto appendPcxProgram = [&](std::string_view port) {
-					const auto &owner = inputOwner(port);
+					const auto *binding =
+						request.GroupReplay ? request.GroupReplay->Binding(node.Id, port) : nullptr;
+					const Node *expressionOwner = &inputOwner(port);
+					if (binding && detail::MovedSourceAnimator(*binding)) {
+						const bool localLink = std::any_of(
+												   plan.EffectiveLinks.begin(),
+												   plan.EffectiveLinks.end(),
+												   [&](const auto &link) {
+													   return link.ToNode == node.Id && link.ToPort == port;
+												   }
+											   ) ||
+											   std::any_of(
+												   plan.ResolvedInputs.begin(),
+												   plan.ResolvedInputs.end(),
+												   [&](const auto &input) {
+													   return input.NodeId == node.Id && input.Port == port;
+												   }
+											   );
+						expressionOwner = localLink ? &node : EffectiveInputOwner(document, node, port);
+					}
+					if (!expressionOwner) return;
+					const auto &owner = *expressionOwner;
 					const auto found = std::find_if(
 						owner.SourceInputExpressions.begin(),
 						owner.SourceInputExpressions.end(),

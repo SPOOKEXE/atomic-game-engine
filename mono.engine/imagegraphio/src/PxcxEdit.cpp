@@ -1,7 +1,11 @@
 #include "CookedShaderAnnotation.hpp"
+#include "HlslSourceArguments.hpp"
 #include "PxcxKeyProvenance.hpp"
+#include "SourceInputProvenance.hpp"
 #include "TileProperties.hpp"
 
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/SourceAnimatorCapture.hpp>
 #include <engine/imagegraphio/PxcxEdit.hpp>
@@ -58,6 +62,16 @@ namespace engine::imagegraphio {
 			if (bytes > budget) return false;
 			budget -= bytes;
 			return true;
+		}
+		// These candidates start empty, so one reserve has no old backing allocation to retain.
+		template <class T>
+		bool ReserveEmptyProjectionSlots(std::vector<T> &items, size_t count, size_t &budget) {
+			if (!items.empty() || items.capacity() != 0 || count > budget / sizeof(T) ||
+				!Spend(count * sizeof(T), budget))
+				return false;
+			items.reserve(count);
+			const size_t extra = items.capacity() - count;
+			return extra <= budget / sizeof(T) && Spend(extra * sizeof(T), budget);
 		}
 		template <class T> bool Bounded(const T &, size_t &);
 		bool
@@ -496,11 +510,263 @@ namespace engine::imagegraphio {
 			const size_t index = size_t(item - list.begin()) + offset;
 			return index < inputs.size() && inputs[index].is_object() ? &inputs[index] : nullptr;
 		}
+		struct HlslInputMove {
+			std::string_view NodeId;
+			size_t OldIndex = 0;
+			size_t NewIndex = 0;
+		};
+		bool MoveHlslInputRecords(
+			Json &root,
+			const Document &before,
+			const Document &desired,
+			size_t &payloadBudget,
+			bool &changed,
+			Diagnostic &diagnostic
+		) {
+			ENGINE_PROFILE("imagegraphio.hlsl_record_move");
+			const size_t initialBudget = payloadBudget;
+			std::vector<HlslInputMove> moves;
+			size_t moveCount = 0;
+			for (const auto &node : desired.Nodes)
+				if (node.Type == "pc.hlsl") moveCount += node.DynamicInputs.size();
+			if (moveCount > Limits::MaximumArrayElements ||
+				!ReserveEmptyProjectionSlots(moves, moveCount, payloadBudget))
+				return Reject(diagnostic, "PXC HLSL record move table exceeds its payload limit");
+			constexpr std::array<std::string_view, 3> names{
+				"argument_name_", "argument_type_", "argument_value_"
+			};
+			for (const auto &node : desired.Nodes) {
+				if (node.Type != "pc.hlsl") continue;
+				const auto *old = NativeNode(before, node.Id);
+				if (!old) {
+					if (std::any_of(
+							node.DynamicInputs.begin(), node.DynamicInputs.end(), [](const auto &input) {
+								return !input.SourceInputId.empty();
+							}
+						))
+						return Reject(
+							diagnostic, "PXC new HLSL node cannot consume an original input record", node.Id
+						);
+					continue;
+				}
+				auto *saved = SourceNode(root, node.Id);
+				if (!saved || old->Type != "pc.hlsl" || saved->value("type", std::string{}) != "Node_HLSL" ||
+					!saved->contains("inputs") || !(*saved)["inputs"].is_array() ||
+					(*saved)["inputs"].size() < 5)
+					return Reject(diagnostic, "PXC HLSL original input records are absent", node.Id);
+				if (node.DynamicInputs.size() % 3 ||
+					node.DynamicInputs.size() > MaximumDynamicInputsForType(node.Type))
+					return Reject(diagnostic, "PXC HLSL input records require complete triples", node.Id);
+				std::set<std::string_view> consumed;
+				Json replacement = Json::array();
+				const auto &original = (*saved)["inputs"];
+				if (!ReserveEmptyProjectionSlots(
+						replacement.get_ref<Json::array_t &>(), 5 + node.DynamicInputs.size(), payloadBudget
+					))
+					return Reject(
+						diagnostic, "PXC HLSL replacement input array exceeds its payload limit", node.Id
+					);
+				for (size_t i = 0; i < 5; ++i) {
+					if (!JsonBytes(original[i], payloadBudget))
+						return Reject(diagnostic, "PXC HLSL fixed records exceed move budget", node.Id);
+					replacement.push_back(original[i]);
+				}
+				bool nodeChanged = original.size() != 5 + node.DynamicInputs.size();
+				std::optional<uint64_t> originalGroup;
+
+				for (size_t i = 0; i < node.DynamicInputs.size(); ++i) {
+					const auto &input = node.DynamicInputs[i];
+					if (i % 3 == 0) originalGroup.reset();
+					if (input.Id != std::string(names[i % 3]) + std::to_string(i / 3))
+						return Reject(
+							diagnostic,
+							"PXC HLSL input records require canonical ordered triples",
+							node.Id,
+							input.Id
+						);
+					if (input.SourceInputId.empty()) {
+						if (i % 3 && !node.DynamicInputs[i - i % 3].SourceInputId.empty())
+							return Reject(
+								diagnostic,
+								"PXC HLSL original and new records cannot share one triple",
+								node.Id,
+								input.Id
+							);
+
+						Json fresh = Json::object();
+						if (input.Default) {
+							const auto owned = ValueClonePayloadBytes(*input.Default);
+							// Eight owned payloads cover JSON escaping, numeric expansion and container
+							// overhead.
+							if (!owned || *owned > payloadBudget / 8 ||
+								!Spend(size_t(*owned) * 8, payloadBudget))
+								return Reject(
+									diagnostic,
+									"PXC new HLSL default encoding exceeds move budget",
+									node.Id,
+									input.Id
+								);
+							auto encoded = EncodeInsertedValue(*input.Default);
+							if (!encoded)
+								return Reject(
+									diagnostic,
+									"PXC new HLSL input default has no source codec",
+									node.Id,
+									input.Id
+								);
+							fresh["r"] = {{"d", std::move(*encoded)}};
+						}
+						if (!JsonBytes(fresh, payloadBudget))
+							return Reject(
+								diagnostic, "PXC new HLSL record exceeds move budget", node.Id, input.Id
+							);
+						replacement.push_back(std::move(fresh));
+						nodeChanged = true;
+						continue;
+					}
+					if (!Spend(sizeof(std::string_view) + 4 * sizeof(void *), payloadBudget))
+						return Reject(
+							diagnostic, "PXC HLSL origin table exceeds move budget", node.Id, input.Id
+						);
+					const auto ordinal = detail::SourceInputOrdinal(input.SourceInputId);
+					const auto oldInput = std::find_if(
+						old->DynamicInputs.begin(), old->DynamicInputs.end(), [&](const auto &candidate) {
+							return candidate.SourceInputId == input.SourceInputId;
+						}
+					);
+					if (!ordinal || *ordinal < 5 || *ordinal >= original.size() ||
+						oldInput == old->DynamicInputs.end() ||
+						!consumed.insert(input.SourceInputId).second ||
+						!oldInput->Id.starts_with(names[i % 3]) || ((*ordinal - 5) % 3) != i % 3)
+						return Reject(
+							diagnostic,
+							"PXC HLSL source input origin does not identify one matching original record",
+							node.Id,
+							input.Id
+						);
+					if (i % 3 == 0) originalGroup = (*ordinal - 5) / 3;
+					if (!originalGroup || *originalGroup != (*ordinal - 5) / 3)
+						return Reject(
+							diagnostic,
+							"PXC HLSL moved triple must retain one original group",
+							node.Id,
+							input.Id
+						);
+					if (!JsonBytes(original[size_t(*ordinal)], payloadBudget))
+						return Reject(
+							diagnostic, "PXC HLSL retained record exceeds move budget", node.Id, input.Id
+						);
+					replacement.push_back(original[size_t(*ordinal)]);
+					moves.push_back({node.Id, size_t(*ordinal), 5 + i});
+					nodeChanged |= *ordinal != 5 + i;
+				}
+				if (nodeChanged) {
+					(*saved)["inputs"] = std::move(replacement);
+					changed = true;
+				}
+			}
+			core::Metrics::Count("imagegraphio.hlsl_record_move.records", moveCount);
+			core::Metrics::Count(
+				"imagegraphio.hlsl_record_move.admitted_payload_bytes", initialBudget - payloadBudget
+			);
+			if (!changed) return true;
+			const auto beforeMove = [](const HlslInputMove &a, const HlslInputMove &b) {
+				return std::tie(a.NodeId, a.OldIndex) < std::tie(b.NodeId, b.OldIndex);
+			};
+			std::sort(moves.begin(), moves.end(), beforeMove);
+			// Source bypasses identify the input record, even when its physical index changes.
+			for (auto &node : root["nodes"]) {
+				if (!node.contains("inputs") || !node["inputs"].is_array()) continue;
+				for (auto &input : node["inputs"]) {
+					if (!input.is_object() || !input.contains("from_node") ||
+						!input["from_node"].is_string() || !input.contains("from_index") ||
+						!input["from_index"].is_number_integer())
+						continue;
+					const auto index = input["from_index"].get<int64_t>();
+					if (index < 1005) continue;
+					const auto &id = input["from_node"].get_ref<const std::string &>();
+					const auto *old = NativeNode(before, id);
+					if (!old || old->Type != "pc.hlsl") continue;
+					const HlslInputMove address{id, size_t(index - 1000), 0};
+					const auto move = std::lower_bound(moves.begin(), moves.end(), address, beforeMove);
+					if (move == moves.end() || beforeMove(address, *move)) {
+						const auto destination = node.value("id", std::string{});
+						const auto *producer = NativeNode(desired, id);
+						for (const auto &link : desired.Links) {
+							if (link.FromNode != id || link.ToNode != destination ||
+								!link.FromPort.ends_with(".bypass"))
+								continue;
+							const auto port =
+								std::string_view(link.FromPort).substr(0, link.FromPort.size() - 7);
+							const auto declared =
+								producer ? std::find_if(
+											   producer->DynamicInputs.begin(),
+											   producer->DynamicInputs.end(),
+											   [&](const auto &candidate) { return candidate.Id == port; }
+										   )
+										 : old->DynamicInputs.end();
+							if (!producer || declared == producer->DynamicInputs.end() ||
+								detail::SourceInputOrdinal(declared->SourceInputId) ==
+									std::optional<uint64_t>{uint64_t(index - 1000)})
+								return Reject(
+									diagnostic,
+									"PXC removed HLSL input still has an authored bypass route",
+									id,
+									port
+								);
+						}
+						// The desired transaction retires this route; retained local data and unknown fields
+						// stay.
+						input.erase("from_node");
+						input.erase("from_index");
+						input.erase("from_tag");
+						continue;
+					}
+					input["from_index"] = 1000 + move->NewIndex;
+				}
+			}
+			return true;
+		}
+
 		std::optional<uint8_t> Side(std::string_view name) {
 			if (name == "linear") return 0;
 			if (name == "bezier") return 1;
 			if (name == "cut") return 2;
 			return std::nullopt;
+		}
+		bool UnchangedHlslAnimator(
+			const Document &previous, const Document &desired, const Node &node, std::string_view port
+		) {
+			if (node.Type != "pc.hlsl") return false;
+			const auto *old = NativeNode(previous, node.Id);
+			if (!old) return false;
+			const auto contains = [&](const auto &ports) {
+				return std::find(ports.begin(), ports.end(), port) != ports.end();
+			};
+			if (contains(old->SourceAnimatedInputs) != contains(node.SourceAnimatedInputs) ||
+				contains(old->SourceStaticInputs) != contains(node.SourceStaticInputs))
+				return false;
+			auto a = previous.Keyframes.begin(), b = desired.Keyframes.begin();
+			while (true) {
+				while (a != previous.Keyframes.end() && (a->NodeId != node.Id || a->Port != port))
+					++a;
+				while (b != desired.Keyframes.end() && (b->NodeId != node.Id || b->Port != port))
+					++b;
+				if (a == previous.Keyframes.end() || b == desired.Keyframes.end()) {
+					if (a != previous.Keyframes.end() || b != desired.Keyframes.end()) return false;
+					break;
+				}
+				if (*a != *b) return false;
+				++a;
+				++b;
+			}
+			const auto match = [&](const auto &track) {
+				return track.NodeId == node.Id && track.Port == port;
+			};
+			const auto before = std::find_if(previous.Tracks.begin(), previous.Tracks.end(), match);
+			const auto after = std::find_if(desired.Tracks.begin(), desired.Tracks.end(), match);
+			return before == previous.Tracks.end() ? after == desired.Tracks.end()
+												   : after != desired.Tracks.end() && *before == *after;
 		}
 		bool AuthoredKeyRecord(
 			const Document &document,
@@ -1791,7 +2057,10 @@ namespace engine::imagegraphio {
 						diagnostic, "PXC source expressions exceed payload budget", node.Id, expression.Port
 					);
 			for (const auto &input : node.DynamicInputs)
-				if (!Spend(input.Id.size() + input.SourceLayerName.size(), payloadBudget) ||
+				if (!Spend(
+						input.Id.size() + input.SourceLayerName.size() + input.SourceInputId.size(),
+						payloadBudget
+					) ||
 					(input.Default && !BoundedValue(*input.Default, payloadBudget)))
 					return Reject(
 						diagnostic,
@@ -1846,6 +2115,35 @@ namespace engine::imagegraphio {
 			keyAmbiguous
 		);
 		if (!keyRoot || keyAmbiguous) return Reject(diagnostic, "PXC source key JSON is ambiguous");
+		bool recordsMoved = false;
+		size_t moveBudget = std::min<uint64_t>(payloadBudget, imported.Options.MaximumOperationBytes);
+		const size_t initialMoveBudget = moveBudget;
+		if (!MoveHlslInputRecords(*keyRoot, imported.Graph, desired, moveBudget, recordsMoved, diagnostic))
+			return false;
+		payloadBudget -= initialMoveBudget - moveBudget;
+		if (recordsMoved) {
+			auto archive = working.Source;
+			size_t jsonBudget = bake::PxcxLimits::MaximumGraphJsonBytes - 1;
+			if (!JsonBytes(*keyRoot, jsonBudget))
+				return Reject(diagnostic, "PXC moved HLSL records exceed the source JSON limit");
+			archive.Nodes.clear();
+			archive.Links.clear();
+			archive.GraphJson = keyRoot->dump();
+			archive.GraphJson.push_back('\0');
+			std::string failure;
+			std::vector<std::byte> prepared;
+			bake::PxcxArchive checked;
+			if (!bake::WritePxcx(archive, prepared, failure) || !bake::ReadPxcx(prepared, checked, failure) ||
+				!ImportPxcxImageGraph(checked, working, failure, imported.Options))
+				return Reject(diagnostic, failure);
+			for (const auto &node : desired.Nodes)
+				if (node.Type == "pc.hlsl") {
+					const auto *saved = NativeNode(working.Graph, node.Id);
+					if (!saved || saved->Type != "pc.hlsl")
+						return Reject(diagnostic, "PXC moved HLSL records cannot be imported", node.Id);
+				}
+		}
+
 		const auto wantedNode = [&](std::string_view id) -> const Node * {
 			for (const auto &node : desired.Nodes)
 				if (node.Id == id) return &node;
@@ -1872,7 +2170,7 @@ namespace engine::imagegraphio {
 			return nullptr;
 		};
 		std::vector<PxcxEdit> keys;
-		for (const auto &key : imported.Graph.Keyframes) {
+		for (const auto &key : working.Graph.Keyframes) {
 			const auto *parentNode = wantedNode(key.NodeId);
 			if (!parentNode) continue;
 			if (parentNode->Type == "pc.group_input" && key.Port == "parent_value") continue;
@@ -1915,7 +2213,7 @@ namespace engine::imagegraphio {
 				entry && savedNode ? SourceInput(*keyRoot, *savedNode, *entry, key.Port) : nullptr;
 			if (savedInput && savedInput->contains("r") && (*savedInput)["r"].is_array()) continue;
 			const auto old = std::find_if(
-				imported.Graph.Keyframes.begin(), imported.Graph.Keyframes.end(), [&](const auto &item) {
+				working.Graph.Keyframes.begin(), working.Graph.Keyframes.end(), [&](const auto &item) {
 					return item.NodeId == key.NodeId && item.Port == key.Port &&
 						   GetFrameTime(item) == GetFrameTime(key);
 				}
@@ -1928,7 +2226,7 @@ namespace engine::imagegraphio {
 					!key.SourceDriver && key.Data == *value)
 					continue;
 			}
-			if (old == imported.Graph.Keyframes.end())
+			if (old == working.Graph.Keyframes.end())
 				keys.emplace_back(PxcxKeyframeInsertEdit{key.NodeId, key.Port, key});
 		}
 		std::string failure;
@@ -1946,6 +2244,52 @@ namespace engine::imagegraphio {
 		);
 		if (!parsed || ambiguous) return Reject(diagnostic, "PXC projection source JSON is ambiguous");
 		Json root = std::move(*parsed);
+		// PXC stores HLSL colours as packed numbers and vectors as numeric tuples.
+		for (auto &node : desired.Nodes) {
+			if (node.Type != "pc.hlsl") continue;
+			for (auto &input : node.DynamicInputs) {
+				if (!input.Id.starts_with("argument_value_")) continue;
+				const auto canonical = [&](Value &value) {
+					if (input.Type == ValueType::Colour) {
+						if (const auto *colour = std::get_if<Colour>(&value))
+							value = int64_t(Packed(*colour));
+						return true;
+					}
+					if (input.Type != ValueType::Array) return true;
+					std::array<double, 4> coordinates{};
+					size_t count = 0;
+					if (const auto *v = std::get_if<Vector2>(&value)) {
+						coordinates = {v->X, v->Y, 0, 0};
+						count = 2;
+					} else if (const auto *v = std::get_if<Vector3>(&value)) {
+						coordinates = {v->X, v->Y, v->Z, 0};
+						count = 3;
+					} else if (const auto *v = std::get_if<Vector4>(&value)) {
+						coordinates = {v->X, v->Y, v->Z, v->W};
+						count = 4;
+					} else
+						return true;
+					ArrayValue tuple{ValueType::Scalar, {}};
+					if (!ReserveEmptyProjectionSlots(tuple.Elements, count, payloadBudget)) return false;
+					for (size_t i = 0; i < count; ++i)
+						tuple.Elements.emplace_back(coordinates[i]);
+					value = std::move(tuple);
+					return true;
+				};
+				if (input.Default && !canonical(*input.Default))
+					return Reject(
+						diagnostic, "PXC canonical HLSL tuple exceeds its payload limit", node.Id, input.Id
+					);
+				for (auto &key : desired.Keyframes)
+					if (key.NodeId == node.Id && key.Port == input.Id && !canonical(key.Data))
+						return Reject(
+							diagnostic,
+							"PXC canonical HLSL key tuple exceeds its payload limit",
+							node.Id,
+							input.Id
+						);
+			}
+		}
 		const ProjectSettings previousProject = working.Graph.Project.value_or(ProjectSettings{});
 		const ProjectSettings project = desired.Project.value_or(ProjectSettings{});
 		if (working.Graph.Project.has_value() != desired.Project.has_value() ||
@@ -2017,6 +2361,26 @@ namespace engine::imagegraphio {
 			const auto *entry = FindCatalogueSource(record.value("type", ""));
 			if (entry) {
 				if (output) {
+					if (entry->Type == "pc.hlsl" && port.ends_with(".bypass")) {
+						const auto inputPort = port.substr(0, port.size() - 7);
+						const auto *owner = NativeNode(desired, record.value("id", ""));
+						size_t group = 0;
+						const auto *input = FindDynamicTemplate(*entry, inputPort, group);
+						if (!owner || !input || input->SourceIndex < 0 || entry->DynamicGroupLength <= 0 ||
+							std::none_of(
+								owner->DynamicInputs.begin(),
+								owner->DynamicInputs.end(),
+								[&](const auto &declaration) { return declaration.Id == inputPort; }
+							))
+							return std::nullopt;
+						const size_t physical = size_t(entry->DynamicFixedLength) +
+												group * size_t(entry->DynamicGroupLength) +
+												size_t(input->SourceIndex);
+						if (!record.contains("inputs") || !record["inputs"].is_array() ||
+							physical >= record["inputs"].size())
+							return std::nullopt;
+						return 1000 + physical;
+					}
 					if (entry->SourceNode == "Node_Array_Split" && port.starts_with("val_")) {
 						size_t index = 0;
 						const auto parsed =
@@ -2769,6 +3133,7 @@ namespace engine::imagegraphio {
 						!(node.Type == "pc.group_input" && key.Port == "parent_value"))
 						ports.insert(key.Port);
 				for (const auto port : ports) {
+					if (UnchangedHlslAnimator(working.Graph, desired, node, port)) continue;
 					auto *record = SourceInput(root, *source, *entry, port);
 					if (record && record->contains("r") && (*record)["r"].is_array() &&
 						!AuthoredKeyRecord(desired, node, port, *record, diagnostic))
@@ -2983,6 +3348,7 @@ namespace engine::imagegraphio {
 			for (const auto &track : projected.Graph.Tracks)
 				if (track.NodeId == node.Id) desired.Tracks.push_back(track);
 		}
+		detail::RebaseInputProvenance(desired, projected.Graph);
 		detail::RebaseKeyProvenance(desired, projected.Graph);
 		detail::CanonicalizeKeyOrder(desired);
 		detail::CanonicalizeKeyOrder(projected.Graph);
@@ -3027,6 +3393,7 @@ namespace engine::imagegraphio {
 		}
 		Document unchanged = imported.Graph;
 		if (Migrate(unchanged, diagnostic) != Status::Ok) return false;
+		detail::RebaseInputProvenance(unchanged, projected.Graph);
 		detail::RebaseKeyProvenance(unchanged, projected.Graph);
 		detail::CanonicalizeKeyOrder(unchanged);
 		out = desired == unchanged ? imported.Source.OriginalBytes : std::move(written);

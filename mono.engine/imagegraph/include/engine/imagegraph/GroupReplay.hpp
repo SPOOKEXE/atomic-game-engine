@@ -50,6 +50,22 @@ namespace engine::imagegraph {
 		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
 		// Actual source child input. Group.inputs parent_value remains local.
 		std::string Port = "subtype";
+		// The retained animator can keep its original socket after a physical input move.
+		// Empty uses Port. An admitted detached animator uses its native Id.
+		// Inherited getters still resolve their current input index.
+		std::string AnimatorPort{};
+	};
+	// Metadata for one retained animator whose original physical input was removed.
+	// The shared overlay owns its values and keys; this record never duplicates them.
+	struct DetachedSourceAnimator {
+		std::string Id;
+		std::string OwnerId;
+		std::string OriginalPort;
+		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
+		ValueType Type = ValueType::Any;
+		std::optional<bool> ArrayClassification;
+		std::optional<AnimationTrack> Track;
+		bool operator==(const DetachedSourceAnimator &) const = default;
 	};
 	struct GroupSubtypeOverlay {
 		std::string NodeId;
@@ -71,6 +87,9 @@ namespace engine::imagegraph {
 		std::span<const GroupReplayEntry> Entries() const noexcept;
 		std::span<const GroupSubtypeBinding> Bindings() const noexcept;
 		std::span<const GroupSubtypeOverlay> SharedSubtypes() const noexcept;
+		std::span<const DetachedSourceAnimator> DetachedAnimators() const noexcept;
+		const DetachedSourceAnimator *
+		DetachedAnimator(std::string_view ownerId, std::string_view id) const noexcept;
 		const GroupSubtypeBinding *
 		Binding(std::string_view nodeId, std::string_view port = "subtype") const noexcept;
 		const GroupSubtypeOverlay *
@@ -103,6 +122,44 @@ namespace engine::imagegraph {
 	// Failed replacement preserves both states.
 	Status RebindGroupReplay(
 		const Document &document,
+		const GroupReplayState &previous,
+		uint64_t authoringRevision,
+		GroupReplayState &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
+	// Surviving source input objects retain their animator identity when renamed.
+	// Empty NewPort retires the selected physical input. Moves are simultaneous.
+	struct SourceInputMove {
+		std::string_view NodeId;
+		std::string_view OldPort;
+		std::string_view NewPort;
+	};
+	// The caller has already staged physical input records, keys and links.
+	// This validates old/new membership and moves retained animator effects only.
+	// Failed replacement preserves all states, including an aliased result.
+	Status RebindGroupReplayWithInputMoves(
+		const Document &original,
+		const Document &staged,
+		std::span<const SourceInputMove> moves,
+		const GroupReplayState &previous,
+		uint64_t authoringRevision,
+		GroupReplayState &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
+	// The caller has staged a fresh frame-zero source animator on this physical socket.
+	// Replacement never redirects through a delegated animator writer.
+	struct SourceAnimatorReplacement {
+		std::string_view NodeId;
+		std::string_view Port;
+	};
+	// Rebinds the staged document while retiring only matching physical SharedSubtype effects.
+	// Boundary Entry animators use their existing distinct refresh operations.
+	// Failed replacement preserves previous and result, including when they alias.
+	Status RebindGroupReplayWithAnimatorReplacements(
+		const Document &document,
+		std::span<const SourceAnimatorReplacement> replacements,
 		const GroupReplayState &previous,
 		uint64_t authoringRevision,
 		GroupReplayState &result,
