@@ -11983,5 +11983,149 @@
       "Provider forwarding and exact feedback capability collection/comparison.",
       "Coherent merge and runtime/GPU validation."
     ]
+  },
+  "font_corrections_83": {
+    "status": "Reviewed root-applied repairs pass71 focused font cases and248 IO cases. Broad font integration remains open.",
+    "applied_packets": [
+      {
+        "path": "/tmp/pc-font-corrections82/FontCorrections82.patch",
+        "sha256": "9c4ea763b76eb7a0be2e62a432b708d98056a2605f2eb66f04245d8b9e014e71"
+      },
+      {
+        "path": "/tmp/pc-bounded-reader-corrections82/BoundedReaderCorrections82.patch",
+        "sha256": "51dc59529803efd07fa71ac1d2de83715e8466e8ca549e9912974037617e2da0"
+      },
+      {
+        "path": "/tmp/pc-font-batch-repair83/FontBatchRepair83.patch",
+        "sha256": "1ccff532d390c8fbe668f4f744dd6084fd7435a00f38f3e625d823b941a8f97f"
+      },
+      {
+        "path": "/tmp/pc-font-host-io-corrections82/FontHostIoFixtureCorrections82.patch",
+        "sha256": "f36f8760bea41a99a2d0e0f722408e36d3fe330666927fd1aeb11e6189ad4099"
+      },
+      {
+        "path": "/tmp/pc-studio-font-corrections83/FontSeed83.patch",
+        "sha256": "d262477cf7eb6e285fd22a8687100334460be0a8102ad5dbdbc0def8380b196c"
+      }
+    ],
+    "root_changes": [
+      "Capture the first word/line trim boundary once; retain independent delimiter-attached source goldens.",
+      "Restore legacy inline text capacity admission and avoid unbound zero-byte quote split.",
+      "Correct invalid fixture port, authored enum compilation, path handle offsets, and use actual background input for batch composition work.",
+      "Respect explicitly playing retained per-node font seed without requiring a font path.",
+      "Correct BDF fixed-strike request, UnicodeScalar observation identity and unsigned packed palette fixture.",
+      "Capture diagnostics after failing operations without changing assertions.",
+      "Remove extra final blank line from minimal seed fixture and verify all six touched font/caller C++ files with clang-format-21 --dry-run --Werror."
+    ],
+    "retained_runs": [
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-83-font-core-repairs.log",
+        "sha256": "1425a64e25eeeef56fb902d8f1ec4c439f4a809135a162f7d24d0eba2b331eda",
+        "exit": 0
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-83-font-batch-repair.log",
+        "sha256": "6f6a9bb334f079f0b5844f194dc0c219e4d4d677e6d15e0b36159ea91aa9d565",
+        "exit": 0
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-83-font-host-repairs.log",
+        "sha256": "1281b57e884267d5ae887485a575b9cf46bc13dfae122e169fb57d04fecfd460",
+        "exit": 0
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-83-font-diagnostics.log",
+        "sha256": "2f8fdcb15e27f72b6650308e0e1fcbc38391f5c6610e8c003738fe49f2fd0eb8",
+        "exit": 0
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-83-font-repairs-focused.log",
+        "sha256": "e5e400a40b67b08c5c3143e5100ff98c8112b20cc3543110a49a746e38299fce",
+        "exit": 42,
+        "cases": 72,
+        "cases_passed": 71,
+        "cases_failed": 1
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-83-reader-repairs-focused.log",
+        "sha256": "5b98c3297ca075d55f2448dc05eb6edd204e1a13d8bbf4eab19f34a6bb57ebfb",
+        "exit": 42,
+        "cases": 34,
+        "cases_passed": 33,
+        "cases_failed": 1
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-83-font-batch-focused.log",
+        "sha256": "307770b84daffb6fbe2d17a9cc73bf6830b6f5a2e09624fc0eb3a871adf822f4",
+        "exit": 0,
+        "assertions": 712,
+        "cases": 70
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-83-font-host-repairs.log",
+        "sha256": "b43192886ff64c9775003f2116433fcbf94ddc4e0828d01968c00dda4a13f908",
+        "exit": 0,
+        "assertions": 722,
+        "cases": 71
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-83-font-host-repairs.log",
+        "sha256": "0e44c58ab22268745fcb19bdc4c2aee46484f25af7c342c72588f8cd97a3c0ea",
+        "exit": 42,
+        "cases": 89,
+        "cases_passed": 88,
+        "cases_failed": 1
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-83-font-host-repairs.log",
+        "sha256": "51f68cbfb5a5f70af20273befd2f957b2d95614d68bc9c25b4efb26769c7d333",
+        "exit": 0,
+        "assertions": 11031,
+        "cases": 248
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-83-font-host-repairs.log",
+        "sha256": "3ac0547f150501c5e1d928e4ef03e4a89352c829ffda2d95359e069c043a1bf3",
+        "exit": 42,
+        "cases": 236,
+        "cases_passed": 235,
+        "cases_failed": 1
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-83-font-diagnostic.log",
+        "sha256": "beed5813b812501b5c1d76ab98eb58b39fa24cdb2e2789d9a12bbebe9cf6e169",
+        "exit": 42
+      },
+      {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-83-font-diagnostic.log",
+        "sha256": "41fb00f9a48df5a5da034bec43a34c1be478e1c6ebf415cad5323ebc6b213c50",
+        "exit": 42
+      }
+    ],
+    "remaining": [
+      "Bounded quoted-query positive fixture still refuses; investigate actual vector growth peak as well as quote lifetime.",
+      "One bitmap/SDF font artifact fixture reports malformed payload.",
+      "Studio seed range fixture reports missing observed source alias map.",
+      "Separate reusable font runtime into sharedL10 imagegraphfont so client does not link bake; candidate outside, not applied.",
+      "Fresh coherent module build, architecture and joined CPU validation.",
+      "Licensed parity and live Studio acceptance."
+    ],
+    "withdrawn_packet": "FontSeed82 contained reverse hunks over newly accepted fixture repairs. Root did not apply it; fully reviewed minimal rebased FontSeed83 instead.",
+    "filter_limitation": "Initial focused83 used nonexistent node_allocation tag and generic document tag. Named bounded-reader cases and actual evaluation_budget tag were run separately; retain that distinct34-case result."
+  },
+  "polar_review_83": {
+    "status": "Root fully read frozen Polar76 four new files and all integration hunks; no live apply/runtime acceptance.",
+    "packet": "/tmp/pc-polar76/integration.patch",
+    "sha256": "ef3c2a2307652bfc1251f9a8943a60a34ae6d64376c7df0dff41c1460faa51c2",
+    "review": [
+      "Literal numeric/Surface route,19controls, mapped pair inverse, main-row reference units, nearest map sampling and shared CleanEdge helper.",
+      "32native and1IO fixtures with independent coordinate oracle and literal32-pixel indices; complete docs and source-equation checker read."
+    ],
+    "correction_requested": "Original fixed32768work quote admits only1953pixels regardless of actual nearest sampling. Requested selected-interpolation/present-map quote to retain practical normal image support. Outside supplement received but not root-reviewed yet.",
+    "remaining": [
+      "Review corrected bounded work admission supplement.",
+      "Integrate authoritative generic Path raw local animator getter.",
+      "Coherent native/IO build and execution; licensed parity remains open."
+    ]
   }
 }
