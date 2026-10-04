@@ -2044,6 +2044,18 @@ namespace engine::imagegraphio {
 				}
 				return true;
 			}
+			// Empty source arrays leave the layer-name constructor's frame-zero key intact.
+			if ((entry.Type == "pc.ase_layer" || entry.Type == "pc.ora_layer" ||
+				 entry.Type == "pc.krita_layer") &&
+				input.Id == "layer_name" && input.Type == imagegraph::ValueType::Text &&
+				input.SourceKind == "Text" && input.Default == R"(s "")" && stored->is_array() &&
+				stored->empty()) {
+				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget)) {
+					reason = "empty artwork layer-name constructor settings are not representable";
+					return false;
+				}
+				return appendValue(id, std::string{});
+			}
 			// Empty scalar HLSL animators return numeric zero in valueAnimator.getValue.
 			if (entry.Type == "pc.hlsl" && input.Id.starts_with("argument_value_") &&
 				input.Type != imagegraph::ValueType::Array && stored->is_array() && stored->empty()) {
@@ -3523,7 +3535,7 @@ namespace engine::imagegraphio {
 					if (const auto group = groups.find(node.Id);
 						group != groups.end() && result.Graph.Groups[group->second].OwnerNodeId.empty())
 						continue;
-					if (!node.Type.starts_with("pxcx.opaque/") &&
+					if (node.InstanceBase.empty() && !node.Type.starts_with("pxcx.opaque/") &&
 						sources.at(node.Id)->contains("instanceBase"))
 						node.InstanceBase = sources.at(node.Id)->at("instanceBase").get<std::string>();
 					if (!membership(node)) return false;
@@ -4205,12 +4217,17 @@ namespace engine::imagegraphio {
 				native[index] = true;
 				result.NativeNodes++;
 			}
-			if (node.Type == "pc.hlsl" && source.contains("instanceBase")) {
+			if (!node.Type.starts_with("pxcx.opaque/") && fact.Type != "Node_Group" &&
+				source.contains("instanceBase")) {
 				const auto &base = source.at("instanceBase");
 				if (!base.is_string() ||
 					base.get_ref<const std::string &>().size() > bake::PxcxLimits::MaximumNodeTextBytes ||
 					!AdmitNativeText(base.get_ref<const std::string &>(), &operationBudget))
-					return Fail(failure, "HLSL instance base is not a bounded durable name");
+					return Fail(
+						failure,
+						node.Type == "pc.hlsl" ? "HLSL instance base is not a bounded durable name"
+											   : "source instance base is not a bounded durable name"
+					);
 				node.InstanceBase = base.get<std::string>();
 				result.Graph.FormatVersion = 9;
 			}
