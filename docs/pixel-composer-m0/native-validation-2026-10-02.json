@@ -11715,5 +11715,46 @@
       "Inactive DoG previous-output observation and source device behavior remain explicit profile gates; broader catalogue/parity tasks remain open."
     ],
     "roadmap_atom": "Integrate bounded XDoG controls, pixels and mapped PXC edits; pass joined CPU validation."
+  },
+  "named_renderer_supplement_review_82": {
+    "status": "Root fully read both corrective supplements; approved for coherent merge, not runtime accepted.",
+    "packets": [
+      {
+        "path": "/tmp/pc-large-sequence70/named-scheduling/ComposerVertexDependency.patch",
+        "sha256": "2b129cade85c5056c99af42805656203bfda9282b8b06cfb10f803453add9c05",
+        "lines": 140
+      },
+      {
+        "path": "/tmp/pc-large-sequence70/named-dimensions/NamedExtraDimensions.patch",
+        "sha256": "c273cc0432cafaf4894efb934aa55aab84fc6a864256cd5176bcc68c4a8c1511",
+        "lines": 125
+      }
+    ],
+    "coverage": [
+      "Private shared 80-byte Composer vertex geometry represented as upload writes and raster reads, including all-named and mixed-input graph fixtures.",
+      "Named extra samplers admit published dimensions through 16384 while base/output and owned images retain 4096 bounds; scratch dimension validation precedes multiplication."
+    ],
+    "integration_requirement": "The dimension supplement retains older fixture context. Final merge must retain the vertex supplement mixed-input Writes2/Reads3 counts and shared geometry dependency.",
+    "remaining": [
+      "Coherent native sampler and host capability integration.",
+      "Joined build and CPU fixtures.",
+      "Approved GPU execution for new device paths."
+    ]
+  },
+  "font_merge_review_82": {
+    "status": "Frozen combined font packet received; final repair and rebase review underway. Not applied or runtime accepted.",
+    "path": "/tmp/pc-font-join78/FontJoined78.patch",
+    "sha256": "df69a3946981ce85d9a533fb2fa16dc897065aee5b92f830bdedae81fe8d78bd",
+    "root_read_now": [
+      "Complete ImageGraphFontArtifact.hpp and ImageGraphFontBindings.hpp.",
+      "Actual artifact writer closes staged stream before atomic publication.",
+      "Actual HLSL refresh now requires successful font binding before cancellation and evaluation.",
+      "Artifact tests cover write failure, replacement failure and successful replacement."
+    ],
+    "remaining": [
+      "Exact newly written merge/correction hunks versus previously reviewed component packets.",
+      "Fresh coherent ABI build and runtime suites.",
+      "Licensed parity and live Studio verification."
+    ]
   }
 }
