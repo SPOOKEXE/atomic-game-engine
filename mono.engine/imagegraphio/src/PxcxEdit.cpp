@@ -3047,7 +3047,11 @@ namespace engine::imagegraphio {
 							record["attri"]["mapped"] = *mapped;
 							continue;
 						}
-						if ((node.Type == "pc.refract" &&
+						if ((node.Type == "pc.xdo_g_threshold" &&
+							 (value.Port == "gamma_mapped" || value.Port == "gamma_map_range" ||
+							  value.Port == "epsilon_mapped" || value.Port == "epsilon_map_range" ||
+							  value.Port == "smoothness_mapped" || value.Port == "smoothness_map_range")) ||
+							(node.Type == "pc.refract" &&
 							 (value.Port == "height_mapped" || value.Port == "height_map_range" ||
 							  value.Port == "distance_mapped" || value.Port == "distance_map_range" ||
 							  value.Port == "ior_mapped" || value.Port == "ior_map_range")) ||
@@ -3083,7 +3087,8 @@ namespace engine::imagegraphio {
 							  value.Port == "radius_mapped" || value.Port == "radius_map_range" ||
 							  value.Port == "shift_mapped" || value.Port == "shift_map_range" ||
 							  value.Port == "scale_mapped" || value.Port == "scale_map_range"))) {
-							const bool herringbone = node.Type == "pc.herringbone_tile",
+							const bool xdog = node.Type == "pc.xdo_g_threshold",
+									   herringbone = node.Type == "pc.herringbone_tile",
 									   occlusion = node.Type == "pc.ambient_occlusion",
 									   gradient = node.Type == "pc.gradient",
 									   gabor = node.Type == "pc.gabor_noise",
@@ -3099,7 +3104,7 @@ namespace engine::imagegraphio {
 									? (value.Port.starts_with("dot_size_")
 										   ? std::string_view("dot_size")
 										   : std::string_view(value.Port).substr(0, value.Port.find('_')))
-								: (gradient || gabor || refract)
+								: (gradient || gabor || refract || xdog)
 									? std::string_view(value.Port).substr(0, value.Port.find('_'))
 								: node.Type == "pc.dither"							? "contrast"
 								: node.Type == "pc.erode"							? "width"
@@ -3108,9 +3113,10 @@ namespace engine::imagegraphio {
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
 							const int expectedIndex =
-								refract		  ? (numericId == "height"	   ? 9
-												 : numericId == "distance" ? 10
-																		   : 11)
+								xdog	  ? (numericId == "gamma" ? 9 : (numericId == "epsilon" ? 10 : 11))
+								: refract ? (numericId == "height"	   ? 9
+											 : numericId == "distance" ? 10
+																	   : 11)
 								: herringbone ? (numericId == "scale" ? 2 : (numericId == "angle" ? 3 : 4))
 								: stripe
 									? (numericId == "size"
@@ -3129,7 +3135,8 @@ namespace engine::imagegraphio {
 								: occlusion && numericId == "height" ? 3
 																	 : 1;
 							const std::string_view expectedKind =
-								refract ? "Float"
+								xdog	  ? (numericId == "gamma" ? "Float" : "Slider")
+								: refract ? "Float"
 								: herringbone
 									? (numericId == "scale" ? "Vec2"
 															: (numericId == "angle" ? "Rotation" : "Slider"))
