@@ -12127,5 +12127,58 @@
       "Integrate authoritative generic Path raw local animator getter.",
       "Coherent native/IO build and execution; licensed parity remains open."
     ]
+  },
+  "font_export_correction_84": {
+    "status": "Root applied reviewed native SDF artifact fixture correction; full export suite passes. Broad font integration remains open.",
+    "packet": {
+      "path": "/tmp/pc-font-artifact-sdf-correction83/SdfArtifactFixtureCorrection83.patch",
+      "sha256": "cabd77ab4e9cf5bad3d5041b73d41636058c96bea5d0577be61b6e80f0f84919"
+    },
+    "proof": "FontPayload.cpp71-78 requires RGBA8 white RGB channels for NativeSignedDistance. Fixture relabeled colored coverage pixels as SDF; corrected RGB255 retains alpha44 and hash. Production validator unchanged. Explicit validity assertion and restored profile/pixels assertions added.",
+    "build": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-84-sdf-artifact.log",
+      "sha256": "5c2eed66e0f295e28c28eb57cd9a37ce3bb277615fcf1ca18c6bac2848d0dc95",
+      "exit": 0
+    },
+    "test": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-84-sdf-artifact.log",
+      "sha256": "c51d81a1cbd6d977217c5563672883caeba77bf1154aebb607dae7d5f4c0e53f",
+      "exit": 0,
+      "cases": 89,
+      "assertions": 3394
+    },
+    "remaining": [
+      "Bounded reader positive quota fixture",
+      "Studio held seed alias-map observation",
+      "Shared L10 font module separation and fresh joined architecture/CPU validation",
+      "Licensed parity and live Studio acceptance"
+    ]
+  },
+  "polar_admission_review_84": {
+    "status": "Root fully reviewed final selected-sampler and present-enabled-map admission supplement. Outside only; no live apply or runtime.",
+    "packet": {
+      "path": "/tmp/pc-polar82-admission/admission.patch",
+      "sha256": "68db774a9c2be4b0df5e988ab00818c1b50c3126a4e3c95dad7aeb771ae6f5cb"
+    },
+    "review": "Removes blanket32768 work per pixel; selected interpolation/main and present enabled map charges, independent mask/feather admission and whole batch limits retained. Ordinary64/128square acceptance and mapped Lanczos refusal fixtures reviewed.",
+    "remaining": [
+      "Record conservative work-count rationale",
+      "Authoritative generic Path animator integration",
+      "Coherent merge and native/IO runtime",
+      "Licensed parity"
+    ]
+  },
+  "resolved_control_review_84": {
+    "status": "Root fully reviewed separate59line supplemental patch; outside only, no runtime.",
+    "packet": {
+      "path": "/tmp/pc-large-sequence70/renderer-preflight/controls-correction/ResolvedControlValidation.patch",
+      "sha256": "415b524bdb83b45bf7bcd1210e97529c6eb56d64c7352dac9cf9a02c0906a3f7"
+    },
+    "review": "Checks bounded control port identities and rejects duplicates before first-match. Static assertions retain borrowed HLSL string_views and argument span. Duplicate main/argument fixtures refresh span after vector changes.",
+    "remaining": [
+      "Coherent renderer integration",
+      "Exact effective-node feedback capability journal",
+      "Runtime and GPU acceptance"
+    ]
   }
 }
