@@ -19,6 +19,8 @@ namespace engine::imagegraphexport {
 	// Collects authored Animation/Sequence frames without a synchronous device wait.
 	// Each Resume borrows providers and observations only until it returns. Caller generations attest
 	// that these observations and grants belong to the frozen intent, including audio and device owner.
+	// SourceCacheProject endpoint/loading facts are frozen at Begin. Resume binds its ProjectFrame to
+	// the session cursor; the caller's preview clock and observations remain unchanged.
 	class GraphExportSession {
 		struct State;
 		std::unique_ptr<State> Inside;

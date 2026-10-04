@@ -13535,5 +13535,168 @@
   "source_empty_animator_design_review_93": {
     "path": "/tmp/pc-axis-empty96/review/REVISED_DESIGN.md",
     "status": "Root fully read revised design/state table/source excerpts. Actual authoring empty carrier approved outside, imported r:[] must retain constructor state; checked inverse lossy normalization refuses atomically. No live integration/runtime."
+  },
+  "region_origin_integration_98": {
+    "status": "Accepted region source-record ownership and range-session project cursor. Eight focused cases and full core/IO/export suites pass; Studio region integration and remaining consumer acceptance are pending.",
+    "region_manifest": {
+      "head": "007ffcd023628b4331f31bd5a258087a2acc5ac1",
+      "files": {
+        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": {
+          "base_sha256": "87b0d116063af968205a06a364f5d6f2f3e7cd8e130eef485bc8677b6b4f0e03",
+          "draft_sha256": "753f501c58e0aa9da47de4629c802e2cdf86483c8e3cc9e211672d868448f000"
+        },
+        "mono.engine/imagegraph/src/Document.cpp": {
+          "base_sha256": "95a1a5923ea288d0131ee3126329fb9b3de94dde6bef86c3989d18e3bb20aa17",
+          "draft_sha256": "58a11a15a740a2d3ae077807c44449a66be77a34a3cca12699eac32ae785470c"
+        },
+        "mono.engine/imagegraph/src/GroupClonePayload.cpp": {
+          "base_sha256": "dbe8658a4bc68f9f2437418138824f658c6488ae8311396174e35c2bc15396ea",
+          "draft_sha256": "dd44fd6ac2da29661e2399dfb939364c28b81ed269cf72bdd0fcbaa987eaf82a"
+        },
+        "mono.engine/imagegraph/src/SourceRegionOrigin.hpp": {
+          "base_sha256": null,
+          "draft_sha256": "cd57c63c1dc48f54cd59801b55d52951c0f2219ce4bf7f1a58154e4cad5a8a0f"
+        },
+        "mono.engine/imagegraph/tests/AnimationRegionOrigins.cpp": {
+          "base_sha256": null,
+          "draft_sha256": "dcd58658b845045f469368295b27cdbef07de0d87a9fc661e1029817e1b367d6"
+        },
+        "mono.engine/imagegraphio/src/PxcxImport.cpp": {
+          "base_sha256": "43454ea8a6115a70ef7f1c427c2bee8a96209535c81e9684a784bfb4ba1fa17a",
+          "draft_sha256": "8a50775b6af21fd3cf1851dedf184a66af89e4fc6aee83c45ff868081261b9d6"
+        },
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp": {
+          "base_sha256": "464b2c8e802d7742af2fc37dedf1cdf974d96ccaee33c5f2368514c7f086a748",
+          "draft_sha256": "50f316d254bfab28f31780dd6848b896688856da8fd8f67bf4eadece547d1ebc"
+        },
+        "mono.engine/imagegraphio/tests/PxcxRegionOrigins.cpp": {
+          "base_sha256": null,
+          "draft_sha256": "468e737483e228aae82d64de7b600e6a24cd3e73b1a5088998f15a9275f89be8"
+        },
+        "mono.engine/imagegraphio/docs/source-region-origin.md": {
+          "base_sha256": null,
+          "draft_sha256": "85e01fe705fa1107c8635b9f218e16e6d11fbe3c52a1c9be477a8bd13b240be1"
+        }
+      },
+      "checks": "Strict GCC syntax only; six new cases are not runtime accepted. No live edits/build/link/runtime/commit.",
+      "patch_sha256": "3a5fd56c4a007649557dbf96ea9bfb7ae19ab52c206e6a4a96030f8a9286be2a",
+      "pinned_sources": {
+        "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/__animation_region/__animation_region.gml": "bdc3ac2b18105fa5cdc4a1ead89d9114fc89950691ba6b60b41c610c7f5b311d",
+        "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/project_data/project_data.gml": "c5689a42b7c6b9a4550058d94ee1ba828b545e1a3610044dd960ada714ffe3a9"
+      }
+    },
+    "session_manifest": {
+      "head": "007ffcd023628b4331f31bd5a258087a2acc5ac1",
+      "checks": "Two TUs strict GCC -Werror syntax PASS; two constructed native cases runtime pending root joined validation. No live edits/build/link/runtime.",
+      "files": {
+        "mono.engine/imagegraphexport/src/GraphExportSession.cpp": {
+          "base_sha256": "c8d0e3078f88003672e82ec6c16f804bf646fdeb826342e783425becaeda1e7c",
+          "draft_sha256": "e924a7ae17864b8b456f8d1cb9b754cf58b434884573f3e0c6ca95bfc43fe47a"
+        },
+        "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphExportSession.hpp": {
+          "base_sha256": "052fc43a388d68d2009e53145b017599a5b1aab7b32cd628533b8a7f25bf871e",
+          "draft_sha256": "6f4b3e7bdf3b35391f1181eb396321cb0ef719baa8b141fbd12edc0895d27224"
+        },
+        "mono.engine/imagegraphexport/tests/GraphExportSession.cpp": {
+          "base_sha256": "8ed113bd4df7aa0d40fc0a5e303766559093bc6d0562909f6adcb71bcba8b357",
+          "draft_sha256": "33ac57826aac5b26a38090e89068760690dfe0f577153612c2e214644863820a"
+        },
+        "mono.engine/imagegraphexport/docs/session-project-clock.md": {
+          "base_sha256": null,
+          "draft_sha256": "e4278d5414cb2c3ae9dc1903e59206e7360fde907b98588251cf76e2fa99826f"
+        }
+      },
+      "patch_sha256": "91e23379757a7f37970ea5d08a907862213953d712daa123bed384d42539f5db"
+    },
+    "format": "clang-format21 dry-run/Werror passes all eleven C++ files.",
+    "studio_review": "Root fully read all1266 UI lines plus120-line source bounce/private staging/stale popup correction and manifests. Pinned animation controller207..219 independently confirms zero lower bounce. UI not applied yet.",
+    "scope": "Archive-scoped original record ownership and owned range cursor observation; broad region/cache/modified-project acceptance remains open.",
+    "build": {
+      "exit": 0,
+      "steps": 393,
+      "preset": "release-tests",
+      "targets": [
+        "test_imagegraph",
+        "test_imagegraphio",
+        "test_imagegraphexport"
+      ]
+    },
+    "runtime": [
+      {
+        "scope": "core-focused",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph",
+          "[region_origin]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/regions-98-core-focused.log",
+        "summary": [
+          "All tests passed (33 assertions in 3 test cases)"
+        ],
+        "tail": ""
+      },
+      {
+        "scope": "io-focused",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio",
+          "[region_origin]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/regions-98-io-focused.log",
+        "summary": [
+          "All tests passed (57 assertions in 3 test cases)"
+        ],
+        "tail": ""
+      },
+      {
+        "scope": "export-focused",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphexport",
+          "[project-clock]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/regions-98-export-focused.log",
+        "summary": [
+          "All tests passed (167 assertions in 2 test cases)"
+        ],
+        "tail": ""
+      },
+      {
+        "scope": "core",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/regions-98-core.log",
+        "summary": [
+          "All tests passed (1858046 assertions in 2748 test cases)"
+        ],
+        "tail": ""
+      },
+      {
+        "scope": "io",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/regions-98-io.log",
+        "summary": [
+          "All tests passed (11212 assertions in 253 test cases)"
+        ],
+        "tail": ""
+      },
+      {
+        "scope": "export",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/regions-98-export.log",
+        "summary": [
+          "All tests passed (2986 assertions in 70 test cases)"
+        ],
+        "tail": ""
+      }
+    ]
   }
 }

@@ -1,6 +1,7 @@
 #include "StillExport.hpp"
 
 #include <engine/bake/Image.hpp>
+#include <engine/imagegraph/SourceFrameCacheProject.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraphexport/GraphExportSession.hpp>
 #include <engine/testing/Suite.hpp>
@@ -466,5 +467,112 @@ TEST_CASE(
 	CHECK(std::filesystem::exists(f.Root / "tile3.png"));
 	CHECK(std::filesystem::exists(f.Root / "tile4.png"));
 	CHECK(f.Host.ShaderAttempts == 8);
+	f.NoStaging();
+}
+
+namespace {
+	struct ProjectClockCapability : Capability {
+		std::vector<SourceFrameCacheProjectObservation> Attempts;
+		std::vector<FrameTime> LastFrames;
+		bool Capture(const HostNodeInvocation &call, HostNodeCapture &out, std::string &failure) override {
+			REQUIRE(call.Request.SourceCacheProject);
+			const auto observed = *call.Request.SourceCacheProject;
+			Attempts.push_back(observed);
+			CHECK(observed.ProjectFrame == (FrameTime{call.Request.Tick, 0, false}));
+			const bool captured = Capability::Capture(call, out, failure);
+			if (captured && call.Authored.Id == "image" && SourceFrameCacheIsLastProjectFrame(observed))
+				LastFrames.push_back(observed.ProjectFrame);
+			return captured;
+		}
+	};
+}
+TEST_CASE(
+	"range cursor owns project frame while endpoint facts stay frozen through pending completion",
+	"[imagegraph][export-session][project-clock]"
+) {
+	Fixture f;
+	ProjectClockCapability host;
+	f.Request.SourceCacheProject = SourceFrameCacheProjectObservation{{7, .25, true}, 1, false, false};
+	const auto originalRequest = f.Request.SourceCacheProject;
+	GraphExportSession session;
+	std::string failure;
+	REQUIRE(session.BeginAuthored(f.Graph, f.Inputs, f.Request, f.Grants, "export", f.Generation, failure));
+	for (uint64_t frame = 0; frame < 2; ++frame) {
+		host.Ready = false;
+		host.IsPending = false;
+		CHECK(session.Resume(f.Request, f.Generation, host, failure) == GraphExportProgress::Pending);
+		REQUIRE(session.NextFrame());
+		CHECK(session.NextFrame()->Tick == frame);
+		CHECK(host.ImageEffects == frame + 1);
+		REQUIRE_FALSE(host.Attempts.empty());
+		CHECK(host.Attempts.back().ProjectFrame == (FrameTime{frame, 0, false}));
+		CHECK(host.Attempts.back().ProjectLastFrame == 1);
+		CHECK_FALSE(host.Attempts.back().ProjectLoading);
+		CHECK_FALSE(host.Attempts.back().ProjectAppending);
+		host.Ready = true;
+		host.IsPending = false;
+		CHECK(session.Resume(f.Request, f.Generation, host, failure) == GraphExportProgress::Progress);
+		CHECK(host.ImageEffects == frame + 1);
+		CHECK(f.Request.SourceCacheProject == originalRequest);
+	}
+	CHECK(host.LastFrames == std::vector<FrameTime>{{1, 0, false}});
+	REQUIRE(session.Resume(f.Request, f.Generation, host, failure) == GraphExportProgress::Complete);
+	for (uint64_t frame = 0; frame < 2; ++frame) {
+		const auto bytes = Read(f.Root / ("tile" + std::to_string(frame + 1) + ".png"));
+		engine::assets::TextureData image;
+		REQUIRE(engine::bake::ReadImage(std::as_bytes(std::span(bytes)), image, failure));
+		REQUIRE(image.Pixels.size() == 4);
+		CHECK(std::to_integer<uint8_t>(image.Pixels[0]) == 12 + frame);
+	}
+	f.NoStaging();
+}
+TEST_CASE(
+	"changed project endpoint or loading facts cancel pending range before repeating a host effect",
+	"[imagegraph][export-session][project-clock]"
+) {
+	Fixture f;
+	ProjectClockCapability host;
+	f.Request.SourceCacheProject = SourceFrameCacheProjectObservation{{8, .5, false}, 1, false, false};
+	{
+		std::ofstream prior(f.Root / "tile1.png");
+		prior << "prior output";
+	}
+	const auto previous = Read(f.Root / "tile1.png");
+	GraphExportSession session;
+	std::string failure;
+	REQUIRE(session.BeginAuthored(f.Graph, f.Inputs, f.Request, f.Grants, "export", f.Generation, failure));
+	host.Ready = false;
+	CHECK(session.Resume(f.Request, f.Generation, host, failure) == GraphExportProgress::Pending);
+	const auto attempts = host.Attempts.size();
+	SECTION("endpoint") {
+		f.Request.SourceCacheProject->ProjectLastFrame = 0;
+	}
+	SECTION("loading") {
+		f.Request.SourceCacheProject->ProjectLoading = true;
+	}
+	SECTION("appending") {
+		f.Request.SourceCacheProject->ProjectAppending = true;
+	}
+	SECTION("missing observation") {
+		f.Request.SourceCacheProject.reset();
+	}
+	SECTION("explicit cancel preserves frozen caller facts") {
+		const auto request = f.Request.SourceCacheProject;
+		session.Cancel(host);
+		CHECK(f.Request.SourceCacheProject == request);
+		CHECK(host.Cancellations == 1);
+		CHECK(host.Attempts.size() == attempts);
+		CHECK(Read(f.Root / "tile1.png") == previous);
+		f.NoStaging();
+		return;
+	}
+	CHECK(session.Resume(f.Request, f.Generation, host, failure) == GraphExportProgress::Failed);
+	CHECK(failure == "export session immutable project endpoint or loading observations changed");
+	CHECK(host.Attempts.size() == attempts);
+	CHECK(host.ImageEffects == 1);
+	CHECK(host.Cancellations == 1);
+	CHECK(Read(f.Root / "tile1.png") == previous);
+	CHECK_FALSE(std::filesystem::exists(f.Root / "tile2.png"));
+	CHECK_FALSE(session.NextFrame());
 	f.NoStaging();
 }

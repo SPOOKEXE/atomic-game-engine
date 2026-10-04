@@ -35,6 +35,7 @@ namespace engine::imagegraphexport {
 		uint64_t Tick = 0, SelectedTick = 0, StagedBytes = 0, Seed = 0;
 		uint32_t MaximumDimension = 0;
 		bool RigidPlaying = false, RigidProgress = false;
+		std::optional<engine::imagegraph::SourceFrameCacheProjectObservation> CacheProject;
 		bool Complete = false, Temporal = false;
 		std::vector<engine::imagegraph::RequestImageSource> ImageSources;
 		std::vector<engine::imagegraph::SourceBuiltinRandomCapture> RandomCaptures;
@@ -409,6 +410,7 @@ namespace engine::imagegraphexport {
 		candidate->MaximumDimension = request.MaximumImageDimension;
 		candidate->RigidPlaying = request.RigidPlaying;
 		candidate->RigidProgress = request.RigidFrameProgress;
+		candidate->CacheProject = request.SourceCacheProject;
 		Inside = std::move(candidate);
 		return true;
 	} catch (const std::bad_alloc &) {
@@ -436,6 +438,12 @@ namespace engine::imagegraphexport {
 			state.RigidPlaying != observations.RigidPlaying ||
 			state.RigidProgress != observations.RigidFrameProgress)
 			return fail("export session immutable generations or observations changed");
+		if (state.CacheProject.has_value() != observations.SourceCacheProject.has_value() ||
+			(state.CacheProject &&
+			 (state.CacheProject->ProjectLastFrame != observations.SourceCacheProject->ProjectLastFrame ||
+			  state.CacheProject->ProjectLoading != observations.SourceCacheProject->ProjectLoading ||
+			  state.CacheProject->ProjectAppending != observations.SourceCacheProject->ProjectAppending)))
+			return fail("export session immutable project endpoint or loading observations changed");
 		if (state.Complete) return GraphExportProgress::Complete;
 		if (state.Target < state.Exports.size()) {
 			auto request = observations;
@@ -444,6 +452,10 @@ namespace engine::imagegraphexport {
 			request.Tick = state.Tick;
 			request.Subframe = 0;
 			request.NegativeFrame = false;
+			// The export cursor is the authoritative project clock, independent of the preview that
+			// admitted this range or any scoped input clock used during evaluation.
+			request.SourceCacheProject = state.CacheProject;
+			if (request.SourceCacheProject) request.SourceCacheProject->ProjectFrame = {state.Tick, 0, false};
 			request.HostProvider = &observer;
 			if (!state.ImageSources.empty()) request.ImageSources = state.ImageSources;
 			if (!state.RandomCaptures.empty()) request.BuiltinRandomCaptures = state.RandomCaptures;

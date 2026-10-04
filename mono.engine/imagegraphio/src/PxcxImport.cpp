@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <initializer_list>
 #include <limits>
@@ -3796,6 +3797,18 @@ namespace engine::imagegraphio {
 					return Fail(failure, "source animation region has invalid bounded fields");
 				region.Label = record["l"].get<std::string>();
 				region.Color.Alpha = 255;
+				std::array<char, imagegraph::Limits::MaximumSourceRegionIdBytes> storage{};
+				constexpr std::string_view prefix = "pxc:region:";
+				std::copy(prefix.begin(), prefix.end(), storage.begin());
+				const auto encoded = std::to_chars(
+					storage.data() + prefix.size(),
+					storage.data() + storage.size(),
+					project.AnimationRegions.size()
+				);
+				const std::string_view origin(storage.data(), size_t(encoded.ptr - storage.data()));
+				if (encoded.ec != std::errc{} || !AdmitNativeText(origin, &budget))
+					return Fail(failure, "source animation region origin exceeds operation bounds");
+				region.SourceRegionId = origin;
 				project.AnimationRegions.push_back(std::move(region));
 			}
 			if (!imagegraph::ValidProjectAnimationRegions(project))

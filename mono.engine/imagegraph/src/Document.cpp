@@ -46,6 +46,7 @@
 #include "SourcePathSequentialCodec.hpp"
 #include "SourcePathShapeCodec.hpp"
 #include "SourcePathShiftMemo.hpp"
+#include "SourceRegionOrigin.hpp"
 #include "SourceRigidCodec.hpp"
 #include "SourceSeparatedVec2.hpp"
 #include "SourceTilesetCodec.hpp"
@@ -3070,6 +3071,13 @@ namespace engine::imagegraph {
 						WriteValue(stream, Value{region.Color});
 						stream << '\n';
 					}
+					for (size_t index = 0; index < project.AnimationRegions.size(); ++index) {
+						const auto &origin = project.AnimationRegions[index].SourceRegionId;
+						if (origin.empty()) continue;
+						stream << "source_region_origin " << index << ' ';
+						WriteQuoted(stream, origin);
+						stream << '\n';
+					}
 				}
 			}
 		}
@@ -4293,6 +4301,17 @@ namespace engine::imagegraph {
 					goto limited;
 				parsed.Project->AnimationRegions.push_back(std::move(region));
 				remember(parsed.Project->AnimationRegions.back().Label);
+			} else if (marker == "source_region_origin" && parsed.FormatVersion >= 9) {
+				size_t index = 0;
+				std::string origin;
+				if (!(row >> index) || !parsed.Project || !projectRegionCount ||
+					index >= parsed.Project->AnimationRegions.size() ||
+					!parsed.Project->AnimationRegions[index].SourceRegionId.empty() ||
+					!readQuoted(row, origin, Limits::MaximumSourceRegionIdBytes) ||
+					!detail::SourceRegionOrdinal(origin) || HasTrailing(row))
+					goto malformed;
+				parsed.Project->AnimationRegions[index].SourceRegionId = std::move(origin);
+				remember(parsed.Project->AnimationRegions[index].SourceRegionId);
 			} else if (marker == "track_quaternion" && parsed.FormatVersion >= 8) {
 				std::string nodeId, port, mode;
 				if (!readQuoted(row, nodeId) || !readQuoted(row, port) || !readQuoted(row, mode) ||
@@ -4331,6 +4350,8 @@ namespace engine::imagegraph {
 			!parsed.Project)
 			goto malformed;
 		if (projectRegionCount && parsed.Project->AnimationRegions.size() != *projectRegionCount)
+			goto malformed;
+		if (parsed.Project && !detail::UniqueSourceRegionOrigins(parsed.Project->AnimationRegions))
 			goto malformed;
 		if (projectDepth) parsed.Project->ColorDepth = *projectDepth;
 		if (projectShader) parsed.Project->Shader3D = *projectShader;
@@ -4467,7 +4488,7 @@ namespace engine::imagegraph {
 	}
 
 	bool ValidProjectAnimationRegions(const ProjectSettings &project) {
-		if (project.AnimationRegions.size() > Limits::MaximumAnimationRegions) return false;
+		if (!detail::UniqueSourceRegionOrigins(project.AnimationRegions)) return false;
 		size_t textBytes = 0;
 		for (const AnimationRegion &region : project.AnimationRegions)
 			if (region.Label.size() > Limits::MaximumTextBytes ||

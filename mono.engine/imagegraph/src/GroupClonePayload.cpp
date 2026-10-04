@@ -219,7 +219,7 @@ namespace engine::imagegraph {
 			return std::nullopt;
 		if (document.Project)
 			for (const AnimationRegion &region : document.Project->AnimationRegions)
-				if (!text(region.Label)) return std::nullopt;
+				if (!text(region.Label) || !text(region.SourceRegionId) || !add(1)) return std::nullopt;
 		return bytes;
 	}
 

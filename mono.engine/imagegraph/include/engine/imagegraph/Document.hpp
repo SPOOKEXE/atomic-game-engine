@@ -1369,6 +1369,8 @@ namespace engine::imagegraph {
 		FrameTime Start{};
 		// Inclusive source frame end, before any export offset conversion.
 		FrameTime End{};
+		// Archive-scoped source record identity. New native regions leave this empty.
+		std::string SourceRegionId{};
 		bool operator==(const AnimationRegion &) const = default;
 	};
 
@@ -1541,6 +1543,7 @@ namespace engine::imagegraph {
 		static constexpr size_t MaximumProjectPaletteEntries = 256;
 		// Bounds the ordered source animation region list.
 		static constexpr size_t MaximumAnimationRegions = 4096;
+		static constexpr size_t MaximumSourceRegionIdBytes = 64;
 		static constexpr size_t MaximumGradientKeys = 128;
 		static constexpr size_t MaximumCurveAnchors = 256;
 		static constexpr size_t MaximumPathAnchors = 1024;

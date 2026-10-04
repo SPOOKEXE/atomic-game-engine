@@ -2518,17 +2518,46 @@ namespace engine::imagegraphio {
 					attributes["palette"].push_back(Packed(colour));
 			}
 		}
-		if (previousProject.AnimationRegions != project.AnimationRegions) {
+		const bool regionRecordsChanged = previousProject.AnimationRegions != project.AnimationRegions;
+		if (regionRecordsChanged) {
 			if (!ValidProjectAnimationRegions(project))
 				return Reject(diagnostic, "PXC animation regions are invalid");
+			const auto previousRecords = root.find("aRegion");
+			if (previousRecords != root.end() && !previousRecords->is_array())
+				return Reject(diagnostic, "PXC animation region records are invalid");
 			Json records = Json::array();
-			for (size_t index = 0; index < project.AnimationRegions.size(); ++index) {
-				const auto &region = project.AnimationRegions[index];
-				Json record =
-					root.contains("aRegion") && root["aRegion"].is_array() && index < root["aRegion"].size()
-						? root["aRegion"][index]
-						: Json::object();
-				if (!record.is_object()) return Reject(diagnostic, "PXC animation region record is invalid");
+			if (!ReserveEmptyProjectionSlots(
+					records.get_ref<Json::array_t &>(), project.AnimationRegions.size(), payloadBudget
+				))
+				return Reject(diagnostic, "PXC animation region slots exceed operation bounds");
+			for (const auto &region : project.AnimationRegions) {
+				Json record = Json::object();
+				if (!region.SourceRegionId.empty()) {
+					constexpr std::string_view prefix = "pxc:region:";
+					const std::string_view origin(region.SourceRegionId);
+					uint64_t ordinal = 0;
+					const auto decoded = std::from_chars(
+						origin.data() + prefix.size(), origin.data() + origin.size(), ordinal
+					);
+					if (decoded.ec != std::errc{} || decoded.ptr != origin.data() + origin.size() ||
+						ordinal >= previousProject.AnimationRegions.size() || previousRecords == root.end() ||
+						previousProject.AnimationRegions[size_t(ordinal)].SourceRegionId != origin)
+						return Reject(diagnostic, "PXC animation region origin is stale or unknown");
+					const auto sourceIndex = size_t(ordinal);
+					if (sourceIndex >= previousRecords->size() ||
+						!(*previousRecords)[sourceIndex].is_object())
+						return Reject(
+							diagnostic, "PXC animation region origin has no retained source record"
+						);
+					if (!JsonBytes((*previousRecords)[sourceIndex], payloadBudget))
+						return Reject(diagnostic, "PXC animation region record exceeds operation bounds");
+					record = (*previousRecords)[sourceIndex];
+				}
+				if (!Spend(
+						region.Label.size() + 1 + region.SourceRegionId.size() + 1 + sizeof(Json) * 8 + 128,
+						payloadBudget
+					))
+					return Reject(diagnostic, "PXC animation region fields exceed operation bounds");
 				const double first = static_cast<double>(FrameTimeToReal(region.Start));
 				const double last = static_cast<double>(FrameTimeToReal(region.End));
 				FrameTime firstRoundtrip, lastRoundtrip;
@@ -3972,6 +4001,16 @@ namespace engine::imagegraphio {
 			for (const auto &track : projected.Graph.Tracks)
 				if (track.NodeId == node.Id) desired.Tracks.push_back(track);
 		}
+		// Origins address the retained archive; reimport assigns positions in the newly written archive.
+		// Normalize only comparison copies. The caller's authoring and undo baseline stay unchanged.
+		if (desired.Project && projected.Graph.Project &&
+			desired.Project->AnimationRegions.size() == projected.Graph.Project->AnimationRegions.size())
+			for (size_t index = 0; index < desired.Project->AnimationRegions.size(); ++index) {
+				const auto &origin = projected.Graph.Project->AnimationRegions[index].SourceRegionId;
+				if (!Spend(origin.capacity() + 1, payloadBudget))
+					return Reject(diagnostic, "PXC region comparison origins exceed operation bounds");
+				desired.Project->AnimationRegions[index].SourceRegionId = origin;
+			}
 		detail::RebaseInputProvenance(desired, projected.Graph);
 		detail::RebaseKeyProvenance(desired, projected.Graph);
 		detail::CanonicalizeKeyOrder(desired);
@@ -4017,10 +4056,19 @@ namespace engine::imagegraphio {
 		}
 		Document unchanged = imported.Graph;
 		if (Migrate(unchanged, diagnostic) != Status::Ok) return false;
+		if (unchanged.Project && projected.Graph.Project &&
+			unchanged.Project->AnimationRegions.size() == projected.Graph.Project->AnimationRegions.size())
+			for (size_t index = 0; index < unchanged.Project->AnimationRegions.size(); ++index) {
+				const auto &origin = projected.Graph.Project->AnimationRegions[index].SourceRegionId;
+				if (!Spend(origin.capacity() + 1, payloadBudget))
+					return Reject(diagnostic, "PXC region baseline origins exceed operation bounds");
+				unchanged.Project->AnimationRegions[index].SourceRegionId = origin;
+			}
 		detail::RebaseInputProvenance(unchanged, projected.Graph);
 		detail::RebaseKeyProvenance(unchanged, projected.Graph);
 		detail::CanonicalizeKeyOrder(unchanged);
-		out = desired == unchanged ? imported.Source.OriginalBytes : std::move(written);
+		out = desired == unchanged && !regionRecordsChanged ? imported.Source.OriginalBytes
+															: std::move(written);
 		return true;
 	}
 

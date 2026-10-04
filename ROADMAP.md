@@ -89,6 +89,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Finish text layout and rendering.
 - [x] Add Dopesheet copy/paste, duplication and time actions with atomic undo; pass headless gesture tests.
 - [_] Finish Dopesheet gestures for shared source animator aliases.
+- [x] Preserve original PXC region records through edits and bind range exports to their owned project cursor.
 - [_] Add animation-region selection and bind cache playback to its frame bounds.
 - [_] Finish Studio host workflows.
 - [_] Verify Transform GPU pixels.
