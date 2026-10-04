@@ -11519,5 +11519,66 @@
       "Outside strict-source reports are not joined runtime evidence.",
       "Native sampler foundation and current renderer ownership changes must be merged before acceptance."
     ]
+  },
+  "source_xdog_integration_81": {
+    "status": "Applied bounded XDoG executor and mapped PXC edits; integration is incomplete because native pixel assertions fail.",
+    "frozen_packet": "/tmp/pc-xdog77/integration.patch",
+    "packet_sha256": "1f4061c528a7721e02dfd65e1b3de5271924d7d68092b5caa12d7f0dacf2151b",
+    "root_review": "Full144-line shared patch, four owned files, pinned node/shader source and independent numeric generator read. Ten pinned source dependency hashes matched before applying.",
+    "applied_paths": [
+      "mono.engine/imagegraph/src/Document.cpp",
+      "mono.engine/imagegraph/src/SourceMappedInputs.hpp",
+      "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp",
+      "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+      "mono.engine/imagegraph/src/nodes/Source2DXDoGNodes.cpp",
+      "mono.engine/imagegraph/tests/Source2DXDoGNodes.cpp",
+      "mono.engine/imagegraphio/tests/XDoGMappedRange.cpp",
+      "mono.engine/imagegraph/docs/SOURCE_XDOG_PROFILE.md"
+    ],
+    "build": "Initial native/IO build and subsequent18-target product/test closure pass.",
+    "focused_native": "24 cases:18 pass,6 fail;1414 assertions:1236 pass,178 fail; exit42.",
+    "focused_io": "1 case178 assertions pass.",
+    "joined_io": "246 cases10983 assertions pass.",
+    "literal_failure": "DoG byte52 actual14 expected15; threshold byte52 actual109 expected111. The exact pixel comparisons remain enabled.",
+    "repair": "Linked Surface radius retains SourceSocketKind::Surface after numeric projection but no borrowed radius image. Original executor checks image presence and applies Reference width again. Correct the provenance check and independently audit arithmetic order in oracle/golden generation.",
+    "root_test_change": "Retained exact byte equality; report first mismatching byte numerically to avoid raw uint8_t formatting noise.",
+    "logs": {
+      "build-release-81-xdog-integrated.log": {
+        "sha256": "5e19c5de0fb8db702aa19c79678c6fed169bf1b4863d627c99cd507fb312c7c3",
+        "exit": 0,
+        "command": "COMMAND: ['cmake', '--build', '.cache/build/release-tests', '-j', '8', '--target', 'test_imagegraph', 'test_imagegraphio']"
+      },
+      "build-release-81-xdog-closure.log": {
+        "sha256": "560cb0dd2b07311ffd6fe454b8badfbb650e07c14d8decdead73106c275a7929",
+        "exit": 0,
+        "command": "COMMAND: ['cmake', '--build', '.cache/build/release-tests', '-j', '8', '--target', 'test_nodegraph', 'test_imagegraph', 'test_imagegraphio', 'test_imagegraphexport', 'test_imagegraphphysics', 'test_studio', 'test_client', 'test_render', 'test_server', 'test_assets', 'client', 'studio', 'server', 'assetc', 'imagegraph', 'test_imagegraph_runner', 'test_gui', 'test_assetc']"
+      },
+      "imagegraph-release-81-xdog-focused.log": {
+        "sha256": "73ba14b3a46a7230afbf5dd565a08fad392483ac951a6d139b047711327df1ed",
+        "exit": 42,
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraph', '[source_xdog]']"
+      },
+      "imagegraph-release-81-xdog-first-byte.log": {
+        "sha256": "55124bdbd550c4818e2788762b0a460417444e1aa6bedb6658dd535183b8236f",
+        "exit": 42,
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraph', 'XDoG RGBA8 pixels match independent pinned literal equation goldens']"
+      },
+      "imagegraphio-release-81-xdog-focused.log": {
+        "sha256": "4a6412689aa9ce7f61a9b00e502b35f96b3d3079c32f48e4702bdaa4e2d93c2e",
+        "exit": 0,
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio', '[xdog_mapped_range]']"
+      },
+      "io-release-81-xdog-initial-joined.log": {
+        "sha256": "a9de8f331b8ceeab8aaf41e3466ab95739e2cc2fab09c67bce246d3896bf674b",
+        "exit": 0,
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio']"
+      }
+    },
+    "remaining": [
+      "Repair and validate native pixel fixtures.",
+      "Run full joined CPU acceptance after repairs.",
+      "Do not claim source GPU, licensed runtime or performance parity."
+    ],
+    "roadmap": "Added unchecked XDoG task; no font, catalogue or GPU completion claimed."
   }
 }
