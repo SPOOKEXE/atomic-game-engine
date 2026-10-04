@@ -3073,7 +3073,11 @@ namespace engine::imagegraphio {
 							record["attri"]["mapped"] = *mapped;
 							continue;
 						}
-						if ((node.Type == "pc.xdo_g_threshold" &&
+						if ((node.Type == "pc.blobify" &&
+							 (value.Port == "radius_mapped" || value.Port == "radius_map_range")) ||
+							(node.Type == "pc.kuwahara" &&
+							 (value.Port == "radius_mapped" || value.Port == "radius_map_range")) ||
+							(node.Type == "pc.xdo_g_threshold" &&
 							 (value.Port == "gamma_mapped" || value.Port == "gamma_map_range" ||
 							  value.Port == "epsilon_mapped" || value.Port == "epsilon_map_range" ||
 							  value.Port == "smoothness_mapped" || value.Port == "smoothness_map_range")) ||
@@ -3113,7 +3117,9 @@ namespace engine::imagegraphio {
 							  value.Port == "radius_mapped" || value.Port == "radius_map_range" ||
 							  value.Port == "shift_mapped" || value.Port == "shift_map_range" ||
 							  value.Port == "scale_mapped" || value.Port == "scale_map_range"))) {
-							const bool xdog = node.Type == "pc.xdo_g_threshold",
+							const bool blobify = node.Type == "pc.blobify",
+									   kuwahara = node.Type == "pc.kuwahara",
+									   xdog = node.Type == "pc.xdo_g_threshold",
 									   herringbone = node.Type == "pc.herringbone_tile",
 									   occlusion = node.Type == "pc.ambient_occlusion",
 									   gradient = node.Type == "pc.gradient",
@@ -3130,7 +3136,7 @@ namespace engine::imagegraphio {
 									? (value.Port.starts_with("dot_size_")
 										   ? std::string_view("dot_size")
 										   : std::string_view(value.Port).substr(0, value.Port.find('_')))
-								: (gradient || gabor || refract || xdog)
+								: (gradient || gabor || refract || xdog || kuwahara || blobify)
 									? std::string_view(value.Port).substr(0, value.Port.find('_'))
 								: node.Type == "pc.dither"							? "contrast"
 								: node.Type == "pc.erode"							? "width"
@@ -3139,7 +3145,8 @@ namespace engine::imagegraphio {
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
 							const int expectedIndex =
-								xdog	  ? (numericId == "gamma" ? 9 : (numericId == "epsilon" ? 10 : 11))
+								(kuwahara || blobify) ? 2
+								: xdog	  ? (numericId == "gamma" ? 9 : (numericId == "epsilon" ? 10 : 11))
 								: refract ? (numericId == "height"	   ? 9
 											 : numericId == "distance" ? 10
 																	   : 11)
@@ -3161,8 +3168,9 @@ namespace engine::imagegraphio {
 								: occlusion && numericId == "height" ? 3
 																	 : 1;
 							const std::string_view expectedKind =
-								xdog	  ? (numericId == "gamma" ? "Float" : "Slider")
-								: refract ? "Float"
+								(kuwahara || blobify) ? "Int"
+								: xdog				  ? (numericId == "gamma" ? "Float" : "Slider")
+								: refract			  ? "Float"
 								: herringbone
 									? (numericId == "scale" ? "Vec2"
 															: (numericId == "angle" ? "Rotation" : "Slider"))

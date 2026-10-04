@@ -6,6 +6,18 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.kuwahara" &&
+			((input.SourceKind == "Attribute" && (input.Id == "interpolate" || input.Id == "oversample")) ||
+			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||
+			 (input.SourceKind == "MapToggle" && input.Id == "radius_mapped") ||
+			 (input.SourceKind == "MapRange" && input.Id == "radius_map_range")))
+			return true;
+		if (entry.Type == "pc.blobify" &&
+			((input.SourceKind == "Attribute" && (input.Id == "interpolate" || input.Id == "oversample")) ||
+			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||
+			 (input.SourceKind == "MapToggle" && input.Id == "radius_mapped") ||
+			 (input.SourceKind == "MapRange" && input.Id == "radius_map_range")))
+			return true;
 		if (entry.Type == "pc.xdo_g_threshold" &&
 			((input.SourceKind == "ValueUnit" && input.Id == "radius_unit") ||
 			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||
@@ -124,6 +136,8 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.kuwahara" && port == "radius") return context.Boolean("radius_mapped");
+		if (context.Entry.Type == "pc.blobify" && port == "radius") return context.Boolean("radius_mapped");
 		if (context.Entry.Type == "pc.xdo_g_threshold" &&
 			(port == "gamma" || port == "epsilon" || port == "smoothness"))
 			return context.Boolean(std::string(port) + "_mapped");
@@ -163,6 +177,17 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.kuwahara" && port == "radius") {
+			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+				return context.Find("radius_map_range");
+			return value;
+		}
+		if (context.Entry.Type == "pc.blobify" && port == "radius") {
+			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+				return context.Find("radius_map_range");
+			return value;
+		}
+
 		if (context.Entry.Type == "pc.xdo_g_threshold" &&
 			(port == "gamma" || port == "epsilon" || port == "smoothness")) {
 			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
@@ -245,6 +270,14 @@ namespace engine::imagegraph::detail {
 	}
 	inline bool ReadSourceMappedRange(NodeContext &context, std::string_view port, Vector2 &range) {
 		const Value *value = SourceMappedRange(context, port);
+		if (!value && context.Entry.Type == "pc.kuwahara" && port == "radius") {
+			range = {0, 2};
+			return true;
+		}
+		if (!value && context.Entry.Type == "pc.blobify" && port == "radius") {
+			range = {0, 3};
+			return true;
+		}
 		if (!value && context.Entry.Type == "pc.mirror_polar" && port == "spokes") {
 			range = {0, 4};
 			return true;
@@ -263,7 +296,8 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if (context.Entry.Type == "pc.xdo_g_threshold" || context.Entry.Type == "pc.refract" ||
+		if (context.Entry.Type == "pc.blobify" || context.Entry.Type == "pc.kuwahara" ||
+			context.Entry.Type == "pc.xdo_g_threshold" || context.Entry.Type == "pc.refract" ||
 			context.Entry.Type == "pc.herringbone_tile" || context.Entry.Type == "pc.gabor_noise" ||
 			context.Entry.Type == "pc.mirror_polar" || context.Entry.Type == "pc.stripe" ||
 			context.Entry.Type == "pc.dotted" || (context.Entry.Type == "pc.dither" && port == "contrast") ||

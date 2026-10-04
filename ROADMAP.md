@@ -68,6 +68,9 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate bounded Surface Project 3D outputs and source getters; pass joined CPU validation.
 - [x] Integrate bounded Refract controls, sampling and PXC edits; pass joined CPU validation.
 - [x] Integrate bounded XDoG controls, pixels and mapped PXC edits; pass joined CPU validation.
+- [x] Integrate bounded Kuwahara controls, pixels and mapped PXC edits; pass joined CPU validation.
+- [x] Integrate bounded Blobify controls, pixels and mapped PXC edits; pass joined CPU validation.
+- [_] Profile Kuwahara and Blobify source-family workloads.
 - [x] Integrate camera capture routing and row receipts; pass joined CPU validation.
 - [x] Integrate Studio camera rows and sequence previews; pass joined CPU validation.
 - [x] Integrate path extension, flattening and smoothing.

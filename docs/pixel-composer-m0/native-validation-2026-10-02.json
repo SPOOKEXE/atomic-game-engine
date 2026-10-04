@@ -1,7 +1,7 @@
 {
   "recorded_date": "2026-10-03",
   "recorded_timezone": "Australia/Darwin, UTC+09:30",
-  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs. Build51 release and focused native gates, the server-headless recipe, and a fresh finalcore51 capability inventory are appended below. Two server-headless build attempts failed from temporary disk exhaustion before a RAM-object retry completed 114/114 steps; the earlier failures remain listed. A prepared CLI run failed because CTest used an old assetc binary, then the assetc rebuild and scoped 14-test rerun passed. The prepared export and Studio suites passed after export fixes. These completed scopes remain separate from any later integrated build, and licensed executable parity remains unavailable. Build52 dev and release gates executed October 3 in Darwin are appended as separate scopes. The release52 executor inventory is a capability snapshot of the archive hash recorded with its captured HEAD d3474640 and SourceCatalogue hash; later source commits do not change that snapshot. Server build, server Composer CTest, and headless runtime are separate gates. Initial Edge Detect/Bokeh Blur fixture and Atlas/Palette runs failed or were interrupted before repairs; those records remain below. Finalized build53 release checks are appended below. Initial joined release, core, physics, and Studio failures remain in excluded_or_failed_runs; logs containing “final” in the initial-run name are not accepted results. The finalized build53 inventory was captured with archive, HEAD, catalogue, and source-scope status verified before and after the query. The finalized build53 release snapshot is tied to imagegraph archive SHA-256 12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717, SourceCatalogue SHA-256 57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c, and HEAD d0611f3282e4a1358e181af621234d2ba641e1f4. Archive, HEAD, catalogue hash, and compiled-source-scope status were captured before and after the query and remained unchanged. The build53 release suites passed after repair; earlier failures remain listed. Build53 dev and server gates are now included. The two failed dev disk-exhaustion attempts remain retained below; successful RAM-backed dev gates are separate. Build54 final release gates passed after repair. Initial build54 compiler, core, CLI fixture, and architecture harness failures remain in excluded_or_failed_runs. The release54 executor inventory is tied to the captured archive SHA-256, HEAD, catalogue hash, and clean compiled-source scope in its artifact; public/private header hashes and the helper link command are retained there. Five generated cache directories were restored to workspace disk with SHA-256 and nanosecond mtime verification; this is build-support provenance. Build55 release retry completed 521/521 steps after a unity-build anonymous-helper collision was fixed. Final release gates and the focused volume result are appended below. The mixed-header volume run was withdrawn and is not counted. No new Python catalogue run is claimed; the latest remains build54. The release55 inventory includes archive, HEAD, catalogue, public/private header, and helper compile/link provenance. The root-owned imagegraph documentation update is outside the compiled code scope. An external FFT proof was withdrawn and is not landed implementation or acceptance evidence. Build56 release logs and inventory are appended with SHA-256 values. The first core run failed one stale TimelineV8 FFT diagnostic fixture; a repair suite passed, then the full core passed. Initial and repair I/O runs failed before the final complete I/O suite passed. The final build56 CLI evidence is the scoped 13-selector run; an earlier 15-selector run also passed. No build56 asset rerun is claimed; the retained 265-case asset log is unchanged. The build56 archive query was linked against the finalized release archive, with HEAD, SourceCatalogue, header hashes, and imagegraph code scope matching before and after. Registration remains capability evidence only. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build57 release checks and inventory are appended. The first core run failed four source shape cases; a first repair run still failed one source shape case; the final full core suite passed. Two incremental source shape object rebuilds each completed 2/2 steps. The remaining release suites passed their listed scopes. Source commits 55787c51e50274a6445c107d8c90c7ec43fa0b78, a44cd44c5821e4a77bb7ac03fd55e44cd32c8522, and 62e0a34a54647f52bd47fd566ff8672c5e12b88e are part of the finalized snapshot. The build57 archive query is bound to the captured archive, HEAD, SourceCatalogue, public/private header hashes, and clean imagegraph code scope. No assets or architecture suite was rerun in build57. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build58 release evidence is appended below with its exact archive inventory; it adds no assets, architecture, server, GPU, manual-scene, or profiling run. The Build57 source pipeline profile remains the latest profiling evidence. Build59 release evidence is appended below, tied to the captured release archive and HEAD. The initial Ninja run was intentionally stopped at 165/552 to raise test compile concurrency; the resumed 388/388 build and tests-only 3/3 repair passed. Initial core failures are retained separately from the repaired core pass. Build59 did not rerun profiling, server, assets, GPU, manual scene, or architecture gates. Build60 release evidence and exact inventory are appended. Initial core fixture failures and an overlapping IO log are retained separately. Production was unchanged by the tests-only repair. Profiling, server, assets, architecture, GPU and manual scenes were not rerun. Requested cache cleanup removed obsolete diagnostic binaries and stale aliases while retaining current builds and text validation artifacts. Build61 final native evidence and exact inventory are appended, with initial failed core/dither and IO runs retained. Earlier other-suite runs preceded the mapped contrast fix and are not used as final acceptance. Noise correction and ordered dither commits are recorded with the committed Draw Gradient source. Server, assets, architecture, GPU, manual scenes, licensed-reference comparisons and representative profiling were not rerun or promoted by this append. Build62 public source typing/reset, source record origins, RNG capture codec v2, cooked Composer host/artifact routing and product receipt/cadence evidence are appended only from final reviewed logs and exact source/header/archive inventory provenance. Failed initial build, client, Studio, CLI and both server resource comparisons remain retained. Summary parsing replaces invalid UTF-8 bytes in server text; evidence hashes preserve the original raw bytes. The authorized initial GPU attempt failed and is retained; any accepted GPU gate is separately checked with backend, driver and scope limitations. Native CPU gates are not GPU pixel evidence and licensed-reference acceptance remains open. Representative profiling was not promoted. Build63 appends coherent current-ABI native node/product checks and approved local Vulkan fixtures after source integration. The five-case focused failure and interrupted initial build invocation remain retained. Final repaired build completed 22/22, final closure 1/1. Inventory captures clean Composer core source at 96a7bd07 with unchanged archive/header/HEAD hashes before and after. CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed reference parity were not promoted. Build64 appends coherent current-ABI native checks for five executors and panel-scoped keyboard editing. All six failed invocations remain retained. Builds completed596/596,36/36 and4/4. Inventory captures clean Composer core at7b5a29f4 with unchanged archive/header/HEAD hashes before and after. Accepted CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed parity were not promoted. Build65 appends six executors, Clear ownership, pending observations, live Transform host adapters, easing and dynamic track policies. Eleven failed invocations remain retained. Accepted source bytes were unchanged before source commits; Studio fixture/private helper repairs were rebuilt and accepted separately. Inventory captures clean Composer core atb78c280338e59aa4bd600f8cd5a69d69f3bc5572 with stable archive/header/HEAD hashes. Representative profiling, live Studio, Transform device completion and licensed parity remain open. Build66 appends three executors, mixed freed-slot refill transport, retained skybox face admission and Transform Vulkan completion. Three fixture failures remain retained with exact resolver/producer boundaries. Inventory captures clean Composer core atcb5900e81fbcd6f8ef15098c919a37db5d2bc406 with stable archive/header/HEAD hashes. Representative profiling, live Studio, broader device captures and licensed parity remain open. Build67 appends five generators, typed source Surface/Colour getters, metadata projection, focused native history and resumable export completion. Ten failed checkpoints retain exact fixture, importer, getter and obsolete-unavailability boundaries. Inventory captures clean Composer core atbc3a3e86b1a433bd5b66a5c11343cb8324a3c86c with stable archive/header/HEAD hashes. Broader device, live Studio, release profiling and licensed comparisons remain open.",
+  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs. Build51 release and focused native gates, the server-headless recipe, and a fresh finalcore51 capability inventory are appended below. Two server-headless build attempts failed from temporary disk exhaustion before a RAM-object retry completed 114/114 steps; the earlier failures remain listed. A prepared CLI run failed because CTest used an old assetc binary, then the assetc rebuild and scoped 14-test rerun passed. The prepared export and Studio suites passed after export fixes. These completed scopes remain separate from any later integrated build, and licensed executable parity remains unavailable. Build52 dev and release gates executed October 3 in Darwin are appended as separate scopes. The release52 executor inventory is a capability snapshot of the archive hash recorded with its captured HEAD d3474640 and SourceCatalogue hash; later source commits do not change that snapshot. Server build, server Composer CTest, and headless runtime are separate gates. Initial Edge Detect/Bokeh Blur fixture and Atlas/Palette runs failed or were interrupted before repairs; those records remain below. Finalized build53 release checks are appended below. Initial joined release, core, physics, and Studio failures remain in excluded_or_failed_runs; logs containing \u201cfinal\u201d in the initial-run name are not accepted results. The finalized build53 inventory was captured with archive, HEAD, catalogue, and source-scope status verified before and after the query. The finalized build53 release snapshot is tied to imagegraph archive SHA-256 12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717, SourceCatalogue SHA-256 57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c, and HEAD d0611f3282e4a1358e181af621234d2ba641e1f4. Archive, HEAD, catalogue hash, and compiled-source-scope status were captured before and after the query and remained unchanged. The build53 release suites passed after repair; earlier failures remain listed. Build53 dev and server gates are now included. The two failed dev disk-exhaustion attempts remain retained below; successful RAM-backed dev gates are separate. Build54 final release gates passed after repair. Initial build54 compiler, core, CLI fixture, and architecture harness failures remain in excluded_or_failed_runs. The release54 executor inventory is tied to the captured archive SHA-256, HEAD, catalogue hash, and clean compiled-source scope in its artifact; public/private header hashes and the helper link command are retained there. Five generated cache directories were restored to workspace disk with SHA-256 and nanosecond mtime verification; this is build-support provenance. Build55 release retry completed 521/521 steps after a unity-build anonymous-helper collision was fixed. Final release gates and the focused volume result are appended below. The mixed-header volume run was withdrawn and is not counted. No new Python catalogue run is claimed; the latest remains build54. The release55 inventory includes archive, HEAD, catalogue, public/private header, and helper compile/link provenance. The root-owned imagegraph documentation update is outside the compiled code scope. An external FFT proof was withdrawn and is not landed implementation or acceptance evidence. Build56 release logs and inventory are appended with SHA-256 values. The first core run failed one stale TimelineV8 FFT diagnostic fixture; a repair suite passed, then the full core passed. Initial and repair I/O runs failed before the final complete I/O suite passed. The final build56 CLI evidence is the scoped 13-selector run; an earlier 15-selector run also passed. No build56 asset rerun is claimed; the retained 265-case asset log is unchanged. The build56 archive query was linked against the finalized release archive, with HEAD, SourceCatalogue, header hashes, and imagegraph code scope matching before and after. Registration remains capability evidence only. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build57 release checks and inventory are appended. The first core run failed four source shape cases; a first repair run still failed one source shape case; the final full core suite passed. Two incremental source shape object rebuilds each completed 2/2 steps. The remaining release suites passed their listed scopes. Source commits 55787c51e50274a6445c107d8c90c7ec43fa0b78, a44cd44c5821e4a77bb7ac03fd55e44cd32c8522, and 62e0a34a54647f52bd47fd566ff8672c5e12b88e are part of the finalized snapshot. The build57 archive query is bound to the captured archive, HEAD, SourceCatalogue, public/private header hashes, and clean imagegraph code scope. No assets or architecture suite was rerun in build57. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build58 release evidence is appended below with its exact archive inventory; it adds no assets, architecture, server, GPU, manual-scene, or profiling run. The Build57 source pipeline profile remains the latest profiling evidence. Build59 release evidence is appended below, tied to the captured release archive and HEAD. The initial Ninja run was intentionally stopped at 165/552 to raise test compile concurrency; the resumed 388/388 build and tests-only 3/3 repair passed. Initial core failures are retained separately from the repaired core pass. Build59 did not rerun profiling, server, assets, GPU, manual scene, or architecture gates. Build60 release evidence and exact inventory are appended. Initial core fixture failures and an overlapping IO log are retained separately. Production was unchanged by the tests-only repair. Profiling, server, assets, architecture, GPU and manual scenes were not rerun. Requested cache cleanup removed obsolete diagnostic binaries and stale aliases while retaining current builds and text validation artifacts. Build61 final native evidence and exact inventory are appended, with initial failed core/dither and IO runs retained. Earlier other-suite runs preceded the mapped contrast fix and are not used as final acceptance. Noise correction and ordered dither commits are recorded with the committed Draw Gradient source. Server, assets, architecture, GPU, manual scenes, licensed-reference comparisons and representative profiling were not rerun or promoted by this append. Build62 public source typing/reset, source record origins, RNG capture codec v2, cooked Composer host/artifact routing and product receipt/cadence evidence are appended only from final reviewed logs and exact source/header/archive inventory provenance. Failed initial build, client, Studio, CLI and both server resource comparisons remain retained. Summary parsing replaces invalid UTF-8 bytes in server text; evidence hashes preserve the original raw bytes. The authorized initial GPU attempt failed and is retained; any accepted GPU gate is separately checked with backend, driver and scope limitations. Native CPU gates are not GPU pixel evidence and licensed-reference acceptance remains open. Representative profiling was not promoted. Build63 appends coherent current-ABI native node/product checks and approved local Vulkan fixtures after source integration. The five-case focused failure and interrupted initial build invocation remain retained. Final repaired build completed 22/22, final closure 1/1. Inventory captures clean Composer core source at 96a7bd07 with unchanged archive/header/HEAD hashes before and after. CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed reference parity were not promoted. Build64 appends coherent current-ABI native checks for five executors and panel-scoped keyboard editing. All six failed invocations remain retained. Builds completed596/596,36/36 and4/4. Inventory captures clean Composer core at7b5a29f4 with unchanged archive/header/HEAD hashes before and after. Accepted CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed parity were not promoted. Build65 appends six executors, Clear ownership, pending observations, live Transform host adapters, easing and dynamic track policies. Eleven failed invocations remain retained. Accepted source bytes were unchanged before source commits; Studio fixture/private helper repairs were rebuilt and accepted separately. Inventory captures clean Composer core atb78c280338e59aa4bd600f8cd5a69d69f3bc5572 with stable archive/header/HEAD hashes. Representative profiling, live Studio, Transform device completion and licensed parity remain open. Build66 appends three executors, mixed freed-slot refill transport, retained skybox face admission and Transform Vulkan completion. Three fixture failures remain retained with exact resolver/producer boundaries. Inventory captures clean Composer core atcb5900e81fbcd6f8ef15098c919a37db5d2bc406 with stable archive/header/HEAD hashes. Representative profiling, live Studio, broader device captures and licensed parity remain open. Build67 appends five generators, typed source Surface/Colour getters, metadata projection, focused native history and resumable export completion. Ten failed checkpoints retain exact fixture, importer, getter and obsolete-unavailability boundaries. Inventory captures clean Composer core atbc3a3e86b1a433bd5b66a5c11343cb8324a3c86c with stable archive/header/HEAD hashes. Broader device, live Studio, release profiling and licensed comparisons remain open.",
   "runtime_gates": [
     {
       "name": "imagegraph IO",
@@ -12798,5 +12798,367 @@
     },
     "status": "Root fullyread contract and tenpathmanifest only; patchbodies notyetread/applied/runtimeprofiled.",
     "scope": "Real granted BDF/Inter coverage and SDF, Unicode Text literals and owned artifact codecs; existing profiler/heap/memorycounter machinery with no benchmarkfiles."
+  },
+  "source_filter_integration_91": {
+    "status": "Bounded CPU executors and mapped PXC edits accepted by joined CPU92; measured profiling, HLSL64 and licensed/device parity remain open.",
+    "application_receipts": {
+      "kuwahara": [
+        {
+          "path": "mono.engine/imagegraph/src/SourceMappedInputs.hpp",
+          "base_sha256": "a06df8635506cf613480fdeab3fa3ed441d1797ac346a0ae65adad01ae930655",
+          "candidate_sha256": "cc5104e791fd1afef53e4d102e708bebf04f203540132a14527b5859c1fe143f"
+        },
+        {
+          "path": "mono.engine/imagegraph/src/Catalogue.cpp",
+          "base_sha256": "50032c796cb9f0e5ab2a11646d203a629246c1dc33545b768897ea227db931b5",
+          "candidate_sha256": "ce55326e0bfb1faca00aa0375f54d00f826b3034719fc18e89c211b61f50241d"
+        },
+        {
+          "path": "mono.engine/imagegraph/src/Document.cpp",
+          "base_sha256": "cea23b08ab18afd2b9903cf727d1f628bae27d8749824e6ff8c369f1f90f3a9b",
+          "candidate_sha256": "d09aead09dc903017cc26da161cc1003d0c74b577d8e5281d2f1a07bb44c92b3"
+        },
+        {
+          "path": "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp",
+          "base_sha256": "7c3fdf30e09817f6311b3c69750d5d2ffd6272022da7b0e7ee64ef30328957a4",
+          "candidate_sha256": "30b7aadb6101a00ddb55d3c90333fb5485277ee36f962fd3680661372653a1f0"
+        },
+        {
+          "path": "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+          "base_sha256": "ac13a2883854cd11788a6d8b95179b67743d20d4c4e60b9b82daa1d2dd1a0296",
+          "candidate_sha256": "cda9183a00ad9369a463f5f3aa7029b4d76450b590416a25ec95f7dfa28b3d0d"
+        }
+      ],
+      "blobify": {
+        "shared": {
+          "mono.engine/imagegraph/src/Catalogue.cpp": {
+            "base_sha256": "ce55326e0bfb1faca00aa0375f54d00f826b3034719fc18e89c211b61f50241d",
+            "post_sha256": "508fd6bb8e657ed9b1c79c694962acafdbb9fcc005aceb6c8a45aacb1b592abe"
+          },
+          "mono.engine/imagegraph/src/Document.cpp": {
+            "base_sha256": "d09aead09dc903017cc26da161cc1003d0c74b577d8e5281d2f1a07bb44c92b3",
+            "post_sha256": "95a1a5923ea288d0131ee3126329fb9b3de94dde6bef86c3989d18e3bb20aa17"
+          },
+          "mono.engine/imagegraph/src/SourceMappedInputs.hpp": {
+            "base_sha256": "cc5104e791fd1afef53e4d102e708bebf04f203540132a14527b5859c1fe143f",
+            "post_sha256": "81fb368e15057c3712109c8bcb09adc7cdfa8ed54bb24a9b3fd0a581f9fbb606"
+          },
+          "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp": {
+            "base_sha256": "30b7aadb6101a00ddb55d3c90333fb5485277ee36f962fd3680661372653a1f0",
+            "post_sha256": "a893198b84bc0219725c6b46cbc5c77549cce5f0e1b605ea180ab6798f1cecbb"
+          },
+          "mono.engine/imagegraphio/src/PxcxEdit.cpp": {
+            "base_sha256": "cda9183a00ad9369a463f5f3aa7029b4d76450b590416a25ec95f7dfa28b3d0d",
+            "post_sha256": "464b2c8e802d7742af2fc37dedf1cdf974d96ccaee33c5f2368514c7f086a748"
+          }
+        },
+        "supplement": {
+          "mono.engine/imagegraph/src/nodes/Source2DBlobifyNodes.cpp": {
+            "base_sha256": "c661c3d5f3cba17cab0f48b66ca9a983c179a1b3f24fd3196fddfaebd52c67b4",
+            "replacement_sha256": "d1abee02cfe9e882d49fca5e7ca1b89f017ac8ec47dcc8ec909abf5754bbdd3c"
+          },
+          "mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp": {
+            "base_sha256": "6f9205f975ac69b64e48b61d9985399862b8b7d79c78c203d32b91b6ed429704",
+            "replacement_sha256": "14f465bff6ef4ac60f09fcd8b32e384751bd586ca34da327632069dca8a3ecbe"
+          }
+        },
+        "final": {
+          "mono.engine/imagegraph/src/Catalogue.cpp": "508fd6bb8e657ed9b1c79c694962acafdbb9fcc005aceb6c8a45aacb1b592abe",
+          "mono.engine/imagegraph/src/Document.cpp": "95a1a5923ea288d0131ee3126329fb9b3de94dde6bef86c3989d18e3bb20aa17",
+          "mono.engine/imagegraph/src/SourceMappedInputs.hpp": "81fb368e15057c3712109c8bcb09adc7cdfa8ed54bb24a9b3fd0a581f9fbb606",
+          "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp": "a893198b84bc0219725c6b46cbc5c77549cce5f0e1b605ea180ab6798f1cecbb",
+          "mono.engine/imagegraphio/src/PxcxEdit.cpp": "464b2c8e802d7742af2fc37dedf1cdf974d96ccaee33c5f2368514c7f086a748",
+          "mono.engine/imagegraph/src/nodes/Source2DBlobifyNodes.cpp": "d1abee02cfe9e882d49fca5e7ca1b89f017ac8ec47dcc8ec909abf5754bbdd3c",
+          "mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp": "8ae5e4e1091bfefab4301254b9209116f54d6fb858bca014c8aeaa1211c80aba",
+          "mono.engine/imagegraphio/tests/BlobifyMappedRange.cpp": "5b11e55741812e04f437de4b0210e300e75cfaffbc0cb52dffaacbeaf98149b0",
+          "mono.engine/imagegraph/docs/SOURCE_BLOBIFY_PROFILE.md": "aef5388ebd9ae856f944be4dff2ccf17e26643deba18d2f5e0e1ca04e23b7c6d"
+        }
+      }
+    },
+    "build": {
+      "command": [
+        "cmake",
+        "--build",
+        ".cache/build/release-tests",
+        "--target",
+        "test_imagegraph",
+        "test_imagegraphio",
+        "-j",
+        "8"
+      ],
+      "exit": 0,
+      "steps": 32
+    },
+    "focused_results": [
+      {
+        "scope": "filters",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph",
+          "[source_kuwahara],[source_blobify]"
+        ],
+        "exit": 42,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/filters-release-91.log",
+        "summary": "Filters: [source_kuwahara],[source_blobify]\nRandomness seeded to: 2367316909\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntest_imagegraph is a Catch2 v3.16.0 host application.\nRun with -? for options\n\n-------------------------------------------------------------------------------\nBlobify static toggle and sampler attributes cannot form later processor rows\n-------------------------------------------------------------------------------\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:588\n...............................................................................\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:613: FAILED:\n  CHECK( Compile(linked, p, diag) == Status::TypeMismatch )\nwith expansion:\n  0 == 7\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:614: FAILED:\n  CHECK( diag.Port == port )\nwith expansion:\n  \"\" == \"radius_mapped\"\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:613: FAILED:\n  CHECK( Compile(linked, p, diag) == Status::TypeMismatch )\nwith expansion:\n  0 == 7\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:614: FAILED:\n  CHECK( diag.Port == port )\nwith expansion:\n  \"\" == \"interpolate\"\n\n-------------------------------------------------------------------------------\nKuwahara source mapped toggle is static rather than a processor array\n-------------------------------------------------------------------------------\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DKuwaharaNodes.cpp:465\n...............................................................................\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DKuwaharaNodes.cpp:483: FAILED:\n  CHECK( Compile(linked, p, diag) == Status::TypeMismatch )\nwith expansion:\n  0 == 7\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DKuwaharaNodes.cpp:484: FAILED:\n  CHECK( diag.Port == \"radius_mapped\" )\nwith expansion:\n  \"\" == \"radius_mapped\"\n\n===============================================================================\ntest cases:   74 |   72 passed | 2 failed\nassertions: 1804 | 1798 passed | 6 failed\n\n"
+      },
+      {
+        "scope": "mapped-io",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio",
+          "[kuwahara_mapped_range],[blobify_mapped_range]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/mapped-io-release-91.log",
+        "summary": "Filters: [kuwahara_mapped_range],[blobify_mapped_range]\nRandomness seeded to: 3286081170\n===============================================================================\nAll tests passed (124 assertions in 2 test cases)\n\n"
+      }
+    ],
+    "full_results": [
+      {
+        "scope": "imagegraph",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "exit": 42,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-91-full.log",
+        "summary": "Randomness seeded to: 788035307\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntest_imagegraph is a Catch2 v3.16.0 host application.\nRun with -? for options\n\n-------------------------------------------------------------------------------\nKuwahara source mapped toggle is static rather than a processor array\n-------------------------------------------------------------------------------\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DKuwaharaNodes.cpp:465\n...............................................................................\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DKuwaharaNodes.cpp:483: FAILED:\n  CHECK( Compile(linked, p, diag) == Status::TypeMismatch )\nwith expansion:\n  0 == 7\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DKuwaharaNodes.cpp:484: FAILED:\n  CHECK( diag.Port == \"radius_mapped\" )\nwith expansion:\n  \"\" == \"radius_mapped\"\n\n-------------------------------------------------------------------------------\nBlobify static toggle and sampler attributes cannot form later processor rows\n-------------------------------------------------------------------------------\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:588\n...............................................................................\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:613: FAILED:\n  CHECK( Compile(linked, p, diag) == Status::TypeMismatch )\nwith expansion:\n  0 == 7\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:614: FAILED:\n  CHECK( diag.Port == port )\nwith expansion:\n  \"\" == \"radius_mapped\"\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:613: FAILED:\n  CHECK( Compile(linked, p, diag) == Status::TypeMismatch )\nwith expansion:\n  0 == 7\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp:614: FAILED:\n  CHECK( diag.Port == port )\nwith expansion:\n  \"\" == \"interpolate\"\n\n===============================================================================\ntest cases:    2745 |    2743 passed | 2 failed\nassertions: 1858001 | 1857995 passed | 6 failed\n\n"
+      },
+      {
+        "scope": "imagegraphio",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraphio-release-91-full.log",
+        "summary": "ck_to\"\nsource_static \"input\" \"input_type\"\nsource_static \"input\" \"subtype\"\nsource_static \"input\" \"vector_size\"\nsource_static \"input\" \"range\"\nsource_static \"input\" \"step\"\nsource_static \"input\" \"enum_labels\"\nsource_static \"input\" \"button_label\"\nsource_static \"input\" \"order\"\nsource_static \"input\" \"display_preview_gizmo\"\nsource_static \"input\" \"gizmo_position\"\nsource_static \"input\" \"gizmo_scale\"\nsource_static \"input\" \"gizmo_rotation\"\nsource_static \"input\" \"gizmo_label\"\nsource_static \"input\" \"parent_value\"\nvalue 1 \"input\" \"subtype\" e 0\nvalue 1 \"input\" \"range\" v 0 1\nvalue 1 \"input\" \"input_type\" e 4\nnode \"output\" \"pc.group_output\" \"group\" 0 0\nsource_static \"output\" \"value\"\nnode \"sink\" \"pc.project_output\" \"\" 0 0\nsource_static \"sink\" \"surface_in\"\nsource_static \"sink\" \"animated\"\nnode \"filter\" \"image.invert\" \"group\" 0 0\nvalue 4 \"filter\" \"include_alpha\" b 0\nvalue 4 \"filter\" \"channel\" i 15\nvalue 4 \"filter\" \"mix\" d 1\nvalue 4 \"filter\" \"invert_mask\" b 0\nvalue 4 \"filter\" \"mask_feather\" d 0\nlink \"root\" \"image\" \"input/parent-value\" \"value\"\nlink \"filter\" \"image\" \"output\" \"value\"\nlink \"output/parent-value\" \"value\" \"sink\" \"surface_in\"\nlink \"input\" \"value\" \"filter\" \"image\"\nlink \"input/parent-value\" \"value\" \"input\" \"parent_value\"\nlink \"output\" \"value\" \"output/parent-value\" \"value\"\ngroup \"group\" \"Group\" \"\"\ngroup_depth \"group\" rgba8\ngroup_sampling \"group\" 1 1\ngroup_port \"group\" \"input\" \"input/parent-value\" input\ngroup_boundary \"group\" \"input\" \"input\"\ngroup_port \"group\" \"output\" \"output/parent-value\" output\ngroup_boundary \"group\" \"output\" \"output\"\njunction \"input/parent-value\" \"group\" any 1 d -1\njunction \"output/parent-value\" \"group\" any 0\noutput \"sink\" \"output\" \"value\"\nkeyframe \"input\" \"subtype\" 0 \"source\" e 0\nkey_source_id \"input\" \"subtype\" 0 \"pxc:compact\"\nkey_ease \"input\" \"subtype\" 0 \"linear\" \"linear\" 0 1 0 0\nkeyframe \"input\" \"range\" 0 \"source\" v 0 1\nkey_source_id \"input\" \"range\" 0 \"pxc:compact\"\nkey_ease \"input\" \"range\" 0 \"linear\" \"linear\" 0 1 0 0\nkeyframe \"input\" \"input_type\" 0 \"source\" e 4\nkey_source_id \"input\" \"input_type\" 0 \"pxc:compact\"\nkey_ease \"input\" \"input_type\" 0 \"linear\" \"linear\" 0 1 0 0\nproject 2 2 0 3 2 255 255 255 255 0 0 0 255\npreview_grid 0 0 16 16\npreview_rulers 0 0\ntrack \"input\" \"subtype\" \"hold\" -1\ntrack \"input\" \"range\" \"hold\" -1\ntrack \"input\" \"input_type\" \"hold\" -1\nINVERT_DIAGNOSTIC_END\nORIGINAL_SINK status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_EXPLICIT_REQUEST status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_DEFAULT_OVERLOAD status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nINVERT_DIAGNOSTIC_BEGIN inherited-depth status=0 message=\ninclude_alpha variant=0 bool=0\nchannel variant=1 integer=15\nmix variant=2 scalar=1\ninvert_mask variant=0 bool=0\nmask_feather variant=2 scalar=0\nEFFECTIVE_LINK filter:image -> output:value\nEFFECTIVE_LINK output:value -> sink:surface_in\nEFFECTIVE_LINK input:value -> filter:image\nEFFECTIVE_LINK root:image -> input:parent_value\nORDER root\nORDER input\nORDER filter\nORDER output\nORDER sink\nDIRECT_FILTER status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_INPUT node=output status=0 message=\nHANDOFF_IMAGE node=output port=value channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_INPUT node=sink status=0 message=\nHANDOFF_IMAGE node=sink port=surface_in channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_OUTPUT node=input status=0 message= channel0=16 channel1=32 channel2=64 channel3=255\nHANDOFF_OUTPUT node=output status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_SINK status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nimagegraph 9\nnode \"root\" \"image.solid\" \"\" 0 0\nvalue 0 \"root\" \"width\" i 2\nvalue 0 \"root\" \"height\" i 2\nvalue 0 \"root\" \"colour\" c 16 32 64 255\nvalue 0 \"root\" \"empty\" b 0\nvalue 0 \"root\" \"use_mask_dimension\" b 0\nvalue 0 \"root\" \"mask_alpha_only\" b 0\nnode \"input\" \"pc.group_input\" \"group\" 0 0\nsource_static \"input\" \"visible_condition\"\nsource_static \"input\" \"visible_check\"\nsource_static \"input\" \"visible_check_to\"\nsource_static \"input\" \"input_type\"\nsource_static \"input\" \"subtype\"\nsource_static \"input\" \"vector_size\"\nsource_static \"input\" \"range\"\nsource_static \"input\" \"step\"\nsource_static \"input\" \"enum_labels\"\nsource_static \"input\" \"button_label\"\nsource_static \"input\" \"order\"\nsource_static \"input\" \"display_preview_gizmo\"\nsource_static \"input\" \"gizmo_position\"\nsource_static \"input\" \"gizmo_scale\"\nsource_static \"input\" \"gizmo_rotation\"\nsource_static \"input\" \"gizmo_label\"\nsource_static \"input\" \"parent_value\"\nvalue 1 \"input\" \"subtype\" e 0\nvalue 1 \"input\" \"range\" v 0 1\nvalue 1 \"input\" \"input_type\" e 4\nnode \"output\" \"pc.group_output\" \"group\" 0 0\nsource_static \"output\" \"value\"\nnode \"sink\" \"pc.project_output\" \"\" 0 0\nsource_static \"sink\" \"surface_in\"\nsource_static \"sink\" \"animated\"\nnode \"filter\" \"image.invert\" \"group\" 0 0\nvalue 4 \"filter\" \"include_alpha\" b 0\nvalue 4 \"filter\" \"channel\" i 15\nvalue 4 \"filter\" \"mix\" d 1\nvalue 4 \"filter\" \"invert_mask\" b 0\nvalue 4 \"filter\" \"mask_feather\" d 0\nlink \"root\" \"image\" \"input/parent-value\" \"value\"\nlink \"filter\" \"image\" \"output\" \"value\"\nlink \"output/parent-value\" \"value\" \"sink\" \"surface_in\"\nlink \"input\" \"value\" \"filter\" \"image\"\nlink \"input/parent-value\" \"value\" \"input\" \"parent_value\"\nlink \"output\" \"value\" \"output/parent-value\" \"value\"\ngroup \"group\" \"Group\" \"\"\ngroup_depth \"group\" rgba8\ngroup_sampling \"group\" 1 1\ngroup_port \"group\" \"input\" \"input/parent-value\" input\ngroup_boundary \"group\" \"input\" \"input\"\ngroup_port \"group\" \"output\" \"output/parent-value\" output\ngroup_boundary \"group\" \"output\" \"output\"\njunction \"input/parent-value\" \"group\" any 1 d -1\njunction \"output/parent-value\" \"group\" any 0\noutput \"sink\" \"output\" \"value\"\nkeyframe \"input\" \"subtype\" 0 \"source\" e 0\nkey_source_id \"input\" \"subtype\" 0 \"pxc:compact\"\nkey_ease \"input\" \"subtype\" 0 \"linear\" \"linear\" 0 1 0 0\nkeyframe \"input\" \"range\" 0 \"source\" v 0 1\nkey_source_id \"input\" \"range\" 0 \"pxc:compact\"\nkey_ease \"input\" \"range\" 0 \"linear\" \"linear\" 0 1 0 0\nkeyframe \"input\" \"input_type\" 0 \"source\" e 4\nkey_source_id \"input\" \"input_type\" 0 \"pxc:compact\"\nkey_ease \"input\" \"input_type\" 0 \"linear\" \"linear\" 0 1 0 0\nproject 2 2 0 3 2 255 255 255 255 0 0 0 255\npreview_grid 0 0 16 16\npreview_rulers 0 0\ntrack \"input\" \"subtype\" \"hold\" -1\ntrack \"input\" \"range\" \"hold\" -1\ntrack \"input\" \"input_type\" \"hold\" -1\nINVERT_DIAGNOSTIC_END\n"
+      }
+    ],
+    "independent_equations": "Root replayed both Python equations with JSON-normalized retained literal and pinned-source hash equality, without modifying original artifacts. Initial direct tuple/list comparison was corrected in the outside replay harness.",
+    "linked_attribute_review": "Confirmed actual authored-array Compile rejection, generic linked-array Compile acceptance and whole-array Boolean/Integer UnsupportedExecution before output. Linked attributes do not form later processor rows; all three exact previous-image assertions pass.",
+    "remaining": [
+      "Measure source-family filter workloads",
+      "Licensed/device parity and HLSL64 Kuwahara profile remain unverified"
+    ],
+    "reader_correction": {
+      "path": "/tmp/pc-static-attribute91-reader-correction/reader-correction.patch",
+      "sha256": "ab6cf51a7e022b38c7cd5fcbd8552cbc6ba75efe93a64c0133a6dc2fd76e4205",
+      "root_review": "Full patch/manifest/exact base and final hashes verified; runtime proves compile acceptance followed by named reader refusal and prior output preservation."
+    },
+    "joined_build_92": {
+      "exit": 0,
+      "steps": 16,
+      "targets": [
+        "test_imagegraph",
+        "test_imagegraphio",
+        "test_imagegraphexport",
+        "test_imagegraphfont",
+        "test_client",
+        "test_server",
+        "test_render",
+        "test_studio",
+        "test_assetc",
+        "test_assets",
+        "test_gui",
+        "test_nodegraph",
+        "test_imagegraphphysics",
+        "assetc"
+      ]
+    },
+    "joined_results_92": [
+      {
+        "scope": "filters",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph",
+          "[source_kuwahara],[source_blobify]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/filters-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (1816 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "core",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/core-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (1858013 assertions in 2745 test cases)"
+        ]
+      },
+      {
+        "scope": "assetc",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (362 assertions in 42 test cases)"
+        ]
+      },
+      {
+        "scope": "assets",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (32488 assertions in 265 test cases)"
+        ]
+      },
+      {
+        "scope": "cli",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+          "--output-on-failure"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-92-filters-joined.log",
+        "summary": [
+          "100% tests passed, 0 tests failed out of 16"
+        ]
+      },
+      {
+        "scope": "client",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+          "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (7479 assertions in 71 test cases)"
+        ]
+      },
+      {
+        "scope": "export",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (2819 assertions in 68 test cases)"
+        ]
+      },
+      {
+        "scope": "gui",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (4974 assertions in 331 test cases)"
+        ]
+      },
+      {
+        "scope": "io",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (11155 assertions in 250 test cases)"
+        ]
+      },
+      {
+        "scope": "nodegraph",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (269 assertions in 31 test cases)"
+        ]
+      },
+      {
+        "scope": "physics",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (715 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "render",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+          "~[gpu]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (336654 assertions in 808 test cases)"
+        ]
+      },
+      {
+        "scope": "server",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (5 assertions in 1 test case)",
+          "All tests passed (2182 assertions in 99 test cases)"
+        ]
+      },
+      {
+        "scope": "font",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (575 assertions in 21 test cases)"
+        ]
+      },
+      {
+        "scope": "studio",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio",
+          "[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result],[studio][imagegraph],[studio][wav_preview],[studio][animation_control_host],[studio][artwork],[export_intent][font],[dopesheet_actions]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-92-filters-joined.log",
+        "summary": [
+          "All tests passed (29967 assertions in 247 test cases)"
+        ]
+      }
+    ],
+    "final_owned_sha256": {
+      "mono.engine/imagegraph/src/Catalogue.cpp": "508fd6bb8e657ed9b1c79c694962acafdbb9fcc005aceb6c8a45aacb1b592abe",
+      "mono.engine/imagegraph/src/Document.cpp": "95a1a5923ea288d0131ee3126329fb9b3de94dde6bef86c3989d18e3bb20aa17",
+      "mono.engine/imagegraph/src/SourceMappedInputs.hpp": "81fb368e15057c3712109c8bcb09adc7cdfa8ed54bb24a9b3fd0a581f9fbb606",
+      "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp": "a893198b84bc0219725c6b46cbc5c77549cce5f0e1b605ea180ab6798f1cecbb",
+      "mono.engine/imagegraphio/src/PxcxEdit.cpp": "464b2c8e802d7742af2fc37dedf1cdf974d96ccaee33c5f2368514c7f086a748",
+      "mono.engine/imagegraph/src/nodes/Source2DKuwaharaNodes.cpp": "5193c6bbab31104ab97ee4287a728391e4c30f51f2729bbee9b9c68edaed7951",
+      "mono.engine/imagegraph/src/nodes/Source2DBlobifyNodes.cpp": "d1abee02cfe9e882d49fca5e7ca1b89f017ac8ec47dcc8ec909abf5754bbdd3c",
+      "mono.engine/imagegraph/tests/Source2DKuwaharaNodes.cpp": "b6a5358a990b0e762807575f8dc9462548304fb140d2682c60e069fc78ef0ebc",
+      "mono.engine/imagegraph/tests/Source2DBlobifyNodes.cpp": "69cacad25013b6573bade056b73e0474ae8cbc5373f2c126e4f592dda3374c8e",
+      "mono.engine/imagegraphio/tests/KuwaharaMappedRange.cpp": "1a467a641dbcc7ffb06fba33bf2166175d436d7edf505671954ff58b119ebdd0",
+      "mono.engine/imagegraphio/tests/BlobifyMappedRange.cpp": "5b11e55741812e04f437de4b0210e300e75cfaffbc0cb52dffaacbeaf98149b0",
+      "mono.engine/imagegraph/docs/SOURCE_KUWAHARA_PROFILE.md": "7209cd2a3bf50b6a13055a1706e9f0ff6ed0a39daac0088cadd2849e3f27e9c4",
+      "mono.engine/imagegraph/docs/SOURCE_BLOBIFY_PROFILE.md": "3b579dfa790cc6ec355e1d4371513cc7b21cf1ffe6b1ecaaf749a711a914230b"
+    },
+    "formatting": "clang-format21 dry-run/Werror passes all six new production/test C++ files. Root reformatted the corrected Kuwahara IO fixture initializer, rebuilt IO in2steps, and both mapped IO cases pass124 assertions again."
+  },
+  "region_origin_review_92": {
+    "packet": "/tmp/pc-region-origin96/RegionOrigins.patch",
+    "sha256": "3a5fd56c4a007649557dbf96ea9bfb7ae19ab52c206e6a4a96030f8a9286be2a",
+    "status": "Root read all541 lines/nine bodies. Exact manifest/base review and current Blobify context rebase pending. Not applied or runtime accepted."
   }
 }

@@ -319,9 +319,13 @@ namespace engine::imagegraph::detail {
 	bool SourceSurfaceReplace(NodeContext &context);
 	bool SourceShapeMap(NodeContext &context);
 	bool SourceXDoG(NodeContext &c);
+	bool SourceKuwahara(NodeContext &c);
+	bool SourceBlobify(NodeContext &c);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.xdo_g_threshold", SourceXDoG, true},
+			ExecutorEntry{"pc.kuwahara", SourceKuwahara, true},
+			ExecutorEntry{"pc.blobify", SourceBlobify, true},
 			ExecutorEntry{"pc.mirror_polar", SourceMirrorPolar, true},
 			ExecutorEntry{"pc.shape_map", SourceShapeMap, true},
 			ExecutorEntry{"pc.smear", SourceSmear, true},

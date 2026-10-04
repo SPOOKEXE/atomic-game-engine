@@ -11277,6 +11277,18 @@ namespace engine::imagegraph {
 						}
 						// Source numeric surface getters return dimensions before units.
 						const bool sourceSurfaceScalar =
+							(node.Type == "pc.kuwahara" &&
+							 ((input.SourceKind == "Int" && input.Id == "radius") ||
+							  (input.SourceKind == "Float" &&
+							   (input.Id == "unused" || input.Id == "hardness" || input.Id == "sharpness")) ||
+							  (input.SourceKind == "Slider" &&
+							   (input.Id == "uv_mix" || input.Id == "mix" || input.Id == "mask_feather" ||
+								input.Id == "alpha" || input.Id == "zero_crossing")))) ||
+							(node.Type == "pc.blobify" &&
+							 ((input.SourceKind == "Int" && input.Id == "radius") ||
+							  (input.SourceKind == "Slider" &&
+							   (input.Id == "threshold" || input.Id == "smoothness" || input.Id == "mix" ||
+								input.Id == "mask_feather")))) ||
 							(node.Type == "pc.xdo_g_threshold" &&
 							 ((input.SourceKind == "Float" &&
 							   (input.Id == "radius" || input.Id == "k" || input.Id == "gamma")) ||

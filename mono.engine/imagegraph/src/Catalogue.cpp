@@ -200,6 +200,28 @@ namespace engine::imagegraph {
 						 "e 0",
 						 "Bit;Second;Progress"}
 					);
+				// A native projection of the endpoint pair stored in source Radius slot 2.
+				if (heads[index].Type == "pc.kuwahara")
+					node.Inputs.push_back(
+						{"radius_map_range",
+						 "Radius Map Range",
+						 -1,
+						 "MapRange",
+						 ValueType::Vector2,
+						 "v 0 2",
+						 ""}
+					);
+				// Radius slot 2 owns the native endpoint projection.
+				if (heads[index].Type == "pc.blobify")
+					node.Inputs.push_back(
+						{"radius_map_range",
+						 "Radius Map Range",
+						 -1,
+						 "MapRange",
+						 ValueType::Vector2,
+						 "v 0 3",
+						 ""}
+					);
 				// A native projection of the endpoint pair stored in source Width slot 1.
 				if (heads[index].Type == "pc.erode")
 					node.Inputs.push_back(
