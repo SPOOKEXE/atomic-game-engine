@@ -205,6 +205,12 @@ namespace {
 				(Graph.IsSourceImage() &&
 				 (!required("imagegraph.source." + std::string(Graph.SourceNodeName())) ||
 				  !required("imagegraph.image.allocate"))) ||
+				(Graph.FilterProfile &&
+				 (!required(
+					  Graph.FilterProfile->Variant < 3 ? "imagegraph.source.kuwahara"
+													   : "imagegraph.source.blobify"
+				  ) ||
+				  !required("imagegraph.surface.scratch") || !required("imagegraph.image.allocate"))) ||
 				(Graph.Kind == Fixture::Family::BitmapTextEightRows &&
 				 (!required("imagegraph.bitmap_font") || !required("imagegraph.text.prepare_batch") ||
 				  !required("imagegraph.text.prepare_row") || !required("imagegraph.text.admit_batch") ||
@@ -228,6 +234,21 @@ namespace {
 			for (const auto &span : FrameGraph::Spans())
 				record.Spans.push_back({std::string(span.Name), span});
 			record.Counters = Metrics::Drain();
+			if (Graph.FilterProfile) {
+				const auto value = [&](std::string_view name) {
+					for (const auto &counter : record.Counters)
+						if (counter.Name.Text() == name) return counter.Value;
+					throw std::runtime_error("filter profile missing actual boundary counter");
+				};
+				if (value("imagegraph.node.executions") <
+						engine::imagegraph::testing::SourceFilterWorkload::Rows ||
+					value("imagegraph.image.allocations") <
+						engine::imagegraph::testing::SourceFilterWorkload::Rows ||
+					value("imagegraph.image.allocated_payload_bytes") <
+						engine::imagegraph::testing::SourceFilterWorkload::Rows * 16 * 16 * 4)
+					throw std::runtime_error("filter profile misses executed rows or output bytes");
+			}
+
 			if (Graph.IsAudioWindow()) {
 				size_t owners = 0, geometry = 0;
 				for (size_t i = 0; i < FrameGraph::Spans().size(); ++i) {
@@ -542,5 +563,50 @@ BENCH("64x64 authored Bubble seed 17 default density 0.5, 32 samples per pixel",
 
 BENCH("Persisted Bitmap Font to eight Text rows, 5888 literal glyphs", 1) {
 	static ProfileFixture fixture(Fixture::Family::BitmapTextEightRows);
+	fixture.Measure();
+}
+
+BENCH("Kuwahara16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::Kuwahara16FourRows);
+	fixture.Measure();
+}
+
+BENCH("KuwaharaAnisotropic16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::KuwaharaAnisotropic16FourRows);
+	fixture.Measure();
+}
+
+BENCH("KuwaharaGeneralized16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::KuwaharaGeneralized16FourRows);
+	fixture.Measure();
+}
+
+BENCH("BlobCircle16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::BlobCircle16FourRows);
+	fixture.Measure();
+}
+
+BENCH("BlobDiamond16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::BlobDiamond16FourRows);
+	fixture.Measure();
+}
+
+BENCH("BlobSquare16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::BlobSquare16FourRows);
+	fixture.Measure();
+}
+
+BENCH("BlobCircleDistance16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::BlobCircleDistance16FourRows);
+	fixture.Measure();
+}
+
+BENCH("BlobDiamondDistance16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::BlobDiamondDistance16FourRows);
+	fixture.Measure();
+}
+
+BENCH("BlobSquareDistance16FourRows pinned source CPU filter", 1) {
+	static ProfileFixture fixture(Fixture::Family::BlobSquareDistance16FourRows);
 	fixture.Measure();
 }

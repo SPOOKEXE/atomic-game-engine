@@ -4,6 +4,7 @@
 #include "../../src/nodes/Processor.hpp"
 #include "AudioWindowObservation.hpp"
 #include "FontTextWorkload.hpp"
+#include "SourceFilterWorkload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/WavPreview.hpp>
@@ -70,7 +71,16 @@ namespace engine::imagegraph::testing {
 			Gabor128Seeded,
 			Flow128DefaultDetail,
 			Bubble64SeededDefaultDensity,
-			BitmapTextEightRows
+			BitmapTextEightRows,
+			Kuwahara16FourRows,
+			KuwaharaAnisotropic16FourRows,
+			KuwaharaGeneralized16FourRows,
+			BlobCircle16FourRows,
+			BlobDiamond16FourRows,
+			BlobSquare16FourRows,
+			BlobCircleDistance16FourRows,
+			BlobDiamondDistance16FourRows,
+			BlobSquareDistance16FourRows
 		};
 		static_assert(static_cast<int>(Family::CylinderProfile) == 14);
 		static_assert(static_cast<int>(Family::ConeDefault8) == 15);
@@ -96,6 +106,7 @@ namespace engine::imagegraph::testing {
 		static_assert(static_cast<int>(Family::Bubble64SeededDefaultDensity) == 33);
 		static_assert(static_cast<int>(Family::BitmapTextEightRows) == 34);
 		std::unique_ptr<FontTextWorkload> FontText;
+		std::unique_ptr<SourceFilterWorkload> FilterProfile;
 		Family Kind;
 		Document Authored;
 		Plan Compiled;
@@ -116,6 +127,16 @@ namespace engine::imagegraph::testing {
 		uint64_t OutputHash = 0;
 
 		explicit SourceFamilyFixture(Family family) : Kind(family) {
+			if (family >= Family::Kuwahara16FourRows && family <= Family::BlobSquareDistance16FourRows) {
+				FilterProfile = std::make_unique<SourceFilterWorkload>(
+					size_t(family) - size_t(Family::Kuwahara16FourRows)
+				);
+				InputHash = FilterProfile->InputHash;
+				Evaluate();
+				OutputHash = Verify();
+				return;
+			}
+
 			if (family == Family::BitmapTextEightRows) {
 				FontText = std::make_unique<FontTextWorkload>();
 				InputHash = FontText->InputHash;
@@ -899,6 +920,10 @@ namespace engine::imagegraph::testing {
 			{{64, .5, false}, {64, .5, true}, {0, .5, false}, {0, .5, true}}
 		};
 		void Evaluate() {
+			if (FilterProfile) {
+				FilterProfile->Evaluate();
+				return;
+			}
 			if (FontText) {
 				FontText->Evaluate();
 				return;
@@ -2133,6 +2158,7 @@ namespace engine::imagegraph::testing {
 		}
 
 		uint64_t Verify() const {
+			if (FilterProfile) return FilterProfile->Verify();
 			if (FontText) return FontText->Verify();
 			uint64_t hash = 14695981039346656037ULL;
 			if (IsAudioWindow()) {

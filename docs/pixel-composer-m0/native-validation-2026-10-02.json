@@ -14557,5 +14557,292 @@
       "mono.studio/docs/image-cache-actions.md": "9425a448efd4eee96bcb6dcdb7478173db75d2b11b724de4f818f7653e6cc741",
       "ROADMAP.md": "bb0120da2a9cccf16df92aa1e0f7189a9f0347d941b80b773a329ef8c2bebc1f"
     }
+  },
+  "source_filter_profile_integration_102": {
+    "status": "Accepted all nine persisted filter profiling workloads with independent complete literal pixels, actual optimized CPU scopes and allocation/byte counters, and fifteen joined CPU scopes. Licensed/device parity remains open.",
+    "manifest": {
+      "base_commit": "007ffcd023628b4331f31bd5a258087a2acc5ac1",
+      "files": [
+        {
+          "path": "mono.engine/imagegraph/tests/fixtures/SourceFamilyEvaluation.hpp",
+          "base_sha256": "85039c653da8f944f0d541c47f6b430e05e8a19481d961f355f2fe7273fbfc69",
+          "sha256": "562911ef63b7469094bfd0d323ad75c3458febbfbe6c2dcbe57433bc9e8229ad",
+          "kind": "patch"
+        },
+        {
+          "path": "mono.engine/imagegraph/tests/SourceFamilyEvaluation.cpp",
+          "base_sha256": "7aaefe5e84c400694c18b927a7f25e05adb7b6faacc30efa29aa893226f01bd0",
+          "sha256": "dccaa2a8143e3c822c81feccbc42cad9c10581b421e9695e582c38f4daec9777",
+          "kind": "patch"
+        },
+        {
+          "path": "mono.engine/imagegraph/benchmarks/SourceFamilies.cpp",
+          "base_sha256": "1105447f0824e9116221ef4d58b24043bf194b41b3af1e7ab8a7cfd30d7922a0",
+          "sha256": "fe661db762f69325e54ee27184f1fae76243686be7c58766f8f70122da41c569",
+          "kind": "patch"
+        },
+        {
+          "path": "mono.engine/imagegraph/tests/fixtures/SourceFilterWorkload.hpp",
+          "sha256": "27dd89da3a3b1210440d24801990e16b3c1cae6eb051a5d5d1141eca0b856105",
+          "kind": "copy"
+        },
+        {
+          "path": "mono.engine/imagegraph/tests/fixtures/FilterLiteralPixels.hpp",
+          "sha256": "3edb27cdad9225c83827255ad6f0a400bcba0875638fd263919d402b4654aba0",
+          "kind": "copy"
+        }
+      ],
+      "integration_sha256": "15df450551db9f1ba1cd9e1a119fdd2b412852a879946be4bcc6e9d9bd32774b",
+      "oracle_sha256": "2486d944579151e0078ecf0d683fc2c16f84617ae4625db50aa24518d9864817",
+      "oracle_imports": [
+        {
+          "path": "/tmp/pc-kuwahara82/evidence/source-equations.py",
+          "sha256": "9c3e302dd48a47e23ac289a2ad6f3ed548117da2642e345ed168ae7e73151930"
+        },
+        {
+          "path": "/tmp/pc-blobify83/evidence/source-equations.py",
+          "sha256": "6c5cf20a38126b27a0f2226f7d450b528e1cb9d5b27d9099d0daf93ff9000fad"
+        }
+      ]
+    },
+    "review": "Root read the integration patch and workload implementation; independent source equations reproduce the entire literal pixel header byte for byte.",
+    "source_equations": {
+      "command": [
+        "python3",
+        "/tmp/pc-filter-profiles93/evidence/source-equations.py"
+      ],
+      "exit": 0,
+      "variants": 9,
+      "bytes_per_image": 1024
+    },
+    "just_recipe": {
+      "command": [
+        "just",
+        "imagegraph-source-family-bench",
+        "1"
+      ],
+      "exit": 0,
+      "selected_cases": 249,
+      "assertions": 7950
+    },
+    "profiles": {
+      "receipt": ".cache/build/dev/evidence/pixel-composer-2026-10-04/filter-profiles-102-receipt.json",
+      "sha256": "536fc0150eb282cbd9ba4d515a1855df47bf5dc325dc544717daf420bf426192",
+      "command": [
+        ".cache/build/bench/bench/bench_imagegraph",
+        "--suite",
+        "engine.imagegraph.bench.source-families",
+        "--samples",
+        "1"
+      ],
+      "exit": 0,
+      "variants": [
+        "Kuwahara16FourRows pinned source CPU filter",
+        "KuwaharaAnisotropic16FourRows pinned source CPU filter",
+        "KuwaharaGeneralized16FourRows pinned source CPU filter",
+        "BlobCircle16FourRows pinned source CPU filter",
+        "BlobDiamond16FourRows pinned source CPU filter",
+        "BlobSquare16FourRows pinned source CPU filter",
+        "BlobCircleDistance16FourRows pinned source CPU filter",
+        "BlobDiamondDistance16FourRows pinned source CPU filter",
+        "BlobSquareDistance16FourRows pinned source CPU filter"
+      ],
+      "calls_per_variant": 9,
+      "warmups": 8,
+      "measured_samples": 1,
+      "raw_benchmark_output_saved": false
+    },
+    "joined_cpu": [
+      {
+        "scope": "filters",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph",
+          "[source_kuwahara],[source_blobify]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/filters-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (1816 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "core",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/core-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (1858072 assertions in 2749 test cases)"
+        ]
+      },
+      {
+        "scope": "assetc",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (411 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "assets",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (32488 assertions in 265 test cases)"
+        ]
+      },
+      {
+        "scope": "cli",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+          "--output-on-failure"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-102-filter-profiles-joined.log",
+        "summary": [
+          "100% tests passed, 0 tests failed out of 16"
+        ]
+      },
+      {
+        "scope": "client",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+          "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (7479 assertions in 71 test cases)"
+        ]
+      },
+      {
+        "scope": "export",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (3049 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "gui",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (4974 assertions in 331 test cases)"
+        ]
+      },
+      {
+        "scope": "io",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (11465 assertions in 262 test cases)"
+        ]
+      },
+      {
+        "scope": "nodegraph",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (269 assertions in 31 test cases)"
+        ]
+      },
+      {
+        "scope": "physics",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (715 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "render",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+          "~[gpu]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (336655 assertions in 808 test cases)"
+        ]
+      },
+      {
+        "scope": "server",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (5 assertions in 1 test case)",
+          "All tests passed (2182 assertions in 99 test cases)"
+        ]
+      },
+      {
+        "scope": "font",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (653 assertions in 26 test cases)"
+        ]
+      },
+      {
+        "scope": "studio",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio",
+          "[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result],[studio][imagegraph],[studio][wav_preview],[studio][animation_control_host],[studio][artwork],[export_intent][font],[dopesheet_actions],[regions],[image_cache],[image_cache_ui]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-102-filter-profiles-joined.log",
+        "summary": [
+          "All tests passed (30411 assertions in 269 test cases)"
+        ]
+      }
+    ],
+    "corrections": [
+      {
+        "command": [
+          ".cache/build/bench/bench/bench_imagegraph",
+          "--help"
+        ],
+        "exit": 134,
+        "reason": "Unsupported argument was ignored; default seven samples exceeded fixture recorder limit. Replaced with explicit --suite and --samples 1; no source change."
+      }
+    ],
+    "limitations": [
+      "One measured sample supports instrumentation coverage only.",
+      "No new GPU or live Studio verification.",
+      "No licensed matched reference captures."
+    ]
   }
 }
