@@ -1,3 +1,5 @@
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/imagegraphfont/GraphFontInputs.hpp>
 
 #include <algorithm>
@@ -736,6 +738,8 @@ namespace engine::imagegraphfont {
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic
 	) try {
+		ENGINE_PROFILE("imagegraphfont.artifact.decode");
+		core::Metrics::Count("imagegraphfont.artifact.decode_input_bytes", bytes.size());
 		const uint64_t maximum = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
 		const auto old = GraphFontConfigurationRetainedBytes(destination);
 		if (!old || *old > maximum || bytes.size() > Limits::MaximumDocumentBytes ||
@@ -761,6 +765,7 @@ namespace engine::imagegraphfont {
 											"font artifact retained capacities exceed bound"
 										)
 									  : false;
+		core::Metrics::Count("imagegraphfont.artifact.decoded_retained_bytes", *owned);
 		destination = std::move(candidate);
 		diagnostic = {};
 		return true;
@@ -781,6 +786,7 @@ namespace engine::imagegraphfont {
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic
 	) try {
+		ENGINE_PROFILE("imagegraphfont.artifact.encode");
 		const uint64_t maximum = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
 		const auto owned = GraphFontConfigurationRetainedBytes(configuration);
 		if (!owned) return Fail(diagnostic, Status::InvalidValue, "font artifact payload is malformed");
@@ -798,6 +804,8 @@ namespace engine::imagegraphfont {
 		if (candidate.size() > Limits::MaximumDocumentBytes ||
 			candidate.capacity() > maximum - destination.capacity() - *owned)
 			return Fail(diagnostic, Status::LimitExceeded, "font artifact encoded bytes exceed bound");
+		core::Metrics::Count("imagegraphfont.artifact.encoded_payload_bytes", candidate.size());
+		core::Metrics::Count("imagegraphfont.artifact.encoded_backing_bytes", candidate.capacity() + 1);
 		destination = std::move(candidate);
 		diagnostic = {};
 		return true;

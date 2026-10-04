@@ -2,6 +2,8 @@
 
 #include "FontUnicode.hpp"
 
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Document.hpp>
 
 #include <algorithm>
@@ -56,6 +58,8 @@ namespace engine::imagegraph::detail {
 		std::string &output,
 		std::string &failure
 	) try {
+		ENGINE_PROFILE("imagegraph.font.unicode_case");
+		core::Metrics::Count("imagegraph.font.case_input_bytes", input.size());
 		if (choice < 1 || choice > 3 || input.size() > Limits::MaximumTextBytes) {
 			failure = "native Text case input is malformed";
 			return Status::InvalidValue;
@@ -162,6 +166,8 @@ namespace engine::imagegraph::detail {
 			NativeCaseAppend(candidate, value);
 			return true;
 		});
+		core::Metrics::Count("imagegraph.font.case_output_bytes", candidate.size());
+		core::Metrics::Count("imagegraph.font.case_candidate_backing_bytes", retainedBacking);
 		output = std::move(candidate);
 		failure.clear();
 		return Status::Ok;

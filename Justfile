@@ -513,6 +513,16 @@ imagegraph-source-family-bench samples="5":
     ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.array-structure --samples {{samples}}
     ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.array-edit --samples {{samples}}
 
+# Profile exact font grants, real byte coverage/SDF, Unicode Text and owned artifact codecs.
+imagegraphfont-boundary-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_imagegraphfont
+    ./.cache/build/release-tests/tests/test_imagegraphfont '[font_boundary_workloads]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagegraphfont
+    ./.cache/build/bench/bench/bench_imagegraphfont --suite engine.imagegraphfont.bench.boundaries --samples {{samples}}
+
 # Project a generated PXCX chain while retaining its parsed source archive.
 imagegraphio-pxcx-import-bench samples="5":
     cmake --preset bench > /dev/null

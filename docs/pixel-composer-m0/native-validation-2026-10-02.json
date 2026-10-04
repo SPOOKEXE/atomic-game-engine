@@ -13160,5 +13160,380 @@
     "packet": "/tmp/pc-region-origin96/RegionOrigins.patch",
     "sha256": "3a5fd56c4a007649557dbf96ea9bfb7ae19ab52c206e6a4a96030f8a9286be2a",
     "status": "Root read all541 lines/nine bodies. Exact manifest/base review and current Blobify context rebase pending. Not applied or runtime accepted."
+  },
+  "font_boundary_integration_93": {
+    "status": "Accepted scoped native font boundary fixtures and instrumentation; all 15 joined CPU scopes pass. Font loading, wrapped text layout, licensed reference and device parity remain open.",
+    "manifest": {
+      "base_head": "2f262071387a0ae7d2350c1b23714f1cc78ee621",
+      "files": [
+        {
+          "path": "Justfile",
+          "base_sha256": "6c13c666bd4c3ae9c30e4cb2220c259de4788705c982960d4fb76d86f4f72eef",
+          "candidate_sha256": "3c8d2039fece8a4a803021e18cd9b0548b5e6a33e701e1a8c7746d42b349b940"
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontNativeCase.hpp",
+          "base_sha256": "ccb34e06fd7528f6324cb70258b6a7aa75e0f209bf44b691e3dd6dd1fbf1885e",
+          "candidate_sha256": "3b35bda20edc9c9e26d995c3e61c592e605588f8f9b7fc298f473b1866d4cea7"
+        },
+        {
+          "path": "mono.engine/imagegraphfont/src/GraphFontConfiguration.cpp",
+          "base_sha256": "6e40dcb8e73205552f1b3dce22897544ecc09ca04562e16c25e9336ba4bc55a9",
+          "candidate_sha256": "4947f0193ac461fe7269935b5d558c02e0db9416e6d5a61031e5633b585d2dbf"
+        },
+        {
+          "path": "mono.engine/imagegraphfont/tests/fixtures/FontHostBoundary.hpp",
+          "base_sha256": null,
+          "candidate_sha256": "3a73bde17112ae8ecef5b017d812dba118abdce32c6703c8bcec4b38f8f15246"
+        },
+        {
+          "path": "mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp",
+          "base_sha256": null,
+          "candidate_sha256": "d6cf3b2720178404868c247298144414fe97a9da5a344885182c30519df04ae8"
+        },
+        {
+          "path": "mono.engine/imagegraphfont/tests/ArtifactFixture.cpp",
+          "base_sha256": null,
+          "candidate_sha256": "5f8b9b7f005c0ddd412e568f72aee9ee27e8493e634d81c69fba4f69c567b343"
+        },
+        {
+          "path": "mono.engine/imagegraphfont/benchmarks/ArtifactFixture.hpp",
+          "base_sha256": null,
+          "candidate_sha256": "81b772a81b42db32c810b7bfe09b3cc3d32bd2f432eb5253cd840d0c5e63f112"
+        },
+        {
+          "path": "mono.engine/imagegraphfont/benchmarks/ArtifactBoundaryWorkload.hpp",
+          "base_sha256": null,
+          "candidate_sha256": "b010e8b985a82b8973a40c25ba4ebd044aba4ed2871332802e8d4d1fe6f60b25"
+        },
+        {
+          "path": "mono.engine/imagegraphfont/benchmarks/FontBoundaryProfile.hpp",
+          "base_sha256": null,
+          "candidate_sha256": "ce6a15bc3dc31e64570e14231b2100992f835162beaba20f4d40c2eac8d22a15"
+        },
+        {
+          "path": "mono.engine/imagegraphfont/benchmarks/FontBoundaries.cpp",
+          "base_sha256": null,
+          "candidate_sha256": "ef756c01b7cb062645c71ce5849c2ae28f8a178dbddf39bf9767fe94852d9b82"
+        }
+      ],
+      "patch_sha256": "7cc04ba32c427b63740f8f7d48d1ed9e5d3bbd3048aef889812528d65e78942b",
+      "apply_check_exit": 0,
+      "formatter_pass_paths": [
+        "mono.engine/imagegraph/src/FontNativeCase.hpp",
+        "mono.engine/imagegraphfont/src/GraphFontConfiguration.cpp",
+        "mono.engine/imagegraphfont/tests/fixtures/FontHostBoundary.hpp",
+        "mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp",
+        "mono.engine/imagegraphfont/tests/ArtifactFixture.cpp",
+        "mono.engine/imagegraphfont/benchmarks/ArtifactFixture.hpp",
+        "mono.engine/imagegraphfont/benchmarks/ArtifactBoundaryWorkload.hpp",
+        "mono.engine/imagegraphfont/benchmarks/FontBoundaryProfile.hpp",
+        "mono.engine/imagegraphfont/benchmarks/FontBoundaries.cpp"
+      ],
+      "syntax": "syntax.json",
+      "runtime_executed": false,
+      "immutable_font_sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031"
+    },
+    "build": {
+      "target": "test_imagegraphfont",
+      "exit": 0,
+      "steps": 7
+    },
+    "format": "clang-format21 dry-run/Werror passes all9 changed C++ paths.",
+    "runtime": [
+      {
+        "scope": "focused",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont",
+          "[font_boundary_workloads]"
+        ],
+        "exit": 42,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-boundary-93-focused.log",
+        "tail": "Filters: [font_boundary_workloads]\nRandomness seeded to: 732151388\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntest_imagegraphfont is a Catch2 v3.16.0 host application.\nRun with -? for options\n\n-------------------------------------------------------------------------------\nfont profiling inputs have literal BDF coverage, real SDF signs and Unicode\nText pixels\n-------------------------------------------------------------------------------\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp:9\n...............................................................................\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp:23: FAILED:\n  {Unknown expression after the reported line}\ndue to unexpected exception with message:\n  font boundary distance geometry signs:\n\n===============================================================================\ntest cases:  5 |  4 passed | 1 failed\nassertions: 48 | 47 passed | 1 failed\n\n"
+      },
+      {
+        "scope": "full",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 42,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-boundary-93-full.log",
+        "tail": "Randomness seeded to: 3530258066\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntest_imagegraphfont is a Catch2 v3.16.0 host application.\nRun with -? for options\n\n-------------------------------------------------------------------------------\nfont profiling inputs have literal BDF coverage, real SDF signs and Unicode\nText pixels\n-------------------------------------------------------------------------------\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp:9\n...............................................................................\n\n/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp:23: FAILED:\n  {Unknown expression after the reported line}\ndue to unexpected exception with message:\n  font boundary distance geometry signs:\n\n===============================================================================\ntest cases:  26 |  25 passed | 1 failed\nassertions: 623 | 622 passed | 1 failed\n\n"
+      }
+    ],
+    "pending": "Native wrapped FullTextSize and broader font loading/rendering remain in progress; no licensed reference or GPU parity claim.",
+    "source_checks": "Root read pinned bsdf source pixel/coverage copy and sign/mapping paths, actual GUI distance loading flags and original animator constructor line144.",
+    "corrections": [
+      {
+        "packet": "/tmp/pc-font-diagnostic93/Diagnostic93.patch",
+        "sha256": "05d67730e416530bd47f38d4be8729a993a4f872ce991065a33e3603675f6373",
+        "scope": "Independent operation sections and exact bitmap distance samples."
+      },
+      {
+        "packet": "/tmp/pc-font-correction94/Correction94.patch",
+        "sha256": "9cefd41edc89ce7b79128f38b6ab9739f3b9e9b43516c7ccbce2e7d926f9a20e",
+        "scope": "Pinned bsdf zero-gradient centre maps to 128; retain positive stroke and negative hole checks."
+      },
+      {
+        "packet": "/tmp/pc-font-correction95/Correction95.patch",
+        "sha256": "9776413782934e8884be29d8ddc063ac8a31552ac59dc29b448e848baec3d539",
+        "scope": "Pinned monochrome rasterizer blank 1x1 space frame and mode-specific glyph counters."
+      },
+      {
+        "scope": "Root normalizes __FILE__ before walking fixture root parents, correcting benchmark-only path failure."
+      }
+    ],
+    "final_runtime": [
+      {
+        "scope": "focused",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont",
+          "[font_boundary_workloads]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-boundary-96-focused.log",
+        "tail": "Filters: [font_boundary_workloads]\nRandomness seeded to: 1622698336\n===============================================================================\nAll tests passed (78 assertions in 5 test cases)\n\n"
+      },
+      {
+        "scope": "full",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-boundary-96-full.log",
+        "tail": "Randomness seeded to: 260788076\n===============================================================================\nAll tests passed (653 assertions in 26 test cases)\n\n"
+      }
+    ],
+    "initial_benchmark": {
+      "command": [
+        "just",
+        "imagegraphfont-boundary-bench",
+        "1"
+      ],
+      "exit": 134,
+      "operation_snapshots": {},
+      "raw_output_written": false,
+      "sample_count": 1,
+      "automatic_warmups": 8
+    },
+    "benchmark": {
+      "command": [
+        "just",
+        "imagegraphfont-boundary-bench",
+        "1"
+      ],
+      "exit": 0,
+      "operation_snapshots": {
+        "artifact_decode": 9,
+        "artifact_encode": 9,
+        "unicode_text": 9,
+        "inter_distance": 9,
+        "inter_coverage": 9,
+        "bdf_distance": 9,
+        "bdf_coverage": 9
+      },
+      "raw_output_written": false,
+      "sample_count": 1,
+      "automatic_warmups": 8,
+      "scope": "Seven optimized warm-filesystem workloads; real scope hierarchy, exclusive heap attribution, byte counters and stable fingerprints verified. One measured sample is instrumentation acceptance, not a statistical cost claim. No raw benchmark output retained."
+    },
+    "joined_runtime": [
+      {
+        "scope": "filters",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph",
+          "[source_kuwahara],[source_blobify]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/filters-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (1816 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "core",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/core-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (1858013 assertions in 2745 test cases)"
+        ]
+      },
+      {
+        "scope": "assetc",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (362 assertions in 42 test cases)"
+        ]
+      },
+      {
+        "scope": "assets",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (32488 assertions in 265 test cases)"
+        ]
+      },
+      {
+        "scope": "cli",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+          "--output-on-failure"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-97-font-joined.log",
+        "summary": [
+          "100% tests passed, 0 tests failed out of 16"
+        ]
+      },
+      {
+        "scope": "client",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+          "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (7479 assertions in 71 test cases)"
+        ]
+      },
+      {
+        "scope": "export",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (2819 assertions in 68 test cases)"
+        ]
+      },
+      {
+        "scope": "gui",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (4974 assertions in 331 test cases)"
+        ]
+      },
+      {
+        "scope": "io",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (11155 assertions in 250 test cases)"
+        ]
+      },
+      {
+        "scope": "nodegraph",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (269 assertions in 31 test cases)"
+        ]
+      },
+      {
+        "scope": "physics",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (715 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "render",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+          "~[gpu]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (336655 assertions in 808 test cases)"
+        ]
+      },
+      {
+        "scope": "server",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (5 assertions in 1 test case)",
+          "All tests passed (2182 assertions in 99 test cases)"
+        ]
+      },
+      {
+        "scope": "font",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (653 assertions in 26 test cases)"
+        ]
+      },
+      {
+        "scope": "studio",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio",
+          "[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result],[studio][imagegraph],[studio][wav_preview],[studio][animation_control_host],[studio][artwork],[export_intent][font],[dopesheet_actions]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-97-font-joined.log",
+        "summary": [
+          "All tests passed (29967 assertions in 247 test cases)"
+        ]
+      }
+    ],
+    "joined_build": {
+      "exit": 0,
+      "steps": 15,
+      "preset": "release-tests",
+      "scope": "All affected CPU consumers and assetc."
+    },
+    "final_cpp_sha256": {
+      "mono.engine/imagegraph/src/FontNativeCase.hpp": "3b35bda20edc9c9e26d995c3e61c592e605588f8f9b7fc298f473b1866d4cea7",
+      "mono.engine/imagegraphfont/src/GraphFontConfiguration.cpp": "4947f0193ac461fe7269935b5d558c02e0db9416e6d5a61031e5633b585d2dbf",
+      "mono.engine/imagegraphfont/tests/fixtures/FontHostBoundary.hpp": "157703bb0913addcb1bb3e9b404ccc3c1a97faac5955a29f4493f429641bed3e",
+      "mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp": "66575ef0919b126d2775374bca6cd6c779295ba9fbc3a322dd972d9b49354272",
+      "mono.engine/imagegraphfont/tests/ArtifactFixture.cpp": "5f8b9b7f005c0ddd412e568f72aee9ee27e8493e634d81c69fba4f69c567b343",
+      "mono.engine/imagegraphfont/benchmarks/ArtifactFixture.hpp": "81b772a81b42db32c810b7bfe09b3cc3d32bd2f432eb5253cd840d0c5e63f112",
+      "mono.engine/imagegraphfont/benchmarks/ArtifactBoundaryWorkload.hpp": "b010e8b985a82b8973a40c25ba4ebd044aba4ed2871332802e8d4d1fe6f60b25",
+      "mono.engine/imagegraphfont/benchmarks/FontBoundaryProfile.hpp": "ce6a15bc3dc31e64570e14231b2100992f835162beaba20f4d40c2eac8d22a15",
+      "mono.engine/imagegraphfont/benchmarks/FontBoundaries.cpp": "ef756c01b7cb062645c71ce5849c2ae28f8a178dbddf39bf9767fe94852d9b82"
+    }
+  },
+  "source_empty_animator_design_review_93": {
+    "path": "/tmp/pc-axis-empty96/review/REVISED_DESIGN.md",
+    "status": "Root fully read revised design/state table/source excerpts. Actual authoring empty carrier approved outside, imported r:[] must retain constructor state; checked inverse lossy normalization refuses atomically. No live integration/runtime."
   }
 }

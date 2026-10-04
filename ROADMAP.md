@@ -84,6 +84,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Add source-compatible argument handling.
 - [_] Establish exact parity with a licensed reference build and matched captures.
 - [x] Integrate bounded font hosts and Text rendering across client, Studio and exports; pass joined CPU validation.
+- [x] Verify real font decoding, Unicode Text pixels and font artifacts; profile all seven boundary workloads.
 - [_] Finish Composer font loading.
 - [_] Finish text layout and rendering.
 - [x] Add Dopesheet copy/paste, duplication and time actions with atomic undo; pass headless gesture tests.
