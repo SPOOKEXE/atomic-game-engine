@@ -11363,7 +11363,9 @@
       "/tmp/pc-client-font72/ClientFont72.patch": "eaecd40c6ce8bd85bb5dc5e23a599ceb2087e12cac72542c3d1789b53cf5cf34",
       "/tmp/pc-font-artifact72/font-artifact.patch": "c95c80803b1970e1537a7418fa93401e5201b673de6bdbe554fb60d1dd3cf894",
       "/tmp/pc-font-case-capacity78/FontCaseCapacity.patch": "0b0f7c8c311392eda4f4e4ca6443e25ccbd6b30cb6e35ed091c732d6445fcc50",
-      "/tmp/pc-font-raster-audit78/FontSamplingTests.patch": "0254098eb3fee8dda38dbea1a6f250e02af163e442860abc445b2bf37e6b94c0"
+      "/tmp/pc-font-raster-audit78/FontSamplingTests.patch": "0254098eb3fee8dda38dbea1a6f250e02af163e442860abc445b2bf37e6b94c0",
+      "/tmp/pc-font-cli72/RunnerFont72.patch": "99d32d12cffc572957f38aae8fb737b4de9eb4c133b891d830accff65bafd35e",
+      "/tmp/pc-studio-font72/StudioFontRebased72.patch": "96a699de7d51bca370a4417c4e7094ad0eebb2a358b119a6644a424a1c886660"
     },
     "native_review": "All handwritten native-completion code and tests read. Generated case data regenerated and compared ignoring formatting; not manually reviewed as2058 individual data lines.",
     "unicode_source": "https://www.unicode.org/Public/16.0.0/ucd/",
@@ -11375,12 +11377,13 @@
     "unicode_verification": "Root fetched all three official files and byte-compared local pinned inputs; reviewed generator produced non-whitespace-identical FontCaseTables.inc.",
     "remaining": [
       "Coherent font/native sampler/parser integration and product runtime acceptance pending.",
-      "Whole Client app/main.cpp representation requires a surgical merge against the existing file.",
-      "CLI and Studio caller review and integration remain pending.",
+      "Client app/main.cpp requires a surgical merge against the existing file.",
+      "Studio artifact publication, font binding refusal and editor allocation repairs require review and validation.",
       "Joined build/runtime, source/platform/reference parity and live Studio remain unproved."
     ],
     "client_review": "ClientFont72.patch1519 lines fully read; no live integration.",
-    "supplements": "Actual casing capacities and all three raster sampling/work refusal paths reviewed; standalone supplements remain outside and runtime untested."
+    "supplements": "Actual casing capacities and all three raster sampling/work refusal paths reviewed; standalone supplements remain outside and runtime untested.",
+    "caller_review": "RunnerFont72.patch556 lines and StudioFontRebased72.patch2073 lines fully read by root; no live integration or runtime acceptance."
   },
   "source_artwork_acceptance_79": {
     "status": "accepted native artwork actions, source PXC round trips and Studio history; all14 joined CPU scopes pass",
@@ -11467,5 +11470,41 @@
       "Broader font, axis, cache, mesh, catalogue and workflow roadmap items remain open."
     ],
     "roadmap_atom": "Integrate ASE, ORA and Krita artwork actions and preserve their edits through PXC saves."
+  },
+  "font_caller_review_80": {
+    "status": "Reviewed frozen callers; defects identified before integration. No source patch applied or runtime verification performed.",
+    "base_commit": "c2d5682ecc1196135c3c6fb7da8af527b9b3818d",
+    "cli": {
+      "lines_reviewed": 556,
+      "path": "/tmp/pc-font-cli72/RunnerFont72.patch",
+      "sha256": "99d32d12cffc572957f38aae8fb737b4de9eb4c133b891d830accff65bafd35e",
+      "coverage": "Owned artifact configuration and caller providers, explicit held Playing context per range frame, conflict refusal and exact read grants; proposed tests not run."
+    },
+    "studio": {
+      "lines_reviewed": 2073,
+      "path": "/tmp/pc-studio-font72/StudioFontRebased72.patch",
+      "sha256": "96a699de7d51bca370a4417c4e7094ad0eebb2a358b119a6644a424a1c886660",
+      "coverage": "Font input editor, observation binding, prepared Text replay seed freezing, current/range export ownership and admission; proposed tests not run."
+    },
+    "confirmed_defects": [
+      {
+        "function": "WriteFontArtifact",
+        "finding": "Opens the destination with std::ios::trunc before the write succeeds. A failed write can destroy the prior artifact.",
+        "required_change": "Use atomic publication and validate old-target preservation on failure."
+      },
+      {
+        "function": "DrawNodeProperties HLSL refresh path",
+        "finding": "ready is initialized from BindObservations, then unconditionally overwritten with Compile and preparation results. A refused font binding can be bypassed.",
+        "required_change": "Retain binding refusal and its diagnostic before shader preparation, preview cancellation or edits."
+      }
+    ],
+    "additional_audit": [
+      "Bound editable alias/grant staging and pending configuration copies before allocation.",
+      "Reconcile actual cloned font seed capacities while original configuration and replay remain retained.",
+      "Remove or use the introduced previewAllowance local before strict compilation."
+    ],
+    "integration": "Existing font lane is preparing an outside combined patch against the recorded base, preserving accepted artwork, camera, SourceBounds and arguments. Root remains the live checkout writer and runtime owner.",
+    "native_sampler_applicability": "git apply --check on the existing foundation fails at Document.cpp:2643 against this base. Merge current parser and retained-size logic surgically; no rejected patch was applied.",
+    "roadmap": "Font loading and text layout/rendering remain unchecked until combined runtime validation."
   }
 }
