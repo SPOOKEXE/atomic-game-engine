@@ -11774,7 +11774,7 @@
     }
   },
   "font_integration_82": {
-    "status": "Corrected coherent source applied; fresh18-target joined ABI build running. No font runtime acceptance yet.",
+    "status": "Coherent source build completed; initial runtime acceptance failed. Source remains uncommitted pending repairs.",
     "packet": "/tmp/pc-font-join78/FontJoined78.patch",
     "sha256": "bb0102c74e2f382d1ef9950b4bb39afd84bd4ce3bcc962a028d6a8ea1810a909",
     "changed_paths": 95,
@@ -11794,8 +11794,8 @@
     "integrity": "All95 live resulting file hashes match frozen manifest. Clean preimage verified before apply.",
     "build_log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-82-font-final-closure.log",
     "remaining": [
-      "Build/link completion.",
-      "Meaningful font and Text runtime fixtures and14 joined CPU scopes.",
+      "Repair reproduced core, IO, export, Studio and architecture failures.",
+      "Rebuild affected targets and run meaningful focused plus joined CPU gates.",
       "Licensed reference parity and live Studio verification."
     ],
     "correction_receipt": {
@@ -11835,6 +11835,153 @@
       "Coherent merge with current font source.",
       "Joined build and real runtime validation.",
       "Licensed source application reload."
+    ]
+  },
+  "font_initial_runtime_83": {
+    "status": "Initial failures retained; no font acceptance or roadmap checkoff.",
+    "head": "65032507c3be22aaadfd6abd61e74e67e39a89c6",
+    "build": {
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-82-font-final-closure.log",
+      "sha256": "609d0ecebb60eec960542aa95b987cda5bc0e127befdcc4996879aa23996e38d",
+      "exit": 0,
+      "targets": 18,
+      "steps": 736
+    },
+    "focused": {
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-82-font-focused.log",
+      "sha256": "98aeb4becda4cbee40f59e4e5a69542ffdf39ae9418c754444d8710175876575",
+      "exit": 42,
+      "cases": 65,
+      "cases_passed": 60,
+      "cases_failed": 5
+    },
+    "core": {
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-82-font-initial-full.log",
+      "sha256": "523e04844b97275ae85298cc28a95567d2b7a8272eabb66377cefea26e72b347",
+      "exit": 42,
+      "cases": 2666,
+      "cases_passed": 2655,
+      "cases_failed": 11
+    },
+    "joined": {
+      "architecture": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-82-font-joined.log",
+        "sha256": "9a238b62b6053da5ecbe016add288e7171787b432f9e28f6a5e280069cbe4108",
+        "exit": 8
+      },
+      "assetc": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-82-font-joined.log",
+        "sha256": "f37d78f87450fd178d35bcc2ff00f750fe17b21bfeed7e0173bec7bdb6af2608",
+        "exit": 0,
+        "assertions": 362,
+        "cases": 42
+      },
+      "assets": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-82-font-joined.log",
+        "sha256": "2526f158c51a496504a83be063f186042fabbc03ffbb949a23152b7442e29e67",
+        "exit": 0,
+        "assertions": 32488,
+        "cases": 265
+      },
+      "cli": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-82-font-joined.log",
+        "sha256": "25ffed60bdb16b22c904e220fe9a5b66bcfbee4b73ec18b15e498b2535487f1a",
+        "exit": 0
+      },
+      "client": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-82-font-joined.log",
+        "sha256": "047291e8969cf161335a414ac0735bca67875cb03d4f6b4156294e1ebc24b29b",
+        "exit": 0,
+        "assertions": 7479,
+        "cases": 71
+      },
+      "export": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-82-font-joined.log",
+        "sha256": "de5b2030d4b9d027b78f60c707c9d320da5f051c6ac021f11b228a259ced9dfb",
+        "exit": 42,
+        "cases": 89,
+        "cases_passed": 77,
+        "cases_failed": 12
+      },
+      "gui": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-82-font-joined.log",
+        "sha256": "fa1418a25ee19cb474034145c8d22412a24a9c346f4e97376862a0e0b17e6177",
+        "exit": 0,
+        "assertions": 4974,
+        "cases": 331
+      },
+      "io": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-82-font-joined.log",
+        "sha256": "29a80dd27c5efe5ce4b65fe021568500ee22fd7a451632cad1e2f47401a0aa08",
+        "exit": 42,
+        "cases": 248,
+        "cases_passed": 247,
+        "cases_failed": 1
+      },
+      "nodegraph": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-82-font-joined.log",
+        "sha256": "cc87abf06b8bbcbd39b9c1184cc37d83dc19b312a46caaaffd3e229702bb07f0",
+        "exit": 0,
+        "assertions": 269,
+        "cases": 31
+      },
+      "physics": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-82-font-joined.log",
+        "sha256": "3b566def430fc76957cfbca93347402c50dfc5d2bd1ceec943425a2cda6aad2f",
+        "exit": 0,
+        "assertions": 715,
+        "cases": 43
+      },
+      "render": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-82-font-joined.log",
+        "sha256": "54f320d00cea6cb44c529236bfd991183e3205d574542909396ddb7617377d0b",
+        "exit": 0,
+        "assertions": 336655,
+        "cases": 808
+      },
+      "server": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-82-font-joined.log",
+        "sha256": "6d7c599438cae930c335f97ef238b616758d89db8b0379e9c2547bdaf6379592",
+        "exit": 0,
+        "assertions": 2180,
+        "cases": 99
+      },
+      "studio": {
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-82-font-joined.log",
+        "sha256": "beabbe2e470af7330eef453fa26138338eb95b10ad763cb534cec40d8c8d57c6",
+        "exit": 42,
+        "cases": 236,
+        "cases_passed": 235,
+        "cases_failed": 1
+      }
+    },
+    "findings": [
+      "AllocationReservation::Split requires a bound ledger even for zero bytes. Bounded Document row settlement unconditionally splits zero from an unbound quote reservation for SSO-only rows.",
+      "Existing NodeAllocation ReadValueText quota test reproduces inline capacity accounting regression: expected190 retained payload bytes, actual160. Preserve legacy contract.",
+      "Font Trim word-token byteBegin overwritten on later scalars; source A-space golden remains authoritative.",
+      "Studio frozen held-playing Text seed range fails EvaluateNodeInputs. Export artifact and Runner failures retained separately.",
+      "IO Text palette selection imports Node_Text as opaque rather than pc.text.",
+      "Client added imagegraphexport dependency transitively links bake, contrary to bake runtime invariant. Decouple reusable font host from foreign-format exporter; do not legitimize forbidden closure by changing expectations."
+    ],
+    "focused_filter_limitation": "Initial focused command included nonexistent native_sampler_bindings tag; full core runs include native sampler cases. Future focused runs must use native_sampler.",
+    "verification_limits": [
+      "GPU excluded from joined render and client scopes.",
+      "No live Studio, licensed application, external matched capture or font parity acceptance."
+    ]
+  },
+  "named_renderer_preflight_review_83": {
+    "status": "Root fully read360-line frozen private helper and two cooked fixtures; not applied or runtime accepted.",
+    "packet": "/tmp/pc-large-sequence70/renderer-preflight/ComposerSamplerPreflight.patch",
+    "sha256": "398bee8587ca51e950e2f43a1da43df694b125faae3b7cdd7b37ac50e4b75a52",
+    "coverage": [
+      "Exact installed owner, selector, revision, native declarations, source image ports and publication facts.",
+      "Every row reissues facts and streams installed-definition fingerprint using four string_view fields and borrowed Argument span. Root independently checked actual Definition member types; earlier mistaken copy concern withdrawn.",
+      "Fixed base/authored sampler name conflict and numeric binding refusal."
+    ],
+    "remaining": [
+      "Explicit duplicate resolved control refusal before first-match lookup.",
+      "Provider forwarding and exact feedback capability collection/comparison.",
+      "Coherent merge and runtime/GPU validation."
     ]
   }
 }
