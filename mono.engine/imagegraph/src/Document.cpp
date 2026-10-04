@@ -9192,6 +9192,19 @@ namespace engine::imagegraph {
 	}
 
 	static Status ValidateEvaluationRequest(const EvaluationRequest &request, Diagnostic &diagnostic) {
+		if (request.SourceCacheProject &&
+			(!ValidFrameTime(request.SourceCacheProject->ProjectFrame) ||
+			 !std::isfinite(request.SourceCacheProject->ProjectLastFrame) ||
+			 std::abs(request.SourceCacheProject->ProjectLastFrame) > double(Limits::MaximumTick))) {
+			SetDiagnostic(
+				diagnostic,
+				Status::InvalidValue,
+				"source cache project clock observation is noncanonical or unbounded",
+				{},
+				"source_cache_project"
+			);
+			return diagnostic.Code;
+		}
 		if (request.SourceFontHostResidentBytes > Limits::MaximumEvaluationBytes) {
 			SetDiagnostic(
 				diagnostic,

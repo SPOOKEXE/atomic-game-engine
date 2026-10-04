@@ -94,6 +94,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate source timeline normalization, seeking and WAV length edits in Studio; pass joined CPU validation.
 - [_] Finish audio workflows.
 - [_] Finish feedback seek/reset and fractional-key playback.
+- [x] Preserve project-clock cache observations and refresh captured inputs without replacing cached frames; pass joined CPU validation.
 - [_] Finish cache groups.
 - [_] Finish selected-cache Clear.
 - [_] Finish fractional cache playback.

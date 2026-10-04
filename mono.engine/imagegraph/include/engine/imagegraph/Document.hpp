@@ -1653,6 +1653,13 @@ namespace engine::imagegraph {
 		bool SynchronousProducer = false;
 		bool operator==(const SourceCachePlaybackObservation &) const = default;
 	};
+	// Authoritative project observations stay independent of a selected node's scoped clock.
+	struct SourceFrameCacheProjectObservation {
+		FrameTime ProjectFrame{};
+		double ProjectLastFrame = 0;
+		bool ProjectLoading = false, ProjectAppending = false;
+		bool operator==(const SourceFrameCacheProjectObservation &) const = default;
+	};
 	// Fixed evaluation inputs. Seed is reserved for deterministic random nodes.
 	struct EvaluationRequest {
 		uint64_t Tick = 0;
@@ -1712,6 +1719,7 @@ namespace engine::imagegraph {
 		uint64_t SimulationAuthoringRevision = 0;
 		// Explicit source frame-cache observation, copied into retained recipes without a provider pointer.
 		std::optional<SourceCachePlaybackObservation> SourceCachePlayback{};
+		std::optional<SourceFrameCacheProjectObservation> SourceCacheProject{};
 	};
 
 	// Why parsing, compilation or evaluation failed.

@@ -3,6 +3,7 @@
 #include <engine/imagegraph/CacheResultsReplay.hpp>
 #include <engine/imagegraph/FeedbackReplay.hpp>
 #include <engine/imagegraph/FrameCacheReplay.hpp>
+#include <engine/imagegraph/SourceFrameCacheProject.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/StatefulTemporalCone.hpp>
 
@@ -201,6 +202,7 @@ namespace engine::imagegraph {
 		bool NegativeFrame = false;
 		bool RigidPlaying = false, RigidFrameProgress = false;
 		std::optional<SourceCachePlaybackObservation> CacheObservation;
+		std::optional<SourceFrameCacheProjectObservation> CacheProjectObservation;
 		bool Configured = false, Initialized = false, Stateful = false, HaveExternalSources = false;
 
 		static uint64_t SourceBytes(const std::vector<RequestImageSource> &sources) {
@@ -669,8 +671,9 @@ namespace engine::imagegraph {
 					Status::UnsupportedExecution,
 					"Cache Results was cleared; await a fresh source observation"
 				);
-			const bool cacheObservationChanged =
-				temporal.SourceFrameCaches && Initialized && CacheObservation != request.SourceCachePlayback;
+			const bool cacheObservationChanged = temporal.SourceFrameCaches && Initialized &&
+												 (CacheObservation != request.SourceCachePlayback ||
+												  CacheProjectObservation != request.SourceCacheProject);
 			const bool rigidObservationChanged =
 				temporal.RigidActors && Initialized &&
 				(RigidPlaying != request.RigidPlaying || RigidFrameProgress != request.RigidFrameProgress);
@@ -807,6 +810,7 @@ namespace engine::imagegraph {
 				clock.Tick = tick;
 				clock.ReuseSimulationFrame = false;
 				clock.Subframe = tick == request.Tick ? request.Subframe : 0;
+				BindNativeSourceFrameCacheProjectPrefix(clock);
 				if (tick != request.Tick) clock.SimulationCacheCaptures = {};
 				clock.SimulationAuthoringRevision = revision;
 				clock.ResetSurfaceReplay = refreshFrame ? FrameStartResetSurfaces : !contiguous && tick == 0;
@@ -1100,6 +1104,7 @@ namespace engine::imagegraph {
 			Subframe = request.Subframe;
 			NegativeFrame = request.NegativeFrame;
 			CacheObservation = request.SourceCachePlayback;
+			CacheProjectObservation = request.SourceCacheProject;
 			RigidPlaying = request.RigidPlaying;
 			RigidFrameProgress = request.RigidFrameProgress;
 			Stateful = stateful;

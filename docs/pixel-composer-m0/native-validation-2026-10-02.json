@@ -1,7 +1,7 @@
 {
   "recorded_date": "2026-10-03",
   "recorded_timezone": "Australia/Darwin, UTC+09:30",
-  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs. Build51 release and focused native gates, the server-headless recipe, and a fresh finalcore51 capability inventory are appended below. Two server-headless build attempts failed from temporary disk exhaustion before a RAM-object retry completed 114/114 steps; the earlier failures remain listed. A prepared CLI run failed because CTest used an old assetc binary, then the assetc rebuild and scoped 14-test rerun passed. The prepared export and Studio suites passed after export fixes. These completed scopes remain separate from any later integrated build, and licensed executable parity remains unavailable. Build52 dev and release gates executed October 3 in Darwin are appended as separate scopes. The release52 executor inventory is a capability snapshot of the archive hash recorded with its captured HEAD d3474640 and SourceCatalogue hash; later source commits do not change that snapshot. Server build, server Composer CTest, and headless runtime are separate gates. Initial Edge Detect/Bokeh Blur fixture and Atlas/Palette runs failed or were interrupted before repairs; those records remain below. Finalized build53 release checks are appended below. Initial joined release, core, physics, and Studio failures remain in excluded_or_failed_runs; logs containing \u201cfinal\u201d in the initial-run name are not accepted results. The finalized build53 inventory was captured with archive, HEAD, catalogue, and source-scope status verified before and after the query. The finalized build53 release snapshot is tied to imagegraph archive SHA-256 12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717, SourceCatalogue SHA-256 57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c, and HEAD d0611f3282e4a1358e181af621234d2ba641e1f4. Archive, HEAD, catalogue hash, and compiled-source-scope status were captured before and after the query and remained unchanged. The build53 release suites passed after repair; earlier failures remain listed. Build53 dev and server gates are now included. The two failed dev disk-exhaustion attempts remain retained below; successful RAM-backed dev gates are separate. Build54 final release gates passed after repair. Initial build54 compiler, core, CLI fixture, and architecture harness failures remain in excluded_or_failed_runs. The release54 executor inventory is tied to the captured archive SHA-256, HEAD, catalogue hash, and clean compiled-source scope in its artifact; public/private header hashes and the helper link command are retained there. Five generated cache directories were restored to workspace disk with SHA-256 and nanosecond mtime verification; this is build-support provenance. Build55 release retry completed 521/521 steps after a unity-build anonymous-helper collision was fixed. Final release gates and the focused volume result are appended below. The mixed-header volume run was withdrawn and is not counted. No new Python catalogue run is claimed; the latest remains build54. The release55 inventory includes archive, HEAD, catalogue, public/private header, and helper compile/link provenance. The root-owned imagegraph documentation update is outside the compiled code scope. An external FFT proof was withdrawn and is not landed implementation or acceptance evidence. Build56 release logs and inventory are appended with SHA-256 values. The first core run failed one stale TimelineV8 FFT diagnostic fixture; a repair suite passed, then the full core passed. Initial and repair I/O runs failed before the final complete I/O suite passed. The final build56 CLI evidence is the scoped 13-selector run; an earlier 15-selector run also passed. No build56 asset rerun is claimed; the retained 265-case asset log is unchanged. The build56 archive query was linked against the finalized release archive, with HEAD, SourceCatalogue, header hashes, and imagegraph code scope matching before and after. Registration remains capability evidence only. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build57 release checks and inventory are appended. The first core run failed four source shape cases; a first repair run still failed one source shape case; the final full core suite passed. Two incremental source shape object rebuilds each completed 2/2 steps. The remaining release suites passed their listed scopes. Source commits 55787c51e50274a6445c107d8c90c7ec43fa0b78, a44cd44c5821e4a77bb7ac03fd55e44cd32c8522, and 62e0a34a54647f52bd47fd566ff8672c5e12b88e are part of the finalized snapshot. The build57 archive query is bound to the captured archive, HEAD, SourceCatalogue, public/private header hashes, and clean imagegraph code scope. No assets or architecture suite was rerun in build57. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build58 release evidence is appended below with its exact archive inventory; it adds no assets, architecture, server, GPU, manual-scene, or profiling run. The Build57 source pipeline profile remains the latest profiling evidence. Build59 release evidence is appended below, tied to the captured release archive and HEAD. The initial Ninja run was intentionally stopped at 165/552 to raise test compile concurrency; the resumed 388/388 build and tests-only 3/3 repair passed. Initial core failures are retained separately from the repaired core pass. Build59 did not rerun profiling, server, assets, GPU, manual scene, or architecture gates. Build60 release evidence and exact inventory are appended. Initial core fixture failures and an overlapping IO log are retained separately. Production was unchanged by the tests-only repair. Profiling, server, assets, architecture, GPU and manual scenes were not rerun. Requested cache cleanup removed obsolete diagnostic binaries and stale aliases while retaining current builds and text validation artifacts. Build61 final native evidence and exact inventory are appended, with initial failed core/dither and IO runs retained. Earlier other-suite runs preceded the mapped contrast fix and are not used as final acceptance. Noise correction and ordered dither commits are recorded with the committed Draw Gradient source. Server, assets, architecture, GPU, manual scenes, licensed-reference comparisons and representative profiling were not rerun or promoted by this append. Build62 public source typing/reset, source record origins, RNG capture codec v2, cooked Composer host/artifact routing and product receipt/cadence evidence are appended only from final reviewed logs and exact source/header/archive inventory provenance. Failed initial build, client, Studio, CLI and both server resource comparisons remain retained. Summary parsing replaces invalid UTF-8 bytes in server text; evidence hashes preserve the original raw bytes. The authorized initial GPU attempt failed and is retained; any accepted GPU gate is separately checked with backend, driver and scope limitations. Native CPU gates are not GPU pixel evidence and licensed-reference acceptance remains open. Representative profiling was not promoted. Build63 appends coherent current-ABI native node/product checks and approved local Vulkan fixtures after source integration. The five-case focused failure and interrupted initial build invocation remain retained. Final repaired build completed 22/22, final closure 1/1. Inventory captures clean Composer core source at 96a7bd07 with unchanged archive/header/HEAD hashes before and after. CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed reference parity were not promoted. Build64 appends coherent current-ABI native checks for five executors and panel-scoped keyboard editing. All six failed invocations remain retained. Builds completed596/596,36/36 and4/4. Inventory captures clean Composer core at7b5a29f4 with unchanged archive/header/HEAD hashes before and after. Accepted CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed parity were not promoted. Build65 appends six executors, Clear ownership, pending observations, live Transform host adapters, easing and dynamic track policies. Eleven failed invocations remain retained. Accepted source bytes were unchanged before source commits; Studio fixture/private helper repairs were rebuilt and accepted separately. Inventory captures clean Composer core atb78c280338e59aa4bd600f8cd5a69d69f3bc5572 with stable archive/header/HEAD hashes. Representative profiling, live Studio, Transform device completion and licensed parity remain open. Build66 appends three executors, mixed freed-slot refill transport, retained skybox face admission and Transform Vulkan completion. Three fixture failures remain retained with exact resolver/producer boundaries. Inventory captures clean Composer core atcb5900e81fbcd6f8ef15098c919a37db5d2bc406 with stable archive/header/HEAD hashes. Representative profiling, live Studio, broader device captures and licensed parity remain open. Build67 appends five generators, typed source Surface/Colour getters, metadata projection, focused native history and resumable export completion. Ten failed checkpoints retain exact fixture, importer, getter and obsolete-unavailability boundaries. Inventory captures clean Composer core atbc3a3e86b1a433bd5b66a5c11343cb8324a3c86c with stable archive/header/HEAD hashes. Broader device, live Studio, release profiling and licensed comparisons remain open.",
+  "evidence_provenance": "Counts and outcomes below were transcribed from retained logs and artifacts under .cache/build/dev/evidence/pixel-composer-2026-10-02, except the focused timeline-only result, which was supplied by the root agent. No whole-tree source snapshot or tested binary hashes were captured for this record. Build47 outcomes use the retained build47 logs listed per gate. Build49 evidence was executed across the Oct 2-3 Darwin boundary; individual log timestamps are retained per gate. The build49 capability inventory was produced by a temporary helper linked against the archived build49 static library and is not a behavioral parity claim. Build50 final accepted development and release core suites, I/O, export, focused Studio, client CPU adapters, CPU-filtered renderer, and examples are recorded below. Earlier failed build50 attempts remain in excluded_or_failed_runs where superseded by later accepted runs. Build51 release and focused native gates, the server-headless recipe, and a fresh finalcore51 capability inventory are appended below. Two server-headless build attempts failed from temporary disk exhaustion before a RAM-object retry completed 114/114 steps; the earlier failures remain listed. A prepared CLI run failed because CTest used an old assetc binary, then the assetc rebuild and scoped 14-test rerun passed. The prepared export and Studio suites passed after export fixes. These completed scopes remain separate from any later integrated build, and licensed executable parity remains unavailable. Build52 dev and release gates executed October 3 in Darwin are appended as separate scopes. The release52 executor inventory is a capability snapshot of the archive hash recorded with its captured HEAD d3474640 and SourceCatalogue hash; later source commits do not change that snapshot. Server build, server Composer CTest, and headless runtime are separate gates. Initial Edge Detect/Bokeh Blur fixture and Atlas/Palette runs failed or were interrupted before repairs; those records remain below. Finalized build53 release checks are appended below. Initial joined release, core, physics, and Studio failures remain in excluded_or_failed_runs; logs containing “final” in the initial-run name are not accepted results. The finalized build53 inventory was captured with archive, HEAD, catalogue, and source-scope status verified before and after the query. The finalized build53 release snapshot is tied to imagegraph archive SHA-256 12ba805e0c9509063d55c8f655c1860f8262cfc67fbf528516484f8d4a19d717, SourceCatalogue SHA-256 57898144c111b7823f56bc5b365aaa25a21e817c1aafa68f1bec23c3b1bbbe1c, and HEAD d0611f3282e4a1358e181af621234d2ba641e1f4. Archive, HEAD, catalogue hash, and compiled-source-scope status were captured before and after the query and remained unchanged. The build53 release suites passed after repair; earlier failures remain listed. Build53 dev and server gates are now included. The two failed dev disk-exhaustion attempts remain retained below; successful RAM-backed dev gates are separate. Build54 final release gates passed after repair. Initial build54 compiler, core, CLI fixture, and architecture harness failures remain in excluded_or_failed_runs. The release54 executor inventory is tied to the captured archive SHA-256, HEAD, catalogue hash, and clean compiled-source scope in its artifact; public/private header hashes and the helper link command are retained there. Five generated cache directories were restored to workspace disk with SHA-256 and nanosecond mtime verification; this is build-support provenance. Build55 release retry completed 521/521 steps after a unity-build anonymous-helper collision was fixed. Final release gates and the focused volume result are appended below. The mixed-header volume run was withdrawn and is not counted. No new Python catalogue run is claimed; the latest remains build54. The release55 inventory includes archive, HEAD, catalogue, public/private header, and helper compile/link provenance. The root-owned imagegraph documentation update is outside the compiled code scope. An external FFT proof was withdrawn and is not landed implementation or acceptance evidence. Build56 release logs and inventory are appended with SHA-256 values. The first core run failed one stale TimelineV8 FFT diagnostic fixture; a repair suite passed, then the full core passed. Initial and repair I/O runs failed before the final complete I/O suite passed. The final build56 CLI evidence is the scoped 13-selector run; an earlier 15-selector run also passed. No build56 asset rerun is claimed; the retained 265-case asset log is unchanged. The build56 archive query was linked against the finalized release archive, with HEAD, SourceCatalogue, header hashes, and imagegraph code scope matching before and after. Registration remains capability evidence only. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build57 release checks and inventory are appended. The first core run failed four source shape cases; a first repair run still failed one source shape case; the final full core suite passed. Two incremental source shape object rebuilds each completed 2/2 steps. The remaining release suites passed their listed scopes. Source commits 55787c51e50274a6445c107d8c90c7ec43fa0b78, a44cd44c5821e4a77bb7ac03fd55e44cd32c8522, and 62e0a34a54647f52bd47fd566ff8672c5e12b88e are part of the finalized snapshot. The build57 archive query is bound to the captured archive, HEAD, SourceCatalogue, public/private header hashes, and clean imagegraph code scope. No assets or architecture suite was rerun in build57. No GPU, manual scene, licensed executable, or representative profiling gate was closed. Build58 release evidence is appended below with its exact archive inventory; it adds no assets, architecture, server, GPU, manual-scene, or profiling run. The Build57 source pipeline profile remains the latest profiling evidence. Build59 release evidence is appended below, tied to the captured release archive and HEAD. The initial Ninja run was intentionally stopped at 165/552 to raise test compile concurrency; the resumed 388/388 build and tests-only 3/3 repair passed. Initial core failures are retained separately from the repaired core pass. Build59 did not rerun profiling, server, assets, GPU, manual scene, or architecture gates. Build60 release evidence and exact inventory are appended. Initial core fixture failures and an overlapping IO log are retained separately. Production was unchanged by the tests-only repair. Profiling, server, assets, architecture, GPU and manual scenes were not rerun. Requested cache cleanup removed obsolete diagnostic binaries and stale aliases while retaining current builds and text validation artifacts. Build61 final native evidence and exact inventory are appended, with initial failed core/dither and IO runs retained. Earlier other-suite runs preceded the mapped contrast fix and are not used as final acceptance. Noise correction and ordered dither commits are recorded with the committed Draw Gradient source. Server, assets, architecture, GPU, manual scenes, licensed-reference comparisons and representative profiling were not rerun or promoted by this append. Build62 public source typing/reset, source record origins, RNG capture codec v2, cooked Composer host/artifact routing and product receipt/cadence evidence are appended only from final reviewed logs and exact source/header/archive inventory provenance. Failed initial build, client, Studio, CLI and both server resource comparisons remain retained. Summary parsing replaces invalid UTF-8 bytes in server text; evidence hashes preserve the original raw bytes. The authorized initial GPU attempt failed and is retained; any accepted GPU gate is separately checked with backend, driver and scope limitations. Native CPU gates are not GPU pixel evidence and licensed-reference acceptance remains open. Representative profiling was not promoted. Build63 appends coherent current-ABI native node/product checks and approved local Vulkan fixtures after source integration. The five-case focused failure and interrupted initial build invocation remain retained. Final repaired build completed 22/22, final closure 1/1. Inventory captures clean Composer core source at 96a7bd07 with unchanged archive/header/HEAD hashes before and after. CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed reference parity were not promoted. Build64 appends coherent current-ABI native checks for five executors and panel-scoped keyboard editing. All six failed invocations remain retained. Builds completed596/596,36/36 and4/4. Inventory captures clean Composer core at7b5a29f4 with unchanged archive/header/HEAD hashes before and after. Accepted CPU source bytes did not change between passing gates and source commits. Representative profiling, live Studio, other GPU backends and licensed parity were not promoted. Build65 appends six executors, Clear ownership, pending observations, live Transform host adapters, easing and dynamic track policies. Eleven failed invocations remain retained. Accepted source bytes were unchanged before source commits; Studio fixture/private helper repairs were rebuilt and accepted separately. Inventory captures clean Composer core atb78c280338e59aa4bd600f8cd5a69d69f3bc5572 with stable archive/header/HEAD hashes. Representative profiling, live Studio, Transform device completion and licensed parity remain open. Build66 appends three executors, mixed freed-slot refill transport, retained skybox face admission and Transform Vulkan completion. Three fixture failures remain retained with exact resolver/producer boundaries. Inventory captures clean Composer core atcb5900e81fbcd6f8ef15098c919a37db5d2bc406 with stable archive/header/HEAD hashes. Representative profiling, live Studio, broader device captures and licensed parity remain open. Build67 appends five generators, typed source Surface/Colour getters, metadata projection, focused native history and resumable export completion. Ten failed checkpoints retain exact fixture, importer, getter and obsolete-unavailability boundaries. Inventory captures clean Composer core atbc3a3e86b1a433bd5b66a5c11343cb8324a3c86c with stable archive/header/HEAD hashes. Broader device, live Studio, release profiling and licensed comparisons remain open.",
   "runtime_gates": [
     {
       "name": "imagegraph IO",
@@ -12467,7 +12467,7 @@
     "review": "Actual residual allowance reaches preflight and core retains reported added residency. Journal clones exact effective nodes through PrepareResolvedHostCapture, charges published/candidate/growth/clone overlap, reissues reached facts before same-clock reuse, restores provider with RAII, and publishes journal with completed state only.",
     "remaining": [
       "Additional effective local-override recipe proof",
-      "Actual cancellation token rather than capture refusal",
+      "Real GraphExportSessionHost/session cancellation lifecycle proof, without inventing a core cancellation token",
       "Multi-prefix journal growth and inactive branch pruning",
       "New preflight allowance API forwarded through all product wrappers",
       "Coherent runtime acceptance"
@@ -12478,7 +12478,7 @@
       "path": "/tmp/pc-studio-gestures96/DopesheetGestures.patch",
       "sha256": "0ca1bd764362cf126270ef60c577b57938fad3beb30a96cf99b724c175c03fcb"
     },
-    "status": "Root fully read1098-line six-path packet and contract; live apply-check passes, no apply/runtime.",
+    "status": "Originalsixpath packet and final focus/menu correction applied with exactbase/final hashes; build89 passed. Runtime found two exact signed-distribution clock mismatches in onecase; correction pending.",
     "review": "Source shortcuts and focused paste, relative full-selection duplication, signed explicit time actions, deterministic ties-to-even, global distribution and per-channel reverse use existing staged history paths. Physical native group channels tested; shared source animator aliases remain separate unfinished requirement.",
     "issues": [
       "FocusedTrack label-click string cloning lacks preflight/exception admission.",
@@ -12489,19 +12489,262 @@
       "sha256": "2806d7be57ca44b6ef21441d13c1bc938ea2fc3a0e66dc7c299eeb50940ff8ab",
       "status": "Rejected before apply: entire files reformatted to default two-space style, requiring repository style and narrow regenerated correction."
     },
-    "rounding_source": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Maths_And_Numbers/Number_Functions/round.htm"
+    "rounding_source": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Maths_And_Numbers/Number_Functions/round.htm",
+    "accepted_correction": {
+      "path": "/tmp/pc-studio-gestures96-review-final88/GestureReview.patch",
+      "sha256": "400146258ad6afb5eb6548063d2da81aa5c8a7bcf1aabcd9a56d4ad40ebc3b59",
+      "root_review": "All108lines read; bounded focus clone preserves old focus on refusal; menu button fixture uses actual layout origin. Every final hash matched."
+    },
+    "runtime_failure": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/dopesheet-release-89.log",
+      "sha256": "5eb77051a6ef4f4d02c82bcfd08e4b96239d1a516128ad40bdca8e399160702b",
+      "exit": 42,
+      "cases": 10,
+      "passed": 9,
+      "assertions": 167,
+      "failed_assertions": 2,
+      "reason": "std::lerp opposite-sign calculation produces a tiny fraction near interior clock1; exactdistribution and later reversal oracle disagree. No Approx or clock-snapping repair accepted."
+    },
+    "joined_failure": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-89.log",
+      "sha256": "e267ffba56dc83ea33232ebab273a5bc76b9d3ef275ede79b5b739b902ff5955",
+      "exit": 42,
+      "cases": 246,
+      "passed": 245,
+      "assertions": 29961,
+      "failed_assertions": 2
+    }
   },
   "cache_project_integration_88": {
     "packet": {
       "path": "/tmp/pc-cache-project-observation79/project-observation-counted.patch",
       "sha256": "23c6739a296a20736b2d6df69464cb96a991833d834e646f42588edd429b16fa"
     },
-    "status": "Root fully read256 lines and applied exact reviewed packet. All five candidate hashes match; fresh19-target release build running, runtime unverified.",
+    "status": "Project clock/endpoint/loading/appending observations integrated and verified. Fresh19-target build88 and build89 passed; focused3/39, fullimagegraph2671/1856189 and all12 established remaining joinedCPU scopes passed. Studio gesture suite has a separate known failure recorded below.",
     "scope": "Copied authoritative project clock/last endpoint/loading/appending facts remain independent of node clock. Only explicit NativePlayedPrefix changes warmup project clock. Cache observation identity participates in host refresh. Fixtures use actual text-provider call counts and output widths to distinguish refresh from exact retry; invalid endpoint preserves prior replay.",
     "remaining": [
-      "Fresh build and runtime fixture acceptance",
       "Actual cache group executors and caller binding",
       "Studio animation-region owner and endpoint binding"
+    ],
+    "initial_failure": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cache-project-release-88.log",
+      "sha256": "176562f246d502661d79294109a67cb0689f4503d5191740ca25f4a8ce35c6c7",
+      "exit": 42,
+      "cases": 3,
+      "passed": 2,
+      "assertions": 29,
+      "failed_assertions": 1,
+      "reason": "Fixture expected cached width3 after upstream refresh, but source Cache retains its already observed frame slot."
+    },
+    "fixture_correction": {
+      "path": "/tmp/pc-cache-project-observation79/retained-slot-linked-fixture-repair.patch",
+      "sha256": "8f02706eed01d3c1f1cbcf116675682582797871d8be33c1b581df616528bbb3",
+      "root_review": "All78lines read; base/final hashes verified. Real linked probe snapshot shows initial17 then777 on observation change and retains777 on retry; cached width2 remains authoritative. Earlier71line proposal rejected before apply for missing probe link."
+    },
+    "build89": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-89-cache-dopesheet.log",
+      "sha256": "fc179c88838a3128114dd1bad2a3b6781ce403b93399f4495f66d51cf606b7ee",
+      "exit": 0
+    },
+    "focused": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cache-project-release-89.log",
+      "sha256": "52ac6e5f8f2d86a91dad87d20aa678c937828efad216df6091687a2ef55fa678",
+      "exit": 0,
+      "cases": 3,
+      "assertions": 39
+    },
+    "imagegraph": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-89.log",
+      "sha256": "c6033c3cba5d8bd0458e32a23481c31530d0bbd46c07f847479c5a600505efd7",
+      "exit": 0,
+      "cases": 2671,
+      "assertions": 1856189
+    },
+    "joined": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cache-project-89-joined-results.json",
+      "sha256": "17593159a73960a2fc00dc36a3704cf21f4d5ed7b2694d165f5402958abeb26d",
+      "results": [
+        {
+          "scope": "assetc",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (362 assertions in 42 test cases)"
+          ]
+        },
+        {
+          "scope": "assets",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (32488 assertions in 265 test cases)"
+          ]
+        },
+        {
+          "scope": "cli",
+          "command": [
+            "ctest",
+            "--test-dir",
+            ".cache/build/release-tests",
+            "-R",
+            "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+            "--output-on-failure"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-89-cache-project-joined.log",
+          "summary": [
+            "100% tests passed, 0 tests failed out of 16"
+          ]
+        },
+        {
+          "scope": "client",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+            "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (7479 assertions in 71 test cases)"
+          ]
+        },
+        {
+          "scope": "export",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (2819 assertions in 68 test cases)"
+          ]
+        },
+        {
+          "scope": "gui",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (4974 assertions in 331 test cases)"
+          ]
+        },
+        {
+          "scope": "io",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (11031 assertions in 248 test cases)"
+          ]
+        },
+        {
+          "scope": "nodegraph",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (269 assertions in 31 test cases)"
+          ]
+        },
+        {
+          "scope": "physics",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (715 assertions in 43 test cases)"
+          ]
+        },
+        {
+          "scope": "render",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+            "~[gpu]"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (336655 assertions in 808 test cases)"
+          ]
+        },
+        {
+          "scope": "server",
+          "command": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (5 assertions in 1 test case)",
+            "All tests passed (2182 assertions in 99 test cases)"
+          ]
+        },
+        {
+          "scope": "font",
+          "command": [
+            ".cache/build/release-tests/tests/test_imagegraphfont"
+          ],
+          "exit": 0,
+          "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-89-cache-project-joined.log",
+          "summary": [
+            "All tests passed (575 assertions in 21 test cases)"
+          ]
+        }
+      ]
+    }
+  },
+  "sequence_actual_use_review_89": {
+    "packet": {
+      "path": "/tmp/pc-large-sequence70/particle-lifetime/ActualUseRetirement.patch",
+      "sha256": "777167f531b92be3701f03960bb3242c4e880e1af7460681c9fdf80dd58dc386"
+    },
+    "status": "Root fully read1858lines all10paths plus manifest. No liveapply/runtime.",
+    "review": "Exactcommand lifetime records transfer to actual scene-submit fence, retain shared resource/metadata charges until completion, restore canceled timeline publication, and keep ambiguous failed submissions until shutdown idle. CPU fixtures are ownership/policy proof, not devicefence or pixels.",
+    "cache_retry_correction": {
+      "path": "/tmp/pc-large-sequence70/particle-cache-retry/PreparedFrameInvalidation.patch",
+      "sha256": "f30686d90ed82c8bd6934e91db6953e23165147effa2f274bab36dd239c34e9a",
+      "review": "Root fully read patch/manifest/audit and independently verified invalid firstview abandons before FrameCounter increment, nextview BatchFirst=false preserves counter, Renderer returns without BatchFailed. Failed preparation token invalidation required. No liveapply/runtime."
+    },
+    "remaining": [
+      "Whole-clock texture publication implementation",
+      "Coherent source integration",
+      "Actual cancellation/fence/device acceptance"
     ]
+  },
+  "source_filter_reviews_89": {
+    "kuwahara": {
+      "status": "Root read all473producer,427nativefixtures,164integration,IO/profile and independentPythonliteral oracle. Noapply/runtime.",
+      "corrections": [
+        "Deterministic half-even replaces ambientnearbyint",
+        "Unused/overridden mapped endpoints must not impose unrelatedwork"
+      ],
+      "supplement": {
+        "path": "/tmp/pc-kuwahara82-review-fix/supplement.patch",
+        "sha256": "21b9a866e5d3d5b7bfd8102dc631e23b654790aaed0ff1e2a710bc4bb1a4bf7b"
+      },
+      "supplement_review": "All narrow bodies read; mappedtoggle original-row/control-eligibility proof and refusalfixtures requested before integration."
+    },
+    "blobify": {
+      "status": "Root read all228producer,564nativefixtures,163integration,IO/profile and independentPythonliteral oracle. Source equations JSON/sourcehash replay and correction acceptance pending. Noapply/runtime.",
+      "corrections": [
+        "Deterministic half-even replaces ambientnearbyint",
+        "Confirm synthetic toggle/interpolation arrays cannot create later unquotedrows and prove refusal paths"
+      ]
+    },
+    "rounding_source": "https://sourceware.org/glibc/manual/2.25/html_node/Rounding-Functions.html"
   }
 }
