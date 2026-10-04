@@ -11521,7 +11521,7 @@
     ]
   },
   "source_xdog_integration_81": {
-    "status": "Applied bounded XDoG executor and mapped PXC edits; integration is incomplete because native pixel assertions fail.",
+    "status": "Historical initial integration and failed native comparisons; superseded by source_xdog_acceptance_81. Failed logs remain retained.",
     "frozen_packet": "/tmp/pc-xdog77/integration.patch",
     "packet_sha256": "1f4061c528a7721e02dfd65e1b3de5271924d7d68092b5caa12d7f0dacf2151b",
     "root_review": "Full144-line shared patch, four owned files, pinned node/shader source and independent numeric generator read. Ten pinned source dependency hashes matched before applying.",
@@ -11580,5 +11580,140 @@
       "Do not claim source GPU, licensed runtime or performance parity."
     ],
     "roadmap": "Added unchecked XDoG task; no font, catalogue or GPU completion claimed."
+  },
+  "source_xdog_acceptance_81": {
+    "status": "Accepted bounded native XDoG controls, both outputs and mapped PXC edits; all14 joined CPU scopes pass.",
+    "commits": {
+      "core": "d30d8c2b",
+      "io": "c8d7df93"
+    },
+    "source_sha256": {
+      "mono.engine/imagegraph/src/Document.cpp": "e7fbdabba04de2c0bbee0feabfb1f1cf0f6f6bfdcc5bfc787c2876e240c1a58e",
+      "mono.engine/imagegraph/src/SourceMappedInputs.hpp": "a06df8635506cf613480fdeab3fa3ed441d1797ac346a0ae65adad01ae930655",
+      "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp": "7c3fdf30e09817f6311b3c69750d5d2ffd6272022da7b0e7ee64ef30328957a4",
+      "mono.engine/imagegraph/src/nodes/Source2DXDoGNodes.cpp": "41620fa25977ef700caa2591827fcb5a8f88356d977b8087082ca0a181fed036",
+      "mono.engine/imagegraph/tests/Source2DXDoGNodes.cpp": "bf320605e30d5fa4644e40f3ee7c79dc3cebf8218d5fc52b6a83e00e8ee88a2e",
+      "mono.engine/imagegraph/docs/SOURCE_XDOG_PROFILE.md": "35e495a63a7c64d5d3af6496e2010e40b8128f856be3581e5e2f7db460033939",
+      "mono.engine/imagegraphio/src/PxcxEdit.cpp": "5064fda9cee5c4687a95db0efb5bdf26ab32d8be367bc26cceba63448722702b",
+      "mono.engine/imagegraphio/tests/XDoGMappedRange.cpp": "e60474f90bab253ddadcbd8e3e7e44cd2d8ee119a84cf52c4b39cc66da77cd6e"
+    },
+    "repair_patch": {
+      "path": "/tmp/pc-xdog81-repair/repair.patch",
+      "sha256": "03abdce8529f14dbf67fa2471e282c6709f335728f71e915c35cba64b2c7e8e2",
+      "root_review": "Full patch and independent ordered source proof read; root executed the independent Python proof before applying."
+    },
+    "production_repair": "Radius Reference-unit bypass checks retained Surface socket provenance even after conversion removes the borrowed radius image. Both whole-array admission and row evaluation use this fact.",
+    "oracle_repair": "Preserve pinned expression order for kernel weights, alpha weighting, normalized difference and threshold channels. Independent source equations predict DoG byte52=14 and threshold byte52=109. Exact comparisons were retained.",
+    "focused_native": "26 cases1415 assertions pass, including fractional Gaussian tap index and projected Surface domain cases.",
+    "focused_io": "1 case178 assertions pass.",
+    "joined": "14/14 scopes pass; full imagegraph2590/1855364, IO246/10983, render808/336654, Studio229/29723. Filters and commands are in retained logs.",
+    "evidence_directory": ".cache/build/dev/evidence/pixel-composer-2026-10-04",
+    "logs": {
+      "architecture-release-81-xdog-joined.log": {
+        "sha256": "c12c04219632472f8b5c9bac36873ecc08262048ffcacccfc734c97d7600195f",
+        "command": "COMMAND: ['ctest', '--test-dir', '.cache/build/release-tests', '-R', 'architecture', '--output-on-failure']",
+        "result": "100% tests passed, 0 tests failed out of 1"
+      },
+      "assetc-release-81-xdog-joined.log": {
+        "sha256": "55ae8000f80ce48ed436ee49094ae1f56505c9a9daa34ed3bcb724778079234f",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc']",
+        "result": "All tests passed (362 assertions in 42 test cases)"
+      },
+      "assets-release-81-xdog-joined.log": {
+        "sha256": "95440d3ba1298b927a185b51d4af4795c92a08bb896fcbb03fee04da29183b67",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets']",
+        "result": "All tests passed (32488 assertions in 265 test cases)"
+      },
+      "cli-release-81-xdog-joined.log": {
+        "sha256": "69a0b323e07589576ed98d2db50d0384c77c7960f63e7f2a12db106f205f9aae",
+        "command": "COMMAND: ['ctest', '--test-dir', '.cache/build/release-tests', '-R', '^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)', '--output-on-failure']",
+        "result": "100% tests passed, 0 tests failed out of 16"
+      },
+      "client-release-81-xdog-joined.log": {
+        "sha256": "cfa647656da3cbf713418bbd1bebe6353269c96a2176e5fde16d424fec8fc660",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client', '[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]']",
+        "result": "All tests passed (7109 assertions in 68 test cases)"
+      },
+      "export-release-81-xdog-joined.log": {
+        "sha256": "d163508a9de2885501eae02a95dce3f2fd418954f5892e85a7341391ea96bc3e",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport']",
+        "result": "All tests passed (2794 assertions in 66 test cases)"
+      },
+      "gui-release-81-xdog-joined.log": {
+        "sha256": "5c628711dc4c76e89b3d8f6b170a9fcc7439bccd917bc839eadc0d1a56ad3fc6",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui']",
+        "result": "All tests passed (4974 assertions in 331 test cases)"
+      },
+      "imagegraph-release-81-xdog-joined.log": {
+        "sha256": "f76ca7b70efd7816faf0ca8523be29608d01a0160f31e066c32f7ded60597104",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraph']",
+        "result": "All tests passed (1855364 assertions in 2590 test cases)"
+      },
+      "io-release-81-xdog-joined.log": {
+        "sha256": "bfdc1c48cef67dfbbeca2054d0390ca889a4ebaf59104d3d3d8347e7d2638a50",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio']",
+        "result": "All tests passed (10983 assertions in 246 test cases)"
+      },
+      "nodegraph-release-81-xdog-joined.log": {
+        "sha256": "06197cbf06a61c4cb33fbbb3c48814e2c8ecc1237bdd402f748eeb4c5b826885",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph']",
+        "result": "All tests passed (269 assertions in 31 test cases)"
+      },
+      "physics-release-81-xdog-joined.log": {
+        "sha256": "a36a3f347558af5871c1c2da12031b303a2f603aea371e8d3806e3bc28802e4b",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics']",
+        "result": "All tests passed (715 assertions in 43 test cases)"
+      },
+      "render-release-81-xdog-joined.log": {
+        "sha256": "1b574b9891bc01f41b57b467a685b35ca56f8539c9eb10aab4b976ae53180f29",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render', '~[gpu]']",
+        "result": "All tests passed (336654 assertions in 808 test cases)"
+      },
+      "server-release-81-xdog-joined.log": {
+        "sha256": "d6e1c6bc70260aedb578bd335da897917d50daa53a1eaca3e57ac3f7855197cb",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server']",
+        "result": "All tests passed (2180 assertions in 99 test cases)"
+      },
+      "studio-release-81-xdog-joined.log": {
+        "sha256": "d1e13ed591467a2b3ef745a6c9e148bd88fe6e3b72725aa905d76a366cae6336",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_studio', '[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result],[studio][imagegraph],[studio][wav_preview],[studio][animation_control_host],[studio][artwork]']",
+        "result": "All tests passed (29723 assertions in 229 test cases)"
+      },
+      "build-release-81-xdog-final-closure.log": {
+        "sha256": "5317e4e6ee1247f1e8b36b6479c978b62217ab29c57f768d158e1df38918c977",
+        "command": "COMMAND: ['cmake', '--build', '.cache/build/release-tests', '-j', '8', '--target', 'test_nodegraph', 'test_imagegraph', 'test_imagegraphio', 'test_imagegraphexport', 'test_imagegraphphysics', 'test_studio', 'test_client', 'test_render', 'test_server', 'test_assets', 'client', 'studio', 'server', 'assetc', 'imagegraph', 'test_imagegraph_runner', 'test_gui', 'test_assetc']",
+        "exit": 0
+      },
+      "imagegraph-release-81-xdog-repaired-focused.log": {
+        "sha256": "ca0fb45a71eb56ea68bda86a5a51700f227950d6cc4c76cd726d91229cb5da62",
+        "command": "COMMAND: ['/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraph', '[source_xdog]']",
+        "exit": 0
+      }
+    },
+    "independent_proof_sha256": {
+      "xdog-81-source-equations.py": "1b5996183044cb5aaef9b0a5860b888fcfef771f6fd77f2c85b1109afc8f6852",
+      "xdog-81-source-equations.json": "84bf7381bb4146a76bcc48627b76f047d912c2cd46194515bcfa04d16616d427"
+    },
+    "test_binary_sha256": {
+      "client": "ee0bc396b07de5e7c460ca74929d6f36076276e6562198ec5f41aa330f2f945b",
+      "render": "651f4ee3e758512be39013391363434c96d00f0ec79b28433fc662891b45f428",
+      "studio": "9e695c7746eced448dd5630c2efd74ff0f9f81c26f8848ff9169c7049cd64934",
+      "server": "90a3ece2e511109387fd211219709d2b31cbc4d92a35ec4e165838ceb9a473e8",
+      "assets": "adf320c33bb1f05a2d55132ad314d9b47d5be05c0a289e73afcacbbd9403e547",
+      "imagegraph": "f69c64159e20d3d19171ede4b17698f8499d8d5e0c509ab4774a8004c1d5437d",
+      "nodegraph": "7ba97049f16b95beee29e2b0140f9d303a8bcb2fecfbc2137741ecddce618d1c",
+      "imagegraphio": "256f8934ab234c0844260213b169b47d3b80a46d8df7ef96d62559f437372ac9",
+      "imagegraphexport": "82fd893113741c5b3639e4099f854c76ed78768f72869247f3b81d6e0e9f1007",
+      "imagegraphphysics": "5a9480fe3f27602c926cce8d2f1dffe3ae833b047afe82534e50e210d8c84d9d",
+      "gui": "b978d647b63a27a0aa34d66bf43d7a9e1a6fbd4ded6028336ac3492cd345bcef",
+      "assetc": "2dd60ffa08b1005461734ef13d17184f421d2745eef0cf662689d68549c2b015"
+    },
+    "format": "clang-format-21 checks pass for all three new C++ files; git diff --check passes.",
+    "limits": [
+      "No licensed reference application execution, GPU pixel acceptance or live Studio verification.",
+      "No new representative XDoG performance measurement.",
+      "Inactive DoG previous-output observation and source device behavior remain explicit profile gates; broader catalogue/parity tasks remain open."
+    ],
+    "roadmap_atom": "Integrate bounded XDoG controls, pixels and mapped PXC edits; pass joined CPU validation."
   }
 }
