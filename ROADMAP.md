@@ -84,6 +84,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Finish Composer font loading.
 - [_] Finish text layout and rendering.
 - [_] Finish Dopesheet gestures.
+- [_] Add animation-region selection and bind cache playback to its frame bounds.
 - [_] Finish Studio host workflows.
 - [_] Verify Transform GPU pixels.
 - [_] Verify skybox GPU pixels.
