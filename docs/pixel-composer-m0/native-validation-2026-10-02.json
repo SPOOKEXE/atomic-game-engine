@@ -7687,6 +7687,208 @@
       "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
       "assertions_passed": 29723,
       "test_cases_passed": 229
+    },
+    {
+      "name": "release79 architecture-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-79-final-joined.log",
+      "log_sha256": "1dc290445375d7828649a59e06bb21d7de0c24a206e3bb90b1987e38601fbf2d",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim."
+    },
+    {
+      "name": "release79 assetc-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-79-final-joined.log",
+      "log_sha256": "c927c0dbb570bb78dbc8f5b4df9a9273d8ebaccca15ac588291027db9f1795b0",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 362,
+      "test_cases_passed": 42
+    },
+    {
+      "name": "release79 assets-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-79-final-joined.log",
+      "log_sha256": "9e9fa4bbdc559cfebff64ad72a20b3efbeac512b013eca5e7f07dcda3c9bf6c9",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "release79 build-release-79-empty-animator",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-79-empty-animator.log",
+      "log_sha256": "57fce2a639d9103541765579ab3b15185854ddd2bed5831fd6a7dd900e5243e1",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Intermediate empty-animator repair checkpoint; superseded by final fixture and joined results."
+    },
+    {
+      "name": "release79 build-release-79-empty-fixture",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-79-empty-fixture.log",
+      "log_sha256": "d0299c03875d2b17dad688968dc53d77d13308e2450ebbaa9e36ea5afa3e042d",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim."
+    },
+    {
+      "name": "release79 cli-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-79-final-joined.log",
+      "log_sha256": "639d884e915c9532c1242b6bc434e8a1a70773c42291e019f77cb3dc5e5b5756",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim."
+    },
+    {
+      "name": "release79 client-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-79-final-joined.log",
+      "log_sha256": "afc3904354872d659991a86a41245b1b2db21b72608d56357e791d4c739749b9",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 7109,
+      "test_cases_passed": 68
+    },
+    {
+      "name": "release79 export-artwork-release-79-empty-animator",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-artwork-release-79-empty-animator.log",
+      "log_sha256": "1480e1f7365d6e11d5761375a33c18165db2c0a6021711d4e8fc83c952af3814",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Intermediate empty-animator repair checkpoint; superseded by final fixture and joined results.",
+      "assertions_passed": 56,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "release79 export-artwork-release-79-empty-fixture",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-artwork-release-79-empty-fixture.log",
+      "log_sha256": "592887c3c454f280d3af1913478c5d6af76c998bc8aa9ac4fffbe918b32bfbdf",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 56,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "release79 export-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-79-final-joined.log",
+      "log_sha256": "5ba7a276a0bd8bfac957f6d41997e48d5ccfa8be3765345087d5c2bd00f64e41",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 2794,
+      "test_cases_passed": 66
+    },
+    {
+      "name": "release79 gui-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-79-final-joined.log",
+      "log_sha256": "614d3feb3c93cf9cc655a706c75ab0039f91fcd12b0fb24c501f1ebee3f1814b",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 4974,
+      "test_cases_passed": 331
+    },
+    {
+      "name": "release79 imagegraph-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-79-final-joined.log",
+      "log_sha256": "80e73a92b837ed778722eeb2b4ed2a6502ad67076e4161dc2c3bf1dee1e09a05",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 1853948,
+      "test_cases_passed": 2564
+    },
+    {
+      "name": "release79 io-artwork-release-79-empty-fixture",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-artwork-release-79-empty-fixture.log",
+      "log_sha256": "16129f516d37d4869a735cfb898ab9273e05199d6583fd30fcd37d3e66fe6a6b",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 373,
+      "test_cases_passed": 16
+    },
+    {
+      "name": "release79 io-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-79-final-joined.log",
+      "log_sha256": "fb26647c483bc23567c08ccefad5edc6d2ee3ae85bdf9dcc7ee51db42e132241",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 10805,
+      "test_cases_passed": 245
+    },
+    {
+      "name": "release79 nodegraph-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-79-final-joined.log",
+      "log_sha256": "b2f859e0f376fb98a5012b50d934f3216aa5a11fc5907149a7f438cfa6526c86",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "release79 physics-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-79-final-joined.log",
+      "log_sha256": "652f31f2c6a35706faa5ae4ebb665451b01a76c71de51f44a33ba2524cf3c9b6",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "release79 render-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-79-final-joined.log",
+      "log_sha256": "8245dca0aa6461193a1c488d2b62af38bf907904882869c81bf7471b8483336a",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 336654,
+      "test_cases_passed": 808
+    },
+    {
+      "name": "release79 server-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-79-final-joined.log",
+      "log_sha256": "3a32dfd11daccdbc4db3ff6fa39cfef02e27b6035f8541acd71d0963b85bc2d4",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 2180,
+      "test_cases_passed": 99
+    },
+    {
+      "name": "release79 studio-artwork-release-79-empty-animator",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-artwork-release-79-empty-animator.log",
+      "log_sha256": "550dd1bc7324afaa6ca75bab48baabca2ab6e3eeaadfe785263efa8574391572",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Intermediate empty-animator repair checkpoint; superseded by final fixture and joined results.",
+      "assertions_passed": 26,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "release79 studio-artwork-release-79-empty-fixture",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-artwork-release-79-empty-fixture.log",
+      "log_sha256": "d66d56b7f93f26fc401c52daf833d7d6900db8db1454d7549da2769952e5d3e8",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 26,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "release79 studio-release-79-final-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-79-final-joined.log",
+      "log_sha256": "5a73c69bb5a9b7ffb247098599da253c52071bb09a81f09eb89065d1538b34bb",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Final repaired artwork CPU acceptance; no GPU, live Studio, licensed-reference or performance claim.",
+      "assertions_passed": 29723,
+      "test_cases_passed": 229
     }
   ],
   "excluded_or_failed_runs": [
@@ -9454,6 +9656,15 @@
       "result": "failed",
       "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
       "reason": "Shared ORA instance nodes are opaque because valid empty animator records lack a native mapping; earlier diagnostic run also retains initial fixture/ordering failures."
+    },
+    {
+      "name": "release79 io-artwork-release-79-empty-animator",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-artwork-release-79-empty-animator.log",
+      "log_sha256": "87a67ced8b5f2162d9525cc8ac8941f63e259a036d709701b9b56f0cbfacae33",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Intermediate empty-animator repair checkpoint; superseded by final fixture and joined results.",
+      "reason": "New ASE fixture incorrectly forbade legitimate compact keys on unrelated crop/loop/opacity sockets; narrowed no-key oracle to layer_name only."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -11148,7 +11359,11 @@
       "/tmp/pc-font-text67/tests.patch": "ebb979b91fb57806d5a0cd3f6c60fd6b4108f5cb827ff28a9969e10d0916ce59",
       "/tmp/pc-font-text67/text-selector-io.patch": "0b1ebdaf9ed225b3bb490cfe3a769ce6573efa237dc63d882bf85766d67f25d9",
       "/tmp/pc-font-text71/bitmap-supplement.patch": "63c1ef4cc6c41b6eb7057606944db68ea6edfa548b28c1ebab4a43c33b3b72df",
-      "/tmp/pc-font-text72/native-completion.patch": "13d018bfd41e13ee73edf65d33e6fd14a40ab12b2e1499338d944291fbedf60b"
+      "/tmp/pc-font-text72/native-completion.patch": "13d018bfd41e13ee73edf65d33e6fd14a40ab12b2e1499338d944291fbedf60b",
+      "/tmp/pc-client-font72/ClientFont72.patch": "eaecd40c6ce8bd85bb5dc5e23a599ceb2087e12cac72542c3d1789b53cf5cf34",
+      "/tmp/pc-font-artifact72/font-artifact.patch": "c95c80803b1970e1537a7418fa93401e5201b673de6bdbe554fb60d1dd3cf894",
+      "/tmp/pc-font-case-capacity78/FontCaseCapacity.patch": "0b0f7c8c311392eda4f4e4ca6443e25ccbd6b30cb6e35ed091c732d6445fcc50",
+      "/tmp/pc-font-raster-audit78/FontSamplingTests.patch": "0254098eb3fee8dda38dbea1a6f250e02af163e442860abc445b2bf37e6b94c0"
     },
     "native_review": "All handwritten native-completion code and tests read. Generated case data regenerated and compared ignoring formatting; not manually reviewed as2058 individual data lines.",
     "unicode_source": "https://www.unicode.org/Public/16.0.0/ucd/",
@@ -11159,10 +11374,98 @@
     },
     "unicode_verification": "Root fetched all three official files and byte-compared local pinned inputs; reviewed generator produced non-whitespace-identical FontCaseTables.inc.",
     "remaining": [
-      "NativeFontTextCase actual reserve capacities need reconciliation before publication.",
-      "Client72 partial review1-480 only; whole app/main.cpp addition requires surgical merge against existing source.",
-      "Artifact, remaining product callers and coherent font/native sampler/parser integration pending.",
+      "Coherent font/native sampler/parser integration and product runtime acceptance pending.",
+      "Whole Client app/main.cpp representation requires a surgical merge against the existing file.",
+      "CLI and Studio caller review and integration remain pending.",
       "Joined build/runtime, source/platform/reference parity and live Studio remain unproved."
-    ]
+    ],
+    "client_review": "ClientFont72.patch1519 lines fully read; no live integration.",
+    "supplements": "Actual casing capacities and all three raster sampling/work refusal paths reviewed; standalone supplements remain outside and runtime untested."
+  },
+  "source_artwork_acceptance_79": {
+    "status": "accepted native artwork actions, source PXC round trips and Studio history; all14 joined CPU scopes pass",
+    "commits": [
+      "d5f7cf6c",
+      "770a9ac5",
+      "93473e16"
+    ],
+    "source_sha256": {
+      "mono.engine/imagegraphio/docs/source-artwork-actions.md": "365d6b9b70ecf94251da4e50ace48ae638cc3f7ab3dfc4613c8f25abc45b553b",
+      "mono.engine/imagegraphio/src/SourceArtworkMetadata.cpp": "ab1c0eee00926854a98e19aa919d79c06661b2d409b53f5d43bd7054e2ce9edc",
+      "mono.engine/imagegraphio/src/SourceArtworkEdit.cpp": "6f63d6e9db7be877a19d4222aa3b3843d355a398ab4d79de70bbad875d61af55",
+      "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp": "efe4110a45560b0030b4549d670ea5af0ea84ce05dbccdde955b2baf71129884",
+      "mono.engine/imagegraphio/include/engine/imagegraphio/SourceArtworkEdit.hpp": "b7c457e14f456c807aeb3738ccdf9cca4e6651741b6b7731920af6f48407325f",
+      "mono.engine/imagegraphexport/src/GraphSpriteHost.cpp": "08fa48f506e7e21192e00a5682818a3d4ee04b3bbcff5e488085ac348b0a4e6e",
+      "mono.engine/imagegraphexport/tests/SourceArtworkHost.cpp": "df0f4f3ef27b4928b9a8c0ba18a48311e880e4067a35cdb9f7868b5b6021411a",
+      "mono.studio/src/ImageComposer.cpp": "2b6d6a13ae235326fe26721037f7e47f2f46078f5bf73d356191a68c039b574c",
+      "mono.studio/src/ImageGraphExportIntent.hpp": "75d3bebc2427a3096e748c68b681310de74ddc5c0ac6a7750c4ae361f8bb2fe5",
+      "mono.studio/src/ImageGraphArtworkEdit.hpp": "a666a3fc04afec2ac5fb68a88176d7762fc2d38bab9f8a244631320bcca532b1",
+      "mono.studio/tests/ImageGraphArtworkEdit.cpp": "7579f7b6a4a1f77964fc16f5e1185105e9754e8e642c801f8460b336df71178b",
+      "mono.engine/imagegraphio/src/PxcxImport.cpp": "6c6a2665f1d5229bb4fcc94a7a76b550df61191e7404b513615f075717e34986"
+    },
+    "empty_animator_patch": {
+      "patch_sha256": "cf47989fb39f410b9a37fcb23fccecc5ba1a8f419ab4ffdba285f60e424b5645",
+      "files": [
+        {
+          "path": "mono.engine/imagegraphio/src/PxcxImport.cpp",
+          "base_sha256": "070ef17d15be97b013064125e8544067d5d8eea334776d16f005be515d182ad8",
+          "draft_sha256": "6c6a2665f1d5229bb4fcc94a7a76b550df61191e7404b513615f075717e34986"
+        },
+        {
+          "path": "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+          "base_sha256": "6b683efc7d6f3a874fe5d1ac1d6c42f006c9a43752ffa61c3584d7cc8275902f",
+          "draft_sha256": "82d000e4a287824263e21cb8ae8fc0cdc89bb2dbe6dbe9877f9c9f2cb352fc64"
+        }
+      ],
+      "pinned_source": [
+        {
+          "path": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652/scripts/node_keyframe/node_keyframe.gml",
+          "sha256": "73a7fe4c85562db01192ae88c7ab35ebd16684f9d3831641e53a572b1480a49b"
+        },
+        {
+          "path": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652/scripts/node_value_text/node_value_text.gml",
+          "sha256": "eace1ad9eda7a00b4c2e4aca9ccca66f8e29ce7b0de438e6d372a25aa5a32e73"
+        },
+        {
+          "path": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652/scripts/node_ase_layer/node_ase_layer.gml",
+          "sha256": "a987b464aef09852151050e794d54d3d50a64aa3777e7de20d6e979f7d598342"
+        },
+        {
+          "path": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652/scripts/node_ora_layer/node_ora_layer.gml",
+          "sha256": "e92f6e4748f72a4821cb20d28eef4bf17b16589e12fedb2d02f429db42119d22"
+        },
+        {
+          "path": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652/scripts/node_krita_layer/node_krita_layer.gml",
+          "sha256": "0e395c9172f69f5d57e2873e0efbd1365d459837185f6bc140d490f05b659fb5"
+        }
+      ]
+    },
+    "root_fixture_correction": "The no-physical-key check applies to layer_name only; ASE compact crop, loop and opacity source records legitimately project separate keys.",
+    "focused": {
+      "io": "16 cases373 assertions",
+      "export": "2 cases56 assertions",
+      "studio": "2 cases26 assertions"
+    },
+    "joined": "14/14 final scopes pass; full IO245/10805, export66/2794, Studio229/29723. Exact filters and commands are retained in hashed logs.",
+    "test_binary_sha256": {
+      "client": "88248326b2cf5dc6d899a50985fd7ca90771f0e0944686a56251856b37877660",
+      "render": "54d04063774889753b3a0de633b25f9024aa52d44cf5700a5b29e05997c9c941",
+      "studio": "a0a13fead75f3e97e9e96550a97a8e6b3b41b17667801f97137aa127fa380d80",
+      "server": "d9a8ad7f9bfdc3d37018af17a7f0325e443bae16f4b75ede40aa24b157d3b1b4",
+      "assets": "adf320c33bb1f05a2d55132ad314d9b47d5be05c0a289e73afcacbbd9403e547",
+      "imagegraph": "492601a42398fa4e410ba298f5788c16d44676bde6f9af8294b636949ee33cdf",
+      "nodegraph": "7ba97049f16b95beee29e2b0140f9d303a8bcb2fecfbc2137741ecddce618d1c",
+      "imagegraphio": "40d5665137cc13af6bb3a97c61dc9cda3157d92c3b95df0df236aa8f869a7f2b",
+      "imagegraphexport": "1220d0dcc762f1d6186c7317a3b0ac6a8d76c1cb50b77c73cd0f8c4abc9ff979",
+      "imagegraphphysics": "b72a8ca06e9df8fac3ff88047fc78cc8da233a622d0109320a94ce4ddf846f8e",
+      "gui": "b978d647b63a27a0aa34d66bf43d7a9e1a6fbd4ded6028336ac3492cd345bcef",
+      "assetc": "6bab2ad301959a5057a25e6be99cfb38090cbaaccec9251f6eab685069b5f88d"
+    },
+    "limits": [
+      "No live Studio workflows or licensed source application execution.",
+      "No new GPU acceptance or representative performance measurement.",
+      "Broader font, axis, cache, mesh, catalogue and workflow roadmap items remain open."
+    ],
+    "roadmap_atom": "Integrate ASE, ORA and Krita artwork actions and preserve their edits through PXC saves."
   }
 }
