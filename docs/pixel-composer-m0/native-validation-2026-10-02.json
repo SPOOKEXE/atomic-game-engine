@@ -7485,6 +7485,38 @@
       "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
       "assertions_passed": 21199,
       "test_cases_passed": 81
+    },
+    {
+      "name": "release78 build-release-78-artwork",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-78-artwork.log",
+      "log_sha256": "4bac9b0a486834b7d1c06b1aab2e14647f0b8b5e8d522c3a2a48afdba0af422a",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio."
+    },
+    {
+      "name": "release78 build-release-78-diagnostics",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-78-diagnostics.log",
+      "log_sha256": "d0299c03875d2b17dad688968dc53d77d13308e2450ebbaa9e36ea5afa3e042d",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio."
+    },
+    {
+      "name": "release78 build-release-78-host-diagnostics",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-78-host-diagnostics.log",
+      "log_sha256": "354ae6b153e9eafd10e5fcf27786864a642563db28de75888807048938614ea5",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio."
+    },
+    {
+      "name": "release78 studio-artwork-release-78-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-artwork-release-78-focused.log",
+      "log_sha256": "d66a07ca46c32203a162e5d80cde9ec20173a0b97affe798c69a0005be26712d",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio."
     }
   ],
   "excluded_or_failed_runs": [
@@ -9180,6 +9212,42 @@
       "result": "failed",
       "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
       "reason": "Test-first reproduction: adapter and core both subtracted one from saved source start. Four assertions fail; matching one-line Studio adapter correction removes the extra subtraction."
+    },
+    {
+      "name": "release78 export-artwork-release-78-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-artwork-release-78-focused.log",
+      "log_sha256": "260b65f314be25ca401a5e66aaee9bf733a8623cb961db86b2d7f97c09d98ffc",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio.",
+      "reason": "Initial fixture/domain/roundtrip or pixel-oracle failure under investigation; not accepted."
+    },
+    {
+      "name": "release78 export-artwork-release-78-host-diagnostics",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-artwork-release-78-host-diagnostics.log",
+      "log_sha256": "f6f5cf8a2f2dda5e1d17fe42b9921c03476b6ca169ac3e2544a087ee0a5e826f",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio.",
+      "reason": "Initial fixture/domain/roundtrip or pixel-oracle failure under investigation; not accepted."
+    },
+    {
+      "name": "release78 io-artwork-release-78-diagnostics",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-artwork-release-78-diagnostics.log",
+      "log_sha256": "6a405d1ce9bd2c38ab3c4d872e64a19b939557e57f66b5f4f465932a038cca23",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio.",
+      "reason": "Initial fixture/domain/roundtrip or pixel-oracle failure under investigation; not accepted."
+    },
+    {
+      "name": "release78 io-artwork-release-78-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-artwork-release-78-focused.log",
+      "log_sha256": "7a5ff98d612c7bfbb596aa0329ab486b9739711a894cd24c6f6e32a952ceb652",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio.",
+      "reason": "Initial fixture/domain/roundtrip or pixel-oracle failure under investigation; not accepted."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -10719,5 +10787,104 @@
     "repair_production_patch_sha256": "aadf22aab1a31f647c79fb0aa72f3806ea2bff5cdf15177b35820c8137cbd5aa",
     "planner_fixture_patch_sha256": "386c1f38b7b8ece07d2a05f8a2b8cbf0f80ff826afc764f879322f1234ecb5be",
     "joined_scope_note": "13 initial joined scopes passed; IO required two test-only format corrections, then matching closure and full IO rerun passed. No production source changed after the 13 accepted scopes. Initial failed joined IO log remains retained."
+  },
+  "source_artwork_integration_78": {
+    "status": "matching21-step full closure passes; initial focused IO and ASE host failures reproduced; repairs and joined CPU acceptance pending",
+    "patch_sha256": "c4afc8ee03c0bcf395fe1f15af05bbae44d5b696c972a70a685d8e7db7e7dde8",
+    "review_supplement_sha256": "6a14003db02c4848510fb34bcb3f345bf28734c425e8839a5892bf987f12b8d2",
+    "paths": [
+      {
+        "path": "mono.engine/imagegraphio/docs/source-artwork-actions.md",
+        "base_sha256": null,
+        "frozen70_sha256": "d6dced32337bc21448d2dd1b45c569885bbf11e90e4dc58ed732815920a403ce",
+        "draft_sha256": "e5ede0a610624829b275fa567239e15acce126ef11d0e40af08bc74508915160"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/SourceArtworkMetadata.cpp",
+        "base_sha256": null,
+        "frozen70_sha256": "4f02ebcd98401fc60d7ec7d695c75d921f232642f3bd2809c19ded6dd8071ca5",
+        "draft_sha256": "ab1c0eee00926854a98e19aa919d79c06661b2d409b53f5d43bd7054e2ce9edc"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/SourceArtworkEdit.cpp",
+        "base_sha256": null,
+        "frozen70_sha256": "bc6f298d602977ec8363b444664e020a52c5281d657156fa7d1078412fe9038b",
+        "draft_sha256": "b0b464a99045f42050753b6f2eb2883bffb4289db4e2369cf67454a984ea58bf"
+      },
+      {
+        "path": "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+        "base_sha256": null,
+        "frozen70_sha256": "25ce9940525af7ca81e25b882b9b8a489c26916f35819224d448b3b98db804a2",
+        "draft_sha256": "8ebdfa6c882110ed4fd98a604de3edc3d2fa00f4ec0a3cc05fcb9e953c2aed19"
+      },
+      {
+        "path": "mono.engine/imagegraphio/include/engine/imagegraphio/SourceArtworkEdit.hpp",
+        "base_sha256": null,
+        "frozen70_sha256": "b7c457e14f456c807aeb3738ccdf9cca4e6651741b6b7731920af6f48407325f",
+        "draft_sha256": "b7c457e14f456c807aeb3738ccdf9cca4e6651741b6b7731920af6f48407325f"
+      },
+      {
+        "path": "mono.engine/imagegraphexport/src/GraphSpriteHost.cpp",
+        "base_sha256": "8b2afcf100979dc371ac50f7e8fd6cfd3d7ba65e27e8ee03a89bdb91293cdcb9",
+        "frozen70_sha256": "08fa48f506e7e21192e00a5682818a3d4ee04b3bbcff5e488085ac348b0a4e6e",
+        "draft_sha256": "08fa48f506e7e21192e00a5682818a3d4ee04b3bbcff5e488085ac348b0a4e6e"
+      },
+      {
+        "path": "mono.engine/imagegraphexport/tests/SourceArtworkHost.cpp",
+        "base_sha256": null,
+        "frozen70_sha256": "a985d09f6b6247312bb52981021f174a53c9c79cade699e13dafcc4275c9e36c",
+        "draft_sha256": "c14844d97a1dfdd8b91ba3b030dbdab19028f7c45ea6bcdc2f5b7c0ef842acae"
+      },
+      {
+        "path": "mono.studio/src/ImageComposer.cpp",
+        "base_sha256": "33a575a616fefa470672b8e13d269ead581d08649e50e4492f2f31a73cd1b1f9",
+        "frozen70_sha256": "444942208b8d4a56c03de85b9768f686a8a00b78a7a593714957d556a62756ad",
+        "draft_sha256": "2b6d6a13ae235326fe26721037f7e47f2f46078f5bf73d356191a68c039b574c"
+      },
+      {
+        "path": "mono.studio/src/ImageGraphExportIntent.hpp",
+        "base_sha256": "fef8629e21f7ca4f64bd23f5edbe1aa43da7097c47264dc839aff159f8e9f0e2",
+        "frozen70_sha256": "75d3bebc2427a3096e748c68b681310de74ddc5c0ac6a7750c4ae361f8bb2fe5",
+        "draft_sha256": "75d3bebc2427a3096e748c68b681310de74ddc5c0ac6a7750c4ae361f8bb2fe5"
+      },
+      {
+        "path": "mono.studio/src/ImageGraphArtworkEdit.hpp",
+        "base_sha256": null,
+        "frozen70_sha256": "a666a3fc04afec2ac5fb68a88176d7762fc2d38bab9f8a244631320bcca532b1",
+        "draft_sha256": "a666a3fc04afec2ac5fb68a88176d7762fc2d38bab9f8a244631320bcca532b1"
+      },
+      {
+        "path": "mono.studio/tests/ImageGraphArtworkEdit.cpp",
+        "base_sha256": null,
+        "frozen70_sha256": "7579f7b6a4a1f77964fc16f5e1185105e9754e8e642c801f8460b336df71178b",
+        "draft_sha256": "7579f7b6a4a1f77964fc16f5e1185105e9754e8e642c801f8460b336df71178b"
+      }
+    ],
+    "scope": "ASE/ORA/Krita prepared metadata and layer generation, frame length and tag edits; Studio history publication. No live Studio or licensed parity acceptance.",
+    "diagnostics": [
+      "Two synthetic consumers lack required canvas coordinates.",
+      "Shared-owner fixture rejected because binding target is not an instance input.",
+      "ASE suffix-collision save inverse refuses changed node values.",
+      "ASE tag pixel expectation compares different authored frames; test oracle under investigation.",
+      "Krita actual capture/generation/evaluation case and Studio two history cases pass."
+    ],
+    "current_paths_sha256": {
+      "mono.engine/imagegraphio/docs/source-artwork-actions.md": "e5ede0a610624829b275fa567239e15acce126ef11d0e40af08bc74508915160",
+      "mono.engine/imagegraphio/src/SourceArtworkMetadata.cpp": "ab1c0eee00926854a98e19aa919d79c06661b2d409b53f5d43bd7054e2ce9edc",
+      "mono.engine/imagegraphio/src/SourceArtworkEdit.cpp": "b0b464a99045f42050753b6f2eb2883bffb4289db4e2369cf67454a984ea58bf",
+      "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp": "9c82184b8b8915c47fe47d481f48cb1a39ca13f0961644b9024d167afd80a8e8",
+      "mono.engine/imagegraphio/include/engine/imagegraphio/SourceArtworkEdit.hpp": "b7c457e14f456c807aeb3738ccdf9cca4e6651741b6b7731920af6f48407325f",
+      "mono.engine/imagegraphexport/src/GraphSpriteHost.cpp": "08fa48f506e7e21192e00a5682818a3d4ee04b3bbcff5e488085ac348b0a4e6e",
+      "mono.engine/imagegraphexport/tests/SourceArtworkHost.cpp": "a5aa6abccd2ac84151373b4ba6e82f6731dd6602d0fc841f9d00074d7036e091",
+      "mono.studio/src/ImageComposer.cpp": "2b6d6a13ae235326fe26721037f7e47f2f46078f5bf73d356191a68c039b574c",
+      "mono.studio/src/ImageGraphExportIntent.hpp": "75d3bebc2427a3096e748c68b681310de74ddc5c0ac6a7750c4ae361f8bb2fe5",
+      "mono.studio/src/ImageGraphArtworkEdit.hpp": "a666a3fc04afec2ac5fb68a88176d7762fc2d38bab9f8a244631320bcca532b1",
+      "mono.studio/tests/ImageGraphArtworkEdit.cpp": "7579f7b6a4a1f77964fc16f5e1185105e9754e8e642c801f8460b336df71178b"
+    }
+  },
+  "bounded_reader_review_78": {
+    "status": "corrected frozen1560-line patch fully read by root; not applied; runtime pending",
+    "patch_sha256": "16c056cda3484004bae50d47870d9b773855c06a74c245ba92903bd9556204df",
+    "scope": "Incremental per-row persisted text accounting and actual string capacities; SourceBounds presence and fractional parser tests retained. Requires coherent native sampler and font carrier merge."
   }
 }
