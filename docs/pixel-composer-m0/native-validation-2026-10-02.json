@@ -7517,6 +7517,176 @@
       "exit_code": 0,
       "result": "passed",
       "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio."
+    },
+    {
+      "name": "release79 architecture-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-79-joined.log",
+      "log_sha256": "c9cea599d23c8fd7324c7352e7b643bebef6e4ee6f2b33c9c2b475d758432416",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance."
+    },
+    {
+      "name": "release79 assetc-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-79-joined.log",
+      "log_sha256": "6a80822cf5f4d67352cb21b1d8a4436eb9b2a09e65ee6d9908747d3e953e28d6",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 362,
+      "test_cases_passed": 42
+    },
+    {
+      "name": "release79 assets-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-79-joined.log",
+      "log_sha256": "b54c36fae8651284b9df1543b88b0c20a172c74105c244e8e9ac13cf5b1aad60",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "release79 build-release-79-artwork-repair",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-79-artwork-repair.log",
+      "log_sha256": "bfca3b068a9f556eec287d12a37b18b98e25054aa32cab7c08c91f7b3d59f75a",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance."
+    },
+    {
+      "name": "release79 build-release-79-instance-diagnostic",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-79-instance-diagnostic.log",
+      "log_sha256": "d0299c03875d2b17dad688968dc53d77d13308e2450ebbaa9e36ea5afa3e042d",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance."
+    },
+    {
+      "name": "release79 build-release-79-node-diagnostic",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-79-node-diagnostic.log",
+      "log_sha256": "d3a11e5633346114fe7137a8d7da3f1ed4ce8af27ac4f0505722f4cc2a920943",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance."
+    },
+    {
+      "name": "release79 cli-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-79-joined.log",
+      "log_sha256": "555b207d9a84f6bf53a54f3c22b6d3729be2cef4ef2b1f0f89c45c1e8f6d5168",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance."
+    },
+    {
+      "name": "release79 client-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-79-joined.log",
+      "log_sha256": "949919f26cbec19c6f6fe52d7800a23299946a9069eac29eca93ac90cd98d3b6",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 7109,
+      "test_cases_passed": 68
+    },
+    {
+      "name": "release79 export-artwork-release-79-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-artwork-release-79-repaired.log",
+      "log_sha256": "8c42d20c847685522ab775b2eed0fc476b05d929bc4456aa47f7b8375c4e1044",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 56,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "release79 export-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-79-joined.log",
+      "log_sha256": "1bd1f413ac94680e0a5816bec0ca5a63eb3562ef516bc012af5dfee93e9ab337",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 2794,
+      "test_cases_passed": 66
+    },
+    {
+      "name": "release79 gui-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-79-joined.log",
+      "log_sha256": "42ef5bf66bfd9e07c1841df8712b8da6a9a7541ea8e8ba73a7a9afbc9f9284df",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 4974,
+      "test_cases_passed": 331
+    },
+    {
+      "name": "release79 imagegraph-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-79-joined.log",
+      "log_sha256": "e32fd79cd60bab0be9f6d86632b5bb36ec4b963b1fc356340503d62dc15a0510",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 1853948,
+      "test_cases_passed": 2564
+    },
+    {
+      "name": "release79 nodegraph-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-79-joined.log",
+      "log_sha256": "fb759f25ee78ba677a11201b78641f1ac8d1be40e4525248f7842d580c19bbc8",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "release79 physics-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-79-joined.log",
+      "log_sha256": "aece3d3682e60fe44461fa38059338515caf4bd13fec9b40377357e79ea5d2cf",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "release79 render-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-79-joined.log",
+      "log_sha256": "347874eb9d079a227802f447137e2c1fcb1779aa38be2ad831fc58ef1335c32e",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 336655,
+      "test_cases_passed": 808
+    },
+    {
+      "name": "release79 server-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-79-joined.log",
+      "log_sha256": "f7ce73c4c77db58e4ae0153b715d82eca548abd8183b3e3e92efac7ecdf531ea",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 2180,
+      "test_cases_passed": 99
+    },
+    {
+      "name": "release79 studio-artwork-release-79-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-artwork-release-79-repaired.log",
+      "log_sha256": "a75cc5cf8077c6e273dfaaa0381bafc79b1ce8e4f98c8c3fc431bb0cfeca3a17",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 26,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "release79 studio-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-79-joined.log",
+      "log_sha256": "0eb7a1c0ca7e014248118e018b287a91cb2795db6d13006fc33fdb3023162f49",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "assertions_passed": 29723,
+      "test_cases_passed": 229
     }
   ],
   "excluded_or_failed_runs": [
@@ -9248,6 +9418,42 @@
       "result": "failed",
       "scope_note": "Artwork integration initial build and diagnostics only. Linked acceptance pending; no GPU or live Studio.",
       "reason": "Initial fixture/domain/roundtrip or pixel-oracle failure under investigation; not accepted."
+    },
+    {
+      "name": "release79 io-artwork-release-79-instance-diagnostic",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-artwork-release-79-instance-diagnostic.log",
+      "log_sha256": "8c213dc08a57f5afc1911eea91522cf61aa78170b78857eca231ab0fa72b15bb",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "reason": "Shared ORA instance nodes are opaque because valid empty animator records lack a native mapping; earlier diagnostic run also retains initial fixture/ordering failures."
+    },
+    {
+      "name": "release79 io-artwork-release-79-node-diagnostic",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-artwork-release-79-node-diagnostic.log",
+      "log_sha256": "a1f01c8b6346835feb27623de2210510960c8885e2849713a31907e179a504d8",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "reason": "Shared ORA instance nodes are opaque because valid empty animator records lack a native mapping; earlier diagnostic run also retains initial fixture/ordering failures."
+    },
+    {
+      "name": "release79 io-artwork-release-79-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-artwork-release-79-repaired.log",
+      "log_sha256": "3172a217cf14fce4143190ad352af4a46340c0020113ba75c351068a41c9cb52",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "reason": "Shared ORA instance nodes are opaque because valid empty animator records lack a native mapping; earlier diagnostic run also retains initial fixture/ordering failures."
+    },
+    {
+      "name": "release79 io-release-79-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-79-joined.log",
+      "log_sha256": "f9b634b830035f388bc32d2012d08ef5f4624f38a6117c983f7af3ad5a80d9f8",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Artwork repair CPU checkpoint; shared empty-instance animator import remains incomplete. No GPU, live Studio or licensed parity acceptance.",
+      "reason": "Shared ORA instance nodes are opaque because valid empty animator records lack a native mapping; earlier diagnostic run also retains initial fixture/ordering failures."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -10886,5 +11092,77 @@
     "status": "corrected frozen1560-line patch fully read by root; not applied; runtime pending",
     "patch_sha256": "16c056cda3484004bae50d47870d9b773855c06a74c245ba92903bd9556204df",
     "scope": "Incremental per-row persisted text accounting and actual string capacities; SourceBounds presence and fractional parser tests retained. Requires coherent native sampler and font carrier merge."
+  },
+  "source_artwork_repair_79": {
+    "status": "repair applied; closure builds pass; joined CPU 13/14 pass; only shared-instance empty animator mapping remains failing",
+    "patch_sha256": "a49c8c5c79af9403928118d01dfc4d217f6618a7b972a1fe5dbc638d5da1632d",
+    "paths": [
+      {
+        "path": "mono.engine/imagegraphexport/tests/SourceArtworkHost.cpp",
+        "base_sha256": "a5aa6abccd2ac84151373b4ba6e82f6731dd6602d0fc841f9d00074d7036e091",
+        "draft_sha256": "df0f4f3ef27b4928b9a8c0ba18a48311e880e4067a35cdb9f7868b5b6021411a"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "base_sha256": "eb405e77aeb8237dcac00dee4753e43d1b9e5453d625180147819f893e485784",
+        "draft_sha256": "070ef17d15be97b013064125e8544067d5d8eea334776d16f005be515d182ad8"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/SourceArtworkEdit.cpp",
+        "base_sha256": "b0b464a99045f42050753b6f2eb2883bffb4289db4e2369cf67454a984ea58bf",
+        "draft_sha256": "6f63d6e9db7be877a19d4222aa3b3843d355a398ab4d79de70bbad875d61af55"
+      },
+      {
+        "path": "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+        "base_sha256": "c59b648732c14f3fcb2699bf588dcffbfda09be853b0dbb95b5f329749c8bdbc",
+        "draft_sha256": "2dc9f40def433bc47fbc9767f1478ec8592b1d1441fe2d84ff0ddd82cbaa7fb4"
+      }
+    ],
+    "current_paths_sha256": {
+      "mono.engine/imagegraphexport/src/GraphSpriteHost.cpp": "08fa48f506e7e21192e00a5682818a3d4ee04b3bbcff5e488085ac348b0a4e6e",
+      "mono.engine/imagegraphexport/tests/SourceArtworkHost.cpp": "df0f4f3ef27b4928b9a8c0ba18a48311e880e4067a35cdb9f7868b5b6021411a",
+      "mono.engine/imagegraphio/docs/source-artwork-actions.md": "e5ede0a610624829b275fa567239e15acce126ef11d0e40af08bc74508915160",
+      "mono.engine/imagegraphio/include/engine/imagegraphio/SourceArtworkEdit.hpp": "b7c457e14f456c807aeb3738ccdf9cca4e6651741b6b7731920af6f48407325f",
+      "mono.engine/imagegraphio/src/PxcxImport.cpp": "070ef17d15be97b013064125e8544067d5d8eea334776d16f005be515d182ad8",
+      "mono.engine/imagegraphio/src/SourceArtworkEdit.cpp": "6f63d6e9db7be877a19d4222aa3b3843d355a398ab4d79de70bbad875d61af55",
+      "mono.engine/imagegraphio/src/SourceArtworkMetadata.cpp": "ab1c0eee00926854a98e19aa919d79c06661b2d409b53f5d43bd7054e2ce9edc",
+      "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp": "6b683efc7d6f3a874fe5d1ac1d6c42f006c9a43752ffa61c3584d7cc8275902f",
+      "mono.studio/src/ImageComposer.cpp": "2b6d6a13ae235326fe26721037f7e47f2f46078f5bf73d356191a68c039b574c",
+      "mono.studio/src/ImageGraphArtworkEdit.hpp": "a666a3fc04afec2ac5fb68a88176d7762fc2d38bab9f8a244631320bcca532b1",
+      "mono.studio/src/ImageGraphExportIntent.hpp": "75d3bebc2427a3096e748c68b681310de74ddc5c0ac6a7750c4ae361f8bb2fe5",
+      "mono.studio/tests/ImageGraphArtworkEdit.cpp": "7579f7b6a4a1f77964fc16f5e1185105e9754e8e642c801f8460b336df71178b"
+    },
+    "verified_findings": [
+      "Generated artwork/file/0 Values order differed from physical source input order; sorting constructor Values repairs checked PXC projection.",
+      "Synthetic coordinates repaired. Independent indexed ASE frame0/frame1 goldens pass: 10x10 RGBA canvas, cel offsets2,2 and0,0.",
+      "Generic mapped nongroup instance inheritance retained, but valid empty layer-name animator records currently force copy/sibling opaque. Opaque node guard remains intact.",
+      "Full IO244 cases243 pass1 fail; export66/2794 and Studio229/29723 pass. All other joined CPU scopes pass."
+    ],
+    "pending": "Map source-valid empty layer-name constructor animators, retain physical key provenance and rerun relevant/joined acceptance before marking artwork complete."
+  },
+  "font_review_79": {
+    "status": "outside packet review; not applied, built, linked or runtime accepted",
+    "reviewed_patches": {
+      "/tmp/pc-font-text67/core.patch": "4dab4c3aace631547e93f65cd2049c764886ee9668816c4df42ff87a2ecd5c69",
+      "/tmp/pc-font-text67/batch.patch": "b1b9e52395871700fbb19eef615be1294166c835c3ec504b471f34a719d34cfc",
+      "/tmp/pc-font-text67/tests.patch": "ebb979b91fb57806d5a0cd3f6c60fd6b4108f5cb827ff28a9969e10d0916ce59",
+      "/tmp/pc-font-text67/text-selector-io.patch": "0b1ebdaf9ed225b3bb490cfe3a769ce6573efa237dc63d882bf85766d67f25d9",
+      "/tmp/pc-font-text71/bitmap-supplement.patch": "63c1ef4cc6c41b6eb7057606944db68ea6edfa548b28c1ebab4a43c33b3b72df",
+      "/tmp/pc-font-text72/native-completion.patch": "13d018bfd41e13ee73edf65d33e6fd14a40ab12b2e1499338d944291fbedf60b"
+    },
+    "native_review": "All handwritten native-completion code and tests read. Generated case data regenerated and compared ignoring formatting; not manually reviewed as2058 individual data lines.",
+    "unicode_source": "https://www.unicode.org/Public/16.0.0/ucd/",
+    "unicode_official_input_sha256": {
+      "UnicodeData.txt": "ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f",
+      "SpecialCasing.txt": "8d5de354eef79f2395a54c9c7dcebbaf3d30fc962d0f85611ea97aa973a0c451",
+      "DerivedCoreProperties.txt": "39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd"
+    },
+    "unicode_verification": "Root fetched all three official files and byte-compared local pinned inputs; reviewed generator produced non-whitespace-identical FontCaseTables.inc.",
+    "remaining": [
+      "NativeFontTextCase actual reserve capacities need reconciliation before publication.",
+      "Client72 partial review1-480 only; whole app/main.cpp addition requires surgical merge against existing source.",
+      "Artifact, remaining product callers and coherent font/native sampler/parser integration pending.",
+      "Joined build/runtime, source/platform/reference parity and live Studio remain unproved."
+    ]
   }
 }
