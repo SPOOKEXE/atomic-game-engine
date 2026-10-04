@@ -5959,6 +5959,18 @@ namespace studio {
 					"with incoming and outgoing handles."
 				);
 			}
+			const auto applyKeyTransfer = [&] {
+				bool unchanged = false;
+				const bool accepted = ApplyDocumentEdit(
+					state,
+					[&](Document &document) {
+						return state.Keys.PrepareCommit(document, state.LastDiagnostic);
+					},
+					&unchanged
+				);
+				if (accepted || unchanged) state.Keys.PublishCommit();
+				return accepted || unchanged;
+			};
 			state.Dopesheet.Draw(
 				state.Authored,
 				state.DocumentRevision,
@@ -5971,20 +5983,12 @@ namespace studio {
 					});
 					if (accepted) state.Dopesheet.PublishCommit(state.Keys);
 					return accepted;
-				}
+				},
+				applyKeyTransfer
 			);
-			state.Keys.Draw(state.Authored, GetImageGraphFrame(state.Playback), state.LastDiagnostic, [&] {
-				bool unchanged = false;
-				const bool accepted = ApplyDocumentEdit(
-					state,
-					[&](Document &document) {
-						return state.Keys.PrepareCommit(document, state.LastDiagnostic);
-					},
-					&unchanged
-				);
-				if (accepted || unchanged) state.Keys.PublishCommit();
-				return accepted || unchanged;
-			});
+			state.Keys.Draw(
+				state.Authored, GetImageGraphFrame(state.Playback), state.LastDiagnostic, applyKeyTransfer
+			);
 			state.EaseKeys.Draw(
 				state.Authored, state.DocumentRevision, state.Keys, state.LastDiagnostic, [&] {
 					bool unchanged = false;

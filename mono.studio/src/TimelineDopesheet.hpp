@@ -1,9 +1,11 @@
 #pragma once
 
+#include "TimelineKeyActions.hpp"
 #include "TimelineKeyEditor.hpp"
 
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <limits>
 #include <map>
 #include <new>
@@ -20,6 +22,7 @@ namespace studio {
 			ImVec2 Position;
 		};
 		std::vector<Track> Tracks;
+		std::optional<Track> FocusedTrack;
 		std::vector<Marker> Markers;
 		std::vector<engine::imagegraph::Keyframe> Originals;
 		std::vector<engine::imagegraph::FrameTime> Destinations;
@@ -31,6 +34,9 @@ namespace studio {
 		engine::imagegraph::FrameTime Anchor, Fixed;
 		bool Dragging = false, Scaling = false, Copying = false, Boxing = false, Deleting = false,
 			 TargetsValid = true;
+		bool Transforming = false, KeyboardCopy = false;
+		TimelineKeyAction StagedAction = TimelineKeyAction::Quantize;
+		engine::imagegraph::FrameTime MouseAnchor;
 
 		std::optional<uint64_t> CacheBytes() const {
 			using namespace engine::imagegraph;
@@ -38,6 +44,7 @@ namespace studio {
 				Tracks.capacity() * sizeof(Track) + Markers.capacity() * sizeof(Marker) +
 				Destinations.capacity() * sizeof(FrameTime) +
 				(BoxSelection.capacity() + PreparedSelection.capacity()) * sizeof(ImageGraphKeyframeIdentity);
+			if (FocusedTrack) bytes += FocusedTrack->NodeId.capacity() + FocusedTrack->Port.capacity() + 2;
 			for (const auto &track : Tracks)
 				bytes += track.NodeId.size() + track.Port.size();
 			for (const auto &identity : BoxSelection)
@@ -53,6 +60,33 @@ namespace studio {
 			}
 			if (bytes > Limits::MaximumEvaluationBytes) return std::nullopt;
 			return bytes;
+		}
+		bool FocusTrack(
+			const Track &track, const TimelineKeyEditor &editor, engine::imagegraph::Diagnostic &error
+		) {
+			using namespace engine::imagegraph;
+			if (FocusedTrack && FocusedTrack->NodeId == track.NodeId && FocusedTrack->Port == track.Port)
+				return true;
+			const auto budget = editor.Remaining(true, true), held = CacheBytes();
+			// The old focus remains alive until the fully admitted candidate is
+			// published.
+			const uint64_t candidateBytes =
+				sizeof(Track) + track.NodeId.capacity() + track.Port.capacity() + 2;
+			const auto refuse = [&] {
+				error = {Status::LimitExceeded, {}, {}, "timeline focus exceeds the key payload budget"};
+				return false;
+			};
+			if (!budget || !held || *held > *budget || candidateBytes > *budget - *held) return refuse();
+			try {
+				Track candidate{track.NodeId, track.Port};
+				const uint64_t actual =
+					sizeof(Track) + candidate.NodeId.capacity() + candidate.Port.capacity() + 2;
+				if (actual > *budget - *held) return refuse();
+				FocusedTrack = std::move(candidate);
+				return true;
+			} catch (const std::bad_alloc &) {
+				return refuse();
+			}
 		}
 		bool UpdateBox(
 			const engine::imagegraph::Document &document,
@@ -153,11 +187,82 @@ namespace studio {
 			return true;
 		}
 		void Cancel() {
-			Dragging = Scaling = Copying = Boxing = Deleting = Prepared = false;
+			Dragging = Scaling = Copying = Boxing = Deleting = Prepared = Transforming = KeyboardCopy = false;
 			std::vector<engine::imagegraph::Keyframe>().swap(Originals);
 			std::vector<engine::imagegraph::FrameTime>().swap(Destinations);
 			std::vector<ImageGraphKeyframeIdentity>().swap(BoxSelection);
 			std::vector<ImageGraphKeyframeIdentity>().swap(PreparedSelection);
+		}
+		bool SelectAll(
+			const engine::imagegraph::Document &document,
+			TimelineKeyEditor &editor,
+			engine::imagegraph::Diagnostic &error
+		) try {
+			using namespace engine::imagegraph;
+			const auto budget = editor.Remaining(true, true), held = CacheBytes();
+			if (!budget || !held || *held > *budget) {
+				error = {Status::LimitExceeded, {}, {}, "key selection exceeds the timeline payload budget"};
+				return false;
+			}
+			uint64_t remaining = *budget - *held;
+			for (const auto &marker : Markers) {
+				if (marker.Key >= document.Keyframes.size()) {
+					error = {Status::InvalidValue, {}, {}, "key selection display is stale"};
+					return false;
+				}
+				const auto &key = document.Keyframes[marker.Key];
+				const uint64_t bytes =
+					sizeof(ImageGraphKeyframeIdentity) + key.NodeId.size() + key.Port.size();
+				if (bytes > remaining) {
+					error = {
+						Status::LimitExceeded, {}, {}, "key selection exceeds the timeline payload budget"
+					};
+					return false;
+				}
+				remaining -= bytes;
+			}
+			std::vector<ImageGraphKeyframeIdentity> selected;
+			selected.reserve(Markers.size());
+			for (const auto &marker : Markers)
+				selected.push_back(TimelineKeyEditor::Identity(document.Keyframes[marker.Key]));
+			editor.Selection = std::move(selected);
+			error = {};
+			return true;
+		} catch (const std::bad_alloc &) {
+			error = {engine::imagegraph::Status::LimitExceeded, {}, {}, "key selection allocation failed"};
+			return false;
+		}
+		bool BeginAction(
+			const engine::imagegraph::Document &document,
+			const TimelineKeyEditor &editor,
+			TimelineKeyAction action,
+			engine::imagegraph::Diagnostic &error
+		) {
+			using namespace engine::imagegraph;
+			if (Dragging || Boxing || Deleting || Transforming || editor.Active || editor.Selection.empty())
+				return false;
+			const auto budget = editor.Remaining(true, true), held = CacheBytes();
+			if (!budget || !held || *held > *budget || editor.Selection.size() > Limits::MaximumKeyframes ||
+				document.Keyframes.size() > Limits::MaximumKeyframes ||
+				uint64_t(editor.Selection.size()) *
+						(editor.Selection.size() + 2 * document.Keyframes.size()) >
+					64'000'000) {
+				error = {Status::LimitExceeded, {}, {}, "key action exceeds timeline payload or work bound"};
+				return false;
+			}
+			if (!CaptureImageGraphKeyframes(document, editor.Selection, Originals, error, *budget - *held))
+				return false;
+			const auto captured = CacheBytes();
+			if (!captured || *captured > *budget ||
+				!PrepareTimelineKeyDestinations(
+					Originals, action, Destinations, error, *budget - *captured
+				)) {
+				Cancel();
+				return false;
+			}
+			StagedAction = action;
+			Transforming = TargetsValid = true;
+			return true;
 		}
 		bool BeginDeletion(
 			const engine::imagegraph::Document &document,
@@ -195,12 +300,14 @@ namespace studio {
 			size_t index,
 			bool scale,
 			bool copy,
-			engine::imagegraph::Diagnostic &error
+			engine::imagegraph::Diagnostic &error,
+			bool keepCopySelection = false
 		) {
 			using namespace engine::imagegraph;
 			if (index >= document.Keyframes.size()) return false;
 			const auto &key = document.Keyframes[index];
-			if (copy || !editor.Selected(key)) editor.Selection = {TimelineKeyEditor::Identity(key)};
+			if ((copy && !keepCopySelection) || !editor.Selected(key))
+				editor.Selection = {TimelineKeyEditor::Identity(key)};
 			const auto budget = editor.Remaining(true, true);
 			const auto retained = CacheBytes();
 			const uint64_t clocks = editor.Selection.size() * sizeof(FrameTime);
@@ -266,7 +373,7 @@ namespace studio {
 			const auto budget = editor.Remaining(true, true);
 			uint64_t remaining = budget.value_or(0);
 			const auto retained = CacheBytes();
-			if ((!Dragging && !Deleting) || (!Deleting && !TargetsValid) || !retained ||
+			if ((!Dragging && !Deleting && !Transforming) || (!Deleting && !TargetsValid) || !retained ||
 				*retained > remaining)
 				return false;
 			if (Deleting && (Originals.empty() || document.Keyframes.size() > Limits::MaximumKeyframes ||
@@ -318,7 +425,23 @@ namespace studio {
 				if (std::find(selection.begin(), selection.end(), identity) == selection.end())
 					selection.push_back(std::move(identity));
 			}
-			if (!RetimeImageGraphKeyframes(document, Originals, Destinations, Copying, error, remaining))
+			if (Transforming && StagedAction == TimelineKeyAction::Distribute) {
+				// Source distribute also sorts the selected list. Keep equal-time selection order.
+				const uint64_t scratch = selection.size() * sizeof(ImageGraphKeyframeIdentity);
+				if (scratch > remaining) {
+					error = {
+						Status::LimitExceeded, {}, {}, "distributed selection sort exceeds the payload budget"
+					};
+					return false;
+				}
+				remaining -= scratch;
+				std::stable_sort(selection.begin(), selection.end(), [](const auto &a, const auto &b) {
+					return CompareFrameTime(a.Time, b.Time) < 0;
+				});
+			}
+			if (!RetimeImageGraphKeyframes(
+					document, Originals, Destinations, Copying, error, remaining, !Transforming
+				))
 				return false;
 			PreparedSelection = std::move(selection);
 			Prepared = true;
@@ -347,12 +470,30 @@ namespace studio {
 			TimelineKeyEditor &editor,
 			const engine::imagegraph::FrameTime &cursor,
 			engine::imagegraph::Diagnostic &error,
-			const Apply &apply
+			const Apply &apply,
+			const std::function<bool()> &paste = {}
 		) {
 			using namespace engine::imagegraph;
 			if (!Rebuild(document, revision, editor, error)) {
 				Cancel();
 				return;
+			}
+			std::optional<TimelineKeyAction> requestedAction;
+			if (ImGui::Button("Key actions")) ImGui::OpenPopup("##dopesheet-actions");
+			if (ImGui::BeginPopup("##dopesheet-actions")) {
+				const std::pair<const char *, TimelineKeyAction> actions[]{
+					{"Quantize", TimelineKeyAction::Quantize},
+					{"Align left", TimelineKeyAction::AlignLeft},
+					{"Align center", TimelineKeyAction::AlignCenter},
+					{"Align right", TimelineKeyAction::AlignRight},
+					{"Distribute", TimelineKeyAction::Distribute},
+					{"Reverse", TimelineKeyAction::Reverse}
+				};
+				ImGui::BeginDisabled(editor.Selection.empty() || Dragging || Boxing || editor.Active);
+				for (const auto &[label, action] : actions)
+					if (ImGui::MenuItem(label)) requestedAction = action;
+				ImGui::EndDisabled();
+				ImGui::EndPopup();
 			}
 			ImGui::TextUnformatted("Shift: select. Ctrl+Alt: scale. Alt: copy. Wheel: zoom. Middle: pan.");
 			const ImVec2 start = ImGui::GetCursorScreenPos();
@@ -365,11 +506,29 @@ namespace studio {
 			);
 			const bool hovered = ImGui::IsItemHovered();
 			const auto &io = ImGui::GetIO();
-			const bool deleteRequested = hovered && !Dragging && !Boxing && !editor.Active &&
-										 !io.WantTextInput && !ImGui::IsAnyItemActive() &&
-										 !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) &&
-										 !io.KeyCtrl && !io.KeyShift && !io.KeyAlt && !io.KeySuper &&
-										 ImGui::IsKeyPressed(ImGuiKey_Delete, false);
+			const bool keyboardAvailable = hovered && !Dragging && !Boxing && !editor.Active &&
+										   !io.WantTextInput && !ImGui::IsAnyItemActive() &&
+										   !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) &&
+										   !io.KeyShift && !io.KeyAlt && !io.KeySuper;
+			const bool deleteRequested =
+				keyboardAvailable && !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Delete, false);
+			if (keyboardAvailable && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false))
+				(void)SelectAll(document, editor, error);
+			if (keyboardAvailable && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false))
+				(void)editor.Copy(document, error);
+			const bool pasteRequested =
+				keyboardAvailable && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false);
+
+			if (keyboardAvailable && !io.KeyCtrl) {
+				if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+					requestedAction = TimelineKeyAction::Quantize;
+				else if (ImGui::IsKeyPressed(ImGuiKey_A, false))
+					requestedAction = TimelineKeyAction::AlignLeft;
+				else if (ImGui::IsKeyPressed(ImGuiKey_D, false))
+					requestedAction = TimelineKeyAction::Distribute;
+				else if (ImGui::IsKeyPressed(ImGuiKey_I, false))
+					requestedAction = TimelineKeyAction::Reverse;
+			}
 			const float labels = 140, header = 24, rowHeight = 24;
 			const double timelineX = start.x + labels;
 			if (!Dragging && !Boxing && hovered && io.MouseWheel != 0 && io.MousePos.x < start.x + 140)
@@ -399,6 +558,9 @@ namespace studio {
 				const std::string label = Tracks[row].NodeId + "." + Tracks[row].Port;
 				draw->PushClipRect({start.x, start.y + header}, {float(timelineX), start.y + size.y}, true);
 				draw->AddText({start.x + 4, y - ImGui::GetFontSize() * .5f}, IM_COL32_WHITE, label.c_str());
+				if (hovered && io.MousePos.x < timelineX && std::abs(io.MousePos.y - y) < rowHeight * .5f &&
+					ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+					(void)FocusTrack(Tracks[row], editor, error);
 				draw->PopClipRect();
 				draw->AddLine(
 					{float(timelineX), y + rowHeight * .5f},
@@ -471,6 +633,23 @@ namespace studio {
 						2
 					);
 				}
+			if (keyboardAvailable && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false) &&
+				!editor.Selection.empty()) {
+				const auto found =
+					std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
+						return TimelineKeyEditor::Identity(key) == editor.Selection.front();
+					});
+				FrameTime mouse;
+				if (found != document.Keyframes.end() &&
+					SplitFrameTime((io.MousePos.x - timelineX - PanX) / PixelsPerFrame, mouse, true) &&
+					ShiftFrameTime(mouse, {1, 0, false}, {}, mouse, false) &&
+					Begin(
+						document, editor, size_t(found - document.Keyframes.begin()), false, true, error, true
+					)) {
+					KeyboardCopy = true;
+					MouseAnchor = mouse;
+				}
+			}
 			if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !hit && !Dragging)
 				editor.Selection.clear();
 			if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !Dragging) {
@@ -543,7 +722,8 @@ namespace studio {
 				FrameTime endpoint;
 				const double mouseFrame = (io.MousePos.x - timelineX - PanX) / PixelsPerFrame;
 				if (SplitFrameTime(mouseFrame, endpoint, true) &&
-					ShiftFrameTime(endpoint, {1, 0, false}, {}, endpoint))
+					ShiftFrameTime(endpoint, {1, 0, false}, {}, endpoint) &&
+					(!KeyboardCopy || ShiftFrameTime(endpoint, MouseAnchor, Anchor, endpoint)))
 					(void)Update(endpoint, error);
 				else {
 					TargetsValid = false;
@@ -554,6 +734,20 @@ namespace studio {
 				else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
 					if (!apply()) Cancel();
 				}
+			}
+			if (pasteRequested && paste && FocusedTrack && editor.Begin(document, true, cursor, error)) {
+				const auto found = std::find_if(Tracks.begin(), Tracks.end(), [&](const auto &track) {
+					return track.NodeId == FocusedTrack->NodeId && track.Port == FocusedTrack->Port;
+				});
+				if (found != Tracks.end()) {
+					editor.TargetNode = FocusedTrack->NodeId;
+					editor.TargetPort = FocusedTrack->Port;
+					if (!paste()) editor.Cancel();
+				} else
+					editor.Cancel();
+			}
+			if (requestedAction && BeginAction(document, editor, *requestedAction, error)) {
+				if (!apply()) Cancel();
 			}
 			if (deleteRequested && !Dragging && !Boxing && BeginDeletion(document, editor, error)) {
 				if (!apply()) Cancel();

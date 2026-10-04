@@ -416,6 +416,7 @@ namespace studio {
 	);
 
 	// Applies exact per-key destination clocks with the same collision and pinned-original policy.
+	// Drag/paste clamp negative clocks by default; explicit source time actions preserve them.
 	// Budget covers logical key payloads, separately from non-key document data and host history.
 	bool RetimeImageGraphKeyframes(
 		engine::imagegraph::Document &document,
@@ -423,7 +424,8 @@ namespace studio {
 		std::span<const engine::imagegraph::FrameTime> destinations,
 		bool copy,
 		engine::imagegraph::Diagnostic &error,
-		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+		bool clampZero = true
 	);
 
 	// Targeted source paste maps one property directly, or multiple properties by source display name.

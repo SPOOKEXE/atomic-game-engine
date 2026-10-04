@@ -12478,7 +12478,7 @@
       "path": "/tmp/pc-studio-gestures96/DopesheetGestures.patch",
       "sha256": "0ca1bd764362cf126270ef60c577b57938fad3beb30a96cf99b724c175c03fcb"
     },
-    "status": "Originalsixpath packet and final focus/menu correction applied with exactbase/final hashes; build89 passed. Runtime found two exact signed-distribution clock mismatches in onecase; correction pending.",
+    "status": "Integrated and verified. Original sixpath packet, bounded focus/menu correction and signeddistribution native arithmetic correction applied with exactbase/final hashes. Build90 and focused11/173 plus joinedStudioCPU247/29967 pass. Earlier89 failures retained.",
     "review": "Source shortcuts and focused paste, relative full-selection duplication, signed explicit time actions, deterministic ties-to-even, global distribution and per-channel reverse use existing staged history paths. Physical native group channels tested; shared source animator aliases remain separate unfinished requirement.",
     "issues": [
       "FocusedTrack label-click string cloning lacks preflight/exception admission.",
@@ -12513,7 +12513,41 @@
       "passed": 245,
       "assertions": 29961,
       "failed_assertions": 2
-    }
+    },
+    "issues_resolved": {
+      "focus": "Old/candidate focus string capacities admitted before allocation; exception and capacity refusal preserve old target.",
+      "menu_fixture": "Actual Key actions position is initialized from current ImGui layout.",
+      "clock_arithmetic": "Native first+(last-first)*fraction preserves mathematical unit clock in demonstrated signed interval and keeps exactendpoint tuples; no snapping or weakenedassertions. SourceVM IEEE order remains unproved."
+    },
+    "distribution_correction": {
+      "path": "/tmp/pc-studio-distribute89-final/DistributeClock.patch",
+      "sha256": "495834f2a6b84e800614c66a87ce141bb8803050413f97e609563239623066f6",
+      "root_review": "All patchbodies and contract/manifest fullyread; allbase/final hashes match. Real ImGui distribute/reverse/history keeps exactoracles and highprecisiondiagnostics; explicit crossingzero tuplecase added."
+    },
+    "build90": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-90-dopesheet.log",
+      "sha256": "617ccd4f409affb995acf6ca2d7d09fdc09ac1c2cce977f7824591172b5c4338",
+      "exit": 0
+    },
+    "focused": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/dopesheet-release-90.log",
+      "sha256": "6c74dd05d304575163a7ba8389817e902b4617d4569e0f941b576ff6574a77cf",
+      "exit": 0,
+      "cases": 11,
+      "assertions": 173
+    },
+    "joined": {
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-90.log",
+      "sha256": "da9964e204a2650c206d620dc5b2c705d7d84290973ceba2777ba8aea9ed65bf",
+      "exit": 0,
+      "cases": 247,
+      "assertions": 29967
+    },
+    "remaining": [
+      "Shared source animator alias edits and whole-channel transactions",
+      "Animation-region selection and endpointbinding",
+      "LiveStudio workflows and licensed reference validation"
+    ]
   },
   "cache_project_integration_88": {
     "packet": {
@@ -12736,15 +12770,33 @@
         "path": "/tmp/pc-kuwahara82-review-fix/supplement.patch",
         "sha256": "21b9a866e5d3d5b7bfd8102dc631e23b654790aaed0ff1e2a710bc4bb1a4bf7b"
       },
-      "supplement_review": "All narrow bodies read; mappedtoggle original-row/control-eligibility proof and refusalfixtures requested before integration."
+      "supplement_review": "All narrow bodies read; mappedtoggle original-row/control-eligibility proof and refusalfixtures requested before integration.",
+      "final_supplement": {
+        "path": "/tmp/pc-kuwahara82-root-frozen89/supplement.patch",
+        "sha256": "86284e7e09b0800400720b095733c656677df765b5d423e5d84bb388ab3018a9",
+        "root_review": "All narrow bodies/manifest/hashreceipts read. Root independentlyread actual AddRows120, SourceSlotLengths271, Catalogue456; synthetic toggles/attributes cannot form laterprocessorrows. Real authored/linkedarray refusal fixtures pending runtime. Earlier supplemental path was superseded by author; unique rootfrozen copy is current authority."
+      }
     },
     "blobify": {
       "status": "Root read all228producer,564nativefixtures,163integration,IO/profile and independentPythonliteral oracle. Source equations JSON/sourcehash replay and correction acceptance pending. Noapply/runtime.",
       "corrections": [
         "Deterministic half-even replaces ambientnearbyint",
         "Confirm synthetic toggle/interpolation arrays cannot create later unquotedrows and prove refusal paths"
-      ]
+      ],
+      "final_supplement": {
+        "path": "/tmp/pc-blobify83-root-frozen89/supplement.patch",
+        "sha256": "258f28fcb05b6669eb481d7f98aa1dd5a98561d7780286e9dd54d7b55323963d",
+        "root_review": "All narrow bodies/manifest/hashreceipts read; same staticattributeproofchecked. Extra original numericoracle formatting correction pendingread/apply. No runtime."
+      }
     },
     "rounding_source": "https://sourceware.org/glibc/manual/2.25/html_node/Rounding-Functions.html"
+  },
+  "font_boundary_profile_queue_90": {
+    "packet": {
+      "path": "/tmp/pc-font-boundary87/FontBoundary87.patch",
+      "sha256": "7cc04ba32c427b63740f8f7d48d1ed9e5d3bbd3048aef889812528d65e78942b"
+    },
+    "status": "Root fullyread contract and tenpathmanifest only; patchbodies notyetread/applied/runtimeprofiled.",
+    "scope": "Real granted BDF/Inter coverage and SDF, Unicode Text literals and owned artifact codecs; existing profiler/heap/memorycounter machinery with no benchmarkfiles."
   }
 }

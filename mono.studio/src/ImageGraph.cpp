@@ -2219,7 +2219,8 @@ namespace studio {
 		std::span<const engine::imagegraph::FrameTime> destinations,
 		bool copy,
 		engine::imagegraph::Diagnostic &error,
-		uint64_t availableBytes
+		uint64_t availableBytes,
+		bool clampZero
 	) {
 		using namespace engine::imagegraph;
 		error = {};
@@ -2263,12 +2264,12 @@ namespace studio {
 		for (size_t index = 0; index < originals.size(); ++index) {
 			const auto &original = originals[index];
 			const FrameTime destination =
-				destinations[index].NegativeFrame ? FrameTime{} : destinations[index];
+				clampZero && destinations[index].NegativeFrame ? FrameTime{} : destinations[index];
 			bool alreadyMoved = false;
 			if (!copy)
 				for (size_t prior = 0; prior < index; ++prior) {
 					const FrameTime previous =
-						destinations[prior].NegativeFrame ? FrameTime{} : destinations[prior];
+						clampZero && destinations[prior].NegativeFrame ? FrameTime{} : destinations[prior];
 					if (original.NodeId == originals[prior].NodeId &&
 						original.Port == originals[prior].Port && destination == previous)
 						alreadyMoved = true;
