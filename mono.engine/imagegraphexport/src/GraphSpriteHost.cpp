@@ -2,6 +2,7 @@
 
 #include <engine/bake/Aseprite.hpp>
 #include <engine/bake/GameMakerRoom.hpp>
+#include <engine/imagegraphio/SourceArtworkEdit.hpp>
 
 #include <algorithm>
 #include <fstream>
@@ -11,6 +12,41 @@
 namespace engine::imagegraphexport {
 	namespace {
 		using namespace engine::imagegraph;
+		std::optional<uint64_t> AsepriteRetainedBytes(const engine::bake::AsepriteDocument &doc) {
+			uint64_t total = sizeof(doc);
+			const auto add = [&](uint64_t count, uint64_t size = 1) {
+				if (count > (UINT64_MAX - total) / size) return false;
+				total += count * size;
+				return true;
+			};
+			const auto texture = [&](const engine::assets::TextureData &image) {
+				if (!add(image.Pixels.capacity()) ||
+					!add(image.Mips.capacity(), sizeof(std::vector<std::byte>)))
+					return false;
+				for (const auto &level : image.Mips)
+					if (!add(level.capacity())) return false;
+				return true;
+			};
+			if (!add(doc.Layers.capacity(), sizeof(engine::bake::AsepriteLayer)) ||
+				!add(doc.Frames.capacity(), sizeof(engine::bake::AsepriteFrame)) ||
+				!add(doc.Tags.capacity(), sizeof(engine::bake::AsepriteTag)) ||
+				!add(doc.Tilesets.capacity(), sizeof(engine::bake::AsepriteTileset)) ||
+				!add(doc.Palette.capacity(), sizeof(std::array<uint8_t, 4>)) ||
+				!add(doc.InspectionJson.capacity() + 1))
+				return std::nullopt;
+			for (const auto &layer : doc.Layers)
+				if (!add(layer.Name.capacity() + 1)) return std::nullopt;
+			for (const auto &tag : doc.Tags)
+				if (!add(tag.Name.capacity() + 1)) return std::nullopt;
+			for (const auto &frame : doc.Frames) {
+				if (!add(frame.Cels.capacity(), sizeof(engine::bake::AsepriteCel))) return std::nullopt;
+				for (const auto &cel : frame.Cels)
+					if (!texture(cel.Pixels)) return std::nullopt;
+			}
+			for (const auto &set : doc.Tilesets)
+				if (!add(set.Name.capacity() + 1) || !texture(set.Pixels)) return std::nullopt;
+			return total;
+		}
 		const Value *Input(const HostNodeInvocation &in, std::string_view name) {
 			auto it = std::find_if(in.Inputs.begin(), in.Inputs.end(), [&](const auto &v) {
 				return v.Port == name;
@@ -303,6 +339,54 @@ namespace engine::imagegraphexport {
 		}
 		engine::bake::AsepriteDocument doc;
 		if (!engine::bake::ReadAseprite(bytes, doc, failure, in.MaximumOperationBytes / 4)) return false;
+		std::optional<size_t> sourceLayerIndex;
+		if (type == "pc.ase_layer") {
+			const auto name = Text(in, "layer_name");
+			for (size_t i = 0; i < doc.Layers.size(); ++i)
+				if (doc.Layers[i].Name == name) sourceLayerIndex = i;
+			if (!sourceLayerIndex) {
+				failure = "ASE layer name is absent from the pinned source raw-name map";
+				return false;
+			}
+		}
+		const auto decodedHeld = AsepriteRetainedBytes(doc);
+		const auto previousHeld = HostCaptureRetainedPayloadBytes(out);
+		if (!decodedHeld || !previousHeld || *decodedHeld > in.MaximumOperationBytes ||
+			*previousHeld > in.MaximumOperationBytes - *decodedHeld ||
+			owned.capacity() > in.MaximumOperationBytes - *decodedHeld - *previousHeld) {
+			failure = "ASE metadata decoder and prior observation overlap exceeds operation bounds";
+			return false;
+		}
+		const uint64_t profileMaximum =
+			in.MaximumOperationBytes - *decodedHeld - *previousHeld - owned.capacity();
+		Value sourceContent;
+		const Value *profileContent = nullptr;
+		if (type == "pc.ase_file_read") {
+			sourceContent = Content(doc, bytes, std::min(in.MaximumOperationBytes / 4, profileMaximum));
+			profileContent = &sourceContent;
+		} else
+			profileContent = Input(in, "ase_data");
+
+		engine::imagegraphio::SourceArtworkMetadata metadata;
+		Diagnostic profileDiagnostic;
+		if (!profileContent || engine::imagegraphio::ReadSourceAsepriteMetadata(
+								   in.Authored, *profileContent, metadata, profileDiagnostic, profileMaximum
+							   ) != Status::Ok) {
+			failure = profileDiagnostic.Message.empty() ? "ASE source inspection profile is absent"
+														: profileDiagnostic.Message;
+			return false;
+		}
+		if (metadata.Layers.size() != doc.Layers.size() || metadata.Tags.size() > doc.Tags.size()) {
+			failure = "ASE source layer or tag profile differs from owned binary data";
+			return false;
+		}
+		for (size_t i = 0; i < metadata.Layers.size(); ++i)
+			doc.Layers[i].Name = std::move(metadata.Layers[i].Name);
+		doc.Tags.clear();
+		// The selected first-frame tag chunk fits the already decoded cumulative table.
+		for (auto &tag : metadata.Tags)
+			doc.Tags.push_back({std::move(tag.Name), uint16_t(tag.First), uint16_t(tag.Last)});
+		metadata = {}; // The profile scratch is retired before rendering and receipt cloning.
 		const auto emptyImage = [&](engine::assets::TextureData &image, bool crop) {
 			image.Width = crop ? 1 : doc.Width;
 			image.Height = crop ? 1 : doc.Height;
@@ -323,9 +407,13 @@ namespace engine::imagegraphexport {
 				if (t == doc.Tags.end()) throw std::runtime_error("Aseprite current tag not found");
 				emptyFrame = frame < t->First || frame > t->Last;
 			}
-			auto content = Content(doc, bytes, in.MaximumOperationBytes / 4);
-			capture.Outputs.push_back({"content", content});
-			capture.Outputs.push_back({"raw_data", std::move(content)});
+			auto &content = std::get<StructValue>(sourceContent);
+			for (auto &[key, value] : content.Data->Fields) {
+				if (key == "layers") value = Names(doc.Layers);
+				if (key == "tags") value = Names(doc.Tags);
+			}
+			capture.Outputs.push_back({"content", sourceContent});
+			capture.Outputs.push_back({"raw_data", std::move(sourceContent)});
 			capture.Outputs.push_back({"frame_amount", int64_t(doc.Frames.size())});
 			capture.Outputs.push_back({"path", Text(in, "path")});
 			capture.Outputs.push_back({"layers", Names(doc.Layers)});
@@ -429,13 +517,21 @@ namespace engine::imagegraphexport {
 			if (type == "pc.ase_layer") {
 				layer = Text(in, "layer_name");
 				if (layer.empty()) throw std::runtime_error("Aseprite layer name is empty");
-				auto l = std::find_if(doc.Layers.begin(), doc.Layers.end(), [&](const auto &l) {
-					return l.Name == layer;
-				});
-				if (l == doc.Layers.end()) throw std::runtime_error("Aseprite layer name not found");
+				auto l = doc.Layers.begin() + *sourceLayerIndex;
+				const auto requestedLayer = layer;
+				// The source map selects an index, while the codec selects a name. Use one bounded
+				// private unique selector so suffix collisions do not change the selected subtree.
+				for (size_t serial = 0;; ++serial) {
+					layer = "native-artwork-selection/" + std::to_string(serial);
+					if (std::none_of(doc.Layers.begin(), doc.Layers.end(), [&](const auto &item) {
+							return item.Name == layer;
+						}))
+						break;
+				}
+				l->Name = layer;
 				frame = Bool(in, "loop", false) ? in.Request.Tick % doc.Frames.size() : in.Request.Tick;
 				emptyFrame = frame >= doc.Frames.size();
-				capture.Outputs.push_back({"layer_name", layer});
+				capture.Outputs.push_back({"layer_name", requestedLayer});
 				capture.Outputs.push_back({"opacity", l->Opacity / 255.0});
 			} else {
 				auto name = Text(in, "tag");
@@ -443,6 +539,8 @@ namespace engine::imagegraphexport {
 					return t.Name == name;
 				});
 				if (tag == doc.Tags.end()) throw std::runtime_error("Aseprite tag name not found");
+				if (tag->First > tag->Last || tag->Last >= doc.Frames.size())
+					throw std::runtime_error("ASE tag frame interval is outside the native render profile");
 				frame = tag->First + in.Request.Tick % (tag->Last - tag->First + 1);
 				emptyFrame = false;
 				capture.Outputs.push_back({"frame_range", Vector2{double(tag->First), double(tag->Last)}});
