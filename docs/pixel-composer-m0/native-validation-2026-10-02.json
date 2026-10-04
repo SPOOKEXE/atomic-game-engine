@@ -12457,5 +12457,51 @@
       "GPU and live Studio workflows",
       "Licensed reference comparison"
     ]
+  },
+  "feedback_preflight_review_88": {
+    "packet": {
+      "path": "/tmp/pc-large-sequence70/feedback-journal/BudgetedFeedbackPreflight.patch",
+      "sha256": "c391e2f584c6c239421c42a2c3ec293ac99e68cb9064fce7a58ef20f7993f369"
+    },
+    "status": "Root fully read all758 lines. No live apply or runtime.",
+    "review": "Actual residual allowance reaches preflight and core retains reported added residency. Journal clones exact effective nodes through PrepareResolvedHostCapture, charges published/candidate/growth/clone overlap, reissues reached facts before same-clock reuse, restores provider with RAII, and publishes journal with completed state only.",
+    "remaining": [
+      "Additional effective local-override recipe proof",
+      "Actual cancellation token rather than capture refusal",
+      "Multi-prefix journal growth and inactive branch pruning",
+      "New preflight allowance API forwarded through all product wrappers",
+      "Coherent runtime acceptance"
+    ]
+  },
+  "dopesheet_gesture_review_88": {
+    "packet": {
+      "path": "/tmp/pc-studio-gestures96/DopesheetGestures.patch",
+      "sha256": "0ca1bd764362cf126270ef60c577b57938fad3beb30a96cf99b724c175c03fcb"
+    },
+    "status": "Root fully read1098-line six-path packet and contract; live apply-check passes, no apply/runtime.",
+    "review": "Source shortcuts and focused paste, relative full-selection duplication, signed explicit time actions, deterministic ties-to-even, global distribution and per-channel reverse use existing staged history paths. Physical native group channels tested; shared source animator aliases remain separate unfinished requirement.",
+    "issues": [
+      "FocusedTrack label-click string cloning lacks preflight/exception admission.",
+      "Menu fixture ActionButton position uninitialized."
+    ],
+    "correction_review": {
+      "path": "/tmp/pc-studio-gestures96-review/GestureReview.patch",
+      "sha256": "2806d7be57ca44b6ef21441d13c1bc938ea2fc3a0e66dc7c299eeb50940ff8ab",
+      "status": "Rejected before apply: entire files reformatted to default two-space style, requiring repository style and narrow regenerated correction."
+    },
+    "rounding_source": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Maths_And_Numbers/Number_Functions/round.htm"
+  },
+  "cache_project_integration_88": {
+    "packet": {
+      "path": "/tmp/pc-cache-project-observation79/project-observation-counted.patch",
+      "sha256": "23c6739a296a20736b2d6df69464cb96a991833d834e646f42588edd429b16fa"
+    },
+    "status": "Root fully read256 lines and applied exact reviewed packet. All five candidate hashes match; fresh19-target release build running, runtime unverified.",
+    "scope": "Copied authoritative project clock/last endpoint/loading/appending facts remain independent of node clock. Only explicit NativePlayedPrefix changes warmup project clock. Cache observation identity participates in host refresh. Fixtures use actual text-provider call counts and output widths to distinguish refresh from exact retry; invalid endpoint preserves prior replay.",
+    "remaining": [
+      "Fresh build and runtime fixture acceptance",
+      "Actual cache group executors and caller binding",
+      "Studio animation-region owner and endpoint binding"
+    ]
   }
 }
