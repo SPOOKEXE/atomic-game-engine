@@ -79,48 +79,52 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Preserve separate Mirror X/Y animators through group replay and PXC edits.
 - [x] Integrate typed arguments across client, Studio and exports; pass joined CPU validation.
 - [x] Select adjacent Dopesheet keys by double-clicking their gap, with one-step undo.
-- [_] Add separate/combine X/Y animation controls.
-- [_] Preserve X/Y animation through groups and PXC edits.
-- [_] Add source-compatible argument handling.
-- [_] Establish exact parity with a licensed reference build and matched captures.
-- [x] Integrate bounded font hosts and Text rendering across client, Studio and exports; pass joined CPU validation.
-- [x] Verify real font decoding, Unicode Text pixels and font artifacts; profile all seven boundary workloads.
-- [_] Finish Composer font loading.
-- [x] Add bounded native wrapped-text sizing with real font metrics, source integer controls and exact observation overrides; pass joined CPU tests.
-- [_] Profile native wrapped-text measurement workloads.
-- [_] Finish text layout and rendering.
 - [x] Add Dopesheet copy/paste, duplication and time actions with atomic undo; pass headless gesture tests.
-- [_] Finish Dopesheet gestures for shared source animator aliases.
-- [x] Preserve original PXC region records through edits and bind range exports to their owned project cursor.
 - [x] Add animation-region creation, selection, settings and resizing with atomic undo; pass headless gesture and joined CPU tests.
-- [_] Bind cache playback and loading to selected animation-region bounds.
-- [_] Finish Studio host workflows.
-- [_] Verify Transform GPU pixels.
-- [_] Verify skybox GPU pixels.
-- [_] Complete remaining Composer GPU checks.
-- [x] Preserve source timeline endpoints through native saves, PXC edits and integral-frame exports; pass joined CPU validation.
-- [x] Integrate ASE, ORA and Krita artwork actions and preserve their edits through PXC saves.
-- [x] Integrate source timeline normalization, seeking and WAV length edits in Studio; pass joined CPU validation.
-- [_] Finish audio workflows.
-- [_] Finish feedback seek/reset and fractional-key playback.
-- [x] Preserve project-clock cache observations and refresh captured inputs without replacing cached frames; pass joined CPU validation.
+- [x] Add bounded native wrapped-text sizing with real font metrics, source integer controls and exact observation overrides; pass joined CPU tests.
 - [x] Add saved-image cache playback and Studio Cache, Remove and Match Length actions; pass PXC, pixel export, headless gesture and joined CPU tests.
+- [x] Integrate ASE, ORA and Krita artwork actions and preserve their edits through PXC saves.
+- [x] Integrate bounded font hosts and Text rendering across client, Studio and exports; pass joined CPU validation.
+- [x] Integrate source timeline normalization, seeking and WAV length edits in Studio; pass joined CPU validation.
+- [x] Preserve original PXC region records through edits and bind range exports to their owned project cursor.
+- [x] Preserve project-clock cache observations and refresh captured inputs without replacing cached frames; pass joined CPU validation.
+- [x] Preserve source timeline endpoints through native saves, PXC edits and integral-frame exports; pass joined CPU validation.
+- [x] Verify real font decoding, Unicode Text pixels and font artifacts; profile all seven boundary workloads.
+- [_] Add separate/combine X/Y animation controls.
+- [_] Add source-compatible argument handling.
+- [_] Bind cache playback and loading to selected animation-region bounds.
+- [_] Complete remaining Composer GPU checks.
+- [_] Establish exact parity with a licensed reference build and matched captures.
+- [_] Finish Composer font loading.
+- [_] Finish Dopesheet gestures for shared source animator aliases.
+- [_] Finish Studio host workflows.
+- [_] Finish audio workflows.
 - [_] Finish cache groups.
-- [_] Finish selected-cache Clear.
-- [_] Finish fractional cache playback.
-- [_] Load saved frame caches.
-- [_] Finish mesh consumers and bindings.
-- [_] Implement remaining 3D nodes.
-- [_] Finish large-sequence playback.
-- [_] Finish remaining PXC edits.
 - [_] Finish export formats.
-- [_] Verify modified-project compatibility.
+- [_] Finish feedback seek/reset and fractional-key playback.
+- [_] Finish fractional cache playback.
+- [_] Finish large-sequence playback.
+- [_] Finish mesh consumers and bindings.
+- [_] Finish remaining PXC edits.
+- [x] Finish selected-cache Clear.
+- [_] Finish text layout and rendering.
+- [_] Implement remaining 3D nodes.
 - [_] Implement remaining catalogue executors.
-- [_] Verify catalogue controls, errors, animation and parity evidence.
-- [_] Integrate camera rendering.
 - [_] Integrate Studio camera previews.
+- [_] Integrate camera rendering.
+- [_] Load saved frame caches.
+- [_] Preserve X/Y animation through groups and PXC edits.
+- [x] Profile native wrapped-text measurement workloads.
+- [_] Validate Hilbert and Kisrhombille generators, grouping, image formats and bounded execution.
 - [_] Validate all integrated changes with joined CPU tests.
+- [x] Validate signed Text trimming and whole-batch work limits with joined CPU tests.
+- [x] Verify Transform GPU pixels.
+- [_] Verify catalogue controls, errors, animation and parity evidence.
 - [_] Verify live Studio workflows.
+- [_] Verify modified-project compatibility.
+- [x] Verify skybox GPU pixels.
+
+The [October 5 continuation checks](docs/pixel-composer-m0/native-validation-2026-10-05.json) record joined CPU suites, native wrapped-text profiling and scoped Vulkan checks for Composer, Transform, cameras and grouped skyboxes. Licensed reference parity and live Studio remain open.
 
 Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
