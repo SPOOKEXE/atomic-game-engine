@@ -11755,6 +11755,22 @@
       "Exact newly written merge/correction hunks versus previously reviewed component packets.",
       "Fresh coherent ABI build and runtime suites.",
       "Licensed parity and live Studio verification."
-    ]
+    ],
+    "root_packet_integrity": {
+      "changed_paths": 95,
+      "candidate_hashes": "All match frozen manifest.",
+      "live_base_hashes": "All match frozen manifest; new paths absent.",
+      "apply_check_exit": 0
+    },
+    "source_extractor_runtime": {
+      "command": "python3 /tmp/pc-font-join78/tree/scripts/tests/pixel_composer_extract_source_test.py",
+      "exit": 0,
+      "tests": 19,
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/source-extractor-font82.log",
+      "log_sha256": "9c5619d8f944d1ff995180212c5d3becb95a5d29d562c034ac356a434579caec",
+      "scope": "Outside coherent extractor on synthetic source fixtures, including Text selector metadata. Not joined font execution acceptance.",
+      "test_sha256": "82a6755b6069076bd1c0dea26e95b631f9e1950ef40a0174b77b182b52850454",
+      "extractor_sha256": "bb328a5822c3b56d316f166148da18000f20561e7fb0c8c4e1ee08494a6cc966"
+    }
   }
 }
