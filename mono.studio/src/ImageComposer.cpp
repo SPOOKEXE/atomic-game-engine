@@ -4,6 +4,7 @@
 #include "ImageGraphAnimationControl.hpp"
 #include "ImageGraphArguments.hpp"
 #include "ImageGraphArrayEditor.hpp"
+#include "ImageGraphArtworkEdit.hpp"
 #include "ImageGraphCacheClearAction.hpp"
 #include "ImageGraphCanvasInputs.hpp"
 #include "ImageGraphChoices.hpp"
@@ -791,6 +792,37 @@ namespace studio {
 						complete = engine::imagegraphexport::ExecuteGraphHostNode(
 							state.Authored, request, target->NodeId, *snapshot, captured, failure
 						);
+						if (complete && target->ArtworkAction) {
+							bool changed = false;
+							const uint64_t nextRevision =
+								state.DocumentRevision == UINT64_MAX ? 1 : state.DocumentRevision + 1;
+							const engine::imagegraphio::SourceArtworkEditOptions options{
+								*target->ArtworkAction,
+								target->MatchRegionNames,
+								true,
+								state.DocumentRevision,
+								nextRevision,
+								std::nullopt
+							};
+							complete = detail::ApplyPreparedImageGraphArtwork(
+								state.Authored,
+								state.History,
+								state.GroupHost.Replay,
+								captured,
+								options,
+								error,
+								changed
+							);
+							if (!complete) failure = error.Message;
+							if (changed) {
+								const auto frame = GetImageGraphFrame(state.Playback);
+								ApplyImageGraphTimeline(state.Authored, state.Playback);
+								(void)SetImageGraphAuthorFrame(state.Playback, frame);
+								AuthoredDocumentChanged(state);
+								state.GroupHost.Revision = state.DocumentRevision;
+								state.CanvasNeedsReload = true;
+							}
+						}
 						failed = !complete;
 					} else if (batch.Automatic &&
 							   !detail::SourceExportTriggered(snapshot->Values(), batch.Event)) {
@@ -3539,6 +3571,35 @@ namespace studio {
 					false,
 					detail::ImageGraphExportEvent::Update
 				);
+			}
+
+			if (selectedNode &&
+				(selectedNode->Type == "pc.ase_file_read" || selectedNode->Type == "pc.ora_file_read" ||
+				 selectedNode->Type == "pc.krita_file_read")) {
+				const bool aseArtwork = selectedNode->Type == "pc.ase_file_read";
+				const auto action = [&](engine::imagegraphio::SourceArtworkAction kind,
+										bool matchNames = true) {
+					detail::ImageGraphExportIntent::Target target{std::string(nodeId), {}, {}, {}};
+					target.ArtworkAction = kind;
+					target.MatchRegionNames = matchNames;
+					BeginExportIntent(
+						state,
+						detail::ImageGraphExportIntent::Kind::HostNode,
+						std::span(&target, 1),
+						false,
+						detail::ImageGraphExportEvent::Update
+					);
+				};
+				if (ImGui::Button("Generate layers"))
+					action(engine::imagegraphio::SourceArtworkAction::GenerateLayers);
+				if (aseArtwork) {
+					if (ImGui::Button("Match animation length"))
+						action(engine::imagegraphio::SourceArtworkAction::MatchFrames);
+					if (ImGui::Button("Import tags as regions"))
+						action(
+							engine::imagegraphio::SourceArtworkAction::ImportTags, !ImGui::GetIO().KeyShift
+						);
+				}
 			}
 
 			if (ImGui::Button(writing ? "Revoke files" : "Revoke reads")) {

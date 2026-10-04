@@ -1,4 +1,5 @@
 #pragma once
+
 #include "ImageGraphComposerExports.hpp"
 #include "ImageGraphExportPreparation.hpp"
 #include "ImageGraphExportTriggers.hpp"
@@ -7,6 +8,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/imagegraph/PendingHostObservations.hpp>
 #include <engine/imagegraphexport/GraphExportSession.hpp>
+#include <engine/imagegraphio/SourceArtworkEdit.hpp>
 
 namespace studio::detail {
 	// A pending export owns its observation and cursor. Audio remains caller-owned and
@@ -17,6 +19,8 @@ namespace studio::detail {
 		struct Target {
 			std::string NodeId, Root, ImageEncoder, VideoEncoder;
 			std::string ProjectPath{};
+			std::optional<engine::imagegraphio::SourceArtworkAction> ArtworkAction{};
+			bool MatchRegionNames = true;
 			bool operator==(const Target &) const = default;
 		};
 		struct Batch {
