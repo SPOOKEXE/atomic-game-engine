@@ -51,6 +51,7 @@ namespace engine::imagegraph::detail {
 			bool antialias,
 			bool sdf,
 			std::span<const uint32_t> characters,
+			std::span<const FontMeasurement> measurements,
 			std::optional<FontValue> &output,
 			AllocationReservation &outputCharge,
 			FontTextFontSelection &selection,
@@ -74,10 +75,15 @@ namespace engine::imagegraph::detail {
 										  ? SourceFontContextRetainedBytes(*c.Request.SourceFonts)
 										  : std::optional<uint64_t>{0};
 			if (!contextBytes) return c.Fail(Status::InvalidValue, "font source context is malformed", role);
-			const uint64_t requestBytes = *contextBytes + sizeof(SourceFontRequest) +
-										  characters.size() * sizeof(uint32_t) +
-										  std::max(resolved.size(), std::string{}.capacity()) +
-										  std::max(role.size(), std::string{}.capacity());
+			uint64_t requestBytes = *contextBytes + sizeof(SourceFontRequest) +
+									characters.size() * sizeof(uint32_t) +
+									std::max(resolved.size(), std::string{}.capacity()) +
+									std::max(role.size(), std::string{}.capacity());
+			if (measurements.size() > 1)
+				return c.Fail(Status::InvalidValue, "Text font measurement request count is malformed", role);
+			if (!measurements.empty())
+				requestBytes += sizeof(FontMeasurement) +
+								std::max(measurements.front().Text.size(), std::string{}.capacity());
 			if (!nodeBytes || *nodeBytes > c.AvailableBytes() ||
 				requestBytes > c.AvailableBytes() - *nodeBytes)
 				return c.Fail(Status::LimitExceeded, "font request clone exceeds live byte budget", role);
@@ -96,6 +102,10 @@ namespace engine::imagegraph::detail {
 			request.Antialias = antialias;
 			request.SignedDistanceField = sdf;
 			request.Characters.assign(characters.begin(), characters.end());
+			request.Measurements.assign(measurements.begin(), measurements.end());
+			const auto retainedRequest = SourceFontRequestRetainedBytes(request);
+			if (!retainedRequest || !charge->Resize(*retainedRequest))
+				return c.Fail(Status::LimitExceeded, "Text font request capacities exceed admission", role);
 			if (!ObserveSourceFont(c, request, selection.Observations[slot])) return false;
 			const auto &observed = *selection.Observations[slot].Record;
 			if (observed.Presence == SourceFontPresence::AbsentFile) return true;
@@ -220,6 +230,7 @@ namespace engine::imagegraph::detail {
 		uint32_t size,
 		bool antialias,
 		bool sdf,
+		std::span<const FontMeasurement> measurements,
 		FontTextFontState &state,
 		FontTextFontSelection &selection
 	) {
@@ -297,6 +308,7 @@ namespace engine::imagegraph::detail {
 					antialias,
 					sdf,
 					characters,
+					measurements,
 					state.Primary,
 					state.PrimaryCharge,
 					selection,
@@ -315,6 +327,7 @@ namespace engine::imagegraph::detail {
 					antialias,
 					sdf,
 					characters,
+					measurements,
 					state.Fallback,
 					state.FallbackCharge,
 					selection,

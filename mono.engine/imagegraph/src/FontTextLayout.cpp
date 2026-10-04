@@ -1,5 +1,7 @@
 #include "FontTextLayout.hpp"
 
+#include "FontNativeMeasurements.hpp"
+#include "FontPayload.hpp"
 #include "FontUnicode.hpp"
 #include "SourceGradient.hpp"
 
@@ -31,6 +33,16 @@ namespace engine::imagegraph::detail {
 		return FontUnitAdvance(font, 0xd800 + (character >> 10)) +
 			   FontUnitAdvance(font, 0xdc00 + (character & 1023));
 	}
+	std::optional<uint64_t> FontTextNativeMeasurementAdmissionBytes(const FontData &font, size_t textBytes) {
+		if (textBytes > Limits::MaximumTextBytes || font.Glyphs.size() > MaximumFontGlyphs ||
+			font.Frames.size() > MaximumFontGlyphs || font.Measurements.size() > MaximumFontGlyphs)
+			return {};
+		const auto fontBytes = FontStorageBytes(font, true);
+		if (fontBytes > Limits::MaximumArrayBytes) return {};
+		// Unit workspace is at most one 16-byte record per UTF8 byte. The remaining
+		// allowance covers request/result string copies, table headers and SSO.
+		return fontBytes + uint64_t(textBytes) * 24 + 512;
+	}
 	Status BuildFontTextLayout(
 		const FontData &font,
 		std::string_view text,
@@ -45,8 +57,8 @@ namespace engine::imagegraph::detail {
 		};
 		if (text.size() > Limits::MaximumTextBytes || options.ChangeCase > 3 || options.TrimType > 2 ||
 			!std::isfinite(options.Tracking) || !std::isfinite(options.LineGap) ||
-			!std::isfinite(options.MaximumLineWidth) || options.MaximumLineWidth < 0 ||
-			!std::isfinite(options.Range.X) || !std::isfinite(options.Range.Y))
+			!std::isfinite(options.MaximumLineWidth) || !std::isfinite(options.Range.X) ||
+			!std::isfinite(options.Range.Y))
 			return fail(Status::InvalidValue, "text layout controls are malformed");
 		FontScalarCursor cursor{text};
 		size_t characters = 0;
@@ -75,11 +87,23 @@ namespace engine::imagegraph::detail {
 		}
 
 		const size_t maximumLines = std::min(Limits::MaximumArrayElements, characters * 2 + 1);
-		const uint64_t admitted =
+		uint64_t admitted =
 			sizeof(FontTextLayout) +
 			4 * (text.size() + (options.ObservedCasedText ? options.ObservedCasedText->size() : 0) +
 				 characters + 32) +
 			maximumLines * (sizeof(FontTextLine) + 32);
+		uint64_t nativeMeasurementBytes = 0;
+		if (options.FullTextSize && options.MaximumLineWidth != 0) {
+			const auto extra = FontTextNativeMeasurementAdmissionBytes(
+				font, options.ObservedCasedText ? options.ObservedCasedText->size() : text.size()
+			);
+			if (!extra || *extra > maximumBytes || admitted > maximumBytes - *extra)
+				return fail(
+					Status::LimitExceeded, "native full-text measurement staging exceeds byte budget"
+				);
+			nativeMeasurementBytes = *extra;
+			admitted += *extra;
+		}
 		if (admitted > maximumBytes)
 			return fail(Status::LimitExceeded, "text layout staging exceeds byte budget");
 		FontTextLayout candidate;
@@ -244,12 +268,16 @@ namespace engine::imagegraph::detail {
 			if (found != font.Measurements.end()) {
 				candidate.Width = found->Width;
 				candidate.Height = found->Height;
-			} else if (options.MaximumLineWidth != 0)
-				return fail(
-					Status::UnsupportedExecution,
-					"wrapped full-text size requires recorded source measurements"
+			} else if (options.MaximumLineWidth != 0) {
+				FontMeasurement request{candidate.RawText, options.MaximumLineWidth, -1, 0, 0};
+				std::vector<FontMeasurement> measured;
+				const auto status = MeasureNativeFontData(
+					font, {&request, 1}, nativeMeasurementBytes, 16u * 1024u * 1024u, measured, failure
 				);
-			else {
+				if (status != Status::Ok) return status;
+				candidate.Width = measured.front().Width;
+				candidate.Height = measured.front().Height;
+			} else {
 				candidate.Width = 0;
 				candidate.Height = 0;
 				size_t offset = 0;

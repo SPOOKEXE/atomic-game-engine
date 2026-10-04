@@ -55,6 +55,32 @@ captured source draws; native rendering does not consume an ambient stream.
 `round_position`, `blend_mode` and `character_range` are read but do not affect
 the pinned active source drawing branch.
 
+Full Text Size measures the cased raw string before trim. With nonzero
+maximum line width, it uses the separately pinned `Split_TextBlock` sizing
+rules rather than the visible Text line wrapper. The graph's integer line-width
+socket normalizes authored values first. Direct font requests retain their
+original fractional width as the receipt identity; native sizing checks and truncates
+its width and separation to int32. Negative widths and the literal 10,000,000
+sentinel use the source no-wrap CR/LF branch. Positive wrapping treats only
+ASCII space as a word delimiter and preserves overlong words and the source
+all-space substring endpoint swap. Widths truncating to zero can produce an
+empty measurement. Native height uses the decoded font line height, independent
+of Text tracking, monospacing and visible line gap in this source branch.
+
+Exact matching observed measurements always win. Otherwise ordinary coverage,
+bitmap and native distance fonts use real owned advances; SourceObserved fonts
+require their matching measurement. File requests carry the cased raw string,
+original width and separation -1. Playing fonts and owned bitmap fonts use
+the same bounded measurement helper without generating another font.
+
+Before the first provider call, a processor prepass quotes every selected
+row's casing and measurement work using the existing schedule. It invokes no
+provider or random consumer. Unicode mapping statistics reuse the existing
+case tables; contextual sigma has equal UTF-8 width and cannot add spaces.
+Space-run rescans, glyph lookups and request/record comparisons have checked
+work caps. The byte allowance covers borrowed font/request storage, prior
+results, candidate strings and decoded-unit workspace before replacement.
+
 Glyph drawing uses explicit CPU pixel-center coverage and source alpha
 multiply blending. The background uses the source Normal blend sequence; Atlas
 glyphs use source alpha-add and own both glyph and original output pixels.

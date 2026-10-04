@@ -86,6 +86,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate bounded font hosts and Text rendering across client, Studio and exports; pass joined CPU validation.
 - [x] Verify real font decoding, Unicode Text pixels and font artifacts; profile all seven boundary workloads.
 - [_] Finish Composer font loading.
+- [x] Add bounded native wrapped-text sizing with real font metrics, source integer controls and exact observation overrides; pass joined CPU tests.
+- [_] Profile native wrapped-text measurement workloads.
 - [_] Finish text layout and rendering.
 - [x] Add Dopesheet copy/paste, duplication and time actions with atomic undo; pass headless gesture tests.
 - [_] Finish Dopesheet gestures for shared source animator aliases.

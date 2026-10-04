@@ -24,8 +24,9 @@ namespace engine::imagegraph::detail {
 	const FontGlyph *FontGlyphForUnit(const FontData &, uint32_t);
 	double FontUnitAdvance(const FontData &, uint32_t);
 	double FontScalarAdvance(const FontData &, uint32_t);
+	std::optional<uint64_t> FontTextNativeMeasurementAdmissionBytes(const FontData &, size_t textBytes);
 	// Uses observed coverage metrics without locale state. Source ASCII casing is explicit; Unicode
-	// casing and wrapped full-text source measurements require recorded source observations.
+	// casing follows the selected context; exact measurements override native font sizing.
 	Status BuildFontTextLayout(
 		const FontData &,
 		std::string_view,

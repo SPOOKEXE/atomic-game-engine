@@ -18,7 +18,9 @@ namespace engine::imagegraph::detail {
 	}
 	uint64_t FontStorageBytes(const FontValue &value, bool retained) {
 		if (!value.Data) return 0;
-		const auto &data = *value.Data;
+		return FontStorageBytes(*value.Data, retained);
+	}
+	uint64_t FontStorageBytes(const FontData &data, bool retained) {
 		uint64_t bytes = sizeof(FontData);
 		if (!AddFontBytes(bytes, retained ? data.Frames.capacity() : data.Frames.size(), sizeof(Image)) ||
 			!AddFontBytes(bytes, retained ? data.Glyphs.capacity() : data.Glyphs.size(), sizeof(FontGlyph)) ||
@@ -43,14 +45,15 @@ namespace engine::imagegraph::detail {
 		return bytes;
 	}
 	bool ValidFontPayload(const FontValue &value) {
-		if (!value.Data) return false;
-		const auto &data = *value.Data;
+		return value.Data && ValidFontData(*value.Data);
+	}
+	bool ValidFontData(const FontData &data) {
 		if (data.Raster > FontRasterProfile::NativeSignedDistance ||
 			data.Characters > FontCharacterProfile::UnicodeScalar || data.Frames.size() > MaximumFontGlyphs ||
 			data.Glyphs.size() > MaximumFontGlyphs || data.Measurements.size() > MaximumFontGlyphs ||
 			data.Identity.size() > Limits::MaximumTextBytes || !std::isfinite(data.LineHeight) ||
 			data.LineHeight < 0 || !std::isfinite(data.MissingAdvance) || !std::isfinite(data.SpaceAdvance) ||
-			FontStorageBytes(value, true) > Limits::MaximumArrayBytes)
+			FontStorageBytes(data, true) > Limits::MaximumArrayBytes)
 			return false;
 		if (data.Raster == FontRasterProfile::NativeSignedDistance) {
 			if (data.DistanceSpread < 2 || data.DistanceSpread > 32 || data.GlyphMapComplete ||
@@ -108,9 +111,9 @@ namespace engine::imagegraph::detail {
 		}
 		for (const auto &measurement : data.Measurements)
 			if (measurement.Text.size() > Limits::MaximumTextBytes ||
-				!std::isfinite(measurement.MaximumLineWidth) || measurement.MaximumLineWidth < 0 ||
-				!std::isfinite(measurement.LineGap) || !std::isfinite(measurement.Width) ||
-				measurement.Width < 0 || !std::isfinite(measurement.Height) || measurement.Height < 0)
+				!std::isfinite(measurement.MaximumLineWidth) || !std::isfinite(measurement.LineGap) ||
+				!std::isfinite(measurement.Width) || measurement.Width < 0 ||
+				!std::isfinite(measurement.Height) || measurement.Height < 0)
 				return false;
 		return true;
 	}

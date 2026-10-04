@@ -35,6 +35,7 @@ namespace engine::imagegraph::detail {
 		uint32_t size,
 		bool antialias,
 		bool sdf,
+		std::span<const FontMeasurement> measurements,
 		FontTextFontState &,
 		FontTextFontSelection &
 	);

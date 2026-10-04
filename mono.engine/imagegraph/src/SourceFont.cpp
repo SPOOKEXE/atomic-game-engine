@@ -243,8 +243,7 @@ namespace engine::imagegraph {
 		}
 		for (const auto &measurement : request.Measurements)
 			if (!bytes.Text(measurement.Text) || !std::isfinite(measurement.MaximumLineWidth) ||
-				measurement.MaximumLineWidth < 0 || !std::isfinite(measurement.LineGap) ||
-				measurement.Width != 0 || measurement.Height != 0)
+				!std::isfinite(measurement.LineGap) || measurement.Width != 0 || measurement.Height != 0)
 				return {};
 		return bytes.Bytes;
 	}

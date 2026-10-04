@@ -174,6 +174,89 @@ namespace engine::imagegraph::detail {
 		}
 		return true;
 	}
+	bool QuoteFontTextMeasurementRow(NodeContext &c, FontTextBatch &batch) {
+		const auto *raw = c.Find("text");
+		const auto *text = raw ? std::get_if<std::string>(raw) : nullptr;
+		if (!text)
+			return c.Fail(Status::UnsupportedExecution, "Text requires a processor-selected string", "text");
+		const bool full = c.Boolean("use_full_text_size");
+		const double width = c.Scalar("max_line_width");
+		int64_t changeCase = 0;
+		if (!TextChoice(c, "change_case", 0, changeCase) || c.FailureCode != Status::Ok) return false;
+		if (changeCase < 0 || changeCase > 3)
+			return c.Fail(
+				Status::UnsupportedExecution, "Text case choice is outside source branches", "change_case"
+			);
+		std::optional<std::string_view> observed;
+		std::string failure;
+		const auto status =
+			FindFontTextCase(*text, uint8_t(changeCase), c.Request.SourceFonts, observed, failure);
+		if (status != Status::Ok) return c.Fail(status, std::move(failure), "change_case");
+		if (changeCase && !observed) {
+			if (text->size() > (FontTextWorkLimit - batch.CaseWork) / 32)
+				return c.Fail(
+					Status::LimitExceeded, "native Text case batch exceeds work bound", "change_case"
+				);
+			batch.CaseWork += uint64_t(text->size()) * 32;
+		}
+		if (!full || width == 0 || text->empty()) return true;
+		uint64_t bytes = 0, points = 0, spaces = 0, run = 0;
+		const auto emit = [&](uint32_t point) {
+			bytes += point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
+			run = point == 0x20 ? run + 1 : 0;
+			spaces = std::max(spaces, run);
+			return ++points <= Limits::MaximumArrayElements && bytes <= Limits::MaximumTextBytes;
+		};
+		if (changeCase && !observed) {
+			FontScalarCursor cursor{*text};
+			uint32_t point = 0;
+			bool titleStart = true;
+			while (cursor.Next(point)) {
+				const auto *mapping =
+					changeCase == 3 && !titleStart ? nullptr : NativeCaseMapping(point, changeCase != 1);
+				if (mapping) {
+					for (size_t i = 0; i < mapping->Count; ++i)
+						if (!emit(mapping->Output[i]))
+							return c.Fail(
+								Status::LimitExceeded,
+								"native Text case output exceeds source limits",
+								"change_case"
+							);
+				} else if (!emit(point))
+					return c.Fail(
+						Status::LimitExceeded, "native Text case output exceeds source limits", "change_case"
+					);
+				titleStart = point == 0x20;
+			}
+			if (cursor.Invalid)
+				return c.Fail(Status::InvalidValue, "native Text casing requires valid UTF-8", "change_case");
+			// Contextual sigma substitutes a same-width non-space scalar, so this quote is exact.
+		} else {
+			const auto source = observed ? *observed : std::string_view{*text};
+			bytes = source.size();
+			for (const auto byte : source) {
+				run = byte == ' ' ? run + 1 : 0;
+				spaces = std::max(spaces, run);
+			}
+		}
+		if (!std::isfinite(width) || bytes > Limits::MaximumTextBytes)
+			return c.Fail(
+				Status::InvalidValue, "native Text measurement input is malformed", "max_line_width"
+			);
+		const uint64_t perByte = NativeFontMeasurementWorkPerByte +
+								 (width >= 1 && !(width >= 10000000 && width < 10000001) ? 2 * spaces : 0);
+		const auto *fallbackValue = c.Find("fallback_font");
+		const auto *fallbackPath = fallbackValue ? std::get_if<std::string>(fallbackValue) : nullptr;
+		const uint64_t roles = fallbackPath && !fallbackPath->empty() ? 2 : 1;
+		const uint64_t available = (FontTextWorkLimit - batch.MeasurementWork) / roles;
+		if (available < NativeFontMeasurementWorkPerByte ||
+			bytes > (available - NativeFontMeasurementWorkPerByte) / perByte)
+			return c.Fail(
+				Status::LimitExceeded, "native Text measurement batch exceeds work bound", "max_line_width"
+			);
+		batch.MeasurementWork += (bytes * perByte + NativeFontMeasurementWorkPerByte) * roles;
+		return true;
+	}
 	bool PrepareFontTextRow(NodeContext &c, FontTextBatch &batch) {
 		ENGINE_PROFILE("imagegraph.text.prepare_row");
 		if (batch.Admitted || c.ProcessorRow != batch.PreparedRows ||
@@ -219,15 +302,7 @@ namespace engine::imagegraph::detail {
 			*text, uint8_t(changeCase), c.Request.SourceFonts, options.ObservedCasedText, caseFailure
 		);
 		if (caseStatus != Status::Ok) return c.Fail(caseStatus, std::move(caseFailure), "change_case");
-		if (changeCase && !options.ObservedCasedText && c.Request.SourceFonts &&
-			c.Request.SourceFonts->TextCaseProfile == FontTextCaseProfile::UnicodeDefault) {
-			constexpr uint64_t maximumCaseWork = 16u * 1024u * 1024u;
-			// Decoding, suffix classification and two mapping passes share one batch work cap.
-			if (text->size() > (maximumCaseWork - batch.CaseWork) / 32)
-				return c.Fail(
-					Status::LimitExceeded, "native Text case batch exceeds work bound", "change_case"
-				);
-			batch.CaseWork += uint64_t(text->size()) * 32;
+		if (changeCase && !options.ObservedCasedText) {
 			const auto maximum = c.AvailableBytes();
 			auto reservation = c.ReserveWorkspace(maximum, "change_case");
 			if (!reservation) return false;
@@ -249,6 +324,24 @@ namespace engine::imagegraph::detail {
 		Vector2 unusedRange;
 		if (!TextVec2(c, "character_range", {32, 128}, unusedRange) || c.FailureCode != Status::Ok)
 			return false;
+		AllocationReservation measurementCharge;
+		std::optional<FontMeasurement> fullMeasurement;
+		if (options.FullTextSize && options.MaximumLineWidth != 0 && !text->empty()) {
+			const auto rawText =
+				options.ObservedCasedText ? *options.ObservedCasedText : std::string_view{*text};
+			auto reserved = c.ReserveWorkspace(
+				sizeof(FontMeasurement) + std::max(rawText.size(), std::string{}.capacity()), "max_line_width"
+			);
+			if (!reserved) return false;
+			fullMeasurement.emplace(
+				FontMeasurement{std::string{rawText}, options.MaximumLineWidth, -1, 0, 0}
+			);
+			if (!reserved->Resize(sizeof(FontMeasurement) + fullMeasurement->Text.capacity()))
+				return c.Fail(
+					Status::LimitExceeded, "Text measurement request backing exceeds budget", "max_line_width"
+				);
+			measurementCharge = std::move(*reserved);
+		}
 		if (!SelectTextFont(
 				c,
 				*text,
@@ -259,6 +352,8 @@ namespace engine::imagegraph::detail {
 				uint32_t(size),
 				antialias,
 				sdf,
+				fullMeasurement ? std::span<const FontMeasurement>{&*fullMeasurement, 1}
+								: std::span<const FontMeasurement>{},
 				batch.Fonts,
 				row.SelectedFont
 			))
@@ -273,11 +368,24 @@ namespace engine::imagegraph::detail {
 			++batch.PreparedRows;
 			return true;
 		}
-		const uint64_t layoutBytes =
+		uint64_t layoutBytes =
 			sizeof(FontTextLayout) +
 			4 * (text->size() + (options.ObservedCasedText ? options.ObservedCasedText->size() : 0) +
 				 MaximumFontGlyphs + 32) +
 			Limits::MaximumArrayElements * (sizeof(FontTextLine) + 32);
+		if (options.FullTextSize && options.MaximumLineWidth != 0) {
+			const auto extra = FontTextNativeMeasurementAdmissionBytes(
+				*row.SelectedFont.Font.Data,
+				options.ObservedCasedText ? options.ObservedCasedText->size() : text->size()
+			);
+			if (!extra || *extra > c.AvailableBytes() || layoutBytes > c.AvailableBytes() - *extra)
+				return c.Fail(
+					Status::LimitExceeded,
+					"Text native measurement layout exceeds staging budget",
+					"max_line_width"
+				);
+			layoutBytes += *extra;
+		}
 		auto layoutCharge = c.ReserveWorkspace(layoutBytes, "text");
 		if (!layoutCharge) return false;
 		std::string failure;
@@ -285,6 +393,15 @@ namespace engine::imagegraph::detail {
 			*row.SelectedFont.Font.Data, *text, options, layoutBytes, row.Layout, failure
 		);
 		if (layoutStatus != Status::Ok) return c.Fail(layoutStatus, std::move(failure), "text");
+		uint64_t retainedLayout = sizeof(FontTextLayout) + row.Layout.RawText.capacity() +
+								  row.Layout.Text.capacity() +
+								  row.Layout.Lines.capacity() * sizeof(FontTextLine);
+		for (const auto &line : row.Layout.Lines)
+			retainedLayout += line.Text.capacity();
+		if (!layoutCharge->Resize(retainedLayout))
+			return c.Fail(
+				Status::LimitExceeded, "Text retained layout capacities exceed staging budget", "text"
+			);
 		row.LayoutCharge = std::move(*layoutCharge);
 		row.GenerateAtlas = c.Boolean("atlas");
 		row.ClearBackground = c.Boolean("render_background");

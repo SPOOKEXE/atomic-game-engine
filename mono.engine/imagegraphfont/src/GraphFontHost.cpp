@@ -61,8 +61,6 @@ namespace engine::imagegraphfont {
 		if (request.Role == "bitmap_texture" || request.FontInput)
 			return fail("bitmap atlas observations never use the file font provider");
 
-		if (!request.Measurements.empty())
-			return fail("source whole-string measurements require owned source observations");
 		const FontGrant *selected = nullptr;
 		for (const auto &grant : Grants)
 			if (grant.NodeId == request.Authored.Id && grant.Resource == request.Role &&
@@ -166,6 +164,26 @@ namespace engine::imagegraphfont {
 				font.Frames.push_back(std::move(image));
 			}
 			font.Glyphs.push_back(std::move(owned));
+		}
+		if (!request.Measurements.empty()) {
+			const auto heldCandidate = SourceFontObservationRetainedBytes(candidate);
+			uint64_t held = GrantBytes + priorBytes + *requestBytes;
+			if (!heldCandidate || bytes.capacity() > maximumBytes - held ||
+				decoded.RetainedBytes > maximumBytes - held - bytes.capacity() ||
+				*heldCandidate > maximumBytes - held - bytes.capacity() - decoded.RetainedBytes)
+				return fail("native font measurement coexistence exceeds operation budget");
+			held += bytes.capacity() + decoded.RetainedBytes + *heldCandidate;
+			// The child operation also counts its borrowed font/request backing. Keeping
+			// that conservative reservation prevents measurement growth using decode storage.
+			const auto measured = MeasureNativeSourceFont(
+				*candidate.Font,
+				request.Measurements,
+				maximumBytes - held,
+				16u * 1024u * 1024u,
+				font.Measurements,
+				failure
+			);
+			if (measured != Status::Ok) return false;
 		}
 		const auto retained = SourceFontObservationRetainedBytes(candidate);
 		if (!retained ||

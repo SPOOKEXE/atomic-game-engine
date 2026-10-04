@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::imagegraph {
@@ -71,6 +72,22 @@ namespace engine::imagegraph {
 			std::string &failure
 		) = 0;
 	};
+	// Native full-text sizing uses real advances and line metrics, with bounded pinned wrap rules.
+	// Exact matching source measurements take precedence. SourceObserved requires those records.
+	// Borrowed inputs, prior result, candidate and workspace share maximumOperationBytes;
+	// refusal preserves result. The work quote counts text scans and glyph/identity comparisons.
+	inline constexpr uint64_t NativeFontMeasurementWorkPerByte = 32;
+	// The pinned positive wrap branch can revisit a run of spaces. This checked
+	// quote is also used by the Text batch before provider work or output pixels.
+	std::optional<uint64_t> NativeSourceFontMeasurementWork(std::string_view text, double maximumLineWidth);
+	Status MeasureNativeSourceFont(
+		const FontValue &,
+		std::span<const FontMeasurement> requests,
+		uint64_t maximumOperationBytes,
+		uint64_t maximumWorkUnits,
+		std::vector<FontMeasurement> &result,
+		std::string &failure
+	);
 	// Validates a borrowed complete font and measures its owned backing without cloning.
 	std::optional<uint64_t> SourceFontValueRetainedBytes(const FontValue &);
 	std::optional<uint64_t> SourceFontContextRetainedBytes(const SourceFontContext &);

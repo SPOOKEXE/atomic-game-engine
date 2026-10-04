@@ -810,6 +810,11 @@ namespace engine::imagegraph::detail {
 			if (!BeginFontTextBatch(context, count, textBatch)) return false;
 			for (size_t row = 0; row < count; ++row) {
 				uint64_t scratchOwned = 0;
+				if (!selectRow(row, scratchOwned) || !QuoteFontTextMeasurementRow(context, textBatch))
+					return false;
+			}
+			for (size_t row = 0; row < count; ++row) {
+				uint64_t scratchOwned = 0;
 				if (!selectRow(row, scratchOwned) || !PrepareFontTextRow(context, textBatch)) return false;
 			}
 			selected.clear();

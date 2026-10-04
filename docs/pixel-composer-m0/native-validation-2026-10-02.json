@@ -14844,5 +14844,468 @@
       "No new GPU or live Studio verification.",
       "No licensed matched reference captures."
     ]
+  },
+  "wrapped_font_integration_104": {
+    "status": "Accepted bounded native full-text sizing across real file-font hosts, owned bitmap fonts and retained playing fonts. Direct request fractional identity and exact observed overrides are preserved; graph Text keeps source integer socket normalization. All fifteen joined CPU scopes pass after fixture correction. Broad source/licensed font parity and new-path profiling remain open.",
+    "packet": {
+      "path": "/tmp/pc-font-layout96/WrappedFontLayout96.patch",
+      "sha256": "7f9a12204fb3f2919874c2764f2cc37ed58297b7509f0e9cf51e3be6aee56250"
+    },
+    "manifest": {
+      "paths": [
+        {
+          "path": "mono.engine/imagegraph/docs/FontText.md",
+          "base_sha256": "bc4ecc6b17256fbcb12a4817eb911fa100317d6445614f17039dcf1b4db4112a",
+          "candidate_sha256": "7dd07a824f532fecfb54b096710ef438dcff34d3ba4005ab2f590cfc5f40e854",
+          "bytes": 9650
+        },
+        {
+          "path": "mono.engine/imagegraph/include/engine/imagegraph/SourceFont.hpp",
+          "base_sha256": "c414595e388945ec1f8f3638a6b519e7a7fc2f3cb599187b91da7c5c7e6d011d",
+          "candidate_sha256": "cd0b903cfa962fcf84f9c6caf1dada1a8d52b7ede5540698623fe1beef571c15",
+          "bytes": 4457
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontNativeMeasurements.cpp",
+          "base_sha256": null,
+          "candidate_sha256": "6175657a9461243ebeae39962d1ec9d331c523f93e0d6787f4334c21e34ff7ba",
+          "bytes": 15102
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontNativeMeasurements.hpp",
+          "base_sha256": null,
+          "candidate_sha256": "b2ce1eedbb4249aa86fa974026702b6905d273dfd442e8115f871ee04824e6a0",
+          "bytes": 311
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontPayload.cpp",
+          "base_sha256": "58cf88e47ce1f5a686c883b61938a7287d172be56f6a0d1d6353339d4fa4b73a",
+          "candidate_sha256": "8f2f851f4cceb276f87ac9c4c6ed3107e8c517bb0fe4236e2310a9f441e396f5",
+          "bytes": 8142
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontPayload.hpp",
+          "base_sha256": "48c71f9a1e33aa1f8d0c6b7070ce7cb1b492d79c7c522f10c131f1fe9a815b99",
+          "candidate_sha256": "16859882554d9e0b9739e80fa8a1aa982795c3f56ab4eaeb36578d15922765fd",
+          "bytes": 478
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontTextBatch.cpp",
+          "base_sha256": "8cfefea33b601aabbce316da91968cb44d8185c2412f84e33779886a7a96e5e2",
+          "candidate_sha256": "89e7518791cd1bc66bf27842ecf76744fc92b81bf674d420aaf04995820974e8",
+          "bytes": 41914
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontTextBatch.hpp",
+          "base_sha256": "666e4b34835970bc959e6983f2d1fa43e33e1a108a80070e094bb74412253ed7",
+          "candidate_sha256": "9defb8a61c3d837b1862111e0d9d85778d15d84ec6191d46e2dc9fee5f85100a",
+          "bytes": 1727
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontTextFontState.cpp",
+          "base_sha256": "99cf4f33a635c1144ead965d9a39318ba0f3612ce27f108785c0194435c73a67",
+          "candidate_sha256": "dd176d56a9efbf46973141b472c1e7c5268689a3e0c1ec06edace7ebc679b6c6",
+          "bytes": 14369
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontTextFontState.hpp",
+          "base_sha256": "f5a1d774ffe517c6c8c2b7c43340e41f6a4d7d244064acbf1d4223c571e218ea",
+          "candidate_sha256": "588df86960561d2e02cff6c61fe9e787d7c623733ccd74def3e7d490c45a4b5a",
+          "bytes": 1018
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontTextLayout.cpp",
+          "base_sha256": "a3f3940c4b4188cf97d351fb1c174251d593fda39993bcfa583857bafde6c0e8",
+          "candidate_sha256": "0309f3a906f780b4453b63593d4566e128b0f78af9cefdf1800dce474afd5313",
+          "bytes": 13501
+        },
+        {
+          "path": "mono.engine/imagegraph/src/FontTextLayout.hpp",
+          "base_sha256": "df954d224003fc8dbb25e5f080ed6e60fbe58a97c7f498d39fa98d8b38f02bed",
+          "candidate_sha256": "f620b9df5c7f3aa8f4256888582facd7b204c962319911910037a81563ccecaf",
+          "bytes": 1295
+        },
+        {
+          "path": "mono.engine/imagegraph/src/ProcessorBatch.cpp",
+          "base_sha256": "e503b6ff22d7f127319c18319af1ca113cf83cc0c691b347299b567a397a82f3",
+          "candidate_sha256": "2db5ce951eabcbee47978dc01ca0d27035a4631ded1556160312cc1cee05bed4",
+          "bytes": 46061
+        },
+        {
+          "path": "mono.engine/imagegraph/src/SourceFont.cpp",
+          "base_sha256": "87959390f47eafc93c6df112963d0bb6bbbb15b56cfd0b33815916eb1b515515",
+          "candidate_sha256": "05ea7a903af892825e722b3d7c77cebf77ee39a3c7f64a80604ecfb70ba82a7b",
+          "bytes": 15670
+        },
+        {
+          "path": "mono.engine/imagegraph/tests/NativeFontMeasurements.cpp",
+          "base_sha256": null,
+          "candidate_sha256": "ee75863be07704b68d98db428d72bb9f9508f3b93d093615b9d7bfa16238c484",
+          "bytes": 10536
+        },
+        {
+          "path": "mono.engine/imagegraphfont/src/GraphFontHost.cpp",
+          "base_sha256": "83318c4bcd6cc5ac57ff090ebb638508faad2e0b84a77bf7674182478dbc7578",
+          "candidate_sha256": "8684ee227b213966b6ef14c8479bdd202b7a91cccc313a5c37657096ccf95833",
+          "bytes": 9917
+        },
+        {
+          "path": "mono.engine/imagegraphfont/tests/WrappedFontBatch.cpp",
+          "base_sha256": null,
+          "candidate_sha256": "4a38a0b563ab69c246e832e06ab105eec08705bb9d49df1c3ec11cd67b749daa",
+          "bytes": 10282
+        },
+        {
+          "path": "mono.engine/imagegraphfont/tests/WrappedFontHost.cpp",
+          "base_sha256": null,
+          "candidate_sha256": "ed2d1a450665aba2901abb6a4deabf4e6d3c44cb145dd799c141a21a9247026f",
+          "bytes": 15092
+        }
+      ],
+      "strict_author_checks": [
+        {
+          "file": "mono.engine/imagegraph/src/FontPayload.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraph/src/SourceFont.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraph/src/FontNativeMeasurements.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraph/src/FontTextFontState.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraph/src/FontTextBatch.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraph/src/FontTextLayout.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraphfont/src/GraphFontHost.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraph/src/ProcessorBatch.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraphfont/tests/WrappedFontHost.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraphfont/tests/WrappedFontBatch.cpp",
+          "exit": 0
+        },
+        {
+          "file": "mono.engine/imagegraph/tests/NativeFontMeasurements.cpp",
+          "exit": 0
+        }
+      ],
+      "runtime_author": "No runtime performed by author."
+    },
+    "root_review": "Complete patch, public helper, accounting, batch prepass, real host caller, all fifteen new cases and pinned source inspected before exact-preimage apply.",
+    "pinned_source": [
+      {
+        "path": "/tmp/pc-font-text67/source-evidence/yyFont.js",
+        "sha256": "8ca0a4af0398a6620da2a95f360a4f574416e2f528f36517c58d23df305227a5",
+        "inspected_ranges": [
+          "1836-1965",
+          "2750-2798"
+        ]
+      },
+      {
+        "path": "/tmp/pc-font-text67/source-evidence/Function_Font.js",
+        "sha256": "c4f67e6a7400f395e2f16165beffebd4137752f14495ef0a27f935f935f2590f",
+        "inspected_ranges": [
+          "365-395"
+        ]
+      },
+      {
+        "path": "/tmp/pc-font-text67/source-evidence/pinned/scripts/node_text/node_text.gml",
+        "sha256": "34640857e6878bb84c4778649dedfac455a062d2a3be35cbb0b191f3cb8cc9ca",
+        "inspected_ranges": [
+          "46",
+          "469-475",
+          "593-599"
+        ]
+      },
+      {
+        "path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/node_value_int/node_value_int.gml",
+        "sha256": "75ae2d6a3df5c6d7f62e50adf0bfc1f1467c51e6519bb80011f6164536dff8d2",
+        "inspected": "Complete valueProcess/getValue implementation; source integer normalization precedes Text measurement."
+      }
+    ],
+    "joined_build": {
+      "command": [
+        "cmake",
+        "--build",
+        "--preset",
+        "release-tests",
+        "--target",
+        "test_imagegraph",
+        "test_imagegraphfont",
+        "test_imagegraphio",
+        "test_imagegraphexport",
+        "test_studio",
+        "test_client",
+        "test_assetc",
+        "assetc",
+        "test_render",
+        "test_assets",
+        "test_gui",
+        "test_nodegraph",
+        "test_imagegraphphysics",
+        "test_server"
+      ],
+      "exit": 0,
+      "steps": 263
+    },
+    "initial_joined_results": ".cache/build/dev/evidence/pixel-composer-2026-10-04/wrapped-font-103-joined-results.json",
+    "correction": {
+      "observed_failure": "Two graph host cases, nine assertions: fractional authored widths were normalized by the source integer socket; zero normalized width creates no wrapped measurement request.",
+      "production_change": false,
+      "root_owned_changes": [
+        "WrappedFontHost.cpp explicit authored/resolved-width literals and zero-width branch assertions",
+        "WrappedFontBatch.cpp socket normalization comment",
+        "FontText.md distinction between graph controls and direct measurement request identity"
+      ],
+      "rebuild_exit": 0,
+      "final_font": {
+        "scope": "font",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-104-wrapped-font-final.log",
+        "summary": [
+          "All tests passed (1658 assertions in 36 test cases)"
+        ]
+      }
+    },
+    "joined_cpu": [
+      {
+        "scope": "filters",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph",
+          "[source_kuwahara],[source_blobify]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/filters-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (1816 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "core",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/core-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (1858401 assertions in 2754 test cases)"
+        ]
+      },
+      {
+        "scope": "assetc",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (411 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "assets",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (32488 assertions in 265 test cases)"
+        ]
+      },
+      {
+        "scope": "cli",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+          "--output-on-failure"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-103-wrapped-font-joined.log",
+        "summary": [
+          "100% tests passed, 0 tests failed out of 16"
+        ]
+      },
+      {
+        "scope": "client",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+          "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (7479 assertions in 71 test cases)"
+        ]
+      },
+      {
+        "scope": "export",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (3049 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "gui",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (4974 assertions in 331 test cases)"
+        ]
+      },
+      {
+        "scope": "io",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (11465 assertions in 262 test cases)"
+        ]
+      },
+      {
+        "scope": "nodegraph",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (269 assertions in 31 test cases)"
+        ]
+      },
+      {
+        "scope": "physics",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (715 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "render",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+          "~[gpu]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (336654 assertions in 808 test cases)"
+        ]
+      },
+      {
+        "scope": "server",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (5 assertions in 1 test case)",
+          "All tests passed (2182 assertions in 99 test cases)"
+        ]
+      },
+      {
+        "scope": "font",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-104-wrapped-font-final.log",
+        "summary": [
+          "All tests passed (1658 assertions in 36 test cases)"
+        ]
+      },
+      {
+        "scope": "studio",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio",
+          "[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result],[studio][imagegraph],[studio][wav_preview],[studio][animation_control_host],[studio][artwork],[export_intent][font],[dopesheet_actions],[regions],[image_cache],[image_cache_ui]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-103-wrapped-font-joined.log",
+        "summary": [
+          "All tests passed (30411 assertions in 269 test cases)"
+        ]
+      }
+    ],
+    "joined_scope_note": "Fourteen passing initial scopes retained because subsequent edits only corrected font fixtures and comments; full font suite rerun after rebuilding both modified fixture translation units.",
+    "final_owned_sha256": {
+      "mono.engine/imagegraph/docs/FontText.md": "e4363daf7ba7949253ce03fc2816e8bd0aeddc136ac13743cda79d61229426e2",
+      "mono.engine/imagegraph/include/engine/imagegraph/SourceFont.hpp": "cd0b903cfa962fcf84f9c6caf1dada1a8d52b7ede5540698623fe1beef571c15",
+      "mono.engine/imagegraph/src/FontNativeMeasurements.cpp": "6175657a9461243ebeae39962d1ec9d331c523f93e0d6787f4334c21e34ff7ba",
+      "mono.engine/imagegraph/src/FontNativeMeasurements.hpp": "b2ce1eedbb4249aa86fa974026702b6905d273dfd442e8115f871ee04824e6a0",
+      "mono.engine/imagegraph/src/FontPayload.cpp": "8f2f851f4cceb276f87ac9c4c6ed3107e8c517bb0fe4236e2310a9f441e396f5",
+      "mono.engine/imagegraph/src/FontPayload.hpp": "16859882554d9e0b9739e80fa8a1aa982795c3f56ab4eaeb36578d15922765fd",
+      "mono.engine/imagegraph/src/FontTextBatch.cpp": "89e7518791cd1bc66bf27842ecf76744fc92b81bf674d420aaf04995820974e8",
+      "mono.engine/imagegraph/src/FontTextBatch.hpp": "9defb8a61c3d837b1862111e0d9d85778d15d84ec6191d46e2dc9fee5f85100a",
+      "mono.engine/imagegraph/src/FontTextFontState.cpp": "dd176d56a9efbf46973141b472c1e7c5268689a3e0c1ec06edace7ebc679b6c6",
+      "mono.engine/imagegraph/src/FontTextFontState.hpp": "588df86960561d2e02cff6c61fe9e787d7c623733ccd74def3e7d490c45a4b5a",
+      "mono.engine/imagegraph/src/FontTextLayout.cpp": "0309f3a906f780b4453b63593d4566e128b0f78af9cefdf1800dce474afd5313",
+      "mono.engine/imagegraph/src/FontTextLayout.hpp": "f620b9df5c7f3aa8f4256888582facd7b204c962319911910037a81563ccecaf",
+      "mono.engine/imagegraph/src/ProcessorBatch.cpp": "2db5ce951eabcbee47978dc01ca0d27035a4631ded1556160312cc1cee05bed4",
+      "mono.engine/imagegraph/src/SourceFont.cpp": "05ea7a903af892825e722b3d7c77cebf77ee39a3c7f64a80604ecfb70ba82a7b",
+      "mono.engine/imagegraph/tests/NativeFontMeasurements.cpp": "ee75863be07704b68d98db428d72bb9f9508f3b93d093615b9d7bfa16238c484",
+      "mono.engine/imagegraphfont/src/GraphFontHost.cpp": "8684ee227b213966b6ef14c8479bdd202b7a91cccc313a5c37657096ccf95833",
+      "mono.engine/imagegraphfont/tests/WrappedFontBatch.cpp": "507eae850cc31f6620e50f4e09fa6209eec938bfec342607c57c023c1ed75817",
+      "mono.engine/imagegraphfont/tests/WrappedFontHost.cpp": "45a67b9cbb71937e53fe6c5127e78e492e385aef6a7fe179eb2ad5e19deb78ea"
+    },
+    "limitations": [
+      "New native measurement scope and counters have not yet been benchmarked; existing seven font boundary workloads do not exercise this path.",
+      "Native decoded advances and line height do not establish browser shaping, kerning, licensed metrics or source device-cache identity.",
+      "No new GPU or live Studio run."
+    ]
+  },
+  "pause_checkpoint_104": {
+    "request": "Finish current item, commit current worktree changes, then pause.",
+    "current_item": "Wrapped native Font/Text sizing, integrated and CPU verified.",
+    "outside_drafts_not_applied": [
+      "/tmp/pc-axis-durable97/PAUSED_CHECKPOINT.json",
+      "/tmp/pc-cache-import-facade90/RESUME.md",
+      "/tmp/pc-flood-fill97/CHECKPOINT.md",
+      "/tmp/pc-large-sequence70/pause-checkpoint-2026-10-04.md"
+    ],
+    "root_read_sequence_packets": [
+      "/tmp/pc-large-sequence70/assets-admission/SequenceEncodedSourceAdmission.patch",
+      "/tmp/pc-large-sequence70/table-publication/TextureTableSequencePublication.patch"
+    ],
+    "sequence_status": "Source reviewed, not applied; coherent actual caller/lifetime supplements and runtime/device acceptance remain required."
   }
 }
