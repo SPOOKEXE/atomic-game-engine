@@ -10,6 +10,7 @@
 #include <engine/imagegraphexport/GraphExportSession.hpp>
 #include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphio/SourceArtworkEdit.hpp>
+#include <engine/imagegraphio/SourceImageEdit.hpp>
 
 namespace studio::detail {
 	// A pending export owns its observation and cursor. Audio remains caller-owned and
@@ -22,6 +23,7 @@ namespace studio::detail {
 			std::string ProjectPath{};
 			std::optional<engine::imagegraphio::SourceArtworkAction> ArtworkAction{};
 			bool MatchRegionNames = true;
+			std::optional<engine::imagegraphio::SourceImageAction> ImageAction{};
 			bool operator==(const Target &) const = default;
 		};
 		struct Batch {

@@ -1,5 +1,6 @@
 #include "CookedShaderAnnotation.hpp"
 #include "HlslSourceArguments.hpp"
+#include "ImageCacheAnnotation.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "SourceInputProvenance.hpp"
 #include "SourceTimelineProjection.hpp"
@@ -2896,6 +2897,8 @@ namespace engine::imagegraphio {
 					);
 					source = &root["nodes"].back();
 				}
+				if (!detail::WriteImageCacheAnnotation(*source, node, failure))
+					return Reject(diagnostic, failure, node.Id, detail::ImageCacheData);
 				if (!detail::WriteCookedAnnotation(*source, node, failure))
 					return Reject(diagnostic, failure, node.Id, detail::CookedSelector);
 				source->at("x") = node.Position.X;

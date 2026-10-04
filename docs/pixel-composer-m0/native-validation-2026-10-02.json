@@ -13907,5 +13907,655 @@
         ]
       }
     ]
+  },
+  "image_cache_integration_99": {
+    "status": "Accepted saved-image sprite-cache codec, PXC metadata/edit ownership, shared file-free playback, live-original cache preparation, assetc layout observations and actual headless Studio actions. All focused cases and 15 joined CPU scopes pass after recorded fixes; full bake suite passes.",
+    "packet": {
+      "path": "/tmp/pc-image-cache97-studio-region/ImageCacheWorkflow.patch",
+      "sha256": "f5202281573d0ce15c2409e492d2185cfbbec25ede32e8728fd619d13ccd7d3d"
+    },
+    "manifest": {
+      "source_commit": "a61ef70657a5934abb598a70c0703ada0a72e88a",
+      "patch": "ImageCacheWorkflow.patch",
+      "patch_sha256": "f5202281573d0ce15c2409e492d2185cfbbec25ede32e8728fd619d13ccd7d3d",
+      "paths": [
+        {
+          "path": "mono.engine/bake/include/engine/bake/SpriteCache.hpp",
+          "base_sha256": null,
+          "draft_sha256": "c91d4c2900f136539750612f0a605c597d4d9ba535f473f0070dffd43321fc44"
+        },
+        {
+          "path": "mono.engine/bake/src/SpriteCache.cpp",
+          "base_sha256": null,
+          "draft_sha256": "836c7e79f0677ad4b7a4e84f457022d64998f7e43e8ee4fa4b411099a490b24a"
+        },
+        {
+          "path": "mono.engine/bake/tests/SpriteCache.cpp",
+          "base_sha256": null,
+          "draft_sha256": "c55072331683bbddac39847bcad6b5ed6e056f969cf9ab4b38a34df5b44e55bc"
+        },
+        {
+          "path": "mono.engine/bake/docs/source-sprite-cache.md",
+          "base_sha256": null,
+          "draft_sha256": "e276cc84c69f0f9a1ba5950f41a3b14d85711f9f70715a38c1208f1ee408c4a4"
+        },
+        {
+          "path": "mono.engine/imagegraphio/include/engine/imagegraphio/SourceImageEdit.hpp",
+          "base_sha256": null,
+          "draft_sha256": "014e8c7925602509883f1499dc3a21e27cc09909ce4f370f51b9ea263c2611ce"
+        },
+        {
+          "path": "mono.engine/imagegraphio/src/ImageCacheAnnotation.hpp",
+          "base_sha256": null,
+          "draft_sha256": "f8bafb6dbc8008e56aa78d2993421f979c9cd082e388467b2cfa27fec27d0e69"
+        },
+        {
+          "path": "mono.engine/imagegraphio/src/PxcxImport.cpp",
+          "base_sha256": "8a50775b6af21fd3cf1851dedf184a66af89e4fc6aee83c45ff868081261b9d6",
+          "draft_sha256": "a1b125f605d059696cb8265deebd0dd3f4187baefcbf9b78e1e6f5dd60014058"
+        },
+        {
+          "path": "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+          "base_sha256": "50f316d254bfab28f31780dd6848b896688856da8fd8f67bf4eadece547d1ebc",
+          "draft_sha256": "396e3827ca155d90f43b07d062716050f2240e0431128f33e7372b82b28dd381"
+        },
+        {
+          "path": "mono.engine/imagegraphio/src/SourceImageEdit.cpp",
+          "base_sha256": null,
+          "draft_sha256": "4322311e4140ea562370544281463934ff6356782dd78b7a3908ee45afde6216"
+        },
+        {
+          "path": "mono.engine/imagegraphio/tests/SourceImageEdit.cpp",
+          "base_sha256": null,
+          "draft_sha256": "9556c3a337bd4b8154748cf7150d6782346ceb9c91c61255b737e3d1aa242624"
+        },
+        {
+          "path": "mono.engine/imagegraphio/tests/PxcxImageCache.cpp",
+          "base_sha256": null,
+          "draft_sha256": "93c6956dfeebf7e7dbd00a5bd5604a90b8a40f0cd38cf23968e98939d4bda429"
+        },
+        {
+          "path": "mono.engine/imagegraphio/docs/source-image-cache.md",
+          "base_sha256": null,
+          "draft_sha256": "069c71ec29e24730d3f3fbb9ace69e7dc0cf57e91a25e0a5c47585a28ab30e70"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphFileHost.hpp",
+          "base_sha256": "87f9b415ae605a65a15105ca262d7aff132a4fce06f9bb60b84450dad579efc7",
+          "draft_sha256": "81725f3aa9499c7f9172c78dcf5bd836d02991a90349b856fde2d5b06c3f6e9e"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphImageCache.hpp",
+          "base_sha256": null,
+          "draft_sha256": "a9e5524a8eec264becb6ed02ea1a7ce1c4ff59f7500d623de20d2ce4a5ac9e06"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/src/GraphFileHost.cpp",
+          "base_sha256": "ffa84dcd69fe7fa693da151690c57d2698cd1773ebb8bbd2fe57184683a47ccd",
+          "draft_sha256": "21672b4006ea81345212880cfcc9d91a46dd067807c06a53a50139cfe0e51aee"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/src/GraphRasterHost.cpp",
+          "base_sha256": "c66c998ec6ebf66877f27dfe0a7743024055f57b72b95e773291d177384fe5f4",
+          "draft_sha256": "6f724fcc9ecbac5af3b2a0e615d78f2703f33f49875a0e69c8894e21f5c4d585"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/src/GraphRasterHost.hpp",
+          "base_sha256": "e53344581ebb409cd835fb91181b6732a74266a06500f4c1ed3a97d9726cf9f2",
+          "draft_sha256": "3d9e74d1d54d79850d85d064f1c6475e46b283c6b89c44de7c25eb1d3231204b"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/src/GraphImageCacheHost.cpp",
+          "base_sha256": null,
+          "draft_sha256": "bcc2e636c6bed6c8aef6607137c69719669ec31ca43212e7f7a45deaead06629"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/src/GraphImageCacheHost.hpp",
+          "base_sha256": null,
+          "draft_sha256": "4356d9d0ad10fd46884b55d7c4bdfd5f11bd711e3819238d9dd5c300da102f11"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/tests/GraphImageCache.cpp",
+          "base_sha256": null,
+          "draft_sha256": "7c41607461e5ccbfca92155b27658e98bdcb958f5f6c9f6f16355685d45e32cb"
+        },
+        {
+          "path": "mono.engine/imagegraphexport/docs/source-image-cache-host.md",
+          "base_sha256": null,
+          "draft_sha256": "908992bec67c50e3577c0dce3258c04ca1ca654434c7df375318f47adf2881ff"
+        },
+        {
+          "path": "mono.studio/src/ImageComposer.cpp",
+          "base_sha256": "1320216c561eba875c36600fa92a6a529048b9dd87223fc9c35dd2544a723f0f",
+          "draft_sha256": "53bd60c40933a6924f23aec20838c9c5c76a827062e9e123323bf609b9fb3878"
+        },
+        {
+          "path": "mono.studio/src/ImageGraphHost.hpp",
+          "base_sha256": "9e03a4368f7a95efdf4dd01b9fa1e964ff40ae2667855c3b989a72428af0dfa9",
+          "draft_sha256": "9ea806f024aa0257e5feebbaff2e99d556a38572c93dc010a084eb3e0b3210c4"
+        },
+        {
+          "path": "mono.studio/src/ImageGraphExportIntent.hpp",
+          "base_sha256": "821a1ba5ffa0a18f1a9973001570fa71897f3736277263eacd9278fdb75874f1",
+          "draft_sha256": "9c0fd0058e25732d4034a1b9525abb69684f2a1c955f0232bef74505a08acd42"
+        },
+        {
+          "path": "mono.studio/src/ImageGraphImageEdit.hpp",
+          "base_sha256": null,
+          "draft_sha256": "7d4574276835edd15b89c081889fc3a778e8d8860fdccb2f72a94f16f2bbf9ff"
+        },
+        {
+          "path": "mono.studio/tests/ImageGraphImageEdit.cpp",
+          "base_sha256": null,
+          "draft_sha256": "4d9562980d35c3be8555169785c6b937bb1de08d970fd3d4548524487e475d46"
+        },
+        {
+          "path": "mono.tools/assetc/app/main.cpp",
+          "base_sha256": "353fca1cf3ee0515656faaa3247b68c03e0b00555fe035ae0ae081a2fb50f07f",
+          "draft_sha256": "2ff53434bb00917bbebd633a69eb26d205c6d2b322490c5562236cf363d909d7"
+        },
+        {
+          "path": "mono.tools/assetc/CMakeLists.txt",
+          "base_sha256": "c027bb403426b1b4865d780c2dc4a96115fb834b33799971a7602c4003698331",
+          "draft_sha256": "4aae2032e49a02f6d7762ba4d3311de3aab1de6ae7adead0db17f070c1d1eb39"
+        },
+        {
+          "path": "mono.tools/assetc/tests/GraphImageCacheCli.cpp",
+          "base_sha256": null,
+          "draft_sha256": "78b8fd3dd70643f7a1c87d4b1902585d7e080ef0ab529602b8bfc0de85948c16"
+        }
+      ],
+      "pinned_source_commit": "b69eca232217360cf1502ef0223523d818606652",
+      "proof": [
+        {
+          "path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/node_image/node_image.gml",
+          "sha256": "e88c9c3c55ad9105610c7d07699352efbe1044f3951df33496fc3f7a34e61197"
+        },
+        {
+          "path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/node_image_sequence/node_image_sequence.gml",
+          "sha256": "e94efab2dfb74591ed7509ada64b941572bcfe7137f26acac9a677e59e5d05d0"
+        },
+        {
+          "path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/node_image_animated/node_image_animated.gml",
+          "sha256": "d5a2b867c59c2cdc2c34b708b5a54a5b185ed4493406cffad86466157b9c92fc"
+        },
+        {
+          "path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/sprite_add_functions/sprite_add_functions.gml",
+          "sha256": "cd582296d2af71c65bda8786f3f71dfe3d8630c7aed1d9729b1f4bf81ba4b14b"
+        },
+        {
+          "path": "/tmp/pc-pinned-b69eca232217360cf1502ef0223523d818606652/scripts/surface_functions/surface_functions.gml",
+          "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2"
+        }
+      ],
+      "validation": {
+        "strict_cpp_translation_units": 4,
+        "strict_flags": [
+          "-Werror",
+          "-fsyntax-only"
+        ],
+        "native_runtime": "not run; root-owned joined gate required",
+        "gpu": "not run",
+        "cmake_configuration": "not run",
+        "prior_full_strict_cpp_translation_units": 15
+      },
+      "capability_scope": "Existing L9 bake primitive codec, pure L10 source authoring, L11 explicit-granted filesystem/provider adapters, CLI and Studio frozen action controls. No new module or dependency edge. No layout inference.",
+      "limits": "Logical retained capacity and owned workspace bounds; vendor parser/codec, allocator bookkeeping and history quotas are separate.",
+      "prior_frozen_packet": {
+        "path": "/tmp/pc-image-cache97-region/ImageCacheWorkflow.patch",
+        "sha256": "a60878080d57a2619787b4708be4dea4e32f41ec8b22e6aaa78ab5473af6134e",
+        "preserved": true
+      },
+      "rebase_paths": [
+        "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "mono.studio/src/ImageComposer.cpp"
+      ],
+      "review": "BUDGET_REBASE_REVIEW.md",
+      "standalone_current_source_hooks": {
+        "path": "/tmp/pc-image-cache97-studio-region/CacheCurrentSourceHooks.patch",
+        "sha256": "3068e9574b09bd1d567ac23ae4ac2abbb3bfcf4fea1bd7fef47b24457d14d037"
+      }
+    },
+    "ui_packet": {
+      "path": "/tmp/pc-image-cache-ui98/ImageCacheUi.patch",
+      "sha256": "7706de75c77a372ddc6c302de2b4df7861b7ca495febf51f59608b1ca6c9e355"
+    },
+    "build": {
+      "exit": 0,
+      "steps": 65,
+      "targets": [
+        "test_bake",
+        "test_imagegraphio",
+        "test_imagegraphexport",
+        "test_studio",
+        "test_assetc",
+        "assetc"
+      ],
+      "ui_followup_steps": 4,
+      "warnings": "Optimized optional-comparison warnings in TimelineRegions and GraphRasterHost; existing bake Pxcx test string bounds and GraphMeshHost unused Point warnings were emitted. Strict packet syntax/format checks passed.",
+      "final_fixture_rebuild_steps": 4
+    },
+    "initial_focused_runtime": [
+      {
+        "scope": "bake",
+        "command": [
+          ".cache/build/release-tests/tests/test_bake",
+          "[sprite_cache]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-99-bake-focused.log",
+        "summary": [
+          "All tests passed (78 assertions in 7 test cases)"
+        ]
+      },
+      {
+        "scope": "io",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio",
+          "[image_cache]"
+        ],
+        "exit": 42,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-99-io-focused.log",
+        "summary": [
+          "test cases:   8 |   5 passed | 3 failed",
+          "assertions: 133 | 130 passed | 3 failed"
+        ]
+      },
+      {
+        "scope": "export",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphexport",
+          "[image_cache]"
+        ],
+        "exit": 42,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-99-export-focused.log",
+        "summary": [
+          "test cases:  4 |  2 passed | 2 failed",
+          "assertions: 63 | 59 passed | 4 failed"
+        ]
+      },
+      {
+        "scope": "studio",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio",
+          "[image_cache]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-99-studio-focused.log",
+        "summary": [
+          "All tests passed (85 assertions in 3 test cases)"
+        ]
+      },
+      {
+        "scope": "assetc",
+        "command": [
+          ".cache/build/release-tests/tests/test_assetc",
+          "[image_cache]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-99-assetc-focused.log",
+        "summary": [
+          "All tests passed (49 assertions in 1 test case)"
+        ]
+      }
+    ],
+    "bake_full_runtime": {
+      "command": [
+        ".cache/build/release-tests/tests/test_bake"
+      ],
+      "exit": 0,
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-99-bake-full.log",
+      "summary": [
+        "All tests passed (15792 assertions in 153 test cases)"
+      ]
+    },
+    "export_assertion_correction": {
+      "reason": "ArraySource::ExportImages preserves explicit positional Items. Compare full replay/prior shape rather than expecting empty shape; no production behavior changed.",
+      "runtime": {
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphexport",
+          "[image_cache]"
+        ],
+        "exit": 0,
+        "cases": 4,
+        "assertions": 63
+      }
+    },
+    "io_diagnostic": "Node_Image_Sequence input paths has no exact native meaning. Current ArrayElement treats FPath array leaves as Scalar; pinned Image Sequence/Animated constructors and FPath getValue accept path-string arrays. Narrow repair and exact inverse fixture pending.",
+    "initial_ui_runtime": {
+      "command": [
+        ".cache/build/release-tests/tests/test_studio",
+        "[image_cache_ui]"
+      ],
+      "exit": 42,
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-ui-99.log"
+    },
+    "initial_ui_failures": "Four of six real gesture cases fail: absent admitted Intent.Current, publication refusal and invalid animated fixture Compile. Preserve real clock/bounds and owned-transaction assertions while correcting exact admission setup.",
+    "scope": "Saved image sprite cache only. Full frame-cache groups/loading, licensed layout/capture parity and live Studio acceptance remain open.",
+    "io_repair": {
+      "path": "/tmp/pc-image-cache99-io-repair/FPathArrayRepair.patch",
+      "sha256": "3fe3cca05dfb861be8087dc9eacf8c0eea5a14bbb1b14241cbe86814b08cc08b",
+      "review": "Root fully read mapping and inverse test plus exact pinned source hashes; all three mapped image cache families now pass original cases."
+    },
+    "runtime_after_io_repair": [
+      {
+        "scope": "io-focused",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio",
+          "[image_cache]"
+        ],
+        "exit": 42,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-100-io-focused.log",
+        "summary": [
+          "test cases:   9 |   8 passed | 1 failed",
+          "assertions: 231 | 229 passed | 2 failed"
+        ]
+      },
+      {
+        "scope": "io-full",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 42,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-100-io-full.log",
+        "summary": [
+          "test cases:   262 |   261 passed | 1 failed",
+          "assertions: 11443 | 11441 passed | 2 failed"
+        ]
+      },
+      {
+        "scope": "export-full",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-100-export-full.log",
+        "summary": [
+          "All tests passed (3049 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "assetc-full",
+        "command": [
+          ".cache/build/release-tests/tests/test_assetc"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-100-assetc-full.log",
+        "summary": [
+          "All tests passed (411 assertions in 43 test cases)"
+        ]
+      }
+    ],
+    "remaining_io_test_diagnostic": "Only new path-edit case fails. Exact serialized document difference is old compact constructor key data versus edited static literal. Fixture must update the admitted source constructor key alongside the literal; full Graph equality stays required.",
+    "ui_nav_repair": {
+      "path": "/tmp/pc-image-cache-ui99-repair/ImageCacheUiRepair.patch",
+      "sha256": "008007a40d4f55a8c7255f83ca4a98237bd9fe4e33936de628caf306aa1c45ed",
+      "review": "Root fully read95 lines and independently inspected actual ImGui keyboard activation guard. Real Tab enters navigation; actual animated fixture uses declared surface output."
+    },
+    "ui_runtime_after_nav_repair": {
+      "command": [
+        ".cache/build/release-tests/tests/test_studio",
+        "[image_cache_ui]"
+      ],
+      "exit": 42,
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-ui-100.log"
+    },
+    "ui_output_repair": {
+      "path": "/tmp/pc-image-cache-ui100-output/ImageCacheUiOutput.patch",
+      "sha256": "06e126bee9dcf45e644f86db0a7d481756cd0aaf7f5ddc77137f253c9475cfda",
+      "review": "Root fully read21 lines and exact pre/post hashes. Test declares actual pc.image surface_out before initial replay binding. Runtime pending.",
+      "runtime": "Final Studio helper/gesture cohort passes 9 cases and 251 assertions, included in 269-case joined Studio scope."
+    },
+    "static_owner_fixture_repair": {
+      "path": "/tmp/pc-image-cache100-owner-repair/StaticPathEditFixture.patch",
+      "sha256": "202f2298e683ff17bdebf99939a9581ab7625d1a912d7ee9908f74fa1be1b8a2",
+      "review": "Root fully read exact compact-key ownership assertions, test patch and proof. Static path literal and its exact source constructor key now change together; complete reimport equality remains required."
+    },
+    "focused_final_runtime": [
+      {
+        "scope": "io",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio",
+          "[image_cache]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-101-io-focused.log",
+        "summary": [
+          "All tests passed (253 assertions in 9 test cases)"
+        ]
+      },
+      {
+        "scope": "studio",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio",
+          "[image_cache],[image_cache_ui]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/image-cache-101-studio-focused.log",
+        "summary": [
+          "All tests passed (251 assertions in 9 test cases)"
+        ]
+      }
+    ],
+    "joined_runtime": [
+      {
+        "scope": "filters",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph",
+          "[source_kuwahara],[source_blobify]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/filters-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (1816 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "core",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/core-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (1858046 assertions in 2748 test cases)"
+        ]
+      },
+      {
+        "scope": "assetc",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (411 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "assets",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (32488 assertions in 265 test cases)"
+        ]
+      },
+      {
+        "scope": "cli",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+          "--output-on-failure"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-101-image-cache-joined.log",
+        "summary": [
+          "100% tests passed, 0 tests failed out of 16"
+        ]
+      },
+      {
+        "scope": "client",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+          "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (7479 assertions in 71 test cases)"
+        ]
+      },
+      {
+        "scope": "export",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (3049 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "gui",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (4974 assertions in 331 test cases)"
+        ]
+      },
+      {
+        "scope": "io",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (11465 assertions in 262 test cases)"
+        ]
+      },
+      {
+        "scope": "nodegraph",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (269 assertions in 31 test cases)"
+        ]
+      },
+      {
+        "scope": "physics",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (715 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "render",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+          "~[gpu]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (336654 assertions in 808 test cases)"
+        ]
+      },
+      {
+        "scope": "server",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (5 assertions in 1 test case)",
+          "All tests passed (2182 assertions in 99 test cases)"
+        ]
+      },
+      {
+        "scope": "font",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (653 assertions in 26 test cases)"
+        ]
+      },
+      {
+        "scope": "studio",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio",
+          "[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result],[studio][imagegraph],[studio][wav_preview],[studio][animation_control_host],[studio][artwork],[export_intent][font],[dopesheet_actions],[regions],[image_cache],[image_cache_ui]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-101-image-cache-joined.log",
+        "summary": [
+          "All tests passed (30411 assertions in 269 test cases)"
+        ]
+      }
+    ],
+    "final_case_inventory": {
+      "bake_codec": 7,
+      "io_actions_and_pxc": 9,
+      "export_pixels_and_live_preparation": 4,
+      "studio_helpers_and_actual_gestures": 9,
+      "assetc_subprocess": 1,
+      "total": 30
+    },
+    "final_owned_sha256": {
+      "mono.engine/bake/include/engine/bake/SpriteCache.hpp": "c91d4c2900f136539750612f0a605c597d4d9ba535f473f0070dffd43321fc44",
+      "mono.engine/bake/src/SpriteCache.cpp": "836c7e79f0677ad4b7a4e84f457022d64998f7e43e8ee4fa4b411099a490b24a",
+      "mono.engine/bake/tests/SpriteCache.cpp": "c55072331683bbddac39847bcad6b5ed6e056f969cf9ab4b38a34df5b44e55bc",
+      "mono.engine/bake/docs/source-sprite-cache.md": "e276cc84c69f0f9a1ba5950f41a3b14d85711f9f70715a38c1208f1ee408c4a4",
+      "mono.engine/imagegraphio/include/engine/imagegraphio/SourceImageEdit.hpp": "014e8c7925602509883f1499dc3a21e27cc09909ce4f370f51b9ea263c2611ce",
+      "mono.engine/imagegraphio/src/ImageCacheAnnotation.hpp": "f8bafb6dbc8008e56aa78d2993421f979c9cd082e388467b2cfa27fec27d0e69",
+      "mono.engine/imagegraphio/src/PxcxImport.cpp": "da3af116e86f6620b9e96b60fa0c445256ce53cd2cd14cf4f9489eb8d74e329e",
+      "mono.engine/imagegraphio/src/PxcxEdit.cpp": "396e3827ca155d90f43b07d062716050f2240e0431128f33e7372b82b28dd381",
+      "mono.engine/imagegraphio/src/SourceImageEdit.cpp": "4322311e4140ea562370544281463934ff6356782dd78b7a3908ee45afde6216",
+      "mono.engine/imagegraphio/tests/SourceImageEdit.cpp": "9556c3a337bd4b8154748cf7150d6782346ceb9c91c61255b737e3d1aa242624",
+      "mono.engine/imagegraphio/tests/PxcxImageCache.cpp": "e5eff9b59487d29ad1b9f465d7a4829bbc9ad0b5e0538e5dfe8fc1df2ac6de7d",
+      "mono.engine/imagegraphio/docs/source-image-cache.md": "069c71ec29e24730d3f3fbb9ace69e7dc0cf57e91a25e0a5c47585a28ab30e70",
+      "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphFileHost.hpp": "81725f3aa9499c7f9172c78dcf5bd836d02991a90349b856fde2d5b06c3f6e9e",
+      "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphImageCache.hpp": "a9e5524a8eec264becb6ed02ea1a7ce1c4ff59f7500d623de20d2ce4a5ac9e06",
+      "mono.engine/imagegraphexport/src/GraphFileHost.cpp": "21672b4006ea81345212880cfcc9d91a46dd067807c06a53a50139cfe0e51aee",
+      "mono.engine/imagegraphexport/src/GraphRasterHost.cpp": "6f724fcc9ecbac5af3b2a0e615d78f2703f33f49875a0e69c8894e21f5c4d585",
+      "mono.engine/imagegraphexport/src/GraphRasterHost.hpp": "3d9e74d1d54d79850d85d064f1c6475e46b283c6b89c44de7c25eb1d3231204b",
+      "mono.engine/imagegraphexport/src/GraphImageCacheHost.cpp": "bcc2e636c6bed6c8aef6607137c69719669ec31ca43212e7f7a45deaead06629",
+      "mono.engine/imagegraphexport/src/GraphImageCacheHost.hpp": "4356d9d0ad10fd46884b55d7c4bdfd5f11bd711e3819238d9dd5c300da102f11",
+      "mono.engine/imagegraphexport/tests/GraphImageCache.cpp": "8a140d0e958f1704647632818119dd807a70437bf91ae79c3716486587f0f552",
+      "mono.engine/imagegraphexport/docs/source-image-cache-host.md": "908992bec67c50e3577c0dce3258c04ca1ca654434c7df375318f47adf2881ff",
+      "mono.studio/src/ImageComposer.cpp": "c8680bd5d4ce60e0a91c5958f3398ba3657891f01e14e2d594d89c78cae61bad",
+      "mono.studio/src/ImageGraphHost.hpp": "9ea806f024aa0257e5feebbaff2e99d556a38572c93dc010a084eb3e0b3210c4",
+      "mono.studio/src/ImageGraphExportIntent.hpp": "9c0fd0058e25732d4034a1b9525abb69684f2a1c955f0232bef74505a08acd42",
+      "mono.studio/src/ImageGraphImageEdit.hpp": "7d4574276835edd15b89c081889fc3a778e8d8860fdccb2f72a94f16f2bbf9ff",
+      "mono.studio/tests/ImageGraphImageEdit.cpp": "11b6b50443c2f4fc31b7a8f3576959d30324064092ec1dfd78cf76b19f972032",
+      "mono.tools/assetc/app/main.cpp": "2ff53434bb00917bbebd633a69eb26d205c6d2b322490c5562236cf363d909d7",
+      "mono.tools/assetc/CMakeLists.txt": "4aae2032e49a02f6d7762ba4d3311de3aab1de6ae7adead0db17f070c1d1eb39",
+      "mono.tools/assetc/tests/GraphImageCacheCli.cpp": "78b8fd3dd70643f7a1c87d4b1902585d7e080ef0ab529602b8bfc0de85948c16",
+      "mono.studio/src/ImageGraphImageActions.hpp": "5cf6f517398d072458f9b4cb5995b8162b14aab63693046b338b7267db4cb48d",
+      "mono.studio/docs/image-cache-actions.md": "9425a448efd4eee96bcb6dcdb7478173db75d2b11b724de4f818f7653e6cc741",
+      "ROADMAP.md": "bb0120da2a9cccf16df92aa1e0f7189a9f0347d941b80b773a329ef8c2bebc1f"
+    }
   }
 }

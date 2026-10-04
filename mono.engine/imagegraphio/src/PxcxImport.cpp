@@ -1,6 +1,7 @@
 #include "CookedShaderAnnotation.hpp"
 #include "GroupInstances.hpp"
 #include "HlslSourceArguments.hpp"
+#include "ImageCacheAnnotation.hpp"
 #include "InlineCollections.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "TileProperties.hpp"
@@ -1328,13 +1329,13 @@ namespace engine::imagegraphio {
 			return true;
 		}
 
-		// Palettes hold packed colours, point lists hold 2D vectors, and other source arrays hold numbers.
+		// Palettes hold colours, point lists hold vectors, and path/text lists retain strings.
 		imagegraph::ValueType ArrayElement(const imagegraph::CatalogueInput &input) {
 			if (input.SourceKind == "Palette") return imagegraph::ValueType::Colour;
 			if (input.SourceKind == "Vec2" || input.SourceKind == "IVec2" || input.SourceKind == "Vector" ||
 				input.SourceKind == "Vec2Arr")
 				return imagegraph::ValueType::Vector2;
-			if (input.SourceKind == "Text") return imagegraph::ValueType::Text;
+			if (input.SourceKind == "Text" || input.SourceKind == "FPath") return imagegraph::ValueType::Text;
 			return imagegraph::ValueType::Scalar;
 		}
 
@@ -2779,6 +2780,32 @@ namespace engine::imagegraphio {
 					}
 					node.Values.push_back({id, std::move(converted)});
 				}
+			}
+			if (detail::SourceImageCacheType(node.Type)) {
+				detail::ImageCacheAttributes cache;
+				if (!detail::ReadImageCacheAnnotation(source, node.Type, cache, reason)) return false;
+				const auto append = [&](std::string_view port,
+										std::optional<std::string_view> text,
+										std::optional<bool> boolean = std::nullopt) {
+					if (node.SourceProperties.size() >= imagegraph::Limits::MaximumPropertiesPerNode ||
+						!AdmitNativeSlots(node.SourceProperties, node.SourceProperties.size() + 1, budget) ||
+						!AdmitNativeText(port, budget) || (text && !AdmitNativeText(*text, budget)))
+						return false;
+					node.SourceProperties.push_back(
+						{std::string(port),
+						 text ? imagegraph::Value{std::string(*text)} : imagegraph::Value{*boolean}}
+					);
+					return true;
+				};
+				if ((cache.Enabled && !append(detail::ImageCacheUse, std::nullopt, *cache.Enabled)) ||
+					(cache.Data && !append(detail::ImageCacheData, *cache.Data)) ||
+					(cache.Layout &&
+					 !append(detail::ImageCacheLayout, bake::SpriteCacheLayoutName(*cache.Layout))) ||
+					(cache.Hash && !append(detail::ImageCacheHash, *cache.Hash))) {
+					reason = "image sprite cache properties exceed native import bounds";
+					return false;
+				}
+				if (cache.Enabled || cache.Data || cache.Layout) animation.FormatVersion = 9;
 			}
 			return true;
 		}

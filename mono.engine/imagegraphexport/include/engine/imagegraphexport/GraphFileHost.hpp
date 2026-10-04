@@ -10,6 +10,7 @@
 
 namespace engine::imagegraphexport {
 	struct GraphDirectoryGrant;
+	struct GraphImageCacheLayoutObservation;
 	struct GraphFileGrant {
 		std::string NodeId;
 		std::filesystem::path File;
@@ -31,7 +32,8 @@ namespace engine::imagegraphexport {
 		GraphFileHost(
 			std::span<const GraphFileGrant> grants,
 			engine::assets::ContentPolicy policy,
-			std::span<const GraphDirectoryGrant> directories = {}
+			std::span<const GraphDirectoryGrant> directories = {},
+			std::span<const GraphImageCacheLayoutObservation> caches = {}
 		);
 		bool Capture(
 			const engine::imagegraph::HostNodeInvocation &invocation,
@@ -42,6 +44,7 @@ namespace engine::imagegraphexport {
 	  private:
 		std::span<const GraphFileGrant> Grants;
 		std::span<const GraphDirectoryGrant> Directories;
+		std::span<const GraphImageCacheLayoutObservation> ImageCaches;
 		engine::assets::ContentPolicy Policy;
 	};
 }

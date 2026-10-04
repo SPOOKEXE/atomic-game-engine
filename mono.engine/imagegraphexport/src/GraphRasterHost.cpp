@@ -1,5 +1,7 @@
 #include "GraphRasterHost.hpp"
 
+#include "GraphImageCacheHost.hpp"
+
 #include <engine/bake/GifSequence.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/core/Metrics.hpp>
@@ -151,12 +153,14 @@ namespace engine::imagegraphexport {
 			}
 		}
 	}
+	using namespace engine::imagegraph;
 	static bool CaptureSequence(
 		const engine::imagegraph::HostNodeInvocation &in,
 		std::span<const GraphFileGrant> grants,
 		const engine::assets::ContentPolicy &policy,
 		engine::imagegraph::HostNodeCapture &out,
-		std::string &failure
+		std::string &failure,
+		std::span<const GraphImageCacheLayoutObservation> caches
 	) {
 		using namespace engine::imagegraph;
 		const auto fail = [&](const char *message) {
@@ -200,35 +204,42 @@ namespace engine::imagegraphexport {
 		}
 		std::vector<Image> images;
 		images.reserve(paths->Elements.size());
+		bool cached = false;
+		if (!ReadGraphSavedImageCache(in, caches, images, cached, failure)) return false;
 		uint32_t commonWidth = 0, commonHeight = 0;
-		for (const auto &element : paths->Elements) {
-			const auto *path = std::get_if<std::string>(&element);
-			if (!path) return fail("image array path has incorrect leaf type");
-			const GraphFileGrant *selected = nullptr;
-			for (const auto &grant : grants)
-				if (grant.NodeId == in.Authored.Id && grant.Resource == *path) {
-					if (selected) return fail("image array resource grant is duplicated");
-					selected = &grant;
-				}
-			if (!selected || selected->Write || selected->File.string() != *path)
-				return fail("image array path requires an exact named read resource grant");
-			Node authored;
-			authored.Id = in.Authored.Id;
-			authored.Type = "pc.image";
-			std::array<AuthoredValue, 2> controls{{{"path", *path}, {"padding", Vector4{}}}};
-			GraphFileGrant exact{authored.Id, selected->File, false};
-			HostNodeCapture decoded;
-			const uint64_t perImage = in.MaximumOperationBytes / (paths->Elements.size() + 1) / 4;
-			if (!CaptureGraphRaster(
-					{authored, in.Request, controls, {}, perImage, in.Timeline, in.OutputFormat},
-					std::span<const GraphFileGrant>(&exact, 1),
-					policy,
-					decoded,
-					failure
-				))
-				return false;
-			auto image = std::move(decoded.Images.front().Data);
-			if (images.empty()) {
+		if (!cached)
+			for (const auto &element : paths->Elements) {
+				const auto *path = std::get_if<std::string>(&element);
+				if (!path) return fail("image array path has incorrect leaf type");
+				const GraphFileGrant *selected = nullptr;
+				for (const auto &grant : grants)
+					if (grant.NodeId == in.Authored.Id && grant.Resource == *path) {
+						if (selected) return fail("image array resource grant is duplicated");
+						selected = &grant;
+					}
+				if (!selected || selected->Write || selected->File.string() != *path)
+					return fail("image array path requires an exact named read resource grant");
+				Node authored;
+				authored.Id = in.Authored.Id;
+				authored.Type = "pc.image";
+				std::array<AuthoredValue, 2> controls{{{"path", *path}, {"padding", Vector4{}}}};
+				GraphFileGrant exact{authored.Id, selected->File, false};
+				HostNodeCapture decoded;
+				const uint64_t perImage = in.MaximumOperationBytes / (paths->Elements.size() + 1) / 4;
+				if (!CaptureGraphRaster(
+						{authored, in.Request, controls, {}, perImage, in.Timeline, in.OutputFormat},
+						std::span<const GraphFileGrant>(&exact, 1),
+						policy,
+						decoded,
+						failure
+					))
+					return false;
+				auto image = std::move(decoded.Images.front().Data);
+				images.push_back(std::move(image));
+			}
+		for (size_t index = 0; index < images.size(); ++index) {
+			const auto &image = images[index];
+			if (index == 0) {
 				commonWidth = image.Width;
 				commonHeight = image.Height;
 			} else if (*canvas == 1) {
@@ -238,7 +249,6 @@ namespace engine::imagegraphexport {
 				commonWidth = std::max(commonWidth, image.Width);
 				commonHeight = std::max(commonHeight, image.Height);
 			}
-			images.push_back(std::move(image));
 		}
 		HostNodeCapture candidate;
 		candidate.Authored = in.Authored;
@@ -259,7 +269,10 @@ namespace engine::imagegraphexport {
 				height > Limits::MaximumDimension)
 				return fail("image array padded dimensions exceed bounded integer surface domain");
 			const auto layout = CheckedSurfaceLayout(
-				uint32_t(width), uint32_t(height), original.Format, in.MaximumOperationBytes / 4 - retained
+				uint32_t(width),
+				uint32_t(height),
+				in.OutputFormat.value_or(original.Format),
+				in.MaximumOperationBytes / 4 - retained
 			);
 			if (!layout) return fail("image array output exceeds aggregate byte budget");
 			const double scale =
@@ -270,7 +283,7 @@ namespace engine::imagegraphexport {
 			Image result;
 			result.Width = uint32_t(width);
 			result.Height = uint32_t(height);
-			result.Format = original.Format;
+			result.Format = in.OutputFormat.value_or(original.Format);
 			result.Pixels.resize(size_t(layout->Bytes));
 			for (uint32_t y = 0; y < result.Height; ++y)
 				for (uint32_t x = 0; x < result.Width; ++x) {
@@ -300,7 +313,8 @@ namespace engine::imagegraphexport {
 		std::span<const GraphFileGrant> grants,
 		const engine::assets::ContentPolicy &policy,
 		engine::imagegraph::HostNodeCapture &out,
-		std::string &failure
+		std::string &failure,
+		std::span<const GraphImageCacheLayoutObservation> caches
 	) {
 		using namespace engine::imagegraph;
 		const auto fail = [&](const char *message) {
@@ -353,6 +367,7 @@ namespace engine::imagegraphexport {
 		Node node;
 		node.Id = in.Authored.Id;
 		node.Type = "pc.image_sequence";
+		node.SourceProperties = in.Authored.SourceProperties;
 		std::array<AuthoredValue, 4> controls{
 			{{"paths", *paths},
 			 {"padding", Vector4{}},
@@ -365,7 +380,8 @@ namespace engine::imagegraphexport {
 				grants,
 				policy,
 				decoded,
-				failure
+				failure,
+				caches
 			))
 			return false;
 		const auto &frames = decoded.ImageArrays[0].Frames;
@@ -448,18 +464,72 @@ namespace engine::imagegraphexport {
 		return true;
 	}
 
-	bool CaptureGraphRaster(
+	static bool CaptureRasterPixels(
+		const HostNodeInvocation &in,
+		const std::string &path,
+		const Vector4 &padding,
+		uint32_t width,
+		uint32_t height,
+		std::span<const std::byte> pixels,
+		HostNodeCapture &out,
+		std::string &failure
+	) {
+		const auto fail = [&](const char *message) {
+			failure = message;
+			return false;
+		};
+		const double w = width + padding.X + padding.Z, h = height + padding.Y + padding.W;
+		const auto format = in.OutputFormat.value_or(SurfaceFormat::RGBA8Unorm);
+		if (w < 1 || h < 1 || w > Limits::MaximumDimension || h > Limits::MaximumDimension ||
+			pixels.size() != uint64_t(width) * height * 4)
+			return fail("cached or decoded image dimensions exceed source surface bounds");
+		const auto layout =
+			CheckedSurfaceLayout(uint32_t(w), uint32_t(h), format, in.MaximumOperationBytes / 4);
+		if (!layout) return fail("cached or decoded image output exceeds byte budget");
+		Image image;
+		image.Width = uint32_t(w);
+		image.Height = uint32_t(h);
+		image.Format = format;
+		image.Pixels.resize(size_t(layout->Bytes));
+		for (uint32_t y = 0; y < image.Height; ++y)
+			for (uint32_t x = 0; x < image.Width; ++x) {
+				const int64_t sx = int64_t(x) - int64_t(padding.Z), sy = int64_t(y) - int64_t(padding.Y);
+				SurfacePixel pixel{};
+				if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
+					const auto at = (uint64_t(sy) * width + uint64_t(sx)) * 4;
+					for (size_t channel = 0; channel < 4; ++channel)
+						pixel[channel] = std::to_integer<uint8_t>(pixels[size_t(at) + channel]) / 255.;
+				}
+				if (!StoreSurfacePixel(image, x, y, pixel)) return fail("image precision conversion failed");
+			}
+		image.Hash = SurfaceHash(image);
+		HostNodeCapture candidate;
+		candidate.Authored = in.Authored;
+		candidate.Tick = in.Request.Tick;
+		candidate.Subframe = in.Request.Subframe;
+		candidate.NegativeFrame = in.Request.NegativeFrame;
+		candidate.Inputs.assign(in.Inputs.begin(), in.Inputs.end());
+		candidate.Outputs = {{"path", path}, {"dimension", Vector2{w, h}}};
+		candidate.Images.push_back({"surface_out", std::move(image)});
+		out = std::move(candidate);
+		return true;
+	}
+
+	static bool CaptureGraphRasterImpl(
 		const engine::imagegraph::HostNodeInvocation &in,
 		std::span<const GraphFileGrant> grants,
 		const engine::assets::ContentPolicy &policy,
 		engine::imagegraph::HostNodeCapture &out,
 		std::string &failure,
-		RasterFailure *classification
+		RasterFailure *classification,
+		std::span<const GraphImageCacheLayoutObservation> caches
 	) {
 		using namespace engine::imagegraph;
 		if (classification) *classification = RasterFailure::Refused;
-		if (in.Authored.Type == "pc.image_animated") return CaptureAnimated(in, grants, policy, out, failure);
-		if (in.Authored.Type == "pc.image_sequence") return CaptureSequence(in, grants, policy, out, failure);
+		if (in.Authored.Type == "pc.image_animated")
+			return CaptureAnimated(in, grants, policy, out, failure, caches);
+		if (in.Authored.Type == "pc.image_sequence")
+			return CaptureSequence(in, grants, policy, out, failure, caches);
 		const auto fail = [&](const char *message, RasterFailure kind = RasterFailure::Refused) {
 			if (classification) *classification = kind;
 			failure = message;
@@ -470,6 +540,24 @@ namespace engine::imagegraphexport {
 		const auto *paddingValue = padValue ? std::get_if<Vector4>(padValue) : nullptr;
 		const auto padding = paddingValue ? RoundedPadding(*paddingValue) : std::nullopt;
 		if (!path || !padding) return fail("image requires resolved path and Vector4 source padding");
+		std::vector<Image> cachedFrames;
+		bool cached = false;
+		if (!ReadGraphSavedImageCache(in, caches, cachedFrames, cached, failure)) return false;
+		if (cached) {
+			if (cachedFrames.size() != 1)
+				return fail("cached still image requires exactly one source sprite");
+			const auto &frame = cachedFrames.front();
+			return CaptureRasterPixels(
+				in,
+				*path,
+				*padding,
+				frame.Width,
+				frame.Height,
+				std::as_bytes(std::span(frame.Pixels)),
+				out,
+				failure
+			);
+		}
 		const GraphFileGrant *grant = nullptr;
 		for (const auto &g : grants)
 			if (g.NodeId == in.Authored.Id && g.Resource.empty()) {
@@ -570,32 +658,25 @@ namespace engine::imagegraphexport {
 				return fail("decoded image dimensions differ from admitted still header");
 			pixels = decoded.Pixels;
 		}
-		Image image;
-		image.Width = uint32_t(w);
-		image.Height = uint32_t(h);
-		image.Format = format;
-		image.Pixels.resize(size_t(layout->Bytes));
-		for (uint32_t y = 0; y < image.Height; ++y)
-			for (uint32_t x = 0; x < image.Width; ++x) {
-				const int64_t sx = int64_t(x) - int64_t(pad[2]), sy = int64_t(y) - int64_t(pad[1]);
-				SurfacePixel pixel{};
-				if (sx >= 0 && sy >= 0 && sx < width && sy < height) {
-					const auto at = (uint64_t(sy) * width + uint64_t(sx)) * 4;
-					for (size_t channel = 0; channel < 4; ++channel)
-						pixel[channel] = std::to_integer<uint8_t>(pixels[size_t(at) + channel]) / 255.;
-				}
-				if (!StoreSurfacePixel(image, x, y, pixel)) return fail("image precision conversion failed");
-			}
-		image.Hash = SurfaceHash(image);
-		HostNodeCapture candidate;
-		candidate.Authored = in.Authored;
-		candidate.Tick = in.Request.Tick;
-		candidate.Subframe = in.Request.Subframe;
-		candidate.NegativeFrame = in.Request.NegativeFrame;
-		candidate.Inputs.assign(in.Inputs.begin(), in.Inputs.end());
-		candidate.Outputs = {{"path", *path}, {"dimension", Vector2{w, h}}};
-		candidate.Images.push_back({"surface_out", std::move(image)});
-		out = std::move(candidate);
-		return true;
+		return CaptureRasterPixels(in, *path, *padding, width, height, pixels, out, failure);
+	}
+	bool CaptureGraphRaster(
+		const HostNodeInvocation &in,
+		std::span<const GraphFileGrant> grants,
+		const assets::ContentPolicy &policy,
+		HostNodeCapture &out,
+		std::string &failure,
+		RasterFailure *classification,
+		std::span<const GraphImageCacheLayoutObservation> caches
+	) {
+		const auto prior = HostCaptureRetainedPayloadBytes(out);
+		if (!prior || *prior > in.MaximumOperationBytes) {
+			if (classification) *classification = RasterFailure::Refused;
+			failure = "prior raster capture exceeds operation budget";
+			return false;
+		}
+		auto bounded = in;
+		bounded.MaximumOperationBytes -= *prior;
+		return CaptureGraphRasterImpl(bounded, grants, policy, out, failure, classification, caches);
 	}
 }

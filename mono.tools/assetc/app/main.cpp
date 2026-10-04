@@ -7,6 +7,7 @@
 #include <engine/imagegraph/SourceArgumentHost.hpp>
 #include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/GraphDirectoryHost.hpp>
+#include <engine/imagegraphexport/GraphImageCache.hpp>
 
 #include <algorithm>
 #include <assetc/Bake.hpp>
@@ -91,6 +92,11 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"graph-file-resource", "NODE:RESOURCE=PATH", "Grant an exact native room dependency; repeatable"
 	);
+	arguments.Value(
+		"graph-image-cache-layout",
+		"NODE:HASH=LAYOUT",
+		"Explicit saved-cache byte layout and exact text hash; requires --export-graph; repeatable"
+	);
 	arguments.Value("graph-video-read", "NODE=PATH", "Grant one exact recorded video file; repeatable");
 	arguments.Value("video-decoder", "PATH", "Explicit absolute FFmpeg decoder for video inputs");
 	arguments.Value(
@@ -154,6 +160,11 @@ int main(int argc, char **argv) {
 	if (parsed.DescribeRequested) {
 		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
+	}
+
+	if (arguments.Has("graph-image-cache-layout") && !arguments.Has("export-graph")) {
+		std::fputs("assetc: --graph-image-cache-layout requires --export-graph\n", stderr);
+		return 2;
 	}
 
 	if ((arguments.Has("rigid-playing") || arguments.Has("rigid-frame-progress")) &&
@@ -355,7 +366,34 @@ int main(int argc, char **argv) {
 				 std::filesystem::path(assignment.substr(separator + 1))}
 			);
 		}
-		assetc::GraphFileHost fileHost(fileGrants, exportSettings.Content, directoryGrants);
+		std::vector<engine::imagegraphexport::GraphImageCacheLayoutObservation> imageCaches;
+		for (const auto assignment : arguments.GetAll("graph-image-cache-layout")) {
+			const auto separator = assignment.find('=');
+			const auto colon = assignment.rfind(':', separator);
+			if (assignment.size() > 512 || separator == std::string_view::npos ||
+				colon == std::string_view::npos || !colon || separator - colon != 65 ||
+				imageCaches.size() == 64) {
+				ENGINE_ERROR("assetc: image cache layout requires bounded NODE:HASH=LAYOUT");
+				return 2;
+			}
+			const auto node = assignment.substr(0, colon);
+			const auto hash = assignment.substr(colon + 1, 64);
+			const auto layout = engine::bake::ParseSpriteCacheLayoutName(assignment.substr(separator + 1));
+			if (!layout ||
+				std::any_of(
+					hash.begin(),
+					hash.end(),
+					[](char byte) { return !(byte >= '0' && byte <= '9') && !(byte >= 'a' && byte <= 'f'); }
+				) ||
+				std::any_of(imageCaches.begin(), imageCaches.end(), [&](const auto &record) {
+					return record.NodeId == node;
+				})) {
+				ENGINE_ERROR("assetc: image cache layout, lowercase hash or unique node identity is invalid");
+				return 2;
+			}
+			imageCaches.push_back({std::string(node), std::string(hash), *layout});
+		}
+		assetc::GraphFileHost fileHost(fileGrants, exportSettings.Content, directoryGrants, imageCaches);
 		engine::imagegraphexport::GraphDirectoryHost directoryHost(
 			directoryGrants, fileGrants, exportSettings.Content
 		);

@@ -125,9 +125,10 @@ namespace engine::imagegraphexport {
 	GraphFileHost::GraphFileHost(
 		std::span<const GraphFileGrant> grants,
 		engine::assets::ContentPolicy policy,
-		std::span<const GraphDirectoryGrant> directories
+		std::span<const GraphDirectoryGrant> directories,
+		std::span<const GraphImageCacheLayoutObservation> caches
 	)
-		: Grants(grants), Directories(directories), Policy(policy) {}
+		: Grants(grants), Directories(directories), ImageCaches(caches), Policy(policy) {}
 	bool GraphFileHost::Capture(
 		const HostNodeInvocation &invocation, HostNodeCapture &output, std::string &failure
 	) {
@@ -137,7 +138,7 @@ namespace engine::imagegraphexport {
 		}
 		if (invocation.Authored.Type == "pc.image" || invocation.Authored.Type == "pc.image_sequence" ||
 			invocation.Authored.Type == "pc.image_animated")
-			return CaptureGraphRaster(invocation, Grants, Policy, output, failure);
+			return CaptureGraphRaster(invocation, Grants, Policy, output, failure, nullptr, ImageCaches);
 		if (invocation.Authored.Type == "pc.3_d_mesh_obj" || invocation.Authored.Type == "pc.3_d_mesh_json" ||
 			invocation.Authored.Type == "pc.3_d_mesh_export")
 			return CaptureGraphMeshFile(Grants, Policy, invocation, output, failure);

@@ -21,6 +21,8 @@
 #include "ImageGraphHistoryKeys.hpp"
 #include "ImageGraphHlslGroups.hpp"
 #include "ImageGraphHost.hpp"
+#include "ImageGraphImageActions.hpp"
+#include "ImageGraphImageEdit.hpp"
 #include "ImageGraphInputs.hpp"
 #include "ImageGraphObservations.hpp"
 #include "ImageGraphPorts.hpp"
@@ -118,6 +120,7 @@ namespace studio {
 			std::string NodeId;
 			std::array<char, 4096> File{}, Resource{}, Directory{}, Template{};
 			std::string Message;
+			int CacheLayout = 0;
 		};
 
 		struct FontInputControls {
@@ -151,6 +154,7 @@ namespace studio {
 			bool ComposerDevicePending = false;
 			std::vector<engine::imagegraphexport::GraphFileGrant> FileGrants;
 			std::vector<engine::imagegraphexport::GraphDirectoryGrant> DirectoryGrants;
+			std::vector<engine::imagegraphexport::GraphImageCacheLayoutObservation> ImageCacheLayouts;
 			std::vector<FileReadControls> FileControls;
 			std::unique_ptr<engine::imagegraphfont::GraphFontInputs> FontInputs =
 				std::make_unique<engine::imagegraphfont::GraphFontInputs>();
@@ -282,6 +286,13 @@ namespace studio {
 					}
 				);
 			});
+			std::erase_if(state.ImageCacheLayouts, [&](const auto &observation) {
+				return std::none_of(
+					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
+						return node.Id == observation.NodeId && detail::SourceImageType(node.Type);
+					}
+				);
+			});
 			std::erase_if(state.FileControls, [&](const auto &control) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
@@ -352,6 +363,7 @@ namespace studio {
 			state.Host.Lua = state.LuaHost.get();
 			state.Host.Grants = state.FileGrants;
 			state.Host.Directories = state.DirectoryGrants;
+			state.Host.ImageCaches = state.ImageCacheLayouts;
 			return state.Host;
 		}
 
@@ -1294,9 +1306,84 @@ namespace studio {
 						failed = true;
 					} else if (batch.Operation == detail::ImageGraphExportIntent::Kind::HostNode) {
 						engine::imagegraph::HostNodeCapture captured;
-						complete = engine::imagegraphexport::ExecuteGraphHostNode(
-							state.Authored, request, target->NodeId, *snapshot, captured, failure
-						);
+						bool imageChanged = false;
+						if (target->ImageAction) {
+							const auto documentBytes =
+								engine::imagegraph::DocumentRetainedPayloadBytes(state.Authored);
+							const uint64_t replayBytes = state.GroupHost.Replay.RetainedBytes();
+							const uint64_t limit = engine::imagegraph::Limits::MaximumEvaluationBytes;
+							const uint64_t maximum =
+								limit - std::min(request.SourceFontHostResidentBytes, limit);
+							complete = documentBytes && *documentBytes < maximum &&
+									   replayBytes < maximum - *documentBytes;
+							if (!complete)
+								failure = "Held authoring owners leave no image action budget";
+							else
+								complete = detail::PrepareImageGraphImageControls(
+									state.Authored,
+									request,
+									target->NodeId,
+									*snapshot,
+									captured,
+									error,
+									maximum - *documentBytes - replayBytes
+								);
+							if (!complete && failure.empty()) failure = error.Message;
+							engine::imagegraphio::SourceImageFrameObservation prepared;
+							if (complete && *target->ImageAction ==
+												engine::imagegraphio::SourceImageAction::RemoveCache) {
+								prepared.Controls = std::move(captured);
+								prepared.Kind = engine::imagegraphio::SourceImageFrameKind::ControlsOnly;
+								prepared.AuthoringRevision = state.DocumentRevision;
+								prepared.InputRevision = state.EvaluationInputRevision;
+							} else if (complete) {
+								complete = engine::imagegraphexport::PrepareGraphSourceImages(
+									captured,
+									state.FileGrants,
+									engine::assets::ContentPolicy::Process(
+										engine::assets::ContentVerb::Handle
+									),
+									state.DocumentRevision,
+									state.EvaluationInputRevision,
+									*target->ImageAction == engine::imagegraphio::SourceImageAction::Cache,
+									prepared,
+									failure,
+									maximum - *documentBytes - replayBytes - snapshot->RetainedBytes()
+								);
+							}
+							if (complete) {
+								// The borrowed snapshot and temporary receipt stay resident through
+								// authoring.
+								const auto receiptBytes =
+									engine::imagegraph::HostCaptureRetainedPayloadBytes(captured);
+								const uint64_t nextRevision =
+									state.DocumentRevision == UINT64_MAX ? 1 : state.DocumentRevision + 1;
+								complete = receiptBytes && snapshot->RetainedBytes() <= maximum &&
+										   *receiptBytes <= maximum - snapshot->RetainedBytes();
+								if (complete)
+									complete = detail::ApplyPreparedImageGraphImage(
+										state.Authored,
+										state.History,
+										state.GroupHost.Replay,
+										prepared,
+										{*target->ImageAction,
+										 state.DocumentRevision,
+										 nextRevision,
+										 state.EvaluationInputRevision},
+										error,
+										imageChanged,
+										maximum - snapshot->RetainedBytes() - *receiptBytes
+									);
+								if (!complete)
+									failure = error.Message.empty()
+												  ? "Prepared image action exceeds operation bounds"
+												  : error.Message;
+							}
+						} else
+							complete = engine::imagegraphexport::ExecuteGraphHostNode(
+								state.Authored, request, target->NodeId, *snapshot, captured, failure
+							);
+
 						if (complete && target->ArtworkAction) {
 							bool changed = false;
 							const uint64_t nextRevision =
@@ -1327,6 +1414,14 @@ namespace studio {
 								state.GroupHost.Revision = state.DocumentRevision;
 								state.CanvasNeedsReload = true;
 							}
+						}
+						if (imageChanged) {
+							const auto frame = GetImageGraphFrame(state.Playback);
+							ApplyImageGraphTimeline(state.Authored, state.Playback);
+							(void)SetImageGraphAuthorFrame(state.Playback, frame);
+							AuthoredDocumentChanged(state);
+							state.GroupHost.Revision = state.DocumentRevision;
+							state.CanvasNeedsReload = true;
 						}
 						failed = !complete;
 					} else if (batch.Automatic &&
@@ -1715,6 +1810,7 @@ namespace studio {
 			state.Authored = std::move(candidate);
 			state.ExportGrants.clear();
 			state.FileGrants.clear();
+			state.ImageCacheLayouts.clear();
 			state.DirectoryGrants.clear();
 			state.FileControls.clear();
 			state.ExportUpdate = {};
@@ -1819,6 +1915,7 @@ namespace studio {
 			state.Authored = std::move(imported.Graph);
 			state.ExportGrants.clear();
 			state.FileGrants.clear();
+			state.ImageCacheLayouts.clear();
 			state.DirectoryGrants.clear();
 			state.FileControls.clear();
 			state.ExportUpdate = {};
@@ -2619,6 +2716,7 @@ namespace studio {
 					state.Authored = std::move(fresh);
 					state.ExportGrants.clear();
 					state.FileGrants.clear();
+					state.ImageCacheLayouts.clear();
 					state.DirectoryGrants.clear();
 					state.FileControls.clear();
 					state.ExportUpdate = {};
@@ -4282,6 +4380,28 @@ namespace studio {
 					std::span(&target, 1),
 					false,
 					detail::ImageGraphExportEvent::Update
+				);
+			}
+
+			if (selectedNode && detail::SourceImageType(selectedNode->Type)) {
+				const auto action = [&](engine::imagegraphio::SourceImageAction kind) {
+					detail::ImageGraphExportIntent::Target target{std::string(nodeId), {}, {}, {}};
+					target.ImageAction = kind;
+					BeginExportIntent(
+						state,
+						detail::ImageGraphExportIntent::Kind::HostNode,
+						std::span(&target, 1),
+						false,
+						detail::ImageGraphExportEvent::Update
+					);
+				};
+				detail::DrawImageGraphImageActions(
+					*selectedNode,
+					controls.CacheLayout,
+					controls.Message,
+					state.ImageCacheLayouts,
+					action,
+					changed
 				);
 			}
 

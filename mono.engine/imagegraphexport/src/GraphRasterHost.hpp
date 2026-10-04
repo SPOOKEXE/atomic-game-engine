@@ -1,6 +1,7 @@
 #pragma once
 #include <engine/imagegraphexport/GraphFileHost.hpp>
 namespace engine::imagegraphexport {
+	struct GraphImageCacheLayoutObservation;
 	// Only an admitted encoded source that the codec cannot decode may be skipped by Directory Search.
 	enum class RasterFailure { Refused, SourceDecodeFailure };
 	bool CaptureGraphRaster(
@@ -9,6 +10,7 @@ namespace engine::imagegraphexport {
 		const engine::assets::ContentPolicy &,
 		engine::imagegraph::HostNodeCapture &,
 		std::string &,
-		RasterFailure *classification = nullptr
+		RasterFailure *classification = nullptr,
+		std::span<const GraphImageCacheLayoutObservation> caches = {}
 	);
 }

@@ -7,6 +7,7 @@
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraphexport/GraphDirectoryHost.hpp>
 #include <engine/imagegraphexport/GraphFileHost.hpp>
+#include <engine/imagegraphexport/GraphImageCache.hpp>
 
 #include <algorithm>
 #include <array>
@@ -97,6 +98,7 @@ namespace studio::detail {
 		engine::imagegraph::HostNodeProvider *Composer = nullptr;
 		std::span<const engine::imagegraphexport::GraphFileGrant> Grants;
 		std::span<const engine::imagegraphexport::GraphDirectoryGrant> Directories;
+		std::span<const engine::imagegraphexport::GraphImageCacheLayoutObservation> ImageCaches;
 		std::array<std::optional<CachedFile>, 64> Files;
 		uint64_t RetainedBytes = sizeof(Files);
 		ImageGraphLuaReceipts LuaReceipts;
@@ -231,6 +233,32 @@ namespace studio::detail {
 					Grants, engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle)
 				);
 				return reader.Capture(bounded, output, failure);
+			}
+			// Saved immutable cache data owns the pixels. Original file grants do not
+			// participate in this path, and no second file snapshot owns the same cache.
+			if (invocation.Authored.Type == "pc.image" || invocation.Authored.Type == "pc.image_sequence" ||
+				invocation.Authored.Type == "pc.image_animated") {
+				const auto use = std::find_if(
+					invocation.Authored.SourceProperties.begin(),
+					invocation.Authored.SourceProperties.end(),
+					[](const auto &value) { return value.Port == "cache_use"; }
+				);
+				if (use != invocation.Authored.SourceProperties.end() && std::get_if<bool>(&use->Data) &&
+					std::get<bool>(use->Data)) {
+					if (RetainedBytes >= invocation.MaximumOperationBytes) {
+						failure = "Studio observations leave no saved-cache decode budget";
+						return false;
+					}
+					HostNodeInvocation bounded = invocation;
+					bounded.MaximumOperationBytes -= RetainedBytes;
+					engine::imagegraphexport::GraphFileHost reader(
+						Grants,
+						engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+						Directories,
+						ImageCaches
+					);
+					return reader.Capture(bounded, output, failure);
+				}
 			}
 			if (ImageGraphFileNeedsPrimary(invocation.Authored.Type) &&
 				std::none_of(Grants.begin(), Grants.end(), [&](const auto &grant) {

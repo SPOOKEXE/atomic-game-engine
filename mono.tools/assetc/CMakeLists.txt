@@ -21,6 +21,8 @@ set_target_properties(assetc PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/tools")
 
 if(MONO_BUILD_TESTS)
+	add_dependencies(test_assetc assetc)
+	target_compile_definitions(test_assetc PRIVATE ASSETC_TEST_EXECUTABLE="$<TARGET_FILE:assetc>")
 	add_test(
 		NAME assetc_cli_source_arguments
 		COMMAND "${CMAKE_COMMAND}"

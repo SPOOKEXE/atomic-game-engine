@@ -102,6 +102,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Finish audio workflows.
 - [_] Finish feedback seek/reset and fractional-key playback.
 - [x] Preserve project-clock cache observations and refresh captured inputs without replacing cached frames; pass joined CPU validation.
+- [x] Add saved-image cache playback and Studio Cache, Remove and Match Length actions; pass PXC, pixel export, headless gesture and joined CPU tests.
 - [_] Finish cache groups.
 - [_] Finish selected-cache Clear.
 - [_] Finish fractional cache playback.
