@@ -10507,6 +10507,12 @@ namespace engine::imagegraph {
 						}
 						// Source numeric surface getters return dimensions before units.
 						const bool sourceSurfaceScalar =
+							(node.Type == "pc.xdo_g_threshold" &&
+							 ((input.SourceKind == "Float" &&
+							   (input.Id == "radius" || input.Id == "k" || input.Id == "gamma")) ||
+							  (input.SourceKind == "Slider" &&
+							   (input.Id == "mix" || input.Id == "mask_feather" || input.Id == "epsilon" ||
+								input.Id == "smoothness")))) ||
 							(node.Type == "pc.refract" &&
 							 ((input.SourceKind == "Float" &&
 							   (input.Id == "height" || input.Id == "distance" || input.Id == "ior" ||

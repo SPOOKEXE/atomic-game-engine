@@ -318,8 +318,10 @@ namespace engine::imagegraph::detail {
 	bool SourceOrderedDither(NodeContext &context);
 	bool SourceSurfaceReplace(NodeContext &context);
 	bool SourceShapeMap(NodeContext &context);
+	bool SourceXDoG(NodeContext &c);
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
+			ExecutorEntry{"pc.xdo_g_threshold", SourceXDoG, true},
 			ExecutorEntry{"pc.mirror_polar", SourceMirrorPolar, true},
 			ExecutorEntry{"pc.shape_map", SourceShapeMap, true},
 			ExecutorEntry{"pc.smear", SourceSmear, true},
