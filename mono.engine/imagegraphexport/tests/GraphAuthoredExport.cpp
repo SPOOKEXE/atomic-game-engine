@@ -1,9 +1,13 @@
+#include <engine/bake/Image.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 TEST_SUITE_ID("engine.imagegraphexport.graph_authored_export")
@@ -528,4 +532,125 @@ TEST_CASE(
 	for (const auto &entry : std::filesystem::directory_iterator(root))
 		CHECK_FALSE(entry.path().filename().string().starts_with(".graph-export-"));
 #endif
+}
+
+TEST_CASE(
+	"Authored export chooses independent exact source endpoints after total shrinks",
+	"[assetc][imagegraph][source_timeline]"
+) {
+	Fixture fixture;
+	fixture.Timeline = TimelineSettings{2, 0, 1, "loop", 25};
+	fixture.Timeline.SourceBounds = SourceAuthoringFrameBounds{
+		{SourceFrameBoundPresence::Null, {}}, {SourceFrameBoundPresence::Explicit, {12, 0, false}}
+	};
+	fixture.Set("custom_range", false);
+	fixture.Set("frame_step", int64_t{1});
+	fixture.Set("sequence_begin", int64_t{0});
+	std::vector<engine::imagegraphexport::GraphExportSettings> exports;
+	std::string failure;
+	REQUIRE(
+		engine::imagegraphexport::PlanAuthoredGraphExport(
+			fixture.Call(), fixture.Grants, {}, exports, failure
+		)
+	);
+	REQUIRE(exports.size() == 12);
+	CHECK(exports.front().Frames.First == 0);
+	CHECK(exports.back().Frames.Last == 11);
+	const auto prior = exports;
+	fixture.Timeline.SourceBounds->End.Value.Subframe = .5;
+	CHECK_FALSE(
+		engine::imagegraphexport::PlanAuthoredGraphExport(
+			fixture.Call(), fixture.Grants, {}, exports, failure
+		)
+	);
+	CHECK(exports.empty());
+	CHECK(failure == "default source export range requires ordered nonnegative integral endpoints");
+	REQUIRE(prior.size() == 12);
+	CHECK(prior.back().Frames.Last == 11);
+}
+
+TEST_CASE(
+	"Authored source bounds publish the full independent range and preserve it on refusal",
+	"[assetc][imagegraph][source_timeline]"
+) {
+	static std::atomic<uint64_t> serial{0};
+	const auto root = std::filesystem::temp_directory_path() /
+					  ("atomic-source-bounds-" +
+					   std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
+					   std::to_string(serial.fetch_add(1)));
+	std::filesystem::create_directories(root);
+	struct Cleanup {
+		std::filesystem::path Root;
+		~Cleanup() {
+			std::error_code error;
+			std::filesystem::remove_all(Root, error);
+		}
+	} cleanup{root};
+	Document document;
+	document.FormatVersion = 9;
+	document.Timeline = TimelineSettings{2, 0, 1, "loop", 25};
+	document.Timeline->SourceBounds = SourceAuthoringFrameBounds{
+		{SourceFrameBoundPresence::Null, {}}, {SourceFrameBoundPresence::Explicit, {12, 0, false}}
+	};
+	document.Nodes = {
+		{"solid",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t{2}}, {"height", int64_t{1}}, {"colour", Colour{17, 83, 201, 255}}}},
+		{"export",
+		 "pc.export",
+		 "",
+		 {},
+		 {{"directory", root.string()},
+		  {"file_name", std::string{"frame"}},
+		  {"template", std::string{"%d%n%f"}},
+		  {"type", EnumValue{1}},
+		  {"format", EnumValue{0}},
+		  {"custom_range", false},
+		  {"frame_step", int64_t{1}}}}
+	};
+	document.Links = {{"solid", "image", "export", "surface"}};
+	document.Outputs = {{"preview", "export", "preview"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	engine::imagegraphexport::GraphExportSettings grants;
+	grants.Input = root / "unsaved.graph";
+	grants.Output = root;
+	grants.OutputId = "preview";
+	std::string failure;
+	const auto read = [](const std::filesystem::path &path) {
+		std::ifstream stream(path, std::ios::binary);
+		return std::vector<char>{std::istreambuf_iterator<char>(stream), {}};
+	};
+	REQUIRE(engine::imagegraphexport::ExportAuthoredGraphNode(document, plan, {}, grants, "export", failure));
+	size_t count = 0;
+	for (const auto &entry : std::filesystem::directory_iterator(root)) {
+		REQUIRE(entry.path().extension() == ".png");
+		const auto bytes = read(entry.path());
+		engine::assets::TextureData decoded;
+		REQUIRE(engine::bake::ReadImage(std::as_bytes(std::span(bytes)), decoded, failure));
+		REQUIRE(decoded.Width == 2);
+		REQUIRE(decoded.Height == 1);
+		REQUIRE(decoded.Pixels.size() == 8);
+		CHECK(decoded.Pixels[0] == std::byte{17});
+		CHECK(decoded.Pixels[1] == std::byte{83});
+		CHECK(decoded.Pixels[2] == std::byte{201});
+		CHECK(decoded.Pixels[3] == std::byte{255});
+		++count;
+	}
+	REQUIRE(count == 12);
+	const auto last = root / "frame12.png";
+	const auto previous = read(last);
+	REQUIRE_FALSE(previous.empty());
+	document.Timeline->SourceBounds->End.Value.Subframe = .5;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CHECK_FALSE(
+		engine::imagegraphexport::ExportAuthoredGraphNode(document, plan, {}, grants, "export", failure)
+	);
+	CHECK(read(last) == previous);
+	CHECK(
+		std::distance(std::filesystem::directory_iterator(root), std::filesystem::directory_iterator{}) == 12
+	);
 }

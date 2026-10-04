@@ -4,6 +4,7 @@
 #include "Families.hpp"
 
 #include <engine/imagegraph/RandomReplay.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 
 #include <array>
 #include <cmath>
@@ -108,8 +109,15 @@ namespace engine::imagegraph::detail {
 					if (period > 0) state.Accumulation += 1 / period;
 					reshuffle = state.Accumulation > 1;
 					state.Accumulation -= std::trunc(state.Accumulation);
-				} else if (mode == 5)
-					reshuffle = frame == double(context.Timeline ? context.Timeline->First : 0);
+				} else if (mode == 5) {
+					const auto first = context.Timeline ? SourceTimelineFirstFrame(*context.Timeline)
+														: std::optional<double>{0.};
+					if (!first)
+						return context.Fail(
+							Status::InvalidValue, "source first-frame bound is invalid", "shuffle"
+						);
+					reshuffle = frame == *first;
+				}
 				if (reshuffle) {
 					if (!entropy)
 						return context.Fail(

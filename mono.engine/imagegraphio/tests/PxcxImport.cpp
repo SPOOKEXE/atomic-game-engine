@@ -1,5 +1,6 @@
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/WavClip.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/testing/Suite.hpp>
@@ -13,6 +14,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -2193,20 +2195,12 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"PXC invalid or playback-ambiguous saved ranges retain opaque source metadata",
+	"PXC unsupported nonnumeric or excessive saved ranges retain opaque source metadata",
 	"[imagegraphio][timeline_range]"
 ) {
 	using namespace engine::imagegraph;
 	for (const std::string_view bounds :
-		 {R"JSON(,"frame_range_start":0)JSON",
-		  R"JSON(,"frame_range_end":-1)JSON",
-		  R"JSON(,"frame_range_start":2.5)JSON",
-		  R"JSON(,"frame_range_end":"8")JSON",
-		  R"JSON(,"frame_range_end":13)JSON",
-		  R"JSON(,"frame_range_start":13)JSON",
-		  R"JSON(,"frame_range_start":8,"frame_range_end":3)JSON",
-		  R"JSON(,"frame_range_start":3,"frame_range_end":3)JSON",
-		  R"JSON(,"frame_range_start":12)JSON"}) {
+		 {R"JSON(,"frame_range_end":"8")JSON", R"JSON(,"frame_range_start":1000000000000)JSON"}) {
 		CAPTURE(bounds);
 		const auto source = TimelineRangeFixture(bounds);
 		PxcxImport imported;
@@ -2642,7 +2636,10 @@ TEST_CASE("PXC unknown key kind leaves the whole animated node opaque", "[imageg
 		CHECK(imported.Graph.Keyframes.empty());
 		CHECK(imported.Graph.Tracks.empty());
 		CHECK(imported.CatalogueNodes == 0);
-		CHECK(imported.Graph.FormatVersion == 8);
+		CHECK(imported.Graph.FormatVersion == 9);
+		REQUIRE(imported.Graph.Timeline);
+		REQUIRE(imported.Graph.Timeline->SourceBounds);
+		CHECK(*imported.Graph.Timeline->SourceBounds == engine::imagegraph::SourceAuthoringFrameBounds{});
 		CHECK(imported.Source.OriginalBytes == source.OriginalBytes);
 		REQUIRE_FALSE(imported.Diagnostics.empty());
 	}
@@ -2689,6 +2686,53 @@ TEST_CASE("PXC unsupported second key does not retain the preceding adder key", 
 	CHECK(imported.Graph.Keyframes.empty());
 	CHECK(imported.Graph.Tracks.empty());
 	CHECK(imported.CatalogueNodes == 0);
-	CHECK(imported.Graph.FormatVersion == 8);
+	CHECK(imported.Graph.FormatVersion == 9);
+	REQUIRE(imported.Graph.Timeline);
+	REQUIRE(imported.Graph.Timeline->SourceBounds);
+	CHECK(*imported.Graph.Timeline->SourceBounds == engine::imagegraph::SourceAuthoringFrameBounds{});
 	CHECK(imported.Source.OriginalBytes == source.OriginalBytes);
+}
+
+TEST_CASE(
+	"PXC signed fractional reversed and out-of-total endpoints are saved source facts",
+	"[imagegraphio][timeline_range]"
+) {
+	using namespace engine::imagegraph;
+	for (const std::string_view bounds :
+		 {R"JSON(,"frame_range_start":0)JSON",
+		  R"JSON(,"frame_range_end":-1)JSON",
+		  R"JSON(,"frame_range_start":2.5)JSON",
+		  R"JSON(,"frame_range_end":13)JSON",
+		  R"JSON(,"frame_range_start":13)JSON",
+		  R"JSON(,"frame_range_start":8,"frame_range_end":3)JSON",
+		  R"JSON(,"frame_range_start":3,"frame_range_end":3)JSON",
+		  R"JSON(,"frame_range_start":12)JSON"}) {
+		CAPTURE(bounds);
+		const auto source = TimelineRangeFixture(bounds);
+		PxcxImport imported;
+		std::string failure;
+		REQUIRE(ImportPxcxImageGraph(source, imported, failure));
+		CHECK(imported.Diagnostics.empty());
+		REQUIRE(imported.Graph.Timeline);
+		REQUIRE(imported.Graph.Timeline->SourceBounds);
+		CHECK(imported.Source.OriginalBytes == source.OriginalBytes);
+		const auto first = SourceTimelineFirstFrame(*imported.Graph.Timeline);
+		const auto last = SourceTimelineLastFrame(*imported.Graph.Timeline);
+		REQUIRE(first);
+		REQUIRE(last);
+		const auto json = nlohmann::ordered_json::parse(source.GraphJson.c_str());
+		const auto &animator = json["animator"];
+		CHECK(
+			*first ==
+			(animator.contains("frame_range_start") ? animator["frame_range_start"].get<double>() - 1 : 0)
+		);
+		CHECK(
+			*last ==
+			(animator.contains("frame_range_end") ? animator["frame_range_end"].get<double>() - 1 : 11)
+		);
+		Document parsed;
+		Diagnostic diagnostic;
+		REQUIRE(Read(Write(imported.Graph), parsed, diagnostic) == Status::Ok);
+		CHECK(parsed.Timeline == imported.Graph.Timeline);
+	}
 }

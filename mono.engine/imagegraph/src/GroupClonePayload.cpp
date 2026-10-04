@@ -3,6 +3,7 @@
 
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -200,7 +201,10 @@ namespace engine::imagegraph {
 		}
 		for (const auto &track : document.Tracks)
 			if (!text(track.NodeId) || !text(track.Port) || !text(track.End)) return std::nullopt;
-		if (document.Timeline && !text(document.Timeline->Playback)) return std::nullopt;
+		if (document.Timeline && (!text(document.Timeline->Playback) ||
+								  (document.Timeline->SourceBounds &&
+								   !ValidSourceAuthoringFrameBounds(*document.Timeline->SourceBounds))))
+			return std::nullopt;
 		if (!text(document.ProjectGlobalNodeId)) return std::nullopt;
 		if (document.Project &&
 			(!slots(document.Project->Palette.capacity(), sizeof(Colour)) ||

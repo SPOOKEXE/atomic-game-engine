@@ -7,6 +7,7 @@
 
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 
 #include <algorithm>
@@ -3882,34 +3883,35 @@ namespace engine::imagegraphio {
 					 "PXCX timeline stays opaque: " + std::move(message) + "; source bytes retained"}
 				);
 			};
-			// The saved authoring bounds are one-based; source getters subtract one. Region selection
-			// is transient and cannot be inferred from the saved list of available regions.
-			std::optional<int64_t> start, end;
-			for (const auto &[key, sourceBound, bound] :
-				 {std::tuple{"frame_range_start", &start, &timeline.First},
-				  std::tuple{"frame_range_end", &end, &timeline.Last}}) {
+			imagegraph::SourceAuthoringFrameBounds sourceBounds;
+			for (const auto &[key, target] :
+				 {std::pair{"frame_range_start", &sourceBounds.Start},
+				  std::pair{"frame_range_end", &sourceBounds.End}}) {
 				const auto found = animator->find(key);
-				if (found == animator->end() || found->is_null()) continue;
-				int64_t frame = 0;
-				if (!WholeNumber(*found, frame) || frame < 1 || frame > frames) {
-					unsupportedRange(key, "saved frame bound must be an integer from 1 through frames_total");
+				if (found == animator->end()) continue;
+				if (found->is_null()) {
+					target->Presence = imagegraph::SourceFrameBoundPresence::Null;
+					continue;
+				}
+				if (!found->is_number() ||
+					!imagegraph::SplitFrameTime(
+						found->get<double>(), target->Value, false, imagegraph::Limits::MaximumTick + 1
+					)) {
+					unsupportedRange(key, "saved numeric endpoint exceeds native signed authoring profile");
 					return;
 				}
-				*sourceBound = frame;
-				*bound = static_cast<uint64_t>(frame - 1);
+				target->Presence = imagegraph::SourceFrameBoundPresence::Explicit;
 			}
-			if (timeline.First > timeline.Last) {
-				unsupportedRange("frame_range", "saved frame bounds are reversed");
-				return;
-			}
-			// Source step clears equal selected bounds, while getters initially expose one frame.
-			// Neither a persistent one-frame range nor silent clearing preserves both behaviors.
-			if ((start || end) && start.value_or(0) == end.value_or(frames)) {
-				unsupportedRange("frame_range", "equal saved bounds are cleared by source playback step");
+			timeline.SourceBounds = sourceBounds;
+			imagegraph::Diagnostic rangeDiagnostic;
+			if (imagegraph::ProjectSourceTimelineWindow(timeline, rangeDiagnostic) !=
+				imagegraph::Status::Ok) {
+				unsupportedRange("frame_range", rangeDiagnostic.Message);
 				return;
 			}
 			timeline.Playback = std::string(ENDS[static_cast<size_t>(playback)]);
 			timeline.FramesPerSecond = rate->get<double>();
+			result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			result.Graph.Timeline = std::move(timeline);
 		}
 	}

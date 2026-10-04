@@ -4,6 +4,7 @@
 #include <engine/imagegraph/CacheResultsReplay.hpp>
 #include <engine/imagegraph/DataReplay.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 
 #include <cmath>
 
@@ -50,9 +51,12 @@ namespace engine::imagegraph::detail {
 				return c.Fail(
 					Status::LimitExceeded, "Cache Results Amount exceeds bounded array storage", "amount"
 				);
+			const auto firstFrame =
+				c.Timeline ? SourceTimelineFirstFrame(*c.Timeline) : std::optional<double>{0.};
+			if (!firstFrame) return c.Fail(Status::InvalidValue, "source first-frame bound is invalid");
 			const bool first =
 				FrameTimeToReal({c.Request.Tick, c.Request.Subframe, c.Request.NegativeFrame}) ==
-				static_cast<long double>(c.Timeline ? c.Timeline->First : 0);
+				static_cast<long double>(*firstFrame);
 			size_t retained = std::min(CacheResultsSlots{old}.Count(), size_t(amount));
 			size_t begin = 0;
 			if (first) {

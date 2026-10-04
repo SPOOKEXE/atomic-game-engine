@@ -1313,6 +1313,18 @@ namespace engine::imagegraph {
 		bool operator==(const AnimationRegion &) const = default;
 	};
 
+	enum class SourceFrameBoundPresence : uint8_t { Missing, Null, Explicit };
+	// Saved one-based coordinates remain independent of frames_total and playback projection.
+	struct SourceAuthoringFrameBound {
+		SourceFrameBoundPresence Presence = SourceFrameBoundPresence::Missing;
+		FrameTime Value{};
+		bool operator==(const SourceAuthoringFrameBound &) const = default;
+	};
+	struct SourceAuthoringFrameBounds {
+		SourceAuthoringFrameBound Start{};
+		SourceAuthoringFrameBound End{};
+		bool operator==(const SourceAuthoringFrameBounds &) const = default;
+	};
 	struct TimelineSettings {
 		uint64_t Frames = 1;
 		uint64_t First = 0;
@@ -1320,6 +1332,7 @@ namespace engine::imagegraph {
 		std::string Playback = "loop";
 		// Authored playback rate. Evaluation remains independent of wall time.
 		double FramesPerSecond = 30.0;
+		std::optional<SourceAuthoringFrameBounds> SourceBounds{};
 		bool operator==(const TimelineSettings &) const = default;
 	};
 

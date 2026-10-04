@@ -4,6 +4,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphInputs.hpp>
@@ -328,11 +329,15 @@ namespace engine::imagegraphexport {
 		}
 		if (const auto *clear = Get<bool>(call, "attribute_clear_directory"))
 			base.RetainTemporaryFrames = !*clear;
-		base.Frames = {
-			call.Timeline ? call.Timeline->First : 0,
-			call.Timeline ? call.Timeline->Last : 0,
-			static_cast<uint64_t>(step)
-		};
+		base.Frames = {0, 0, static_cast<uint64_t>(step)};
+		if (type != 0 && !*custom && call.Timeline) {
+			const auto first = SourceTimelineFirstFrame(*call.Timeline);
+			const auto last = SourceTimelineLastFrame(*call.Timeline);
+			if (!first || !last || *first < 0 || *last < *first || *last > double(Limits::MaximumTick) ||
+				std::floor(*first) != *first || std::floor(*last) != *last)
+				return fail("default source export range requires ordered nonnegative integral endpoints");
+			base.Frames = {uint64_t(*first), uint64_t(*last), static_cast<uint64_t>(step)};
+		}
 		if (type == 0)
 			base.Frames = {call.Request.Tick, call.Request.Tick, 1};
 		else if (*custom) {

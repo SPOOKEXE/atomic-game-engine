@@ -2,6 +2,7 @@
 #include "HlslSourceArguments.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "SourceInputProvenance.hpp"
+#include "SourceTimelineProjection.hpp"
 #include "TileProperties.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -2471,6 +2472,17 @@ namespace engine::imagegraphio {
 						);
 			}
 		}
+		if (working.Graph.Timeline != desired.Timeline) {
+			constexpr size_t timelineScratch = 5 * (sizeof(Json) + sizeof(Json::object_t::value_type) + 32);
+			if (!Spend(timelineScratch, payloadBudget))
+				return Reject(
+					diagnostic,
+					"PXC timeline JSON projection exceeds operation payload budget",
+					{},
+					"timeline"
+				);
+		}
+		if (!ProjectSourceTimeline(root, working.Graph.Timeline, desired.Timeline, diagnostic)) return false;
 		const ProjectSettings previousProject = working.Graph.Project.value_or(ProjectSettings{});
 		const ProjectSettings project = desired.Project.value_or(ProjectSettings{});
 		if (working.Graph.Project.has_value() != desired.Project.has_value() ||

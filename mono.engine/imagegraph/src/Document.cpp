@@ -64,6 +64,7 @@
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/SliceStackReplay.hpp>
 #include <engine/imagegraph/SourceBuiltinRandom.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/StatefulTemporalCone.hpp>
 #include <engine/imagegraph/Vector2Presentation.hpp>
@@ -2643,6 +2644,10 @@ namespace engine::imagegraph {
 	}
 
 	std::string Write(const Document &document) {
+		if (document.Timeline && document.Timeline->SourceBounds &&
+			(document.FormatVersion < 9 ||
+			 !ValidSourceAuthoringFrameBounds(*document.Timeline->SourceBounds)))
+			return {};
 		if (document.Project && (!ValidProjectAnimationRegions(*document.Project) ||
 								 (document.FormatVersion < 9 && !document.Project->AnimationRegions.empty())))
 			return {};
@@ -2953,6 +2958,22 @@ namespace engine::imagegraph {
 				if (document.FormatVersion >= 5)
 					stream << ' ' << std::setprecision(17) << document.Timeline->FramesPerSecond;
 				stream << '\n';
+				if (document.Timeline->SourceBounds) {
+					const auto writeBound = [&](const SourceAuthoringFrameBound &bound) {
+						if (bound.Presence == SourceFrameBoundPresence::Missing)
+							stream << "missing";
+						else if (bound.Presence == SourceFrameBoundPresence::Null)
+							stream << "null";
+						else
+							stream << "explicit " << bound.Value.Tick << ' ' << std::setprecision(17)
+								   << bound.Value.Subframe << ' ' << bound.Value.NegativeFrame;
+					};
+					stream << "source_timeline_bounds ";
+					writeBound(document.Timeline->SourceBounds->Start);
+					stream << ' ';
+					writeBound(document.Timeline->SourceBounds->End);
+					stream << '\n';
+				}
 			}
 			for (const AnimationTrack &track : document.Tracks) {
 				stream << "track ";
@@ -3566,6 +3587,26 @@ namespace engine::imagegraph {
 					1.0 / timeline.FramesPerSecond <= 0)
 					goto malformed;
 				parsed.Timeline = std::move(timeline);
+			} else if (marker == "source_timeline_bounds" && parsed.FormatVersion >= 9) {
+				if (!parsed.Timeline || parsed.Timeline->SourceBounds) goto malformed;
+				SourceAuthoringFrameBounds bounds;
+				const auto readBound = [&](SourceAuthoringFrameBound &bound) {
+					std::string tag;
+					if (!(row >> std::setw(9) >> tag)) return false;
+					if (tag == "missing")
+						bound.Presence = SourceFrameBoundPresence::Missing;
+					else if (tag == "null")
+						bound.Presence = SourceFrameBoundPresence::Null;
+					else if (tag == "explicit") {
+						bound.Presence = SourceFrameBoundPresence::Explicit;
+						if (!(row >> bound.Value.Tick >> bound.Value.Subframe >> bound.Value.NegativeFrame))
+							return false;
+					} else
+						return false;
+					return ValidSourceAuthoringFrameBound(bound);
+				};
+				if (!readBound(bounds.Start) || !readBound(bounds.End) || HasTrailing(row)) goto malformed;
+				parsed.Timeline->SourceBounds = bounds;
 			} else if (marker == "project_global_node" && parsed.FormatVersion >= 9) {
 				if (!parsed.ProjectGlobalNodeId.empty() ||
 					!ReadQuoted(row, parsed.ProjectGlobalNodeId, Limits::MaximumTextBytes) ||
@@ -4121,6 +4162,26 @@ namespace engine::imagegraph {
 		}
 		if (document.Timeline) {
 			const TimelineSettings &timeline = *document.Timeline;
+			if (timeline.SourceBounds && document.FormatVersion < 9) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedVersion,
+					"source timeline bounds need imagegraph v9",
+					{},
+					"timeline"
+				);
+				return diagnostic.Code;
+			}
+			if (timeline.SourceBounds && !ValidSourceAuthoringFrameBounds(*timeline.SourceBounds)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"source timeline bounds must be canonical finite signed coordinates",
+					{},
+					"timeline"
+				);
+				return diagnostic.Code;
+			}
 			const double frameSeconds = 1.0 / timeline.FramesPerSecond;
 			if (!std::isfinite(timeline.FramesPerSecond) || timeline.FramesPerSecond <= 0 ||
 				!std::isfinite(frameSeconds) || frameSeconds <= 0 ||
