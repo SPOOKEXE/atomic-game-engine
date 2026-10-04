@@ -1,10 +1,12 @@
 #include "../src/ImageGraphPreview.hpp"
+#include "../src/ImageGraphSourceTimelineTransition.hpp"
 #include "../src/KeyframeKindEditor.hpp"
 
 #include <engine/bake/Pxcx.hpp>
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/scene/ImageGraphBinding.hpp>
@@ -669,6 +671,131 @@ TEST_CASE("v4 saved timeline drives bounded pingpong playback", "[studio][imageg
 		CHECK(studio::AdvanceImageGraphPlayback(playback, 1.0 / playback.FramesPerSecond));
 		CHECK(playback.CurrentTick == tick);
 	}
+}
+
+TEST_CASE("source step caller publishes normalized bounds with one undo", "[studio][imagegraph]") {
+	using namespace engine::imagegraph;
+	Document authored;
+	TimelineSettings timeline{
+		2,
+		0,
+		1,
+		"loop",
+		30.0,
+		SourceAuthoringFrameBounds{
+			{SourceFrameBoundPresence::Missing, {}}, {SourceFrameBoundPresence::Explicit, {12, 0.0, false}}
+		}
+	};
+	Diagnostic diagnostic;
+	REQUIRE(ProjectSourceTimelineWindow(timeline, diagnostic) == Status::Ok);
+	REQUIRE(studio::SetImageGraphTimeline(authored, timeline, diagnostic));
+	studio::ImageGraphPlayback playback;
+	studio::ApplyImageGraphTimeline(authored, playback);
+	const Document before = authored;
+	const auto playbackBefore = playback;
+	studio::detail::PreparedSourceTimelineStep prepared;
+	REQUIRE(studio::detail::PrepareSourceTimelineStep(authored, playback, prepared, diagnostic));
+	REQUIRE(prepared.AuthoredTimeline.has_value());
+	CHECK(prepared.BoundsChanged);
+	CHECK(prepared.Playback.SourceBounds->End.Value.Tick == 2);
+	CHECK(authored == before);
+	CHECK(GetImageGraphFrame(playback) == GetImageGraphFrame(playbackBefore));
+	CHECK(playback.SourceBounds == playbackBefore.SourceBounds);
+	studio::ImageGraphHistory history(4);
+	bool documentChanged = false;
+	REQUIRE(
+		studio::detail::CommitSourceTimelineStep(
+			authored, history, playback, std::move(prepared), documentChanged, diagnostic
+		)
+	);
+	CHECK(documentChanged);
+	CHECK(playback.SourceBounds->End.Value.Tick == 2);
+	REQUIRE(authored.Timeline.has_value());
+	CHECK(authored.Timeline->SourceBounds->End.Value.Tick == 2);
+	CHECK(history.Undo(authored));
+	CHECK(authored == before);
+	CHECK(history.Redo(authored));
+	CHECK(authored.Timeline->SourceBounds->End.Value.Tick == 2);
+	studio::ImageGraphHistory noHistory(0, 0);
+	studio::detail::PreparedSourceTimelineStep steadyStep;
+	REQUIRE(studio::detail::PrepareSourceTimelineStep(authored, playback, steadyStep, diagnostic));
+	CHECK_FALSE(steadyStep.AuthoredTimeline.has_value());
+	CHECK_FALSE(steadyStep.BoundsChanged);
+	const Document normalized = authored;
+	const auto normalizedPlayback = playback;
+	REQUIRE(
+		studio::detail::CommitSourceTimelineStep(
+			authored, noHistory, playback, std::move(steadyStep), documentChanged, diagnostic
+		)
+	);
+	CHECK_FALSE(documentChanged);
+	CHECK(authored == normalized);
+	CHECK(GetImageGraphFrame(playback) == GetImageGraphFrame(normalizedPlayback));
+	CHECK(playback.SourceBounds == normalizedPlayback.SourceBounds);
+
+	Document refused = before;
+	studio::ImageGraphPlayback refusedPlayback = playbackBefore;
+	studio::detail::PreparedSourceTimelineStep refusedStep;
+	REQUIRE(studio::detail::PrepareSourceTimelineStep(refused, refusedPlayback, refusedStep, diagnostic));
+	documentChanged = true;
+	CHECK_FALSE(
+		studio::detail::CommitSourceTimelineStep(
+			refused, noHistory, refusedPlayback, std::move(refusedStep), documentChanged, diagnostic
+		)
+	);
+	CHECK_FALSE(documentChanged);
+	CHECK(refused == before);
+	CHECK(GetImageGraphFrame(refusedPlayback) == GetImageGraphFrame(playbackBefore));
+	CHECK(refusedPlayback.SourceBounds == playbackBefore.SourceBounds);
+
+	studio::ImageGraphPlayback nativePlayback;
+	studio::detail::PreparedSourceTimelineStep nativeStep;
+	REQUIRE(studio::detail::PrepareSourceTimelineStep(authored, nativePlayback, nativeStep, diagnostic));
+	CHECK_FALSE(nativeStep.AuthoredTimeline.has_value());
+	const Document authoredUnchanged = authored;
+	documentChanged = true;
+	REQUIRE(
+		studio::detail::CommitSourceTimelineStep(
+			authored, noHistory, nativePlayback, std::move(nativeStep), documentChanged, diagnostic
+		)
+	);
+	CHECK_FALSE(documentChanged);
+	CHECK(authored == authoredUnchanged);
+}
+
+TEST_CASE(
+	"source timeline projection retains endpoints outside the playback window", "[studio][imagegraph]"
+) {
+	using namespace engine::imagegraph;
+	TimelineSettings timeline{
+		2,
+		0,
+		1,
+		"loop",
+		30.0,
+		SourceAuthoringFrameBounds{
+			{SourceFrameBoundPresence::Explicit, {0, 0.5, false}},
+			{SourceFrameBoundPresence::Explicit, {12, 0.0, false}}
+		}
+	};
+	Diagnostic diagnostic;
+	REQUIRE(ProjectSourceTimelineWindow(timeline, diagnostic) == Status::Ok);
+	CHECK(timeline.First == 0);
+	CHECK(timeline.Last == 1);
+	CHECK(SourceTimelineFirstFrame(timeline) == -0.5);
+	CHECK(SourceTimelineLastFrame(timeline) == 11.0);
+
+	timeline.SourceBounds->Start = {SourceFrameBoundPresence::Explicit, {4, 0.0, false}};
+	timeline.SourceBounds->End = {SourceFrameBoundPresence::Explicit, {4, 0.0, false}};
+	CHECK(NormalizeSourceTimelineBounds(timeline, diagnostic) == Status::Ok);
+	CHECK(timeline.SourceBounds->Start.Presence == SourceFrameBoundPresence::Null);
+	CHECK(timeline.SourceBounds->End.Presence == SourceFrameBoundPresence::Null);
+
+	timeline.SourceBounds->Start = {SourceFrameBoundPresence::Explicit, {0, 0.0, false}};
+	timeline.SourceBounds->End = {SourceFrameBoundPresence::Explicit, {0, 0.0, false}};
+	CHECK(NormalizeSourceTimelineBounds(timeline, diagnostic) == Status::Ok);
+	CHECK(timeline.SourceBounds->Start.Presence == SourceFrameBoundPresence::Explicit);
+	CHECK(timeline.SourceBounds->End.Presence == SourceFrameBoundPresence::Explicit);
 }
 
 TEST_CASE(

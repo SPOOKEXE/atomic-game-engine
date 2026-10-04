@@ -6,6 +6,7 @@
 
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraph/WavClip.hpp>
@@ -274,6 +275,7 @@ namespace studio {
 			for (const auto &track : document.Tracks)
 				if (track.QuaternionMode) required = std::max(required, 8u);
 			if (document.Timeline) required = std::max(required, 5u);
+			if (document.Timeline && document.Timeline->SourceBounds) required = 9;
 			if (document.Project) {
 				required = std::max(required, 7u);
 				const auto &project = *document.Project;
@@ -681,9 +683,17 @@ namespace studio {
 		playback.NegativeFrame = false;
 		if (document.Timeline) {
 			const engine::imagegraph::TimelineSettings &timeline = *document.Timeline;
+			engine::imagegraph::TimelineSettings projection = timeline;
+			engine::imagegraph::Diagnostic diagnostic;
+			if (engine::imagegraph::ProjectSourceTimelineWindow(projection, diagnostic) !=
+				engine::imagegraph::Status::Ok) {
+				projection.First = 0;
+				projection.Last = timeline.Frames ? timeline.Frames - 1 : 0;
+			}
 			playback.TotalFrames = timeline.Frames;
-			playback.StartTick = timeline.First;
-			playback.EndTick = timeline.Last;
+			playback.StartTick = projection.First;
+			playback.EndTick = projection.Last;
+			playback.SourceBounds = timeline.SourceBounds;
 			playback.FramesPerSecond = timeline.FramesPerSecond;
 			playback.Loop = timeline.Playback == "loop";
 			playback.PingPong = timeline.Playback == "pingpong";
@@ -694,6 +704,7 @@ namespace studio {
 			playback.FramesPerSecond = 30.0;
 			playback.Loop = true;
 			playback.PingPong = false;
+			playback.SourceBounds.reset();
 		}
 		if (!ValidFramesPerSecond(playback.FramesPerSecond)) playback.FramesPerSecond = 30.0;
 		const uint64_t maximumFrames = engine::imagegraph::Limits::MaximumTick + 1;
@@ -2668,7 +2679,9 @@ namespace studio {
 		if (timeline.Frames == 0 || timeline.Frames > engine::imagegraph::Limits::MaximumTick + 1 ||
 			timeline.First > timeline.Last || timeline.Last >= timeline.Frames ||
 			(timeline.Playback != "loop" && timeline.Playback != "stop" && timeline.Playback != "pingpong") ||
-			!ValidFramesPerSecond(timeline.FramesPerSecond)) {
+			!ValidFramesPerSecond(timeline.FramesPerSecond) ||
+			(timeline.SourceBounds &&
+			 !engine::imagegraph::ValidSourceAuthoringFrameBounds(*timeline.SourceBounds))) {
 			SetDiagnostic(
 				error,
 				engine::imagegraph::Status::InvalidValue,

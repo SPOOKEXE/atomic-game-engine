@@ -53,6 +53,7 @@ namespace studio {
 		uint64_t StartTick = 0;
 		uint64_t EndTick = 240;
 		uint64_t TotalFrames = 241;
+		std::optional<engine::imagegraph::SourceAuthoringFrameBounds> SourceBounds;
 		double FramesPerSecond = 30.0;
 		double Accumulator = 0.0;
 		int8_t Direction = 1;

@@ -315,6 +315,27 @@ TEST_CASE(
 	CHECK(document == before);
 	REQUIRE(history.Redo(document));
 	CHECK(document == restored);
+	Document nativeShort = Graph();
+	std::array shortSources{AudioClipSource{"exact.wav", {std::vector<double>(1, .5), 48000, {}}}};
+	request.AudioClips = shortSources;
+	playback.StartTick = 10;
+	playback.EndTick = 20;
+	REQUIRE(studio::SyncImageGraphWavTimeline(nativeShort, "file", request, playback, diagnostic));
+	REQUIRE(nativeShort.Timeline);
+	CHECK(nativeShort.Timeline->Frames == 2);
+	CHECK(nativeShort.Timeline->First == 1);
+	CHECK(nativeShort.Timeline->Last == 1);
+	Document sourceShort = Graph();
+	playback.SourceBounds = SourceAuthoringFrameBounds{
+		{SourceFrameBoundPresence::Missing, {}}, {SourceFrameBoundPresence::Explicit, {12, 0.0, false}}
+	};
+	request.AudioClips = shortSources;
+	REQUIRE(studio::SyncImageGraphWavTimeline(sourceShort, "file", request, playback, diagnostic));
+	REQUIRE(sourceShort.Timeline);
+	CHECK(sourceShort.Timeline->Frames == 2);
+	CHECK(sourceShort.Timeline->Last == 1);
+	CHECK(sourceShort.Timeline->SourceBounds == playback.SourceBounds);
+	request.AudioClips = sources;
 	sources[0].SourceId = "missing.wav";
 	CHECK_FALSE(studio::SyncImageGraphWavTimeline(document, "file", request, playback, diagnostic));
 	CHECK(document == restored);

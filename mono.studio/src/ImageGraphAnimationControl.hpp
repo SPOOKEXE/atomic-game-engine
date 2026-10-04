@@ -3,6 +3,7 @@
 #include <engine/imagegraph/AnimationControl.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -20,7 +21,14 @@ namespace studio::detail {
 		state.Simulating = owner.Simulating;
 		state.FrameProgress = owner.FrameProgress;
 		state.Direction = owner.Direction;
-		state.FrameRangeStart = double(owner.StartTick) + 1;
+		if (owner.SourceBounds) {
+			const auto &sourceStart = owner.SourceBounds->Start;
+			if (sourceStart.Presence == engine::imagegraph::SourceFrameBoundPresence::Explicit &&
+				engine::imagegraph::ValidSourceAuthoringFrameBound(sourceStart))
+				state.FrameRangeStart = double(engine::imagegraph::FrameTimeToReal(sourceStart.Value));
+		} else {
+			state.FrameRangeStart = double(owner.StartTick) + 1;
+		}
 		return state;
 	}
 	// Validate the complete effect sequence before changing the owner or

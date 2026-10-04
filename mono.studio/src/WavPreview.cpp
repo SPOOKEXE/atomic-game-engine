@@ -1,5 +1,6 @@
 #include "WavFileWatch.hpp"
 
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/WavPreview.hpp>
 
 #include <algorithm>
@@ -55,13 +56,16 @@ namespace studio {
 			return false;
 		TimelineSettings timeline{
 			frames,
-			std::min(playback.StartTick, frames - 1),
-			std::min(playback.EndTick, frames - 1),
+			playback.SourceBounds ? 0 : std::min(playback.StartTick, frames - 1),
+			playback.SourceBounds ? frames - 1 : std::min(playback.EndTick, frames - 1),
 			playback.PingPong ? "pingpong"
 			: playback.Loop	  ? "loop"
 							  : "stop",
-			playback.FramesPerSecond
+			playback.FramesPerSecond,
+			playback.SourceBounds
 		};
+		if (playback.SourceBounds && ProjectSourceTimelineWindow(timeline, diagnostic) != Status::Ok)
+			return false;
 		return SetImageGraphTimeline(document, timeline, diagnostic);
 	}
 

@@ -28,6 +28,7 @@
 #include "ImageGraphRigid.hpp"
 #include "ImageGraphRigidMeshAction.hpp"
 #include "ImageGraphSourceEdit.hpp"
+#include "ImageGraphSourceTimelineTransition.hpp"
 #include "KeyframeKindEditor.hpp"
 #include "TimelineDopesheet.hpp"
 #include "TimelineEaseEditor.hpp"
@@ -45,6 +46,7 @@
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
+#include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/WavPreview.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
@@ -1814,20 +1816,89 @@ namespace studio {
 				playback.PingPong ? "pingpong"
 				: playback.Loop	  ? "loop"
 								  : "stop",
-				playback.FramesPerSecond
+				playback.FramesPerSecond,
+				playback.SourceBounds
 			};
 		}
 
-		bool SavePlaybackTimeline(State &state) {
-			bool saved = false;
-			ApplyDocumentEdit(state, [&](Document &document) {
-				if (studio::SetImageGraphTimeline(
-						document, PlaybackTimeline(state.Playback), state.LastDiagnostic
-					)) {
-					state.LastDiagnostic = {};
-					saved = true;
-				}
+		void ApplyPlaybackTimelineProjection(
+			ImageGraphPlayback &playback, const engine::imagegraph::TimelineSettings &timeline
+		) {
+			playback.TotalFrames = timeline.Frames;
+			playback.StartTick = timeline.First;
+			playback.EndTick = timeline.Last;
+			playback.Loop = timeline.Playback == "loop";
+			playback.PingPong = timeline.Playback == "pingpong";
+			playback.FramesPerSecond = timeline.FramesPerSecond;
+			playback.SourceBounds = timeline.SourceBounds;
+			if (playback.NegativeFrame || playback.CurrentTick < playback.StartTick ||
+				playback.CurrentTick > playback.EndTick) {
+				(void)SetImageGraphAuthorFrame(
+					playback,
+					{std::clamp(playback.CurrentTick, playback.StartTick, playback.EndTick), 0.0, false}
+				);
+			}
+		}
+
+		bool CommitPlaybackTimeline(State &state, engine::imagegraph::TimelineSettings timeline) {
+			if (engine::imagegraph::ProjectSourceTimelineWindow(timeline, state.LastDiagnostic) !=
+				engine::imagegraph::Status::Ok)
+				return false;
+			const bool accepted = ApplyDocumentEdit(state, [&](Document &document) {
+				return studio::SetImageGraphTimeline(document, timeline, state.LastDiagnostic);
 			});
+			if (!accepted) return false;
+			ApplyPlaybackTimelineProjection(state.Playback, timeline);
+			state.LastDiagnostic = {};
+			return true;
+		}
+
+		bool CommitSourcePlaybackTransition(State &state, const auto &transition) {
+			Diagnostic diagnostic;
+			detail::PreparedSourceTimelineStep prepared;
+			if (!detail::PrepareSourceTimelineStep(state.Authored, state.Playback, prepared, diagnostic)) {
+				state.LastDiagnostic = std::move(diagnostic);
+				return false;
+			}
+			if (!transition(prepared.Playback)) return false;
+			bool documentChanged = false;
+			if (!detail::CommitSourceTimelineStep(
+					state.Authored,
+					state.History,
+					state.Playback,
+					std::move(prepared),
+					documentChanged,
+					diagnostic
+				)) {
+				state.LastDiagnostic = std::move(diagnostic);
+				return false;
+			}
+			if (documentChanged) AuthoredDocumentChanged(state);
+			if (documentChanged) RequestPreview(state, true);
+			return true;
+		}
+
+		bool SeekSourceBound(State &state, bool first) {
+			const auto timeline = PlaybackTimeline(state.Playback);
+			const auto frame = first ? engine::imagegraph::SourceTimelineFirstFrame(timeline)
+									 : engine::imagegraph::SourceTimelineLastFrame(timeline);
+			engine::imagegraph::FrameTime target;
+			if (!frame || !engine::imagegraph::SplitFrameTime(*frame, target, false)) {
+				state.LastDiagnostic = {
+					Status::InvalidValue,
+					{},
+					"timeline",
+					"source frame endpoint exceeds the native authoring clock"
+				};
+				return false;
+			}
+			if (!SetImageGraphAuthorFrame(state.Playback, target)) return false;
+			RequestPreview(state);
+			return true;
+		}
+
+		bool SavePlaybackTimeline(State &state) {
+			const bool saved = CommitPlaybackTimeline(state, PlaybackTimeline(state.Playback));
 			if (!saved && state.Authored.Timeline) ApplyImageGraphTimeline(state.Authored, state.Playback);
 			return saved;
 		}
@@ -1840,6 +1911,7 @@ namespace studio {
 					removed = true;
 				}
 			});
+			if (removed) state.Playback.SourceBounds.reset();
 			return removed;
 		}
 
@@ -4821,16 +4893,12 @@ namespace studio {
 				if (!state.Playback.Playing &&
 					(state.Playback.NegativeFrame || state.Playback.CurrentTick < state.Playback.StartTick ||
 					 state.Playback.CurrentTick > state.Playback.EndTick)) {
-					if (SetImageGraphPlaybackFrame(
-							state.Playback, static_cast<double>(state.Playback.StartTick)
-						))
-						RequestPreview(state);
+					(void)SeekSourceBound(state, true);
 				}
 				if (!state.Playback.Playing) state.Playback.Direction = 1;
 				if (state.Playback.CurrentTick >= state.Playback.EndTick && !state.Playback.Loop &&
-					!state.Playback.PingPong &&
-					SetImageGraphPlaybackFrame(state.Playback, static_cast<double>(state.Playback.StartTick)))
-					RequestPreview(state);
+					!state.Playback.PingPong)
+					(void)SeekSourceBound(state, true);
 				if (!state.Playback.Playing &&
 					std::any_of(
 						state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [](const Node &node) {
@@ -4852,26 +4920,34 @@ namespace studio {
 			ImGui::SameLine();
 			if (ImGui::Button("Step -1") &&
 				(state.Playback.CurrentTick > state.Playback.StartTick || state.Playback.Subframe > 0.0)) {
-				(void)SetImageGraphPlaybackFrame(
-					state.Playback,
-					static_cast<double>(
-						engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))
-					) - 1.0
-				);
-				state.Playback.Direction = -1;
-				RequestPreview(state);
+				const double target =
+					double(engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))) - 1.0;
+				engine::imagegraph::FrameTime frameTarget;
+				if (engine::imagegraph::SplitFrameTime(target, frameTarget, false) &&
+					CommitSourcePlaybackTransition(state, [&](ImageGraphPlayback &playback) {
+						const bool changed = SetImageGraphAuthorFrame(playback, frameTarget);
+						playback.Direction = -1;
+						return changed;
+					}))
+					RequestPreview(state);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Step +1") && state.Playback.CurrentTick < state.Playback.EndTick) {
-				(void)SetImageGraphPlaybackFrame(
-					state.Playback,
-					static_cast<double>(
-						engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))
-					) + 1.0
-				);
-				state.Playback.Direction = 1;
-				RequestPreview(state);
+				const double target =
+					double(engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))) + 1.0;
+				engine::imagegraph::FrameTime frameTarget;
+				if (engine::imagegraph::SplitFrameTime(target, frameTarget, false) &&
+					CommitSourcePlaybackTransition(state, [&](ImageGraphPlayback &playback) {
+						const bool changed = SetImageGraphAuthorFrame(playback, frameTarget);
+						playback.Direction = 1;
+						return changed;
+					}))
+					RequestPreview(state);
 			}
+			ImGui::SameLine();
+			if (ImGui::Button("First frame")) (void)SeekSourceBound(state, true);
+			ImGui::SameLine();
+			if (ImGui::Button("Last frame")) (void)SeekSourceBound(state, false);
 			ImGui::SameLine();
 			const char *playbackMode = state.Playback.PingPong ? "pingpong"
 									   : state.Playback.Loop   ? "loop"
@@ -4953,6 +5029,67 @@ namespace studio {
 				if (ImGui::SmallButton("Remove saved range")) (void)RemoveSavedTimeline(state);
 			} else if (ImGui::SmallButton("Save range")) {
 				(void)SavePlaybackTimeline(state);
+			}
+			if (state.Playback.SourceBounds) {
+				auto sourceBounds = *state.Playback.SourceBounds;
+				bool sourceBoundsChanged = false;
+				ImGui::TextUnformatted("Source endpoints (one-based)");
+				const auto drawBound = [&](const char *label,
+										   const char *id,
+										   engine::imagegraph::SourceAuthoringFrameBound &bound) {
+					using Presence = engine::imagegraph::SourceFrameBoundPresence;
+					const char *presence = bound.Presence == Presence::Missing ? "Missing"
+										   : bound.Presence == Presence::Null  ? "Null"
+																			   : "Explicit";
+					ImGui::PushID(id);
+					ImGui::TextUnformatted(label);
+					ImGui::SameLine(96.0f);
+					if (ImGui::BeginCombo("##presence", presence)) {
+						for (const auto &[choice, value] : std::array<std::pair<const char *, Presence>, 3>{
+								 {{"Missing", Presence::Missing},
+								  {"Null", Presence::Null},
+								  {"Explicit", Presence::Explicit}}
+							 }) {
+							const bool selected = bound.Presence == value;
+							if (ImGui::Selectable(choice, selected)) {
+								bound.Presence = value;
+								if (value != Presence::Explicit) bound.Value = {};
+								sourceBoundsChanged = true;
+							}
+							if (selected) ImGui::SetItemDefaultFocus();
+						}
+						ImGui::EndCombo();
+					}
+					if (bound.Presence == Presence::Explicit) {
+						ImGui::SameLine();
+						ImGui::SetNextItemWidth(120.0f);
+						double authored = double(engine::imagegraph::FrameTimeToReal(bound.Value));
+						if (ImGui::InputDouble("##value", &authored, 0.01, 1.0, "%.9g")) {
+							engine::imagegraph::FrameTime parsed;
+							if (engine::imagegraph::SplitFrameTime(
+									authored, parsed, false, engine::imagegraph::Limits::MaximumTick + 1
+								)) {
+								bound.Value = parsed;
+								sourceBoundsChanged = true;
+							} else {
+								state.LastDiagnostic = {
+									Status::InvalidValue,
+									{},
+									id,
+									"source endpoint exceeds the native authoring clock"
+								};
+							}
+						}
+					}
+					ImGui::PopID();
+				};
+				drawBound("Start", "source-start", sourceBounds.Start);
+				drawBound("End", "source-end", sourceBounds.End);
+				if (sourceBoundsChanged) {
+					auto timeline = PlaybackTimeline(state.Playback);
+					timeline.SourceBounds = sourceBounds;
+					(void)CommitPlaybackTimeline(state, std::move(timeline));
+				}
 			}
 			ImGui::TextDisabled(
 				"%s at %.6g fps. %s",
@@ -5722,7 +5859,16 @@ namespace studio {
 		PumpRetiredTexture(state, renderer);
 		state.VectorControls.PumpRetired(renderer);
 
-		if (detail::AdvanceAnimationPlayback(state.Playback, ImGui::GetIO().DeltaTime)) RequestPreview(state);
+		bool playbackAdvanced = false;
+		if (CommitSourcePlaybackTransition(
+				state,
+				[&](ImageGraphPlayback &playback) {
+					playbackAdvanced = detail::AdvanceAnimationPlayback(playback, ImGui::GetIO().DeltaTime);
+					return true;
+				}
+			) &&
+			playbackAdvanced)
+			RequestPreview(state);
 		RunAnimationControls(state, renderer);
 		ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 255));
 		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));

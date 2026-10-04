@@ -7,7 +7,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <limits>
+#include <tuple>
+#include <utility>
 
 TEST_SUITE_ID("studio.imagegraph_animation_control")
 TEST_DEPENDS("studio.imagegraph")
@@ -96,6 +99,48 @@ TEST_CASE(
 	);
 	CHECK(GetImageGraphFrame(owner) == priorFrame);
 	CHECK(events.size() == count);
+}
+TEST_CASE(
+	"animation start applies one-based source start once and keeps absent fallback",
+	"[studio][animation_control_host]"
+) {
+	using namespace engine::imagegraph;
+	const std::array<std::tuple<FrameTime, double, double>, 3> explicitStarts{
+		{{{8, 0.25, false}, 7.25, 7}, {{2, 0.5, true}, -3.5, -4}, {{0, 0.5, true}, -1.5, -2}}
+	};
+	for (const auto &[sourceStart, expectedRealFrame, expectedFrame] : explicitStarts) {
+		CAPTURE(sourceStart.Tick, sourceStart.Subframe, sourceStart.NegativeFrame);
+		ImageGraphPlayback owner;
+		owner.StartTick = 6;
+		owner.SourceBounds = SourceAuthoringFrameBounds{
+			{SourceFrameBoundPresence::Explicit, sourceStart}, {SourceFrameBoundPresence::Missing, {}}
+		};
+		AnimationControlInputs inputs;
+		inputs.PlayFromStart = true;
+		AnimationControlResult result;
+		Diagnostic diagnostic;
+		REQUIRE(
+			BuildAnimationControl(inputs, detail::AnimationPlayback(owner), result, diagnostic) == Status::Ok
+		);
+		CHECK(result.Playback.RealFrame == Catch::Approx(expectedRealFrame).margin(1e-12));
+		CHECK(result.Playback.CurrentFrame == expectedFrame);
+	}
+	for (const SourceFrameBoundPresence presence :
+		 {SourceFrameBoundPresence::Missing, SourceFrameBoundPresence::Null}) {
+		CAPTURE(presence);
+		ImageGraphPlayback owner;
+		owner.StartTick = 6;
+		owner.SourceBounds =
+			SourceAuthoringFrameBounds{{presence, {}}, {SourceFrameBoundPresence::Missing, {}}};
+		const auto prior = detail::AnimationPlayback(owner);
+		CHECK_FALSE(prior.FrameRangeStart.has_value());
+		AnimationControlInputs inputs;
+		inputs.PlayFromStart = true;
+		AnimationControlResult result;
+		Diagnostic diagnostic;
+		REQUIRE(BuildAnimationControl(inputs, prior, result, diagnostic) == Status::Ok);
+		CHECK(result.Playback.CurrentFrame == 0);
+	}
 }
 TEST_CASE(
 	"render once traverses its complete range and restores authored loop "
