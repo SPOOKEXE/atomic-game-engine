@@ -13697,6 +13697,215 @@
         ],
         "tail": ""
       }
+    ],
+    "joined_consumers": "All 15 joined CPU scopes pass after Studio region integration; see studio_regions_integration_98.joined_runtime. Broad cache groups and licensed/live/device acceptance remain open."
+  },
+  "studio_regions_integration_98": {
+    "status": "Accepted native region authoring and playback endpoint integration. Joined release build completed 307/307 steps; focused region and all 15 joined CPU scopes pass.",
+    "packet": {
+      "path": "/tmp/pc-studio-regions97-final/StudioRegions.patch",
+      "sha256": "0722ef37031ce1cdddee548f6d5efa1d17180f845d3e4e0ce792bf1bd45c5d96"
+    },
+    "correction": {
+      "path": "/tmp/pc-studio-regions97-bounce/RegionBounceCorrection.patch",
+      "sha256": "b9a1b15f1794523589052b402dcb3c377d0554299bd06a8127712ee70610aaa1"
+    },
+    "format": "clang-format21 dry-run/Werror passes all seven C++ files.",
+    "focused_filter": "[regions]",
+    "constructed_cases": 13,
+    "source_check": "Root independently inspected pinned animation_controller.gml207..219. Pingpong upper bounce uses max(0,last-1) and lower bounce is zero regardless selected start. Fixed-tick stepping remains named native cadence.",
+    "scope": "Transient selection, creation/settings/resize/history, retained PXC record ownership, frozen project endpoint observations. Licensed cadence/device/live Studio and selected frame-cache groups remain unverified.",
+    "build": {
+      "command": "cmake --build .cache/build/release-tests --target test_imagegraph test_imagegraphio test_imagegraphexport test_imagegraphfont test_client test_server test_render test_studio test_assetc test_assets test_gui test_nodegraph test_imagegraphphysics assetc -j8",
+      "exit": 0,
+      "steps": 307,
+      "warning": "GCC13 optimized optional comparison emitted -Wmaybe-uninitialized in TimelineRegions::Stage; optional equality checks presence before reading. Strict syntax/Werror checks passed; warning remains recorded."
+    },
+    "focused_runtime": {
+      "command": [
+        ".cache/build/release-tests/tests/test_studio",
+        "[regions]"
+      ],
+      "exit": 0,
+      "cases": 13,
+      "assertions": 193
+    },
+    "joined_runtime": [
+      {
+        "scope": "filters",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph",
+          "[source_kuwahara],[source_blobify]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/filters-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (1816 assertions in 74 test cases)"
+        ]
+      },
+      {
+        "scope": "core",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/core-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (1858046 assertions in 2748 test cases)"
+        ]
+      },
+      {
+        "scope": "assetc",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assetc"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (362 assertions in 42 test cases)"
+        ]
+      },
+      {
+        "scope": "assets",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_assets"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (32488 assertions in 265 test cases)"
+        ]
+      },
+      {
+        "scope": "cli",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_rigid_observations|assetc_cli_builtin_random_observations|assetc_cli_source_arguments)",
+          "--output-on-failure"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-98-region-joined.log",
+        "summary": [
+          "100% tests passed, 0 tests failed out of 16"
+        ]
+      },
+      {
+        "scope": "client",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_client",
+          "[client][imagegraph]~[gpu],[composer-scenes]~[gpu],[contentdemand]~[gpu],[composer-runtime]~[gpu],[transform-graph-host],[transform-binding-capacity],[source-skybox],[source_skybox],[source_frame_cache],[client][mirror_axes],[client][source_argument]~[gpu],[client][source-camera-graph-host],[client][camera-route]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (7479 assertions in 71 test cases)"
+        ]
+      },
+      {
+        "scope": "export",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (2986 assertions in 70 test cases)"
+        ]
+      },
+      {
+        "scope": "gui",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_gui"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (4974 assertions in 331 test cases)"
+        ]
+      },
+      {
+        "scope": "io",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (11212 assertions in 253 test cases)"
+        ]
+      },
+      {
+        "scope": "nodegraph",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (269 assertions in 31 test cases)"
+        ]
+      },
+      {
+        "scope": "physics",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (715 assertions in 43 test cases)"
+        ]
+      },
+      {
+        "scope": "render",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_render",
+          "~[gpu]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (336655 assertions in 808 test cases)"
+        ]
+      },
+      {
+        "scope": "server",
+        "command": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/.cache/build/release-tests/tests/test_server"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (5 assertions in 1 test case)",
+          "All tests passed (2182 assertions in 99 test cases)"
+        ]
+      },
+      {
+        "scope": "font",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (653 assertions in 26 test cases)"
+        ]
+      },
+      {
+        "scope": "studio",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio",
+          "[file_export],[dynamic_outputs],[source_group_ports],[group_host],[lua],[source_inputs],[pcx_observations],[export_triggers],[source_transaction],[file_host],[wav_export],[array_editor],[composer_workflow],[timeline_keys],[animation_control_host],[rigid_host],[checkpoint52],[rigid_mesh_action],[composer_workflow53],[wav_checker],[studio][timeline_dopesheet],[timeline_history54],[timeline_history55],[composer_cook_action],[hlsl_inputs],[composer_cadence],[hlsl_groups],[dopesheet_delete],[dopesheet_keyboard_ownership],[cache_results_clear],[timeline_ease],[dynamic_track_policy],[export_intent],[timeline_history_keys],[source_frame_cache],[pxcx_save],[studio][source_arguments],[studio][wav_watcher],[studio][camera_preview],[studio][preview-result],[studio][imagegraph],[studio][wav_preview],[studio][animation_control_host],[studio][artwork],[export_intent][font],[dopesheet_actions],[regions]"
+        ],
+        "exit": 0,
+        "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-98-region-joined.log",
+        "summary": [
+          "All tests passed (30160 assertions in 260 test cases)"
+        ]
+      }
     ]
   }
 }

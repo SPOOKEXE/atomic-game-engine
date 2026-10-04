@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ImageGraphRegionBounds.hpp"
+
 #include <engine/imagegraph/AnimationControl.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
@@ -21,6 +23,9 @@ namespace studio::detail {
 		state.Simulating = owner.Simulating;
 		state.FrameProgress = owner.FrameProgress;
 		state.Direction = owner.Direction;
+		if (owner.SelectedRegion)
+			state.SelectionFrameStart =
+				double(engine::imagegraph::FrameTimeToReal(owner.SelectedRegion->first));
 		if (owner.SourceBounds) {
 			const auto &sourceStart = owner.SourceBounds->Start;
 			if (sourceStart.Presence == engine::imagegraph::SourceFrameBoundPresence::Explicit &&
@@ -88,7 +93,9 @@ namespace studio::detail {
 		ImageGraphPlayback candidate = owner;
 		if (candidate.Rendering) candidate.Loop = candidate.PingPong = false;
 		if (candidate.Simulating && candidate.CurrentTick < candidate.StartTick) candidate.StartTick = 0;
-		const bool changed = AdvanceImageGraphPlayback(candidate, elapsed);
+		const bool changed = candidate.SelectedRegion && candidate.SourceBounds
+								 ? AdvanceSelectedRegionPlayback(candidate, elapsed)
+								 : AdvanceImageGraphPlayback(candidate, elapsed);
 		candidate.Loop = owner.Loop;
 		candidate.PingPong = owner.PingPong;
 		candidate.StartTick = owner.StartTick;

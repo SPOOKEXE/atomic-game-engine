@@ -36,6 +36,7 @@
 #include "TimelineDopesheet.hpp"
 #include "TimelineEaseEditor.hpp"
 #include "TimelineKeyEditor.hpp"
+#include "TimelineRegions.hpp"
 #include "Vector2Panel.hpp"
 #include "WavExport.hpp"
 #include "WavFileChecker.hpp"
@@ -186,6 +187,7 @@ namespace studio {
 			TimelineKeyEditor Keys;
 			TimelineEaseEditor EaseKeys;
 			TimelineDopesheet Dopesheet;
+			TimelineRegions Regions;
 			uint8_t TextureSlot = 1;
 			engine::imagegraph::PortDirection GroupPortDirection = engine::imagegraph::PortDirection::Input;
 			engine::imagegraph::ValueType GroupPortType = engine::imagegraph::ValueType::Image;
@@ -261,6 +263,8 @@ namespace studio {
 		}
 
 		void AuthoredDocumentChanged(State &state) {
+			// External authoring changes cannot retain a row selection from the old project.
+			state.Playback.SelectedRegion.reset();
 			state.PxcxCompletedPreview.reset();
 			std::erase_if(state.DirectoryGrants, [&](const auto &grant) {
 				return std::none_of(
@@ -2543,9 +2547,8 @@ namespace studio {
 		}
 
 		bool SeekSourceBound(State &state, bool first) {
-			const auto timeline = PlaybackTimeline(state.Playback);
-			const auto frame = first ? engine::imagegraph::SourceTimelineFirstFrame(timeline)
-									 : engine::imagegraph::SourceTimelineLastFrame(timeline);
+			const auto frame = first ? detail::SelectedRegionFirstFrame(state.Playback)
+									 : detail::SelectedRegionLastFrame(state.Playback);
 			engine::imagegraph::FrameTime target;
 			if (!frame || !engine::imagegraph::SplitFrameTime(*frame, target, false)) {
 				state.LastDiagnostic = {
@@ -5680,7 +5683,24 @@ namespace studio {
 		}
 
 		void DrawTimeline(State &state) {
+			if (state.Regions.Draw(
+					state.Authored,
+					state.DocumentRevision,
+					state.Playback,
+					state.Dopesheet.PixelsPerFrame,
+					state.Dopesheet.PanX,
+					state.LastDiagnostic,
+					[&](const auto &edit) { return ApplyDocumentEdit(state, edit); }
+				)) {
+				CancelComposerPreview(state);
+				state.PreviewCache.Clear();
+				state.PreviewSequence.Invalidate();
+				RequestPreview(state, true);
+			}
+
 			if (ImGui::Button(state.Playback.Playing ? "Pause" : "Play")) {
+				if (!state.Playback.Playing && state.Playback.SelectedRegion && state.Playback.SourceBounds)
+					(void)SeekSourceBound(state, true);
 				if (!state.Playback.Playing &&
 					(state.Playback.NegativeFrame || state.Playback.CurrentTick < state.Playback.StartTick ||
 					 state.Playback.CurrentTick > state.Playback.EndTick)) {

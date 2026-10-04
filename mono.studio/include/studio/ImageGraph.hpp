@@ -18,6 +18,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -64,6 +65,8 @@ namespace studio {
 		double RealFrame = 0.0;
 		double LastTime = 0.0;
 		double RealTime = 0.0;
+		// Frozen transient region observations; definitions remain in the authored project.
+		std::optional<std::pair<engine::imagegraph::FrameTime, engine::imagegraph::FrameTime>> SelectedRegion;
 	};
 
 	engine::imagegraph::FrameTime GetImageGraphFrame(const ImageGraphPlayback &playback);

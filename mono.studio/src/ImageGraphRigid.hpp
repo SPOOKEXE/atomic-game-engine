@@ -1,8 +1,11 @@
 #pragma once
 
+#include "ImageGraphRegionBounds.hpp"
+
 #include <engine/imagegraphphysics/RigidReplay.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <studio/ImageGraph.hpp>
 
 namespace studio::detail {
@@ -25,7 +28,9 @@ namespace studio::detail {
 	inline void BindImageGraphRigid(
 		engine::imagegraph::EvaluationRequest &request,
 		engine::imagegraphphysics::RigidProvider &provider,
-		const ImageGraphPlayback &playback
+		const ImageGraphPlayback &playback,
+		bool projectLoading = false,
+		bool projectAppending = false
 	) {
 		request.RigidProvider = &provider;
 		request.RigidPlaying = playback.Playing;
@@ -33,5 +38,11 @@ namespace studio::detail {
 			playback.Playing, engine::imagegraph::SourceCacheSampling::ObservedFrame, true
 		};
 		request.RigidFrameProgress = playback.FrameProgress;
+		request.SourceCacheProject = engine::imagegraph::SourceFrameCacheProjectObservation{
+			GetImageGraphFrame(playback),
+			SelectedRegionLastFrame(playback).value_or(std::numeric_limits<double>::quiet_NaN()),
+			projectLoading,
+			projectAppending
+		};
 	}
 }
