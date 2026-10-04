@@ -1,7 +1,9 @@
 #include "ProcessorBatch.hpp"
 
 #include "ArrayOps.hpp"
+#include "FontTextBatch.hpp"
 #include "SimulationAliases.hpp"
+#include "SourceFontTransport.hpp"
 #include "SourceGetterProjection.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourceMappedInputs.hpp"
@@ -116,6 +118,9 @@ namespace engine::imagegraph::detail {
 			std::vector<InputRows> &rows
 		) {
 			if (SourceMappedSynthetic(context.Entry, input)) return true;
+			if (context.Entry.Type == "pc.font_data" && port == "font" &&
+				!context.Boolean("attribute_process", true))
+				return context.FailureCode == Status::Ok;
 			const bool mapped = SourceRangeMapped(context, port);
 			const bool hlslTuple =
 				context.Entry.Type == "pc.hlsl" && port.starts_with("argument_value_") &&
@@ -222,6 +227,7 @@ namespace engine::imagegraph::detail {
 				const bool supported =
 					mapped || input.Type == ValueType::Any || input.Type == ValueType::Array ||
 					leaf == input.Type ||
+					(leaf == ValueType::Font && SourceFontInput(context.Entry.Type, port)) ||
 					(leaf == ValueType::Path3D && port == "path" &&
 					 (context.Entry.Type == "pc.path_sample" || context.Entry.Type == "pc.path_smoothen")) ||
 					(leaf == ValueType::Atlas && input.Type == ValueType::Image) ||
@@ -696,7 +702,7 @@ namespace engine::imagegraph::detail {
 
 		context.ProcessorCount = count;
 		uint64_t accumulated = workspaceBytes + (count > 1 ? shapeBytes : 0);
-		for (size_t row = 0; row < count; row++) {
+		const auto selectRow = [&](size_t row, uint64_t &scratchOwned) -> bool {
 			selected.clear();
 			selectedCharge = context.ReserveWorkspace(0, "attribute_array_process");
 			if (!selectedCharge) return false;
@@ -706,7 +712,7 @@ namespace engine::imagegraph::detail {
 			context.ProcessorRow = row;
 			context.ByteBudget = budget;
 			size_t slot = 0;
-			uint64_t scratchOwned = 0;
+			scratchOwned = 0;
 			for (const InputRows &input : rows) {
 				const size_t index =
 					input.Batch ? schedule[row][sourceInverse ? size_t(input.Index) : slot++] : 0;
@@ -769,7 +775,8 @@ namespace engine::imagegraph::detail {
 												input.Port == "up" || input.Port == "unit");
 					// Look At's source getters accept scalar coordinates and numeric selector leaves.
 					if (const auto kind = PayloadType(item);
-						!lookAtControl && input.Type != ValueType::Any && input.Type != ValueType::Array &&
+						!lookAtControl && !SourceFontInput(context.Entry.Type, input.Port) &&
+						input.Type != ValueType::Any && input.Type != ValueType::Array &&
 						kind != input.Type && !(kind == ValueType::Array && input.Depth > 0) &&
 						!(kind == ValueType::Path3D && input.Port == "path" &&
 						  (context.Entry.Type == "pc.path_sample" ||
@@ -788,6 +795,30 @@ namespace engine::imagegraph::detail {
 					context.ValueViews.emplace_back(input.Port, &selected.back());
 				}
 			}
+			return true;
+		};
+		FontTextBatch textBatch;
+		struct RestoreTextBatch {
+			NodeContext &Context;
+			FontTextBatch *Previous;
+			~RestoreTextBatch() {
+				Context.TextBatch = Previous;
+			}
+		} restoreTextBatch{context, context.TextBatch};
+		if (context.Authored.Type == "pc.text") {
+			context.TextBatch = &textBatch;
+			if (!BeginFontTextBatch(context, count, textBatch)) return false;
+			for (size_t row = 0; row < count; ++row) {
+				uint64_t scratchOwned = 0;
+				if (!selectRow(row, scratchOwned) || !PrepareFontTextRow(context, textBatch)) return false;
+			}
+			selected.clear();
+			selectedCharge->Reset();
+			if (!AdmitFontTextBatch(context, textBatch)) return false;
+		}
+		for (size_t row = 0; row < count; row++) {
+			uint64_t scratchOwned = 0;
+			if (!selectRow(row, scratchOwned)) return false;
 			if (!simulationRows.empty()) {
 				context.PendingSimulationRows = simulationRows;
 				if (!ResolveSimulationInputAliases(context)) return false;
@@ -931,6 +962,7 @@ namespace engine::imagegraph::detail {
 				// Source Look At can alternate between Euler triples and quaternion tuples per row.
 				const bool generic =
 					(context.Authored.Type == "pc.quarternion_lookat" && value.Port == "rotation") ||
+					(context.Authored.Type == "pc.font_data" && value.Port == "font") ||
 					std::any_of(
 						context.Entry.Outputs.begin(), context.Entry.Outputs.end(), [&](const auto &output) {
 							return output.Id == value.Port && output.Type == ValueType::Any;

@@ -21,7 +21,10 @@
 #include <cmath>
 #include <cstdio>
 #include <discord/Settings.hpp>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -73,6 +76,7 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		engine::imagegraph::SOURCE_ARGUMENT_TEXT_OPTION, "NAME=VALUE", "Text graph argument; repeatable"
 	);
+	arguments.Value("font-inputs", "PATH", "Owned font configuration and exact read grants for image graphs");
 	arguments.Value(
 		engine::imagegraph::SOURCE_ARGUMENT_BOOLEAN_OPTION, "NAME=VALUE", "Boolean graph argument; repeatable"
 	);
@@ -496,6 +500,35 @@ int main(int argc, char **argv) {
 		options.ShowFrameGraph = true;
 	}
 
+	std::optional<engine::imagegraphfont::GraphFontConfiguration> fontConfiguration;
+	if (const auto fontInputs = arguments.Get("font-inputs")) {
+		constexpr uint64_t MAXIMUM_FONT_CONFIGURATION_BYTES = 128ull * 1024 * 1024;
+		std::ifstream input(std::filesystem::path(*fontInputs), std::ios::binary | std::ios::ate);
+		if (!input) {
+			ENGINE_ERROR("--font-inputs could not open '{}'", *fontInputs);
+			return 2;
+		}
+		const std::streamoff size = input.tellg();
+		if (size < 0 || static_cast<uint64_t>(size) > MAXIMUM_FONT_CONFIGURATION_BYTES) {
+			ENGINE_ERROR("--font-inputs exceeds its 128 MiB file limit");
+			return 2;
+		}
+		std::string contents(static_cast<size_t>(size), '\0');
+		input.seekg(0);
+		if (!input.read(contents.data(), size)) {
+			ENGINE_ERROR("--font-inputs could not read '{}'", *fontInputs);
+			return 2;
+		}
+		fontConfiguration.emplace();
+		engine::imagegraph::Diagnostic fontDiagnostic;
+		if (!engine::imagegraphfont::ReadGraphFontConfiguration(
+				contents, *fontConfiguration, MAXIMUM_FONT_CONFIGURATION_BYTES, fontDiagnostic
+			)) {
+			ENGINE_ERROR("--font-inputs is invalid: {}", fontDiagnostic.Message);
+			return 2;
+		}
+	}
+
 	client::Client client;
 	engine::imagegraph::Diagnostic argumentDiagnostic;
 	if (client.PrepareImageGraphArguments(
@@ -511,6 +544,15 @@ int main(int argc, char **argv) {
 	if (!client.Initialise(options)) {
 		ENGINE_ERROR("client failed to start");
 		return 1;
+	}
+	if (fontConfiguration) {
+		engine::imagegraph::Diagnostic fontDiagnostic;
+		if (client.PrepareImageGraphFonts(*fontConfiguration, fontDiagnostic) !=
+			engine::imagegraph::Status::Ok) {
+			ENGINE_ERROR("client: --font-inputs was refused: {}", fontDiagnostic.Message);
+			client.Shutdown();
+			return 2;
+		}
 	}
 	if (options.DataFactory) {
 		// An empty data-factory host does not load a game or create a presentation

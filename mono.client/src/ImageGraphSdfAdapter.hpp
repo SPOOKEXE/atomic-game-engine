@@ -2,6 +2,10 @@
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/render/SourceSdf.hpp>
+namespace engine::imagegraphfont {
+	class GraphFontInputs;
+}
+
 namespace client::detail {
 	bool BuildSdfRequest(
 		const engine::imagegraph::Document &document,
@@ -15,6 +19,8 @@ namespace client::detail {
 		engine::imagegraph::Diagnostic &diagnostic,
 		engine::imagegraph::HostNodeProvider *hostProvider = nullptr,
 		engine::imagegraph::CapturedFeedbackHost *replayOwner = nullptr,
-		uint64_t authoringRevision = 1
+		uint64_t authoringRevision = 1,
+		const engine::imagegraphfont::GraphFontInputs *fonts = nullptr,
+		const engine::imagegraph::EvaluationRequest *fontInputs = nullptr
 	);
 }

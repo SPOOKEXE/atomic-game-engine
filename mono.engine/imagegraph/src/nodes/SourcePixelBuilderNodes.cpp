@@ -240,6 +240,47 @@ namespace engine::imagegraph::detail {
 						"Builder cache action snapshot exceeds its byte bound",
 						"dynamic_builder"
 					);
+			const size_t fontCount = context.Request.FontObservations.size() + context.ObservedFonts.size();
+			if (fontCount > Limits::MaximumNodes * 2)
+				return context.Fail(Status::LimitExceeded, "Builder font receipt count exceeds limits");
+			uint64_t fontComparisonBytes = 0;
+			for (const auto source : {context.Request.FontObservations, context.ObservedFonts})
+				for (const auto &record : source) {
+					const auto bytes = SourceFontObservationRetainedBytes(record);
+					if (!bytes || *bytes > Limits::MaximumEvaluationBytes - fontComparisonBytes)
+						return context.Fail(
+							Status::LimitExceeded, "Builder font receipt comparisons exceed owned limits"
+						);
+					fontComparisonBytes += *bytes;
+				}
+			if (fontCount && fontComparisonBytes > (16 * 1024 * 1024) / fontCount)
+				return context.Fail(
+					Status::LimitExceeded, "Builder font receipt comparisons exceed bounded work"
+				);
+			auto fontIndexCharge = context.ReserveWorkspace(
+				fontCount * sizeof(const SourceFontObservation *), "dynamic_builder"
+			);
+			if (!fontIndexCharge) return false;
+			std::vector<const SourceFontObservation *> fontRecords;
+			fontRecords.reserve(fontCount);
+			for (const auto source : {context.Request.FontObservations, context.ObservedFonts})
+				for (const auto &record : source)
+					if (std::none_of(fontRecords.begin(), fontRecords.end(), [&](const auto *old) {
+							return *old == record;
+						})) {
+						const auto recordBytes = SourceFontObservationRetainedBytes(record);
+						if (!recordBytes || fontRecords.size() == Limits::MaximumNodes ||
+							!AddRecipeBytes(bytes, *recordBytes))
+							return context.Fail(
+								Status::LimitExceeded, "Builder font snapshot exceeds byte limits"
+							);
+						fontRecords.push_back(&record);
+					}
+			if (context.Request.SourceFonts) {
+				const auto contextBytes = SourceFontContextRetainedBytes(*context.Request.SourceFonts);
+				if (!contextBytes || !AddRecipeBytes(bytes, *contextBytes))
+					return context.Fail(Status::LimitExceeded, "Builder font context exceeds byte limits");
+			}
 			if (!context.ReserveOutput(bytes, "dynamic_builder")) return false;
 			DynamicSurfaceValue recipe;
 			auto &data = recipe.Data.emplace();
@@ -270,6 +311,10 @@ namespace engine::imagegraph::detail {
 			data.ImageSources.assign(
 				context.Request.ImageSources.begin(), context.Request.ImageSources.end()
 			);
+			if (context.Request.SourceFonts) data.Fonts = *context.Request.SourceFonts;
+			data.FontObservations.reserve(fontRecords.size());
+			for (const auto *record : fontRecords)
+				data.FontObservations.push_back(*record);
 			data.HostCaptures.reserve(receipts.size());
 			for (const auto *receipt : receipts)
 				data.HostCaptures.push_back(*receipt);

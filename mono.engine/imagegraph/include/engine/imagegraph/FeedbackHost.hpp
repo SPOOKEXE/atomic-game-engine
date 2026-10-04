@@ -467,6 +467,13 @@ namespace engine::imagegraph {
 			return bytes;
 		}
 
+		// Borrow only for an immediate admitted copy while the matching published revision is ready.
+		const DataReplayState *PreparedData(uint64_t revision, uint64_t externalRevision) const noexcept {
+			if (!Configured || !Initialized || DocumentRevision != revision ||
+				InputRevision != externalRevision)
+				return nullptr;
+			return &State.Data;
+		}
 		bool Active() const {
 			return Stateful || !Bindings.empty();
 		}

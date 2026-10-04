@@ -55,6 +55,7 @@ mono_add_library(studio
 		# retaining the checked archive as the lossless source.
 		Engine::imagegraphio
 		Engine::imagegraphexport
+		Engine::imagegraphfont
 
 		# L6, `shared`. The simulation. **Named here rather than reached
 		# through `Engine::script`**, which is where it was arriving from: since

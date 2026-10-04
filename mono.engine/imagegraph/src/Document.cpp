@@ -6,6 +6,7 @@
 #include "HostCaptureReceipts.hpp"
 #include "ImageArrayCollector.hpp"
 #include "KeyframeText.hpp"
+#include "NativeSamplerBindings.hpp"
 #include "NodeExecutors.hpp"
 #include "PaletteOps.hpp"
 #include "ParticleCodec.hpp"
@@ -36,6 +37,8 @@
 #include "SourceAnimatorIdentity.hpp"
 #include "SourceArgumentTransport.hpp"
 #include "SourceAtlasCodec.hpp"
+#include "SourceFontReceipts.hpp"
+#include "SourceFontTransport.hpp"
 #include "SourceGetterProjection.hpp"
 #include "SourceInputOrigin.hpp"
 #include "SourceLuaSockets.hpp"
@@ -64,6 +67,7 @@
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/SliceStackReplay.hpp>
 #include <engine/imagegraph/SourceBuiltinRandom.hpp>
+#include <engine/imagegraph/SourceFont.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/StatefulTemporalCone.hpp>
@@ -77,9 +81,11 @@
 #include <limits>
 #include <locale>
 #include <map>
+#include <new>
 #include <queue>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -835,7 +841,7 @@ namespace engine::imagegraph {
 		};
 
 		// Indexed by ValueType. Names are durable document text.
-		constexpr std::array<std::string_view, 41> TYPE_NAMES = {
+		constexpr std::array<std::string_view, 42> TYPE_NAMES = {
 			"boolean",	"integer",	  "scalar",		  "text",		  "colour",
 			"vector2",	"image",	  "array",		  "gradient",	  "area",
 			"curve",	"vector4",	  "path2d",		  "vector3",	  "quaternion",
@@ -844,9 +850,9 @@ namespace engine::imagegraph {
 			"sdf",		"armature",	  "atlas",		  "tileset",	  "pixel_box",
 			"scene3d",	"material3d", "light3d",	  "buffer",		  "struct",
 			"any",		"node_ref",	  "pcx_node",	  "object",		  "dynamic_surface",
-			"path3d",
+			"path3d",	"font",
 		};
-		static_assert(static_cast<size_t>(ValueType::Path3D) + 1 == TYPE_NAMES.size());
+		static_assert(static_cast<size_t>(ValueType::Font) + 1 == TYPE_NAMES.size());
 
 		constexpr std::array<std::string_view, 9> DEPTH_NAMES = {
 			"input", "inherited", "rgba4", "rgba8", "rgba16f", "rgba32f", "r8", "r16f", "r32f"
@@ -942,6 +948,9 @@ namespace engine::imagegraph {
 				return 1ull << 5 | 1ull << 33;
 			case ValueType::Text:
 				return 1ull << 10;
+			case ValueType::Font:
+				// Source Font shares the string bit; native resource transport is restricted to Font getters.
+				return 1ull << 39;
 			case ValueType::Object:
 				return 1ull << 13;
 			case ValueType::Path2D:
@@ -1209,6 +1218,88 @@ namespace engine::imagegraph {
 		bool ReadQuoted(std::istream &stream, std::string &text);
 		bool ReadQuoted(std::istream &stream, std::string &text, size_t maximum);
 
+		uint64_t OwnedTextCapacity(const std::string &value) {
+			return value.capacity() > std::string{}.capacity() ? value.capacity() : 0;
+		}
+		struct TokenCharge {
+			detail::AllocationReservation Storage;
+			std::array<std::pair<const std::string *, uint64_t>, 32> Strings{};
+			size_t Count = 0;
+			void Reset() {
+				Storage.Reset();
+				Count = 0;
+			}
+		};
+		bool ReadToken(
+			std::istream &stream,
+			std::string &text,
+			detail::EvaluationBudget *budget,
+			TokenCharge &charge,
+			bool *allocationRefused
+		) {
+			if (!budget) return bool(stream >> text);
+			stream >> std::ws;
+			const auto start = stream.tellg();
+			if (start == std::istream::pos_type(-1)) return false;
+			const std::locale streamLocale = stream.getloc();
+			const auto &ctype = std::use_facet<std::ctype<char>>(streamLocale);
+			size_t length = 0;
+			int character = stream.peek();
+			const size_t maximumLength =
+				stream.width() > 0 ? static_cast<size_t>(stream.width()) : std::numeric_limits<size_t>::max();
+			while (length < maximumLength && character != std::char_traits<char>::eof() &&
+				   !ctype.is(std::ctype_base::space, static_cast<char>(character))) {
+				stream.get();
+				++length;
+				character = stream.peek();
+			}
+			if (!length) return false;
+			stream.clear();
+			stream.seekg(start);
+			if (length > text.capacity()) {
+				size_t slot = 0;
+				while (slot < charge.Count && charge.Strings[slot].first != &text)
+					++slot;
+				if (slot == charge.Count) {
+					if (charge.Count == charge.Strings.size() || text.capacity() > std::string{}.capacity()) {
+						*allocationRefused = true;
+						return false;
+					}
+					charge.Strings[charge.Count++] = {&text, 0};
+				}
+				const uint64_t oldBytes = charge.Strings[slot].second;
+				auto replacement = budget->Reserve(length);
+				if (!replacement) {
+					*allocationRefused = true;
+					return false;
+				}
+				std::string sized(length, '\0');
+				if (!replacement->Resize(sized.capacity())) {
+					*allocationRefused = true;
+					return false;
+				}
+				text = std::move(sized);
+				text.clear();
+				if (oldBytes > charge.Storage.Bytes() ||
+					!charge.Storage.Resize(charge.Storage.Bytes() - oldBytes) ||
+					!charge.Storage.Merge(std::move(*replacement)))
+					std::terminate();
+				charge.Strings[slot].second = text.capacity();
+			}
+			return bool(stream >> text);
+		}
+		struct BoundedToken {
+			std::string &Text;
+			detail::EvaluationBudget *Budget;
+			TokenCharge &Charge;
+			bool *AllocationRefused;
+		};
+		std::istream &operator>>(std::istream &stream, BoundedToken token) {
+			if (!ReadToken(stream, token.Text, token.Budget, token.Charge, token.AllocationRefused))
+				stream.setstate(std::ios::failbit);
+			return stream;
+		}
+
 		void WriteValue(std::ostream &stream, const Value &value);
 		void WritePathPayload(std::ostream &stream, const Path2D &path) {
 			if (path.SourceOperation) {
@@ -1324,6 +1415,10 @@ namespace engine::imagegraph {
 		}
 
 		void WriteValue(std::ostream &stream, const Value &value) {
+			if (detail::ContainsFontLiteral(value)) {
+				stream.setstate(std::ios::failbit);
+				return;
+			}
 			stream << ValueTag(value) << ' ';
 			if (const auto *strand = std::get_if<StrandValue>(&value)) {
 				stream << std::setprecision(17);
@@ -1547,8 +1642,9 @@ namespace engine::imagegraph {
 				}
 				return outputCharge->Merge(std::move(*charge));
 			};
+			TokenCharge tagCharge;
 			std::string tag;
-			if (!(stream >> tag)) return false;
+			if (!ReadToken(stream, tag, budget, tagCharge, allocationRefused)) return false;
 			if (tag == "b") {
 				int stored = 0;
 				if (!(stream >> stored) || (stored != 0 && stored != 1)) return false;
@@ -1586,10 +1682,17 @@ namespace engine::imagegraph {
 					}
 					if (!closed || length > Limits::MaximumTextBytes) return false;
 					stream.seekg(start);
-					if (!admit(std::max(length, stored.capacity()))) return false;
-					// Sized construction avoids reserve's geometric growth beyond the
-					// admitted payload.
+					auto storage = budget->Reserve(length);
+					if (!storage) {
+						*allocationRefused = true;
+						return false;
+					}
 					stored = std::string(length, '\0');
+					if (!storage->Resize(stored.capacity())) {
+						*allocationRefused = true;
+						return false;
+					}
+					if (!outputCharge->Merge(std::move(*storage))) std::terminate();
 					stored.clear();
 				}
 				if (!ReadQuoted(stream, stored)) return false;
@@ -1618,9 +1721,12 @@ namespace engine::imagegraph {
 				return true;
 			}
 			if (tag == "a" && allowArray) {
+				TokenCharge typeCharge;
 				std::string typeName;
 				size_t count = 0;
-				if (!(stream >> typeName >> count) || count > Limits::MaximumArrayElements) return false;
+				if (!ReadToken(stream, typeName, budget, typeCharge, allocationRefused) ||
+					!(stream >> count) || count > Limits::MaximumArrayElements)
+					return false;
 				if (count > Limits::MaximumArrayElements - *arrayCount) return false;
 				*arrayCount += count;
 				if (typeName == "array") {
@@ -1853,7 +1959,12 @@ namespace engine::imagegraph {
 			if (tag == "rg") {
 				if (version < 9) return false;
 				RigidValue rigid;
-				if (!detail::ReadSourceRigidAlias(stream, rigid, admit, [](auto &input, auto &text, size_t count) { return ReadQuoted(input, text, count); })) return false;
+				if (!detail::ReadSourceRigidAlias(
+						stream, rigid, admit, [](auto &input, auto &text, size_t count) {
+							return ReadQuoted(input, text, count);
+						}
+					))
+					return false;
 				value = std::move(rigid);
 				return true;
 			}
@@ -2111,9 +2222,10 @@ namespace engine::imagegraph {
 			}
 
 			if (tag == "po" && version >= 9) {
+				TokenCharge kindCharge;
 				std::string kind;
 				size_t count = 0;
-				if (!(stream >> kind)) return false;
+				if (!ReadToken(stream, kind, budget, kindCharge, allocationRefused)) return false;
 				if (kind == "shape") {
 					if (!admit(sizeof(SourcePathData2D))) return false;
 					Path2D path;
@@ -2644,6 +2756,8 @@ namespace engine::imagegraph {
 	}
 
 	std::string Write(const Document &document) {
+		for (const auto &node : document.Nodes)
+			if (detail::ValidateNativeSamplerBindings(node, document.FormatVersion)) return {};
 		if (document.Timeline && document.Timeline->SourceBounds &&
 			(document.FormatVersion < 9 ||
 			 !ValidSourceAuthoringFrameBounds(*document.Timeline->SourceBounds)))
@@ -2722,6 +2836,15 @@ namespace engine::imagegraph {
 				WriteQuoted(stream, value.Port);
 				stream << ' ';
 				WriteValue(stream, value.Data);
+				stream << '\n';
+			}
+			for (const auto &binding : node.NativeSamplerBindings) {
+				stream << "native_sampler " << nodeIndex << ' ';
+				WriteQuoted(stream, node.Id);
+				stream << ' ';
+				WriteQuoted(stream, binding.Argument);
+				stream << ' ';
+				WriteQuoted(stream, binding.Texture);
 				stream << '\n';
 			}
 			for (const AuthoredValue &property : node.SourceProperties) {
@@ -2994,26 +3117,152 @@ namespace engine::imagegraph {
 				}
 			}
 		}
-		return stream.str();
+		return stream ? stream.str() : std::string{};
 	}
 
-	Status Read(const std::string &text, Document &document, Diagnostic &diagnostic) {
+	static Status ReadDocumentText(
+		const std::string &text,
+		Document &document,
+		Diagnostic &diagnostic,
+		detail::EvaluationBudget *budget,
+		detail::AllocationReservation *candidateCharge
+	) {
 		if (text.size() > Limits::MaximumDocumentBytes) {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "document text exceeds the byte limit");
 			return diagnostic.Code;
 		}
-		std::istringstream input(text);
-		input.imbue(std::locale::classic());
+		bool allocationRefused = false;
+		size_t cursor = 0;
 		std::string line;
-		if (!std::getline(input, line)) {
-			SetDiagnostic(diagnostic, Status::Malformed, "missing imagegraph header");
+		detail::AllocationReservation lineCharge;
+		const auto nextLine = [&]() {
+			if (cursor == text.size()) return false;
+			const size_t end = text.find('\n', cursor);
+			const size_t length = (end == std::string::npos ? text.size() : end) - cursor;
+			if (budget) {
+				auto replacementCharge = budget->Reserve(length);
+				if (!replacementCharge) {
+					allocationRefused = true;
+					return false;
+				}
+				std::string replacement(length, '\0');
+				if (!replacementCharge->Resize(OwnedTextCapacity(replacement))) {
+					allocationRefused = true;
+					return false;
+				}
+				replacement.assign(text.data() + cursor, length);
+				line = std::move(replacement);
+				lineCharge = std::move(*replacementCharge);
+			} else {
+				line.assign(text.data() + cursor, length);
+			}
+			cursor = end == std::string::npos ? text.size() : end + 1;
+			return true;
+		};
+		if (!nextLine()) {
+			SetDiagnostic(
+				diagnostic,
+				allocationRefused ? Status::LimitExceeded : Status::Malformed,
+				allocationRefused ? "document line exceeds the byte limit" : "missing imagegraph header"
+			);
 			return diagnostic.Code;
 		}
-		std::istringstream header(line);
-		std::string marker;
+		auto headerCharge =
+			budget ? budget->Reserve(line.size()) : std::optional<detail::AllocationReservation>{};
+		if (budget && !headerCharge) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "document header exceeds the byte limit");
+			return diagnostic.Code;
+		}
+		TokenCharge headerTokenCharge;
+		std::string headerText;
+		if (budget) {
+			headerText = std::string(line.size(), '\0');
+			if (!headerCharge->Resize(OwnedTextCapacity(headerText))) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "document header exceeds the byte limit");
+				return diagnostic.Code;
+			}
+			headerText.assign(line);
+		} else
+			headerText = line;
+		std::istringstream header(std::move(headerText));
+		std::string headerMarker;
+		detail::AllocationReservation rowQuoteCharge;
+		auto persistedTextCharge =
+			budget ? budget->Reserve(0) : std::optional<detail::AllocationReservation>{};
 		Document parsed;
-		if (!(header >> marker >> parsed.FormatVersion) || marker != "imagegraph" || HasTrailing(header)) {
-			SetDiagnostic(diagnostic, Status::Malformed, "invalid imagegraph header");
+		const auto reserveSlots = [&](auto &items, size_t required) {
+			if (!budget || required <= items.capacity()) return true;
+			using Item = typename std::remove_reference_t<decltype(items)>::value_type;
+			static_assert(std::is_nothrow_move_constructible_v<Item>);
+			if (required > items.max_size()) return false;
+			const size_t oldCapacity = items.capacity();
+			const size_t doubled = oldCapacity <= items.max_size() / 2 ? oldCapacity * 2 : items.max_size();
+			const size_t newCapacity = std::max(required, doubled);
+			if (newCapacity > UINT64_MAX / sizeof(Item)) return false;
+			auto replacement = budget->Reserve(uint64_t(newCapacity) * sizeof(Item));
+			if (!replacement) return false;
+			items.reserve(newCapacity);
+			if (items.capacity() > UINT64_MAX / sizeof(Item) ||
+				!replacement->Resize(uint64_t(items.capacity()) * sizeof(Item)))
+				return false;
+			const uint64_t oldBytes = uint64_t(oldCapacity) * sizeof(Item);
+			if (oldBytes > candidateCharge->Bytes() ||
+				!candidateCharge->Resize(candidateCharge->Bytes() - oldBytes))
+				std::terminate();
+			if (!candidateCharge->Merge(std::move(*replacement))) std::terminate();
+			return true;
+		};
+		const auto readQuoted = [&](std::istream &stream,
+									std::string &destination,
+									size_t maximum = std::numeric_limits<size_t>::max()) {
+			if (!budget) return ReadQuoted(stream, destination, maximum);
+			stream >> std::ws;
+			const auto start = stream.tellg();
+			if (start == std::istream::pos_type(-1) || stream.get() != '"') return false;
+			size_t length = 0;
+			char character = 0;
+			bool closed = false;
+			while (stream.get(character)) {
+				if (character == '"') {
+					closed = true;
+					break;
+				}
+				if (character == '\\') {
+					if (!stream.get(character) || (character != '\\' && character != '"' &&
+												   character != 'n' && character != 'r' && character != 't'))
+						return false;
+				}
+				if (length == maximum) return false;
+				++length;
+			}
+			if (!closed) return false;
+			stream.seekg(start);
+			if (length > destination.capacity()) {
+				auto storage = budget->Reserve(length);
+				if (!storage) {
+					allocationRefused = true;
+					return false;
+				}
+				std::string sized(length, '\0');
+				if (!storage->Resize(sized.capacity())) {
+					allocationRefused = true;
+					return false;
+				}
+				if (!rowQuoteCharge.Merge(std::move(*storage))) std::terminate();
+				destination = std::move(sized);
+				destination.clear();
+			}
+			return ReadQuoted(stream, destination, maximum);
+		};
+		if (!(header >> BoundedToken{headerMarker, budget, headerTokenCharge, &allocationRefused} >>
+			  parsed.FormatVersion) ||
+			headerMarker != "imagegraph" || HasTrailing(header)) {
+			SetDiagnostic(
+				diagnostic,
+				allocationRefused ? Status::LimitExceeded : Status::Malformed,
+				allocationRefused ? "document header token exceeds the byte limit"
+								  : "invalid imagegraph header"
+			);
 			return diagnostic.Code;
 		}
 		if (parsed.FormatVersion < 1 || parsed.FormatVersion > 9) {
@@ -3024,36 +3273,157 @@ namespace engine::imagegraph {
 		std::optional<PreviewGridSettings> previewGrid;
 		std::optional<int64_t> projectDepth;
 		std::optional<int64_t> projectShader;
-		std::set<std::string> groupDepths;
-		std::set<std::string> groupSampling;
-		std::set<size_t> keyTimes;
-		std::set<size_t> keyKinds;
-		std::set<size_t> keySourceIds;
+		detail::EvaluationBudget unboundedSetBudget(UINT64_MAX);
+		auto &setBudget = budget ? *budget : unboundedSetBudget;
+		auto setStringCharge = budget ? budget->Reserve(0) : std::optional<detail::AllocationReservation>{};
+		auto groupDepths = detail::MakeEvaluationSet<std::string>(setBudget);
+		auto groupSampling = detail::MakeEvaluationSet<std::string>(setBudget);
+		auto keyTimes = detail::MakeEvaluationSet<size_t>(setBudget);
+		auto keyKinds = detail::MakeEvaluationSet<size_t>(setBudget);
+		auto keySourceIds = detail::MakeEvaluationSet<size_t>(setBudget);
 		std::optional<std::pair<bool, std::vector<PreviewRulerGuide>>> previewRulers;
 		std::optional<size_t> projectRegionCount;
 		size_t projectRegionTextBytes = 0;
 		std::vector<Keyframe> *axisKeys = nullptr;
 		std::string axisNode, axisPort;
-		std::set<std::tuple<std::string, std::string, std::string>> axesSeen;
+		auto axesSeen =
+			detail::MakeEvaluationSet<std::tuple<std::string, std::string, std::string>>(setBudget);
+		const auto insertString = [&](auto &items, const std::string &key) {
+			auto keyCharge =
+				budget ? budget->Reserve(key.size()) : std::optional<detail::AllocationReservation>{};
+			if (budget && !keyCharge) {
+				allocationRefused = true;
+				return false;
+			}
+			std::string copied;
+			if (budget) {
+				copied = std::string(key.size(), '\0');
+				if (!keyCharge->Resize(OwnedTextCapacity(copied))) {
+					allocationRefused = true;
+					return false;
+				}
+				copied.assign(key);
+			} else
+				copied = key;
+			const bool inserted = items.insert(std::move(copied)).second;
+			if (inserted && budget && !setStringCharge->Merge(std::move(*keyCharge))) std::terminate();
+			return inserted;
+		};
+		const auto insertAxis = [&](const std::string &node,
+									const std::string &port,
+									const std::string &axis) {
+			if (node.size() > UINT64_MAX - port.size() ||
+				node.size() + port.size() > UINT64_MAX - axis.size()) {
+				allocationRefused = true;
+				return false;
+			}
+			auto keyCharge = budget ? budget->Reserve(node.size() + port.size() + axis.size())
+									: std::optional<detail::AllocationReservation>{};
+			if (budget && !keyCharge) {
+				allocationRefused = true;
+				return false;
+			}
+			std::string nodeCopy, portCopy, axisCopy;
+			if (budget) {
+				nodeCopy = std::string(node.size(), '\0');
+				portCopy = std::string(port.size(), '\0');
+				axisCopy = std::string(axis.size(), '\0');
+				const uint64_t nodeBytes = OwnedTextCapacity(nodeCopy);
+				const uint64_t portBytes = OwnedTextCapacity(portCopy);
+				const uint64_t axisBytes = OwnedTextCapacity(axisCopy);
+				if (nodeBytes > UINT64_MAX - portBytes || nodeBytes + portBytes > UINT64_MAX - axisBytes ||
+					!keyCharge->Resize(nodeBytes + portBytes + axisBytes)) {
+					allocationRefused = true;
+					return false;
+				}
+				nodeCopy.assign(node);
+				portCopy.assign(port);
+				axisCopy.assign(axis);
+			} else {
+				nodeCopy = node;
+				portCopy = port;
+				axisCopy = axis;
+			}
+			const bool inserted =
+				axesSeen.emplace(std::move(nodeCopy), std::move(portCopy), std::move(axisCopy)).second;
+			if (inserted && budget && !setStringCharge->Merge(std::move(*keyCharge))) std::terminate();
+			return inserted;
+		};
+		std::array<const std::string *, 32> rowPersistentStrings{};
+		size_t rowPersistentCount = 0;
+		uint64_t rowReleasedTextBytes = 0;
+		const auto ownedTextBytes = [](const std::string &value) -> uint64_t {
+			return OwnedTextCapacity(value);
+		};
+		const auto remember = [&](const std::string &value) {
+			if (rowPersistentCount == rowPersistentStrings.size()) std::terminate();
+			rowPersistentStrings[rowPersistentCount++] = &value;
+		};
+		const auto release = [&](const std::string &value) {
+			if (ownedTextBytes(value) > UINT64_MAX - rowReleasedTextBytes) std::terminate();
+			rowReleasedTextBytes += ownedTextBytes(value);
+		};
+		const auto settleQuotedText = [&]() {
+			if (!budget) {
+				rowPersistentCount = 0;
+				rowReleasedTextBytes = 0;
+				return true;
+			}
+			uint64_t added = 0;
+			for (size_t index = 0; index < rowPersistentCount; ++index) {
+				const uint64_t amount = ownedTextBytes(*rowPersistentStrings[index]);
+				if (amount > UINT64_MAX - added) return false;
+				added += amount;
+			}
+			if (added > rowQuoteCharge.Bytes() || rowReleasedTextBytes > persistedTextCharge->Bytes())
+				return false;
+			if (!persistedTextCharge->Resize(persistedTextCharge->Bytes() - rowReleasedTextBytes))
+				return false;
+			if (added != 0) {
+				auto transferred = rowQuoteCharge.Split(added);
+				if (!transferred || !persistedTextCharge->Merge(std::move(*transferred))) return false;
+			}
+			rowQuoteCharge.Reset();
+			rowPersistentCount = 0;
+			rowReleasedTextBytes = 0;
+			return true;
+		};
 		size_t totalKeys = 0;
 		const auto keyframes = [&]() -> std::vector<Keyframe> & {
 			return axisKeys ? *axisKeys : parsed.Keyframes;
 		};
 		size_t lineNumber = 1;
-		while (std::getline(input, line)) {
+		TokenCharge rowTokenCharge;
+		const auto token = [&](std::string &value) {
+			return BoundedToken{value, budget, rowTokenCharge, &allocationRefused};
+		};
+		while (true) {
+			rowTokenCharge.Reset();
+			if (!nextLine()) break;
 			lineNumber++;
 			if (line.empty()) continue;
-			std::istringstream row(line);
+			auto rowCharge =
+				budget ? budget->Reserve(line.size()) : std::optional<detail::AllocationReservation>{};
+			if (budget && !rowCharge) goto limited;
+			std::string rowText;
+			if (budget) {
+				rowText = std::string(line.size(), '\0');
+				if (!rowCharge->Resize(OwnedTextCapacity(rowText))) goto limited;
+				rowText.assign(line);
+			} else
+				rowText = line;
+			std::istringstream row(std::move(rowText));
 			row.imbue(std::locale::classic());
-			if (!(row >> marker)) continue;
+			std::string marker;
+			if (!(row >> token(marker))) continue;
 			if (axisKeys && marker != "source_vec2_axis_end" && marker != "keyframe" &&
 				marker != "key_source_id" && marker != "key_time" && marker != "key_kind" &&
 				marker != "key_ease" && marker != "key_driver" && marker != "key_source_driver")
 				goto malformed;
 			if (marker == "node") {
 				Node node;
-				if (!ReadQuoted(row, node.Id) || !ReadQuoted(row, node.Type) ||
-					!ReadQuoted(row, node.GroupId) || !(row >> node.Position.X >> node.Position.Y) ||
+				if (!readQuoted(row, node.Id) || !readQuoted(row, node.Type) ||
+					!readQuoted(row, node.GroupId) || !(row >> node.Position.X >> node.Position.Y) ||
 					!std::isfinite(node.Position.X) || !std::isfinite(node.Position.Y) || HasTrailing(row))
 					goto malformed;
 				if (parsed.Nodes.size() == Limits::MaximumNodes) {
@@ -3062,13 +3432,17 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(parsed.Nodes, parsed.Nodes.size() + 1)) goto limited;
 				parsed.Nodes.push_back(std::move(node));
+				remember(parsed.Nodes.back().Id);
+				remember(parsed.Nodes.back().Type);
+				remember(parsed.Nodes.back().GroupId);
 			} else if (marker == "node_name" || marker == "node_internal_name") {
 				size_t index = 0;
 				std::string id, name;
 				if (parsed.FormatVersion < 9 || !(row >> index) ||
-					!ReadQuoted(row, id, Limits::MaximumTextBytes) ||
-					!ReadQuoted(row, name, Limits::MaximumTextBytes) || name.empty() || HasTrailing(row) ||
+					!readQuoted(row, id, Limits::MaximumTextBytes) ||
+					!readQuoted(row, name, Limits::MaximumTextBytes) || name.empty() || HasTrailing(row) ||
 					index >= parsed.Nodes.size() || parsed.Nodes[index].Id != id ||
 					!(marker == "node_name" ? parsed.Nodes[index].SourceDisplayName
 											: parsed.Nodes[index].SourceInternalName)
@@ -3076,12 +3450,70 @@ namespace engine::imagegraph {
 					goto malformed;
 				(marker == "node_name" ? parsed.Nodes[index].SourceDisplayName
 									   : parsed.Nodes[index].SourceInternalName) = std::move(name);
+				remember(
+					marker == "node_name" ? parsed.Nodes[index].SourceDisplayName
+										  : parsed.Nodes[index].SourceInternalName
+				);
+			} else if (marker == "native_sampler" && parsed.FormatVersion >= 9) {
+				size_t nodeIndex = 0;
+				if (!(row >> nodeIndex) || nodeIndex >= parsed.Nodes.size()) goto malformed;
+				auto &node = parsed.Nodes[nodeIndex];
+				if (node.Type != "pc.hlsl") goto malformed;
+				if (node.NativeSamplerBindings.size() >= Limits::MaximumNativeSamplerBindingsPerNode) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"native sampler binding count exceeds its limit",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
+				std::string nodeId;
+				if (!readQuoted(row, nodeId, Limits::MaximumTextBytes) || node.Id != nodeId) goto malformed;
+				NativeSamplerBinding binding;
+				if (!readQuoted(row, binding.Argument, Limits::MaximumNativeSamplerArgumentBytes))
+					goto malformed;
+				if (std::any_of(
+						node.NativeSamplerBindings.begin(),
+						node.NativeSamplerBindings.end(),
+						[&](const auto &existing) { return existing.Argument == binding.Argument; }
+					)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::DuplicateId,
+						"native sampler argument binding repeats",
+						nodeId,
+						binding.Argument
+					);
+					return diagnostic.Code;
+				}
+				if (!readQuoted(row, binding.Texture, Limits::MaximumNativeSamplerTextureBytes) ||
+					HasTrailing(row))
+					goto malformed;
+				if (!reserveSlots(node.NativeSamplerBindings, node.NativeSamplerBindings.size() + 1))
+					goto limited;
+				node.NativeSamplerBindings.push_back(std::move(binding));
+				remember(node.NativeSamplerBindings.back().Argument);
+				remember(node.NativeSamplerBindings.back().Texture);
+				if (const auto fault = detail::ValidateNativeSamplerBindings(node, parsed.FormatVersion)) {
+					SetDiagnostic(
+						diagnostic,
+						fault->Code,
+						std::string(fault->Message),
+						nodeId,
+						std::string(fault->Argument)
+					);
+					return diagnostic.Code;
+				}
 			} else if (marker == "value" || (marker == "source_property" && parsed.FormatVersion >= 9)) {
 				size_t nodeIndex = 0;
 				std::string nodeId, port;
 				Value value;
-				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId) || !ReadQuoted(row, port) ||
-					!ReadValue(row, value, parsed.FormatVersion) || HasTrailing(row))
+				if (!(row >> nodeIndex) || !readQuoted(row, nodeId) || !readQuoted(row, port) ||
+					!ReadValue(
+						row, value, parsed.FormatVersion, true, budget, candidateCharge, &allocationRefused
+					) ||
+					HasTrailing(row))
 					goto malformed;
 				if (nodeIndex >= parsed.Nodes.size() || parsed.Nodes[nodeIndex].Id != nodeId) {
 					SetDiagnostic(diagnostic, Status::Malformed, "value precedes its node", nodeId, port);
@@ -3109,13 +3541,15 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(properties, properties.size() + 1)) goto limited;
 				properties.push_back({std::move(port), std::move(value)});
+				remember(properties.back().Port);
 			} else if (marker == "dynamic" && parsed.FormatVersion >= 2) {
 				size_t nodeIndex = 0;
 				std::string nodeId, inputId, typeName;
 				int hasDefault = 0;
-				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId) || !ReadQuoted(row, inputId) ||
-					!(row >> typeName >> hasDefault) || (hasDefault != 0 && hasDefault != 1))
+				if (!(row >> nodeIndex) || !readQuoted(row, nodeId) || !readQuoted(row, inputId) ||
+					!(row >> token(typeName) >> hasDefault) || (hasDefault != 0 && hasDefault != 1))
 					goto malformed;
 				const auto type = ParseType(typeName);
 				if (!type || (parsed.FormatVersion < 3 && *type >= ValueType::Gradient)) goto malformed;
@@ -3128,7 +3562,16 @@ namespace engine::imagegraph {
 				DynamicInput dynamic{std::move(inputId), *type, std::nullopt};
 				if (hasDefault) {
 					Value value;
-					if (!ReadValue(row, value, parsed.FormatVersion)) goto malformed;
+					if (!ReadValue(
+							row,
+							value,
+							parsed.FormatVersion,
+							true,
+							budget,
+							candidateCharge,
+							&allocationRefused
+						))
+						goto malformed;
 					if (!WithinValueBudget(value)) {
 						SetDiagnostic(
 							diagnostic,
@@ -3153,17 +3596,24 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(
+						parsed.Nodes[nodeIndex].DynamicInputs,
+						parsed.Nodes[nodeIndex].DynamicInputs.size() + 1
+					))
+					goto limited;
 				parsed.Nodes[nodeIndex].DynamicInputs.push_back(std::move(dynamic));
+				remember(parsed.Nodes[nodeIndex].DynamicInputs.back().Id);
 			} else if (marker == "source_input_origin" && parsed.FormatVersion >= 9) {
 				size_t nodeIndex = 0;
 				std::string nodeId, inputId, origin;
-				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId) || !ReadQuoted(row, inputId) ||
-					!ReadQuoted(row, origin, Limits::MaximumSourceInputIdBytes) ||
+				if (!(row >> nodeIndex) || !readQuoted(row, nodeId) || !readQuoted(row, inputId) ||
+					!readQuoted(row, origin, Limits::MaximumSourceInputIdBytes) ||
 					!detail::SourceInputOrdinal(origin) || HasTrailing(row) ||
 					nodeIndex >= parsed.Nodes.size() || parsed.Nodes[nodeIndex].Id != nodeId)
 					goto malformed;
 				auto &inputs = parsed.Nodes[nodeIndex].DynamicInputs;
-				// Canonical writers put origin metadata directly after its dynamic declaration.
+				// Canonical writers put origin metadata directly after its
+				// dynamic declaration.
 				auto found = inputs.empty() ? inputs.end() : inputs.end() - 1;
 				if (found == inputs.end() || found->Id != inputId)
 					found = std::find_if(inputs.begin(), inputs.end(), [&](const auto &input) {
@@ -3171,11 +3621,12 @@ namespace engine::imagegraph {
 					});
 				if (found == inputs.end() || !found->SourceInputId.empty()) goto malformed;
 				found->SourceInputId = std::move(origin);
+				remember(found->SourceInputId);
 			} else if (marker == "dynamic_layer" && parsed.FormatVersion >= 9) {
 				size_t nodeIndex = 0;
 				std::string nodeId, inputId, name;
-				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId) || !ReadQuoted(row, inputId) ||
-					!ReadQuoted(row, name) || name.empty() || HasTrailing(row) ||
+				if (!(row >> nodeIndex) || !readQuoted(row, nodeId) || !readQuoted(row, inputId) ||
+					!readQuoted(row, name) || name.empty() || HasTrailing(row) ||
 					nodeIndex >= parsed.Nodes.size() || parsed.Nodes[nodeIndex].Id != nodeId)
 					goto malformed;
 				auto &inputs = parsed.Nodes[nodeIndex].DynamicInputs;
@@ -3184,13 +3635,14 @@ namespace engine::imagegraph {
 				});
 				if (found == inputs.end() || !found->SourceLayerName.empty()) goto malformed;
 				found->SourceLayerName = std::move(name);
+				remember(found->SourceLayerName);
 			} else if (marker == "node_expression" && parsed.FormatVersion >= 9) {
 				size_t nodeIndex = 0;
 				std::string nodeId, port, code;
 				int enabled = 0;
-				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId, Limits::MaximumTextBytes) ||
-					!ReadQuoted(row, port, Limits::MaximumTextBytes) || !(row >> enabled) ||
-					(enabled != 0 && enabled != 1) || !ReadQuoted(row, code, Limits::MaximumTextBytes) ||
+				if (!(row >> nodeIndex) || !readQuoted(row, nodeId, Limits::MaximumTextBytes) ||
+					!readQuoted(row, port, Limits::MaximumTextBytes) || !(row >> enabled) ||
+					(enabled != 0 && enabled != 1) || !readQuoted(row, code, Limits::MaximumTextBytes) ||
 					HasTrailing(row) || port.empty() || port.size() > Limits::MaximumTextBytes ||
 					code.size() > Limits::MaximumTextBytes || nodeIndex >= parsed.Nodes.size() ||
 					parsed.Nodes[nodeIndex].Id != nodeId)
@@ -3201,12 +3653,15 @@ namespace engine::imagegraph {
 						return entry.Port == port;
 					}))
 					goto malformed;
+				if (!reserveSlots(expressions, expressions.size() + 1)) goto limited;
 				expressions.push_back({std::move(port), std::move(code), enabled != 0});
+				remember(expressions.back().Port);
+				remember(expressions.back().Code);
 			} else if (marker == "dynamic_output" && parsed.FormatVersion >= 9) {
 				size_t nodeIndex = 0;
 				std::string nodeId, outputId, typeName;
-				if (!(row >> nodeIndex) || !ReadQuoted(row, nodeId) || !ReadQuoted(row, outputId) ||
-					!(row >> typeName) || HasTrailing(row))
+				if (!(row >> nodeIndex) || !readQuoted(row, nodeId) || !readQuoted(row, outputId) ||
+					!(row >> token(typeName)) || HasTrailing(row))
 					goto malformed;
 				const auto type = ParseType(typeName);
 				if (!type || nodeIndex >= parsed.Nodes.size() || parsed.Nodes[nodeIndex].Id != nodeId)
@@ -3221,21 +3676,32 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(
+						parsed.Nodes[nodeIndex].DynamicOutputs,
+						parsed.Nodes[nodeIndex].DynamicOutputs.size() + 1
+					))
+					goto limited;
 				parsed.Nodes[nodeIndex].DynamicOutputs.push_back({std::move(outputId), *type});
+				remember(parsed.Nodes[nodeIndex].DynamicOutputs.back().Id);
 			} else if (marker == "link") {
 				Link link;
-				if (!ReadQuoted(row, link.FromNode) || !ReadQuoted(row, link.FromPort) ||
-					!ReadQuoted(row, link.ToNode) || !ReadQuoted(row, link.ToPort) || HasTrailing(row))
+				if (!readQuoted(row, link.FromNode) || !readQuoted(row, link.FromPort) ||
+					!readQuoted(row, link.ToNode) || !readQuoted(row, link.ToPort) || HasTrailing(row))
 					goto malformed;
 				if (parsed.Links.size() == Limits::MaximumLinks) {
 					SetDiagnostic(diagnostic, Status::LimitExceeded, "document exceeds the link limit");
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(parsed.Links, parsed.Links.size() + 1)) goto limited;
 				parsed.Links.push_back(std::move(link));
+				remember(parsed.Links.back().FromNode);
+				remember(parsed.Links.back().FromPort);
+				remember(parsed.Links.back().ToNode);
+				remember(parsed.Links.back().ToPort);
 			} else if (marker == "group") {
 				Group group;
-				if (!ReadQuoted(row, group.Id) || !ReadQuoted(row, group.Name) ||
-					(parsed.FormatVersion >= 2 && !ReadQuoted(row, group.ParentId)) || HasTrailing(row))
+				if (!readQuoted(row, group.Id) || !readQuoted(row, group.Name) ||
+					(parsed.FormatVersion >= 2 && !readQuoted(row, group.ParentId)) || HasTrailing(row))
 					goto malformed;
 				if (parsed.Groups.size() == Limits::MaximumGroups) {
 					SetDiagnostic(
@@ -3243,12 +3709,16 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(parsed.Groups, parsed.Groups.size() + 1)) goto limited;
 				parsed.Groups.push_back(std::move(group));
+				remember(parsed.Groups.back().Id);
+				remember(parsed.Groups.back().Name);
+				remember(parsed.Groups.back().ParentId);
 			} else if ((marker == "node_instance_override" || marker == "source_anim" ||
 						marker == "source_static") &&
 					   parsed.FormatVersion >= 9) {
 				std::string nodeId, port;
-				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || port.empty() || HasTrailing(row))
+				if (!readQuoted(row, nodeId) || !readQuoted(row, port) || port.empty() || HasTrailing(row))
 					goto malformed;
 				auto node = std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const Node &n) {
 					return n.Id == nodeId;
@@ -3260,11 +3730,13 @@ namespace engine::imagegraph {
 				if (ports.size() == Limits::MaximumArrayElements ||
 					std::find(ports.begin(), ports.end(), port) != ports.end())
 					goto malformed;
+				if (!reserveSlots(ports, ports.size() + 1)) goto limited;
 				ports.push_back(std::move(port));
+				remember(ports.back());
 			} else if ((marker == "node_instance" || marker == "group_instance") &&
 					   parsed.FormatVersion >= 9) {
 				std::string id, base;
-				if (!ReadQuoted(row, id) || !ReadQuoted(row, base) || base.empty() || HasTrailing(row))
+				if (!readQuoted(row, id) || !readQuoted(row, base) || base.empty() || HasTrailing(row))
 					goto malformed;
 				if (marker == "node_instance") {
 					const auto found =
@@ -3273,6 +3745,7 @@ namespace engine::imagegraph {
 						});
 					if (found == parsed.Nodes.end() || !found->InstanceBase.empty()) goto malformed;
 					found->InstanceBase = std::move(base);
+					remember(found->InstanceBase);
 				} else {
 					const auto found =
 						std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &g) {
@@ -3280,10 +3753,11 @@ namespace engine::imagegraph {
 						});
 					if (found == parsed.Groups.end() || !found->InstanceBase.empty()) goto malformed;
 					found->InstanceBase = std::move(base);
+					remember(found->InstanceBase);
 				}
 			} else if (marker == "group_owner" && parsed.FormatVersion >= 9) {
 				std::string id, owner;
-				if (!ReadQuoted(row, id) || !ReadQuoted(row, owner) || owner.empty() || HasTrailing(row))
+				if (!readQuoted(row, id) || !readQuoted(row, owner) || owner.empty() || HasTrailing(row))
 					goto malformed;
 				const auto group =
 					std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &candidate) {
@@ -3291,10 +3765,11 @@ namespace engine::imagegraph {
 					});
 				if (group == parsed.Groups.end() || !group->OwnerNodeId.empty()) goto malformed;
 				group->OwnerNodeId = std::move(owner);
+				remember(group->OwnerNodeId);
 			} else if (marker == "group_depth" && parsed.FormatVersion >= 9) {
 				std::string id, name;
-				if (!ReadQuoted(row, id) || !(row >> name) || HasTrailing(row) ||
-					!groupDepths.insert(id).second)
+				if (!readQuoted(row, id) || !(row >> token(name)) || HasTrailing(row) ||
+					!insertString(groupDepths, id))
 					goto malformed;
 				const auto depth = ParseDepth(name);
 				const auto group =
@@ -3305,8 +3780,8 @@ namespace engine::imagegraph {
 				group->ColorDepth = *depth;
 			} else if (marker == "group_port" && parsed.FormatVersion >= 2) {
 				std::string groupId, portId, junctionId, direction;
-				if (!ReadQuoted(row, groupId) || !ReadQuoted(row, portId) || !ReadQuoted(row, junctionId) ||
-					!(row >> direction) || HasTrailing(row) ||
+				if (!readQuoted(row, groupId) || !readQuoted(row, portId) || !readQuoted(row, junctionId) ||
+					!(row >> token(direction)) || HasTrailing(row) ||
 					(direction != "input" && direction != "output"))
 					goto malformed;
 				const auto group =
@@ -3325,25 +3800,28 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(group->Ports, group->Ports.size() + 1)) goto limited;
 				group->Ports.push_back(
 					{std::move(portId),
 					 std::move(junctionId),
 					 direction == "input" ? PortDirection::Input : PortDirection::Output}
 				);
+				remember(group->Ports.back().Id);
+				remember(group->Ports.back().JunctionId);
 			} else if (marker == "group_sampling" && parsed.FormatVersion >= 9) {
 				std::string groupId;
 				int64_t interpolation, oversample;
-				if (!ReadQuoted(row, groupId) || !(row >> interpolation >> oversample) || HasTrailing(row))
+				if (!readQuoted(row, groupId) || !(row >> interpolation >> oversample) || HasTrailing(row))
 					goto malformed;
 				auto group = std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &g) {
 					return g.Id == groupId;
 				});
-				if (group == parsed.Groups.end() || !groupSampling.insert(groupId).second) goto malformed;
+				if (group == parsed.Groups.end() || !insertString(groupSampling, groupId)) goto malformed;
 				group->Interpolation = interpolation;
 				group->Oversample = oversample;
 			} else if (marker == "group_boundary" && parsed.FormatVersion >= 9) {
 				std::string groupId, portId, controlId;
-				if (!ReadQuoted(row, groupId) || !ReadQuoted(row, portId) || !ReadQuoted(row, controlId) ||
+				if (!readQuoted(row, groupId) || !readQuoted(row, portId) || !readQuoted(row, controlId) ||
 					controlId.empty() || HasTrailing(row))
 					goto malformed;
 				const auto group =
@@ -3357,19 +3835,29 @@ namespace engine::imagegraph {
 					});
 				if (port == group->Ports.end() || !port->ControlNodeId.empty()) goto malformed;
 				port->ControlNodeId = std::move(controlId);
+				remember(port->ControlNodeId);
 			} else if (marker == "junction" && parsed.FormatVersion >= 2) {
 				Junction junction;
 				std::string typeName;
 				int hasDefault = 0;
-				if (!ReadQuoted(row, junction.Id) || !ReadQuoted(row, junction.GroupId) ||
-					!(row >> typeName >> hasDefault) || (hasDefault != 0 && hasDefault != 1))
+				if (!readQuoted(row, junction.Id) || !readQuoted(row, junction.GroupId) ||
+					!(row >> token(typeName) >> hasDefault) || (hasDefault != 0 && hasDefault != 1))
 					goto malformed;
 				const auto type = ParseType(typeName);
 				if (!type || (parsed.FormatVersion < 3 && *type >= ValueType::Gradient)) goto malformed;
 				junction.Type = *type;
 				if (hasDefault) {
 					Value value;
-					if (!ReadValue(row, value, parsed.FormatVersion)) goto malformed;
+					if (!ReadValue(
+							row,
+							value,
+							parsed.FormatVersion,
+							true,
+							budget,
+							candidateCharge,
+							&allocationRefused
+						))
+						goto malformed;
 					if (!WithinValueBudget(value)) {
 						SetDiagnostic(
 							diagnostic,
@@ -3389,11 +3877,14 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(parsed.Junctions, parsed.Junctions.size() + 1)) goto limited;
 				parsed.Junctions.push_back(std::move(junction));
+				remember(parsed.Junctions.back().Id);
+				remember(parsed.Junctions.back().GroupId);
 			} else if (marker == "output") {
 				Output output;
-				if (!ReadQuoted(row, output.Id) || !ReadQuoted(row, output.NodeId) ||
-					!ReadQuoted(row, output.Port) || HasTrailing(row))
+				if (!readQuoted(row, output.Id) || !readQuoted(row, output.NodeId) ||
+					!readQuoted(row, output.Port) || HasTrailing(row))
 					goto malformed;
 				if (parsed.Outputs.size() == Limits::MaximumOutputs) {
 					SetDiagnostic(
@@ -3405,37 +3896,74 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(parsed.Outputs, parsed.Outputs.size() + 1)) goto limited;
 				parsed.Outputs.push_back(std::move(output));
+				remember(parsed.Outputs.back().Id);
+				remember(parsed.Outputs.back().NodeId);
+				remember(parsed.Outputs.back().Port);
 			} else if (marker == "source_vec2_axis" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, axis;
-				if (axisKeys || !ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> axis) ||
+				if (axisKeys || !readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> token(axis)) ||
 					HasTrailing(row) || (axis != "x" && axis != "y") ||
-					!detail::SourceMirrorVectorIndex(port) || !axesSeen.emplace(nodeId, port, axis).second)
+					!detail::SourceMirrorVectorIndex(port) || !insertAxis(nodeId, port, axis))
 					goto malformed;
 				auto found = std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const auto &node) {
 					return node.Id == nodeId;
 				});
 				if (found == parsed.Nodes.end() || found->Type != "pc.mirror_polar") goto malformed;
-				if (!found->SourceSeparatedVec2Animators) found->SourceSeparatedVec2Animators.emplace();
+				if (!found->SourceSeparatedVec2Animators) {
+					if (budget) {
+						auto storage = budget->Reserve(sizeof(SourceSeparatedVec2Data));
+						if (!storage) goto limited;
+						if (!candidateCharge->Merge(std::move(*storage))) std::terminate();
+					}
+					found->SourceSeparatedVec2Animators.emplace();
+				}
 				auto &inputs = found->SourceSeparatedVec2Animators->Inputs;
 				auto input = std::find_if(inputs.begin(), inputs.end(), [&](const auto &value) {
 					return value.Port == port;
 				});
 				if (input == inputs.end()) {
-					inputs.push_back({port, {}});
+					auto copyCharge = budget ? budget->Reserve(port.size())
+											 : std::optional<detail::AllocationReservation>{};
+					if (budget && !copyCharge) goto limited;
+					std::string copiedPort;
+					if (budget) {
+						copiedPort = std::string(port.size(), '\0');
+						if (!copyCharge->Resize(ownedTextBytes(copiedPort))) goto limited;
+						copiedPort.assign(port);
+					} else
+						copiedPort = port;
+					if (!reserveSlots(inputs, inputs.size() + 1)) goto limited;
+					inputs.push_back({std::move(copiedPort), {}});
 					input = inputs.end() - 1;
+					if (budget && !rowQuoteCharge.Merge(std::move(*copyCharge))) std::terminate();
+					remember(input->Port);
 				}
 				axisKeys = &input->Axes[axis == "x" ? 0 : 1].Keys;
+				release(axisNode);
+				release(axisPort);
 				axisNode = std::move(nodeId);
 				axisPort = std::move(port);
+				remember(axisNode);
+				remember(axisPort);
 			} else if (marker == "source_vec2_axis_end" && parsed.FormatVersion >= 9) {
 				if (!axisKeys || HasTrailing(row)) goto malformed;
 				axisKeys = nullptr;
 			} else if (marker == "keyframe") {
 				Keyframe keyframe;
-				if (!ReadQuoted(row, keyframe.NodeId) || !ReadQuoted(row, keyframe.Port) ||
-					!(row >> keyframe.Tick) || !ReadQuoted(row, keyframe.Interpolation) ||
-					!ReadValue(row, keyframe.Data, parsed.FormatVersion) || HasTrailing(row))
+				if (!readQuoted(row, keyframe.NodeId) || !readQuoted(row, keyframe.Port) ||
+					!(row >> keyframe.Tick) || !readQuoted(row, keyframe.Interpolation) ||
+					!ReadValue(
+						row,
+						keyframe.Data,
+						parsed.FormatVersion,
+						true,
+						budget,
+						candidateCharge,
+						&allocationRefused
+					) ||
+					HasTrailing(row))
 					goto malformed;
 				if (!WithinValueBudget(keyframe.Data)) {
 					SetDiagnostic(
@@ -3458,13 +3986,17 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				if (axisKeys && (keyframe.NodeId != axisNode || keyframe.Port != axisPort)) goto malformed;
+				if (!reserveSlots(keyframes(), keyframes().size() + 1)) goto limited;
 				keyframes().push_back(std::move(keyframe));
+				remember(keyframes().back().NodeId);
+				remember(keyframes().back().Port);
+				remember(keyframes().back().Interpolation);
 				++totalKeys;
 			} else if (marker == "key_source_id" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, id;
 				uint64_t tick = 0;
-				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick) ||
-					!ReadQuoted(row, id, Limits::MaximumSourceKeyIdBytes) || id.empty() || HasTrailing(row) ||
+				if (!readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> tick) ||
+					!readQuoted(row, id, Limits::MaximumSourceKeyIdBytes) || id.empty() || HasTrailing(row) ||
 					keyframes().empty())
 					goto malformed;
 				auto &key = keyframes().back();
@@ -3472,11 +4004,12 @@ namespace engine::imagegraph {
 					!keySourceIds.emplace(totalKeys - 1).second)
 					goto malformed;
 				key.SourceKeyId = std::move(id);
+				remember(key.SourceKeyId);
 			} else if (marker == "key_time" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, sign;
 				FrameTime time;
-				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) ||
-					!(row >> time.Tick >> sign >> time.Subframe) || HasTrailing(row) ||
+				if (!readQuoted(row, nodeId) || !readQuoted(row, port) ||
+					!(row >> time.Tick >> token(sign) >> time.Subframe) || HasTrailing(row) ||
 					(sign != "positive" && sign != "negative") || keyframes().empty())
 					goto malformed;
 				time.NegativeFrame = sign == "negative";
@@ -3488,7 +4021,7 @@ namespace engine::imagegraph {
 			} else if (marker == "key_kind" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, kind;
 				uint64_t tick = 0;
-				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick >> kind) ||
+				if (!readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> tick >> token(kind)) ||
 					HasTrailing(row) || keyframes().empty() || (kind != "normal" && kind != "adder"))
 					goto malformed;
 				auto &key = keyframes().back();
@@ -3500,8 +4033,8 @@ namespace engine::imagegraph {
 				std::string nodeId, port;
 				uint64_t tick = 0;
 				KeyframeEase ease;
-				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick) ||
-					!ReadQuoted(row, ease.InType) || !ReadQuoted(row, ease.OutType) ||
+				if (!readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> tick) ||
+					!readQuoted(row, ease.InType) || !readQuoted(row, ease.OutType) ||
 					!(row >> ease.In.X >> ease.In.Y >> ease.Out.X >> ease.Out.Y) || HasTrailing(row))
 					goto malformed;
 				if (keyframes().empty() || keyframes().back().NodeId != nodeId ||
@@ -3512,12 +4045,14 @@ namespace engine::imagegraph {
 					!std::isfinite(ease.Out.Y))
 					goto malformed;
 				keyframes().back().Ease = std::move(ease);
+				remember(keyframes().back().Ease->InType);
+				remember(keyframes().back().Ease->OutType);
 			} else if ((marker == "key_driver" && parsed.FormatVersion >= 6) ||
 					   (marker == "key_source_driver" && parsed.FormatVersion >= 8)) {
 				std::string nodeId, port, type;
 				uint64_t tick = 0;
-				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !(row >> tick) ||
-					!ReadQuoted(row, type))
+				if (!readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> tick) ||
+					!readQuoted(row, type))
 					goto malformed;
 				if (keyframes().empty() || keyframes().back().NodeId != nodeId ||
 					keyframes().back().Port != port || keyframes().back().Tick != tick ||
@@ -3554,18 +4089,24 @@ namespace engine::imagegraph {
 						key.SourceDriver = driver;
 					} else if (type == "native_audio") {
 						KeyframeAudioDriver driver;
-						if (!ReadQuoted(row, driver.SourceId) || !ReadQuoted(row, driver.Metric) ||
+						if (!readQuoted(row, driver.SourceId) || !readQuoted(row, driver.Metric) ||
 							!(row >> driver.Channel >> driver.Gain >> driver.Bias))
 							goto malformed;
 						key.SourceDriver = std::move(driver);
+						if (const auto *audio = std::get_if<KeyframeAudioDriver>(&*key.SourceDriver)) {
+							remember(audio->SourceId);
+							remember(audio->Metric);
+						}
 					} else if (type == "curve") {
 						std::string tag;
 						size_t count;
 						Curve curve;
-						if (!(row >> tag >> count) || tag != "q" || count > Limits::MaximumCurveAnchors)
+						if (!(row >> token(tag) >> count) || tag != "q" ||
+							count > Limits::MaximumCurveAnchors)
 							goto malformed;
 						for (double &field : curve.Header)
 							if (!(row >> field) || !std::isfinite(field)) goto malformed;
+						if (!reserveSlots(curve.Anchors, count)) goto limited;
 						curve.Anchors.resize(count);
 						for (auto &anchor : curve.Anchors)
 							for (double &field : anchor)
@@ -3579,7 +4120,7 @@ namespace engine::imagegraph {
 			} else if (marker == "timeline" && parsed.FormatVersion >= 4) {
 				TimelineSettings timeline;
 				if (parsed.Timeline || !(row >> timeline.Frames >> timeline.First >> timeline.Last) ||
-					!ReadQuoted(row, timeline.Playback))
+					!readQuoted(row, timeline.Playback))
 					goto malformed;
 				if (parsed.FormatVersion >= 5 && !(row >> timeline.FramesPerSecond)) goto malformed;
 				if (HasTrailing(row) || !std::isfinite(timeline.FramesPerSecond) ||
@@ -3587,12 +4128,15 @@ namespace engine::imagegraph {
 					1.0 / timeline.FramesPerSecond <= 0)
 					goto malformed;
 				parsed.Timeline = std::move(timeline);
+				remember(parsed.Timeline->Playback);
 			} else if (marker == "source_timeline_bounds" && parsed.FormatVersion >= 9) {
 				if (!parsed.Timeline || parsed.Timeline->SourceBounds) goto malformed;
 				SourceAuthoringFrameBounds bounds;
 				const auto readBound = [&](SourceAuthoringFrameBound &bound) {
 					std::string tag;
-					if (!(row >> std::setw(9) >> tag)) return false;
+					TokenCharge tagCharge;
+					row >> std::setw(9);
+					if (!ReadToken(row, tag, budget, tagCharge, &allocationRefused)) return false;
 					if (tag == "missing")
 						bound.Presence = SourceFrameBoundPresence::Missing;
 					else if (tag == "null")
@@ -3609,10 +4153,16 @@ namespace engine::imagegraph {
 				parsed.Timeline->SourceBounds = bounds;
 			} else if (marker == "project_global_node" && parsed.FormatVersion >= 9) {
 				if (!parsed.ProjectGlobalNodeId.empty() ||
-					!ReadQuoted(row, parsed.ProjectGlobalNodeId, Limits::MaximumTextBytes) ||
+					!readQuoted(row, parsed.ProjectGlobalNodeId, Limits::MaximumTextBytes) ||
 					parsed.ProjectGlobalNodeId.empty() || HasTrailing(row))
 					goto malformed;
+				remember(parsed.ProjectGlobalNodeId);
 			} else if (marker == "project" && parsed.FormatVersion >= 7) {
+				if (budget) {
+					auto paletteStorage = budget->Reserve(2 * sizeof(Colour));
+					if (!paletteStorage) goto limited;
+					if (!candidateCharge->Merge(std::move(*paletteStorage))) std::terminate();
+				}
 				ProjectSettings project;
 				size_t count = 0;
 				if (parsed.Project ||
@@ -3626,6 +4176,7 @@ namespace engine::imagegraph {
 					if (!(row >> red >> green >> blue >> alpha) || red > 255 || green > 255 || blue > 255 ||
 						alpha > 255)
 						goto malformed;
+					if (!reserveSlots(project.Palette, project.Palette.size() + 1)) goto limited;
 					project.Palette.push_back(
 						{static_cast<uint8_t>(red),
 						 static_cast<uint8_t>(green),
@@ -3638,21 +4189,25 @@ namespace engine::imagegraph {
 			} else if (marker == "slice_stack_action" && parsed.FormatVersion >= 9) {
 				SliceStackAction action;
 				if (parsed.SliceStackActions.size() >= Limits::MaximumNodes ||
-					!ReadQuoted(row, action.NodeId) ||
+					!readQuoted(row, action.NodeId) ||
 					!(row >> action.Time.Tick >> action.Time.Subframe >> action.Time.NegativeFrame >>
 					  action.WorkPixels) ||
 					HasTrailing(row) || action.NodeId.empty() || !ValidFrameTime(action.Time) ||
 					action.WorkPixels > Limits::MaximumArrayElements)
 					goto malformed;
+				if (!reserveSlots(parsed.SliceStackActions, parsed.SliceStackActions.size() + 1))
+					goto limited;
 				parsed.SliceStackActions.push_back(std::move(action));
+				remember(parsed.SliceStackActions.back().NodeId);
 			} else if (marker == "project_shader" && parsed.FormatVersion >= 9) {
 				std::string name;
-				if (projectShader || !(row >> name) || HasTrailing(row) || (name != "phong" && name != "pbr"))
+				if (projectShader || !(row >> token(name)) || HasTrailing(row) ||
+					(name != "phong" && name != "pbr"))
 					goto malformed;
 				projectShader = name == "pbr" ? 1 : 0;
 			} else if (marker == "project_depth" && parsed.FormatVersion >= 9) {
 				std::string name;
-				if (projectDepth || !(row >> name) || HasTrailing(row)) goto malformed;
+				if (projectDepth || !(row >> token(name)) || HasTrailing(row)) goto malformed;
 				const auto depth = ParseDepth(name);
 				if (!depth || *depth < 2) goto malformed;
 				projectDepth = *depth - 2;
@@ -3674,11 +4229,11 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				std::vector<PreviewRulerGuide> guides;
-				guides.reserve(count);
+				if (!reserveSlots(guides, count)) goto limited;
 				for (size_t index = 0; index < count; ++index) {
 					std::string axis;
 					double position = 0;
-					if (!(row >> axis >> position) || !std::isfinite(position) ||
+					if (!(row >> token(axis) >> position) || !std::isfinite(position) ||
 						(axis != "horizontal" && axis != "vertical"))
 						goto malformed;
 					guides.push_back(
@@ -3701,19 +4256,22 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				projectRegionCount = count;
-				parsed.Project->AnimationRegions.reserve(count);
+				if (!reserveSlots(parsed.Project->AnimationRegions, count)) goto limited;
 			} else if (marker == "animation_region" && parsed.FormatVersion >= 9) {
 				AnimationRegion region;
 				std::string startSign, endSign;
 				Value color;
 				if (!parsed.Project || !projectRegionCount ||
 					parsed.Project->AnimationRegions.size() >= *projectRegionCount ||
-					!ReadQuoted(row, region.Label, Limits::MaximumTextBytes) ||
-					!(row >> region.Start.Tick >> startSign >> region.Start.Subframe >> region.End.Tick >>
-					  endSign >> region.End.Subframe) ||
+					!readQuoted(row, region.Label, Limits::MaximumTextBytes) ||
+					!(row >> region.Start.Tick >> token(startSign) >> region.Start.Subframe >>
+					  region.End.Tick >> token(endSign) >> region.End.Subframe) ||
 					(startSign != "positive" && startSign != "negative") ||
 					(endSign != "positive" && endSign != "negative") || !ValidFrameTime(region.Start) ||
-					!ValidFrameTime(region.End) || !ReadValue(row, color, parsed.FormatVersion) ||
+					!ValidFrameTime(region.End) ||
+					!ReadValue(
+						row, color, parsed.FormatVersion, true, budget, candidateCharge, &allocationRefused
+					) ||
 					!std::holds_alternative<Colour>(color) || HasTrailing(row))
 					goto malformed;
 				region.Start.NegativeFrame = startSign == "negative";
@@ -3729,10 +4287,15 @@ namespace engine::imagegraph {
 				}
 				projectRegionTextBytes += region.Label.size();
 				region.Color = std::get<Colour>(std::move(color));
+				if (!reserveSlots(
+						parsed.Project->AnimationRegions, parsed.Project->AnimationRegions.size() + 1
+					))
+					goto limited;
 				parsed.Project->AnimationRegions.push_back(std::move(region));
+				remember(parsed.Project->AnimationRegions.back().Label);
 			} else if (marker == "track_quaternion" && parsed.FormatVersion >= 8) {
 				std::string nodeId, port, mode;
-				if (!ReadQuoted(row, nodeId) || !ReadQuoted(row, port) || !ReadQuoted(row, mode) ||
+				if (!readQuoted(row, nodeId) || !readQuoted(row, port) || !readQuoted(row, mode) ||
 					HasTrailing(row) || (mode != "raw" && mode != "euler") || parsed.Tracks.empty() ||
 					parsed.Tracks.back().NodeId != nodeId || parsed.Tracks.back().Port != port ||
 					parsed.Tracks.back().QuaternionMode)
@@ -3740,8 +4303,8 @@ namespace engine::imagegraph {
 				parsed.Tracks.back().QuaternionMode = mode == "raw" ? 0 : 1;
 			} else if (marker == "track" && parsed.FormatVersion >= 4) {
 				AnimationTrack track;
-				if (!ReadQuoted(row, track.NodeId) || !ReadQuoted(row, track.Port) ||
-					!ReadQuoted(row, track.End) || !(row >> track.LoopRange) || HasTrailing(row))
+				if (!readQuoted(row, track.NodeId) || !readQuoted(row, track.Port) ||
+					!readQuoted(row, track.End) || !(row >> track.LoopRange) || HasTrailing(row))
 					goto malformed;
 				if (parsed.Tracks.size() == Limits::MaximumTracks) {
 					SetDiagnostic(
@@ -3753,11 +4316,17 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (!reserveSlots(parsed.Tracks, parsed.Tracks.size() + 1)) goto limited;
 				parsed.Tracks.push_back(std::move(track));
+				remember(parsed.Tracks.back().NodeId);
+				remember(parsed.Tracks.back().Port);
+				remember(parsed.Tracks.back().End);
 			} else {
 				goto malformed;
 			}
+			if (!settleQuotedText()) goto limited;
 		}
+		if (allocationRefused) goto limited;
 		if ((previewGrid || previewRulers || projectDepth || projectShader || projectRegionCount) &&
 			!parsed.Project)
 			goto malformed;
@@ -3771,7 +4340,8 @@ namespace engine::imagegraph {
 			parsed.Project->PreviewRulers = std::move(previewRulers->second);
 		}
 		{
-			// One fixed bounded scratch array validates all nodes without per-origin allocation.
+			// One fixed bounded scratch array validates all nodes without
+			// per-origin allocation.
 			std::array<uint64_t, Limits::MaximumPixelBuilderDynamicInputsPerNode> origins{};
 			std::string_view failedPort;
 			for (const auto &node : parsed.Nodes)
@@ -3783,23 +4353,105 @@ namespace engine::imagegraph {
 			size_t aggregateKeys = parsed.Keyframes.size();
 			for (const auto &node : parsed.Nodes) {
 				if (node.SourceSeparatedVec2Animators)
-					for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
-						if (!axesSeen.contains({node.Id, input.Port, "x"}) ||
-							!axesSeen.contains({node.Id, input.Port, "y"}))
-							goto malformed;
+					for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+						if (node.Id.size() > UINT64_MAX - input.Port.size()) goto limited;
+						auto lookupCharge = budget ? budget->Reserve(node.Id.size() + input.Port.size())
+												   : std::optional<detail::AllocationReservation>{};
+						if (budget && !lookupCharge) goto limited;
+						std::string lookupNode, lookupPort;
+						if (budget) {
+							lookupNode = std::string(node.Id.size(), '\0');
+							lookupPort = std::string(input.Port.size(), '\0');
+							const uint64_t nodeBytes = OwnedTextCapacity(lookupNode);
+							const uint64_t portBytes = OwnedTextCapacity(lookupPort);
+							if (nodeBytes > UINT64_MAX - portBytes ||
+								!lookupCharge->Resize(nodeBytes + portBytes))
+								goto limited;
+							lookupNode.assign(node.Id);
+							lookupPort.assign(input.Port);
+						} else {
+							lookupNode = node.Id;
+							lookupPort = input.Port;
+						}
+						auto lookup =
+							std::make_tuple(std::move(lookupNode), std::move(lookupPort), std::string("x"));
+						if (!axesSeen.contains(lookup)) goto malformed;
+						std::get<2>(lookup) = "y";
+						if (!axesSeen.contains(lookup)) goto malformed;
+					}
 				const Status status = detail::ValidateSeparatedVec2(node, aggregateKeys, diagnostic);
 				if (status != Status::Ok) return status;
 			}
+		}
+		if (budget) {
+			const auto retained = DocumentRetainedPayloadBytes(parsed);
+			const uint64_t axisScratchBytes = ownedTextBytes(axisNode) + ownedTextBytes(axisPort);
+			if (!retained || axisScratchBytes > persistedTextCharge->Bytes() ||
+				*retained < persistedTextCharge->Bytes() - axisScratchBytes)
+				goto limited;
+			const uint64_t remaining = *retained - (persistedTextCharge->Bytes() - axisScratchBytes);
+			if (remaining > candidateCharge->Bytes() && !candidateCharge->Resize(remaining)) goto limited;
 		}
 		document = std::move(parsed);
 		diagnostic = {};
 		return Status::Ok;
 
+	limited:
+		allocationRefused = true;
 	malformed:
 		SetDiagnostic(
-			diagnostic, Status::Malformed, "malformed imagegraph record at line " + std::to_string(lineNumber)
+			diagnostic,
+			allocationRefused ? Status::LimitExceeded : Status::Malformed,
+			allocationRefused ? "document allocation exceeds the byte limit"
+							  : "malformed imagegraph record at line " + std::to_string(lineNumber)
 		);
 		return diagnostic.Code;
+	}
+
+	Status Read(const std::string &text, Document &document, Diagnostic &diagnostic) {
+		return ReadDocumentText(text, document, diagnostic, nullptr, nullptr);
+	}
+
+	Status
+	Read(std::string_view text, Document &document, Diagnostic &diagnostic, uint64_t maximumOperationBytes) {
+		try {
+			if (text.size() > Limits::MaximumDocumentBytes) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "document text exceeds the byte limit");
+				return diagnostic.Code;
+			}
+			const auto previousBytes = DocumentRetainedPayloadBytes(document);
+			if (!previousBytes || *previousBytes > maximumOperationBytes ||
+				text.size() > maximumOperationBytes - *previousBytes) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "document read exceeds the byte limit");
+				return diagnostic.Code;
+			}
+			detail::EvaluationBudget budget(maximumOperationBytes);
+			auto previousCharge = budget.Reserve(*previousBytes);
+			auto borrowedCharge = budget.Reserve(text.size());
+			auto ownedCopyCharge = budget.Reserve(text.size());
+			if (!previousCharge || !borrowedCharge || !ownedCopyCharge) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "document read exceeds the byte limit");
+				return diagnostic.Code;
+			}
+			std::string ownedText(text.size(), '\0');
+			if (!ownedCopyCharge->Resize(OwnedTextCapacity(ownedText))) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "document read exceeds the byte limit");
+				return diagnostic.Code;
+			}
+			ownedText.assign(text.data(), text.size());
+			auto candidateCharge = budget.Reserve(sizeof(Document));
+			if (!candidateCharge) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "document read exceeds the byte limit");
+				return diagnostic.Code;
+			}
+			return ReadDocumentText(ownedText, document, diagnostic, &budget, &*candidateCharge);
+		} catch (const std::bad_alloc &) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "document allocation exceeds the byte limit");
+			return diagnostic.Code;
+		} catch (const std::length_error &) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "document allocation exceeds the byte limit");
+			return diagnostic.Code;
+		}
 	}
 
 	bool ValidProjectPreviewSettings(const ProjectSettings &project) {
@@ -4288,6 +4940,16 @@ namespace engine::imagegraph {
 		}
 
 		for (const auto &node : document.Nodes) {
+			if (const auto fault = detail::ValidateNativeSamplerBindings(node, document.FormatVersion)) {
+				SetDiagnostic(
+					diagnostic,
+					fault->Code,
+					std::string(fault->Message),
+					node.Id,
+					std::string(fault->Argument)
+				);
+				return diagnostic.Code;
+			}
 			if (node.SourceDisplayName.size() > Limits::MaximumTextBytes ||
 				node.SourceInternalName.size() > Limits::MaximumTextBytes ||
 				((!node.SourceDisplayName.empty() || !node.SourceInternalName.empty()) &&
@@ -6106,6 +6768,10 @@ namespace engine::imagegraph {
 			}
 			const ValueType sourceType = source.value_or(ValueType::Boolean);
 			const ValueType targetType = target.value_or(ValueType::Boolean);
+			const bool sourceFontInput =
+				to != nodeIndices.end() && targetType == ValueType::Text &&
+				detail::SourceFontInput(document.Nodes[to->second].Type, link.ToPort) &&
+				(sourceType == ValueType::Font || sourceType == ValueType::Array);
 			const bool arrayElement = from != nodeIndices.end() && to != nodeIndices.end() &&
 									  sourceType == ValueType::Array && targetType == ValueType::Image &&
 									  document.Nodes[to->second].Type == "value.array";
@@ -6128,6 +6794,8 @@ namespace engine::imagegraph {
 						 (entry->Type == "pc.crop_content" && input->Id == "surface_in") ||
 						 ((entry->Type == "pc.cache" || entry->Type == "pc.cache_array") &&
 						  input->Id == "surface_in") ||
+						 (entry->Type == "pc.font_bitmap" && input->Id == "font_surfaces" &&
+						  input->ArrayDepth == 1) ||
 						 (entry->Type == "pc.sequence_anim" && input->Id == "surface_in" &&
 						  input->ArrayDepth == 1));
 				}
@@ -6203,6 +6871,7 @@ namespace engine::imagegraph {
 			if (sourceType != targetType && !arrayElement && !heightBlendArrayInput &&
 				!heightBlendArrayOutput && !catalogueArrayInput && !catalogueAtlasArrayInput &&
 				!catalogueStrandArrayInput && !sourceMaterialInput && !heightmapColourArrayInput &&
+				!sourceFontInput &&
 				!((catalogueLink || boundaryLink) && JunctionCompatible(sourceType, targetType))) {
 				SetDiagnostic(
 					diagnostic,
@@ -7221,7 +7890,10 @@ namespace engine::imagegraph {
 			SetDiagnostic(diagnostic, Status::Cycle, "graph contains a cycle");
 			return diagnostic.Code;
 		}
-		if (const auto status = detail::AppendRigidSchedule(document, compiled, budget, planCharge, diagnostic); status != Status::Ok) return status;
+		if (const auto status =
+				detail::AppendRigidSchedule(document, compiled, budget, planCharge, diagnostic);
+			status != Status::Ok)
+			return status;
 		plan = std::move(compiled);
 		diagnostic = {};
 		return Status::Ok;
@@ -7370,6 +8042,8 @@ namespace engine::imagegraph {
 			return SourceSocketKind::Sdf;
 		case ValueType::Gradient:
 			return SourceSocketKind::Gradient;
+		case ValueType::Font:
+			return SourceSocketKind::Font;
 		// Text may represent a source file-path declaration. Any may be a dynamic
 		// resource. Neither is inferred from a native carrier or runtime payload
 		// shape.
@@ -8518,6 +9192,20 @@ namespace engine::imagegraph {
 	}
 
 	static Status ValidateEvaluationRequest(const EvaluationRequest &request, Diagnostic &diagnostic) {
+		if (request.SourceFontHostResidentBytes > Limits::MaximumEvaluationBytes) {
+			SetDiagnostic(
+				diagnostic,
+				Status::LimitExceeded,
+				"font host residency exceeds evaluation bounds",
+				{},
+				"font_inputs"
+			);
+			return diagnostic.Code;
+		}
+		const auto fontStatus = ValidateSourceFontObservations(
+			request.SourceFonts, request.FontObservations, Limits::MaximumEvaluationBytes, diagnostic
+		);
+		if (fontStatus != Status::Ok) return fontStatus;
 		uint64_t builtinBytes = 0;
 		const auto builtinStatus = ValidateBuiltinRandomCaptures(
 			request.BuiltinRandomCaptures, Limits::MaximumEvaluationBytes, builtinBytes, diagnostic
@@ -8790,6 +9478,49 @@ namespace engine::imagegraph {
 		StatefulOutputCapture *batch = nullptr
 	) {
 
+		// Host ownership coexists with the held context and observations admitted below.
+		auto fontHostShadow = budget.Reserve(request.SourceFontHostResidentBytes);
+		if (!fontHostShadow) {
+			SetDiagnostic(
+				diagnostic,
+				Status::LimitExceeded,
+				"font host residency exceeds live evaluation budget",
+				{},
+				"font_inputs"
+			);
+			return diagnostic.Code;
+		}
+		if (request.SourceFonts) {
+			uint64_t seedNameBytes = 0;
+			for (const auto &seed : request.SourceFonts->InitialTextFonts)
+				seedNameBytes += seed.NodeId.size();
+			if (!document.Nodes.empty() && seedNameBytes > (16 * 1024 * 1024) / document.Nodes.size()) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"initial Text font node lookup exceeds work bounds",
+					{},
+					"font_inputs"
+				);
+				return diagnostic.Code;
+			}
+			for (const auto &seed : request.SourceFonts->InitialTextFonts) {
+				const auto node =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &candidate) {
+						return candidate.Id == seed.NodeId;
+					});
+				if (node == document.Nodes.end() || node->Type != "pc.text") {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"initial Text fonts require an existing Text node",
+						seed.NodeId,
+						"font_inputs"
+					);
+					return diagnostic.Code;
+				}
+			}
+		}
 		detail::SourcePathShiftMemo pathShiftMemo;
 		// Ordinary evaluations share a temporary journal; stateful evaluations supply
 		// their already admitted candidate. The borrowed prior is never mutated.
@@ -8828,6 +9559,24 @@ namespace engine::imagegraph {
 		if (!builtinShadow) {
 			SetDiagnostic(
 				diagnostic, Status::LimitExceeded, "builtin random recordings exceed live evaluation budget"
+			);
+			return diagnostic.Code;
+		}
+		uint64_t fontBytes = 0;
+		const auto fontStatus = ValidateSourceFontObservations(
+			request.SourceFonts, request.FontObservations, budget.Available(), diagnostic
+		);
+		if (fontStatus != Status::Ok) return fontStatus;
+		if (request.SourceFonts)
+			fontBytes +=
+				SourceFontContextRetainedBytes(*request.SourceFonts).value_or(Limits::MaximumEvaluationBytes);
+		for (const auto &observation : request.FontObservations)
+			fontBytes +=
+				SourceFontObservationRetainedBytes(observation).value_or(Limits::MaximumEvaluationBytes);
+		auto fontShadow = budget.Reserve(fontBytes);
+		if (!fontShadow) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "font observations exceed live evaluation budget"
 			);
 			return diagnostic.Code;
 		}
@@ -9104,10 +9853,13 @@ namespace engine::imagegraph {
 		std::vector<detail::AllocationReservation> resultCharges(document.Nodes.size());
 		std::vector<NodeResult> results(document.Nodes.size());
 		std::optional<detail::HostCaptureReceiptSink> hostReceipts;
+		std::optional<detail::SourceFontReceiptSink> fontReceipts;
 		if (std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
 				return node.Type == "pc.pixel_builder";
-			}))
+			})) {
 			hostReceipts.emplace(budget);
+			fontReceipts.emplace(budget);
+		}
 		const bool dynamicPcx =
 			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
 				return node.Type == "pc.equation" || node.Type.starts_with("pc.pcx_") ||
@@ -9763,6 +10515,8 @@ namespace engine::imagegraph {
 				context.PathShiftMemo = &pathShiftMemo;
 				if (hostReceipts) {
 					context.HostReceipts = &*hostReceipts;
+					context.FontReceipts = &*fontReceipts;
+					context.ObservedFonts = {fontReceipts->Records.data(), fontReceipts->Records.size()};
 					context.ObservedHostCaptures = {
 						hostReceipts->Captures.data(), hostReceipts->Captures.size()
 					};
@@ -10137,14 +10891,16 @@ namespace engine::imagegraph {
 									}
 									const auto *array = std::get_if<ArrayValue>(&value.Data);
 									// Draw Surface can synchronously rasterize a retained Builder recipe.
-									const bool dynamicBuilder = node.Type == "pc.pb_draw_surface" &&
-										input.Id == "surface" &&
+									const bool dynamicBuilder =
+										node.Type == "pc.pb_draw_surface" && input.Id == "surface" &&
 										std::holds_alternative<DynamicSurfaceValue>(value.Data);
 									if (dynamicBuilder && detail::ValidRuntimeValue(value.Data)) {
 										context.ValueViews.emplace_back(input.Id, &value.Data);
 										break;
 									}
-									if ((std::holds_alternative<AtlasValue>(value.Data) || (array && array->ElementType == ValueType::Atlas)) && detail::ValidRuntimeValue(value.Data)) {
+									if ((std::holds_alternative<AtlasValue>(value.Data) ||
+										 (array && array->ElementType == ValueType::Atlas)) &&
+										detail::ValidRuntimeValue(value.Data)) {
 										context.ValueViews.emplace_back(input.Id, &value.Data);
 										break;
 									}
@@ -10389,7 +11145,8 @@ namespace engine::imagegraph {
 							((input.SourceKind == "Vec3" &&
 							  (input.Id == "view_angle" || input.Id == "position")) ||
 							 (input.SourceKind == "Range" && input.Id == "depth_range") ||
-							 (input.SourceKind == "Slider" && (input.Id == "fov" || input.Id == "threshold")) ||
+							 (input.SourceKind == "Slider" &&
+							  (input.Id == "fov" || input.Id == "threshold")) ||
 							 (input.SourceKind == "Float" &&
 							  (input.Id == "distance" || input.Id == "scale")));
 						if ((cylinderSurfaceGetter || heightmapSurfaceGetter || surfaceProjectGetter) &&
@@ -10601,6 +11358,9 @@ namespace engine::imagegraph {
 						const bool shapeSurfaceVector =
 							input.SourceKind == "Vec2" &&
 							(node.Type == "pc.mirror_polar" ||
+							 (node.Type == "pc.text" &&
+							  (input.Id == "fixed_dimension" || input.Id == "offset" ||
+							   input.Id == "character_range")) ||
 							 (simpleShape && (input.Id == "center" || input.Id == "half_size")));
 						// Dimension projects surfaces before processor selection. Equal sizes collapse.
 						if ((simpleShape || node.Type == "pc.flow_noise" || node.Type == "pc.noise_bubble" ||
@@ -10732,7 +11492,10 @@ namespace engine::imagegraph {
 												   : nullptr;
 						const bool sourceSurfaceVec2 =
 							input.SourceKind == "Vec2" &&
-							((node.Type == "pc.padding" && input.Id == "dimension") ||
+							((node.Type == "pc.text" &&
+							  (input.Id == "fixed_dimension" || input.Id == "offset" ||
+							   input.Id == "character_range")) ||
+							 (node.Type == "pc.padding" && input.Id == "dimension") ||
 							 (node.Type == "pc.stripe" && input.Id == "position") ||
 							 (node.Type == "pc.julia_set" &&
 							  (input.Id == "c" || input.Id == "position" || input.Id == "scale")) ||
@@ -10815,6 +11578,17 @@ namespace engine::imagegraph {
 							value = &authored->Data;
 					}
 					if (value) {
+						if (input.Type == ValueType::Text && !detail::SourceFontInput(node.Type, input.Id) &&
+							detail::ContainsFontLiteral(*value)) {
+							SetDiagnostic(
+								diagnostic,
+								Status::TypeMismatch,
+								"owned Font cannot enter an unrelated Text getter",
+								node.Id,
+								input.Id
+							);
+							return diagnostic.Code;
+						}
 						// Heightmap's Gradient getter converts the complete declared Color value before row
 						// selection.
 						const auto colourDomain = context.InputDomain(input.Id);

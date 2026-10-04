@@ -83,15 +83,15 @@ namespace engine::imagegraph {
 			cone.DataProcessors += node.Type.starts_with("pc.strand_") || node.Type == "pc.trigger_bool" ||
 								   node.Type == "pc.differential" || node.Type == "pc.counter" ||
 								   node.Type == "pc.delay_value" || node.Type == "pc.cache_value_array" ||
-								   node.Type == "pc.cache_results" || node.Type == "pc.cache" ||
-								   node.Type == "pc.cache_array" || node.Type == "pc.3_d_affector" ||
-								   node.Type == "pc.segment_filter" || node.Type == "pc.path_blend" ||
-								   node.Type == "pc.path_to_curve" || node.Type == "pc.path_redistribute" ||
-								   node.Type == "pc.path_skew" || node.Type == "pc.path_map_area" ||
-								   node.Type == "pc.path_shape_3_d" || node.Type == "pc.path_extends" ||
-								   node.Type == "pc.path_flattern" || node.Type == "pc.path_smoothen" ||
-								   node.Type == "pc.path_sample" || node.Type == "pc.crop_content" ||
-								   node.Type == "pc.smear";
+								   node.Type == "pc.cache_results" || node.Type == "pc.text" ||
+								   node.Type == "pc.cache" || node.Type == "pc.cache_array" ||
+								   node.Type == "pc.3_d_affector" || node.Type == "pc.segment_filter" ||
+								   node.Type == "pc.path_blend" || node.Type == "pc.path_to_curve" ||
+								   node.Type == "pc.path_redistribute" || node.Type == "pc.path_skew" ||
+								   node.Type == "pc.path_map_area" || node.Type == "pc.path_shape_3_d" ||
+								   node.Type == "pc.path_extends" || node.Type == "pc.path_flattern" ||
+								   node.Type == "pc.path_smoothen" || node.Type == "pc.path_sample" ||
+								   node.Type == "pc.crop_content" || node.Type == "pc.smear";
 			cone.FirstFrameData |= node.Type == "pc.3_d_affector" || node.Type == "pc.crop_content" ||
 								   node.Type == "pc.smear" || node.Type == "pc.path_extends" ||
 								   node.Type == "pc.path_flattern" || node.Type == "pc.path_smoothen" ||

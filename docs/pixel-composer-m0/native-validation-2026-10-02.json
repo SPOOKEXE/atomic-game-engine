@@ -12351,5 +12351,77 @@
       "Atomic refusal/cancellation/provider restoration and actual effective-node fixtures",
       "Coherent runtime acceptance"
     ]
+  },
+  "font_module_closure_87": {
+    "status": "Fresh module build and all established joined native/filtered CPU scopes pass after exact architecture and MCP fixture repairs. Licensed parity, GPU and live Studio acceptance remain open.",
+    "module_packet": {
+      "path": "/tmp/pc-font-module82/FontModuleUnified85.patch",
+      "sha256": "6385de4939cc2530b53c8a8a347789948f34d8450ffb1e3dfd58630c008418b2",
+      "paths": 47,
+      "root_review": "All packet bodies and all base/candidate hashes reviewed before/after application. Root subsequently removed one extra EOF blank in export CMake and added imagegraphfont to two unified_tests transitive link expectations."
+    },
+    "build": {
+      "steps": 275,
+      "exit": 0,
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-86-font-module-corrected.log",
+      "sha256": "c8d1a2cb9ceb9dc15e42f1a3280c1732be28c8380d338c86e51a64ee2932c5ed"
+    },
+    "joined_initial": {
+      "all_results": {
+        "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/font-module-86-joined-results.json",
+        "sha256": "7695c1c8d8001551386dfbc8a52e79b051bc4fdcbad5633fa4f1b65309e10a93"
+      },
+      "passed_scopes": [
+        "assets",
+        "assetc",
+        "gui",
+        "export",
+        "client",
+        "physics",
+        "nodegraph",
+        "io",
+        "studio",
+        "render",
+        "font",
+        "imagegraph",
+        "cli"
+      ],
+      "failures": [
+        "Architecture omitted imagegraphfont from the module/program unified_tests closure.",
+        "Server normal/factory resource fixtures omitted the new font module."
+      ]
+    },
+    "architecture_repair": {
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "architecture",
+        "--output-on-failure"
+      ],
+      "exit": 0,
+      "observed_output": "100% tests passed, 0 tests failed out of 1",
+      "scope": "Exact two transitive expectation additions only; no layer/tier escape or client bake dependency."
+    },
+    "mcp_fixture_repair": {
+      "path": "/tmp/pc-mcp-resources86/McpResourceFixtures86.patch",
+      "sha256": "adedc7be4bb86ef3d51f1e3d6529b7b20c0581416f82f65d0a14f2fb77ac6964",
+      "review": "Root read all six additive records and registrar discovery/metadata code; independently checked both base and candidate hashes. Server adds font in both maps; Studio adds existing audiocodec/physics in both maps. Studio manifest execution deferred to approved live verification."
+    },
+    "server_final": {
+      "exit": 0,
+      "cases": 99,
+      "assertions": 2182,
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-87-mcp-resources.log",
+      "sha256": "3158ee2f7435ca3a51ab1d8bf389b07fe930206475bc3f0fe36d63814858e8aa"
+    },
+    "metadata": {
+      "exit": 0,
+      "tests": 97,
+      "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/metadata-release-86-font-module.log",
+      "sha256": "3bde03a16da24ebfc25bde12d23126e9227528a048432062eb2a01cbb9b79891"
+    },
+    "acceptance": "Bounded core font/Text and font-byte/artifact hosts integrated across products with joined CPU validation. Broad font loading/layout, measured host costs, licensed captures and manual Studio workflows are not marked complete."
   }
 }

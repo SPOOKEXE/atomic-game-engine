@@ -10,6 +10,7 @@
 #include <engine/imagegraph/SimulationReplay.hpp>
 #include <engine/imagegraph/SliceStackReplay.hpp>
 #include <engine/imagegraph/SourceBuiltinRandom.hpp>
+#include <engine/imagegraph/SourceFont.hpp>
 #include <engine/imagegraph/SurfaceFrameReplay.hpp>
 
 namespace engine::imagegraph {
@@ -37,6 +38,8 @@ namespace engine::imagegraph {
 		std::vector<AudioClipSource> AudioClips;
 		std::vector<RequestImageSource> ImageSources;
 		std::vector<HostNodeCapture> HostCaptures;
+		std::optional<SourceFontContext> Fonts;
+		std::vector<SourceFontObservation> FontObservations;
 		std::vector<SourceBuiltinRandomCapture> BuiltinRandomCaptures;
 		std::optional<SimulationReplayState> Simulation;
 		std::optional<SurfaceFrameReplayState> Surfaces;

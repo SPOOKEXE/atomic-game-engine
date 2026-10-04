@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -64,6 +65,188 @@ namespace {
 		document.Outputs.push_back({"texture", "node-a", "image"});
 		return document;
 	}
+}
+
+TEST_CASE(
+	"bounded native document read refuses live storage growth before "
+	"replacing the destination"
+) {
+	Document destination;
+	destination.FormatVersion = 9;
+	Node oldNode;
+	oldNode.Id = "old";
+	oldNode.Type = "pc.solid";
+	destination.Nodes.push_back(std::move(oldNode));
+	const Document original = destination;
+	const auto oldBytes = engine::imagegraph::DocumentRetainedPayloadBytes(destination);
+	REQUIRE(oldBytes);
+	Diagnostic diagnostic;
+
+	const std::string small = "imagegraph 9\n";
+	CHECK(
+		Read(std::string_view(small), destination, diagnostic, *oldBytes + small.size() - 1) ==
+		Status::LimitExceeded
+	);
+	CHECK(destination == original);
+	CHECK(
+		Read(std::string_view(small), destination, diagnostic, *oldBytes + small.size()) ==
+		Status::LimitExceeded
+	);
+	CHECK(destination == original);
+
+	const std::string guides = "imagegraph 9\npreview_rulers 1 4096\n";
+	CHECK(Read(std::string_view(guides), destination, diagnostic, *oldBytes + 4096) == Status::LimitExceeded);
+	CHECK(destination == original);
+
+	const std::string prefix = "imagegraph 9\nnode \"fresh\" \"pc.solid\" \"\" 0 0\n";
+	constexpr uint64_t countedAllowance = 8192;
+	static_assert(sizeof(engine::imagegraph::ElementValue) * Limits::MaximumArrayElements > countedAllowance);
+	REQUIRE(
+		Read(std::string_view(prefix), destination, diagnostic, *oldBytes + countedAllowance) == Status::Ok
+	);
+	destination = original;
+	const std::string declaredArray = prefix + "value 0 \"fresh\" \"values\" a scalar 4096\n";
+	CHECK(
+		Read(std::string_view(declaredArray), destination, diagnostic, *oldBytes + countedAllowance) ==
+		Status::LimitExceeded
+	);
+	CHECK(destination == original);
+
+	const std::string replacement = "imagegraph 9\nnode \"fresh\" \"pc.solid\" \"\" 0 0\n";
+	REQUIRE(Read(std::string_view(replacement), destination, diagnostic, *oldBytes + 65536) == Status::Ok);
+	REQUIRE(destination.Nodes.size() == 1);
+	CHECK(destination.Nodes.front().Id == "fresh");
+}
+
+TEST_CASE("bounded native document read releases quoted query storage after each record") {
+	const std::string id(1024, 'n');
+	std::string text = "imagegraph 9\nnode \"" + id + "\" \"pc.solid\" \"\" 0 0\n";
+	for (size_t index = 0; index < 1024; ++index)
+		text += "node_instance_override \"" + id + "\" \"p" + std::to_string(index) + "\"\n";
+	Document parsed;
+	parsed.FormatVersion = 9;
+	Node oldNode;
+	oldNode.Id = "old";
+	oldNode.Type = "pc.solid";
+	parsed.Nodes.push_back(std::move(oldNode));
+	const Document original = parsed;
+	const auto oldBytes = engine::imagegraph::DocumentRetainedPayloadBytes(parsed);
+	REQUIRE(oldBytes);
+	Diagnostic diagnostic;
+	// The final growth overlaps 512 old and 1024 new slots. Active document and row
+	// storage need room beyond that; a leaked quoted ID per row would exceed this bound.
+	const uint64_t vectorGrowthPeak = (512 + 1024) * sizeof(std::string);
+	const uint64_t structuralAllowance = 80 * 1024;
+	REQUIRE(vectorGrowthPeak + structuralAllowance < 1024 * id.size());
+	const uint64_t lowerBudget = *oldBytes + 2 * text.size() + vectorGrowthPeak;
+	CHECK(Read(std::string_view(text), parsed, diagnostic, lowerBudget) == Status::LimitExceeded);
+	CHECK(parsed == original);
+	const uint64_t successBudget = lowerBudget + structuralAllowance;
+	REQUIRE(Read(std::string_view(text), parsed, diagnostic, successBudget) == Status::Ok);
+	REQUIRE(parsed.Nodes.size() == 1);
+	CHECK(parsed.Nodes.front().InstanceOverrides.size() == 1024);
+}
+
+TEST_CASE("bounded native sampler metadata remains atomic at its allocation and count limits") {
+	Document destination;
+	destination.FormatVersion = 9;
+	destination.Nodes.push_back(Solid("old"));
+	const Document original = destination;
+	const auto oldBytes = engine::imagegraph::DocumentRetainedPayloadBytes(destination);
+	REQUIRE(oldBytes);
+	Diagnostic diagnostic;
+	const std::string text = "imagegraph 9\nnode \"fresh\" \"pc.hlsl\" \"\" 0 0\n"
+							 "native_sampler 0 \"fresh\" \"Sampler\" \"texture\"\n";
+	CHECK(
+		Read(std::string_view(text), destination, diagnostic, *oldBytes + 2 * text.size() + 64) ==
+		Status::LimitExceeded
+	);
+	CHECK(destination == original);
+	REQUIRE(Read(std::string_view(text), destination, diagnostic, *oldBytes + 65536) == Status::Ok);
+	REQUIRE(destination.Nodes.size() == 1);
+	REQUIRE(destination.Nodes.front().NativeSamplerBindings.size() == 1);
+	CHECK(destination.Nodes.front().NativeSamplerBindings.front().Argument == "Sampler");
+
+	destination = original;
+	std::string overCount = "imagegraph 9\nnode \"fresh\" \"pc.hlsl\" \"\" 0 0\n";
+	for (size_t index = 0; index <= Limits::MaximumNativeSamplerBindingsPerNode; ++index)
+		overCount += "native_sampler 0 \"fresh\" \"S" + std::to_string(index) + "\" \"texture\"\n";
+	CHECK(
+		Read(std::string_view(overCount), destination, diagnostic, *oldBytes + 65536) == Status::LimitExceeded
+	);
+	CHECK(destination == original);
+}
+
+TEST_CASE("bounded source timeline bounds retain presence and signed fractional endpoints") {
+	for (const bool explicitBounds : {false, true}) {
+		Document authored;
+		authored.FormatVersion = 9;
+		authored.Timeline.emplace();
+		authored.Timeline->Frames = 16;
+		authored.Timeline->Last = 15;
+		authored.Timeline->SourceBounds.emplace();
+		if (explicitBounds) {
+			authored.Timeline->SourceBounds->Start = {
+				engine::imagegraph::SourceFrameBoundPresence::Explicit, {2, 0.25, true}
+			};
+			authored.Timeline->SourceBounds->End = {
+				engine::imagegraph::SourceFrameBoundPresence::Explicit, {8, 0.75, false}
+			};
+		} else {
+			authored.Timeline->SourceBounds->End.Presence =
+				engine::imagegraph::SourceFrameBoundPresence::Null;
+		}
+		const std::string text = Write(authored);
+		REQUIRE(text.find("source_timeline_bounds ") != std::string::npos);
+		Document prior;
+		prior.FormatVersion = 9;
+		prior.Nodes.push_back(Solid("old"));
+		const Document original = prior;
+		const auto priorBytes = engine::imagegraph::DocumentRetainedPayloadBytes(prior);
+		REQUIRE(priorBytes);
+		Diagnostic diagnostic;
+		CHECK(
+			Read(std::string_view(text), prior, diagnostic, *priorBytes + text.size()) ==
+			Status::LimitExceeded
+		);
+		CHECK(prior == original);
+		REQUIRE(Read(std::string_view(text), prior, diagnostic, *priorBytes + 65536) == Status::Ok);
+		CHECK(prior == authored);
+		Document unbounded;
+		REQUIRE(Read(text, unbounded, diagnostic) == Status::Ok);
+		CHECK(unbounded == authored);
+	}
+}
+
+TEST_CASE("bounded native read scales with repeated keyframe metadata and token storage") {
+	std::string text = "imagegraph 9\nnode \"n\" \"pc.solid\" \"\" 0 0\n";
+	for (size_t index = 0; index < 8192; ++index) {
+		text += "keyframe \"n\" \"v\" " + std::to_string(index) + " \"linear\" d 1\n";
+		text += "key_source_id \"n\" \"v\" " + std::to_string(index) + " \"authored-key-id-" +
+				std::to_string(index) + "\"\n";
+	}
+	Document parsed;
+	Diagnostic diagnostic;
+	REQUIRE(
+		Read(std::string_view(text), parsed, diagnostic, 2 * text.size() + 32 * 1024 * 1024) == Status::Ok
+	);
+	CHECK(parsed.Keyframes.size() == 8192);
+	CHECK(parsed.Keyframes.back().SourceKeyId == "authored-key-id-8191");
+}
+
+TEST_CASE("bounded native read preflights a long unknown token atomically") {
+	const std::string marker(8192, 'x');
+	const std::string text = "imagegraph 9\n" + marker + "\n";
+	Document prior;
+	prior.FormatVersion = 9;
+	prior.Nodes.push_back(Solid("old"));
+	const Document original = prior;
+	const auto priorBytes = engine::imagegraph::DocumentRetainedPayloadBytes(prior);
+	REQUIRE(priorBytes);
+	Diagnostic diagnostic;
+	const uint64_t allowance = *priorBytes + 2 * text.size() + 2 * marker.size() + 4096;
+	CHECK(Read(std::string_view(text), prior, diagnostic, allowance) == Status::LimitExceeded);
+	CHECK(prior == original);
 }
 
 TEST_CASE("authored imagegraph fields round trip with stable text", "[imagegraph]") {

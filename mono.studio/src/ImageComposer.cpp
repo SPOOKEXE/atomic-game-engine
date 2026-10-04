@@ -15,6 +15,8 @@
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphExportIntent.hpp"
 #include "ImageGraphExportTriggers.hpp"
+#include "ImageGraphFontArtifact.hpp"
+#include "ImageGraphFontBindings.hpp"
 #include "ImageGraphGroupHost.hpp"
 #include "ImageGraphHistoryKeys.hpp"
 #include "ImageGraphHlslGroups.hpp"
@@ -52,6 +54,7 @@
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
 #include <engine/imagegraphexport/GraphExportSession.hpp>
+#include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scripthost/ComposerLua.hpp>
@@ -116,6 +119,16 @@ namespace studio {
 			std::string Message;
 		};
 
+		struct FontInputControls {
+			std::array<char, 4096> Artifact{}, DefaultPath{};
+			std::array<char, 4096> Directory{}, ApplicationLocation{}, ProjectPath{};
+			std::array<char, 256> Alias{}, AliasPath{}, GrantNode{};
+			std::array<char, 4096> GrantPath{};
+			std::string Message;
+			bool PendingFontArtifactLoad = false, PendingFontArtifactSave = false;
+			bool PendingClearFontObservations = false, PendingApplyFontInputs = false;
+		};
+
 		struct State {
 			bool Initialized = false;
 			std::vector<ExportGrant> ExportGrants;
@@ -138,6 +151,12 @@ namespace studio {
 			std::vector<engine::imagegraphexport::GraphFileGrant> FileGrants;
 			std::vector<engine::imagegraphexport::GraphDirectoryGrant> DirectoryGrants;
 			std::vector<FileReadControls> FileControls;
+			std::unique_ptr<engine::imagegraphfont::GraphFontInputs> FontInputs =
+				std::make_unique<engine::imagegraphfont::GraphFontInputs>();
+			engine::imagegraphfont::GraphFontConfiguration EditableFontConfiguration;
+			std::optional<engine::imagegraphfont::GraphFontConfiguration> PendingFontConfiguration;
+			FontInputControls FontControls;
+			bool FontInputsActive = false;
 			bool LivePreview = true;
 			bool PreviewDirty = true;
 			bool CanvasNeedsReload = false;
@@ -349,7 +368,11 @@ namespace studio {
 				CancelComposerPreview(state, host->Renderer);
 		}
 
-		void BindObservations(State &state, engine::imagegraph::EvaluationRequest &request) {
+		bool BindObservations(
+			State &state,
+			engine::imagegraph::EvaluationRequest &request,
+			engine::imagegraph::SourceFontContext *heldFontContext = nullptr
+		) {
 			const auto frame = GetImageGraphFrame(state.Playback);
 			const std::string project =
 				std::filesystem::path(state.PxcxPathDisplay.empty() ? state.GraphName : state.PxcxPathDisplay)
@@ -369,6 +392,22 @@ namespace studio {
 				state.PcxObservations.Capture(state.DocumentRevision, frame, project, elapsed, calendar);
 			}
 			state.PcxObservations.Bind(request);
+			if (state.FontInputsActive && heldFontContext) {
+				Diagnostic diagnostic;
+				if (!detail::BindImageGraphFontInputs(
+						*state.FontInputs,
+						true,
+						state.Playback.Playing,
+						*heldFontContext,
+						request,
+						engine::imagegraph::Limits::MaximumEvaluationBytes,
+						diagnostic
+					)) {
+					state.LastDiagnostic = std::move(diagnostic);
+					return false;
+				}
+			}
+			return true;
 		}
 
 		void ReloadCanvas(State &state);
@@ -388,7 +427,8 @@ namespace studio {
 			request.HostProvider = &HostFor(state);
 			request.GroupReplay = replay;
 			request.GroupAuthoringRevision = replay ? replay->AuthoringRevision() : 0;
-			BindObservations(state, request);
+			engine::imagegraph::SourceFontContext requestFontContext;
+			if (!BindObservations(state, request, &requestFontContext)) return false;
 			detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 			request.AudioFrames = state.AudioFrames;
 			request.AudioClips = state.AudioClips;
@@ -564,6 +604,407 @@ namespace studio {
 			return true;
 		}
 
+		constexpr uint64_t FONT_ARTIFACT_LIMIT_BYTES = 16 * 1024 * 1024;
+		constexpr uint64_t FONT_ARTIFACT_PATH_SCRATCH_BYTES = 4096;
+		constexpr uint64_t FONT_ARTIFACT_PUBLISH_SCRATCH_BYTES = 4096;
+
+		std::optional<uint64_t> FontEditorHeldBytes(const State &state) {
+			const auto editable =
+				engine::imagegraphfont::GraphFontConfigurationRetainedBytes(state.EditableFontConfiguration);
+			if (!editable) return {};
+			uint64_t bytes = state.FontInputs->RetainedBytes();
+			if (*editable > UINT64_MAX - bytes) return {};
+			bytes += *editable;
+			if (state.PendingFontConfiguration) {
+				const auto pending = engine::imagegraphfont::GraphFontConfigurationRetainedBytes(
+					*state.PendingFontConfiguration
+				);
+				if (!pending || *pending > UINT64_MAX - bytes) return {};
+				bytes += *pending;
+			}
+			return bytes;
+		}
+
+		std::optional<uint64_t> FontEditorAvailableBytes(const State &state, uint64_t scratchBytes) {
+			const auto held = FontEditorHeldBytes(state);
+			const uint64_t maximum = engine::imagegraph::Limits::MaximumEvaluationBytes;
+			if (!held || *held > maximum || scratchBytes > maximum - *held) return {};
+			return maximum - *held - scratchBytes;
+		}
+
+		bool AdmitEditableFontGrowth(State &state, uint64_t growthBytes) {
+			const auto held = FontEditorHeldBytes(state);
+			const uint64_t maximum = engine::imagegraph::Limits::MaximumEvaluationBytes;
+			if (held && *held <= maximum && growthBytes <= maximum - *held) return true;
+			state.FontControls.Message = "Font editor changes exceed the retained byte budget.";
+			state.LastDiagnostic = {
+				Status::LimitExceeded,
+				{},
+				"font inputs",
+				"Font editor allocation exceeds retained byte budget"
+			};
+			return false;
+		}
+
+		uint64_t FontStringGrowth(size_t length) {
+			return uint64_t(length) + 64;
+		}
+
+		bool ReadFontArtifact(
+			const std::filesystem::path &path,
+			engine::imagegraphfont::GraphFontConfiguration &configuration,
+			uint64_t maximumBytes,
+			Diagnostic &diagnostic
+		) {
+			maximumBytes = std::min(maximumBytes, FONT_ARTIFACT_LIMIT_BYTES);
+			std::error_code filesystemError;
+			const uintmax_t size = std::filesystem::file_size(path, filesystemError);
+			if (filesystemError) {
+				diagnostic = {
+					Status::InvalidValue,
+					{},
+					"font inputs",
+					"Could not read font artifact size: " + filesystemError.message()
+				};
+				return false;
+			}
+			if (size > maximumBytes) {
+				diagnostic = {Status::LimitExceeded, {}, "font inputs", "Font input artifact exceeds 16 MiB"};
+				return false;
+			}
+			std::ifstream file(path, std::ios::binary);
+			if (!file) {
+				diagnostic = {
+					Status::InvalidValue, {}, "font inputs", "Could not open the font input artifact"
+				};
+				return false;
+			}
+			std::string bytes(static_cast<size_t>(size), '\0');
+			if (!bytes.empty() && (!file.read(bytes.data(), static_cast<std::streamsize>(bytes.size())) ||
+								   static_cast<size_t>(file.gcount()) != bytes.size())) {
+				diagnostic = {
+					Status::InvalidValue, {}, "font inputs", "Could not read the font input artifact"
+				};
+				return false;
+			}
+			return engine::imagegraphfont::ReadGraphFontConfiguration(
+				bytes, configuration, maximumBytes, diagnostic
+			);
+		}
+
+		bool WriteFontArtifact(
+			const std::filesystem::path &path,
+			const engine::imagegraphfont::GraphFontConfiguration &configuration,
+			uint64_t maximumBytes,
+			Diagnostic &diagnostic
+		) {
+			maximumBytes = std::min(maximumBytes, FONT_ARTIFACT_LIMIT_BYTES);
+			if (maximumBytes <= FONT_ARTIFACT_PUBLISH_SCRATCH_BYTES) {
+				diagnostic = {
+					Status::LimitExceeded, {}, "font inputs", "No memory remains to publish the font artifact"
+				};
+				return false;
+			}
+			std::string bytes;
+			if (!engine::imagegraphfont::WriteGraphFontConfiguration(
+					configuration, bytes, maximumBytes - FONT_ARTIFACT_PUBLISH_SCRATCH_BYTES, diagnostic
+				))
+				return false;
+			return detail::PublishImageGraphFontArtifact(
+				path,
+				[&](const std::filesystem::path &staged) {
+					std::ofstream file(staged, std::ios::binary | std::ios::trunc);
+					if (!file || !file.write(bytes.data(), static_cast<std::streamsize>(bytes.size())))
+						return false;
+					file.close();
+					return bool(file);
+				},
+				diagnostic
+			);
+		}
+
+		template <size_t Size>
+		void
+		CopyFontContextPath(std::array<char, Size> &destination, const std::optional<std::string> &source) {
+			destination.fill('\0');
+			if (source)
+				std::memcpy(
+					destination.data(), source->data(), std::min(destination.size() - 1, source->size())
+				);
+		}
+
+		void DrawFontInputs(State &state) {
+			auto &controls = state.FontControls;
+			auto &configuration = state.EditableFontConfiguration;
+			bool known = configuration.Context.AliasMapKnown;
+			if (ImGui::Checkbox("Alias namespace is known", &known))
+				configuration.Context.AliasMapKnown = known;
+			int caseProfile = static_cast<int>(configuration.Context.TextCaseProfile);
+			if (ImGui::Combo("Text case", &caseProfile, "Recorded only\0Unicode default\0"))
+				configuration.Context.TextCaseProfile =
+					static_cast<engine::imagegraph::FontTextCaseProfile>(caseProfile);
+			int bitmapProfile = static_cast<int>(configuration.Context.BitmapTextureProfile);
+			if (ImGui::Combo("Bitmap texture", &bitmapProfile, "Source observed\0Native frame UV\0"))
+				configuration.Context.BitmapTextureProfile =
+					static_cast<engine::imagegraph::FontBitmapTextureProfile>(bitmapProfile);
+			ImGui::InputText("Default font file", controls.DefaultPath.data(), controls.DefaultPath.size());
+			if (ImGui::Button("Set default path")) {
+				const size_t length = std::strlen(controls.DefaultPath.data());
+				const uint64_t growth = length ? FontStringGrowth(length) : 0;
+				if (AdmitEditableFontGrowth(state, growth)) {
+					if (length)
+						configuration.Context.DefaultFontPath = controls.DefaultPath.data();
+					else
+						configuration.Context.DefaultFontPath.reset();
+				}
+			}
+			ImGui::InputText("Directory", controls.Directory.data(), controls.Directory.size());
+			ImGui::InputText(
+				"Application location",
+				controls.ApplicationLocation.data(),
+				controls.ApplicationLocation.size()
+			);
+			ImGui::InputText("Project path", controls.ProjectPath.data(), controls.ProjectPath.size());
+			if (ImGui::Button("Set context paths")) {
+				const size_t directoryBytes = std::strlen(controls.Directory.data());
+				const size_t applicationBytes = std::strlen(controls.ApplicationLocation.data());
+				const size_t projectBytes = std::strlen(controls.ProjectPath.data());
+				const uint64_t growth = (directoryBytes ? FontStringGrowth(directoryBytes) : 0) +
+										(applicationBytes ? FontStringGrowth(applicationBytes) : 0) +
+										(projectBytes ? FontStringGrowth(projectBytes) : 0);
+				if (AdmitEditableFontGrowth(state, growth)) {
+					configuration.Context.Directory =
+						directoryBytes ? std::optional<std::string>(controls.Directory.data()) : std::nullopt;
+					configuration.Context.ApplicationLocation =
+						applicationBytes ? std::optional<std::string>(controls.ApplicationLocation.data())
+										 : std::nullopt;
+					configuration.Context.ProjectPath =
+						projectBytes ? std::optional<std::string>(controls.ProjectPath.data()) : std::nullopt;
+				}
+			}
+			ImGui::InputText("Alias", controls.Alias.data(), controls.Alias.size());
+			ImGui::InputText("Alias path", controls.AliasPath.data(), controls.AliasPath.size());
+			if (ImGui::Button("Add alias")) {
+				const auto found = std::find_if(
+					configuration.Context.Aliases.begin(),
+					configuration.Context.Aliases.end(),
+					[&](const auto &item) { return item.first == controls.Alias.data(); }
+				);
+				if (found == configuration.Context.Aliases.end()) {
+					const uint64_t metadata = sizeof(std::pair<std::string, std::string>);
+					const uint64_t growth =
+						metadata + FontStringGrowth(std::strlen(controls.Alias.data())) +
+						FontStringGrowth(std::strlen(controls.AliasPath.data())) +
+						(configuration.Context.Aliases.size() == configuration.Context.Aliases.capacity()
+							 ? 2 * (configuration.Context.Aliases.size() + 1) * metadata
+							 : 0);
+					if (AdmitEditableFontGrowth(state, growth))
+						configuration.Context.Aliases.emplace_back(
+							controls.Alias.data(), controls.AliasPath.data()
+						);
+				} else {
+					const uint64_t growth = FontStringGrowth(std::strlen(controls.AliasPath.data()));
+					if (AdmitEditableFontGrowth(state, growth)) found->second = controls.AliasPath.data();
+				}
+			}
+			for (size_t i = 0; i < configuration.Context.Aliases.size(); ++i) {
+				const auto &alias = configuration.Context.Aliases[i];
+				ImGui::PushID(static_cast<int>(i));
+				ImGui::Text("%s -> %s", alias.first.c_str(), alias.second.c_str());
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Remove")) {
+					configuration.Context.Aliases.erase(configuration.Context.Aliases.begin() + i);
+					ImGui::PopID();
+					break;
+				}
+				ImGui::PopID();
+			}
+			ImGui::SeparatorText("Exact file read grants");
+			ImGui::InputText("Node ID", controls.GrantNode.data(), controls.GrantNode.size());
+			ImGui::InputText("Granted file", controls.GrantPath.data(), controls.GrantPath.size());
+			if (ImGui::Button("Grant this file to this node")) {
+				if (controls.GrantNode[0] && controls.GrantPath[0]) {
+					auto &grants = configuration.ReadGrants;
+					const auto found = std::find_if(grants.begin(), grants.end(), [&](const auto &grant) {
+						return grant.NodeId == controls.GrantNode.data() && grant.Resource == "font";
+					});
+					const uint64_t growth =
+						sizeof(engine::imagegraphfont::GraphFontFileGrant) +
+						FontStringGrowth(std::strlen(controls.GrantNode.data())) +
+						4 * FontStringGrowth(std::strlen(controls.GrantPath.data())) +
+						(grants.size() == grants.capacity()
+							 ? 2 * (grants.size() + 1) * sizeof(engine::imagegraphfont::GraphFontFileGrant)
+							 : 0);
+					if (AdmitEditableFontGrowth(state, growth)) {
+						engine::imagegraphfont::GraphFontFileGrant grant{
+							controls.GrantNode.data(),
+							std::filesystem::path(controls.GrantPath.data()),
+							false,
+							"font"
+						};
+						if (found == grants.end())
+							grants.push_back(std::move(grant));
+						else
+							*found = std::move(grant);
+					}
+				}
+			}
+			for (size_t i = 0; i < configuration.ReadGrants.size(); ++i) {
+				const auto &grant = configuration.ReadGrants[i];
+				ImGui::PushID(static_cast<int>(i + 1024));
+				ImGui::Text("%s reads %s", grant.NodeId.c_str(), grant.File.string().c_str());
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Revoke")) {
+					configuration.ReadGrants.erase(configuration.ReadGrants.begin() + i);
+					ImGui::PopID();
+					break;
+				}
+				ImGui::PopID();
+			}
+			ImGui::SeparatorText("Owned observations");
+			ImGui::Text("%zu recorded font observations", configuration.Observations.size());
+			ImGui::InputText("Configuration artifact", controls.Artifact.data(), controls.Artifact.size());
+			if (ImGui::Button("Load artifact into editor")) controls.PendingFontArtifactLoad = true;
+			ImGui::SameLine();
+			if (ImGui::Button("Save editor artifact")) controls.PendingFontArtifactSave = true;
+			if (ImGui::Button("Apply font inputs")) controls.PendingApplyFontInputs = true;
+			ImGui::SameLine();
+			if (ImGui::Button("Clear observations")) controls.PendingClearFontObservations = true;
+			if (!controls.Message.empty()) ImGui::TextWrapped("%s", controls.Message.c_str());
+		}
+
+		void CancelExportIntent(State &state, engine::render::Renderer &renderer);
+
+		void ApplyPendingFontInputs(State &state, engine::render::Renderer &renderer) {
+			auto &controls = state.FontControls;
+			if (controls.PendingFontArtifactLoad) {
+				controls.PendingFontArtifactLoad = false;
+				engine::imagegraphfont::GraphFontConfiguration candidate;
+				Diagnostic diagnostic;
+				const auto available = FontEditorAvailableBytes(state, FONT_ARTIFACT_PATH_SCRATCH_BYTES);
+				if (available &&
+					ReadFontArtifact(controls.Artifact.data(), candidate, *available, diagnostic)) {
+					state.EditableFontConfiguration = std::move(candidate);
+					CopyFontContextPath(
+						controls.DefaultPath, state.EditableFontConfiguration.Context.DefaultFontPath
+					);
+					CopyFontContextPath(
+						controls.Directory, state.EditableFontConfiguration.Context.Directory
+					);
+					CopyFontContextPath(
+						controls.ApplicationLocation,
+						state.EditableFontConfiguration.Context.ApplicationLocation
+					);
+					CopyFontContextPath(
+						controls.ProjectPath, state.EditableFontConfiguration.Context.ProjectPath
+					);
+					controls.Message = "Artifact loaded. Apply font inputs to use this configuration.";
+				} else {
+					if (!available)
+						diagnostic = {
+							Status::LimitExceeded, {}, "font inputs", "No memory remains to load the artifact"
+						};
+					controls.Message = diagnostic.Message;
+					state.LastDiagnostic = std::move(diagnostic);
+				}
+			}
+			if (controls.PendingFontArtifactSave) {
+				controls.PendingFontArtifactSave = false;
+				Diagnostic diagnostic;
+				const auto available = FontEditorAvailableBytes(state, FONT_ARTIFACT_PATH_SCRATCH_BYTES);
+				const bool written =
+					available &&
+					WriteFontArtifact(
+						controls.Artifact.data(), state.EditableFontConfiguration, *available, diagnostic
+					);
+				if (!available)
+					diagnostic = {
+						Status::LimitExceeded, {}, "font inputs", "No memory remains to save the artifact"
+					};
+				controls.Message = written ? "Font input artifact saved." : diagnostic.Message;
+				if (!written) state.LastDiagnostic = std::move(diagnostic);
+			}
+			if (controls.PendingClearFontObservations) {
+				controls.PendingClearFontObservations = false;
+				state.EditableFontConfiguration.Observations.clear();
+			}
+			if (controls.PendingApplyFontInputs) {
+				controls.PendingApplyFontInputs = false;
+				const auto editableBytes = engine::imagegraphfont::GraphFontConfigurationRetainedBytes(
+					state.EditableFontConfiguration
+				);
+				const uint64_t ownerBytes = state.FontInputs->RetainedBytes();
+				const uint64_t maximum = engine::imagegraph::Limits::MaximumEvaluationBytes;
+				if (!editableBytes || ownerBytes > maximum || *editableBytes > (maximum - ownerBytes) / 2) {
+					state.FontControls.Message =
+						"Editable and pending font configurations exceed the byte budget.";
+					state.LastDiagnostic = {
+						Status::LimitExceeded,
+						{},
+						"font inputs",
+						"Pending font configuration clone exceeds its byte budget"
+					};
+					return;
+				}
+				try {
+					state.PendingFontConfiguration = state.EditableFontConfiguration;
+				} catch (const std::bad_alloc &) {
+					state.FontControls.Message = "Could not allocate pending font configuration.";
+					state.LastDiagnostic = {
+						Status::LimitExceeded,
+						{},
+						"font inputs",
+						"Pending font configuration allocation was refused"
+					};
+					return;
+				}
+			}
+			if (!state.PendingFontConfiguration) return;
+			Diagnostic diagnostic;
+			const auto pendingBytes =
+				engine::imagegraphfont::GraphFontConfigurationRetainedBytes(*state.PendingFontConfiguration);
+			const auto editableBytes =
+				engine::imagegraphfont::GraphFontConfigurationRetainedBytes(state.EditableFontConfiguration);
+			const uint64_t ownerBytes = state.FontInputs->RetainedBytes();
+			const uint64_t maximum = engine::imagegraph::Limits::MaximumEvaluationBytes;
+			if (!pendingBytes || !editableBytes || ownerBytes > maximum ||
+				*editableBytes > maximum - ownerBytes ||
+				*pendingBytes > maximum - ownerBytes - *editableBytes) {
+				diagnostic = {
+					Status::LimitExceeded,
+					{},
+					"font inputs",
+					"Font owner, editor and pending copies exceed their byte budget"
+				};
+				state.FontControls.Message = diagnostic.Message;
+				state.LastDiagnostic = std::move(diagnostic);
+				state.PendingFontConfiguration.reset();
+				return;
+			}
+			if (!state.FontInputs->Replace(
+					*state.PendingFontConfiguration,
+					engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+					maximum - *editableBytes,
+					diagnostic
+				)) {
+				state.FontControls.Message = diagnostic.Message;
+				state.LastDiagnostic = std::move(diagnostic);
+				state.PendingFontConfiguration.reset();
+				return;
+			}
+			state.EditableFontConfiguration = std::move(*state.PendingFontConfiguration);
+			state.PendingFontConfiguration.reset();
+			state.FontInputsActive = true;
+			state.FontControls.Message.clear();
+			CancelExportIntent(state, renderer);
+			CancelComposerPreview(state, renderer);
+			state.FeedbackHost.Clear();
+			state.PreviewCache.Clear();
+			state.PxcxCompletedPreview.reset();
+			if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
+			RequestPreview(state, true);
+		}
+
 		ExportGrant &GrantFor(State &state, std::string_view nodeId) {
 			const auto found =
 				std::find_if(state.ExportGrants.begin(), state.ExportGrants.end(), [&](const auto &grant) {
@@ -643,6 +1084,59 @@ namespace studio {
 				const auto &batch = *intent.Current;
 				batch.Observation.Pcx.Bind(request);
 				detail::BindImageGraphRigid(request, rigid, batch.Observation.Playback);
+				std::unique_ptr<engine::imagegraphfont::GraphFontInputs> frozenFonts;
+				engine::imagegraph::SourceFontContext heldFontContext;
+				uint64_t evaluationAllowance = engine::imagegraph::Limits::MaximumEvaluationBytes;
+				if (batch.FontConfiguration) {
+					const auto frozenBytes =
+						engine::imagegraphfont::GraphFontConfigurationRetainedBytes(*batch.FontConfiguration);
+					if (!frozenBytes || *frozenBytes > evaluationAllowance) {
+						state.LastDiagnostic = {
+							Status::LimitExceeded,
+							target->NodeId,
+							"font inputs",
+							"Frozen font configuration exceeds its byte budget"
+						};
+						CancelExportIntent(state, composer->Renderer);
+						return;
+					}
+					evaluationAllowance -= *frozenBytes;
+					frozenFonts = std::make_unique<engine::imagegraphfont::GraphFontInputs>();
+					if (!frozenFonts->Replace(
+							*batch.FontConfiguration,
+							engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+							evaluationAllowance,
+							error
+						)) {
+						state.LastDiagnostic = std::move(error);
+						CancelExportIntent(state, composer->Renderer);
+						return;
+					}
+					if (!detail::BindImageGraphFontInputs(
+							*frozenFonts,
+							true,
+							batch.Observation.Playback.Playing,
+							heldFontContext,
+							request,
+							evaluationAllowance,
+							error
+						)) {
+						state.LastDiagnostic = std::move(error);
+						CancelExportIntent(state, composer->Renderer);
+						return;
+					}
+					if (*frozenBytes > UINT64_MAX - request.SourceFontHostResidentBytes) {
+						state.LastDiagnostic = {
+							Status::LimitExceeded,
+							target->NodeId,
+							"font inputs",
+							"Frozen font residency exceeds its byte limit"
+						};
+						CancelExportIntent(state, composer->Renderer);
+						return;
+					}
+					request.SourceFontHostResidentBytes += *frozenBytes;
+				}
 				if (!state.RangeExport && !intent.Preparation.Current && compiled == Status::Ok) {
 					std::vector<std::string> outputs;
 					bool feedback = false;
@@ -697,7 +1191,8 @@ namespace studio {
 				const auto frame =
 					state.RangeExport ? state.RangeExport->NextFrame() : intent.Preparation.Current;
 				if (frame) (void)engine::imagegraph::SetFrameTime(request, *frame);
-				// The matching generation above precedes every read of these caller-owned spans.
+				// The matching generation above precedes every read of these caller-owned
+				// spans.
 				request.AudioFrames = state.AudioFrames;
 				request.AudioClips = state.AudioClips;
 				if (batch.Operation == detail::ImageGraphExportIntent::Kind::HostNode)
@@ -750,7 +1245,7 @@ namespace studio {
 								 state.EvaluationInputRevision,
 								 request,
 								 error,
-								 engine::imagegraph::Limits::MaximumEvaluationBytes,
+								 evaluationAllowance,
 								 state.SelectedOutput,
 								 target->NodeId
 							 ))
@@ -758,7 +1253,13 @@ namespace studio {
 					else if (state.FeedbackHost.Active())
 						snapshot = &state.FeedbackHost.Snapshot();
 					else if (engine::imagegraph::EvaluateNodeInputs(
-								 state.Authored, plan, target->NodeId, request, directInputs, error
+								 state.Authored,
+								 plan,
+								 target->NodeId,
+								 request,
+								 directInputs,
+								 error,
+								 evaluationAllowance
 							 ) == Status::Ok)
 						snapshot = &directInputs;
 					else
@@ -857,16 +1358,28 @@ namespace studio {
 								engine::imagegraph::DocumentRetainedPayloadBytes(state.Authored);
 							const auto metadataBytes = intent.MetadataBytes();
 							const auto observationBytes = intent.Observations.RetainedPayloadBytes();
-							const std::array<uint64_t, 7> held{
+							const auto frozenConfigurationBytes =
+								batch.FontConfiguration
+									? engine::imagegraphfont::GraphFontConfigurationRetainedBytes(
+										  *batch.FontConfiguration
+									  )
+									: std::optional<uint64_t>{0};
+							const auto rangeMetadataBytes =
+								metadataBytes && frozenConfigurationBytes &&
+										*frozenConfigurationBytes <= *metadataBytes
+									? std::optional<uint64_t>{*metadataBytes - *frozenConfigurationBytes}
+									: std::optional<uint64_t>{};
+							const std::array<uint64_t, 8> held{
 								documentBytes.value_or(UINT64_MAX),
-								metadataBytes.value_or(UINT64_MAX),
+								rangeMetadataBytes.value_or(UINT64_MAX),
 								observationBytes.value_or(UINT64_MAX),
 								snapshot->RetainedBytes(),
 								state.Host.RetainedObservationBytes(),
 								state.Host.LuaReceipts.Bytes,
+								request.SourceFontHostResidentBytes,
 								engine::imagegraph::Limits::MaximumEvaluationBytes
 							};
-							const bool admitted = documentBytes && metadataBytes && observationBytes &&
+							const bool admitted = documentBytes && rangeMetadataBytes && observationBytes &&
 												  detail::ImageGraphExportIntent::AdmitRangePayload(
 													  held,
 													  engine::imagegraphexport::GraphExportSession::
@@ -952,8 +1465,6 @@ namespace studio {
 		) {
 			auto *composer = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer);
 			if (!composer) return false;
-			if (state.ExportIntent.Current) CancelExportIntent(state, composer->Renderer);
-			if (!automatic) CancelComposerPreview(state, composer->Renderer);
 			engine::imagegraph::EvaluationRequest request;
 			if (!recorded) BindObservations(state, request);
 			const auto observation = recorded ? *recorded
@@ -963,6 +1474,108 @@ namespace studio {
 													state.DocumentRevision,
 													state.EvaluationInputRevision
 												};
+			std::optional<engine::imagegraphfont::GraphFontConfiguration> frozenFontConfiguration;
+			if (state.FontInputsActive) {
+				const auto editableBytes = engine::imagegraphfont::GraphFontConfigurationRetainedBytes(
+					state.EditableFontConfiguration
+				);
+				const uint64_t ownerBytes = state.FontInputs->RetainedBytes();
+				if (!editableBytes || ownerBytes > engine::imagegraph::Limits::MaximumEvaluationBytes ||
+					*editableBytes > engine::imagegraph::Limits::MaximumEvaluationBytes - ownerBytes) {
+					state.LastDiagnostic = {
+						Status::LimitExceeded,
+						{},
+						"font inputs",
+						"Held Studio font configuration exceeds its byte budget"
+					};
+					return false;
+				}
+				const uint64_t heldFontBytes = ownerBytes + *editableBytes;
+				uint64_t frozenBudget = engine::imagegraph::Limits::MaximumEvaluationBytes - heldFontBytes;
+				const bool hasTextNodes = std::any_of(
+					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [](const auto &node) {
+						return node.Type == "pc.text";
+					}
+				);
+				const bool freezeTextFonts = observation.Playback.Playing && hasTextNodes;
+				if (freezeTextFonts) {
+					const auto frame = GetImageGraphFrame(observation.Playback);
+					if (state.PreviewDirty || state.PreviewRequested || !state.PxcxCompletedPreview ||
+						state.PxcxCompletedPreview->DocumentRevision != observation.Revision ||
+						state.PxcxCompletedPreview->InputRevision != observation.InputRevision ||
+						state.PxcxCompletedPreview->Frame != frame) {
+						state.LastDiagnostic = {
+							Status::InvalidValue,
+							{},
+							"font inputs",
+							"Text font seeds require a completed preview for the held export frame"
+						};
+						return false;
+					}
+					const auto preparedFrame =
+						state.FeedbackHost.PreparedFrame(observation.Revision, observation.InputRevision);
+					const auto *preparedData =
+						state.FeedbackHost.PreparedData(observation.Revision, observation.InputRevision);
+					if (!preparedFrame || preparedFrame->Tick != frame.Tick ||
+						preparedFrame->Subframe != frame.Subframe ||
+						preparedFrame->NegativeFrame != frame.NegativeFrame || !preparedData) {
+						state.LastDiagnostic = {
+							Status::InvalidValue,
+							{},
+							"font inputs",
+							"Matching prepared Text font replay is unavailable"
+						};
+						return false;
+					}
+					const uint64_t replayBytes = engine::imagegraph::RetainedDataReplayBytes(*preparedData);
+					if (*editableBytes > frozenBudget || replayBytes > frozenBudget - *editableBytes ||
+						engine::imagegraph::ValidateDataReplay(
+							*preparedData, frozenBudget - *editableBytes, state.LastDiagnostic
+						) != Status::Ok) {
+						if (state.LastDiagnostic.Code == Status::Ok)
+							state.LastDiagnostic = {
+								Status::LimitExceeded,
+								{},
+								"font inputs",
+								"Held replay and cloned font configuration exceed their byte budget"
+							};
+						return false;
+					}
+				}
+				if (*editableBytes > frozenBudget) {
+					state.LastDiagnostic = {
+						Status::LimitExceeded,
+						{},
+						"font inputs",
+						"Held and frozen Studio font configurations exceed their byte budget"
+					};
+					return false;
+				}
+				frozenFontConfiguration = state.EditableFontConfiguration;
+				if (freezeTextFonts) {
+					const auto frame = GetImageGraphFrame(observation.Playback);
+					if (!detail::FreezePreparedImageGraphInitialTextFonts(
+							state.Authored,
+							state.FeedbackHost,
+							observation.Revision,
+							observation.InputRevision,
+							frame,
+							*frozenFontConfiguration,
+							frozenBudget,
+							state.LastDiagnostic
+						))
+						return false;
+				}
+				if (!detail::ImageGraphFontConfigurationFitsBudget(
+						*frozenFontConfiguration,
+						heldFontBytes,
+						engine::imagegraph::Limits::MaximumEvaluationBytes,
+						state.LastDiagnostic
+					))
+					return false;
+			}
+			if (state.ExportIntent.Current) CancelExportIntent(state, composer->Renderer);
+			if (!automatic) CancelComposerPreview(state, composer->Renderer);
 			std::string failure;
 			if (!state.ExportIntent.Begin(
 					kind,
@@ -972,7 +1585,8 @@ namespace studio {
 					automatic,
 					failure,
 					detail::ImageGraphExportIntent::MaximumBytes,
-					event
+					event,
+					frozenFontConfiguration ? &*frozenFontConfiguration : nullptr
 				)) {
 				state.LastDiagnostic = {Status::LimitExceeded, {}, "export", std::move(failure)};
 				return false;
@@ -1389,7 +2003,8 @@ namespace studio {
 						Status::UnsupportedExecution,
 						nodeId,
 						{},
-						"PXCX has no projected image output; the original source archive remains available"
+						"PXCX has no projected image output; the "
+						"original source archive remains available"
 					};
 					return;
 				}
@@ -1458,7 +2073,7 @@ namespace studio {
 				};
 				return;
 			}
-			const uint64_t previewAllowance = maximumBytes - sequenceHeld - cacheHeld - keyHeld;
+			uint64_t previewAllowance = maximumBytes - sequenceHeld - cacheHeld - keyHeld;
 			detail::ImageGraphPreviewSequence::Key sequenceKey{
 				identity,
 				previewFrame,
@@ -1538,6 +2153,21 @@ namespace studio {
 				request.AudioFrames =
 					std::span<const engine::imagegraph::AudioCaptureFrame>(state.AudioFrames);
 				request.AudioClips = state.AudioClips;
+				engine::imagegraph::SourceFontContext heldFontContext;
+				if (state.FontInputsActive) {
+					if (!detail::BindImageGraphFontInputs(
+							*state.FontInputs,
+							true,
+							previewPlayback.Playing,
+							heldFontContext,
+							request,
+							engine::imagegraph::Limits::MaximumEvaluationBytes,
+							diagnostic
+						)) {
+						state.LastDiagnostic = std::move(diagnostic);
+						return;
+					}
+				}
 				if (!state.GroupHost.Prepare(
 						previewDocument, plan, state.DocumentRevision, request, diagnostic
 					)) {
@@ -1739,7 +2369,8 @@ namespace studio {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
-				BindObservations(state, request);
+				engine::imagegraph::SourceFontContext requestFontContext;
+				if (!BindObservations(state, request, &requestFontContext)) continue;
 				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
@@ -1835,7 +2466,8 @@ namespace studio {
 			if (accepted)
 				AuthoredDocumentChanged(state);
 			else if (state.GroupHost.Revision != state.DocumentRevision)
-				// A refused staged transaction must rebuild previews from the retained document.
+				// A refused staged transaction must rebuild previews from the retained
+				// document.
 				state.GroupHost.Clear();
 			return accepted;
 		}
@@ -2131,7 +2763,8 @@ namespace studio {
 			}
 			const engine::imagegraph::ProjectSettings &authored = *state.Authored.Project;
 			std::optional<engine::imagegraph::ProjectSettings> edited;
-			// Clone the palette only when a control edits it, not on every idle panel frame.
+			// Clone the palette only when a control edits it, not on every idle panel
+			// frame.
 			const auto draft = [&]() -> engine::imagegraph::ProjectSettings & {
 				if (!edited) edited = authored;
 				return *edited;
@@ -2682,7 +3315,8 @@ namespace studio {
 
 			const ImGuiID itemId = ImGui::GetID("##value");
 			BeginPropertyEdit(state, itemId);
-			// A combo selection finishes before the numeric field becomes the last ImGui item.
+			// A combo selection finishes before the numeric field becomes the last ImGui
+			// item.
 			if (changed && !state.HaveActiveEdit) {
 				state.EditBefore = state.Authored;
 				state.HaveActiveEdit = true;
@@ -2697,26 +3331,31 @@ namespace studio {
 					event.At.HostProvider = &HostFor(state);
 					event.At.AudioFrames = state.AudioFrames;
 					event.At.AudioClips = state.AudioClips;
-					BindObservations(state, event.At);
-					event.NodeId = std::string(nodeId);
-					event.EditedPort = property.Port;
-					event.LocalValue = &replacement;
-					event.LocalAnimated =
-						triggerButton || ImageGraphGroupHost::Mode(state.Authored, *node, property.Port) ==
-											 engine::imagegraph::GroupSubtypeAnimator::Animated;
-					event.SubtypeAnimator = ImageGraphGroupHost::Mode(state.Authored, *node, "subtype");
-					event.Reason = property.Port == "parent_value"
-									   ? engine::imagegraph::GroupRefreshReason::ParentEdit
-									   : engine::imagegraph::GroupRefreshReason::Edit;
-					(void)engine::imagegraph::SetFrameTime(event.At, GetImageGraphFrame(state.Playback));
-					changed = state.GroupHost.Edit(
-						state.Authored,
-						state.History,
-						state.DocumentRevision,
-						event,
-						state.LastDiagnostic,
-						false
-					);
+					engine::imagegraph::SourceFontContext eventAtFontContext;
+					if (!BindObservations(state, event.At, &eventAtFontContext)) {
+						changed = false;
+					} else {
+						event.NodeId = std::string(nodeId);
+						event.EditedPort = property.Port;
+						event.LocalValue = &replacement;
+						event.LocalAnimated =
+							triggerButton ||
+							ImageGraphGroupHost::Mode(state.Authored, *node, property.Port) ==
+								engine::imagegraph::GroupSubtypeAnimator::Animated;
+						event.SubtypeAnimator = ImageGraphGroupHost::Mode(state.Authored, *node, "subtype");
+						event.Reason = property.Port == "parent_value"
+										   ? engine::imagegraph::GroupRefreshReason::ParentEdit
+										   : engine::imagegraph::GroupRefreshReason::Edit;
+						(void)engine::imagegraph::SetFrameTime(event.At, GetImageGraphFrame(state.Playback));
+						changed = state.GroupHost.Edit(
+							state.Authored,
+							state.History,
+							state.DocumentRevision,
+							event,
+							state.LastDiagnostic,
+							false
+						);
+					}
 				} else {
 					changed = SetImageGraphValue(
 						state.Authored, nodeId, property.Port, std::move(replacement), state.LastDiagnostic
@@ -3003,6 +3642,71 @@ namespace studio {
 						DrawReadOnlyValue(state, field, depth + 1, remaining);
 						ImGui::PopID();
 					}
+			} else if (const auto *font = std::get_if<engine::imagegraph::FontValue>(&value)) {
+				if (!font->Data) {
+					ImGui::TextUnformatted("Font: empty");
+				} else {
+					const auto &data = *font->Data;
+					ImGui::Text(
+						"Font %s  %zu glyphs  %zu frames",
+						data.Identity.c_str(),
+						data.Glyphs.size(),
+						data.Frames.size()
+					);
+					ImGui::Text(
+						"Line height %.9g  missing advance %.9g  space advance %.9g",
+						data.LineHeight,
+						data.MissingAdvance,
+						data.SpaceAdvance
+					);
+					for (size_t frame = 0; frame < data.Frames.size() && remaining; ++frame) {
+						--remaining;
+						const auto &image = data.Frames[frame];
+						ImGui::Text(
+							"Frame %zu  %u x %u  %s  %zu bytes  hash %016llx",
+							frame,
+							image.Width,
+							image.Height,
+							engine::imagegraph::DescribeSurfaceFormat(image.Format)->Name.data(),
+							image.Pixels.size(),
+							static_cast<unsigned long long>(image.Hash)
+						);
+					}
+					if (data.SourceTexture && remaining) {
+						--remaining;
+						ImGui::Text(
+							"Source texture  %u x %u  %zu bytes",
+							data.SourceTexture->Width,
+							data.SourceTexture->Height,
+							data.SourceTexture->Pixels.size()
+						);
+					}
+					for (const auto &measurement : data.Measurements) {
+						if (!remaining) break;
+						--remaining;
+						ImGui::Text(
+							"Text %s  %g x %g  line width %g  gap %g",
+							measurement.Text.c_str(),
+							measurement.Width,
+							measurement.Height,
+							measurement.MaximumLineWidth,
+							measurement.LineGap
+						);
+					}
+					for (const auto &glyph : data.Glyphs) {
+						if (!remaining) break;
+						--remaining;
+						ImGui::Text(
+							"U+%04X  %s  advance %g  %g x %g  frame %s",
+							glyph.Character,
+							glyph.Present ? "present" : "missing",
+							glyph.Advance,
+							glyph.Width,
+							glyph.Height,
+							glyph.Frame ? std::to_string(*glyph.Frame).c_str() : "none"
+						);
+					}
+				}
 			} else if (const auto *path = std::get_if<engine::imagegraph::PathValue3D>(&value)) {
 				ImGui::Text("Path3D: %zu anchors", path->Data ? path->Data->Anchors.size() : 0);
 			} else if (const auto *box = std::get_if<engine::imagegraph::PixelBoxValue>(&value)) {
@@ -3017,6 +3721,7 @@ namespace studio {
 			} else if (std::holds_alternative<engine::imagegraph::AudioBit>(value) ||
 					   std::holds_alternative<engine::imagegraph::MeshValue3D>(value) ||
 					   std::holds_alternative<engine::imagegraph::MeshValue2D>(value) ||
+					   std::holds_alternative<engine::imagegraph::FontValue>(value) ||
 					   std::holds_alternative<engine::imagegraph::SceneValue3D>(value) ||
 					   std::holds_alternative<engine::imagegraph::MaterialValue3D>(value) ||
 					   std::holds_alternative<engine::imagegraph::LightValue3D>(value)) {
@@ -3207,7 +3912,11 @@ namespace studio {
 					event.At.HostProvider = &HostFor(state);
 					event.At.AudioFrames = state.AudioFrames;
 					event.At.AudioClips = state.AudioClips;
-					BindObservations(state, event.At);
+					engine::imagegraph::SourceFontContext eventAtFontContext;
+					if (!BindObservations(state, event.At, &eventAtFontContext)) {
+						ImGui::PopID();
+						return;
+					}
 					(void)engine::imagegraph::SetFrameTime(event.At, GetImageGraphFrame(state.Playback));
 					if (state.GroupHost.Edit(
 							state.Authored, state.History, state.DocumentRevision, event, state.LastDiagnostic
@@ -3236,14 +3945,14 @@ namespace studio {
 					request.HostProvider = &HostFor(state);
 					request.AudioFrames = state.AudioFrames;
 					request.AudioClips = state.AudioClips;
-					BindObservations(state, request);
+					engine::imagegraph::SourceFontContext requestFontContext;
+					bool ready = BindObservations(state, request, &requestFontContext);
 					detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 					engine::imagegraph::EvaluationSnapshot directInputs;
 					const engine::imagegraph::EvaluationSnapshot *preparedInputs = nullptr;
-					bool ready = true;
 					std::optional<detail::ImageGraphComposerSynchronousScope> synchronous;
-					if (node.Type == "pc.hlsl" && detail::HlslRefreshControl(input.Id)) {
+					if (ready && node.Type == "pc.hlsl" && detail::HlslRefreshControl(input.Id)) {
 						CancelComposerPreview(state);
 						synchronous.emplace(state.Host.Composer);
 						const uint64_t revision = state.DocumentRevision;
@@ -3793,7 +4502,8 @@ namespace studio {
 						engine::imagegraphphysics::RigidProvider requestRigidProvider;
 						engine::imagegraph::EvaluationRequest request;
 						request.HostProvider = &HostFor(state);
-						BindObservations(state, request);
+						engine::imagegraph::SourceFontContext requestFontContext;
+						if (!BindObservations(state, request, &requestFontContext)) return nullptr;
 						detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 						(void)SetFrameTime(request, GetImageGraphFrame(state.Playback));
 						request.AudioFrames = state.AudioFrames;
@@ -3877,7 +4587,8 @@ namespace studio {
 					engine::imagegraphphysics::RigidProvider requestRigidProvider;
 					engine::imagegraph::EvaluationRequest request;
 					request.HostProvider = &HostFor(state);
-					BindObservations(state, request);
+					engine::imagegraph::SourceFontContext requestFontContext;
+					if (!BindObservations(state, request, &requestFontContext)) return nullptr;
 					detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 					(void)SetFrameTime(request, GetImageGraphFrame(state.Playback));
 					request.AudioFrames = state.AudioFrames;
@@ -3980,7 +4691,8 @@ namespace studio {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
-				BindObservations(state, request);
+				engine::imagegraph::SourceFontContext requestFontContext;
+				if (!BindObservations(state, request, &requestFontContext)) return;
 				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
@@ -4019,31 +4731,36 @@ namespace studio {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
-				BindObservations(state, request);
-				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
-				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
-				request.AudioFrames = state.AudioFrames;
-				request.AudioClips = state.AudioClips;
-				request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				engine::imagegraph::SourceFontContext requestFontContext;
 				engine::imagegraph::Diagnostic error;
-				if (state.AudioWindow.Update(
-						state.Authored,
-						nodeId,
-						request,
-						state.DocumentRevision,
-						state.EvaluationInputRevision,
-						error
-					))
-					state.AudioWindow.Draw();
-				else
-					ImGui::TextWrapped("%s", error.Message.c_str());
+				if (!BindObservations(state, request, &requestFontContext)) {
+					ImGui::TextWrapped("%s", state.LastDiagnostic.Message.c_str());
+				} else {
+					detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
+					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+					request.AudioFrames = state.AudioFrames;
+					request.AudioClips = state.AudioClips;
+					request.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+					if (state.AudioWindow.Update(
+							state.Authored,
+							nodeId,
+							request,
+							state.DocumentRevision,
+							state.EvaluationInputRevision,
+							error
+						))
+						state.AudioWindow.Draw();
+					else
+						ImGui::TextWrapped("%s", error.Message.c_str());
+				}
 			}
 			if (node->Type == "pc.wav_file_read") {
 				if (ImGui::Button("Sync length")) {
 					engine::imagegraphphysics::RigidProvider requestRigidProvider;
 					engine::imagegraph::EvaluationRequest request;
 					request.HostProvider = &HostFor(state);
-					BindObservations(state, request);
+					engine::imagegraph::SourceFontContext requestFontContext;
+					if (!BindObservations(state, request, &requestFontContext)) return;
 					detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 					(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 					request.AudioFrames = state.AudioFrames;
@@ -4077,31 +4794,43 @@ namespace studio {
 				engine::imagegraphphysics::RigidProvider waveformRequestRigidProvider;
 				engine::imagegraph::EvaluationRequest waveformRequest;
 				waveformRequest.HostProvider = &HostFor(state);
-				BindObservations(state, waveformRequest);
-				detail::BindImageGraphRigid(waveformRequest, waveformRequestRigidProvider, state.Playback);
-				(void)engine::imagegraph::SetFrameTime(waveformRequest, GetImageGraphFrame(state.Playback));
-				waveformRequest.AudioClips = state.AudioClips;
-				waveformRequest.AudioFrames = state.AudioFrames;
-				waveformRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				engine::imagegraph::SourceFontContext waveformRequestFontContext;
 				engine::imagegraph::Diagnostic waveformError;
-				if (state.WavTimeline.Update(
-						state.Authored,
-						nodeId,
-						waveformRequest,
-						state.Playback.FramesPerSecond,
-						state.DocumentRevision,
-						state.EvaluationInputRevision,
-						waveformError
-					))
-					state.WavTimeline.Draw();
-				else
-					ImGui::TextWrapped("%s", waveformError.Message.c_str());
+				if (!BindObservations(state, waveformRequest, &waveformRequestFontContext)) {
+					ImGui::TextWrapped("%s", state.LastDiagnostic.Message.c_str());
+				} else {
+					detail::BindImageGraphRigid(
+						waveformRequest, waveformRequestRigidProvider, state.Playback
+					);
+					(void)engine::imagegraph::SetFrameTime(
+						waveformRequest, GetImageGraphFrame(state.Playback)
+					);
+					waveformRequest.AudioClips = state.AudioClips;
+					waveformRequest.AudioFrames = state.AudioFrames;
+					waveformRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+					if (state.WavTimeline.Update(
+							state.Authored,
+							nodeId,
+							waveformRequest,
+							state.Playback.FramesPerSecond,
+							state.DocumentRevision,
+							state.EvaluationInputRevision,
+							waveformError
+						))
+						state.WavTimeline.Draw();
+					else
+						ImGui::TextWrapped("%s", waveformError.Message.c_str());
+				}
 			}
 			if (node->Type == "pc.wav_file_write") {
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
 				request.HostProvider = &HostFor(state);
-				BindObservations(state, request);
+				engine::imagegraph::SourceFontContext requestFontContext;
+				if (!BindObservations(state, request, &requestFontContext)) {
+					ImGui::TextWrapped("%s", state.LastDiagnostic.Message.c_str());
+					return;
+				}
 				detail::BindImageGraphRigid(request, requestRigidProvider, state.Playback);
 				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 				request.AudioFrames = state.AudioFrames;
@@ -4873,7 +5602,8 @@ namespace studio {
 				}
 				ImGui::EndCombo();
 			}
-			// Curve data is copied only while its controls are open, never for an idle timeline row.
+			// Curve data is copied only while its controls are open, never for an idle
+			// timeline row.
 			auto driver = state.Authored.Keyframes[index].SourceDriver;
 			if (driver) {
 				const bool changed = std::visit(
@@ -5219,12 +5949,14 @@ namespace studio {
 			);
 			if (hasLegacyCubic) {
 				ImGui::TextDisabled(
-					"Legacy cubic keys are retained and report UnsupportedExecution. Choose source for "
+					"Legacy cubic keys are retained and report "
+					"UnsupportedExecution. Choose source for "
 					"editable handles."
 				);
 			} else {
 				ImGui::TextDisabled(
-					"Source easing supports linear, Bezier and cut sides with incoming and outgoing handles."
+					"Source easing supports linear, Bezier and cut sides "
+					"with incoming and outgoing handles."
 				);
 			}
 			state.Dopesheet.Draw(
@@ -5441,7 +6173,8 @@ namespace studio {
 			if (!state.AudioCaptureMessage.empty())
 				ImGui::TextWrapped("Audio input: %s", state.AudioCaptureMessage.c_str());
 			ImGui::TextDisabled(
-				"Audio source selects one exact source ID and tick. Live devices are not read by the "
+				"Audio source selects one exact source ID and tick. Live "
+				"devices are not read by the "
 				"evaluator."
 			);
 			ImGui::Separator();
@@ -5494,7 +6227,8 @@ namespace studio {
 					}
 				));
 				ImGui::Text(
-					"Native mappings: %zu  opaque nodes: %zu. Opaque nodes are preserved and cannot execute.",
+					"Native mappings: %zu  opaque nodes: %zu. Opaque nodes are "
+					"preserved and cannot execute.",
 					nativeCount,
 					state.Authored.Nodes.size() - nativeCount
 				);
@@ -5518,7 +6252,10 @@ namespace studio {
 			ImGui::SameLine();
 			if (ImGui::Button("Save .graph")) SaveNativeGraph(state);
 			if (!state.GraphIoMessage.empty()) ImGui::TextWrapped("Graph: %s", state.GraphIoMessage.c_str());
-			ImGui::TextDisabled("Files use Assets/imagegraphs/<name>.graph. PXCX bytes remain unchanged.");
+			ImGui::TextDisabled(
+				"Files use Assets/imagegraphs/<name>.graph. PXCX bytes "
+				"remain unchanged."
+			);
 			ImGui::Separator();
 			ImGui::TextUnformatted("Output sinks");
 			const std::vector<ImageComposerSinkRow> rows =
@@ -5541,7 +6278,8 @@ namespace studio {
 			}
 			ImGui::Separator();
 			ImGui::TextDisabled(
-				"Preview uses the selected output. Scene texture bindings are set on the selected entity."
+				"Preview uses the selected output. Scene texture "
+				"bindings are set on the selected entity."
 			);
 		}
 
@@ -5795,7 +6533,7 @@ namespace studio {
 			);
 		}
 
-	}
+	} // namespace
 
 	void CloseImageComposerVector2Preview(engine::render::Renderer &renderer) {
 		Composer().VectorControls.Close(renderer);
@@ -5894,28 +6632,32 @@ namespace studio {
 			engine::imagegraphphysics::RigidProvider checkerRigidProvider;
 			engine::imagegraph::EvaluationRequest checkerRequest;
 			checkerRequest.HostProvider = &HostFor(state);
-			BindObservations(state, checkerRequest);
-			detail::BindImageGraphRigid(checkerRequest, checkerRigidProvider, state.Playback);
-			(void)SetFrameTime(checkerRequest, GetImageGraphFrame(state.Playback));
-			checkerRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
-			size_t reloaded = 0;
-			Diagnostic diagnostic;
-			const bool checked = state.WavAudio.CheckFiles(
-				state.Authored,
-				checkerRequest,
-				state.WavCheckerHostFrame++,
-				state.AudioClips,
-				state.PreviewCache,
-				reloaded,
-				diagnostic
-			);
-			if (reloaded) {
-				CancelComposerPreview(state, renderer);
-				state.WavSourceMessage.clear();
-				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
-				RequestPreview(state, true);
+			engine::imagegraph::SourceFontContext checkerRequestFontContext;
+			if (!BindObservations(state, checkerRequest, &checkerRequestFontContext)) {
+				state.WavSourceMessage = state.LastDiagnostic.Message;
+			} else {
+				detail::BindImageGraphRigid(checkerRequest, checkerRigidProvider, state.Playback);
+				(void)SetFrameTime(checkerRequest, GetImageGraphFrame(state.Playback));
+				checkerRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+				size_t reloaded = 0;
+				Diagnostic diagnostic;
+				const bool checked = state.WavAudio.CheckFiles(
+					state.Authored,
+					checkerRequest,
+					state.WavCheckerHostFrame++,
+					state.AudioClips,
+					state.PreviewCache,
+					reloaded,
+					diagnostic
+				);
+				if (reloaded) {
+					CancelComposerPreview(state, renderer);
+					state.WavSourceMessage.clear();
+					if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
+					RequestPreview(state, true);
+				}
+				if (!checked) state.WavSourceMessage = diagnostic.Message;
 			}
-			if (!checked) state.WavSourceMessage = diagnostic.Message;
 		}
 		PumpRetiredTexture(state, renderer);
 		state.VectorControls.PumpRetired(renderer);
@@ -5972,7 +6714,11 @@ namespace studio {
 		engine::imagegraphphysics::RigidProvider vectorRequestRigidProvider;
 		engine::imagegraph::EvaluationRequest vectorRequest;
 		vectorRequest.HostProvider = &HostFor(state);
-		BindObservations(state, vectorRequest);
+		engine::imagegraph::SourceFontContext vectorRequestFontContext;
+		if (!BindObservations(state, vectorRequest, &vectorRequestFontContext)) {
+			ImGui::TextWrapped("%s", state.LastDiagnostic.Message.c_str());
+			return;
+		}
 		detail::BindImageGraphRigid(vectorRequest, vectorRequestRigidProvider, state.Playback);
 		(void)engine::imagegraph::SetFrameTime(vectorRequest, GetImageGraphFrame(state.Playback));
 		vectorRequest.AudioFrames = state.AudioFrames;
@@ -6024,6 +6770,10 @@ namespace studio {
 					DrawAssetsAndSinks(state, renderer);
 					ImGui::EndTabItem();
 				}
+				if (ImGui::BeginTabItem("Font inputs")) {
+					DrawFontInputs(state);
+					ImGui::EndTabItem();
+				}
 				if (ImGui::BeginTabItem("Timeline")) {
 					DrawTimeline(state);
 					ImGui::EndTabItem();
@@ -6037,6 +6787,7 @@ namespace studio {
 			}
 		}
 		ImGui::EndChild();
+		ApplyPendingFontInputs(state, renderer);
 		detail::ApplyImageGraphHistoryKey([&](bool redo) { ApplyHistory(state, redo); });
 		RefreshPreview(state, renderer);
 		state.ComposerExports.Invalidate(state.DocumentRevision, state.EvaluationInputRevision);
@@ -6101,4 +6852,4 @@ namespace studio {
 		}
 		ImGui::PopStyleColor(2);
 	}
-}
+} // namespace studio

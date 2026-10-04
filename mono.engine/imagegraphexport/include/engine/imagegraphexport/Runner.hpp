@@ -17,6 +17,10 @@ namespace engine::imagegraph {
 	struct EvaluationRequest;
 }
 
+namespace engine::imagegraphfont {
+	class GraphFontInputs;
+}
+
 namespace engine::imagegraphexport::runner {
 
 	// Parses, compiles and exports one selected output with explicit timeline inputs.
@@ -40,6 +44,17 @@ namespace engine::imagegraphexport::runner {
 		std::span<const engine::imagegraph::RequestImageSource> imageSources,
 		std::span<const engine::imagegraph::HostNodeCapture> captures,
 		engine::imagegraph::HostNodeProvider *provider
+	);
+	// Adds one explicitly owned font namespace, recording set and exact read capability.
+	int RunWithHostInputs(
+		int argc,
+		char **argv,
+		std::ostream &output,
+		std::ostream &errors,
+		std::span<const engine::imagegraph::RequestImageSource> imageSources,
+		std::span<const engine::imagegraph::HostNodeCapture> captures,
+		engine::imagegraph::HostNodeProvider *provider,
+		imagegraphfont::GraphFontInputs &fontInputs
 	);
 
 	// Executes an immutable in-memory document and plan without reading the --input context path.

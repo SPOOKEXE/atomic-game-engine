@@ -34,7 +34,9 @@
 
 namespace engine::imagegraph::detail {
 	struct SourcePathShiftMemo;
+	struct FontTextBatch;
 	struct HostCaptureReceiptSink;
+	struct SourceFontReceiptSink;
 	// Evaluation attributes borrow the palette; authored guide storage stays in the document.
 	struct EvaluationProjectSettings {
 		inline static constexpr Colour DefaultPalette[]{{255, 255, 255, 255}, {0, 0, 0, 255}};
@@ -99,6 +101,8 @@ namespace engine::imagegraph::detail {
 		std::vector<PcxMessage> PcxControlMessages;
 		HostCaptureReceiptSink *HostReceipts = nullptr;
 		std::span<const HostNodeCapture> ObservedHostCaptures;
+		SourceFontReceiptSink *FontReceipts = nullptr;
+		std::span<const SourceFontObservation> ObservedFonts;
 		// Borrowed nearest inline owner's fully resolved inputs, retained by the evaluation.
 		std::span<const std::string_view> SimulationColliderIds;
 		std::string_view InlineOwnerId;
@@ -154,6 +158,7 @@ namespace engine::imagegraph::detail {
 		const RandomReplayState *CurrentRandom = nullptr;
 		const DataReplayState *CurrentData = nullptr;
 		SourcePathShiftMemo *PathShiftMemo = nullptr;
+		FontTextBatch *TextBatch = nullptr;
 		AllocationReservation PathMemoInputsCharge;
 		std::vector<std::pair<std::string_view, Value>> PathMemoInputValues;
 		// One bounded transaction journal is shared by every actor and processor row.

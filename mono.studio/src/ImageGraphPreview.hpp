@@ -11,7 +11,8 @@ namespace studio::detail {
 	inline bool ImageGraphValuePreviewSupported(engine::imagegraph::ValueType type) {
 		using engine::imagegraph::ValueType;
 		return engine::imagegraph::IsAuthoredValueType(type) || type == ValueType::Any ||
-			   type == ValueType::Struct || type == ValueType::Path3D || type == ValueType::PixelBox;
+			   type == ValueType::Struct || type == ValueType::Path3D || type == ValueType::PixelBox ||
+			   type == ValueType::Font;
 	}
 	// Builds the bounded RGBA8 display payload without changing the cached source
 	// image.

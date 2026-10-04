@@ -8,6 +8,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/imagegraph/PendingHostObservations.hpp>
 #include <engine/imagegraphexport/GraphExportSession.hpp>
+#include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphio/SourceArtworkEdit.hpp>
 
 namespace studio::detail {
@@ -27,6 +28,7 @@ namespace studio::detail {
 			Kind Operation = Kind::Authored;
 			engine::core::Name Owner;
 			ImageGraphComposerExports::Observation Observation;
+			std::optional<engine::imagegraphfont::GraphFontConfiguration> FontConfiguration;
 			std::vector<Target> Targets;
 			size_t Cursor = 0;
 			bool Automatic = false;
@@ -39,7 +41,8 @@ namespace studio::detail {
 		bool Pending = false;
 		static constexpr uint64_t MaximumBytes = 2 * 1024 * 1024;
 		// One range reserves owned collection payload separately from compiler,
-		// encoder and device workspace. The existing replay owner keeps its own reservation.
+		// encoder and device workspace. The existing replay owner keeps its own
+		// reservation.
 		static constexpr uint64_t MaximumRangePayloadBytes = 512ULL * 1024 * 1024;
 		static bool AdmitRangePayload(
 			std::span<const uint64_t> held,
@@ -81,6 +84,13 @@ namespace studio::detail {
 					  &target.VideoEncoder,
 					  &target.ProjectPath})
 					if (!add(field->capacity()) || !add(1)) return {};
+			if (batch.FontConfiguration) {
+				const auto fontBytes =
+					engine::imagegraphfont::GraphFontConfigurationRetainedBytes(*batch.FontConfiguration);
+				if (!fontBytes || *fontBytes < sizeof(*batch.FontConfiguration) ||
+					!add(*fontBytes - sizeof(*batch.FontConfiguration)))
+					return {};
+			}
 			return bytes;
 		}
 		std::optional<uint64_t> MetadataBytes(uint64_t limit = MaximumBytes) const {
@@ -103,7 +113,8 @@ namespace studio::detail {
 			bool automatic,
 			std::string &failure,
 			uint64_t maximumBytes = MaximumBytes,
-			ImageGraphExportEvent event = ImageGraphExportEvent::Update
+			ImageGraphExportEvent event = ImageGraphExportEvent::Update,
+			const engine::imagegraphfont::GraphFontConfiguration *fontConfiguration = nullptr
 		) try {
 			if (Current || !owner.IsValid() || targets.empty() || targets.size() > 64 ||
 				!engine::imagegraph::ValidFrameTime(GetImageGraphFrame(observation.Playback))) {
@@ -129,6 +140,15 @@ namespace studio::detail {
 				failure = "Export intent exceeds its byte budget";
 				return false;
 			}
+			const auto fontBytes =
+				fontConfiguration
+					? engine::imagegraphfont::GraphFontConfigurationRetainedBytes(*fontConfiguration)
+					: std::optional<uint64_t>{};
+			if (fontConfiguration && (!fontBytes || *fontBytes < sizeof(*fontConfiguration) ||
+									  !add(*fontBytes - sizeof(*fontConfiguration)))) {
+				failure = "Frozen font inputs exceed the export intent byte budget";
+				return false;
+			}
 			for (const auto &target : targets) {
 				if (target.NodeId.empty() || target.NodeId.size() > 255) {
 					failure = "Export target needs a bounded node identity";
@@ -149,7 +169,13 @@ namespace studio::detail {
 				failure = "Export intent clone exceeds its byte budget";
 				return false;
 			}
-			Batch candidate{operation, owner, observation, {}, 0, automatic, event};
+			Batch candidate;
+			candidate.Operation = operation;
+			candidate.Owner = owner;
+			candidate.Observation = observation;
+			candidate.Automatic = automatic;
+			candidate.Event = event;
+			if (fontConfiguration) candidate.FontConfiguration = *fontConfiguration;
 			candidate.Targets.reserve(targets.size());
 			candidate.Targets.assign(targets.begin(), targets.end());
 			const auto cloned = Bytes(candidate, maximumBytes);
@@ -268,4 +294,4 @@ namespace studio::detail {
 			return Host.Capture(bounded, output, failure);
 		}
 	};
-}
+} // namespace studio::detail

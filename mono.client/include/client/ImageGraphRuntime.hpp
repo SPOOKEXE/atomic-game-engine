@@ -9,6 +9,7 @@
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/PendingHostObservations.hpp>
 #include <engine/imagegraph/SourceArgumentHost.hpp>
+#include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/render/ImageGraphTransform3D.hpp>
 #include <engine/render/LiveImagePublisher.hpp>
 #include <engine/render/SourceSkyboxGroup.hpp>
@@ -61,7 +62,9 @@ namespace client {
 		engine::core::Name output,
 		uint64_t tick,
 		uint64_t seed = 0,
-		engine::imagegraph::SourceArgumentHost *arguments = nullptr
+		engine::imagegraph::SourceArgumentHost *arguments = nullptr,
+		const engine::imagegraphfont::GraphFontInputs *fonts = nullptr,
+		const engine::imagegraph::EvaluationRequest *fontInputs = nullptr
 	);
 
 	// Evaluates one authored graph through the renderer-owned synchronous export
@@ -74,7 +77,9 @@ namespace client {
 		engine::render::Renderer &renderer,
 		uint64_t tick,
 		uint64_t seed = 0,
-		engine::imagegraph::SourceArgumentHost *arguments = nullptr
+		engine::imagegraph::SourceArgumentHost *arguments = nullptr,
+		const engine::imagegraphfont::GraphFontInputs *fonts = nullptr,
+		const engine::imagegraph::EvaluationRequest *fontInputs = nullptr
 	);
 
 	// Owns live publication generations for one client presentation loop.
@@ -94,6 +99,18 @@ namespace client {
 		);
 		uint64_t ArgumentGeneration() const {
 			return ArgumentsGeneration;
+		}
+
+		// Retires font-derived cache entries only after an owned configuration replacement succeeds.
+		engine::imagegraph::Status PrepareFonts(
+			const engine::imagegraphfont::GraphFontConfiguration &,
+			const engine::assets::ContentPolicy &,
+			engine::render::Renderer &,
+			engine::imagegraph::Diagnostic &,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		);
+		uint64_t FontGeneration() const {
+			return Fonts.Revision();
 		}
 
 		// Starts a presentation budget shared by every world's binding scan.
@@ -146,6 +163,7 @@ namespace client {
 
 	  private:
 		engine::imagegraph::SourceArgumentHost Arguments;
+		engine::imagegraphfont::GraphFontInputs Fonts;
 		uint64_t ArgumentsGeneration = 1;
 		struct Entry {
 			engine::imagegraph::CapturedFeedbackHost Feedback;

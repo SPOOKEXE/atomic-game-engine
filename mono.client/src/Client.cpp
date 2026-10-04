@@ -311,6 +311,18 @@ namespace client {
 		return LiveImageGraphs.PrepareArguments(options, Renderer, diagnostic);
 	}
 
+	engine::imagegraph::Status Client::PrepareImageGraphFonts(
+		const engine::imagegraphfont::GraphFontConfiguration &configuration,
+		engine::imagegraph::Diagnostic &diagnostic
+	) {
+		return LiveImageGraphs.PrepareFonts(
+			configuration,
+			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+			Renderer,
+			diagnostic
+		);
+	}
+
 	bool Client::Initialise(const Options &options) {
 		Settings = options;
 		SubmittedMoveTick = 0;

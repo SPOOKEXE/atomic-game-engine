@@ -1912,6 +1912,24 @@ namespace engine::imagegraphio {
 				}
 				quaternionMode = mode;
 			}
+			if (entry.Type == "pc.text" && input.Id == "color_by_letter") {
+				const auto attributes = record.find("attri");
+				if (attributes != record.end() && !attributes->is_object()) {
+					reason = "Text palette attributes must be an object";
+					return false;
+				}
+				if (const Json *selection = Attribute(record, "array_select")) {
+					int64_t mode = 0;
+					const auto *selector = imagegraph::FindCatalogueInput(entry, "color_by_letter_select");
+					if (!selector || selector->SourceKind != "SourceArraySelect" || input.SourceIndex != 31 ||
+						input.SourceKind != "Palette" || !WholeNumber(*selection, mode) || mode < 0 ||
+						mode > 2) {
+						reason = "Text palette array_select must be Loop, Ping-pong or Random";
+						return false;
+					}
+					if (!appendValue("color_by_letter_select", imagegraph::EnumValue{mode})) return false;
+				}
+			}
 			if (entry.Type == "pc.export" && input.Id == "framerate") {
 				int64_t mode = 1;
 				if (const auto *unit = Attribute(record, "unit");

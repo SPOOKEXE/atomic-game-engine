@@ -2,6 +2,7 @@
 mono_add_library(imagegraphexport
     TIER shared
     DEPS
+        Engine::imagegraphfont
         Engine::core
         Engine::assets
         Engine::imagegraph

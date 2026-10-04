@@ -1,6 +1,7 @@
 #include "TimelineOverrides.hpp"
 
 #include "EvaluationAllocator.hpp"
+#include "NativeSamplerBindings.hpp"
 #include "PuppetControl.hpp"
 #include "SourceAnimatorIdentity.hpp"
 #include "SourceArgumentTransport.hpp"
@@ -308,6 +309,8 @@ namespace engine::imagegraph::detail {
 						node.SourceProperties.size() * sizeof(AuthoredValue)
 					))
 					goto clone_refused;
+				const auto samplers = NativeSamplerBindingsPayloadBytes(node, false);
+				if (!samplers || !add(*samplers)) goto clone_refused;
 				const auto axes = SeparatedVec2Bytes(node, false);
 				if (!axes || !add(*axes)) goto clone_refused;
 				for (const auto &port : node.InstanceOverrides)
@@ -382,6 +385,7 @@ namespace engine::imagegraph::detail {
 			copy.SourceInternalName = original.SourceInternalName;
 			copy.SourceInputExpressions = original.SourceInputExpressions;
 			copy.SourceProperties = original.SourceProperties;
+			copy.NativeSamplerBindings = original.NativeSamplerBindings;
 			copy.Values.reserve(original.Values.size() + fresh);
 			copy.DynamicInputs.reserve(original.DynamicInputs.size());
 			for (const auto &value : original.Values)

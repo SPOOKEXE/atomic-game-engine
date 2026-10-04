@@ -1,6 +1,7 @@
 #include "NodeExecutors.hpp"
 
 #include "GroupBoundary.hpp"
+#include "SourceFontTransport.hpp"
 #include "nodes/Families.hpp"
 
 #include <unordered_map>
@@ -38,6 +39,9 @@ namespace engine::imagegraph::detail {
 					  SourceAmbientOcclusionExecutors(),
 					  SourceSimpleShapeExecutors(),
 					  SourceTextExecutors(),
+					  SourceFontDataExecutors(),
+					  SourceFontTextExecutors(),
+					  SourceBitmapFontExecutors(),
 					  SourcePcxExecutors(),
 					  SceneExecutors(),
 					  SourceSdfExecutors(),
@@ -103,6 +107,7 @@ namespace engine::imagegraph::detail {
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
 				if (type == "pc.argument" && port == "default_value") return true;
 				if ((type == "pc.path_sample" || type == "pc.path_smoothen") && port == "path") return true;
+				if (SourceFontInput(type, port)) return true;
 				if ((type == "pc.surface_to_buffer" && port == "surface") ||
 					(type == "pc.surface_from_buffer" && port == "input_0"))
 					return true;
@@ -119,8 +124,7 @@ namespace engine::imagegraph::detail {
 					(port == "dimension" || port == "view_angle" || port == "position" ||
 					 port == "height_range" || port == "depth_range"))
 					return true;
-				if (type == "pc.path_shape_3_d" && (port == "position" || port == "half_size"))
-					return true;
+				if (type == "pc.path_shape_3_d" && (port == "position" || port == "half_size")) return true;
 				if (type == "pc.cache_results" && port == "surface_in") return true;
 				if (type == "pc.switch" || type == "pc.threshold_switch") {
 					if (port == "default_value" || port == "index") return true;

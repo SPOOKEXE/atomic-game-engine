@@ -37,6 +37,7 @@ function __NodeValue_Number(_name, _node, _type, _value) : NodeValue(_name, _nod
             "scripts/node_value/node_value.gml": """
 function NodeValue(_name, _node, _connect, _type, _value) constructor {
     array_depth = 0;
+    static setOptions = function(_title, _key, _choices, _icon, _val = 0) { attributes[$ _key] = _val; }
 }
 """,
             "scripts/node_3d_object/node_3d_object.gml": """
@@ -165,6 +166,12 @@ function Node_Comment_Fixture(_x, _y) : Node(_x, _y) constructor {
             "scripts/node_scatter_point_fibo/node_scatter_point_fibo.gml": """
 function Node_Scatter_Point_Fibonacci(_x, _y) : Node(_x, _y) constructor {
     newInput(4, nodeValue_Float("Rotation", (1 + sqrt(5)) / 2));
+}
+""",
+            "scripts/node_text/node_text.gml": """
+function Node_Text(_x, _y) : Node(_x, _y) constructor {
+    newInput(31, nodeValue_Palette("Color by Letter", [ca_white])).setOptions("Select by:", "array_select", ["Index Loop", "Index Ping-pong", "Random"], THEME.array_select_type).iconPad();
+    newInput(32, nodeValue_Palette("Other Palette", [ca_white])).setOptions("Other:", "unrelated", ["Index Loop", "Index Ping-pong", "Random"], THEME.array_select_type).iconPad();
 }
 """,
             "scripts/node_points_remap/node_points_remap.gml": """
@@ -362,6 +369,7 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
                 "Node_Comment_Fixture",
                 "Node_Fn_WaveTable",
                 "Node_Points_Remap",
+                "Node_Text",
                 "Node_Points_Triangulate",
                 "Node_Noise_Simplex",
                 "Node_Herringbone_Tile",
@@ -615,6 +623,19 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
         self.assertEqual(triangulate["default"], "[0,0]")
         self.assertEqual(triangulate["array_depth"], 2)
         self.assertNotIn("effective_type", triangulate)
+
+
+    def test_text_palette_retains_exact_physical_array_select_option(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary))
+        inputs = snapshot["nodes"]["Node_Text"]["inputs"]
+        letter = next(item for item in inputs if item["index"] == "31")
+        self.assertEqual("Palette", letter["kind"])
+        self.assertEqual({"default": 0, "choices": ["Index Loop", "Index Ping-pong", "Random"]}, letter["array_select"])
+        other = next(item for item in inputs if item["index"] == "32")
+        self.assertNotIn("array_select", other)
+        self.assertIn("scripts/node_text/node_text.gml", snapshot["source_constructor_evidence"])
+        self.assertIn("scripts/node_value/node_value.gml", snapshot["source_constructor_evidence"])
 
 
 if __name__ == "__main__":

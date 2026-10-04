@@ -1,6 +1,7 @@
 #include "ImageGraphCameraAdapter.hpp"
 #include "ImageGraphCameraRoute.hpp"
 #include "ImageGraphComposerAdapter.hpp"
+#include "ImageGraphFontInputs.hpp"
 #include "ImageGraphSdfAdapter.hpp"
 #include "ImageGraphSkyboxCache.hpp"
 #include "ImageGraphSurfaceFormat.hpp"
@@ -246,7 +247,9 @@ namespace client {
 			uint64_t seed,
 			engine::imagegraph::CapturedFeedbackHost *feedbackOwner = nullptr,
 			engine::imagegraph::HostNodeProvider *hostProvider = nullptr,
-			engine::imagegraph::SourceArgumentHost *arguments = nullptr
+			engine::imagegraph::SourceArgumentHost *arguments = nullptr,
+			const engine::imagegraphfont::GraphFontInputs *fonts = nullptr,
+			const engine::imagegraph::EvaluationRequest *fontInputs = nullptr
 		) {
 			ImageGraphFrameResult result;
 			result.Animated = NeedsFrameSamples(document);
@@ -268,6 +271,11 @@ namespace client {
 				true, engine::imagegraph::SourceCacheSampling::NativePlayedPrefix, true
 			};
 			clock.RigidFrameProgress = true;
+			engine::imagegraph::SourceFontContext heldFontContext;
+			if (!detail::BindFontInputs(fonts, fontInputs, heldFontContext, clock, result.Diagnostic)) {
+				result.Status = result.Diagnostic.Code;
+				return result;
+			}
 			if (!feedback.Prepare(
 					document,
 					plan,
@@ -378,7 +386,9 @@ namespace client {
 			engine::render::Renderer &renderer,
 			uint64_t tick,
 			uint64_t seed,
-			engine::imagegraph::SourceArgumentHost *arguments
+			engine::imagegraph::SourceArgumentHost *arguments,
+			const engine::imagegraphfont::GraphFontInputs *fonts,
+			const engine::imagegraph::EvaluationRequest *fontInputs
 		) {
 			using namespace engine;
 			ImageGraphFrameResult result;
@@ -404,7 +414,11 @@ namespace client {
 					false,
 					request,
 					result.Diagnostic,
-					&argumentProvider
+					&argumentProvider,
+					nullptr,
+					1,
+					fonts,
+					fontInputs
 				)) {
 				result.Status = result.Diagnostic.Code;
 				return result;
@@ -462,7 +476,9 @@ namespace client {
 			engine::render::Renderer &renderer,
 			uint64_t tick,
 			uint64_t seed,
-			engine::imagegraph::SourceArgumentHost *arguments
+			engine::imagegraph::SourceArgumentHost *arguments,
+			const engine::imagegraphfont::GraphFontInputs *fonts,
+			const engine::imagegraph::EvaluationRequest *fontInputs
 		) {
 			ImageGraphFrameResult result;
 			result.Animated = NeedsFrameSamples(document);
@@ -481,7 +497,11 @@ namespace client {
 					false,
 					request,
 					result.Diagnostic,
-					&argumentProvider
+					&argumentProvider,
+					nullptr,
+					1,
+					fonts,
+					fontInputs
 				)) {
 				result.Status = result.Diagnostic.Code;
 				return result;
@@ -522,7 +542,9 @@ namespace client {
 			engine::render::Renderer &renderer,
 			uint64_t tick,
 			uint64_t seed,
-			engine::imagegraph::SourceArgumentHost *arguments
+			engine::imagegraph::SourceArgumentHost *arguments,
+			const engine::imagegraphfont::GraphFontInputs *fonts,
+			const engine::imagegraph::EvaluationRequest *fontInputs
 		) {
 			ImageGraphFrameResult result;
 			result.Animated = NeedsFrameSamples(document);
@@ -541,7 +563,11 @@ namespace client {
 					false,
 					request,
 					result.Diagnostic,
-					&argumentProvider
+					&argumentProvider,
+					nullptr,
+					1,
+					fonts,
+					fontInputs
 				)) {
 				result.Status = result.Diagnostic.Code;
 				return result;
@@ -579,19 +605,29 @@ namespace client {
 			engine::render::Renderer &renderer,
 			uint64_t tick,
 			uint64_t seed,
-			engine::imagegraph::SourceArgumentHost *arguments
+			engine::imagegraph::SourceArgumentHost *arguments,
+			const engine::imagegraphfont::GraphFontInputs *fonts,
+			const engine::imagegraph::EvaluationRequest *fontInputs
 		) {
 			std::string_view port;
 			const auto *node = OutputNode(document, output, port);
 			if (node != nullptr && node->Type == "image.transform_3d")
-				return EvaluateTransform(document, plan, *node, port, renderer, tick, seed, arguments);
+				return EvaluateTransform(
+					document, plan, *node, port, renderer, tick, seed, arguments, fonts, fontInputs
+				);
 			if (node && (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set"))
-				return EvaluateCamera(document, plan, *node, port, renderer, tick, seed, arguments);
+				return EvaluateCamera(
+					document, plan, *node, port, renderer, tick, seed, arguments, fonts, fontInputs
+				);
 			if (node && (node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
 						 node->Type == "pc.rm_cloud" || node->Type == "pc.rm_terrain" ||
 						 node->Type == "pc.rm_primitive" || node->Type == "pc.rm_combine"))
-				return EvaluateSdf(document, plan, *node, port, renderer, tick, seed, arguments);
-			return EvaluateCompiled(document, plan, output, tick, seed, nullptr, nullptr, arguments);
+				return EvaluateSdf(
+					document, plan, *node, port, renderer, tick, seed, arguments, fonts, fontInputs
+				);
+			return EvaluateCompiled(
+				document, plan, output, tick, seed, nullptr, nullptr, arguments, fonts, fontInputs
+			);
 		}
 	} // namespace
 
@@ -607,7 +643,9 @@ namespace client {
 		engine::core::Name output,
 		uint64_t tick,
 		uint64_t seed,
-		engine::imagegraph::SourceArgumentHost *arguments
+		engine::imagegraph::SourceArgumentHost *arguments,
+		const engine::imagegraphfont::GraphFontInputs *fonts,
+		const engine::imagegraph::EvaluationRequest *fontInputs
 	) {
 		ImageGraphFrameResult result;
 		const std::filesystem::path path = ImageGraphDocumentPath(directory, graph);
@@ -622,7 +660,9 @@ namespace client {
 		engine::imagegraph::Plan plan;
 		result.Status = ReadCompiled(path, document, plan, result.Diagnostic);
 		if (result.Status != engine::imagegraph::Status::Ok) return result;
-		return EvaluateCompiled(document, plan, output, tick, seed, nullptr, nullptr, arguments);
+		return EvaluateCompiled(
+			document, plan, output, tick, seed, nullptr, nullptr, arguments, fonts, fontInputs
+		);
 	}
 
 	ImageGraphFrameResult LoadImageGraphRenderExportFrame(
@@ -632,7 +672,9 @@ namespace client {
 		engine::render::Renderer &renderer,
 		uint64_t tick,
 		uint64_t seed,
-		engine::imagegraph::SourceArgumentHost *arguments
+		engine::imagegraph::SourceArgumentHost *arguments,
+		const engine::imagegraphfont::GraphFontInputs *fonts,
+		const engine::imagegraph::EvaluationRequest *fontInputs
 	) {
 		ImageGraphFrameResult result;
 		const std::filesystem::path path = ImageGraphDocumentPath(directory, graph);
@@ -647,7 +689,9 @@ namespace client {
 		engine::imagegraph::Plan plan;
 		result.Status = ReadCompiled(path, document, plan, result.Diagnostic);
 		if (result.Status != engine::imagegraph::Status::Ok) return result;
-		return EvaluateForRenderer(document, plan, output, renderer, tick, seed, arguments);
+		return EvaluateForRenderer(
+			document, plan, output, renderer, tick, seed, arguments, fonts, fontInputs
+		);
 	}
 
 	bool ImageGraphRuntime::CollectWantedComposerShaders(
@@ -750,6 +794,20 @@ namespace client {
 		NextTransformGeneration = transformGeneration;
 		++ArgumentsGeneration;
 		return status;
+	}
+
+	engine::imagegraph::Status ImageGraphRuntime::PrepareFonts(
+		const engine::imagegraphfont::GraphFontConfiguration &configuration,
+		const engine::assets::ContentPolicy &policy,
+		engine::render::Renderer &renderer,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		if (!Fonts.Replace(configuration, policy, maximumBytes, diagnostic)) return diagnostic.Code;
+		const auto transformGeneration = NextTransformGeneration;
+		Clear(renderer);
+		NextTransformGeneration = transformGeneration;
+		return engine::imagegraph::Status::Ok;
 	}
 
 	void ImageGraphRuntime::BeginFrame() {
@@ -1202,7 +1260,9 @@ namespace client {
 									diagnostic,
 									&composerProvider,
 									&entry.Feedback,
-									1
+									1,
+									&Fonts,
+									nullptr
 								);
 								if (valid) {
 									engine::render::imagegraph::SourceSkyboxFace pendingFace =
@@ -1240,7 +1300,9 @@ namespace client {
 									diagnostic,
 									&composerProvider,
 									&entry.Feedback,
-									1
+									1,
+									&Fonts,
+									nullptr
 								);
 								if (valid) {
 									engine::render::imagegraph::SourceSkyboxFace pendingFace =
@@ -1272,7 +1334,10 @@ namespace client {
 									candidate.Ticks[index],
 									skyFaces[index].Selector.Seed,
 									&entry.Feedback,
-									&composerProvider
+									&composerProvider,
+									nullptr,
+									&Fonts,
+									nullptr
 								);
 								const auto format = detail::TextureFormatForSurface(frame.Image.Format);
 								valid = frame.Status == engine::imagegraph::Status::Ok &&
@@ -1436,7 +1501,10 @@ namespace client {
 							ticks[index],
 							skyFaces[index].Selector.Seed,
 							&feedbackEntry.Feedback,
-							feedbackEntry.LuaHost.get()
+							feedbackEntry.LuaHost.get(),
+							nullptr,
+							&Fonts,
+							nullptr
 						);
 						const auto uploadFormat = detail::TextureFormatForSurface(frames[index].Image.Format);
 						const uint32_t uploadBytesPerPixel =
@@ -1728,7 +1796,9 @@ namespace client {
 										 diagnostic,
 										 &composerProvider,
 										 &entry.Feedback,
-										 1
+										 1,
+										 &Fonts,
+										 nullptr
 									 )
 					: sourceSdf ? detail::BuildSdfRequest(
 									  cached->Authored,
@@ -1742,7 +1812,9 @@ namespace client {
 									  diagnostic,
 									  &composerProvider,
 									  &entry.Feedback,
-									  1
+									  1,
+									  &Fonts,
+									  nullptr
 								  )
 					: sourceCamera ? detail::BuildCameraRequest(
 										 cached->Authored,
@@ -1756,7 +1828,9 @@ namespace client {
 										 diagnostic,
 										 &composerProvider,
 										 &entry.Feedback,
-										 1
+										 1,
+										 &Fonts,
+										 nullptr
 									 )
 								   : detail::BuildTransformRequest(
 										 cached->Authored,
@@ -1769,7 +1843,9 @@ namespace client {
 										 diagnostic,
 										 &composerProvider,
 										 &entry.Feedback,
-										 1
+										 1,
+										 &Fonts,
+										 nullptr
 									 );
 				if (!built) {
 					Error = diagnostic.Message;
@@ -1916,7 +1992,10 @@ namespace client {
 				evaluationTick,
 				selector.Seed,
 				&entry.Feedback,
-				&composerProvider
+				&composerProvider,
+				nullptr,
+				&Fonts,
+				nullptr
 			);
 			if (frame.Status != engine::imagegraph::Status::Ok) {
 				Error = frame.Diagnostic.Message;

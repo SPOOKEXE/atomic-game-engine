@@ -134275,7 +134275,15 @@
      "index": "31",
      "kind": "Palette",
      "name": "Color by Letter",
-     "source_array_classification": true
+     "source_array_classification": true,
+     "array_select": {
+      "default": 0,
+      "choices": [
+       "Index Loop",
+       "Index Ping-pong",
+       "Random"
+      ]
+     }
     },
     {
      "array_depth": 0,
@@ -155934,5 +155942,9 @@
    "bytes": 2533,
    "sha256": "08008f6a73b08ca9f3687e06089f186e1a637ba919a1a518b86e9d8cc4359011"
   }
- }
+,
+  "scripts/node_text/node_text.gml": {
+   "bytes": 27610,
+   "sha256": "34640857e6878bb84c4778649dedfac455a062d2a3be35cbb0b191f3cb8cc9ca"
+  } }
 }

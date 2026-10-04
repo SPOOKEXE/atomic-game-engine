@@ -2,6 +2,10 @@
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/PendingHostObservations.hpp>
 #include <engine/render/Renderer.hpp>
+namespace engine::imagegraphfont {
+	class GraphFontInputs;
+}
+
 namespace client::detail {
 	// Stack-owned composition keeps Lua/file capability ownership with its caller.
 	class ComposerProvider final : public engine::imagegraph::HostNodeProvider {
@@ -52,7 +56,9 @@ namespace client::detail {
 		engine::imagegraph::Diagnostic &,
 		engine::imagegraph::HostNodeProvider * = nullptr,
 		engine::imagegraph::CapturedFeedbackHost * = nullptr,
-		uint64_t authoringRevision = 1
+		uint64_t authoringRevision = 1,
+		const engine::imagegraphfont::GraphFontInputs *fonts = nullptr,
+		const engine::imagegraph::EvaluationRequest *fontInputs = nullptr
 	);
 	engine::core::Name ComposerAsset(const engine::imagegraph::Node &);
 }

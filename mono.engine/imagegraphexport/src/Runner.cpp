@@ -9,6 +9,7 @@
 #include <engine/imagegraph/WavClip.hpp>
 #include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
+#include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
 
 #include <algorithm>
@@ -33,6 +34,7 @@
 #include <vector>
 
 namespace engine::imagegraphexport::runner {
+	using imagegraphfont::GraphFontInputs;
 	namespace {
 		using engine::imagegraph::AudioCaptureFrame;
 		using engine::imagegraph::Diagnostic;
@@ -1164,7 +1166,8 @@ namespace engine::imagegraphexport::runner {
 		engine::imagegraph::HostNodeProvider *provider,
 		const engine::imagegraph::Document *liveDocument,
 		const engine::imagegraph::Plan *livePlan,
-		const engine::imagegraph::EvaluationRequest *liveRequest
+		const engine::imagegraph::EvaluationRequest *liveRequest,
+		GraphFontInputs *ownedFontInputs
 	);
 
 	int Run(int argc, char **argv, std::ostream &output, std::ostream &errors) {
@@ -1190,7 +1193,23 @@ namespace engine::imagegraphexport::runner {
 		std::span<const engine::imagegraph::HostNodeCapture> captures,
 		engine::imagegraph::HostNodeProvider *provider
 	) {
-		return RunImpl(argc, argv, output, errors, images, captures, provider, nullptr, nullptr, nullptr);
+		return RunImpl(
+			argc, argv, output, errors, images, captures, provider, nullptr, nullptr, nullptr, nullptr
+		);
+	}
+	int RunWithHostInputs(
+		int argc,
+		char **argv,
+		std::ostream &output,
+		std::ostream &errors,
+		std::span<const engine::imagegraph::RequestImageSource> images,
+		std::span<const engine::imagegraph::HostNodeCapture> captures,
+		engine::imagegraph::HostNodeProvider *provider,
+		GraphFontInputs &fontInputs
+	) {
+		return RunImpl(
+			argc, argv, output, errors, images, captures, provider, nullptr, nullptr, nullptr, &fontInputs
+		);
 	}
 	int RunWithDocument(
 		int argc,
@@ -1211,7 +1230,8 @@ namespace engine::imagegraphexport::runner {
 			request.HostProvider,
 			&document,
 			&plan,
-			&request
+			&request,
+			nullptr
 		);
 	}
 
@@ -1225,7 +1245,8 @@ namespace engine::imagegraphexport::runner {
 		engine::imagegraph::HostNodeProvider *provider,
 		const engine::imagegraph::Document *liveDocument,
 		const engine::imagegraph::Plan *livePlan,
-		const engine::imagegraph::EvaluationRequest *liveRequest
+		const engine::imagegraph::EvaluationRequest *liveRequest,
+		GraphFontInputs *ownedFontInputs
 	) {
 		engine::core::Arguments arguments(
 			"imagegraph",
@@ -1258,6 +1279,9 @@ namespace engine::imagegraphexport::runner {
 		arguments.Flag("rigid-frame-progress", "Capture source rigid frame advancement");
 		arguments.Flag("value", "Evaluate a numeric scalar or array output and print its value record");
 		arguments.Value("audio-capture", "PATH", "Bounded recorded audio input frames");
+		arguments.Value(
+			"font-inputs", "PATH", "Owned source font context, observations and exact read grants"
+		);
 		arguments.Value(
 			"builtin-random-capture", "PATH", "Exact file containing recorded builtin random observations"
 		);
@@ -1370,6 +1394,7 @@ namespace engine::imagegraphexport::runner {
 		const auto outputPath = arguments.Get("output");
 		const auto bundlePath = arguments.Get("bundle");
 		const auto audioCapturePath = arguments.Get("audio-capture");
+		const auto fontInputsPath = arguments.Get("font-inputs");
 		const auto builtinRandomPath = arguments.Get("builtin-random-capture");
 		const bool bundleOutput = bundlePath.has_value();
 		const bool scalarOutput = arguments.Has("value");
@@ -1493,6 +1518,53 @@ namespace engine::imagegraphexport::runner {
 					  ".json extension\"\n";
 			return 2;
 		}
+		std::string fileFailure;
+		bool inputLimitExceeded = false;
+		GraphFontInputs loadedFontInputs;
+		if (fontInputsPath) {
+			const std::filesystem::path fontFile(*fontInputsPath);
+			if (fontFile.empty() || SamePath(inputFile, fontFile) ||
+				(pngOutput && SamePath(outputFile, fontFile)) ||
+				(bundleOutput && SamePath(bundleDirectory, fontFile))) {
+				errors
+					<< "error status=Arguments message=\"font input, graph and output paths must differ\"\n";
+				return 2;
+			}
+			if (ownedFontInputs ||
+				(liveRequest &&
+				 (liveRequest->SourceFonts || !liveRequest->FontObservations.empty() ||
+				  liveRequest->FontProvider || liveRequest->SourceFontHostResidentBytes != 0))) {
+				errors << "error status=Arguments message=\"font input artifact conflicts with caller-owned "
+						  "font inputs\"\n";
+				return 2;
+			}
+			std::string fontArtifact;
+			if (!ReadBounded(fontFile, fontArtifact, inputLimitExceeded, fileFailure, MAXIMUM_INPUT_BYTES)) {
+				if (inputLimitExceeded)
+					PrintDiagnostic(errors, {Status::LimitExceeded, {}, {}, fileFailure});
+				else
+					errors << "error status=InputError message="
+						   << std::quoted("font input artifact: " + fileFailure) << '\n';
+				return 1;
+			}
+			engine::imagegraphfont::GraphFontConfiguration configuration;
+			if (!engine::imagegraphfont::ReadGraphFontConfiguration(
+					fontArtifact, configuration, Limits::MaximumEvaluationBytes, diagnostic
+				)) {
+				PrintDiagnostic(errors, diagnostic);
+				return 1;
+			}
+			if (!loadedFontInputs.Replace(
+					configuration,
+					engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+					Limits::MaximumEvaluationBytes,
+					diagnostic
+				)) {
+				PrintDiagnostic(errors, diagnostic);
+				return 1;
+			}
+			ownedFontInputs = &loadedFontInputs;
+		}
 
 		std::optional<size_t> arrayIndex;
 		if (const auto textIndex = arguments.Get("array-index")) {
@@ -1527,8 +1599,6 @@ namespace engine::imagegraphexport::runner {
 		}
 
 		std::string text;
-		std::string fileFailure;
-		bool inputLimitExceeded = false;
 		if (!liveDocument && !ReadBounded(inputFile, text, inputLimitExceeded, fileFailure)) {
 			if (inputLimitExceeded) {
 				PrintDiagnostic(errors, {Status::LimitExceeded, {}, {}, fileFailure});
@@ -1721,6 +1791,26 @@ namespace engine::imagegraphexport::runner {
 			request.ImageSources = imageSources;
 			request.HostCaptures = captures;
 			request.HostProvider = provider;
+			engine::imagegraph::SourceFontContext heldFontContext;
+			if (ownedFontInputs && ownedFontInputs->Revision() != 0) {
+				const auto playing = ownedFontInputs->Configuration().Context.Playing;
+				if (!playing) {
+					PrintDiagnostic(
+						errors,
+						{Status::InvalidValue,
+						 {},
+						 "font inputs",
+						 "Configured font context must state whether it is playing"}
+					);
+					return 1;
+				}
+				if (!ownedFontInputs->Bind(
+						*playing, heldFontContext, request, Limits::MaximumEvaluationBytes, diagnostic
+					)) {
+					PrintDiagnostic(errors, diagnostic);
+					return 1;
+				}
+			}
 			if (!replayHost.Prepare(
 					document,
 					plan,

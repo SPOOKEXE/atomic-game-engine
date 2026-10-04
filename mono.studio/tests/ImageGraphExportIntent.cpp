@@ -1,5 +1,8 @@
 #include "ImageGraphExportIntent.hpp"
 
+#include "ImageGraphFontArtifact.hpp"
+#include "ImageGraphFontBindings.hpp"
+
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/scripthost/ComposerLua.hpp>
@@ -9,12 +12,50 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 
 TEST_SUITE_ID("studio.imagegraph.export_intent")
 TEST_DEPENDS("studio.imagegraph")
 TEST_DEPENDS("engine.scripthost.composer_lua")
 namespace {
 	using namespace engine::imagegraph;
+	FontValue InitialTextFont() {
+		FontValue value;
+		auto &font = value.Data.emplace();
+		font.LineHeight = 1;
+		font.Frames = {{1, 1, {255, 255, 255, 255}}};
+		FontGlyph glyph;
+		glyph.Character = 'A';
+		glyph.Frame = 0;
+		glyph.Width = 1;
+		glyph.Height = 1;
+		glyph.Advance = 1;
+		font.Glyphs = {glyph};
+		return value;
+	}
+	DataReplayState TextReplay(const FontValue &font) {
+		StructValue text;
+		auto &fields = text.Data.emplace().Fields;
+		fields = {{"primary", font}, {"fallback", UndefinedValue{}}};
+		DataReplayState replay;
+		DataReplayEntry entry;
+		entry.NodeId = "text-node";
+		entry.Initialized = true;
+		entry.Tick = 4;
+		entry.Values = {{4, Value{text}}};
+		replay.Entries.push_back(std::move(entry));
+		return replay;
+	}
+	struct FontRangeHost final : engine::imagegraphexport::GraphExportSessionHost {
+		bool Capture(const HostNodeInvocation &, HostNodeCapture &, std::string &failure) override {
+			failure = "Text range fixture does not use host captures";
+			return false;
+		}
+		bool Pending() const noexcept override {
+			return false;
+		}
+		void Cancel() noexcept override {}
+	};
 	struct CountedLua final : ComposerLuaHost {
 		std::unique_ptr<ComposerLuaHost> Host = engine::script::MakeComposerLuaHost();
 		size_t Calls = 0;
@@ -124,9 +165,10 @@ namespace {
 			return true;
 		}
 	};
-}
+} // namespace
 TEST_CASE(
-	"Pending current-frame export preserves genuine Lua receipts and the target cursor",
+	"Pending current-frame export preserves genuine Lua receipts and the "
+	"target cursor",
 	"[studio][export_intent]"
 ) {
 	using namespace engine::imagegraph;
@@ -203,7 +245,8 @@ TEST_CASE(
 			CHECK_FALSE(intent.Finish(ImageGraphExportIntent::Result::Complete));
 			CHECK(intent.Current->Cursor == 1);
 		}
-		// Authoritative playback advances, but the export request is never relabeled.
+		// Authoritative playback advances, but the export request is never
+		// relabeled.
 		CHECK(GetFrameTime(request) == FrameTime{12, .25});
 		CHECK(playback > request.Tick);
 		CHECK(lua.Calls == 1);
@@ -232,7 +275,9 @@ TEST_CASE(
 	CHECK_FALSE(intent.Observations.Active);
 }
 TEST_CASE(
-	"Export intent metadata admission is atomic and completed targets never rewind", "[studio][export_intent]"
+	"Export intent metadata admission is atomic and completed targets "
+	"never rewind",
+	"[studio][export_intent]"
 ) {
 	using namespace studio::detail;
 	ImageGraphExportIntent intent;
@@ -262,7 +307,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"Export preparation advances only completed clocks and preserves contiguous history beyond seek bounds",
+	"Export preparation advances only completed clocks and preserves "
+	"contiguous history beyond seek bounds",
 	"[studio][export_intent]"
 ) {
 	using namespace engine::imagegraph;
@@ -296,7 +342,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"Cold export admission warms genuine feedback one completed frame at a time without repeating Lua",
+	"Cold export admission warms genuine feedback one completed frame at "
+	"a time without repeating Lua",
 	"[studio][export_intent]"
 ) {
 	using namespace engine::imagegraph;
@@ -380,7 +427,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"Range payload admission includes held small controls and rejects overflow before session creation",
+	"Range payload admission includes held small controls and rejects "
+	"overflow before session creation",
 	"[export_intent]"
 ) {
 	using studio::detail::ImageGraphExportIntent;
@@ -431,7 +479,7 @@ TEST_CASE("Terminal export observations consume only their queued event", "[expo
 	const auto prepareEvent = queue.Pending.front();
 	Document doc = Graph();
 	Plan plan;
-	Diagnostic diagnostic;
+	engine::imagegraph::Diagnostic diagnostic;
 	REQUIRE(Compile(doc, plan, diagnostic) == Status::Ok);
 	CapturedFeedbackHost host;
 	EvaluationRequest request;
@@ -498,4 +546,414 @@ TEST_CASE("Export warmup admits at most 4096 inclusive frames", "[export_intent]
 	while (!preparation.Complete())
 		++count;
 	CHECK(count == 4096);
+}
+
+TEST_CASE("Export intent freezes owned font context and exact grants", "[export_intent][font]") {
+	using engine::imagegraphfont::GraphFontConfiguration;
+	using studio::detail::ImageGraphExportIntent;
+	GraphFontConfiguration fonts;
+	fonts.Context.AliasMapKnown = true;
+	fonts.Context.DefaultFontPath = "assets/fonts/regular.ttf";
+	fonts.Context.Aliases.emplace_back("SourceSans", "assets/fonts/source-sans.ttf");
+	fonts.ReadGrants.push_back({"text-node", "assets/fonts/regular.ttf", false});
+	auto observation = studio::detail::ImageGraphComposerExports::Observation{};
+	observation.Playback.CurrentTick = 3;
+	observation.Playback.Playing = true;
+	const ImageGraphExportIntent::Target target{"export", {}, {}, {}};
+	ImageGraphExportIntent intent;
+	std::string failure;
+	REQUIRE(intent.Begin(
+		ImageGraphExportIntent::Kind::Authored,
+		engine::core::Name("font-export-owner"),
+		observation,
+		std::span(&target, 1),
+		false,
+		failure,
+		ImageGraphExportIntent::MaximumBytes,
+		studio::detail::ImageGraphExportEvent::Save,
+		&fonts
+	));
+	fonts.Context.DefaultFontPath = "assets/fonts/replacement.ttf";
+	fonts.ReadGrants.clear();
+	observation.Playback.CurrentTick = 8;
+	observation.Playback.Playing = false;
+	REQUIRE(intent.Current);
+	CHECK(intent.Current->Observation.Playback.CurrentTick == 3);
+	CHECK(intent.Current->Observation.Playback.Playing);
+	REQUIRE(intent.Current->FontConfiguration);
+	CHECK(intent.Current->FontConfiguration->Context.DefaultFontPath == "assets/fonts/regular.ttf");
+	REQUIRE(intent.Current->FontConfiguration->ReadGrants.size() == 1);
+	CHECK(intent.Current->FontConfiguration->ReadGrants.front().NodeId == "text-node");
+	CHECK_FALSE(intent.Current->FontConfiguration->ReadGrants.front().Write);
+}
+
+TEST_CASE("Studio font bindings retain a held playback context", "[export_intent][font]") {
+	using engine::assets::ContentPolicy;
+	using engine::imagegraph::EvaluationRequest;
+	using engine::imagegraph::Limits;
+	using engine::imagegraph::SourceFontContext;
+	using engine::imagegraphfont::GraphFontConfiguration;
+	using engine::imagegraphfont::GraphFontInputs;
+	GraphFontConfiguration configuration;
+	configuration.Context.AliasMapKnown = true;
+	GraphFontInputs inputs;
+	Diagnostic diagnostic;
+	REQUIRE(inputs.Replace(configuration, ContentPolicy{}, Limits::MaximumEvaluationBytes, diagnostic));
+	SourceFontContext heldContext;
+	const uint64_t sourceBytes =
+		engine::imagegraph::SourceFontContextRetainedBytes(configuration.Context).value();
+	const uint64_t heldBytes = engine::imagegraph::SourceFontContextRetainedBytes(heldContext).value();
+	const uint64_t bindBytes = inputs.RetainedBytes() + heldBytes + sourceBytes * 2;
+	EvaluationRequest request;
+	CHECK_FALSE(inputs.Bind(true, heldContext, request, bindBytes - 1, diagnostic));
+	REQUIRE(inputs.Bind(true, heldContext, request, bindBytes, diagnostic));
+	CHECK(request.SourceFonts == &heldContext);
+	CHECK(heldContext.Playing == true);
+	CHECK(request.FontProvider != nullptr);
+	CHECK(request.FontObservations.empty());
+	CHECK(request.SourceFontHostResidentBytes == inputs.RetainedBytes());
+}
+
+TEST_CASE("Studio refuses a font-bound operation without changing its request", "[export_intent][font]") {
+	using engine::imagegraph::EvaluationRequest;
+	using engine::imagegraph::SourceFontContext;
+	using engine::imagegraphfont::GraphFontConfiguration;
+	using engine::imagegraphfont::GraphFontInputs;
+	GraphFontConfiguration configuration;
+	GraphFontInputs inputs;
+	Diagnostic diagnostic;
+	REQUIRE(inputs.Replace(
+		configuration,
+		engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+		engine::imagegraph::Limits::MaximumEvaluationBytes,
+		diagnostic
+	));
+	SourceFontContext heldContext;
+	EvaluationRequest request;
+	const auto original = &heldContext;
+	request.SourceFonts = original;
+	CHECK_FALSE(
+		studio::detail::BindImageGraphFontInputs(inputs, true, true, heldContext, request, 1, diagnostic)
+	);
+	CHECK(request.SourceFonts == original);
+	CHECK(request.FontProvider == nullptr);
+	CHECK(request.FontObservations.empty());
+}
+
+TEST_CASE(
+	"Studio font artifact staging preserves an existing file on write failure", "[export_intent][font]"
+) {
+	const auto root = std::filesystem::temp_directory_path() /
+					  ("atomic-studio-font-artifact-" +
+					   std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+	std::error_code error;
+	REQUIRE(std::filesystem::create_directory(root, error));
+	struct RemoveDirectory {
+		std::filesystem::path Path;
+		~RemoveDirectory() {
+			std::error_code ignored;
+			std::filesystem::remove_all(Path, ignored);
+		}
+	} cleanup{root};
+	const auto destination = root / "inputs.json";
+	{
+		std::ofstream file(destination, std::ios::binary);
+		REQUIRE(file.write("previous artifact", 17));
+	}
+	Diagnostic diagnostic;
+	CHECK_FALSE(
+		studio::detail::PublishImageGraphFontArtifact(
+			destination,
+			[](const std::filesystem::path &staged) {
+				std::ofstream file(staged, std::ios::binary);
+				return bool(file.write("partial", 7)) && false;
+			},
+			diagnostic
+		)
+	);
+	std::ifstream file(destination, std::ios::binary);
+	const std::string bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+	CHECK(bytes == "previous artifact");
+	CHECK(!studio::detail::PublishImageGraphFontArtifact(
+		destination,
+		[](const std::filesystem::path &staged) {
+			std::ofstream file(staged, std::ios::binary);
+			return bool(file.write("complete replacement", 20));
+		},
+		diagnostic,
+		[](const std::filesystem::path &, const std::filesystem::path &, std::error_code &error) {
+			error = std::make_error_code(std::errc::permission_denied);
+			return false;
+		}
+	));
+	std::ifstream unchanged(destination, std::ios::binary);
+	const std::string afterFailedPublish{
+		std::istreambuf_iterator<char>(unchanged), std::istreambuf_iterator<char>()
+	};
+	CHECK(afterFailedPublish == "previous artifact");
+	CHECK(
+		studio::detail::PublishImageGraphFontArtifact(
+			destination,
+			[](const std::filesystem::path &staged) {
+				std::ofstream file(staged, std::ios::binary);
+				return bool(file.write("replacement", 11));
+			},
+			diagnostic
+		)
+	);
+	std::ifstream replaced(destination, std::ios::binary);
+	const std::string replacement{std::istreambuf_iterator<char>(replaced), std::istreambuf_iterator<char>()};
+	CHECK(replacement == "replacement");
+}
+
+TEST_CASE(
+	"Studio freezes only matching Text fonts into held-playing export inputs", "[export_intent][font]"
+) {
+	using engine::imagegraphfont::GraphFontConfiguration;
+	using studio::detail::FreezeImageGraphInitialTextFontsFromReplay;
+	Document document;
+	document.Nodes = {{"text-node", "pc.text", {}, {}, {}}, {"atlas-node", "pc.text_atlas", {}, {}, {}}};
+	const auto font = InitialTextFont();
+	const auto replay = TextReplay(font);
+	GraphFontConfiguration configuration;
+	configuration.Context.AliasMapKnown = true;
+	Diagnostic diagnostic;
+	const FrameTime heldFrame{4, 0, false};
+	const auto bytes = engine::imagegraphfont::GraphFontConfigurationRetainedBytes(configuration);
+	REQUIRE(bytes);
+	const uint64_t replayBytes = RetainedDataReplayBytes(replay);
+	const uint64_t seedBytes = sizeof(SourceFontInitialTextState) + std::string("text-node").size() + 1 +
+							   SourceFontValueRetainedBytes(font).value() +
+							   2 * sizeof(SourceFontInitialTextState);
+	const uint64_t validationWorkspace = replay.Entries.size() * sizeof(size_t);
+	const uint64_t requiredBytes = replayBytes + 2 * bytes.value() + seedBytes + validationWorkspace;
+	GraphFontConfiguration byteShort;
+	CHECK_FALSE(FreezeImageGraphInitialTextFontsFromReplay(
+		document, replay, heldFrame, byteShort, requiredBytes - 1, diagnostic
+	));
+	CHECK(byteShort.Context.InitialTextFonts.empty());
+	REQUIRE(FreezeImageGraphInitialTextFontsFromReplay(
+		document, replay, heldFrame, configuration, requiredBytes, diagnostic
+	));
+	REQUIRE(configuration.Context.InitialTextFonts.size() == 1);
+	CHECK(configuration.Context.InitialTextFonts.front().NodeId == "text-node");
+	CHECK(configuration.Context.InitialTextFonts.front().Primary == font);
+	CHECK_FALSE(configuration.Context.InitialTextFonts.front().Fallback);
+	const uint64_t frozenBytes =
+		engine::imagegraphfont::GraphFontConfigurationRetainedBytes(configuration).value();
+	REQUIRE(
+		studio::detail::ImageGraphFontConfigurationFitsBudget(
+			configuration, bytes.value(), bytes.value() + frozenBytes, diagnostic
+		)
+	);
+	CHECK_FALSE(
+		studio::detail::ImageGraphFontConfigurationFitsBudget(
+			configuration, bytes.value(), bytes.value() + frozenBytes - 1, diagnostic
+		)
+	);
+
+	auto observation = studio::detail::ImageGraphComposerExports::Observation{};
+	observation.Playback.CurrentTick = heldFrame.Tick;
+	observation.Playback.Playing = true;
+	const studio::detail::ImageGraphExportIntent::Target target{"export-node", {}, {}, {}};
+	studio::detail::ImageGraphExportIntent intent;
+	std::string failure;
+	REQUIRE(intent.Begin(
+		studio::detail::ImageGraphExportIntent::Kind::Authored,
+		engine::core::Name("text-font-export-owner"),
+		observation,
+		std::span(&target, 1),
+		false,
+		failure,
+		studio::detail::ImageGraphExportIntent::MaximumBytes,
+		studio::detail::ImageGraphExportEvent::Save,
+		&configuration
+	));
+	REQUIRE(intent.Current->FontConfiguration);
+	CHECK(intent.Current->Observation.Playback.Playing);
+	CHECK(
+		intent.Current->FontConfiguration->Context.InitialTextFonts == configuration.Context.InitialTextFonts
+	);
+
+	const auto unchanged = configuration;
+	CHECK_FALSE(FreezeImageGraphInitialTextFontsFromReplay(
+		document,
+		replay,
+		FrameTime{5, 0, false},
+		configuration,
+		engine::imagegraph::Limits::MaximumEvaluationBytes,
+		diagnostic
+	));
+	CHECK(configuration.Context.InitialTextFonts == unchanged.Context.InitialTextFonts);
+	CHECK_FALSE(FreezeImageGraphInitialTextFontsFromReplay(
+		document, replay, heldFrame, configuration, bytes.value(), diagnostic
+	));
+	CHECK(configuration.Context.InitialTextFonts == unchanged.Context.InitialTextFonts);
+
+	engine::imagegraph::CapturedFeedbackHost unprepared;
+	CHECK_FALSE(
+		studio::detail::FreezePreparedImageGraphInitialTextFonts(
+			document,
+			unprepared,
+			1,
+			1,
+			heldFrame,
+			configuration,
+			engine::imagegraph::Limits::MaximumEvaluationBytes,
+			diagnostic
+		)
+	);
+	auto duplicate = replay;
+	duplicate.Entries.push_back(duplicate.Entries.front());
+	CHECK_FALSE(FreezeImageGraphInitialTextFontsFromReplay(
+		document,
+		duplicate,
+		heldFrame,
+		configuration,
+		engine::imagegraph::Limits::MaximumEvaluationBytes,
+		diagnostic
+	));
+	CHECK(configuration.Context.InitialTextFonts == unchanged.Context.InitialTextFonts);
+	auto malformed = replay;
+	malformed.Entries.front().Values.back().Data = double{1};
+	CHECK_FALSE(FreezeImageGraphInitialTextFontsFromReplay(
+		document,
+		malformed,
+		heldFrame,
+		configuration,
+		engine::imagegraph::Limits::MaximumEvaluationBytes,
+		diagnostic
+	));
+	CHECK(configuration.Context.InitialTextFonts == unchanged.Context.InitialTextFonts);
+	auto malformedFont = replay;
+	auto &malformedState = std::get<StructValue>(malformedFont.Entries.front().Values.back().Data);
+	std::get<FontValue>(malformedState.Data->Fields.front().second).Data->Glyphs.front().Character = 0x110000;
+	GraphFontConfiguration rejectedFont;
+	CHECK_FALSE(FreezeImageGraphInitialTextFontsFromReplay(
+		document,
+		malformedFont,
+		heldFrame,
+		rejectedFont,
+		engine::imagegraph::Limits::MaximumEvaluationBytes,
+		diagnostic
+	));
+	CHECK(rejectedFont.Context.InitialTextFonts.empty());
+
+	auto emptyFontReplay = replay;
+	auto &emptyState = std::get<StructValue>(emptyFontReplay.Entries.front().Values.back().Data);
+	emptyState.Data->Fields.front().second = UndefinedValue{};
+	GraphFontConfiguration globalFont;
+	globalFont.Context.InitialFont = font;
+	REQUIRE(FreezeImageGraphInitialTextFontsFromReplay(
+		document,
+		emptyFontReplay,
+		heldFrame,
+		globalFont,
+		engine::imagegraph::Limits::MaximumEvaluationBytes,
+		diagnostic
+	));
+	REQUIRE(globalFont.Context.InitialTextFonts.size() == 1);
+	CHECK_FALSE(globalFont.Context.InitialTextFonts.front().Primary);
+	CHECK_FALSE(globalFont.Context.InitialTextFonts.front().Fallback);
+}
+
+TEST_CASE("Studio bounds Text font replay matching work before selection", "[export_intent][font]") {
+	using studio::detail::ImageGraphTextFontFreezeWorkWithinBounds;
+	Document document;
+	DataReplayState replay;
+	constexpr size_t entryCount = 3000;
+	document.Nodes.reserve(entryCount);
+	replay.Entries.reserve(entryCount);
+	for (size_t index = 0; index < entryCount; ++index) {
+		auto id = "text-" + std::to_string(index);
+		document.Nodes.push_back({id, "pc.text", {}, {}, {}});
+		DataReplayEntry entry;
+		entry.NodeId = std::move(id);
+		replay.Entries.push_back(std::move(entry));
+	}
+	engine::imagegraphfont::GraphFontConfiguration configuration;
+	Diagnostic diagnostic;
+	CHECK_FALSE(ImageGraphTextFontFreezeWorkWithinBounds(document, replay, configuration, diagnostic));
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+}
+
+TEST_CASE("frozen Text font seeds survive a fresh held-playing range export", "[export_intent][font]") {
+	using namespace engine::imagegraph;
+	using namespace engine::imagegraphexport;
+	using engine::imagegraphfont::GraphFontConfiguration;
+	using engine::imagegraphfont::GraphFontInputs;
+	using studio::detail::FreezeImageGraphInitialTextFontsFromReplay;
+	const auto root = std::filesystem::temp_directory_path() /
+					  ("atomic-studio-text-font-range-" +
+					   std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+	std::error_code filesystemError;
+	std::filesystem::create_directories(root, filesystemError);
+	REQUIRE_FALSE(filesystemError);
+	struct RemoveDirectory {
+		std::filesystem::path Path;
+		~RemoveDirectory() {
+			std::error_code error;
+			std::filesystem::remove_all(Path, error);
+		}
+	} cleanup{root};
+
+	Document document;
+	document.FormatVersion = 9;
+	document.Timeline = TimelineSettings{2, 0, 1, "loop", 30};
+	document.Nodes = {
+		{"text-node", "pc.text", {}, {}, {{"text", std::string{"A"}}}},
+		{"export-node",
+		 "pc.export",
+		 {},
+		 {},
+		 {{"directory", root.string()},
+		  {"file_name", std::string{"frame"}},
+		  {"template", std::string{"%d%n%f"}},
+		  {"type", EnumValue{1}},
+		  {"format", EnumValue{0}}}}
+	};
+	document.Links = {{"text-node", "surface_out", "export-node", "surface"}};
+	document.Outputs = {{"preview", "export-node", "preview"}};
+	const auto font = InitialTextFont();
+	const auto replay = TextReplay(font);
+	GraphFontConfiguration configuration;
+	configuration.Context.AliasMapKnown = true;
+	Diagnostic diagnostic;
+	REQUIRE(FreezeImageGraphInitialTextFontsFromReplay(
+		document, replay, FrameTime{4, 0, false}, configuration, Limits::MaximumEvaluationBytes, diagnostic
+	));
+	GraphFontInputs fonts;
+	REQUIRE(fonts.Replace(
+		configuration,
+		engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+		Limits::MaximumEvaluationBytes,
+		diagnostic
+	));
+	SourceFontContext heldContext;
+	EvaluationRequest request;
+	REQUIRE(fonts.Bind(true, heldContext, request, Limits::MaximumEvaluationBytes, diagnostic));
+	request.HostProvider = nullptr;
+	Plan plan;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	EvaluationSnapshot prepared;
+	const auto preparedStatus =
+		EvaluateNodeInputs(document, plan, "export-node", request, prepared, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(preparedStatus == Status::Ok);
+	GraphExportSettings grants;
+	grants.Input = root / "source.graph";
+	grants.Output = root;
+	grants.OutputId = "preview";
+	GraphExportGeneration generation{1, 2, 3, 4, 5};
+	GraphExportSession session;
+	std::string failure;
+	REQUIRE(session.BeginAuthored(document, prepared, request, grants, "export-node", generation, failure));
+	FontRangeHost host;
+	GraphExportProgress progress = GraphExportProgress::Progress;
+	while (progress == GraphExportProgress::Progress || progress == GraphExportProgress::Pending)
+		progress = session.Resume(request, generation, host, failure);
+	INFO(failure);
+	CHECK(progress == GraphExportProgress::Complete);
+	CHECK(std::filesystem::exists(root / "frame1.png"));
+	CHECK(std::filesystem::exists(root / "frame2.png"));
 }

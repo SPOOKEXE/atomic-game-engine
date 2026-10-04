@@ -2,6 +2,7 @@
 #include "AtlasPayload.hpp"
 #include "AudioPayload.hpp"
 #include "FluidPayload.hpp"
+#include "FontPayload.hpp"
 #include "Mesh2DPayload.hpp"
 #include "MeshPayload.hpp"
 #include "ParticlePayload.hpp"
@@ -32,10 +33,10 @@ namespace engine::imagegraph::detail {
 		ValueType::Image,	ValueType::Buffer,		ValueType::NodeRef,		   ValueType::Path3D,
 		ValueType::PcxNode, ValueType::PixelBox,	ValueType::DynamicSurface, ValueType::Array,
 		ValueType::Sdf,		ValueType::FluidDomain, ValueType::Particle,	   ValueType::Tileset,
-		ValueType::Rigid,	ValueType::Atlas,		ValueType::Strand
+		ValueType::Rigid,	ValueType::Atlas,		ValueType::Strand,		   ValueType::Font
 	};
 	static_assert(std::size(VALUE_PAYLOAD_TYPES) == std::variant_size_v<Value>);
-	static_assert(std::variant_size_v<Value> == 39 && std::variant_size_v<ElementValue> == 38);
+	static_assert(std::variant_size_v<Value> == 40 && std::variant_size_v<ElementValue> == 39);
 	static_assert(std::is_same_v<std::variant_alternative_t<34, Value>, ParticleValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<33, ElementValue>, ParticleValue>);
 	static_assert(sizeof(ParticleValue) == 8 && sizeof(TilesetValue) == 8 && sizeof(Value) == 88);
@@ -49,6 +50,9 @@ namespace engine::imagegraph::detail {
 	static_assert(sizeof(StrandValue) == 8 && sizeof(Value) == 88);
 	static_assert(std::is_same_v<std::variant_alternative_t<38, Value>, StrandValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<37, ElementValue>, StrandValue>);
+	static_assert(sizeof(FontValue) == 8 && sizeof(Value) == 88);
+	static_assert(std::is_same_v<std::variant_alternative_t<39, Value>, FontValue>);
+	static_assert(std::is_same_v<std::variant_alternative_t<38, ElementValue>, FontValue>);
 	inline ValueType PayloadType(const Value &value) {
 		return VALUE_PAYLOAD_TYPES[value.index()];
 	}
@@ -157,6 +161,8 @@ namespace engine::imagegraph::detail {
 			return ValueType::Tileset;
 		else if constexpr (std::is_same_v<T, RigidValue>)
 			return ValueType::Rigid;
+		else if constexpr (std::is_same_v<T, FontValue>)
+			return ValueType::Font;
 		else if constexpr (std::is_same_v<T, AtlasValue>)
 			return ValueType::Atlas;
 		else {
@@ -244,6 +250,8 @@ namespace engine::imagegraph::detail {
 			return TilesetStorageBytes<false>(item);
 		else if constexpr (std::is_same_v<T, RigidValue>)
 			return RigidStorageBytes<false>(item);
+		else if constexpr (std::is_same_v<T, FontValue>)
+			return FontStorageBytes(item, false);
 		else if constexpr (std::is_same_v<T, AtlasValue>)
 			return AtlasStorageBytes(item, false);
 		else if constexpr (std::is_same_v<T, SourceArrayItem>) {
@@ -358,6 +366,8 @@ namespace engine::imagegraph::detail {
 			return TilesetStorageBytes<true>(item);
 		else if constexpr (std::is_same_v<T, RigidValue>)
 			return RigidStorageBytes<true>(item);
+		else if constexpr (std::is_same_v<T, FontValue>)
+			return FontStorageBytes(item, true);
 		else if constexpr (std::is_same_v<T, AtlasValue>)
 			return AtlasStorageBytes(item, true);
 		else if constexpr (std::is_same_v<T, SourceArrayItem>) {
@@ -402,7 +412,9 @@ namespace engine::imagegraph::detail {
 	}
 
 	template <class T> inline bool ValidPayload(const T &item, bool runtime) {
-		if constexpr (std::is_same_v<T, ArraySelectorValue>)
+		if constexpr (std::is_same_v<T, FontValue>)
+			return runtime && ValidFontPayload(item);
+		else if constexpr (std::is_same_v<T, ArraySelectorValue>)
 			return runtime && ValidSelectorPayload(item);
 		else if constexpr (std::is_same_v<T, UndefinedValue>)
 			return runtime;

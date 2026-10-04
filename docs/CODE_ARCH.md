@@ -126,6 +126,7 @@ checks it.
 | 11 | `net` `delivery` `discord` | shared | transport, fetching, presence |
 | 11 | `resources` `msl` | client | built-in GLSL, SPIR-V to MSL |
 | 11 | `scripthost` | shared | which VM to open |
+| 10 | `imagegraphfont` | shared | explicit owned font decoding and observations |
 | 10 | `scriptluau` `scriptjs` | shared | one adapter each, and neither names the other |
 | 9 | `script` `graph` `bake` `bakegraph` | shared | what a script may name, what is drawn, importing |
 | 8 | `assets` `physics` `effects` | shared | content addressing, simulation |

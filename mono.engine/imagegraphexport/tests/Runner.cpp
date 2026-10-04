@@ -4,20 +4,27 @@
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/HostCapture.hpp>
 #include <engine/imagegraph/RigidReplay.hpp>
+#include <engine/imagegraph/SourceFont.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
+#include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <vector>
 TEST_SUITE_ID("engine.imagegraphexport.runner")
+using engine::imagegraphfont::GraphFontConfiguration;
+using engine::imagegraphfont::GraphFontInputs;
+using engine::imagegraphfont::WriteGraphFontConfiguration;
 TEST_DEPENDS("engine.imagegraph.document")
 TEST_DEPENDS("engine.imagegraphphysics.rigid-replay")
 TEST_DEPENDS("engine.imagegraphphysics.rigid_graph")
@@ -389,4 +396,330 @@ TEST_CASE(
 	);
 	CHECK(request.RigidReplay == &prior);
 	CHECK(prior == result.Rigid);
+}
+
+namespace {
+	engine::imagegraph::FontValue RunnerTestFont() {
+		using namespace engine::imagegraph;
+		FontValue value;
+		auto &font = value.Data.emplace();
+		font.Characters = FontCharacterProfile::UnicodeScalar;
+		font.Frames.push_back({1, 1, {255, 255, 255, 255}});
+		font.LineHeight = 1;
+		font.MissingAdvance = 1;
+		font.SpaceAdvance = 1;
+		FontGlyph glyph;
+		glyph.Character = 'A';
+		glyph.Frame = 0;
+		glyph.Advance = glyph.Width = glyph.Height = 1;
+		font.Glyphs.push_back(glyph);
+		return value;
+	}
+
+	engine::imagegraph::Document RunnerFontText(std::string fontPath = {}, uint32_t pixelSize = 16) {
+		using namespace engine::imagegraph;
+		Document document;
+		document.FormatVersion = 9;
+		document.Nodes.push_back(
+			{"text",
+			 "pc.text",
+			 "",
+			 {},
+			 {{"text", std::string{"A"}},
+			  {"font", std::move(fontPath)},
+			  {"size", int64_t{pixelSize}},
+			  {"interpolate", EnumValue{1}},
+			  {"oversample", EnumValue{3}}}}
+		);
+		document.Outputs.push_back({"image", "text", "surface_out"});
+		return document;
+	}
+
+	std::vector<char *> RunnerArgv(std::vector<std::string> &arguments) {
+		std::vector<char *> result;
+		result.reserve(arguments.size());
+		for (auto &argument : arguments)
+			result.push_back(argument.data());
+		return result;
+	}
+}
+
+TEST_CASE(
+	"Runner imports an explicit font artifact and binds it on each ranged frame", "[imagegraph][font]"
+) {
+	using namespace engine::imagegraph;
+	using namespace engine::imagegraphexport;
+	const auto root = std::filesystem::temp_directory_path() / "atomic-imagegraph-font-runner-test";
+	std::filesystem::remove_all(root);
+	std::filesystem::create_directories(root);
+	struct Cleanup {
+		std::filesystem::path Path;
+		~Cleanup() {
+			std::error_code error;
+			std::filesystem::remove_all(Path, error);
+		}
+	} cleanup{root};
+	const auto fontPath = root / "font.bdf";
+	constexpr std::string_view bdf = R"(STARTFONT 2.1
+FONT -engine-test-medium-r-normal--10-100-72-72-c-80-iso10646-1
+SIZE 10 72 72
+FONTBOUNDINGBOX 5 7 -1 -2
+STARTPROPERTIES 4
+FONT_ASCENT 8
+FONT_DESCENT 2
+CHARSET_REGISTRY "ISO10646"
+CHARSET_ENCODING "1"
+ENDPROPERTIES
+CHARS 2
+STARTCHAR A
+ENCODING 65
+SWIDTH 800 0
+DWIDTH 8 0
+BBX 5 7 -1 -2
+BITMAP
+70
+88
+88
+F8
+88
+88
+88
+ENDCHAR
+STARTCHAR space
+ENCODING 32
+SWIDTH 400 0
+DWIDTH 4 0
+BBX 0 0 0 0
+BITMAP
+ENDCHAR
+ENDFONT
+)";
+	{
+		std::ofstream font(fontPath, std::ios::binary);
+		font.write(bdf.data(), static_cast<std::streamsize>(bdf.size()));
+		auto document = RunnerFontText(fontPath.string(), 10);
+		std::ofstream graph(root / "font.graph", std::ios::binary);
+		graph << Write(document);
+	}
+	const auto document = RunnerFontText(fontPath.string(), 10);
+	GraphFontConfiguration configuration;
+	configuration.Context.AliasMapKnown = true;
+	configuration.Context.DefaultFontPath = std::string{};
+	configuration.Context.Playing = false;
+	configuration.ReadGrants.push_back({"text", fontPath, false, "font"});
+	std::string artifact;
+	Diagnostic diagnostic;
+	REQUIRE(WriteGraphFontConfiguration(configuration, artifact, Limits::MaximumEvaluationBytes, diagnostic));
+	{
+		std::ofstream file(root / "fonts.inputs", std::ios::binary);
+		file.write(artifact.data(), static_cast<std::streamsize>(artifact.size()));
+	}
+	std::vector<std::string> arguments{
+		"imagegraph",
+		"--input",
+		(root / "font.graph").string(),
+		"--font-inputs",
+		(root / "fonts.inputs").string(),
+		"--output-id",
+		"image",
+		"--output",
+		(root / "frame.png").string(),
+		"--frames",
+		"0:1"
+	};
+	auto argv = RunnerArgv(arguments);
+	std::ostringstream output, errors;
+	const int result = runner::Run(static_cast<int>(argv.size()), argv.data(), output, errors);
+	INFO(errors.str());
+	REQUIRE(result == 0);
+	CHECK(std::filesystem::is_regular_file(root / "frame.tick-00000000000000000000.png"));
+	CHECK(std::filesystem::is_regular_file(root / "frame.tick-00000000000000000001.png"));
+	GraphFontInputs explicitInputs;
+	REQUIRE(explicitInputs.Replace(
+		configuration,
+		engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle),
+		Limits::MaximumEvaluationBytes,
+		diagnostic
+	));
+	std::vector<std::string> hostArguments{
+		"imagegraph",
+		"--input",
+		(root / "font.graph").string(),
+		"--output-id",
+		"image",
+		"--output",
+		(root / "owned.png").string()
+	};
+	auto hostArgv = RunnerArgv(hostArguments);
+	std::ostringstream hostOutput, hostErrors;
+	const int hostResult = runner::RunWithHostInputs(
+		static_cast<int>(hostArgv.size()),
+		hostArgv.data(),
+		hostOutput,
+		hostErrors,
+		{},
+		{},
+		nullptr,
+		explicitInputs
+	);
+	INFO(hostErrors.str());
+	REQUIRE(hostResult == 0);
+	CHECK(std::filesystem::is_regular_file(root / "owned.png"));
+	GraphFontConfiguration noGrant;
+	noGrant.Context.AliasMapKnown = true;
+	noGrant.Context.DefaultFontPath = std::string{};
+	noGrant.Context.Playing = false;
+	std::string noGrantArtifact;
+	REQUIRE(
+		WriteGraphFontConfiguration(noGrant, noGrantArtifact, Limits::MaximumEvaluationBytes, diagnostic)
+	);
+	const auto ungrantedGraph = RunnerFontText("/not-granted/font.ttf");
+	{
+		std::ofstream graph(root / "ungranted.graph", std::ios::binary);
+		graph << Write(ungrantedGraph);
+		std::ofstream prior(root / "refused.png", std::ios::binary);
+		prior << "previous output";
+		std::ofstream fontFile(root / "no-grant.inputs", std::ios::binary);
+		fontFile.write(noGrantArtifact.data(), static_cast<std::streamsize>(noGrantArtifact.size()));
+	}
+	std::vector<std::string> deniedArguments{
+		"imagegraph",
+		"--input",
+		(root / "ungranted.graph").string(),
+		"--font-inputs",
+		(root / "no-grant.inputs").string(),
+		"--output-id",
+		"image",
+		"--output",
+		(root / "refused.png").string()
+	};
+	auto deniedArgv = RunnerArgv(deniedArguments);
+	std::ostringstream deniedOutput, deniedErrors;
+	CHECK(
+		runner::Run(static_cast<int>(deniedArgv.size()), deniedArgv.data(), deniedOutput, deniedErrors) == 1
+	);
+	std::ifstream prior(root / "refused.png", std::ios::binary);
+	CHECK(std::string{std::istreambuf_iterator<char>(prior), {}} == "previous output");
+}
+
+TEST_CASE(
+	"Live runner preserves caller-owned font observations and provider over a frame range",
+	"[imagegraph][font]"
+) {
+	using namespace engine::imagegraph;
+	using namespace engine::imagegraphexport;
+	const auto root = std::filesystem::temp_directory_path() / "atomic-live-font-runner-test";
+	std::filesystem::remove_all(root);
+	std::filesystem::create_directories(root);
+	struct Cleanup {
+		std::filesystem::path Path;
+		~Cleanup() {
+			std::error_code error;
+			std::filesystem::remove_all(Path, error);
+		}
+	} cleanup{root};
+	const auto document = RunnerFontText("/caller/font.ttf");
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	SourceFontContext context;
+	context.AliasMapKnown = true;
+	context.DefaultFontPath = std::string{};
+	context.Playing = false;
+	struct Provider final : SourceFontProvider {
+		std::vector<SourceFontRequest> Requests;
+		bool Observe(
+			const SourceFontRequest &request, uint64_t, SourceFontObservation &output, std::string &
+		) override {
+			Requests.push_back(request);
+			output.Request = request;
+			output.Font = RunnerTestFont();
+			return true;
+		}
+	} provider;
+	SourceFontObservation unrelated;
+	unrelated.Request.Authored = {"other", "pc.text", "", {}, {}};
+	unrelated.Request.Context = context;
+	unrelated.Request.Role = "font";
+	unrelated.Request.ResolvedPath = "/other/font.ttf";
+	unrelated.Request.Characters = {'Z'};
+	unrelated.Font = RunnerTestFont();
+	unrelated.Font->Data->Glyphs.front().Character = 'Z';
+	REQUIRE(SourceFontObservationRetainedBytes(unrelated));
+	const std::array observations{unrelated};
+	EvaluationRequest request;
+	request.SourceFonts = &context;
+	request.FontObservations = observations;
+	request.FontProvider = &provider;
+	std::vector<std::string> arguments{
+		"imagegraph",
+		"--input",
+		(root / "unused.graph").string(),
+		"--output-id",
+		"image",
+		"--output",
+		(root / "frame.png").string(),
+		"--frames",
+		"0:1"
+	};
+	auto argv = RunnerArgv(arguments);
+	std::ostringstream output, errors;
+	const int result = engine::imagegraphexport::runner::RunWithDocument(
+		static_cast<int>(argv.size()), argv.data(), output, errors, document, plan, request
+	);
+	INFO(errors.str());
+	REQUIRE(result == 0);
+	REQUIRE(!provider.Requests.empty());
+	CHECK(std::all_of(provider.Requests.begin(), provider.Requests.end(), [&](const auto &seen) {
+		return seen.Context == context && seen.ResolvedPath == "/caller/font.ttf";
+	}));
+	CHECK(std::any_of(provider.Requests.begin(), provider.Requests.end(), [](const auto &seen) {
+		return seen.Tick == 0;
+	}));
+	CHECK(std::any_of(provider.Requests.begin(), provider.Requests.end(), [](const auto &seen) {
+		return seen.Tick == 1;
+	}));
+	CHECK(context.Playing == false);
+	CHECK(request.FontObservations.data() == observations.data());
+	CHECK(request.FontProvider == &provider);
+	GraphFontConfiguration conflicting;
+	conflicting.Context.AliasMapKnown = true;
+	std::string artifact;
+	REQUIRE(WriteGraphFontConfiguration(conflicting, artifact, Limits::MaximumEvaluationBytes, diagnostic));
+	{
+		std::ofstream file(root / "conflicting.inputs", std::ios::binary);
+		file.write(artifact.data(), static_cast<std::streamsize>(artifact.size()));
+	}
+	arguments.insert(arguments.end(), {"--font-inputs", (root / "conflicting.inputs").string()});
+	argv = RunnerArgv(arguments);
+	std::ostringstream conflictOutput, conflictErrors;
+	CHECK(
+		engine::imagegraphexport::runner::RunWithDocument(
+			static_cast<int>(argv.size()),
+			argv.data(),
+			conflictOutput,
+			conflictErrors,
+			document,
+			plan,
+			request
+		) == 2
+	);
+	CHECK(conflictErrors.str().find("conflicts with caller-owned font inputs") != std::string::npos);
+	request.SourceFonts = nullptr;
+	request.FontObservations = {};
+	request.FontProvider = nullptr;
+	request.SourceFontHostResidentBytes = 1;
+	std::ostringstream residentConflictOutput, residentConflictErrors;
+	CHECK(
+		engine::imagegraphexport::runner::RunWithDocument(
+			static_cast<int>(argv.size()),
+			argv.data(),
+			residentConflictOutput,
+			residentConflictErrors,
+			document,
+			plan,
+			request
+		) == 2
+	);
+	CHECK(residentConflictErrors.str().find("conflicts with caller-owned font inputs") != std::string::npos);
 }

@@ -3016,6 +3016,32 @@ namespace engine::imagegraphio {
 								return old == value;
 							}))
 							continue;
+						if (node.Type == "pc.text" && value.Port == "color_by_letter_select") {
+							const auto *palette = FindCatalogueInput(*entry, "color_by_letter");
+							const auto *selector = FindCatalogueInput(*entry, value.Port);
+							const auto *mode = std::get_if<EnumValue>(&value.Data);
+							if (!palette || palette->SourceIndex != 31 || palette->SourceKind != "Palette" ||
+								!selector || selector->SourceKind != "SourceArraySelect" || !mode ||
+								mode->Value < 0 || mode->Value > 2 || inputs.size() <= 31 ||
+								!inputs[31].is_object())
+								return Reject(
+									diagnostic,
+									"PXC Text palette selector has no valid source mapping",
+									node.Id,
+									value.Port
+								);
+							Json &record = inputs[31];
+							if (!record.contains("attri")) record["attri"] = Json::object();
+							if (!record["attri"].is_object())
+								return Reject(
+									diagnostic,
+									"PXC Text palette attributes are malformed",
+									node.Id,
+									value.Port
+								);
+							record["attri"]["array_select"] = mode->Value;
+							continue;
+						}
 						if (node.Type == "pc.stripe" && value.Port == "colors_mapped") {
 							const auto *gradientInput = FindCatalogueInput(*entry, "colors");
 							const auto *mapped = std::get_if<bool>(&value.Data);

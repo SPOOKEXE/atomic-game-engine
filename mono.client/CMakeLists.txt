@@ -37,6 +37,8 @@ mono_add_library(client
 		Engine::imagegraph
 		# Bounded host physics for authored Composer rigid-body journals.
 		Engine::imagegraphphysics
+		# Exact process-owned font read capabilities and bounded byte-font decoding.
+		Engine::imagegraphfont
 
 		Engine::render
 

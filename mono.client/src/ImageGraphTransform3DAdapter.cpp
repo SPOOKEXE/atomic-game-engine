@@ -1,5 +1,6 @@
 #include "ImageGraphTransform3DAdapter.hpp"
 
+#include "ImageGraphFontInputs.hpp"
 #include "ImageGraphSurfaceFormat.hpp"
 
 #include <engine/imagegraphphysics/RigidReplay.hpp>
@@ -76,7 +77,9 @@ namespace client::detail {
 		engine::imagegraph::Diagnostic &diagnostic,
 		engine::imagegraph::HostNodeProvider *hostProvider,
 		engine::imagegraph::CapturedFeedbackHost *replayOwner,
-		uint64_t authoringRevision
+		uint64_t authoringRevision,
+		const engine::imagegraphfont::GraphFontInputs *fonts,
+		const engine::imagegraph::EvaluationRequest *fontInputs
 	) {
 		using namespace engine;
 		engine::render::imagegraph::TransformImage3DRequest request;
@@ -92,6 +95,11 @@ namespace client::detail {
 			true, imagegraph::SourceCacheSampling::NativePlayedPrefix, true
 		};
 		clock.RigidFrameProgress = true;
+		imagegraph::SourceFontContext heldFontContext;
+		if (!BindFontInputs(
+				fonts, fontInputs, heldFontContext, clock, diagnostic, MAXIMUM_TRANSFORM_HOST_BYTES
+			))
+			return false;
 		if (!owner.PrepareNodeInputs(
 				document,
 				plan,

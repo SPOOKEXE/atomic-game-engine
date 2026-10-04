@@ -1,5 +1,7 @@
 #include "ImageGraphCameraAdapter.hpp"
 
+#include "ImageGraphFontInputs.hpp"
+
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/SourceCamera3D.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
@@ -23,7 +25,9 @@ namespace client::detail {
 		engine::imagegraph::Diagnostic &diagnostic,
 		engine::imagegraph::HostNodeProvider *hostProvider,
 		engine::imagegraph::CapturedFeedbackHost *replayOwner,
-		uint64_t authoringRevision
+		uint64_t authoringRevision,
+		const engine::imagegraphfont::GraphFontInputs *fonts,
+		const engine::imagegraph::EvaluationRequest *fontInputs
 	) {
 		ENGINE_PROFILE("imagegraph source camera request");
 		using namespace engine;
@@ -40,6 +44,9 @@ namespace client::detail {
 			true, imagegraph::SourceCacheSampling::NativePlayedPrefix, true
 		};
 		clock.RigidFrameProgress = true;
+		imagegraph::SourceFontContext heldFontContext;
+		if (!BindFontInputs(fonts, fontInputs, heldFontContext, clock, diagnostic, CAMERA_HOST_BYTES))
+			return false;
 		if (!owner.PrepareNodeInputs(
 				document, plan, authoringRevision, seed, node.Id, clock, diagnostic, CAMERA_HOST_BYTES
 			))

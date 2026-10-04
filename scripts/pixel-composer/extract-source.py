@@ -485,6 +485,23 @@ def parse(name, seen):
         chain = body[input_end:chain_end] if input_end is not None else ""
         declaration_end = min(chain_end, following.start()) if following and chain_end >= 0 else chain_end
         declaration = body[match.start():declaration_end] if declaration_end >= 0 else ""
+        # Text's letter palette stores its selection on the physical source input.
+        if name == "Node_Text" and entry["kind"] == "Palette" and entry["index"] == "31":
+            option_calls = list(re.finditer(r"\.setOptions\s*\(", chain))
+            if len(option_calls) == 1:
+                option_args = call_args(chain, option_calls[0].end() - 1)
+                helper = root / "scripts/node_value/node_value.gml"
+                helper_text = strip_comments(helper.read_text()) if helper.is_file() else ""
+                default_zero = re.search(
+                    r"static\s+setOptions\s*=\s*function\s*\([^)]*_val\s*=\s*0\s*\)\s*\{\s*attributes\s*\[\s*\$\s*_key\s*\]\s*=\s*_val", helper_text
+                )
+                if len(option_args) in (4, 5) and unquote(option_args[1]) == "array_select" and default_zero:
+                    labels = choices(option_args[2], body)
+                    default = option_args[4].strip() if len(option_args) == 5 else "0"
+                    if labels == ["Index Loop", "Index Ping-pong", "Random"] and default == "0":
+                        entry["array_select"] = {"default": 0, "choices": labels}
+                        record_constructor_source(name)
+                        record_constructor_source_file("scripts/node_value/node_value.gml")
         entry["_source_classification_state"] = source_classification.state(entry["kind"], declaration)
         entry["source_array_classification"] = _result(entry["_source_classification_state"])
         choice_calls = list(re.finditer(r"\.setChoices\s*\(", chain))

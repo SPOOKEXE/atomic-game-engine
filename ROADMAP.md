@@ -80,7 +80,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Preserve X/Y animation through groups and PXC edits.
 - [_] Add source-compatible argument handling.
 - [_] Establish exact parity with a licensed reference build and matched captures.
-- [_] Integrate bounded font hosts and Text rendering across client, Studio and exports; pass joined CPU validation.
+- [x] Integrate bounded font hosts and Text rendering across client, Studio and exports; pass joined CPU validation.
 - [_] Finish Composer font loading.
 - [_] Finish text layout and rendering.
 - [_] Finish Dopesheet gestures.

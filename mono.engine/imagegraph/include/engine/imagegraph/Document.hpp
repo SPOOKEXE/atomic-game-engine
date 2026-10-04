@@ -104,6 +104,8 @@ namespace engine::imagegraph {
 		DynamicSurface,
 		// Source 3D path anchors retain Z and both spatial handles.
 		Path3D,
+		// Owned runtime font metrics and glyph pixels, never a device handle.
+		Font,
 	};
 
 	// Stable text name of a value type, as written in documents and catalogues.
@@ -722,6 +724,54 @@ namespace engine::imagegraph {
 		bool operator==(const AtlasValue &) const = default;
 	};
 
+	// UTF16 reproduces the inspected sprite-font map; UnicodeScalar is a named native profile.
+	enum class FontCharacterProfile : uint8_t { Utf16, UnicodeScalar };
+	enum class FontRasterProfile : uint8_t {
+		BitmapSurface,
+		NativeGlyphCoverage,
+		SourceObserved,
+		NativeSignedDistance
+	};
+	struct FontGlyph {
+		uint32_t Character = 0;
+		bool Present = true;
+		// Missing bitmap slots still carry their source spacing but have no image.
+		std::optional<uint32_t> Frame;
+		double Advance = 0, Width = 0, Height = 0;
+		Vector2 Offset{};
+		// Source glyph-cache UV data is optional; absence does not invent texture coordinates.
+		std::optional<Vector4> TextureRectangle;
+		uint8_t DistancePaddingPixels = 0;
+		bool operator==(const FontGlyph &) const = default;
+	};
+	struct FontMeasurement {
+		std::string Text;
+		double MaximumLineWidth = 0, LineGap = 0, Width = 0, Height = 0;
+		bool operator==(const FontMeasurement &) const = default;
+	};
+	struct FontData {
+		FontRasterProfile Raster = FontRasterProfile::BitmapSurface;
+		uint8_t DistanceSpread = 0;
+		FontCharacterProfile Characters = FontCharacterProfile::Utf16;
+		// Bitmap maps are complete. File decode observations cover only explicitly requested scalars.
+		bool GlyphMapComplete = true;
+		std::vector<Image> Frames;
+		// Sorted unique character keys; source duplicate map entries retain the last frame.
+		std::vector<FontGlyph> Glyphs;
+		std::vector<FontMeasurement> Measurements;
+		double LineHeight = 0, MissingAdvance = 0, SpaceAdvance = 0;
+		uint32_t FirstCharacter = 0, LastCharacter = 0;
+		// Raw sprite-font string map range controls the special missing-space branch.
+		bool HasCharacterRange = false;
+		std::optional<Image> SourceTexture;
+		std::string Identity;
+		bool operator==(const FontData &) const = default;
+	};
+	struct FontValue {
+		OwnedPayload3D<FontData> Data;
+		bool operator==(const FontValue &) const = default;
+	};
+
 	struct StructData;
 	struct StructValue {
 		OwnedPayload3D<StructData> Data;
@@ -877,7 +927,8 @@ namespace engine::imagegraph {
 		TilesetValue,
 		RigidValue,
 		AtlasValue,
-		StrandValue>;
+		StrandValue,
+		FontValue>;
 
 	// Source arrays may mix leaves, nested arrays and owned surfaces. No pointer survives evaluation.
 	struct SourceArrayItem {
@@ -945,7 +996,8 @@ namespace engine::imagegraph {
 		TilesetValue,
 		RigidValue,
 		AtlasValue,
-		StrandValue>;
+		StrandValue,
+		FontValue>;
 
 	// Fields retain owned runtime values; nesting never creates shared mutable references.
 	struct StructData {
@@ -1058,6 +1110,11 @@ namespace engine::imagegraph {
 
 	struct SourceSeparatedVec2Data;
 
+	// Native bindings identify source sampler arguments by text without adding source archive properties.
+	struct NativeSamplerBinding {
+		std::string Argument, Texture;
+		bool operator==(const NativeSamplerBinding &) const = default;
+	};
 	// One authored node instance. Id remains stable when nodes are reordered.
 	struct Node {
 		// Durable instance identifier.
@@ -1092,6 +1149,8 @@ namespace engine::imagegraph {
 		std::vector<AuthoredValue> SourceProperties{};
 		// Source separated Vec2 axes retain independent scalar keys and the dormant ordinary animator.
 		OwnedPayload3D<SourceSeparatedVec2Data> SourceSeparatedVec2Animators{};
+		// Literal texture assets bound to named native HLSL sampler arguments.
+		std::vector<NativeSamplerBinding> NativeSamplerBindings{};
 		// Compares all authored node fields.
 		bool operator==(const Node &) const = default;
 	};
@@ -1446,6 +1505,9 @@ namespace engine::imagegraph {
 
 	// Bounds graph work and every CPU image allocation.
 	struct Limits {
+		static constexpr size_t MaximumNativeSamplerBindingsPerNode = 16;
+		static constexpr size_t MaximumNativeSamplerArgumentBytes = 128;
+		static constexpr size_t MaximumNativeSamplerTextureBytes = 255;
 		// Maximum authored node count.
 		static constexpr size_t MaximumNodes = 4096;
 		// Maximum authored link count.
@@ -1567,6 +1629,9 @@ namespace engine::imagegraph {
 		Image Data;
 	};
 
+	struct SourceFontContext;
+	struct SourceFontObservation;
+	class SourceFontProvider;
 	struct HostNodeCapture;
 	struct SourceBuiltinRandomCapture;
 	class HostNodeProvider;
@@ -1609,6 +1674,12 @@ namespace engine::imagegraph {
 		std::span<const HostNodeCapture> HostCaptures{};
 		std::span<const SourceBuiltinRandomCapture> BuiltinRandomCaptures{};
 		HostNodeProvider *HostProvider = nullptr;
+		// Explicit source font namespace and row-bound glyph observations, borrowed synchronously.
+		const SourceFontContext *SourceFonts = nullptr;
+		std::span<const SourceFontObservation> FontObservations{};
+		SourceFontProvider *FontProvider = nullptr;
+		// Caller-owned font configuration and provider capacities remain resident during evaluation.
+		uint64_t SourceFontHostResidentBytes = 0;
 		// Host observations are captured once; the evaluator never reads a clock or source path.
 		std::span<const AuthoredValue> PcxObservations{};
 		std::string_view ProjectName{};
@@ -1807,7 +1878,8 @@ namespace engine::imagegraph {
 		Audio,
 		FluidDomain,
 		Sdf,
-		Gradient
+		Gradient,
+		Font
 	};
 	struct SourceSocketDomain {
 		ValueType Type = ValueType::Any;
@@ -1887,6 +1959,10 @@ namespace engine::imagegraph {
 
 	// Parses a document without discarding incomplete or unknown authored nodes.
 	Status Read(const std::string &text, Document &document, Diagnostic &diagnostic);
+	// Bounds the live allocation footprint of a replacement parse,
+	// including the retained old document.
+	Status
+	Read(std::string_view text, Document &document, Diagnostic &diagnostic, uint64_t maximumOperationBytes);
 
 	// Upgrades a valid legacy v1 document to the v2 authored grammar.
 	Status Migrate(Document &document, Diagnostic &diagnostic);

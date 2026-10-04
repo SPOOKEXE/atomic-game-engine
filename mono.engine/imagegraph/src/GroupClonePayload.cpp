@@ -1,3 +1,4 @@
+#include "NativeSamplerBindings.hpp"
 #include "SourceSeparatedVec2.hpp"
 #include "ValuePayload.hpp"
 
@@ -79,6 +80,8 @@ namespace engine::imagegraph {
 				if (!size || !add(*size - sizeof(Value))) return std::nullopt;
 			}
 		}
+		const auto samplers = detail::NativeSamplerBindingsPayloadBytes(node, false);
+		if (!samplers || !add(*samplers)) return std::nullopt;
 		const auto axes = detail::SeparatedVec2Bytes(node, false);
 		if (!axes || !add(*axes)) return std::nullopt;
 		return bytes;
@@ -125,6 +128,8 @@ namespace engine::imagegraph {
 		for (const auto &node : document.Nodes) {
 			if (detail::ValidateSeparatedVec2(node, aggregateKeys, axesDiagnostic) != Status::Ok)
 				return std::nullopt;
+			const auto samplers = detail::NativeSamplerBindingsPayloadBytes(node, true);
+			if (!samplers || !add(*samplers)) return std::nullopt;
 			const auto axes = detail::SeparatedVec2Bytes(node, true);
 			if (!axes || !add(*axes)) return std::nullopt;
 			if (node.DynamicOutputs.size() > Limits::MaximumDynamicOutputsPerNode) return std::nullopt;

@@ -20,6 +20,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
@@ -111,6 +112,11 @@ namespace client {
 		// Copies graph arguments before startup or replaces the live host table atomically.
 		engine::imagegraph::Status PrepareImageGraphArguments(
 			const engine::imagegraph::SourceArgumentOptions &options,
+			engine::imagegraph::Diagnostic &diagnostic
+		);
+		// Installs an explicit font namespace and exact file grants before the frame loop runs.
+		engine::imagegraph::Status PrepareImageGraphFonts(
+			const engine::imagegraphfont::GraphFontConfiguration &configuration,
 			engine::imagegraph::Diagnostic &diagnostic
 		);
 

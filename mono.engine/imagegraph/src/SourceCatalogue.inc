@@ -29172,6 +29172,8 @@ S	I	color	0
 I	color_by_letter	Color by Letter	31	Palette	array	a colour 1 c 255 255 255 255	
 S	I	color_by_letter	1
 A	I	color_by_letter	1
+I	color_by_letter_select	Color by Letter Array Select	-1	SourceArraySelect	enum	e 0	Index Loop;Index Ping-pong;Random
+S	I	color_by_letter_select	?
 I	texture	Texture	38	Surface	image		
 S	I	texture	0
 I	render_background	Render Background	16	Bool	boolean	b 0	

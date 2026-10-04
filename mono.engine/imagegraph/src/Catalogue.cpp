@@ -229,6 +229,14 @@ namespace engine::imagegraph {
 					for (CatalogueOutput &output : node.Outputs)
 						if (output.Id == "value") output.Type = ValueType::Any;
 				}
+				// Source Text emits a complete per-letter Atlas array.
+				if (heads[index].Type == "pc.text")
+					for (CatalogueOutput &output : node.Outputs)
+						if (output.Id == "draw_data") output.Type = ValueType::Array;
+				// Only source Font getters accept the owned bitmap font carrier.
+				if (heads[index].Type == "pc.font_bitmap")
+					for (CatalogueOutput &output : node.Outputs)
+						if (output.Id == "font") output.Type = ValueType::Font;
 				// These source colour junctions emit palettes despite declaring VALUE_TYPE.color.
 				if (heads[index].Type == "pc.gradient_extract" || heads[index].Type == "pc.gradient_sample")
 					for (CatalogueOutput &output : node.Outputs)

@@ -1,5 +1,6 @@
 #include "PixelBuilderPayload.hpp"
 
+#include "NativeSamplerBindings.hpp"
 #include "ValuePayload.hpp"
 
 #include <algorithm>
@@ -78,6 +79,7 @@ namespace engine::imagegraph {
 			   RigidPlaying == other.RigidPlaying && RigidFrameProgress == other.RigidFrameProgress &&
 			   SourceCachePlayback == other.SourceCachePlayback &&
 			   SimulationAuthoringRevision == other.SimulationAuthoringRevision && Entropy == other.Entropy &&
+			   Fonts == other.Fonts && FontObservations == other.FontObservations &&
 			   PcxObservations == other.PcxObservations && ProjectName == other.ProjectName &&
 			   SimulationCacheCaptures == other.SimulationCacheCaptures &&
 			   SameSequence(
@@ -183,6 +185,7 @@ namespace engine::imagegraph::detail {
 				document.Outputs.size() > Limits::MaximumOutputs)
 				return false;
 			for (const auto &node : document.Nodes) {
+				if (ValidateNativeSamplerBindings(node, document.FormatVersion)) return false;
 				if (node.Values.size() > Limits::MaximumArrayElements) return false;
 				for (const auto &value : node.Values)
 					if (!ValidValuePayload(value.Data, false)) return false;
@@ -197,6 +200,7 @@ namespace engine::imagegraph::detail {
 			return true;
 		}
 		bool FrozenCapture(const HostNodeCapture &capture) {
+			if (ValidateNativeSamplerBindings(capture.Authored)) return false;
 			if (!std::isfinite(capture.Subframe) || capture.Subframe < 0 || capture.Subframe >= 1 ||
 				uint8_t(capture.State) > uint8_t(HostCaptureState::Failed) ||
 				(capture.CameraPolicy && !ValidSourceCameraEvaluationPolicy(*capture.CameraPolicy)) ||
@@ -293,6 +297,17 @@ namespace engine::imagegraph::detail {
 			bytes = Add(bytes, Text(image.SourceId, retained));
 			bytes = Add(bytes, ImageBytes(image.Data, retained));
 		}
+		if (data.Fonts) {
+			const auto extra = SourceFontContextRetainedBytes(*data.Fonts);
+			if (!extra) return UINT64_MAX;
+			bytes = Add(bytes, *extra - sizeof(SourceFontContext));
+		}
+		bytes = Add(bytes, Container(data.FontObservations, retained));
+		for (const auto &record : data.FontObservations) {
+			const auto extra = SourceFontObservationRetainedBytes(record);
+			if (!extra) return UINT64_MAX;
+			bytes = Add(bytes, *extra - sizeof(record));
+		}
 		bytes = Add(bytes, Container(data.HostCaptures, retained));
 		for (const auto &capture : data.HostCaptures) {
 			const auto node = NodeClonePayloadBytes(capture.Authored);
@@ -364,15 +379,16 @@ namespace engine::imagegraph::detail {
 			data.AudioClips.size() > Limits::MaximumArrayElements ||
 			data.ImageSources.size() > Limits::MaximumArrayElements ||
 			data.HostCaptures.size() > Limits::MaximumNodes ||
+			data.FontObservations.size() > Limits::MaximumNodes ||
 			data.Entropy.size() > Limits::MaximumArrayElements)
 			return false;
 		if (data.NineSlice) {
 			const auto &recipe = *data.NineSlice;
 			if (data.Authored != Document{} || !data.AudioFrames.empty() || !data.AudioClips.empty() ||
-				!data.ImageSources.empty() || !data.HostCaptures.empty() ||
-				!data.BuiltinRandomCaptures.empty() || data.Simulation || data.Surfaces || data.Random ||
-				data.DataHistory || data.RigidHistory || data.SliceStack || data.Groups ||
-				!data.Entropy.empty() || !data.PcxObservations.empty() ||
+				!data.ImageSources.empty() || !data.HostCaptures.empty() || data.Fonts ||
+				!data.FontObservations.empty() || !data.BuiltinRandomCaptures.empty() || data.Simulation ||
+				data.Surfaces || data.Random || data.DataHistory || data.RigidHistory || data.SliceStack ||
+				data.Groups || !data.Entropy.empty() || !data.PcxObservations.empty() ||
 				!data.SimulationCacheCaptures.empty() || !data.ProjectName.empty() ||
 				!ValidSurfaceLayout(recipe.Source, data.MaximumImageDimension, Limits::MaximumArrayBytes) ||
 				!FiniteSurfaceSamples(recipe.Source) || recipe.Source.Width == 0 ||
@@ -417,6 +433,14 @@ namespace engine::imagegraph::detail {
 		if (data.SimulationCacheCaptures.size() > Limits::MaximumNodes) return false;
 		for (const auto &node : data.SimulationCacheCaptures)
 			if (node.empty() || node.size() > Limits::MaximumTextBytes) return false;
+		Diagnostic fontDiagnostic;
+		if (ValidateSourceFontObservations(
+				data.Fonts ? &*data.Fonts : nullptr,
+				data.FontObservations,
+				Limits::MaximumArrayBytes,
+				fontDiagnostic
+			) != Status::Ok)
+			return false;
 		if (data.ProjectName.size() > Limits::MaximumTextBytes ||
 			data.PcxObservations.size() > Limits::MaximumArrayElements)
 			return false;

@@ -1,5 +1,6 @@
 #include "ImageGraphSdfAdapter.hpp"
 
+#include "ImageGraphFontInputs.hpp"
 #include "ImageGraphSurfaceFormat.hpp"
 
 #include <engine/core/Profiling.hpp>
@@ -124,7 +125,9 @@ namespace client::detail {
 		engine::imagegraph::Diagnostic &diagnostic,
 		engine::imagegraph::HostNodeProvider *hostProvider,
 		engine::imagegraph::CapturedFeedbackHost *replayOwner,
-		uint64_t authoringRevision
+		uint64_t authoringRevision,
+		const engine::imagegraphfont::GraphFontInputs *fonts,
+		const engine::imagegraph::EvaluationRequest *fontInputs
 	) {
 		ENGINE_PROFILE("imagegraph source sdf request");
 		using namespace engine;
@@ -138,6 +141,9 @@ namespace client::detail {
 		// Native client snapshots sample played frames, including fixed seeks.
 		clock.RigidPlaying = true;
 		clock.RigidFrameProgress = true;
+		imagegraph::SourceFontContext heldFontContext;
+		if (!BindFontInputs(fonts, fontInputs, heldFontContext, clock, diagnostic, SDF_HOST_BYTES))
+			return false;
 		if (!owner.PrepareNodeInputs(
 				document, plan, authoringRevision, seed, node.Id, clock, diagnostic, SDF_HOST_BYTES
 			))

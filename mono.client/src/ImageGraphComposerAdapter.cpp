@@ -1,5 +1,7 @@
 #include "ImageGraphComposerAdapter.hpp"
 
+#include "ImageGraphFontInputs.hpp"
+
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
 
@@ -118,7 +120,9 @@ namespace client::detail {
 		engine::imagegraph::Diagnostic &diagnostic,
 		engine::imagegraph::HostNodeProvider *provider,
 		engine::imagegraph::CapturedFeedbackHost *replay,
-		uint64_t revision
+		uint64_t revision,
+		const engine::imagegraphfont::GraphFontInputs *fonts,
+		const engine::imagegraph::EvaluationRequest *fontInputs
 	) {
 		ENGINE_PROFILE("imagegraph cooked composer request");
 		using namespace engine;
@@ -132,6 +136,11 @@ namespace client::detail {
 		clock.RigidProvider = &rigid;
 		clock.RigidPlaying = true;
 		clock.RigidFrameProgress = true;
+		imagegraph::SourceFontContext heldFontContext;
+		if (!BindFontInputs(
+				fonts, fontInputs, heldFontContext, clock, diagnostic, render::hlsl::MAXIMUM_SURFACE_JOB_BYTES
+			))
+			return false;
 		if (!owner.PrepareNodeInputs(
 				document,
 				plan,

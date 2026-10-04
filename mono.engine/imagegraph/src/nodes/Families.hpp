@@ -35,6 +35,9 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceAmbientOcclusionExecutors();
 	std::span<const ExecutorEntry> SourceSimpleShapeExecutors();
 	std::span<const ExecutorEntry> SourceTextExecutors();
+	std::span<const ExecutorEntry> SourceFontDataExecutors();
+	std::span<const ExecutorEntry> SourceFontTextExecutors();
+	std::span<const ExecutorEntry> SourceBitmapFontExecutors();
 	std::span<const ExecutorEntry> SourcePcxExecutors();
 	std::span<const ExecutorEntry> SourceAnimationExecutors();
 	std::span<const ExecutorEntry> SourceRoutingExecutors();
