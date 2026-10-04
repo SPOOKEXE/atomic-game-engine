@@ -3,6 +3,7 @@
 // Fixed headless workloads with analytical expected outputs. No external source parity is claimed.
 #include "../../src/nodes/Processor.hpp"
 #include "AudioWindowObservation.hpp"
+#include "FontTextWorkload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/WavPreview.hpp>
@@ -68,7 +69,8 @@ namespace engine::imagegraph::testing {
 			Julia128EightIterations,
 			Gabor128Seeded,
 			Flow128DefaultDetail,
-			Bubble64SeededDefaultDensity
+			Bubble64SeededDefaultDensity,
+			BitmapTextEightRows
 		};
 		static_assert(static_cast<int>(Family::CylinderProfile) == 14);
 		static_assert(static_cast<int>(Family::ConeDefault8) == 15);
@@ -92,6 +94,8 @@ namespace engine::imagegraph::testing {
 		static_assert(static_cast<int>(Family::Gabor128Seeded) == 31);
 		static_assert(static_cast<int>(Family::Flow128DefaultDetail) == 32);
 		static_assert(static_cast<int>(Family::Bubble64SeededDefaultDensity) == 33);
+		static_assert(static_cast<int>(Family::BitmapTextEightRows) == 34);
+		std::unique_ptr<FontTextWorkload> FontText;
 		Family Kind;
 		Document Authored;
 		Plan Compiled;
@@ -112,6 +116,13 @@ namespace engine::imagegraph::testing {
 		uint64_t OutputHash = 0;
 
 		explicit SourceFamilyFixture(Family family) : Kind(family) {
+			if (family == Family::BitmapTextEightRows) {
+				FontText = std::make_unique<FontTextWorkload>();
+				InputHash = FontText->InputHash;
+				Evaluate();
+				OutputHash = Verify();
+				return;
+			}
 			if (IsAudioWindow()) {
 				AudioObservation = std::make_unique<AudioWindowObservationFixture>(
 					family == Family::AudioWindow4096 ? 4096 : 65536
@@ -804,10 +815,11 @@ namespace engine::imagegraph::testing {
 			return Kind == Family::HdrDirectional || Kind == Family::HdrZoom;
 		}
 		bool IsSourceImage() const {
-			return Kind == Family::Julia128 || Kind == Family::Gabor128 || Kind == Family::Julia128EightIterations ||
-				   Kind == Family::Gabor128Seeded || Kind == Family::Flow128DefaultDetail ||
-				   Kind == Family::Bubble64SeededDefaultDensity || Kind == Family::Herringbone128 ||
-				   Kind == Family::Honeycomb128 || Kind == Family::Heightmap80;
+			return Kind == Family::Julia128 || Kind == Family::Gabor128 ||
+				   Kind == Family::Julia128EightIterations || Kind == Family::Gabor128Seeded ||
+				   Kind == Family::Flow128DefaultDetail || Kind == Family::Bubble64SeededDefaultDensity ||
+				   Kind == Family::Herringbone128 || Kind == Family::Honeycomb128 ||
+				   Kind == Family::Heightmap80;
 		}
 		std::string_view SourceNodeName() const {
 			switch (Kind) {
@@ -836,7 +848,8 @@ namespace engine::imagegraph::testing {
 			Document golden = Authored;
 			for (auto &[name, value] : golden.Nodes[0].Values)
 				if (name == "dimension")
-					value = Kind == Family::Julia128EightIterations ? Value{Vector2{4, 4}} : Value{Vector2{4, 3}};
+					value =
+						Kind == Family::Julia128EightIterations ? Value{Vector2{4, 4}} : Value{Vector2{4, 3}};
 			Plan plan;
 			Diagnostic diagnostic;
 			if (Compile(golden, plan, diagnostic) != Status::Ok) Fail("pinned source golden compile");
@@ -863,10 +876,11 @@ namespace engine::imagegraph::testing {
 				actual.Pixels.size() != size_t(width) * height * 4)
 				Fail("pinned source golden shape");
 			for (size_t pixel = 0; pixel < size_t(width) * height; ++pixel) {
-				const auto expected = isJulia ? julia[pixel / width][pixel % width]
-						: Kind == Family::Gabor128Seeded ? gabor[pixel / width][pixel % width]
-						: Kind == Family::Flow128DefaultDetail ? flow[pixel / width][pixel % width]
-						: bubble[pixel / width][pixel % width];
+				const auto expected = isJulia						   ? julia[pixel / width][pixel % width]
+									  : Kind == Family::Gabor128Seeded ? gabor[pixel / width][pixel % width]
+									  : Kind == Family::Flow128DefaultDetail
+										  ? flow[pixel / width][pixel % width]
+										  : bubble[pixel / width][pixel % width];
 				for (size_t channel = 0; channel < 4; ++channel) {
 					const uint8_t expectedChannel = channel < 3 ? expected : 255;
 					if (actual.Pixels[pixel * 4 + channel] != expectedChannel)
@@ -885,6 +899,10 @@ namespace engine::imagegraph::testing {
 			{{64, .5, false}, {64, .5, true}, {0, .5, false}, {0, .5, true}}
 		};
 		void Evaluate() {
+			if (FontText) {
+				FontText->Evaluate();
+				return;
+			}
 			if (IsAudioWindow()) {
 				// Replace the first retained waveform, then restore it so every signed result remains
 				// observable.
@@ -2115,6 +2133,7 @@ namespace engine::imagegraph::testing {
 		}
 
 		uint64_t Verify() const {
+			if (FontText) return FontText->Verify();
 			uint64_t hash = 14695981039346656037ULL;
 			if (IsAudioWindow()) {
 				AudioObservation->VerifyInputs();
@@ -2179,9 +2198,9 @@ namespace engine::imagegraph::testing {
 				for (uint8_t byte : HdrOutput.Pixels)
 					hash = HashBytes(hash, byte, 1);
 			} else if (IsSourceImage()) {
-				const uint32_t side = Kind == Family::Heightmap80 ? 80
-							 : Kind == Family::Bubble64SeededDefaultDensity ? 64
-							 : 128;
+				const uint32_t side = Kind == Family::Heightmap80					 ? 80
+									  : Kind == Family::Bubble64SeededDefaultDensity ? 64
+																					 : 128;
 				if (SourceOutput.Width != side || SourceOutput.Height != side || SourceOutput.Pixels.empty())
 					Fail("source image output shape");
 				if (Kind == Family::Julia128) {

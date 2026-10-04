@@ -43,7 +43,8 @@ TEST_CASE(
 		  Fixture::Family::Julia128EightIterations,
 		  Fixture::Family::Gabor128Seeded,
 		  Fixture::Family::Flow128DefaultDetail,
-		  Fixture::Family::Bubble64SeededDefaultDensity}) {
+		  Fixture::Family::Bubble64SeededDefaultDensity,
+		  Fixture::Family::BitmapTextEightRows}) {
 		CAPTURE(static_cast<int>(family));
 		Fixture fixture(family);
 		const auto hash = fixture.Verify();
@@ -51,4 +52,20 @@ TEST_CASE(
 		CHECK(fixture.Verify() == hash);
 		CHECK(fixture.InputHash != 0);
 	}
+}
+
+TEST_CASE(
+	"profiled Text workload refuses insufficient dimension allowance without replacing pixels",
+	"[imagegraph][source_family]"
+) {
+	engine::imagegraph::testing::FontTextWorkload fixture;
+	fixture.Evaluate();
+	const auto before = fixture.Output;
+	const auto hash = fixture.Verify();
+	CHECK(fixture.TryEvaluate(1) == engine::imagegraph::Status::LimitExceeded);
+	CHECK(fixture.Output.Images == before.Images);
+	CHECK(fixture.Output.Items == before.Items);
+	CHECK(fixture.Verify() == hash);
+	fixture.Evaluate();
+	CHECK(fixture.Verify() == hash);
 }

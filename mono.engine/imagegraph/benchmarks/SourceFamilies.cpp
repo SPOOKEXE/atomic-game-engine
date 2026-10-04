@@ -205,6 +205,10 @@ namespace {
 				(Graph.IsSourceImage() &&
 				 (!required("imagegraph.source." + std::string(Graph.SourceNodeName())) ||
 				  !required("imagegraph.image.allocate"))) ||
+				(Graph.Kind == Fixture::Family::BitmapTextEightRows &&
+				 (!required("imagegraph.bitmap_font") || !required("imagegraph.text.prepare_batch") ||
+				  !required("imagegraph.text.prepare_row") || !required("imagegraph.text.admit_batch") ||
+				  !required("imagegraph.text") || !required("imagegraph.image.allocate"))) ||
 				(Graph.Kind == Fixture::Family::Solid &&
 				 (!required("imagegraph.node.generate") || !required("imagegraph.node.filter") ||
 				  !required("imagegraph.image.allocate")))) {
@@ -533,5 +537,10 @@ BENCH("128x128 authored Flow detail 1..8, eight iterations and nine-step admissi
 }
 BENCH("64x64 authored Bubble seed 17 default density 0.5, 32 samples per pixel", 1) {
 	static ProfileFixture fixture(Fixture::Family::Bubble64SeededDefaultDensity);
+	fixture.Measure();
+}
+
+BENCH("Persisted Bitmap Font to eight Text rows, 5888 literal glyphs", 1) {
+	static ProfileFixture fixture(Fixture::Family::BitmapTextEightRows);
 	fixture.Measure();
 }

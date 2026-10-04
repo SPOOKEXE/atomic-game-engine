@@ -12423,5 +12423,39 @@
       "sha256": "3bde03a16da24ebfc25bde12d23126e9227528a048432062eb2a01cbb9b79891"
     },
     "acceptance": "Bounded core font/Text and font-byte/artifact hosts integrated across products with joined CPU validation. Broad font loading/layout, measured host costs, licensed captures and manual Studio workflows are not marked complete."
+  },
+  "font_text_profile_87": {
+    "packet": {
+      "path": "/tmp/pc-font-profile86/FontTextProfile86.patch",
+      "sha256": "784badff179c1805fc89d7bb9387ba2a91e6a45c0e2e0e429ea3fa9387d5330f"
+    },
+    "root_review": "All four-path patch bodies, independent full-white pixel oracle, refusal preservation and all base/candidate hashes read and verified before/after apply.",
+    "command": [
+      "just",
+      "imagegraph-source-family-bench",
+      "1"
+    ],
+    "exit": 0,
+    "cpu_preflight": {
+      "cases": 248,
+      "assertions": 7924,
+      "exit": 0
+    },
+    "profile_scope": "bench optimized CPU with heap hooks; eight warmups and one measured sample. Persisted Bitmap Font/Font Data to eight Text rows, 5888 glyphs and 23552 exact white channel bytes. Existing source-family/array suites completed. Raw benchmark output printed to stdout only.",
+    "output_observation": "Initial combined output was tool-truncated. Repeated source-family suite with samples1 and an in-memory stdout filter for measured family34; exit0 and68 selected lines observed, including all49 hierarchy spans, allocation byte/count counters and heap tags. No benchmark output file written.",
+    "failed_invocation": {
+      "command": [
+        ".cache/build/bench/bench/bench_imagegraph",
+        "--help"
+      ],
+      "exit": 134,
+      "observed_error": "array profile permits eight warmups and at most five samples",
+      "reason": "BenchMain silently ignores unknown help argument and runs default unfiltered ten samples. Root inspected actual parser and used supported explicit suite/samples thereafter. Not counted as acceptance."
+    },
+    "remaining": [
+      "Real file-font decoder, Unicode/SDF and artifact host profiling",
+      "GPU and live Studio workflows",
+      "Licensed reference comparison"
+    ]
   }
 }
