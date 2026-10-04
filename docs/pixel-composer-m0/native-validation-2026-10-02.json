@@ -11506,5 +11506,18 @@
     "integration": "Existing font lane is preparing an outside combined patch against the recorded base, preserving accepted artwork, camera, SourceBounds and arguments. Root remains the live checkout writer and runtime owner.",
     "native_sampler_applicability": "git apply --check on the existing foundation fails at Document.cpp:2643 against this base. Merge current parser and retained-size logic surgically; no rejected patch was applied.",
     "roadmap": "Font loading and text layout/rendering remain unchecked until combined runtime validation."
+  },
+  "named_renderer_review_80": {
+    "status": "Root fully read1139 patch lines and manifest; not applied, built or runtime accepted.",
+    "path": "/tmp/pc-large-sequence70/named-render/NamedRendererBindings.patch",
+    "sha256": "8ccdfe0f8273821cd3d4e1aa32c35dd2ebc5c3d7917070914a5e5c7338746fc0",
+    "coverage": "Owned/named texture variant; exact owner-scoped publication revisions; cooked Sampler2D argument matching; request and capture cache facts; device lookup before recording; proposed CPU/GPU fixture changes.",
+    "scheduling_audit": "All-named input requests remove every upload texture write and leave raster reads external. The upload callback still creates and uploads the vertex buffer consumed by raster. Require an explicit represented dependency rather than relying on insertion-order scheduling; runtime failure has not been reproduced.",
+    "follow_up": "Renderer lane is investigating a corrective supplement. Full host preflight, feedback capability comparisons and large-sequence clock readiness remain separate unfinished consumers.",
+    "limits": [
+      "No device execution or GPU acceptance.",
+      "Outside strict-source reports are not joined runtime evidence.",
+      "Native sampler foundation and current renderer ownership changes must be merged before acceptance."
+    ]
   }
 }
