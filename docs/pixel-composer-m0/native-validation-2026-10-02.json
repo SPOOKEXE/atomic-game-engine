@@ -12232,5 +12232,124 @@
       "Audit final shared font wrappers",
       "Coherent integration/runtime/GPU acceptance"
     ]
+  },
+  "font_fixture_closure_85": {
+    "status": "Root applied reviewed query quota and explicit observed empty alias-map fixture corrections. Full native imagegraph and established Studio CPU scopes pass. Module separation and fresh joined acceptance remain open.",
+    "packets": [
+      {
+        "path": "/tmp/pc-bounded-reader-fixture83/BoundedReaderFixture83.patch",
+        "sha256": "10d919942a1a5bb7e4c096a9597f1ebc5594d8420d7aae0c39a59230793442b4"
+      },
+      {
+        "path": "/tmp/pc-studio-alias82/StudioAliasMapFixture82.patch",
+        "sha256": "09ee36d9f231a440519882575c004648010d481505b231329f93095ccdc96b8f"
+      }
+    ],
+    "review": [
+      "Final query vector growth requires512old+1024new string slots before document/parser/line/ID residency. Positive fixture now admits derived vector peak plus bounded80KiB headroom, still well below1024leaked IDs; lower cap preserves nonempty old destination on refusal.",
+      "Studio fixture explicitly observes empty alias map; source alias lookup occurs before held-playing font generation. No kernel lookup bypass or invented namespace."
+    ],
+    "runs": [
+      {
+        "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-85-font-fixture-closure.log",
+        "sha256": "6a1456c8942a3230c8a74a3c20f289e5d9795a9e0ee78f63cf6cb722bd672f94",
+        "exit": 0
+      },
+      {
+        "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-85-font-fixture-closure.log",
+        "sha256": "58aabccd80580c2911cf1677ee8a7fb38e62897195c5c83820388f6ec3a8c845",
+        "exit": 0,
+        "cases": 2667,
+        "assertions": 1856143
+      },
+      {
+        "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-85-font-fixture-closure-cpu.log",
+        "sha256": "26463ef84659b3eba5b454bb7cbc8d5a31142e4a0665661b78fa60017c4ed119",
+        "exit": 0,
+        "cases": 236,
+        "assertions": 29794
+      }
+    ],
+    "scope_error": {
+      "description": "Root mistakenly invoked Studio executable without established CPU filter; run included GPU cases. Not acceptance evidence for unapproved GPU/live Studio work. Restored exact established236case CPU filter.",
+      "run": {
+        "path": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-85-font-fixture-closure.log",
+        "sha256": "a4df4dc62c3d89436d5272d247500ea4a123254de0fd430dd1061029d932c111",
+        "exit": 42,
+        "cases": 909,
+        "cases_passed": 907,
+        "cases_failed": 2,
+        "assertions": 42880
+      },
+      "failures": [
+        "Studio normal MCP manifest is available: McpContract.cpp243 resources equality",
+        "Studio factory MCP manifest is available: McpContract.cpp243 resources equality"
+      ],
+      "next": "Audit resource manifest expectation coherently with new module. Do not repeat unfiltered Studio run."
+    },
+    "checks": [
+      "Touched fixture clang-format-21 dry-run Werror passed",
+      "git diff --check passed"
+    ],
+    "remaining": [
+      "Immutable sharedL10 imagegraphfont module split",
+      "MCP resource inventory expectation audit",
+      "Fresh module links/architecture/joined CPU acceptance",
+      "Licensed parity and live Studio"
+    ]
+  },
+  "axis_io_rebase_review_85": {
+    "status": "Outside-only preimage and semantic equivalence verified; no live apply/runtime.",
+    "packet": {
+      "path": "/tmp/pc-axis-font95/GenericSourceAxes.patch",
+      "sha256": "95d1d266ff13ca3114999e51f1d56f028c87cae50223580738841c9bf281354c"
+    },
+    "proof": [
+      "All591changedlines match original reviewedIO80packet",
+      "New suite and persistence doc byte-identical",
+      "All4currentlivepreimages match manifest andgitapplycheck passes"
+    ],
+    "prerequisite": "Full source-axis core definition/getter packet remains unfinished."
+  },
+  "source_axis_supplement_review_85": {
+    "status": "Root fully reviewed398line defaults supplement, logical key count header/110line producer and selected alias/callback fixtures. Full2699line logical packet NOT reviewed/applied.",
+    "defaults": {
+      "path": "/tmp/pc-axis-logical-supplement80/defaults.patch",
+      "sha256": "73c1511821f417ef85fe1eb61e15bfe0744aca6d59dfcc1893a77929ce2bf059"
+    },
+    "logical": {
+      "path": "/tmp/pc-axis-logical-supplement80/logical.patch",
+      "sha256": "db3ffe9f8f3a16065ee58373ce394151f135a2016d67df9b9c1895f2e36b4221"
+    },
+    "review": [
+      "Reserved saved-default validation rejects duplicates with bounded fixed sort scratch and explicit property count. Native and captured-node malformed/duplicate publication fixtures preserve prior outputs.",
+      "Logical counting treats original and projected alias scalar lists as one logical source while residency still charges all copies; bounded search work and aggregate accounting reviewed."
+    ],
+    "remaining": [
+      "Remaining logical transactions/edit/projection source and fixtures",
+      "Full raw getter/unit audit and coherent Font/SourceBounds rebase",
+      "Runtime acceptance"
+    ]
+  },
+  "polar_work_rationale_review_85": {
+    "status": "Root fully read static work-count rationale; no live apply/runtime.",
+    "evidence": {
+      "path": "/tmp/pc-polar82-admission/evidence/work-counts.md",
+      "sha256": "d8982d1f08de96668e074ee380c25f4d44bc399af97ae022b1ab5d931e64a1b6"
+    },
+    "review": "Selected filtering/texel/Lanczos/CleanEdge expression counts derive conservative admission units. Explicitly not measured cycles or standard-library instruction bounds; actual mapped presence and whole-batch mask work remain charged."
+  },
+  "feedback_preflight_proposal_review_85": {
+    "status": "Root fully read proposal and approved outside construction only; no live apply/runtime.",
+    "proposal": {
+      "path": "/tmp/pc-large-sequence70/feedback-journal/budget-aware-preflight-proposal.md",
+      "sha256": "e7f556c19eae41bc3aecbd5be64450c90233fdd6eb1af7e3699d84f9a997db28"
+    },
+    "review": "Actual core remaining allowance bounds transient exact recipe cloning; core retains positive reported growth reservation per preflight. Prefix requests subtract published and candidate journal residency. Provider restored by RAII, existing demand walker authoritative.",
+    "remaining": [
+      "Surgical API/core/feedback integration and capability retained byte accounting",
+      "Atomic refusal/cancellation/provider restoration and actual effective-node fixtures",
+      "Coherent runtime acceptance"
+    ]
   }
 }
