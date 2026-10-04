@@ -12180,5 +12180,57 @@
       "Exact effective-node feedback capability journal",
       "Runtime and GPU acceptance"
     ]
+  },
+  "font_module_review_84": {
+    "status": "Root reviewed outside module separation and21path caller packet; no live apply. Final unified immutable freeze and configured caller checks pending.",
+    "core_packet": {
+      "path": "/tmp/pc-font-module82/FontModuleCore82.patch",
+      "sha256": "ae973e315b0cd15fb4277bf99e49042f5acf2ac2ef3769b96513438785b1621a"
+    },
+    "caller_packet": {
+      "path": "/tmp/pc-font-module82-caller/FontModuleCaller82.patch",
+      "sha256": "20f505379af3d9d9114ffdf616382d9c1438c9134eb8746c817ca9f5f7fd7a84"
+    },
+    "review": [
+      "Read DESIGN, new module policy/CMake, root CMake, CODE_ARCH, exporter dependencies, Runner header/source/test and expected graph changes.",
+      "Normalized all eight moved headers/producers/suites against current live by replacing module namespace/path and grant type. Bodies match except standalone four-field file grant and its explicit filesystem/ContentPolicy includes.",
+      "Read all771 caller patch lines with truncated middle reread. Client replaces export dependency with font; Studio retains exporter and adds font; all caller font types/includes/grant sizes and client suite dependency follow the move."
+    ],
+    "remaining": [
+      "Refresh immutable manifest after latest SDF fixture and root diagnostic changes",
+      "Remove incidental expected graph Unicode escape churn",
+      "Derived reader fixture budget and known-empty Studio alias observation correction",
+      "Configured caller syntax and fresh coherent build/architecture/joined CPU validation"
+    ]
+  },
+  "particle_pages_review_84": {
+    "status": "Root fully read1103line11path particle page device packet; outside strict-only, no live apply/runtime.",
+    "packet": {
+      "path": "/tmp/pc-large-sequence70/particle-device/ParticleSequencePages.patch",
+      "sha256": "7390c557b1371a512a508744660f5a62a18b548ff0bdc9d60e7f54f45a39ed8f"
+    },
+    "review": [
+      "Ready/Published whole-clock barrier, borrowed CPU source, charged device/transfer/padding allocations and consecutive atlas/page route transitions.",
+      "Read all three pure CPU helper fixtures; these do not verify actual device upload or draw behavior."
+    ],
+    "remaining": [
+      "Actual scene last-use fence or contiguous fully completed epoch retirement for replaced/dropped Active pages and old timeline resources",
+      "Whole runtime budget including allocator/capacity coexistence",
+      "Coherent integration and actual CPU/GPU acceptance"
+    ]
+  },
+  "provider_forwarding_review_84": {
+    "status": "Root fully read322line11path provider forwarding patch; outside strict-only, no live apply/runtime.",
+    "packet": {
+      "path": "/tmp/pc-large-sequence70/provider-forwarding/ProviderForwarding.patch",
+      "sha256": "f8f7f3ee649f14e6ae50c9f83d089bb11b1f7b4cff7f59b46b3ecc3de36f179e"
+    },
+    "review": "Renderer capability issuer/validator and client, Runner, export-session, Studio host/intent/preview forwarding retain unavailable-validation diagnostics and empty default capabilities.",
+    "remaining": [
+      "Install Studio cooked artifact before installed-only capability preflight",
+      "Exact effective-node feedback recipe journal and owner/revision behavior fixtures",
+      "Audit final shared font wrappers",
+      "Coherent integration/runtime/GPU acceptance"
+    ]
   }
 }
