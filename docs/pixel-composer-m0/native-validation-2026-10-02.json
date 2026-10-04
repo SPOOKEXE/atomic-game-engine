@@ -11772,5 +11772,31 @@
       "test_sha256": "82a6755b6069076bd1c0dea26e95b631f9e1950ef40a0174b77b182b52850454",
       "extractor_sha256": "bb328a5822c3b56d316f166148da18000f20561e7fb0c8c4e1ee08494a6cc966"
     }
+  },
+  "font_integration_82": {
+    "status": "Corrected coherent source applied; fresh18-target joined ABI build running. No font runtime acceptance yet.",
+    "packet": "/tmp/pc-font-join78/FontJoined78.patch",
+    "sha256": "bb0102c74e2f382d1ef9950b4bb39afd84bd4ce3bcc962a028d6a8ea1810a909",
+    "changed_paths": 95,
+    "root_review": [
+      "Previously fully reviewed Font67, Bitmap71, Native72, client/CLI/artifact/reader/Studio packets and case/sampling/native-sampler supplements.",
+      "58 combined files match previously reviewed files exactly. Six reader function regions independently compared byte-for-byte with reviewed corrected72 bodies.",
+      "All rebase deltas reviewed, including complete Studio corrections and331-line core non-reader merge delta.",
+      "Private export fixture link to Vendor::json preserves public vendor boundary."
+    ],
+    "source_evidence_repair": {
+      "problem": "Merged metadata retained Text palette selection but omitted its pinned constructor evidence.",
+      "path": "scripts/node_text/node_text.gml",
+      "bytes": 27610,
+      "sha256": "34640857e6878bb84c4778649dedfac455a062d2a3be35cbb0b191f3cb8cc9ca",
+      "result": "Verified pinned bytes and restored constructor evidence while preserving existing Refract evidence."
+    },
+    "integrity": "All95 live resulting file hashes match frozen manifest. Clean preimage verified before apply.",
+    "build_log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-82-font-final-closure.log",
+    "remaining": [
+      "Build/link completion.",
+      "Meaningful font and Text runtime fixtures and14 joined CPU scopes.",
+      "Licensed reference parity and live Studio verification."
+    ]
   }
 }
