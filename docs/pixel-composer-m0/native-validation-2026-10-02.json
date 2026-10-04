@@ -7243,6 +7243,248 @@
       ],
       "assertions_passed": 8648,
       "test_cases_passed": 155
+    },
+    {
+      "name": "release77 architecture-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/architecture-release-77-joined.log",
+      "log_sha256": "429cb145146bf45fd5dcd5b3bbcc58514c7dfa4071eaf9d3a8c56a8acd601432",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance."
+    },
+    {
+      "name": "release77 assetc-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assetc-release-77-joined.log",
+      "log_sha256": "f97f5d1bd33cbcd921ad4bc3125f0a17257ffb682cf56014efc6c940aebe9412",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 362,
+      "test_cases_passed": 42
+    },
+    {
+      "name": "release77 assets-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/assets-release-77-joined.log",
+      "log_sha256": "3dce3cf873178ae4f955b6bf52a1e39691abbd3e549e4b590ab1612136677da5",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 32488,
+      "test_cases_passed": 265
+    },
+    {
+      "name": "release77 build-release-77-io-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-77-io-repaired.log",
+      "log_sha256": "6b54d0d3aaaa7663b0fa2faa34c9b9320d4da47d0b0a0dd666c2aada3013cea4",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "build_steps_completed": 3
+    },
+    {
+      "name": "release77 build-release-77-offset-test",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-77-offset-test.log",
+      "log_sha256": "1af9399b69bd9d08b6a29e13225822583137108c345b2115a9a8a400ef9e89f1",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "build_steps_completed": 3
+    },
+    {
+      "name": "release77 build-release-77-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-77-repaired.log",
+      "log_sha256": "39396609e441b8e77f3e638a4777a7f5b768d131172c623eb525ee4559635499",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "build_steps_completed": 8
+    },
+    {
+      "name": "release77 build-release-77-source-bounds",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-77-source-bounds.log",
+      "log_sha256": "b9976cec9613abda14553557baa038e3f41fc86dd73493997975995ce329f05a",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "build_steps_completed": 673
+    },
+    {
+      "name": "release77 cli-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/cli-release-77-joined.log",
+      "log_sha256": "e84e12742db2ae6d8858d5cf236a4035ed5890354db46f95b2b141cf78141ede",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance."
+    },
+    {
+      "name": "release77 client-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/client-release-77-joined.log",
+      "log_sha256": "ebce18553c89c200d479c40665ad5c1b1f00f7b8020f330a14197271a21ad5fc",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 7109,
+      "test_cases_passed": 68
+    },
+    {
+      "name": "release77 export-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-release-77-joined.log",
+      "log_sha256": "6147942c71243ac5332551f6f8fc1665f15abcaf36f9c95529abf46b8eac9996",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 2738,
+      "test_cases_passed": 64
+    },
+    {
+      "name": "release77 export-timeline-release-77-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-timeline-release-77-focused-repaired.log",
+      "log_sha256": "e945f65e82d49e091b8f2c1cc807131c89d595e1c23516f42a2888835d804c0f",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 125,
+      "test_cases_passed": 2
+    },
+    {
+      "name": "release77 gui-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/gui-release-77-joined.log",
+      "log_sha256": "2045667d1e184755bbc3bb18ae1fa9dac88b690d0a43792c0983639042c5711c",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 4974,
+      "test_cases_passed": 331
+    },
+    {
+      "name": "release77 imagegraph-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/imagegraph-release-77-joined.log",
+      "log_sha256": "44304534a2726edf6b4e040182a2fbde7bc1c4ba8b527244561b81e849f6a8a4",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 1853948,
+      "test_cases_passed": 2564
+    },
+    {
+      "name": "release77 io-release-77-joined-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-77-joined-repaired.log",
+      "log_sha256": "88c760b57c2ebc7081c5defebfecf5e368005733d38e54ad1e7a48b6a3b2a457",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 10494,
+      "test_cases_passed": 233
+    },
+    {
+      "name": "release77 io-timeline-release-77-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-timeline-release-77-focused-repaired.log",
+      "log_sha256": "94eb59efcfae5a999f33dcfbec3fe9ee5f914c1c1aa56af8ce826767fec3eac9",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 268,
+      "test_cases_passed": 7
+    },
+    {
+      "name": "release77 io-timeline-release-77-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-timeline-release-77-focused.log",
+      "log_sha256": "bb442f9aa7644b3c7a898596bc55950d2f59d07574e4bf91c16483cf9927170e",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 268,
+      "test_cases_passed": 7
+    },
+    {
+      "name": "release77 nodegraph-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/nodegraph-release-77-joined.log",
+      "log_sha256": "76247998601acfb0267ffc44952fc02e3388d30a49c5c5076f1e53d0ddd62b9c",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 269,
+      "test_cases_passed": 31
+    },
+    {
+      "name": "release77 physics-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/physics-release-77-joined.log",
+      "log_sha256": "7779d334f9db1f7f0b1cbd31c5d0eee946893413cdc8b738375b45d200f29b29",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 715,
+      "test_cases_passed": 43
+    },
+    {
+      "name": "release77 render-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/render-release-77-joined.log",
+      "log_sha256": "79da498298cecd5f097beb9d041d54ef0312cd0b21aa47c192cb54639ad4793d",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 336655,
+      "test_cases_passed": 808
+    },
+    {
+      "name": "release77 server-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/server-release-77-joined.log",
+      "log_sha256": "c0c2b8e790a6d004b61a7b4d112f527e94e629ecfdc8bd55e5b61ab2dbc41d3b",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 2180,
+      "test_cases_passed": 99
+    },
+    {
+      "name": "release77 source-timeline-release-77-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/source-timeline-release-77-focused-repaired.log",
+      "log_sha256": "e28c30a01e37c87cd2338c21d1272635e3640f8482c438fd3fda3f13b85e6049",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 72,
+      "test_cases_passed": 4
+    },
+    {
+      "name": "release77 source-timeline-release-77-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/source-timeline-release-77-focused.log",
+      "log_sha256": "145109d719633180ceba2ccc4af23c27ef71c337f83a985c366f5ec712bf05fe",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 72,
+      "test_cases_passed": 4
+    },
+    {
+      "name": "release77 studio-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-release-77-joined.log",
+      "log_sha256": "b983c12436e102de0ba701615fa158134c3767a3049077467ac9c6a6c4f8cff3",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 29697,
+      "test_cases_passed": 227
+    },
+    {
+      "name": "release77 studio-timeline-release-77-focused-repaired",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-timeline-release-77-focused-repaired.log",
+      "log_sha256": "5fd15854607316eeb18c3e8d66c559573fd30285a0277919e9ffd7ec8a2ed449",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 21214,
+      "test_cases_passed": 82
+    },
+    {
+      "name": "release77 studio-timeline-release-77-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-timeline-release-77-focused.log",
+      "log_sha256": "a8b04238cbe02eb84560eb28613f2af25d8aa5a1e0bd4ea3c25a122857509e59",
+      "exit_code": 0,
+      "result": "passed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "assertions_passed": 21199,
+      "test_cases_passed": 81
     }
   ],
   "excluded_or_failed_runs": [
@@ -8911,6 +9153,33 @@
       "exit_code": 42,
       "result": "failed; retained before native acceptance",
       "scope_note": "Camera release76 fixture repair SHA256 59a9ed0b0aaedb91aceeb71d2a4078fe1db690c4735bcb18848733721fd2a719. Registered cube is pc.3_d_mesh_cube; source Solid exposes a linked dimension, native image.solid.width is authored property only. Camera acceptance and GPU/live/reference gates remain open. 6 cases:5 passed1 failed,107 assertions:105 passed2 failed. Group ColorDepth3 explicitly selects rgba8, the same resolved format as inherited project ColorDepth1; policy remains valid. Fixture must cover equivalent resolved policy acceptance and rgba16f mismatch refusal."
+    },
+    {
+      "name": "release77 export-timeline-release-77-focused",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/export-timeline-release-77-focused.log",
+      "log_sha256": "3d440f8bd9935993a169493075d6577438577b5778b9d4dfcfae0e4efe2ebc5e",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "reason": "Fixture incorrectly expected the planner to preserve its result vector on refusal; established planner contract clears results. Actual published PNG preservation test passed. Test-only repair follows the existing contract."
+    },
+    {
+      "name": "release77 io-release-77-joined",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/io-release-77-joined.log",
+      "log_sha256": "042049af26a1b5f3239a4ebc63d90b2257d8f855a6b105b7871e4f0e5e073f6e",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "reason": "Two old opaque-node fixtures expect v8; retained source timeline bounds require v9. Six format assertions failed. Test-only repair verifies retained missing endpoints while opacity and discarded keys remain unchanged."
+    },
+    {
+      "name": "release77 studio-offset-release-77-before",
+      "log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/studio-offset-release-77-before.log",
+      "log_sha256": "ff41bc16088cada2b6621d3562a9026ed6d762f81a5db947fc067fe2e3d99fc2",
+      "exit_code": 42,
+      "result": "failed",
+      "scope_note": "Matching source timeline CPU integration. No GPU, live Studio, licensed parity or performance acceptance.",
+      "reason": "Test-first reproduction: adapter and core both subtracted one from saved source start. Four assertions fail; matching one-line Studio adapter correction removes the extra subtraction."
     }
   ],
   "pinned_gml_helper_translation": {
@@ -10137,7 +10406,8 @@
     "build76_initial_joined": "Fourteen joined CPU scopes executed: eleven passed; imagegraph/client/Studio failed only the retained focused camera and sequence compile cases. Full render808/336655 passed. Repairs pending; camera and overall joined acceptance not claimed.",
     "build76_fixture_repair": "Five test fixtures repaired, matching9-step closure passed. Client camera2/31, route3/22, Studio9/295, request3/51 and payload1/6 pass. Core camera5/6 cases pass; stale-policy fixture erroneously expects equivalent rgba8 to invalidate a receipt. Source-backed oracle repair pending.",
     "build76_final": "Camera6/118, payload1/6, render request3/51, client provider2/31, client routing3/22 and Studio preview9/295 pass. All14 joined CPU scopes pass, including fullimagegraph2560/1853878, render808/336654, client68/7109 and Studio155/8648. 671-step ABI build and matching fixture repairs passed. Prior failures retained; production registration unchanged.",
-    "build77_in_progress": "Source timeline foundation15 paths and corrected Studio8 paths applied with exact preimages and resulting hashes. Matching673-step release ABI build started; build and runtime acceptance pending. Changed/new C++ format check21/22 passed; one new Studio test requires formatting after build. Source review identified double first-frame conversion in Animation Control adapter; test-first reproduction and correction pending. No completed roadmap task, GPU, live Studio or licensed parity acceptance claimed."
+    "build77_in_progress": "Completed matching673-step ABI build,3-step offset fixture build,8-step production/test repair and2-step IO fixture closure. Initial failures and source snapshots remain retained below.",
+    "build77_final": "Focused source timeline4/72, PXC7/268, authored export2/125 and Studio82/21214 pass. All14 joined CPU scopes accepted after IO test-only repair: full imagegraph2564/1853948, IO233/10494, export64/2738, selectedStudio227/29697, client68/7109 and render808/336655. Format all22 changed/new C++ paths plus new animation fixture passes. Double-offset was reproduced before correction. Overall M0-M7, source fractional playback/export profiles, GPU/live Studio, fonts/axes/cache/3D/catalogue and licensed-reference gates remain incomplete."
   },
   "pending_gates": [
     {
@@ -10179,7 +10449,7 @@
     ]
   },
   "source_timeline_integration_77": {
-    "status": "applied; matching build and runtime checks pending",
+    "status": "accepted for documented native CPU timeline profile",
     "foundation_patch_sha256": "7cced402e8153510bb217f0668cbb50a9212fdebb7ce2d2eafc07cfb675c812f",
     "studio_patch_sha256": "9bc2f86ad1db8e34762fa8e021383f34f266e71cdd03a15656fd5bde8b4a41c3",
     "build_log": ".cache/build/dev/evidence/pixel-composer-2026-10-04/build-release-77-source-bounds.log",
@@ -10299,6 +10569,155 @@
         "preimage": null,
         "integrated_sha256": "459f9f0a6d5c276a9b9b04cce47edf88623ff1899664f6cb9954c31df27ee4a1"
       }
-    ]
+    ],
+    "final_paths": [
+      {
+        "path": "mono.engine/imagegraph/docs/source-timeline-bounds.md",
+        "preimage": null,
+        "integrated_sha256": "e945fb7601377ba70f0c4c025519c12622a50438eaae859fe1f267f0a484e402",
+        "final_sha256": "e945fb7601377ba70f0c4c025519c12622a50438eaae859fe1f267f0a484e402"
+      },
+      {
+        "path": "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+        "preimage": "a3ce16e4147ca6a2ec8bba7f316bab48c8f612fce901381d3b747868ae85320d",
+        "integrated_sha256": "1e2da044715ab34f3efea2d9c41f76f1ff725c3c93e3532d084f123074ac4edf",
+        "final_sha256": "1e2da044715ab34f3efea2d9c41f76f1ff725c3c93e3532d084f123074ac4edf"
+      },
+      {
+        "path": "mono.engine/imagegraph/include/engine/imagegraph/SourceTimeline.hpp",
+        "preimage": null,
+        "integrated_sha256": "0650a37c04fc576bd5a032533002c79df5c739fb0662a06f9e9e23a3f2b72e0d",
+        "final_sha256": "0650a37c04fc576bd5a032533002c79df5c739fb0662a06f9e9e23a3f2b72e0d"
+      },
+      {
+        "path": "mono.engine/imagegraph/src/Document.cpp",
+        "preimage": "f15a9fa5a8e64f116efaaee4a351ea54a0d76423ec9f9b51e7ef8c760aebf2ec",
+        "integrated_sha256": "a79b4c8234c269d8df1bc9ffce6f61282b3349dd1205da8fbaf0e92e29c6c1cf",
+        "final_sha256": "a79b4c8234c269d8df1bc9ffce6f61282b3349dd1205da8fbaf0e92e29c6c1cf"
+      },
+      {
+        "path": "mono.engine/imagegraph/src/GroupClonePayload.cpp",
+        "preimage": "da659f6f3f102b6bf57b50cc4aeae5604a2e0bccddfc98a02c49964e13915e84",
+        "integrated_sha256": "aedbc604ce0443cb58dece620a15b4a2c558a345f0433f648e2a6be425ee42b9",
+        "final_sha256": "aedbc604ce0443cb58dece620a15b4a2c558a345f0433f648e2a6be425ee42b9"
+      },
+      {
+        "path": "mono.engine/imagegraph/src/nodes/RandomNodes.cpp",
+        "preimage": "d44cc9e0f0bc0796b693e4c976dac8a6cbee2f7e6a41a7a798f81cb28045bc1f",
+        "integrated_sha256": "8cce0401894c04693b5d15e6b8a76757c166067970c5569209e631c810dc7a04",
+        "final_sha256": "8cce0401894c04693b5d15e6b8a76757c166067970c5569209e631c810dc7a04"
+      },
+      {
+        "path": "mono.engine/imagegraph/src/nodes/SourceCacheResults.cpp",
+        "preimage": "dc7ec4bfb488b424cd16a2b121a92fc0fc2e4d474c35cf3217987ae59943c847",
+        "integrated_sha256": "cad208ae5fabc8f14e1cb7c078ed4af46d5f35c9fdd7802b46dbdf9f6c9d1da7",
+        "final_sha256": "cad208ae5fabc8f14e1cb7c078ed4af46d5f35c9fdd7802b46dbdf9f6c9d1da7"
+      },
+      {
+        "path": "mono.engine/imagegraph/tests/SourceTimeline.cpp",
+        "preimage": null,
+        "integrated_sha256": "51d9b1305f322043bb663db2fc580ba82a588ef582285fed065031f2f9d629f5",
+        "final_sha256": "51d9b1305f322043bb663db2fc580ba82a588ef582285fed065031f2f9d629f5"
+      },
+      {
+        "path": "mono.engine/imagegraphexport/src/GraphAuthoredExport.cpp",
+        "preimage": "523a84a068966226c9cd09933f99346df9cbeac5234bf1a98304b94475b4e9b1",
+        "integrated_sha256": "8bc658a72d91a7cd281c7a31c448d7fa3e03869c0f935536f86c9755d6e9169b",
+        "final_sha256": "8bc658a72d91a7cd281c7a31c448d7fa3e03869c0f935536f86c9755d6e9169b"
+      },
+      {
+        "path": "mono.engine/imagegraphexport/tests/GraphAuthoredExport.cpp",
+        "preimage": "2821f11d22e740739141efb3819b84a9ee748ec50479f798ebd9bb86dd1c8b7e",
+        "integrated_sha256": "469a876ebc740929ee38df7c93982e527a03577c41b421b5e37c95ec9d28ad4e",
+        "final_sha256": "71715d9c64e861c22be550ab52b53a6d984bd3d94b701f2b635e1a8f753a44b2"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "preimage": "d7b34d1bdf59d3983917aefe0a29071991408427885be8a965f3c081572a5e5b",
+        "integrated_sha256": "31745d3c2f0bc45b36527844c611e3ad0f6a3af6e494c5cc366f6278e1ebba95",
+        "final_sha256": "31745d3c2f0bc45b36527844c611e3ad0f6a3af6e494c5cc366f6278e1ebba95"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "preimage": "f297e3099b53502c84fbed496cbfbbee34171096981dd1c85a24eb3dab9b11e6",
+        "integrated_sha256": "eb405e77aeb8237dcac00dee4753e43d1b9e5453d625180147819f893e485784",
+        "final_sha256": "eb405e77aeb8237dcac00dee4753e43d1b9e5453d625180147819f893e485784"
+      },
+      {
+        "path": "mono.engine/imagegraphio/src/SourceTimelineProjection.hpp",
+        "preimage": null,
+        "integrated_sha256": "1ecd79008739a0253b99a6645ad6dc2cdf4134cafc85bee2774cc6996612ab37",
+        "final_sha256": "1ecd79008739a0253b99a6645ad6dc2cdf4134cafc85bee2774cc6996612ab37"
+      },
+      {
+        "path": "mono.engine/imagegraphio/tests/PxcxImport.cpp",
+        "preimage": "bd8c36c3e71be1580aabed05ab30a61d4c38742136bdb9907865516277d889e4",
+        "integrated_sha256": "5edda77a0885f38e910c7d1ae482e96ab9b44d581aa12b97bd1082d87988740b",
+        "final_sha256": "05d9bf24ad53f306c7230d7d96cbe37abca563ff4f19ae8d2c57c9217133cc94"
+      },
+      {
+        "path": "mono.engine/imagegraphio/tests/PxcxTimelineEdit.cpp",
+        "preimage": null,
+        "integrated_sha256": "b1e35a68b7b299f4fb9a64c7751e07ac17ab5324f5b5a06c895674ae6d3b3d38",
+        "final_sha256": "b1e35a68b7b299f4fb9a64c7751e07ac17ab5324f5b5a06c895674ae6d3b3d38"
+      },
+      {
+        "path": "mono.studio/include/studio/ImageGraph.hpp",
+        "preimage": "bee9a8ecbeec8173a1ce7a776e26009a7d85cf241490b69120ad9afe2034b33c",
+        "integrated_sha256": "ec7a31b35971045bfdd8b231e8ed73386f8327bc4829d572a4a6acf4a7ca0c4e",
+        "final_sha256": "ec7a31b35971045bfdd8b231e8ed73386f8327bc4829d572a4a6acf4a7ca0c4e"
+      },
+      {
+        "path": "mono.studio/src/ImageComposer.cpp",
+        "preimage": "ea5325b8be9ea4de46c19a9df26f067291da3b7c13f3cefeea953169edec71fc",
+        "integrated_sha256": "33a575a616fefa470672b8e13d269ead581d08649e50e4492f2f31a73cd1b1f9",
+        "final_sha256": "33a575a616fefa470672b8e13d269ead581d08649e50e4492f2f31a73cd1b1f9"
+      },
+      {
+        "path": "mono.studio/src/ImageGraph.cpp",
+        "preimage": "86dd8ce1c56a082443dfd769f8902f29ae94b85af24455335c624077ea681141",
+        "integrated_sha256": "3444552614df8e072c37bbb3f0168213541483c57f3cf4a969a69cf08a66324f",
+        "final_sha256": "3444552614df8e072c37bbb3f0168213541483c57f3cf4a969a69cf08a66324f"
+      },
+      {
+        "path": "mono.studio/src/ImageGraphAnimationControl.hpp",
+        "preimage": "c2057c73be7bd6d49805c82524ccebce9cb5e38ca1c9857d3ff686d86f907257",
+        "integrated_sha256": "cec04881edc289962bfb16741557e15f3e9e04625a405b94ae00bfe39c07d35b",
+        "final_sha256": "e5975649c54f518f44252e61afe07db692b84ef93aab81c810861d81fda79153"
+      },
+      {
+        "path": "mono.studio/src/WavPreview.cpp",
+        "preimage": "822e1eef826da79ca2b1aadf4e2b57b623d8431bc2c0994f2061c5aebf90e5d8",
+        "integrated_sha256": "cb49132b0052ee0e7cbd17944c2cfe81c6d75b289c39554ba96283a0ab27cdf2",
+        "final_sha256": "cb49132b0052ee0e7cbd17944c2cfe81c6d75b289c39554ba96283a0ab27cdf2"
+      },
+      {
+        "path": "mono.studio/tests/ImageGraph.cpp",
+        "preimage": "e7383e28277838ebec7857f966ceb11937db02f155b62065295d6af410bd5588",
+        "integrated_sha256": "f8d8b66129a4b63f155d232feec46761e27cbaa52a4b7633fd65c9d57c7b4bb4",
+        "final_sha256": "77366b6ed8c76f3725c5ecff26697bff59be7dcb58dfec9456cab7b54c1160cf"
+      },
+      {
+        "path": "mono.studio/tests/WavPreview.cpp",
+        "preimage": "99bad756b63901d0486422fee11e04ea15b9e486dc65bc5ca54c750b99de8577",
+        "integrated_sha256": "cf816dd567d095f54d87879ae056459d704cf8c12d2d4d5654a1a533002fe2fa",
+        "final_sha256": "cf816dd567d095f54d87879ae056459d704cf8c12d2d4d5654a1a533002fe2fa"
+      },
+      {
+        "path": "mono.studio/src/ImageGraphSourceTimelineTransition.hpp",
+        "preimage": null,
+        "integrated_sha256": "459f9f0a6d5c276a9b9b04cce47edf88623ff1899664f6cb9954c31df27ee4a1",
+        "final_sha256": "459f9f0a6d5c276a9b9b04cce47edf88623ff1899664f6cb9954c31df27ee4a1"
+      },
+      {
+        "path": "mono.studio/tests/ImageGraphAnimationControl.cpp",
+        "preimage": "762d0a261b1bc037ffd70d2b8168de752bee2d2c46c83eb91d9a8c5e45be8128",
+        "final_sha256": "a525c27f1f2232ce7afd67d8743712138ee03513d9c5315cac682aac5e7947f8"
+      }
+    ],
+    "repair_test_patch_sha256": "d492c3cf129f58278be5802b69e7111edea0dc4798d34f5510d3c0254cfbeffb",
+    "repair_production_patch_sha256": "aadf22aab1a31f647c79fb0aa72f3806ea2bff5cdf15177b35820c8137cbd5aa",
+    "planner_fixture_patch_sha256": "386c1f38b7b8ece07d2a05f8a2b8cbf0f80ff826afc764f879322f1234ecb5be",
+    "joined_scope_note": "13 initial joined scopes passed; IO required two test-only format corrections, then matching closure and full IO rerun passed. No production source changed after the 13 accepted scopes. Initial failed joined IO log remains retained."
   }
 }
