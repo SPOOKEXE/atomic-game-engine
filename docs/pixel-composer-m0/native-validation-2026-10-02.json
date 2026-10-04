@@ -11797,6 +11797,44 @@
       "Build/link completion.",
       "Meaningful font and Text runtime fixtures and14 joined CPU scopes.",
       "Licensed reference parity and live Studio verification."
+    ],
+    "correction_receipt": {
+      "path": "/tmp/pc-font-join78/correction-receipt.json",
+      "sha256": "b3c5f43686106d3322b24e9e5a679bde4116ca9a8ed17aee8b86720de5b05a91",
+      "map_read": true,
+      "newest_exact_reviewed_files": 61,
+      "parser_exact_functions": 6
+    }
+  },
+  "source_axes_review_83": {
+    "status": "Root fully read819-line generic IO patch and declaration API source/tests. Not applied or runtime accepted.",
+    "packet": "/tmp/pc-axis-io80/GenericSourceAxes.patch",
+    "sha256": "1b2ab97af4d1289e8b5e237ad238e97e124ea4ed71bd2d54277cbb2705c37d30",
+    "definition_files_read": [
+      "SourceAxisDefinition.hpp",
+      "SourceAxisDefinition.cpp",
+      "SourceAxisDefaults.hpp",
+      "SourceTwoAxisInput.cpp",
+      "tests/SourceAxisDefinition.cpp"
+    ],
+    "coverage": [
+      "Reconcile physical axes after complete dynamic declarations and dormant key admission.",
+      "Preserve signed fractional keys, physical origins, unknown fields and unchanged source archive bytes.",
+      "Adopt finite matching-width saved def_val independently of sampled/dormant animator values.",
+      "Distinguish native pair getters from actual source constructor width; refuse unsupported HLSL/global/Group inverse.",
+      "Remove Mirror-only five-input limit for repeated pair declarations."
+    ],
+    "source_verification": {
+      "file": "scripts/node_value/node_value.gml",
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "reviewed_region": "applyDeserialize: saved def_val adopted only for matching array width; animators load up to original animVector."
+    },
+    "fixtures": "Six IO and10 declaration/codec cases authored; outside syntax evidence does not prove runtime acceptance.",
+    "remaining": [
+      "Complete core separate/combine actions and runtime getter integration.",
+      "Coherent merge with current font source.",
+      "Joined build and real runtime validation.",
+      "Licensed source application reload."
     ]
   }
 }
