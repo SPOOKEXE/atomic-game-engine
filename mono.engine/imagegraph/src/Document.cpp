@@ -10503,30 +10503,57 @@ namespace engine::imagegraph {
 					pending.push_back(source);
 			}
 		}
+		const bool deferredTimeline =
+			!nodeValues && cacheGroups &&
+			std::any_of(cacheGroups->Owners.begin(), cacheGroups->Owners.end(), [](const auto &owner) {
+				return !owner.Members.empty();
+			});
 		detail::EvaluationVector<uint8_t> timelineNeeded(
-			needed.begin(), needed.end(), detail::EvaluationAllocator<uint8_t>(budget)
+			document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
 		);
-		for (size_t index = 0; index < frozen.size(); ++index)
-			if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
-				timelineNeeded[index] = 0;
-		for (const auto &route : plan.InlineOwnerDependencies)
-			if (route.ControlsOnly && needed[route.Consumer] && !frozen[route.Consumer] &&
-				frameCacheReads(route.Consumer) != detail::SourceFrameCacheInputReads::None)
-				timelineNeeded[route.Owner] = 1;
-		for (size_t index = 0; index < needed.size(); ++index) {
-			if (!timelineNeeded[index]) continue;
-			const Node *current = &document.Nodes[index];
-			for (size_t hop = 0; !current->InstanceBase.empty() && hop < document.Nodes.size(); ++hop) {
-				const size_t base = nodeIndices.at(current->InstanceBase);
-				timelineNeeded[base] = 1;
-				current = &document.Nodes[base];
+		uint64_t scheduleWork = 0;
+		const auto admitTimelineWork = [&](uint64_t work) -> bool {
+			if (work > 64'000'000 - scheduleWork) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "pending timeline admission exceeds its work budget"
+				);
+				return false;
 			}
-		}
+			scheduleWork += work;
+			return true;
+		};
+		const auto selectTimelineInputs = [&](std::span<const uint8_t> selected) -> bool {
+			if (deferredTimeline &&
+				!admitTimelineWork(document.Nodes.size() * 3 + plan.InlineOwnerDependencies.size()))
+				return false;
+			std::copy(selected.begin(), selected.end(), timelineNeeded.begin());
+			for (size_t index = 0; index < frozen.size(); ++index)
+				if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
+					timelineNeeded[index] = 0;
+			for (const auto &route : plan.InlineOwnerDependencies)
+				if (route.ControlsOnly && selected[route.Consumer] && !frozen[route.Consumer] &&
+					frameCacheReads(route.Consumer) != detail::SourceFrameCacheInputReads::None)
+					timelineNeeded[route.Owner] = 1;
+			for (size_t index = 0; index < needed.size(); ++index) {
+				if (!timelineNeeded[index]) continue;
+				const Node *current = &document.Nodes[index];
+				for (size_t hop = 0; !current->InstanceBase.empty() && hop < document.Nodes.size(); ++hop) {
+					if (deferredTimeline && !admitTimelineWork(1)) return false;
+					const size_t base = nodeIndices.at(current->InstanceBase);
+					timelineNeeded[base] = 1;
+					current = &document.Nodes[base];
+				}
+			}
+			return true;
+		};
 		detail::TimelineOverrides timelineOverrides;
-		const Status timelineStatus = detail::ResolveTimelineOverrides(
-			document, timelineNeeded, request, budget, timelineOverrides, diagnostic, {}, true
-		);
-		if (timelineStatus != Status::Ok) return timelineStatus;
+		if (!deferredTimeline) {
+			if (!selectTimelineInputs(needed)) return diagnostic.Code;
+			const Status timelineStatus = detail::ResolveTimelineOverrides(
+				document, timelineNeeded, request, budget, timelineOverrides, diagnostic, {}, true
+			);
+			if (timelineStatus != Status::Ok) return timelineStatus;
+		}
 		if (nodeValues) {
 			size_t valuesIndex = targetIndex;
 			for (size_t hop = 0;
@@ -10582,7 +10609,6 @@ namespace engine::imagegraph {
 		detail::EvaluationVector<uint8_t> completed(
 			dynamicPcx ? document.Nodes.size() : 0, 0, detail::EvaluationAllocator<uint8_t>(budget)
 		);
-		uint64_t scheduleWork = 0;
 		const bool hasInlineOwners =
 			std::any_of(
 				document.Groups.begin(),
@@ -10664,28 +10690,13 @@ namespace engine::imagegraph {
 				for (const auto source : upstream[current])
 					pending.push_back(source);
 			}
-			std::copy(needed.begin(), needed.end(), timelineNeeded.begin());
-			for (size_t index = 0; index < frozen.size(); ++index)
-				if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
-					timelineNeeded[index] = 0;
-			for (const auto &inlineRoute : plan.InlineOwnerDependencies)
-				if (inlineRoute.ControlsOnly && needed[inlineRoute.Consumer] &&
-					!frozen[inlineRoute.Consumer] &&
-					frameCacheReads(inlineRoute.Consumer) != detail::SourceFrameCacheInputReads::None)
-					timelineNeeded[inlineRoute.Owner] = 1;
-			for (size_t index = 0; index < needed.size(); ++index) {
-				if (!timelineNeeded[index]) continue;
-				const Node *node = &document.Nodes[index];
-				for (size_t hop = 0; !node->InstanceBase.empty() && hop < document.Nodes.size(); ++hop) {
-					const auto base = nodeIndices.at(node->InstanceBase);
-					timelineNeeded[base] = 1;
-					node = &document.Nodes[base];
-				}
+			if (!deferredTimeline) {
+				if (!selectTimelineInputs(needed)) return false;
+				const auto status = detail::ExtendTimelineOverrides(
+					document, timelineNeeded, request, budget, timelineOverrides, diagnostic, true
+				);
+				if (status != Status::Ok) return false;
 			}
-			const auto status = detail::ExtendTimelineOverrides(
-				document, timelineNeeded, request, budget, timelineOverrides, diagnostic, true
-			);
-			if (status != Status::Ok) return false;
 			completed[route.Consumer] = 0;
 			pendingPcxRoute.reset();
 			diagnostic = {};
@@ -10892,10 +10903,55 @@ namespace engine::imagegraph {
 			captured.Captured = true;
 			return true;
 		};
+		detail::EvaluationVector<uint8_t> timelineSelected(
+			deferredTimeline ? document.Nodes.size() : 0, 0, detail::EvaluationAllocator<uint8_t>(budget)
+		),
+			timelineAdmitted(timelineSelected.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)),
+			timelineBarriers(timelineSelected.size(), 0, detail::EvaluationAllocator<uint8_t>(budget));
+		if (deferredTimeline)
+			for (const auto &owner : cacheGroups->Owners)
+				if (!owner.Members.empty()) timelineBarriers[nodeIndices.at(owner.NodeId)] = 1;
+		const auto admitPendingTimeline = [&](size_t index, size_t position) -> bool {
+			if (!deferredTimeline || timelineAdmitted[index] || frozen[index] ||
+				frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
+				return true;
+			ENGINE_PROFILE("imagegraph.timeline.dispatch_epoch");
+			if (!admitTimelineWork(document.Nodes.size())) return false;
+			std::fill(timelineSelected.begin(), timelineSelected.end(), 0);
+			// Stop at the next possible activity change. Pending members beyond it keep unread drivers.
+			for (; position < plan.NodeOrder.size(); ++position) {
+				if (!admitTimelineWork(1)) return false;
+				const auto candidate = plan.NodeOrder[position];
+				if (!needed[candidate] || produced[candidate]) continue;
+				if (!timelineAdmitted[candidate]) timelineSelected[candidate] = 1;
+				// Computed routes can reorder readiness across an earlier unresolved barrier.
+				if (dynamicPcx) break;
+				if (timelineBarriers[candidate]) break;
+			}
+			if (!selectTimelineInputs(timelineSelected)) return false;
+			uint64_t scanWork = document.Nodes.size() + document.Keyframes.size() + document.Tracks.size();
+			if (request.GroupReplay) {
+				scanWork += request.GroupReplay->DetachedAnimators().size();
+				for (const auto &entry : request.GroupReplay->Entries())
+					scanWork += 1 + entry.SubtypeKeys.size() + entry.ParentKeys.size();
+				for (const auto &overlay : request.GroupReplay->SharedSubtypes())
+					scanWork += 1 + overlay.Keys.size();
+			}
+			if (!admitTimelineWork(scanWork)) return false;
+			const auto status = detail::ExtendTimelineOverrides(
+				document, timelineNeeded, request, budget, timelineOverrides, diagnostic, true
+			);
+			if (status != Status::Ok) return false;
+			for (size_t candidate = 0; candidate < timelineSelected.size(); ++candidate)
+				if (timelineSelected[candidate] && !frozen[candidate] &&
+					frameCacheReads(candidate) != detail::SourceFrameCacheInputReads::None)
+					timelineAdmitted[candidate] = 1;
+			return true;
+		};
 		uint64_t evaluationBytes = 0, captureComparisonWork = 0;
 		size_t ordinaryCursor = 0;
 		while (true) {
-			size_t index = document.Nodes.size();
+			size_t index = document.Nodes.size(), dispatchPosition = 0;
 			bool unfinished = false;
 			for (size_t position = dynamicPcx ? 0 : ordinaryCursor; position < plan.NodeOrder.size();
 				 ++position) {
@@ -10914,6 +10970,7 @@ namespace engine::imagegraph {
 						return completed[source] != 0;
 					})) {
 					index = candidate;
+					dispatchPosition = position;
 					break;
 				}
 			}
@@ -10952,6 +11009,7 @@ namespace engine::imagegraph {
 				produced[index] = 1;
 				continue;
 			}
+			if (!admitPendingTimeline(index, dispatchPosition)) return diagnostic.Code;
 			const Node &node = timelineOverrides.Find(index, document.Nodes[index]);
 			size_t valuesIndex = index;
 			for (size_t hop = 0;

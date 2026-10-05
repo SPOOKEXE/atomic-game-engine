@@ -125,6 +125,151 @@ namespace {
 		return *v;
 	}
 }
+
+TEST_CASE(
+	"Group owner dispatch precedes unread member drivers across joined roots",
+	"[imagegraph][source_frame_cache][cache_group][timeline]"
+) {
+	for (const bool array : {false, true})
+		for (const bool dynamic : {false, true})
+			for (const bool endpoint : {false, true}) {
+				auto document = Scene(array);
+				const auto initial = Run(document, Clock(0));
+				document.Nodes.push_back({"member", "value.number", "", {}, {{"value", 0.0}}});
+				if (dynamic)
+					document.Nodes.push_back(
+						{"dormant", "pc.equation", "", {}, {{"equation", std::string{"0"}}}}
+					);
+				document.Nodes[1].SourceProperties = {
+					{"cache_group", ArrayValue{ValueType::Text, {std::string{"member"}}}}
+				};
+				document.Keyframes = {{"member", "value", 0, 1.0, "source", KeyframeEase{}}};
+				document.Keyframes.front().SourceDriver =
+					KeyframeAudioDriver{"unavailable-member", "rms", 0, 1, 0};
+				document.Tracks = {{"member", "value", "hold", -1}};
+				document.Outputs.push_back({"member-out", "member", "number"});
+				const auto plan = Compiled(document);
+				REQUIRE(
+					std::find(plan.NodeOrder.begin(), plan.NodeOrder.end(), 1) <
+					std::find(plan.NodeOrder.begin(), plan.NodeOrder.end(), 2)
+				);
+				auto request = Clock(1);
+				request.DataReplay = &initial.Data;
+				request.SourceCacheProject =
+					SourceFrameCacheProjectObservation{{1, 0, false}, endpoint ? 1.0 : 5.0, false, false};
+				StatefulOutputEvaluationResult result;
+				result.Data = initial.Data;
+				Diagnostic diagnostic;
+				const std::array<std::string, 2> outputs{"out", "member-out"};
+				const auto status =
+					EvaluateStatefulOutputs(document, plan, outputs, request, result, diagnostic);
+				INFO(diagnostic.NodeId << ":" << diagnostic.Port << " " << diagnostic.Message);
+				CHECK(status == (endpoint ? Status::UnsupportedExecution : Status::InvalidValue));
+				CHECK(diagnostic.NodeId == (endpoint ? "cache" : "member"));
+				CHECK(diagnostic.Port == (endpoint ? "cache_group" : "value"));
+				CHECK(result.Data == initial.Data);
+				CHECK(result.Outputs.empty());
+				EvaluationSnapshot inspected;
+				CHECK(
+					EvaluateNodeInputs(document, plan, "member", request, inspected, diagnostic) ==
+					Status::InvalidValue
+				);
+				CHECK(diagnostic.NodeId == "member");
+			}
+}
+
+TEST_CASE(
+	"Computed cache controls do not admit members past an earlier unresolved owner",
+	"[imagegraph][source_frame_cache][cache_group][timeline][pcx]"
+) {
+	auto document = Scene();
+	const auto initial = Run(document, Clock(0));
+	Node animator{"animator", "pc.equation", "", {}, {{"equation", std::string{}}}};
+	Node program{"program", "pc.string", "", {}, {{"text", std::string{}}}};
+	program.SourceInputExpressions = {{"text", "\"producer.outputs.result\"", true}};
+	Node producer{"producer", "pc.equation", "", {}, {{"equation", std::string{"1"}}}};
+	producer.SourceInternalName = "producer";
+	document.Nodes.push_back(animator);
+	document.Nodes.push_back(program);
+	document.Nodes.push_back(producer);
+	document.Nodes.push_back({"member", "value.number", "", {}, {{"value", 0.0}}});
+	document.Links.push_back({"program", "text", "animator", "equation"});
+	document.Links.push_back({"animator", "result", "cache", "animated"});
+	document.Nodes[1].SourceProperties = {
+		{"cache_group", ArrayValue{ValueType::Text, {std::string{"member"}}}}
+	};
+	document.Keyframes = {{"member", "value", 0, 1.0, "source", KeyframeEase{}}};
+	document.Keyframes.front().SourceDriver = KeyframeAudioDriver{"unavailable-member", "rms", 0, 1, 0};
+	document.Tracks = {{"member", "value", "hold", -1}};
+	document.Outputs.push_back({"member-out", "member", "number"});
+	const auto plan = Compiled(document);
+	REQUIRE(
+		std::find(plan.NodeOrder.begin(), plan.NodeOrder.end(), 1) <
+		std::find(plan.NodeOrder.begin(), plan.NodeOrder.end(), 4)
+	);
+	auto request = Clock(1);
+	request.DataReplay = &initial.Data;
+	request.SourceCacheProject = SourceFrameCacheProjectObservation{{1, 0, false}, 1, false, false};
+	StatefulOutputEvaluationResult result;
+	Diagnostic diagnostic;
+	const std::array<std::string, 2> outputs{"out", "member-out"};
+	CHECK(
+		EvaluateStatefulOutputs(document, plan, outputs, request, result, diagnostic) ==
+		Status::UnsupportedExecution
+	);
+	INFO(diagnostic.Message);
+	CHECK(diagnostic.NodeId == "cache");
+	CHECK(diagnostic.Port == "cache_group");
+	CHECK(result.Outputs.empty());
+}
+
+TEST_CASE(
+	"Deferred group dispatch samples inherited values and newly discovered PCX dependencies",
+	"[imagegraph][source_frame_cache][cache_group][timeline][pcx]"
+) {
+	for (const bool computed : {false, true}) {
+		auto document = Scene();
+		document.Nodes[1].SourceProperties = {
+			{"cache_group", ArrayValue{ValueType::Text, {std::string{"member"}}}}
+		};
+		if (computed) {
+			document.Nodes.push_back({"member", "pc.equation", "", {}, {{"equation", std::string{}}}});
+			Node program{"program", "pc.string", "", {}, {{"text", std::string{}}}};
+			program.SourceInputExpressions = {{"text", "\"producer.outputs.result\"", true}};
+			document.Nodes.push_back(program);
+			Node producer{"producer", "pc.equation", "", {}, {{"equation", std::string{"7"}}}};
+			producer.SourceInternalName = "producer";
+			document.Nodes.push_back(producer);
+			document.Links.push_back({"program", "text", "member", "equation"});
+			document.Keyframes = {
+				{"producer", "equation", 0, std::string{"7"}, "step"},
+				{"producer", "equation", 1, std::string{"11"}, "step"}
+			};
+			document.Outputs.push_back({"member-out", "member", "result"});
+		} else {
+			Node member{"member", "pc.number", "", {}, {}};
+			member.InstanceBase = "base";
+			document.Nodes.push_back(member);
+			document.Nodes.push_back({"base", "pc.number", "", {}, {{"value", 0.0}}});
+			document.Keyframes = {{"base", "value", 0, 4.0, "linear"}, {"base", "value", 2, 8.0, "linear"}};
+			document.Outputs.push_back({"member-out", "member", "number"});
+		}
+		auto request = Clock(1);
+		request.SourceCacheProject = SourceFrameCacheProjectObservation{{1, 0, false}, 5, false, false};
+		StatefulOutputEvaluationResult result;
+		Diagnostic diagnostic;
+		const std::array<std::string, 2> outputs{"out", "member-out"};
+		const auto status =
+			EvaluateStatefulOutputs(document, Compiled(document), outputs, request, result, diagnostic);
+		INFO(diagnostic.NodeId << ":" << diagnostic.Port << " " << diagnostic.Message);
+		REQUIRE(status == Status::Ok);
+		REQUIRE(result.Outputs.size() == 2);
+		CHECK(
+			std::get<double>(std::get<EvaluatedValue>(result.Outputs[1].Output).Data) ==
+			(computed ? 11.0 : 6.0)
+		);
+	}
+}
 TEST_CASE(
 	"Source Cache recovers owned frames and paused misses retain the last output",
 	"[imagegraph][source_frame_cache]"
