@@ -128,8 +128,12 @@ The [October 5 continuation checks](docs/pixel-composer-m0/native-validation-202
 
 Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
 
+- [_] fix on startup the studio widgets are unsnapped from studio viewport slots
+- [_] fix so we can take ui elements out of the studio screen and onto other screens if possible
+
 ### v0.26
 
+- [_] Check whether shaderc needs glslang's deprecated HLSL front-end; disable `ENABLE_HLSL` if unused.
 - [_] Remove dead engine code and obsolete compatibility paths.
 - [_] Consolidate render hooks, nodes, graphs and graph visualization.
 - [_] Profile CPU, GPU and memory costs; evaluate channel packing, cheaper computation and reduced precision against output quality.
