@@ -6,6 +6,7 @@
 #include "ImageGraphArguments.hpp"
 #include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphArtworkEdit.hpp"
+#include "ImageGraphCacheBackground.hpp"
 #include "ImageGraphCacheClearAction.hpp"
 #include "ImageGraphCacheControls.hpp"
 #include "ImageGraphCacheEditObservation.hpp"
@@ -254,6 +255,7 @@ namespace studio {
 			engine::imagegraph::CapturedFeedbackHost FeedbackHost;
 			detail::ImageGraphCacheEditObservation CacheEditObservation;
 			detail::ImageGraphCacheGroupEdit CacheGroupEdit;
+			detail::ImageGraphCacheBackgrounds CacheBackgrounds;
 			detail::ImageGraphCacheEditKind CacheEditKind = detail::ImageGraphCacheEditKind::ValueSetter;
 			bool CacheEditBlocked = false;
 			detail::ImageGraphCacheEditKind CacheEditRetryKind = detail::ImageGraphCacheEditKind::ValueSetter;
@@ -596,6 +598,17 @@ namespace studio {
 			SetCanvasStyle(state.Canvas);
 			state.Canvas.Signals.Changed = [&state] { SyncCanvas(state); };
 			state.Canvas.Signals.Rerun = [&state](nodegraph::NodeId) { RequestPreview(state, true); };
+			state.Canvas.Signals.DrawBackground = [&state](const auto &graph, const auto &view) {
+				(void)detail::DrawImageGraphCacheBackgrounds(
+					graph,
+					state.Canvas,
+					view,
+					state.FeedbackHost.SourceCacheGroups(),
+					state.Ids.ToCanvas,
+					state.CacheBackgrounds,
+					state.LastDiagnostic
+				);
+			};
 			state.Canvas.Signals.ClickNode = [&state](nodegraph::NodeId id) {
 				const auto found = state.Ids.ToDocument.find(id);
 				if (found == state.Ids.ToDocument.end() || state.CacheGroupEdit.OwnerId.empty()) return false;
@@ -4730,6 +4743,8 @@ namespace studio {
 				return;
 			state.CacheEditBlocked = false;
 			state.CacheEditRetryKind = detail::ImageGraphCacheEditKind::RenderOnly;
+			const auto owner = state.Ids.ToCanvas.find(state.CacheGroupEdit.OwnerId);
+			if (owner != state.Ids.ToCanvas.end()) state.CacheBackgrounds.Invalidate(owner->second);
 			PublishAuthoredDocumentChanged(state);
 			RequestPreview(state, true);
 		}

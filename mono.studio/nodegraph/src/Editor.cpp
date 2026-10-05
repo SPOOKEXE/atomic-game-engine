@@ -1635,7 +1635,6 @@ namespace nodegraph {
 
 		draw->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
 		DrawGrid(origin.x, origin.y, size.x, size.y);
-		DrawGroups(graph);
 
 		float mouseX = 0.0f;
 		float mouseY = 0.0f;
@@ -2041,6 +2040,9 @@ namespace nodegraph {
 
 		// --- painting ---------------------------------------------------------
 
+		if (Signals.DrawBackground)
+			Signals.DrawBackground(graph, {OriginX, OriginY, ViewWidth, ViewHeight, PanX, PanY, Scale});
+		DrawGroups(graph);
 		DrawLinks(graph, litLink);
 
 		if (Drag == Dragging::Link && DragNode != NO_NODE) {

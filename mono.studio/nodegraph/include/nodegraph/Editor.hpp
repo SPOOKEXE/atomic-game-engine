@@ -77,6 +77,10 @@ namespace nodegraph {
 		bool LeftPressed = false, LeftDown = false, LeftReleased = false;
 		bool MiddlePressed = false, MiddleDown = false, RightPressed = false;
 	};
+	// grug background host gets the same graph-to-screen transform as nodes.
+	struct ViewFrame {
+		float X = 0, Y = 0, Width = 0, Height = 0, PanX = 0, PanY = 0, Scale = 1;
+	};
 
 	// The host owns undo, reruns and custom node content.
 	struct Hooks {
@@ -90,6 +94,8 @@ namespace nodegraph {
 		// Runs before selection or movement on a plain node-body click. A true
 		// answer consumes the press; queue host edits for after Draw returns.
 		std::function<bool(NodeId)> ClickNode;
+		// grug draw view-only background after grid, before groups, links and nodes. do not mutate graph.
+		std::function<void(const Graph &, const ViewFrame &)> DrawBackground;
 
 		// Host drawing uses the current canvas draw list, without making toolkit types public.
 		std::function<BodySize(const Node &)> MeasureBody;
@@ -134,6 +140,10 @@ namespace nodegraph {
 
 		// Marks nodes in this view without changing the graph or selection.
 		void MarkNodes(std::vector<NodeId> nodes);
+		// grug host overlays measure the same custom body and layout that the canvas draws.
+		NodeLayout MeasureNode(const Node &node) const {
+			return Layout(node);
+		}
 
 		// Shows what each node last produced. Read only, and when the graph is
 		// evaluated stays the caller's decision.

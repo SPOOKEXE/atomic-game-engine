@@ -1457,6 +1457,94 @@
         "source runtime constructors, append/loading workflows, live Studio gestures and licensed-reference captures remain incomplete/unverified.",
         "broader33-item Composer goal remains active."
       ]
+    },
+    "group_background": {
+      "recorded_date": "2026-10-06",
+      "scope": "grug draw cached native convex backgrounds for retained Cache and Cache Array groups outside edit mode, with selected-owner forced refresh after admitted membership clicks.",
+      "pinned_source": [
+        {
+          "path": "scripts/__node_cache_base/__node_cache_base.gml",
+          "bytes": 6945,
+          "sha256": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb",
+          "git_blob_sha1": "251252e9867bc8406aba016217fe0764fe0fe295",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/node_data/node_data.gml",
+          "bytes": 119599,
+          "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d",
+          "git_blob_sha1": "7488016460777a298599fe2219006e5d233bf4d4",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/panel_graph/panel_graph.gml",
+          "bytes": 226117,
+          "sha256": "ef98b9e725fa84c1e2f9e647176464f4bab5225cd646dac25b80d4c5e431ffa3",
+          "git_blob_sha1": "548ed45ea27ffe40649586c8ade643846e3e809f",
+          "verified_local_match": true
+        }
+      ],
+      "source_rules": [
+        "base105-120:28 corner points per owner/member, radius4,15-degree samples,32-unit padding; every self-owner occurrence uses asymmetric rightmost x+w/2+4.",
+        "base122-176:geometry cache observes ordered owner/member bounds; empty groups have no hull; pan/zoom do not change graph-space geometry.",
+        "base177-220:draw outside editing mode; fill alpha0.025, closed outline alpha0.3; retained hidden/frozen members still contribute; no Serialize gate.",
+        "panel_graph2080-2086 and2120-2134:owner visibility/body viewport culling controls background; before node foreground. membership2230-2237 forces selected background refresh even when authored list unchanged."
+      ],
+      "native_adaptation": "native measured canvas boxes and current depth/viewport culling; monotone convex hull over sampled corners, float graph-space geometry, ImGui fill/outline. hull tint stays white with native dark visual style. source owner colours, exact licensed layouts and antialias pixels are not accepted as parity.",
+      "coverage": [
+        "exact two-box extents,15-degree arc point,strict convex winding,no duplicate vertices, repeated owner-id half-width,empty/single/invalid boxes.",
+        "actual headless Canvas background hook draws white alpha fill and closed border before node body without changing graph save/signature/hash,selection or replay.",
+        "hidden/frozen/self/duplicate retained members participate; offscreen or other-depth owner suppresses drawing even while its member remains visible; empty owners prune shapes.",
+        "unchanged draws and zoom reuse hull storage; wheel-frame hook observes current zoom; member position,node width and membership changes rebuild geometry.",
+        "forced selected-owner invalidation retains other owner storage/order and replay; a disabled Serialize owner still retains its background.",
+        "cap refusal clears only derived shapes;1-byte cap,oversized owners,owner shrink and populated-to-empty graph verify original lookup workspace is admitted."
+      ],
+      "budget": "separate64 MiB default geometry cache/workspace cap,4096 graph nodes/owners,32768 aggregate owner/member boxes and weighted point/name work preflight. original shape capacities, replacement boxes, sampled points, hull chains, screen copy and index tables are charged before construction. prior index uses old shape count. node indexing avoids repeated linear Graph.Find; each distinct node is measured once in the background pass. borrowed graph/replay/catalogue data, existing canvas layout scratch and ImGui drawing allocations are outside this geometry-cache cap; no whole-UI residency claim.",
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-batch4-results.json",
+      "preceding_results": [
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-batch1-results.json",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-batch2-results.json",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-batch3-results.json"
+      ],
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-build1.log",
+          "exit_code": 1
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-build3.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-build4.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-build5.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-build6.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-hull-issues.json",
+      "native_cases": 4989,
+      "native_assertions": 1996046,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "review": "Sol audited source geometry and production bounds, found original prior-index admission gap and reviewed repair. root added forced-click refresh and empty-replacement isolation check.",
+      "profiling": "ENGINE_PROFILE scopes for background work and actual hull rebuild. storage reuse is verified; no fresh isolated profile, sanitizer run, performance claim or live Studio verification.",
+      "ownership": "prior50 inserted/11 deleted Composer user lines remain outside commit. other user work and prior untracked IO assertion stay unstaged.",
+      "remaining": [
+        "licensed owner colours/layout/antialias capture parity and live Studio gestures remain unverified.",
+        "source runtime constructors and append/loading workflows remain incomplete; broader33-item Composer goal stays active."
+      ]
     }
   },
   "source_sha256": {
