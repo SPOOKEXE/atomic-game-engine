@@ -1,3 +1,4 @@
+#include "NativeFrameCacheReceipt.hpp"
 #include "PixelBuilderPayload.hpp"
 #include "nodes/ArraySource.hpp"
 
@@ -783,6 +784,14 @@ TEST_CASE(
 		REQUIRE(DecodeSourceFrameCacheReceipt(roundtrip.Nodes[1], decoded, diagnostic) == Status::Ok);
 		CHECK(decoded == row);
 		CHECK(RetainedDataReplayEntryBytes(decoded) <= measured);
+		for (const uint64_t tick : {uint64_t{0}, uint64_t{1}, uint64_t{2}, UINT64_MAX}) {
+			detail::NativeFrameCacheReceiptInspection inspection;
+			REQUIRE(
+				detail::InspectNativeFrameCacheReceipt(roundtrip.Nodes[1], tick, inspection) == Status::Ok
+			);
+			CHECK(inspection.DecodedBytes == measured);
+			CHECK(inspection.HasFrame == (tick == 0 || tick == 2));
+		}
 		const auto frozen = decoded;
 		CHECK(
 			DecodeSourceFrameCacheReceipt(roundtrip.Nodes[1], decoded, diagnostic, measured - 1) ==
@@ -901,6 +910,10 @@ TEST_CASE(
 	uint64_t measured = 123;
 	CHECK(MeasureSourceFrameCacheReceipt(node, measured, diagnostic) != Status::Ok);
 	CHECK(measured == 123);
+	detail::NativeFrameCacheReceiptInspection inspection{123, true};
+	const auto originalInspection = inspection;
+	CHECK(detail::InspectNativeFrameCacheReceipt(node, 0, inspection) != Status::Ok);
+	CHECK(inspection == originalInspection);
 	CHECK(DecodeSourceFrameCacheReceipt(node, decoded, diagnostic) != Status::Ok);
 	CHECK(decoded == original);
 }
@@ -2007,21 +2020,25 @@ namespace {
 }
 TEST_CASE("Cache hits skip connected getters and preserve Animated", "[imagegraph][source_frame_cache]") {
 	for (const bool playing : {false, true}) {
-		for (const bool saved : {false, true}) {
+		for (const int constructor : {0, 1, 2}) {
+			const bool saved = constructor != 0;
 			auto document = Scene();
 			auto prior = Run(document, Clock(0));
 			prior.Data.Entries[0].PreviousValue = 1;
 			DataReplayState loads = prior.Data;
 			if (saved) {
 				loads.Entries[0].LoadedCacheData = "[owned exact receipt]";
-				document.Nodes[1].SourceProperties = {{"cache", loads.Entries[0].LoadedCacheData}};
+				document.Nodes[1].SourceProperties =
+					constructor == 2
+						? NativeNode(loads.Entries[0]).SourceProperties
+						: std::vector<AuthoredValue>{{"cache", loads.Entries[0].LoadedCacheData}};
 			}
 			AddUnreadableCacheGetters(document);
 			const auto original = prior.Data;
 			const auto originalLoads = loads;
 			auto request = Clock(0, playing);
 			request.DataReplay = saved ? nullptr : &prior.Data;
-			if (saved) request.SourceFrameCacheLoads = &loads;
+			if (constructor == 1) request.SourceFrameCacheLoads = &loads;
 			StatefulEvaluationResult result;
 			Diagnostic diagnostic;
 			const auto code =
@@ -2088,4 +2105,89 @@ TEST_CASE("Cache hit pruning preserves independent selected roots", "[imagegraph
 	);
 	CHECK(result.Outputs.empty());
 	CHECK(prior.Data.Entries.size() == 1);
+}
+
+TEST_CASE("Cold native Cache distinguishes array hits and noone misses", "[imagegraph][source_frame_cache]") {
+	for (const bool arrayHit : {false, true}) {
+		auto row = CookRow();
+		row.Values[2].Data = arrayHit ? Value{ArrayValue{ValueType::Any, {}}} : Value{int64_t{-4}};
+		auto document = Scene();
+		document.Nodes[1].SourceProperties = NativeNode(row).SourceProperties;
+		AddUnreadableCacheGetters(document);
+		const auto original = document;
+		detail::NativeFrameCacheReceiptInspection inspection;
+		REQUIRE(detail::InspectNativeFrameCacheReceipt(document.Nodes[1], 0, inspection) == Status::Ok);
+		CHECK(inspection.HasFrame == arrayHit);
+		StatefulEvaluationResult result;
+		Diagnostic diagnostic;
+		const auto code = EvaluateStateful(document, Compiled(document), "out", Clock(0), result, diagnostic);
+		INFO(diagnostic.Message);
+		if (arrayHit) {
+			REQUIRE(code == Status::Ok);
+			CHECK(Slots(result).empty());
+			CHECK(std::holds_alternative<ArrayValue>(Row(result.Data).Values[1].Data));
+		} else {
+			CHECK(code == Status::UnsupportedExecution);
+			CHECK(result.Data.Entries.empty());
+		}
+		CHECK(document == original);
+	}
+}
+TEST_CASE(
+	"Cold native Cache admission preserves receipt and clear precedence", "[imagegraph][source_frame_cache]"
+) {
+	for (const int precedence : {0, 1, 2, 3}) {
+		auto row = CookRow();
+		auto document = Scene();
+		document.Nodes[1].SourceProperties = NativeNode(row).SourceProperties;
+		AddUnreadableCacheGetters(document);
+		DataReplayState current, loads;
+		if (precedence == 0) {
+			row.Values.resize(2);
+			current.Entries.push_back(row);
+		} else if (precedence == 1) {
+			row.Values.resize(2);
+			loads.Entries.push_back(row);
+		} else if (precedence == 2) {
+			row.ProcessorRow = 1;
+			row.FrameCacheConstructorCleared = true;
+			row.Values.resize(2);
+			current.Entries.push_back(row);
+		} else {
+			row.LoadedCacheData = "[different exact source receipt]";
+			loads.Entries.push_back(row);
+		}
+		const auto originalCurrent = current, originalLoads = loads;
+		auto request = Clock(0);
+		request.DataReplay = &current;
+		request.SourceFrameCacheLoads = &loads;
+		StatefulEvaluationResult result;
+		Diagnostic diagnostic;
+		CHECK(
+			EvaluateStateful(document, Compiled(document), "out", request, result, diagnostic) ==
+			Status::UnsupportedExecution
+		);
+		CHECK(result.Data.Entries.empty());
+		CHECK(current == originalCurrent);
+		CHECK(loads == originalLoads);
+	}
+}
+TEST_CASE("Cold native Cache admission keeps loaded duration bounds", "[imagegraph][source_frame_cache]") {
+	const auto row = CookRow();
+	auto document = Scene();
+	document.Timeline = TimelineSettings{2, 0, 1, "loop", 24};
+	document.Nodes[1].SourceProperties = NativeNode(row).SourceProperties;
+	AddUnreadableCacheGetters(document);
+	StatefulEvaluationResult result;
+	Diagnostic diagnostic;
+	CHECK(
+		EvaluateStateful(document, Compiled(document), "out", Clock(2), result, diagnostic) ==
+		Status::UnsupportedExecution
+	);
+	CHECK(result.Data.Entries.empty());
+	const auto loaded = Run(Scene(), Clock(2));
+	auto retained = loaded.Data;
+	retained.Entries[0].LoadedCacheData = row.LoadedCacheData;
+	const auto hit = Run(document, Clock(2), &retained);
+	CHECK(Red(hit) == 10);
 }

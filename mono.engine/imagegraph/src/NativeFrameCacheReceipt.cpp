@@ -1,3 +1,5 @@
+#include "NativeFrameCacheReceipt.hpp"
+
 #include "ValuePayload.hpp"
 
 #include <engine/core/Bytes.hpp>
@@ -121,11 +123,14 @@ namespace engine::imagegraph {
 				return Good;
 			}
 		};
-		bool GetItem(Cursor &cursor, SourceArrayItem *result, Shape &shape, size_t depth) {
+		bool GetItem(
+			Cursor &cursor, SourceArrayItem *result, Shape &shape, size_t depth, uint8_t *rootTag = nullptr
+		) {
 			if (depth > Limits::MaximumArrayDepth || ++shape.Nodes > Limits::MaximumArrayElements)
 				return false;
 			const auto tag = cursor.Byte();
 			if (!cursor.Good) return false;
+			if (rootTag) *rootTag = tag;
 			if (tag == 0) {
 				if (result) result->Data = ElementValue{int64_t{-4}};
 				return true;
@@ -165,7 +170,13 @@ namespace engine::imagegraph {
 			return true;
 		}
 		bool Packet(
-			const ArrayValue &chunks, uint64_t bytes, const Node &node, Shape &shape, DataReplayEntry *row
+			const ArrayValue &chunks,
+			uint64_t bytes,
+			const Node &node,
+			Shape &shape,
+			DataReplayEntry *row,
+			std::optional<uint64_t> requestedFrame = {},
+			bool *hasFrame = nullptr
 		) {
 			Cursor cursor{chunks.Elements, 0, 0, bytes};
 			if (cursor.UInt() != 1 || !cursor.Name(node.Type)) return false;
@@ -191,7 +202,9 @@ namespace engine::imagegraph {
 				if (!cursor.Good || frame <= previous || frame >= Limits::MaximumArrayElements) return false;
 				previous = frame;
 				SourceArrayItem item;
-				if (!GetItem(cursor, row ? &item : nullptr, shape, 1)) return false;
+				uint8_t rootTag = 0;
+				if (!GetItem(cursor, row ? &item : nullptr, shape, 1, &rootTag)) return false;
+				if (hasFrame && requestedFrame == frame && (rootTag == 1 || rootTag == 2)) *hasFrame = true;
 				if (!row) continue;
 				Value value;
 				if (auto *image = std::get_if<Image>(&item.Data))
@@ -207,9 +220,10 @@ namespace engine::imagegraph {
 			return cursor.Good && !cursor.Remaining;
 		}
 		Status
-		Metadata(const Node &node, const ArrayValue *&chunks, uint64_t &bytes, Diagnostic &diagnostic) {
+		Metadata(const Node &node, const ArrayValue *&chunks, uint64_t &bytes, Diagnostic *diagnostic) {
 			const auto fail = [&](Status status, const char *message) {
-				diagnostic = {status, node.Id, std::string(SOURCE_FRAME_CACHE_NATIVE_DATA), message};
+				if (diagnostic)
+					*diagnostic = {status, node.Id, std::string(SOURCE_FRAME_CACHE_NATIVE_DATA), message};
 				return status;
 			};
 			if (node.Id.empty() || node.SourceProperties.size() > Limits::MaximumPropertiesPerNode ||
@@ -258,6 +272,24 @@ namespace engine::imagegraph {
 				return fail(Status::LimitExceeded, "native frame cache chunk table exceeds value bounds");
 			return Status::Ok;
 		}
+	}
+	Status detail::InspectNativeFrameCacheReceipt(
+		const Node &node, uint64_t tick, NativeFrameCacheReceiptInspection &inspection
+	) {
+		ENGINE_PROFILE("imagegraph.frame_cache.inspect_receipt");
+		const ArrayValue *chunks;
+		uint64_t bytes;
+		const auto status = Metadata(node, chunks, bytes, nullptr);
+		if (status != Status::Ok) return status;
+		NativeFrameCacheReceiptInspection candidate;
+		const std::optional<uint64_t> requestedFrame =
+			tick <= UINT64_MAX - 2 ? std::optional<uint64_t>{tick + 2} : std::nullopt;
+		Shape shape;
+		if (!Packet(*chunks, bytes, node, shape, nullptr, requestedFrame, &candidate.HasFrame))
+			return Status::Malformed;
+		candidate.DecodedBytes = shape.Decoded;
+		inspection = candidate;
+		return Status::Ok;
 	}
 	Status EncodeSourceFrameCacheReceipt(
 		const DataReplayEntry &row, ArrayValue &chunks, Diagnostic &diagnostic, uint64_t maximumBytes
@@ -333,7 +365,7 @@ namespace engine::imagegraph {
 		ENGINE_PROFILE("imagegraph.frame_cache.measure_receipt");
 		const ArrayValue *chunks;
 		uint64_t bytes;
-		const auto status = Metadata(node, chunks, bytes, diagnostic);
+		const auto status = Metadata(node, chunks, bytes, &diagnostic);
 		if (status != Status::Ok) return status;
 		Shape shape;
 		if (!Packet(*chunks, bytes, node, shape, nullptr)) {
@@ -372,7 +404,7 @@ namespace engine::imagegraph {
 		}
 		const ArrayValue *chunks;
 		uint64_t bytes;
-		if (Metadata(node, chunks, bytes, diagnostic) != Status::Ok) return diagnostic.Code;
+		if (Metadata(node, chunks, bytes, &diagnostic) != Status::Ok) return diagnostic.Code;
 		DataReplayEntry candidate;
 		Shape shape;
 		if (!Packet(*chunks, bytes, node, shape, &candidate)) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EvaluationAllocator.hpp"
+#include "NativeFrameCacheReceipt.hpp"
 
 #include <engine/imagegraph/FrameCacheReplay.hpp>
 
@@ -37,7 +38,8 @@ namespace engine::imagegraph::detail {
 				return left->NodeId < right->NodeId;
 			});
 		}
-		const DataReplayEntry *Find(const Node &node, bool &constructorCleared) const {
+		const DataReplayEntry *
+		Find(const Node &node, bool &constructorCleared, bool *rowZeroSeen = nullptr) const {
 			const auto first = std::lower_bound(
 				Rows.begin(), Rows.end(), node.Id, [](const auto *row, const std::string &id) {
 					return row->NodeId < id;
@@ -48,6 +50,7 @@ namespace engine::imagegraph::detail {
 			for (auto position = first; position != Rows.end() && (*position)->NodeId == node.Id;
 				 ++position) {
 				const auto *row = *position;
+				if (rowZeroSeen && row->ProcessorRow == 0) *rowZeroSeen = true;
 				if (SourceFrameCacheRowType(*row) != node.Type || row->LoadedCacheData != saved) continue;
 				constructorCleared |= row->FrameCacheConstructorCleared;
 				if (row->ProcessorRow == 0) result = row;
@@ -66,10 +69,15 @@ namespace engine::imagegraph::detail {
 		bool cleared = false;
 		const auto *row = current.Find(node, cleared);
 		if (!row && !cleared && !SourceFrameCacheSavedText(node).empty()) {
-			bool ignored = false;
-			row = loads.Find(node, ignored);
+			bool ignored = false, loadRowSeen = false;
+			row = loads.Find(node, ignored, &loadRowSeen);
 			if (request.Tick >= totalFrames || (row && (row->NegativeFrame || row->Subframe != 0)))
 				return false;
+			if (!row && !loadRowSeen) {
+				NativeFrameCacheReceiptInspection inspection;
+				return InspectNativeFrameCacheReceipt(node, request.Tick, inspection) == Status::Ok &&
+					   inspection.HasFrame;
+			}
 		}
 		return SourceFrameCacheExistingFrame(row, request.Tick) != nullptr;
 	}
