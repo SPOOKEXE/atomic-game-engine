@@ -1327,6 +1327,54 @@
         "prepublication History.Undo/Redo admission and Studio inspector controls remain unfinished.",
         "source runtime constructors, live Studio workflows and licensed-reference captures remain incomplete/unverified."
       ]
+    },
+    "history_restoration_admission": {
+      "scope": "grug stage Composer Undo/Redo document, history and playback until cache observation and both current/preframe journals admit restoration.",
+      "native_policy": "native history remains separate from source membership-click parity; pinned source clicks contain no history record. no licensed-reference undo claim.",
+      "coverage": [
+        "both Undo and Redo refusals retain authored document, history direction, entire current journal, prior inputs, pending flag/kind, playing clock and selected region; outer document cap and inner observation cap both tested.",
+        "history callbacks run only after parsing, serialized byte admission and opposite-stack reserve. rejected callback and bad_alloc preserve document/stacks and later accepted restore works. budget refusal never invokes callback.",
+        "accepted Serialize history retains frames/getters/activity while restoring flag. accepted value undo/redo wakes members and both replay checkpoints; same-clock producer pixels70 then10 are verified for Cache and Cache Array.",
+        "actual add/freeze/membership undo goes through admitted seam, detaches omitted member, wakes it, retains frames/getters and later produces pixel90.",
+        "existing pending value edits refuse history; Composer retries those before using admitted history. actual toolbar and key path use shared seam and avoid a second fallible observation."
+      ],
+      "runtime_budget": "current authored document residency is subtracted before restored observer/current/preframe transaction admission. serialized history has its own existing16 MiB cap. playback is scalar/optional staging. observer routing and journal phases retain shared64 MiB comparison-work cap.",
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-admit-batch3-results.json",
+      "preceding_results": [
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-admit-batch1-results.json",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-admit-batch2-results.json"
+      ],
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-admit-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-admit-build2.log",
+          "exit_code": 1
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-admit-build3.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-admit-build4.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-admit-issues.json",
+      "native_cases": 4942,
+      "native_assertions": 1994898,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "review": "Sol audited staged parsing/reservation/publication, caller residency, pending flags and Composer post-change effects; identified diagnostic-allocation exception gap and reviewed noexcept guard repair. no remaining confirmed concern reported.",
+      "profiling": "new ENGINE_PROFILE scope for admitted cache history. no fresh isolated profile, sanitizer run or speed claim.",
+      "ownership": "Composer contains prior50 inserted/11 deleted user lines; only owned history and notification changes are staged. prior untracked IO assertion adjustment remains uncommitted.",
+      "remaining": [
+        "cache inspector controls remain unfinished.",
+        "source runtime constructors, live Studio workflows and licensed-reference captures remain incomplete/unverified."
+      ]
     }
   },
   "source_sha256": {

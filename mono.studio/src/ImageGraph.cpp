@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <studio/ImageGraph.hpp>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -3253,41 +3254,38 @@ namespace studio {
 		return false;
 	}
 
-	bool ImageGraphHistory::Undo(engine::imagegraph::Document &document) try {
-		if (UndoText.empty()) return false;
-		std::string currentText = engine::imagegraph::Write(document);
-		const size_t replacedBytes = UndoText.back().size();
-		if (currentText.size() > ByteCapacity - (RetainedBytes - replacedBytes)) return false;
-		engine::imagegraph::Document restored;
-		engine::imagegraph::Diagnostic diagnostic;
-		if (engine::imagegraph::Read(UndoText.back(), restored, diagnostic) != engine::imagegraph::Status::Ok)
-			return false;
-		RedoText.reserve(RedoText.size() + 1);
-		RetainedBytes -= replacedBytes;
-		RetainedBytes += currentText.size();
-		RedoText.push_back(std::move(currentText));
-		document = std::move(restored);
-		UndoText.pop_back();
-		return true;
-	} catch (const std::bad_alloc &) {
-		return false;
+	bool ImageGraphHistory::Undo(Document &document) {
+		return Restore(document, false, {});
 	}
-
-	bool ImageGraphHistory::Redo(engine::imagegraph::Document &document) try {
-		if (RedoText.empty()) return false;
+	bool ImageGraphHistory::Redo(Document &document) {
+		return Restore(document, true, {});
+	}
+	bool ImageGraphHistory::Undo(Document &document, const Admission &admit) {
+		return Restore(document, false, admit);
+	}
+	bool ImageGraphHistory::Redo(Document &document, const Admission &admit) {
+		return Restore(document, true, admit);
+	}
+	bool ImageGraphHistory::Restore(Document &document, bool redo, const Admission &admit) try {
+		auto &source = redo ? RedoText : UndoText;
+		auto &destination = redo ? UndoText : RedoText;
+		if (source.empty()) return false;
 		std::string currentText = engine::imagegraph::Write(document);
-		const size_t replacedBytes = RedoText.back().size();
+		const size_t replacedBytes = source.back().size();
 		if (currentText.size() > ByteCapacity - (RetainedBytes - replacedBytes)) return false;
-		engine::imagegraph::Document restored;
+		Document restored;
 		engine::imagegraph::Diagnostic diagnostic;
-		if (engine::imagegraph::Read(RedoText.back(), restored, diagnostic) != engine::imagegraph::Status::Ok)
+		if (engine::imagegraph::Read(source.back(), restored, diagnostic) != engine::imagegraph::Status::Ok)
 			return false;
-		UndoText.reserve(UndoText.size() + 1);
-		RetainedBytes -= replacedBytes;
-		RetainedBytes += currentText.size();
-		UndoText.push_back(std::move(currentText));
+		destination.reserve(destination.size() + 1);
+		if (admit && !admit(document, restored)) return false;
+		// grug all fallible work finished before the runtime admission publishes its candidate.
+		static_assert(std::is_nothrow_move_assignable_v<Document>);
+		static_assert(std::is_nothrow_move_constructible_v<std::string>);
+		RetainedBytes = RetainedBytes - replacedBytes + currentText.size();
+		destination.push_back(std::move(currentText));
 		document = std::move(restored);
-		RedoText.pop_back();
+		source.pop_back();
 		return true;
 	} catch (const std::bad_alloc &) {
 		return false;

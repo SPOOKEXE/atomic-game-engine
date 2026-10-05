@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <nodegraph/Graph.hpp>
 #include <optional>
 #include <span>
@@ -657,6 +658,12 @@ namespace studio {
 		// @param document Document to replace.
 		// @return Whether a next state was restored.
 		bool Redo(engine::imagegraph::Document &document);
+		// grug reserve history and parse the target before admission. false preserves document/stacks.
+		// callback must preserve external state on refusal and must not mutate this history/document.
+		using Admission =
+			std::function<bool(const engine::imagegraph::Document &, const engine::imagegraph::Document &)>;
+		bool Undo(engine::imagegraph::Document &document, const Admission &admit);
+		bool Redo(engine::imagegraph::Document &document, const Admission &admit);
 		void Clear();
 		bool CanUndo() const;
 		bool CanRedo() const;
@@ -665,6 +672,7 @@ namespace studio {
 		size_t Capacity = 128;
 		size_t ByteCapacity = 16 * 1024 * 1024;
 		size_t RetainedBytes = 0;
+		bool Restore(engine::imagegraph::Document &document, bool redo, const Admission &admit);
 		std::vector<std::string> UndoText;
 		std::vector<std::string> RedoText;
 	};

@@ -4,6 +4,7 @@
 
 namespace studio {
 	class ImageGraphHistory;
+	struct ImageGraphPlayback;
 }
 
 namespace studio::detail {
@@ -36,6 +37,18 @@ namespace studio::detail {
 		engine::imagegraph::CapturedFeedbackHost &host,
 		std::string_view ownerId,
 		std::string_view memberId,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
+	// grug speculative history changes stage playback and runtime admission before document publication.
+	// refusal preserves history, playback, inputs, pending edit kind and both host journals.
+	[[nodiscard]] bool ApplyImageGraphCacheHistory(
+		engine::imagegraph::Document &document,
+		ImageGraphHistory &history,
+		engine::imagegraph::CapturedFeedbackHost &host,
+		ImageGraphCacheEditObservation &observation,
+		ImageGraphPlayback &playback,
+		bool redo,
 		engine::imagegraph::Diagnostic &diagnostic,
 		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);

@@ -614,8 +614,10 @@ TEST_CASE(
 	REQUIRE_FALSE(currentMember().RenderActive);
 	const auto rows = fixture.Host.PreparedData(2, 1)->Entries;
 	const auto getters = currentMember().Outputs;
-	REQUIRE(history.Undo(fixture.Authored));
-	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
+	studio::ImageGraphPlayback playback;
+	REQUIRE(ApplyImageGraphCacheHistory(
+		fixture.Authored, history, fixture.Host, fixture.Observation, playback, false, fixture.Error
+	));
 	CHECK(currentMember().OwnerId.empty());
 	CHECK(currentMember().RenderActive);
 	CHECK(currentMember().Outputs == getters);
@@ -638,4 +640,150 @@ TEST_CASE(
 	REQUIRE(fixture.Host.Output("input-out"));
 	CHECK(fixture.Host.Output("input-out")->Pixels[0] == 90);
 	CHECK(fixture.Host.PreparedData(3, 1)->Entries == rows);
+}
+
+TEST_CASE(
+	"Studio refused cache history keeps authored state and history direction",
+	"[studio][imagegraph][cache_group][history]"
+) {
+	for (const bool redo : {false, true}) {
+		Fixture fixture;
+		studio::ImageGraphHistory history;
+		const auto initial = fixture.Authored;
+		auto edited = initial;
+		edited.Nodes[1].SourceProperties.push_back({"serialize", false});
+		REQUIRE(history.TryRecord(initial, edited));
+		if (redo)
+			REQUIRE(history.Undo(edited));
+		else
+			fixture.Authored = edited;
+		REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+		const auto document = fixture.Authored;
+		const auto data = *fixture.Host.PreparedData(1, 1);
+		const auto inputs = fixture.Observation.Inputs;
+		const bool undoBefore = history.CanUndo(), redoBefore = history.CanRedo();
+		studio::ImageGraphPlayback playback;
+		playback.Playing = true;
+		playback.Subframe = 0.25;
+		playback.Accumulator = 0.1;
+		playback.SelectedRegion = std::pair{FrameTime{1, 0, false}, FrameTime{3, 0, false}};
+		fixture.Observation.PendingValueKind = ImageGraphCacheEditKind::RenderOnly;
+		const auto bytes = DocumentRetainedPayloadBytes(document);
+		REQUIRE(bytes);
+		for (const uint64_t cap : {uint64_t{1}, *bytes + 1})
+			CHECK_FALSE(ApplyImageGraphCacheHistory(
+				fixture.Authored,
+				history,
+				fixture.Host,
+				fixture.Observation,
+				playback,
+				redo,
+				fixture.Error,
+				cap
+			));
+		CHECK(fixture.Authored == document);
+		CHECK(history.CanUndo() == undoBefore);
+		CHECK(history.CanRedo() == redoBefore);
+		CHECK(*fixture.Host.PreparedData(1, 1) == data);
+		CHECK(fixture.Observation.Inputs == inputs);
+		CHECK_FALSE(fixture.Observation.PendingValueEdit);
+		CHECK(fixture.Observation.PendingValueKind == ImageGraphCacheEditKind::RenderOnly);
+		CHECK(playback.Playing);
+		CHECK(playback.Subframe == 0.25);
+		CHECK(playback.Accumulator == 0.1);
+		CHECK(playback.SelectedRegion.has_value());
+		REQUIRE(ApplyImageGraphCacheHistory(
+			fixture.Authored, history, fixture.Host, fixture.Observation, playback, redo, fixture.Error
+		));
+		CHECK(fixture.Authored.Nodes[1].SourceProperties.size() == (redo ? 2 : 1));
+		CHECK(history.CanUndo() == redo);
+		CHECK(history.CanRedo() == !redo);
+		CHECK_FALSE(playback.Playing);
+		CHECK(playback.Subframe == 0.25);
+		CHECK_FALSE(playback.SelectedRegion.has_value());
+		const auto &restored = *fixture.Host.PreparedData(1, 1);
+		CHECK(restored.Entries == data.Entries);
+		CHECK(restored.CacheGroups.Nodes == data.CacheGroups.Nodes);
+		REQUIRE(restored.CacheGroups.Owners.size() == 1);
+		CHECK(restored.CacheGroups.Owners[0].Serialize == !redo);
+		CHECK(restored.CacheGroups.Owners[0].Members == data.CacheGroups.Owners[0].Members);
+	}
+}
+
+TEST_CASE(
+	"Studio admitted value history wakes current and preframe cache journals",
+	"[studio][imagegraph][cache_group][history]"
+) {
+	for (const bool array : {false, true}) {
+		Fixture fixture(array);
+		const auto original = fixture.Authored;
+		auto prior = original;
+		prior.Nodes[0].Values[2].Data = Colour{70, 20, 30, 255};
+		studio::ImageGraphHistory history;
+		REQUIRE(history.TryRecord(prior, original));
+		studio::ImageGraphPlayback playback;
+		REQUIRE(ApplyImageGraphCacheHistory(
+			fixture.Authored, history, fixture.Host, fixture.Observation, playback, false, fixture.Error
+		));
+		CHECK(fixture.Authored == prior);
+		CHECK(fixture.Member("input").RenderActive);
+		CHECK(fixture.Host.PreparedData(1, 1)->Entries[0].Values.size() == 2);
+		auto request = Request();
+		request.SourceCachePlayback->Playing = false;
+		REQUIRE(fixture.Host.Prepare(
+			fixture.Authored,
+			Compiled(fixture.Authored),
+			2,
+			1,
+			request,
+			fixture.Error,
+			Limits::MaximumEvaluationBytes,
+			"input-out"
+		));
+		REQUIRE(fixture.Host.Output("input-out"));
+		CHECK(fixture.Host.Output("input-out")->Pixels[0] == 70);
+		REQUIRE(ApplyImageGraphCacheHistory(
+			fixture.Authored, history, fixture.Host, fixture.Observation, playback, true, fixture.Error
+		));
+		CHECK(fixture.Authored == original);
+		request = Request();
+		request.SourceCachePlayback->Playing = false;
+		REQUIRE(fixture.Host.Prepare(
+			fixture.Authored,
+			Compiled(fixture.Authored),
+			3,
+			1,
+			request,
+			fixture.Error,
+			Limits::MaximumEvaluationBytes,
+			"input-out"
+		));
+		REQUIRE(fixture.Host.Output("input-out"));
+		CHECK(fixture.Host.Output("input-out")->Pixels[0] == 10);
+	}
+}
+TEST_CASE(
+	"Studio history waits for an already pending authored value edit",
+	"[studio][imagegraph][cache_group][history]"
+) {
+	Fixture fixture;
+	auto prior = fixture.Authored;
+	prior.Nodes[0].Values[2].Data = Colour{70, 20, 30, 255};
+	studio::ImageGraphHistory history;
+	REQUIRE(history.TryRecord(prior, fixture.Authored));
+	fixture.Observation.PendingValueEdit = true;
+	fixture.Observation.PendingValueKind = ImageGraphCacheEditKind::ValueSetter;
+	studio::ImageGraphPlayback playback;
+	const auto document = fixture.Authored;
+	const auto data = *fixture.Host.PreparedData(1, 1);
+	CHECK_FALSE(ApplyImageGraphCacheHistory(
+		fixture.Authored, history, fixture.Host, fixture.Observation, playback, false, fixture.Error
+	));
+	CHECK(fixture.Error.Code == Status::UnsupportedExecution);
+	CHECK(fixture.Authored == document);
+	CHECK(*fixture.Host.PreparedData(1, 1) == data);
+	CHECK(history.CanUndo());
+	CHECK_FALSE(history.CanRedo());
+	CHECK(fixture.Observation.PendingValueEdit);
+	CHECK(fixture.Observation.PendingValueKind == ImageGraphCacheEditKind::ValueSetter);
 }

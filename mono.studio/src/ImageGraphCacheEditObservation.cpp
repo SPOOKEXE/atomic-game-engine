@@ -7,6 +7,7 @@
 #include <new>
 #include <studio/ImageGraph.hpp>
 #include <tuple>
+#include <type_traits>
 
 namespace studio::detail {
 	namespace {
@@ -159,6 +160,69 @@ namespace studio::detail {
 			[&](const auto &before, const auto &after) { return history.TryRecord(before, after); },
 			maximumBytes
 		);
+	}
+
+	bool ApplyImageGraphCacheHistory(
+		Document &document,
+		ImageGraphHistory &history,
+		CapturedFeedbackHost &host,
+		ImageGraphCacheEditObservation &observation,
+		ImageGraphPlayback &playback,
+		bool redo,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("studio.imagegraph.cache_history");
+		if (redo ? !history.CanRedo() : !history.CanUndo()) return false;
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return false;
+		};
+		if (observation.PendingValueEdit)
+			return fail(Status::UnsupportedExecution, "Retry the pending source value edit before history");
+		const auto currentBytes = DocumentRetainedPayloadBytes(document);
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || !currentBytes ||
+			*currentBytes >= maximumBytes)
+			return fail(Status::LimitExceeded, "Source cache history document residency exceeds bounds");
+		auto stagedPlayback = playback;
+		const auto frame = GetImageGraphFrame(playback);
+		diagnostic = {};
+		const auto admit = [&](const Document &, const Document &restored) {
+			ApplyImageGraphTimeline(restored, stagedPlayback);
+			(void)SetImageGraphAuthorFrame(stagedPlayback, frame);
+			stagedPlayback.SelectedRegion.reset();
+			struct PendingEditRollback {
+				ImageGraphCacheEditObservation &Observation;
+				bool Pending;
+				ImageGraphCacheEditKind Kind;
+				bool Accepted = false;
+				~PendingEditRollback() noexcept {
+					if (Accepted) return;
+					Observation.PendingValueEdit = Pending;
+					Observation.PendingValueKind = Kind;
+				}
+			} pending{observation, observation.PendingValueEdit, observation.PendingValueKind};
+			pending.Accepted = ObserveImageGraphCacheEdits(
+				restored,
+				observation,
+				host,
+				ImageGraphCacheEditKind::AnimatorUndo,
+				diagnostic,
+				maximumBytes - *currentBytes
+			);
+			return pending.Accepted;
+		};
+		if (!(redo ? history.Redo(document, admit) : history.Undo(document, admit))) {
+			if (diagnostic.Code == Status::Ok)
+				return fail(Status::LimitExceeded, "Image graph history could not retain the transition");
+			return false;
+		}
+		static_assert(std::is_nothrow_move_assignable_v<ImageGraphPlayback>);
+		playback = std::move(stagedPlayback);
+		return true;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "Source cache history allocation refused"};
+		return false;
 	}
 
 	bool ObserveImageGraphCacheEdits(

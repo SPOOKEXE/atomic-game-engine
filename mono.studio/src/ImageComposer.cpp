@@ -290,17 +290,7 @@ namespace studio {
 			return !state.CacheEditBlocked;
 		}
 
-		void AuthoredDocumentChanged(
-			State &state, std::optional<detail::ImageGraphCacheEditKind> kind = std::nullopt
-		) {
-			state.CacheEditRetryKind = kind.value_or(state.CacheEditKind);
-			state.CacheEditBlocked = !detail::ObserveImageGraphCacheEdits(
-				state.Authored,
-				state.CacheEditObservation,
-				state.FeedbackHost,
-				kind.value_or(state.CacheEditKind),
-				state.LastDiagnostic
-			);
+		void PublishAuthoredDocumentChanged(State &state) {
 			// External authoring changes cannot retain a row selection from the old project.
 			state.Playback.SelectedRegion.reset();
 			state.PxcxCompletedPreview.reset();
@@ -354,6 +344,20 @@ namespace studio {
 				state.DocumentRevision++;
 			}
 			RequestPreview(state);
+		}
+
+		void AuthoredDocumentChanged(
+			State &state, std::optional<detail::ImageGraphCacheEditKind> kind = std::nullopt
+		) {
+			state.CacheEditRetryKind = kind.value_or(state.CacheEditKind);
+			state.CacheEditBlocked = !detail::ObserveImageGraphCacheEdits(
+				state.Authored,
+				state.CacheEditObservation,
+				state.FeedbackHost,
+				kind.value_or(state.CacheEditKind),
+				state.LastDiagnostic
+			);
+			PublishAuthoredDocumentChanged(state);
 		}
 
 		Node *FindNode(Document &document, std::string_view id) {
@@ -2586,16 +2590,22 @@ namespace studio {
 		}
 
 		void ApplyHistory(State &state, bool redo) {
-			const bool changed =
-				redo ? state.History.Redo(state.Authored) : state.History.Undo(state.Authored);
-			if (changed) {
-				state.GroupHost.Clear();
-				const auto frame = GetImageGraphFrame(state.Playback);
-				ApplyImageGraphTimeline(state.Authored, state.Playback);
-				(void)SetImageGraphAuthorFrame(state.Playback, frame);
-				AuthoredDocumentChanged(state, detail::ImageGraphCacheEditKind::AnimatorUndo);
-				ReloadCanvas(state);
-			}
+			if (!RetryCacheEdit(state)) return;
+			if (!detail::ApplyImageGraphCacheHistory(
+					state.Authored,
+					state.History,
+					state.FeedbackHost,
+					state.CacheEditObservation,
+					state.Playback,
+					redo,
+					state.LastDiagnostic
+				))
+				return;
+			state.GroupHost.Clear();
+			state.CacheEditBlocked = false;
+			state.CacheEditRetryKind = detail::ImageGraphCacheEditKind::AnimatorUndo;
+			PublishAuthoredDocumentChanged(state);
+			ReloadCanvas(state);
 		}
 
 		bool ApplyDocumentEdit(State &state, const auto &edit, bool *unchanged = nullptr) {

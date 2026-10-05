@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <new>
 #include <nodegraph/Editor.hpp>
 #include <nodegraph/Layout.hpp>
 #include <string>
@@ -944,7 +945,9 @@ TEST_CASE("canvas edits keep durable IDs and give new Solid nodes explicit value
 	CHECK(document.Nodes[1].Id == "node-3");
 }
 
-TEST_CASE("every source catalogue node is searchable and placed with source defaults", "[studio][imagegraph]") {
+TEST_CASE(
+	"every source catalogue node is searchable and placed with source defaults", "[studio][imagegraph]"
+) {
 	Document document;
 	nodegraph::Graph canvas;
 	studio::ImageGraphCanvasIds ids;
@@ -954,11 +957,11 @@ TEST_CASE("every source catalogue node is searchable and placed with source defa
 	for (const engine::imagegraph::CatalogueEntry &entry : engine::imagegraph::Catalogue()) {
 		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(std::string(entry.Type));
 		if (!type) continue;
-		const size_t inputs = static_cast<size_t>(std::count_if(
-			entry.Schema.Ports.begin(), entry.Schema.Ports.end(), [](const auto &port) {
+		const size_t inputs = static_cast<size_t>(
+			std::count_if(entry.Schema.Ports.begin(), entry.Schema.Ports.end(), [](const auto &port) {
 				return port.Direction == engine::imagegraph::PortDirection::Input;
-			}
-		));
+			})
+		);
 		const std::string_view expectedTitle =
 			entry.Type == "pc.graph_preview" ? "Image Preview" : entry.Title;
 		if (type->Title == expectedTitle && type->Category == "Pixel Composer/" + std::string(entry.Family) &&
@@ -2948,4 +2951,62 @@ TEST_CASE(
 	CHECK_FALSE(cache.Store(2, 0, 0, malformed));
 	CHECK(cache.HeldBytes() == before);
 	CHECK(cache.Find(2, 0, 0)->Pixels == replacement.Pixels);
+}
+
+TEST_CASE(
+	"Image graph history admission runs before publishing either direction", "[studio][imagegraph][history]"
+) {
+	for (const bool redo : {false, true}) {
+		const auto before = Fixture();
+		auto after = before;
+		after.Nodes[0].Values[0].Data = int64_t{17};
+		studio::ImageGraphHistory history;
+		REQUIRE(history.TryRecord(before, after));
+		auto current = after;
+		if (redo) REQUIRE(history.Undo(current));
+		const auto original = current;
+		const bool canUndo = history.CanUndo(), canRedo = history.CanRedo();
+		int called = 0;
+		const auto refuse = [&](const Document &authored, const Document &restored) {
+			++called;
+			CHECK(authored == original);
+			CHECK(restored == (redo ? after : before));
+			CHECK(current == original);
+			CHECK(history.CanUndo() == canUndo);
+			CHECK(history.CanRedo() == canRedo);
+			return false;
+		};
+		CHECK_FALSE((redo ? history.Redo(current, refuse) : history.Undo(current, refuse)));
+		CHECK(called == 1);
+		CHECK(current == original);
+		CHECK(history.CanUndo() == canUndo);
+		CHECK(history.CanRedo() == canRedo);
+		const auto allocationFailure = [](const Document &, const Document &) -> bool {
+			throw std::bad_alloc{};
+		};
+		CHECK_FALSE(
+			(redo ? history.Redo(current, allocationFailure) : history.Undo(current, allocationFailure))
+		);
+		CHECK(current == original);
+		CHECK(history.CanUndo() == canUndo);
+		CHECK(history.CanRedo() == canRedo);
+		REQUIRE((redo ? history.Redo(current) : history.Undo(current)));
+		CHECK(current == (redo ? after : before));
+	}
+}
+TEST_CASE(
+	"Image graph history budget refusal never calls runtime admission", "[studio][imagegraph][history]"
+) {
+	Document before, after;
+	after.Nodes.push_back({"large", "unknown.large", "", {}, {{"payload", std::string(512, 'x')}}, {}});
+	studio::ImageGraphHistory history(4, engine::imagegraph::Write(before).size() + 32);
+	history.Record(before, after);
+	bool called = false;
+	CHECK_FALSE(history.Undo(after, [&](const Document &, const Document &) {
+		called = true;
+		return true;
+	}));
+	CHECK_FALSE(called);
+	CHECK(history.CanUndo());
+	CHECK_FALSE(history.CanRedo());
 }
