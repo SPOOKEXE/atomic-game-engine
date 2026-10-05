@@ -44,6 +44,10 @@ namespace studio::detail {
 				input.SourceStaticInputs = node.SourceStaticInputs;
 				input.SourceSeparatedVec2Animators = node.SourceSeparatedVec2Animators;
 				input.NativeSamplerBindings = node.NativeSamplerBindings;
+				if (node.Type == "pc.cache" || node.Type == "pc.cache_array")
+					for (const auto &property : node.SourceProperties)
+						if (property.Port == "cache_group" || property.Port == "serialize")
+							input.SourceProperties.push_back(property);
 				std::sort(input.Values.begin(), input.Values.end(), [](const auto &left, const auto &right) {
 					return left.Port < right.Port;
 				});
@@ -204,6 +208,11 @@ namespace studio::detail {
 			for (const auto &port : node.SourceStaticInputs)
 				names += port.size() + 1;
 		}
+		for (const auto &node : document.Nodes) {
+			if (node.Type != "pc.cache" && node.Type != "pc.cache_array") continue;
+			for (const auto &property : node.SourceProperties)
+				names += property.Port.size() + 1;
+		}
 		for (const auto &link : document.Links)
 			names +=
 				link.ToNode.size() + link.ToPort.size() + link.FromNode.size() + link.FromPort.size() + 4;
@@ -256,6 +265,49 @@ namespace studio::detail {
 			return AddDestination(inputs, id, port, edited, count, work);
 		};
 		const auto &before = observation.Inputs;
+		std::array<std::string_view, Limits::MaximumNodes> membershipOwners{}, serializeOwners{};
+		size_t membershipCount = 0, serializeCount = 0;
+		const auto property = [](const Node &node, std::string_view port) -> const Value * {
+			for (const auto &value : node.SourceProperties)
+				if (value.Port == port) return &value.Data;
+			return nullptr;
+		};
+		const auto propertyCount = [](const Node &node, std::string_view port) {
+			return std::count_if(
+				node.SourceProperties.begin(), node.SourceProperties.end(), [&](const auto &value) {
+					return value.Port == port;
+				}
+			);
+		};
+		const auto sameProperty = [&](const Node &left, const Node &right, std::string_view port) {
+			const auto a = property(left, port), b = property(right, port);
+			if (propertyCount(left, port) > 1 || propertyCount(right, port) > 1) return false;
+			if (a && b) return *a == *b;
+			if (!a && !b) return true;
+			const auto value = a ? a : b;
+			if (port == "serialize") return std::get_if<bool>(value) && std::get<bool>(*value);
+			const auto array = std::get_if<ArrayValue>(value);
+			return array && array->ElementType == ValueType::Text && array->Elements.empty() &&
+				   array->Items.empty() && array->Nested.empty();
+		};
+		// grug native restored owners use document order. Serialize-only edits never refresh pointers.
+		for (const auto &node : document.Nodes) {
+			if (node.Type != "pc.cache" && node.Type != "pc.cache_array") continue;
+			if (!work.Charge(16, node.Id.size() + 1))
+				return fail(Status::LimitExceeded, "cache metadata lookup exceeds work bounds");
+			const auto old = std::lower_bound(
+				before.Nodes.begin(), before.Nodes.end(), node.Id, [](const auto &item, const auto &id) {
+					return item.Id < id;
+				}
+			);
+			if (old != before.Nodes.end() && old->Id == node.Id && old->Type != node.Type) continue;
+			const bool fresh = old == before.Nodes.end() || old->Id != node.Id;
+			if (fresh || !sameProperty(*old, node, "cache_group"))
+				membershipOwners[membershipCount++] = node.Id;
+			else if (!sameProperty(*old, node, "serialize"))
+				serializeOwners[serializeCount++] = node.Id;
+		}
+
 		if (kind != ImageGraphCacheEditKind::RenderOnly) {
 			size_t prior = 0;
 			for (const auto &node : candidate.Nodes) {
@@ -353,10 +405,15 @@ namespace studio::detail {
 		if (work.Refused)
 			return fail(Status::LimitExceeded, "Source cache input edits exceed name work bounds");
 		const uint64_t held = *authoredBytes + *priorBytes + *candidateBytes;
-		if (held >= maximumBytes ||
-			!host.NotifySourceInputEdits(
-				document, std::span(edited).first(count), diagnostic, maximumBytes - held
-			))
+		if (held >= maximumBytes || !host.NotifySourceAuthoredEdits(
+										document,
+										std::span(edited).first(count),
+										std::span(membershipOwners).first(membershipCount),
+										std::span(serializeOwners).first(serializeCount),
+										diagnostic,
+										maximumBytes - held,
+										work.Remaining
+									))
 			return false;
 		observation.Inputs = std::move(candidate);
 		observation.PendingValueEdit = false;

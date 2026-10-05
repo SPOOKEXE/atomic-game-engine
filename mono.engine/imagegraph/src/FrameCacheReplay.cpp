@@ -1,3 +1,4 @@
+#include "CacheGroupReplayClone.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/core/Profiling.hpp>
@@ -319,14 +320,51 @@ namespace engine::imagegraph {
 			maximumBytes
 		);
 	}
-	Status EnableSourceFrameCacheEditedGroups(
+	static Status
+	AdmitSourceCacheEditData(const DataReplayState &source, uint64_t &work, Diagnostic &diagnostic) {
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return code;
+		};
+		const auto charge = [&](uint64_t count, uint64_t bytes) {
+			if (count && bytes > work / count) return false;
+			work -= count * bytes;
+			return true;
+		};
+		// grug reject record counts and aggregate clone work before retained payload traversal.
+		if (source.Entries.size() > Limits::MaximumArrayElements ||
+			!charge(1, detail::CacheGroupReplayComparisonWork(source.CacheGroups)))
+			return fail(Status::LimitExceeded, "frame-cache source counts exceed work bounds");
+		for (const auto &row : source.Entries) {
+			if (row.Values.size() > Limits::MaximumArrayElements ||
+				row.NodeId.size() > Limits::MaximumTextBytes ||
+				row.LoadedCacheData.size() > Limits::MaximumTextBytes ||
+				!charge(
+					4,
+					sizeof(row) + row.NodeId.size() + row.LoadedCacheData.size() +
+						row.Values.size() * sizeof(DataReplayValueFrame)
+				))
+				return fail(Status::LimitExceeded, "frame-cache source rows exceed work bounds");
+			for (const auto &frame : row.Values) {
+				const auto clone = ValueClonePayloadBytes(frame.Data);
+				if (!clone) return fail(Status::InvalidValue, "frame-cache source value is malformed");
+				if (!charge(4, *clone))
+					return fail(Status::LimitExceeded, "frame-cache source values exceed work bounds");
+			}
+		}
+		if (!charge(2, detail::CacheGroupReplayCloneBytes(source.CacheGroups)))
+			return fail(Status::LimitExceeded, "frame-cache group payload exceeds work bounds");
+		return Status::Ok;
+	}
+	static Status EnableSourceFrameCacheEditedGroupsImpl(
 		const Document &document,
 		std::span<const std::string_view> editedNodes,
 		const DataReplayState &source,
 		DataReplayState &output,
 		const std::optional<SourceFrameCacheProjectObservation> &project,
 		Diagnostic &diagnostic,
-		uint64_t maximumBytes
+		uint64_t maximumBytes,
+		uint64_t &work
 	) try {
 		ENGINE_PROFILE("imagegraph.frame_cache.input_edits");
 		const auto fail = [&](Status code, const char *message) {
@@ -337,16 +375,8 @@ namespace engine::imagegraph {
 			document.Nodes.size() > Limits::MaximumNodes || document.Groups.size() > Limits::MaximumGroups ||
 			editedNodes.size() > Limits::MaximumNodes)
 			return fail(Status::LimitExceeded, "frame-cache input edits exceed count or byte bounds");
-		const uint64_t retained = RetainedDataReplayBytes(source);
-		const uint64_t oldOutput = &source == &output ? 0 : RetainedDataReplayBytes(output);
-		const uint64_t initialWorkspace = DataReplayValidationWorkspaceBytes(source);
-		if (retained > maximumBytes || oldOutput > maximumBytes - retained ||
-			initialWorkspace > maximumBytes - retained - oldOutput)
-			return fail(Status::LimitExceeded, "frame-cache input edit validation exceeds live byte bounds");
-		if (ValidateDataReplay(source, maximumBytes - oldOutput, diagnostic) != Status::Ok)
-			return diagnostic.Code;
-		constexpr uint64_t WORK_LIMIT = 64ull * 1024 * 1024;
-		uint64_t work = WORK_LIMIT;
+		if (work > SOURCE_FRAME_CACHE_EDIT_WORK_BYTES)
+			return fail(Status::LimitExceeded, "frame-cache input work cap is outside bounds");
 		bool workExceeded = false;
 		const auto charge = [&](uint64_t count, uint64_t bytes) {
 			if (count && bytes > work / count) {
@@ -359,6 +389,15 @@ namespace engine::imagegraph {
 		const auto same = [&](std::string_view left, std::string_view right) {
 			return charge(1, std::max(left.size(), right.size()) + 1) && left == right;
 		};
+		if (AdmitSourceCacheEditData(source, work, diagnostic) != Status::Ok) return diagnostic.Code;
+		const uint64_t retained = RetainedDataReplayBytes(source);
+		const uint64_t oldOutput = &source == &output ? 0 : RetainedDataReplayBytes(output);
+		const uint64_t initialWorkspace = DataReplayValidationWorkspaceBytes(source);
+		if (retained > maximumBytes || oldOutput > maximumBytes - retained ||
+			initialWorkspace > maximumBytes - retained - oldOutput)
+			return fail(Status::LimitExceeded, "frame-cache input edit validation exceeds live byte bounds");
+		if (ValidateDataReplay(source, maximumBytes - oldOutput, diagnostic) != Status::Ok)
+			return diagnostic.Code;
 		std::array<const Node *, Limits::MaximumNodes> owners{};
 		size_t ownerCount = 0;
 		const auto select = [&](std::string_view id) {
@@ -499,6 +538,119 @@ namespace engine::imagegraph {
 		diagnostic = {Status::LimitExceeded, {}, {}, "frame-cache input edit allocation refused"};
 		return diagnostic.Code;
 	}
+	Status EnableSourceFrameCacheEditedGroups(
+		const Document &document,
+		std::span<const std::string_view> editedNodes,
+		const DataReplayState &source,
+		DataReplayState &output,
+		const std::optional<SourceFrameCacheProjectObservation> &project,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		uint64_t work = SOURCE_FRAME_CACHE_EDIT_WORK_BYTES;
+		return EnableSourceFrameCacheEditedGroupsImpl(
+			document, editedNodes, source, output, project, diagnostic, maximumBytes, work
+		);
+	}
+	Status SynchronizeSourceFrameCacheEdits(
+		const Document &document,
+		std::span<const std::string_view> editedNodes,
+		std::span<const std::string_view> membershipOwners,
+		std::span<const std::string_view> serializeOwners,
+		std::span<DataReplayState *const> journals,
+		const std::optional<SourceFrameCacheProjectObservation> &project,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes,
+		uint64_t maximumWork
+	) try {
+		ENGINE_PROFILE("imagegraph.frame_cache.authored_edits");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return code;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+			maximumWork > SOURCE_FRAME_CACHE_EDIT_WORK_BYTES || journals.empty() || journals.size() > 2 ||
+			document.Nodes.size() > Limits::MaximumNodes || document.Groups.size() > Limits::MaximumGroups ||
+			editedNodes.size() > Limits::MaximumNodes || membershipOwners.size() > Limits::MaximumNodes ||
+			serializeOwners.size() > Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "frame-cache authored transaction cap is outside bounds");
+		std::array<DataReplayState, 2> candidates;
+		uint64_t work = maximumWork, held = 0;
+		for (size_t i = 0; i < journals.size(); ++i) {
+			if (!journals[i]) return fail(Status::InvalidValue, "frame-cache authored journal is absent");
+			for (size_t j = 0; j < i; ++j)
+				if (journals[i] == journals[j])
+					return fail(Status::InvalidValue, "frame-cache authored journals alias");
+			if (AdmitSourceCacheEditData(*journals[i], work, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			held = detail::MeshAddBytes(held, RetainedDataReplayBytes(*journals[i]));
+			held = detail::MeshAddBytes(held, RetainedDataReplayBytes(candidates[i]));
+		}
+		if (held >= maximumBytes)
+			return fail(Status::LimitExceeded, "frame-cache authored journals exceed live bytes");
+		for (size_t i = 0; i < journals.size(); ++i) {
+			const auto empty = RetainedDataReplayBytes(candidates[i]);
+			const auto cap = maximumBytes - held + RetainedDataReplayBytes(*journals[i]) + empty;
+			const auto status = EnableSourceFrameCacheEditedGroupsImpl(
+				document, {}, *journals[i], candidates[i], project, diagnostic, cap, work
+			);
+			if (status != Status::Ok) return status;
+			held = detail::MeshAddBytes(held - empty, RetainedDataReplayBytes(candidates[i]));
+			if (held >= maximumBytes)
+				return fail(Status::LimitExceeded, "frame-cache authored candidates exceed live bytes");
+		}
+		uint64_t groupBytes = 0;
+		std::array<CacheGroupReplayState *, 2> groups{};
+		for (size_t i = 0; i < journals.size(); ++i) {
+			groups[i] = &candidates[i].CacheGroups;
+			groupBytes += RetainedCacheGroupReplayBytes(*groups[i]);
+		}
+		if (!membershipOwners.empty() || !serializeOwners.empty()) {
+			const auto status = detail::SynchronizeAuthoredCacheGroupMetadata(
+				document,
+				membershipOwners,
+				serializeOwners,
+				std::span(groups).first(journals.size()),
+				maximumBytes - held + groupBytes,
+				diagnostic,
+				work
+			);
+			if (status != Status::Ok) return status;
+			uint64_t updated = 0;
+			for (size_t i = 0; i < journals.size(); ++i)
+				updated += RetainedCacheGroupReplayBytes(*groups[i]);
+			held = detail::MeshAddBytes(held - groupBytes, updated);
+		}
+		if (!editedNodes.empty()) {
+			for (size_t i = 0; i < journals.size(); ++i) {
+				const auto before = RetainedDataReplayBytes(candidates[i]);
+				if (held >= maximumBytes)
+					return fail(Status::LimitExceeded, "frame-cache authored Enable exceeds live bytes");
+				const auto status = EnableSourceFrameCacheEditedGroupsImpl(
+					document,
+					editedNodes,
+					candidates[i],
+					candidates[i],
+					project,
+					diagnostic,
+					maximumBytes - held + before,
+					work
+				);
+				if (status != Status::Ok) return status;
+				held = detail::MeshAddBytes(held - before, RetainedDataReplayBytes(candidates[i]));
+			}
+		}
+		if (held > maximumBytes)
+			return fail(Status::LimitExceeded, "frame-cache authored result exceeds live bytes");
+		for (size_t i = 0; i < journals.size(); ++i)
+			*journals[i] = std::move(candidates[i]);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "frame-cache authored edit allocation refused"};
+		return diagnostic.Code;
+	}
+
 	Status OverlaySourceFrameCacheRows(
 		const Document &document,
 		const DataReplayState &retained,

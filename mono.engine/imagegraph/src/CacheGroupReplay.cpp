@@ -898,12 +898,15 @@ namespace engine::imagegraph {
 		);
 	}
 
-	Status RefreshLoadedCacheGroupReplay(
+	static Status RefreshCacheGroupMetadata(
 		const Document &document,
 		std::span<const std::string_view> owners,
+		std::span<const std::string_view> serializeOwners,
 		std::span<CacheGroupReplayState *const> journals,
 		uint64_t maximumBytes,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		uint64_t &work,
+		bool retireOmitted
 	) try {
 		ENGINE_PROFILE("imagegraph.cache_group.loaded_refresh");
 		const auto fail = [&](Status code, const char *message) {
@@ -911,7 +914,8 @@ namespace engine::imagegraph {
 			return code;
 		};
 		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || journals.size() > 2 ||
-			owners.size() > Limits::MaximumNodes)
+			owners.size() > Limits::MaximumNodes || serializeOwners.size() > Limits::MaximumNodes ||
+			document.Nodes.size() > Limits::MaximumNodes || work > COMPARISON_WORK_LIMIT)
 			return fail(Status::LimitExceeded, "loaded cache group transaction cap is outside bounds");
 		for (size_t i = 0; i < journals.size(); ++i) {
 			if (!journals[i]) return fail(Status::InvalidValue, "loaded cache group journal is absent");
@@ -921,7 +925,7 @@ namespace engine::imagegraph {
 			if (ComparisonWork(*journals[i]) > COMPARISON_WORK_LIMIT)
 				return fail(Status::LimitExceeded, "loaded cache group journal exceeds count or work bounds");
 		}
-		if (owners.empty() || journals.empty()) {
+		if ((owners.empty() && serializeOwners.empty()) || journals.empty()) {
 			diagnostic = {};
 			return Status::Ok;
 		}
@@ -933,18 +937,110 @@ namespace engine::imagegraph {
 		}
 		if (held >= maximumBytes)
 			return fail(Status::LimitExceeded, "loaded cache group journals exceed live bytes");
-		uint64_t work = COMPARISON_WORK_LIMIT;
 		for (size_t i = 0; i < journals.size(); ++i) {
 			const auto prior = RetainedCacheGroupReplayBytes(*journals[i]);
 			const auto empty = RetainedCacheGroupReplayBytes(candidates[i]);
 			const auto cap = maximumBytes - held + prior + empty;
-			const auto status = InitializeLoadedCacheGroups(
-				document, *journals[i], candidates[i], cap, diagnostic, owners, work
-			);
-			if (status != Status::Ok) return status;
+			if (!owners.empty()) {
+				const auto status = InitializeLoadedCacheGroups(
+					document, *journals[i], candidates[i], cap, diagnostic, owners, work
+				);
+				if (status != Status::Ok) return status;
+			} else {
+				const auto cloneWork = ComparisonWork(*journals[i]);
+				if (cloneWork > work)
+					return fail(Status::LimitExceeded, "cache metadata clone exceeds work bounds");
+				work -= cloneWork;
+				const auto cloneBytes = StateBytes(*journals[i], false);
+				if (MeshAddBytes(cloneBytes, ValidationWorkspace(*journals[i])) > maximumBytes - held)
+					return fail(Status::LimitExceeded, "cache metadata clone exceeds live bytes");
+				if (ValidateCacheGroupReplay(*journals[i], cap, diagnostic) != Status::Ok)
+					return diagnostic.Code;
+				candidates[i] = *journals[i];
+				if (RetainedCacheGroupReplayBytes(candidates[i]) > cloneBytes)
+					return fail(Status::LimitExceeded, "cache metadata clone capacities exceed admission");
+			}
 			held = MeshAddBytes(held - empty, RetainedCacheGroupReplayBytes(candidates[i]));
 			if (held > maximumBytes)
 				return fail(Status::LimitExceeded, "loaded cache group candidates exceed live bytes");
+		}
+		const auto same = [&](std::string_view left, std::string_view right, bool &exhausted) {
+			const auto cost = std::max(left.size(), right.size()) + 1;
+			if (cost > work) {
+				exhausted = true;
+				return false;
+			}
+			work -= cost;
+			return left == right;
+		};
+		bool exhausted = false;
+		for (size_t i = 0; i < journals.size(); ++i) {
+			if (retireOmitted) {
+				// grug omitted native members wake, keeping getters and captured rows.
+				for (auto &node : candidates[i].Nodes) {
+					if (node.OwnerId.empty()) continue;
+					for (const auto id : owners) {
+						if (!same(node.OwnerId, id, exhausted)) continue;
+						auto owner = candidates[i].Owners.begin();
+						while (owner != candidates[i].Owners.end() && !same(owner->NodeId, id, exhausted))
+							++owner;
+						if (exhausted)
+							return fail(
+								Status::LimitExceeded, "cache metadata owner lookup exceeds work bounds"
+							);
+						if (owner == candidates[i].Owners.end())
+							return fail(Status::UnknownNode, "cache metadata owner is absent");
+						bool present = false;
+						for (const auto &member : owner->Members)
+							if (same(node.NodeId, member, exhausted)) {
+								present = true;
+								break;
+							}
+						if (!present && !exhausted) {
+							node.OwnerId.clear();
+							node.RenderActive = true;
+						}
+						break;
+					}
+					if (exhausted)
+						return fail(Status::LimitExceeded, "cache metadata pointers exceed work bounds");
+				}
+			}
+			for (const auto id : serializeOwners) {
+				if (!ValidText(id)) return fail(Status::InvalidValue, "cache Serialize owner ID is invalid");
+				const Node *authored = nullptr;
+				for (const auto &node : document.Nodes) {
+					if (node.Id.size() > Limits::MaximumTextBytes)
+						return fail(Status::LimitExceeded, "cache Serialize document ID exceeds text bounds");
+					if (same(node.Id, id, exhausted)) {
+						authored = &node;
+						break;
+					}
+				}
+				if (exhausted)
+					return fail(Status::LimitExceeded, "cache Serialize lookup exceeds work bounds");
+				if (!authored || (authored->Type != "pc.cache" && authored->Type != "pc.cache_array"))
+					return fail(Status::UnknownNode, "cache Serialize owner is absent or has wrong type");
+				if (authored->SourceProperties.size() > Limits::MaximumPropertiesPerNode)
+					return fail(Status::LimitExceeded, "cache Serialize properties exceed count bounds");
+				bool serialize = true, seen = false;
+				for (const auto &property : authored->SourceProperties) {
+					if (!same(property.Port, "serialize", exhausted)) continue;
+					const auto *flag = std::get_if<bool>(&property.Data);
+					if (!flag || seen) return fail(Status::InvalidValue, "cache Serialize is malformed");
+					serialize = *flag;
+					seen = true;
+				}
+				if (exhausted)
+					return fail(Status::LimitExceeded, "cache Serialize properties exceed work bounds");
+				for (auto &owner : candidates[i].Owners)
+					if (same(owner.NodeId, id, exhausted)) {
+						owner.Serialize = serialize;
+						break;
+					}
+				if (exhausted)
+					return fail(Status::LimitExceeded, "cache Serialize journal exceeds work bounds");
+			}
 		}
 		for (size_t i = 0; i < journals.size(); ++i)
 			*journals[i] = std::move(candidates[i]);
@@ -953,6 +1049,32 @@ namespace engine::imagegraph {
 	} catch (const std::bad_alloc &) {
 		diagnostic = {Status::LimitExceeded, {}, {}, "loaded cache group transaction allocation refused"};
 		return diagnostic.Code;
+	}
+
+	Status RefreshLoadedCacheGroupReplay(
+		const Document &document,
+		std::span<const std::string_view> owners,
+		std::span<CacheGroupReplayState *const> journals,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	) {
+		uint64_t work = COMPARISON_WORK_LIMIT;
+		return RefreshCacheGroupMetadata(
+			document, owners, {}, journals, maximumBytes, diagnostic, work, false
+		);
+	}
+	Status detail::SynchronizeAuthoredCacheGroupMetadata(
+		const Document &document,
+		std::span<const std::string_view> owners,
+		std::span<const std::string_view> serializeOwners,
+		std::span<CacheGroupReplayState *const> journals,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic,
+		uint64_t &remainingWork
+	) {
+		return RefreshCacheGroupMetadata(
+			document, owners, serializeOwners, journals, maximumBytes, diagnostic, remainingWork, true
+		);
 	}
 
 	std::optional<PreparedCacheGroupMembership> PrepareAuthoredCacheGroupMember(
@@ -1194,6 +1316,10 @@ namespace engine::imagegraph {
 		for (size_t i = 0; i < journals.size(); ++i)
 			*journals[i] = std::move(prepared->Journals[i]);
 		return Status::Ok;
+	}
+
+	uint64_t detail::CacheGroupReplayComparisonWork(const CacheGroupReplayState &state) {
+		return ComparisonWork(state);
 	}
 
 	uint64_t detail::CacheGroupReplayCloneBytes(const CacheGroupReplayState &state) {

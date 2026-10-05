@@ -2,6 +2,7 @@
 #include <engine/imagegraph/DataReplay.hpp>
 
 namespace engine::imagegraph {
+	inline constexpr uint64_t SOURCE_FRAME_CACHE_EDIT_WORK_BYTES = 64ull * 1024 * 1024;
 	// Private replay tags identify the source node type without adding authored schema fields.
 	std::string_view SourceFrameCacheRowType(const DataReplayEntry &entry);
 	// Empty when serialization is disabled or no typed saved payload is authored.
@@ -52,6 +53,21 @@ namespace engine::imagegraph {
 		const std::optional<SourceFrameCacheProjectObservation> &project,
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
+	// grug stage authored membership, Serialize flags and input Enable together for one or two journals.
+	// native restoration retires omitted owner pointers without waking members. source load refresh stays
+	// separate. caller subtracts document/host residency; all stages share the supplied bounded
+	// comparison-work allowance.
+	[[nodiscard]] Status SynchronizeSourceFrameCacheEdits(
+		const Document &document,
+		std::span<const std::string_view> editedNodes,
+		std::span<const std::string_view> membershipOwners,
+		std::span<const std::string_view> serializeOwners,
+		std::span<DataReplayState *const> journals,
+		const std::optional<SourceFrameCacheProjectObservation> &project,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes,
+		uint64_t maximumWork = SOURCE_FRAME_CACHE_EDIT_WORK_BYTES
 	);
 	inline constexpr std::string_view SOURCE_FRAME_CACHE_NATIVE_TEXT = "composer_frame_cache_text";
 	inline constexpr std::string_view SOURCE_FRAME_CACHE_NATIVE_DATA = "composer_frame_cache_data";

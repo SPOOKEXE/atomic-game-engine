@@ -121,21 +121,21 @@ namespace {
 }
 
 TEST_CASE(
-	"Studio cache input observation ignores presentation and source attributes",
+	"Studio cache input observation ignores presentation and noncache source attributes",
 	"[studio][imagegraph][cache_group]"
 ) {
 	Fixture fixture;
 	const auto original = *fixture.Host.PreparedData(1, 1);
 	fixture.Authored.Nodes[0].Position = {30, 50};
 	fixture.Authored.Nodes[0].SourceDisplayName = "new label";
-	fixture.Authored.Nodes[1].SourceProperties.push_back({"serialize", false});
+	fixture.Authored.Nodes[1].SourceProperties.push_back({"opaque", false});
 	fixture.Authored.Nodes[0].SourceInputExpressions.push_back({"width", "2", true});
 	fixture.Authored.Nodes[0].InstanceBase = "different-base";
 	std::reverse(fixture.Authored.Nodes[0].Values.begin(), fixture.Authored.Nodes[0].Values.end());
 	std::reverse(fixture.Authored.Nodes.begin(), fixture.Authored.Nodes.end());
 	REQUIRE(fixture.Observe());
 	CHECK(*fixture.Host.PreparedData(1, 1) == original);
-	CHECK(fixture.Observation.Inputs.Nodes[0].SourceProperties.empty());
+	CHECK(fixture.Observation.Inputs.Nodes[0].SourceProperties.size() == 1);
 	CHECK(fixture.Observation.Inputs.Nodes[0].SourceDisplayName.empty());
 	CHECK_FALSE(fixture.Member("input").RenderActive);
 }
@@ -450,4 +450,192 @@ TEST_CASE(
 	CHECK_FALSE(history.CanUndo());
 	CHECK(fixture.Authored == before);
 	CHECK(*fixture.Host.PreparedData(1, 1) == replay);
+}
+
+TEST_CASE(
+	"Studio Serialize restoration preserves overlapping pointers and frozen frames",
+	"[studio][imagegraph][cache_group][metadata][history]"
+) {
+	Fixture fixture;
+	Node other{"other", "pc.cache", "", {}, {{"animated", false}}};
+	other.SourceProperties = {{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}};
+	fixture.Authored.Nodes.push_back(other);
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	CHECK(fixture.Member("input").OwnerId == "other");
+	const auto rows = fixture.Host.PreparedData(1, 1)->Entries;
+	const auto getters = fixture.Member("input").Outputs;
+	fixture.Authored.Nodes[1].SourceProperties.push_back({"serialize", false});
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
+	CHECK(fixture.Host.SourceCacheGroups().Owners.front().Serialize == false);
+	CHECK(fixture.Member("input").OwnerId == "other");
+	CHECK_FALSE(fixture.Member("input").RenderActive);
+	CHECK(fixture.Member("input").Outputs == getters);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == rows);
+	fixture.Authored.Nodes[1].SourceProperties.pop_back();
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
+	CHECK(fixture.Host.SourceCacheGroups().Owners.front().Serialize);
+	CHECK(fixture.Member("input").OwnerId == "other");
+	CHECK_FALSE(fixture.Member("input").RenderActive);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == rows);
+}
+
+TEST_CASE(
+	"Studio membership history restoration detaches omitted pointers without clearing frames",
+	"[studio][imagegraph][cache_group][metadata][history]"
+) {
+	Fixture fixture;
+	const auto rows = fixture.Host.PreparedData(1, 1)->Entries;
+	REQUIRE(fixture.Host.ToggleSourceCacheGroupMember(fixture.Authored, "cache", "input", fixture.Error));
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	studio::ImageGraphHistory history;
+	REQUIRE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, "cache", "input", fixture.Error
+	));
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	CHECK(fixture.Member("input").OwnerId == "cache");
+	REQUIRE(history.Undo(fixture.Authored));
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
+	CHECK(fixture.Member("input").OwnerId.empty());
+	CHECK(fixture.Member("input").RenderActive);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == rows);
+	REQUIRE(history.Redo(fixture.Authored));
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
+	CHECK(fixture.Member("input").OwnerId == "cache");
+	CHECK(fixture.Member("input").RenderActive);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == rows);
+}
+
+TEST_CASE(
+	"Studio restored Serialize gates admitted input edits in the same transaction",
+	"[studio][imagegraph][cache_group][metadata][history]"
+) {
+	Fixture fixture;
+	const auto rows = fixture.Host.PreparedData(1, 1)->Entries;
+	fixture.Authored.Nodes[1].SourceProperties.push_back({"serialize", false});
+	fixture.Authored.Nodes[0].Values[2].Data = Colour{80, 20, 30, 255};
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
+	CHECK_FALSE(fixture.Member("input").RenderActive);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == rows);
+	CHECK_FALSE(fixture.Host.SourceCacheGroups().Owners.front().Serialize);
+	fixture.Authored.Nodes[1].SourceProperties.pop_back();
+	fixture.Authored.Nodes[0].Values[2].Data = Colour{90, 20, 30, 255};
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
+	CHECK(fixture.Member("input").RenderActive);
+	CHECK(fixture.Host.SourceCacheGroups().Owners.front().Serialize);
+	REQUIRE(fixture.Host.PreparedData(1, 1)->Entries.size() == 1);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries.front().Values.size() == 2);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries.front().FrameCacheConstructorCleared);
+}
+
+TEST_CASE(
+	"Studio malformed metadata refusal preserves replay observation and retries",
+	"[studio][imagegraph][cache_group][metadata][bounds]"
+) {
+	Fixture fixture;
+	const auto replay = *fixture.Host.PreparedData(1, 1);
+	const auto observation = fixture.Observation.Inputs;
+	fixture.Authored.Nodes[1].SourceProperties.push_back({"serialize", std::string{"false"}});
+	CHECK_FALSE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	CHECK(fixture.Error.Code == Status::InvalidValue);
+	CHECK(*fixture.Host.PreparedData(1, 1) == replay);
+	CHECK(fixture.Observation.Inputs == observation);
+	fixture.Authored.Nodes[1].SourceProperties.back().Data = false;
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	CHECK_FALSE(fixture.Host.SourceCacheGroups().Owners.front().Serialize);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == replay.Entries);
+	CHECK_FALSE(fixture.Member("input").RenderActive);
+}
+
+TEST_CASE(
+	"Studio cold metadata and new membership edits synchronize before first preparation",
+	"[studio][imagegraph][cache_group][metadata][load]"
+) {
+	auto document = Scene();
+	ImageGraphCacheEditObservation observation;
+	CapturedFeedbackHost host;
+	Diagnostic error;
+	REQUIRE(ObserveImageGraphCacheEdits(
+		document, observation, host, ImageGraphCacheEditKind::FreshDocument, error
+	));
+	document.Nodes[1].SourceProperties.push_back({"serialize", false});
+	REQUIRE(
+		ObserveImageGraphCacheEdits(document, observation, host, ImageGraphCacheEditKind::AnimatorUndo, error)
+	);
+	CHECK_FALSE(host.SourceCacheGroups().Owners.front().Serialize);
+	Node other{"other", "pc.cache", "", {}, {{"animated", false}}};
+	other.SourceProperties = {{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}};
+	document.Nodes.push_back(other);
+	REQUIRE(
+		ObserveImageGraphCacheEdits(document, observation, host, ImageGraphCacheEditKind::RenderOnly, error)
+	);
+	REQUIRE(host.SourceCacheGroups().Owners.size() == 2);
+	const auto member = std::find_if(
+		host.SourceCacheGroups().Nodes.begin(), host.SourceCacheGroups().Nodes.end(), [](const auto &node) {
+			return node.NodeId == "input";
+		}
+	);
+	REQUIRE(member != host.SourceCacheGroups().Nodes.end());
+	CHECK(member->OwnerId == "other");
+}
+
+TEST_CASE(
+	"Studio undo of an added then frozen member wakes it for later value edits",
+	"[studio][imagegraph][cache_group][metadata][history]"
+) {
+	Fixture fixture;
+	REQUIRE(fixture.Host.ToggleSourceCacheGroupMember(fixture.Authored, "cache", "input", fixture.Error));
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	studio::ImageGraphHistory history;
+	REQUIRE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, "cache", "input", fixture.Error
+	));
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	auto request = Request();
+	request.Tick = 1;
+	request.SourceCacheProject = SourceFrameCacheProjectObservation{{1, 0, false}, 1, false, false};
+	REQUIRE(fixture.Host.Prepare(
+		fixture.Authored,
+		Compiled(fixture.Authored),
+		2,
+		1,
+		request,
+		fixture.Error,
+		Limits::MaximumEvaluationBytes,
+		"out"
+	));
+	const auto currentMember = [&]() -> const CacheGroupReplayNode & {
+		const auto &groups = fixture.Host.SourceCacheGroups();
+		const auto member = std::find_if(groups.Nodes.begin(), groups.Nodes.end(), [](const auto &node) {
+			return node.NodeId == "input";
+		});
+		REQUIRE(member != groups.Nodes.end());
+		return *member;
+	};
+	REQUIRE_FALSE(currentMember().RenderActive);
+	const auto rows = fixture.Host.PreparedData(2, 1)->Entries;
+	const auto getters = currentMember().Outputs;
+	REQUIRE(history.Undo(fixture.Authored));
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
+	CHECK(currentMember().OwnerId.empty());
+	CHECK(currentMember().RenderActive);
+	CHECK(currentMember().Outputs == getters);
+	CHECK(fixture.Host.PreparedData(2, 1)->Entries == rows);
+	fixture.Authored.Nodes[0].Values[2].Data = Colour{90, 20, 30, 255};
+	REQUIRE(fixture.Observe());
+	request = Request();
+	request.Tick = 1;
+	request.SourceCacheProject = SourceFrameCacheProjectObservation{{1, 0, false}, 1, false, false};
+	REQUIRE(fixture.Host.Prepare(
+		fixture.Authored,
+		Compiled(fixture.Authored),
+		3,
+		1,
+		request,
+		fixture.Error,
+		Limits::MaximumEvaluationBytes,
+		"input-out"
+	));
+	REQUIRE(fixture.Host.Output("input-out"));
+	CHECK(fixture.Host.Output("input-out")->Pixels[0] == 90);
+	CHECK(fixture.Host.PreparedData(3, 1)->Entries == rows);
 }

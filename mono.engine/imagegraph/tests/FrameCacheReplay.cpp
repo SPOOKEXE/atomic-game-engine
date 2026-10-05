@@ -2915,3 +2915,110 @@ TEST_CASE(
 		CHECK(output->Pixels[0] == 70);
 	}
 }
+
+TEST_CASE(
+	"Authored metadata synchronization preserves rows and rolls back failed input Enable",
+	"[imagegraph][source_frame_cache][metadata]"
+) {
+	auto document = Scene();
+	document.Nodes[1].SourceProperties = {
+		{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}
+	};
+	auto request = Clock(0);
+	const SourceFrameCacheProjectObservation project{{0, 0, false}, 0, false, false};
+	request.SourceCacheProject = project;
+	auto initial = Run(document, request).Data;
+	Diagnostic error;
+	auto checkpoint = initial;
+	const auto before = initial;
+	const std::array journals{&initial, &checkpoint};
+	const std::array<std::string_view, 1> owner{"cache"}, input{"input"};
+	document.Nodes[1].SourceProperties.push_back({"serialize", false});
+	const auto code = SynchronizeSourceFrameCacheEdits(document, input, {}, owner, journals, project, error);
+	INFO(error.Message);
+	REQUIRE(code == Status::Ok);
+	CHECK_FALSE(initial.CacheGroups.Owners.front().Serialize);
+	CHECK(initial.Entries == before.Entries);
+	CHECK(initial.CacheGroups.Nodes == before.CacheGroups.Nodes);
+	CHECK(initial == checkpoint);
+	const auto gated = initial;
+	document.Nodes[1].SourceProperties.pop_back();
+	CHECK(
+		SynchronizeSourceFrameCacheEdits(document, input, {}, owner, journals, std::nullopt, error) ==
+		Status::UnsupportedExecution
+	);
+	CHECK(initial == gated);
+	CHECK(checkpoint == gated);
+	REQUIRE(
+		SynchronizeSourceFrameCacheEdits(document, input, {}, owner, journals, project, error) == Status::Ok
+	);
+	CHECK(initial.CacheGroups.Owners.front().Serialize);
+	CHECK(initial.Entries.front().Values.size() == 2);
+	CHECK(initial.Entries.front().FrameCacheConstructorCleared);
+	CHECK(initial == checkpoint);
+}
+
+TEST_CASE(
+	"Authored metadata transaction bounds and journals are admitted before publication",
+	"[imagegraph][source_frame_cache][metadata][bounds]"
+) {
+	auto document = Scene();
+	document.Nodes[1].SourceProperties = {
+		{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}
+	};
+	DataReplayState original;
+	Diagnostic error;
+	REQUIRE(
+		InitializeAuthoredCacheGroupReplay(
+			document, {}, original.CacheGroups, Limits::MaximumEvaluationBytes, error
+		) == Status::Ok
+	);
+	document.Nodes[1].SourceProperties.push_back({"serialize", false});
+	const std::array<std::string_view, 1> owner{"cache"};
+	auto first = original, second = original;
+	const std::array journals{&first, &second};
+	CHECK(
+		SynchronizeSourceFrameCacheEdits(document, {}, {}, owner, journals, std::nullopt, error, 1) ==
+		Status::LimitExceeded
+	);
+	CHECK(first == original);
+	CHECK(second == original);
+	const std::array<DataReplayState *, 2> alias{&first, &first}, absent{&first, nullptr};
+	CHECK(
+		SynchronizeSourceFrameCacheEdits(document, {}, {}, owner, alias, std::nullopt, error) ==
+		Status::InvalidValue
+	);
+	CHECK(
+		SynchronizeSourceFrameCacheEdits(document, {}, {}, owner, absent, std::nullopt, error) ==
+		Status::InvalidValue
+	);
+	CHECK(first == original);
+	// grug find the single-journal work floor, then prove two journals share that allowance.
+	uint64_t low = 0, high = SOURCE_FRAME_CACHE_EDIT_WORK_BYTES;
+	while (low < high) {
+		const auto middle = low + (high - low) / 2;
+		auto candidate = original;
+		const std::array one{&candidate};
+		const auto code = SynchronizeSourceFrameCacheEdits(
+			document, {}, {}, owner, one, std::nullopt, error, Limits::MaximumEvaluationBytes, middle
+		);
+		REQUIRE((code == Status::Ok || code == Status::LimitExceeded));
+		if (code == Status::Ok)
+			high = middle;
+		else
+			low = middle + 1;
+	}
+	CHECK(
+		SynchronizeSourceFrameCacheEdits(
+			document, {}, {}, owner, journals, std::nullopt, error, Limits::MaximumEvaluationBytes, low
+		) == Status::LimitExceeded
+	);
+	CHECK(first == original);
+	CHECK(second == original);
+	const auto code =
+		SynchronizeSourceFrameCacheEdits(document, {}, {}, owner, journals, std::nullopt, error);
+	INFO(error.Message);
+	REQUIRE(code == Status::Ok);
+	CHECK_FALSE(first.CacheGroups.Owners.front().Serialize);
+	CHECK(first == second);
+}

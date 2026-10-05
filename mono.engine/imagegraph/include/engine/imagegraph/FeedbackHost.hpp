@@ -374,61 +374,55 @@ namespace engine::imagegraph {
 		const CacheGroupReplayState &SourceCacheGroups() const {
 			return State.Data.CacheGroups;
 		}
-		// Notify accepted input/connection edits before preparing the revised document. Both current
-		// and preframe source journals change together; retained pixels keep their last observation.
+		// grug synchronize native authored metadata and input edits before revision replay.
+		// both complete data journals publish together; metadata alone keeps rows and latest pixels.
+		[[nodiscard]] bool NotifySourceAuthoredEdits(
+			const Document &document,
+			std::span<const std::string_view> editedNodes,
+			std::span<const std::string_view> membershipOwners,
+			std::span<const std::string_view> serializeOwners,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes,
+			uint64_t maximumWork = SOURCE_FRAME_CACHE_EDIT_WORK_BYTES
+		) {
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+				maximumWork > SOURCE_FRAME_CACHE_EDIT_WORK_BYTES) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "Source authored edit cap is outside bounds"};
+				return false;
+			}
+			// grug unconfigured cold journals have no captured rows or frozen members to wake.
+			if (!Configured) editedNodes = {};
+			if (editedNodes.empty() && membershipOwners.empty() && serializeOwners.empty()) {
+				diagnostic = {};
+				return true;
+			}
+			const auto resident = RetainedBytes();
+			const auto data = RetainedDataReplayBytes(State.Data) + RetainedDataReplayBytes(FrameStart.Data);
+			if (resident >= maximumBytes || data > resident) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "Source authored edit host exceeds live bytes"};
+				return false;
+			}
+			const std::array journals{&State.Data, &FrameStart.Data};
+			return SynchronizeSourceFrameCacheEdits(
+					   document,
+					   editedNodes,
+					   membershipOwners,
+					   serializeOwners,
+					   journals,
+					   CacheProjectObservation,
+					   diagnostic,
+					   maximumBytes - resident + data,
+					   maximumWork
+				   ) == Status::Ok;
+		}
+		// Notify accepted input/connection edits before preparing the revised document.
 		[[nodiscard]] bool NotifySourceInputEdits(
 			const Document &document,
 			std::span<const std::string_view> editedNodes,
 			Diagnostic &diagnostic,
 			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
 		) {
-			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
-				diagnostic = {Status::LimitExceeded, {}, {}, "Source input edit byte cap is outside bounds"};
-				return false;
-			}
-			if (!Configured || editedNodes.empty()) {
-				diagnostic = {};
-				return true;
-			}
-			const auto resident = RetainedBytes();
-			const auto stateBytes = RetainedDataReplayBytes(State.Data);
-			const auto startBytes = RetainedDataReplayBytes(FrameStart.Data);
-			if (resident >= maximumBytes) {
-				diagnostic = {Status::LimitExceeded, {}, {}, "Source input edit host exceeds byte bounds"};
-				return false;
-			}
-			DataReplayState nextState, nextStart;
-			if (EnableSourceFrameCacheEditedGroups(
-					document,
-					editedNodes,
-					State.Data,
-					nextState,
-					CacheProjectObservation,
-					diagnostic,
-					maximumBytes - resident + stateBytes
-				) != Status::Ok)
-				return false;
-			const auto candidateBytes = RetainedDataReplayBytes(nextState);
-			if (candidateBytes >= maximumBytes - resident) {
-				diagnostic = {
-					Status::LimitExceeded, {}, {}, "Source input edit checkpoint exceeds byte bounds"
-				};
-				return false;
-			}
-			if (EnableSourceFrameCacheEditedGroups(
-					document,
-					editedNodes,
-					FrameStart.Data,
-					nextStart,
-					CacheProjectObservation,
-					diagnostic,
-					maximumBytes - resident - candidateBytes + startBytes
-				) != Status::Ok)
-				return false;
-			State.Data = std::move(nextState);
-			FrameStart.Data = std::move(nextStart);
-			diagnostic = {};
-			return true;
+			return NotifySourceAuthoredEdits(document, editedNodes, {}, {}, diagnostic, maximumBytes);
 		}
 		// The observed source button frees slots without evaluating the graph. A fresh
 		// observation owns the next update; same-clock dependent previews are unavailable.
@@ -1063,7 +1057,11 @@ namespace engine::imagegraph {
 				for (const auto &entry : State.Simulation.Entries)
 					if (retainCache(entry)) candidate.Simulation.Entries.push_back(entry);
 			}
-			if (!contiguous && temporal.SourceFrameCaches) {
+			const bool retainedSourceFrames =
+				std::any_of(State.Data.Entries.begin(), State.Data.Entries.end(), [](const auto &row) {
+					return !SourceFrameCacheRowType(row).empty();
+				});
+			if (!contiguous && (temporal.SourceFrameCaches || retainedSourceFrames)) {
 				const uint64_t resident = currentBytes + OutputBytes(candidate);
 				if (resident >= maximumBytes)
 					return fail(Status::LimitExceeded, "frame-cache seek overlay residency exceeds bounds");
@@ -1071,7 +1069,8 @@ namespace engine::imagegraph {
 						document,
 						State.Data,
 						candidate.Data,
-						FrameCacheOutputPolicy::Constructor,
+						temporal.SourceFrameCaches ? FrameCacheOutputPolicy::Constructor
+												   : FrameCacheOutputPolicy::RetainedObservation,
 						diagnostic,
 						maximumBytes - resident
 					) != Status::Ok)
