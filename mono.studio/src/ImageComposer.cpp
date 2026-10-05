@@ -624,6 +624,7 @@ namespace studio {
 			state.Authored.Outputs.push_back({"output-main", "solid-1", "image"});
 			state.SelectedOutput = "output-main";
 			state.NextOutputId = 1;
+			state.CacheEditRetryKind = detail::ImageGraphCacheEditKind::FreshDocument;
 			state.CacheEditBlocked = !detail::ObserveImageGraphCacheEdits(
 				state.Authored,
 				state.CacheEditObservation,

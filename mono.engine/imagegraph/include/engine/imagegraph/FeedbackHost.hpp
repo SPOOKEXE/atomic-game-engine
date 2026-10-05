@@ -280,6 +280,36 @@ namespace engine::imagegraph {
 		}
 
 	  public:
+		// grug call after loaded nodes exist, before preparing the revised document. no input edit is
+		// invented.
+		[[nodiscard]] bool RefreshLoadedSourceCacheGroups(
+			const Document &document,
+			std::span<const std::string_view> owners,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) {
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "loaded cache group host cap is outside bounds"};
+				return false;
+			}
+			if (owners.empty()) {
+				diagnostic = {};
+				return true;
+			}
+			const auto resident = RetainedBytes();
+			const auto groups = RetainedCacheGroupReplayBytes(State.Data.CacheGroups) +
+								RetainedCacheGroupReplayBytes(FrameStart.Data.CacheGroups);
+			if (resident >= maximumBytes || groups > resident) {
+				diagnostic = {
+					Status::LimitExceeded, {}, {}, "loaded cache group host exceeds live byte bounds"
+				};
+				return false;
+			}
+			const std::array journals{&State.Data.CacheGroups, &FrameStart.Data.CacheGroups};
+			return RefreshLoadedCacheGroupReplay(
+					   document, owners, journals, maximumBytes - resident + groups, diagnostic
+				   ) == Status::Ok;
+		}
 		// Notify accepted input/connection edits before preparing the revised document. Both current
 		// and preframe source journals change together; retained pixels keep their last observation.
 		[[nodiscard]] bool NotifySourceInputEdits(
@@ -949,10 +979,13 @@ namespace engine::imagegraph {
 						++retainedCaches;
 						cacheCopyBytes += RetainedSimulationEntryBytes(entry);
 					}
-			const uint64_t seedCopyBytes = RetainedSurfaceFrameReplayBytes(State.Surfaces) + cacheCopyBytes;
+			const uint64_t seedCopyBytes = RetainedSurfaceFrameReplayBytes(State.Surfaces) + cacheCopyBytes +
+										   RetainedCacheGroupReplayBytes(State.Data.CacheGroups);
 			if (!contiguous && seedCopyBytes > maximumBytes - currentBytes)
 				return fail(Status::LimitExceeded, "stateful seek cache copy exceeds bounds");
 			if (!contiguous) {
+				// grug keep loaded owner order and frozen getters when frame history starts again.
+				candidate.Data.CacheGroups = State.Data.CacheGroups;
 				candidate.Surfaces = State.Surfaces;
 				if (changed)
 					std::erase_if(candidate.Surfaces.Entries, [&](const SurfaceFrameReplayEntry &entry) {

@@ -368,3 +368,152 @@ TEST_CASE(
 	CHECK_FALSE(host.Prepare(document, plan, 1, 2, request, error, 1, "out"));
 	CHECK(host.PreparedFrame(1, 2) == std::optional(frame));
 }
+
+TEST_CASE(
+	"Host loaded cache refresh preserves frame rows and owner state across append",
+	"[imagegraph][feedback][cache_group][load]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Project = ProjectSettings{};
+	document.Project->SurfaceWidth = 2;
+	document.Project->SurfaceHeight = 1;
+	document.Timeline = TimelineSettings{6, 0, 5, "loop", 24};
+	document.Nodes = {
+		{"input",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t{2}}, {"height", int64_t{1}}, {"colour", Colour{10, 20, 30, 255}}}},
+		{"cache", "pc.cache", "", {}, {{"animated", false}}}
+	};
+	document.Nodes[1].SourceProperties = {
+		{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}
+	};
+	document.Links = {{"input", "image", "cache", "surface_in"}};
+	document.Outputs = {{"out", "cache", "cache_surface"}};
+	CapturedFeedbackHost host;
+	Diagnostic error;
+	const std::array<std::string_view, 1> initial{"cache"};
+	REQUIRE(host.RefreshLoadedSourceCacheGroups(document, initial, error));
+	Plan plan;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	EvaluationRequest request;
+	request.SourceCachePlayback =
+		SourceCachePlaybackObservation{true, SourceCacheSampling::ObservedFrame, true};
+	request.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 0.0, false, false};
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, error, Limits::MaximumEvaluationBytes, "out"));
+	const auto prior = *host.PreparedData(1, 1);
+	const auto pixels = *host.Output("out");
+	document.Nodes.push_back(
+		{"loaded",
+		 "pc.cache_array",
+		 "",
+		 {},
+		 {{"start_frame", int64_t{-1}}, {"stop_frame", int64_t{-1}}, {"step", int64_t{1}}}}
+	);
+	document.Nodes.back().SourceProperties = {
+		{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}, std::string{"new-number"}}}},
+		{"serialize", false}
+	};
+	document.Nodes.push_back({"new-number", "pc.number_simple", "", {}, {{"value", 99.0}}});
+	const std::array<std::string_view, 1> loaded{"loaded"};
+	CHECK_FALSE(host.RefreshLoadedSourceCacheGroups(document, loaded, error, 1));
+	CHECK(*host.PreparedData(1, 1) == prior);
+	CHECK(*host.Output("out") == pixels);
+	REQUIRE(host.RefreshLoadedSourceCacheGroups(document, loaded, error));
+	REQUIRE(host.PreparedData(1, 1));
+	const auto refreshed = *host.PreparedData(1, 1);
+	CHECK(refreshed.Entries == prior.Entries);
+	CHECK(refreshed.CacheGroups.Owners[0] == prior.CacheGroups.Owners[0]);
+	const auto member = std::find_if(
+		refreshed.CacheGroups.Nodes.begin(), refreshed.CacheGroups.Nodes.end(), [](const auto &node) {
+			return node.NodeId == "input";
+		}
+	);
+	REQUIRE(member != refreshed.CacheGroups.Nodes.end());
+	CHECK_FALSE(member->RenderActive);
+	CHECK(member->OwnerId == "loaded");
+	CHECK(*host.Output("out") == pixels);
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	request.SourceCacheProject->ProjectLastFrame = 5.0;
+	REQUIRE(host.Prepare(document, plan, 2, 1, request, error, Limits::MaximumEvaluationBytes, "out"));
+	CHECK(*host.Output("out") == pixels);
+	CHECK(host.PreparedData(2, 1)->CacheGroups.Owners.size() == 2);
+	request.SourceCachePlayback->Playing = false;
+	REQUIRE(host.Prepare(document, plan, 2, 1, request, error, Limits::MaximumEvaluationBytes, "out"));
+	const auto after = std::find_if(
+		host.PreparedData(2, 1)->CacheGroups.Nodes.begin(),
+		host.PreparedData(2, 1)->CacheGroups.Nodes.end(),
+		[](const auto &node) { return node.NodeId == "input"; }
+	);
+	REQUIRE(after != host.PreparedData(2, 1)->CacheGroups.Nodes.end());
+	CHECK_FALSE(after->RenderActive);
+	CHECK(after->OwnerId == "loaded");
+}
+
+TEST_CASE(
+	"Host replay start keeps loaded callback ownership instead of document order",
+	"[imagegraph][feedback][cache_group][load]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Project = ProjectSettings{};
+	document.Project->SurfaceWidth = 2;
+	document.Project->SurfaceHeight = 1;
+	document.Timeline = TimelineSettings{6, 0, 5, "loop", 24};
+	document.Nodes = {
+		{"input",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t{2}}, {"height", int64_t{1}}, {"colour", Colour{10, 20, 30, 255}}}},
+		{"cache-a", "pc.cache", "", {}, {{"animated", false}}},
+		{"cache-b", "pc.cache", "", {}, {{"animated", false}}}
+	};
+	for (size_t i = 1; i < document.Nodes.size(); ++i)
+		document.Nodes[i].SourceProperties = {
+			{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}, {"serialize", false}
+		};
+	document.Links = {{"input", "image", "cache-a", "surface_in"}};
+	document.Outputs = {{"out", "cache-a", "cache_surface"}};
+	CapturedFeedbackHost host;
+	Diagnostic error;
+	const std::array<std::string_view, 2> owners{"cache-b", "cache-a"};
+	REQUIRE(host.RefreshLoadedSourceCacheGroups(document, owners, error));
+	Plan plan;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	EvaluationRequest request;
+	request.SourceCachePlayback =
+		SourceCachePlaybackObservation{true, SourceCacheSampling::NativePlayedPrefix, true};
+	request.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 5.0, false, false};
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, error, Limits::MaximumEvaluationBytes, "out"));
+	const auto checkOwnership = [&](uint64_t revision) {
+		const auto *data = host.PreparedData(revision, 1);
+		REQUIRE(data);
+		REQUIRE(data->CacheGroups.Owners.size() >= 2);
+		CHECK(data->CacheGroups.Owners[0].NodeId == "cache-b");
+		CHECK(data->CacheGroups.Owners[1].NodeId == "cache-a");
+		const auto input = std::find_if(
+			data->CacheGroups.Nodes.begin(), data->CacheGroups.Nodes.end(), [](const auto &node) {
+				return node.NodeId == "input";
+			}
+		);
+		REQUIRE(input != data->CacheGroups.Nodes.end());
+		CHECK(input->OwnerId == "cache-a");
+	};
+	checkOwnership(1);
+	const auto pixels = *host.Output("out");
+	document.Nodes.push_back({"cache-c", "pc.cache", "", {}, {{"animated", false}}});
+	document.Nodes.back().SourceProperties = document.Nodes[1].SourceProperties;
+	const std::array<std::string_view, 2> appended{"cache-c", "cache-a"};
+	REQUIRE(host.RefreshLoadedSourceCacheGroups(document, appended, error));
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	REQUIRE(host.Prepare(document, plan, 2, 1, request, error, Limits::MaximumEvaluationBytes, "out"));
+	checkOwnership(2);
+	CHECK(*host.Output("out") == pixels);
+	request.SourceCachePlayback->Playing = false;
+	request.SourceCachePlayback->Sampling = SourceCacheSampling::ObservedFrame;
+	REQUIRE(host.Prepare(document, plan, 2, 1, request, error, Limits::MaximumEvaluationBytes, "out"));
+	checkOwnership(2);
+}

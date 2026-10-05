@@ -88,6 +88,15 @@ namespace engine::imagegraph {
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic
 	);
+	// grug refresh only deserialized owners, in source callback order. members keep outputs and activity.
+	// at most two journals publish together, under one live byte and comparison-work cap.
+	[[nodiscard]] Status RefreshLoadedCacheGroupReplay(
+		const Document &document,
+		std::span<const std::string_view> owners,
+		std::span<CacheGroupReplayState *const> journals,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	);
 	// Retires missing or type-replaced producers and owner lists. Retiring an enabled owner requires
 	// authoritative loading/appending observations before waking its surviving members.
 	[[nodiscard]] Status ReconcileCacheGroupReplay(

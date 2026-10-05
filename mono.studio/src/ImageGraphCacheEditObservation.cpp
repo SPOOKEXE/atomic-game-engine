@@ -205,7 +205,25 @@ namespace studio::detail {
 		if (!candidateBytes || *candidateBytes > *authoredBytes)
 			return fail(Status::LimitExceeded, "Source cache edit observation clone exceeds admission");
 		if (kind == ImageGraphCacheEditKind::FreshDocument || !observation.Ready) {
-			if (kind == ImageGraphCacheEditKind::FreshDocument) host.Clear();
+			if (kind == ImageGraphCacheEditKind::FreshDocument) {
+				std::array<std::string_view, Limits::MaximumNodes> owners{};
+				size_t ownerCount = 0;
+				for (const auto &node : document.Nodes) {
+					if (node.Type != "pc.cache" && node.Type != "pc.cache_array") continue;
+					if (ownerCount == owners.size())
+						return fail(Status::LimitExceeded, "loaded cache owner count exceeds bounds");
+					owners[ownerCount++] = node.Id;
+				}
+				const uint64_t held = *authoredBytes + *priorBytes + *candidateBytes + hostBytes;
+				if (held >= maximumBytes)
+					return fail(Status::LimitExceeded, "fresh cache groups exceed live byte bounds");
+				CapturedFeedbackHost fresh;
+				if (!fresh.RefreshLoadedSourceCacheGroups(
+						document, std::span(owners).first(ownerCount), diagnostic, maximumBytes - held
+					))
+					return false;
+				host = std::move(fresh);
+			}
 			observation.Inputs = std::move(candidate);
 			observation.Ready = true;
 			observation.PendingValueEdit = false;

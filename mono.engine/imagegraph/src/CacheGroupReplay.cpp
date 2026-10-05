@@ -10,6 +10,7 @@
 #include <engine/imagegraph/SourceFrameCacheProject.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <new>
 #include <numeric>
@@ -484,12 +485,14 @@ namespace engine::imagegraph {
 		const auto found = Find(state.Nodes, nodeId);
 		return found == state.Nodes.end() || CacheGroupReplayShouldRun(*found);
 	}
-	Status InitializeAuthoredCacheGroupReplay(
+	static Status InitializeLoadedCacheGroups(
 		const Document &document,
 		const CacheGroupReplayState &source,
 		CacheGroupReplayState &output,
 		uint64_t maximumBytes,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		std::optional<std::span<const std::string_view>> loadedOwners,
+		uint64_t &remainingWork
 	) try {
 		ENGINE_PROFILE("imagegraph.cache_group.initialize");
 		diagnostic = {};
@@ -501,10 +504,11 @@ namespace engine::imagegraph {
 			return code;
 		};
 		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
-			document.Nodes.size() > Limits::MaximumNodes)
+			document.Nodes.size() > Limits::MaximumNodes ||
+			(loadedOwners && loadedOwners->size() > Limits::MaximumNodes))
 			return refuse(Status::LimitExceeded, "cache-group initialization cap is outside bounds");
 		uint64_t work = ComparisonWork(source);
-		if (work > COMPARISON_WORK_LIMIT || output.Nodes.size() > Limits::MaximumNodes ||
+		if (work > remainingWork || output.Nodes.size() > Limits::MaximumNodes ||
 			output.Owners.size() > Limits::MaximumNodes)
 			return refuse(
 				Status::LimitExceeded, "cache-group initialization prior exceeds record or work bounds"
@@ -549,7 +553,7 @@ namespace engine::imagegraph {
 		for (size_t count = sorted.size(); count > 1; count = (count + 1) / 2)
 			++levels;
 		const auto spend = [&](uint64_t bytes) {
-			if (bytes > COMPARISON_WORK_LIMIT - std::min(work, COMPARISON_WORK_LIMIT)) return false;
+			if (bytes > remainingWork - std::min(work, remainingWork)) return false;
 			work += bytes;
 			return true;
 		};
@@ -595,8 +599,32 @@ namespace engine::imagegraph {
 			bool Serialize;
 		};
 		detail::EvaluationVector<OwnerPlan> owners{detail::EvaluationAllocator<OwnerPlan>(budget)};
+		Indices ownerOrder{detail::EvaluationAllocator<size_t>(budget)};
+		ownerOrder.reserve(loadedOwners ? loadedOwners->size() : document.Nodes.size());
+		if (loadedOwners) {
+			detail::EvaluationVector<uint8_t> selected(
+				document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
+			);
+			for (const auto id : *loadedOwners) {
+				if (!ValidText(id)) return refuse(Status::InvalidValue, "loaded cache owner ID is invalid");
+				const auto index = lookup(id);
+				if (exhausted)
+					return refuse(Status::LimitExceeded, "loaded cache owner lookup exceeds work bounds");
+				if (index == SIZE_MAX || (document.Nodes[index].Type != "pc.cache" &&
+										  document.Nodes[index].Type != "pc.cache_array"))
+					return refuse(
+						Status::UnknownNode, "loaded cache owner is absent or has the wrong type", id
+					);
+				if (selected[index]) return refuse(Status::DuplicateId, "loaded cache owner repeats", id);
+				selected[index] = 1;
+				ownerOrder.push_back(index);
+			}
+		} else {
+			for (size_t index = 0; index < document.Nodes.size(); ++index)
+				ownerOrder.push_back(index);
+		}
 		size_t totalMembers = 0;
-		for (size_t index = 0; index < document.Nodes.size(); ++index) {
+		for (const auto index : ownerOrder) {
 			const auto &node = document.Nodes[index];
 			if (node.Type != "pc.cache" && node.Type != "pc.cache_array") continue;
 			const ArrayValue *members = nullptr;
@@ -850,9 +878,78 @@ namespace engine::imagegraph {
 		if (RetainedCacheGroupReplayBytes(candidate) > clone->Bytes() + constructors.Bytes())
 			return refuse(Status::LimitExceeded, "cache-group initialized capacities exceed admitted bytes");
 		output = std::move(candidate);
+		remainingWork -= work;
 		return Status::Ok;
 	} catch (const std::bad_alloc &) {
 		diagnostic = {Status::LimitExceeded, {}, {}, "cache-group initialization allocation refused"};
+		return diagnostic.Code;
+	}
+
+	Status InitializeAuthoredCacheGroupReplay(
+		const Document &document,
+		const CacheGroupReplayState &source,
+		CacheGroupReplayState &output,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	) {
+		uint64_t work = COMPARISON_WORK_LIMIT;
+		return InitializeLoadedCacheGroups(
+			document, source, output, maximumBytes, diagnostic, std::nullopt, work
+		);
+	}
+
+	Status RefreshLoadedCacheGroupReplay(
+		const Document &document,
+		std::span<const std::string_view> owners,
+		std::span<CacheGroupReplayState *const> journals,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	) try {
+		ENGINE_PROFILE("imagegraph.cache_group.loaded_refresh");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return code;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || journals.size() > 2 ||
+			owners.size() > Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "loaded cache group transaction cap is outside bounds");
+		for (size_t i = 0; i < journals.size(); ++i) {
+			if (!journals[i]) return fail(Status::InvalidValue, "loaded cache group journal is absent");
+			for (size_t j = 0; j < i; ++j)
+				if (journals[i] == journals[j])
+					return fail(Status::InvalidValue, "loaded cache group journals alias");
+		}
+		if (owners.empty() || journals.empty()) {
+			diagnostic = {};
+			return Status::Ok;
+		}
+		std::array<CacheGroupReplayState, 2> candidates;
+		uint64_t held = 0;
+		for (size_t i = 0; i < journals.size(); ++i) {
+			held = MeshAddBytes(held, RetainedCacheGroupReplayBytes(*journals[i]));
+			held = MeshAddBytes(held, RetainedCacheGroupReplayBytes(candidates[i]));
+		}
+		if (held >= maximumBytes)
+			return fail(Status::LimitExceeded, "loaded cache group journals exceed live bytes");
+		uint64_t work = COMPARISON_WORK_LIMIT;
+		for (size_t i = 0; i < journals.size(); ++i) {
+			const auto prior = RetainedCacheGroupReplayBytes(*journals[i]);
+			const auto empty = RetainedCacheGroupReplayBytes(candidates[i]);
+			const auto cap = maximumBytes - held + prior + empty;
+			const auto status = InitializeLoadedCacheGroups(
+				document, *journals[i], candidates[i], cap, diagnostic, owners, work
+			);
+			if (status != Status::Ok) return status;
+			held = MeshAddBytes(held - empty, RetainedCacheGroupReplayBytes(candidates[i]));
+			if (held > maximumBytes)
+				return fail(Status::LimitExceeded, "loaded cache group candidates exceed live bytes");
+		}
+		for (size_t i = 0; i < journals.size(); ++i)
+			*journals[i] = std::move(candidates[i]);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "loaded cache group transaction allocation refused"};
 		return diagnostic.Code;
 	}
 

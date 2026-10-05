@@ -289,3 +289,40 @@ TEST_CASE(
 		CHECK_FALSE(fixture.Member("globals").RenderActive);
 	}
 }
+
+TEST_CASE(
+	"Studio fresh load stages membership before replacing the live host",
+	"[studio][imagegraph][cache_group][load]"
+) {
+	Fixture fixture;
+	const auto original = *fixture.Host.PreparedData(1, 1);
+	const auto observed = fixture.Observation.Inputs;
+	fixture.Authored.Nodes[1].SourceProperties[0].Data = int64_t{4};
+	CHECK_FALSE(fixture.Observe(ImageGraphCacheEditKind::FreshDocument));
+	CHECK(fixture.Error.Code == Status::InvalidValue);
+	CHECK(*fixture.Host.PreparedData(1, 1) == original);
+	CHECK(fixture.Observation.Inputs == observed);
+	fixture.Authored.Nodes[1].SourceProperties[0].Data = ArrayValue{ValueType::Text, {std::string{"input"}}};
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::FreshDocument));
+	CHECK_FALSE(fixture.Host.PreparedData(1, 1));
+	auto request = Request();
+	REQUIRE(fixture.Host.Prepare(
+		fixture.Authored,
+		Compiled(fixture.Authored),
+		2,
+		1,
+		request,
+		fixture.Error,
+		Limits::MaximumEvaluationBytes,
+		"out"
+	));
+	const auto *data = fixture.Host.PreparedData(2, 1);
+	REQUIRE(data);
+	const auto input =
+		std::find_if(data->CacheGroups.Nodes.begin(), data->CacheGroups.Nodes.end(), [](const auto &node) {
+			return node.NodeId == "input";
+		});
+	REQUIRE(input != data->CacheGroups.Nodes.end());
+	CHECK(input->RenderActive);
+	CHECK(input->OwnerId == "cache");
+}
