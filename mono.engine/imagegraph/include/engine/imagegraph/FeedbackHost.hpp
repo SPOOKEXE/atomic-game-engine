@@ -310,6 +310,33 @@ namespace engine::imagegraph {
 					   document, owners, journals, maximumBytes - resident + groups, diagnostic
 				   ) == Status::Ok;
 		}
+		// grug apply the source membership click before preparing its new document revision.
+		[[nodiscard]] bool ToggleSourceCacheGroupMember(
+			Document &document,
+			std::string_view ownerId,
+			std::string_view memberId,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) {
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "cache membership host cap is outside bounds"};
+				return false;
+			}
+			const auto resident = RetainedBytes();
+			const auto groups = RetainedCacheGroupReplayBytes(State.Data.CacheGroups) +
+								RetainedCacheGroupReplayBytes(FrameStart.Data.CacheGroups);
+			if (resident >= maximumBytes || groups > resident) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "cache membership host exceeds live bytes"};
+				return false;
+			}
+			const std::array journals{&State.Data.CacheGroups, &FrameStart.Data.CacheGroups};
+			return ToggleAuthoredCacheGroupMember(
+					   document, journals, ownerId, memberId, maximumBytes - resident + groups, diagnostic
+				   ) == Status::Ok;
+		}
+		const CacheGroupReplayState &SourceCacheGroups() const {
+			return State.Data.CacheGroups;
+		}
 		// Notify accepted input/connection edits before preparing the revised document. Both current
 		// and preframe source journals change together; retained pixels keep their last observation.
 		[[nodiscard]] bool NotifySourceInputEdits(

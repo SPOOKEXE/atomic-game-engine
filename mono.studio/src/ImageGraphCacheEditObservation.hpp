@@ -26,8 +26,8 @@ namespace studio::detail {
 		}
 	};
 	// Admission or action failure preserves prior inputs and replay journals. A failed value edit
-	// must be retried as a value/undo event before a render-only notification can consume it. Fresh loads
-	// replace the observation and reset the host without manufacturing interactive edits.
+	// must be retried as a value/undo event before a render-only notification can consume it. fresh loads
+	// stage membership and replace the host only after admission.
 	[[nodiscard]] bool ObserveImageGraphCacheEdits(
 		const engine::imagegraph::Document &document,
 		ImageGraphCacheEditObservation &observation,

@@ -326,3 +326,34 @@ TEST_CASE(
 	CHECK(input->RenderActive);
 	CHECK(input->OwnerId == "cache");
 }
+
+TEST_CASE(
+	"Studio membership removal preserves captured rows through render-only revision",
+	"[studio][imagegraph][cache_group][membership]"
+) {
+	Fixture fixture;
+	const auto prior = *fixture.Host.PreparedData(1, 1);
+	const auto pixels = *fixture.Host.Output("out");
+	REQUIRE(fixture.Host.ToggleSourceCacheGroupMember(fixture.Authored, "cache", "input", fixture.Error));
+	CHECK(fixture.Member("input").RenderActive);
+	CHECK(fixture.Member("input").OwnerId.empty());
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == prior.Entries);
+	CHECK(*fixture.Host.Output("out") == pixels);
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == prior.Entries);
+	auto request = Request();
+	REQUIRE(fixture.Host.Prepare(
+		fixture.Authored,
+		Compiled(fixture.Authored),
+		2,
+		1,
+		request,
+		fixture.Error,
+		Limits::MaximumEvaluationBytes,
+		"out"
+	));
+	CHECK(*fixture.Host.Output("out") == pixels);
+	CHECK(fixture.Host.PreparedData(2, 1)->Entries == prior.Entries);
+	CHECK(std::get<ArrayValue>(fixture.Authored.Nodes[1].SourceProperties[0].Data).Elements.empty());
+	CHECK(fixture.Host.SourceCacheGroups().Owners.front().Members.empty());
+}

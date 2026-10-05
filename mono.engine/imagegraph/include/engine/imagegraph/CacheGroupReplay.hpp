@@ -97,6 +97,16 @@ namespace engine::imagegraph {
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic
 	);
+	// grug stage a source membership click with authored lists and both runtime journals together.
+	// after add/remove, selected owner refresh handles loaded overlaps without clearing frames.
+	[[nodiscard]] Status ToggleAuthoredCacheGroupMember(
+		Document &document,
+		std::span<CacheGroupReplayState *const> journals,
+		std::string_view ownerId,
+		std::string_view memberId,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	);
 	// Retires missing or type-replaced producers and owner lists. Retiring an enabled owner requires
 	// authoritative loading/appending observations before waking its surviving members.
 	[[nodiscard]] Status ReconcileCacheGroupReplay(

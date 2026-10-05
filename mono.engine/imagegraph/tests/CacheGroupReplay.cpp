@@ -1575,3 +1575,244 @@ TEST_CASE("Loaded cache journals share one comparison work cap", "[imagegraph][c
 	CHECK(state == CacheGroupReplayState{});
 	CHECK(checkpoint == CacheGroupReplayState{});
 }
+
+TEST_CASE(
+	"Authored membership clicks transfer and remove without enabling whole groups",
+	"[imagegraph][cache_group][membership]"
+) {
+	auto document = AuthoredGroups();
+	CacheGroupReplayState state;
+	Diagnostic error;
+	REQUIRE(InitializeAuthoredCacheGroupReplay(document, {}, state, BYTE_BUDGET, error) == Status::Ok);
+	REQUIRE(ApplyCacheGroupReplay(state, Disable(), BYTE_BUDGET).Code == Status::Ok);
+	auto checkpoint = state;
+	const auto before = state;
+	const std::array journals{&state, &checkpoint};
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-b", "path", BYTE_BUDGET, error) ==
+		Status::Ok
+	);
+	CHECK(state == checkpoint);
+	CHECK(
+		std::get<ArrayValue>(document.Nodes[0].SourceProperties[0].Data) ==
+		GroupIds({"number", "missing", "number"})
+	);
+	CHECK(std::get<ArrayValue>(document.Nodes[1].SourceProperties[0].Data) == GroupIds({"number", "path"}));
+	const auto find = [&](std::string_view id) -> const CacheGroupReplayNode & {
+		const auto found = std::find_if(state.Nodes.begin(), state.Nodes.end(), [&](const auto &node) {
+			return node.NodeId == id;
+		});
+		REQUIRE(found != state.Nodes.end());
+		return *found;
+	};
+	CHECK(find("path").OwnerId == "cache-b");
+	CHECK(find("path").RenderActive);
+	CHECK_FALSE(find("number").RenderActive);
+	CHECK(
+		find("path").Outputs == std::find_if(before.Nodes.begin(), before.Nodes.end(), [](const auto &node) {
+									return node.NodeId == "path";
+								})->Outputs
+	);
+	CHECK_FALSE(state.Owners[1].Serialize);
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-b", "path", BYTE_BUDGET, error) ==
+		Status::Ok
+	);
+	CHECK(find("path").OwnerId.empty());
+	CHECK(find("path").RenderActive);
+	CHECK_FALSE(find("number").RenderActive);
+	CHECK(state == checkpoint);
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-b", "unrelated", BYTE_BUDGET, error) ==
+		Status::Ok
+	);
+	CHECK(find("unrelated").OwnerId == "cache-b");
+	CHECK(find("unrelated").RenderActive);
+	REQUIRE_FALSE(find("unrelated").Outputs.empty());
+	REQUIRE(find("unrelated").Outputs.front().Data);
+	CHECK(std::get<std::string>(*find("unrelated").Outputs.front().Data).empty());
+	Document roundtrip;
+	REQUIRE(Read(Write(document), roundtrip, error) == Status::Ok);
+	CHECK(roundtrip == document);
+}
+
+TEST_CASE(
+	"Loaded overlap membership clicks refresh ownership even when removal does nothing",
+	"[imagegraph][cache_group][membership]"
+) {
+	auto document = AuthoredGroups();
+	CacheGroupReplayState state;
+	Diagnostic error;
+	REQUIRE(InitializeAuthoredCacheGroupReplay(document, {}, state, BYTE_BUDGET, error) == Status::Ok);
+	REQUIRE(ApplyCacheGroupReplay(state, Disable(), BYTE_BUDGET).Code == Status::Ok);
+	auto checkpoint = state;
+	const auto oldDocument = document;
+	const auto old = state;
+	const std::array journals{&state, &checkpoint};
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-a", "number", BYTE_BUDGET, error) ==
+		Status::Ok
+	);
+	CHECK(document == oldDocument);
+	CHECK(state.Owners == old.Owners);
+	const auto number = std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "number";
+	});
+	REQUIRE(number != state.Nodes.end());
+	CHECK(number->OwnerId == "cache-a");
+	CHECK_FALSE(number->RenderActive);
+	CHECK(state == checkpoint);
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-a", "number", BYTE_BUDGET, error) ==
+		Status::Ok
+	);
+	CHECK(std::get<ArrayValue>(document.Nodes[0].SourceProperties[0].Data) == GroupIds({"missing", "path"}));
+	CHECK(state.Owners[1] == old.Owners[1]);
+	const auto removed = std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "number";
+	});
+	REQUIRE(removed != state.Nodes.end());
+	CHECK(removed->OwnerId.empty());
+	CHECK(removed->RenderActive);
+	CHECK(state == checkpoint);
+}
+
+TEST_CASE(
+	"Authored membership refusal keeps document and both journals unchanged",
+	"[imagegraph][cache_group][membership][bounds]"
+) {
+	auto document = AuthoredGroups();
+	CacheGroupReplayState state;
+	Diagnostic error;
+	REQUIRE(InitializeAuthoredCacheGroupReplay(document, {}, state, BYTE_BUDGET, error) == Status::Ok);
+	auto checkpoint = state;
+	const auto oldDocument = document;
+	const auto old = state;
+	const std::array journals{&state, &checkpoint};
+	CHECK(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-b", "path", 1, error) ==
+		Status::LimitExceeded
+	);
+	CHECK(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-a", "cache-a", BYTE_BUDGET, error) ==
+		Status::InvalidValue
+	);
+	CHECK(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-a", "absent", BYTE_BUDGET, error) ==
+		Status::UnknownNode
+	);
+	CHECK(document == oldDocument);
+	CHECK(state == old);
+	CHECK(checkpoint == old);
+	const auto number = std::find_if(checkpoint.Nodes.begin(), checkpoint.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "number";
+	});
+	number->OwnerId = "cache-a";
+	const auto different = checkpoint;
+	CHECK(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-b", "number", BYTE_BUDGET, error) ==
+		Status::InvalidValue
+	);
+	CHECK(document == oldDocument);
+	CHECK(state == old);
+	CHECK(checkpoint == different);
+
+	Document longDocument;
+	longDocument.FormatVersion = 9;
+	longDocument.Nodes = {{"cache", "pc.cache", "", {}, {}}};
+	const auto id = std::string(20000, 'n');
+	longDocument.Nodes.push_back({id, "pc.number_simple", "", {}, {}});
+	for (size_t i = 2; i < 64; ++i)
+		longDocument.Nodes.push_back({"other-" + std::to_string(i), "pc.number_simple", "", {}, {}});
+	longDocument.Nodes[0].SourceProperties = {{"cache_group", GroupIds({id})}};
+	CacheGroupReplayState loaded;
+	REQUIRE(InitializeAuthoredCacheGroupReplay(longDocument, {}, loaded, BYTE_BUDGET, error) == Status::Ok);
+	auto single = loaded;
+	auto singleDocument = longDocument;
+	const std::array one{&single};
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(singleDocument, one, "cache", id, BYTE_BUDGET, error) == Status::Ok
+	);
+	state = checkpoint = loaded;
+	const std::array two{&state, &checkpoint};
+	CHECK(
+		ToggleAuthoredCacheGroupMember(longDocument, two, "cache", id, BYTE_BUDGET, error) ==
+		Status::LimitExceeded
+	);
+	CHECK(longDocument.Nodes[0].SourceProperties[0].Data == Value{GroupIds({id})});
+	CHECK(state == loaded);
+	CHECK(checkpoint == loaded);
+	CacheGroupReplayState oversized;
+	const std::array invalid{&oversized};
+	const std::array<std::string_view, 1> selected{"cache-a"};
+	for (unsigned shape = 0; shape < 3; ++shape) {
+		oversized = {};
+		if (shape == 0) oversized.Nodes.resize(Limits::MaximumNodes + 1);
+		if (shape == 1) {
+			oversized.Nodes.resize(1);
+			oversized.Nodes.front().Outputs.resize(
+				Limits::MaximumDynamicOutputsPerNode + Limits::MaximumGroupPorts + 1
+			);
+		}
+		if (shape == 2) {
+			oversized.Owners.resize(1);
+			oversized.Owners.front().Members.resize(Limits::MaximumLinks + 1);
+		}
+		const auto prior = oversized;
+		CHECK(
+			ToggleAuthoredCacheGroupMember(document, invalid, "cache-a", "path", BYTE_BUDGET, error) ==
+			Status::LimitExceeded
+		);
+		CHECK(
+			RefreshLoadedCacheGroupReplay(document, selected, invalid, BYTE_BUDGET, error) ==
+			Status::LimitExceeded
+		);
+		CHECK(oversized == prior);
+		CHECK(document == oldDocument);
+	}
+}
+
+TEST_CASE(
+	"Membership adds preserve unowned activity and keep nested cache membership direct",
+	"[imagegraph][cache_group][membership]"
+) {
+	auto document = AuthoredGroups();
+	CacheGroupReplayState state;
+	Diagnostic error;
+	REQUIRE(InitializeAuthoredCacheGroupReplay(document, {}, state, BYTE_BUDGET, error) == Status::Ok);
+	REQUIRE(ApplyCacheGroupReplay(state, Disable(), BYTE_BUDGET).Code == Status::Ok);
+	const auto pathBefore = *std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "path";
+	});
+	auto checkpoint = state;
+	const std::array journals{&state, &checkpoint};
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-b", "cache-a", BYTE_BUDGET, error) ==
+		Status::Ok
+	);
+	CHECK(*std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "path";
+	}) == pathBefore);
+	CHECK(std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+			  return node.NodeId == "cache-a";
+		  })->OwnerId == "cache-b");
+	CHECK(state == checkpoint);
+
+	Document cold;
+	cold.FormatVersion = 9;
+	cold.Nodes = {{"cache", "pc.cache", "", {}, {}}, {"text", "pc.string", "", {}, {}}};
+	CacheGroupReplayState orphan;
+	const std::array<CacheGroupReplayOutput, 1> outputs{{{"text", Value{std::string{"held"}}, {}, {}}}};
+	REQUIRE(RetainCacheGroupReplayNode(orphan, "text", "pc.string", outputs, BYTE_BUDGET).Code == Status::Ok);
+	orphan.Nodes.front().RenderActive = false;
+	auto start = orphan;
+	const std::array coldJournals{&orphan, &start};
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(cold, coldJournals, "cache", "text", BYTE_BUDGET, error) == Status::Ok
+	);
+	CHECK(orphan == start);
+	CHECK_FALSE(orphan.Nodes.front().RenderActive);
+	CHECK(orphan.Nodes.front().Outputs == std::vector<CacheGroupReplayOutput>{outputs.front()});
+	CHECK(orphan.Nodes.front().OwnerId == "cache");
+	CHECK(std::get<ArrayValue>(cold.Nodes.front().SourceProperties.front().Data) == GroupIds({"text"}));
+}

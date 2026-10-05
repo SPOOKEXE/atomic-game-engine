@@ -1087,6 +1087,70 @@
         "mixed observed seek still needs recorded scheduler; remaining source revision/seek policy and runtime/dynamic constructors remain incomplete.",
         "live Studio gestures, incremental source loading and licensed-reference captures remain unverified."
       ]
+    },
+    "membership_edit_implementation": {
+      "scope": "grug built a bounded native source membership click. authored lists and at most two host journals change together. transfer/remove wake only the affected member, then refresh the selected owner. host frame rows and latest pixels stay unchanged. Studio inspector/history wiring remains next work.",
+      "official_source_files": [
+        {
+          "path": "scripts/panel_graph/panel_graph.gml",
+          "sha256": "ef98b9e725fa84c1e2f9e647176464f4bab5225cd646dac25b80d4c5e431ffa3",
+          "git_blob_sha1": "548ed45ea27ffe40649586c8ade643846e3e809f",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/__node_cache_base/__node_cache_base.gml",
+          "sha256": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb",
+          "git_blob_sha1": "251252e9867bc8406aba016217fe0764fe0fe295",
+          "verified_local_match": true
+        }
+      ],
+      "source_calls": [
+        "__node_cache_base.gml:28-45,66-78",
+        "panel_graph.gml:2225-2236"
+      ],
+      "coverage": [
+        "transfer updates previous and selected authored lists, preserves missing IDs and Serialize=false, wakes the transferred member and leaves other frozen members/getters unchanged.",
+        "loaded overlap removal can do nothing, then selected refresh reclaims ownership without waking; a subsequent owned removal erases all authored occurrences and wakes that member.",
+        "unowned additions preserve activity and getters, initialize supported cold constructors, and keep nested cache membership direct.",
+        "byte, identity, missing-node, ownership mismatch and shared comparison-work refusal preserve authored document and both journals. early checks reject oversized node, output and membership tables.",
+        "Studio render-only revision after the host action preserves captured rows and latest pixels. actual PXC write/reimport preserves both changed owner lists and opaque attributes."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-membership-batch2-results.json",
+      "preceding_results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-membership-batch1-results.json",
+      "native_cases": 4922,
+      "native_assertions": 1994180,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-membership-build1.log",
+          "exit_code": 1
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-membership-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-membership-pxc-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-membership-build3.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-membership-issues.json",
+      "review": "Sol audited pinned source click order, reviewed authored/journal staging and borrowed text lifetime, found early count gating gap, and confirmed source PXC writeback route. first joined runtime batch passed; final joined batch includes repaired early admission. final read found no further confirmed defect.",
+      "binary_hashes": "all twelve native suite binaries and assetc/imagegraph child hashes stayed stable during the final batch and matched afterwards.",
+      "architecture": "passed:55 modules,6 programs,39 layered.",
+      "format": "clang-format-21 dry run, ruff and git diff --check passed.",
+      "profiling": "membership edit has ENGINE_PROFILE scope. no fresh isolated profile or sanitizer run; no speed claim.",
+      "remaining": [
+        "Studio inspector controls and native history handoff are not wired yet. source membership click branch has no history record; no source membership undo parity is claimed.",
+        "Serialize undo/editor synchronization, full append workflows, runtime constructors and remaining seek policy remain incomplete.",
+        "live Studio gestures, source incremental loading and licensed-reference captures remain unverified."
+      ]
     }
   },
   "source_sha256": {

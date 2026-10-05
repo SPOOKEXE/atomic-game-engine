@@ -918,6 +918,8 @@ namespace engine::imagegraph {
 			for (size_t j = 0; j < i; ++j)
 				if (journals[i] == journals[j])
 					return fail(Status::InvalidValue, "loaded cache group journals alias");
+			if (ComparisonWork(*journals[i]) > COMPARISON_WORK_LIMIT)
+				return fail(Status::LimitExceeded, "loaded cache group journal exceeds count or work bounds");
 		}
 		if (owners.empty() || journals.empty()) {
 			diagnostic = {};
@@ -950,6 +952,221 @@ namespace engine::imagegraph {
 		return Status::Ok;
 	} catch (const std::bad_alloc &) {
 		diagnostic = {Status::LimitExceeded, {}, {}, "loaded cache group transaction allocation refused"};
+		return diagnostic.Code;
+	}
+
+	Status ToggleAuthoredCacheGroupMember(
+		Document &document,
+		std::span<CacheGroupReplayState *const> journals,
+		std::string_view ownerId,
+		std::string_view memberId,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	) try {
+		ENGINE_PROFILE("imagegraph.cache_group.membership_edit");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return code;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || journals.empty() ||
+			journals.size() > 2 || document.Nodes.size() > Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "cache membership transaction cap is outside bounds");
+		if (!ValidText(ownerId) || !ValidText(memberId) || ownerId == memberId)
+			return fail(Status::InvalidValue, "cache membership click identities are invalid");
+		for (size_t i = 0; i < journals.size(); ++i) {
+			if (!journals[i]) return fail(Status::InvalidValue, "cache membership journal is absent");
+			for (size_t j = 0; j < i; ++j)
+				if (journals[i] == journals[j])
+					return fail(Status::InvalidValue, "cache membership journals alias");
+			if (ComparisonWork(*journals[i]) > COMPARISON_WORK_LIMIT)
+				return fail(Status::LimitExceeded, "cache membership journal exceeds count or work bounds");
+		}
+		const auto authoredBytes = DocumentRetainedPayloadBytes(document);
+		if (!authoredBytes || *authoredBytes >= maximumBytes)
+			return fail(Status::LimitExceeded, "cache membership document exceeds live bytes");
+		uint64_t longest = std::max(ownerId.size(), memberId.size()) + 1;
+		for (const auto &node : document.Nodes)
+			longest = std::max(longest, uint64_t(node.Id.size() + 1));
+		uint64_t work = COMPARISON_WORK_LIMIT;
+		const auto scanWork = WorkProduct(document.Nodes.size() * 16ull, longest);
+		if (scanWork > work)
+			return fail(Status::LimitExceeded, "cache membership document scan exceeds work bounds");
+		work -= scanWork;
+		const auto authoredOwner =
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+				return node.Id == ownerId;
+			});
+		const auto authoredMember =
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+				return node.Id == memberId;
+			});
+		if (authoredOwner == document.Nodes.end() || authoredMember == document.Nodes.end() ||
+			(authoredOwner->Type != "pc.cache" && authoredOwner->Type != "pc.cache_array"))
+			return fail(Status::UnknownNode, "cache membership owner or member is absent");
+		std::array<CacheGroupReplayState, 2> candidates;
+		uint64_t held = *authoredBytes;
+		for (size_t i = 0; i < journals.size(); ++i) {
+			held = MeshAddBytes(held, RetainedCacheGroupReplayBytes(*journals[i]));
+			held = MeshAddBytes(held, RetainedCacheGroupReplayBytes(candidates[i]));
+		}
+		const std::array<std::string_view, 1> selected{ownerId};
+		for (size_t i = 0; i < journals.size(); ++i) {
+			if (held >= maximumBytes)
+				return fail(Status::LimitExceeded, "cache membership staging exceeds live bytes");
+			const auto before = RetainedCacheGroupReplayBytes(candidates[i]);
+			const auto cap = maximumBytes - held + RetainedCacheGroupReplayBytes(*journals[i]) + before;
+			if (Find(journals[i]->Owners, ownerId) == journals[i]->Owners.end()) {
+				const auto status = InitializeLoadedCacheGroups(
+					document, *journals[i], candidates[i], cap, diagnostic, selected, work
+				);
+				if (status != Status::Ok) return status;
+			} else {
+				const auto sourceWork = ComparisonWork(*journals[i]);
+				if (sourceWork > work)
+					return fail(Status::LimitExceeded, "cache membership validation exceeds work bounds");
+				work -= sourceWork;
+				const auto cloneBytes = StateBytes(*journals[i], false);
+				if (MeshAddBytes(cloneBytes, ValidationWorkspace(*journals[i])) > maximumBytes - held)
+					return fail(Status::LimitExceeded, "cache membership journal copy exceeds live bytes");
+				if (ValidateCacheGroupReplay(*journals[i], cap, diagnostic) != Status::Ok)
+					return diagnostic.Code;
+				candidates[i] = *journals[i];
+				if (RetainedCacheGroupReplayBytes(candidates[i]) > cloneBytes)
+					return fail(Status::LimitExceeded, "cache membership clone capacities exceed admission");
+			}
+			held = MeshAddBytes(held - before, RetainedCacheGroupReplayBytes(candidates[i]));
+		}
+		const auto &primary = candidates[0];
+		const auto owner = Find(primary.Owners, ownerId);
+		const bool removing =
+			std::find(owner->Members.begin(), owner->Members.end(), memberId) != owner->Members.end();
+		const auto member = Find(primary.Nodes, memberId);
+		const std::string_view borrowedPrevious =
+			member == primary.Nodes.end() ? std::string_view{} : member->OwnerId;
+		const bool removeOwned = removing && borrowedPrevious == ownerId;
+		const bool adding = !removing && borrowedPrevious != ownerId;
+		for (size_t i = 1; i < journals.size(); ++i) {
+			const auto otherOwner = Find(candidates[i].Owners, ownerId);
+			const auto otherMember = Find(candidates[i].Nodes, memberId);
+			const std::string_view otherPrevious =
+				otherMember == candidates[i].Nodes.end() ? std::string_view{} : otherMember->OwnerId;
+			const bool otherContains =
+				std::find(otherOwner->Members.begin(), otherOwner->Members.end(), memberId) !=
+				otherOwner->Members.end();
+			if (borrowedPrevious != otherPrevious || removing != otherContains)
+				return fail(Status::InvalidValue, "cache membership journals disagree on ownership");
+		}
+		const auto ownerTextBytes =
+			sizeof(std::string) + std::max(borrowedPrevious.size(), std::string{}.capacity());
+		if (held >= maximumBytes || ownerTextBytes > maximumBytes - held)
+			return fail(Status::LimitExceeded, "cache membership owner identity exceeds live bytes");
+		held += ownerTextBytes;
+		const std::string previousOwnerText(borrowedPrevious);
+		const std::string_view previousOwner = previousOwnerText;
+		uint64_t metadataWork = 0;
+		for (const auto &node : document.Nodes) {
+			if (node.Id != ownerId && node.Id != previousOwner) continue;
+			for (const auto &property : node.SourceProperties) {
+				metadataWork = MeshAddBytes(metadataWork, property.Port.size() + 1);
+				if (property.Port != "cache_group") continue;
+				const auto *array = std::get_if<ArrayValue>(&property.Data);
+				if (!array || array->ElementType != ValueType::Text ||
+					array->Elements.size() > Limits::MaximumNodes || !array->Items.empty() ||
+					!array->Nested.empty())
+					return fail(Status::InvalidValue, "cache membership authored list is malformed");
+				for (const auto &element : array->Elements) {
+					const auto *id = std::get_if<std::string>(&element);
+					if (!id || !ValidText(*id))
+						return fail(Status::InvalidValue, "cache membership authored member is malformed");
+					metadataWork = MeshAddBytes(metadataWork, id->size() + memberId.size() + 2);
+				}
+			}
+		}
+		if (metadataWork > work)
+			return fail(Status::LimitExceeded, "cache membership metadata exceeds work bounds");
+		work -= metadataWork;
+		// grug admit the document copy and any metadata vector replacement before cloning.
+		const auto editExtra =
+			MeshAddBytes(*authoredBytes, MeshAddBytes(4096, WorkProduct(4, memberId.size() + 1)));
+		const auto documentOverlap = MeshAddBytes(*authoredBytes, editExtra);
+		if (held >= maximumBytes || documentOverlap > maximumBytes - held)
+			return fail(Status::LimitExceeded, "cache membership authored edit exceeds live bytes");
+		Document authored = document;
+		const auto editList = [&](std::string_view id, bool append) -> bool {
+			auto node =
+				std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [&](const auto &candidate) {
+					return candidate.Id == id;
+				});
+			if (node == authored.Nodes.end()) return false;
+			AuthoredValue *property = nullptr;
+			for (auto &value : node->SourceProperties) {
+				if (value.Port != "cache_group") continue;
+				if (property) return false;
+				property = &value;
+			}
+			if (!property) {
+				if (!append) return true;
+				if (node->SourceProperties.size() >= Limits::MaximumPropertiesPerNode) return false;
+				node->SourceProperties.reserve(node->SourceProperties.size() + 1);
+				node->SourceProperties.push_back({"cache_group", ArrayValue{ValueType::Text, {}}});
+				property = &node->SourceProperties.back();
+			}
+			auto &list = std::get<ArrayValue>(property->Data).Elements;
+			if (append) {
+				if (list.size() == Limits::MaximumNodes) return false;
+				list.reserve(list.size() + 1);
+				list.emplace_back(std::string(memberId));
+			} else {
+				std::erase_if(list, [&](const auto &value) {
+					return std::get<std::string>(value) == memberId;
+				});
+			}
+			return true;
+		};
+		if (removeOwned && !editList(ownerId, false))
+			return fail(Status::InvalidValue, "cache membership owner list could not be edited");
+		if (adding) {
+			if (!previousOwner.empty() && !editList(previousOwner, false))
+				return fail(Status::InvalidValue, "cache membership prior owner list could not be edited");
+			if (!editList(ownerId, true))
+				return fail(Status::LimitExceeded, "cache membership selected list could not be extended");
+		}
+		const auto candidateDocumentBytes = DocumentRetainedPayloadBytes(authored);
+		if (!candidateDocumentBytes || *candidateDocumentBytes > documentOverlap)
+			return fail(Status::LimitExceeded, "cache membership authored capacities exceed admission");
+		held = MeshAddBytes(held, *candidateDocumentBytes);
+		for (size_t i = 0; i < journals.size(); ++i) {
+			const auto beforeMutation = RetainedCacheGroupReplayBytes(candidates[i]);
+			auto tracked = Find(candidates[i].Nodes, memberId);
+			if ((removeOwned || (adding && !previousOwner.empty())) && tracked != candidates[i].Nodes.end()) {
+				auto old = Find(candidates[i].Owners, previousOwner);
+				std::erase_if(old->Members, [&](const auto &id) { return id == memberId; });
+				tracked->OwnerId.clear();
+				tracked->RenderActive = true;
+			}
+			const auto before = RetainedCacheGroupReplayBytes(candidates[i]);
+			held = MeshAddBytes(held - beforeMutation, before);
+			if (held >= maximumBytes)
+				return fail(Status::LimitExceeded, "cache membership refresh exceeds live bytes");
+			const auto status = InitializeLoadedCacheGroups(
+				authored,
+				candidates[i],
+				candidates[i],
+				maximumBytes - held + before,
+				diagnostic,
+				selected,
+				work
+			);
+			if (status != Status::Ok) return status;
+			held = MeshAddBytes(held - before, RetainedCacheGroupReplayBytes(candidates[i]));
+		}
+		document = std::move(authored);
+		for (size_t i = 0; i < journals.size(); ++i)
+			*journals[i] = std::move(candidates[i]);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "cache membership edit allocation refused"};
 		return diagnostic.Code;
 	}
 
