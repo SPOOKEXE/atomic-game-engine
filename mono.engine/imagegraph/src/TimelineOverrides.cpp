@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <new>
+#include <type_traits>
 
 namespace engine::imagegraph::detail {
 	namespace {
@@ -102,6 +103,7 @@ namespace engine::imagegraph::detail {
 			return diagnostic.Code;
 		}
 		TimelineOverrides candidate;
+		candidate.Observation = GetFrameTime(request);
 		const bool replayKeys =
 			request.GroupReplay &&
 			(std::any_of(
@@ -117,6 +119,7 @@ namespace engine::imagegraph::detail {
 		if (document.Keyframes.empty() && !replayKeys) {
 			std::swap(candidate.Charge, result.Charge);
 			candidate.Nodes.swap(result.Nodes);
+			std::swap(candidate.Observation, result.Observation);
 			diagnostic = {};
 			return Status::Ok;
 		}
@@ -992,6 +995,7 @@ namespace engine::imagegraph::detail {
 		}
 		std::swap(candidate.Charge, result.Charge);
 		candidate.Nodes.swap(result.Nodes);
+		std::swap(candidate.Observation, result.Observation);
 		diagnostic = {};
 		return Status::Ok;
 	clone_refused:
@@ -1001,4 +1005,84 @@ namespace engine::imagegraph::detail {
 		SetDiagnostic(diagnostic, Status::LimitExceeded, "timeline allocation was refused");
 		return diagnostic.Code;
 	}
+	Status ExtendTimelineOverrides(
+		const Document &document,
+		std::span<const uint8_t> needed,
+		const EvaluationRequest &request,
+		EvaluationBudget &budget,
+		TimelineOverrides &result,
+		Diagnostic &diagnostic,
+		bool rawSourceQuaternion
+	) try {
+		ENGINE_PROFILE("imagegraph.timeline.extend");
+		const auto clock = GetFrameTime(request);
+		if (needed.size() != document.Nodes.size() || !ValidFrameTime(clock) ||
+			(result.Observation && *result.Observation != clock) ||
+			(!result.Nodes.empty() && !result.Observation)) {
+			SetDiagnostic(diagnostic, Status::InvalidValue, "timeline extension needs the same observation");
+			return diagnostic.Code;
+		}
+		EvaluationVector<uint8_t> fresh(needed.begin(), needed.end(), EvaluationAllocator<uint8_t>(budget));
+		size_t previous = document.Nodes.size();
+		for (const auto &node : result.Nodes) {
+			if (node.NodeIndex >= document.Nodes.size() ||
+				(previous != document.Nodes.size() && node.NodeIndex <= previous) ||
+				node.Authored.Id != document.Nodes[node.NodeIndex].Id ||
+				node.Authored.Type != document.Nodes[node.NodeIndex].Type) {
+				SetDiagnostic(diagnostic, Status::InvalidValue, "timeline extension has invalid prior nodes");
+				return diagnostic.Code;
+			}
+			previous = node.NodeIndex;
+			fresh[node.NodeIndex] = 0;
+		}
+		if (std::none_of(fresh.begin(), fresh.end(), [](uint8_t value) { return value != 0; })) {
+			diagnostic = {};
+			return Status::Ok;
+		}
+		TimelineOverrides additions;
+		const auto status = ResolveTimelineOverrides(
+			document, fresh, request, budget, additions, diagnostic, {}, rawSourceQuaternion
+		);
+		if (status != Status::Ok) return status;
+		if (additions.Nodes.empty()) {
+			result.Observation = clock;
+			return Status::Ok;
+		}
+		const uint64_t oldTables =
+			(result.Nodes.size() + additions.Nodes.size()) * sizeof(TimelineNodeOverride);
+		auto combinedCharge = budget.Reserve(oldTables);
+		if (!combinedCharge) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "timeline extension table exceeds live bytes");
+			return diagnostic.Code;
+		}
+		std::vector<TimelineNodeOverride> combined;
+		combined.reserve(result.Nodes.size() + additions.Nodes.size());
+		// All allocations finish before moving payload ownership. No sampled node is replaced.
+		static_assert(std::is_nothrow_move_constructible_v<TimelineNodeOverride>);
+		if (!combinedCharge->Merge(std::move(result.Charge))) {
+			SetDiagnostic(diagnostic, Status::InvalidValue, "timeline extension uses another byte ledger");
+			return diagnostic.Code;
+		}
+		if (!combinedCharge->Merge(std::move(additions.Charge))) std::terminate();
+		auto old = result.Nodes.begin(), added = additions.Nodes.begin();
+		while (old != result.Nodes.end() || added != additions.Nodes.end()) {
+			if (added == additions.Nodes.end() ||
+				(old != result.Nodes.end() && old->NodeIndex < added->NodeIndex))
+				combined.push_back(std::move(*old++));
+			else
+				combined.push_back(std::move(*added++));
+		}
+		result.Nodes.swap(combined);
+		std::vector<TimelineNodeOverride>().swap(combined);
+		std::vector<TimelineNodeOverride>().swap(additions.Nodes);
+		if (!combinedCharge->Resize(combinedCharge->Bytes() - oldTables)) std::terminate();
+		result.Charge = std::move(*combinedCharge);
+		result.Observation = clock;
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		SetDiagnostic(diagnostic, Status::LimitExceeded, "timeline extension allocation was refused");
+		return diagnostic.Code;
+	}
+
 }

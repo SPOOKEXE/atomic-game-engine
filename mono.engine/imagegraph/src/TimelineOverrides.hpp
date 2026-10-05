@@ -16,6 +16,7 @@ namespace engine::imagegraph::detail {
 	struct TimelineOverrides {
 		AllocationReservation Charge;
 		std::vector<TimelineNodeOverride> Nodes;
+		std::optional<FrameTime> Observation;
 		const Node &Find(size_t index, const Node &fallback) const;
 	};
 
@@ -29,6 +30,17 @@ namespace engine::imagegraph::detail {
 		TimelineOverrides &result,
 		Diagnostic &diagnostic,
 		std::string_view port = {},
+		bool rawSourceQuaternion = false
+	);
+	// Adds newly needed nodes within the same immutable document/request observation.
+	// Already sampled nodes survive; all old/new payloads and replacement tables coexist under budget.
+	Status ExtendTimelineOverrides(
+		const Document &document,
+		std::span<const uint8_t> needed,
+		const EvaluationRequest &request,
+		EvaluationBudget &budget,
+		TimelineOverrides &result,
+		Diagnostic &diagnostic,
 		bool rawSourceQuaternion = false
 	);
 }

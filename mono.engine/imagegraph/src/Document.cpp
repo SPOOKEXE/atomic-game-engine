@@ -10682,8 +10682,8 @@ namespace engine::imagegraph {
 					node = &document.Nodes[base];
 				}
 			}
-			const auto status = detail::ResolveTimelineOverrides(
-				document, timelineNeeded, request, budget, timelineOverrides, diagnostic, {}, true
+			const auto status = detail::ExtendTimelineOverrides(
+				document, timelineNeeded, request, budget, timelineOverrides, diagnostic, true
 			);
 			if (status != Status::Ok) return false;
 			completed[route.Consumer] = 0;

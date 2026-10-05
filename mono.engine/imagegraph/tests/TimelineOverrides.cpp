@@ -32,6 +32,127 @@ namespace {
 }
 
 TEST_CASE(
+	"Timeline extension merges rich late dependencies under an exact overlapping byte limit",
+	"[imagegraph][timeline_overrides][evaluation_budget]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"array", "pc.number", "", {}, {{"value", ArrayValue{ValueType::Scalar, {0., 2., 4.}}}}},
+		{"collector", "value.array", "", {}, {{"spread", false}}},
+		{"text", "value.text", "", {}, {{"value", std::string(512, 'a')}}}
+	};
+	document.Nodes[1].DynamicInputs = {{"item", ValueType::Text, std::string(1024, 'b')}};
+	document.Keyframes = {
+		{"array", "value", 0, ArrayValue{ValueType::Scalar, {5., 7.}}, "source", KeyframeEase{}},
+		{"collector", "item", 0, std::string(513, 'c'), "step"},
+		{"text", "value", 0, std::string(2048, 'd'), "step"}
+	};
+	document.Tracks = {{"array", "value", "hold", -1}};
+	document.Outputs = {{"out", "collector", "array"}};
+	Checked(document);
+	const auto original = document;
+	const std::array<uint8_t, 3> first{0, 1, 0}, all{1, 1, 1};
+	uint64_t peak = 0;
+	for (size_t attempt = 0; attempt < 3; ++attempt) {
+		const uint64_t limit = attempt == 0 ? Limits::MaximumEvaluationBytes : attempt == 1 ? peak - 1 : peak;
+		detail::EvaluationBudget budget(limit);
+		detail::TimelineOverrides result;
+		Diagnostic diagnostic;
+		REQUIRE(
+			detail::ResolveTimelineOverrides(document, first, {}, budget, result, diagnostic) == Status::Ok
+		);
+		const Node retained = result.Nodes.front().Authored;
+		const auto charge = result.Charge.Bytes();
+		const auto observation = result.Observation;
+		const auto status = detail::ExtendTimelineOverrides(document, all, {}, budget, result, diagnostic);
+		INFO(diagnostic.Message);
+		if (attempt == 1) {
+			CHECK(status == Status::LimitExceeded);
+			REQUIRE(result.Nodes.size() == 1);
+			CHECK(result.Nodes.front().NodeIndex == 1);
+			CHECK(result.Nodes.front().Authored == retained);
+			CHECK(result.Charge.Bytes() == charge);
+			CHECK(result.Observation == observation);
+		} else {
+			REQUIRE(status == Status::Ok);
+			REQUIRE(result.Nodes.size() == 3);
+			for (size_t index = 0; index < 3; ++index)
+				CHECK(result.Nodes[index].NodeIndex == index);
+			CHECK(result.Nodes[1].Authored == retained);
+			CHECK(
+				Property(result.Nodes[0].Authored, "value") == Value{ArrayValue{ValueType::Scalar, {5., 7.}}}
+			);
+			CHECK(Property(result.Nodes[2].Authored, "value") == Value{std::string(2048, 'd')});
+			if (attempt == 0) peak = budget.Peak();
+			CHECK(budget.Peak() == peak);
+			const auto mergedCharge = result.Charge.Bytes();
+			REQUIRE(
+				detail::ExtendTimelineOverrides(document, all, {}, budget, result, diagnostic) == Status::Ok
+			);
+			CHECK(result.Charge.Bytes() == mergedCharge);
+			CHECK(result.Nodes[1].Authored == retained);
+		}
+		CHECK(budget.Used() == result.Charge.Bytes());
+		CHECK(document == original);
+	}
+}
+
+TEST_CASE(
+	"Timeline extension refuses changed observations and ledgers without losing prior samples",
+	"[imagegraph][timeline_overrides][evaluation_budget]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"first", "value.number", "", {}, {{"value", 0.0}}},
+		{"late", "value.number", "", {}, {{"value", 0.0}}}
+	};
+	document.Keyframes = {{"first", "value", 0, 3.0, "step"}, {"late", "value", 0, 7.0, "step"}};
+	document.Outputs = {{"out", "first", "number"}};
+	Checked(document);
+	detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+	detail::TimelineOverrides result;
+	Diagnostic diagnostic;
+	const std::array<uint8_t, 2> first{1, 0}, all{1, 1};
+	EvaluationRequest request;
+	REQUIRE(SetFrameTime(request, {0, .25, true}));
+	REQUIRE(
+		detail::ResolveTimelineOverrides(document, first, request, budget, result, diagnostic) == Status::Ok
+	);
+	const Node retained = result.Nodes.front().Authored;
+	const auto charge = result.Charge.Bytes();
+	const auto observation = result.Observation;
+	SECTION("changed signed fractional clock") {
+		REQUIRE(SetFrameTime(request, {0, .25, false}));
+		CHECK(
+			detail::ExtendTimelineOverrides(document, all, request, budget, result, diagnostic) ==
+			Status::InvalidValue
+		);
+	}
+	SECTION("invalid dependency cone") {
+		CHECK(
+			detail::ExtendTimelineOverrides(
+				document, std::span(first).first(1), request, budget, result, diagnostic
+			) == Status::InvalidValue
+		);
+	}
+	SECTION("another live byte ledger") {
+		detail::EvaluationBudget other(Limits::MaximumEvaluationBytes);
+		CHECK(
+			detail::ExtendTimelineOverrides(document, all, request, other, result, diagnostic) ==
+			Status::InvalidValue
+		);
+		CHECK(other.Used() == 0);
+	}
+	REQUIRE(result.Nodes.size() == 1);
+	CHECK(result.Nodes.front().Authored == retained);
+	CHECK(result.Charge.Bytes() == charge);
+	CHECK(result.Observation == observation);
+	CHECK(budget.Used() == charge);
+}
+
+TEST_CASE(
 	"Timeline overrides sample signed fractions without cloning unrelated nodes",
 	"[imagegraph][timeline_overrides]"
 ) {
