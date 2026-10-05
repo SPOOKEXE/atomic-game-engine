@@ -40,6 +40,28 @@ namespace studio::detail {
 		engine::imagegraph::Diagnostic &diagnostic,
 		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
+	// grug stage observer metadata with the source click, without replaying native restore policy.
+	// earlier authored notifications must be admitted before this operation.
+	[[nodiscard]] bool ApplyImageGraphCacheGroupMember(
+		engine::imagegraph::Document &document,
+		ImageGraphHistory &history,
+		engine::imagegraph::CapturedFeedbackHost &host,
+		ImageGraphCacheEditObservation &observation,
+		std::string_view ownerId,
+		std::string_view memberId,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
+	[[nodiscard]] bool ApplyImageGraphCacheSerialize(
+		engine::imagegraph::Document &document,
+		ImageGraphHistory &history,
+		engine::imagegraph::CapturedFeedbackHost &host,
+		ImageGraphCacheEditObservation &observation,
+		std::string_view ownerId,
+		bool serialize,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
 	// grug speculative history changes stage playback and runtime admission before document publication.
 	// refusal preserves history, playback, inputs, pending edit kind and both host journals.
 	[[nodiscard]] bool ApplyImageGraphCacheHistory(

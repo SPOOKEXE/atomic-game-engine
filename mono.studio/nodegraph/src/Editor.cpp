@@ -182,6 +182,12 @@ namespace nodegraph {
 		Scale = std::clamp(zoom, 0.2f, 3.0f);
 	}
 
+	void Canvas::MarkNodes(std::vector<NodeId> nodes) {
+		std::sort(nodes.begin(), nodes.end());
+		nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+		Marked = std::move(nodes);
+	}
+
 	void Canvas::Select(NodeId node) {
 		Chosen.clear();
 		ChosenGroup = NO_GROUP;
@@ -756,6 +762,8 @@ namespace nodegraph {
 		ToScreen(node.X + layout.Width, node.Y + layout.Height, far.x, far.y);
 
 		const bool selected = std::find(Chosen.begin(), Chosen.end(), node.Id) != Chosen.end();
+		const bool marked = std::binary_search(Marked.begin(), Marked.end(), node.Id);
+		const bool emphasized = selected || marked;
 
 		draw->AddRectFilled(corner, far, Look.NodeBody, Look.Sizes.Rounding * Scale);
 
@@ -774,10 +782,10 @@ namespace nodegraph {
 		draw->AddRect(
 			corner,
 			far,
-			selected ? Look.NodeSelected : Look.NodeBorder,
+			emphasized ? Look.NodeSelected : Look.NodeBorder,
 			Look.Sizes.Rounding * Scale,
 			0,
-			selected ? 2.0f : 1.0f
+			emphasized ? 2.0f : 1.0f
 		);
 
 		const float title = Look.Sizes.LabelSize * Scale;
@@ -1777,6 +1785,9 @@ namespace nodegraph {
 					Drag = Dragging::Widget;
 					DragNode = hit;
 					DragWidget = widget->Key;
+				} else if (!io.KeyShift && Signals.ClickNode && Signals.ClickNode(hit)) {
+					// The host may queue work, but graph edits during Draw would
+					// invalidate the nodes and layouts this pass is still reading.
 				} else {
 					// **A double click opens a fold and collapses anything
 					// else.** It is the one gesture over a node body that is not
@@ -2064,8 +2075,7 @@ namespace nodegraph {
 		// **Guarded on the canvas window rather than the shared dock root**, so a
 		// sibling inspector keeps its own shortcuts while the canvas still listens
 		// over its toolbar and child windows.
-		const bool listening = !bodyCaptured &&
-							   ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
+		const bool listening = !bodyCaptured && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
 							   !ImGui::IsAnyItemActive() && !PaletteOpen && !MenuOpen;
 
 		if (listening) {

@@ -3010,3 +3010,42 @@ TEST_CASE(
 	CHECK(history.CanUndo());
 	CHECK_FALSE(history.CanRedo());
 }
+
+TEST_CASE(
+	"image graph record admission preserves redo until callback accepts", "[studio][imagegraph][history]"
+) {
+	engine::imagegraph::Document before;
+	before.Nodes = {{"number", "pc.number", "", {}, {{"value", 1.0}}}};
+	auto after = before;
+	after.Nodes[0].Position.X = 25;
+	studio::ImageGraphHistory history;
+	REQUIRE(history.TryRecord(before, after));
+	auto document = after;
+	REQUIRE(history.Undo(document));
+	for (const bool throws : {false, true}) {
+		bool called = false;
+		CHECK_FALSE(history.TryRecord(before, after, [&](const auto &old, const auto &next) {
+			called = true;
+			CHECK(old == before);
+			CHECK(next == after);
+			if (throws) throw std::bad_alloc{};
+			return false;
+		}));
+		CHECK(called);
+		CHECK_FALSE(history.CanUndo());
+		CHECK(history.CanRedo());
+	}
+	studio::ImageGraphHistory full(128, 1);
+	bool called = false;
+	CHECK_FALSE(full.TryRecord(before, after, [&](const auto &, const auto &) {
+		called = true;
+		return true;
+	}));
+	CHECK_FALSE(called);
+	REQUIRE(history.TryRecord(before, after, [](const auto &, const auto &) { return true; }));
+	CHECK(history.CanUndo());
+	CHECK_FALSE(history.CanRedo());
+	document = after;
+	REQUIRE(history.Undo(document));
+	CHECK(document == before);
+}

@@ -5,6 +5,59 @@
 #include <imgui.h>
 #include <nodegraph/Editor.hpp>
 #include <nodegraph/Registry.hpp>
+#include <nodegraph/Types.hpp>
+#include <vector>
+
+namespace {
+	struct HeadlessContext {
+		ImGuiContext *Previous = ImGui::GetCurrentContext();
+		ImGuiContext *Value = ImGui::CreateContext();
+
+		HeadlessContext() {
+			ImGui::SetCurrentContext(Value);
+			auto &io = ImGui::GetIO();
+			io.DisplaySize = {640, 480};
+			io.DeltaTime = 1.0f / 60.0f;
+			io.IniFilename = nullptr;
+			io.LogFilename = nullptr;
+			io.Fonts->AddFontDefault();
+			io.Fonts->Build();
+		}
+		~HeadlessContext() {
+			ImGui::SetCurrentContext(Value);
+			ImGui::DestroyContext(Value);
+			ImGui::SetCurrentContext(Previous);
+		}
+	};
+
+	ImVec2 DrawFrame(nodegraph::Canvas &canvas, nodegraph::Graph &graph) {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos({0, 0});
+		ImGui::SetNextWindowSize({600, 440});
+		ImGui::Begin(
+			"nodegraph-test",
+			nullptr,
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
+		);
+		const ImVec2 origin = ImGui::GetCursorScreenPos();
+		canvas.Draw(graph);
+		ImGui::End();
+		ImGui::Render();
+		return origin;
+	}
+
+	void RegisterClickNodeType(const char *id, bool widgetsAndPorts = false) {
+		nodegraph::NodeType type;
+		type.Id = id;
+		type.Title = "Click target";
+		if (widgetsAndPorts) {
+			type.Inputs = {nodegraph::Port("In", "data.NUMBER")};
+			type.Outputs = {nodegraph::Port("Out", "data.NUMBER")};
+			type.Widgets = {nodegraph::Number("amount", "Amount", 0.0)};
+		}
+		nodegraph::NodeTypes::Register(type);
+	}
+}
 
 TEST_SUITE_ID("studio.nodegraph.editor")
 
@@ -80,4 +133,138 @@ TEST_CASE("host node body captures wheel and dragging before canvas gestures", "
 	CHECK(body.BodyTop + body.BodyHeight <= body.Height);
 	graph.Find(id)->Collapsed = true;
 	CHECK(nodegraph::LayoutOf(*graph.Find(id), {}, {160, 160}).BodyHeight == 0);
+}
+
+TEST_CASE(
+	"node click hooks can consume body presses without changing selection or moving nodes",
+	"[nodegraph][click]"
+) {
+	HeadlessContext context;
+	RegisterClickNodeType("fixture.click-hook");
+	nodegraph::Graph graph;
+	const auto first = graph.Add("fixture.click-hook", 20, 20);
+	const auto second = graph.Add("fixture.click-hook", 240, 20);
+	nodegraph::Canvas canvas;
+	canvas.Select(second);
+	std::vector<nodegraph::NodeId> queued;
+	int attempts = 0;
+	canvas.Signals.ClickNode = [&](nodegraph::NodeId id) {
+		++attempts;
+		queued.push_back(id);
+		return true;
+	};
+	ImVec2 origin = DrawFrame(canvas, graph);
+	const auto firstLayout = nodegraph::LayoutOf(*graph.Find(first));
+	const float firstX = origin.x + 20 + firstLayout.Width * 0.5f;
+	const float firstY = origin.y + 20 + firstLayout.Height * 0.5f;
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(firstX, firstY);
+	DrawFrame(canvas, graph);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	DrawFrame(canvas, graph);
+	REQUIRE(queued == std::vector<nodegraph::NodeId>{first});
+	const float originalX = graph.Find(first)->X;
+	const float originalY = graph.Find(first)->Y;
+	io.AddMousePosEvent(firstX + 80, firstY + 60);
+	for (int frame = 0; frame < 12; ++frame) {
+		io.DeltaTime = 0.02f;
+		DrawFrame(canvas, graph);
+	}
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	DrawFrame(canvas, graph);
+	CHECK(attempts == 1);
+	CHECK(graph.Find(first)->X == originalX);
+	CHECK(graph.Find(first)->Y == originalY);
+	CHECK(canvas.Selection() == std::vector<nodegraph::NodeId>{second});
+
+	canvas.Signals.ClickNode = [&](nodegraph::NodeId) {
+		++attempts;
+		return false;
+	};
+	const float secondX = origin.x + 240 + firstLayout.Width * 0.5f;
+	const float secondY = origin.y + 20 + firstLayout.Height * 0.5f;
+	io.AddMousePosEvent(secondX, secondY);
+	DrawFrame(canvas, graph);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	DrawFrame(canvas, graph);
+	CHECK(canvas.Selection() == std::vector<nodegraph::NodeId>{second});
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	DrawFrame(canvas, graph);
+	CHECK(attempts == 2);
+
+	io.AddKeyEvent(ImGuiMod_Shift, true);
+	io.AddMousePosEvent(firstX, firstY);
+	DrawFrame(canvas, graph);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	DrawFrame(canvas, graph);
+	CHECK(attempts == 2);
+	CHECK(canvas.Selection() == (std::vector<nodegraph::NodeId>{second, first}));
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	DrawFrame(canvas, graph);
+	io.AddKeyEvent(ImGuiMod_Shift, false);
+	DrawFrame(canvas, graph);
+}
+
+TEST_CASE("node click hooks leave port and widget presses to the canvas", "[nodegraph][click]") {
+	HeadlessContext context;
+	RegisterClickNodeType("fixture.click-priority", true);
+	nodegraph::Graph graph;
+	const auto node = graph.Add("fixture.click-priority", 20, 20);
+	nodegraph::Canvas canvas;
+	int attempts = 0;
+	canvas.Signals.ClickNode = [&](nodegraph::NodeId) {
+		++attempts;
+		return true;
+	};
+	ImVec2 origin = DrawFrame(canvas, graph);
+	const auto layout = nodegraph::LayoutOf(*graph.Find(node));
+	const auto &widget = layout.Widgets.front();
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(
+		origin.x + 20 + widget.X + widget.Width * 0.5f, origin.y + 20 + widget.Y + widget.Height * 0.5f
+	);
+	DrawFrame(canvas, graph);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	DrawFrame(canvas, graph);
+	CHECK(attempts == 0);
+	CHECK(canvas.Selection().empty());
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	DrawFrame(canvas, graph);
+
+	const auto &port = layout.Ports.front();
+	io.AddMousePosEvent(origin.x + 20 + port.X, origin.y + 20 + port.Y);
+	DrawFrame(canvas, graph);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	DrawFrame(canvas, graph);
+	CHECK(attempts == 0);
+	CHECK(canvas.Selection().empty());
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	DrawFrame(canvas, graph);
+}
+
+TEST_CASE("node marks highlight nodes without replacing selection", "[nodegraph][mark]") {
+	HeadlessContext context;
+	RegisterClickNodeType("fixture.node-mark");
+	nodegraph::Graph graph;
+	const auto marked = graph.Add("fixture.node-mark", 20, 20);
+	const auto selected = graph.Add("fixture.node-mark", 240, 20);
+	nodegraph::Canvas canvas;
+	canvas.Look.NodeSelected = 0xFF17A35Bu;
+	canvas.Select(selected);
+	const auto highlightedVertices = [&] {
+		int count = 0;
+		const ImDrawData *data = ImGui::GetDrawData();
+		for (int list = 0; list < data->CmdListsCount; ++list)
+			for (const ImDrawVert &vertex : data->CmdLists[list]->VtxBuffer)
+				if (vertex.col == canvas.Look.NodeSelected) ++count;
+		return count;
+	};
+	DrawFrame(canvas, graph);
+	const int selectedOnly = highlightedVertices();
+	REQUIRE(selectedOnly > 0);
+	canvas.MarkNodes({marked, marked});
+	CHECK(canvas.Selection() == std::vector<nodegraph::NodeId>{selected});
+	DrawFrame(canvas, graph);
+	CHECK(highlightedVertices() > selectedOnly);
+	CHECK(canvas.Selection() == std::vector<nodegraph::NodeId>{selected});
 }

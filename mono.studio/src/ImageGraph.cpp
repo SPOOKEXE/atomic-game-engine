@@ -3230,7 +3230,11 @@ namespace studio {
 		}
 	}
 
-	bool ImageGraphHistory::TryRecord(const Document &before, const Document &after) try {
+	bool ImageGraphHistory::TryRecord(const Document &before, const Document &after) {
+		return TryRecord(before, after, {});
+	}
+	bool
+	ImageGraphHistory::TryRecord(const Document &before, const Document &after, const Admission &admit) try {
 		if (before == after) return true;
 		if (!Capacity || !ByteCapacity) return false;
 		std::string snapshot = engine::imagegraph::Write(before);
@@ -3238,6 +3242,9 @@ namespace studio {
 		const size_t afterBytes = engine::imagegraph::Write(after).size();
 		if (afterBytes > ByteCapacity) return false;
 		UndoText.reserve(UndoText.size() + 1);
+		if (admit && !admit(before, after)) return false;
+		static_assert(std::is_nothrow_move_assignable_v<std::string>);
+		static_assert(std::is_nothrow_move_constructible_v<std::string>);
 		for (const auto &entry : RedoText)
 			RetainedBytes -= entry.size();
 		RedoText.clear();

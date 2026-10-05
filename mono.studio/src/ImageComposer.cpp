@@ -7,6 +7,7 @@
 #include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphArtworkEdit.hpp"
 #include "ImageGraphCacheClearAction.hpp"
+#include "ImageGraphCacheControls.hpp"
 #include "ImageGraphCacheEditObservation.hpp"
 #include "ImageGraphCanvasInputs.hpp"
 #include "ImageGraphChoices.hpp"
@@ -252,6 +253,7 @@ namespace studio {
 			ImageGraphGroupHost GroupHost;
 			engine::imagegraph::CapturedFeedbackHost FeedbackHost;
 			detail::ImageGraphCacheEditObservation CacheEditObservation;
+			detail::ImageGraphCacheGroupEdit CacheGroupEdit;
 			detail::ImageGraphCacheEditKind CacheEditKind = detail::ImageGraphCacheEditKind::ValueSetter;
 			bool CacheEditBlocked = false;
 			detail::ImageGraphCacheEditKind CacheEditRetryKind = detail::ImageGraphCacheEditKind::ValueSetter;
@@ -293,6 +295,7 @@ namespace studio {
 		void PublishAuthoredDocumentChanged(State &state) {
 			// External authoring changes cannot retain a row selection from the old project.
 			state.Playback.SelectedRegion.reset();
+			state.CacheGroupEdit.Reconcile(state.Authored);
 			state.PxcxCompletedPreview.reset();
 			std::erase_if(state.DirectoryGrants, [&](const auto &grant) {
 				return std::none_of(
@@ -349,6 +352,7 @@ namespace studio {
 		void AuthoredDocumentChanged(
 			State &state, std::optional<detail::ImageGraphCacheEditKind> kind = std::nullopt
 		) {
+			if (kind == detail::ImageGraphCacheEditKind::FreshDocument) state.CacheGroupEdit.Clear();
 			state.CacheEditRetryKind = kind.value_or(state.CacheEditKind);
 			state.CacheEditBlocked = !detail::ObserveImageGraphCacheEdits(
 				state.Authored,
@@ -592,6 +596,18 @@ namespace studio {
 			SetCanvasStyle(state.Canvas);
 			state.Canvas.Signals.Changed = [&state] { SyncCanvas(state); };
 			state.Canvas.Signals.Rerun = [&state](nodegraph::NodeId) { RequestPreview(state, true); };
+			state.Canvas.Signals.ClickNode = [&state](nodegraph::NodeId id) {
+				const auto found = state.Ids.ToDocument.find(id);
+				if (found == state.Ids.ToDocument.end() || state.CacheGroupEdit.OwnerId.empty()) return false;
+				try {
+					return state.CacheGroupEdit.QueueClick(found->second);
+				} catch (const std::bad_alloc &) {
+					state.LastDiagnostic = {
+						Status::LimitExceeded, {}, {}, "Cache group click allocation refused"
+					};
+					return true;
+				}
+			};
 			state.VectorControls.Attach(state.Canvas, state.Authored, state.Ids, state.History, [&state] {
 				AuthoredDocumentChanged(state);
 			});
@@ -4676,6 +4692,48 @@ namespace studio {
 			if (!controls.Message.empty()) ImGui::TextWrapped("%s", controls.Message.c_str());
 		}
 
+		void RefreshCacheGroupMarks(State &state) {
+			state.CacheGroupEdit.Reconcile(state.Authored);
+			std::vector<nodegraph::NodeId> marked;
+			if (!state.CacheGroupEdit.OwnerId.empty()) {
+				const auto owner = detail::ImageGraphCacheEditingOwner(
+					state.CacheGroupEdit, state.FeedbackHost.SourceCacheGroups()
+				);
+				marked.reserve(owner ? owner->Members.size() + 1 : 1);
+				const auto add = [&](const std::string &id) {
+					const auto node = state.Ids.ToCanvas.find(id);
+					if (node != state.Ids.ToCanvas.end()) marked.push_back(node->second);
+				};
+				add(state.CacheGroupEdit.OwnerId);
+				if (owner)
+					for (const auto &member : owner->Members)
+						add(member);
+			}
+			state.Canvas.MarkNodes(std::move(marked));
+		}
+		void ApplyPendingCacheGroupClick(State &state) {
+			if (state.CacheGroupEdit.PendingMember.empty()) return;
+			std::string member = std::move(state.CacheGroupEdit.PendingMember);
+			state.CacheGroupEdit.PendingMember.clear();
+			FinishInactiveEdit(state);
+			state.CacheGroupEdit.Reconcile(state.Authored);
+			if (state.CacheGroupEdit.OwnerId.empty() || !RetryCacheEdit(state)) return;
+			if (!detail::ApplyImageGraphCacheGroupMember(
+					state.Authored,
+					state.History,
+					state.FeedbackHost,
+					state.CacheEditObservation,
+					state.CacheGroupEdit.OwnerId,
+					member,
+					state.LastDiagnostic
+				))
+				return;
+			state.CacheEditBlocked = false;
+			state.CacheEditRetryKind = detail::ImageGraphCacheEditKind::RenderOnly;
+			PublishAuthoredDocumentChanged(state);
+			RequestPreview(state, true);
+		}
+
 		void DrawInspector(
 			State &state,
 			engine::render::Renderer &renderer,
@@ -4695,6 +4753,32 @@ namespace studio {
 			if (schema == nullptr) {
 				ImGui::TextDisabled("This node type is not registered in this build.");
 				return;
+			}
+			if (node->Type == "pc.cache" || node->Type == "pc.cache_array") {
+				const auto serialize = detail::DrawImageGraphCacheControls(
+					*node, state.CacheGroupEdit, state.FeedbackHost.SourceCacheGroups()
+				);
+				if (serialize) {
+					FinishInactiveEdit(state);
+					if (RetryCacheEdit(state) && detail::ApplyImageGraphCacheSerialize(
+													 state.Authored,
+													 state.History,
+													 state.FeedbackHost,
+													 state.CacheEditObservation,
+													 nodeId,
+													 *serialize,
+													 state.LastDiagnostic
+												 )) {
+						state.CacheEditBlocked = false;
+						state.CacheEditRetryKind = detail::ImageGraphCacheEditKind::RenderOnly;
+						PublishAuthoredDocumentChanged(state);
+						RequestPreview(state, true);
+					}
+					node = FindNode(state.Authored, nodeId);
+					if (!node) return;
+					schema = engine::imagegraph::FindSchema(node->Type);
+					if (!schema) return;
+				}
 			}
 			if (node->Type == "pc.rigid_object") {
 				engine::imagegraph::EvaluationSnapshot directInputs;
@@ -7020,7 +7104,9 @@ namespace studio {
 			if (ImGui::Begin(detail::IMAGE_COMPOSER_GRAPH)) {
 				if (ImGui::BeginChild("##image-graph-canvas", ImVec2(0, 0), false)) {
 					if (state.CanvasNeedsReload) ReloadCanvas(state);
+					RefreshCacheGroupMarks(state);
 					state.Canvas.Draw(state.Graph);
+					ApplyPendingCacheGroupClick(state);
 					if (state.CanvasNeedsReload) ReloadCanvas(state);
 				}
 				ImGui::EndChild();

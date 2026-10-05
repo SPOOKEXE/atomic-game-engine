@@ -1375,6 +1375,88 @@
         "cache inspector controls remain unfinished.",
         "source runtime constructors, live Studio workflows and licensed-reference captures remain incomplete/unverified."
       ]
+    },
+    "inspector_controls": {
+      "recorded_date": "2026-10-06",
+      "scope": "grug wire Cache and Cache Array inspector Serialize and Edit group controls, queued durable-id canvas clicks and view-only membership outlines.",
+      "pinned_source": [
+        {
+          "path": "scripts/__node_cache_base/__node_cache_base.gml",
+          "bytes": 6945,
+          "sha256": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb",
+          "git_blob_sha1": "251252e9867bc8406aba016217fe0764fe0fe295",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/panel_graph/panel_graph.gml",
+          "bytes": 226117,
+          "sha256": "ef98b9e725fa84c1e2f9e647176464f4bab5225cd646dac25b80d4c5e431ffa3",
+          "git_blob_sha1": "548ed45ea27ffe40649586c8ade643846e3e809f",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/panel_inspector/panel_inspector.gml",
+          "bytes": 120608,
+          "sha256": "b1f6c1040135eb1142419ad6fedcf07e29b3098365c4c5bb3e8a2ae9447564b5",
+          "git_blob_sha1": "6a4a6e78fb2290d4eec3e2e49435f1c9dee0bce7",
+          "verified_local_match": true
+        }
+      ],
+      "source_policy": "Serialize changes authored flag without membership refresh, activity changes or frame deletion. group owner click exits, plain member click uses retained list containment and selected-owner-only refresh, Shift selection takes priority. pinned source group clicks contain no history record; native undo is an added authoring policy.",
+      "coverage": [
+        "actual headless ImGui checkbox/button clicks return Serialize request without changing document, set edit owner independently of canvas selection, queue member click and exit on owner click; missing/type-replaced owners clear mode.",
+        "headless canvas checks consumed body clicks, unchanged selection and drag positions, declined click fallback, Shift bypass, widget/port priority, queued one-click action and view-only marked-node highlighting beyond selected-only baseline.",
+        "Serialize default true, false/true edits and admitted undo/redo for Cache and Cache Array preserve retained frames, getters, activity and loaded overlapping owner pointers.",
+        "observed membership clicks preserve loaded-overlap selected refresh without a later native metadata restore reclaiming the pointer. subsequent remove/add and value setter still reach cache wake.",
+        "history capacity refusal, runtime byte refusal, pending/unready/stale observer and malformed/duplicate Serialize metadata preserve authored document, observation, current journal and history direction. generic record callback refusal and bad_alloc retain redo; byte rejection never invokes callback."
+      ],
+      "runtime_budget": "membership reserves retained prior and two derived observations before host document/journal preparation. observer copy/sort work is capped at64 MiB separately from core membership work; no combined64 MiB claim. Serialize preflights prior observation work, verifies it matches, and subtracts current document and comparison clone residency before runtime observation. serialized history retains its separate existing byte cap.",
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-batch4-results.json",
+      "preceding_results": [
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-batch1-results.json",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-batch2-results.json",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-batch3-results.json"
+      ],
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-build1.log",
+          "exit_code": 1
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-build3.log",
+          "exit_code": 1
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-build4.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-build5.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-build6.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-inspector-issues.json",
+      "native_cases": 4983,
+      "native_assertions": 1995539,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "review": "Sol read-only review confirmed no production defect in admission ordering or UI wiring; found weak marking assertion and repair was applied.",
+      "profiling": "new ENGINE_PROFILE scopes for membership and Serialize controls. no fresh isolated profile, sanitizer run, performance claim or live UI verification.",
+      "ownership": "Composer retains prior50 inserted/11 deleted user lines outside this commit. other user work and prior untracked IO test assertion remain unstaged.",
+      "remaining": [
+        "source convex-hull group background parity remains unimplemented; native view outlines show retained owner/members.",
+        "source runtime constructors, append/loading workflows, live Studio gestures and licensed-reference captures remain incomplete/unverified.",
+        "broader33-item Composer goal remains active."
+      ]
     }
   },
   "source_sha256": {

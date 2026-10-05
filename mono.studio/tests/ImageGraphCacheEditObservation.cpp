@@ -787,3 +787,180 @@ TEST_CASE(
 	CHECK(fixture.Observation.PendingValueEdit);
 	CHECK(fixture.Observation.PendingValueKind == ImageGraphCacheEditKind::ValueSetter);
 }
+
+TEST_CASE(
+	"Studio cache controls admit Serialize without changing ownership or captured data",
+	"[studio][imagegraph][cache_group][controls]"
+) {
+	for (const bool array : {false, true}) {
+		Fixture fixture(array);
+		Node other{"other", "pc.cache", "", {}, {{"animated", false}}};
+		other.SourceProperties = {{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}};
+		fixture.Authored.Nodes.push_back(other);
+		REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+		const auto before = fixture.Authored;
+		const auto data = *fixture.Host.PreparedData(1, 1);
+		REQUIRE(fixture.Host.Value("out"));
+		const auto output = *fixture.Host.Value("out");
+		studio::ImageGraphHistory history;
+		REQUIRE(ApplyImageGraphCacheSerialize(
+			fixture.Authored, history, fixture.Host, fixture.Observation, "cache", false, fixture.Error
+		));
+		CHECK_FALSE(fixture.Host.SourceCacheGroups().Owners.front().Serialize);
+		CHECK(fixture.Host.PreparedData(1, 1)->Entries == data.Entries);
+		CHECK(fixture.Host.PreparedData(1, 1)->CacheGroups.Nodes == data.CacheGroups.Nodes);
+		REQUIRE(fixture.Host.Value("out"));
+		const auto &current = fixture.Host.Value("out")->Output;
+		CHECK(current.index() == output.Output.index());
+
+		std::visit(
+			[&](const auto &value) {
+				using T = std::decay_t<decltype(value)>;
+				const auto &prior = std::get<T>(output.Output);
+				if constexpr (std::is_same_v<T, ImageArray>) {
+					CHECK(value.Images == prior.Images);
+					CHECK(value.Items == prior.Items);
+				} else
+					CHECK(value == prior);
+			},
+			current
+		);
+		CHECK(fixture.Member("input").OwnerId == "other");
+		CHECK_FALSE(fixture.Member("input").RenderActive);
+		const auto disabled = fixture.Authored;
+		CHECK_FALSE(ApplyImageGraphCacheSerialize(
+			fixture.Authored, history, fixture.Host, fixture.Observation, "cache", false, fixture.Error
+		));
+		CHECK(fixture.Authored == disabled);
+		studio::ImageGraphPlayback playback;
+		REQUIRE(ApplyImageGraphCacheHistory(
+			fixture.Authored, history, fixture.Host, fixture.Observation, playback, false, fixture.Error
+		));
+		CHECK(fixture.Authored == before);
+		CHECK(fixture.Host.SourceCacheGroups().Owners.front().Serialize);
+		CHECK(fixture.Host.PreparedData(1, 1)->CacheGroups.Nodes == data.CacheGroups.Nodes);
+		REQUIRE(ApplyImageGraphCacheHistory(
+			fixture.Authored, history, fixture.Host, fixture.Observation, playback, true, fixture.Error
+		));
+		CHECK(fixture.Authored == disabled);
+		REQUIRE(ApplyImageGraphCacheSerialize(
+			fixture.Authored, history, fixture.Host, fixture.Observation, "cache", true, fixture.Error
+		));
+		CHECK(fixture.Host.SourceCacheGroups().Owners.front().Serialize);
+		CHECK(fixture.Host.PreparedData(1, 1)->Entries == data.Entries);
+		CHECK(fixture.Host.PreparedData(1, 1)->CacheGroups.Nodes == data.CacheGroups.Nodes);
+	}
+}
+
+TEST_CASE(
+	"Studio observed membership click preserves selected refresh policy for loaded overlap",
+	"[studio][imagegraph][cache_group][controls]"
+) {
+	Fixture fixture;
+	Node other{"other", "pc.cache", "", {}, {{"animated", false}}};
+	other.SourceProperties = {{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}};
+	fixture.Authored.Nodes.push_back(other);
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	REQUIRE(fixture.Member("input").OwnerId == "other");
+	const auto document = fixture.Authored;
+	const auto data = *fixture.Host.PreparedData(1, 1);
+	const auto getters = fixture.Member("input").Outputs;
+	studio::ImageGraphHistory history;
+	REQUIRE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, fixture.Observation, "cache", "input", fixture.Error
+	));
+	CHECK(fixture.Authored == document);
+	CHECK_FALSE(history.CanUndo());
+	CHECK(fixture.Member("input").OwnerId == "cache");
+	CHECK_FALSE(fixture.Member("input").RenderActive);
+	CHECK(fixture.Member("input").Outputs == getters);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == data.Entries);
+	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::RenderOnly));
+	CHECK(fixture.Member("input").OwnerId == "cache");
+	REQUIRE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, fixture.Observation, "cache", "input", fixture.Error
+	));
+	CHECK(fixture.Member("input").OwnerId.empty());
+	CHECK(fixture.Member("input").RenderActive);
+	CHECK(history.CanUndo());
+	REQUIRE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, fixture.Observation, "cache", "input", fixture.Error
+	));
+	CHECK(fixture.Member("input").OwnerId == "cache");
+	fixture.Authored.Nodes[0].Values[2].Data = Colour{90, 20, 30, 255};
+	REQUIRE(fixture.Observe());
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries.front().FrameCacheConstructorCleared);
+}
+
+TEST_CASE(
+	"Studio cache control refusals preserve document observation replay and redo",
+	"[studio][imagegraph][cache_group][controls][bounds]"
+) {
+	for (const bool membership : {false, true}) {
+		for (const int refusal : {0, 1, 2, 3, 4}) {
+			Fixture fixture;
+			studio::ImageGraphHistory history(refusal == 0 ? 0 : 128);
+			if (refusal != 0) {
+				auto prior = fixture.Authored;
+				prior.Nodes[0].Position.X = 20;
+				REQUIRE(history.TryRecord(fixture.Authored, prior));
+				REQUIRE(history.Undo(prior));
+				REQUIRE(history.CanRedo());
+			}
+			if (refusal == 2) fixture.Observation.PendingValueEdit = true;
+			if (refusal == 3) fixture.Authored.Nodes[0].Values[2].Data = Colour{99, 20, 30, 255};
+			if (refusal == 4) fixture.Observation.Ready = false;
+			const auto document = fixture.Authored;
+			const auto inputs = fixture.Observation.Inputs;
+			const auto data = *fixture.Host.PreparedData(1, 1);
+			const uint64_t cap = refusal == 1 ? 1 : Limits::MaximumEvaluationBytes;
+			const bool applied = membership ? ApplyImageGraphCacheGroupMember(
+												  fixture.Authored,
+												  history,
+												  fixture.Host,
+												  fixture.Observation,
+												  "cache",
+												  "input",
+												  fixture.Error,
+												  cap
+											  )
+											: ApplyImageGraphCacheSerialize(
+												  fixture.Authored,
+												  history,
+												  fixture.Host,
+												  fixture.Observation,
+												  "cache",
+												  false,
+												  fixture.Error,
+												  cap
+											  );
+			CHECK_FALSE(applied);
+			CHECK(fixture.Error.Code != Status::Ok);
+			CHECK(fixture.Authored == document);
+			CHECK(fixture.Observation.Inputs == inputs);
+			CHECK(*fixture.Host.PreparedData(1, 1) == data);
+			CHECK_FALSE(history.CanUndo());
+			CHECK(history.CanRedo() == (refusal != 0));
+			CHECK(fixture.Observation.PendingValueEdit == (refusal == 2));
+			CHECK(fixture.Observation.Ready == (refusal != 4));
+		}
+	}
+	for (const bool duplicate : {false, true}) {
+		Fixture fixture;
+		fixture.Authored.Nodes[1].SourceProperties.push_back({"serialize", std::string{"bad"}});
+		if (duplicate) {
+			fixture.Authored.Nodes[1].SourceProperties.back().Data = true;
+			fixture.Authored.Nodes[1].SourceProperties.push_back({"serialize", true});
+		}
+		const auto before = fixture.Authored;
+		const auto data = *fixture.Host.PreparedData(1, 1);
+		studio::ImageGraphHistory history;
+		CHECK_FALSE(ApplyImageGraphCacheSerialize(
+			fixture.Authored, history, fixture.Host, fixture.Observation, "cache", false, fixture.Error
+		));
+		CHECK(fixture.Error.Code == Status::InvalidValue);
+		CHECK(fixture.Authored == before);
+		CHECK(*fixture.Host.PreparedData(1, 1) == data);
+		CHECK_FALSE(history.CanUndo());
+	}
+}

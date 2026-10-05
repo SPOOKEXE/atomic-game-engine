@@ -28,6 +28,38 @@ namespace studio::detail {
 				return Charge(1, std::max(left.size(), right.size()) + 1) && left == right;
 			}
 		};
+		uint64_t ObservationNames(const Document &document) {
+			uint64_t names = 0;
+			for (const auto &node : document.Nodes) {
+				names += node.Id.size() + 1;
+				for (const auto &value : node.Values)
+					names += value.Port.size() + 1;
+				for (const auto &port : node.SourceAnimatedInputs)
+					names += port.size() + 1;
+				for (const auto &port : node.SourceStaticInputs)
+					names += port.size() + 1;
+			}
+			for (const auto &node : document.Nodes) {
+				if (node.Type != "pc.cache" && node.Type != "pc.cache_array") continue;
+				for (const auto &property : node.SourceProperties)
+					names += property.Port.size() + 1;
+			}
+			for (const auto &link : document.Links)
+				names +=
+					link.ToNode.size() + link.ToPort.size() + link.FromNode.size() + link.FromPort.size() + 4;
+			for (const auto &group : document.Groups) {
+				names += group.Id.size() + 1;
+				for (const auto &port : group.Ports)
+					names += port.Id.size() + 1;
+			}
+			for (const auto &junction : document.Junctions)
+				names += junction.Id.size() + 1;
+			for (const auto &key : document.Keyframes)
+				names += key.NodeId.size() + 1;
+			for (const auto &track : document.Tracks)
+				names += track.NodeId.size() + 1;
+			return names;
+		}
 		auto LinkKey(const Link &link) {
 			return std::tie(link.ToNode, link.ToPort, link.FromNode, link.FromPort);
 		}
@@ -162,6 +194,165 @@ namespace studio::detail {
 		);
 	}
 
+	bool ApplyImageGraphCacheGroupMember(
+		Document &document,
+		ImageGraphHistory &history,
+		CapturedFeedbackHost &host,
+		ImageGraphCacheEditObservation &observation,
+		std::string_view ownerId,
+		std::string_view memberId,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("studio.imagegraph.cache_member_control");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return false;
+		};
+		if (!observation.Ready || observation.PendingValueEdit)
+			return fail(
+				Status::UnsupportedExecution, "Admit prior source cache observations before membership"
+			);
+		const auto authored = DocumentRetainedPayloadBytes(document);
+		const auto prior = DocumentRetainedPayloadBytes(observation.Inputs);
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || !authored || !prior)
+			return fail(Status::LimitExceeded, "Cache membership observation cap is outside bounds");
+		// grug reserve both derived observations before host preparation holds its document/journal clones.
+		const uint64_t reserved = *prior + 4 * *authored + 4 * Limits::MaximumTextBytes;
+		if (reserved >= maximumBytes)
+			return fail(Status::LimitExceeded, "Cache membership observations exceed live byte bounds");
+		Document staged;
+		Diagnostic admissionFailure;
+		const bool accepted = host.ToggleSourceCacheGroupMember(
+			document,
+			ownerId,
+			memberId,
+			diagnostic,
+			[&](const Document &before, const Document &after) {
+				const auto afterBytes = DocumentRetainedPayloadBytes(after);
+				EditWork work;
+				if (!afterBytes || !work.Charge(4, *authored + *afterBytes + *prior) ||
+					!work.Charge(64, ObservationNames(before) + ObservationNames(after))) {
+					admissionFailure = {
+						Status::LimitExceeded, {}, {}, "Cache membership observation work exceeded"
+					};
+					return false;
+				}
+				const auto expected = InputObservation(before);
+				if (expected != observation.Inputs) {
+					admissionFailure = {
+						Status::UnsupportedExecution,
+						{},
+						{},
+						"Retry prior cache observation before membership"
+					};
+					return false;
+				}
+				staged = InputObservation(after);
+				const auto expectedBytes = DocumentRetainedPayloadBytes(expected);
+				const auto stagedBytes = DocumentRetainedPayloadBytes(staged);
+				if (!expectedBytes || !stagedBytes || *expectedBytes > reserved - *prior ||
+					*stagedBytes > reserved - *prior - *expectedBytes)
+					return false;
+				return history.TryRecord(before, after);
+			},
+			maximumBytes - reserved
+		);
+		if (!accepted) {
+			if (admissionFailure.Code != Status::Ok) diagnostic = std::move(admissionFailure);
+			return false;
+		}
+		static_assert(std::is_nothrow_move_assignable_v<Document>);
+		observation.Inputs = std::move(staged);
+		observation.PendingValueEdit = false;
+		diagnostic = {};
+		return true;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "Cache membership observation allocation refused"};
+		return false;
+	}
+	bool ApplyImageGraphCacheSerialize(
+		Document &document,
+		ImageGraphHistory &history,
+		CapturedFeedbackHost &host,
+		ImageGraphCacheEditObservation &observation,
+		std::string_view ownerId,
+		bool serialize,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("studio.imagegraph.cache_serialize_control");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return false;
+		};
+		if (!observation.Ready || observation.PendingValueEdit)
+			return fail(
+				Status::UnsupportedExecution, "Admit prior source cache observations before Serialize"
+			);
+		const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
+			return item.Id == ownerId;
+		});
+		if (node == document.Nodes.end() || (node->Type != "pc.cache" && node->Type != "pc.cache_array"))
+			return fail(Status::InvalidValue, "Serialize requires a source frame-cache owner");
+		bool current = true, seen = false;
+		for (const auto &property : node->SourceProperties)
+			if (property.Port == "serialize") {
+				if (seen || !std::holds_alternative<bool>(property.Data))
+					return fail(Status::InvalidValue, "Serialize must be one source boolean");
+				seen = true;
+				current = std::get<bool>(property.Data);
+			}
+		if (current == serialize) {
+			diagnostic = {};
+			return false;
+		}
+		if (!seen && node->SourceProperties.size() == Limits::MaximumPropertiesPerNode)
+			return fail(Status::LimitExceeded, "Serialize metadata count exceeds bounds");
+		const auto bytes = DocumentRetainedPayloadBytes(document);
+		const uint64_t editBytes = 2 * Limits::MaximumPropertiesPerNode * sizeof(AuthoredValue);
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || !bytes ||
+			editBytes >= maximumBytes || *bytes > (maximumBytes - editBytes) / 2)
+			return fail(Status::LimitExceeded, "Serialize document staging exceeds live byte bounds");
+		EditWork work;
+		if (!work.Charge(4, *bytes) || !work.Charge(64, ObservationNames(document)))
+			return fail(Status::LimitExceeded, "Serialize prior observation exceeds work bounds");
+		const auto expected = InputObservation(document);
+		if (expected != observation.Inputs)
+			return fail(Status::UnsupportedExecution, "Retry prior cache observation before Serialize");
+		const auto expectedBytes = DocumentRetainedPayloadBytes(expected);
+		if (!expectedBytes || *expectedBytes > *bytes)
+			return fail(Status::LimitExceeded, "Serialize prior observation exceeds admission");
+		Document staged = document;
+		auto &properties = staged.Nodes[size_t(node - document.Nodes.begin())].SourceProperties;
+		if (seen) {
+			for (auto &property : properties)
+				if (property.Port == "serialize") property.Data = serialize;
+		} else
+			properties.push_back({"serialize", serialize});
+		diagnostic = {};
+		if (!history.TryRecord(document, staged, [&](const Document &, const Document &after) {
+				return ObserveImageGraphCacheEdits(
+					after,
+					observation,
+					host,
+					ImageGraphCacheEditKind::RenderOnly,
+					diagnostic,
+					maximumBytes - *bytes - *expectedBytes
+				);
+			})) {
+			if (diagnostic.Code == Status::Ok)
+				return fail(Status::LimitExceeded, "Serialize history admission refused");
+			return false;
+		}
+		static_assert(std::is_nothrow_move_assignable_v<Document>);
+		document = std::move(staged);
+		return true;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "Serialize control allocation refused"};
+		return false;
+	}
+
 	bool ApplyImageGraphCacheHistory(
 		Document &document,
 		ImageGraphHistory &history,
@@ -262,35 +453,7 @@ namespace studio::detail {
 		// Copy, sorting and payload comparisons have one cap across all edited inputs and routes.
 		if (!work.Charge(4, *authoredBytes + *priorBytes))
 			return fail(Status::LimitExceeded, "Source cache edit observations exceed copy work bounds");
-		uint64_t names = 0;
-		for (const auto &node : document.Nodes) {
-			names += node.Id.size() + 1;
-			for (const auto &value : node.Values)
-				names += value.Port.size() + 1;
-			for (const auto &port : node.SourceAnimatedInputs)
-				names += port.size() + 1;
-			for (const auto &port : node.SourceStaticInputs)
-				names += port.size() + 1;
-		}
-		for (const auto &node : document.Nodes) {
-			if (node.Type != "pc.cache" && node.Type != "pc.cache_array") continue;
-			for (const auto &property : node.SourceProperties)
-				names += property.Port.size() + 1;
-		}
-		for (const auto &link : document.Links)
-			names +=
-				link.ToNode.size() + link.ToPort.size() + link.FromNode.size() + link.FromPort.size() + 4;
-		for (const auto &group : document.Groups) {
-			names += group.Id.size() + 1;
-			for (const auto &port : group.Ports)
-				names += port.Id.size() + 1;
-		}
-		for (const auto &junction : document.Junctions)
-			names += junction.Id.size() + 1;
-		for (const auto &key : document.Keyframes)
-			names += key.NodeId.size() + 1;
-		for (const auto &track : document.Tracks)
-			names += track.NodeId.size() + 1;
+		const auto names = ObservationNames(document);
 		if (!work.Charge(64, names))
 			return fail(Status::LimitExceeded, "Source cache input sorting exceeds name work bounds");
 		auto candidate = InputObservation(document);

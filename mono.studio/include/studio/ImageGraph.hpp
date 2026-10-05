@@ -662,6 +662,12 @@ namespace studio {
 		// callback must preserve external state on refusal and must not mutate this history/document.
 		using Admission =
 			std::function<bool(const engine::imagegraph::Document &, const engine::imagegraph::Document &)>;
+		// grug admit runtime before the authored edit and its undo entry become visible.
+		bool TryRecord(
+			const engine::imagegraph::Document &before,
+			const engine::imagegraph::Document &after,
+			const Admission &admit
+		);
 		bool Undo(engine::imagegraph::Document &document, const Admission &admit);
 		bool Redo(engine::imagegraph::Document &document, const Admission &admit);
 		void Clear();

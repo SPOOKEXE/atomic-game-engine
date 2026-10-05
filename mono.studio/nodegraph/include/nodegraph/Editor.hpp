@@ -87,6 +87,10 @@ namespace nodegraph {
 		// Somebody asked for one node to be computed again from scratch.
 		std::function<void(NodeId)> Rerun;
 
+		// Runs before selection or movement on a plain node-body click. A true
+		// answer consumes the press; queue host edits for after Draw returns.
+		std::function<bool(NodeId)> ClickNode;
+
 		// Host drawing uses the current canvas draw list, without making toolkit types public.
 		std::function<BodySize(const Node &)> MeasureBody;
 		std::function<void(const Node &, const BodyFrame &)> DrawBody;
@@ -127,6 +131,9 @@ namespace nodegraph {
 
 		// Draws and drives the graph inside the current ImGui window.
 		void Draw(Graph &graph);
+
+		// Marks nodes in this view without changing the graph or selection.
+		void MarkNodes(std::vector<NodeId> nodes);
 
 		// Shows what each node last produced. Read only, and when the graph is
 		// evaluated stays the caller's decision.
@@ -360,6 +367,7 @@ namespace nodegraph {
 		}
 
 		std::vector<NodeId> Chosen;
+		std::vector<NodeId> Marked;
 		GroupId ChosenGroup = NO_GROUP;
 		std::vector<NodeId> Depth;
 
