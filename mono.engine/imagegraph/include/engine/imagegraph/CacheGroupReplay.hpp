@@ -79,7 +79,7 @@ namespace engine::imagegraph {
 		CacheGroupReplayState &state, const CacheGroupReplayOperation &operation, uint64_t maximumBytes
 	);
 	// Load-time authored refresh, in document owner order. Existing producer outputs/activity survive.
-	// New producers receive exact literal constructor outputs or explicit runtime-constructor refusals.
+	// New producers receive exact supported constructor outputs or explicit runtime-constructor refusals.
 	// This is not a per-frame refresh or an interactive transfer. Reconcile replaced types before loading.
 	[[nodiscard]] Status InitializeAuthoredCacheGroupReplay(
 		const Document &document,

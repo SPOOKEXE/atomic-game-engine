@@ -1,3 +1,5 @@
+#include "nodes/Path3D.hpp"
+
 #include <engine/imagegraph/CacheGroupReplay.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/testing/Suite.hpp>
@@ -1042,6 +1044,7 @@ TEST_CASE(
 	"[imagegraph][frame_cache_groups]"
 ) {
 	auto document = AuthoredGroups();
+	document.Nodes[3].Type = "pc.path_builder";
 	CacheGroupReplayState empty, loaded;
 	Diagnostic diagnostic;
 	REQUIRE(
@@ -1060,7 +1063,7 @@ TEST_CASE(
 	prior.CacheGroups = loaded;
 	for (auto &node : prior.CacheGroups.Nodes)
 		if (node.NodeId == "path") node.RenderActive = false;
-	document.Outputs = {{"out", "path", "joined_path"}};
+	document.Outputs = {{"out", "path", "path"}};
 	Plan plan;
 	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
 	EvaluationRequest request;
@@ -1308,4 +1311,115 @@ TEST_CASE(
 		InitializeAuthoredCacheGroupReplay(document, {}, destination, 1, diagnostic) == Status::LimitExceeded
 	);
 	CHECK(destination == prior.CacheGroups);
+}
+
+TEST_CASE(
+	"Frozen source path constructors preserve cold ownership and reusable point getter semantics",
+	"[imagegraph][cache_group][constructor][path]"
+) {
+	const std::array<std::pair<std::string_view, std::string_view>, 5> paths{
+		{{"pc.path_join", "joined_path"},
+		 {"pc.path_array", "combined_path"},
+		 {"pc.path_shift", "path"},
+		 {"pc.path_weight_adjust", "path"},
+		 {"pc.path_3_d", "path_data"}}
+	};
+	for (const auto &[type, port] : paths) {
+		INFO(type);
+		Document document;
+		document.FormatVersion = 9;
+		document.Nodes = {{"path", std::string(type), "", {}, {}}, {"owner", "pc.cache", "", {}, {}}};
+		document.Nodes.back().SourceProperties = {{"cache_group", GroupIds({"path"})}};
+		document.Outputs = {{"out", "path", std::string(port)}};
+		DataReplayState prior;
+		Diagnostic diagnostic;
+		REQUIRE(
+			InitializeAuthoredCacheGroupReplay(document, {}, prior.CacheGroups, BYTE_BUDGET, diagnostic) ==
+			Status::Ok
+		);
+		for (auto &node : prior.CacheGroups.Nodes)
+			node.RenderActive = false;
+		const auto original = prior;
+		Plan plan;
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		EvaluationRequest request;
+		request.DataReplay = &prior;
+		EvaluatedValue output;
+		REQUIRE(EvaluateValue(document, plan, "out", request, output, diagnostic) == Status::Ok);
+		CHECK(prior == original);
+		const auto *entry = FindCatalogueEntry(type);
+		REQUIRE(entry);
+		detail::NodeContext context(document.Nodes.front(), *entry, request);
+		if (type == "pc.path_3_d") {
+			const auto &spatial = std::get<PathValue3D>(output.Data);
+			REQUIRE(spatial.Data);
+			CHECK(spatial.Data->SourcePresent);
+			CHECK_FALSE(spatial.Data->Loop);
+			CHECK(spatial.Data->Anchors.empty());
+			detail::PathRuntime3D runtime(*spatial.Data, &context);
+			CHECK(runtime.LineCount() == 1);
+			CHECK(runtime.SourceSegmentCount() == 0);
+			CHECK(runtime.Length() == 0);
+			CHECK(runtime.SourceBoundary() == std::optional<Vector4>{{-4, -4, -4, -4}});
+			CHECK(runtime.Ratio(.5).Position == Vector3{});
+		} else {
+			const auto &path = std::get<Path2D>(output.Data);
+			REQUIRE(path.SourceOperation);
+			CHECK(path.SourceOperation->Inputs.empty());
+			CHECK(path.SourceOperation->EvaluationMemoId == 0);
+			if (type == "pc.path_weight_adjust") {
+				CHECK(path.SourceOperation->WeightCurve.empty());
+				for (const bool partialCurve : {false, true}) {
+					auto malformed = prior.CacheGroups;
+					auto member =
+						std::find_if(malformed.Nodes.begin(), malformed.Nodes.end(), [](const auto &node) {
+							return node.NodeId == "path";
+						});
+					REQUIRE(member != malformed.Nodes.end());
+					auto &operation = std::get<Path2D>(*member->Outputs.front().Data).SourceOperation;
+					if (partialCurve)
+						operation->WeightCurve = {0};
+					else
+						operation->WeightValue = 1;
+					CHECK(
+						ValidateCacheGroupReplay(malformed, BYTE_BUDGET, diagnostic) == Status::InvalidValue
+					);
+				}
+			}
+			detail::PathRuntime runtime;
+			REQUIRE(runtime.Init(context, path));
+			const bool compound = type == "pc.path_join" || type == "pc.path_array";
+			CHECK(runtime.LineCount() == (compound ? 0 : 1));
+			CHECK(runtime.Length() == 0);
+			CHECK(runtime.AccumulatedCount() == 0);
+			CHECK(
+				Vector4{runtime.MinX, runtime.MinY, runtime.MaxX, runtime.MaxY} ==
+				(compound ? Vector4{-4, -4, -4, -4} : Vector4{0, 0, 1, 1})
+			);
+			const SourcePathPointBuffer initial{SourcePathPointClass::Spatial, {7, 9}, 11, .4};
+			for (const bool distance : {false, true}) {
+				auto supplied = initial;
+				const auto sampled = distance ? runtime.PointDistanceInto(.5, 0, supplied)
+											  : runtime.PointRatioInto(.5, 0, supplied);
+				if (type == "pc.path_join") {
+					CHECK(sampled == initial);
+					CHECK(supplied == initial);
+				} else if (type == "pc.path_array") {
+					CHECK(sampled == SourcePathPointBuffer{});
+					CHECK(supplied == initial);
+				} else {
+					auto expected = initial;
+					expected.Position = {};
+					CHECK(sampled == expected);
+					CHECK(supplied == expected);
+				}
+			}
+		}
+		CacheGroupReplayState destination = prior.CacheGroups;
+		CHECK(
+			InitializeAuthoredCacheGroupReplay(document, {}, destination, 1, diagnostic) ==
+			Status::LimitExceeded
+		);
+		CHECK(destination == prior.CacheGroups);
+	}
 }

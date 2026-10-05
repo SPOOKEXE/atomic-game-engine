@@ -20,6 +20,17 @@ namespace engine::imagegraph {
 		constexpr size_t MAXIMUM_OUTPUTS_PER_NODE =
 			Limits::MaximumDynamicOutputsPerNode + Limits::MaximumGroupPorts;
 		constexpr uint64_t COMPARISON_WORK_LIMIT = 64ull * 1024 * 1024;
+		enum class ColdPathConstructor { Join, Combine, Shift, WeightAdjust, Spatial };
+		std::optional<ColdPathConstructor>
+		ColdPathKind(std::string_view type, std::string_view port, std::string_view expression) {
+			if (expression != "self") return {};
+			if (type == "pc.path_join" && port == "joined_path") return ColdPathConstructor::Join;
+			if (type == "pc.path_array" && port == "combined_path") return ColdPathConstructor::Combine;
+			if (type == "pc.path_shift" && port == "path") return ColdPathConstructor::Shift;
+			if (type == "pc.path_weight_adjust" && port == "path") return ColdPathConstructor::WeightAdjust;
+			if (type == "pc.path_3_d" && port == "path_data") return ColdPathConstructor::Spatial;
+			return {};
+		}
 		uint64_t WorkProduct(uint64_t count, uint64_t bytes) {
 			return count && bytes > UINT64_MAX / count ? UINT64_MAX : count * bytes;
 		}
@@ -744,6 +755,32 @@ namespace engine::imagegraph {
 							parsed, "source cold constructor literal could not be admitted", node.Id, id
 						);
 					port.Data = std::move(value);
+				} else if (const auto kind = ColdPathKind(node.Type, id, expression)) {
+					const uint64_t bytes =
+						*kind == ColdPathConstructor::Spatial ? sizeof(PathData3D) : sizeof(SourcePathData2D);
+					auto payload = budget.Reserve(bytes);
+					if (!payload || !constructors.Merge(std::move(*payload)))
+						return refuse(
+							Status::LimitExceeded,
+							"source cold path constructor exceeds live bytes",
+							node.Id,
+							id
+						);
+					if (*kind == ColdPathConstructor::Spatial) {
+						PathValue3D value;
+						value.Data.emplace();
+						port.Data = std::move(value);
+					} else {
+						Path2D value;
+						auto &operation = value.SourceOperation.emplace();
+						operation.Kind =
+							*kind == ColdPathConstructor::Join		? SourcePathOperationKind::Join
+							: *kind == ColdPathConstructor::Combine ? SourcePathOperationKind::Combine
+							: *kind == ColdPathConstructor::Shift	? SourcePathOperationKind::Shift
+																	: SourcePathOperationKind::WeightAdjust;
+						if (*kind == ColdPathConstructor::Shift) operation.ShiftDistance = -4;
+						port.Data = std::move(value);
+					}
 				} else {
 					constexpr std::string_view prefix =
 						"source cold constructor requires runtime execution: ";

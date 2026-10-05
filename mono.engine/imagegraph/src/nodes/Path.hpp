@@ -224,6 +224,10 @@ namespace engine::imagegraph::detail {
 					replacement.MaxY = 1;
 					replacement.HasBoundary = true;
 				}
+				if (operation.Kind == SourcePathOperationKind::Combine && replacement.Inputs.empty()) {
+					replacement.MinX = replacement.MinY = replacement.MaxX = replacement.MaxY = -4;
+					replacement.HasBoundary = true;
+				}
 				if (operation.Kind == SourcePathOperationKind::Blend ||
 					operation.Kind == SourcePathOperationKind::Join) {
 					// Source BoundingBox starts each coordinate at noone (-4); Join's addBBOX uses raw
@@ -689,6 +693,14 @@ namespace engine::imagegraph::detail {
 			return out;
 		}
 		SourcePathPointBuffer PointRatioInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
+			if (Operation && Inputs.empty() && !WeightSpatial) {
+				if (*Operation == SourcePathOperationKind::Join) return out;
+				if (*Operation == SourcePathOperationKind::Shift ||
+					*Operation == SourcePathOperationKind::WeightAdjust) {
+					SourceSequentialResetPoint(out);
+					return out;
+				}
+			}
 			if (SourceData && SourceData->Sequential) return SequentialPoint(ratio, line, false, out);
 			if (Shape) {
 				const auto point = PointRatio(ratio, line);
@@ -704,6 +716,7 @@ namespace engine::imagegraph::detail {
 					ratio = SourceData->ClampOffset ? std::clamp(sum, 0., 1.) : sum - std::floor(sum);
 				}
 				const auto *child = SelectLine(line);
+				if (!child && *Operation == SourcePathOperationKind::Combine) return {};
 				return child ? child->PointRatioInto(
 								   *Operation == SourcePathOperationKind::Reverse ? 1 - ratio
 								   : *Operation == SourcePathOperationKind::Trim
@@ -721,6 +734,7 @@ namespace engine::imagegraph::detail {
 		}
 		SourcePathPointBuffer
 		PointDistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			if (Operation && *Operation == SourcePathOperationKind::Join && Inputs.empty()) return out;
 			if (SourceData && SourceData->Sequential) return SequentialPoint(distance, line, true, out);
 			if (Shape) {
 				if (LengthTotal != 0) {
@@ -731,7 +745,7 @@ namespace engine::imagegraph::detail {
 			}
 			if (Operation && *Operation == SourcePathOperationKind::Combine) {
 				const auto *child = SelectLine(line);
-				return child ? child->PointDistanceInto(distance, line, out) : out;
+				return child ? child->PointDistanceInto(distance, line, out) : SourcePathPointBuffer{};
 			}
 			if (Operation && *Operation != SourcePathOperationKind::Join &&
 				*Operation != SourcePathOperationKind::Skew)

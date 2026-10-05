@@ -81,8 +81,14 @@ namespace engine::imagegraph::detail {
 			!std::isfinite(op.WeightRange.X) || !std::isfinite(op.WeightRange.Y))
 			return false;
 		if (op.Kind == SourcePathOperationKind::WeightAdjust) {
+			// Cold missing-path ownership has no curve object to sample.
+			const bool coldCurve = op.WeightCurve.empty() && op.Inputs.empty() && !op.WeightInput3D &&
+								   op.WeightType == 0 && op.WeightMode == 0 && !op.WeightLoop &&
+								   op.WeightValue == 0 && op.WeightDirection == 0 &&
+								   op.WeightRange == Vector2{0, 1};
 			if ((!op.Inputs.empty() && op.WeightInput3D) || op.WeightType > 2 || op.WeightMode > 2 ||
-				op.WeightCurve.size() < 2 || op.WeightCurve.size() > Limits::MaximumArrayElements - *count)
+				(!coldCurve && op.WeightCurve.size() < 2) ||
+				op.WeightCurve.size() > Limits::MaximumArrayElements - *count)
 				return false;
 			*count += op.WeightCurve.size();
 			if (op.WeightInput3D && !ValidSourceWeightInput3D(*op.WeightInput3D, depth + 1, count))

@@ -81,7 +81,7 @@
       "mono.engine/imagegraph/src/CacheGroupReplay.cpp: InitializeAuthoredCacheGroupReplay literal constructors and named runtime refusals"
     ],
     "required_next_steps": [
-      "Initialize remaining path/self, runtime resource and dynamic constructors through exact native owner semantics. Zero matrices, default curves, one-key gradients and named colours now initialize as owned native values.",
+      "Initialize remaining path/self, runtime resource and dynamic constructors through exact native owner semantics. Zero matrices, curves, gradients, colours and cold Join/Combine/Shift/Weight Adjust/Path3D ownership are verified.",
       "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
       "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
@@ -709,6 +709,106 @@
         "Path self constructors, randomized array objects, mesh/dynamic-surface/resource wrappers, Lua/rigid ownership and dynamic outputs still need exact owner semantics.",
         "Cache-group seek/revision activity, host edit/load workflows, licensed-reference parity and live Studio verification remain incomplete."
       ]
+    },
+    "cold_path_implementation": {
+      "scope": "Exact cold source ownership for Join, Combine, Shift, Weight Adjust and present empty Path3D. Native frozen output restoration preserves source counts, bounds and reusable point-buffer getter semantics without updating those nodes.",
+      "head_before_commit": "6b83a7e896fc2b61454b58b950e3f7c2a6070f80",
+      "source_pin": "b69eca232217360cf1502ef0223523d818606652",
+      "source_evidence": {
+        "scripts/node_path_join/node_path_join.gml": {
+          "sha256": "2a178f1a12216b3353d1d531a6cf617b469f43a3649704d7cc76a85c3284aaca",
+          "git_blob_sha1": "f5f21e45d80198603f5f80e2010aef2f421498fc",
+          "verified_local_match": true
+        },
+        "scripts/node_path_array/node_path_array.gml": {
+          "sha256": "adca98fdd2219d8575b2c50f39477488d857db671360648e695abc948012c6de",
+          "git_blob_sha1": "53d102221905665319e42f2dcb17b89d56b89a0e",
+          "verified_local_match": true
+        },
+        "scripts/node_path_shift/node_path_shift.gml": {
+          "sha256": "55539a3ae8ea96ec199900632f7045a74e5427e587a65a521235e65c4e4aafab",
+          "git_blob_sha1": "ffa6377e892f6338a881b76398ee5e470b13d7e8",
+          "verified_local_match": true
+        },
+        "scripts/node_path_weight_adjust/node_path_weight_adjust.gml": {
+          "sha256": "6e955bcc6d2edafe2f22f8e5a006c5b3edaba3b7b4bda4638e1e699d8906cfd4",
+          "git_blob_sha1": "cf1ada5abb06a7333ea290c426a9c8de30d2d35c",
+          "verified_local_match": true
+        },
+        "scripts/node_path_3d/node_path_3d.gml": {
+          "sha256": "0472ae043ef0b71e5c59699a5104803a4f29fb665fcbeb6d64310066788a01b2",
+          "git_blob_sha1": "8e1fc7e7f072414890c157cbe01ca9bb45644f25",
+          "verified_local_match": true
+        },
+        "scripts/node_path_builder/node_path_builder.gml": {
+          "sha256": "0010ffa8cd34df874e70103ade9e6ec0efec021fd128e39615dc1180b6160ee9",
+          "git_blob_sha1": "580deb8b47bc0d50b90df615a2b8fd02d610bd80",
+          "verified_local_match": true
+        }
+      },
+      "coverage": [
+        "Cold Join/Combine zero lines and length, sentinel bounds and empty accumulated lengths; Join leaves supplied ratio/distance buffers unchanged, Combine returns a fresh planar origin without mutating the supplied buffer.",
+        "Cold Shift/Weight Adjust retain missing-path controls, one line, zero length and unit bounds; ratio/distance getters reset only x/y, preserving supplied class/z/weight.",
+        "Cold Path3D retains present owned empty anchors, non-looping state, one line, zero segments/length, sentinel XY bounds and origin sampling.",
+        "Exact cold WeightAdjust without curve validates; partial curve and edited cold controls refuse. Builder remains an exact named constructor refusal.",
+        "Frozen evaluation preserves caller journal; one-byte constructor admission refusal preserves destination."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-batch2-results.json",
+      "native_cases": 4899,
+      "native_assertions": 1993630,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "approved_vulkan_cases": 15,
+      "architecture": "Passed: 55 modules, 6 programs, 39 layered.",
+      "format": "clang-format-21 dry run, ruff and git diff --check passed.",
+      "binary_hashes": "All twelve native suite binaries and assetc/imagegraph child hashes stable during checks and matched afterwards.",
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-final-prep-build.log",
+          "exit_code": 0
+        }
+      ],
+      "preceding_batches": [
+        {
+          "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-batch1-results.json",
+          "failure": "Two core cases failed,14 assertions: old Join refusal expectation, reusable buffer semantics, empty Combine bounds and cold WeightAdjust curve admission. Other17 processes passed."
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-issues.json",
+      "review": "Sol source audit and current repair review found no confirmed defect in exact factory selectors, owned payload admission, getter buffer semantics or strict cold WeightAdjust validation.",
+      "profiling": "Existing initialization and evaluation scopes carry ENGINE_PROFILE. No fresh isolated performance measurement or sanitizer run. No performance claim.",
+      "source_sha256": {
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp": "27ec535f5bcf8cd4e6858fd97bc553fbccc28ff8968d46ee171f65e6a4a48435",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp": "85db8643e3ec94948f5a25122b1fa5848fc57f50137d35cb025a977df5d1091c",
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp": "b2cc040dd38f544967145cc7651c3eae990be0bf1ab0fc767b54f47939d9e608",
+        "mono.engine/imagegraph/src/nodes/Path.hpp": "ef3e3532a897a59ffe9bcb81ed31fac5cccbfad4de1762ecdb049684c6ef41ad",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp": "412d82360c06122cc0543c5e3364a500b158df2e71e3c01c7490be2e2685a959",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "ba0054c9661f12585c1942fa7eefab0b64ec8d2e4bfa554a4c50e76100f86c50"
+      },
+      "remaining": [
+        "Builder, Bridge, Plot, Trail and internal wrapper self constructors require explicit missing-method/indexing semantics; generic empty paths would hide source failures.",
+        "Runtime resource and dynamic outputs, cache-group host edits/load/seek/revision activity, licensed-reference parity and live Studio workflows remain incomplete."
+      ]
+    },
+    "host_edit_audit": {
+      "result": "Studio SyncCanvas input/connection edits call AuthoredDocumentChanged but do not enable controlling cache owners. Revision overlays preserve unchanged node activity, so edited members can remain frozen.",
+      "inspection": [
+        "mono.studio/src/ImageComposer.cpp: SyncCanvas and AuthoredDocumentChanged",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp: revision copy/overlay path"
+      ],
+      "source_rules": [
+        "node_value.gml valueUpdate/valueFromUpdate call node_data.gml cacheCheck.",
+        "cacheCheck enables the current cache_group owner pointer, then checks enclosing groups. Enable follows Serialize/loading/appending gates and force-clears owner rows."
+      ],
+      "next": "Apply bounded owner-pointer authoring transitions to both current and frame-start host journals before same-clock Prepare; retain member outputs and invalidate affected previews."
     }
   },
   "source_sha256": {
