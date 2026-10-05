@@ -1151,6 +1151,43 @@
         "Serialize undo/editor synchronization, full append workflows, runtime constructors and remaining seek policy remain incomplete.",
         "live Studio gestures, source incremental loading and licensed-reference captures remain unverified."
       ]
+    },
+    "membership_history_admission": {
+      "scope": "grug prepare owned membership candidates before native history admission. rejected History.TryRecord preserves authored document, current/preframe replay and existing redo. successful history admission is followed only by checked nonthrowing document and journal moves. inspector and runtime undo synchronization remain unwired.",
+      "coverage": [
+        "prepared candidates own authored document and both replay journals without publishing borrowed sources; publishing wrapper produces identical states.",
+        "real serialized history budget refusal preserves document, output pixels, frame rows and existing redo; same-clock host replay after refusal preserves both journal semantics.",
+        "accepted removal records authored history and preserves captured rows and output pixels; undo/redo roundtrip of document snapshots is checked independently from still-unwired runtime undo notification.",
+        "runtime byte and missing-member refusals do not consume history."
+      ],
+      "runtime_budget": "original document, original journals, candidate document/journals and operation workspace retain preceding aggregate live-byte and shared comparison-work admission. Studio serialized history has its own byte cap; no single cap for total Studio/history residency is claimed.",
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-batch1-results.json",
+      "native_cases": 4926,
+      "native_assertions": 1994255,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-build1.log",
+          "exit_code": 143
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-build2.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-history-issues.json",
+      "review": "Sol read prepared ownership, source aliases, history false/bad_alloc path, aggregate admission and nonthrowing publication; no confirmed defect.",
+      "binary_hashes": "all twelve native binaries and assetc/imagegraph children stayed stable during checks and matched afterwards.",
+      "architecture": "passed:55 modules,6 programs,39 layered.",
+      "format": "clang-format-21, ruff and git diff --check passed.",
+      "profiling": "existing membership ENGINE_PROFILE scope remains. no fresh profile or sanitizer run; no speed claim.",
+      "remaining": [
+        "Studio inspector controls and runtime history admission/synchronization remain unwired. source membership clicks have no history record; no source membership undo parity claimed.",
+        "Serialize-only history must update flags without refreshing member pointers, waking members or clearing rows.",
+        "live Studio gestures, source host workflows and licensed-reference captures remain unverified."
+      ]
     }
   },
   "source_sha256": {

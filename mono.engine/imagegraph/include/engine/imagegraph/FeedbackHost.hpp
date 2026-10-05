@@ -11,6 +11,7 @@
 #include <array>
 #include <limits>
 #include <new>
+#include <type_traits>
 
 namespace engine::imagegraph {
 	namespace feedback_detail {
@@ -310,14 +311,18 @@ namespace engine::imagegraph {
 					   document, owners, journals, maximumBytes - resident + groups, diagnostic
 				   ) == Status::Ok;
 		}
-		// grug apply the source membership click before preparing its new document revision.
+		// grug admit history while candidates stay private. false or bad_alloc must preserve admission state.
+		// callback borrows documents; successful admission is followed only by no-throw moves.
+		template <class Admission>
+			requires std::is_invocable_r_v<bool, const Admission &, const Document &, const Document &>
 		[[nodiscard]] bool ToggleSourceCacheGroupMember(
 			Document &document,
 			std::string_view ownerId,
 			std::string_view memberId,
 			Diagnostic &diagnostic,
+			const Admission &admit,
 			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
-		) {
+		) try {
 			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
 				diagnostic = {Status::LimitExceeded, {}, {}, "cache membership host cap is outside bounds"};
 				return false;
@@ -329,10 +334,42 @@ namespace engine::imagegraph {
 				diagnostic = {Status::LimitExceeded, {}, {}, "cache membership host exceeds live bytes"};
 				return false;
 			}
-			const std::array journals{&State.Data.CacheGroups, &FrameStart.Data.CacheGroups};
-			return ToggleAuthoredCacheGroupMember(
-					   document, journals, ownerId, memberId, maximumBytes - resident + groups, diagnostic
-				   ) == Status::Ok;
+			const std::array<const CacheGroupReplayState *, 2> journals{
+				&State.Data.CacheGroups, &FrameStart.Data.CacheGroups
+			};
+			auto prepared = PrepareAuthoredCacheGroupMember(
+				document, journals, ownerId, memberId, maximumBytes - resident + groups, diagnostic
+			);
+			if (!prepared) return false;
+			if (!admit(document, prepared->Authored)) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "cache membership authoring admission refused"};
+				return false;
+			}
+			static_assert(std::is_nothrow_move_assignable_v<Document>);
+			static_assert(std::is_nothrow_move_assignable_v<CacheGroupReplayState>);
+			document = std::move(prepared->Authored);
+			State.Data.CacheGroups = std::move(prepared->Journals[0]);
+			FrameStart.Data.CacheGroups = std::move(prepared->Journals[1]);
+			return true;
+		} catch (const std::bad_alloc &) {
+			diagnostic = {Status::LimitExceeded, {}, {}, "cache membership authoring allocation refused"};
+			return false;
+		}
+		[[nodiscard]] bool ToggleSourceCacheGroupMember(
+			Document &document,
+			std::string_view ownerId,
+			std::string_view memberId,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) {
+			return ToggleSourceCacheGroupMember(
+				document,
+				ownerId,
+				memberId,
+				diagnostic,
+				[](const Document &, const Document &) { return true; },
+				maximumBytes
+			);
 		}
 		const CacheGroupReplayState &SourceCacheGroups() const {
 			return State.Data.CacheGroups;

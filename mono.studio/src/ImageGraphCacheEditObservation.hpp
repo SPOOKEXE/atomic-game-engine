@@ -2,6 +2,10 @@
 
 #include <engine/imagegraph/FeedbackHost.hpp>
 
+namespace studio {
+	class ImageGraphHistory;
+}
+
 namespace studio::detail {
 	// Source setters and animator undo wake caches. Timeline gestures only request a render.
 	enum class ImageGraphCacheEditKind { ValueSetter, RenderOnly, AnimatorUndo, FreshDocument };
@@ -25,6 +29,16 @@ namespace studio::detail {
 			Current = Previous;
 		}
 	};
+	// grug admit native history before publishing membership. history has its own serialized byte cap.
+	[[nodiscard]] bool ApplyImageGraphCacheGroupMember(
+		engine::imagegraph::Document &document,
+		ImageGraphHistory &history,
+		engine::imagegraph::CapturedFeedbackHost &host,
+		std::string_view ownerId,
+		std::string_view memberId,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
 	// Admission or action failure preserves prior inputs and replay journals. A failed value edit
 	// must be retried as a value/undo event before a render-only notification can consume it. fresh loads
 	// stage membership and replace the host only after admission.

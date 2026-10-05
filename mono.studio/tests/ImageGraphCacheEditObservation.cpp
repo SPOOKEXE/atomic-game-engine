@@ -4,6 +4,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <studio/ImageGraph.hpp>
+
 TEST_SUITE_ID("studio.imagegraph.cache_edit_observation")
 
 namespace {
@@ -356,4 +358,96 @@ TEST_CASE(
 	CHECK(fixture.Host.PreparedData(2, 1)->Entries == prior.Entries);
 	CHECK(std::get<ArrayValue>(fixture.Authored.Nodes[1].SourceProperties[0].Data).Elements.empty());
 	CHECK(fixture.Host.SourceCacheGroups().Owners.front().Members.empty());
+}
+
+TEST_CASE(
+	"Studio membership history admission preserves replay and existing redo on refusal",
+	"[studio][imagegraph][cache_group][membership][history]"
+) {
+	Fixture fixture;
+	const auto before = fixture.Authored;
+	const auto replay = *fixture.Host.PreparedData(1, 1);
+	const auto pixels = *fixture.Host.Output("out");
+	Document small;
+	small.Nodes = {{"number", "pc.number", "", {}, {{"value", 1.0}}}};
+	auto changed = small;
+	changed.Nodes.front().Position.X = 30;
+	studio::ImageGraphHistory history(128, Write(changed).size() + 1);
+	REQUIRE(history.TryRecord(small, changed));
+	REQUIRE(history.Undo(changed));
+	REQUIRE(history.CanRedo());
+	CHECK_FALSE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, "cache", "input", fixture.Error
+	));
+	CHECK(fixture.Error.Code == Status::LimitExceeded);
+	CHECK(fixture.Authored == before);
+	CHECK(*fixture.Host.PreparedData(1, 1) == replay);
+	CHECK(*fixture.Host.Output("out") == pixels);
+	CHECK_FALSE(history.CanUndo());
+	CHECK(history.CanRedo());
+	REQUIRE(history.Redo(changed));
+	CHECK(changed.Nodes.front().Position.X == 30);
+	// grug same-clock replay uses the preframe journal too, after rejected admission.
+	auto request = Request(true);
+	REQUIRE(fixture.Host.Prepare(
+		fixture.Authored,
+		Compiled(fixture.Authored),
+		1,
+		1,
+		request,
+		fixture.Error,
+		Limits::MaximumEvaluationBytes,
+		"out"
+	));
+	CHECK(*fixture.Host.PreparedData(1, 1) == replay);
+}
+
+TEST_CASE(
+	"Studio membership records authored history before publishing replay without clearing frames",
+	"[studio][imagegraph][cache_group][membership][history]"
+) {
+	Fixture fixture;
+	studio::ImageGraphHistory history;
+	const auto before = fixture.Authored;
+	const auto replay = *fixture.Host.PreparedData(1, 1);
+	const auto pixels = *fixture.Host.Output("out");
+	REQUIRE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, "cache", "input", fixture.Error
+	));
+	const auto edited = fixture.Authored;
+	CHECK(fixture.Member("input").OwnerId.empty());
+	CHECK(fixture.Member("input").RenderActive);
+	CHECK(fixture.Host.PreparedData(1, 1)->Entries == replay.Entries);
+	CHECK(*fixture.Host.Output("out") == pixels);
+	CHECK(history.CanUndo());
+	// grug check history text here. runtime undo notification belongs to the caller.
+	auto restored = edited;
+	REQUIRE(history.Undo(restored));
+	CHECK(restored == before);
+	REQUIRE(history.Redo(restored));
+	CHECK(restored == edited);
+}
+
+TEST_CASE(
+	"Studio membership runtime refusal leaves history unused",
+	"[studio][imagegraph][cache_group][membership][history]"
+) {
+	Fixture fixture;
+	studio::ImageGraphHistory history;
+	const auto before = fixture.Authored;
+	const auto replay = *fixture.Host.PreparedData(1, 1);
+	CHECK_FALSE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, "cache", "input", fixture.Error, 1
+	));
+	CHECK(fixture.Authored == before);
+	CHECK(*fixture.Host.PreparedData(1, 1) == replay);
+	CHECK_FALSE(history.CanUndo());
+	CHECK_FALSE(history.CanRedo());
+	CHECK_FALSE(ApplyImageGraphCacheGroupMember(
+		fixture.Authored, history, fixture.Host, "cache", "absent", fixture.Error
+	));
+	CHECK(fixture.Error.Code == Status::UnknownNode);
+	CHECK_FALSE(history.CanUndo());
+	CHECK(fixture.Authored == before);
+	CHECK(*fixture.Host.PreparedData(1, 1) == replay);
 }

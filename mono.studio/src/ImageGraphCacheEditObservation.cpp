@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <new>
+#include <studio/ImageGraph.hpp>
 #include <tuple>
 
 namespace studio::detail {
@@ -137,6 +138,25 @@ namespace studio::detail {
 			return true;
 		}
 	}
+	bool ApplyImageGraphCacheGroupMember(
+		engine::imagegraph::Document &document,
+		ImageGraphHistory &history,
+		engine::imagegraph::CapturedFeedbackHost &host,
+		std::string_view ownerId,
+		std::string_view memberId,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		return host.ToggleSourceCacheGroupMember(
+			document,
+			ownerId,
+			memberId,
+			diagnostic,
+			[&](const auto &before, const auto &after) { return history.TryRecord(before, after); },
+			maximumBytes
+		);
+	}
+
 	bool ObserveImageGraphCacheEdits(
 		const Document &document,
 		ImageGraphCacheEditObservation &observation,

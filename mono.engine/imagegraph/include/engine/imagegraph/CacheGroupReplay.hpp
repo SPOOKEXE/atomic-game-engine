@@ -5,6 +5,7 @@
 
 #include <engine/imagegraph/Document.hpp>
 
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -94,6 +95,20 @@ namespace engine::imagegraph {
 		const Document &document,
 		std::span<const std::string_view> owners,
 		std::span<CacheGroupReplayState *const> journals,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	);
+	// grug prepare owned candidates first. caller can admit authoring history before publication.
+	struct PreparedCacheGroupMembership {
+		Document Authored;
+		std::array<CacheGroupReplayState, 2> Journals;
+		size_t JournalCount = 0;
+	};
+	[[nodiscard]] std::optional<PreparedCacheGroupMembership> PrepareAuthoredCacheGroupMember(
+		const Document &document,
+		std::span<const CacheGroupReplayState *const> journals,
+		std::string_view ownerId,
+		std::string_view memberId,
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic
 	);

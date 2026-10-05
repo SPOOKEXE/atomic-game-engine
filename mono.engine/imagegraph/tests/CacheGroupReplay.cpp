@@ -1816,3 +1816,39 @@ TEST_CASE(
 	CHECK(orphan.Nodes.front().OwnerId == "cache");
 	CHECK(std::get<ArrayValue>(cold.Nodes.front().SourceProperties.front().Data) == GroupIds({"text"}));
 }
+
+TEST_CASE(
+	"Prepared membership owns candidates without publishing borrowed source journals",
+	"[imagegraph][cache_group][membership][prepare]"
+) {
+	auto document = AuthoredGroups();
+	CacheGroupReplayState state;
+	Diagnostic error;
+	REQUIRE(InitializeAuthoredCacheGroupReplay(document, {}, state, BYTE_BUDGET, error) == Status::Ok);
+	REQUIRE(ApplyCacheGroupReplay(state, Disable(), BYTE_BUDGET).Code == Status::Ok);
+	auto checkpoint = state;
+	const auto originalDocument = document;
+	const auto originalState = state;
+	const std::array<const CacheGroupReplayState *, 2> sources{&state, &checkpoint};
+	auto prepared = PrepareAuthoredCacheGroupMember(document, sources, "cache-b", "path", BYTE_BUDGET, error);
+	REQUIRE(prepared);
+	CHECK(error.Code == Status::Ok);
+	CHECK(prepared->JournalCount == 2);
+	CHECK(document == originalDocument);
+	CHECK(state == originalState);
+	CHECK(checkpoint == originalState);
+	const std::array journals{&state, &checkpoint};
+	REQUIRE(
+		ToggleAuthoredCacheGroupMember(document, journals, "cache-b", "path", BYTE_BUDGET, error) ==
+		Status::Ok
+	);
+	CHECK(document == prepared->Authored);
+	CHECK(state == prepared->Journals[0]);
+	CHECK(checkpoint == prepared->Journals[1]);
+	document = {};
+	state = {};
+	checkpoint = {};
+	CHECK(prepared->Authored != document);
+	CHECK_FALSE(prepared->Journals[0].Nodes.empty());
+	CHECK(prepared->Journals[0] == prepared->Journals[1]);
+}

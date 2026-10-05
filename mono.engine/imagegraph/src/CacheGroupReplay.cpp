@@ -955,18 +955,19 @@ namespace engine::imagegraph {
 		return diagnostic.Code;
 	}
 
-	Status ToggleAuthoredCacheGroupMember(
-		Document &document,
-		std::span<CacheGroupReplayState *const> journals,
+	std::optional<PreparedCacheGroupMembership> PrepareAuthoredCacheGroupMember(
+		const Document &document,
+		std::span<const CacheGroupReplayState *const> journals,
 		std::string_view ownerId,
 		std::string_view memberId,
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic
 	) try {
 		ENGINE_PROFILE("imagegraph.cache_group.membership_edit");
-		const auto fail = [&](Status code, const char *message) {
+		const auto fail = [&](Status code,
+							  const char *message) -> std::optional<PreparedCacheGroupMembership> {
 			diagnostic = {code, {}, {}, message};
-			return code;
+			return std::nullopt;
 		};
 		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || journals.empty() ||
 			journals.size() > 2 || document.Nodes.size() > Limits::MaximumNodes)
@@ -1003,7 +1004,9 @@ namespace engine::imagegraph {
 		if (authoredOwner == document.Nodes.end() || authoredMember == document.Nodes.end() ||
 			(authoredOwner->Type != "pc.cache" && authoredOwner->Type != "pc.cache_array"))
 			return fail(Status::UnknownNode, "cache membership owner or member is absent");
-		std::array<CacheGroupReplayState, 2> candidates;
+		PreparedCacheGroupMembership prepared;
+		prepared.JournalCount = journals.size();
+		auto &candidates = prepared.Journals;
 		uint64_t held = *authoredBytes;
 		for (size_t i = 0; i < journals.size(); ++i) {
 			held = MeshAddBytes(held, RetainedCacheGroupReplayBytes(*journals[i]));
@@ -1019,7 +1022,7 @@ namespace engine::imagegraph {
 				const auto status = InitializeLoadedCacheGroups(
 					document, *journals[i], candidates[i], cap, diagnostic, selected, work
 				);
-				if (status != Status::Ok) return status;
+				if (status != Status::Ok) return std::nullopt;
 			} else {
 				const auto sourceWork = ComparisonWork(*journals[i]);
 				if (sourceWork > work)
@@ -1029,7 +1032,7 @@ namespace engine::imagegraph {
 				if (MeshAddBytes(cloneBytes, ValidationWorkspace(*journals[i])) > maximumBytes - held)
 					return fail(Status::LimitExceeded, "cache membership journal copy exceeds live bytes");
 				if (ValidateCacheGroupReplay(*journals[i], cap, diagnostic) != Status::Ok)
-					return diagnostic.Code;
+					return std::nullopt;
 				candidates[i] = *journals[i];
 				if (RetainedCacheGroupReplayBytes(candidates[i]) > cloneBytes)
 					return fail(Status::LimitExceeded, "cache membership clone capacities exceed admission");
@@ -1091,7 +1094,8 @@ namespace engine::imagegraph {
 		const auto documentOverlap = MeshAddBytes(*authoredBytes, editExtra);
 		if (held >= maximumBytes || documentOverlap > maximumBytes - held)
 			return fail(Status::LimitExceeded, "cache membership authored edit exceeds live bytes");
-		Document authored = document;
+		auto &authored = prepared.Authored;
+		authored = document;
 		const auto editList = [&](std::string_view id, bool append) -> bool {
 			auto node =
 				std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [&](const auto &candidate) {
@@ -1157,17 +1161,39 @@ namespace engine::imagegraph {
 				selected,
 				work
 			);
-			if (status != Status::Ok) return status;
+			if (status != Status::Ok) return std::nullopt;
 			held = MeshAddBytes(held - before, RetainedCacheGroupReplayBytes(candidates[i]));
 		}
-		document = std::move(authored);
-		for (size_t i = 0; i < journals.size(); ++i)
-			*journals[i] = std::move(candidates[i]);
 		diagnostic = {};
-		return Status::Ok;
+		return prepared;
 	} catch (const std::bad_alloc &) {
 		diagnostic = {Status::LimitExceeded, {}, {}, "cache membership edit allocation refused"};
-		return diagnostic.Code;
+		return std::nullopt;
+	}
+
+	Status ToggleAuthoredCacheGroupMember(
+		Document &document,
+		std::span<CacheGroupReplayState *const> journals,
+		std::string_view ownerId,
+		std::string_view memberId,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	) {
+		if (journals.size() > 2) {
+			diagnostic = {Status::LimitExceeded, {}, {}, "cache membership journal count exceeds bounds"};
+			return diagnostic.Code;
+		}
+		std::array<const CacheGroupReplayState *, 2> sources{};
+		for (size_t i = 0; i < journals.size(); ++i)
+			sources[i] = journals[i];
+		auto prepared = PrepareAuthoredCacheGroupMember(
+			document, std::span(sources).first(journals.size()), ownerId, memberId, maximumBytes, diagnostic
+		);
+		if (!prepared) return diagnostic.Code;
+		document = std::move(prepared->Authored);
+		for (size_t i = 0; i < journals.size(); ++i)
+			*journals[i] = std::move(prepared->Journals[i]);
+		return Status::Ok;
 	}
 
 	uint64_t detail::CacheGroupReplayCloneBytes(const CacheGroupReplayState &state) {
