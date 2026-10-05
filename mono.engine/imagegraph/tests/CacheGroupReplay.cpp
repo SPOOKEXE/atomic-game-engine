@@ -1236,3 +1236,76 @@ TEST_CASE(
 	CHECK(member->Outputs[0].Refusal->NodeId == "number");
 	CHECK(member->Outputs[0].Refusal->Port == "number");
 }
+
+TEST_CASE(
+	"Frozen cold constructors retain zero matrices colours curves and gradients without node updates",
+	"[imagegraph][cache_group][constructor]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"matrix", "pc.matrix_identity", "", {}, {}},
+		{"projection", "pc.matrix_projection", "", {}, {}},
+		{"colour", "pc.color", "", {}, {}},
+		{"curve", "pc.curve_function", "", {}, {}},
+		{"gradient", "pc.gradient_out", "", {}, {}},
+		{"samples", "pc.gradient_sample", "", {}, {}},
+		{"owner", "pc.cache", "", {}, {}}
+	};
+	document.Nodes.back().SourceProperties = {
+		{"cache_group", GroupIds({"matrix", "projection", "colour", "curve", "gradient", "samples"})}
+	};
+	document.Outputs = {
+		{"matrix", "matrix", "matrix"},
+		{"projection", "projection", "matrix"},
+		{"colour", "colour", "color"},
+		{"curve", "curve", "curve"},
+		{"gradient", "gradient", "gradient"},
+		{"samples", "samples", "colors"}
+	};
+	DataReplayState prior;
+	Diagnostic diagnostic;
+	REQUIRE(
+		InitializeAuthoredCacheGroupReplay(document, {}, prior.CacheGroups, BYTE_BUDGET, diagnostic) ==
+		Status::Ok
+	);
+	for (auto &node : prior.CacheGroups.Nodes)
+		node.RenderActive = false;
+	const auto original = prior;
+	Plan plan;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	EvaluationRequest request;
+	request.DataReplay = &prior;
+	for (const auto &output : document.Outputs) {
+		INFO(output.Id);
+		EvaluatedValue result;
+		REQUIRE(EvaluateValue(document, plan, output.Id, request, result, diagnostic) == Status::Ok);
+		if (output.Id == "matrix" || output.Id == "projection") {
+			const auto &matrix = std::get<MatrixValue>(result.Data);
+			const uint32_t size = output.Id == "matrix" ? 3 : 4;
+			CHECK(matrix.Rows == size);
+			CHECK(matrix.Columns == size);
+			CHECK(matrix.Values == std::vector<double>(size * size, 0));
+		} else if (output.Id == "colour") {
+			CHECK(result.Data == Value{Colour{255, 255, 255, 255}});
+		} else if (output.Id == "curve") {
+			const auto &curve = std::get<Curve>(result.Data);
+			CHECK(curve.Header == std::array<double, 6>{0, 1, 0, 0, 1, 0});
+			REQUIRE(curve.Anchors.size() == 2);
+			CHECK(curve.Anchors[0] == std::array<double, 6>{0, 0, 0, 0, 1. / 3, 1. / 3});
+			CHECK(curve.Anchors[1] == std::array<double, 6>{-1. / 3, -1. / 3, 1, 1, 0, 0});
+		} else if (output.Id == "gradient") {
+			CHECK(result.Data == Value{Gradient{0, {{0, {255, 255, 255, 255}}}}});
+		} else {
+			const auto &samples = std::get<ArrayValue>(result.Data);
+			REQUIRE(samples.Items.size() == 1);
+			CHECK(std::get<ElementValue>(samples.Items[0].Data) == ElementValue{Colour{0, 0, 0, 255}});
+		}
+		CHECK(prior == original);
+	}
+	CacheGroupReplayState destination = prior.CacheGroups;
+	CHECK(
+		InitializeAuthoredCacheGroupReplay(document, {}, destination, 1, diagnostic) == Status::LimitExceeded
+	);
+	CHECK(destination == prior.CacheGroups);
+}

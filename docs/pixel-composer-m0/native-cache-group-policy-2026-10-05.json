@@ -81,7 +81,7 @@
       "mono.engine/imagegraph/src/CacheGroupReplay.cpp: InitializeAuthoredCacheGroupReplay literal constructors and named runtime refusals"
     ],
     "required_next_steps": [
-      "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
+      "Initialize remaining path/self, runtime resource and dynamic constructors through exact native owner semantics. Zero matrices, default curves, one-key gradients and named colours now initialize as owned native values.",
       "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
       "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
@@ -645,6 +645,69 @@
         "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
         "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
         "Cache hit/loading branch getter admission and complete source update-loop scheduling remain to audit and integrate before enabling nonempty groups."
+      ]
+    },
+    "cold_constructor_implementation": {
+      "scope": "Bounded catalogue folding for 27 source-backed cold output ports: zero Matrix(1..4), CURVE_DEF_01, one-key gradientObject(ca_white|ca_black) and named source colours, including nested colour arrays. Frozen restoration reads owned constructor values without node updates or input getters.",
+      "head_before_commit": "aa3eb84ac0de28d8aec7266227aed8508864909e",
+      "source_pin": "b69eca232217360cf1502ef0223523d818606652",
+      "source_evidence": {
+        "scripts/__matrix/__matrix.gml": {
+          "sha256": "92f6f0e6786c81235fd7e723fa34736045eab1d345590a77338b45b8c02d4800",
+          "git_blob_sha1": "aff627120ca16c84e05f1956dcf1346bcb92c312",
+          "verified_local_match": true
+        },
+        "scripts/curve_bezier_function/curve_bezier_function.gml": {
+          "sha256": "8fcccafa408be91d95a1bc61be75ce21058b798a943ebb0ee3658760b35f2ae1",
+          "git_blob_sha1": "fb37f6df09fafa9e19156c428ec8ba1456de29eb",
+          "verified_local_match": true
+        },
+        "scripts/gradients_function/gradients_function.gml": {
+          "sha256": "a8206594b6d99c31776d4332b5cf48658666f6de7b2c2823d6901e89cef661fa",
+          "git_blob_sha1": "45422dc219392fdb6e2e9e82df51457e3a3a0f38",
+          "verified_local_match": true
+        },
+        "scripts/globals/globals.gml": {
+          "sha256": "833bfc44078933cac824a5cd48d6eebb2c06d85590de4775af5dd6d053afd3e3",
+          "git_blob_sha1": "7f64bfba3ee9de4be109aa097de00e0745d2e2d3",
+          "verified_local_match": true
+        }
+      },
+      "coverage": [
+        "Frozen cold Matrix Identity returns a 3x3 zero matrix, projection returns4x4 zero matrix. Source update methods remain unread.",
+        "Curve exact header/two anchors and white one-key gradient restore as native values.",
+        "White colour and gradient sample [c_black] restore with exact source array shape despite colour socket type.",
+        "Caller prior journal preserved for each output; one-byte constructor initialization refusal preserves destination.",
+        "Generator preserves exact expressions and rejects oversized/edited Matrix, unknown gradient, unsupported expressions and existing malformed literal cases."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-values-batch1-results.json",
+      "native_cases": 4898,
+      "native_assertions": 1993601,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "approved_vulkan_cases": 15,
+      "architecture": "Passed: 55 modules, 6 programs, 39 layered.",
+      "format": "clang-format-21 dry run, ruff and git diff --check passed.",
+      "binary_hashes": "All twelve native suite binaries and assetc/imagegraph child hashes stable during checks and matched afterwards.",
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-values-build1.log",
+          "exit_code": 0
+        }
+      ],
+      "review": "Sol source audit and read-only diff review found no confirmed defect in zero matrix initialization, exact curve anchors, gradient key/mode or nested colour array shape. Existing charged ReadValueText handles native payload admission.",
+      "profiling": "No fresh isolated performance measurement or sanitizer run. No performance claim.",
+      "source_sha256": {
+        "scripts/pixel-composer/generate-catalogue.py": "80e13f25d31c520bdbc706f6cf50849ac9f748794f82404235f8f50be269505c",
+        "scripts/tests/pixel_composer_catalogue_metadata_test.py": "ba13c341f462173d5d1e3845245a0bbd7e315ff1e597be1da98da49734e9c46f",
+        "mono.engine/imagegraph/src/SourceCatalogue.inc": "58e0fdee2320ebc247b41fce2a400207c2c7b49559e5d74ab0574c6e8bc3246d",
+        "mono.engine/imagegraph/tests/Catalogue.cpp": "f257f07acc7fc98cb79855b31820b99caecaf11ff2e943533f527fea1c648f4c",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp": "401f1f0721f3756f3bfb129a936fa8ad99671ad760d9c375d559bc5f1f2f5e38",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "8548375940265476c1af42b8ce4736158b880d08973a18cd490be7ec2130691f"
+      },
+      "remaining": [
+        "Path self constructors, randomized array objects, mesh/dynamic-surface/resource wrappers, Lua/rigid ownership and dynamic outputs still need exact owner semantics.",
+        "Cache-group seek/revision activity, host edit/load workflows, licensed-reference parity and live Studio verification remain incomplete."
       ]
     }
   },

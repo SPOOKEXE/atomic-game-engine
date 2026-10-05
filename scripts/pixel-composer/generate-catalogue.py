@@ -420,11 +420,19 @@ def value_text_string(text):
 
 
 def output_constructor_default(raw, value_type):
-    """Resolve bounded source literals only; a declared socket type is not its initial value."""
+    """Resolve bounded source literals and reviewed constructors without executing update code."""
     if len(raw) > 256 or not raw.strip():
         return None
     try:
         expression = raw.strip()
+        matrix = re.fullmatch(r"new Matrix\(([1-4])\)", expression)
+        if matrix:
+            size = int(matrix.group(1))
+            return f"m {size} {size} " + " ".join(["0"] * (size * size))
+        if expression == "CURVE_DEF_01":
+            return default_text("Curve", "curve", expand(expression), {})
+        if re.fullmatch(r"new gradientObject\((?:ca_white|ca_black)\)", expression):
+            return default_text("Gradient", "gradient", expression, {})
         if "#" in re.sub(r'"(?:[^"\\]|\\.)*"', "", expression):
             return None
         tree = ast.parse(expression, mode="eval")
@@ -435,6 +443,13 @@ def output_constructor_default(raw, value_type):
         def encode(node, declared="any", depth=0):
             if depth > 16:
                 raise ValueError("constructor literal depth")
+            if isinstance(node, ast.Name) and node.id in (*COLOURS, "ca_white", "ca_black", "ca_zero"):
+                if ast.get_source_segment(expression, node) != node.id:
+                    raise ValueError("unsupported source colour identifier")
+                value = colour(node.id)
+                if value is None:
+                    raise ValueError("unresolved source colour")
+                return "c " + " ".join(str(channel) for channel in value)
             if isinstance(node, ast.Name) and node.id in ("noone", "true", "false"):
                 if ast.get_source_segment(expression, node) != node.id:
                     raise ValueError("unsupported source identifier")

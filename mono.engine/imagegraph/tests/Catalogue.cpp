@@ -112,7 +112,7 @@ TEST_CASE("Catalogue retains cold constructor values and unresolved expressions"
 	CHECK(path.ConstructorDefault.empty());
 	const CatalogueOutput &matrix = output("Node_Matrix");
 	CHECK(matrix.ConstructorExpression == "new Matrix(3)");
-	CHECK(matrix.ConstructorDefault.empty());
+	CHECK(matrix.ConstructorDefault == "m 3 3 0 0 0 0 0 0 0 0 0");
 }
 
 TEST_CASE("Catalogue keeps source input indices, mask modifiers and map inputs", "[imagegraph]") {

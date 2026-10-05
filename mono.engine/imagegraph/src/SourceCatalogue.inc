@@ -3098,7 +3098,7 @@ S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 O	surface_out	Surface Out	0	image	i -4	s "noone"
-O	color	Color	1	colour		s "ca_black"
+O	color	Color	1	colour	c 0 0 0 255	s "ca_black"
 N	pc.bw	Node_BW	BW	filter	scripts/node_bw/node_bw.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5229,7 +5229,7 @@ I	color	Color	0	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour		s "c_white"
+O	color	Color	0	colour	c 255 255 255 255	s "c_white"
 N	pc.color_blind	Node_Color_Blind	Color Blind	filter	scripts/node_color_blind/node_color_blind.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5299,7 +5299,7 @@ I	alpha	Alpha	4	Slider	scalar	d 1
 S	I	alpha	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour		s "c_white"
+O	color	Color	0	colour	c 255 255 255 255	s "c_white"
 N	pc.color_math	Node_Color_Math	Blend Color	color	scripts/node_color_math/node_color_math.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5346,7 +5346,7 @@ I	intensity	Intensity	3	Slider	scalar	d 1
 S	I	intensity	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	colour		s "ca_white"
+O	result	Result	0	colour	c 255 255 255 255	s "ca_white"
 N	pc.color_mix	Node_Color_Mix	Mix Color	color	scripts/node_color_mix/node_color_mix.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5365,7 +5365,7 @@ I	mix	Mix	2	Slider	scalar	d 0.5
 S	I	mix	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour		s "c_white"
+O	color	Color	0	colour	c 255 255 255 255	s "c_white"
 N	pc.color_oklch	Node_Color_OKLCH	OKLCH Color	color	scripts/node_color_oklch/node_color_oklch.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5387,7 +5387,7 @@ Q	I	gamut_clipping	2	0	s "Adaptive grey"
 Q	I	gamut_clipping	3	0	s "RGB (Naive)"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour		s "c_white"
+O	color	Color	0	colour	c 255 255 255 255	s "c_white"
 O	raw_rgb	Raw RGB	1	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
 N	pc.color_rgb	Node_Color_RGB	RGB Color	color	scripts/node_color_rgb/node_color_rgb.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
@@ -5404,7 +5404,7 @@ I	alpha	Alpha	4	Slider	scalar	d 1
 S	I	alpha	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour		s "c_white"
+O	color	Color	0	colour	c 255 255 255 255	s "c_white"
 N	pc.color_remove	Node_Color_Remove	Remove Color	filter	scripts/node_color_remove/node_color_remove.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6495,7 +6495,7 @@ A	I	output_range	1
 I	y_range	Y Range	4	Range	vector2	v 0 1	
 S	I	y_range	1
 A	I	y_range	1
-O	curve	Curve	0	curve		s "CURVE_DEF_01"
+O	curve	Curve	0	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	s "CURVE_DEF_01"
 N	pc.curve_hsv	Node_Curve_HSV	HSV Curve	filter	scripts/node_curve_hsv/node_curve_hsv.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9127,8 +9127,8 @@ I	sample	Sample	1	Slider	scalar	d 0
 S	I	sample	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	gradient	Gradient	0	gradient		s "new gradientObject(ca_white)"
-O	color	Color	1	colour		s "c_white"
+O	gradient	Gradient	0	gradient	g 0 1 0 255 255 255 255	s "new gradientObject(ca_white)"
+O	color	Color	1	colour	c 255 255 255 255	s "c_white"
 N	pc.gradient_palette	Node_Gradient_Palette	Palette to Gradient	color	scripts/node_gradient_palette/node_gradient_palette.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9151,7 +9151,7 @@ Q	I	interpolation	3	0	s "OKLAB"
 Q	I	interpolation	4	0	s "sRGB"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	gradient	Gradient	0	gradient		s "new gradientObject(ca_white)"
+O	gradient	Gradient	0	gradient	g 0 1 0 255 255 255 255	s "new gradientObject(ca_white)"
 N	pc.gradient_path	Node_Gradient_Path	Draw Gradient Path	generate	scripts/node_gradient_path/node_gradient_path.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9327,7 +9327,7 @@ I	threshold	Threshold	3	Slider	scalar	d 0.1
 S	I	threshold	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	gradient	Gradient	0	gradient		s "new gradientObject(ca_white)"
+O	gradient	Gradient	0	gradient	g 0 1 0 255 255 255 255	s "new gradientObject(ca_white)"
 N	pc.gradient_sample	Node_Gradient_Sample	Sample Gradient	color	scripts/node_gradient_sample/node_gradient_sample.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9348,7 +9348,7 @@ S	I	ratio	0
 A	I	ratio	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	colors	Colors	0	colour		s "[ c_black ]"
+O	colors	Colors	0	colour	a any 1 c 0 0 0 255	s "[ c_black ]"
 N	pc.gradient_shift	Node_Gradient_Shift	Gradient Shift	color	scripts/node_gradient_shift/node_gradient_shift.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9362,7 +9362,7 @@ I	scale	Scale	3	Slider	scalar	d 1
 S	I	scale	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	gradient	Gradient	0	gradient		s "new gradientObject(ca_white)"
+O	gradient	Gradient	0	gradient	g 0 1 0 255 255 255 255	s "new gradientObject(ca_white)"
 N	pc.grain	Node_Grain	Grain	filter	scripts/node_grain/node_grain.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16863,7 +16863,7 @@ S	I	data	1
 A	I	data	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_color_apply	Node_Matrix_Color_Apply	Matrix Color Apply	values	scripts/node_matrix_color_apply/node_matrix_color_apply.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16914,7 +16914,7 @@ Q	I	overflow	1	0	s "Repeat"
 Q	I	overflow	2	0	s "Clamp"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_det	Node_Matrix_Det	Matrix Determinant	values	scripts/node_matrix_det/node_matrix_det.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16964,7 +16964,7 @@ I	size	Size	0	Int	integer	i 3
 S	I	size	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_invert	Node_Matrix_Invert	Matrix Invert	values	scripts/node_matrix_invert/node_matrix_invert.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16973,7 +16973,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_math	Node_Matrix_Math	Matrix Math	values	scripts/node_matrix_math/node_matrix_math.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16997,7 +16997,7 @@ I	scala	Scala	3	Float	scalar	d 0
 S	I	scala	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_multiply_vector	Node_Matrix_Multiply_Vector	Matrix Multiply Vector	values	scripts/node_matrix_multiply_vector/node_matrix_multiply_vector.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17033,7 +17033,7 @@ S	I	clipping	1
 A	I	clipping	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(4)"
+O	matrix	Matrix	0	matrix	m 4 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0	s "new Matrix(4)"
 N	pc.matrix_set	Node_Matrix_Set	Matrix Set	values	scripts/node_matrix_set/node_matrix_set.gml
 I	matrix	Matrix	0	Matrix	matrix		
 S	I	matrix	1
@@ -17043,7 +17043,7 @@ S	I	position	1
 A	I	position	1
 I	value	Value	2	Float	scalar	d 0	
 S	I	value	0
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_set_vector	Node_Matrix_Set_Vector	Matrix Set Vector	values	scripts/node_matric_set_vector/node_matric_set_vector.gml
 I	matrix	Matrix	0	Matrix	matrix		
 S	I	matrix	1
@@ -17061,7 +17061,7 @@ S	I	position	0
 I	vector	Vector	3	Float	array	a scalar 0	
 S	I	vector	0
 A	I	vector	1
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_to_array	Node_Matrix_To_Array	Matrix to Array	values	scripts/node_matrix_to_array/node_matrix_to_array.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17086,7 +17086,7 @@ S	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_transform_3_d	Node_Matrix_Transform_3D	3D Transform Matrix	values	scripts/node_matrix_transform_3d/node_matrix_transform_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17103,7 +17103,7 @@ S	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.matrix_transpose	Node_Matrix_Transpose	Matrix Transpose	values	scripts/node_matrix_tranpose/node_matrix_tranpose.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17112,7 +17112,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix		s "new Matrix(3)"
+O	matrix	Matrix	0	matrix	m 3 3 0 0 0 0 0 0 0 0 0	s "new Matrix(3)"
 N	pc.maze_pattern	Node_Maze_Pattern	Maze Pattern	generate	scripts/node_maze_pattern/node_maze_pattern.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22601,7 +22601,7 @@ A	I	output_range	1
 I	y_range	Y Range	6	Range	vector2	v 0 1	
 S	I	y_range	1
 A	I	y_range	1
-O	curve	Curve	0	curve		s "CURVE_DEF_01"
+O	curve	Curve	0	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	s "CURVE_DEF_01"
 N	pc.perlin	Node_Perlin	Perlin Noise	generate	scripts/node_perlin/node_perlin.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25770,7 +25770,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour		s "c_white"
+O	color	Color	0	colour	c 255 255 255 255	s "c_white"
 N	pc.scale	Node_Scale	Scale	transform	scripts/node_scale/node_scale.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
