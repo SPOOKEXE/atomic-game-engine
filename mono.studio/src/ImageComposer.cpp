@@ -7,6 +7,7 @@
 #include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphArtworkEdit.hpp"
 #include "ImageGraphCacheClearAction.hpp"
+#include "ImageGraphCacheEditObservation.hpp"
 #include "ImageGraphCanvasInputs.hpp"
 #include "ImageGraphChoices.hpp"
 #include "ImageGraphComposerCadence.hpp"
@@ -250,6 +251,10 @@ namespace studio {
 			ImageGraphHistory History{MAXIMUM_HISTORY};
 			ImageGraphGroupHost GroupHost;
 			engine::imagegraph::CapturedFeedbackHost FeedbackHost;
+			detail::ImageGraphCacheEditObservation CacheEditObservation;
+			detail::ImageGraphCacheEditKind CacheEditKind = detail::ImageGraphCacheEditKind::ValueSetter;
+			bool CacheEditBlocked = false;
+			detail::ImageGraphCacheEditKind CacheEditRetryKind = detail::ImageGraphCacheEditKind::ValueSetter;
 			ImageGraphCanvasIds Ids;
 			nodegraph::Graph Graph;
 			nodegraph::Canvas Canvas;
@@ -272,7 +277,30 @@ namespace studio {
 			state.PreviewRequested = state.PreviewRequested || immediate;
 		}
 
-		void AuthoredDocumentChanged(State &state) {
+		bool RetryCacheEdit(State &state) {
+			if (!state.CacheEditBlocked) return true;
+			state.CacheEditBlocked = !detail::ObserveImageGraphCacheEdits(
+				state.Authored,
+				state.CacheEditObservation,
+				state.FeedbackHost,
+				state.CacheEditObservation.PendingValueEdit ? state.CacheEditObservation.PendingValueKind
+															: state.CacheEditRetryKind,
+				state.LastDiagnostic
+			);
+			return !state.CacheEditBlocked;
+		}
+
+		void AuthoredDocumentChanged(
+			State &state, std::optional<detail::ImageGraphCacheEditKind> kind = std::nullopt
+		) {
+			state.CacheEditRetryKind = kind.value_or(state.CacheEditKind);
+			state.CacheEditBlocked = !detail::ObserveImageGraphCacheEdits(
+				state.Authored,
+				state.CacheEditObservation,
+				state.FeedbackHost,
+				kind.value_or(state.CacheEditKind),
+				state.LastDiagnostic
+			);
 			// External authoring changes cannot retain a row selection from the old project.
 			state.Playback.SelectedRegion.reset();
 			state.PxcxCompletedPreview.reset();
@@ -395,6 +423,7 @@ namespace studio {
 			engine::imagegraph::EvaluationRequest &request,
 			engine::imagegraph::SourceFontContext *heldFontContext = nullptr
 		) {
+			if (!RetryCacheEdit(state)) return false;
 			const auto frame = GetImageGraphFrame(state.Playback);
 			const std::string project =
 				std::filesystem::path(state.PxcxPathDisplay.empty() ? state.GraphName : state.PxcxPathDisplay)
@@ -595,6 +624,13 @@ namespace studio {
 			state.Authored.Outputs.push_back({"output-main", "solid-1", "image"});
 			state.SelectedOutput = "output-main";
 			state.NextOutputId = 1;
+			state.CacheEditBlocked = !detail::ObserveImageGraphCacheEdits(
+				state.Authored,
+				state.CacheEditObservation,
+				state.FeedbackHost,
+				detail::ImageGraphCacheEditKind::FreshDocument,
+				state.LastDiagnostic
+			);
 			ReloadCanvas(state);
 		}
 
@@ -1080,6 +1116,7 @@ namespace studio {
 		}
 
 		void ResumeExportIntent(State &state) {
+			if (!RetryCacheEdit(state)) return;
 			auto *composer = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer);
 			auto &intent = state.ExportIntent;
 			if (!composer || !intent.Current) return;
@@ -1825,7 +1862,7 @@ namespace studio {
 			ApplyImageGraphTimeline(state.Authored, state.Playback);
 			state.History.Clear();
 			state.GroupHost.Clear();
-			AuthoredDocumentChanged(state);
+			AuthoredDocumentChanged(state, detail::ImageGraphCacheEditKind::FreshDocument);
 			state.ImportedPxcx.reset();
 			state.PublishedPxcx = {};
 			state.PxcxCompletedPreview.reset();
@@ -1928,7 +1965,7 @@ namespace studio {
 			state.ExportUpdate = {};
 			state.Playback.CurrentTick = 0;
 			ApplyImageGraphTimeline(state.Authored, state.Playback);
-			AuthoredDocumentChanged(state);
+			AuthoredDocumentChanged(state, detail::ImageGraphCacheEditKind::FreshDocument);
 			state.SelectedOutput =
 				state.Authored.Outputs.empty() ? std::string{} : state.Authored.Outputs.front().Id;
 			state.NextOutputId = 1;
@@ -2043,7 +2080,9 @@ namespace studio {
 
 		void RefreshPreview(State &state, engine::render::Renderer &renderer) {
 			if (state.ExportIntent.Current) return;
-			if (!state.PreviewDirty || (!state.LivePreview && !state.PreviewRequested)) return;
+			if (!RetryCacheEdit(state) || !state.PreviewDirty ||
+				(!state.LivePreview && !state.PreviewRequested))
+				return;
 			if (state.PxcxPreviewCacheInputRevision != state.EvaluationInputRevision) {
 				state.PreviewCache.Clear();
 				state.PreviewSequence.Invalidate();
@@ -2553,12 +2592,13 @@ namespace studio {
 				const auto frame = GetImageGraphFrame(state.Playback);
 				ApplyImageGraphTimeline(state.Authored, state.Playback);
 				(void)SetImageGraphAuthorFrame(state.Playback, frame);
-				AuthoredDocumentChanged(state);
+				AuthoredDocumentChanged(state, detail::ImageGraphCacheEditKind::AnimatorUndo);
 				ReloadCanvas(state);
 			}
 		}
 
 		bool ApplyDocumentEdit(State &state, const auto &edit, bool *unchanged = nullptr) {
+			if (!RetryCacheEdit(state)) return false;
 			const bool accepted = ApplyImageGraphDocumentEdit(
 				state.Authored,
 				state.History,
@@ -2626,6 +2666,7 @@ namespace studio {
 		}
 
 		bool CommitSourcePlaybackTransition(State &state, const auto &transition) {
+			if (!RetryCacheEdit(state)) return false;
 			Diagnostic diagnostic;
 			detail::PreparedSourceTimelineStep prepared;
 			if (!detail::PrepareSourceTimelineStep(state.Authored, state.Playback, prepared, diagnostic)) {
@@ -2645,7 +2686,7 @@ namespace studio {
 				state.LastDiagnostic = std::move(diagnostic);
 				return false;
 			}
-			if (documentChanged) AuthoredDocumentChanged(state);
+			if (documentChanged) AuthoredDocumentChanged(state, detail::ImageGraphCacheEditKind::RenderOnly);
 			if (documentChanged) RequestPreview(state, true);
 			return true;
 		}
@@ -2727,7 +2768,7 @@ namespace studio {
 					state.DirectoryGrants.clear();
 					state.FileControls.clear();
 					state.ExportUpdate = {};
-					AuthoredDocumentChanged(state);
+					AuthoredDocumentChanged(state, detail::ImageGraphCacheEditKind::FreshDocument);
 					state.SelectedOutput = "output-main";
 					state.NextOutputId = 1;
 					state.Playback = {};
@@ -4246,6 +4287,9 @@ namespace studio {
 		}
 
 		void DrawAnimationTrackControls(State &state, const Node &node, std::string_view property) {
+			detail::ImageGraphCacheEditScope editKind(
+				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
+			);
 			detail::DrawAnimationTrackPolicy(
 				state.Authored, node, property, state.LastDiagnostic, [&](const auto &edit) {
 					return ApplyDocumentEdit(state, edit);
@@ -5646,6 +5690,9 @@ namespace studio {
 		}
 
 		void DrawKeyframeEaseSide(State &state, size_t index, const Keyframe &frame, bool incoming) {
+			detail::ImageGraphCacheEditScope editKind(
+				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
+			);
 			if (frame.Interpolation != "source" || !frame.Ease) {
 				ImGui::TextUnformatted("-");
 				return;
@@ -5681,6 +5728,9 @@ namespace studio {
 		}
 
 		void DrawKeyframeSineDriver(State &state, size_t index, const Keyframe &frame) {
+			detail::ImageGraphCacheEditScope editKind(
+				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
+			);
 			if (!std::holds_alternative<double>(frame.Data)) {
 				ImGui::TextUnformatted("Scalar only");
 				return;
@@ -5729,6 +5779,9 @@ namespace studio {
 		}
 
 		void DrawKeyframeSourceDriver(State &state, size_t index) {
+			detail::ImageGraphCacheEditScope editKind(
+				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
+			);
 			using namespace engine::imagegraph;
 			if (state.Authored.Keyframes[index].SineDriver) {
 				DrawKeyframeSineDriver(state, index, state.Authored.Keyframes[index]);
@@ -5844,6 +5897,9 @@ namespace studio {
 		}
 
 		void DrawKeyframeKind(State &state, size_t index) {
+			detail::ImageGraphCacheEditScope editKind(
+				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
+			);
 			state.KeyKind.Draw(state.Authored, index, [&] {
 				bool accepted = false;
 				ApplyDocumentEdit(state, [&](Document &document) {
@@ -5854,6 +5910,9 @@ namespace studio {
 		}
 
 		void DrawTimeline(State &state) {
+			detail::ImageGraphCacheEditScope editKind(
+				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
+			);
 			if (state.Regions.Draw(
 					state.Authored,
 					state.DocumentRevision,

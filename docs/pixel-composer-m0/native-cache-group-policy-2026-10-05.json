@@ -82,7 +82,7 @@
     ],
     "required_next_steps": [
       "Initialize remaining path/self, runtime resource and dynamic constructors through exact native owner semantics. Zero matrices, curves, gradients, colours and cold Join/Combine/Shift/Weight Adjust/Path3D ownership are verified.",
-      "Integrate authored load refresh for append/revision, exact Studio semantic input-edit observations and seek/restart activity policy. Core edited-ID actions and two-journal host notifications are verified.",
+      "Integrate authored load refresh for append/revision and remaining seek/restart activity policy. Studio native input-edit observations and retries are verified headlessly; live panel gestures and source global-value exceptions remain.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
       "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
       "Cache hit/loading branch getter admission and complete source update-loop scheduling remain to audit and integrate before enabling nonempty groups."
@@ -864,6 +864,88 @@
       "remaining": [
         "Collect exact semantic input edits across Studio authoring callbacks, including connections, undo and multiple edits before preview. Position, labels and Serialize-only changes must not wake members.",
         "Source append/load/seek/revision activity policies, remaining runtime/dynamic constructors, licensed-reference parity and live Studio workflows remain incomplete."
+      ]
+    },
+    "studio_edit_implementation": {
+      "scope": "Studio semantic input observations and cache wake event wiring, bounded to the tested native authoring paths.",
+      "coverage": [
+        "Value setters wake frozen Cache and Cache Array members across multiple edits before same-clock preview.",
+        "Presentation, Serialize, expression/instance attributes and value ordering changes preserve frozen activity.",
+        "Timeline key gestures and mode conversion render only; animator value undo wakes members.",
+        "Connection replacement/disconnect, junction defaults and group-port map changes resolve native junction consumers.",
+        "Refusals retain inputs and both journals, preserve pending value event kind across undo, block render-only consumption and retry in Studio before further work. Fresh loads reset the host."
+      ],
+      "official_source_files": {
+        "scripts/node_data/node_data.gml": {
+          "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d",
+          "git_blob_sha1": "7488016460777a298599fe2219006e5d233bf4d4",
+          "verified_local_match": true
+        },
+        "scripts/node_value/node_value.gml": {
+          "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+          "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125",
+          "verified_local_match": true
+        },
+        "scripts/__node_cache_base/__node_cache_base.gml": {
+          "sha256": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb",
+          "git_blob_sha1": "251252e9867bc8406aba016217fe0764fe0fe295",
+          "verified_local_match": true
+        },
+        "scripts/node_keyframe/node_keyframe.gml": {
+          "sha256": "73a7fe4c85562db01192ae88c7ab35ebd16684f9d3831641e53a572b1480a49b",
+          "git_blob_sha1": "664ab1dd72723221dd2182a87a6ea4c2f9fd3327",
+          "verified_local_match": true
+        },
+        "scripts/panel_animation_dopesheet/panel_animation_dopesheet.gml": {
+          "sha256": "4c28791f249e057f68d449d7b3f5ea41c93a278b0a487de0396179069a451c27",
+          "git_blob_sha1": "ddea7c86342250dfb7a597f640d4437db28be565",
+          "verified_local_match": true
+        }
+      },
+      "source_calls": [
+        "node_data.gml:1491-1500,3305-3309",
+        "node_value.gml:2248-2286,2434-2453,2496",
+        "node_keyframe.gml:386-397",
+        "panel_animation_dopesheet.gml:2043-2057",
+        "__node_cache_base.gml:48-54"
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/studio-cache-edit-batch3-results.json",
+      "native_cases": 4908,
+      "native_assertions": 1993893,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/studio-cache-edit-build1.log",
+          "exit_code": 1
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/studio-cache-edit-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/studio-cache-edit-build3.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/studio-cache-edit-build4.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/studio-cache-edit-build5.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/studio-cache-edit-issues.json",
+      "review": "Sol read-only review found pending-event and retry defects, repaired before acceptance. Native endpoint review confirmed junction routing. Final recovery review found no additional confirmed defect. Two joined batches exposed fixture errors; final joined batch passed all 18 processes.",
+      "binary_hashes": "All twelve native suite binaries and assetc/imagegraph child hashes stable and matched after final batch.",
+      "architecture": "Passed:55 modules,6 programs,39 layered.",
+      "format": "clang-format-21 dry run, ruff and git diff --check passed.",
+      "profiling": "ENGINE_PROFILE marks observation work. No fresh isolated profile or sanitizer run; no performance claim.",
+      "remaining": [
+        "Live panel gestures and source global-value setter exceptions still require verification/integration.",
+        "Source append/load refresh, remaining revision/seek activity policies, runtime/dynamic constructors and licensed-reference parity remain incomplete."
       ]
     }
   },
