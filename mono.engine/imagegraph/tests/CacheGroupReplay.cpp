@@ -1212,3 +1212,27 @@ TEST_CASE(
 	CHECK(destination.Nodes[2].OwnerId.capacity() < 2 * oldId.size());
 	CHECK(old == prior);
 }
+
+TEST_CASE(
+	"Cold native cache group members retain named runtime refusals", "[imagegraph][cache_group][constructor]"
+) {
+	Document document;
+	document.Nodes = {
+		{"number", "value.number", "", {}, {{"value", 7.0}}}, {"owner", "pc.cache", "", {}, {}}
+	};
+	document.Nodes[1].SourceProperties = {{"cache_group", GroupIds({"number"})}};
+	CacheGroupReplayState result;
+	Diagnostic diagnostic;
+	REQUIRE(InitializeAuthoredCacheGroupReplay(document, {}, result, BYTE_BUDGET, diagnostic) == Status::Ok);
+	const auto member = std::find_if(result.Nodes.begin(), result.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "number";
+	});
+	REQUIRE(member != result.Nodes.end());
+	REQUIRE(member->Outputs.size() == 1);
+	CHECK(member->Outputs[0].Port == "number");
+	CHECK_FALSE(member->Outputs[0].Data);
+	REQUIRE(member->Outputs[0].Refusal);
+	CHECK(member->Outputs[0].Refusal->Code == Status::UnsupportedExecution);
+	CHECK(member->Outputs[0].Refusal->NodeId == "number");
+	CHECK(member->Outputs[0].Refusal->Port == "number");
+}

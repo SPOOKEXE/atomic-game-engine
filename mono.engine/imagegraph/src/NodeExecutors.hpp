@@ -161,6 +161,8 @@ namespace engine::imagegraph::detail {
 		const DataReplayState *CurrentData = nullptr;
 		SourceFrameCacheInputReads FrameCacheInputReads = SourceFrameCacheInputReads::All;
 		bool FrameCacheSurfaceLinked = false, FrameCacheProducerActive = true;
+		bool FrameCacheGroupActionsAvailable = false;
+		std::optional<CacheGroupReplayAction> FrameCacheGroupAction;
 		SourcePathShiftMemo *PathShiftMemo = nullptr;
 		FontTextBatch *TextBatch = nullptr;
 		AllocationReservation PathMemoInputsCharge;

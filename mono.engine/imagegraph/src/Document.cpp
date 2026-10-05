@@ -10297,7 +10297,7 @@ namespace engine::imagegraph {
 			detail::EvaluationAllocator<detail::SourceFrameCacheInputReads>(budget)
 		);
 		const bool cachePlaying = request.SourceCachePlayback && request.SourceCachePlayback->Playing;
-		{
+		const auto refreshFrameCacheReads = [&] {
 			const auto *currentFrameCacheData =
 				simulation && simulation->Data ? simulation->Data : request.DataReplay;
 			const detail::SourceFrameCacheInputIndex currentFrameCacheIndex(
@@ -10318,16 +10318,17 @@ namespace engine::imagegraph {
 					document.Nodes[index].Type, cachePlaying, false, true, hit
 				);
 			}
-		}
-		for (const auto &link : plan.EffectiveLinks) {
-			if (frameCacheInputReads.empty() || link.ToPort != "surface_in") continue;
-			const size_t target = nodeIndices.at(link.ToNode), producer = nodeIndices.at(link.FromNode);
-			const bool hit = document.Nodes[target].Type == "pc.cache" &&
-							 frameCacheInputReads[target] == detail::SourceFrameCacheInputReads::None;
-			frameCacheInputReads[target] = detail::SourceFrameCacheReadPolicy(
-				document.Nodes[target].Type, cachePlaying, true, !frozen[producer], hit
-			);
-		}
+			for (const auto &link : plan.EffectiveLinks) {
+				if (frameCacheInputReads.empty() || link.ToPort != "surface_in") continue;
+				const size_t target = nodeIndices.at(link.ToNode), producer = nodeIndices.at(link.FromNode);
+				const bool hit = document.Nodes[target].Type == "pc.cache" &&
+								 frameCacheInputReads[target] == detail::SourceFrameCacheInputReads::None;
+				frameCacheInputReads[target] = detail::SourceFrameCacheReadPolicy(
+					document.Nodes[target].Type, cachePlaying, true, !frozen[producer], hit
+				);
+			}
+		};
+		refreshFrameCacheReads();
 		const auto frameCacheReads = [&](size_t index) {
 			return frameCacheInputReads.empty() ? detail::SourceFrameCacheInputReads::All
 												: frameCacheInputReads[index];
@@ -10525,13 +10526,16 @@ namespace engine::imagegraph {
 						   [](const auto &program) { return program.Enabled; }
 					   );
 			});
+		const bool mutableDispatch =
+			dynamicPcx || (simulation && simulation->Data && cacheGroups && !cacheGroups->Owners.empty());
+		bool groupActivityChanged = false;
 		detail::EvaluationVector<PcxNamedDependency> dynamicPcxRoutes{
 			detail::EvaluationAllocator<PcxNamedDependency>(budget)
 		};
 		detail::AllocationReservation dynamicPcxCharge;
 		std::optional<PcxNamedDependency> pendingPcxRoute;
 		detail::EvaluationVector<uint8_t> completed(
-			dynamicPcx ? document.Nodes.size() : 0, 0, detail::EvaluationAllocator<uint8_t>(budget)
+			mutableDispatch ? document.Nodes.size() : 0, 0, detail::EvaluationAllocator<uint8_t>(budget)
 		);
 		const bool hasInlineOwners =
 			std::any_of(
@@ -10843,7 +10847,7 @@ namespace engine::imagegraph {
 				if (!needed[candidate] || produced[candidate]) continue;
 				if (!timelineAdmitted[candidate]) timelineSelected[candidate] = 1;
 				// Computed routes can reorder readiness across an earlier unresolved barrier.
-				if (dynamicPcx) break;
+				if (dynamicPcx || groupActivityChanged) break;
 				if (timelineBarriers[candidate]) break;
 			}
 			if (!selectTimelineInputs(timelineSelected)) return false;
@@ -10871,19 +10875,19 @@ namespace engine::imagegraph {
 		while (true) {
 			size_t index = document.Nodes.size(), dispatchPosition = 0;
 			bool unfinished = false;
-			for (size_t position = dynamicPcx ? 0 : ordinaryCursor; position < plan.NodeOrder.size();
+			for (size_t position = mutableDispatch ? 0 : ordinaryCursor; position < plan.NodeOrder.size();
 				 ++position) {
 				const auto candidate = plan.NodeOrder[position];
-				if (!dynamicPcx) ordinaryCursor = position + 1;
+				if (!mutableDispatch) ordinaryCursor = position + 1;
 				if (++scheduleWork > 64'000'000) {
 					SetDiagnostic(
 						diagnostic, Status::LimitExceeded, "PCX scheduling exceeds its work budget"
 					);
 					return diagnostic.Code;
 				}
-				if (!needed[candidate] || (dynamicPcx && completed[candidate])) continue;
+				if (!needed[candidate] || (mutableDispatch && completed[candidate])) continue;
 				unfinished = true;
-				if (!dynamicPcx || frozen[candidate] ||
+				if (!mutableDispatch || frozen[candidate] ||
 					std::all_of(upstream[candidate].begin(), upstream[candidate].end(), [&](size_t source) {
 						return completed[source] != 0;
 					})) {
@@ -10897,7 +10901,7 @@ namespace engine::imagegraph {
 				SetDiagnostic(diagnostic, Status::Cycle, "computed PCX dependencies form a cycle");
 				return diagnostic.Code;
 			}
-			if (dynamicPcx) completed[index] = 1;
+			if (mutableDispatch) completed[index] = 1;
 			pendingPcxRoute.reset();
 			if (frozen[index]) {
 				CatalogueOutputs restored;
@@ -11317,6 +11321,7 @@ namespace engine::imagegraph {
 					simulation && simulation->Random ? simulation->Random : request.RandomReplay;
 				context.CurrentData = simulation && simulation->Data ? simulation->Data : request.DataReplay;
 				context.FrameCacheInputReads = frameCacheReads(index);
+				context.FrameCacheGroupActionsAvailable = simulation && simulation->Data && mutableDispatch;
 				if (node.Type == "pc.cache" || node.Type == "pc.cache_array") {
 					const auto surface = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &link) {
@@ -12863,8 +12868,8 @@ namespace engine::imagegraph {
 					if (!batch) return Status::Ok;
 					if (!executeCaptured) {
 						for (const size_t source : upstream[index]) {
-							if (!dynamicPcx && --remainingConsumers[source] == 0 && source != targetIndex &&
-								!retainedTargets[source]) {
+							if (!mutableDispatch && --remainingConsumers[source] == 0 &&
+								source != targetIndex && !retainedTargets[source]) {
 								evaluationBytes -= ResultBytes(results[source]);
 								results[source] = Image{};
 								resultCharges[source].Reset();
@@ -13022,6 +13027,74 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				if (context.FrameCacheGroupAction) {
+					auto &data = *simulation->Data;
+					const uint64_t retained = RetainedDataReplayBytes(data);
+					const uint64_t replacement =
+						*context.FrameCacheGroupAction == CacheGroupReplayAction::Enable
+							? ClearedSourceFrameCacheReplayBytes(node, data)
+							: retained;
+					const bool additionalRow =
+						std::none_of(data.Entries.begin(), data.Entries.end(), [&](const auto &row) {
+							return row.NodeId == node.Id;
+						});
+					const uint64_t workspaceBytes =
+						DataReplayValidationWorkspaceBytes(data, additionalRow ? 1 : 0);
+					auto replacementCharge = budget.Reserve(replacement),
+						 workspace = budget.Reserve(workspaceBytes);
+					if (!replacementCharge || !workspace || retained > Limits::MaximumEvaluationBytes ||
+						replacement > Limits::MaximumEvaluationBytes - retained ||
+						workspaceBytes > Limits::MaximumEvaluationBytes - retained - replacement) {
+						SetDiagnostic(
+							diagnostic,
+							Status::LimitExceeded,
+							"cache group action exceeds the live byte budget",
+							node.Id,
+							"cache_group"
+						);
+						return diagnostic.Code;
+					}
+					if (ApplySourceFrameCacheGroupReplay(
+							node,
+							*context.FrameCacheGroupAction,
+							data,
+							data,
+							cachePlaying,
+							request.SourceCacheProject,
+							diagnostic,
+							retained + replacement + workspaceBytes
+						) != Status::Ok)
+						return diagnostic.Code;
+					if (!replacementCharge->Resize(RetainedDataReplayBytes(data))) std::terminate();
+					auto released = simulation->Charge->Split(retained);
+					if (!released || !simulation->Charge->Merge(std::move(*replacementCharge)))
+						std::terminate();
+					std::fill(frozen.begin(), frozen.end(), nullptr);
+					std::fill(tracked.begin(), tracked.end(), nullptr);
+					for (auto &member : data.CacheGroups.Nodes) {
+						const auto memberIndex = nodeIndices.at(member.NodeId);
+						tracked[memberIndex] = &member;
+						if (!member.RenderActive) frozen[memberIndex] = &member;
+					}
+					refreshFrameCacheReads();
+					if (captureTarget && !frameCacheInputReads.empty())
+						frameCacheInputReads[targetIndex] = detail::SourceFrameCacheInputReads::All;
+					if (pendingGraph.Rebuild(
+							document,
+							plan,
+							frameCacheInputReads,
+							frozen,
+							pendingRoots,
+							dynamicPcxRoutes,
+							completed,
+							true,
+							scheduleWork,
+							diagnostic
+						) != Status::Ok)
+						return diagnostic.Code;
+					groupActivityChanged = true;
+				}
+
 				if (!context.PcxControlMessages.empty()) {
 					std::string failure;
 					if (!request.HostProvider ||

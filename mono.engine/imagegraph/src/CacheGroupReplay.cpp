@@ -651,7 +651,15 @@ namespace engine::imagegraph {
 			}
 			++newNodes;
 			const auto *entry = FindCatalogueEntry(node.Type);
-			const size_t ports = (entry ? entry->Outputs.size() : 0) + node.DynamicOutputs.size();
+			const auto *nativeSchema = entry ? nullptr : FindSchema(node.Type);
+			const size_t nativePorts =
+				nativeSchema ? std::count_if(
+								   nativeSchema->Ports.begin(),
+								   nativeSchema->Ports.end(),
+								   [](const auto &port) { return port.Direction == PortDirection::Output; }
+							   )
+							 : 0;
+			const size_t ports = (entry ? entry->Outputs.size() : nativePorts) + node.DynamicOutputs.size();
 			if (ports > MAXIMUM_OUTPUTS_PER_NODE)
 				return refuse(Status::LimitExceeded, "cold producer exceeds output bounds", node.Id);
 			extra = MeshAddBytes(
@@ -669,6 +677,10 @@ namespace engine::imagegraph {
 			if (entry)
 				for (const auto &port : entry->Outputs)
 					extra = MeshAddBytes(extra, portBytes(port.Id, port.ConstructorExpression));
+			if (nativeSchema)
+				for (const auto &port : nativeSchema->Ports)
+					if (port.Direction == PortDirection::Output)
+						extra = MeshAddBytes(extra, portBytes(port.Id, "native node output"));
 			for (const auto &port : node.DynamicOutputs)
 				extra = MeshAddBytes(extra, portBytes(port.Id, {}));
 		}
@@ -708,7 +720,17 @@ namespace engine::imagegraph {
 			record.NodeId = std::string(node.Id);
 			record.NodeType = std::string(node.Type);
 			const auto *entry = FindCatalogueEntry(node.Type);
-			record.Outputs.reserve((entry ? entry->Outputs.size() : 0) + node.DynamicOutputs.size());
+			const auto *nativeSchema = entry ? nullptr : FindSchema(node.Type);
+			const size_t nativePorts =
+				nativeSchema ? std::count_if(
+								   nativeSchema->Ports.begin(),
+								   nativeSchema->Ports.end(),
+								   [](const auto &port) { return port.Direction == PortDirection::Output; }
+							   )
+							 : 0;
+			record.Outputs.reserve(
+				(entry ? entry->Outputs.size() : nativePorts) + node.DynamicOutputs.size()
+			);
 			const auto append =
 				[&](std::string_view id, std::string_view initial, std::string_view expression) -> Status {
 				CacheGroupReplayOutput port;
@@ -739,6 +761,11 @@ namespace engine::imagegraph {
 					if (append(port.Id, port.ConstructorDefault, port.ConstructorExpression) != Status::Ok)
 						return diagnostic.Code;
 				}
+			if (nativeSchema)
+				for (const auto &port : nativeSchema->Ports)
+					if (port.Direction == PortDirection::Output &&
+						append(port.Id, {}, "native node output") != Status::Ok)
+						return diagnostic.Code;
 			for (const auto &port : node.DynamicOutputs)
 				if (append(port.Id, {}, "dynamic output") != Status::Ok) return diagnostic.Code;
 			records[index] = candidate.Nodes.size();

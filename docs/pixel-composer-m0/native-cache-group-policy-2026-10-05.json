@@ -1,7 +1,7 @@
 {
   "source_pin": "b69eca232217360cf1502ef0223523d818606652",
   "recorded_date": "2026-10-05",
-  "result": "Bounded policy, journal transport/reconciliation, frozen getters, live capture, authored membership/literal initialization and manual Clear group reactivation verified. Automatic source update-loop transitions, runtime constructors and host edit/load workflows remain incomplete.",
+  "result": "Bounded policy, journal transport/reconciliation, frozen getters, live capture, authored membership/literal initialization, manual Clear and automatic stateful update-loop actions verified by joined native CPU checks. Runtime constructors, ordinary read-only activity actions and host edit/load workflows remain incomplete.",
   "scheduler_profiles": {
     "ordinary_graph": {
       "rules": [
@@ -73,16 +73,15 @@
     ]
   },
   "native_evidence": {
-    "current_gap": "Bounded branch-selected ApplySourceFrameCacheGroupReplay Enable/Disable transactions share the existing manual button mutation path. Enable obeys Serialize/loading/appending gates and force-clears all processor rows while retaining latest outputs and waking loaded member lists. Disable uses Playing and the authoritative rounded project endpoint, preserving frames and latest getters. Caller scheduling is not implemented by this API; enabled nonempty automatic groups remain guarded.",
+    "current_gap": "Stateful dispatch applies branch-selected Enable/Disable after borrowed kernel reads and before emitted row merge. Enable clears all owner rows while preserving Cache outer capture and Cache Array latest output. Pending dependencies and activity pointers refresh; completed actors retain outputs. Runtime constructors, ordinary read-only activity actions and host workflow integration remain incomplete.",
     "inspection": [
-      "mono.engine/imagegraph/src/Document.cpp:7965-7972 NodeResult alternatives",
-      "mono.engine/imagegraph/src/Document.cpp:9856-9859 dependency closure",
-      "mono.engine/imagegraph/src/Document.cpp:10265-10345 execution scheduling",
-      "mono.engine/imagegraph/src/Document.cpp:15041-15065 result publication and release",
-      "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp:71-74 unsupported group gate"
+      "mono.engine/imagegraph/src/Document.cpp: completed readiness dispatch, selected action transaction, pointer refresh and PendingGraph rebuild",
+      "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp: GroupActionAvailable and Execute early-return history handling",
+      "mono.engine/imagegraph/src/FrameCacheReplay.cpp: ApplySourceFrameCacheGroupReplay owned replacement",
+      "mono.engine/imagegraph/src/CacheGroupReplay.cpp: InitializeAuthoredCacheGroupReplay literal constructors and named runtime refusals"
     ],
     "required_next_steps": [
-      "Integrate branch-selected group actions into source Cache/Array update loops, update pending dispatch activity and defer getter admission. Enable must clear before outer capture and must not rerun its disabled producer in the same observation. Enabled nonempty groups remain refused until this scheduling integration is verified.",
+      "Ordinary read-only activity actions still require an owned temporary/host journal. Stateful actions are verified in automatic_group_validation; Enable clears before outer capture and does not rerun completed disabled producers in the same observation.",
       "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
       "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",

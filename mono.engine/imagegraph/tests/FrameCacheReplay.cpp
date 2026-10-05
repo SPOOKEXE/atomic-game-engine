@@ -135,7 +135,7 @@ TEST_CASE(
 			for (const bool endpoint : {false, true}) {
 				auto document = Scene(array);
 				const auto initial = Run(document, Clock(0));
-				document.Nodes.push_back({"member", "value.number", "", {}, {{"value", 0.0}}});
+				document.Nodes.push_back({"member", "pc.number_simple", "", {}, {{"value", 0.0}}});
 				if (dynamic)
 					document.Nodes.push_back(
 						{"dormant", "pc.equation", "", {}, {{"equation", std::string{"0"}}}}
@@ -164,11 +164,19 @@ TEST_CASE(
 				const auto status =
 					EvaluateStatefulOutputs(document, plan, outputs, request, result, diagnostic);
 				INFO(diagnostic.NodeId << ":" << diagnostic.Port << " " << diagnostic.Message);
-				CHECK(status == (endpoint ? Status::UnsupportedExecution : Status::InvalidValue));
-				CHECK(diagnostic.NodeId == (endpoint ? "cache" : "member"));
-				CHECK(diagnostic.Port == (endpoint ? "cache_group" : "value"));
-				CHECK(result.Data == initial.Data);
-				CHECK(result.Outputs.empty());
+				if (endpoint) {
+					REQUIRE(status == Status::Ok);
+					REQUIRE(result.Outputs.size() == 2);
+					CHECK(std::get<double>(std::get<EvaluatedValue>(result.Outputs[1].Output).Data) == 0.0);
+					for (const auto &member : result.Data.CacheGroups.Nodes)
+						if (member.NodeId == "member") CHECK_FALSE(member.RenderActive);
+				} else {
+					CHECK(status == Status::InvalidValue);
+					CHECK(diagnostic.NodeId == "member");
+					CHECK(diagnostic.Port == "value");
+					CHECK(result.Data == initial.Data);
+					CHECK(result.Outputs.empty());
+				}
 				EvaluationSnapshot inspected;
 				CHECK(
 					EvaluateNodeInputs(document, plan, "member", request, inspected, diagnostic) ==
@@ -192,7 +200,7 @@ TEST_CASE(
 	document.Nodes.push_back(animator);
 	document.Nodes.push_back(program);
 	document.Nodes.push_back(producer);
-	document.Nodes.push_back({"member", "value.number", "", {}, {{"value", 0.0}}});
+	document.Nodes.push_back({"member", "pc.number_simple", "", {}, {{"value", 0.0}}});
 	document.Links.push_back({"program", "text", "animator", "equation"});
 	document.Links.push_back({"animator", "result", "cache", "animated"});
 	document.Nodes[1].SourceProperties = {
@@ -213,14 +221,11 @@ TEST_CASE(
 	StatefulOutputEvaluationResult result;
 	Diagnostic diagnostic;
 	const std::array<std::string, 2> outputs{"out", "member-out"};
-	CHECK(
-		EvaluateStatefulOutputs(document, plan, outputs, request, result, diagnostic) ==
-		Status::UnsupportedExecution
-	);
+	const auto status = EvaluateStatefulOutputs(document, plan, outputs, request, result, diagnostic);
 	INFO(diagnostic.Message);
-	CHECK(diagnostic.NodeId == "cache");
-	CHECK(diagnostic.Port == "cache_group");
-	CHECK(result.Outputs.empty());
+	REQUIRE(status == Status::Ok);
+	REQUIRE(result.Outputs.size() == 2);
+	CHECK(std::get<double>(std::get<EvaluatedValue>(result.Outputs[1].Output).Data) == 0.0);
 }
 
 TEST_CASE(
@@ -2239,7 +2244,7 @@ TEST_CASE(
 	}
 }
 TEST_CASE(
-	"Grouped cache misses require scheduling only on an admitted endpoint action",
+	"Grouped cache misses freeze members only on an admitted endpoint action",
 	"[imagegraph][source_frame_cache][cache_group]"
 ) {
 	for (const bool array : {false, true})
@@ -2264,7 +2269,7 @@ TEST_CASE(
 				const auto status =
 					EvaluateStateful(document, Compiled(document), "out", request, result, diagnostic);
 				INFO(diagnostic.Message);
-				if (gate == 0 || gate == 2) {
+				if (gate == 0) {
 					CHECK(status == Status::UnsupportedExecution);
 					CHECK(diagnostic.NodeId == "cache");
 					CHECK(diagnostic.Port == "cache_group");
@@ -2277,7 +2282,7 @@ TEST_CASE(
 					else
 						CHECK(Red(result) == 10);
 					for (const auto &node : result.Data.CacheGroups.Nodes)
-						CHECK(node.RenderActive);
+						CHECK(node.RenderActive == (gate != 2 || node.NodeId != "input"));
 				}
 			}
 }
@@ -2313,15 +2318,16 @@ TEST_CASE(
 			SameOutput(result, initial);
 			CHECK(Row(result.Data).Values == Row(initial.Data).Values);
 		} else {
-			CHECK(status == Status::UnsupportedExecution);
-			CHECK(diagnostic.Port == "cache_group");
+			REQUIRE(status == Status::Ok);
 			SameOutput(result, initial);
-			CHECK(result.Data == initial.Data);
+			CHECK(Row(result.Data).Values == Row(initial.Data).Values);
+			for (const auto &member : result.Data.CacheGroups.Nodes)
+				if (member.NodeId == "input") CHECK_FALSE(member.RenderActive);
 		}
 	}
 }
 TEST_CASE(
-	"Frozen cache producers require Enable scheduling only when source gates allow it",
+	"Frozen cache producers wake without reading getters only when source gates allow it",
 	"[imagegraph][source_frame_cache][cache_group]"
 ) {
 	for (const bool array : {false, true})
@@ -2360,7 +2366,7 @@ TEST_CASE(
 			const auto status =
 				EvaluateStateful(document, Compiled(document), "out", request, result, diagnostic);
 			INFO(diagnostic.NodeId << ":" << diagnostic.Port << " " << diagnostic.Message);
-			if (gate < 2) {
+			if (gate == 0) {
 				CHECK(status == Status::UnsupportedExecution);
 				CHECK(diagnostic.NodeId == "cache");
 				CHECK(diagnostic.Port == "cache_group");
@@ -2374,7 +2380,12 @@ TEST_CASE(
 					[](const auto &node) { return node.NodeId == "input"; }
 				);
 				REQUIRE(input != result.Data.CacheGroups.Nodes.end());
-				CHECK_FALSE(input->RenderActive);
+				CHECK(input->RenderActive == (gate == 1));
+				if (gate == 1) {
+					CHECK(Row(result.Data).FrameCacheConstructorCleared);
+					CHECK(Row(result.Data).Values.size() == (array ? 2 : 3));
+					if (!array) CHECK(Row(result.Data).Values.back().Frame == 3);
+				}
 			}
 			CHECK(frozen == original);
 		}
@@ -2508,4 +2519,103 @@ TEST_CASE("Cold native Cache admission keeps loaded duration bounds", "[imagegra
 	retained.Entries[0].LoadedCacheData = row.LoadedCacheData;
 	const auto hit = Run(document, Clock(2), &retained);
 	CHECK(Red(hit) == 10);
+}
+
+TEST_CASE(
+	"Automatic group Enable clears all owner rows and preserves completed frozen getters",
+	"[imagegraph][source_frame_cache][cache_group][timeline]"
+) {
+	for (const bool array : {false, true}) {
+		auto document = Scene(array);
+		document.Nodes[1].SourceProperties = {
+			{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}
+		};
+		auto first = Clock(0);
+		first.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 5, false, false};
+		const auto initial = Run(document, first);
+		DataReplayState frozen;
+		Diagnostic diagnostic;
+		REQUIRE(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1],
+				CacheGroupReplayAction::Disable,
+				initial.Data,
+				frozen,
+				true,
+				SourceFrameCacheProjectObservation{{5, 0, false}, 5, false, false},
+				diagnostic
+			) == Status::Ok
+		);
+		auto otherRow = Row(frozen);
+		otherRow.ProcessorRow = 9;
+		frozen.Entries.push_back(std::move(otherRow));
+		const auto original = frozen;
+		ColourAt(document, 70);
+		document.Keyframes = {{"input", "width", 0, int64_t{2}, "source", KeyframeEase{}}};
+		document.Keyframes.front().SourceDriver = KeyframeAudioDriver{"unavailable-input", "rms", 0, 1, 0};
+		document.Tracks = {{"input", "width", "hold", -1}};
+		document.Outputs.push_back({"input-out", "input", "image"});
+		auto request = Clock(1);
+		request.DataReplay = &frozen;
+		request.SourceCacheProject = SourceFrameCacheProjectObservation{{1, 0, false}, 5, false, false};
+		const std::array<std::string, 2> outputs{"out", "input-out"};
+		StatefulOutputEvaluationResult result;
+		const auto status =
+			EvaluateStatefulOutputs(document, Compiled(document), outputs, request, result, diagnostic);
+		INFO(diagnostic.NodeId << ":" << diagnostic.Port << " " << diagnostic.Message);
+		REQUIRE(status == Status::Ok);
+		REQUIRE(result.Outputs.size() == 2);
+		CHECK(std::get<Image>(result.Outputs[1].Output).Pixels[0] == 10);
+		REQUIRE(result.Data.Entries.size() == 2);
+		for (const auto &row : result.Data.Entries) {
+			CHECK(row.FrameCacheConstructorCleared);
+			CHECK(row.Values.size() == (array || row.ProcessorRow == 9 ? 2 : 3));
+			if (!array && row.ProcessorRow == 0) CHECK(row.Values.back().Frame == 3);
+		}
+		for (const auto &member : result.Data.CacheGroups.Nodes)
+			CHECK(member.RenderActive);
+		CHECK(frozen == original);
+		request.Tick = 2;
+		request.DataReplay = &result.Data;
+		request.SourceCacheProject->ProjectFrame = {2, 0, false};
+		auto refused = result;
+		CHECK(
+			EvaluateStatefulOutputs(document, Compiled(document), outputs, request, refused, diagnostic) ==
+			Status::InvalidValue
+		);
+		CHECK(diagnostic.NodeId == "input");
+		CHECK(refused.Data == result.Data);
+		document.Keyframes.clear();
+		document.Tracks.clear();
+		StatefulOutputEvaluationResult live;
+		REQUIRE(
+			EvaluateStatefulOutputs(document, Compiled(document), outputs, request, live, diagnostic) ==
+			Status::Ok
+		);
+		CHECK(std::get<Image>(live.Outputs[1].Output).Pixels[0] == 70);
+		CHECK(frozen == original);
+	}
+}
+
+TEST_CASE(
+	"Automatic Disable captures the current owner output when its own group freezes it",
+	"[imagegraph][source_frame_cache][cache_group][timeline]"
+) {
+	auto document = Scene();
+	document.Nodes[1].SourceProperties = {
+		{"cache_group", ArrayValue{ValueType::Text, {std::string{"cache"}, std::string{"input"}}}}
+	};
+	auto request = Clock(0);
+	request.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 0, false, false};
+	const auto result = Run(document, request);
+	CHECK(Red(result) == 10);
+	for (const auto &member : result.Data.CacheGroups.Nodes)
+		CHECK_FALSE(member.RenderActive);
+	document.Keyframes = {{"input", "width", 0, int64_t{2}, "source", KeyframeEase{}}};
+	document.Keyframes.front().SourceDriver = KeyframeAudioDriver{"unavailable-owner", "rms", 0, 1, 0};
+	document.Tracks = {{"input", "width", "hold", -1}};
+	ColourAt(document, 70);
+	const auto frozen = Run(document, Clock(1), &result.Data);
+	CHECK(Red(frozen) == 10);
+	CHECK(frozen.Data == result.Data);
 }

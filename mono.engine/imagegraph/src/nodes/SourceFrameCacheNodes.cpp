@@ -92,6 +92,11 @@ namespace engine::imagegraph::detail {
 				);
 			if (project->ProjectLoading || project->ProjectAppending) return true;
 			if (disable && !SourceFrameCacheIsLastProjectFrame(*project)) return true;
+			if (c.FrameCacheGroupActionsAvailable) {
+				c.FrameCacheGroupAction =
+					disable ? CacheGroupReplayAction::Disable : CacheGroupReplayAction::Enable;
+				return true;
+			}
 			return c.Fail(
 				Status::UnsupportedExecution,
 				"source cache-group scheduling requires host capture",
@@ -289,6 +294,7 @@ namespace engine::imagegraph::detail {
 			const bool enableGroup = (!hit || array) && c.Request.SourceCachePlayback->Playing &&
 									 c.FrameCacheSurfaceLinked && !c.FrameCacheProducerActive;
 			if (enableGroup && !GroupActionAvailable(c, groupEnabled, false)) return false;
+			const bool clearedHistory = c.FrameCacheGroupAction == CacheGroupReplayAction::Enable;
 			if (!array) {
 				if (hit)
 					output = hit;
@@ -327,14 +333,15 @@ namespace engine::imagegraph::detail {
 			// and captures beyond the current duration; manual Cache Array resizes only on capture.
 			const uint64_t frameLimit = capture ? std::min(loadLimit, total + 3) : loadLimit;
 			size_t records = 2 + (writeFrame ? 1 : 0);
-			if (previous)
+			if (previous && !clearedHistory)
 				for (size_t i = 2; i < previous->Values.size(); ++i)
 					if (previous->Values[i].Frame < frameLimit &&
 						(!writeFrame || previous->Values[i].Frame != c.Request.Tick + 2))
 						++records;
 			if (records > Limits::MaximumArrayElements)
 				return c.Fail(Status::LimitExceeded, "frame-cache history exceeds native frame count");
-			const uint64_t oldBytes = previous ? RetainedDataReplayEntryBytes(*previous) : 0;
+			const uint64_t oldBytes =
+				previous && !clearedHistory ? RetainedDataReplayEntryBytes(*previous) : 0;
 			const auto lastBytes = ValueClonePayloadBytes(*output);
 			if (!lastBytes)
 				return c.Fail(Status::LimitExceeded, "frame-cache latest output exceeds clone bounds");
@@ -345,7 +352,7 @@ namespace engine::imagegraph::detail {
 				2 * (c.Authored.Type.size() + std::string{}.capacity()) +
 				(count + total) * 2 * sizeof(SourceArrayItem);
 			uint64_t normalization = NormalizationBytes(*output);
-			if (previous)
+			if (previous && !clearedHistory)
 				for (const auto &frame : previous->Values) {
 					const auto bytes = NormalizationBytes(frame.Data);
 					if (bytes > Limits::MaximumEvaluationBytes -
@@ -372,13 +379,13 @@ namespace engine::imagegraph::detail {
 			state.ProcessorRow = c.ProcessorRow;
 			state.Tick = c.Request.Tick;
 			state.Initialized = true;
-			state.FrameCacheConstructorCleared = constructorCleared;
+			state.FrameCacheConstructorCleared = constructorCleared || clearedHistory;
 			state.PreviousValue = animated;
 			state.PreviousFrame = double(c.Request.Tick);
 			state.Values.reserve(records);
 			state.Values.push_back({0, c.Authored.Type});
 			state.Values.push_back({1, *output});
-			if (previous)
+			if (previous && !clearedHistory)
 				for (size_t i = 2; i < previous->Values.size(); ++i) {
 					if (previous->Values[i].Frame < 2)
 						return c.Fail(Status::InvalidValue, "frame-cache retained position is invalid");
