@@ -134,6 +134,7 @@ Isolated passes do not establish combined acceptance. See the [native validation
 ### v0.26
 
 - [_] Check whether shaderc needs glslang's deprecated HLSL front-end; disable `ENABLE_HLSL` if unused.
+- [_] Check whether shaderc needs glslang's deprecated HLSL front-end; disable `ENABLE_HLSL` if unused.
 - [_] Remove dead engine code and obsolete compatibility paths.
 - [_] Consolidate render hooks, nodes, graphs and graph visualization.
 - [_] Profile CPU, GPU and memory costs; evaluate channel packing, cheaper computation and reduced precision against output quality.
