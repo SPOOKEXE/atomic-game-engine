@@ -4,9 +4,11 @@
 
 namespace engine::imagegraph::detail {
 	enum class SourceFrameCacheInputReads { All, ControlsOnly, None };
-	// Array checks playback and producer activity before any getter. Cache reads Animated first.
-	inline SourceFrameCacheInputReads
-	SourceFrameCacheReadPolicy(std::string_view type, bool playing, bool linked, bool active) {
+	// Auto Cache hits bypass update entirely. Array checks playback and producer activity first.
+	inline SourceFrameCacheInputReads SourceFrameCacheReadPolicy(
+		std::string_view type, bool playing, bool linked, bool active, bool cacheHit = false
+	) {
+		if (type == "pc.cache" && cacheHit) return SourceFrameCacheInputReads::None;
 		if (type != "pc.cache" && type != "pc.cache_array") return SourceFrameCacheInputReads::All;
 		if (playing && linked && active) return SourceFrameCacheInputReads::All;
 		return type == "pc.cache_array" ? SourceFrameCacheInputReads::None

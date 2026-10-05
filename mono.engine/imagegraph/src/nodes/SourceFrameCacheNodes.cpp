@@ -1,3 +1,4 @@
+#include "../SourceFrameCacheLookup.hpp"
 #include "ArraySource.hpp"
 
 #include <engine/imagegraph/FrameCacheReplay.hpp>
@@ -173,24 +174,6 @@ namespace engine::imagegraph::detail {
 			c.SetValue(port, value);
 			return c.FailureCode == Status::Ok;
 		}
-		const Value *FindStoredFrame(const DataReplayEntry *state, uint64_t tick) {
-			if (!state) return nullptr;
-			const auto key = tick + 2;
-			const auto position = std::lower_bound(
-				state->Values.begin() + 2, state->Values.end(), key, [](const auto &frame, uint64_t index) {
-					return frame.Frame < index;
-				}
-			);
-			return position != state->Values.end() && position->Frame == key ? &position->Data : nullptr;
-		}
-		const Value *FindFrame(const DataReplayEntry *state, uint64_t tick) {
-			const auto *value = FindStoredFrame(state, tick);
-			// Source cacheExist accepts an array or an existing surface, never its noone sentinel.
-			return value && (std::holds_alternative<SurfaceValue>(*value) ||
-							 std::holds_alternative<ArrayValue>(*value))
-					   ? value
-					   : nullptr;
-		}
 		bool Execute(NodeContext &c, bool array) {
 			ENGINE_PROFILE("imagegraph.source.frame_cache");
 			const std::string *saved = nullptr;
@@ -276,7 +259,9 @@ namespace engine::imagegraph::detail {
 			uint64_t count = 0, first = 0, last = 0, step = 1;
 			// Cache loads exactly TOTAL_FRAMES slots. Cache Array restores every serialized slot.
 			const uint64_t loadLimit = loadedNow && !array ? total + 2 : UINT64_MAX;
-			const auto *hit = c.Request.Tick + 2 < loadLimit ? FindFrame(previous, c.Request.Tick) : nullptr;
+			const auto *hit = c.Request.Tick + 2 < loadLimit
+								  ? SourceFrameCacheExistingFrame(previous, c.Request.Tick)
+								  : nullptr;
 			double animated = previous ? previous->PreviousValue : 1;
 			if (!array && !hit) {
 				animated = c.Boolean("animated") ? 1 : 0;
@@ -382,14 +367,14 @@ namespace engine::imagegraph::detail {
 			});
 			if (!array) {
 				if (writeFrame)
-					state.Values[1].Data = *FindStoredFrame(&state, c.Request.Tick);
+					state.Values[1].Data = *SourceFrameCacheStoredFrame(&state, c.Request.Tick);
 				else if (useInput)
 					state.Values[1].Data = CopyInput(input);
 			} else if (capture) {
 				source_array::Items items;
 				items.reserve(size_t(count));
 				for (uint64_t frame = first; frame < last; frame += step) {
-					const Value *value = FindFrame(&state, frame);
+					const Value *value = SourceFrameCacheExistingFrame(&state, frame);
 					if (!value)
 						items.push_back({ElementValue{int64_t{-1}}});
 					else if (const auto *surface = std::get_if<SurfaceValue>(value))

@@ -39,6 +39,7 @@
 #include "SourceAtlasCodec.hpp"
 #include "SourceFontReceipts.hpp"
 #include "SourceFontTransport.hpp"
+#include "SourceFrameCacheLookup.hpp"
 #include "SourceGetterProjection.hpp"
 #include "SourceInputOrigin.hpp"
 #include "SourceLuaSockets.hpp"
@@ -10301,14 +10302,35 @@ namespace engine::imagegraph {
 			detail::EvaluationAllocator<detail::SourceFrameCacheInputReads>(budget)
 		);
 		const bool cachePlaying = request.SourceCachePlayback && request.SourceCachePlayback->Playing;
-		for (size_t index = 0; index < frameCacheInputReads.size(); ++index)
-			frameCacheInputReads[index] =
-				detail::SourceFrameCacheReadPolicy(document.Nodes[index].Type, cachePlaying, false, true);
+		{
+			const auto *currentFrameCacheData =
+				simulation && simulation->Data ? simulation->Data : request.DataReplay;
+			const detail::SourceFrameCacheInputIndex currentFrameCacheIndex(
+				hasFrameCaches ? currentFrameCacheData : nullptr, budget
+			);
+			const detail::SourceFrameCacheInputIndex loadedFrameCacheIndex(
+				hasFrameCaches ? request.SourceFrameCacheLoads : nullptr, budget
+			);
+			for (size_t index = 0; index < frameCacheInputReads.size(); ++index) {
+				const bool hit = detail::SourceFrameCacheKnownHit(
+					document.Nodes[index],
+					request,
+					currentFrameCacheIndex,
+					loadedFrameCacheIndex,
+					document.Timeline ? document.Timeline->Frames : 1
+				);
+				frameCacheInputReads[index] = detail::SourceFrameCacheReadPolicy(
+					document.Nodes[index].Type, cachePlaying, false, true, hit
+				);
+			}
+		}
 		for (const auto &link : plan.EffectiveLinks) {
 			if (frameCacheInputReads.empty() || link.ToPort != "surface_in") continue;
 			const size_t target = nodeIndices.at(link.ToNode), producer = nodeIndices.at(link.FromNode);
+			const bool hit = document.Nodes[target].Type == "pc.cache" &&
+							 frameCacheInputReads[target] == detail::SourceFrameCacheInputReads::None;
 			frameCacheInputReads[target] = detail::SourceFrameCacheReadPolicy(
-				document.Nodes[target].Type, cachePlaying, true, !frozen[producer]
+				document.Nodes[target].Type, cachePlaying, true, !frozen[producer], hit
 			);
 		}
 		const auto frameCacheReads = [&](size_t index) {

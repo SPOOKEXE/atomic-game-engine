@@ -1987,3 +1987,105 @@ TEST_CASE(
 		CHECK(enabled.Entries.front().Values.size() == 2);
 	}
 }
+
+namespace {
+	void AddUnreadableCacheGetters(Document &document) {
+		document.Nodes[0].Type = "pc.lua_compute";
+		document.Nodes[0].Values = {
+			{"function_name", std::string{"surface_trap"}}, {"return_type", EnumValue{0}}
+		};
+		document.Links[0].FromPort = "return_value";
+		document.Nodes.push_back(
+			{"animated-trap",
+			 "pc.lua_compute",
+			 "",
+			 {},
+			 {{"function_name", std::string{"animated_trap"}}, {"return_type", EnumValue{0}}}}
+		);
+		document.Links.push_back({"animated-trap", "return_value", "cache", "animated"});
+	}
+}
+TEST_CASE("Cache hits skip connected getters and preserve Animated", "[imagegraph][source_frame_cache]") {
+	for (const bool playing : {false, true}) {
+		for (const bool saved : {false, true}) {
+			auto document = Scene();
+			auto prior = Run(document, Clock(0));
+			prior.Data.Entries[0].PreviousValue = 1;
+			DataReplayState loads = prior.Data;
+			if (saved) {
+				loads.Entries[0].LoadedCacheData = "[owned exact receipt]";
+				document.Nodes[1].SourceProperties = {{"cache", loads.Entries[0].LoadedCacheData}};
+			}
+			AddUnreadableCacheGetters(document);
+			const auto original = prior.Data;
+			const auto originalLoads = loads;
+			auto request = Clock(0, playing);
+			request.DataReplay = saved ? nullptr : &prior.Data;
+			if (saved) request.SourceFrameCacheLoads = &loads;
+			StatefulEvaluationResult result;
+			Diagnostic diagnostic;
+			const auto code =
+				EvaluateStateful(document, Compiled(document), "out", request, result, diagnostic);
+			INFO(diagnostic.Message);
+			REQUIRE(code == Status::Ok);
+			CHECK(Red(result) == 10);
+			CHECK(Row(result.Data).PreviousValue == 1);
+			CHECK(Row(result.Data).Values == Row(saved ? loads : prior.Data).Values);
+			CHECK(prior.Data == original);
+			CHECK(loads == originalLoads);
+			request.Tick = 1;
+			StatefulEvaluationResult refused = result;
+			CHECK(
+				EvaluateStateful(document, Compiled(document), "out", request, refused, diagnostic) ==
+				Status::UnsupportedExecution
+			);
+			SameOutput(refused, result);
+			CHECK(refused.Data == result.Data);
+		}
+	}
+}
+TEST_CASE(
+	"Cache hits skip producer driver sampling but retain input inspection",
+	"[imagegraph][source_frame_cache][timeline]"
+) {
+	auto document = Scene();
+	const auto prior = Run(document, Clock(0));
+	document.Keyframes = {
+		{"input", "width", 0, int64_t{2}, "source", KeyframeEase{}},
+		{"input", "width", 5, int64_t{1}, "source", KeyframeEase{}}
+	};
+	for (auto &key : document.Keyframes)
+		key.SourceDriver = KeyframeAudioDriver{"unavailable-capture", "rms", 0, 1, 0};
+	document.Tracks = {{"input", "width", "hold", -1}};
+	auto request = Clock(0);
+	request.DataReplay = &prior.Data;
+	const auto result = Run(document, request, &prior.Data);
+	CHECK(Red(result) == 10);
+	EvaluationSnapshot snapshot;
+	Diagnostic diagnostic;
+	CHECK(
+		EvaluateNodeInputs(document, Compiled(document), "cache", request, snapshot, diagnostic) ==
+		Status::InvalidValue
+	);
+	CHECK(diagnostic.NodeId == "input");
+	CHECK(diagnostic.Port == "width");
+}
+TEST_CASE("Cache hit pruning preserves independent selected roots", "[imagegraph][source_frame_cache]") {
+	auto document = Scene();
+	const auto prior = Run(document, Clock(0));
+	AddUnreadableCacheGetters(document);
+	document.Outputs.push_back({"independent", "animated-trap", "return_value"});
+	auto request = Clock(0);
+	request.DataReplay = &prior.Data;
+	const auto single = Run(document, request, &prior.Data);
+	CHECK(Red(single) == 10);
+	StatefulOutputEvaluationResult result;
+	Diagnostic diagnostic;
+	const std::array<std::string, 2> outputs{"out", "independent"};
+	CHECK(
+		EvaluateStatefulOutputs(document, Compiled(document), outputs, request, result, diagnostic) ==
+		Status::UnsupportedExecution
+	);
+	CHECK(result.Outputs.empty());
+	CHECK(prior.Data.Entries.size() == 1);
+}
