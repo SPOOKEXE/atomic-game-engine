@@ -8,6 +8,7 @@ namespace engine::render {
 namespace studio {
 
 	bool ImageComposerHasPendingCapture();
+	void ResetImageComposerPanelLayout();
 	void CloseImageComposerAudioPreview();
 	void CloseImageComposerVector2Preview(engine::render::Renderer &renderer);
 

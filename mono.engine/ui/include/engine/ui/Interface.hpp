@@ -82,6 +82,10 @@ namespace engine::ui {
 		// mouse clicks.
 		bool Docking = true;
 
+		// Allows floating panels to become native windows on supported desktop
+		// backends. Headless hosts always keep a single virtual display.
+		bool PlatformWindows = false;
+
 		// How big the interface believes the display is, when there is no
 		// window to ask.
 		//
@@ -180,6 +184,19 @@ namespace engine::ui {
 		// Nothing is submitted here - the renderer does that, from inside its
 		// own command buffer, through the two hook calls below.
 		void End();
+
+		// Creates, updates and presents detached windows after the main renderer
+		// submitted its frame. The SDL GPU backend shares its geometry buffers
+		// between windows, so this must follow the main overlay's Record call.
+		void PresentPlatformWindows();
+
+		// Whether detached windows need presentation even when the main window
+		// is minimised. False before initialisation and in headless hosts.
+		bool HasPlatformWindows() const;
+
+		// Whether any of this interface's native windows owns keyboard focus.
+		// Headless hosts are treated as focused.
+		bool HasFocus() const;
 
 		// Persistent geometry signature of the completed host frame. Texture
 		// handles are excluded: a viewport publishing a new retained scene image

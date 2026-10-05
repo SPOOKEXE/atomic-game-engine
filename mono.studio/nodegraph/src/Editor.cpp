@@ -789,7 +789,7 @@ namespace nodegraph {
 				nullptr,
 				title,
 				ImVec2(corner.x + 8.0f * Scale, corner.y + 5.0f * Scale),
-				0xFF101010,
+				Look.Text,
 				label.c_str()
 			);
 		}

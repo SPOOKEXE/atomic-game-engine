@@ -1,6 +1,7 @@
 #include "AnimationTrackPolicyEditor.hpp"
 #include "AudioWindowPanel.hpp"
 #include "ImageComposerInternal.hpp"
+#include "ImageComposerPanels.hpp"
 #include "ImageGraphAnimationControl.hpp"
 #include "ImageGraphArguments.hpp"
 #include "ImageGraphArrayEditor.hpp"
@@ -34,6 +35,7 @@
 #include "ImageGraphRigidMeshAction.hpp"
 #include "ImageGraphSourceEdit.hpp"
 #include "ImageGraphSourceTimelineTransition.hpp"
+#include "ImagePreviewPanel.hpp"
 #include "KeyframeKindEditor.hpp"
 #include "TimelineDopesheet.hpp"
 #include "TimelineEaseEditor.hpp"
@@ -65,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -135,6 +138,7 @@ namespace studio {
 
 		struct State {
 			bool Initialized = false;
+			detail::ImageComposerPanels Panels;
 			std::vector<ExportGrant> ExportGrants;
 			detail::ImageGraphExportUpdate ExportUpdate;
 			detail::ImageGraphObservations PcxObservations;
@@ -173,6 +177,7 @@ namespace studio {
 			bool HaveVector2Preview = false;
 			engine::imagegraph::Vector2 Vector2Preview;
 			Vector2Panel VectorControls;
+			detail::ImagePreviewPanel NodePreviews;
 			bool HaveArrayPreview = false;
 			engine::imagegraph::ArrayValue ArrayPreview;
 			bool HaveActiveEdit = false;
@@ -263,6 +268,7 @@ namespace studio {
 
 		void RequestPreview(State &state, bool immediate = false) {
 			state.PreviewDirty = true;
+			if (immediate) state.NodePreviews.Request();
 			state.PreviewRequested = state.PreviewRequested || immediate;
 		}
 
@@ -556,6 +562,7 @@ namespace studio {
 			state.VectorControls.Attach(state.Canvas, state.Authored, state.Ids, state.History, [&state] {
 				AuthoredDocumentChanged(state);
 			});
+			state.NodePreviews.Attach(state.Canvas, state.Ids);
 			if (!selectedDocumentId.empty()) {
 				if (const auto selected = state.Ids.ToCanvas.find(selectedDocumentId);
 					selected != state.Ids.ToCanvas.end()) {
@@ -2742,6 +2749,8 @@ namespace studio {
 			ImGui::Text(
 				"frame %.20Lg", engine::imagegraph::FrameTimeToReal(GetImageGraphFrame(state.Playback))
 			);
+			ImGui::SameLine();
+			detail::DrawImageComposerView(state.Panels);
 			if (state.ComposerCadence.Displayed &&
 				*state.ComposerCadence.Displayed != GetImageGraphFrame(state.Playback)) {
 				ImGui::SameLine();
@@ -2757,24 +2766,66 @@ namespace studio {
 			);
 			ImGui::Separator();
 			const std::string_view search(state.Search);
+			const auto contains = [](std::string_view text, std::string_view query) {
+				if (query.empty()) return true;
+				if (query.size() > text.size()) return false;
+				for (size_t start = 0; start <= text.size() - query.size(); ++start) {
+					size_t offset = 0;
+					while (offset < query.size() &&
+						   std::tolower(static_cast<unsigned char>(text[start + offset])) ==
+							   std::tolower(static_cast<unsigned char>(query[offset]))) {
+						++offset;
+					}
+					if (offset == query.size()) return true;
+				}
+				return false;
+			};
+			struct PaletteCategory {
+				std::string_view Name;
+				std::vector<const nodegraph::NodeType *> Types;
+			};
+			std::vector<PaletteCategory> categories;
+			std::unordered_map<std::string_view, size_t> categoryIndexes;
 			for (const nodegraph::NodeType &type : nodegraph::NodeTypes::All()) {
 				if (engine::imagegraph::FindSchema(type.Id) == nullptr) continue;
-				if (!search.empty() && type.Title.find(search) == std::string::npos &&
-					type.Id.find(search) == std::string::npos) {
-					continue;
-				}
-				ImGui::PushID(type.Id.c_str());
-				if (ImGui::Selectable(type.Title.c_str())) {
-					const float offset = static_cast<float>(state.Graph.Nodes().size()) * 40.0f;
-					const nodegraph::NodeId node =
-						state.Graph.Add(type.Id, 40.0f + offset, 40.0f + offset * 0.2f);
-					if (node != nodegraph::NO_NODE) {
-						state.Canvas.Select(node);
-						state.Canvas.Centre(state.Graph, node);
-						SyncCanvas(state);
+				auto [found, inserted] = categoryIndexes.try_emplace(type.Category, categories.size());
+				if (inserted) categories.push_back({type.Category, {}});
+				categories[found->second].Types.push_back(&type);
+			}
+
+			for (const PaletteCategory &category : categories) {
+				bool hasMatch = false;
+				for (const nodegraph::NodeType *type : category.Types) {
+					if (contains(type->Title, search) || contains(type->Id, search) ||
+						contains(category.Name, search)) {
+						hasMatch = true;
+						break;
 					}
 				}
-				ImGui::PopID();
+				if (!hasMatch) continue;
+
+				// Keep the whole catalogue browsable, and reveal every category that
+				// contains a search hit so filtering never hides its own results.
+				ImGui::SetNextItemOpen(true, search.empty() ? ImGuiCond_Once : ImGuiCond_Always);
+				if (!ImGui::CollapsingHeader(std::string(category.Name).c_str())) continue;
+
+				for (const nodegraph::NodeType *type : category.Types) {
+					if (!contains(type->Title, search) && !contains(type->Id, search) &&
+						!contains(category.Name, search))
+						continue;
+					ImGui::PushID(type->Id.c_str());
+					if (ImGui::Selectable(type->Title.c_str())) {
+						const float offset = static_cast<float>(state.Graph.Nodes().size()) * 40.0f;
+						const nodegraph::NodeId node =
+							state.Graph.Add(type->Id, 40.0f + offset, 40.0f + offset * 0.2f);
+						if (node != nodegraph::NO_NODE) {
+							state.Canvas.Select(node);
+							state.Canvas.Centre(state.Graph, node);
+							SyncCanvas(state);
+						}
+					}
+					ImGui::PopID();
+				}
 			}
 		}
 
@@ -6681,6 +6732,7 @@ namespace studio {
 
 	void CloseImageComposerVector2Preview(engine::render::Renderer &renderer) {
 		Composer().VectorControls.Close(renderer);
+		Composer().NodePreviews.Close(renderer);
 	}
 
 	void CloseImageComposerAudioPreview() {
@@ -6743,6 +6795,12 @@ namespace studio {
 			diagnostic,
 			maximumBytes
 		);
+	}
+
+	void ResetImageComposerPanelLayout() {
+		auto &panels = Composer().Panels;
+		panels.LayoutInitialized = false;
+		panels.ResetRequested = true;
 	}
 
 	bool ImageComposerHasPendingCapture() {
@@ -6820,119 +6878,132 @@ namespace studio {
 		ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 255));
 		ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 255));
 		if (open) ResumeExportIntent(state);
-		if (!ImGui::Begin("Image Composer", &open, ImGuiWindowFlags_MenuBar)) {
-			CancelComposerPreview(state, renderer);
-			state.VectorControls.FinishPointer(
-				ImGui::IsMouseDown(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Middle)
-			);
+		const bool ownerVisible = ImGui::Begin("Image Composer", &open);
+		if (!open) {
 			ImGui::End();
 			ImGui::PopStyleColor(2);
-			if (!open) {
-				state.PreviewSequence.Clear();
-				CancelExportIntent(state, renderer);
-				CancelComposerPreview(state, renderer);
-				if (state.LuaHost) state.LuaHost->Reset();
-				state.Host.ResetFiles();
-				state.ExportUpdate = {};
-				CloseImageComposerAudioPreview();
-				state.VectorControls.Close(renderer);
-			} else {
-				Diagnostic diagnostic;
-				if (!state.WavAudio.Update(
-						state.Authored,
-						state.AudioClips,
-						state.AudioFrames,
-						state.Playback,
-						state.DocumentRevision,
-						state.EvaluationInputRevision,
-						diagnostic
-					))
-					state.WavAudioMessage = diagnostic.Message;
-				else if (state.WavAudio.Enabled())
-					state.WavAudioMessage.clear();
-			}
+			state.PreviewSequence.Clear();
+			CancelExportIntent(state, renderer);
+			CancelComposerPreview(state, renderer);
+			if (state.LuaHost) state.LuaHost->Reset();
+			state.Host.ResetFiles();
+			state.ExportUpdate = {};
+			CloseImageComposerAudioPreview();
+			state.VectorControls.Close(renderer);
+			state.NodePreviews.Close(renderer);
 			return;
 		}
 		FinishInactiveEdit(state);
-		DrawToolbar(state);
+		if (ownerVisible) DrawToolbar(state);
 		engine::imagegraphphysics::RigidProvider vectorRequestRigidProvider;
 		engine::imagegraph::EvaluationRequest vectorRequest;
 		vectorRequest.HostProvider = &HostFor(state);
 		engine::imagegraph::SourceFontContext vectorRequestFontContext;
-		if (!BindObservations(state, vectorRequest, &vectorRequestFontContext)) {
-			ImGui::TextWrapped("%s", state.LastDiagnostic.Message.c_str());
-			return;
+		const bool vectorInputsBound = BindObservations(state, vectorRequest, &vectorRequestFontContext);
+		if (vectorInputsBound) {
+			detail::BindImageGraphRigid(vectorRequest, vectorRequestRigidProvider, state.Playback);
+			(void)engine::imagegraph::SetFrameTime(vectorRequest, GetImageGraphFrame(state.Playback));
+			vectorRequest.AudioFrames = state.AudioFrames;
+			vectorRequest.AudioClips = state.AudioClips;
+			vectorRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+			state.VectorControls.Refresh(
+				state.Authored, vectorRequest, state.DocumentRevision, state.EvaluationInputRevision
+			);
 		}
-		detail::BindImageGraphRigid(vectorRequest, vectorRequestRigidProvider, state.Playback);
-		(void)engine::imagegraph::SetFrameTime(vectorRequest, GetImageGraphFrame(state.Playback));
-		vectorRequest.AudioFrames = state.AudioFrames;
-		vectorRequest.AudioClips = state.AudioClips;
-		vectorRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
-		state.VectorControls.Refresh(
-			state.Authored, vectorRequest, state.DocumentRevision, state.EvaluationInputRevision
-		);
-		ImGui::Separator();
-
-		const ImVec2 room = ImGui::GetContentRegionAvail();
-		const float rightWidth = engine::ui::Scaled(310.0f);
-		const float toolbarHeight = engine::ui::Scaled(28.0f);
-		if (ImGui::BeginChild(
-				"##image-graph-canvas", ImVec2(room.x - rightWidth, room.y - toolbarHeight), false
-			)) {
-			if (state.CanvasNeedsReload) ReloadCanvas(state);
-			state.Canvas.Draw(state.Graph);
-			if (state.CanvasNeedsReload) ReloadCanvas(state);
+		if (vectorInputsBound && (state.LivePreview || state.PreviewRequested))
+			state.NodePreviews.Refresh(
+				state.Authored,
+				vectorRequest,
+				HostFor(state),
+				renderer,
+				state.DocumentRevision,
+				state.EvaluationInputRevision,
+				detail::ImageGraphPlaybackObservation(state.Authored, state.Playback)
+			);
+		const ImGuiWindowClass composerClass = detail::ImageComposerWindowClass();
+		if (ownerVisible) {
+			ImGui::Separator();
+			detail::InitializeImageComposerPanels(
+				state.Panels, ImGui::GetCursorScreenPos(), ImGui::GetContentRegionAvail()
+			);
+			ImGui::DockSpace(
+				detail::ImageComposerDockspaceId(), ImVec2(0, 0), ImGuiDockNodeFlags_None, &composerClass
+			);
+			detail::ApplyImageGraphHistoryKey([&](bool redo) { ApplyHistory(state, redo); });
+		} else {
+			if (!state.Panels.LayoutInitialized && !state.Panels.ResetRequested &&
+				ImGui::DockBuilderGetNode(detail::ImageComposerDockspaceId()) != nullptr &&
+				ImGui::FindWindowSettingsByID(ImHashStr(detail::IMAGE_COMPOSER_GRAPH)) != nullptr)
+				detail::InitializeImageComposerPanels(
+					state.Panels, ImGui::GetWindowPos(), ImGui::GetWindowSize()
+				);
+			ImGui::DockSpace(
+				detail::ImageComposerDockspaceId(),
+				ImVec2(0, 0),
+				ImGuiDockNodeFlags_KeepAliveOnly,
+				&composerClass
+			);
 		}
-		ImGui::EndChild();
-		ImGui::SameLine();
-		if (ImGui::BeginChild("##image-graph-inspector", ImVec2(0.0f, room.y - toolbarHeight), false)) {
-			if (ImGui::BeginTabBar("##image-composer-tabs")) {
-				if (ImGui::BeginTabItem("Nodes")) {
-					DrawPalette(state);
-					ImGui::EndTabItem();
+		ImGui::End();
+		if (state.Panels.LayoutInitialized) {
+			ImGui::SetNextWindowClass(&composerClass);
+			if (ImGui::Begin(detail::IMAGE_COMPOSER_GRAPH)) {
+				if (ImGui::BeginChild("##image-graph-canvas", ImVec2(0, 0), false)) {
+					if (state.CanvasNeedsReload) ReloadCanvas(state);
+					state.Canvas.Draw(state.Graph);
+					if (state.CanvasNeedsReload) ReloadCanvas(state);
 				}
-				if (ImGui::BeginTabItem("Inspector")) {
-					DrawInspector(state, renderer, owner, paths);
-					ImGui::EndTabItem();
+				ImGui::EndChild();
+				detail::ApplyImageGraphHistoryKey([&](bool redo) { ApplyHistory(state, redo); });
+			}
+			ImGui::End();
+			for (size_t index = 0; index < detail::IMAGE_COMPOSER_PANELS.size(); ++index) {
+				if (!state.Panels.Open[index]) continue;
+				ImGui::SetNextWindowClass(&composerClass);
+				const bool visible =
+					ImGui::Begin(detail::IMAGE_COMPOSER_PANELS[index].Window, &state.Panels.Open[index]);
+				if (visible) {
+					switch (index) {
+					case 0:
+						DrawPalette(state);
+						break;
+					case 1:
+						DrawInspector(state, renderer, owner, paths);
+						break;
+					case 2:
+						DrawProjectSettings(state);
+						break;
+					case 3:
+						DrawGroups(state);
+						break;
+					case 4:
+						DrawOutputs(state);
+						ImGui::Separator();
+						RefreshPreview(state, renderer);
+						DrawPreview(state, renderer);
+						break;
+					case 5:
+						DrawAssetsAndSinks(state, renderer);
+						break;
+					case 6:
+						DrawFontInputs(state);
+						break;
+					case 7:
+						DrawTimeline(state);
+						break;
+					case 8:
+						RefreshPreview(state, renderer);
+						DrawDiagnostics(state);
+						if (!state.WavAudioMessage.empty())
+							ImGui::TextWrapped("%s", state.WavAudioMessage.c_str());
+						break;
+					}
+					detail::ApplyImageGraphHistoryKey([&](bool redo) { ApplyHistory(state, redo); });
 				}
-				if (ImGui::BeginTabItem("Project")) {
-					DrawProjectSettings(state);
-					ImGui::EndTabItem();
-				}
-				if (ImGui::BeginTabItem("Groups")) {
-					DrawGroups(state);
-					ImGui::EndTabItem();
-				}
-				if (ImGui::BeginTabItem("Preview")) {
-					DrawOutputs(state);
-					ImGui::Separator();
-					RefreshPreview(state, renderer);
-					DrawPreview(state, renderer);
-					ImGui::EndTabItem();
-				}
-				if (ImGui::BeginTabItem("Assets / Sinks")) {
-					DrawAssetsAndSinks(state, renderer);
-					ImGui::EndTabItem();
-				}
-				if (ImGui::BeginTabItem("Font inputs")) {
-					DrawFontInputs(state);
-					ImGui::EndTabItem();
-				}
-				if (ImGui::BeginTabItem("Timeline")) {
-					DrawTimeline(state);
-					ImGui::EndTabItem();
-				}
-				if (ImGui::BeginTabItem("Diagnostics")) {
-					RefreshPreview(state, renderer);
-					DrawDiagnostics(state);
-					ImGui::EndTabItem();
-				}
-				ImGui::EndTabBar();
+				ImGui::End();
 			}
 		}
-		ImGui::EndChild();
 		ApplyPendingFontInputs(state, renderer);
-		detail::ApplyImageGraphHistoryKey([&](bool redo) { ApplyHistory(state, redo); });
 		RefreshPreview(state, renderer);
 		state.ComposerExports.Invalidate(state.DocumentRevision, state.EvaluationInputRevision);
 		if (!state.Playback.Rendering &&
@@ -6980,20 +7051,9 @@ namespace studio {
 			state.WavAudioMessage = audioDiagnostic.Message;
 		else if (state.WavAudio.Enabled())
 			state.WavAudioMessage.clear();
-		if (!state.WavAudioMessage.empty()) ImGui::TextWrapped("%s", state.WavAudioMessage.c_str());
 		state.VectorControls.FinishPointer(
 			ImGui::IsMouseDown(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Middle)
 		);
-		ImGui::End();
-		if (!open) {
-			CancelExportIntent(state, renderer);
-			CancelComposerPreview(state, renderer);
-			if (state.LuaHost) state.LuaHost->Reset();
-			state.Host.ResetFiles();
-			state.ExportUpdate = {};
-			CloseImageComposerAudioPreview();
-			state.VectorControls.Close(renderer);
-		}
 		ImGui::PopStyleColor(2);
 	}
 } // namespace studio

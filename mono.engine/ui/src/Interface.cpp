@@ -186,6 +186,9 @@ namespace engine::ui {
 		if (settings.Docking) {
 			io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 		}
+		if (drawable && settings.PlatformWindows) {
+			io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+		}
 
 		if (settings.LayoutPath.empty()) {
 			// Null rather than the default "imgui.ini", so a program that said
@@ -273,6 +276,11 @@ namespace engine::ui {
 		info.Device = static_cast<SDL_GPUDevice *>(backend.Device);
 		info.ColorTargetFormat = static_cast<SDL_GPUTextureFormat>(backend.ColourFormat);
 		info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+		// The host paces the interface. A vblank wait for every detached panel
+		// would add another display deadline while dragging between windows.
+		if (SDL_WindowSupportsGPUPresentMode(info.Device, window, SDL_GPU_PRESENTMODE_IMMEDIATE)) {
+			info.PresentMode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+		}
 
 		if (!ImGui_ImplSDLGPU3_Init(&info)) {
 			ENGINE_ERROR("ImGui_ImplSDLGPU3_Init failed");
@@ -285,6 +293,10 @@ namespace engine::ui {
 
 		State->Ready = true;
 		State->Drawable = true;
+		if (settings.PlatformWindows && (io.BackendFlags & ImGuiBackendFlags_PlatformHasViewports) == 0) {
+			io.ConfigFlags &= ~ImGuiConfigFlags_ViewportsEnable;
+			ENGINE_WARN("this display backend cannot place detached interface windows on other screens");
+		}
 		return true;
 	}
 
@@ -360,6 +372,16 @@ namespace engine::ui {
 		if (!State->Ready) return;
 		auto &pending = State->AutomationEvents.emplace_back();
 		pending.Event = event;
+		if (State->Drawable && event.type == SDL_EVENT_MOUSE_MOTION &&
+			(ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
+			if (SDL_Window *window = SDL_GetWindowFromID(event.motion.windowID); window != nullptr) {
+				int x = 0;
+				int y = 0;
+				SDL_GetWindowPosition(window, &x, &y);
+				pending.Event.motion.x += static_cast<float>(x);
+				pending.Event.motion.y += static_cast<float>(y);
+			}
+		}
 		if (event.type == SDL_EVENT_TEXT_INPUT) {
 			pending.Text = event.text.text == nullptr ? "" : event.text.text;
 			pending.Event.text.text = nullptr;
@@ -429,6 +451,32 @@ namespace engine::ui {
 
 	uint64_t Interface::Signature() const {
 		return State->DrawSignature;
+	}
+
+	void Interface::PresentPlatformWindows() {
+		if (!State->Drawable || (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0) {
+			return;
+		}
+		ENGINE_PROFILE_CAT("ui.platform windows", core::ProfileCategory::Render);
+		ImGui::UpdatePlatformWindows();
+		if (!HasPlatformWindows()) return;
+		ImGui::RenderPlatformWindowsDefault();
+		// Secondary windows upload into the backend's shared geometry buffers.
+		// The main overlay must restore its vertices even if its chrome stayed still.
+		State->UploadedSignatureValid = false;
+	}
+
+	bool Interface::HasPlatformWindows() const {
+		return State->Drawable && (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0 &&
+			   ImGui::GetPlatformIO().Viewports.Size > 1;
+	}
+
+	bool Interface::HasFocus() const {
+		if (!State->Drawable) return true;
+		SDL_Window *focused = SDL_GetKeyboardFocus();
+		if (focused == nullptr) return false;
+		const auto id = reinterpret_cast<void *>(static_cast<intptr_t>(SDL_GetWindowID(focused)));
+		return ImGui::FindViewportByPlatformHandle(id) != nullptr;
 	}
 
 	bool Interface::WantsMouse() const {

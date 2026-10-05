@@ -4,6 +4,7 @@
 #include "ImageCacheAnnotation.hpp"
 #include "InlineCollections.hpp"
 #include "PxcxKeyProvenance.hpp"
+#include "PxcxNativePorts.hpp"
 #include "TileProperties.hpp"
 
 #include <engine/imagegraph/Catalogue.hpp>
@@ -876,16 +877,6 @@ namespace engine::imagegraphio {
 				   Real(source, 9, "mask_feather", node);
 		}
 
-		std::string_view NativeOutput(std::string_view type, uint32_t index) {
-			if (type == "Node_Number") return index == 0 ? "number" : std::string_view{};
-			if (type == "Node_Math") return index == 0 ? "result" : std::string_view{};
-			if (type == "Node_Shape") {
-				constexpr std::array<std::string_view, 4> outputs = {"colored", "mask", "height", "uv"};
-				return index < outputs.size() ? outputs[index] : std::string_view{};
-			}
-			return index == 0 ? "image" : std::string_view{};
-		}
-
 		std::string_view NativeInput(std::string_view type, uint32_t index) {
 			if (type == "Node_Math") {
 				if (index == 1) return "a";
@@ -927,7 +918,9 @@ namespace engine::imagegraphio {
 		}
 		bool LinksRepresentable(const bake::PxcxArchive &archive, const bake::PxcxNodeFact &node) {
 			for (const bake::PxcxLinkFact &link : archive.Links) {
-				if (link.FromNode == node.Id && NativeOutput(node.Type, link.FromIndex).empty()) return false;
+				if (link.FromNode == node.Id &&
+					detail::LegacyNativeOutputPort(node.Type, link.FromIndex).empty())
+					return false;
 				if (link.ToNode == node.Id && NativeInput(node.Type, link.ToInputIndex).empty()) return false;
 			}
 			return true;
@@ -4313,7 +4306,8 @@ namespace engine::imagegraphio {
 			const size_t from = indexById.at(link.FromNode);
 			const size_t to = indexById.at(link.ToNode);
 			const std::string fromPort =
-				native[from]	   ? std::string(NativeOutput(archive.Nodes[from].Type, link.FromIndex))
+				native[from]
+					? std::string(detail::LegacyNativeOutputPort(archive.Nodes[from].Type, link.FromIndex))
 				: catalogued[from] ? CatalogueOutputPort(*catalogued[from], link.FromIndex)
 								   : OutputPort(link.FromIndex);
 			std::string toPort = native[to]
@@ -4333,7 +4327,10 @@ namespace engine::imagegraphio {
 				result.Graph.Outputs.push_back(
 					{node.Id,
 					 link.FromNode,
-					 native[from]		? std::string(NativeOutput(archive.Nodes[from].Type, link.FromIndex))
+					 native[from]
+						 ? std::string(
+							   detail::LegacyNativeOutputPort(archive.Nodes[from].Type, link.FromIndex)
+						   )
 					 : catalogued[from] ? CatalogueOutputPort(*catalogued[from], link.FromIndex)
 										: OutputPort(link.FromIndex)}
 				);

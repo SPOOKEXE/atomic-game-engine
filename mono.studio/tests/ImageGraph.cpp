@@ -959,11 +959,29 @@ TEST_CASE("every source catalogue node is searchable and placed with source defa
 				return port.Direction == engine::imagegraph::PortDirection::Input;
 			}
 		));
-		if (type->Title == entry.Title && type->Category == "Pixel Composer/" + std::string(entry.Family) &&
+		const std::string_view expectedTitle =
+			entry.Type == "pc.graph_preview" ? "Image Preview" : entry.Title;
+		if (type->Title == expectedTitle && type->Category == "Pixel Composer/" + std::string(entry.Family) &&
 			type->Inputs.size() == inputs && type->Outputs.size() == entry.Schema.Ports.size() - inputs)
 			registered++;
 	}
 	CHECK(registered == engine::imagegraph::Catalogue().size());
+	for (const auto &[id, category] :
+		 {std::pair<std::string_view, std::string_view>{"image.solid", "Generate"},
+		  {"image.flip", "Filter"},
+		  {"image.audio_recording", "Audio"},
+		  {"value.array", "Values"}}) {
+		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(std::string(id));
+		REQUIRE(type != nullptr);
+		CHECK(type->Category == category);
+	}
+	const nodegraph::NodeType *preview = nodegraph::NodeTypes::Find("pc.graph_preview");
+	REQUIRE(preview != nullptr);
+	CHECK(preview->Title == "Image Preview");
+	const engine::imagegraph::CatalogueEntry *previewEntry =
+		engine::imagegraph::FindCatalogueEntry("pc.graph_preview");
+	REQUIRE(previewEntry != nullptr);
+	CHECK(preview->Category == "Pixel Composer/" + std::string(previewEntry->Family));
 
 	REQUIRE(canvas.Add("pc.bw", 20.0f, 30.0f) != nodegraph::NO_NODE);
 	Document added;

@@ -3,9 +3,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <fstream>
+#include <studio/ImageGraph.hpp>
 #include <studio/PxcxSave.hpp>
 
 TEST_SUITE_ID("studio.pxcxsave")
@@ -290,4 +292,47 @@ TEST_CASE(
 	CHECK_FALSE(published.ThumbnailIdentity);
 	CHECK(std::filesystem::exists(path / "keep"));
 	OneFile(directory);
+}
+TEST_CASE(
+	"Studio saves and reopens an embedded image viewer in a PXC project", "[studio][pxcx_save][node-preview]"
+) {
+	using namespace engine::imagegraph;
+	const auto source = ImageSource();
+	auto authored = source.Graph;
+	Node viewer{"viewer", "pc.graph_preview", {}, {90, 40}, {}};
+	const auto *schema = FindSchema(viewer.Type);
+	REQUIRE(schema);
+	for (const auto &property : schema->Properties) {
+		if (auto value = studio::ImageGraphPropertyDefault(authored, viewer.Type, property.Id))
+			viewer.Values.push_back({std::string(property.Id), std::move(*value)});
+	}
+	authored.Nodes.push_back(std::move(viewer));
+	authored.Links.push_back({"solid", "image", "viewer", "surface"});
+	Directory directory;
+	const auto path = directory.Path / "viewer.pxc";
+	Diagnostic diagnostic;
+	studio::PxcxPublishedSave published;
+	const bool saved =
+		studio::SavePxcxProjectionAndAdopt(path, source.Source, authored, {}, published, nullptr, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(saved);
+	engine::bake::PxcxArchive archive;
+	std::string failure;
+	REQUIRE(engine::bake::ReadPxcx(Read(path), archive, failure));
+	CHECK(archive.GraphJson.find("Node_Graph_Preview") != std::string::npos);
+	engine::imagegraphio::PxcxImport reloaded;
+	REQUIRE(engine::imagegraphio::ImportPxcxImageGraph(archive, reloaded, failure));
+	const auto found =
+		std::find_if(reloaded.Graph.Nodes.begin(), reloaded.Graph.Nodes.end(), [](const auto &node) {
+			return node.Id == "viewer";
+		});
+	REQUIRE(found != reloaded.Graph.Nodes.end());
+	CHECK(found->Type == "pc.graph_preview");
+	CHECK(found->Position.X == 90);
+	CHECK(found->Position.Y == 40);
+	REQUIRE(std::any_of(reloaded.Graph.Links.begin(), reloaded.Graph.Links.end(), [](const auto &link) {
+		return link.FromNode == "solid" && link.FromPort == "image" && link.ToNode == "viewer" &&
+			   link.ToPort == "surface";
+	}));
+	CHECK(Render(reloaded.Graph).Pixels == Render(source.Graph).Pixels);
 }

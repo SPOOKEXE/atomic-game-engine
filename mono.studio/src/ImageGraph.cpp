@@ -140,6 +140,21 @@ namespace studio {
 			return std::string(dot == std::string_view::npos ? type : type.substr(dot + 1));
 		}
 
+		std::string_view NativeImageNodeCategory(std::string_view type) {
+			if (type.starts_with("value.")) return "Values";
+			if (type.starts_with("image.audio_")) return "Audio";
+			if (type == "image.transform_3d") return "3D";
+			if (type == "image.solid" || type == "image.gradient" || type == "image.noise_simplex" ||
+				type == "image.tile")
+				return "Generate";
+			if (type == "image.blend" || type == "image.height_blend") return "Composite";
+			if (type == "image.flip" || type == "image.invert" || type == "image.alpha_cutoff" ||
+				type == "image.offset" || type == "image.threshold" || type == "image.posterize")
+				return "Filter";
+			if (type == "image.passthrough") return "Utility";
+			return "Image";
+		}
+
 		void RegisterDataType(engine::imagegraph::ValueType type, const char *label) {
 			nodegraph::DataType dataType;
 			dataType.Id = CanvasType(type);
@@ -810,7 +825,7 @@ namespace studio {
 			[](const engine::imagegraph::NodeSchema &schema, std::string title, std::string category) {
 				nodegraph::NodeType type;
 				type.Id = std::string(schema.Type);
-				type.Title = std::move(title);
+				type.Title = schema.Type == "pc.graph_preview" ? "Image Preview" : std::move(title);
 				type.Category = std::move(category);
 				type.Accent = nodegraph::Colour::Hex(0x262626);
 				for (const engine::imagegraph::PortSchema &port : schema.Ports) {
@@ -827,7 +842,9 @@ namespace studio {
 			};
 		for (const std::string_view id : IMAGE_NODE_TYPES) {
 			if (const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(id))
-				registerSchema(*schema, NodeTitle(schema->Type), "Image");
+				registerSchema(
+					*schema, NodeTitle(schema->Type), std::string(NativeImageNodeCategory(schema->Type))
+				);
 		}
 		// Every source catalogue node is searchable under its documentation family, native executor or not.
 		for (const engine::imagegraph::CatalogueEntry &entry : engine::imagegraph::Catalogue())

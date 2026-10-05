@@ -2,6 +2,7 @@
 #include "HlslSourceArguments.hpp"
 #include "ImageCacheAnnotation.hpp"
 #include "PxcxKeyProvenance.hpp"
+#include "PxcxNativePorts.hpp"
 #include "SourceInputProvenance.hpp"
 #include "SourceTimelineProjection.hpp"
 #include "TileProperties.hpp"
@@ -2584,6 +2585,20 @@ namespace engine::imagegraphio {
 			const auto *entry = FindCatalogueSource(record.value("type", ""));
 			if (entry) {
 				if (output) {
+					const auto *native = NativeNode(working.Graph, record.value("id", ""));
+					if (native && native->Type != entry->Type && !FindCatalogueEntry(native->Type)) {
+						const auto *schema = FindSchema(native->Type);
+						const bool declared =
+							schema &&
+							std::any_of(schema->Ports.begin(), schema->Ports.end(), [&](const auto &socket) {
+								return socket.Direction == PortDirection::Output && socket.Id == port;
+							});
+						if (declared) {
+							for (uint32_t index = 0; index < 4; ++index)
+								if (detail::LegacyNativeOutputPort(entry->SourceNode, index) == port)
+									return index;
+						}
+					}
 					if (entry->Type == "pc.hlsl" && port.ends_with(".bypass")) {
 						const auto inputPort = port.substr(0, port.size() - 7);
 						const auto *owner = NativeNode(desired, record.value("id", ""));
