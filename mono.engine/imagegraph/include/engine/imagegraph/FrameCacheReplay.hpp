@@ -41,6 +41,18 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
 	);
+	// Input and connection edits wake the member's current owner, then enclosing source groups.
+	// Overlapping membership lists do not select additional owners. All selected owner actions
+	// share one work cap and publish together, preserving latest outputs and unrelated histories.
+	[[nodiscard]] Status EnableSourceFrameCacheEditedGroups(
+		const Document &document,
+		std::span<const std::string_view> editedNodes,
+		const DataReplayState &source,
+		DataReplayState &output,
+		const std::optional<SourceFrameCacheProjectObservation> &project,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
 	inline constexpr std::string_view SOURCE_FRAME_CACHE_NATIVE_TEXT = "composer_frame_cache_text";
 	inline constexpr std::string_view SOURCE_FRAME_CACHE_NATIVE_DATA = "composer_frame_cache_data";
 	// Native constructor receipts carry named node types, sparse frame indices and

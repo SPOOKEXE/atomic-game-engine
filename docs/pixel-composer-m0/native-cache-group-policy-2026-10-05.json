@@ -82,7 +82,7 @@
     ],
     "required_next_steps": [
       "Initialize remaining path/self, runtime resource and dynamic constructors through exact native owner semantics. Zero matrices, curves, gradients, colours and cold Join/Combine/Shift/Weight Adjust/Path3D ownership are verified.",
-      "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
+      "Integrate authored load refresh for append/revision, exact Studio semantic input-edit observations and seek/restart activity policy. Core edited-ID actions and two-journal host notifications are verified.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
       "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
       "Cache hit/loading branch getter admission and complete source update-loop scheduling remain to audit and integrate before enabling nonempty groups."
@@ -808,7 +808,63 @@
         "node_value.gml valueUpdate/valueFromUpdate call node_data.gml cacheCheck.",
         "cacheCheck enables the current cache_group owner pointer, then checks enclosing groups. Enable follows Serialize/loading/appending gates and force-clears owner rows."
       ],
-      "next": "Apply bounded owner-pointer authoring transitions to both current and frame-start host journals before same-clock Prepare; retain member outputs and invalidate affected previews."
+      "next": "Apply bounded owner-pointer authoring transitions to both current and frame-start host journals before same-clock Prepare; retain member outputs and invalidate affected previews.",
+      "implementation_followup": "Core and captured-host edited-ID actions verified. Studio semantic observation and authoring callback wiring remain pending."
+    },
+    "input_edit_implementation": {
+      "scope": "Core edited-ID selection and host two-journal authoring notification. Studio semantic input-edit detection still pending.",
+      "api": [
+        "EnableSourceFrameCacheEditedGroups",
+        "CapturedFeedbackHost::NotifySourceInputEdits"
+      ],
+      "coverage": [
+        "Current OwnerId selects only the controlling cache despite overlapping loaded lists; enclosing source group owners also wake.",
+        "Selected Enable clears all selected-owner processor rows, retains latest getter output and wakes every listed member; unrelated owner frames and member activity survive.",
+        "Serialize=false, loading and appending keep frames and activity, including a full4096-row ledger with selected-owner rows absent.",
+        "Shared copy/name/row work cap, prior destination and validation workspace admission, cyclic/missing ancestry and transactional byte refusal.",
+        "Host stages both current and preframe journals atomically; a same-clock revised preview and subsequent same-clock replay show the edited pixels for Cache and Cache Array."
+      ],
+      "official_source_files": {
+        "scripts/node_data/node_data.gml": {
+          "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d",
+          "git_blob_sha1": "7488016460777a298599fe2219006e5d233bf4d4",
+          "verified_local_match": true
+        },
+        "scripts/node_value/node_value.gml": {
+          "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+          "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125",
+          "verified_local_match": true
+        },
+        "scripts/__node_cache_base/__node_cache_base.gml": {
+          "sha256": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb",
+          "git_blob_sha1": "251252e9867bc8406aba016217fe0764fe0fe295",
+          "verified_local_match": true
+        }
+      },
+      "source_calls": [
+        "node_value.gml:2434-2453,2496",
+        "node_data.gml:1491-1500,3305-3309",
+        "__node_cache_base.gml:48-54"
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-batch1-results.json",
+      "native_cases": 4901,
+      "native_assertions": 1993710,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-build1.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-issues.json",
+      "review": "Sol read-only review found two prebuild admission defects; both repaired together and follow-up review found no further confirmed defect. Joined batch had no failures.",
+      "profiling": "New operation carries ENGINE_PROFILE. No fresh isolated performance measurement or sanitizer run; no performance claim.",
+      "remaining": [
+        "Collect exact semantic input edits across Studio authoring callbacks, including connections, undo and multiple edits before preview. Position, labels and Serialize-only changes must not wake members.",
+        "Source append/load/seek/revision activity policies, remaining runtime/dynamic constructors, licensed-reference parity and live Studio workflows remain incomplete."
+      ]
     }
   },
   "source_sha256": {

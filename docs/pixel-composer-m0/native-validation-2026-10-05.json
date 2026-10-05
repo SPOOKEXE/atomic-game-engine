@@ -6,14 +6,14 @@
   "runtime_gates": [
     {
       "name": "bake",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-bake-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-bake-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_bake"
       ],
       "binary": ".cache/build/release-tests/tests/test_bake",
       "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
       "exit_code": 0,
-      "elapsed_seconds": 0.316,
+      "elapsed_seconds": 0.305,
       "assertions": 15875,
       "cases": 157,
       "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
@@ -22,88 +22,88 @@
     },
     {
       "name": "physics",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-physics-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-physics-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_imagegraphphysics"
       ],
       "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
-      "binary_sha256": "53c31e60b4be2d7598cf1953d181ade69c8743d0bf7f41f8c43a0245cb59c918",
+      "binary_sha256": "3f9a51e4b49e2580b0459cd960fb88654bfbf4d83ed8d97032ca6a07ed2ade4f",
       "exit_code": 0,
-      "elapsed_seconds": 0.42,
+      "elapsed_seconds": 0.343,
       "assertions": 715,
       "cases": 43,
-      "binary_sha256_after": "53c31e60b4be2d7598cf1953d181ade69c8743d0bf7f41f8c43a0245cb59c918",
+      "binary_sha256_after": "3f9a51e4b49e2580b0459cd960fb88654bfbf4d83ed8d97032ca6a07ed2ade4f",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "runner",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-runner-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-runner-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_imagegraph_runner"
       ],
       "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
-      "binary_sha256": "933d296debd685c5dc36055bd3caf3fe2c4afe03c27346621afe9b0374a823b8",
+      "binary_sha256": "547e451fabaf43fcda0574421cc01efb8f540b87341bb7496b91bc55beb35e7d",
       "exit_code": 0,
-      "elapsed_seconds": 0.327,
+      "elapsed_seconds": 0.303,
       "assertions": 296,
       "cases": 29,
-      "binary_sha256_after": "933d296debd685c5dc36055bd3caf3fe2c4afe03c27346621afe9b0374a823b8",
+      "binary_sha256_after": "547e451fabaf43fcda0574421cc01efb8f540b87341bb7496b91bc55beb35e7d",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "font",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-font-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-font-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_imagegraphfont"
       ],
       "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
-      "binary_sha256": "c106dd2fd2b22c619f4273dabcf6217d132b0d59c725dd03b8e4e66c1ea181bc",
+      "binary_sha256": "ec7b7d0540f50f035ce074a1641e673f0c995c208a35cb4d53a91e34ce8c8ad3",
       "exit_code": 0,
-      "elapsed_seconds": 0.553,
+      "elapsed_seconds": 0.554,
       "assertions": 1686,
       "cases": 37,
-      "binary_sha256_after": "c106dd2fd2b22c619f4273dabcf6217d132b0d59c725dd03b8e4e66c1ea181bc",
+      "binary_sha256_after": "ec7b7d0540f50f035ce074a1641e673f0c995c208a35cb4d53a91e34ce8c8ad3",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "export",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-export-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-export-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_imagegraphexport"
       ],
       "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
-      "binary_sha256": "7cb7bdfdb1c3f8ef7f64caff91a9a09caf9812b67b0d50d585b41e4c79997c85",
+      "binary_sha256": "3ca2af4363f107579b04361a2247cac42c324fa37c083a587ca13d318abd983a",
       "exit_code": 0,
-      "elapsed_seconds": 0.699,
+      "elapsed_seconds": 0.605,
       "assertions": 3132,
       "cases": 77,
-      "binary_sha256_after": "7cb7bdfdb1c3f8ef7f64caff91a9a09caf9812b67b0d50d585b41e4c79997c85",
+      "binary_sha256_after": "3ca2af4363f107579b04361a2247cac42c324fa37c083a587ca13d318abd983a",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "render",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-render-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-render-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_render",
         "[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
       ],
       "binary": ".cache/build/release-tests/tests/test_render",
-      "binary_sha256": "3298eb890f12e1e89459799fb620c23be10b316160cbb79b1fc31784719e2162",
+      "binary_sha256": "0aa3a56b80711d03902f7225015fbdbdca20734396eabd781322f17079d7f6af",
       "exit_code": 0,
-      "elapsed_seconds": 1.648,
+      "elapsed_seconds": 1.825,
       "assertions": 477,
       "cases": 15,
-      "binary_sha256_after": "3298eb890f12e1e89459799fb620c23be10b316160cbb79b1fc31784719e2162",
+      "binary_sha256_after": "0aa3a56b80711d03902f7225015fbdbdca20734396eabd781322f17079d7f6af",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "cli",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-cli-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-cli-batch1.log",
       "command": [
         "ctest",
         "--test-dir",
@@ -114,109 +114,109 @@
         "-j8"
       ],
       "exit_code": 0,
-      "elapsed_seconds": 3.229,
+      "elapsed_seconds": 3.271,
       "ctest_cases": 16
     },
     {
       "name": "io",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-io-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-io-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_imagegraphio"
       ],
       "binary": ".cache/build/release-tests/tests/test_imagegraphio",
-      "binary_sha256": "abb43c7510c1e3b5a024c3bf128c1d0f876b4e39cc58fb5aa5d7e00e6ba76590",
+      "binary_sha256": "50d9db424ec8e6e3dab75cc2ac6b9d6ba7466ed4bf6166b12301235dd9e3ed9c",
       "exit_code": 0,
-      "elapsed_seconds": 3.392,
+      "elapsed_seconds": 3.407,
       "assertions": 11685,
       "cases": 275,
-      "binary_sha256_after": "abb43c7510c1e3b5a024c3bf128c1d0f876b4e39cc58fb5aa5d7e00e6ba76590",
+      "binary_sha256_after": "50d9db424ec8e6e3dab75cc2ac6b9d6ba7466ed4bf6166b12301235dd9e3ed9c",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "core",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-core-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-core-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_imagegraph"
       ],
       "binary": ".cache/build/release-tests/tests/test_imagegraph",
-      "binary_sha256": "dc2910c6360ac237308fb92f40cc1562ac8a315d5495d10a3b2e117c714785b6",
+      "binary_sha256": "61fd44a8825f6dc04eb57a0ae42718f74c97521de05c9531ca3c897baaa8fdf7",
       "exit_code": 0,
-      "elapsed_seconds": 3.643,
-      "assertions": 1890857,
-      "cases": 2864,
-      "binary_sha256_after": "dc2910c6360ac237308fb92f40cc1562ac8a315d5495d10a3b2e117c714785b6",
+      "elapsed_seconds": 3.613,
+      "assertions": 1890937,
+      "cases": 2866,
+      "binary_sha256_after": "61fd44a8825f6dc04eb57a0ae42718f74c97521de05c9531ca3c897baaa8fdf7",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "assetc",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-assetc-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-assetc-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_assetc"
       ],
       "binary": ".cache/build/release-tests/tests/test_assetc",
-      "binary_sha256": "d848aeab3ac0870d455b80891029cd95a5ba82f4ec754c909decc82f5f312976",
+      "binary_sha256": "c3584b4d8636c78b633330e5d0318381e74b0f24b720d91c983dc59be424e52b",
       "exit_code": 0,
-      "elapsed_seconds": 6.093,
+      "elapsed_seconds": 6.168,
       "assertions": 509,
       "cases": 45,
-      "binary_sha256_after": "d848aeab3ac0870d455b80891029cd95a5ba82f4ec754c909decc82f5f312976",
+      "binary_sha256_after": "c3584b4d8636c78b633330e5d0318381e74b0f24b720d91c983dc59be424e52b",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "client",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-client-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-client-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_client",
         "~[.],[argument_binding][gpu],[argument-transform-gpu]"
       ],
       "binary": ".cache/build/release-tests/tests/test_client",
-      "binary_sha256": "fb02166f05c75ab9aa820502aaae463fe67126f091de7dc5051134973858b491",
+      "binary_sha256": "0caa75d199b31d6a64ea7b39dcfbcd874ef7697b227aa9a76e04fc8fbe10f940",
       "exit_code": 0,
-      "elapsed_seconds": 4.827,
+      "elapsed_seconds": 4.927,
       "assertions": 23821,
       "cases": 358,
-      "binary_sha256_after": "fb02166f05c75ab9aa820502aaae463fe67126f091de7dc5051134973858b491",
+      "binary_sha256_after": "0caa75d199b31d6a64ea7b39dcfbcd874ef7697b227aa9a76e04fc8fbe10f940",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "studio",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-studio-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-studio-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_studio"
       ],
       "binary": ".cache/build/release-tests/tests/test_studio",
-      "binary_sha256": "cf8c994ae1c68403310393e17b90fcc08412fd92fac92491237b9adbc5fa6120",
+      "binary_sha256": "24304a4efd1817977253399b97eac425d02216a44c1b0cc238d61d8a6efc9d30",
       "exit_code": 0,
-      "elapsed_seconds": 7.429,
+      "elapsed_seconds": 7.584,
       "assertions": 43873,
       "cases": 959,
-      "binary_sha256_after": "cf8c994ae1c68403310393e17b90fcc08412fd92fac92491237b9adbc5fa6120",
+      "binary_sha256_after": "24304a4efd1817977253399b97eac425d02216a44c1b0cc238d61d8a6efc9d30",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "ui",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-ui-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-ui-batch1.log",
       "command": [
         ".cache/build/release-tests/tests/test_ui"
       ],
       "binary": ".cache/build/release-tests/tests/test_ui",
-      "binary_sha256": "0c2602485f06c9053f61ea9982d2e4aaf502a9741ec0e0de0dfd2f2b9da569a8",
+      "binary_sha256": "4074e7aac4410bc9414120a4d370af27f511b2ebe650ce55fb2e13e969ab0517",
       "exit_code": 0,
-      "elapsed_seconds": 0.573,
+      "elapsed_seconds": 0.56,
       "assertions": 704,
       "cases": 40,
-      "binary_sha256_after": "0c2602485f06c9053f61ea9982d2e4aaf502a9741ec0e0de0dfd2f2b9da569a8",
+      "binary_sha256_after": "4074e7aac4410bc9414120a4d370af27f511b2ebe650ce55fb2e13e969ab0517",
       "binary_changed_during_test": false,
       "current_binary_matches_test_record": true
     },
     {
       "name": "startup",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-startup-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-startup-batch1.log",
       "command": [
         "ctest",
         "--test-dir",
@@ -226,13 +226,13 @@
         "-V"
       ],
       "exit_code": 0,
-      "elapsed_seconds": 0.275,
+      "elapsed_seconds": 0.26,
       "assertions": 5,
       "cases": 1
     },
     {
       "name": "lint",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-lint-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-lint-batch1.log",
       "command": [
         "ruff",
         "check",
@@ -240,11 +240,11 @@
         "scripts/tests/pixel_composer_catalogue_metadata_test.py"
       ],
       "exit_code": 0,
-      "elapsed_seconds": 0.013
+      "elapsed_seconds": 0.023
     },
     {
       "name": "architecture",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-architecture-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-architecture-batch1.log",
       "command": [
         "cmake",
         "-DGRAPH=.cache/build/release-tests/target-graph.json",
@@ -253,11 +253,11 @@
         "mono.tools/architecture/CheckTargetGraph.cmake"
       ],
       "exit_code": 0,
-      "elapsed_seconds": 0.476
+      "elapsed_seconds": 0.444
     },
     {
       "name": "python",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-python-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-python-batch1.log",
       "command": [
         "python3",
         "-m",
@@ -269,12 +269,12 @@
         "pixel_composer_*_test.py"
       ],
       "exit_code": 0,
-      "elapsed_seconds": 1.897,
+      "elapsed_seconds": 1.693,
       "python_cases": 100
     },
     {
       "name": "format",
-      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-format-batch2.log",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-format-batch1.log",
       "command": [
         "/usr/bin/clang-format-21",
         "--dry-run",
@@ -317,7 +317,7 @@
         "mono.engine/imagegraph/tests/PendingGraph.cpp"
       ],
       "exit_code": 0,
-      "elapsed_seconds": 0.808
+      "elapsed_seconds": 0.671
     }
   ],
   "architecture": {
@@ -9351,5 +9351,388 @@
       "Builder, Bridge, Plot, Trail and internal wrapper self constructors require explicit missing-method/indexing semantics; generic empty paths would hide source failures.",
       "Runtime resource and dynamic outputs, cache-group host edits/load/seek/revision activity, licensed-reference parity and live Studio workflows remain incomplete."
     ]
+  },
+  "preceding_input_edit_runtime_gates": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-bake-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_bake"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.316,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-physics-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "53c31e60b4be2d7598cf1953d181ade69c8743d0bf7f41f8c43a0245cb59c918",
+      "exit_code": 0,
+      "elapsed_seconds": 0.42,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "53c31e60b4be2d7598cf1953d181ade69c8743d0bf7f41f8c43a0245cb59c918",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-runner-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph_runner"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "933d296debd685c5dc36055bd3caf3fe2c4afe03c27346621afe9b0374a823b8",
+      "exit_code": 0,
+      "elapsed_seconds": 0.327,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "933d296debd685c5dc36055bd3caf3fe2c4afe03c27346621afe9b0374a823b8",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-font-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphfont"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "c106dd2fd2b22c619f4273dabcf6217d132b0d59c725dd03b8e4e66c1ea181bc",
+      "exit_code": 0,
+      "elapsed_seconds": 0.553,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "c106dd2fd2b22c619f4273dabcf6217d132b0d59c725dd03b8e4e66c1ea181bc",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-export-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphexport"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "7cb7bdfdb1c3f8ef7f64caff91a9a09caf9812b67b0d50d585b41e4c79997c85",
+      "exit_code": 0,
+      "elapsed_seconds": 0.699,
+      "assertions": 3132,
+      "cases": 77,
+      "binary_sha256_after": "7cb7bdfdb1c3f8ef7f64caff91a9a09caf9812b67b0d50d585b41e4c79997c85",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-render-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_render",
+        "[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "3298eb890f12e1e89459799fb620c23be10b316160cbb79b1fc31784719e2162",
+      "exit_code": 0,
+      "elapsed_seconds": 1.648,
+      "assertions": 477,
+      "cases": 15,
+      "binary_sha256_after": "3298eb890f12e1e89459799fb620c23be10b316160cbb79b1fc31784719e2162",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-cli-batch2.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_)",
+        "--output-on-failure",
+        "-j8"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.229,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-io-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "abb43c7510c1e3b5a024c3bf128c1d0f876b4e39cc58fb5aa5d7e00e6ba76590",
+      "exit_code": 0,
+      "elapsed_seconds": 3.392,
+      "assertions": 11685,
+      "cases": 275,
+      "binary_sha256_after": "abb43c7510c1e3b5a024c3bf128c1d0f876b4e39cc58fb5aa5d7e00e6ba76590",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-core-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "dc2910c6360ac237308fb92f40cc1562ac8a315d5495d10a3b2e117c714785b6",
+      "exit_code": 0,
+      "elapsed_seconds": 3.643,
+      "assertions": 1890857,
+      "cases": 2864,
+      "binary_sha256_after": "dc2910c6360ac237308fb92f40cc1562ac8a315d5495d10a3b2e117c714785b6",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-assetc-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_assetc"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "d848aeab3ac0870d455b80891029cd95a5ba82f4ec754c909decc82f5f312976",
+      "exit_code": 0,
+      "elapsed_seconds": 6.093,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "d848aeab3ac0870d455b80891029cd95a5ba82f4ec754c909decc82f5f312976",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-client-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_client",
+        "~[.],[argument_binding][gpu],[argument-transform-gpu]"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "fb02166f05c75ab9aa820502aaae463fe67126f091de7dc5051134973858b491",
+      "exit_code": 0,
+      "elapsed_seconds": 4.827,
+      "assertions": 23821,
+      "cases": 358,
+      "binary_sha256_after": "fb02166f05c75ab9aa820502aaae463fe67126f091de7dc5051134973858b491",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-studio-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_studio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "cf8c994ae1c68403310393e17b90fcc08412fd92fac92491237b9adbc5fa6120",
+      "exit_code": 0,
+      "elapsed_seconds": 7.429,
+      "assertions": 43873,
+      "cases": 959,
+      "binary_sha256_after": "cf8c994ae1c68403310393e17b90fcc08412fd92fac92491237b9adbc5fa6120",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-ui-batch2.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_ui"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "0c2602485f06c9053f61ea9982d2e4aaf502a9741ec0e0de0dfd2f2b9da569a8",
+      "exit_code": 0,
+      "elapsed_seconds": 0.573,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "0c2602485f06c9053f61ea9982d2e4aaf502a9741ec0e0de0dfd2f2b9da569a8",
+      "binary_changed_during_test": false,
+      "current_binary_matches_test_record": true
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-startup-batch2.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^studio_composer_startup_arguments$",
+        "-V"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.275,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-lint-batch2.log",
+      "command": [
+        "ruff",
+        "check",
+        "scripts/pixel-composer/generate-catalogue.py",
+        "scripts/tests/pixel_composer_catalogue_metadata_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.013
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-architecture-batch2.log",
+      "command": [
+        "cmake",
+        "-DGRAPH=.cache/build/release-tests/target-graph.json",
+        "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+        "-P",
+        "mono.tools/architecture/CheckTargetGraph.cmake"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.476
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-python-batch2.log",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "pixel_composer_*_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.897,
+      "python_cases": 100
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cold-path-format-batch2.log",
+      "command": [
+        "/usr/bin/clang-format-21",
+        "--dry-run",
+        "--Werror",
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+        "mono.engine/imagegraph/src/DataReplay.cpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+        "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+        "mono.engine/imagegraph/tests/DataReplay.cpp",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+        "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+        "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+        "mono.engine/ui/src/Interface.cpp",
+        "mono.engine/ui/tests/Interface.cpp",
+        "mono.engine/ui/include/engine/ui/Interface.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+        "mono.engine/imagegraph/src/nodes/Path.hpp",
+        "mono.engine/imagegraph/tests/Catalogue.cpp",
+        "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/PendingGraph.cpp"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.808
+    }
+  ],
+  "input_edit_validation": {
+    "scope": "Core edited-ID selection and host two-journal authoring notification. Studio semantic input-edit detection still pending.",
+    "api": [
+      "EnableSourceFrameCacheEditedGroups",
+      "CapturedFeedbackHost::NotifySourceInputEdits"
+    ],
+    "coverage": [
+      "Current OwnerId selects only the controlling cache despite overlapping loaded lists; enclosing source group owners also wake.",
+      "Selected Enable clears all selected-owner processor rows, retains latest getter output and wakes every listed member; unrelated owner frames and member activity survive.",
+      "Serialize=false, loading and appending keep frames and activity, including a full4096-row ledger with selected-owner rows absent.",
+      "Shared copy/name/row work cap, prior destination and validation workspace admission, cyclic/missing ancestry and transactional byte refusal.",
+      "Host stages both current and preframe journals atomically; a same-clock revised preview and subsequent same-clock replay show the edited pixels for Cache and Cache Array."
+    ],
+    "official_source_files": {
+      "scripts/node_data/node_data.gml": {
+        "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d",
+        "git_blob_sha1": "7488016460777a298599fe2219006e5d233bf4d4",
+        "verified_local_match": true
+      },
+      "scripts/node_value/node_value.gml": {
+        "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+        "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125",
+        "verified_local_match": true
+      },
+      "scripts/__node_cache_base/__node_cache_base.gml": {
+        "sha256": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb",
+        "git_blob_sha1": "251252e9867bc8406aba016217fe0764fe0fe295",
+        "verified_local_match": true
+      }
+    },
+    "source_calls": [
+      "node_value.gml:2434-2453,2496",
+      "node_data.gml:1491-1500,3305-3309",
+      "__node_cache_base.gml:48-54"
+    ],
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-batch1-results.json",
+    "native_cases": 4901,
+    "native_assertions": 1993710,
+    "approved_vulkan_cases": 15,
+    "python_cases": 100,
+    "cli_ctest_cases": 16,
+    "builds": [
+      {
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-build1.log",
+        "exit_code": 0
+      }
+    ],
+    "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/input-edit-issues.json",
+    "review": "Sol read-only review found two prebuild admission defects; both repaired together and follow-up review found no further confirmed defect. Joined batch had no failures.",
+    "profiling": "New operation carries ENGINE_PROFILE. No fresh isolated performance measurement or sanitizer run; no performance claim.",
+    "remaining": [
+      "Collect exact semantic input edits across Studio authoring callbacks, including connections, undo and multiple edits before preview. Position, labels and Serialize-only changes must not wake members.",
+      "Source append/load/seek/revision activity policies, remaining runtime/dynamic constructors, licensed-reference parity and live Studio workflows remain incomplete."
+    ],
+    "source_sha256": {
+      "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp": "fdf5fa5f0ab53557952887a4c6f2750928babc28bfdd710bed3667be315cdf93",
+      "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp": "25cbbba3c54b7830e31c17cad9915ef4d274e1acd0d459798da1902abd4b4777",
+      "mono.engine/imagegraph/src/FrameCacheReplay.cpp": "1df195011d9a59c0898729dc60d118ab3852d8cc507262c3a39a9dd7e042be36",
+      "mono.engine/imagegraph/tests/FrameCacheReplay.cpp": "0045cdecaf04b57c9e58e8a908e29ad515cef2a4c365dd6ba10502f8617f7a4b",
+      "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "dd38446bdfa7c0c830f5829b75339bfde96c2525374634ea1500d544e5dee04c",
+      "docs/pixel-composer-m0/native-cache-group-policy-2026-10-05.json": "e889d9fe4a669741eb1aadf97ef380f247a9baf78cdc0ce617cb4a3e43f8d0ba"
+    },
+    "binary_hashes": "All twelve native suite binaries and assetc/imagegraph child hashes stable during the batch and matched afterwards.",
+    "architecture": "Passed:55 modules,6 programs,39 layered.",
+    "format": "clang-format-21 dry run, ruff and git diff --check passed."
   }
 }

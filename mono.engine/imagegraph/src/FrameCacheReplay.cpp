@@ -5,6 +5,7 @@
 #include <engine/imagegraph/SourceFrameCacheProject.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <new>
 
@@ -230,15 +231,6 @@ namespace engine::imagegraph {
 							Status::InvalidValue, "frame-cache group owner type does not match the action"
 						);
 				}
-				if (std::any_of(
-						source.Entries.begin(),
-						source.Entries.end(),
-						[&](const auto &row) { return row.NodeId == node.Id; }
-					) &&
-					ClearedSourceFrameCacheReplayBytes(node, source) == UINT64_MAX)
-					return fail(
-						Status::InvalidValue, "frame-cache group action requires matching typed source rows"
-					);
 			}
 			const bool nonempty = (authoredGroup && !authoredGroup->Elements.empty()) ||
 								  (owner != source.CacheGroups.Owners.end() && !owner->Members.empty());
@@ -326,6 +318,186 @@ namespace engine::imagegraph {
 			diagnostic,
 			maximumBytes
 		);
+	}
+	Status EnableSourceFrameCacheEditedGroups(
+		const Document &document,
+		std::span<const std::string_view> editedNodes,
+		const DataReplayState &source,
+		DataReplayState &output,
+		const std::optional<SourceFrameCacheProjectObservation> &project,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraph.frame_cache.input_edits");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return code;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+			document.Nodes.size() > Limits::MaximumNodes || document.Groups.size() > Limits::MaximumGroups ||
+			editedNodes.size() > Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "frame-cache input edits exceed count or byte bounds");
+		const uint64_t retained = RetainedDataReplayBytes(source);
+		const uint64_t oldOutput = &source == &output ? 0 : RetainedDataReplayBytes(output);
+		const uint64_t initialWorkspace = DataReplayValidationWorkspaceBytes(source);
+		if (retained > maximumBytes || oldOutput > maximumBytes - retained ||
+			initialWorkspace > maximumBytes - retained - oldOutput)
+			return fail(Status::LimitExceeded, "frame-cache input edit validation exceeds live byte bounds");
+		if (ValidateDataReplay(source, maximumBytes - oldOutput, diagnostic) != Status::Ok)
+			return diagnostic.Code;
+		constexpr uint64_t WORK_LIMIT = 64ull * 1024 * 1024;
+		uint64_t work = WORK_LIMIT;
+		bool workExceeded = false;
+		const auto charge = [&](uint64_t count, uint64_t bytes) {
+			if (count && bytes > work / count) {
+				workExceeded = true;
+				return false;
+			}
+			work -= count * bytes;
+			return true;
+		};
+		const auto same = [&](std::string_view left, std::string_view right) {
+			return charge(1, std::max(left.size(), right.size()) + 1) && left == right;
+		};
+		std::array<const Node *, Limits::MaximumNodes> owners{};
+		size_t ownerCount = 0;
+		const auto select = [&](std::string_view id) {
+			const CacheGroupReplayNode *member = nullptr;
+			for (const auto &node : source.CacheGroups.Nodes) {
+				if (same(node.NodeId, id)) {
+					member = &node;
+					break;
+				}
+				if (workExceeded) return;
+			}
+			if (!member || member->OwnerId.empty()) return;
+			for (size_t i = 0; i < ownerCount; ++i)
+				if (same(owners[i]->Id, member->OwnerId) || workExceeded) return;
+			for (const auto &node : document.Nodes) {
+				if (same(node.Id, member->OwnerId)) {
+					owners[ownerCount++] = &node;
+					return;
+				}
+				if (workExceeded) return;
+			}
+		};
+		for (const auto id : editedNodes) {
+			if (id.empty() || id.size() > Limits::MaximumTextBytes)
+				return fail(Status::InvalidValue, "frame-cache edited node identity is invalid");
+			select(id);
+			std::string_view groupId;
+			for (const auto &node : document.Nodes) {
+				if (same(node.Id, id)) {
+					groupId = node.GroupId;
+					break;
+				}
+				if (workExceeded) break;
+			}
+			std::array<bool, Limits::MaximumGroups> visited{};
+			while (!groupId.empty() && !workExceeded) {
+				bool found = false;
+				for (size_t i = 0; i < document.Groups.size(); ++i) {
+					const auto &group = document.Groups[i];
+					if (!same(group.Id, groupId)) {
+						if (workExceeded) break;
+						continue;
+					}
+					if (visited[i])
+						return fail(Status::InvalidValue, "frame-cache edited group ancestry is cyclic");
+					visited[i] = true;
+					if (!group.OwnerNodeId.empty()) select(group.OwnerNodeId);
+					groupId = group.ParentId;
+					found = true;
+					break;
+				}
+				if (!found && !workExceeded)
+					return fail(Status::InvalidValue, "frame-cache edited group ancestry is missing");
+			}
+			if (workExceeded)
+				return fail(Status::LimitExceeded, "frame-cache input edits exceed name work bounds");
+		}
+		if (!ownerCount && &source == &output) {
+			diagnostic = {};
+			return Status::Ok;
+		}
+		uint64_t candidateBytes = retained;
+		size_t additionalRows = 0;
+		for (size_t i = 0; i < ownerCount; ++i) {
+			const auto &owner = *owners[i];
+			if (!charge(8, candidateBytes))
+				return fail(Status::LimitExceeded, "frame-cache input edits exceed batch copy work bounds");
+			for (const auto &row : source.Entries)
+				if (!charge(3, std::max(row.NodeId.size(), owner.Id.size()) + 1))
+					return fail(Status::LimitExceeded, "frame-cache input edits exceed row work bounds");
+			bool serialize = true;
+			if (owner.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
+				return fail(Status::LimitExceeded, "frame-cache edited owner properties exceed bounds");
+			for (const auto &property : owner.SourceProperties) {
+				if (property.Port != "serialize") continue;
+				const auto *flag = std::get_if<bool>(&property.Data);
+				if (!flag)
+					return fail(Status::InvalidValue, "frame-cache edited owner Serialize is not typed");
+				serialize = *flag;
+			}
+			const bool clear =
+				serialize && (!project || (!project->ProjectLoading && !project->ProjectAppending));
+			if (clear) {
+				const auto cleared = ClearedSourceFrameCacheReplayBytes(owner, source);
+				if (cleared == UINT64_MAX)
+					return fail(
+						Status::InvalidValue, "frame-cache edited owner requires matching typed rows"
+					);
+				const auto extra = cleared - retained;
+				if (extra > maximumBytes - std::min(candidateBytes, maximumBytes))
+					return fail(
+						Status::LimitExceeded, "frame-cache input edit candidates exceed byte bounds"
+					);
+				candidateBytes += extra;
+				const bool present =
+					std::any_of(source.Entries.begin(), source.Entries.end(), [&](const auto &row) {
+						return row.NodeId == owner.Id;
+					});
+				additionalRows += !present;
+			}
+			// One batch owns the budget for every copy and member lookup, not one cap per owner.
+			uint64_t names = 0;
+			for (const auto &node : source.CacheGroups.Nodes)
+				names += node.NodeId.size() + 1;
+			for (const auto &group : source.CacheGroups.Owners) {
+				if (!same(group.NodeId, owner.Id)) continue;
+				if (!charge(group.Members.size(), names)) break;
+				for (const auto &member : group.Members)
+					if (!charge(source.CacheGroups.Nodes.size(), member.size() + 1)) break;
+			}
+			if (!charge(1, candidateBytes) || workExceeded)
+				return fail(Status::LimitExceeded, "frame-cache input edits exceed batch work bounds");
+		}
+		const uint64_t workspace = DataReplayValidationWorkspaceBytes(source, additionalRows);
+		// The outer transaction retains source and destination while each admitted action builds its clone.
+		if (retained > maximumBytes || oldOutput > maximumBytes - retained ||
+			candidateBytes > (maximumBytes - retained - oldOutput) / 2 ||
+			workspace > maximumBytes - retained - oldOutput - 2 * candidateBytes)
+			return fail(Status::LimitExceeded, "frame-cache input edit transaction exceeds live byte bounds");
+		DataReplayState candidate = source;
+		const auto actionBytes = maximumBytes - retained - oldOutput;
+		for (size_t i = 0; i < ownerCount; ++i)
+			if (ApplySourceFrameCacheGroupReplay(
+					*owners[i],
+					CacheGroupReplayAction::Enable,
+					candidate,
+					candidate,
+					false,
+					project,
+					diagnostic,
+					actionBytes
+				) != Status::Ok)
+				return diagnostic.Code;
+		output = std::move(candidate);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "frame-cache input edit allocation refused"};
+		return diagnostic.Code;
 	}
 	Status OverlaySourceFrameCacheRows(
 		const Document &document,

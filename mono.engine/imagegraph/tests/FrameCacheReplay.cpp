@@ -2732,3 +2732,186 @@ TEST_CASE(
 	);
 	CHECK(prior.Data == original);
 }
+
+TEST_CASE(
+	"Source input edits follow current owner pointers and enclosing groups atomically",
+	"[imagegraph][source_frame_cache][cache_group]"
+) {
+	auto document = Scene();
+	document.Nodes.push_back({"other", "pc.cache_array", "", {}, {}});
+	document.Nodes.push_back({"outer", "pc.cache", "", {}, {}});
+	document.Nodes.push_back({"wrapper", "pc.number_simple", "", {}, {}});
+	document.Nodes.push_back({"spare", "pc.number_simple", "", {}, {}});
+	document.Nodes[0].GroupId = "inside";
+	document.Groups = {{"inside", "inside", "parent", {}, 1, {}, 0, 0, "wrapper"}, {"parent", "parent"}};
+	const auto captured = Run(Scene(), Clock(0));
+	DataReplayState source = captured.Data;
+	for (const auto id : {"other", "outer"}) {
+		auto row = id == std::string_view{"other"} ? Run(Scene(true), Clock(0)).Data.Entries.front()
+												   : source.Entries.front();
+		row.NodeId = id;
+		source.Entries.push_back(std::move(row));
+	}
+	source.CacheGroups.Nodes = {
+		{"cache", "pc.cache", "", true, {}},
+		{"other", "pc.cache_array", "", true, {}},
+		{"outer", "pc.cache", "", true, {}},
+		{"input", "image.solid", "other", false, {{"image", SurfaceValue{std::get<Image>(captured.Output)}}}},
+		{"wrapper", "pc.number_simple", "outer", false, {}},
+		{"spare", "pc.number_simple", "cache", false, {}}
+	};
+	source.CacheGroups.Owners = {
+		{"cache", true, {"input", "spare"}}, {"other", true, {"input"}}, {"outer", true, {"wrapper", "input"}}
+	};
+	const auto original = source;
+	Diagnostic diagnostic;
+	REQUIRE(ValidateDataReplay(source, Limits::MaximumEvaluationBytes, diagnostic) == Status::Ok);
+	const std::array<std::string_view, 2> edits{"input", "input"};
+	DataReplayState updated;
+	REQUIRE(
+		EnableSourceFrameCacheEditedGroups(
+			document,
+			edits,
+			source,
+			updated,
+			SourceFrameCacheProjectObservation{{0, 0, false}, 5, false, false},
+			diagnostic
+		) == Status::Ok
+	);
+	CHECK(source == original);
+	CHECK(updated.Entries[0] == original.Entries[0]);
+	for (size_t i = 1; i < updated.Entries.size(); ++i) {
+		CHECK(updated.Entries[i].FrameCacheConstructorCleared);
+		CHECK(updated.Entries[i].Values.size() == 2);
+		CHECK(updated.Entries[i].Values[1] == original.Entries[i].Values[1]);
+	}
+	CHECK(updated.CacheGroups.Nodes[3].RenderActive);
+	CHECK(updated.CacheGroups.Nodes[4].RenderActive);
+	CHECK_FALSE(updated.CacheGroups.Nodes[5].RenderActive);
+	CHECK(updated.CacheGroups.Nodes[3].Outputs == original.CacheGroups.Nodes[3].Outputs);
+	for (const auto cap : {uint64_t{1}, RetainedDataReplayBytes(source)}) {
+		auto refused = original;
+		CHECK(
+			EnableSourceFrameCacheEditedGroups(
+				document,
+				edits,
+				source,
+				refused,
+				SourceFrameCacheProjectObservation{{0, 0, false}, 5, false, false},
+				diagnostic,
+				cap
+			) == Status::LimitExceeded
+		);
+		CHECK(refused == original);
+	}
+	for (const bool full : {false, true})
+		for (const int gate : {0, 1, 2}) {
+			auto gatedSource = source;
+			if (full) {
+				gatedSource.Entries.clear();
+				for (size_t i = 0; i < Limits::MaximumArrayElements; ++i) {
+					auto row = source.Entries.front();
+					row.ProcessorRow = i;
+					gatedSource.Entries.push_back(std::move(row));
+				}
+			}
+			auto gatedDocument = document;
+			if (gate == 0) {
+				gatedDocument.Nodes[2].SourceProperties.push_back({"serialize", false});
+				gatedDocument.Nodes[3].SourceProperties.push_back({"serialize", false});
+			}
+			REQUIRE(
+				EnableSourceFrameCacheEditedGroups(
+					gatedDocument,
+					edits,
+					gatedSource,
+					updated,
+					SourceFrameCacheProjectObservation{{0, 0, false}, 5, gate == 1, gate == 2},
+					diagnostic
+				) == Status::Ok
+			);
+			CHECK(updated.Entries == gatedSource.Entries);
+			CHECK(updated.CacheGroups.Nodes == gatedSource.CacheGroups.Nodes);
+		}
+	auto cyclic = document;
+	cyclic.Groups[1].ParentId = "inside";
+	updated = original;
+	CHECK(
+		EnableSourceFrameCacheEditedGroups(
+			cyclic,
+			edits,
+			source,
+			updated,
+			SourceFrameCacheProjectObservation{{0, 0, false}, 5, false, false},
+			diagnostic
+		) == Status::InvalidValue
+	);
+	CHECK(updated == original);
+}
+
+TEST_CASE(
+	"Host source input edit wakes frozen members at the same clock and preserves clear on replay",
+	"[imagegraph][source_frame_cache][cache_group]"
+) {
+	for (const bool array : {false, true}) {
+		auto document = Scene(array);
+		document.Nodes[1].SourceProperties = {
+			{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}
+		};
+		document.Outputs.push_back({"input-out", "input", "image"});
+		CapturedFeedbackHost host;
+		Diagnostic diagnostic;
+		auto request = Clock(0);
+		request.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 0, false, false};
+		REQUIRE(host.Prepare(
+			document, Compiled(document), 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"
+		));
+		REQUIRE(request.DataReplay);
+		const auto original = *request.DataReplay;
+		for (const auto &member : original.CacheGroups.Nodes)
+			if (member.NodeId == "input") CHECK_FALSE(member.RenderActive);
+		ColourAt(document, 70);
+		const std::array<std::string_view, 1> edits{"input"};
+		CHECK_FALSE(host.NotifySourceInputEdits(document, edits, diagnostic, host.RetainedBytes()));
+		REQUIRE(host.PreparedData(1, 1));
+		CHECK(*host.PreparedData(1, 1) == original);
+		REQUIRE(host.NotifySourceInputEdits(document, edits, diagnostic));
+		const auto edited = *host.PreparedData(1, 1);
+		for (const auto &member : edited.CacheGroups.Nodes)
+			if (member.NodeId == "input") CHECK(member.RenderActive);
+		if (!edited.Entries.empty()) {
+			CHECK(edited.Entries.front().FrameCacheConstructorCleared);
+			CHECK(edited.Entries.front().Values.size() == 2);
+		}
+		request = Clock(0, false);
+		request.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 5, false, false};
+		REQUIRE(host.Prepare(
+			document,
+			Compiled(document),
+			2,
+			1,
+			request,
+			diagnostic,
+			Limits::MaximumEvaluationBytes,
+			"input-out"
+		));
+		const auto *output = host.Output("input-out");
+		REQUIRE(output);
+		CHECK(output->Pixels[0] == 70);
+		request = Clock(0, false);
+		request.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 5, false, false};
+		REQUIRE(host.Prepare(
+			document,
+			Compiled(document),
+			2,
+			1,
+			request,
+			diagnostic,
+			Limits::MaximumEvaluationBytes,
+			"input-out"
+		));
+		output = host.Output("input-out");
+		REQUIRE(output);
+		CHECK(output->Pixels[0] == 70);
+	}
+}

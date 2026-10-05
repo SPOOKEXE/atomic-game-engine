@@ -280,6 +280,62 @@ namespace engine::imagegraph {
 		}
 
 	  public:
+		// Notify accepted input/connection edits before preparing the revised document. Both current
+		// and preframe source journals change together; retained pixels keep their last observation.
+		[[nodiscard]] bool NotifySourceInputEdits(
+			const Document &document,
+			std::span<const std::string_view> editedNodes,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) {
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "Source input edit byte cap is outside bounds"};
+				return false;
+			}
+			if (!Configured || editedNodes.empty()) {
+				diagnostic = {};
+				return true;
+			}
+			const auto resident = RetainedBytes();
+			const auto stateBytes = RetainedDataReplayBytes(State.Data);
+			const auto startBytes = RetainedDataReplayBytes(FrameStart.Data);
+			if (resident >= maximumBytes) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "Source input edit host exceeds byte bounds"};
+				return false;
+			}
+			DataReplayState nextState, nextStart;
+			if (EnableSourceFrameCacheEditedGroups(
+					document,
+					editedNodes,
+					State.Data,
+					nextState,
+					CacheProjectObservation,
+					diagnostic,
+					maximumBytes - resident + stateBytes
+				) != Status::Ok)
+				return false;
+			const auto candidateBytes = RetainedDataReplayBytes(nextState);
+			if (candidateBytes >= maximumBytes - resident) {
+				diagnostic = {
+					Status::LimitExceeded, {}, {}, "Source input edit checkpoint exceeds byte bounds"
+				};
+				return false;
+			}
+			if (EnableSourceFrameCacheEditedGroups(
+					document,
+					editedNodes,
+					FrameStart.Data,
+					nextStart,
+					CacheProjectObservation,
+					diagnostic,
+					maximumBytes - resident - candidateBytes + startBytes
+				) != Status::Ok)
+				return false;
+			State.Data = std::move(nextState);
+			FrameStart.Data = std::move(nextStart);
+			diagnostic = {};
+			return true;
+		}
 		// The observed source button frees slots without evaluating the graph. A fresh
 		// observation owns the next update; same-clock dependent previews are unavailable.
 		bool ClearSourceCache(
