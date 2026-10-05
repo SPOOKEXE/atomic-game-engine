@@ -113,6 +113,10 @@ namespace engine::ui {
 	// to `render::Renderer::Render` as its hook. Outside that bracket no
 	// `ImGui::` call is legal, which is imgui's rule rather than this class's.
 	//
+	// Initialise, Begin and End select the owned context. Event, query and
+	// renderer hook calls preserve the caller's current context; shutdown
+	// preserves it unless it is the context being destroyed.
+	//
 	// @since v0.7
 	// @client
 	class Interface final : public render::FrameOverlayHook {

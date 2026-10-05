@@ -24,6 +24,21 @@ ImGuiKey ImGui_ImplSDL3_KeyEventToImGuiKey(SDL_Keycode keycode, SDL_Scancode sca
 
 namespace engine::ui {
 	namespace {
+		class ScopedContext final {
+		  public:
+			explicit ScopedContext(ImGuiContext *context) : Previous(ImGui::GetCurrentContext()) {
+				ImGui::SetCurrentContext(context);
+			}
+			~ScopedContext() {
+				ImGui::SetCurrentContext(Previous);
+			}
+			ScopedContext(const ScopedContext &) = delete;
+			ScopedContext &operator=(const ScopedContext &) = delete;
+
+		  private:
+			ImGuiContext *Previous;
+		};
+
 		void ApplyHeadlessEvent(const SDL_Event &event) {
 			ImGuiIO &io = ImGui::GetIO();
 			switch (event.type) {
@@ -156,6 +171,7 @@ namespace engine::ui {
 	bool
 	Interface::Initialise(render::Renderer &renderer, SDL_Window *window, const InterfaceSettings &settings) {
 		if (State->Ready) {
+			ImGui::SetCurrentContext(State->Context);
 			return true;
 		}
 
@@ -170,11 +186,20 @@ namespace engine::ui {
 		}
 
 		IMGUI_CHECKVERSION();
+		ImGuiContext *previous = ImGui::GetCurrentContext();
 		State->Context = ImGui::CreateContext();
 		if (State->Context == nullptr) {
 			return false;
 		}
 
+		// CreateContext preserves a foreign current context. Configure only ours.
+		ImGui::SetCurrentContext(State->Context);
+		const auto discardContext = [&] {
+			ImGui::DestroyContext(State->Context);
+			State->Context = nullptr;
+			ImGui::SetCurrentContext(previous);
+			State->LayoutPath.clear();
+		};
 		ImGuiIO &io = ImGui::GetIO();
 
 		// **Keyboard navigation on, gamepad navigation off.** An editor is
@@ -227,8 +252,7 @@ namespace engine::ui {
 
 		if (drawable && !State->Spatial.Initialise(backend.Device, backend.ColourFormat, 16.0f * scale)) {
 			ENGINE_ERROR("ui::Interface could not initialise the spatial GUI pass");
-			ImGui::DestroyContext(State->Context);
-			State->Context = nullptr;
+			discardContext();
 			return false;
 		}
 		State->Spatial.SetImageSource([this, &renderer](const core::Name &name) {
@@ -267,8 +291,7 @@ namespace engine::ui {
 		if (!ImGui_ImplSDL3_InitForSDLGPU(window)) {
 			ENGINE_ERROR("ImGui_ImplSDL3_InitForSDLGPU failed");
 			State->Spatial.Shutdown();
-			ImGui::DestroyContext(State->Context);
-			State->Context = nullptr;
+			discardContext();
 			return false;
 		}
 
@@ -286,8 +309,7 @@ namespace engine::ui {
 			ENGINE_ERROR("ImGui_ImplSDLGPU3_Init failed");
 			ImGui_ImplSDL3_Shutdown();
 			State->Spatial.Shutdown();
-			ImGui::DestroyContext(State->Context);
-			State->Context = nullptr;
+			discardContext();
 			return false;
 		}
 
@@ -305,6 +327,9 @@ namespace engine::ui {
 			return;
 		}
 
+		ImGuiContext *previous = ImGui::GetCurrentContext();
+		ImGui::SetCurrentContext(State->Context);
+
 		if (State->Drawable) {
 			// Only what was started. Shutting down a backend that never
 			// initialised is an assertion inside imgui rather than a no-op.
@@ -314,6 +339,8 @@ namespace engine::ui {
 		ShutdownGuiPainter();
 
 		ImGui::DestroyContext(State->Context);
+		ImGui::SetCurrentContext(previous == State->Context ? nullptr : previous);
+		State->LayoutPath.clear();
 
 		State->Context = nullptr;
 		State->Draw = nullptr;
@@ -344,6 +371,7 @@ namespace engine::ui {
 		if (!State->Ready) {
 			return;
 		}
+		const ScopedContext context(State->Context);
 		if (State->Drawable) {
 			ImGui_ImplSDL3_ProcessEvent(&event);
 			return;
@@ -370,6 +398,7 @@ namespace engine::ui {
 
 	void Interface::QueueAutomationEvent(const SDL_Event &event) {
 		if (!State->Ready) return;
+		const ScopedContext context(State->Context);
 		auto &pending = State->AutomationEvents.emplace_back();
 		pending.Event = event;
 		if (State->Drawable && event.type == SDL_EVENT_MOUSE_MOTION &&
@@ -399,6 +428,7 @@ namespace engine::ui {
 		if (!State->Ready) {
 			return;
 		}
+		ImGui::SetCurrentContext(State->Context);
 
 		if (State->Drawable) {
 			ImGui_ImplSDLGPU3_NewFrame();
@@ -440,6 +470,7 @@ namespace engine::ui {
 		if (!State->Ready) {
 			return;
 		}
+		ImGui::SetCurrentContext(State->Context);
 
 		ImGui::Render();
 		State->Draw = ImGui::GetDrawData();
@@ -454,7 +485,9 @@ namespace engine::ui {
 	}
 
 	void Interface::PresentPlatformWindows() {
-		if (!State->Drawable || (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0) {
+		if (!State->Drawable) return;
+		const ScopedContext context(State->Context);
+		if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0) {
 			return;
 		}
 		ENGINE_PROFILE_CAT("ui.platform windows", core::ProfileCategory::Render);
@@ -467,7 +500,9 @@ namespace engine::ui {
 	}
 
 	bool Interface::HasPlatformWindows() const {
-		return State->Drawable && (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0 &&
+		if (!State->Drawable) return false;
+		const ScopedContext context(State->Context);
+		return (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0 &&
 			   ImGui::GetPlatformIO().Viewports.Size > 1;
 	}
 
@@ -475,16 +510,21 @@ namespace engine::ui {
 		if (!State->Drawable) return true;
 		SDL_Window *focused = SDL_GetKeyboardFocus();
 		if (focused == nullptr) return false;
+		const ScopedContext context(State->Context);
 		const auto id = reinterpret_cast<void *>(static_cast<intptr_t>(SDL_GetWindowID(focused)));
 		return ImGui::FindViewportByPlatformHandle(id) != nullptr;
 	}
 
 	bool Interface::WantsMouse() const {
-		return State->Ready && ImGui::GetIO().WantCaptureMouse;
+		if (!State->Ready) return false;
+		const ScopedContext context(State->Context);
+		return ImGui::GetIO().WantCaptureMouse;
 	}
 
 	bool Interface::WantsKeyboard() const {
-		return State->Ready && ImGui::GetIO().WantCaptureKeyboard;
+		if (!State->Ready) return false;
+		const ScopedContext context(State->Context);
+		return ImGui::GetIO().WantCaptureKeyboard;
 	}
 
 	void Interface::SubmitSpatial(
@@ -508,6 +548,7 @@ namespace engine::ui {
 		if (!State->Ready || commandBuffer == nullptr) {
 			return false;
 		}
+		const ScopedContext context(State->Context);
 		const bool spatial = State->Spatial.Prepare(commandBuffer);
 		if (!State->Drawable) {
 			return spatial;
@@ -571,6 +612,7 @@ namespace engine::ui {
 		if (!State->Ready || !State->Drawable || State->Draw == nullptr) {
 			return;
 		}
+		const ScopedContext context(State->Context);
 
 		ImGui_ImplSDLGPU3_RenderDrawData(
 			State->Draw,

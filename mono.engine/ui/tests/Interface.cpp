@@ -5,6 +5,8 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <filesystem>
 #include <imgui.h>
 #include <memory>
 #include <string>
@@ -181,4 +183,87 @@ TEST_CASE("detached interface windows render and close without closing the host"
 	CHECK_FALSE(interface.HasPlatformWindows());
 	CHECK(SDL_GetWindowFromID(detachedId) == nullptr);
 	CHECK(SDL_GetWindowFromID(SDL_GetWindowID(window.get())) == window.get());
+}
+
+TEST_CASE("interface owns its context beside a foreign host", "[ui][headless][context]") {
+	struct ForeignHost {
+		ImGuiContext *Previous = ImGui::GetCurrentContext();
+		ImGuiContext *Context = ImGui::CreateContext();
+		std::filesystem::path Directory =
+			std::filesystem::temp_directory_path() /
+			("mono-interface-owner-" +
+			 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+		ForeignHost() {
+			REQUIRE(std::filesystem::create_directory(Directory));
+			ImGui::SetCurrentContext(Context);
+			auto &io = ImGui::GetIO();
+			io.IniFilename = io.LogFilename = nullptr;
+			io.DisplaySize = {73, 41};
+			io.ConfigFlags = ImGuiConfigFlags_None;
+		}
+		~ForeignHost() {
+			ImGui::SetCurrentContext(Context);
+			ImGui::GetIO().IniFilename = ImGui::GetIO().LogFilename = nullptr;
+			ImGui::DestroyContext(Context);
+			ImGui::SetCurrentContext(Previous);
+			std::error_code ignored;
+			std::filesystem::remove_all(Directory, ignored);
+		}
+	} foreign;
+	engine::render::Renderer renderer;
+	engine::ui::Interface interface;
+	engine::ui::InterfaceSettings settings;
+	settings.DisplayWidth = 640;
+	settings.DisplayHeight = 480;
+	settings.LayoutPath = (foreign.Directory / "layout.ini").string();
+	const auto layout = settings.LayoutPath;
+	REQUIRE(interface.Initialise(renderer, nullptr, settings));
+	auto *owned = ImGui::GetCurrentContext();
+	CHECK(owned != foreign.Context);
+	ImGui::SetCurrentContext(foreign.Context);
+	CHECK(ImGui::GetIO().IniFilename == nullptr);
+	CHECK(ImGui::GetIO().DisplaySize.x == 73);
+	CHECK(ImGui::GetIO().ConfigFlags == ImGuiConfigFlags_None);
+	REQUIRE(owned != foreign.Context);
+	ImGui::SetCurrentContext(owned);
+	REQUIRE(ImGui::GetIO().IniFilename != nullptr);
+	CHECK(std::string(ImGui::GetIO().IniFilename) == layout);
+	settings.LayoutPath = "replaced";
+	CHECK(std::string(ImGui::GetIO().IniFilename) == layout);
+	ImGui::GetIO().WantCaptureMouse = true;
+	ImGui::GetIO().WantCaptureKeyboard = false;
+	ImGui::SetCurrentContext(foreign.Context);
+	ImGui::GetIO().WantCaptureMouse = false;
+	ImGui::GetIO().WantCaptureKeyboard = true;
+	CHECK(interface.WantsMouse());
+	CHECK_FALSE(interface.WantsKeyboard());
+	CHECK(ImGui::GetCurrentContext() == foreign.Context);
+	SDL_Event motion{};
+	motion.type = SDL_EVENT_MOUSE_MOTION;
+	motion.motion.x = 240;
+	motion.motion.y = 36;
+	interface.ProcessEvent(motion);
+	CHECK(ImGui::GetCurrentContext() == foreign.Context);
+	interface.Begin(1.f / 60);
+	CHECK(ImGui::GetCurrentContext() == owned);
+	CHECK(ImGui::GetMousePos().x == 240);
+	CHECK(ImGui::GetMousePos().y == 36);
+	ImGui::Begin("Owned host");
+	ImGui::TextUnformatted("Owned layout");
+	ImGui::End();
+	ImGui::SetCurrentContext(foreign.Context);
+	interface.End();
+	CHECK(ImGui::GetCurrentContext() == owned);
+	ImGui::SetCurrentContext(foreign.Context);
+	interface.PresentPlatformWindows();
+	CHECK_FALSE(interface.HasPlatformWindows());
+	CHECK(interface.HasFocus());
+	CHECK(ImGui::GetCurrentContext() == foreign.Context);
+	interface.Shutdown();
+	CHECK(ImGui::GetCurrentContext() == foreign.Context);
+	CHECK(ImGui::GetIO().IniFilename == nullptr);
+	CHECK(ImGui::GetIO().DisplaySize.x == 73);
+	CHECK(std::filesystem::is_regular_file(foreign.Directory / "layout.ini"));
+	CHECK_FALSE(interface.WantsMouse());
+	CHECK_FALSE(interface.WantsKeyboard());
 }
