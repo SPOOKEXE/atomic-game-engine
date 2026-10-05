@@ -474,12 +474,15 @@ namespace engine::imagegraph {
 	} catch (const std::bad_alloc &) {
 		return Refuse(Status::LimitExceeded, "cache-group mutation allocation refused");
 	}
+	bool CacheGroupReplayShouldRun(const CacheGroupReplayNode &node, bool explicitRenderList) {
+		return explicitRenderList || node.NodeType == "pc.global_scope" || node.RenderActive;
+	}
 	bool CacheGroupReplayShouldRun(
 		const CacheGroupReplayState &state, std::string_view nodeId, bool explicitRenderList
 	) {
 		if (explicitRenderList) return true;
 		const auto found = Find(state.Nodes, nodeId);
-		return found == state.Nodes.end() || found->RenderActive;
+		return found == state.Nodes.end() || CacheGroupReplayShouldRun(*found);
 	}
 	Status InitializeAuthoredCacheGroupReplay(
 		const Document &document,

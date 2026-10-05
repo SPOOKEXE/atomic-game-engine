@@ -221,6 +221,8 @@ namespace studio::detail {
 		if (kind != ImageGraphCacheEditKind::RenderOnly) {
 			size_t prior = 0;
 			for (const auto &node : candidate.Nodes) {
+				// GLOBAL setters only request RenderAll; no source cacheCheck is called.
+				if (node.Type == "pc.global_scope") continue;
 				while (prior < before.Nodes.size() && before.Nodes[prior].Id < node.Id)
 					++prior;
 				if (prior == before.Nodes.size() || before.Nodes[prior].Id != node.Id ||

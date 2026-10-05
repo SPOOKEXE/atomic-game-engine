@@ -1423,3 +1423,39 @@ TEST_CASE(
 		CHECK(destination == prior.CacheGroups);
 	}
 }
+
+TEST_CASE(
+	"Project globals execute despite retained cache group activity flags",
+	"[imagegraph][frame_cache_groups][pcx]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	Node globals{"globals", "pc.global_scope", "", {}, {}};
+	globals.DynamicInputs = {{"answer", ValueType::Scalar, Value{4.0}}};
+	document.Nodes = {globals, {"consumer", "pc.equation", "", {}, {{"equation", std::string{"answer+1"}}}}};
+	document.ProjectGlobalNodeId = "globals";
+	document.Timeline = TimelineSettings{2, 0, 1, "loop", 24};
+	document.Keyframes = {{"globals", "answer", 0, 4.0, "step"}, {"globals", "answer", 1, 8.0, "step"}};
+	document.Outputs = {{"out", "consumer", "result"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	auto prior = FrozenNode("globals", "pc.global_scope", {});
+	const auto original = prior;
+	CHECK(CacheGroupReplayShouldRun(prior.CacheGroups, "globals"));
+	EvaluationRequest request;
+	request.DataReplay = &prior;
+	for (const uint64_t tick : {0, 1}) {
+		request.Tick = tick;
+		EvaluatedValue value;
+		const auto status = EvaluateValue(document, plan, "out", request, value, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(status == Status::Ok);
+		CHECK(std::get<double>(value.Data) == (tick ? 9.0 : 5.0));
+		StatefulEvaluationResult result;
+		REQUIRE(EvaluateStateful(document, plan, "out", request, result, diagnostic) == Status::Ok);
+		CHECK(std::get<double>(std::get<EvaluatedValue>(result.Output).Data) == (tick ? 9.0 : 5.0));
+		CHECK_FALSE(result.Data.CacheGroups.Nodes.front().RenderActive);
+	}
+	CHECK(prior == original);
+}

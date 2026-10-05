@@ -98,6 +98,8 @@ namespace engine::imagegraph {
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic
 	);
+	// Project globals update outside ordinary dispatch even when their stored render flag is false.
+	bool CacheGroupReplayShouldRun(const CacheGroupReplayNode &node, bool explicitRenderList = false);
 	// The explicit source renderList bypasses ordinary activity gates. Untracked nodes are active.
 	bool CacheGroupReplayShouldRun(
 		const CacheGroupReplayState &state, std::string_view nodeId, bool explicitRenderList = false

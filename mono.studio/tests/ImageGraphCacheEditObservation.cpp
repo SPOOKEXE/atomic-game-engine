@@ -61,7 +61,7 @@ namespace {
 		ImageGraphCacheEditObservation Observation;
 		CapturedFeedbackHost Host;
 		Diagnostic Error;
-		Fixture(bool array = false, bool ownerMember = false, bool routed = false)
+		Fixture(bool array = false, bool ownerMember = false, bool routed = false, bool globals = false)
 			: Authored(Scene(array, ownerMember)) {
 			if (routed) {
 				Authored.Nodes.push_back({"number", "pc.number", "", {}, {{"value", 2.0}}});
@@ -79,6 +79,14 @@ namespace {
 					  {"alternate", "replacement", PortDirection::Output}}}
 				};
 				Authored.Links.push_back({"junction", "value", "number", "integer"});
+			}
+			if (globals) {
+				Node global{"globals", "pc.global_scope", "", {}, {}};
+				global.DynamicInputs = {{"answer", ValueType::Scalar, Value{4.0}}};
+				Authored.Nodes.push_back(std::move(global));
+				Authored.ProjectGlobalNodeId = "globals";
+				std::get<ArrayValue>(Authored.Nodes[1].SourceProperties[0].Data)
+					.Elements.push_back(std::string{"globals"});
 			}
 			REQUIRE(ObserveImageGraphCacheEdits(
 				Authored, Observation, Host, ImageGraphCacheEditKind::FreshDocument, Error
@@ -263,4 +271,21 @@ TEST_CASE(
 	REQUIRE(fixture.Observe(ImageGraphCacheEditKind::AnimatorUndo));
 	CHECK(fixture.Member("input").RenderActive);
 	CHECK_FALSE(fixture.Observation.PendingValueEdit);
+}
+
+TEST_CASE(
+	"Studio global value setters and animator undo preserve frozen group activity",
+	"[studio][imagegraph][cache_group]"
+) {
+	for (const auto kind : {ImageGraphCacheEditKind::ValueSetter, ImageGraphCacheEditKind::AnimatorUndo}) {
+		Fixture fixture(false, false, false, true);
+		const auto original = *fixture.Host.PreparedData(1, 1);
+		fixture.Authored.Nodes.back().DynamicInputs[0].Default = Value{8.0};
+		fixture.Authored.Keyframes = {{"globals", "answer", 0, 8.0, "step"}};
+		Compiled(fixture.Authored);
+		REQUIRE(fixture.Observe(kind));
+		CHECK(*fixture.Host.PreparedData(1, 1) == original);
+		CHECK_FALSE(fixture.Member("input").RenderActive);
+		CHECK_FALSE(fixture.Member("globals").RenderActive);
+	}
 }

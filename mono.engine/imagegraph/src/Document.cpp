@@ -10354,7 +10354,7 @@ namespace engine::imagegraph {
 		);
 		if (cacheGroups)
 			for (const auto &node : cacheGroups->Nodes)
-				if (!node.RenderActive) frozen[nodeIndices.at(node.NodeId)] = &node;
+				if (!CacheGroupReplayShouldRun(node)) frozen[nodeIndices.at(node.NodeId)] = &node;
 		detail::EvaluationVector<CacheGroupReplayNode *> tracked(
 			currentData ? document.Nodes.size() : 0,
 			nullptr,
@@ -13145,7 +13145,7 @@ namespace engine::imagegraph {
 					for (auto &member : data.CacheGroups.Nodes) {
 						const auto memberIndex = nodeIndices.at(member.NodeId);
 						tracked[memberIndex] = &member;
-						if (!member.RenderActive) frozen[memberIndex] = &member;
+						if (!CacheGroupReplayShouldRun(member)) frozen[memberIndex] = &member;
 					}
 					refreshFrameCacheReads();
 					if (captureTarget && !frameCacheInputReads.empty())

@@ -82,7 +82,7 @@
     ],
     "required_next_steps": [
       "Initialize remaining path/self, runtime resource and dynamic constructors through exact native owner semantics. Zero matrices, curves, gradients, colours and cold Join/Combine/Shift/Weight Adjust/Path3D ownership are verified.",
-      "Integrate authored load refresh for append/revision and remaining seek/restart activity policy. Studio native input-edit observations and retries are verified headlessly; live panel gestures and source global-value exceptions remain.",
+      "Integrate authored load refresh for append/revision and remaining seek/restart activity policy. Studio native input-edit observations, retries and GLOBAL setter/activity exceptions are verified headlessly; live panel gestures remain.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
       "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
       "Cache hit/loading branch getter admission and complete source update-loop scheduling remain to audit and integrate before enabling nonempty groups."
@@ -946,6 +946,66 @@
       "remaining": [
         "Live panel gestures and source global-value setter exceptions still require verification/integration.",
         "Source append/load refresh, remaining revision/seek activity policies, runtime/dynamic constructors and licensed-reference parity remain incomplete."
+      ]
+    },
+    "global_activity_implementation": {
+      "scope": "Project-global activity and own-value setter exceptions; existing native connection policy is unchanged.",
+      "official_source_files": [
+        {
+          "path": "scripts/node_global/node_global.gml",
+          "sha256": "9e8b30301a03c6168a1e80f3610e0227fc120bb2f49e7b252594df0a798087bd",
+          "git_blob_sha1": "cd13c82dda759113da3c54e581edf3451451c795",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/node_value_global/node_value_global.gml",
+          "sha256": "8b787e6933f5e9903b34f01ebe783f95ed8723e7f704f1dcc15863ffc067c23c",
+          "git_blob_sha1": "cde3f99cf9f8656c0eb168f7187cf7d6b463915f",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/project_data/project_data.gml",
+          "sha256": "c5689a42b7c6b9a4550058d94ee1ba828b545e1a3610044dd960ada714ffe3a9",
+          "git_blob_sha1": "86bfbb934c5c76c8fa9d27d8536ed5e3cbbae60c",
+          "verified_local_match": true
+        }
+      ],
+      "source_calls": [
+        "node_global.gml:14-15,74-87",
+        "project_data.gml:533-544",
+        "node_value_global.gml:68-71"
+      ],
+      "coverage": [
+        "Direct and stateful PCX evaluation resolve global values and keyframes despite stored RenderActive=false; prior caller journal and retained flags remain unchanged.",
+        "Studio global ValueSetter and AnimatorUndo leave frozen member activity and both retained journals unchanged.",
+        "Shared node activity policy applies to initial and post-action frozen indexing; ordinary member freeze rules retain their existing tests."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/global-cache-batch2-results.json",
+      "reproduction_results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/global-cache-batch1-results.json",
+      "native_cases": 4910,
+      "native_assertions": 1993939,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/global-cache-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/global-cache-build2.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/global-cache-issues.json",
+      "review": "Sol source audit identified the two exceptions, joined batch reproduced both, implementation fixed them together, and read-only review found no additional confirmed defect. Final joined batch passed all18processes.",
+      "binary_hashes": "All twelve native suite binaries and assetc/imagegraph child hashes stable during the final batch and matched afterwards.",
+      "architecture": "Passed:55 modules,6 programs,39 layered.",
+      "format": "clang-format-21 dry run, ruff and git diff --check passed.",
+      "profiling": "Existing evaluation and observation profiling scopes include the policy checks. No fresh isolated profile or sanitizer run; no performance claim.",
+      "remaining": [
+        "Live Studio gestures and licensed-reference captures remain unverified.",
+        "Append/load refresh, remaining seek/revision policy and runtime/dynamic constructors remain incomplete."
       ]
     }
   },
