@@ -1453,3 +1453,21 @@ TEST_CASE(
 	REQUIRE(Read(withoutIdentity, restored, error) == Status::Ok);
 	CHECK(restored.Keyframes[0].SourceKeyId.empty());
 }
+
+TEST_CASE(
+	"Caller bounded compilation preserves the previous plan on refused workspace",
+	"[imagegraph][compile_budget]"
+) {
+	const auto document = SolidDocument();
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	const auto previous = plan;
+	for (const uint64_t limit : {uint64_t{0}, uint64_t{1}, Limits::MaximumEvaluationBytes + 1}) {
+		CHECK(Compile(document, plan, diagnostic, limit) == Status::LimitExceeded);
+		CHECK(plan == previous);
+	}
+	Plan bounded;
+	REQUIRE(Compile(document, bounded, diagnostic, 1024 * 1024) == Status::Ok);
+	CHECK(bounded == previous);
+}

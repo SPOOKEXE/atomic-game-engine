@@ -101,7 +101,7 @@ namespace engine::imagegraph::detail {
 							route.Size = saved;
 						}
 					}
-				if (value.Data->DataHistory)
+				if (value.Data->DataHistory) {
 					for (size_t i = 0; i < value.Data->DataHistory->Entries.size(); ++i) {
 						const auto saved = route.Size;
 						if (!route.Index('r', i)) return false;
@@ -110,6 +110,15 @@ namespace engine::imagegraph::detail {
 								return false;
 						route.Size = saved;
 					}
+					for (size_t i = 0; i < value.Data->DataHistory->CacheGroups.Nodes.size(); ++i) {
+						const auto saved = route.Size;
+						if (!route.Index('c', i)) return false;
+						auto &outputs = value.Data->DataHistory->CacheGroups.Nodes[i].Outputs;
+						for (size_t j = 0; j < outputs.size(); ++j)
+							if (outputs[j].Data && !variant(*outputs[j].Data, 'o', j)) return false;
+						route.Size = saved;
+					}
+				}
 			}
 		} else if constexpr (std::is_same_v<Leaf, Path2D>) {
 			if (value.SourceOperation) {

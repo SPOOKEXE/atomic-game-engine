@@ -74,9 +74,10 @@ namespace engine::imagegraph {
 			   CirclePrecision == other.CirclePrecision && AudioFrames == other.AudioFrames &&
 			   Simulation == other.Simulation && Surfaces == other.Surfaces && Random == other.Random &&
 			   Groups == other.Groups && GroupAuthoringRevision == other.GroupAuthoringRevision &&
-			   DataHistory == other.DataHistory && SliceStack == other.SliceStack &&
-			   RigidHistory == other.RigidHistory && RigidAuthoringRevision == other.RigidAuthoringRevision &&
-			   RigidPlaying == other.RigidPlaying && RigidFrameProgress == other.RigidFrameProgress &&
+			   DataHistory == other.DataHistory && FrameCacheLoads == other.FrameCacheLoads &&
+			   SliceStack == other.SliceStack && RigidHistory == other.RigidHistory &&
+			   RigidAuthoringRevision == other.RigidAuthoringRevision && RigidPlaying == other.RigidPlaying &&
+			   RigidFrameProgress == other.RigidFrameProgress &&
 			   SourceCachePlayback == other.SourceCachePlayback &&
 			   SimulationAuthoringRevision == other.SimulationAuthoringRevision && Entropy == other.Entropy &&
 			   Fonts == other.Fonts && FontObservations == other.FontObservations &&
@@ -277,6 +278,7 @@ namespace engine::imagegraph::detail {
 		bytes = Add(bytes, Text(data.OwnerNodeId, retained));
 		if (data.Groups) bytes = Add(bytes, data.Groups->Replay.RetainedBytes());
 		if (data.DataHistory) bytes = Add(bytes, RetainedDataReplayBytes(*data.DataHistory));
+		if (data.FrameCacheLoads) bytes = Add(bytes, RetainedDataReplayBytes(*data.FrameCacheLoads));
 		if (data.RigidHistory) bytes = Add(bytes, RetainedRigidReplayBytes(*data.RigidHistory));
 		if (data.SliceStack) bytes = Add(bytes, RetainedSliceStackReplayBytes(*data.SliceStack));
 		bytes = Add(bytes, Container(data.AudioFrames, retained));
@@ -387,9 +389,10 @@ namespace engine::imagegraph::detail {
 			if (data.Authored != Document{} || !data.AudioFrames.empty() || !data.AudioClips.empty() ||
 				!data.ImageSources.empty() || !data.HostCaptures.empty() || data.Fonts ||
 				!data.FontObservations.empty() || !data.BuiltinRandomCaptures.empty() || data.Simulation ||
-				data.Surfaces || data.Random || data.DataHistory || data.RigidHistory || data.SliceStack ||
-				data.Groups || !data.Entropy.empty() || !data.PcxObservations.empty() ||
-				!data.SimulationCacheCaptures.empty() || !data.ProjectName.empty() ||
+				data.Surfaces || data.Random || data.DataHistory || data.FrameCacheLoads ||
+				data.RigidHistory || data.SliceStack || data.Groups || !data.Entropy.empty() ||
+				!data.PcxObservations.empty() || !data.SimulationCacheCaptures.empty() ||
+				!data.ProjectName.empty() ||
 				!ValidSurfaceLayout(recipe.Source, data.MaximumImageDimension, Limits::MaximumArrayBytes) ||
 				!FiniteSurfaceSamples(recipe.Source) || recipe.Source.Width == 0 ||
 				recipe.Source.Height == 0 ||
@@ -454,6 +457,10 @@ namespace engine::imagegraph::detail {
 			return false;
 		if (data.DataHistory &&
 			ValidateDataReplay(*data.DataHistory, Limits::MaximumEvaluationBytes, diagnostic) != Status::Ok)
+			return false;
+		if (data.FrameCacheLoads &&
+			ValidateDataReplay(*data.FrameCacheLoads, Limits::MaximumEvaluationBytes, diagnostic) !=
+				Status::Ok)
 			return false;
 		if (data.SliceStack &&
 			ValidateSliceStackReplay(*data.SliceStack, Limits::MaximumEvaluationBytes, diagnostic) !=

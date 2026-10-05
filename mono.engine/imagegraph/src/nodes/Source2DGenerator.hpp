@@ -194,7 +194,7 @@ namespace engine::imagegraph::detail::source2d {
 	inline bool SourceMaskDimensionGenerator(std::string_view type) {
 		return type == "pc.checker" || type == "pc.quasicrystal" || type == "pc.wave_interfere" ||
 			   type == "pc.zigzag" || type == "pc.box_pattern" || type == "pc.fold_noise" ||
-			   type == "pc.noise_aniso";
+			   type == "pc.noise_aniso" || type == "pc.kisrhombille";
 	}
 
 	inline bool

@@ -347,3 +347,56 @@ TEST_CASE("borrowed font retention validates complete backing before a caller cl
 	CHECK_FALSE(SourceFontValueRetainedBytes(font));
 	CHECK_FALSE(SourceFontValueRetainedBytes(FontValue{}));
 }
+
+TEST_CASE(
+	"text trim signed endpoints preserve source substring and directional token rules", "[source_font_trim]"
+) {
+	const auto font = BitmapFace();
+	detail::FontTextLayoutOptions options;
+	options.Trim = true;
+	detail::FontTextLayout result;
+	std::string failure;
+	for (const auto &[text, type, range, expected] :
+		 std::array<std::tuple<std::string_view, uint8_t, Vector2, std::string_view>, 9>{
+			 {{"AABB", 0, {-.25, .5}, "AAB"},
+			  {"AABB", 0, {.75, .25}, "AB"},
+			  {"AABB", 0, {-1, 2}, "AABB"},
+			  {"AABB", 0, {2, 3}, ""},
+			  {"A B W", 1, {1, 0}, "WB A "},
+			  {"A B W", 1, {-1. / 3, 1. / 3}, "W"},
+			  {"A B W", 1, {2, 3}, "W"},
+			  {"A\nB\nW", 2, {1, 0}, "WB\nA\n"},
+			  {"", 2, {-1, 2}, ""}}
+		 }) {
+		options.TrimType = type;
+		options.Range = range;
+		INFO(text << ':' << int(type) << ':' << range.X << ',' << range.Y);
+		REQUIRE(
+			detail::BuildFontTextLayout(
+				*font.Data, text, options, Limits::MaximumEvaluationBytes, result, failure
+			) == Status::Ok
+		);
+		CHECK(result.Text == expected);
+	}
+	const auto prior = result;
+	options.Range = {1e100, 2e100};
+	CHECK(
+		detail::BuildFontTextLayout(
+			*font.Data, "A B", options, Limits::MaximumEvaluationBytes, result, failure
+		) == Status::LimitExceeded
+	);
+	CHECK(result.Text == prior.Text);
+	CHECK(result.Lines.size() == prior.Lines.size());
+	options.TrimType = 1;
+	options.Range = {1, 0};
+	CHECK(
+		detail::BuildFontTextLayout(*font.Data, "A B", options, 1, result, failure) == Status::LimitExceeded
+	);
+	CHECK(result.Text == prior.Text);
+	REQUIRE(
+		detail::BuildFontTextLayout(
+			*font.Data, "A B", options, Limits::MaximumEvaluationBytes, result, failure
+		) == Status::Ok
+	);
+	CHECK(result.Text == "BA ");
+}

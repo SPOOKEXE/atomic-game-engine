@@ -199,7 +199,8 @@ namespace engine::imagegraph::detail {
 				);
 			batch.CaseWork += uint64_t(text->size()) * 32;
 		}
-		if (!full || width == 0 || text->empty()) return true;
+		const bool trim = c.Boolean("trim");
+		if ((!full || width == 0) && !trim) return true;
 		uint64_t bytes = 0, points = 0, spaces = 0, run = 0;
 		const auto emit = [&](uint32_t point) {
 			bytes += point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
@@ -243,6 +244,13 @@ namespace engine::imagegraph::detail {
 			return c.Fail(
 				Status::InvalidValue, "native Text measurement input is malformed", "max_line_width"
 			);
+		if (trim) {
+			// Scalar decoding, token indexing and copying are bounded linear passes, quoted before fonts.
+			if (bytes > (FontTextWorkLimit - batch.TrimWork) / 8)
+				return c.Fail(Status::LimitExceeded, "native Text trim batch exceeds work bound", "range");
+			batch.TrimWork += bytes * 8;
+		}
+		if (!full || width == 0 || !bytes) return true;
 		const uint64_t perByte = NativeFontMeasurementWorkPerByte +
 								 (width >= 1 && !(width >= 10000000 && width < 10000001) ? 2 * spaces : 0);
 		const auto *fallbackValue = c.Find("fallback_font");
@@ -373,6 +381,9 @@ namespace engine::imagegraph::detail {
 			4 * (text->size() + (options.ObservedCasedText ? options.ObservedCasedText->size() : 0) +
 				 MaximumFontGlyphs + 32) +
 			Limits::MaximumArrayElements * (sizeof(FontTextLine) + 32);
+		if (options.Trim && options.TrimType)
+			layoutBytes += sizeof(std::vector<std::string_view>) +
+						   (Limits::MaximumArrayElements + 1) * sizeof(std::string_view);
 		if (options.FullTextSize && options.MaximumLineWidth != 0) {
 			const auto extra = FontTextNativeMeasurementAdmissionBytes(
 				*row.SelectedFont.Font.Data,

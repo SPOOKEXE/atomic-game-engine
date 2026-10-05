@@ -7929,7 +7929,15 @@ namespace engine::imagegraph {
 	}
 
 	Status Compile(const Document &document, Plan &plan, Diagnostic &diagnostic) {
-		detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+		return Compile(document, plan, diagnostic, Limits::MaximumEvaluationBytes);
+	}
+	Status
+	Compile(const Document &document, Plan &plan, Diagnostic &diagnostic, uint64_t maximumWorkspaceBytes) {
+		if (maximumWorkspaceBytes > Limits::MaximumEvaluationBytes) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "compile workspace exceeds native bounds");
+			return diagnostic.Code;
+		}
+		detail::EvaluationBudget budget(maximumWorkspaceBytes);
 		detail::AllocationReservation planCharge;
 		return CompileWithBudget(document, plan, diagnostic, budget, planCharge);
 	}
@@ -7949,6 +7957,7 @@ namespace engine::imagegraph {
 	struct CatalogueOutputs {
 		std::vector<Diagnostic> Diagnostics;
 		std::vector<std::pair<std::string_view, SourceSocketDomain>> Domains;
+		std::vector<std::pair<std::string, SourceSocketDomain>> FrozenDomains;
 		std::vector<std::pair<std::string, Image>> Images;
 		std::vector<std::pair<std::string, ImageArray>> ImageArrays;
 		ValueOutputs Values;
@@ -8075,9 +8084,12 @@ namespace engine::imagegraph {
 	// Typed values produced by a value node or a catalogue executor.
 	static std::optional<SourceSocketDomain>
 	FindOutputDomain(const Node &node, const NodeResult &result, std::string_view port) {
-		if (const auto *outputs = std::get_if<CatalogueOutputs>(&result))
+		if (const auto *outputs = std::get_if<CatalogueOutputs>(&result)) {
+			for (const auto &[id, domain] : outputs->FrozenDomains)
+				if (id == port) return domain;
 			for (const auto &[id, domain] : outputs->Domains)
 				if (id == port) return domain;
+		}
 		if (const auto *entry = FindCatalogueEntry(node.Type))
 			for (const auto &output : entry->Outputs)
 				if (output.Id == port) {
@@ -8266,6 +8278,484 @@ namespace engine::imagegraph {
 		for (const AuthoredValue &value : *FindValueOutputs(result))
 			bytes += detail::ValuePayloadBytes(value.Data);
 		return bytes;
+	}
+
+	// Native image collectors use indexed leaves; the replay Value carrier owns source-shaped pixels.
+	static bool MeasureFrozenImageArray(const ArrayValue &array, size_t &images, size_t &items) {
+		const auto element = [&](const ElementValue &value) {
+			if (!std::holds_alternative<SurfaceValue>(value)) return false;
+			++images;
+			++items;
+			return true;
+		};
+		const auto visit = [&](auto &&self, const SourceArrayItem &item) -> bool {
+			if (const auto *children = std::get_if<std::vector<SourceArrayItem>>(&item.Data)) {
+				++items;
+				for (const auto &child : *children)
+					if (!self(self, child)) return false;
+				return true;
+			}
+			if (std::holds_alternative<Image>(item.Data)) {
+				++images;
+				++items;
+				return true;
+			}
+			return element(std::get<ElementValue>(item.Data));
+		};
+		for (const auto &item : array.Items)
+			if (!visit(visit, item)) return false;
+		for (const auto &row : array.Nested) {
+			++items;
+			for (const auto &value : row)
+				if (!element(value)) return false;
+		}
+		for (const auto &value : array.Elements)
+			if (!element(value)) return false;
+		return images <= Limits::MaximumArrayElements && items <= Limits::MaximumArrayElements;
+	}
+	static ImageArray RestoreFrozenImageArray(ArrayValue &array, size_t images) {
+		ImageArray output;
+		output.Images.reserve(images);
+		const auto image = [&](Image &value) {
+			ImageArrayItem item{output.Images.size()};
+			output.Images.push_back(std::move(value));
+			return item;
+		};
+		const auto element = [&](ElementValue &value) { return image(std::get<SurfaceValue>(value).Data); };
+		const auto visit = [&](auto &&self, SourceArrayItem &item) -> ImageArrayItem {
+			if (auto *children = std::get_if<std::vector<SourceArrayItem>>(&item.Data)) {
+				std::vector<ImageArrayItem> row;
+				row.reserve(children->size());
+				for (auto &child : *children)
+					row.push_back(self(self, child));
+				return ImageArrayItem{std::move(row)};
+			}
+			if (auto *value = std::get_if<Image>(&item.Data)) return image(*value);
+			return element(std::get<ElementValue>(item.Data));
+		};
+		output.Items.reserve(array.Items.size() + array.Nested.size() + array.Elements.size());
+		for (auto &item : array.Items)
+			output.Items.push_back(visit(visit, item));
+		for (auto &values : array.Nested) {
+			std::vector<ImageArrayItem> row;
+			row.reserve(values.size());
+			for (auto &value : values)
+				row.push_back(element(value));
+			output.Items.push_back({std::move(row)});
+		}
+		for (auto &value : array.Elements)
+			output.Items.push_back(element(value));
+		return output;
+	}
+
+	template <class T> static bool FrozenSurfaceBounds(const T &value, uint32_t maximumDimension) {
+		if constexpr (std::is_same_v<T, Value> || std::is_same_v<T, ElementValue>)
+			return std::visit(
+				[&](const auto &leaf) { return FrozenSurfaceBounds(leaf, maximumDimension); }, value
+			);
+		else if constexpr (std::is_same_v<T, SourceArrayItem>)
+			return std::visit(
+				[&](const auto &leaf) { return FrozenSurfaceBounds(leaf, maximumDimension); }, value.Data
+			);
+		else if constexpr (std::is_same_v<T, ArrayValue>)
+			return FrozenSurfaceBounds(value.Elements, maximumDimension) &&
+				   FrozenSurfaceBounds(value.Nested, maximumDimension) &&
+				   FrozenSurfaceBounds(value.Items, maximumDimension);
+		else if constexpr (std::is_same_v<T, std::vector<ElementValue>> ||
+						   std::is_same_v<T, std::vector<std::vector<ElementValue>>> ||
+						   std::is_same_v<T, std::vector<SourceArrayItem>>)
+			return std::all_of(value.begin(), value.end(), [&](const auto &leaf) {
+				return FrozenSurfaceBounds(leaf, maximumDimension);
+			});
+		else if constexpr (std::is_same_v<T, SurfaceValue>)
+			return FrozenSurfaceBounds(value.Data, maximumDimension);
+		else if constexpr (std::is_same_v<T, Image>)
+			return ValidSurfaceLayout(value, maximumDimension, Limits::MaximumOutputBytes);
+		else if constexpr (std::is_same_v<T, AtlasValue>)
+			return !value.Data || value.Data->Kind != AtlasKind::SurfaceAtlas ||
+				   FrozenSurfaceBounds(value.Data->Surface, maximumDimension);
+		else
+			return true;
+	}
+
+	static std::optional<uint64_t> CacheGroupValueCloneBytes(const Value &value) {
+		if (const auto *surface = std::get_if<SurfaceValue>(&value)) {
+			if (!ValidSurfaceLayout(surface->Data, Limits::MaximumDimension, Limits::MaximumOutputBytes) ||
+				!FiniteSurfaceSamples(surface->Data))
+				return std::nullopt;
+			return sizeof(Value) + surface->Data.Pixels.size();
+		}
+		return ValueClonePayloadBytes(value);
+	}
+	// Frozen journals carry owned raw values. Restore named getters without input reads or kernels.
+	static bool RestoreFrozenCacheGroupOutputs(
+		const Node &node,
+		const CacheGroupReplayNode &snapshot,
+		uint32_t maximumDimension,
+		CatalogueOutputs &output,
+		detail::EvaluationBudget &budget,
+		detail::AllocationReservation &charge,
+		Diagnostic &diagnostic
+	) {
+		ENGINE_PROFILE("imagegraph.cache_group.restore");
+		uint64_t bytes = 0;
+		size_t values = 0, images = 0, arrays = 0, domains = 0, refusals = 0;
+		const auto overflow = [&]() {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "frozen output size exceeds bounds", node.Id, "cache_group"
+			);
+			return false;
+		};
+		for (const auto &port : snapshot.Outputs) {
+			if (port.Data) {
+				if (!FrozenSurfaceBounds(*port.Data, maximumDimension)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"frozen surface exceeds request bounds",
+						node.Id,
+						port.Port
+					);
+					return false;
+				}
+				const auto payload = CacheGroupValueCloneBytes(*port.Data);
+				if (!payload || !AddBytes(bytes, *payload)) return overflow();
+				if (std::holds_alternative<SurfaceValue>(*port.Data)) {
+					++images;
+					if (!AddBytes(bytes, sizeof(std::pair<std::string, Image>))) return overflow();
+				} else if (node.Type == "value.array" && std::holds_alternative<ArrayValue>(*port.Data)) {
+					++arrays;
+					size_t arrayImages = 0, arrayItems = 0;
+					if (!MeasureFrozenImageArray(std::get<ArrayValue>(*port.Data), arrayImages, arrayItems)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::TypeMismatch,
+							"frozen native image array contains a value leaf",
+							node.Id,
+							port.Port
+						);
+						return false;
+					}
+					if (!AddBytes(bytes, sizeof(std::pair<std::string, ImageArray>)) ||
+						!AddArrayBytes(bytes, arrayImages, sizeof(Image)) ||
+						!AddArrayBytes(bytes, arrayItems, sizeof(ImageArrayItem)))
+						return overflow();
+				} else {
+					++values;
+					if (!AddBytes(bytes, sizeof(AuthoredValue))) return overflow();
+				}
+				if (!AddBytes(bytes, std::max(port.Port.size(), std::string{}.capacity()))) return overflow();
+			}
+			if (port.Domain) {
+				++domains;
+				if (!AddBytes(bytes, sizeof(std::pair<std::string, SourceSocketDomain>)) ||
+					!AddBytes(bytes, std::max(port.Port.size(), std::string{}.capacity())))
+					return overflow();
+			}
+			if (port.Refusal) {
+				++refusals;
+				if (!AddBytes(bytes, sizeof(Diagnostic))) return overflow();
+				for (const auto *text : {&port.Refusal->NodeId, &port.Refusal->Port, &port.Refusal->Message})
+					if (!AddBytes(bytes, std::max(text->size(), std::string{}.capacity()))) return overflow();
+			}
+		}
+		auto reservation = budget.Reserve(bytes);
+		if (!reservation) {
+			SetDiagnostic(
+				diagnostic,
+				Status::LimitExceeded,
+				"frozen output clone exceeds live byte budget",
+				node.Id,
+				"cache_group"
+			);
+			return false;
+		}
+		charge = std::move(*reservation);
+		output.Values.reserve(values);
+		output.Images.reserve(images);
+		output.ImageArrays.reserve(arrays);
+		output.FrozenDomains.reserve(domains);
+		output.Diagnostics.reserve(refusals);
+		for (const auto &port : snapshot.Outputs) {
+			if (port.Refusal) output.Diagnostics.push_back(*port.Refusal);
+			if (port.Domain) output.FrozenDomains.emplace_back(port.Port, *port.Domain);
+			if (!port.Data) continue;
+			if (const auto *surface = std::get_if<SurfaceValue>(&*port.Data))
+				output.Images.emplace_back(port.Port, surface->Data);
+			else if (node.Type == "value.array" && std::holds_alternative<ArrayValue>(*port.Data)) {
+				ArrayValue owned = std::get<ArrayValue>(*port.Data);
+				size_t arrayImages = 0, arrayItems = 0;
+				if (!MeasureFrozenImageArray(owned, arrayImages, arrayItems)) std::terminate();
+				output.ImageArrays.emplace_back(port.Port, RestoreFrozenImageArray(owned, arrayImages));
+			} else {
+				output.Values.push_back({port.Port, *port.Data});
+				detail::StripSourcePathShiftIdentities(output.Values.back().Data);
+			}
+		}
+		return true;
+	}
+
+	struct CacheGroupCaptureView {
+		std::string_view Port;
+		const Value *Data = nullptr;
+		const Image *Surface = nullptr;
+		const ImageArray *Images = nullptr;
+		const Diagnostic *Refusal = nullptr;
+		std::optional<SourceSocketDomain> Domain;
+		bool Published = false;
+	};
+	static std::optional<uint64_t> CapturedImageArrayBytes(const ImageArray &array) {
+		uint64_t bytes = 0;
+		size_t count = 0;
+		const auto image = [&](size_t index) {
+			return index < array.Images.size() && bytes <= Limits::MaximumArrayBytes &&
+				   array.Images[index].Pixels.size() <= Limits::MaximumArrayBytes - bytes &&
+				   ValidSurfaceLayout(
+					   array.Images[index], Limits::MaximumDimension, Limits::MaximumArrayBytes
+				   ) &&
+				   FiniteSurfaceSamples(array.Images[index]) &&
+				   AddBytes(bytes, array.Images[index].Pixels.size());
+		};
+		const auto item = [&](auto &&self, const ImageArrayItem &value, size_t depth) -> bool {
+			if (depth > Limits::MaximumArrayDepth || ++count > Limits::MaximumArrayElements ||
+				!AddBytes(bytes, sizeof(SourceArrayItem)) || bytes > Limits::MaximumArrayBytes)
+				return false;
+			if (const auto *index = std::get_if<size_t>(&value.Data)) return image(*index);
+			for (const auto &child : std::get<std::vector<ImageArrayItem>>(value.Data))
+				if (!self(self, child, depth + 1)) return false;
+			return true;
+		};
+		if (array.Items.empty()) {
+			if (array.Images.size() > Limits::MaximumArrayElements) return std::nullopt;
+			for (size_t index = 0; index < array.Images.size(); ++index)
+				if (!AddBytes(bytes, sizeof(SourceArrayItem)) || !image(index)) return std::nullopt;
+		} else
+			for (const auto &value : array.Items)
+				if (!item(item, value, 1)) return std::nullopt;
+		return bytes <= Limits::MaximumArrayBytes ? std::optional<uint64_t>{bytes} : std::nullopt;
+	}
+	static ArrayValue CaptureImageArray(const ImageArray &array) {
+		ArrayValue output{ValueType::Any, {}};
+		const auto item = [&](auto &&self, const ImageArrayItem &value) -> SourceArrayItem {
+			if (const auto *index = std::get_if<size_t>(&value.Data))
+				return SourceArrayItem{array.Images[*index]};
+			const auto &children = std::get<std::vector<ImageArrayItem>>(value.Data);
+			std::vector<SourceArrayItem> row;
+			row.reserve(children.size());
+			for (const auto &child : children)
+				row.push_back(self(self, child));
+			return SourceArrayItem{std::move(row)};
+		};
+		output.Items.reserve(array.Items.empty() ? array.Images.size() : array.Items.size());
+		if (array.Items.empty())
+			for (const auto &image : array.Images)
+				output.Items.push_back({image});
+		else
+			for (const auto &value : array.Items)
+				output.Items.push_back(item(item, value));
+		return output;
+	}
+	static uint64_t
+	RetainedCacheGroupOutputBytes(std::span<const CacheGroupReplayOutput> outputs, size_t capacity) {
+		uint64_t bytes = capacity * sizeof(CacheGroupReplayOutput);
+		for (const auto &port : outputs) {
+			if (!AddBytes(bytes, port.Port.capacity())) return UINT64_MAX;
+			if (port.Data && !AddBytes(bytes, detail::RetainedPayloadBytes(*port.Data))) return UINT64_MAX;
+			if (port.Refusal)
+				for (const auto *text : {&port.Refusal->NodeId, &port.Refusal->Port, &port.Refusal->Message})
+					if (!AddBytes(bytes, text->capacity())) return UINT64_MAX;
+		}
+		return bytes;
+	}
+	// Replace only published getters. Uncomputed constructor ports and owner/activity remain intact.
+	static bool CaptureCacheGroupOutputs(
+		const Node &node,
+		const NodeResult &result,
+		CacheGroupReplayNode &target,
+		detail::EvaluationBudget &budget,
+		detail::AllocationReservation &stateCharge,
+		uint64_t &comparisonWork,
+		Diagnostic &diagnostic
+	) {
+		ENGINE_PROFILE("imagegraph.cache_group.capture");
+		constexpr size_t MAXIMUM_PORTS = Limits::MaximumDynamicOutputsPerNode + Limits::MaximumGroupPorts;
+		constexpr uint64_t WORK_LIMIT = 64ull * 1024 * 1024;
+		const auto fail = [&](Status code, const char *message, std::string_view port = {}) {
+			SetDiagnostic(diagnostic, code, message, node.Id, std::string(port));
+			return false;
+		};
+		using IndexEntry = std::pair<const std::string_view, size_t>;
+		std::map<std::string_view, size_t, std::less<>, detail::EvaluationAllocator<IndexEntry>> indices{
+			std::less<>{}, detail::EvaluationAllocator<IndexEntry>(budget)
+		};
+		detail::EvaluationVector<CacheGroupCaptureView> views{
+			detail::EvaluationAllocator<CacheGroupCaptureView>(budget)
+		};
+		const auto find = [&](std::string_view port) -> CacheGroupCaptureView * {
+			if (port.empty() || port.size() > Limits::MaximumTextBytes) {
+				fail(Status::InvalidValue, "published cache-group output name is invalid");
+				return nullptr;
+			}
+			size_t levels = 1;
+			for (size_t count = indices.size(); count > 1; count = (count + 1) / 2)
+				++levels;
+			const uint64_t work = 4 * levels * (port.size() + 1);
+			if (work > WORK_LIMIT - comparisonWork) {
+				fail(Status::LimitExceeded, "cache-group capture exceeds whole-batch name work");
+				return nullptr;
+			}
+			comparisonWork += work;
+			const auto existing = indices.find(port);
+			if (existing != indices.end()) return &views[existing->second];
+			if (views.size() == MAXIMUM_PORTS) {
+				fail(Status::LimitExceeded, "cache-group capture exceeds named output count");
+				return nullptr;
+			}
+			indices.emplace(port, views.size());
+			CacheGroupCaptureView view;
+			view.Port = port;
+			views.push_back(view);
+			return &views.back();
+		};
+		for (const auto &port : target.Outputs) {
+			auto *view = find(port.Port);
+			if (!view) return false;
+			view->Data = port.Data ? &*port.Data : nullptr;
+			view->Domain = port.Domain;
+			view->Refusal = port.Refusal ? &*port.Refusal : nullptr;
+		}
+		const auto publish = [&](std::string_view port) -> CacheGroupCaptureView * {
+			auto *view = find(port);
+			if (view && !view->Published) {
+				view->Data = nullptr;
+				view->Refusal = nullptr;
+				view->Domain.reset();
+				if (const auto *entry = FindCatalogueEntry(node.Type))
+					for (const auto &output : entry->Outputs)
+						if (output.Id == port) {
+							ValueType declared = output.Type;
+							if (node.Type == "pc.gradient_extract" || node.Type == "pc.gradient_sample")
+								declared = ValueType::Colour;
+							view->Domain = SourceSocketDomain{declared, {}, DeclaredSourceKind(declared)};
+							break;
+						}
+				view->Published = true;
+			}
+			return view;
+		};
+		if (const auto *catalogue = std::get_if<CatalogueOutputs>(&result)) {
+			for (const auto &[id, surface] : catalogue->Images) {
+				auto *view = publish(id);
+				if (!view) return false;
+				view->Surface = &surface;
+			}
+			for (const auto &[id, images] : catalogue->ImageArrays) {
+				auto *view = publish(id);
+				if (!view) return false;
+				view->Images = &images;
+			}
+			for (const auto &value : catalogue->Values) {
+				auto *view = publish(value.Port);
+				if (!view) return false;
+				view->Data = &value.Data;
+			}
+			for (const auto &refusal : catalogue->Diagnostics) {
+				auto *view = publish(refusal.Port);
+				if (!view) return false;
+				if (!view->Refusal) view->Refusal = &refusal;
+			}
+			for (const auto &[id, domain] : catalogue->Domains) {
+				auto *view = find(id);
+				if (!view) return false;
+				view->Domain = domain;
+			}
+		} else if (const auto *values = std::get_if<ValueOutputs>(&result)) {
+			for (const auto &value : *values) {
+				auto *view = publish(value.Port);
+				if (!view) return false;
+				view->Data = &value.Data;
+			}
+		} else if (const auto *schema = FindSchema(node.Type)) {
+			for (const auto &port : schema->Ports) {
+				if (port.Direction != PortDirection::Output) continue;
+				const auto *surface =
+					port.Type == ValueType::Image ? FindImageOutput(result, port.Id) : nullptr;
+				const auto *images =
+					port.Type == ValueType::Array ? FindImageArrayOutput(result, port.Id) : nullptr;
+				if (!surface && !images) continue;
+				auto *view = publish(port.Id);
+				if (!view) return false;
+				view->Surface = surface;
+				view->Images = images;
+			}
+		}
+		uint64_t bytes = views.size() * sizeof(CacheGroupReplayOutput);
+		for (auto &view : views) {
+			if (!AddBytes(bytes, std::max(view.Port.size(), std::string{}.capacity())))
+				return fail(Status::LimitExceeded, "cache-group clone size overflows", view.Port);
+			std::optional<uint64_t> payload{0};
+			if (view.Data)
+				payload = CacheGroupValueCloneBytes(*view.Data);
+			else if (view.Surface) {
+				if (view.Surface->Pixels.size() > Limits::MaximumOutputBytes)
+					return fail(
+						Status::LimitExceeded, "cache-group surface exceeds native output bounds", view.Port
+					);
+				if ((!ValidSurfaceLayout(
+						 *view.Surface, Limits::MaximumDimension, Limits::MaximumOutputBytes
+					 ) ||
+					 !FiniteSurfaceSamples(*view.Surface)))
+					payload.reset();
+				else
+					payload = view.Surface->Pixels.size();
+			} else if (view.Images) {
+				payload = CapturedImageArrayBytes(*view.Images);
+				if (!payload)
+					return fail(
+						Status::LimitExceeded,
+						"cache-group image array exceeds typed shape or payload bounds",
+						view.Port
+					);
+			}
+			if (!payload) {
+				if (!view.Refusal)
+					return fail(Status::InvalidValue, "published cache-group payload is invalid", view.Port);
+				view.Data = nullptr;
+				view.Surface = nullptr;
+				view.Images = nullptr;
+				payload = 0;
+			}
+			if (!AddBytes(bytes, *payload))
+				return fail(Status::LimitExceeded, "cache-group clone size overflows", view.Port);
+			if (view.Refusal)
+				for (const auto *text : {&view.Refusal->NodeId, &view.Refusal->Port, &view.Refusal->Message})
+					if (!AddBytes(bytes, std::max(text->size(), std::string{}.capacity())))
+						return fail(Status::LimitExceeded, "cache-group refusal size overflows", view.Port);
+		}
+		auto charge = budget.Reserve(bytes);
+		if (!charge)
+			return fail(Status::LimitExceeded, "cache-group snapshot clone exceeds live byte budget");
+		std::vector<CacheGroupReplayOutput> outputs;
+		outputs.reserve(views.size());
+		for (const auto &view : views) {
+			CacheGroupReplayOutput output;
+			output.Port = view.Port;
+			output.Domain = view.Domain;
+			if (view.Refusal) output.Refusal = *view.Refusal;
+			if (view.Data)
+				output.Data = *view.Data;
+			else if (view.Surface)
+				output.Data = SurfaceValue{*view.Surface};
+			else if (view.Images)
+				output.Data = CaptureImageArray(*view.Images);
+			outputs.push_back(std::move(output));
+		}
+		const uint64_t oldBytes = RetainedCacheGroupOutputBytes(target.Outputs, target.Outputs.capacity());
+		target.Outputs = std::move(outputs);
+		if (!stateCharge.Merge(std::move(*charge))) std::terminate();
+		auto released = stateCharge.Split(oldBytes);
+		if (!released) std::terminate();
+		return true;
 	}
 
 	struct WavPreviewCapture {
@@ -9226,6 +9716,13 @@ namespace engine::imagegraph {
 			);
 			return diagnostic.Code;
 		}
+		if (request.SourceFrameCacheLoads &&
+			request.SourceFrameCacheLoads->Entries.size() > Limits::MaximumArrayElements) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "loaded frame cache receipt count exceeds bounds"
+			);
+			return diagnostic.Code;
+		}
 		if (request.SourceFontHostResidentBytes > Limits::MaximumEvaluationBytes) {
 			SetDiagnostic(
 				diagnostic,
@@ -9512,6 +10009,68 @@ namespace engine::imagegraph {
 		StatefulOutputCapture *batch = nullptr
 	) {
 
+		detail::AllocationReservation cacheGroupCharge;
+		CacheGroupReplayState temporaryCacheGroups;
+		const CacheGroupReplayState *cacheGroups =
+			simulation && simulation->Data ? &simulation->Data->CacheGroups : nullptr;
+		if (!cacheGroups && request.DataReplay && !request.DataReplay->CacheGroups.Nodes.empty()) {
+			const auto &source = request.DataReplay->CacheGroups;
+			const uint64_t available = budget.Available();
+			const uint64_t retained = RetainedCacheGroupReplayBytes(source);
+			if (source.Nodes.size() > Limits::MaximumNodes) {
+				SetDiagnostic(diagnostic, Status::LimitExceeded, "cache-group owner exceeds node bounds");
+				return diagnostic.Code;
+			}
+			size_t ports = 0;
+			for (const auto &node : source.Nodes)
+				ports = std::max(ports, node.Outputs.size());
+			if (retained > available / 2) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "cache-group owners exceed live byte budget"
+				);
+				return diagnostic.Code;
+			}
+			auto charge = budget.Reserve(2 * retained);
+			auto workspace = budget.Reserve(ports * sizeof(size_t));
+			if (!charge || !workspace) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "cache-group workspace exceeds live byte budget"
+				);
+				return diagnostic.Code;
+			}
+			cacheGroupCharge = std::move(*charge);
+			if (ReconcileCacheGroupReplay(
+					document, source, temporaryCacheGroups, request.SourceCacheProject, available, diagnostic
+				) != Status::Ok)
+				return diagnostic.Code;
+			cacheGroups = &temporaryCacheGroups;
+		}
+		const uint64_t loadBytes =
+			request.SourceFrameCacheLoads ? RetainedDataReplayBytes(*request.SourceFrameCacheLoads) : 0;
+		auto frameCacheLoadShadow = budget.Reserve(loadBytes);
+		if (!frameCacheLoadShadow) {
+			SetDiagnostic(
+				diagnostic,
+				Status::LimitExceeded,
+				"loaded frame cache residency exceeds live evaluation budget"
+			);
+			return diagnostic.Code;
+		}
+		if (request.SourceFrameCacheLoads) {
+			auto workspace = budget.Reserve(request.SourceFrameCacheLoads->Entries.size() * sizeof(size_t));
+			if (!workspace) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"loaded frame cache validation workspace exceeds budget"
+				);
+				return diagnostic.Code;
+			}
+			if (ValidateDataReplay(
+					*request.SourceFrameCacheLoads, Limits::MaximumEvaluationBytes, diagnostic
+				) != Status::Ok)
+				return diagnostic.Code;
+		}
 		// Host ownership coexists with the held context and observations admitted below.
 		auto fontHostShadow = budget.Reserve(request.SourceFontHostResidentBytes);
 		if (!fontHostShadow) {
@@ -9717,6 +10276,21 @@ namespace engine::imagegraph {
 			return diagnostic.Code;
 		}
 		const EvaluationNodeIndices nodeIndices(document);
+		detail::EvaluationVector<const CacheGroupReplayNode *> frozen(
+			document.Nodes.size(), nullptr, detail::EvaluationAllocator<const CacheGroupReplayNode *>(budget)
+		);
+		if (cacheGroups)
+			for (const auto &node : cacheGroups->Nodes)
+				if (!node.RenderActive) frozen[nodeIndices.at(node.NodeId)] = &node;
+		detail::EvaluationVector<CacheGroupReplayNode *> tracked(
+			simulation && simulation->Data ? document.Nodes.size() : 0,
+			nullptr,
+			detail::EvaluationAllocator<CacheGroupReplayNode *>(budget)
+		);
+		if (simulation && simulation->Data)
+			for (auto &node : simulation->Data->CacheGroups.Nodes)
+				tracked[nodeIndices.at(node.NodeId)] = &node;
+
 		const auto targetNode =
 			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
 				return node.Id == targetNodeId;
@@ -9728,6 +10302,17 @@ namespace engine::imagegraph {
 			return diagnostic.Code;
 		}
 		const size_t targetIndex = nodeIndices.at(captureTarget ? targetNodeId : output->NodeId);
+		if (captureTarget && frozen[targetIndex]) {
+			SetDiagnostic(
+				diagnostic,
+				Status::UnsupportedExecution,
+				"frozen node input inspection requires an explicit source render list",
+				std::string(targetNodeId),
+				"cache_group"
+			);
+			return diagnostic.Code;
+		}
+
 		detail::EvaluationVector<const Output *> selectedOutputs{
 			detail::EvaluationAllocator<const Output *>(budget)
 		};
@@ -9792,6 +10377,11 @@ namespace engine::imagegraph {
 			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
 				sources.push_back(route.Producer);
 		}
+		// Frozen output getters do not read inputs or run their upstream producers.
+		// Input inspection retains structural reachability before applying this cut.
+		if (requiredOutput == document.Outputs.end())
+			for (size_t index = 0; index < upstream.size(); ++index)
+				if (frozen[index]) upstream[index].clear();
 		std::vector<uint8_t> needed(document.Nodes.size(), 0);
 		std::vector<size_t> pending;
 		pending.reserve(
@@ -9825,6 +10415,8 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
+			for (size_t index = 0; index < upstream.size(); ++index)
+				if (frozen[index]) upstream[index].clear();
 			std::fill(needed.begin(), needed.end(), 0);
 			pending.clear();
 			pending.push_back(targetIndex);
@@ -9840,8 +10432,11 @@ namespace engine::imagegraph {
 		detail::EvaluationVector<uint8_t> timelineNeeded(
 			needed.begin(), needed.end(), detail::EvaluationAllocator<uint8_t>(budget)
 		);
+		for (size_t index = 0; index < frozen.size(); ++index)
+			if (frozen[index]) timelineNeeded[index] = 0;
 		for (const auto &route : plan.InlineOwnerDependencies)
-			if (route.ControlsOnly && needed[route.Consumer]) timelineNeeded[route.Owner] = 1;
+			if (route.ControlsOnly && needed[route.Consumer] && !frozen[route.Consumer])
+				timelineNeeded[route.Owner] = 1;
 		for (size_t index = 0; index < needed.size(); ++index) {
 			if (!timelineNeeded[index]) continue;
 			const Node *current = &document.Nodes[index];
@@ -9994,8 +10589,10 @@ namespace engine::imagegraph {
 					pending.push_back(source);
 			}
 			std::copy(needed.begin(), needed.end(), timelineNeeded.begin());
+			for (size_t index = 0; index < frozen.size(); ++index)
+				if (frozen[index]) timelineNeeded[index] = 0;
 			for (const auto &inlineRoute : plan.InlineOwnerDependencies)
-				if (inlineRoute.ControlsOnly && needed[inlineRoute.Consumer])
+				if (inlineRoute.ControlsOnly && needed[inlineRoute.Consumer] && !frozen[inlineRoute.Consumer])
 					timelineNeeded[inlineRoute.Owner] = 1;
 			for (size_t index = 0; index < needed.size(); ++index) {
 				if (!timelineNeeded[index]) continue;
@@ -10216,7 +10813,7 @@ namespace engine::imagegraph {
 			captured.Captured = true;
 			return true;
 		};
-		uint64_t evaluationBytes = 0;
+		uint64_t evaluationBytes = 0, captureComparisonWork = 0;
 		size_t ordinaryCursor = 0;
 		while (true) {
 			size_t index = document.Nodes.size();
@@ -10233,7 +10830,7 @@ namespace engine::imagegraph {
 				}
 				if (!needed[candidate] || (dynamicPcx && completed[candidate])) continue;
 				unfinished = true;
-				if (!dynamicPcx ||
+				if (!dynamicPcx || frozen[candidate] ||
 					std::all_of(upstream[candidate].begin(), upstream[candidate].end(), [&](size_t source) {
 						return completed[source] != 0;
 					})) {
@@ -10248,6 +10845,34 @@ namespace engine::imagegraph {
 			}
 			if (dynamicPcx) completed[index] = 1;
 			pendingPcxRoute.reset();
+			if (frozen[index]) {
+				CatalogueOutputs restored;
+				if (!RestoreFrozenCacheGroupOutputs(
+						document.Nodes[index],
+						*frozen[index],
+						request.MaximumImageDimension,
+						restored,
+						budget,
+						resultCharges[index],
+						diagnostic
+					))
+					return diagnostic.Code;
+				const uint64_t bytes = ResultBytes(restored);
+				if (bytes > Limits::MaximumEvaluationBytes - evaluationBytes) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"frozen outputs exceed intermediate budget",
+						document.Nodes[index].Id,
+						"cache_group"
+					);
+					return diagnostic.Code;
+				}
+				evaluationBytes += bytes;
+				results[index] = std::move(restored);
+				produced[index] = 1;
+				continue;
+			}
 			const Node &node = timelineOverrides.Find(index, document.Nodes[index]);
 			size_t valuesIndex = index;
 			for (size_t hop = 0;
@@ -15012,6 +15637,17 @@ namespace engine::imagegraph {
 				results[index] = std::move(result);
 			resultCharges[index] = std::move(currentCharge);
 			produced[index] = 1;
+			if (!tracked.empty() && tracked[index] &&
+				!CaptureCacheGroupOutputs(
+					node,
+					results[index],
+					*tracked[index],
+					budget,
+					*simulation->Charge,
+					captureComparisonWork,
+					diagnostic
+				))
+				return diagnostic.Code;
 			// A large chain needs only the current input and output in memory.
 			for (const size_t source : upstream[index]) {
 				if (!dynamicPcx && --remainingConsumers[source] == 0 && source != targetIndex &&
@@ -15023,6 +15659,13 @@ namespace engine::imagegraph {
 			}
 		}
 		if (simulation && simulation->Data) {
+			for (auto &node : simulation->Data->CacheGroups.Nodes)
+				for (auto &output : node.Outputs)
+					if (output.Data && !std::holds_alternative<SurfaceValue>(*output.Data) &&
+						!detail::SyncSourcePathSequentialValue(
+							pathShiftMemo, *output.Data, budget, *simulation->Charge, diagnostic
+						))
+						return diagnostic.Code;
 			for (auto &entry : simulation->Data->Entries)
 				for (auto &frame : entry.Values) {
 					if (!detail::SyncSourcePathSequentialValue(
@@ -15198,6 +15841,7 @@ namespace engine::imagegraph {
 				// Dynamic group declarations travel with the raw value through final
 				// output selection.
 				selected.Domains = std::move(catalogue->Domains);
+				selected.FrozenDomains = std::move(catalogue->FrozenDomains);
 				outputValue = std::move(selected);
 				if (!resultCharges[targetIndex].Merge(std::move(*selectionCharge))) std::terminate();
 			} else {
@@ -16055,6 +16699,46 @@ namespace engine::imagegraph {
 			capture.Random = &candidate.Random;
 		}
 		if constexpr (surfaceSupport) {
+			if (request.DataReplay && !request.DataReplay->CacheGroups.Nodes.empty() &&
+				ReconcileCacheGroupReplay(
+					document,
+					request.DataReplay->CacheGroups,
+					candidate.Data.CacheGroups,
+					request.SourceCacheProject,
+					maximumBytes,
+					diagnostic
+				) != Status::Ok)
+				return diagnostic.Code;
+			// Load authored membership once; observation ticks preserve interactive ownership and activity.
+			const bool authoredGroups =
+				std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+					if ((node.Type != "pc.cache" && node.Type != "pc.cache_array") ||
+						node.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
+						return false;
+					return std::any_of(
+						node.SourceProperties.begin(),
+						node.SourceProperties.end(),
+						[](const AuthoredValue &property) {
+							const auto *group = std::get_if<ArrayValue>(&property.Data);
+							return property.Port == "cache_group" && group &&
+								   group->ElementType == ValueType::Text && !group->Elements.empty();
+						}
+					);
+				});
+			if (authoredGroups && candidate.Data.CacheGroups.Owners.empty()) {
+				CacheGroupReplayState initialized;
+				if (InitializeAuthoredCacheGroupReplay(
+						document, candidate.Data.CacheGroups, initialized, budget.Available(), diagnostic
+					) != Status::Ok)
+					return diagnostic.Code;
+				auto initializedCharge = budget.Reserve(RetainedCacheGroupReplayBytes(initialized));
+				if (!initializedCharge || !stateCharge->Merge(std::move(*initializedCharge)))
+					return fail(Status::LimitExceeded, "initialized cache-group journal exceeds live bytes");
+				candidate.Data.CacheGroups = std::move(initialized);
+			}
+			for (auto &node : candidate.Data.CacheGroups.Nodes)
+				for (auto &output : node.Outputs)
+					if (output.Data) detail::StripSourcePathShiftIdentities(*output.Data);
 			candidate.Data.Entries.reserve(
 				std::min(
 					Limits::MaximumArrayElements,
@@ -16174,14 +16858,38 @@ namespace engine::imagegraph {
 		if constexpr (inputSupport)
 			for (auto &value : inputStorage->Values)
 				if (resolveAlias(value.Data) != Status::Ok) return diagnostic.Code;
-		if constexpr (inputSupport) {
-			inputStorage->ReplayCharge = std::move(*stateCharge);
-			StatefulSnapshotAccess::Install(candidate.Inputs, std::move(inputStorage));
+		if constexpr (surfaceSupport) {
+			for (auto &node : candidate.Data.CacheGroups.Nodes)
+				for (auto &output : node.Outputs)
+					if (output.Data) {
+						if (detail::ResolveSimulationValueAliases(
+								*output.Data,
+								candidateSimulation,
+								budget,
+								*stateCharge,
+								diagnostic,
+								&candidate.Data
+							) != Status::Ok)
+							return diagnostic.Code;
+						detail::StripSourcePathShiftIdentities(*output.Data);
+					}
+			size_t workspaceRows = candidate.Data.Entries.size();
+			for (const auto &node : candidate.Data.CacheGroups.Nodes)
+				workspaceRows = std::max(workspaceRows, node.Outputs.size());
+			auto workspace = budget.Reserve(workspaceRows * sizeof(size_t));
+			if (!workspace)
+				return fail(Status::LimitExceeded, "data replay validation workspace exceeds live budget");
+			if (ValidateDataReplay(candidate.Data, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
 		}
 		if constexpr (surfaceSupport)
 			for (auto &entry : candidate.Data.Entries)
 				for (auto &frame : entry.Values)
 					detail::StripSourcePathShiftIdentities(frame.Data);
+		if constexpr (inputSupport) {
+			inputStorage->ReplayCharge = std::move(*stateCharge);
+			StatefulSnapshotAccess::Install(candidate.Inputs, std::move(inputStorage));
+		}
 		result = std::move(candidate);
 		oldShadow->Reset();
 		diagnostic = {};

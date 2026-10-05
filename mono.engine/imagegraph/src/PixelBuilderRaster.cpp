@@ -113,11 +113,16 @@ namespace engine::imagegraph::detail {
 			if (overridden != Status::Ok) return overridden;
 		}
 		EvaluationRequest request;
+		// Saved frames seed a fresh ledger when this recipe has no captured history.
+		const DataReplayState emptyHistory;
 		request.Tick = data.Tick;
 		request.Seed = data.Seed;
 		request.Subframe = data.Subframe;
 		request.NegativeFrame = data.NegativeFrame;
-		request.DataReplay = data.DataHistory ? &*data.DataHistory : nullptr;
+		request.DataReplay = data.DataHistory		? &*data.DataHistory
+							 : data.FrameCacheLoads ? &emptyHistory
+													: nullptr;
+		request.SourceFrameCacheLoads = data.FrameCacheLoads ? &*data.FrameCacheLoads : nullptr;
 		request.RigidReplay = data.RigidHistory ? &*data.RigidHistory : nullptr;
 		request.RigidProvider = rigidProvider;
 		request.RigidAuthoringRevision = data.RigidAuthoringRevision;

@@ -263,7 +263,7 @@ TEST_CASE(
 		clock.Tick = 1;
 		prepare();
 		REQUIRE(Record(*clock.DataReplay).Elements.size() == 2);
-		REQUIRE(host.ClearCacheResults(d, p, "cache", 1, 1, diagnostic));
+		REQUIRE(host.ClearSourceCache(d, p, "cache", 1, 1, diagnostic));
 		clock.Tick = 2;
 		prepare();
 		REQUIRE(FreedItem(Record(*clock.DataReplay), 1));

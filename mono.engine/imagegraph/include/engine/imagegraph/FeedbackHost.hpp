@@ -119,7 +119,7 @@ namespace engine::imagegraph {
 		) const {
 			const auto failWork = [&] {
 				diagnostic = {
-					Status::LimitExceeded, {}, {}, "Cache Results clear overlay exceeds work bounds"
+					Status::LimitExceeded, {}, {}, "Source cache clear overlay exceeds work bounds"
 				};
 				return false;
 			};
@@ -149,10 +149,27 @@ namespace engine::imagegraph {
 				!AdmitClearWork(work, matching * 2, targetNames) ||
 				!AdmitClearWork(work, matching * 2, sourceNames))
 				return failWork();
+			uint64_t identities = 0;
+			for (const auto &node : document.Nodes) {
+				if (node.SourceProperties.size() > Limits::MaximumPropertiesPerNode) return failWork();
+				const uint64_t metadataWork =
+					ClearNameScanWork(node.SourceProperties, [](const auto &property) -> const auto & {
+						return property.Port;
+					});
+				if (!AdmitClearWork(work, matching * 2, metadataWork)) return failWork();
+				const auto saved = SourceFrameCacheSavedText(node);
+				if (saved.size() > CLEAR_WORK_LIMIT - identities) return failWork();
+				identities += saved.size();
+			}
+			if (!AdmitClearWork(work, matching * 2, identities)) return failWork();
 			const auto retainedNode = [&](const auto &entry) {
 				return tracked(entry) &&
 					   std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
-						   return node.Id == entry.NodeId && node.Type == "pc.cache_results";
+						   if (node.Id != entry.NodeId) return false;
+						   const auto type = SourceFrameCacheRowType(entry);
+						   return type.empty() ? node.Type == "pc.cache_results"
+											   : node.Type == type &&
+													 entry.LoadedCacheData == SourceFrameCacheSavedText(node);
 					   });
 			};
 			size_t count = 0;
@@ -170,7 +187,7 @@ namespace engine::imagegraph {
 			if (count + target.Entries.size() > Limits::MaximumArrayElements || retained > maximumBytes ||
 				copies > maximumBytes - retained || slots > maximumBytes - retained - copies) {
 				diagnostic = {
-					Status::LimitExceeded, {}, {}, "Cache Results clear overlay exceeds byte bounds"
+					Status::LimitExceeded, {}, {}, "Source cache clear overlay exceeds byte bounds"
 				};
 				return false;
 			}
@@ -265,7 +282,7 @@ namespace engine::imagegraph {
 	  public:
 		// The observed source button frees slots without evaluating the graph. A fresh
 		// observation owns the next update; same-clock dependent previews are unavailable.
-		bool ClearCacheResults(
+		bool ClearSourceCache(
 			const Document &document,
 			const Plan &plan,
 			std::string_view nodeId,
@@ -280,13 +297,16 @@ namespace engine::imagegraph {
 			};
 			if (!Configured || DocumentRevision != revision || InputRevision != externalRevision)
 				return fail(
-					Status::InvalidValue, "Cache Results clear requires the current prepared document"
+					Status::InvalidValue, "Source cache clear requires the current prepared document"
 				);
 			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
 				document.Nodes.size() > Limits::MaximumNodes ||
 				document.Outputs.size() > Limits::MaximumOutputs ||
 				plan.EffectiveLinks.size() > Limits::MaximumLinks)
-				return fail(Status::LimitExceeded, "Cache Results clear graph or byte bound exceeded");
+				return fail(Status::LimitExceeded, "Source cache clear graph or byte bound exceeded");
+			for (const auto &item : document.Nodes)
+				if (item.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
+					return fail(Status::LimitExceeded, "source cache Clear metadata count exceeds bounds");
 			const uint64_t edges = plan.GroupSurfaceDependencies.size() +
 								   plan.InlineOwnerDependencies.size() +
 								   plan.InlineControlDependencies.size() + plan.PcxNamedDependencies.size();
@@ -294,7 +314,7 @@ namespace engine::imagegraph {
 				CacheInvalidInputs.size() > Limits::MaximumNodes ||
 				CacheInvalidOutputs.size() > Limits::MaximumOutputs)
 				return fail(
-					Status::LimitExceeded, "Cache Results clear dependency or name count exceeds bounds"
+					Status::LimitExceeded, "Source cache clear dependency or name count exceeds bounds"
 				);
 			const uint64_t nodeNames =
 				ClearNameScanWork(document.Nodes, [](const auto &n) -> const auto & { return n.Id; });
@@ -318,13 +338,79 @@ namespace engine::imagegraph {
 				!AdmitClearWork(work, document.Outputs.size(), outputNames) ||
 				!AdmitClearWork(work, document.Outputs.size(), ClearNamesScanWork(CacheInvalidInputs)) ||
 				!AdmitClearWork(work, document.Outputs.size(), nodeNames))
-				return fail(Status::LimitExceeded, "Cache Results clear dependency/name work exceeds bounds");
+				return fail(Status::LimitExceeded, "Source cache clear dependency/name work exceeds bounds");
 			const auto node =
 				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &item) {
 					return item.Id == nodeId;
 				});
-			if (node == document.Nodes.end() || node->Type != "pc.cache_results")
-				return fail(Status::UnknownNode, "Clear cache requires an authored Cache Results node");
+			if (node == document.Nodes.end() || (node->Type != "pc.cache_results" &&
+												 node->Type != "pc.cache" && node->Type != "pc.cache_array"))
+				return fail(Status::UnknownNode, "Clear cache requires an authored source cache node");
+			const bool frameCache = node->Type != "pc.cache_results";
+			bool serialize = true, seenSerialize = false;
+			if (frameCache) {
+				for (const auto &property : node->SourceProperties) {
+					if (property.Port != "serialize") continue;
+					const auto *value = std::get_if<bool>(&property.Data);
+					if (!value || seenSerialize)
+						return fail(
+							Status::InvalidValue, "frame-cache Clear requires one typed Serialize flag"
+						);
+					serialize = *value;
+					seenSerialize = true;
+				}
+				// Cache Array's nonforced clear is inert; admitted group enabling forces it.
+				if (node->Type == "pc.cache_array" &&
+					(!serialize ||
+					 (CacheProjectObservation && (CacheProjectObservation->ProjectLoading ||
+												  CacheProjectObservation->ProjectAppending)))) {
+					// Source clears input captures before its nonforced frame-clear guards.
+					if (InputNode == nodeId) {
+						InputSnapshot = {};
+						InputNode.clear();
+					}
+					diagnostic = {};
+					return true;
+				}
+			}
+			const bool enableMembers =
+				frameCache && serialize &&
+				(!CacheProjectObservation ||
+				 (!CacheProjectObservation->ProjectLoading && !CacheProjectObservation->ProjectAppending));
+			const auto memberOwner = [&](const DataReplayState &source) {
+				return std::find_if(
+					source.CacheGroups.Owners.begin(),
+					source.CacheGroups.Owners.end(),
+					[&](const auto &owner) { return owner.NodeId == nodeId; }
+				);
+			};
+			if (enableMembers) {
+				for (const auto *source : {&State.Data, &FrameStart.Data}) {
+					if (source->CacheGroups.Owners.size() > Limits::MaximumNodes)
+						return fail(Status::LimitExceeded, "frame-cache button owner count exceeds bounds");
+					if (!AdmitClearWork(
+							work,
+							2,
+							ClearNameScanWork(
+								source->CacheGroups.Owners,
+								[](const auto &owner) -> const auto & { return owner.NodeId; }
+							)
+						))
+						return fail(
+							Status::LimitExceeded, "frame-cache button owner-name work exceeds bounds"
+						);
+					const auto owner = memberOwner(*source);
+					if (owner == source->CacheGroups.Owners.end()) continue;
+					if (owner->Members.size() > Limits::MaximumLinks ||
+						!AdmitClearWork(work, owner->Members.size(), nodeNames))
+						return fail(Status::LimitExceeded, "frame-cache button member work exceeds bounds");
+					if (!owner->Members.empty() && !CacheProjectObservation)
+						return fail(
+							Status::UnsupportedExecution,
+							"frame-cache group enabling requires project observations"
+						);
+				}
+			}
 			std::array<bool, Limits::MaximumNodes> affected{};
 			std::array<size_t, Limits::MaximumNodes> pending{};
 			size_t count = 0;
@@ -350,6 +436,13 @@ namespace engine::imagegraph {
 					add(size_t(item - document.Nodes.begin()));
 			};
 			add(size_t(node - document.Nodes.begin()));
+			if (enableMembers)
+				for (const auto *source : {&State.Data, &FrameStart.Data}) {
+					const auto owner = memberOwner(*source);
+					if (owner == source->CacheGroups.Owners.end()) continue;
+					for (const auto &id : owner->Members)
+						addId(id);
+				}
 			while (count && !invalid) {
 				const size_t current = pending[--count];
 				for (const auto &link : plan.EffectiveLinks)
@@ -363,7 +456,7 @@ namespace engine::imagegraph {
 				for (const auto &edge : plan.PcxNamedDependencies)
 					if (edge.Producer == current) add(edge.Consumer);
 			}
-			if (invalid) return fail(Status::InvalidValue, "Cache Results clear dependencies are invalid");
+			if (invalid) return fail(Status::InvalidValue, "Source cache clear dependencies are invalid");
 			uint64_t names = (CacheClearNodes.size() + document.Nodes.size() + CacheInvalidInputs.size() +
 							  CacheInvalidOutputs.size() + document.Outputs.size() + 1) *
 							 sizeof(std::string);
@@ -378,25 +471,38 @@ namespace engine::imagegraph {
 			live += Bindings.capacity() * sizeof(FeedbackBinding);
 			for (const auto &binding : Bindings)
 				live += binding.SourceId.capacity() + binding.OutputId.capacity();
-			const uint64_t stateCopy = ClearedCacheResultsReplayBytes(State.Data, nodeId);
-			const uint64_t startCopy = ClearedCacheResultsReplayBytes(FrameStart.Data, nodeId);
+			const auto clearedBytes = [&](const DataReplayState &source) {
+				return frameCache ? ClearedSourceFrameCacheReplayBytes(*node, source)
+								  : ClearedCacheResultsReplayBytes(source, nodeId);
+			};
+			const uint64_t stateCopy = clearedBytes(State.Data);
+			const uint64_t startCopy = clearedBytes(FrameStart.Data);
+			const auto validationBytes = [&](const DataReplayState &source) {
+				const bool additionalRow =
+					frameCache &&
+					std::none_of(source.Entries.begin(), source.Entries.end(), [&](const auto &row) {
+						return row.NodeId == nodeId;
+					});
+				return DataReplayValidationWorkspaceBytes(source, additionalRow ? 1 : 0);
+			};
 			const uint64_t validation =
-				std::max(State.Data.Entries.size(), FrameStart.Data.Entries.size()) * sizeof(size_t);
+				std::max(validationBytes(State.Data), validationBytes(FrameStart.Data));
 			if (stateCopy == UINT64_MAX || startCopy == UINT64_MAX)
-				return fail(Status::InvalidValue, "Cache Results clear slot ledger is invalid");
+				return fail(Status::InvalidValue, "Source cache clear slot ledger is invalid");
 			if (live > maximumBytes || names > maximumBytes - live ||
 				stateCopy > maximumBytes - live - names ||
 				startCopy > maximumBytes - live - names - stateCopy ||
 				validation > maximumBytes - live - names - stateCopy - startCopy)
-				return fail(
-					Status::LimitExceeded, "Cache Results clear transaction exceeds live byte bounds"
-				);
+				return fail(Status::LimitExceeded, "Source cache clear transaction exceeds live byte bounds");
 			DataReplayState cleared, start;
 			const auto clear = [&](const DataReplayState &source, DataReplayState &output) {
-				const uint64_t bytes = RetainedDataReplayBytes(source) +
-									   ClearedCacheResultsReplayBytes(source, nodeId) +
-									   source.Entries.size() * sizeof(size_t);
-				return ClearCacheResultsReplay(source, nodeId, output, diagnostic, bytes) == Status::Ok;
+				const uint64_t bytes =
+					RetainedDataReplayBytes(source) + clearedBytes(source) + validationBytes(source);
+				return (frameCache ? ClearSourceFrameCacheButtonReplay(
+										 *node, source, output, CacheProjectObservation, diagnostic, bytes
+									 )
+								   : ClearCacheResultsReplay(source, nodeId, output, diagnostic, bytes)) ==
+					   Status::Ok;
 			};
 			if (!clear(State.Data, cleared) || !clear(FrameStart.Data, start)) return false;
 			auto nodes = CacheClearNodes, outputs = CacheInvalidOutputs, inputs = CacheInvalidInputs;
@@ -424,7 +530,7 @@ namespace engine::imagegraph {
 			diagnostic = {};
 			return true;
 		} catch (const std::bad_alloc &) {
-			diagnostic = {Status::LimitExceeded, {}, {}, "Cache Results clear allocation refused"};
+			diagnostic = {Status::LimitExceeded, {}, {}, "Source cache clear allocation refused"};
 			return false;
 		}
 		// Export continuation can resume only a published clock from matching authored inputs.
@@ -576,10 +682,24 @@ namespace engine::imagegraph {
 				document, plan, outputs, selectedNode, request.SimulationCacheCaptures
 			);
 			if (!temporal.Valid) return fail(Status::InvalidOutput, "stateful output cone is invalid");
-			stateful = temporal.Simulation || temporal.SurfaceCaches != 0 || temporal.RandomGenerators != 0 ||
-					   temporal.DataProcessors != 0 || !State.Simulation.Entries.empty() ||
-					   !State.Surfaces.Entries.empty() || !State.Random.Entries.empty() ||
-					   !State.Data.Entries.empty() || temporal.RigidActors != 0 ||
+			const bool authoredGroups =
+				std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+					if ((node.Type != "pc.cache" && node.Type != "pc.cache_array") ||
+						node.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
+						return false;
+					return std::any_of(
+						node.SourceProperties.begin(), node.SourceProperties.end(), [](const auto &property) {
+							const auto *group = std::get_if<ArrayValue>(&property.Data);
+							return property.Port == "cache_group" && group &&
+								   group->ElementType == ValueType::Text && !group->Elements.empty();
+						}
+					);
+				});
+			stateful = authoredGroups || temporal.Simulation || temporal.SurfaceCaches != 0 ||
+					   temporal.RandomGenerators != 0 || temporal.DataProcessors != 0 ||
+					   !State.Simulation.Entries.empty() || !State.Surfaces.Entries.empty() ||
+					   !State.Random.Entries.empty() || !State.Data.Entries.empty() ||
+					   !State.Data.CacheGroups.Nodes.empty() || temporal.RigidActors != 0 ||
 					   !State.Rigid.Owners.empty();
 			const bool directData = temporal.DataProcessors != 0 && !temporal.FirstFrameData &&
 									!temporal.Simulation && !temporal.SurfaceCaches &&
@@ -645,13 +765,39 @@ namespace engine::imagegraph {
 				const uint64_t nodeNames =
 					ClearNameScanWork(document.Nodes, [](const auto &n) -> const auto & { return n.Id; });
 				const uint64_t outputNames = ClearNamesScanWork(outputs);
-				if (!AdmitClearWork(work, CacheClearNodes.size(), nodeNames) ||
+				const uint64_t replayNames =
+					ClearNameScanWork(State.Data.Entries, [](const auto &row) -> const auto & {
+						return row.NodeId;
+					});
+				uint64_t identities = 0;
+				for (const auto &node : document.Nodes) {
+					if (node.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
+						return fail(
+							Status::LimitExceeded, "source cache clear metadata count exceeds bounds"
+						);
+					if (!AdmitClearWork(
+							work,
+							CacheClearNodes.size(),
+							ClearNameScanWork(
+								node.SourceProperties,
+								[](const auto &property) -> const auto & { return property.Port; }
+							)
+						))
+						return fail(Status::LimitExceeded, "source cache clear metadata work exceeds bounds");
+					const auto saved = SourceFrameCacheSavedText(node);
+					if (saved.size() > CLEAR_WORK_LIMIT - identities)
+						return fail(Status::LimitExceeded, "source cache clear identity work exceeds bounds");
+					identities += saved.size();
+				}
+				if (!AdmitClearWork(work, CacheClearNodes.size(), replayNames) ||
+					!AdmitClearWork(work, CacheClearNodes.size() * State.Data.Entries.size(), identities) ||
+					!AdmitClearWork(work, CacheClearNodes.size(), nodeNames) ||
 					!AdmitClearWork(work, CacheClearNodes.size(), sizeof("pc.cache_results")) ||
 					!AdmitClearWork(work, CacheInvalidOutputs.size(), outputNames) ||
 					!AdmitClearWork(work, outputs.size() + 1, ClearNamesScanWork(CacheInvalidOutputs)) ||
 					!AdmitClearWork(work, 1, ClearNamesScanWork(CacheInvalidInputs)))
 					return fail(
-						Status::LimitExceeded, "Cache Results clear retirement/name work exceeds bounds"
+						Status::LimitExceeded, "Source cache clear retirement/name work exceeds bounds"
 					);
 			}
 			const auto clearedOutput = [&](std::string_view id) {
@@ -668,8 +814,7 @@ namespace engine::imagegraph {
 				FrameTime{request.Tick, request.Subframe, request.NegativeFrame} == CacheClearClock &&
 				clearSelection)
 				return fail(
-					Status::UnsupportedExecution,
-					"Cache Results was cleared; await a fresh source observation"
+					Status::UnsupportedExecution, "Source cache was cleared; await a fresh source observation"
 				);
 			const bool cacheObservationChanged = temporal.SourceFrameCaches && Initialized &&
 												 (CacheObservation != request.SourceCachePlayback ||
@@ -877,7 +1022,7 @@ namespace engine::imagegraph {
 											  LedgerBytes(candidateStart) + SourceBytes(candidateStartInputs);
 					if (resident >= maximumBytes)
 						return fail(
-							Status::LimitExceeded, "Cache Results clear overlay residency exceeds bounds"
+							Status::LimitExceeded, "Source cache clear overlay residency exceeds bounds"
 						);
 					if (!OverlayClearedRows(document, data, maximumBytes - resident, diagnostic))
 						return false;
@@ -1073,9 +1218,20 @@ namespace engine::imagegraph {
 			}
 			if (DocumentRevision != revision) {
 				std::erase_if(CacheClearNodes, [&](const auto &id) {
-					return std::none_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
-						return node.Id == id && node.Type == "pc.cache_results";
-					});
+					const auto node =
+						std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
+							return item.Id == id;
+						});
+					if (node == document.Nodes.end()) return true;
+					return std::none_of(
+						State.Data.Entries.begin(), State.Data.Entries.end(), [&](const auto &row) {
+							if (row.NodeId != id) return false;
+							const auto type = SourceFrameCacheRowType(row);
+							return type.empty() ? node->Type == "pc.cache_results"
+												: node->Type == type &&
+													  row.LoadedCacheData == SourceFrameCacheSavedText(*node);
+						}
+					);
 				});
 				CacheInvalidOutputs = CacheInvalidInputs = {};
 			} else {
@@ -1139,7 +1295,7 @@ namespace engine::imagegraph {
 				document, plan, revision, externalRevision, request, diagnostic, maximumBytes, {}, nodeId
 			);
 		}
-		std::span<const std::string> CacheResultsInvalidatedOutputs() const {
+		std::span<const std::string> CacheInvalidatedOutputs() const {
 			return CacheInvalidOutputs;
 		}
 		const EvaluationSnapshot &Snapshot() const {

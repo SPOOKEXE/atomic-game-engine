@@ -1,10 +1,14 @@
 #pragma once
 #include <engine/imagegraph/FrameTime.hpp>
 namespace engine::imagegraph {
-	// Source isLastFrame compares the authoritative project's real current frame
-	// to its resolved endpoint, independently of a node's scoped input clock.
+	// Source setFrame rounds the authoritative project clock to even before isLastFrame compares it to the
+	// resolved endpoint.
 	inline bool SourceFrameCacheIsLastProjectFrame(const SourceFrameCacheProjectObservation &observation) {
-		return double(FrameTimeToReal(observation.ProjectFrame)) == observation.ProjectLastFrame;
+		if (!ValidFrameTime(observation.ProjectFrame) || !std::isfinite(observation.ProjectLastFrame))
+			return false;
+		FrameTime current, endpoint;
+		return SplitFrameTime(double(FrameTimeToReal(observation.ProjectFrame)), current, true) &&
+			   SplitFrameTime(observation.ProjectLastFrame, endpoint) && current == endpoint;
 	}
 	// Only this named native profile synthesizes played project observations for seek warmup.
 	// ObservedFrame keeps the caller's authoritative project facts unchanged.

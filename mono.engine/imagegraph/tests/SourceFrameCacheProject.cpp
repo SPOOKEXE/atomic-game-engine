@@ -10,14 +10,14 @@
 TEST_SUITE_ID("engine.imagegraph.source_frame_cache_project")
 using namespace engine::imagegraph;
 TEST_CASE(
-	"Cache Last Frame observes project clock independently of scoped node time",
+	"Cache Last Frame rounds project time to even independently of scoped node time",
 	"[frame_cache_groups][cache_project_observation]"
 ) {
 	EvaluationRequest node;
 	node.Tick = 2;
 	node.Subframe = .25;
 	node.SourceCachePlayback = SourceCachePlaybackObservation{true, SourceCacheSampling::ObservedFrame, true};
-	node.SourceCacheProject = SourceFrameCacheProjectObservation{{9, .5, false}, 9.5, false, false};
+	node.SourceCacheProject = SourceFrameCacheProjectObservation{{9, .5, false}, 10, false, false};
 	REQUIRE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
 	BindNativeSourceFrameCacheProjectPrefix(node);
 	REQUIRE(node.SourceCacheProject->ProjectFrame == FrameTime{9, .5, false});
@@ -26,13 +26,29 @@ TEST_CASE(
 	BindNativeSourceFrameCacheProjectPrefix(node);
 	REQUIRE(node.SourceCacheProject->ProjectFrame == FrameTime{2, .25, false});
 	REQUIRE_FALSE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
-	node.Tick = 9;
-	node.Subframe = .5;
-	BindNativeSourceFrameCacheProjectPrefix(node);
+	node.SourceCacheProject->ProjectLastFrame = 2;
+	node.SourceCacheProject->ProjectFrame = {2, .5, false};
 	REQUIRE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
-	node.Tick = 0;
-	node.Subframe = 0;
-	BindNativeSourceFrameCacheProjectPrefix(node);
+	node.SourceCacheProject->ProjectFrame = {3, .5, false};
+	node.SourceCacheProject->ProjectLastFrame = 4;
+	REQUIRE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
+	node.SourceCacheProject->ProjectFrame = {4, .49, false};
+	REQUIRE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
+	node.SourceCacheProject->ProjectFrame = {4, .51, false};
+	REQUIRE_FALSE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
+	node.SourceCacheProject->ProjectFrame = {4, .5, false};
+	node.SourceCacheProject->ProjectLastFrame = 4.5;
+	REQUIRE_FALSE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
+	node.SourceCacheProject->ProjectFrame = {2, .5, true};
+	node.SourceCacheProject->ProjectLastFrame = -2;
+	REQUIRE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
+	node.SourceCacheProject->ProjectFrame = {3, .5, true};
+	node.SourceCacheProject->ProjectLastFrame = -4;
+	REQUIRE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
+	node.SourceCacheProject->ProjectFrame.Subframe = 1;
+	REQUIRE_FALSE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
+	node.SourceCacheProject->ProjectFrame = {4, 0, false};
+	node.SourceCacheProject->ProjectLastFrame = std::numeric_limits<double>::quiet_NaN();
 	REQUIRE_FALSE(SourceFrameCacheIsLastProjectFrame(*node.SourceCacheProject));
 }
 TEST_CASE(
@@ -46,11 +62,17 @@ TEST_CASE(
 	SourceFrameCacheProjectObservation observation{
 		{6, .5, false}, *SourceTimelineLastFrame(timeline, 7.5), false, false
 	};
+	REQUIRE_FALSE(SourceFrameCacheIsLastProjectFrame(observation));
+	observation.ProjectFrame = {6, 0, false};
+	observation.ProjectLastFrame = 6;
 	REQUIRE(SourceFrameCacheIsLastProjectFrame(observation));
 	timeline.SourceBounds->End = {SourceFrameBoundPresence::Explicit, {2, .25, true}};
 	observation.ProjectLastFrame = *SourceTimelineLastFrame(timeline, 7.5);
 	REQUIRE(observation.ProjectLastFrame == -3.25);
 	observation.ProjectFrame = {3, .25, true};
+	REQUIRE_FALSE(SourceFrameCacheIsLastProjectFrame(observation));
+	observation.ProjectFrame = {3, 0, true};
+	observation.ProjectLastFrame = -3;
 	REQUIRE(SourceFrameCacheIsLastProjectFrame(observation));
 	observation.ProjectFrame.Subframe = .5;
 	REQUIRE_FALSE(SourceFrameCacheIsLastProjectFrame(observation));

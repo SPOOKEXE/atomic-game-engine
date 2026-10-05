@@ -1,0 +1,518 @@
+{
+  "source_pin": "b69eca232217360cf1502ef0223523d818606652",
+  "recorded_date": "2026-10-05",
+  "result": "Bounded policy, journal transport/reconciliation, frozen getters, live capture, authored membership/literal initialization and manual Clear group reactivation verified. Automatic source update-loop transitions, runtime constructors and host edit/load workflows remain incomplete.",
+  "scheduler_profiles": {
+    "ordinary_graph": {
+      "rules": [
+        "Disabled nodes are rejected as scheduler leaves, rechecked immediately before doUpdate and rechecked before downstream enqueue.",
+        "Disabled upstream producers count as ready for consumers.",
+        "Disabled nodes retain their existing output_value without processor execution. Cold disabled nodes retain their node-specific constructor outputs."
+      ],
+      "evidence": [
+        "render_data.gml:171,298-325",
+        "node_data.gml:1613-1625",
+        "node_value.gml:1708-1716",
+        "node_value_output.gml:9-18"
+      ]
+    },
+    "explicit_render_list": {
+      "rule": "The explicit renderList path calls every listed doUpdate without ordinary active gating. This path must remain distinct from ordinary graph scheduling.",
+      "evidence": [
+        "render_data.gml:270-274"
+      ]
+    }
+  },
+  "membership": {
+    "rules": [
+      "Interactive add transfers a member from its previous owner through removeNode first. Removal immediately sets renderActive=true.",
+      "Loaded refresh skips missing IDs and assigns the member owner pointer without removing earlier lists. Overlapping persisted lists can therefore coexist; last refreshed owner wins the pointer, while either list can toggle the shared activity flag.",
+      "Serialize toggling alone does not reactivate previously frozen members. It updates the attribute with the default nonrendering setter and has no enable hook.",
+      "Owner destruction invokes enableNodeGroup subject to the old owner Serialize and loading/appending gates."
+    ],
+    "evidence": [
+      "__node_cache_base.gml:13,27-45,66-77,222",
+      "node_data.gml:241-256"
+    ]
+  },
+  "enable": {
+    "rules": [
+      "Loading, appending or Serialize=false cause an immediate return.",
+      "Admitted enable sets every listed member renderActive=true, then force-clears captured slots.",
+      "Input edits invoke valueUpdate/cacheCheck before render scheduling. cacheCheck enables the member owning cache and recursively checks enclosing groups. Connection changes also invoke valueUpdate/valueFromUpdate before render."
+    ],
+    "evidence": [
+      "__node_cache_base.gml:48-54",
+      "node_value.gml:2286-2288,2447-2453",
+      "node_data.gml:1491,3308"
+    ]
+  },
+  "cache_update": {
+    "rules": [
+      "Outer automatic recovery can skip the entire update. Cache reads Animated only on an update miss.",
+      "Paused, cache-hit and cache-loading branches return before group disable.",
+      "A missing surface link returns. A disabled linked producer invokes enableNodeGroup and returns before reading surface data. Declined enable still returns.",
+      "Only the live input capture branch reaches group disabling.",
+      "The outer automatic wrapper may capture the retained output after an early-return update, including after enable cleared prior captured slots."
+    ],
+    "evidence": [
+      "node_cache.gml:40-59",
+      "node_data.gml:1408-1425"
+    ]
+  },
+  "cache_array_update": {
+    "rules": [
+      "Loading or paused returns first; missing link returns next.",
+      "Disabled linked producer invokes enableNodeGroup and returns before reading surface or range controls, even when enable gates decline.",
+      "A valid range reaches group disabling before clock-range rejection. A played endpoint outside the capture range can still disable members.",
+      "Invalid range skips disabling. Manual array caching does not get the ordinary automatic post-return capture. Generic source onion-skin wrapper behavior remains outside the admitted native cache profile."
+    ],
+    "evidence": [
+      "node_cache_array.gml:44-66",
+      "node_data.gml:1423-1425"
+    ]
+  },
+  "native_evidence": {
+    "current_gap": "Manual Cache button force-clears frames then enables retained members. Cache Array guards nonforced clear by Serialize/loading/appending, then applies the same enable gates. Host publishes current/preframe candidates together, invalidates member/consumer previews and input captures, and initializes authored group journals for an ordinary selected member. Automatic update-loop transitions remain refused for enabled nonempty authored groups.",
+    "inspection": [
+      "mono.engine/imagegraph/src/Document.cpp:7965-7972 NodeResult alternatives",
+      "mono.engine/imagegraph/src/Document.cpp:9856-9859 dependency closure",
+      "mono.engine/imagegraph/src/Document.cpp:10265-10345 execution scheduling",
+      "mono.engine/imagegraph/src/Document.cpp:15041-15065 result publication and release",
+      "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp:71-74 unsupported group gate"
+    ],
+    "required_next_steps": [
+      "Implement source Cache/Cache Array update-loop branch-local enable/disable and frame-clear, including disabled-input early return before control normalization.",
+      "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
+      "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
+      "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
+      "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile."
+    ],
+    "bounded_policy_implementation": {
+      "scope": "Bounded caller-owned named producer snapshots and source membership/activity policy. Evaluator and host journal integration remains outstanding; nonempty enabled source groups remain refused.",
+      "api": "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+      "coverage": [
+        "Owned scalar values, image pixels, nested heterogeneous arrays, source socket domains and refused output records.",
+        "Aliased snapshots preserve member activity/owner pointers and reject node-type changes.",
+        "Loaded overlaps retain duplicate/extant members and last-refreshed owner pointers, skipping missing IDs.",
+        "Interactive transfer wakes the removed old-owner member; guarded remove/no-op preserve overlaps.",
+        "Enable and owner destruction use old Serialize/loading/appending gates and signal a host force-clear.",
+        "Disable requires Playing and rounded authoritative project endpoint; explicit renderList bypasses activity.",
+        "Atomic invalid/byte-bound/work-bound refusal, finite pixels/values and invalid domain/refusal records."
+      ],
+      "bounds": {
+        "maximum_nodes": 4096,
+        "maximum_owners": 4096,
+        "maximum_memberships": 8192,
+        "maximum_outputs_per_node": 64,
+        "maximum_live_bytes": 134217728,
+        "maximum_comparison_byte_work": 67108864,
+        "allocation": "Prior state and full candidate payloads plus vector growth admitted before copying; bad_alloc becomes LimitExceeded."
+      },
+      "joined_verification": {
+        "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-replay-batch1-results.json",
+        "native_cases": 4790,
+        "native_assertions": 1966050,
+        "python_cases": 100,
+        "cli_ctest_cases": 16,
+        "approved_vulkan_cases": 15,
+        "architecture": "55 modules, 6 programs, 39 layered; passed",
+        "format": "clang-format-21 dry run passed",
+        "binary_hashes": "All eleven native suite binaries stable during the run and matched afterwards; assetc/imagegraph child hashes also stable."
+      },
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-replay-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-replay-build2.log",
+          "exit_code": 0
+        }
+      ],
+      "review": "Sol read-only review found missing allocation diagnostics and comparison-work admission; root repaired both before the joined batch. Sol final read found no further confirmed defect.",
+      "profiling": "Retain and membership mutations carry ENGINE_PROFILE scopes. No fresh isolated runtime-performance measurement or speed claim.",
+      "source_sha256": {
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp": "428c0b0e8d0a77778b8b66e709ebdae4589c7cdd482169b699f6fb0de16c8da4",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp": "02edff63965388fecb8d87faccd58da7df63999d0962dc529ce33b0676f78cca",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp": "a04b58b273eab0e28da5fcfbb46fe768ee6076921b3a3fee4701f8c79ea05c3f"
+      },
+      "next": [
+        "Carry owner through current/preframe/revision/seek and Pixel Builder/client/Studio/export journals.",
+        "Restore all disabled output kinds before input resolution and prune dependencies required only by frozen outputs.",
+        "Apply transitions at source Cache/Cache Array branch points, including frame clear and edit callbacks.",
+        "Resolve supported constructor defaults without guessing runtime expressions; validate integrated cache-group fixtures."
+      ]
+    },
+    "journal_transport_implementation": {
+      "scope": "DataReplay carries caller-owned cache-group journals through copies, clear and frame overlays. Evaluator reconciles named typed identities and owner retirement atomically. Frozen output restoration and authored cache-group execution remain refused.",
+      "coverage": [
+        "Aggregate retained payload and temporary port-sort workspace budget; independent copied snapshots.",
+        "Typed producer and owner retirement with Serialize/loading/appending gates and authoritative project observation.",
+        "Frame-row Clear preserves source group journal; overlay preserves target group journal.",
+        "Path memo identities stripped on evaluator and Pixel Builder copies without mutating caller snapshots.",
+        "Direct and stateful evaluator refuse frozen journals before live kernel execution.",
+        "4096 dynamic outputs plus declared outputs retain publication order; duplicate names refused atomically."
+      ],
+      "bounds": {
+        "maximum_outputs_per_node": 4160,
+        "maximum_dynamic_outputs": 4096,
+        "maximum_declared_group_ports": 64,
+        "maximum_live_bytes": 134217728,
+        "maximum_comparison_byte_work": 67108864,
+        "workspace": "Largest producer output count times sizeof(size_t), admitted beside all other DataReplay retained rows before allocation."
+      },
+      "joined_verification": {
+        "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-transport-batch2-results.json",
+        "native_cases": 4796,
+        "native_assertions": 1966173,
+        "python_cases": 100,
+        "cli_ctest_cases": 16,
+        "approved_vulkan_cases": 15,
+        "architecture": "55 modules, 6 programs, 39 layered; passed",
+        "format": "clang-format-21 dry run passed",
+        "binary_hashes": "All eleven native suite binaries stable during the run and matched afterwards; assetc/imagegraph child hashes stable and matched afterwards."
+      },
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-transport-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-transport-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-transport-build3.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-transport-build4.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-transport-build5.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-transport-issues.json",
+      "review": "Sol read-only review identified aggregate temporary-workspace admission gap; root repaired it and added boundary assertions before the final joined batch.",
+      "profiling": "Reconciliation carries ENGINE_PROFILE scopes. No fresh isolated performance measurement or speed claim.",
+      "source_sha256": {
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp": "976003bc7ca81f1b0689c69b1d7084456c11a6b3df5fd664a3a03922255b77cb",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp": "6cbabf1d02cb252241dea779d88d9e1f1942ddea20b84254c738b32701b0c12a",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp": "9939a149a940aed2062edebcd2ce90baa8c1c02294f50569f0ea9526713ff2f1",
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp": "b47d6dfc393a2303a2ad0e651594ac94beff0128809366d326d689bf7866e75a",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp": "e35af8408d7b1bff1fd305cd74d142ee91226d1074d26bc207e37ccc61fac310",
+        "mono.engine/imagegraph/src/DataReplay.cpp": "25237244ed3a0a4b68af9fcdfb05f00c265c00a3eccbf7ef441e0ea55bf841f7",
+        "mono.engine/imagegraph/src/Document.cpp": "1c662d74d6fe7ed7896762f2bfa1a03b01ce7983ef9682fb2a0280a9b1d5b225",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp": "8d1001be2247b39fa2c52a00213fa225ff0706eef18458bcb0aeec445afb5224",
+        "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp": "c9d8dadc32d85b106666749603edc7f3ad835e8426bfafebe534e37ddfd4da11",
+        "mono.engine/imagegraph/tests/DataReplay.cpp": "a8ea047eb6a36cf08961d0ef0da22bcbc60b829b53c464219b8c3e170355b16d",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp": "18679fa2d66807af3a751cb720a3111e06f423a4c4184fbe06df953507d00fef"
+      },
+      "next": [
+        "Restore disabled producer outputs before input resolution and prune dependencies required only by frozen outputs.",
+        "Initialize authored memberships and node-specific cold outputs; apply transitions at verified Cache and Cache Array branches.",
+        "Wire host force-clear and edit callbacks and validate seek/revision behavior across client, Studio and export."
+      ]
+    },
+    "frozen_output_implementation": {
+      "scope": "Restore caller-owned frozen cache-group producer outputs in direct and stateful graph output evaluation. Authored group initialization, live snapshot capture and source Cache/Cache Array transitions remain outstanding; nonempty enabled authored groups remain refused.",
+      "coverage": [
+        "Restore named raw scalar/resource values, images and source-shaped nested arrays without reading inputs or running frozen kernels.",
+        "Native image collectors restore indexed nested image-array shape and pixels from their owned Value snapshots.",
+        "Owned output domain names survive temporary journal destruction and final selected-port movement; port-specific refusals preserve their original diagnostics.",
+        "Cut every frozen producer upstream dependency before ordinary and computed PCX closure scheduling; independent selected roots still execute or refuse atomically.",
+        "Preserve live instance animator reads from frozen bases in either declaration order.",
+        "Retire changed node types before restore and preserve caller journals/pixels on copies and failed byte/image-bound admission."
+      ],
+      "bounds": {
+        "maximum_live_bytes": 134217728,
+        "image_dimension": "Every restored surface and nested array image leaf uses the current EvaluationRequest.MaximumImageDimension. Surface atlases also checked.",
+        "allocation": "Direct journal prior and clone plus validation workspace admitted before reconciliation. Each named result reserves value clone, port names, domains, refusals and native image-array conversion tables before copying."
+      },
+      "joined_verification": {
+        "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-batch2-results.json",
+        "native_cases": 4803,
+        "native_assertions": 1966250,
+        "python_cases": 100,
+        "cli_ctest_cases": 16,
+        "approved_vulkan_cases": 15,
+        "architecture": "55 modules, 6 programs, 39 layered; passed",
+        "format": "clang-format-21 dry run passed",
+        "binary_hashes": "All eleven native suite binaries stable during the run and matched afterwards; assetc/imagegraph child hashes stable and matched afterwards. Shared Studio changes are not attributed to this phase."
+      },
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-build1.log",
+          "exit_code": 1
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-build3.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-build4.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-build5.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-build6.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-build7.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-restore-issues.json",
+      "review": "Sol read-only review identified request dimension bypass. Root repaired it and the instance timeline ordering gap before tests; Sol final read confirmed both repairs and no further confirmed defect.",
+      "profiling": "Frozen output restoration carries ENGINE_PROFILE scope. No isolated performance measurement or speed claim. Sanitizers were not run for this phase.",
+      "source_sha256": {
+        "mono.engine/imagegraph/src/Document.cpp": "51156df1bc0340ed6fff8bf43b2dd494b9b423bcd88fe702a372061106bdde8b",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp": "4c10ae494338c4a769a1aa9ba6ee492704839b594f3226a50db617ac6f29da1f",
+        "mono.engine/imagegraph/tests/DataReplay.cpp": "4ceba4924e6312d782ca2d4b29bee00a3e03aa3f230224b10330d92f05b443b7",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "b6d275cdf38b98985cbf2337eef90c5552d5792962a1a2e1f4ae4230d23086c7"
+      },
+      "remaining": [
+        "Capture latest published outputs for active tracked producers into the candidate journal.",
+        "Initialize authored memberships and exact node-specific cold outputs without guessing unresolved constructors.",
+        "Apply enable/disable and frame-clear at verified source Cache/Cache Array branches, with edit callbacks and seek/revision integration.",
+        "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented."
+      ]
+    },
+    "live_capture_implementation": {
+      "scope": "Capture latest published getters from active tracked producers into the candidate cache-group journal. Authored initialization and source Cache/Cache Array transitions remain outstanding; nonempty enabled authored groups remain refused.",
+      "coverage": [
+        "Refresh published values, surfaces, nested native image arrays, raw socket domains and per-port refusals before intermediate result release.",
+        "Preserve uncomputed constructor ports, ownership/activity and loaded owner membership; keep caller journals and failed result publication unchanged.",
+        "Live value refresh, aliased request/result reuse, frozen latest observation, and refusal replacing stale surface pixels while sibling output remains usable.",
+        "Retain root native surfaces above 4 MiB and restore independently owned pixels; reject insufficient residency atomically.",
+        "Copy native indexed image arrays to source-shaped nested Values and recover exact pixels/shape from frozen getters.",
+        "Synchronize late downstream sequential path memo changes after producer release, then strip memo identities.",
+        "Resolve retained simulation aliases against the final candidate state before input snapshot reservation installation; verify selected/input/retained mesh equality and next-tick mutation."
+      ],
+      "bounds": {
+        "maximum_live_bytes": 134217728,
+        "maximum_comparison_byte_work": 67108864,
+        "maximum_outputs_per_node": 4160,
+        "root_surface_bytes": 67108864,
+        "nested_typed_array_bytes": 4194304,
+        "allocation": "Charged output-name index and merge views; complete replacement port table/payload clone reserved before allocation; old outputs released after publication. Final journal validation workspace admitted alongside candidate state."
+      },
+      "joined_verification": {
+        "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-capture-batch2-results.json",
+        "native_cases": 4809,
+        "native_assertions": 1966331,
+        "python_cases": 100,
+        "cli_ctest_cases": 16,
+        "approved_vulkan_cases": 15,
+        "architecture": "55 modules, 6 programs, 39 layered; passed",
+        "format": "clang-format-21 dry run and git diff --check passed",
+        "binary_hashes": "All eleven native suite binaries stable during tests and matched afterwards; assetc/imagegraph child hashes stable and matched afterwards. Shared changes are not attributed to this phase."
+      },
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-capture-build1.log",
+          "exit_code": 1
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-capture-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-capture-build3.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-capture-issues.json",
+      "review": "Sol read-only review confirmed clone ownership and reservations. Root found input snapshot reservation move preceding group alias sync; Sol confirmed the defect and final correction. A new joined fixture verifies that exact path. No further confirmed defect.",
+      "profiling": "Capture carries ENGINE_PROFILE scope. No fresh isolated performance measurement or speed claim. Sanitizers were not run for this phase.",
+      "source_sha256": {
+        "mono.engine/imagegraph/src/Document.cpp": "e5bd41157888cd016a96570c9379b41b6f190eb61120be6360e73204b5407f78",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp": "e86b2801ada3fac067470fa2da7b68f5f1b383ad54d341f6266a9a99a97b8acb",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp": "a25f5a59dd5a095a99b292d091eb538a151ef9ba1285666694cf253152cd156b",
+        "mono.engine/imagegraph/tests/DataReplay.cpp": "d6c0926952394c209b546c0b1238154d173c13e34e2f05615232f5be78af51d0",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp": "30e946ba5941bf26102228cd997841a2fb8651c81ffb8536476fa0b36d6876d6",
+        "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp": "f5b1d9beb69619db051f69a78bae03da43b59c37230efc066d5d5f58d1589370",
+        "mono.engine/imagegraph/tests/StatefulOutputs.cpp": "bd4d868fbe0bd80e68801b4f84a6093fb29a9cf2e6bffb7ea8468a09df7fd383",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "40cc64c84189c1ff86f91b1691cb2cf840eb517efab1f39573fb7a2661058bb8"
+      },
+      "remaining": [
+        "Initialize authored memberships and exact node-specific cold outputs without guessing unresolved constructors.",
+        "Apply enable/disable and frame-clear at verified source Cache/Cache Array branches, with edit callbacks and seek/revision integration.",
+        "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
+        "Native image-array snapshots retain the typed 4 MiB nested payload cap; broader source array admission remains outside this profile."
+      ]
+    },
+    "authored_initialization_implementation": {
+      "scope": "Load authored cache-group memberships and exact cold literal getters atomically. Fresh stateful observations with nonempty authored groups initialize once before producer capture; existing owner journals preserve interactive membership and activity. Nonempty enabled Cache/Cache Array execution remains refused pending source branch integration.",
+      "api": "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp: InitializeAuthoredCacheGroupReplay",
+      "coverage": [
+        "Document owner order, loaded overlaps/duplicate members, skipped missing IDs and last-refreshed owner pointer, including Serialize=false.",
+        "Preserve existing frozen getters/activity; initialize newly tracked owners/members from exact catalogue constructor literals, independently of authored input values.",
+        "Restore cold number value zero from loaded journal without running its authored value 99; frozen latest value 17 survives load refresh.",
+        "Unknown self/runtime constructors retain exact node/port refusal rather than fabricated resource values.",
+        "Reject malformed string-array/duplicate metadata, node type replacement and aggregate member/byte bounds without mutating source or destination.",
+        "First stateful evaluation automatically initializes authored nonempty groups, captures active current value and preserves later interactive ownership/frozen activity.",
+        "Admit sorting workspace beside source and distinct destination before source validation; test one-byte-short overlap refusal.",
+        "Construct identifier/owner strings separately then move; refusal messages reserve complete size before append. Long owner ID replacement avoids doubled assignment growth."
+      ],
+      "bounds": {
+        "maximum_live_bytes": 134217728,
+        "maximum_comparison_byte_work": 67108864,
+        "maximum_nodes_and_owners": 4096,
+        "maximum_memberships": 8192,
+        "maximum_outputs_per_node": 4160,
+        "allocation": "Charged document index/record/owner plans, prior plus destination, source/final validation workspace and candidate clone. Constructor parsing uses charged ValueText. All candidate data admitted before copying and published only after final validation."
+      },
+      "joined_verification": {
+        "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-init-batch2-results.json",
+        "native_cases": 4815,
+        "native_assertions": 1966418,
+        "python_cases": 100,
+        "cli_ctest_cases": 16,
+        "approved_vulkan_cases": 15,
+        "architecture": "55 modules, 6 programs, 39 layered; passed",
+        "format": "clang-format-21 dry run and git diff --check passed",
+        "binary_hashes": "All eleven native suite binaries stable during tests and matched afterwards; assetc/imagegraph child hashes stable and matched afterwards. Shared changes are not attributed to this phase."
+      },
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-init-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-init-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-init-build3.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-init-issues.json",
+      "review": "Sol read-only review found source/destination validation overlap and geometric owner-string growth admission gaps. Root repaired both. Sol confirmed initial integration and production fixes, then flagged a capacity-equality test assumption; root changed it to bounded growth before final joined verification.",
+      "profiling": "Initialization carries ENGINE_PROFILE scope. No fresh isolated performance measurement or speed claim. Sanitizers were not run for this phase.",
+      "source_sha256": {
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp": "7bf107f683a4c14cc2202e75ef4f68c8a851b79ee59003459930f5f5deebb364",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp": "be762ddb6336c76e9cfe86b7f4acb0d467efcf6f691073f8e4569f2d5d7fca0e",
+        "mono.engine/imagegraph/src/Document.cpp": "e9f97382cbbe292072e33f1e03de92127c0c59e818df62c51f2bde38ec986ca9",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp": "dcb2a52b6a0058e02f6d36615f8fb8e9fdd118b76ea1de2117287eac75d2e78e",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "180dbdc548caaf291e789ddf85432714c6ae0d17cae441a79a998d47879ed76c"
+      },
+      "remaining": [
+        "Implement source Cache/Cache Array branch-local enable/disable and frame-clear, including disabled-input early return before control normalization.",
+        "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
+        "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
+        "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
+        "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile."
+      ]
+    },
+    "clear_workspace_validation": {
+      "scope": "Clear admission includes largest sequential row/group-output sorting workspace beside retained and replacement replay copies in both low-level Clear implementations and the captured host transaction. Full-size frame ledgers clear existing matching rows; only a missing cache requires room for a constructor row. Group reactivation and source branch transitions remain open.",
+      "coverage": [
+        "Empty/row/group-dominant validation workspaces and invalid row/output/additional-row bounds.",
+        "In-place Cache and Cache Array clear: one-byte-short group workspace cap refuses atomically; admitted cap preserves frozen group getters/activity and clears frame slots.",
+        "Cache Results Clear: one-byte-short group workspace cap refuses atomically and admitted cap preserves frozen group journal.",
+        "4096-row Cache and Cache Array ledgers clear all existing processor rows and retain latest outputs; missing cache refuses without mutation."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-clear-workspace-batch1-results.json",
+      "native_cases": 4819,
+      "native_assertions": 1991031,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "approved_vulkan_cases": 15,
+      "architecture": "Passed: 55 modules, 6 programs, 39 layered.",
+      "binary_hashes": "All eleven native suite binaries and assetc/imagegraph child binaries stable during tests and matched afterwards.",
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-clear-workspace-build1.log",
+          "exit_code": 143,
+          "note": "Ended before completion; cause not established. No compiler error in captured tail."
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-clear-workspace-build2.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-clear-workspace-issues.json",
+      "review": "Sol read-only review identified full-ledger refusal before tests and confirmed repaired boundary. No further confirmed defect.",
+      "profiling": "No fresh isolated performance measurement or sanitizer run. No performance claim.",
+      "source_sha256": {
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp": "a719fa11932c63c191ff37ff9064382f6b81ec38efbfd146a23544190aae7608",
+        "mono.engine/imagegraph/src/DataReplay.cpp": "c58402404814275fa287273a804e9ca301d96c2d7c450d6dd16b6c43f2624dc4",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp": "d55cf28f995de08c10bf83e1d10fa611385a85886abd5a890dc88456b6d159fd",
+        "mono.engine/imagegraph/src/CacheResultsReplay.cpp": "438d40cc5f5987299e66b0b5c8081d6562bbe89301f7b204c235a11c17188d75",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp": "50751387da975f60a5e76372870d0fd1b7c2470d87d437e2d1f929d1e9a2cd8c",
+        "mono.engine/imagegraph/tests/DataReplay.cpp": "5b052681e02e267be1abdd527d2a023a567d9128ee8ed64dc03056b1f77b441b",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp": "e30a36e7f8a5348ca3e7d8fa0109d2db8773b3e9263d49c46717d02da547ed12",
+        "mono.engine/imagegraph/tests/CacheResultsReplay.cpp": "cdf60eb3da8c497972382c56eb957c420b62ef85858a234807248da54df1e75e",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "214f6256e1c36748d4102e00b3ae3c7570284ebce77d07e683f3776ebdfc0cae"
+      }
+    },
+    "button_implementation": {
+      "scope": "Manual Cache button force-clears frames then enables retained members. Cache Array guards nonforced clear by Serialize/loading/appending, then applies the same enable gates. Host publishes current/preframe candidates together, invalidates member/consumer previews and input captures, and initializes authored group journals for an ordinary selected member.",
+      "head_before_commit": "40b9ceb3d5f2966a6b196574f0b1a61b2c5cad9f",
+      "api": "ClearSourceFrameCacheButtonReplay in FrameCacheReplay.hpp; storage-only ClearSourceFrameCacheReplay remains separate.",
+      "coverage": [
+        "Cache and Array Serialize/loading/appending gate matrix, in-place and distinct destinations, retained latest output/getters/refusals, overlapping loaded lists and unchanged last-owner pointer.",
+        "Nonempty enabled groups without project facts and partial journals refuse atomically. Duplicate group and malformed Serialize metadata refuse atomically.",
+        "One-byte-short source/destination/workspace budget refusal; admitted budget wakes only selected members.",
+        "Gated Array button accepts full unrelated 4096-row ledger without adding a constructor row.",
+        "Ordinary selected member initializes journal and Clear invalidates member plus downstream outputs. Shared host preserves unrelated preview and clears affected input capture; same-clock observation refused and fresh tick restores live member pixels."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-button-batch1-results.json",
+      "native_cases": 4824,
+      "native_assertions": 1991234,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "approved_vulkan_cases": 15,
+      "architecture": "Passed: 55 modules, 6 programs, 39 layered.",
+      "format": "clang-format-21 dry run and git diff --check passed.",
+      "binary_hashes": "All eleven native suite binaries and assetc/imagegraph child hashes stable during tests and matched afterwards.",
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-button-build1.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-button-issues.json",
+      "review": "Sol read-only review found no confirmed defect in button gates, overlapping member wakeups, atomic publication, host routing or no-op Array copy admission.",
+      "profiling": "Button action carries ENGINE_PROFILE. No fresh isolated performance measurement or sanitizer run; no performance claim.",
+      "source_sha256": {
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp": "ceda3e801e30992a785b67d9b31230d946752cbda8d4a8feb4f7895a619d09d6",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp": "4084cc4c84ce9a16d5181f3e7c3060dda343bcb6b0ff1dd560bb25fe55eeacb0",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp": "5c60ead9623ac7e342914311fe99b67ec159750b031980ce5337e8ed4ef0d985",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp": "72fb8562839c47412c18b75e4d065a488b0a9eb5849c6cb911abf6f01a08fdfd",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "098d32f54d25055ef8ab070a03d2dd486f2dae7869984bc77397e5cbc0128803"
+      },
+      "remaining": [
+        "Implement source Cache/Cache Array update-loop branch-local enable/disable and frame-clear, including disabled-input early return before control normalization.",
+        "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
+        "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
+        "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
+        "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile."
+      ]
+    }
+  },
+  "source_sha256": {
+    "scripts/__node_cache_base/__node_cache_base.gml": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb",
+    "scripts/__node_cache/__node_cache.gml": "527e8382130fd91f0040607b0d209585a0543d4156350a12180b46615515d2d9",
+    "scripts/node_cache/node_cache.gml": "4f333ac660485560b57d86f99f87d767dff094a7d635e83383b155e83ebed71b",
+    "scripts/node_cache_array/node_cache_array.gml": "bd90b08058183361d0349a2c16f398a053b2391720c61970e6942da54fdd630b",
+    "scripts/node_data/node_data.gml": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d",
+    "scripts/node_value/node_value.gml": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+    "scripts/node_value_output/node_value_output.gml": "4b9bd058c0731ebb55e8662ba566d9e87d722e460e6288ae6574fc712ad9f69c",
+    "scripts/render_data/render_data.gml": "cf3e2ab554de0f98bc4d946810444c2689ff5a53c70f4c4dedbdbe906b2d2b39"
+  },
+  "review": "Sol source audit established scheduler and transition semantics. Sol frozen-output read found a request image-bound bypass, repaired before the joined batch; final read confirmed repairs. Runtime acceptance is limited to the recorded native frozen-getter checks, not licensed-reference parity."
+}

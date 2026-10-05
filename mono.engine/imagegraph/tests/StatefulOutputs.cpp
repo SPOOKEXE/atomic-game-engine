@@ -249,3 +249,53 @@ TEST_CASE(
 	REQUIRE(retainedCache(request) != request.SimulationReplay->Entries.end());
 	CHECK(*retainedCache(request)->Cache == retainedPositions);
 }
+
+TEST_CASE(
+	"Input snapshots synchronize retained group mesh aliases before installing replay reservations",
+	"[imagegraph][stateful_outputs][frame_cache_groups]"
+) {
+	auto document = StatefulGraph();
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	DataReplayState prior;
+	REQUIRE(
+		RetainCacheGroupReplayNode(
+			prior.CacheGroups, "grid", "pc.verlet_sim_mesh_grid", {}, Limits::MaximumEvaluationBytes
+		)
+			.Code == Status::Ok
+	);
+	EvaluationRequest request;
+	request.DataReplay = &prior;
+	request.SimulationAuthoringRevision = 1;
+	StatefulInputEvaluationResult result;
+	const std::array<std::string, 1> outputs{"mesh"};
+	const auto captured = EvaluateStatefulNodeInputs(
+		document, plan, "step", request, result, diagnostic, Limits::MaximumEvaluationBytes, outputs
+	);
+	INFO(diagnostic.Message);
+	REQUIRE(captured == Status::Ok);
+	REQUIRE(result.Data.CacheGroups.Nodes.front().Outputs.size() == 1);
+	const auto &retained = std::get<MeshValue2D>(*result.Data.CacheGroups.Nodes.front().Outputs.front().Data);
+	CHECK(retained == std::get<MeshValue2D>(std::get<EvaluatedValue>(result.Outputs.front().Output).Data));
+	REQUIRE(retained.Data);
+	const auto inputs = result.Inputs.Values();
+	const auto mesh =
+		std::find_if(inputs.begin(), inputs.end(), [](const auto &input) { return input.Port == "mesh"; });
+	REQUIRE(mesh != inputs.end());
+	CHECK(std::get<MeshValue2D>(mesh->Data) == retained);
+	CHECK(result.Inputs.RetainedBytes() > 0);
+	CHECK(prior.CacheGroups.Nodes.front().Outputs.empty());
+	const auto before = result.Data;
+	request.DataReplay = &result.Data;
+	request.SimulationReplay = &result.Simulation;
+	request.Tick = 1;
+	REQUIRE(
+		EvaluateStatefulNodeInputs(
+			document, plan, "step", request, result, diagnostic, Limits::MaximumEvaluationBytes, outputs
+		) == Status::Ok
+	);
+	const auto &updated = std::get<MeshValue2D>(*result.Data.CacheGroups.Nodes.front().Outputs.front().Data);
+	CHECK(updated == std::get<MeshValue2D>(std::get<EvaluatedValue>(result.Outputs.front().Output).Data));
+	CHECK(updated != std::get<MeshValue2D>(*before.CacheGroups.Nodes.front().Outputs.front().Data));
+}

@@ -1,11 +1,11 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 GENERATOR = REPOSITORY / "scripts/pixel-composer/generate-catalogue.py"
@@ -155,6 +155,85 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                 continue
             with self.subTest(expression=name):
                 self.assertEqual("", defaults[name.lower().replace(" ", "_")])
+
+    def test_output_constructor_values_are_independent_of_socket_types_and_keep_expressions(self):
+        expressions = [
+            ("Absent surface", "surface", "noone", "i -4"),
+            ("Empty surfaces", "surface", "[]", "a any 0"),
+            ("Boolean", "any", "false", "b 0"),
+            ("Real", "float", "-2.5", "d -2.5"),
+            ("Negative zero", "float", "-0.0", "d -0"),
+            ("Negated zero", "float", "-0", "d -0"),
+            ("Signed vector", "float", "[-0.0, 0]", "v -0 0"),
+            ("Integer", "integer", "7", "i 7"),
+            ("Vector", "float", "[0, 1]", "v 0 1"),
+            ("Nested", "any", "[[], [noone, true, 2]]", "a any 2 a any 0 a any 3 i -4 b 1 d 2"),
+            ("Text", "text", '"line\\n\\t\\\\\\\"end"', 's "line\\n\\t\\\\\\\"end"'),
+            ("Runtime", "any", "  new Thing(\n\tself)  ", ""),
+            ("Unknown", "any", "PROJECT_WIDTH", ""),
+            ("Arithmetic", "any", "1 + 2", ""),
+            ("Call", "any", "run()", ""),
+            ("Division", "any", "1/0", ""),
+            ("Nonfinite", "any", "1e309", ""),
+            ("Large integer", "integer", "9223372036854775808", ""),
+            ("Inexact real", "float", "9007199254740993", ""),
+            ("String escape", "text", '"\\x41"', ""),
+            ("Python boolean", "any", "True", ""),
+            ("Python number", "any", "1_000", ""),
+            ("Python comment", "any", "1 # comment", ""),
+            ("Nested comment", "any", "[1, # comment\n2]", ""),
+            ("Hash text", "text", '"#keep"', 's "#keep"'),
+            ("Normalized identifier", "any", "ｎｏｏｎｅ", ""),
+            ("Too long", "any", "1" * 257, ""),
+            ("Too deep", "any", "[" * 18 + "0" + "]" * 18, ""),
+            ("Too many nodes", "any", "[" + ",".join(["0"] * 65) + "]", ""),
+        ]
+        node = {"display_name": "Output defaults", "family": "fixture", "base": None,
+                "file": "scripts/node_output_defaults/node_output_defaults.gml", "inputs": [],
+                "outputs": [{"name": name, "type": "VALUE_TYPE." + kind,
+                             "index": str(index), "default": expression}
+                            for index, (name, kind, expression, _) in enumerate(expressions)]}
+        with tempfile.TemporaryDirectory() as temporary:
+            lines = self.run_generator(Path(temporary), {"Node_Output_Defaults": node})
+        outputs = {parts[2]: parts for line in lines if (parts := line.split("\t"))[0] == "O"}
+        for name, _, expression, expected in expressions:
+            with self.subTest(output=name):
+                record = outputs[name]
+                self.assertEqual(7, len(record))
+                self.assertEqual(expected, record[5])
+                self.assertEqual(expression, json.loads(record[6][2:]))
+
+    def test_committed_output_records_preserve_every_selected_source_expression(self):
+        snapshot = json.loads((REPOSITORY / "docs/pixel-composer-m0/source-inputs.json").read_text())
+        catalogue = (REPOSITORY / "mono.engine/imagegraph/src/SourceCatalogue.inc").read_text()
+        body = catalogue.split('R"CATALOGUE(', 1)[1].rsplit(')CATALOGUE"', 1)[0]
+        outputs = []
+        index = 0
+        for line in body.splitlines():
+            fields = line.split("\t")
+            if fields[0] == "N":
+                self.assertEqual(len(outputs), index)
+                outputs = snapshot["nodes"][fields[2]]["outputs"]
+                index = 0
+            elif fields[0] == "O":
+                self.assertEqual(7, len(fields))
+                self.assertEqual(outputs[index]["default"], json.loads(fields[6][2:]))
+                index += 1
+        self.assertEqual(len(outputs), index)
+
+    def test_unchanged_generation_keeps_catalogue_build_timestamp(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.run_generator(root)
+            output = root / "mono.engine/imagegraph/src/SourceCatalogue.inc"
+            original = output.read_bytes()
+            timestamp = 1_700_000_000_000_000_000
+            os.utime(output, ns=(timestamp, timestamp))
+            retained_timestamp = output.stat().st_mtime_ns
+            subprocess.run([sys.executable, str(root / "scripts/pixel-composer/generate-catalogue.py")],
+                           cwd=root, check=True)
+            self.assertEqual(original, output.read_bytes())
+            self.assertEqual(retained_timestamp, output.stat().st_mtime_ns)
 
     def test_bevel_mapped_integer_height_emits_source_endpoint_pair_default(self):
         node = {"display_name": "Bevel", "family": "fixture", "base": None,
@@ -366,11 +445,11 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
         self.assertIn("N\tpc.string_insert\tNode_String_Insert\tInsert Text\tundocumented\tscripts/node_string_insert/node_string_insert.gml", lines)
         self.assertIn('I\ttext\tText\t0\tText\ttext\ts ""\t', lines)
         self.assertIn("I\tposition\tPosition\t2\tInt\tinteger\ti 0\t", lines)
-        self.assertIn("O\ttext\tText\t0\ttext", lines)
+        self.assertIn('O\ttext\tText\t0\ttext\ts ""\ts "\\\"\\\""', lines)
         self.assertIn("N\tpc.spout_receive\tNode_Spout_Receive\tSpout Receive\tundocumented\tscripts/node_spout_receive/node_spout_receive.gml", lines)
         self.assertIn('I\treceiver_name\tReceiver name\t0\tText\ttext\ts "PixelComposer"\t', lines)
         self.assertIn("I\tanimated\tAnimated\t1\tBool\tboolean\tb 1\t", lines)
-        self.assertIn("O\tsurface\tSurface\t0\timage", lines)
+        self.assertIn('O\tsurface\tSurface\t0\timage\ti -4\ts "noone"', lines)
         self.assertIn("D\t0\t2", lines)
         self.assertIn('T\tkey\tKey\t0\tText\ttext\ts ""\t', lines)
         self.assertIn("T\tvalue\tvalue\t1\tGeneric_any\tany\t\t", lines)
@@ -395,9 +474,8 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
             }],
             "outputs": [],
         }
-        with tempfile.TemporaryDirectory() as temporary:
-            with self.assertRaises(subprocess.CalledProcessError):
-                self.run_generator(Path(temporary), {"Node_Fn_WaveTable": node})
+        with tempfile.TemporaryDirectory() as temporary, self.assertRaises(subprocess.CalledProcessError):
+            self.run_generator(Path(temporary), {"Node_Fn_WaveTable": node})
 
 
 if __name__ == "__main__":

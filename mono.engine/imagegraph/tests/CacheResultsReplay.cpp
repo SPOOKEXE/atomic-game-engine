@@ -93,7 +93,7 @@ TEST_CASE(
 	const auto sources =
 		std::vector<RequestImageSource>(request.ImageSources.begin(), request.ImageSources.end());
 	Diagnostic diagnostic;
-	REQUIRE(host.ClearCacheResults(d, p, "cacheA", 17, 29, diagnostic));
+	REQUIRE(host.ClearSourceCache(d, p, "cacheA", 17, 29, diagnostic));
 	CHECK(Slots(Entry(*request.DataReplay, "cacheA")).ElementType == ValueType::Struct);
 	CHECK(host.Value("A-image") == nullptr);
 	CHECK(host.Value("A-list") == nullptr);
@@ -121,7 +121,7 @@ TEST_CASE(
 	REQUIRE(Slots(cleared).Elements.size() == 1);
 	CHECK(IsFreedCacheResultsSlot(Slots(cleared).Elements[0]));
 	const auto clearAgain = *request.DataReplay;
-	REQUIRE(host.ClearCacheResults(d, p, "cacheA", 17, 29, diagnostic));
+	REQUIRE(host.ClearSourceCache(d, p, "cacheA", 17, 29, diagnostic));
 	CHECK(*request.DataReplay == clearAgain);
 	CHECK(std::get<SurfaceValue>(Slots(Entry(before, "cacheA")).Elements[0]).Data.Pixels[0] == 10);
 }
@@ -138,12 +138,12 @@ TEST_CASE(
 	const Image good = *host.Output("A-image");
 	Diagnostic diagnostic;
 	for (const auto id : {"cache", "A", "source"}) {
-		CHECK_FALSE(host.ClearCacheResults(d, p, id, 17, 29, diagnostic));
+		CHECK_FALSE(host.ClearSourceCache(d, p, id, 17, 29, diagnostic));
 		CHECK(diagnostic.Code == Status::UnknownNode);
 	}
-	CHECK_FALSE(host.ClearCacheResults(d, p, "cacheA", 18, 29, diagnostic));
-	CHECK_FALSE(host.ClearCacheResults(d, p, "cacheA", 17, 30, diagnostic));
-	CHECK_FALSE(host.ClearCacheResults(d, p, "cacheA", 17, 29, diagnostic, 1));
+	CHECK_FALSE(host.ClearSourceCache(d, p, "cacheA", 18, 29, diagnostic));
+	CHECK_FALSE(host.ClearSourceCache(d, p, "cacheA", 17, 30, diagnostic));
+	CHECK_FALSE(host.ClearSourceCache(d, p, "cacheA", 17, 29, diagnostic, 1));
 	CHECK(diagnostic.Code == Status::LimitExceeded);
 	CHECK(*request.DataReplay == before);
 	REQUIRE(host.Output("A-image"));
@@ -199,7 +199,7 @@ TEST_CASE("Cache Results clear survives native restart and bounded backward seek
 	EvaluationRequest request;
 	Prepared(host, d, p, request);
 	Diagnostic diagnostic;
-	REQUIRE(host.ClearCacheResults(d, p, "cacheA", 17, 29, diagnostic));
+	REQUIRE(host.ClearSourceCache(d, p, "cacheA", 17, 29, diagnostic));
 	const auto cleared = *request.DataReplay;
 	host.RestartCycle();
 	CHECK_FALSE(host.Prepare(d, p, 17, 29, request, diagnostic, Limits::MaximumEvaluationBytes, "A-image"));
@@ -209,7 +209,7 @@ TEST_CASE("Cache Results clear survives native restart and bounded backward seek
 	REQUIRE(host.Output("A-image"));
 	CHECK(host.Output("A-image")->Pixels[0] == 10);
 	CHECK(Slots(Entry(*request.DataReplay, "cacheA")).Elements.size() == 1);
-	REQUIRE(host.ClearCacheResults(d, p, "cacheA", 17, 29, diagnostic));
+	REQUIRE(host.ClearSourceCache(d, p, "cacheA", 17, 29, diagnostic));
 	request.Tick = 0;
 	request.Subframe = .5;
 	request.NegativeFrame = true;
@@ -246,7 +246,7 @@ TEST_CASE(
 	Prepared(host, d, p, request);
 	REQUIRE(Slots(Entry(*request.DataReplay, "cacheA")).Elements.size() == 1);
 	Diagnostic diagnostic;
-	REQUIRE(host.ClearCacheResults(d, p, "cacheA", 17, 29, diagnostic));
+	REQUIRE(host.ClearSourceCache(d, p, "cacheA", 17, 29, diagnostic));
 	request.Tick = 2;
 	Prepared(host, d, p, request);
 	const auto &row = Entry(*request.DataReplay, "cacheA");
@@ -329,7 +329,7 @@ TEST_CASE(
 		EvaluationRequest request;
 		Prepared(host, document, plan, request);
 		Diagnostic diagnostic;
-		REQUIRE(host.ClearCacheResults(document, plan, "cacheA", 17, 29, diagnostic));
+		REQUIRE(host.ClearSourceCache(document, plan, "cacheA", 17, 29, diagnostic));
 		const auto cleared = *request.DataReplay;
 		const auto prepare = [&](uint64_t revision, std::string_view selected = "A-image") {
 			const bool ok = host.Prepare(
@@ -402,7 +402,7 @@ TEST_CASE("Whole replay owner Clear retires manual Cache Results slot history", 
 	EvaluationRequest request;
 	Prepared(host, document, plan, request);
 	Diagnostic diagnostic;
-	REQUIRE(host.ClearCacheResults(document, plan, "cacheA", 17, 29, diagnostic));
+	REQUIRE(host.ClearSourceCache(document, plan, "cacheA", 17, 29, diagnostic));
 	REQUIRE(IsFreedCacheResultsSlot(Slots(Entry(*request.DataReplay, "cacheA")).Elements.front()));
 	host.Clear();
 	Prepared(host, document, plan, request);
@@ -438,15 +438,36 @@ TEST_CASE(
 		const auto pixels = *host.Output("A-image");
 		const auto other = *host.Output("B-image");
 		Diagnostic diagnostic;
-		CHECK_FALSE(host.ClearCacheResults(document, plan, "cacheA", 17, 29, diagnostic));
+		CHECK_FALSE(host.ClearSourceCache(document, plan, "cacheA", 17, 29, diagnostic));
 		CHECK(diagnostic.Code == Status::LimitExceeded);
-		CHECK(diagnostic.Message == "Cache Results clear dependency/name work exceeds bounds");
+		CHECK(diagnostic.Message == "Source cache clear dependency/name work exceeds bounds");
 		CHECK(*request.DataReplay == prior);
-		CHECK(host.CacheResultsInvalidatedOutputs().empty());
+		CHECK(host.CacheInvalidatedOutputs().empty());
 		REQUIRE(host.Output("A-image"));
 		CHECK(*host.Output("A-image") == pixels);
 		CHECK(*host.Output("B-image") == other);
 		Prepared(host, document, plan, request);
 		CHECK(*request.DataReplay == prior);
 	}
+}
+
+TEST_CASE(
+	"Cache Results Clear admits group sorting beside both replay copies", "[imagegraph][cache_results]"
+) {
+	DataReplayState state;
+	CacheGroupReplayNode producer;
+	producer.NodeId = "producer";
+	producer.NodeType = "native.outputs";
+	producer.RenderActive = false;
+	for (size_t index = 0; index < 100; ++index)
+		producer.Outputs.push_back({"port" + std::to_string(index), Value{int64_t(index)}, {}, {}});
+	state.CacheGroups.Nodes.push_back(std::move(producer));
+	const auto original = state;
+	const auto cap = RetainedDataReplayBytes(state) + ClearedCacheResultsReplayBytes(state, "cache") +
+					 DataReplayValidationWorkspaceBytes(state);
+	Diagnostic diagnostic;
+	CHECK(ClearCacheResultsReplay(state, "cache", state, diagnostic, cap - 1) == Status::LimitExceeded);
+	CHECK(state == original);
+	REQUIRE(ClearCacheResultsReplay(state, "cache", state, diagnostic, cap) == Status::Ok);
+	CHECK(state == original);
 }

@@ -285,6 +285,8 @@ namespace engine::imagegraph::detail {
 				);
 		}
 		core::Metrics::Count("imagegraph.font.measure_work_units", work);
+		core::Metrics::Count("imagegraph.font.measure_request_bytes", requestText);
+		core::Metrics::Count("imagegraph.font.measure_requests", requests.size());
 		core::Metrics::Count("imagegraph.font.measure_workspace_bytes", actualWorkspace);
 		core::Metrics::Count("imagegraph.font.measure_candidate_bytes", actualCandidate);
 		output = std::move(candidate);

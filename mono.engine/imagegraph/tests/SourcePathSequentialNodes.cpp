@@ -437,3 +437,34 @@ TEST_CASE(
 	CHECK(path.SourceOperation->Sequential->CachedLength == 0);
 	CHECK(path.SourceOperation->Sequential->CachedSegments == 1);
 }
+
+TEST_CASE(
+	"Live cache-group paths retain late consumer sampling after producer output release",
+	"[source_path_sequential][frame_cache_groups]"
+) {
+	auto document = Graph("pc.path_smoothen");
+	document.Nodes.front().Values.push_back({"span", .1});
+	document.Nodes.front().Values.push_back({"step", int64_t{2}});
+	DataReplayState prior;
+	REQUIRE(
+		RetainCacheGroupReplayNode(
+			prior.CacheGroups, "modify", "pc.path_smoothen", {}, Limits::MaximumEvaluationBytes
+		)
+			.Code == Status::Ok
+	);
+	EvaluationRequest request;
+	request.DataReplay = &prior;
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	StatefulEvaluationResult result;
+	const auto evaluated = EvaluateStateful(document, plan, "position", request, result, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(evaluated == Status::Ok);
+	const auto &path = std::get<Path2D>(*result.Data.CacheGroups.Nodes.front().Outputs.front().Data);
+	REQUIRE(path.SourceOperation);
+	REQUIRE(path.SourceOperation->Sequential);
+	CHECK(path.SourceOperation->EvaluationMemoId == 0);
+	CHECK_FALSE(path.SourceOperation->Sequential->Cache.empty());
+	CHECK(prior.CacheGroups.Nodes.front().Outputs.empty());
+}

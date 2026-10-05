@@ -35,6 +35,7 @@ namespace engine::imagegraph {
 
 		struct CatalogueStorage {
 			std::deque<std::string> ChoiceLabels;
+			std::deque<std::string> ConstructorExpressions;
 			std::vector<CatalogueParsed> Nodes;
 			std::vector<CatalogueEntry> Entries;
 			std::unordered_map<std::string_view, size_t> ByType;
@@ -174,11 +175,21 @@ namespace engine::imagegraph {
 						auto &choices = fields[1] == "T" ? node.TemplateChoices : node.InputChoices;
 						choices[found->Id].push_back({index, storage.ChoiceLabels.back(), fields[4] == "1"});
 					}
-				} else if (fields[0] == "O" && fields.size() == 5 && !storage.Nodes.empty()) {
+				} else if (fields[0] == "O" && fields.size() == 7 && !storage.Nodes.empty()) {
 					const auto type = ParseValueTypeName(fields[4]);
 					if (!type) continue;
+					Value expression;
+					if (!detail::ReadValueText(fields[6], expression) ||
+						!std::holds_alternative<std::string>(expression))
+						continue;
+					storage.ConstructorExpressions.push_back(std::move(std::get<std::string>(expression)));
 					storage.Nodes.back().Outputs.push_back(
-						{fields[1], fields[2], RecordIndex(fields[3]), *type}
+						{fields[1],
+						 fields[2],
+						 RecordIndex(fields[3]),
+						 *type,
+						 fields[5],
+						 storage.ConstructorExpressions.back()}
 					);
 				}
 			}

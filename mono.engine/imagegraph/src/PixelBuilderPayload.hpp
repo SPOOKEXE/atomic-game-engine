@@ -45,6 +45,7 @@ namespace engine::imagegraph {
 		std::optional<SurfaceFrameReplayState> Surfaces;
 		std::optional<RandomReplayState> Random;
 		std::optional<DataReplayState> DataHistory;
+		std::optional<DataReplayState> FrameCacheLoads;
 		std::optional<RigidReplayState> RigidHistory;
 		uint64_t RigidAuthoringRevision = 0;
 		bool RigidPlaying = false, RigidFrameProgress = false;

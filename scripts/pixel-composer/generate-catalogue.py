@@ -9,7 +9,7 @@ mono.engine/imagegraph/src/SourceCatalogue.inc. Each record is one tab-separated
 A Dimension or unit-bearing input is followed by its "<id>_unit" enum. A mappable input is followed by its "<id>_mapped" toggle, which the source keeps as an input attribute, and
 for setMappable numeric inputs its "<id>_map_range" [low, high] pair. A curvable input is followed by its
 "<id>_<key>" toggle.
-    O <id> <name> <source index> <value type>
+    O <id> <name> <source index> <value type> <constructor ValueText or empty> <constructor expression as ValueText text>
     D <fixed input count> <inputs per dynamic group> [maximum groups]
     T <id> <name> <offset in group> <source kind> <value type> <default or empty> <choices>
     S <I|T> <id> <source typeArray classification: 0|1|?>
@@ -33,8 +33,10 @@ from pathlib import Path
 from enum_values import enum_member_value
 
 REPO = Path(__file__).resolve().parents[2]
-SNAPSHOT = json.load(open(REPO / "docs/pixel-composer-m0/source-inputs.json", encoding="utf-8"))
-MATRIX = list(csv.DictReader(open(REPO / "docs/pixel-composer-m0/node-parity-matrix.csv", encoding="utf-8")))
+with (REPO / "docs/pixel-composer-m0/source-inputs.json").open(encoding="utf-8") as snapshot_file:
+    SNAPSHOT = json.load(snapshot_file)
+with (REPO / "docs/pixel-composer-m0/node-parity-matrix.csv").open(encoding="utf-8") as matrix_file:
+    MATRIX = list(csv.DictReader(matrix_file))
 OUT = REPO / "mono.engine/imagegraph/src/SourceCatalogue.inc"
 PINNED_ENUM_SOURCE = "b69eca232217360cf1502ef0223523d818606652"
 if SNAPSHOT.get("source_commit") == PINNED_ENUM_SOURCE and "enum_values" not in SNAPSHOT:
@@ -411,6 +413,73 @@ def output_type(item):
     return value_type
 
 
+def value_text_string(text):
+    """Match the document reader's escapes without losing source whitespace."""
+    return 's "' + text.replace("\\", "\\\\").replace('"', '\\"').replace(
+        "\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
+
+
+def output_constructor_default(raw, value_type):
+    """Resolve bounded source literals only; a declared socket type is not its initial value."""
+    if len(raw) > 256 or not raw.strip():
+        return None
+    try:
+        expression = raw.strip()
+        if "#" in re.sub(r'"(?:[^"\\]|\\.)*"', "", expression):
+            return None
+        tree = ast.parse(expression, mode="eval")
+        if (sum(1 for _ in ast.walk(tree)) > 64
+                or ast.get_source_segment(expression, tree.body) != expression):
+            return None
+
+        def encode(node, declared="any", depth=0):
+            if depth > 16:
+                raise ValueError("constructor literal depth")
+            if isinstance(node, ast.Name) and node.id in ("noone", "true", "false"):
+                if ast.get_source_segment(expression, node) != node.id:
+                    raise ValueError("unsupported source identifier")
+                return {"noone": "i -4", "true": "b 1", "false": "b 0"}[node.id]
+            if isinstance(node, ast.Constant) and type(node.value) is str:
+                segment = ast.get_source_segment(expression, node)
+                if not re.fullmatch(r'"(?:[^"\\\r\n]|\\[\\"nrt])*"', segment or ""):
+                    raise ValueError("unsupported source string literal")
+                return value_text_string(node.value)
+            if isinstance(node, ast.List):
+                tags = {"vector2": (2, "v"), "vector3": (3, "3"),
+                        "vector4": (4, "w"), "quaternion": (4, "h")}
+                elements = [encode(child, depth=depth + 1) for child in node.elts]
+                vector = tags.get(declared)
+                if vector and len(elements) == vector[0] and all(v.startswith("d ") for v in elements):
+                    return vector[1] + " " + " ".join(v[2:] for v in elements)
+                return f"a any {len(elements)}" + "".join(" " + v for v in elements)
+            sign = 1
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+                sign = -1 if isinstance(node.op, ast.USub) else 1
+                node = node.operand
+            if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+                segment = ast.get_source_segment(expression, node)
+                if not re.fullmatch(r'(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?', segment or ""):
+                    raise ValueError("unsupported source number literal")
+                value = sign * node.value
+                if not math.isfinite(value):
+                    raise ValueError("nonfinite constructor literal")
+                if declared == "integer" and type(value) is int:
+                    if not -(2 ** 63) <= value < 2 ** 63:
+                        raise ValueError("constructor integer range")
+                    return f"i {value}"
+                if type(value) is int and abs(value) > 2 ** 53:
+                    raise ValueError("constructor number is not exactly representable")
+                numeric = sign * float(node.value)
+                if numeric == 0 and math.copysign(1, numeric) < 0:
+                    return "d -0"
+                return f"d {fmt(numeric)}"
+            raise ValueError("unresolved constructor expression")
+
+        return encode(tree.body, value_type)
+    except (SyntaxError, ValueError, OverflowError, RecursionError):
+        return None
+
+
 def clean(text):
     return re.sub(r"[\t\n\r]+", " ", text).strip()
 
@@ -429,7 +498,7 @@ def source_behavior_record(record_kind, identifier, item):
         return None
     clamp = behavior.get("choice_clamp")
     if not isinstance(clamp, dict):
-        raise ValueError(f"incomplete source behavior metadata: {identifier}")
+        raise TypeError(f"incomplete source behavior metadata: {identifier}")
     actual = behavior.get("actual_connectability")
     if actual not in ("general", "unknown"):
         raise ValueError(f"unknown source connectability metadata for {identifier}: {actual!r}")
@@ -464,14 +533,14 @@ def source_choice_records(record_kind, identifier, item):
     if status == "unknown":
         if entries is not None:
             raise ValueError(f"unknown source choices include fabricated entries: {identifier}")
-        return ["\t".join(["C", record_kind, identifier, "unknown"])]
+        return [f"C\t{record_kind}\t{identifier}\tunknown"]
     if not isinstance(entries, list):
-        raise ValueError(f"resolved source choices lack entries: {identifier}")
+        raise TypeError(f"resolved source choices lack entries: {identifier}")
 
-    records = ["\t".join(["C", record_kind, identifier, "resolved"])]
+    records = [f"C\t{record_kind}\t{identifier}\tresolved"]
     for expected_index, entry in enumerate(entries):
         if not isinstance(entry, dict):
-            raise ValueError(f"invalid source choice entry for {identifier}: {entry!r}")
+            raise TypeError(f"invalid source choice entry for {identifier}: {entry!r}")
         source_index = entry.get("choice_index")
         if type(source_index) is not int or source_index != expected_index:
             raise ValueError(f"nonsequential source choice index for {identifier}: {source_index!r}")
@@ -542,7 +611,7 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
         if item["kind"] == "Surface" and item["name"] == "Mask":
             # mask_apply_input reads the Mask junction's mask_alpha_only attribute.
             seen.add("mask_alpha_only")
-            lines.append("\t".join(["I", "mask_alpha_only", "Mask Alpha Only", "-1", "MaskAlphaOnly", "boolean", "b 0", ""]))
+            lines.append("I\tmask_alpha_only\tMask Alpha Only\t-1\tMaskAlphaOnly\tboolean\tb 0\t")
         if item.get("array_select"):
             selector = item["array_select"]
             lines.append("\t".join([
@@ -639,7 +708,11 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
             identifier, suffix = f"{base}_{suffix}", suffix + 1
         outputs.add(identifier)
         index = item["index"] if re.fullmatch(r"\d+", item["index"]) else "-1"
-        lines.append("\t".join(["O", identifier, clean(item["name"]), index, output_type(item)]))
+        value_type = output_type(item)
+        expression = item["default"]
+        lines.append("\t".join(["O", identifier, clean(item["name"]), index, value_type,
+                                output_constructor_default(expression, value_type) or "",
+                                value_text_string(expression)]))
 
 # Every input has a distinct declaration classification record, including unknown host attributes.
 classified_lines = []
@@ -662,7 +735,9 @@ header = (
 )
 body = "\n".join(lines)
 assert ")CATALOGUE\"" not in body
-OUT.write_text(header + 'R"CATALOGUE(' + body + '\n)CATALOGUE"\n', encoding="utf-8")
+generated = header + 'R"CATALOGUE(' + body + '\n)CATALOGUE"\n'
+if not OUT.exists() or OUT.read_text(encoding="utf-8") != generated:
+    OUT.write_text(generated, encoding="utf-8")
 inputs = [line for line in lines if line.startswith("I")]
 typed = [line for line in inputs if line.split("\t")[5] in AUTHORED]
 defaulted = [line for line in typed if line.split("\t")[6]]

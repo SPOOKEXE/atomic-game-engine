@@ -10,6 +10,8 @@
 namespace engine::imagegraph {
 	uint64_t RetainedDataReplayEntryBytes(const DataReplayEntry &entry) {
 		uint64_t bytes = detail::MeshAddBytes(sizeof(entry), entry.NodeId.capacity());
+		if (entry.LoadedCacheData.capacity() > std::string{}.capacity())
+			bytes = detail::MeshAddBytes(bytes, entry.LoadedCacheData.capacity());
 		bytes = detail::MeshAddBytes(bytes, detail::MeshVectorBytes<true>(entry.Values));
 		for (const auto &frame : entry.Values)
 			bytes = detail::MeshAddBytes(bytes, detail::RetainedPayloadBytes(frame.Data));
@@ -19,7 +21,23 @@ namespace engine::imagegraph {
 		uint64_t bytes = detail::MeshAddBytes(sizeof(state), detail::MeshVectorBytes<true>(state.Entries));
 		for (const auto &entry : state.Entries)
 			bytes = detail::MeshAddBytes(bytes, RetainedDataReplayEntryBytes(entry) - sizeof(entry));
+		bytes = detail::MeshAddBytes(
+			bytes, RetainedCacheGroupReplayBytes(state.CacheGroups) - sizeof(state.CacheGroups)
+		);
 		return bytes;
+	}
+	uint64_t DataReplayValidationWorkspaceBytes(const DataReplayState &state, size_t additionalRows) {
+		if (state.Entries.size() > Limits::MaximumArrayElements ||
+			additionalRows > Limits::MaximumArrayElements - state.Entries.size() ||
+			state.CacheGroups.Nodes.size() > Limits::MaximumNodes)
+			return UINT64_MAX;
+		size_t largest = state.Entries.size() + additionalRows;
+		for (const auto &node : state.CacheGroups.Nodes) {
+			if (node.Outputs.size() > Limits::MaximumDynamicOutputsPerNode + Limits::MaximumGroupPorts)
+				return UINT64_MAX;
+			largest = std::max(largest, node.Outputs.size());
+		}
+		return largest * sizeof(size_t);
 	}
 	Status ValidateDataReplay(const DataReplayState &state, uint64_t maximumBytes, Diagnostic &diagnostic) {
 		diagnostic = {};
@@ -34,6 +52,11 @@ namespace engine::imagegraph {
 			RetainedDataReplayBytes(state) > Limits::MaximumEvaluationBytes)
 			return refuse(Status::LimitExceeded, "data replay exceeds row or byte budget");
 		const uint64_t retained = RetainedDataReplayBytes(state);
+		const auto groupBytes = RetainedCacheGroupReplayBytes(state.CacheGroups);
+		const auto otherRetained = retained - groupBytes;
+		if (ValidateCacheGroupReplay(state.CacheGroups, maximumBytes - otherRetained, diagnostic) !=
+			Status::Ok)
+			return diagnostic.Code;
 		if (state.Entries.size() > (maximumBytes - retained) / sizeof(size_t))
 			return refuse(Status::LimitExceeded, "data replay validation workspace exceeds budget");
 		std::vector<size_t> order(state.Entries.size());
@@ -59,6 +82,10 @@ namespace engine::imagegraph {
 				!std::isfinite(entry.PreviousFrame))
 				return refuse(
 					Status::InvalidValue, "data replay identity or scalar state is invalid", entry.NodeId
+				);
+			if (entry.LoadedCacheData.size() > Limits::MaximumTextBytes)
+				return refuse(
+					Status::LimitExceeded, "loaded frame cache identity exceeds text bounds", entry.NodeId
 				);
 			if (entry.Values.size() > Limits::MaximumArrayElements)
 				return refuse(

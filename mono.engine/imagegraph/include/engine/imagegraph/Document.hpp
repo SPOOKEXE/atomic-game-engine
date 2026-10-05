@@ -1710,6 +1710,8 @@ namespace engine::imagegraph {
 		const SurfaceFrameReplayState *SurfaceReplay = nullptr;
 		const RandomReplayState *RandomReplay = nullptr;
 		const DataReplayState *DataReplay = nullptr;
+		// Decoded saved frame-cache constructor rows, borrowed for this synchronous evaluation.
+		const DataReplayState *SourceFrameCacheLoads = nullptr;
 		// Borrowed host physics capability and immutable durable event journal.
 		const RigidReplayState *RigidReplay = nullptr;
 		SourceRigidProvider *RigidProvider = nullptr;
@@ -1980,6 +1982,10 @@ namespace engine::imagegraph {
 
 	// Checks limits, identities, schemas, links, outputs and cycles.
 	Status Compile(const Document &document, Plan &plan, Diagnostic &diagnostic);
+	// Caps transient compiler work and new plan storage. Callers account separately
+	// for their retained document and previous plan. Failure preserves the previous plan.
+	Status
+	Compile(const Document &document, Plan &plan, Diagnostic &diagnostic, uint64_t maximumWorkspaceBytes);
 
 	// Prepares a bounded key copy for a property in the same native typed domain. Cross-domain source
 	// transfers require a representable getter policy and are diagnosed. Failure preserves result.

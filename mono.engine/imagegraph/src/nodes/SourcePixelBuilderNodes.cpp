@@ -188,6 +188,11 @@ namespace engine::imagegraph::detail {
 			if (context.Request.DataReplay &&
 				!AddRecipeBytes(bytes, RetainedDataReplayBytes(*context.Request.DataReplay)))
 				return context.Fail(Status::LimitExceeded, "Builder data history exceeds its byte bound");
+			if (context.Request.SourceFrameCacheLoads &&
+				!AddRecipeBytes(bytes, RetainedDataReplayBytes(*context.Request.SourceFrameCacheLoads)))
+				return context.Fail(
+					Status::LimitExceeded, "Builder loaded frame cache exceeds its byte bound"
+				);
 			if (context.Request.SliceStackReplay &&
 				!AddRecipeBytes(bytes, RetainedSliceStackReplayBytes(*context.Request.SliceStackReplay)))
 				return context.Fail(Status::LimitExceeded, "Builder slice stack exceeds its byte bound");
@@ -319,6 +324,8 @@ namespace engine::imagegraph::detail {
 			for (const auto *receipt : receipts)
 				data.HostCaptures.push_back(*receipt);
 			if (context.Request.DataReplay) data.DataHistory = *context.Request.DataReplay;
+			if (context.Request.SourceFrameCacheLoads)
+				data.FrameCacheLoads = *context.Request.SourceFrameCacheLoads;
 			// Retained Draw regenerates this frame from the immutable prior, never the current actor prefix.
 			if (context.Request.RigidReplay) data.RigidHistory = *context.Request.RigidReplay;
 			data.RigidAuthoringRevision = context.Request.RigidAuthoringRevision;

@@ -79,7 +79,7 @@ namespace engine::imagegraph {
 		const uint64_t replacement = ClearedCacheResultsReplayBytes(source, nodeId);
 		if (replacement == UINT64_MAX)
 			return fail(Status::InvalidValue, "Cache Results clear requires an owned source slot list");
-		const uint64_t workspace = source.Entries.size() * sizeof(size_t);
+		const uint64_t workspace = DataReplayValidationWorkspaceBytes(source);
 		if (retained > maximumBytes || oldOutput > maximumBytes - retained ||
 			replacement > maximumBytes - retained - oldOutput ||
 			workspace > maximumBytes - retained - oldOutput - replacement)

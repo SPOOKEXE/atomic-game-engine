@@ -68,10 +68,10 @@ I	intensity	Intensity	19	Slider	scalar	d 1
 S	I	intensity	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth	Depth	1	image
-O	extrude_only	Extrude Only	2	image
-O	face_only	Face Only	3	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth	Depth	1	image	i -4	s "noone"
+O	extrude_only	Extrude Only	2	image	i -4	s "noone"
+O	face_only	Face Only	3	image	i -4	s "noone"
 N	pc.2_d_light	Node_2D_light	2D Light	filter	scripts/node_2d_light/node_2d_light.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -156,8 +156,8 @@ T	exponent	Exponent	18	Float	scalar	d 2
 S	T	exponent	0
 T	anti_aliasing	Anti Aliasing	19	Bool	boolean	b 0	
 S	T	anti_aliasing	0
-O	surface_out	Surface Out	0	image
-O	light_only	Light only	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	light_only	Light only	1	image	i -4	s "noone"
 N	pc.3_d_affector	Node_3D_Affector	Scene Affector	3d	scripts/node_3d_affector/node_3d_affector.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -197,7 +197,7 @@ S	I	affect_scale	1
 A	I	affect_scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	scene	Scene	0	scene3d
+O	scene	Scene	0	scene3d	i -4	s "noone"
 N	pc.3_d_camera	Node_3D_Camera	3D Camera	3d	scripts/node_3d_camera/node_3d_camera.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -320,13 +320,13 @@ I	swap_view_normal_x	Swap View Normal X	34	Bool	boolean	b 0
 S	I	swap_view_normal_x	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rendered	Rendered	0	image
-O	diffuse	Diffuse	5	image
-O	normal	Normal	1	image
-O	view_normal	View Normal	6	image
-O	depth	Depth	2	image
-O	shadow	Shadow	3	image
-O	ambient_occlusion	Ambient Occlusion	4	image
+O	rendered	Rendered	0	image	i -4	s "noone"
+O	diffuse	Diffuse	5	image	i -4	s "noone"
+O	normal	Normal	1	image	i -4	s "noone"
+O	view_normal	View Normal	6	image	i -4	s "noone"
+O	depth	Depth	2	image	i -4	s "noone"
+O	shadow	Shadow	3	image	i -4	s "noone"
+O	ambient_occlusion	Ambient Occlusion	4	image	i -4	s "noone"
 N	pc.3_d_camera_set	Node_3D_Camera_Set	3D Camera Set	3d	scripts/node_3d_camera_set/node_3d_camera_set.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -465,13 +465,13 @@ I	l2_intensity	L2 Intensity	46	Slider	scalar	d 0.25
 S	I	l2_intensity	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rendered	Rendered	0	image
-O	diffuse	Diffuse	5	image
-O	normal	Normal	1	image
-O	view_normal	View Normal	6	image
-O	depth	Depth	2	image
-O	shadow	Shadow	3	image
-O	ambient_occlusion	Ambient Occlusion	4	image
+O	rendered	Rendered	0	image	i -4	s "noone"
+O	diffuse	Diffuse	5	image	i -4	s "noone"
+O	normal	Normal	1	image	i -4	s "noone"
+O	view_normal	View Normal	6	image	i -4	s "noone"
+O	depth	Depth	2	image	i -4	s "noone"
+O	shadow	Shadow	3	image	i -4	s "noone"
+O	ambient_occlusion	Ambient Occlusion	4	image	i -4	s "noone"
 N	pc.3_d_displace	Node_3D_Displace	3D Displace	3d	scripts/node_3d_displace/node_3d_displace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -487,7 +487,7 @@ I	recalculate_normal	Recalculate Normal	4	Bool	boolean	b 1
 S	I	recalculate_normal	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_get_data	Node_3D_Get_Data	3D Get Data	3d	scripts/node_3d_get_data/node_3d_get_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -495,10 +495,10 @@ I	mesh	Mesh	0	D3Mesh	mesh
 S	I	mesh	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	origin	Origin	0	vector3
-O	position	Position	1	vector3
-O	rotation	Rotation	2	vector4
-O	scale	Scale	3	vector3
+O	origin	Origin	0	vector3	3 0 0 0	s "[0,0,0]"
+O	position	Position	1	vector3	3 0 0 0	s "[0,0,0]"
+O	rotation	Rotation	2	vector4	w 0 0 0 1	s "[0,0,0,1]"
+O	scale	Scale	3	vector3	3 0 0 0	s "[0,0,0]"
 N	pc.3_d_instancer	Node_3D_Instancer	3D Instancer	3d	scripts/node_3d_instancer/node_3d_instancer.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -585,7 +585,7 @@ I	random_colors	Random Colors	11	Gradient	gradient	g 0 1 0 255 255 255 255
 S	I	random_colors	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_light_directional	Node_3D_Light_Directional	Directional Light	3d	scripts/node_3d_light_directional/node_3d_light_directional.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -617,7 +617,7 @@ I	shadow_bias	Shadow Bias	10	Float	scalar	d 0.01
 S	I	shadow_bias	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	light	Light	0	light3d
+O	light	Light	0	light3d	i -4	s "noone"
 N	pc.3_d_light_point	Node_3D_Light_Point	Point Light	3d	scripts/node_3d_light_point/node_3d_light_point.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -649,7 +649,7 @@ I	shadow_bias	Shadow Bias	10	Float	scalar	d 0.01
 S	I	shadow_bias	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	light	Light	0	light3d
+O	light	Light	0	light3d	i -4	s "noone"
 N	pc.3_d_material	Node_3D_Material	3D Material	3d	scripts/node_3d_material/node_3d_material.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -707,7 +707,7 @@ I	normal_strength	Normal Strength	6	Slider	scalar	d 1
 S	I	normal_strength	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	material	Material	0	material3d
+O	material	Material	0	material3d	i -4	s "noone"
 N	pc.3_d_mesh_cone	Node_3D_Mesh_Cone	3D Cone	3d	scripts/node_3d_mesh_cone/node_3d_mesh_cone.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -733,7 +733,7 @@ I	material_side	Material Side	6	D3Material	material3d
 S	I	material_side	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_cube	Node_3D_Mesh_Cube	3D Cube	3d	scripts/node_3d_mesh_cube/node_3d_mesh_cube.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -782,7 +782,7 @@ I	material_front	Material Front	10	D3Material	material3d
 S	I	material_front	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_cylinder	Node_3D_Mesh_Cylinder	3D Cylinder	3d	scripts/node_3d_mesh_cylinder/node_3d_mesh_cylinder.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -817,7 +817,7 @@ I	material_side	Material Side	7	D3Material	material3d
 S	I	material_side	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_export	Node_3D_Mesh_Export	Mesh Export	3d	scripts/node_3d_mesh_export/node_3d_mesh_export.gml
 I	mesh	Mesh	0	D3Mesh	mesh		
 S	I	mesh	0
@@ -878,7 +878,7 @@ I	side_texture	Side Texture	15	D3Material	material3d
 S	I	side_texture	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_extrude_mesh	Node_3D_Mesh_Extrude_Mesh	Mesh Extrude 3D	3d	scripts/node_3d_mesh_extrude_mesh/node_3d_mesh_extrude_mesh.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -912,7 +912,7 @@ I	back_texture	Back Texture	10	D3Material	material3d
 S	I	back_texture	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_json	Node_3D_Mesh_Json	3D Json	3d	scripts/node_3d_mesh_json/node_3d_mesh_json.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -947,7 +947,7 @@ S	I	attribute_array_process	?
 D	9	1
 T	material	Material	0	D3Material	material3d		
 S	T	material	0
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_obj	Node_3D_Mesh_Obj	3D Object	3d	scripts/node_3d_mesh_obj/node_3d_mesh_obj.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -978,7 +978,7 @@ S	I	attribute_array_process	?
 D	8	1
 T	material	Material	0	D3Material	material3d		
 S	T	material	0
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_path_extrude	Node_3D_Mesh_Path_Extrude	Path Extrude 3D	3d	scripts/node_3d_mesh_path_extrude/node_3d_mesh_path_extrude.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1028,7 +1028,7 @@ I	use_path_color	Use Path Color	18	Bool	boolean	b 0
 S	I	use_path_color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_path_revolve	Node_3D_Mesh_Path_Revolve	Path Revolve 3D	3d	scripts/node_3d_mesh_path_revolve/node_3d_mesh_path_revolve.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1082,7 +1082,7 @@ I	material_cap	Material Cap	12	D3Material	material3d
 S	I	material_cap	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_plane	Node_3D_Mesh_Plane	3D Plane	3d	scripts/node_3d_mesh_plane/node_3d_mesh_plane.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1113,7 +1113,7 @@ I	back_material	Back Material	7	D3Material	material3d
 S	I	back_material	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_sphere_ico	Node_3D_Mesh_Sphere_Ico	3D Icosphere	3d	scripts/node_3d_mesh_sphere_ico/node_3d_mesh_sphere_ico.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1137,7 +1137,7 @@ I	smooth_normal	Smooth Normal	6	Bool	boolean	b 0
 S	I	smooth_normal	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_sphere_uv	Node_3D_Mesh_Sphere_UV	3D UV Sphere	3d	scripts/node_3d_mesh_sphere_uv/node_3d_mesh_sphere_uv.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1169,7 +1169,7 @@ Q	I	projection	0	0	s "Lambert"
 Q	I	projection	1	0	s "Equirectangular"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_stack_slice	Node_3D_Mesh_Stack_Slice	Slice Stack	3d	scripts/node_3d_mesh_stack_slice/node_3d_mesh_stack_slice.gml
 I	mesh	Mesh	0	D3Mesh	mesh		
 S	I	mesh	0
@@ -1183,7 +1183,7 @@ I	scale	Scale	2	Float	scalar	d 1
 S	I	scale	0
 I	slices	Slices	3	Int	integer	i 4	
 S	I	slices	0
-O	outputs	Outputs	0	image
+O	outputs	Outputs	0	image	a any 0	s "[]"
 N	pc.3_d_mesh_terrain	Node_3D_Mesh_Terrain	3D Terrain	3d	scripts/node_3d_mesh_terrain/node_3d_mesh_terrain.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1221,7 +1221,7 @@ I	material	Material	4	D3Material	material3d
 S	I	material	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_torus	Node_3D_Mesh_Torus	3D Torus	3d	scripts/node_3d_mesh_torus/node_3d_mesh_torus.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1257,7 +1257,7 @@ I	material	Material	8	D3Material	material3d
 S	I	material	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mesh_vertex_points	Node_3D_Mesh_Vertex_Points	Mesh Vertices	3d	scripts/node_3d_vertex_points/node_3d_vertex_points.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1269,8 +1269,8 @@ I	apply_transform	Apply Transform	1	Bool	boolean	b 0
 S	I	apply_transform	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	positions	Positions	0	vector3
-O	normals	Normals	1	vector3
+O	positions	Positions	0	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
+O	normals	Normals	1	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
 N	pc.3_d_mesh_wall_builder	Node_3D_Mesh_Wall_Builder	3D Wall Builder	3d	scripts/node_3d_mesh_wall_builder/node_3d_mesh_wall_builder.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1310,7 +1310,7 @@ I	cap_material	Cap Material	12	D3Material	material3d
 S	I	cap_material	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_mirror	Node_3D_Mirror	Mirror 3D	3d	scripts/node_3d_mirror/node_3d_mirror.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1339,7 +1339,7 @@ I	show_original	Show Original	6	Bool	boolean	b 0
 S	I	show_original	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_particle	Node_3D_Particle	3D Particle	3d	scripts/node_3d_particle/node_3d_particle.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1525,7 +1525,7 @@ S	I	scale_wiggle	1
 A	I	scale_wiggle	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_point_affector	Node_3D_Point_Affector	Point Affector	3d	scripts/node_3d_point_affector/node_3d_point_affector.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1563,7 +1563,7 @@ S	I	final_value	1
 A	I	final_value	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	output	Output	0	vector3
+O	output	Output	0	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
 N	pc.3_d_repeat	Node_3D_Repeat	3D Repeat	3d	scripts/node_3d_repeat/node_3d_repeat.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1646,7 +1646,7 @@ S	I	scale_scatter	1
 A	I	scale_scatter	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	scene	Scene	0	scene3d
+O	scene	Scene	0	scene3d	i -4	s "noone"
 N	pc.3_d_round_vertex	Node_3D_Round_Vertex	Discretize vertex	3d	scripts/node_3d_round_vertex/node_3d_round_vertex.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1656,7 +1656,7 @@ I	step	Step	1	Float	scalar	d 0.1
 S	I	step	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_scene	Node_3D_Scene	3D Scene	3d	scripts/node_3d_scene/node_3d_scene.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1670,7 +1670,7 @@ D	1	1
 T	object	Object	0	D3Mesh	mesh		
 S	T	object	0
 A	T	object	?
-O	scene	Scene	0	scene3d
+O	scene	Scene	0	scene3d	i -4	s "noone"
 N	pc.3_d_set_material	Node_3D_Set_Material	Set Material	3d	scripts/node_3d_set_material/node_3d_set_material.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1703,7 +1703,7 @@ Q	I	overflow	0	0	s "Keep Original"
 Q	I	overflow	1	0	s "Loop"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_set_origin	Node_3D_Set_Origin	3D Set Origin	3d	scripts/node_3d_set_origin/node_3d_set_origin.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1720,8 +1720,8 @@ S	I	point	1
 A	I	point	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	scene	Scene	0	mesh
-O	origin	Origin	1	vector3
+O	scene	Scene	0	mesh	i -4	s "noone"
+O	origin	Origin	1	vector3	3 0 0 0	s "[0,0,0]"
 N	pc.3_d_subdivide	Node_3D_Subdivide	3D Subdivide	3d	scripts/node_3d_subdivide/node_3d_subdivide.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1733,7 +1733,7 @@ I	level	Level	2	Int	integer	i 1
 S	I	level	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_transform	Node_3D_Transform	Transform 3D	3d	scripts/node_3d_transform/node_3d_transform.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1753,7 +1753,7 @@ I	mesh	Mesh	4	D3Mesh	mesh
 S	I	mesh	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.3_d_transform_image	Node_3D_Transform_Image	Transform Image 3D	3d	scripts/node_3d_transform_image/node_3d_transform_image.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1796,9 +1796,9 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
-O	rendered	Rendered	1	image
-O	depth	Depth	2	image
+O	mesh	Mesh	0	mesh	i -4	s "noone"
+O	rendered	Rendered	1	image	i -4	s "noone"
+O	depth	Depth	2	image	i -4	s "noone"
 N	pc.3_d_transform_scene	Node_3D_Transform_Scene	Transform Scene	3d	scripts/node_3d_transform_scene/node_3d_transform_scene.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1834,7 +1834,7 @@ Q	I	scaling_type	1	0	s "Multiplicative"
 Q	I	scaling_type	2	0	s "Override"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	scene	Scene	0	scene3d
+O	scene	Scene	0	scene3d	i -4	s "noone"
 N	pc.3_d_uv_remap	Node_3D_UV_Remap	UV Remap	3d	scripts/node_3d_uv_remap/node_3d_uv_remap.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1859,7 +1859,7 @@ I	bake_uv	Bake UV	6	Int	integer	i 0
 S	I	bake_uv	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.9_slice	Node_9Slice	Nine Slice	transform	scripts/node_9slice/node_9slice.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1889,8 +1889,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	dyna_surf	DynaSurf	1	dynamic_surface
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	dyna_surf	DynaSurf	1	dynamic_surface		s "new nineSliceSurf()"
 N	pc.ase_file_read	Node_ASE_File_Read	ASE File In	io	scripts/node_ase_file_read/node_ase_file_read.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -1903,15 +1903,15 @@ S	I	current_tag	0
 I	attribute_layer_loop	attribute layer_loop	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_layer_loop	?
 A	I	attribute_layer_loop	?
-O	output	Output	0	image
-O	content	Content	1	object
-O	path	Path	2	text
-O	palette	Palette	3	colour
-O	layers	Layers	4	text
-O	tags	Tags	5	text
-O	tilesets	Tilesets	8	struct
-O	raw_data	Raw data	6	struct
-O	frame_amount	Frame Amount	7	integer
+O	output	Output	0	image	i -4	s "noone"
+O	content	Content	1	object		s "self"
+O	path	Path	2	text	s ""	s "\"\""
+O	palette	Palette	3	colour	a any 0	s "[]"
+O	layers	Layers	4	text	a any 0	s "[]"
+O	tags	Tags	5	text	a any 0	s "[]"
+O	tilesets	Tilesets	8	struct	a any 0	s "[]"
+O	raw_data	Raw data	6	struct		s "{}"
+O	frame_amount	Frame Amount	7	integer	i 1	s "1"
 N	pc.ase_tag	Node_ASE_Tag	ASE Tag	io	scripts/node_ase_tag/node_ase_tag.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -1921,17 +1921,17 @@ I	tag	Tag	1	Text	text	s ""
 S	I	tag	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	frame_range	Frame Range	1	vector2
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	frame_range	Frame Range	1	vector2	v 0 0	s "[0,0]"
 N	pc.ase_tileset	Node_ASE_Tileset	ASE Tileset	io	scripts/node_ase_tileset/node_ase_tileset.gml
 I	ase_data	ASE data	0	Generic_object	object		
 S	I	ase_data	0
 I	tileset_name	Tileset Name	1	Text	text	s ""	
 S	I	tileset_name	0
-O	tiles	Tiles	0	image
-O	tile_size	Tile Size	1	vector2
-O	tile_amount	Tile Amount	2	integer
-O	tileset_name	Tileset name	3	text
+O	tiles	Tiles	0	image	a any 0	s "[]"
+O	tile_size	Tile Size	1	vector2	v 1 1	s "[1,1]"
+O	tile_amount	Tile Amount	2	integer	i 0	s "0"
+O	tileset_name	Tileset name	3	text	s ""	s "\"\""
 N	pc.ase_layer	Node_ASE_layer	ASE Layer	io	scripts/node_ase_layer/node_ase_layer.gml
 I	ase_data	ASE data	0	Generic_object	object		
 S	I	ase_data	0
@@ -1943,9 +1943,9 @@ I	loop	Loop	3	Bool	boolean	b 0
 S	I	loop	0
 I	apply_opacity	Apply Opacity	4	Bool	boolean	b 1	
 S	I	apply_opacity	0
-O	surface_out	Surface Out	0	image
-O	layer_name	Layer Name	1	text
-O	opacity	Opacity	2	scalar
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	layer_name	Layer Name	1	text	s ""	s "\"\""
+O	opacity	Opacity	2	scalar	d 1	s "1"
 N	pc.active_canvas	Node_Active_Canvas	Active Canvas	io	scripts/node_active_canvas/node_active_canvas.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -1988,7 +1988,7 @@ I	alpha	Alpha	6	Slider	scalar	d 1
 S	I	alpha	0
 I	color_jitter	Color Jitter	15	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	color_jitter	0
-O	output	Output	0	image
+O	output	Output	0	image	i -4	s "noone"
 N	pc.align_content	Node_Align_Content	Align Content	transform	scripts/node_align_content/node_align_content.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2010,7 +2010,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.alpha_cutoff	Node_Alpha_Cutoff	Alpha Cutoff	filter	scripts/node_alpha_cutoff/node_alpha_cutoff.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2034,7 +2034,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.alpha_grey	Node_Alpha_Grey	Alpha to Grey	filter	scripts/node_alpha_grey/node_alpha_grey.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2051,7 +2051,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.ambient_occlusion	Node_Ambient_Occlusion	Ambient Occlusion	3d	scripts/node_ambient_occlusion/node_ambient_occlusion.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2102,7 +2102,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.anim_curve	Node_Anim_Curve	Evaluate Curve	animation	scripts/node_anim_curve/node_anim_curve.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2125,7 +2125,7 @@ Q	I	display_type	0	0	s "Number"
 Q	I	display_type	1	0	s "Curve"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	curve	Curve	0	array
+O	curve	Curve	0	array	a any 0	s "[]"
 N	pc.anim_loop	Node_Anim_Loop	Frame Loop	animation	scripts/node_anim_loop/node_anim_loop.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2159,7 +2159,7 @@ Q	I	post_loop	0	0	s "Passthrough"
 Q	I	post_loop	1	0	s "Empty"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.animation_control	Node_Animation_Control	Animation Control	misc	scripts/node_animation_control/node_animation_control.gml
 I	play_pause	Play / Pause	0	Trigger	boolean	b 0	
 S	I	play_pause	0
@@ -2179,7 +2179,7 @@ N	pc.application_in	Node_Application_In	GUI In	misc	scripts/node_application_in/
 I	gui	GUI	0	Surface	image		
 S	I	gui	0
 N	pc.application_out	Node_Application_Out	GUI Out	misc	scripts/node_application_out/node_application_out.gml
-O	gui	GUI	0	image
+O	gui	GUI	0	image	i -4	s "noone"
 N	pc.area	Node_Area	Area	values	scripts/node_area/node_area.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2203,7 +2203,7 @@ Q	I	shape	0	0	s "Rectangle"
 Q	I	shape	1	0	s "Elipse"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	area	Area	0	array
+O	area	Area	0	array		s "[ 0, 0, 0, 0, AREA_SHAPE.rectangle ]"
 N	pc.argument	Node_Argument	Argument	misc	scripts/node_argument/node_argument.gml
 I	tag	Tag	0	Text	text	s ""	
 S	I	tag	0
@@ -2215,9 +2215,9 @@ Q	I	type	0	0	s "String"
 Q	I	type	1	0	s "Number"
 I	default_value	Default value	2	Text	text	s ""	
 S	I	default_value	0
-O	value	Value	0	text
+O	value	Value	0	text	s ""	s "\"\""
 N	pc.armature	Node_Armature	Armature Create	compose	scripts/node_armature/node_armature.gml
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.armature_bind	Node_Armature_Bind	Armature Bind	compose	scripts/node_armature_bind/node_armature_bind.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2258,9 +2258,9 @@ T	inherit_scale	Inherit Scale	4	Bool	boolean	b 0
 S	T	inherit_scale	0
 T	apply_bone_scale	Apply Bone Scale	5	Bool	boolean	b 0	
 S	T	apply_bone_scale	0
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas data	1	atlas
-O	bind_data	Bind data	2	struct
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas data	1	atlas	a any 0	s "[]"
+O	bind_data	Bind data	2	struct	a any 0	s "[]"
 N	pc.armature_bone	Node_Armature_Bone	Armature Bone	compose	scripts/node_armature_bone/node_armature_bone.gml
 I	input_5		5	Armature	armature		
 S	I	input_5	0
@@ -2290,13 +2290,13 @@ S	I	tail	1
 A	I	tail	1
 I	tail_unit	Tail Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	tail_unit	?
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.armature_from_path	Node_Armature_From_Path	Armature from Path	compose	scripts/node_armature_from_path/node_armature_from_path.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
 I	bones	Bones	1	Int	integer	i 4	
 S	I	bones	0
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.armature_ik	Node_Armature_IK	Armature IK	compose	scripts/node_armature_ik/node_armature_ik.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
@@ -2306,7 +2306,7 @@ I	origin	Origin	1	Bone	armature
 S	I	origin	0
 I	target	Target	2	Bone	armature		
 S	I	target	0
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.armature_mesh_rig	Node_Armature_Mesh_Rig	Armature Mesh Rig	compose	scripts/node_armature_mesh_rig/node_armature_mesh_rig.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
@@ -2320,7 +2320,7 @@ I	attribute_baked	attribute baked	-1	Bool	boolean	b 0
 S	I	attribute_baked	0
 I	attribute_display_mesh_size	attribute display_mesh_size	-1	Float	scalar	d 2	
 S	I	attribute_display_mesh_size	0
-O	rigged_surface	Rigged Surface	0	dynamic_surface
+O	rigged_surface	Rigged Surface	0	dynamic_surface	i -4	s "noone"
 N	pc.armature_mirror	Node_Armature_Mirror	Armature Mirror	compose	scripts/node_armature_mirror/node_armature_mirror.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
@@ -2338,13 +2338,13 @@ I	axis	Axis	2	Bone	armature
 S	I	axis	0
 I	angle	Angle	5	Rotation	scalar	d 0	
 S	I	angle	0
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.armature_path	Node_Armature_Path	Armature Path	compose	scripts/node_armature_path/node_armature_path.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
 I	flatten	Flatten	1	Bool	boolean	b 0	
 S	I	flatten	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.armature_pose	Node_Armature_Pose	Armature Pose	compose	scripts/node_armature_pose/node_armature_pose.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
@@ -2354,7 +2354,7 @@ D	1	1
 T	name	_name	0	Transform	struct		
 S	T	name	1
 A	T	name	1
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.armature_pose_bone	Node_Armature_Pose_Bone	Armature Pose Bone	compose	scripts/node_armature_pose_bone/node_armature_pose_bone.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
@@ -2385,7 +2385,7 @@ Q	I	scale_mode	0	0	s "Absolute"
 Q	I	scale_mode	1	0	s "Relative"
 I	scale	Scale	4	Float	scalar	d 1	
 S	I	scale	0
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.armature_pose_stagger	Node_Armature_Pose_Stagger	Armature Stagger	compose	scripts/node_armature_pose_stagger/node_armature_pose_stagger.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
@@ -2405,7 +2405,7 @@ I	intertia	Intertia	7	Slider	scalar	d 1
 S	I	intertia	0
 I	scale	Scale	4	Float	scalar	d 1	
 S	I	scale	0
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.armature_sample	Node_Armature_Sample	Armature Sample	compose	scripts/node_armature_sample/node_armature_sample.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
@@ -2413,7 +2413,7 @@ I	bone	Bone	1	Bone	armature
 S	I	bone	0
 I	sample_point	Sample point	2	Slider	scalar	d 0	
 S	I	sample_point	0
-O	position	Position	0	vector2
+O	position	Position	0	vector2	v 0 0	s "[ 0, 0 ]"
 N	pc.armature_skin	Node_Armature_Skin	Armature Skin	compose	scripts/node_armature_skin/node_armature_skin.gml
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -2432,7 +2432,7 @@ T	color	Color	1	Gradient	gradient	g 0 1 0 255 255 255 255
 S	T	color	0
 T	texture	Texture	2	Surface	image		
 S	T	texture	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.armature_subdivide	Node_Armature_Subdivide	Armature Subdivide	compose	scripts/node_armature_subdivide/node_armature_subdivide.gml
 I	input_0		0	Armature	armature		
 S	I	input_0	0
@@ -2440,7 +2440,7 @@ I	bone	Bone	1	Bone	armature
 S	I	bone	0
 I	subdivision	Subdivision	2	Int	integer	i 4	
 S	I	subdivision	0
-O	armature	Armature	0	armature
+O	armature	Armature	0	armature	i -4	s "noone"
 N	pc.array	Node_Array	Array	values	scripts/node_array/node_array.gml
 I	type	Type	0	EScroll	enum	e 0	Any;Surface;Number;Color;Text
 S	I	type	?
@@ -2457,7 +2457,7 @@ D	2	1
 T	input	Input	0	_typ	enum	e -1	
 S	T	input	?
 A	T	input	?
-O	array	Array	0	any
+O	array	Array	0	any	a any 0	s "[]"
 N	pc.array_add	Node_Array_Add	Array Add	values	scripts/node_array_add/node_array_add.gml
 I	spread_array	Spread array	1	Bool	boolean	b 0	
 S	I	spread_array	?
@@ -2466,7 +2466,7 @@ S	I	array	?
 D	2	1
 T	value	Value	0	Generic_any	any		
 S	T	value	0
-O	output	Output	0	any
+O	output	Output	0	any	d 0	s "0"
 N	pc.array_boolean_opr	Node_Array_Boolean_Opr	Array Boolean Opr	values	scripts/node_array_boolean_opr/node_array_boolean_opr.gml
 I	operation	Operation	2	EScroll	enum	e 0	Union;Subtract;Intersect;XOR
 S	I	operation	0
@@ -2480,7 +2480,7 @@ I	array_1	Array 1	0	Generic_any	any
 S	I	array_1	?
 I	array_2	Array 2	1	Generic_any	any		
 S	I	array_2	?
-O	array_out	Array out	0	any
+O	array_out	Array out	0	any	a any 0	s "[]"
 N	pc.array_csv_parse	Node_Array_CSV_Parse	Parse CSV	values	scripts/node_array_csv_parse/node_array_csv_parse.gml
 I	csv_string	CSV string	0	Text	text	s ""	
 S	I	csv_string	0
@@ -2499,7 +2499,7 @@ S	I	columns	1
 A	I	columns	1
 I	output_struct	Output Struct	4	Bool	boolean	b 0	
 S	I	output_struct	0
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_composite	Node_Array_Composite	Array Composite	values	scripts/node_array_composite/node_array_composite.gml
 I	array	Array	0	Float	array	a scalar 0	
 S	I	array	0
@@ -2507,7 +2507,7 @@ A	I	array	1
 I	compose	Compose	1	Float	array	a scalar 0	
 S	I	compose	0
 A	I	compose	1
-O	array	Array	0	scalar
+O	array	Array	0	scalar	d 0	s "0"
 N	pc.array_convolute	Node_Array_Convolute	Array Convolute	values	scripts/node_array_convolute/node_array_convolute.gml
 I	array	Array	0	Float	array	a scalar 0	
 S	I	array	0
@@ -2523,7 +2523,7 @@ C	I	boundary	resolved
 Q	I	boundary	0	0	s "Zero"
 Q	I	boundary	1	0	s "Wrap"
 Q	I	boundary	2	0	s "Skip"
-O	array	Array	0	scalar
+O	array	Array	0	scalar	d 0	s "0"
 N	pc.array_copy	Node_Array_Copy	Array Copy	values	scripts/node_array_copy/node_array_copy.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
@@ -2531,7 +2531,7 @@ I	starting_index	Starting Index	1	Int	integer	i 0
 S	I	starting_index	0
 I	size	Size	2	Int	integer	i 1	
 S	I	size	0
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_cumulative	Node_Array_Cumulative	Array Cumulative	undocumented	scripts/node_array_cumulative/node_array_cumulative.gml
 I	array_in	Array In	0	Generic_float	array	a scalar 0	
 S	I	array_in	0
@@ -2539,19 +2539,19 @@ I	start	Start	1	Float	scalar	d 0
 S	I	start	0
 I	include_current	Include Current	2	Bool	boolean	b 1	
 S	I	include_current	0
-O	cumulative_array	Cumulative Array	0	array
+O	cumulative_array	Cumulative Array	0	array	a any 0	s "[]"
 N	pc.array_find	Node_Array_Find	Array Find	values	scripts/node_array_find/node_array_find.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
 I	value	Value	1	Generic_any	any		
 S	I	value	?
-O	index	Index	0	integer
+O	index	Index	0	integer	i 0	s "0"
 N	pc.array_flattern	Node_Array_Flattern	Array Flatten	values	scripts/node_array_flattern/node_array_flattern.gml
 I	array_in	Array in	0	Any	any		
 S	I	array_in	?
 I	depth	Depth	1	Int	integer	i 0	
 S	I	depth	0
-O	flattened_array	Flattened Array	0	any
+O	flattened_array	Flattened Array	0	any	a any 0	s "[]"
 N	pc.array_get	Node_Array_Get	Array Get	values	scripts/node_array_get/node_array_get.gml
 I	array	Array	0	Any	any		
 S	I	array	?
@@ -2572,7 +2572,7 @@ Q	I	overflow	1	0	s "Loop"
 Q	I	overflow	2	0	s "Ping Pong"
 I	seed	Seed	4	Seed	scalar		
 S	I	seed	0
-O	value	Value	0	any
+O	value	Value	0	any	d 0	s "0"
 N	pc.array_insert	Node_Array_Insert	Array Insert	values	scripts/node_array_insert/node_array_insert.gml
 I	array	Array	0	Any	any		
 S	I	array	?
@@ -2582,11 +2582,11 @@ I	value	Value	2	Any	any
 S	I	value	?
 I	spread_array	Spread Array	3	Bool	boolean	b 0	
 S	I	spread_array	0
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_length	Node_Array_Length	Array Length	values	scripts/node_array_length/node_array_length.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
-O	size	Size	0	integer
+O	size	Size	0	integer	i 0	s "0"
 N	pc.array_partition	Node_Array_Partition	Array Partition	values	scripts/node_array_partition/node_array_partition.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
@@ -2598,19 +2598,19 @@ Q	I	type	0	0	s "Fix Length"
 Q	I	type	1	0	s "Fix Amount"
 I	length	Length	2	Int	integer	i 1	
 S	I	length	0
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_pin	Node_Array_Pin	Array Pin	misc	scripts/node_array_pin/node_array_pin.gml
 D	0	1
 T	input	Input	0	Generic_any	any		
 S	T	input	0
-O	array	Array	0	any
+O	array	Array	0	any	a any 0	s "[]"
 N	pc.array_randomizer	Node_Array_Randomizer	Array Weighted Selector	values	scripts/node_array_randomizer/node_array_randomizer.gml
 I	array_in	Array in	0	Generic_any	any		
 S	I	array_in	?
 D	1	1
 T	weight	Weight	0	Float	scalar	d 1	
 S	T	weight	0
-O	array_selector	Array Selector	0	any
+O	array_selector	Array Selector	0	any		s "new RandomizedArray()"
 N	pc.array_range	Node_Array_Range	Array Range	values	scripts/node_array_range/node_array_range.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2630,14 +2630,14 @@ I	inclusive	Inclusive	3	Bool	boolean	b 0
 S	I	inclusive	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	array	Array	0	array
+O	array	Array	0	array	a any 0	s "[]"
 N	pc.array_rearrange	Node_Array_Rearrange	Array Rearrange	values	scripts/node_array_rearrange/node_array_rearrange.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
 I	orders	Orders	1	Int	array	a scalar 0	
 S	I	orders	0
 A	I	orders	1
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_remove	Node_Array_Remove	Array Remove	values	scripts/node_array_remove/node_array_remove.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
@@ -2653,11 +2653,11 @@ I	value	Value	3	Generic_any	any
 S	I	value	?
 I	spread_array	Spread array	4	Bool	boolean	b 0	
 S	I	spread_array	0
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_reverse	Node_Array_Reverse	Array Reverse	values	scripts/node_array_reverse/node_array_reverse.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_sample	Node_Array_Sample	Array Sample	values	scripts/node_array_sample/node_array_sample.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
@@ -2683,7 +2683,7 @@ Q	I	amount_type	0	0	s "Input Range"
 Q	I	amount_type	1	0	s "Custom"
 I	amount	Amount	5	Int	integer	i 4	
 S	I	amount	0
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_set	Node_Array_Set	Array Set	values	scripts/node_array_set/node_array_set.gml
 I	array	Array	0	Any	any		
 S	I	array	?
@@ -2691,7 +2691,7 @@ I	index	Index	1	Int	integer	i 0
 S	I	index	0
 I	value	Value	2	Any	any		
 S	I	value	?
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_shift	Node_Array_Shift	Array Shift	values	scripts/node_array_shift/node_array_shift.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2709,13 +2709,13 @@ Q	I	overflow	1	0	s "Zero"
 Q	I	overflow	2	0	s "Ignore"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_shuffle	Node_Array_Shuffle	Shuffle Array	values	scripts/node_array_shuffle/node_array_shuffle.gml
 I	array_in	Array in	0	Generic_any	any		
 S	I	array_in	?
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
-O	shuffled_array	Shuffled array	0	any
+O	shuffled_array	Shuffled array	0	any	a any 0	s "[]"
 N	pc.array_sort	Node_Array_Sort	Sort Array	values	scripts/node_array_sort/node_array_sort.gml
 I	array_in	Array in	0	Generic_any	any		
 S	I	array_in	?
@@ -2725,8 +2725,8 @@ B	I	order	0	general	1	always	2
 C	I	order	resolved
 Q	I	order	0	0	s "Ascending"
 Q	I	order	1	0	s "Descending"
-O	sorted_array	Sorted array	0	any
-O	sorted_index	Sorted index	1	array
+O	sorted_array	Sorted array	0	any	a any 0	s "[]"
+O	sorted_index	Sorted index	1	array	a any 0	s "[]"
 N	pc.array_split	Node_Array_Split	Array Split	values	scripts/node_array_split/node_array_split.gml
 I	array	Array	0	Any	any		
 S	I	array	?
@@ -2734,11 +2734,11 @@ I	minimum_outputs	Minimum Outputs	1	Int	integer	i 0
 S	I	minimum_outputs	0
 I	attribute_output_amount	attribute output_amount	-1	Float	scalar	d 1	
 S	I	attribute_output_amount	0
-O	val_0	val 0	0	any
+O	val_0	val 0	0	any	d 0	s "0"
 N	pc.array_transpose	Node_Array_Transpose	Array Transpose	values	scripts/node_array_transpose/node_array_transpose.gml
 I	array_in	Array in	0	Generic_any	any		
 S	I	array_in	?
-O	transposed_array	Transposed Array	0	any
+O	transposed_array	Transposed Array	0	any	a any 0	s "[]"
 N	pc.array_trim	Node_Array_Trim	Array Trim	values	scripts/node_array_trim/node_array_trim.gml
 I	array	Array	0	Generic_any	any		
 S	I	array	?
@@ -2746,24 +2746,24 @@ I	trim_start	Trim Start	1	Int	integer	i 0
 S	I	trim_start	0
 I	trim_end	Trim End	2	Int	integer	i 0	
 S	I	trim_end	0
-O	array	Array	0	any
+O	array	Array	0	any	d 0	s "0"
 N	pc.array_uniform	Node_Array_Uniform	Uniform Array	values	scripts/node_array_uniform/node_array_uniform.gml
 I	data	Data	0	Any	any		
 S	I	data	?
 I	length	Length	1	Int	integer	i 1	
 S	I	length	0
-O	array_out	Array Out	0	any
+O	array_out	Array Out	0	any	i -4	s "noone"
 N	pc.array_unique	Node_Array_Unique	Array Unique	values	scripts/node_array_unique/node_array_unique.gml
 I	array_in	Array in	0	Generic_any	any		
 S	I	array_in	?
-O	unique_array	Unique Array	0	any
+O	unique_array	Unique Array	0	any	a any 0	s "[]"
 N	pc.array_zip	Node_Array_Zip	Array Zip	values	scripts/node_array_zip/node_array_zip.gml
 I	spread_content	Spread Content	0	Bool	boolean	b 0	
 S	I	spread_content	?
 D	1	1
 T	value	Value	0	Generic_any	any		
 S	T	value	0
-O	output	Output	0	integer
+O	output	Output	0	integer	i 0	s "0"
 N	pc.assert	Node_Assert	Assert	misc	scripts/node_assert/node_assert.gml
 I	name	Name	0	Text	text	s ""	
 S	I	name	0
@@ -2805,7 +2805,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.atlas_affector	Node_Atlas_Affector	Atlas Affector	values	scripts/node_atlas_affector/node_atlas_affector.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2927,8 +2927,8 @@ S	I	target_atlas	0
 A	I	target_atlas	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	atlas_out	Atlas Out	0	atlas
-O	rendered	Rendered	1	image
+O	atlas_out	Atlas Out	0	atlas	i -4	s "noone"
+O	rendered	Rendered	1	image	i -4	s "noone"
 N	pc.atlas_draw	Node_Atlas_Draw	Draw Atlas	values	scripts/node_atlas_draw/node_atlas_draw.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2953,7 +2953,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.atlas_get	Node_Atlas_Get	Atlas Get	values	scripts/node_atlas_get/node_atlas_get.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -2961,12 +2961,12 @@ I	input_0		0	Atlas	atlas
 S	I	input_0	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
-O	position	Position	1	array
-O	rotation	Rotation	2	array
-O	scale	Scale	3	array
-O	blend	Blend	4	colour
-O	alpha	Alpha	5	array
+O	surface	Surface	0	image	a any 0	s "[]"
+O	position	Position	1	array	a any 0	s "[]"
+O	rotation	Rotation	2	array	a any 0	s "[]"
+O	scale	Scale	3	array	a any 0	s "[]"
+O	blend	Blend	4	colour	a any 0	s "[]"
+O	alpha	Alpha	5	array	a any 0	s "[]"
 N	pc.atlas_set	Node_Atlas_Set	Atlas Set	values	scripts/node_atlas_set/node_atlas_set.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3037,7 +3037,7 @@ I	alpha	Alpha	18	Float	scalar	d 1
 S	I	alpha	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	atlas	Atlas	0	atlas
+O	atlas	Atlas	0	atlas	i -4	s "noone"
 N	pc.atlas_struct	Node_Atlas_Struct	Atlas to Struct	values	scripts/node_atlas_to_struct/node_atlas_to_struct.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3045,7 +3045,7 @@ I	input_0		0	Atlas	atlas
 S	I	input_0	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	struct	Struct	0	struct
+O	struct	Struct	0	struct	a any 0	s "[]"
 N	pc.audio_loudness	Node_Audio_Loudness	Audio Volume	animation	scripts/node_audio_loudness/node_audio_loudness.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3054,7 +3054,7 @@ S	I	audio_data	0
 A	I	audio_data	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	loudness	Loudness	0	scalar
+O	loudness	Loudness	0	scalar	d 0	s "0"
 N	pc.audio_window	Node_Audio_Window	Audio Window	animation	scripts/node_audio_window/node_audio_window.gml
 I	audio_data	Audio data	0	AudioBit	audiobit		
 S	I	audio_data	0
@@ -3073,7 +3073,7 @@ I	step	Step	4	Int	integer	i 16
 S	I	step	0
 I	match_timeline	Match timeline	5	Bool	boolean	b 1	
 S	I	match_timeline	0
-O	bit_array	Bit Array	0	array
+O	bit_array	Bit Array	0	array	a any 0	s "[]"
 N	pc.average	Node_Average	Average	filter	scripts/node_average/node_average.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3097,8 +3097,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	color	Color	1	colour
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	color	Color	1	colour		s "ca_black"
 N	pc.bw	Node_BW	BW	filter	scripts/node_bw/node_bw.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3138,7 +3138,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.background	Node_Background	Background	transform	scripts/node_background/node_background.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3164,7 +3164,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.barrel_distort	Node_Barrel_Distort	Barrel Distort	filter	scripts/node_barrel_distort/node_barrel_distort.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3216,7 +3216,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.base_convert	Node_Base_Convert	Convert Base	values	scripts/node_base_convert/node_base_convert.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3228,7 +3228,7 @@ I	base_to	Base to	2	Int	integer	i 10
 S	I	base_to	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	text
+O	result	Result	0	text	s ""	s "\"\""
 N	pc.bend	Node_Bend	Bend	transform	scripts/node_bend/node_bend.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3282,7 +3282,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.bevel	Node_Bevel	Bevel	3d	scripts/node_bevel/node_bevel.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3347,7 +3347,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.bit_reduce	Node_Bit_Reduce	Quantize Colors	filter	scripts/node_bit_reduce/node_bit_reduce.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3387,7 +3387,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blend	Node_Blend	Blend	compose	scripts/node_blend/node_blend.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3486,7 +3486,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blend_depth	Node_Blend_Depth	Blend Depth	compose	scripts/node_blend_depth/node_blend_depth.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3544,8 +3544,8 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth_out	Depth Out	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth_out	Depth Out	1	image	i -4	s "noone"
 N	pc.blend_edge	Node_Blend_Edge	Blend Edge	filter	scripts/node_blend_edge/node_blend_edge.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3595,7 +3595,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blend_height	Node_Blend_Height	Blend Height	compose	scripts/node_height_blend/node_height_blend.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3623,7 +3623,7 @@ I	factor	Factor	2	Slider	scalar	d 0.5
 S	I	factor	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blobify	Node_Blobify	Blobify	filter	scripts/node_blobify/node_blobify.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3674,7 +3674,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.bloom	Node_Bloom	Bloom	filter	scripts/node_bloom/node_bloom.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3755,8 +3755,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	bloom_mask	Bloom Mask	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	bloom_mask	Bloom Mask	1	image	i -4	s "noone"
 N	pc.blur	Node_Blur	Blur	filter	scripts/node_blur/node_blur.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3817,7 +3817,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_bokeh	Node_Blur_Bokeh	Lens Blur	filter	scripts/node_blur_bokeh/node_blur_bokeh.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3887,7 +3887,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_box	Node_Blur_Box	Box Blur	filter	scripts/node_blur_box/node_blur_box.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -3950,7 +3950,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_contrast	Node_Blur_Contrast	Contrast Blur	filter	scripts/node_blur_contrast/node_blur_contrast.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4002,7 +4002,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_directional	Node_Blur_Directional	Directional Blur	filter	scripts/node_blur_directional/node_blur_directional.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4082,7 +4082,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_path	Node_Blur_Path	Path Blur	filter	scripts/node_blur_path/node_blur_path.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4149,7 +4149,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_radial	Node_Blur_Radial	Radial Blur	filter	scripts/node_blur_radial/node_blur_radial.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4225,7 +4225,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_shape	Node_Blur_Shape	Shape Blur	filter	scripts/node_blur_shape/node_blur_shape.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4269,7 +4269,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_simple	Node_Blur_Simple	Non-Uniform Blur	filter	scripts/node_blur_simple/node_blur_simple.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4333,7 +4333,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_slope	Node_Blur_Slope	Slope Blur	filter	scripts/node_blur_slope/node_blur_slope.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4384,7 +4384,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.blur_zoom	Node_Blur_Zoom	Zoom Blur	filter	scripts/node_blur_zoom/node_blur_zoom.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4477,7 +4477,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.boolean	Node_Boolean	Boolean	values	scripts/node_boolean/node_boolean.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4493,7 +4493,7 @@ Q	I	label_position	0	0	s "Top"
 Q	I	label_position	1	0	s "Bottom"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	boolean	Boolean	0	boolean
+O	boolean	Boolean	0	boolean	b 0	s "false"
 N	pc.box_pattern	Node_Box_Pattern	Box Pattern	generate	scripts/node_box_pattern/node_box_pattern.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4564,7 +4564,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.brush_linear	Node_Brush_Linear	Brush	filter	scripts/node_brush_linear/node_brush_linear.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4621,7 +4621,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.buffer_to_string	Node_Buffer_to_String	Buffer to Text	values	scripts/node_buffer_to_string/node_buffer_to_string.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4637,12 +4637,12 @@ Q	I	format	2	0	s "ASCII"
 Q	I	format	3	0	s "Base64"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	string_out	String Out	0	text
+O	string_out	String Out	0	text	s ""	s "\"\""
 N	pc.byte_file_read	Node_Byte_File_Read	Byte File In	io	scripts/node_byte_file_read/node_byte_file_read.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
-O	content	Content	0	buffer
-O	path	Path	1	text
+O	content	Content	0	buffer	i -4	s "noone"
+O	path	Path	1	text	s ""	s "\"\""
 N	pc.byte_file_write	Node_Byte_File_Write	Byte File Out	io	scripts/node_byte_file_write/node_byte_file_write.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -4653,8 +4653,8 @@ I	path	Path	0	FPath	text	s ""
 S	I	path	0
 I	convert_to_number	Convert to Number	1	Bool	boolean	b 0	
 S	I	convert_to_number	0
-O	content	Content	0	text
-O	path	Path	1	text
+O	content	Content	0	text	s ""	s "\"\""
+O	path	Path	1	text	s ""	s "\"\""
 N	pc.csv_file_write	Node_CSV_File_Write	CSV File Out	io	scripts/node_csv_file_write/node_csv_file_write.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -4665,7 +4665,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	animated	Animated	1	Bool	boolean	b 0	
 S	I	animated	0
-O	cache_surface	Cache surface	0	image
+O	cache_surface	Cache surface	0	image	i -4	s "noone"
 N	pc.cache_array	Node_Cache_Array	Cache Array	io	scripts/node_cache_array/node_cache_array.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
@@ -4675,13 +4675,13 @@ I	stop_frame	Stop frame	2	Int	integer	i -1
 S	I	stop_frame	0
 I	step	Step	3	Int	integer	i 1	
 S	I	step	0
-O	cache_array	Cache array	0	image
+O	cache_array	Cache array	0	image	a any 0	s "[]"
 N	pc.cache_results	Node_Cache_Results	Cache Results	misc	scripts/node_cache_results/node_cache_results.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
 I	amount	Amount	1	Int	integer	i 4	
 S	I	amount	0
-O	cache_surfaces	Cache Surfaces	0	image
+O	cache_surfaces	Cache Surfaces	0	image	a any 0	s "[]"
 N	pc.cache_value_array	Node_Cache_Value_Array	Cache Value Array	misc	scripts/node_cache_value_array/node_cache_value_array.gml
 I	value	Value	0	Generic_any	any		
 S	I	value	?
@@ -4689,7 +4689,7 @@ I	start_frame	Start frame	1	Int	integer	i -1
 S	I	start_frame	0
 I	stop_frame	Stop frame	2	Int	integer	i -1	
 S	I	stop_frame	0
-O	cache_array	Cache array	0	any
+O	cache_array	Cache array	0	any	a any 0	s "[]"
 N	pc.camera	Node_Camera	Camera	compose	scripts/node_camera/node_camera.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4749,7 +4749,7 @@ S	T	parallax_s	1
 A	T	parallax_s	1
 T	depth_s	Depth {_s}	5	Float	scalar	d 0	
 S	T	depth_s	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.canvas	Node_Canvas	Canvas Ext	generate	scripts/node_canvas/node_canvas.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -4846,7 +4846,7 @@ S	I	attribute_dimension	?
 A	I	attribute_dimension	?
 I	attribute_show_slope_check	attribute show_slope_check	-1	Bool	boolean	b 1	
 S	I	attribute_show_slope_check	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.canvas_s	Node_Canvas_S	Canvas	io	scripts/node_canvas_s/node_canvas_s.gml
 I	dimension	Dimension	0	Vec2	vector2	v 32 32	
 S	I	dimension	1
@@ -4869,8 +4869,8 @@ A	I	attribute_dimension	?
 D	6	1
 T	resource	Resource	0	Surface	image		
 S	T	resource	0
-O	surface_out	Surface Out	0	image
-O	draw_surface	Draw Surface	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	draw_surface	Draw Surface	1	image	i -4	s "noone"
 N	pc.caustic	Node_Caustic	Caustic	generate	scripts/node_caustic/node_caustic.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -4921,7 +4921,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.cellular	Node_Cellular	Cellular Noise	generate	scripts/node_cellular/node_cellular.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5016,7 +5016,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.cellular_cube	Node_Cellular_Cube	Cellular Noise Cube	generate	scripts/node_cellular_cube/node_cellular_cube.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5074,8 +5074,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	cross_section	Cross Section	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	cross_section	Cross Section	1	image	i -4	s "noone"
 N	pc.checker	Node_Checker	Checker	generate	scripts/node_checker/node_checker.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5134,7 +5134,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.chromatic_aberration	Node_Chromatic_Aberration	Chromatic Aberration	filter	scripts/node_chromatic_aberration/node_chromatic_aberration.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5221,7 +5221,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.color	Node_Color	Color	color	scripts/node_color/node_color.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5229,7 +5229,7 @@ I	color	Color	0	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour
+O	color	Color	0	colour		s "c_white"
 N	pc.color_blind	Node_Color_Blind	Color Blind	filter	scripts/node_color_blind/node_color_blind.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5266,7 +5266,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.color_data	Node_Color_Data	Color Data	color	scripts/node_color_data/node_color_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5276,14 +5276,14 @@ I	normalize	Normalize	1	Bool	boolean	b 1
 S	I	normalize	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	red	Red	0	scalar
-O	green	Green	1	scalar
-O	blue	Blue	2	scalar
-O	hue	Hue	3	scalar
-O	saturation	Saturation	4	scalar
-O	value	Value	5	scalar
-O	brightness	Brightness	6	scalar
-O	alpha	Alpha	7	scalar
+O	red	Red	0	scalar	d 0	s "0"
+O	green	Green	1	scalar	d 0	s "0"
+O	blue	Blue	2	scalar	d 0	s "0"
+O	hue	Hue	3	scalar	d 0	s "0"
+O	saturation	Saturation	4	scalar	d 0	s "0"
+O	value	Value	5	scalar	d 0	s "0"
+O	brightness	Brightness	6	scalar	d 0	s "0"
+O	alpha	Alpha	7	scalar	d 0	s "0"
 N	pc.color_hsv	Node_Color_HSV	HSV Color	color	scripts/node_color_hsv/node_color_hsv.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5299,7 +5299,7 @@ I	alpha	Alpha	4	Slider	scalar	d 1
 S	I	alpha	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour
+O	color	Color	0	colour		s "c_white"
 N	pc.color_math	Node_Color_Math	Blend Color	color	scripts/node_color_math/node_color_math.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5346,7 +5346,7 @@ I	intensity	Intensity	3	Slider	scalar	d 1
 S	I	intensity	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	colour
+O	result	Result	0	colour		s "ca_white"
 N	pc.color_mix	Node_Color_Mix	Mix Color	color	scripts/node_color_mix/node_color_mix.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5365,7 +5365,7 @@ I	mix	Mix	2	Slider	scalar	d 0.5
 S	I	mix	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour
+O	color	Color	0	colour		s "c_white"
 N	pc.color_oklch	Node_Color_OKLCH	OKLCH Color	color	scripts/node_color_oklch/node_color_oklch.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5387,8 +5387,8 @@ Q	I	gamut_clipping	2	0	s "Adaptive grey"
 Q	I	gamut_clipping	3	0	s "RGB (Naive)"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour
-O	raw_rgb	Raw RGB	1	vector3
+O	color	Color	0	colour		s "c_white"
+O	raw_rgb	Raw RGB	1	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
 N	pc.color_rgb	Node_Color_RGB	RGB Color	color	scripts/node_color_rgb/node_color_rgb.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5404,7 +5404,7 @@ I	alpha	Alpha	4	Slider	scalar	d 1
 S	I	alpha	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour
+O	color	Color	0	colour		s "c_white"
 N	pc.color_remove	Node_Color_Remove	Remove Color	filter	scripts/node_color_remove/node_color_remove.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5447,7 +5447,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.color_select	Node_Color_Select	Select Color	filter	scripts/node_color_select/node_color_select.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5503,7 +5503,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.color_separate	Node_Color_Separate	Separate Color	compose	scripts/node_separate_color/node_separate_color.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5518,7 +5518,7 @@ I	match_all	Match All	3	Bool	boolean	b 1
 S	I	match_all	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.color_adjust	Node_Color_adjust	Color Adjust	filter	scripts/node_color_adjust/node_color_adjust.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5650,8 +5650,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	color_out	Color Out	1	colour
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	color_out	Color Out	1	colour	a any 0	s "[]"
 N	pc.color_replace	Node_Color_replace	Replace Palette	filter	scripts/node_color_replace/node_color_replace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5706,7 +5706,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.color_to_hsv	Node_Color_to_HSV	Color HSV	color	scripts/node_color_to_hsv/node_color_to_hsv.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5714,9 +5714,9 @@ I	color	Color	0	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	hue	Hue	0	scalar
-O	saturation	Saturation	1	scalar
-O	value	Value	2	scalar
+O	hue	Hue	0	scalar	d 0	s "0"
+O	saturation	Saturation	1	scalar	d 0	s "0"
+O	value	Value	2	scalar	d 0	s "0"
 N	pc.color_to_oklch	Node_Color_to_OKLCH	Color OKLCH	color	scripts/node_color_to_oklch/node_color_to_oklch.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5724,9 +5724,9 @@ I	color	Color	0	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	lightness	Lightness	0	scalar
-O	chroma	Chroma	1	scalar
-O	hue	Hue	2	scalar
+O	lightness	Lightness	0	scalar	d 0	s "0"
+O	chroma	Chroma	1	scalar	d 0	s "0"
+O	hue	Hue	2	scalar	d 0	s "0"
 N	pc.color_to_rgb	Node_Color_to_RGB	Color RGB	color	scripts/node_color_to_rgb/node_color_to_rgb.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5734,9 +5734,9 @@ I	color	Color	0	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	red	Red	0	scalar
-O	green	Green	1	scalar
-O	blue	Blue	2	scalar
+O	red	Red	0	scalar	d 0	s "0"
+O	green	Green	1	scalar	d 0	s "0"
+O	blue	Blue	2	scalar	d 0	s "0"
 N	pc.colorize	Node_Colorize	Colorize	filter	scripts/node_colorize/node_colorize.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5790,7 +5790,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.colors_replace	Node_Colors_Replace	Replace Colors	filter	scripts/node_colors_replace/node_colors_replace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5822,7 +5822,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.combine_hsv	Node_Combine_HSV	HSV Combine	filter	scripts/node_combine_hsv/node_combine_hsv.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5849,7 +5849,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.combine_rgb	Node_Combine_RGB	RGBA Combine	filter	scripts/node_combine_rgb/node_combine_rgb.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5884,7 +5884,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.compare	Node_Compare	Compare	values	scripts/node_compare/node_compare.gml
 I	type	Type	0	EScroll	enum	e 0	Equal;Not equal;Greater;Greater or equal;Lesser;Lesser or equal
 S	I	type	0
@@ -5900,7 +5900,7 @@ I	a	a	1	Float	scalar	d 0
 S	I	a	0
 I	b	b	2	Float	scalar	d 0	
 S	I	b	0
-O	result	Result	0	boolean
+O	result	Result	0	boolean	b 0	s "false"
 N	pc.compose_texture	Node_Compose_Texture	Compose Texture	compose	scripts/node_compose_texture/node_compose_texture.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -5930,7 +5930,7 @@ S	T	rotation	0
 T	scale	Scale	4	Vec2	vector2	v 1 1	
 S	T	scale	1
 A	T	scale	1
-O	composed	Composed	0	image
+O	composed	Composed	0	image	i -4	s "noone"
 N	pc.composite	Node_Composite	Composite	compose	scripts/node_composite/node_composite.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6017,9 +6017,9 @@ S	T	rotation	0
 T	scale	Scale	3	Vec2	vector2	v 1 1	
 S	T	scale	1
 A	T	scale	1
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas data	1	atlas
-O	dimension	Dimension	2	vector2
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas data	1	atlas	a any 0	s "[]"
+O	dimension	Dimension	2	vector2	v 1 1	s "[1,1]"
 N	pc.composite_tag	Node_Composite_Tag	Composite Tag	compose	scripts/node_composite_tag/node_composite_tag.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6033,7 +6033,7 @@ S	I	attribute_array_process	?
 D	1	1
 T	surface	Surface	0	Surface	image		
 S	T	surface	0
-O	surface_out	Surface Out	0	dynamic_surface
+O	surface_out	Surface Out	0	dynamic_surface	i -4	s "noone"
 N	pc.condition	Node_Condition	Condition	misc	scripts/node_condition/node_condition.gml
 I	eval_mode	Eval Mode	5	EScroll	enum	e 0	Boolean;Number compare;Text compare
 S	I	eval_mode	0
@@ -6066,8 +6066,8 @@ I	true	True	3	Any	any
 S	I	true	?
 I	false	False	4	Any	any		
 S	I	false	?
-O	result	Result	0	any
-O	bool	Bool	1	boolean
+O	result	Result	0	any	a any 0	s "[]"
+O	bool	Bool	1	boolean	b 0	s "false"
 N	pc.convolution	Node_Convolution	Convolution	filter	scripts/node_convolution/node_convolution.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6109,7 +6109,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.corner	Node_Corner	Round Corner	filter	scripts/node_corner/node_corner.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6153,7 +6153,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.corner_data	Node_Corner_Data	Corner Data	values	scripts/node_corner_data/node_corner_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6167,7 +6167,7 @@ I	bottom_right	Bottom Right	3	Float	scalar	d 0
 S	I	bottom_right	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	corner	Corner	0	vector4
+O	corner	Corner	0	vector4	w 0 0 0 0	s "[ 0, 0, 0, 0 ]"
 N	pc.counter	Node_Counter	Frame Index	animation	scripts/node_counter/node_counter.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6187,7 +6187,7 @@ I	reset	Reset	4	Trigger	boolean	b 0
 S	I	reset	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	value	Value	0	scalar
+O	value	Value	0	scalar	d 0	s "0"
 N	pc.crack_pattern	Node_Crack_Pattern	Crack Pattern	generate	scripts/node_crack_pattern/node_crack_pattern.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6276,7 +6276,7 @@ I	texture	Texture	19	Surface	image
 S	I	texture	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.crop	Node_Crop	Crop	transform	scripts/node_crop/node_crop.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6321,7 +6321,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.crop_content	Node_Crop_Content	Crop Content	transform	scripts/node_crop_content/node_crop_content.gml
 I	active	Active	1	Active	boolean	b 1	
 S	I	active	0
@@ -6341,9 +6341,9 @@ S	I	padding	1
 A	I	padding	1
 I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
 S	I	attribute_color_depth	?
-O	surface_out	Surface Out	0	image
-O	crop_distance	Crop distance	1	vector4
-O	atlas	Atlas	2	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	crop_distance	Crop distance	1	vector4	w 0 0 0 0	s "[0,0,0,0]"
+O	atlas	Atlas	2	atlas	a any 0	s "[]"
 N	pc.cross_section	Node_Cross_Section	Draw Cross Section	generate	scripts/node_cross_section/node_cross_section.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6378,7 +6378,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.curvature	Node_Curvature	Curvature	filter	scripts/node_curvature/node_curvature.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6424,7 +6424,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.curve	Node_Curve	Curve	filter	scripts/node_curve/node_curve.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6463,7 +6463,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.curve_function	Node_Curve_Function	Curve Fn	values	scripts/node_curve_function/node_curve_function.gml
 I	type	Type	0	EScroll	enum	e 0	Linear;Wave;Zigzag;Saw;Step
 S	I	type	0
@@ -6495,7 +6495,7 @@ A	I	output_range	1
 I	y_range	Y Range	4	Range	vector2	v 0 1	
 S	I	y_range	1
 A	I	y_range	1
-O	curve	Curve	0	curve
+O	curve	Curve	0	curve		s "CURVE_DEF_01"
 N	pc.curve_hsv	Node_Curve_HSV	HSV Curve	filter	scripts/node_curve_hsv/node_curve_hsv.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6528,7 +6528,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.datetime_get	Node_Datetime_Get	Datetime	values	scripts/node_datetime_get/node_datetime_get.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6538,7 +6538,7 @@ I	update	Update	1	Bool	boolean	b 1
 S	I	update	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	data	Data	0	text
+O	data	Data	0	text	s ""	s "\"\""
 N	pc.de_corner	Node_De_Corner	De-Corner	filter	scripts/node_de_corner/node_de_corner.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6582,7 +6582,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.de_stray	Node_De_Stray	De-Stray	filter	scripts/node_de_stray/node_de_stray.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6623,7 +6623,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.deblur	Node_Deblur	Deblur	filter	scripts/node_deblur/node_deblur.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6664,7 +6664,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.delay	Node_Delay	Delay	animation	scripts/node_delay/node_delay.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6685,7 +6685,7 @@ I	array_index	Array Index	4	Int	integer	i 0
 S	I	array_index	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.delay_value	Node_Delay_Value	Delay Value	animation	scripts/node_delay_value/node_delay_value.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6704,7 +6704,7 @@ I	default	Default	3	Generic_any	any
 S	I	default	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	value	Value	0	any
+O	value	Value	0	any	i -4	s "noone"
 N	pc.differential	Node_Differential	Differential	values	scripts/node_differential/node_differential.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6712,7 +6712,7 @@ I	value	Value	0	Float	scalar	d 0
 S	I	value	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	scalar
+O	result	Result	0	scalar	d 0	s "0"
 N	pc.diffuse	Node_Diffuse	Diffuse	generate	scripts/node_diffuse/node_diffuse.gml
 I	density_field	Density Field	0	Surface	image		
 S	I	density_field	0
@@ -6788,7 +6788,7 @@ I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic
 S	I	interpolate	?
 I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat XY;;Repeat X Empty Y;Repeat X Black Y;Repeat X Clamp Y;;Repeat Y Empty X;Repeat Y Black X;Repeat Y Clamp X
 S	I	oversample	?
-O	result	Result	0	image
+O	result	Result	0	image	i -4	s "noone"
 N	pc.dilate	Node_Dilate	Dilate	filter	scripts/node_dilate/node_dilate.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6855,7 +6855,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.directory_search	Node_Directory_Search	Directory Search	io	scripts/node_directory_search/node_directory_search.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -6869,8 +6869,8 @@ Q	I	type	0	0	s "Surface"
 Q	I	type	1	0	s "Text"
 I	recursive	Recursive	3	Bool	boolean	b 0	
 S	I	recursive	0
-O	outputs	Outputs	0	image
-O	paths	Paths	1	text
+O	outputs	Outputs	0	image	a any 0	s "[]"
+O	paths	Paths	1	text	a any 1 s ""	s "[\"\"]"
 N	pc.displace	Node_Displace	Displace	filter	scripts/node_displace/node_displace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -6981,7 +6981,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.display_image	Node_Display_Image	Display Image	misc	scripts/node_display_image/node_display_image.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -7098,7 +7098,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.dither_diffuse	Node_Dither_Diffuse	Error Diffuse Dither	filter	scripts/node_dither_diffuse/node_dither_diffuse.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7132,7 +7132,7 @@ I	greyscale	Greyscale	9	Bool	boolean	b 0
 S	I	greyscale	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.dotted	Node_Dotted	Dotted	generate	scripts/node_dot_pattern/node_dot_pattern.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7233,7 +7233,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.downscale	Node_Downscale	Downscale	transform	scripts/node_downscale/node_downscale.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7260,7 +7260,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.edge_detect	Node_Edge_Detect	Edge Detect	filter	scripts/node_edge_detect/node_edge_detect.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7319,7 +7319,7 @@ S	I	attribute_filter	?
 A	I	attribute_filter	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.emboss	Node_Emboss	Emboss	filter	scripts/node_emboss/node_emboss.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7371,7 +7371,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.equation	Node_Equation	Equation	values	scripts/node_equation/node_equation.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7386,7 +7386,7 @@ T	argument_name	Argument name	0	Text	text	s ""
 S	T	argument_name	0
 T	argument_value	Argument value	1	Float	scalar	d 0	
 S	T	argument_value	0
-O	result	Result	0	scalar
+O	result	Result	0	scalar	d 0	s "0"
 N	pc.erode	Node_Erode	Erode	filter	scripts/node_erode/node_erode.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7432,7 +7432,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.export	Node_Export	Export	compose	scripts/node_export/node_export.gml
 I	surface	Surface	0	Surface	image		
 S	I	surface	0
@@ -7504,7 +7504,7 @@ S	I	export_regions	1
 A	I	export_regions	1
 I	attribute_clear_directory	attribute clear_directory	-1	Bool	boolean	b 1	
 S	I	attribute_clear_directory	0
-O	preview	Preview	0	image
+O	preview	Preview	0	image	i -4	s "noone"
 N	pc.extends	Node_Extends	Extends	filter	scripts/node_extends/node_extends.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7584,8 +7584,8 @@ I	blend_color	Blend Color	18	Color	colour	c 255 255 255 255
 S	I	blend_color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	extends_mask	Extends Mask	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	extends_mask	Extends Mask	1	image	i -4	s "noone"
 N	pc.fft	Node_FFT	FFT	animation	scripts/node_FFT/node_FFT.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7601,7 +7601,7 @@ Q	I	preprocess_function	1	0	s "Hann"
 Q	I	preprocess_function	2	0	s "Blackman"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	array	Array	0	array
+O	array	Array	0	array	a any 0	s "[]"
 N	pc.flip_apply_force	Node_FLIP_Apply_Force	Shaped Collider	simulation	scripts/node_FLIP_apply_force/node_FLIP_apply_force.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
@@ -7623,7 +7623,7 @@ I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	texture	Texture	5	Surface	image		
 S	I	texture	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_apply_velocity	Node_FLIP_Apply_Velocity	Apply Velocity	simulation	scripts/node_FLIP_apply_velocity/node_FLIP_apply_velocity.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
@@ -7646,7 +7646,7 @@ A	I	size	1
 I	velocity	Velocity	3	Vec2	vector2	v 0 0	
 S	I	velocity	1
 A	I	velocity	1
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_destroy	Node_FLIP_Destroy	Destroy	simulation	scripts/node_FLIP_destroy/node_FLIP_destroy.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
@@ -7677,7 +7677,7 @@ I	expands	Expands	8	Int	integer	i 0
 S	I	expands	0
 I	chance	Chance	5	Slider	scalar	d 1	
 S	I	chance	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_domain	Node_FLIP_Domain	Domain	simulation	scripts/node_FLIP_domain/node_FLIP_domain.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -7722,7 +7722,7 @@ I	attribute_overrelax	attribute overrelax	-1	Float	scalar	d 1.5
 S	I	attribute_overrelax	0
 I	attribute_skip_incompressible	attribute skip_incompressible	-1	Bool	boolean	b 0	
 S	I	attribute_skip_incompressible	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_fill	Node_FLIP_Fill	Fill	simulation	scripts/node_FLIP_fill/node_FLIP_fill.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
@@ -7743,7 +7743,7 @@ I	spawn_area_unit	Spawn Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	spawn_area_unit	?
 I	density	Density	4	Slider	scalar	d 0.5	
 S	I	density	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_group_inline	Node_FLIP_Group_Inline	FLIP Fluid	generate	scripts/node_FLIP_group_inline/node_FLIP_group_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -7792,7 +7792,7 @@ I	merge_threshold	Merge threshold	1	Slider	scalar	d 0.75
 S	I	merge_threshold	0
 I	attribute_update	attribute update	-1	Bool	boolean	b 1	
 S	I	attribute_update	0
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.flip_repel	Node_FLIP_Repel	Repel	simulation	scripts/node_FLIP_repel/node_FLIP_repel.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
@@ -7805,7 +7805,7 @@ I	radius	Radius	2	Float	scalar	d 4
 S	I	radius	0
 I	strength	Strength	3	Slider	scalar	d 4	
 S	I	strength	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_solid	Node_FLIP_Solid	Surface Collider	simulation	scripts/node_FLIP_solid/node_FLIP_solid.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
@@ -7815,7 +7815,7 @@ I	threshold	Threshold	3	Slider	scalar	d 0.1
 S	I	threshold	0
 I	expands	Expands	2	Int	integer	i 0	
 S	I	expands	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_spawner	Node_FLIP_Spawner	Spawner	simulation	scripts/node_FLIP_spawner/node_FLIP_spawner.gml
 I	seed	Seed	9	Seed	scalar		
 S	I	seed	0
@@ -7862,7 +7862,7 @@ S	I	spawn_velocity	1
 A	I	spawn_velocity	1
 I	inherit_velocity	Inherit Velocity	11	Slider	scalar	d 0	
 S	I	inherit_velocity	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_update	Node_FLIP_Update	Update	simulation	scripts/node_FLIP_update/node_FLIP_update.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
@@ -7872,7 +7872,7 @@ I	override	Override	2	Bool	boolean	b 0
 S	I	override	0
 I	timestep	Timestep	3	Float	scalar	d 0.01	
 S	I	timestep	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_vortex	Node_FLIP_Vortex	Vortex	simulation	scripts/node_FLIP_vortex/node_FLIP_vortex.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
@@ -7887,13 +7887,13 @@ I	strength	Strength	3	Slider	scalar	d 4
 S	I	strength	0
 I	attraction	Attraction	4	Slider	scalar	d 0	
 S	I	attraction	0
-O	domain	Domain	0	fluid_domain
+O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_to_vfx	Node_FLIP_to_VFX	FLIP to VFX	simulation	scripts/node_FLIP_to_VFX/node_FLIP_to_VFX.gml
 I	domain	Domain	0	Fdomain	fluid_domain		
 S	I	domain	0
 I	attribute_part_amount	attribute part_amount	-1	Float	scalar	d 512	
 S	I	attribute_part_amount	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	a any 0	s "[]"
 N	pc.fxaa	Node_FXAA	FXAA	filter	scripts/node_FXAA/node_FXAA.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -7927,8 +7927,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	mask	Mask	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	mask	Mask	1	image	i -4	s "noone"
 N	pc.feedback	Node_Feedback	Feedback	misc	scripts/node_feedback/node_feedback.gml
 I	attribute_input_display_list	attribute input_display_list	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_input_display_list	?
@@ -8032,8 +8032,8 @@ I	gizmo_rotation	Gizmo Rotation	14	Rotation	scalar	d 0
 S	I	gizmo_rotation	0
 I	gizmo_label	Gizmo Label	15	Bool	boolean	b 1	
 S	I	gizmo_label	0
-O	value	Value	0	any
-O	feedback_loop	Feedback loop	1	node_ref
+O	value	Value	0	any	d 0	s "0"
+O	feedback_loop	Feedback loop	1	node_ref	d 0	s "0"
 N	pc.feedback_output	Node_Feedback_Output	Output	feedback	scripts/node_feedback_output/node_feedback_output.gml
 I	value	Value	0	Generic_any	any		
 S	I	value	?
@@ -8056,7 +8056,7 @@ I	alpha_tolerance	Alpha tolerance	5	Slider	scalar	d 0.2
 S	I	alpha_tolerance	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	position	Position	0	vector2
+O	position	Position	0	vector2	v 0 0	s "[0,0]"
 N	pc.flip	Node_Flip	Flip	transform	scripts/node_flip/node_flip.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8082,7 +8082,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.flood_fill	Node_Flood_Fill	Flood Fill	generate	scripts/node_flood_fill/node_flood_fill.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8160,8 +8160,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	fill_mask	Fill Mask	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	fill_mask	Fill Mask	1	image	i -4	s "noone"
 N	pc.flow_noise	Node_Flow_Noise	Flow Noise	generate	scripts/node_flow_noise/node_flow_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8203,7 +8203,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.flow_path	Node_Flow_Path	Flow Path	filter	scripts/node_flow_path/node_flow_path.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8252,7 +8252,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.fluffify	Node_Fluffify	Fluffify	filter	scripts/node_fluffify/node_fluffify.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8336,7 +8336,7 @@ I	tolerance	Tolerance	25	Slider	scalar	d 0
 S	I	tolerance	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.fn_ease	Node_Fn_Ease	Ease	animation	scripts/node_fn_ease/node_fn_ease.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8362,7 +8362,7 @@ Q	I	smooth	2	0	s "Cubic rat"
 Q	I	smooth	3	0	s "Cosine"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	output	Output	0	scalar
+O	output	Output	0	scalar	d 0	s "0"
 N	pc.fn_math	Node_Fn_Math	Fn Math	animation	scripts/node_fn_math/node_fn_math.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8385,7 +8385,7 @@ I	value_2	Value 2	3	Float	scalar	d 0
 S	I	value_2	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	output	Output	0	scalar
+O	output	Output	0	scalar	d 0	s "0"
 N	pc.fn_smooth_step	Node_Fn_SmoothStep	SmoothStep	animation	scripts/node_fn_smoothstep/node_fn_smoothstep.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8407,7 +8407,7 @@ Q	I	type	2	0	s "Cubic rat"
 Q	I	type	3	0	s "Cosine"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	output	Output	0	scalar
+O	output	Output	0	scalar	d 0	s "0"
 N	pc.fn_wave_table	Node_Fn_WaveTable	WaveTable	animation	scripts/node_fn_wave_table/node_fn_wave_table.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8441,7 +8441,7 @@ S	I	attribute_wavetable	?
 A	I	attribute_wavetable	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	output	Output	0	scalar
+O	output	Output	0	scalar	d 0	s "0"
 N	pc.fold_noise	Node_Fold_Noise	Fold Noise	generate	scripts/node_fold_noise/node_fold_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8493,7 +8493,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.font_bitmap	Node_Font_Bitmap	Surfaces to Font	values	scripts/node_font_bitmap/node_font_bitmap.gml
 I	font_surfaces	Font Surfaces	0	Surface	image		
 S	I	font_surfaces	0
@@ -8504,7 +8504,7 @@ I	proportional	Proportional	2	Bool	boolean	b 1
 S	I	proportional	0
 I	separation	Separation	3	Float	scalar	d 2	
 S	I	separation	0
-O	font	Font	0	text
+O	font	Font	0	text	i -4	s "noone"
 N	pc.font_data	Node_Font_Data	Font	values	scripts/node_font_data/node_font_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8512,7 +8512,7 @@ I	font	Font	0	Font	text	s ""
 S	I	font	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	font	Font	0	text
+O	font	Font	0	text	i -4	s "noone"
 N	pc.frame	Node_Frame	Frame	misc	scripts/node_frame/node_frame.gml
 I	size	Size	0	Vec2	vector2	v 240 160	
 S	I	size	1
@@ -8623,12 +8623,12 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gmroom	Node_GMRoom	GMRoom	io	scripts/node_gm_room/node_gm_room.gml
 D	0	1
 T	data	Data	0	Generic_any	any		
 S	T	data	0
-O	room_preview	Room Preview	0	image
+O	room_preview	Room Preview	0	image		s ""
 N	pc.gabor_noise	Node_Gabor_Noise	Gabor Noise	generate	scripts/node_gabor_noise/node_gabor_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8700,7 +8700,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gamma_map	Node_Gamma_Map	Gamma Map	filter	scripts/node_gamma_map/node_gamma_map.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8714,7 +8714,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gap_contract	Node_Gap_Contract	Gap Contract	filter	scripts/node_gap_contract/node_gap_contract.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8746,11 +8746,11 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.globalvar	Node_Globalvar	Globalvar	values	scripts/node_globalvar/node_globalvar.gml
 I	globalvar	Globalvar	0	Text	text	s ""	
 S	I	globalvar	0
-O	value	Value	0	any
+O	value	Value	0	any	i -4	s "noone"
 N	pc.glow	Node_Glow	Glow	filter	scripts/node_glow/node_glow.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8829,7 +8829,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gradient	Node_Gradient	Draw Gradient	generate	scripts/node_gradient/node_gradient.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -8933,7 +8933,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gradient_cos	Node_Gradient_Cos	Draw Cos Gradient	generate	scripts/node_gradient_cos/node_gradient_cos.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9023,7 +9023,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gradient_cube	Node_Gradient_Cube	Gradient Cube	generate	scripts/node_gradient_cube/node_gradient_cube.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9072,8 +9072,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	cross_section	Cross Section	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	cross_section	Cross Section	1	image	i -4	s "noone"
 N	pc.gradient_extract	Node_Gradient_Extract	Gradient Data	color	scripts/node_gradient_extract/node_gradient_extract.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9081,9 +9081,9 @@ I	gradient	Gradient	0	Gradient	gradient	g 0 1 0 255 255 255 255
 S	I	gradient	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	colors	Colors	0	colour
-O	positions	Positions	1	array
-O	type	Type	2	integer
+O	colors	Colors	0	colour	a any 0	s "[]"
+O	positions	Positions	1	array	a any 0	s "[]"
+O	type	Type	2	integer	i 0	s "0"
 N	pc.gradient_grid	Node_Gradient_Grid	Draw Grid Gradient	generate	scripts/node_gradient_grid/node_gradient_grid.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9117,7 +9117,7 @@ T	anchor_i_unit	Anchor {i} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	anchor_i_unit	?
 T	color_i	Color {i}	1	Color	colour	c 255 255 255 255	
 S	T	color_i	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gradient_out	Node_Gradient_Out	Gradient	color	scripts/node_gradient_out/node_gradient_out.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9127,8 +9127,8 @@ I	sample	Sample	1	Slider	scalar	d 0
 S	I	sample	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	gradient	Gradient	0	gradient
-O	color	Color	1	colour
+O	gradient	Gradient	0	gradient		s "new gradientObject(ca_white)"
+O	color	Color	1	colour		s "c_white"
 N	pc.gradient_palette	Node_Gradient_Palette	Palette to Gradient	color	scripts/node_gradient_palette/node_gradient_palette.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9151,7 +9151,7 @@ Q	I	interpolation	3	0	s "OKLAB"
 Q	I	interpolation	4	0	s "sRGB"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	gradient	Gradient	0	gradient
+O	gradient	Gradient	0	gradient		s "new gradientObject(ca_white)"
 N	pc.gradient_path	Node_Gradient_Path	Draw Gradient Path	generate	scripts/node_gradient_path/node_gradient_path.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9215,7 +9215,7 @@ Q	I	type	0	0	s "Along Path"
 Q	I	type	1	0	s "Distance"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gradient_points	Node_Gradient_Points	Draw 4 Points Gradient	generate	scripts/node_gradient_points/node_gradient_points.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9281,7 +9281,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gradient_points_n	Node_Gradient_Points_N	Draw Points Gradient	generate	scripts/node_gradient_point_n/node_gradient_point_n.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9311,7 +9311,7 @@ T	color_i	Color {i}	1	Color	colour	c 255 255 255 255
 S	T	color_i	0
 T	influence_i	Influence {i}	2	Float	scalar	d 6	
 S	T	influence_i	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.gradient_replace_color	Node_Gradient_Replace_Color	Gradient Replace	color	scripts/node_gradient_replace_color/node_gradient_replace_color.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9327,7 +9327,7 @@ I	threshold	Threshold	3	Slider	scalar	d 0.1
 S	I	threshold	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	gradient	Gradient	0	gradient
+O	gradient	Gradient	0	gradient		s "new gradientObject(ca_white)"
 N	pc.gradient_sample	Node_Gradient_Sample	Sample Gradient	color	scripts/node_gradient_sample/node_gradient_sample.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9348,7 +9348,7 @@ S	I	ratio	0
 A	I	ratio	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	colors	Colors	0	colour
+O	colors	Colors	0	colour		s "[ c_black ]"
 N	pc.gradient_shift	Node_Gradient_Shift	Gradient Shift	color	scripts/node_gradient_shift/node_gradient_shift.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9362,7 +9362,7 @@ I	scale	Scale	3	Slider	scalar	d 1
 S	I	scale	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	gradient	Gradient	0	gradient
+O	gradient	Gradient	0	gradient		s "new gradientObject(ca_white)"
 N	pc.grain	Node_Grain	Grain	filter	scripts/node_grain/node_grain.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9501,7 +9501,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.graph_preview	Node_Graph_Preview	Graph Preview	misc	scripts/node_graph_preview/node_graph_preview.gml
 I	surface	Surface	0	Surface	image		
 S	I	surface	0
@@ -9534,7 +9534,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.greyscale	Node_Greyscale	Greyscale	filter	scripts/node_greyscale/node_greyscale.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9574,7 +9574,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.grid	Node_Grid	Grid	generate	scripts/node_grid/node_grid.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9722,8 +9722,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	heightmap	Heightmap	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	heightmap	Heightmap	1	image	i -4	s "noone"
 N	pc.grid_hex	Node_Grid_Hex	Hexagonal Grid	generate	scripts/node_grid_hex/node_grid_hex.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9832,8 +9832,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	heightmap	Heightmap	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	heightmap	Heightmap	1	image	i -4	s "noone"
 N	pc.grid_pentagonal	Node_Grid_Pentagonal	Pentagonal Grid	generate	scripts/node_grid_pentagonal/node_grid_pentagonal.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -9920,7 +9920,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.grid_tri	Node_Grid_Tri	Triangular Grid	generate	scripts/node_grid_tri/node_grid_tri.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10037,8 +10037,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	heightmap	Heightmap	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	heightmap	Heightmap	1	image	i -4	s "noone"
 N	pc.grid_warp	Node_Grid_Warp	Grid Warp	transform	scripts/node_grid_warp/node_grid_warp.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10072,7 +10072,7 @@ S	T	anchor_i	1
 A	T	anchor_i	1
 T	anchor_i_unit	Anchor {i} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	anchor_i_unit	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.group	Node_Group	Group	misc	scripts/node_group/node_group.gml
 I	attribute_input_display_list	attribute input_display_list	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_input_display_list	?
@@ -10176,14 +10176,14 @@ I	gizmo_rotation	Gizmo Rotation	14	Rotation	scalar	d 0
 S	I	gizmo_rotation	0
 I	gizmo_label	Gizmo Label	15	Bool	boolean	b 1	
 S	I	gizmo_label	0
-O	value	Value	0	any
+O	value	Value	0	any	d 0	s "0"
 N	pc.group_output	Node_Group_Output	Output	group	scripts/node_group_output/node_group_output.gml
 I	value	Value	0	Generic_any	any		
 S	I	value	?
 N	pc.group_thumbnail	Node_Group_Thumbnail	Thumbnail	feedback	scripts/node_group_thumbnail/node_group_thumbnail.gml
 I	input	Input	0	Surface	image		
 S	I	input	0
-O	out	Out	0	image
+O	out	Out	0	image	i -4	s "noone"
 N	pc.hlsl	Node_HLSL	HLSL	misc	scripts/node_hlsl/node_hlsl.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	?
@@ -10217,7 +10217,7 @@ Q	T	argument_type	7	0	s "Sampler2D"
 Q	T	argument_type	8	0	s "Color"
 T	argument_value	Argument value	2	Generic_float	scalar	d 0	
 S	T	argument_value	0
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.hsv_channel	Node_HSV_Channel	HSV Extract	filter	scripts/node_hsv_channel/node_hsv_channel.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10235,10 +10235,10 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	hue	Hue	0	image
-O	saturation	Saturation	1	image
-O	value	Value	2	image
-O	alpha	Alpha	3	image
+O	hue	Hue	0	image	i -4	s "noone"
+O	saturation	Saturation	1	image	i -4	s "noone"
+O	value	Value	2	image	i -4	s "noone"
+O	alpha	Alpha	3	image	i -4	s "noone"
 N	pc.http_request_file	Node_HTTP_Request_File	HTTP Download	io	scripts/node_http_request_file/node_http_request_file.gml
 I	address	Address	0	Text	text	s ""	
 S	I	address	0
@@ -10247,7 +10247,7 @@ S	I	format	0
 B	I	format	0	general	1	default	1
 C	I	format	resolved
 Q	I	format	0	0	s "Image"
-O	result	Result	0	image
+O	result	Result	0	image	i -4	s "noone"
 N	pc.http_request	Node_HTTP_request	HTTP	io	scripts/node_http_request/node_http_request.gml
 I	address	Address	0	Text	text	s ""	
 S	I	address	0
@@ -10261,7 +10261,7 @@ I	content	Content	2	Text	text	s ""
 S	I	content	0
 I	attribute_max_file_size	attribute max_file_size	-1	Float	scalar	d 10000	
 S	I	attribute_max_file_size	0
-O	result	Result	0	text
+O	result	Result	0	text	s ""	s "\"\""
 N	pc.heightmap_project_3_d	Node_Heightmap_Project_3D	Heightmap Project 3D	3d	scripts/node_heightmap_project_3d/node_heightmap_project_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10318,9 +10318,9 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth_pass	Depth Pass	1	image
-O	normal_pass	Normal Pass	2	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth_pass	Depth Pass	1	image	i -4	s "noone"
+O	normal_pass	Normal Pass	2	image	i -4	s "noone"
 N	pc.herringbone_tile	Node_Herringbone_Tile	Herringbone Tile	generate	scripts/node_herringbone_tile/node_herringbone_tile.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10426,7 +10426,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.high_pass	Node_High_Pass	High Pass	filter	scripts/node_high_pass/node_high_pass.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10470,7 +10470,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.hilbert	Node_Hilbert	Hilbert	generate	scripts/node_hilbert_curve/node_hilbert_curve.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10499,7 +10499,7 @@ I	shift	Shift	6	Slider	scalar	d 0
 S	I	shift	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.honeycomb_noise	Node_Honeycomb_Noise	Honeycomb Noise	generate	scripts/node_honey_noise/node_honey_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10546,7 +10546,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.hough_transform	Node_Hough_Transform	Hough Transform	filter	scripts/node_hough/node_hough.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10600,8 +10600,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	hough_space	Hough Space	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	hough_space	Hough Space	1	image	i -4	s "noone"
 N	pc.image	Node_Image	Image	io	scripts/node_image/node_image.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -10610,9 +10610,9 @@ S	I	padding	1
 A	I	padding	1
 I	attribute_check_splice	attribute check_splice	-1	Bool	boolean	b 1	
 S	I	attribute_check_splice	0
-O	surface_out	Surface Out	0	image
-O	path	Path	1	text
-O	dimension	Dimension	2	vector2
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	path	Path	1	text	s ""	s "\"\""
+O	dimension	Dimension	2	vector2	v 1 1	s "[1,1]"
 N	pc.image_animated	Node_Image_Animated	Image Sequence	io	scripts/node_image_animated/node_image_animated.gml
 I	edit_in_timeline	Edit in Timeline	11	Bool	boolean	b 1	
 S	I	edit_in_timeline	0
@@ -10651,8 +10651,8 @@ I	custom_frame_order	Custom Frame Order	6	Bool	boolean	b 0
 S	I	custom_frame_order	0
 I	frame	Frame	7	Int	integer	i 0	
 S	I	frame	0
-O	surface_out	Surface Out	0	image
-O	dimension	Dimension	1	vector2
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	dimension	Dimension	1	vector2	v 1 1	s "[1,1]"
 N	pc.image_grid	Node_Image_Grid	Image Grid	compose	scripts/node_image_grid/node_image_grid.gml
 I	main_axis	Main Axis	0	EScroll	enum	e 0	
 S	I	main_axis	0
@@ -10689,8 +10689,8 @@ A	I	group	1
 D	9	1
 T	input	Input	0	Surface	image		
 S	T	input	0
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas data	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas data	1	atlas	a any 0	s "[]"
 N	pc.image_grid_patreon	Node_Image_Grid_Patreon	Patreon Grid	misc	scripts/node_image_grid_patreon/node_image_grid_patreon.gml
 I	surfaces	Surfaces	4	Surface	image		
 S	I	surfaces	0
@@ -10704,7 +10704,7 @@ A	I	spacing	1
 I	padding	Padding	3	IPadding	vector4	w 0 0 0 0	
 S	I	padding	1
 A	I	padding	1
-O	atlas_data	Atlas data	0	atlas
+O	atlas_data	Atlas data	0	atlas	a any 0	s "[]"
 N	pc.image_list_bug	Node_Image_List_Bug	Bug List	misc	scripts/node_image_list_bug/node_image_list_bug.gml
 I	texts	Texts	0	Surface	image		
 S	I	texts	0
@@ -10725,7 +10725,7 @@ I	time_per_list	Time Per List	3	Float	scalar	d 8
 S	I	time_per_list	0
 I	start_frame	Start Frame	4	Int	integer	i 8	
 S	I	start_frame	0
-O	atlas_data	Atlas data	0	image
+O	atlas_data	Atlas data	0	image	i -4	s "noone"
 N	pc.image_sequence	Node_Image_Sequence	Image Array	io	scripts/node_image_sequence/node_image_sequence.gml
 I	paths	Paths	0	FPath	array	a scalar 0	
 S	I	paths	1
@@ -10746,9 +10746,9 @@ B	I	sizing_method	0	general	1	default	2
 C	I	sizing_method	resolved
 Q	I	sizing_method	0	0	s "Padding/Crop"
 Q	I	sizing_method	1	0	s "Scale"
-O	surfaces_out	Surfaces Out	0	image
-O	paths	Paths	1	text
-O	dimensions	Dimensions	2	integer
+O	surfaces_out	Surfaces Out	0	image	a any 0	s "[]"
+O	paths	Paths	1	text	a any 0	s "[]"
+O	dimensions	Dimensions	2	integer	a any 1 a any 2 d 1 d 1	s "[[1,1]]"
 N	pc.image_sheet	Node_Image_Sheet	Splice Spritesheet	io	scripts/node_image_sheet/node_image_sheet.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
@@ -10799,8 +10799,8 @@ Q	I	filtered_pixel	0	0	s "Transparent"
 Q	I	filtered_pixel	1	0	s "Color"
 I	filtered_color	Filtered Color	14	Color	colour	c 0 0 0 255	
 S	I	filtered_color	0
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas Data	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas Data	1	atlas	a any 0	s "[]"
 N	pc.image_gif	Node_Image_gif	Image GIF	io	scripts/node_image_gif/node_image_gif.gml
 I	edit_in_timeline	Edit in Timeline	8	Bool	boolean	b 1	
 S	I	edit_in_timeline	0
@@ -10828,9 +10828,9 @@ I	custom_frame_order	Custom Frame Order	5	Bool	boolean	b 0
 S	I	custom_frame_order	0
 I	frame	Frame	6	Int	integer	i 0	
 S	I	frame	0
-O	surface_out	Surface Out	0	image
-O	path	Path	1	text
-O	dimension	Dimension	2	vector2
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	path	Path	1	text	s ""	s "\"\""
+O	dimension	Dimension	2	vector2	v 1 1	s "[1,1]"
 N	pc.image_mp4	Node_Image_mp4	MP4	io	scripts/node_mp4/node_mp4.gml
 I	edit_in_timeline	Edit in Timeline	8	Bool	boolean	b 1	
 S	I	edit_in_timeline	0
@@ -10858,9 +10858,9 @@ I	custom_frame_order	Custom Frame Order	5	Bool	boolean	b 0
 S	I	custom_frame_order	0
 I	frame	Frame	6	Int	integer	i 0	
 S	I	frame	0
-O	surface_out	Surface Out	0	image
-O	path	Path	1	text
-O	dimension	Dimension	2	vector2
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	path	Path	1	text	s ""	s "\"\""
+O	dimension	Dimension	2	vector2	v 1 1	s "[1,1]"
 N	pc.interlaced	Node_Interlaced	Interlace	filter	scripts/node_interlaced/node_interlaced.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10904,7 +10904,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.interpret_matrix	Node_Interpret_Matrix	Interpret Matrix	generate	scripts/node_interpret_matrix/node_interpret_matrix.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10947,7 +10947,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.interpret_number	Node_Interpret_Number	Interpret Number	generate	scripts/node_interpret_number/node_interpret_number.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -10982,7 +10982,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.invert	Node_Invert	Invert	filter	scripts/node_invert/node_invert.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11008,7 +11008,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.iso_surf	Node_IsoSurf	IsoSurf	values	scripts/node_isosurf/node_isosurf.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11027,7 +11027,7 @@ S	I	offsets	0
 A	I	offsets	2
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	iso_surf	IsoSurf	0	dynamic_surface
+O	iso_surf	IsoSurf	0	dynamic_surface	i -4	s "noone"
 N	pc.iterate	Node_Iterate	Loop	iteration	scripts/node_iterate/node_iterate.gml
 I	attribute_input_display_list	attribute input_display_list	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_input_display_list	?
@@ -11084,7 +11084,7 @@ A	I	attribute_members	?
 I	attribute_shape	attribute shape	-1	Float	scalar	d 0	
 S	I	attribute_shape	0
 N	pc.iterator_each_length	Node_Iterator_Each_Length	Array Length	iteration	scripts/node_iterator_each_size/node_iterator_each_size.gml
-O	length	Length	0	integer
+O	length	Length	0	integer	i 0	s "0"
 N	pc.iterator_input	Node_Iterator_Input	Loop Input	iteration	scripts/node_iterator_input/node_iterator_input.gml
 I	visible_condition	Visible Condition	9	EScroll	enum	e 0	Always Show;Always Hide;Equal;Not equal;Greater;Greater or equal;Lesser;Lesser or equal
 S	I	visible_condition	0
@@ -11171,10 +11171,10 @@ I	gizmo_rotation	Gizmo Rotation	14	Rotation	scalar	d 0
 S	I	gizmo_rotation	0
 I	gizmo_label	Gizmo Label	15	Bool	boolean	b 1	
 S	I	gizmo_label	0
-O	value	Value	0	any
-O	loop_entrance	Loop entrance	1	node_ref
+O	value	Value	0	any	d 0	s "0"
+O	loop_entrance	Loop entrance	1	node_ref	d 0	s "0"
 N	pc.iterator_length	Node_Iterator_Length	Loop amount	iteration	scripts/node_iterator_length/node_iterator_length.gml
-O	length	Length	0	integer
+O	length	Length	0	integer	i 0	s "0"
 N	pc.iterator_output	Node_Iterator_Output	Loop Output	iteration	scripts/node_iterator_output/node_iterator_output.gml
 I	value	Value	0	Generic_any	any		
 S	I	value	?
@@ -11229,12 +11229,12 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.json_file_read	Node_Json_File_Read	JSON File In	io	scripts/node_json_file_read/node_json_file_read.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
-O	path	Path	0	text
-O	struct	Struct	1	struct
+O	path	Path	0	text	s ""	s "\"\""
+O	struct	Struct	1	struct		s "{}"
 N	pc.json_file_write	Node_Json_File_Write	JSON File Out	io	scripts/node_json_file_write/node_json_file_write.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -11281,7 +11281,7 @@ S	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.kisrhombille	Node_Kisrhombille	Kisrhombille	generate	scripts/node_grid_kisrhombille/node_grid_kisrhombille.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11338,20 +11338,20 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.krita_file_read	Node_Krita_File_Read	Krita File In	io	scripts/node_krita_file_read/node_krita_file_read.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
-O	merged_image	Merged Image	0	image
-O	content	Content	1	object
-O	path	Path	2	text
+O	merged_image	Merged Image	0	image	i -4	s "noone"
+O	content	Content	1	object	i -4	s "noone"
+O	path	Path	2	text	s ""	s "\"\""
 N	pc.krita_layer	Node_Krita_layer	Krita Layer	io	scripts/node_krita_layer/node_krita_layer.gml
 I	data	Data	0	Generic_object	object		
 S	I	data	0
 I	layer_name	Layer name	1	Text	text	s ""	
 S	I	layer_name	0
-O	surface_out	Surface Out	0	image
-O	layer_name	Layer name	1	text
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	layer_name	Layer name	1	text	s ""	s "\"\""
 N	pc.kuwahara	Node_Kuwahara	Kuwahara	filter	scripts/node_kuwahara/node_kuwahara.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11406,7 +11406,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.lut	Node_LUT	LUT	filter	scripts/node_lut/node_lut.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11432,10 +11432,10 @@ I	strength	Strength	8	Slider	scalar	d 1
 S	I	strength	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	lut_surface	LUT Surface	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	lut_surface	LUT Surface	1	image	i -4	s "noone"
 N	pc.layer_output	Node_Layer_Output	Layer Output	misc	scripts/node_layer_output/node_layer_output.gml
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.level	Node_Level	Level	filter	scripts/node_level/node_level.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11489,7 +11489,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.level_selector	Node_Level_Selector	Level Selector	filter	scripts/node_level_selector/node_level_selector.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11533,7 +11533,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.line	Node_Line	Draw Line	generate	scripts/node_line/node_line.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11758,9 +11758,9 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	width_pass	Width Pass	1	image
-O	line_data	Line Data	2	struct
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	width_pass	Width Pass	1	image	i -4	s "noone"
+O	line_data	Line Data	2	struct	a any 0	s "[]"
 N	pc.line_2_points	Node_Line_2Points	Draw Line 2 Points	generate	scripts/node_line_2points/node_line_2points.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -11836,7 +11836,7 @@ A	I	uv_position	1
 I	uv_scale	UV Scale	15	Vec2	vector2	v 1 1	
 S	I	uv_scale	1
 A	I	uv_scale	1
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.line_match	Node_Line_Match	Line Match	filter	scripts/node_line_match/node_line_match.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11874,7 +11874,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.linearize	Node_Linearize	Hough Extrude	filter	scripts/node_linearize/node_linearize.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11917,7 +11917,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.liquefy	Node_Liquefy	Liquefy	filter	scripts/node_liquefy/node_liquefy.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -11977,7 +11977,7 @@ T	intensity	Intensity	4	Slider	scalar	d 0.1
 S	T	intensity	0
 T	push	Push	7	Slider	scalar	d 0.1	
 S	T	push	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.local_analyze	Node_Local_Analyze	Local Analyze	filter	scripts/node_local_analyze/node_local_analyze.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -12029,7 +12029,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.logic	Node_Logic	Logic Opr	values	scripts/node_logic/node_logic.gml
 I	type	Type	0	EScroll	enum	e 0	And;Or;Not;Nand;Nor;Xor
 S	I	type	0
@@ -12044,7 +12044,7 @@ Q	I	type	5	0	s "Xor"
 D	1	1
 T	jname	jname	0	Bool	boolean	b 0	
 S	T	jname	0
-O	result	Result	0	boolean
+O	result	Result	0	boolean	b 0	s "false"
 N	pc.lua_compute	Node_Lua_Compute	Lua Compute	misc	scripts/node_lua_compute/node_lua_compute.gml
 I	execution_thread	Execution Thread	3	Generic_node	node_ref		
 S	I	execution_thread	0
@@ -12079,8 +12079,8 @@ Q	T	argument_type	2	0	s "Surface"
 Q	T	argument_type	3	0	s "Struct"
 T	argument_value	Argument value	2	Generic_float	scalar	d 0	
 S	T	argument_value	0
-O	execution_thread	Execution Thread	0	node_ref
-O	return_value	Return Value	1	any
+O	execution_thread	Execution Thread	0	node_ref		s "lua_state"
+O	return_value	Return Value	1	any	i -4	s "noone"
 N	pc.lua_global	Node_Lua_Global	Lua Global	misc	scripts/node_lua_global/node_lua_global.gml
 I	execution_thread	Execution Thread	2	Generic_node	node_ref		
 S	I	execution_thread	0
@@ -12092,7 +12092,7 @@ Q	I	run_order	0	0	s "On start"
 Q	I	run_order	1	0	s "Every frame"
 I	lua_code	Lua Code	0	Text	text	s ""	
 S	I	lua_code	0
-O	execution_thread	Execution Thread	0	node_ref
+O	execution_thread	Execution Thread	0	node_ref		s "lua_state"
 N	pc.lua_surface	Node_Lua_Surface	Lua Surface	misc	scripts/node_lua_surface/node_lua_surface.gml
 I	execution_thread	Execution Thread	3	Generic_node	node_ref		
 S	I	execution_thread	0
@@ -12122,8 +12122,8 @@ Q	T	argument_type	2	0	s "Surface"
 Q	T	argument_type	3	0	s "Struct"
 T	argument_value	Argument value	2	Generic_float	scalar	d 0	
 S	T	argument_value	0
-O	execution_thread	Execution Thread	0	node_ref
-O	surface_out	Surface Out	1	image
+O	execution_thread	Execution Thread	0	node_ref		s "lua_state"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.midi_in	Node_MIDI_In	MIDI In	io	scripts/node_midi_in/node_midi_in.gml
 I	input	Input	0	EScroll	enum	e 0	
 S	I	input	0
@@ -12136,9 +12136,9 @@ T	index	Index	0	Int	integer	i -1
 S	T	index	0
 T	normalize	Normalize	1	Bool	boolean	b 0	
 S	T	normalize	0
-O	raw_message	Raw Message	0	array
-O	pressing_notes	Pressing Notes	1	array
-O	direct_values	Direct Values	2	struct
+O	raw_message	Raw Message	0	array	a any 0	s "[]"
+O	pressing_notes	Pressing Notes	1	array	a any 0	s "[]"
+O	direct_values	Direct Values	2	struct		s "{}"
 N	pc.mk_blast_align	Node_MK_Blast_Align	Align	mk_blast	scripts/node_mk_blast_align/node_mk_blast_align.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -12148,7 +12148,7 @@ I	mask	Mask	2	Toggle	integer	i 1
 S	I	mask	0
 I	speed	Speed	3	Slider	scalar	d 1	
 S	I	speed	0
-O	blast	Blast	0	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_attract	Node_MK_Blast_Attract	Attract	mk_blast	scripts/node_mk_blast_attract/node_mk_blast_attract.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -12188,14 +12188,14 @@ S	I	overshoot	0
 I	spiral	Spiral	4	Range	vector2	v 0 0	
 S	I	spiral	1
 A	I	spiral	1
-O	blast	Blast	0	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_combine	Node_MK_Blast_Combine	Combine	mk_blast	scripts/node_mk_blast_combine/node_mk_blast_combine.gml
 I	mask	Mask	0	Toggle	integer	i 1	
 S	I	mask	0
 D	1	1
 T	blast	Blast	0	Struct	struct		
 S	T	blast	0
-O	blast	Blast	0	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_flame	Node_MK_Blast_Flame	Flame Ball	mk_blast	scripts/node_mk_blast_flame/node_mk_blast_flame.gml
 I	seed	Seed	0	Seed	scalar		
 S	I	seed	0
@@ -12380,7 +12380,7 @@ A	I	depth_darken	1
 I	depth_darken_range	Depth Darken Range	53	Range	vector2	v 0 1	
 S	I	depth_darken_range	1
 A	I	depth_darken_range	1
-O	blast	Blast	0	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_force	Node_MK_Blast_Force	Move	mk_blast	scripts/node_mk_blast_force/node_mk_blast_force.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -12416,7 +12416,7 @@ A	I	move_curve	1
 I	life_range	Life Range	6	Range	vector2	v 0 1	
 S	I	life_range	1
 A	I	life_range	1
-O	blast	Blast	0	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_gravity	Node_MK_Blast_Gravity	Gravity	mk_blast	scripts/node_mk_blast_gravity/node_mk_blast_gravity.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -12444,7 +12444,7 @@ A	I	strength	1
 I	direction	Direction	3	RotRand	array	a scalar 5 d 0 d -90 d -90 d 0 d 0	
 S	I	direction	1
 A	I	direction	1
-O	blast	Blast	0	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_inline	Node_MK_Blast_Inline	MK Blast	generate	scripts/node_mk_blast_inline/node_mk_blast_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -12571,7 +12571,7 @@ S	I	view_origin_unit	?
 I	perspective	Perspective	20	Range	vector2	v 2 2	
 S	I	perspective	1
 A	I	perspective	1
-O	blast	Blast	0	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_render	Node_MK_Blast_Render	Render	mk_blast	scripts/node_mk_blast_render/node_mk_blast_render.gml
 I	blast	Blast	0	Struct	struct		
 S	I	blast	0
@@ -12584,7 +12584,7 @@ S	I	posterize	0
 I	colors	Colors	4	Palette	array	a colour 2 c 255 255 255 255 c 0 0 0 255	
 S	I	colors	1
 A	I	colors	1
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.mk_blast_smoke	Node_MK_Blast_Smoke	Smoke	mk_blast	scripts/node_mk_blast_smoke/node_mk_blast_smoke.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -12679,8 +12679,8 @@ S	I	shift	0
 I	level	Level	10	Range	vector2	v 0 1	
 S	I	level	1
 A	I	level	1
-O	blast	Blast	0	struct
-O	smoke	Smoke	1	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
+O	smoke	Smoke	1	struct	a any 0	s "[]"
 N	pc.mk_blast_wave	Node_MK_Blast_Wave	Wave	mk_blast	scripts/node_mk_blast_wave/node_mk_blast_wave.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -12711,7 +12711,7 @@ A	I	frequency	1
 I	phase	Phase	4	Range	vector2	v 0 0	
 S	I	phase	1
 A	I	phase	1
-O	blast	Blast	0	struct
+O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blinker	Node_MK_Blinker	MK Blinker	generate	scripts/node_mk_blinker/node_mk_blinker.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -12743,8 +12743,8 @@ I	strength	Strength	10	Slider	scalar	d 0.5
 S	I	strength	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	light_only	Light only	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	light_only	Light only	1	image	i -4	s "noone"
 N	pc.mk_brownian	Node_MK_Brownian	MK Brownian	generate	scripts/node_mk_brownian/node_mk_brownian.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -12802,8 +12802,8 @@ I	tile	Tile	14	Bool	boolean	b 0
 S	I	tile	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	output	Output	0	image
-O	positions	Positions	1	array
+O	output	Output	0	image	i -4	s "noone"
+O	positions	Positions	1	array	a any 0	s "[]"
 N	pc.mk_cable	Node_MK_Cable	MK Cables	generate	scripts/node_mk_cable/node_mk_cable.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -12913,7 +12913,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_circuit	Node_MK_Circuit	MK Circuit	generate	scripts/node_mk_circuit/node_mk_circuit.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -12985,7 +12985,7 @@ I	max_attempt	Max Attempt	13	Int	integer	i 8
 S	I	max_attempt	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_cloud	Node_MK_Cloud	MK Cloud	generate	scripts/node_mk_cloud/node_mk_cloud.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -13213,7 +13213,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_delay_machine	Node_MK_Delay_Machine	MK Delay Machine	generate	scripts/node_mk_delay_machine/node_mk_delay_machine.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
@@ -13265,7 +13265,7 @@ Q	I	blend_mode	0	0	s "Normal"
 Q	I	blend_mode	1	0	s "Alpha"
 Q	I	blend_mode	2	0	s "Additive"
 Q	I	blend_mode	3	0	s "Maximum"
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.mk_dialog	Node_MK_Dialog	MK Dialog	generate	scripts/node_mk_dialog/node_mk_dialog.gml
 I	seed	Seed	26	Seed	scalar		
 S	I	seed	0
@@ -13413,7 +13413,7 @@ A	T	frequency	1
 T	speed	Speed	16	Vec2	vector2	v 4 4	
 S	T	speed	1
 A	T	speed	1
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_drip	Node_MK_Drip	MK Drip	mkfx	scripts/node_mk_drip/node_mk_drip.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -13501,7 +13501,7 @@ I	shift	Shift	26	Slider	scalar	d 0
 S	I	shift	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_facet	Node_MK_Facet	MK Facet	generate	scripts/node_mk_facet/node_mk_facet.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -13565,9 +13565,9 @@ D	17	1
 T	facet	Facet	0	Vec4	vector4	w 4 0 8 0.5	
 S	T	facet	1
 A	T	facet	1
-O	shaded	Shaded	0	image
-O	depth	Depth	1	image
-O	cut_order	Cut Order	2	image
+O	shaded	Shaded	0	image	i -4	s "noone"
+O	depth	Depth	1	image	i -4	s "noone"
+O	cut_order	Cut Order	2	image	i -4	s "noone"
 N	pc.mk_fall	Node_MK_Fall	MK Fall	generate	scripts/node_mk_fall/node_mk_fall.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -13647,7 +13647,7 @@ S	I	twist_speed	1
 A	I	twist_speed	1
 I	twist_radius	Twist Radius	23	Slider	scalar	d 0.7	
 S	I	twist_radius	0
-O	output	Output	0	image
+O	output	Output	0	image	i -4	s "noone"
 N	pc.mk_flag	Node_MK_Flag	MK Flag	generate	scripts/node_mk_flag/node_mk_flag.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -13703,7 +13703,7 @@ I	attribute_iteration	attribute iteration	-1	Float	scalar	d 4
 S	I	attribute_iteration	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_flake	Node_MK_Flake	MK Flake	generate	scripts/node_mk_flake/node_mk_flake.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -13787,7 +13787,7 @@ I	trim	Trim	9	Slider	scalar	d 0
 S	I	trim	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_flare	Node_MK_Flare	MK Lens Flare	generate	scripts/node_mk_flare/node_mk_flare.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -13839,8 +13839,8 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	light_only	Light only	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	light_only	Light only	1	image	i -4	s "noone"
 N	pc.mk_fracture	Node_MK_Fracture	MK Fracture	generate	scripts/node_mk_fracture/node_mk_fracture.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -13892,7 +13892,7 @@ I	alpha	Alpha	7	Slider	scalar	d 1
 S	I	alpha	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_god_ray	Node_MK_GodRay	MK GodRay	mkfx	scripts/node_mk_godray/node_mk_godray.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -13991,8 +13991,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	ray_only	Ray Only	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	ray_only	Ray Only	1	image	i -4	s "noone"
 N	pc.mk_grass	Node_MK_Grass	MK Grass	generate	scripts/node_mk_grass/node_mk_grass.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14082,7 +14082,7 @@ I	ground	Ground	19	Color	colour	c 0 0 0 255
 S	I	ground	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_grid_balls	Node_MK_GridBalls	MK GridBalls	generate	scripts/node_mk_gridballs/node_mk_gridballs.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14230,7 +14230,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_grid_flip	Node_MK_GridFlip	MK GridFlip	generate	scripts/node_mk_gridflip/node_mk_gridflip.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14273,7 +14273,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_iso_cube	Node_MK_IsoCube	MK IsoCube	generate	scripts/node_mk_isocube/node_mk_isocube.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14336,8 +14336,8 @@ I	outside_color	Outside Color	18	Color	colour	c 255 255 255 255
 S	I	outside_color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth	Depth	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth	Depth	1	image	i -4	s "noone"
 N	pc.mk_isoextrude	Node_MK_Isoextrude	MK Isoextrude	generate	scripts/node_mk_isoextrude/node_mk_isoextrude.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14403,8 +14403,8 @@ I	shift	Shift	20	Slider	scalar	d 0
 S	I	shift	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth	Depth	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth	Depth	1	image	i -4	s "noone"
 N	pc.mk_jigsaw	Node_MK_Jigsaw	MK Jigsaw	generate	scripts/node_mk_jigsaw/node_mk_jigsaw.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14440,9 +14440,9 @@ I	separate	Separate	9	Bool	boolean	b 0
 S	I	separate	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	combined	Combined	0	image
-O	pieces	Pieces	1	image
-O	atlas	Atlas	2	image
+O	combined	Combined	0	image	i -4	s "noone"
+O	pieces	Pieces	1	image	a any 0	s "[]"
+O	atlas	Atlas	2	image	a any 0	s "[]"
 N	pc.mk_panels	Node_MK_Panels	MK Panels	generate	scripts/node_mk_panels/node_mk_panels.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14558,8 +14558,8 @@ I	posterize	Posterize	31	Bool	boolean	b 0
 S	I	posterize	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	glow_mask	Glow Mask	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	glow_mask	Glow Mask	1	image	i -4	s "noone"
 N	pc.mk_parallax	Node_MK_Parallax	MK Parallax	generate	scripts/node_mk_parallax/node_mk_parallax.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14578,7 +14578,7 @@ S	T	parallax_s	1
 A	T	parallax_s	1
 T	depth_s	Depth {_s}	3	Float	scalar		
 S	T	depth_s	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_pile	Node_MK_Pile	MK Pile	generate	scripts/node_mk_pile/node_mk_pile.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14644,8 +14644,8 @@ S	I	range	1
 A	I	range	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	positions	Positions	1	vector2
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	positions	Positions	1	vector2	v 0 0	s "[0,0]"
 N	pc.mk_rain	Node_MK_Rain	MK Rain	generate	scripts/node_mk_rain/node_mk_rain.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14722,7 +14722,7 @@ I	rip_alpha	Rip. Alpha	25	Slider	scalar	d 1
 S	I	rip_alpha	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_rock	Node_MK_Rock	MK Rock	generate	scripts/node_mk_rock/node_mk_rock.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14939,8 +14939,8 @@ S	I	colors	1
 A	I	colors	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth	Depth	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth	Depth	1	image	i -4	s "noone"
 N	pc.mk_saber	Node_MK_Saber	MK Saber	generate	scripts/node_mk_saber/node_mk_saber.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -14979,7 +14979,7 @@ I	trace_texture	Trace Texture	10	Surface	image
 S	I	trace_texture	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_smoke	Node_MK_Smoke	MK Smoke	generate	scripts/node_mk_smoke/node_mk_smoke.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -15116,7 +15116,7 @@ S	I	anim_shift	1
 A	I	anim_shift	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_sparkle	Node_MK_Sparkle	MK Sparkle	generate	scripts/node_mk_sparkle/node_mk_sparkle.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -15156,7 +15156,7 @@ I	additive	Additive	7	Bool	boolean	b 0
 S	I	additive	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_subpixel	Node_MK_Subpixel	MK Subpixel	generate	scripts/node_mk_subpixel/node_mk_subpixel.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -15208,7 +15208,7 @@ I	flicker_cut	Flicker Cut	16	Slider	scalar	d 0.5
 S	I	flicker_cut	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_tile	Node_MK_Tile	MK Tile	generate	scripts/node_mk_tile/node_mk_tile.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -15267,14 +15267,14 @@ I	attribute_show_tile_index	attribute show_tile_index	-1	Bool	boolean	b 0
 S	I	attribute_show_tile_index	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_tree_add_branch	Node_MK_Tree_Add_Branch	Combine Branches	mk_tree	scripts/node_mk_tree_add_branch/node_mk_tree_add_branch.gml
 I	tree	Tree	0	Struct	struct		
 S	I	tree	0
 D	1	1
 T	branch	Branch	0	Struct	struct		
 S	T	branch	0
-O	tree	Tree	0	struct
+O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_tree_add_leaf	Node_MK_Tree_Add_Leaf	Combine Leaves	mk_tree	scripts/node_mk_tree_add_leaf/node_mk_tree_add_leaf.gml
 I	tree	Tree	0	Struct	struct		
 S	I	tree	0
@@ -15283,7 +15283,7 @@ S	I	order	0
 D	2	1
 T	leaves	Leaves	0	Struct	struct		
 S	T	leaves	0
-O	tree	Tree	0	struct
+O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_tree_attract	Node_MK_Tree_Attract	Attract Branch	mk_tree	scripts/node_mk_tree_attract/node_mk_tree_attract.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -15307,7 +15307,7 @@ Q	I	mode	0	0	s "Propagate"
 Q	I	mode	1	0	s "Direct"
 I	strength	Strength	5	Slider	scalar	d 0.2	
 S	I	strength	0
-O	tree	Tree	0	struct
+O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_tree_branch	Node_MK_Tree_Branch	Branch	mk_tree	scripts/node_mk_tree_branch/node_mk_tree_branch.gml
 I	origin_position	Origin Position	1	Vec2	vector2	v 0.5 1	
 S	I	origin_position	1
@@ -15519,9 +15519,9 @@ Q	I	array_selection	1	0	s "Random"
 I	grow_delay	Grow Delay	20	Range	vector2	v 0 0	
 S	I	grow_delay	1
 A	I	grow_delay	1
-O	tree	Tree	0	struct
-O	branches	Branches	1	struct
-O	trunk	Trunk	2	struct
+O	tree	Tree	0	struct	i -4	s "noone"
+O	branches	Branches	1	struct	i -4	s "noone"
+O	trunk	Trunk	2	struct	i -4	s "noone"
 N	pc.mk_tree_branch_fan	Node_MK_Tree_Branch_Fan	Fan Branch	mk_tree	scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -15662,9 +15662,9 @@ B	I	array_selection	0	general	1	always	2
 C	I	array_selection	resolved
 Q	I	array_selection	0	0	s "Ordered"
 Q	I	array_selection	1	0	s "Random"
-O	tree	Tree	0	struct
-O	branches	Branches	1	struct
-O	trunk	Trunk	2	struct
+O	tree	Tree	0	struct	i -4	s "noone"
+O	branches	Branches	1	struct	i -4	s "noone"
+O	trunk	Trunk	2	struct	i -4	s "noone"
 N	pc.mk_tree_branch_reroot	Node_MK_Tree_Branch_Reroot	Re-Root	mk_tree	scripts/node_mk_tree_branch_reroot/node_mk_tree_branch_reroot.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -15678,11 +15678,11 @@ S	I	scatter_curved	?
 I	scatter_curve	Scatter Curve	3	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	scatter_curve	1
 A	I	scatter_curve	1
-O	branches	Branches	0	struct
+O	branches	Branches	0	struct	i -4	s "noone"
 N	pc.mk_tree_branch_to_path	Node_MK_Tree_Branch_To_Path	Branch to Path	mk_tree	scripts/node_mk_tree_branch_to_path/node_mk_tree_branch_to_path.gml
 I	branch	Branch	0	Struct	struct		
 S	I	branch	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.mk_tree_branch_trim	Node_MK_Tree_Branch_Trim	Trim Branch	mk_tree	scripts/node_mk_tree_branch_trim/node_mk_tree_branch_trim.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -15692,7 +15692,7 @@ I	mask	Mask	2	Surface	image
 S	I	mask	0
 I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0	
 S	I	mask_alpha_only	?
-O	branch	Branch	0	struct
+O	branch	Branch	0	struct	i -4	s "noone"
 N	pc.mk_tree_bush	Node_MK_Tree_Bush	Bush	mk_tree	scripts/node_mk_tree_bush/node_mk_tree_bush.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -15719,7 +15719,7 @@ I	sampler	Sampler	5	Surface	image
 S	I	sampler	0
 I	rotation	Rotation	7	Rot	scalar	d 90	
 S	I	rotation	0
-O	bush	Bush	0	struct
+O	bush	Bush	0	struct	i -4	s "noone"
 N	pc.mk_tree_ground_branch	Node_MK_Tree_Ground_Branch	Ground Branch	mk_tree	scripts/node_mk_tree_ground_branch/node_mk_tree_ground_branch.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -15744,7 +15744,7 @@ A	I	range	1
 I	thickness	Thickness	5	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	I	thickness	1
 A	I	thickness	1
-O	branches	Branches	0	struct
+O	branches	Branches	0	struct	i -4	s "noone"
 N	pc.mk_tree_grow	Node_MK_Tree_Grow	Grow Tree	mk_tree	scripts/node_mk_tree_grow/node_mk_tree_grow.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -15777,7 +15777,7 @@ S	I	whorled_delay_curved	?
 I	whorled_delay_falloff	Whorled Delay Falloff	9	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	I	whorled_delay_falloff	1
 A	I	whorled_delay_falloff	1
-O	tree	Tree	0	struct
+O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_tree_inline	Node_MK_Tree_Inline	MK Tree	generate	scripts/node_mk_tree_inline/node_mk_tree_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -16022,8 +16022,8 @@ S	I	top_edge_color_map	0
 I	grow_delay	Grow Delay	22	Range	vector2	v 0 0	
 S	I	grow_delay	1
 A	I	grow_delay	1
-O	branches	Branches	0	struct
-O	leaves	Leaves	1	struct
+O	branches	Branches	0	struct	i -4	s "noone"
+O	leaves	Leaves	1	struct	i -4	s "noone"
 N	pc.mk_tree_leaf_hull	Node_MK_Tree_Leaf_Hull	Leaves Hull	mk_tree	scripts/node_mk_tree_leaf_hull/node_mk_tree_leaf_hull.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -16060,8 +16060,8 @@ I	random_leaf_map	Random Leaf Map	10	Surface	image
 S	I	random_leaf_map	0
 I	along_leaf	Along Leaf	11	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	along_leaf	0
-O	branches	Branches	0	struct
-O	leaves	Leaves	1	struct
+O	branches	Branches	0	struct	i -4	s "noone"
+O	leaves	Leaves	1	struct	i -4	s "noone"
 N	pc.mk_tree_leaf_particle	Node_MK_Tree_Leaf_Particle	Leaves Particle	mk_tree	scripts/node_mk_tree_leaf_particle/node_mk_tree_leaf_particle.gml
 I	active	Active	18	Bool	boolean	b 1	
 S	I	active	0
@@ -16120,11 +16120,11 @@ S	I	ground	0
 I	ground_range	Ground Range	9	Range	vector2	v 0.9 1	
 S	I	ground_range	1
 A	I	ground_range	1
-O	leaves	Leaves	0	struct
+O	leaves	Leaves	0	struct	i -4	s "noone"
 N	pc.mk_tree_leaf_to_points	Node_MK_Tree_Leaf_to_Points	Leaves to Points	mk_tree	scripts/node_mk_tree_leaf_to_points/node_mk_tree_leaf_to_points.gml
 I	leaves	Leaves	0	Struct	struct		
 S	I	leaves	0
-O	points	Points	0	array
+O	points	Points	0	array	a any 0	s "[]"
 N	pc.mk_tree_path_root	Node_MK_Tree_Path_Root	Trunk Path	mk_tree	scripts/node_mk_tree_root_path/node_mk_tree_root_path.gml
 I	seed	Seed	0	Seed	scalar		
 S	I	seed	0
@@ -16215,7 +16215,7 @@ B	I	array_selection	0	general	1	always	2
 C	I	array_selection	resolved
 Q	I	array_selection	0	0	s "Ordered"
 Q	I	array_selection	1	0	s "Random"
-O	trunk	Trunk	0	struct
+O	trunk	Trunk	0	struct	i -4	s "noone"
 N	pc.mk_tree_render	Node_MK_Tree_Render	Render Tree	mk_tree	scripts/node_mk_tree_render/node_mk_tree_render.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16271,7 +16271,7 @@ I	chance	Chance	8	Slider	scalar	d 0.5
 S	I	chance	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_tree_repulse	Node_MK_Tree_Repulse	Repulse Branch	mk_tree	scripts/node_mk_tree_repulse/node_mk_tree_repulse.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -16295,7 +16295,7 @@ Q	I	mode	0	0	s "Propagate"
 Q	I	mode	1	0	s "Direct"
 I	strength	Strength	5	Slider	scalar	d 0.2	
 S	I	strength	0
-O	tree	Tree	0	struct
+O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_tree_root	Node_MK_Tree_Root	Trunk	mk_tree	scripts/node_mk_tree_root/node_mk_tree_root.gml
 I	origin_ratio	Origin Ratio	8	Vec2	vector2	v 0.5 1	
 S	I	origin_ratio	1
@@ -16462,7 +16462,7 @@ B	I	array_selection	0	general	1	always	2
 C	I	array_selection	resolved
 Q	I	array_selection	0	0	s "Ordered"
 Q	I	array_selection	1	0	s "Random"
-O	trunk	Trunk	0	struct
+O	trunk	Trunk	0	struct	i -4	s "noone"
 N	pc.mk_tree_smoothen_branch	Node_MK_Tree_Smoothen_Branch	Smoothen Branch	mk_tree	scripts/node_mk_tree_smoothen_branch/node_mk_tree_smoothen_branch.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -16470,7 +16470,7 @@ I	branch	Branch	0	Struct	struct
 S	I	branch	0
 I	smoothness	Smoothness	2	Int	integer	i 1	
 S	I	smoothness	0
-O	branches	Branches	0	struct
+O	branches	Branches	0	struct	i -4	s "noone"
 N	pc.mk_tree_spiral_branch	Node_MK_Tree_Spiral_Branch	Spiral Branch	mk_tree	scripts/node_mk_tree_spiral_branch/node_mk_tree_spiral_branch.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -16519,7 +16519,7 @@ C	I	flip	resolved
 Q	I	flip	0	0	s "None"
 Q	I	flip	1	0	s "Random"
 Q	I	flip	2	0	s "Starting Angle"
-O	branches	Branches	0	struct
+O	branches	Branches	0	struct	i -4	s "noone"
 N	pc.mk_tree_subdivide_branch	Node_MK_Tree_Subdivide_Branch	Subdivide Branch	mk_tree	scripts/node_mk_tree_subdivide_branch/node_mk_tree_subdivide_branch.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -16527,7 +16527,7 @@ I	branch	Branch	0	Struct	struct
 S	I	branch	0
 I	subdivision	Subdivision	2	Int	integer	i 1	
 S	I	subdivision	0
-O	branches	Branches	0	struct
+O	branches	Branches	0	struct	i -4	s "noone"
 N	pc.mk_tree_wave_branch	Node_MK_Tree_Wave_Branch	Wave Branch	mk_tree	scripts/node_mk_tree_wave_branch/node_mk_tree_wave_branch.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -16575,7 +16575,7 @@ A	I	amplitude_curve	1
 I	phase	Phase	5	RotRange	vector2		
 S	I	phase	1
 A	I	phase	1
-O	branches	Branches	0	struct
+O	branches	Branches	0	struct	i -4	s "noone"
 N	pc.mk_tree_wiggle	Node_MK_Tree_Wiggle	Wiggle Branch	mk_tree	scripts/node_mk_tree_wiggle/node_mk_tree_wiggle.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -16618,7 +16618,7 @@ A	I	strength	1
 I	direction	Direction	3	RotRand	array	a scalar 5 d 0 d 0 d 360 d 0 d 0	
 S	I	direction	1
 A	I	direction	1
-O	tree	Tree	0	struct
+O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_tree_wiggle_leaf	Node_MK_Tree_Wiggle_Leaf	Wiggle Leaves	mk_tree	scripts/node_mk_tree_wiggle_leaf/node_mk_tree_wiggle_leaf.gml
 I	seed	Seed	1	Seed	scalar		
 S	I	seed	0
@@ -16661,7 +16661,7 @@ A	I	strength	1
 I	direction	Direction	3	RotRand	array	a scalar 5 d 0 d 0 d 360 d 0 d 0	
 S	I	direction	1
 A	I	direction	1
-O	tree	Tree	0	struct
+O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_wire_frame	Node_MK_WireFrame	MK WireFrame	generate	scripts/node_mk_wireframe/node_mk_wireframe.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16709,7 +16709,7 @@ I	shift_2	Shift	14	Slider	scalar	d 0
 S	I	shift_2	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.markov	Node_Markov	Markov	generate	scripts/node_markov/node_markov.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16776,7 +16776,7 @@ I	reverse_order	Reverse Order	16	Bool	boolean	b 0
 S	I	reverse_order	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.markov_gradient	Node_Markov_Gradient	Markov Gradient	generate	scripts/node_markov_gradient/node_markov_gradient.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16801,7 +16801,7 @@ I	replace_chance_map	Replace Chance Map	6	Surface	image
 S	I	replace_chance_map	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.math	Node_Math	Math	values	scripts/node_math/node_math.gml
 I	type	Type	0	EScroll	enum	e 0	Add;Subtract;Multiply;Divide;Power;Root;Sin;Cos;Tan;Modulo;Floor;Ceil;Round;Lerp;Abs;Clamp;Snap;Fract;Map;Log;Max;Min
 S	I	type	0
@@ -16851,7 +16851,7 @@ I	to_integer	To Integer	4	Bool	boolean	b 0
 S	I	to_integer	0
 I	output_vector	Output Vector	8	Bool	boolean	b 0	
 S	I	output_vector	0
-O	result	Result	0	scalar
+O	result	Result	0	scalar	d 0	s "0"
 N	pc.matrix	Node_Matrix	Matrix	values	scripts/node_matrix/node_matrix.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16863,7 +16863,7 @@ S	I	data	1
 A	I	data	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_color_apply	Node_Matrix_Color_Apply	Matrix Color Apply	values	scripts/node_matrix_color_apply/node_matrix_color_apply.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16892,7 +16892,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.matrix_crop	Node_Matrix_Crop	Matrix Crop	values	scripts/node_matrix_crop/node_matrix_crop.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16914,7 +16914,7 @@ Q	I	overflow	1	0	s "Repeat"
 Q	I	overflow	2	0	s "Clamp"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_det	Node_Matrix_Det	Matrix Determinant	values	scripts/node_matrix_det/node_matrix_det.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16923,7 +16923,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	determinant	Determinant	0	scalar
+O	determinant	Determinant	0	scalar	d 0	s "0"
 N	pc.matrix_eigen	Node_Matrix_Eigen	Matrix Eigen	values	scripts/node_matrix_eigen/node_matrix_eigen.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16932,8 +16932,8 @@ S	I	matrix	1
 A	I	matrix	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	eigenvector	Eigenvector	0	array
-O	eigenvalue	Eigenvalue	1	scalar
+O	eigenvector	Eigenvector	0	array	a any 0	s "[]"
+O	eigenvalue	Eigenvalue	1	scalar	d 0	s "0"
 N	pc.matrix_get	Node_Matrix_Get	Matrix Get	values	scripts/node_matrix_get/node_matrix_get.gml
 I	matrix	Matrix	0	Matrix	matrix		
 S	I	matrix	1
@@ -16941,7 +16941,7 @@ A	I	matrix	1
 I	position	Position	1	IVec2	vector2	v 0 0	
 S	I	position	1
 A	I	position	1
-O	output	Output	0	scalar
+O	output	Output	0	scalar	d 0	s "0"
 N	pc.matrix_get_vector	Node_Matrix_Get_Vector	Matrix Get Vector	values	scripts/node_matrix_get_vector/node_matrix_get_vector.gml
 I	matrix	Matrix	0	Matrix	matrix		
 S	I	matrix	1
@@ -16956,7 +16956,7 @@ Q	I	direction	2	0	s "Diagonal"
 Q	I	direction	3	0	s "Inv. Diagonal"
 I	position	Position	2	Int	integer	i 0	
 S	I	position	0
-O	matrix	Matrix	0	array
+O	matrix	Matrix	0	array	a any 0	s "[]"
 N	pc.matrix_identity	Node_Matrix_Identity	Identity Matrix	values	scripts/node_matrix_identity/node_matrix_identity.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16964,7 +16964,7 @@ I	size	Size	0	Int	integer	i 3
 S	I	size	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_invert	Node_Matrix_Invert	Matrix Invert	values	scripts/node_matrix_invert/node_matrix_invert.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16973,7 +16973,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_math	Node_Matrix_Math	Matrix Math	values	scripts/node_matrix_math/node_matrix_math.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -16997,7 +16997,7 @@ I	scala	Scala	3	Float	scalar	d 0
 S	I	scala	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_multiply_vector	Node_Matrix_Multiply_Vector	Matrix Multiply Vector	values	scripts/node_matrix_multiply_vector/node_matrix_multiply_vector.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17009,7 +17009,7 @@ S	I	vector	0
 A	I	vector	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	vector	Vector	0	array
+O	vector	Vector	0	array	a any 0	s "[]"
 N	pc.matrix_projection	Node_Matrix_Projection	Projection Matrix	values	scripts/node_matrix_projection/node_matrix_projection.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17033,7 +17033,7 @@ S	I	clipping	1
 A	I	clipping	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(4)"
 N	pc.matrix_set	Node_Matrix_Set	Matrix Set	values	scripts/node_matrix_set/node_matrix_set.gml
 I	matrix	Matrix	0	Matrix	matrix		
 S	I	matrix	1
@@ -17043,7 +17043,7 @@ S	I	position	1
 A	I	position	1
 I	value	Value	2	Float	scalar	d 0	
 S	I	value	0
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_set_vector	Node_Matrix_Set_Vector	Matrix Set Vector	values	scripts/node_matric_set_vector/node_matric_set_vector.gml
 I	matrix	Matrix	0	Matrix	matrix		
 S	I	matrix	1
@@ -17061,7 +17061,7 @@ S	I	position	0
 I	vector	Vector	3	Float	array	a scalar 0	
 S	I	vector	0
 A	I	vector	1
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_to_array	Node_Matrix_To_Array	Matrix to Array	values	scripts/node_matrix_to_array/node_matrix_to_array.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17070,7 +17070,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	array	Array	0	array
+O	array	Array	0	array	a any 0	s "[]"
 N	pc.matrix_transform_2_d	Node_Matrix_Transform_2D	2D Transform Matrix	values	scripts/node_matrix_transform_2d/node_matrix_transform_2d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17086,7 +17086,7 @@ S	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_transform_3_d	Node_Matrix_Transform_3D	3D Transform Matrix	values	scripts/node_matrix_transform_3d/node_matrix_transform_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17103,7 +17103,7 @@ S	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.matrix_transpose	Node_Matrix_Transpose	Matrix Transpose	values	scripts/node_matrix_tranpose/node_matrix_tranpose.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17112,7 +17112,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	matrix	Matrix	0	matrix
+O	matrix	Matrix	0	matrix		s "new Matrix(3)"
 N	pc.maze_pattern	Node_Maze_Pattern	Maze Pattern	generate	scripts/node_maze_pattern/node_maze_pattern.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17159,7 +17159,7 @@ I	path_iteration	Path Iteration	8	Int	integer	i 100
 S	I	path_iteration	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mesh_create_lattice	Node_Mesh_Create_Lattice	Lattice Mesh	values	scripts/node_mesh_create_lattice/node_mesh_create_lattice.gml
 I	area	Area	0	Area	area	r 0.5 0.5 0.5 0.5 0 0	
 S	I	area	1
@@ -17171,7 +17171,7 @@ S	I	sample	1
 A	I	sample	1
 I	quad	Quad	2	Bool	boolean	b 0	
 S	I	quad	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.mesh_create_path	Node_Mesh_Create_Path	Path to Mesh	values	scripts/node_mesh_create_path/node_mesh_create_path.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -17184,7 +17184,7 @@ C	I	algorithm	resolved
 Q	I	algorithm	0	0	s "Ear Clipping"
 Q	I	algorithm	1	0	s "Convex Fan"
 Q	I	algorithm	2	0	s "Delaunay"
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.mesh_transform	Node_Mesh_Transform	Mesh Transform	values	scripts/node_mesh_transform/node_mesh_transform.gml
 I	mesh	Mesh	0	Mesh	mesh2d		
 S	I	mesh	0
@@ -17199,7 +17199,7 @@ A	I	scale	1
 I	anchor	Anchor	4	Vec2	vector2	v 0 0	
 S	I	anchor	1
 A	I	anchor	1
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.mesh_warp	Node_Mesh_Warp	Mesh Warp	transform	scripts/node_mesh_warp/node_mesh_warp.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17246,8 +17246,8 @@ D	11	1
 T	control_point	Control point	0	Puppet	struct		
 S	T	control_point	1
 A	T	control_point	1
-O	surface_out	Surface Out	0	image
-O	mesh_data	Mesh data	1	mesh2d
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	mesh_data	Mesh data	1	mesh2d		s "new Mesh()"
 N	pc.mirror	Node_Mirror	Mirror	filter	scripts/node_mirror/node_mirror.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17282,8 +17282,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	mirror_mask	Mirror Mask	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	mirror_mask	Mirror Mask	1	image	i -4	s "noone"
 N	pc.mirror_path	Node_Mirror_Path	Mirror Path	transform	scripts/node_mirror_path/node_mirror_path.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17324,7 +17324,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mirror_polar	Node_Mirror_Polar	Polar Mirror	filter	scripts/node_mirror_polar/node_mirror_polar.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17393,7 +17393,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.monitor_capture	Node_Monitor_Capture	Monitor Capture	misc	scripts/node_monitor_capture/node_monitor_capture.gml
 I	mode	Mode	0	EScroll	enum	e 0	Monitor;Region
 S	I	mode	0
@@ -17408,7 +17408,7 @@ C	I	monitor	unknown
 I	region	Region	2	Vec4	vector4		
 S	I	region	1
 A	I	region	1
-O	gui	GUI	0	image
+O	gui	GUI	0	image	i -4	s "noone"
 N	pc.morph_surface	Node_Morph_Surface	Morph Surface	filter	scripts/node_morph_surface/node_morph_surface.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17428,7 +17428,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.move_point	Node_Move_Point	Transform Point	values	scripts/node_move_point/node_move_point.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17450,7 +17450,7 @@ S	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	vector2
+O	result	Result	0	vector2	v 0 0	s "[ 0, 0 ]"
 N	pc.multiply_alpha	Node_Multiply_Alpha	Multiply Alpha	filter	scripts/node_multiply_alpha/node_multiply_alpha.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17478,7 +17478,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise	Node_Noise	Noise	generate	scripts/node_noise/node_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17523,7 +17523,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_aniso	Node_Noise_Aniso	Anisotropic Noise	generate	scripts/node_noise_aniso/node_noise_aniso.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17591,7 +17591,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_blue	Node_Noise_Blue	Blue Noise	generate	scripts/node_noise_blue/node_noise_blue.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -17616,7 +17616,7 @@ I	sigma	Sigma	5	Float	scalar	d 1.9
 S	I	sigma	0
 I	patch_size	Patch Size	7	Int	integer	i 32	
 S	I	patch_size	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_bubble	Node_Noise_Bubble	Bubble Noise	generate	scripts/node_noise_bubble/node_noise_bubble.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17667,7 +17667,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_cristal	Node_Noise_Cristal	Cristal Noise	generate	scripts/node_noise_cristal/node_noise_cristal.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17712,7 +17712,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_gaussian	Node_Noise_Gaussian	Gaussian Noise	generate	scripts/node_noise_gaussian/node_noise_gaussian.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17751,7 +17751,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_scratch	Node_Noise_Scratch	Scratch Noise	generate	scripts/node_noise_scratch/node_noise_scratch.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17817,7 +17817,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_simplex	Node_Noise_Simplex	Simplex Noise	generate	scripts/node_noise_simplex/node_noise_simplex.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17894,7 +17894,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_strand	Node_Noise_Strand	Strand Noise	generate	scripts/node_noise_strand/node_noise_strand.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -17957,7 +17957,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.normal	Node_Normal	Normal	3d	scripts/node_normal/node_normal.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18001,7 +18001,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.normal_adjust	Node_Normal_Adjust	Adjust Normal	3d	scripts/node_normal_adjust/node_normal_adjust.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18030,7 +18030,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.normal_blend	Node_Normal_Blend	Blend Normal	3d	scripts/node_normal_blend/node_normal_blend.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18087,7 +18087,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.normal_light	Node_Normal_Light	Normal Light	3d	scripts/node_normal_light/node_normal_light.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18151,8 +18151,8 @@ T	radial_shadow	Radial Shadow	15	Slider	scalar	d 0
 S	T	radial_shadow	0
 T	banding	Banding	14	ISlider	integer	i 0	
 S	T	banding	0
-O	surface_out	Surface Out	0	image
-O	light_only	Light Only	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	light_only	Light Only	1	image	i -4	s "noone"
 N	pc.normal_to_height	Node_Normal_to_Height	Normal to Height	3d	scripts/node_normal_to_height/node_normal_to_height.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18170,7 +18170,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.normalize	Node_Normalize	Normalize	filter	scripts/node_normalize/node_normalize.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18194,7 +18194,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.number	Node_Number	Number	values	scripts/node_number/node_number.gml
 I	value	Value	0	Float	scalar	d 0	
 S	I	value	0
@@ -18270,11 +18270,11 @@ I	show_label	Show Label	17	Bool	boolean	b 0
 S	I	show_label	0
 I	label	Label	18	Text	text	s "Value"	
 S	I	label	0
-O	number	Number	0	scalar
+O	number	Number	0	scalar	d 0	s "0"
 N	pc.number_simple	Node_Number_Simple	Number Simple	values	scripts/node_number_simple/node_number_simple.gml
 I	value	Value	0	Float	scalar	d 0	
 S	I	value	0
-O	number	Number	0	scalar
+O	number	Number	0	scalar	d 0	s "0"
 N	pc.number_text_format	Node_Number_Text_Format	Format Number	values	scripts/node_number_text_format/node_number_text_format.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18302,20 +18302,20 @@ I	suffix	Suffix	10	Text	text	s ""
 S	I	suffix	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.ora_file_read	Node_ORA_File_Read	ORA File In	io	scripts/node_ora_file_read/node_ora_file_read.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
-O	merged_image	Merged Image	0	image
-O	content	Content	1	object
-O	path	Path	2	text
+O	merged_image	Merged Image	0	image	i -4	s "noone"
+O	content	Content	1	object	i -4	s "noone"
+O	path	Path	2	text	s ""	s "\"\""
 N	pc.ora_layer	Node_ORA_layer	ORA Layer	io	scripts/node_ora_layer/node_ora_layer.gml
 I	data	Data	0	Generic_object	object		
 S	I	data	0
 I	layer_name	Layer name	1	Text	text	s ""	
 S	I	layer_name	0
-O	surface_out	Surface Out	0	image
-O	layer_name	Layer name	1	text
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	layer_name	Layer name	1	text	s ""	s "\"\""
 N	pc.offset	Node_Offset	Offset	transform	scripts/node_offset/node_offset.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18343,7 +18343,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.outline	Node_Outline	Outline	filter	scripts/node_outline/node_outline.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18439,8 +18439,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	outline	Outline	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	outline	Outline	1	image	i -4	s "noone"
 N	pc.override_channel	Node_Override_Channel	Override Channel	filter	scripts/node_override_channel/node_override_channel.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18464,7 +18464,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pb_box	Node_PB_Box	PB Box	pixel_builder	scripts/node_pb_box/node_pb_box.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18486,7 +18486,7 @@ I	pbbox_height	PBbox Height	7	Float	scalar	d 0
 S	I	pbbox_height	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	pbbox	PBbox	0	pixel_box
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
 N	pc.pb_box_bbox	Node_PB_Box_BBOX	PBBOX Convert	pixel_builder	scripts/node_pb_box_bbox/node_pb_box_bbox.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18494,11 +18494,11 @@ I	pbbox	PBbox	0	Pbbox	pixel_box
 S	I	pbbox	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	bbox	BBOX	0	vector4
-O	area	Area	1	array
-O	width	Width	2	scalar
-O	height	Height	3	scalar
-O	dimension	Dimension	4	vector2
+O	bbox	BBOX	0	vector4	w 0 0 0 0	s "[0,0,0,0]"
+O	area	Area	1	array	a any 5 d 0 d 0 d 0 d 0 d 0	s "[0,0,0,0,0]"
+O	width	Width	2	scalar	d 0	s "0"
+O	height	Height	3	scalar	d 0	s "0"
+O	dimension	Dimension	4	vector2	v 0 0	s "[0,0]"
 N	pc.pb_box_mirror	Node_PB_Box_Mirror	PBBox Mirror	pixel_builder	scripts/node_pb_box_mirror/node_pb_box_mirror.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18510,7 +18510,7 @@ I	axis	Axis	2	Toggle	integer	i 0
 S	I	axis	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	pbbox	PBbox	0	pixel_box
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
 N	pc.pb_box_point	Node_PB_Box_Point	PBBOX Get Point	pixel_builder	scripts/node_pb_box_point/node_pb_box_point.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18526,7 +18526,7 @@ I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	point	Point	0	vector2
+O	point	Point	0	vector2	v 0 0	s "[0,0]"
 N	pc.pb_box_split	Node_PB_Box_Split	PBBox Split	pixel_builder	scripts/node_pb_box_split/node_pb_box_split.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18556,8 +18556,8 @@ I	size	Size	5	Int	integer	i 4
 S	I	size	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	pbbox	PBbox	0	pixel_box
-O	pbbox_2	PBbox	1	pixel_box
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	pbbox_2	PBbox	1	pixel_box	i -4	s "noone"
 N	pc.pb_crop_pbbox	Node_PB_Crop_PBBOX	Crop PBBOX	pixel_builder	scripts/node_pb_crop_pbbox/node_pb_crop_pbbox.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18567,11 +18567,11 @@ I	pbbox	PBbox	1	Pbbox	pixel_box
 S	I	pbbox	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.pb_dimension	Node_PB_Dimension	Dimension	pixel_builder	scripts/node_pb_dimension/node_pb_dimension.gml
-O	dimension	Dimension	0	vector2
-O	width	Width	1	scalar
-O	height	Height	2	scalar
+O	dimension	Dimension	0	vector2	v 1 1	s "[1,1]"
+O	width	Width	1	scalar	d 1	s "1"
+O	height	Height	2	scalar	d 1	s "1"
 N	pc.pb_draw_curve	Node_PB_Draw_Curve	Curve	pixel_builder	scripts/node_pb_draw_line_curve/node_pb_draw_line_curve.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18724,8 +18724,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_diamond	Node_PB_Draw_Diamond	Diamond	pixel_builder	scripts/node_pb_draw_diamond/node_pb_draw_diamond.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -18872,8 +18872,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_ellipse	Node_PB_Draw_Ellipse	Ellipse	pixel_builder	scripts/node_pb_draw_ellipse/node_pb_draw_ellipse.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -19014,8 +19014,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_line	Node_PB_Draw_Line	Line	pixel_builder	scripts/node_pb_draw_line/node_pb_draw_line.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -19164,8 +19164,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_pie	Node_PB_Draw_Pie	Pie	pixel_builder	scripts/node_pb_draw_pie/node_pb_draw_pie.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -19310,8 +19310,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_polygon	Node_PB_Draw_Polygon	Polygon	pixel_builder	scripts/node_pb_draw_polygon/node_pb_draw_polygon.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -19456,8 +19456,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_quadrilateral	Node_PB_Draw_Quadrilateral	Quadrilateral	pixel_builder	scripts/node_pb_draw_quadri/node_pb_draw_quadri.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -19610,8 +19610,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_rectangle	Node_PB_Draw_Rectangle	Rectangle	pixel_builder	scripts/node_pb_draw_rectangle/node_pb_draw_rectangle.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -19752,8 +19752,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_round_rectangle	Node_PB_Draw_Round_Rectangle	Round Rectangle	pixel_builder	scripts/node_pb_draw_round_rectangle/node_pb_draw_round_rectangle.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -19905,8 +19905,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_star	Node_PB_Draw_Star	Star	pixel_builder	scripts/node_pb_draw_star/node_pb_draw_star.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20061,8 +20061,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_surface	Node_PB_Draw_Surface	PB Draw Surface	pixel_builder	scripts/node_pb_draw_surface/node_pb_draw_surface.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20088,7 +20088,7 @@ I	crop	Crop	9	Bool	boolean
 S	I	crop	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.pb_draw_trapezoid	Node_PB_Draw_Trapezoid	Trapezoid	pixel_builder	scripts/node_pb_draw_trapezoid/node_pb_draw_trapezoid.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20239,8 +20239,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_draw_triangle	Node_PB_Draw_Triangle	Triangle	pixel_builder	scripts/node_pb_draw_triangle/node_pb_draw_triangle.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20395,8 +20395,8 @@ Q	T	axis	0	0	s "X"
 Q	T	axis	1	0	s "Y"
 T	seed	Seed	25	Float	scalar		
 S	T	seed	?
-O	pbbox	PBbox	0	pixel_box
-O	surface_out	Surface Out	1	image
+O	pbbox	PBbox	0	pixel_box	i -4	s "noone"
+O	surface_out	Surface Out	1	image	i -4	s "noone"
 N	pc.pb_fx_bevel	Node_PB_FX_Bevel	Pixel Bevel	3d	scripts/node_pb_filter_bevel/node_pb_filter_bevel.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20424,8 +20424,8 @@ I	highlight_all	Highlight All	8	Bool	boolean	b 0
 S	I	highlight_all	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	inner_area	Inner Area	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	inner_area	Inner Area	1	image	i -4	s "noone"
 N	pc.pb_fx_extrude	Node_PB_FX_Extrude	Extrude	pixel_builder	scripts/node_pb_filter_extrude/node_pb_filter_extrude.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20459,7 +20459,7 @@ I	highlight_direction	Highlight Direction	7	Rotation	scalar	d 0
 S	I	highlight_direction	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pb_fx_highlight	Node_PB_FX_Highlight	Highlight	pixel_builder	scripts/node_pb_filter_highlight/node_pb_filter_highlight.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20478,7 +20478,7 @@ I	color_bottom	Color Bottom	5	Color	colour	c 255 255 255 255
 S	I	color_bottom	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pb_fx_shine	Node_PB_FX_Shine	Shine	filter	scripts/node_pd_filter_shine/node_pd_filter_shine.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20535,8 +20535,8 @@ I	keep_alpha	Keep Alpha	16	Bool	boolean	b 0
 S	I	keep_alpha	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	mask	Mask	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	mask	Mask	1	image	i -4	s "noone"
 N	pc.pb_filter_mirror	Node_PB_Filter_Mirror	PB Mirror	pixel_builder	scripts/node_pb_filter_mirror/node_pb_filter_mirror.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20548,7 +20548,7 @@ I	axis	Axis	2	Toggle	integer	i 0
 S	I	axis	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pb_filter_polar	Node_PB_Filter_Polar	PB Polar	pixel_builder	scripts/node_pb_filter_polar/node_pb_filter_polar.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20560,7 +20560,7 @@ I	copies	Copies	2	Int	integer	i 4
 S	I	copies	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pb_output	Node_PB_Output	PB Output	pixel_builder	scripts/node_pb_output/node_pb_output.gml
 I	active	Active	3	Active	boolean	b 1	
 S	I	active	0
@@ -20579,7 +20579,7 @@ I	array	Array	0	Generic_PCXnode	pcx_node
 S	I	array	0
 I	index	Index	1	Generic_PCXnode	pcx_node		
 S	I	index	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pcx_array_set	Node_PCX_Array_Set	Array Set	pcx	scripts/node_PCX_array_set/node_PCX_array_set.gml
 I	array	Array	0	Generic_PCXnode	pcx_node		
 S	I	array	0
@@ -20587,7 +20587,7 @@ I	index	Index	1	Generic_PCXnode	pcx_node
 S	I	index	0
 I	value	Value	2	Generic_PCXnode	pcx_node		
 S	I	value	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pcx_condition	Node_PCX_Condition	Condition	pcx	scripts/node_PCX_condition/node_PCX_condition.gml
 I	condition	Condition	0	Generic_PCXnode	pcx_node		
 S	I	condition	0
@@ -20595,7 +20595,7 @@ I	true	True	1	Generic_PCXnode	pcx_node
 S	I	true	0
 I	false	False	2	Generic_PCXnode	pcx_node		
 S	I	false	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pcx_equation	Node_PCX_Equation	Equation	pcx	scripts/node_PCX_equation/node_PCX_equation.gml
 I	equation	Equation	0	Text	text	s ""	
 S	I	equation	0
@@ -20604,7 +20604,7 @@ T	argument_name	Argument name	0	Text	text	s ""
 S	T	argument_name	0
 T	argument_value	Argument value	1	Generic_PCXnode	pcx_node		
 S	T	argument_value	0
-O	result	Result	0	pcx_node
+O	result	Result	0	pcx_node	i -4	s "noone"
 N	pc.pcx_fn_math	Node_PCX_fn_Math	Math	pcx	scripts/node_PCX_fn_math/node_PCX_fn_math.gml
 I	operator	Operator	0	EScroll	enum	e 0	Add;Subtract;Multiply;Divide;Power;Modulo;Absolute;Round;Floor;Ceil;Sin;Cos;Tan;Arcsin;Arccos;Arctan;Min;Max;Clamp;Lerp
 S	I	operator	0
@@ -20640,7 +20640,7 @@ I	y	y	2	Generic_PCXnode	pcx_node
 S	I	y	0
 I	z	z	3	Generic_PCXnode	pcx_node		
 S	I	z	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pcx_fn_random	Node_PCX_fn_Random	Random	pcx	scripts/node_PCX_fn_random/node_PCX_fn_random.gml
 I	min	Min	0	Generic_PCXnode	pcx_node		
 S	I	min	0
@@ -20648,25 +20648,25 @@ I	max	Max	1	Generic_PCXnode	pcx_node
 S	I	max	0
 I	integer	Integer	2	Bool	boolean	b 0	
 S	I	integer	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pcx_fn_surface_height	Node_PCX_fn_Surface_Height	Surface Height	pcx	scripts/node_PCX_fn_surface_height/node_PCX_fn_surface_height.gml
 I	surface	Surface	0	Generic_PCXnode	pcx_node		
 S	I	surface	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pcx_fn_surface_width	Node_PCX_fn_Surface_Width	Surface Width	pcx	scripts/node_PCX_fn_surface_width/node_PCX_fn_surface_width.gml
 I	surface	Surface	0	Generic_PCXnode	pcx_node		
 S	I	surface	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pcx_fn_var	Node_PCX_fn_var	Fn Variable	pcx	scripts/node_PCX_fn_var/node_PCX_fn_var.gml
 I	default_value	Default Value	0	Generic_any	any		
 S	I	default_value	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pcx_var	Node_PCX_var	Variable	pcx	scripts/node_PCX_var/node_PCX_var.gml
 I	name	Name	0	Text	text	s ""	
 S	I	name	0
 I	value	Value	1	Generic_any	any		
 S	I	value	0
-O	pcx	PCX	0	pcx_node
+O	pcx	PCX	0	pcx_node	i -4	s "noone"
 N	pc.pxc	Node_PXC	PXC	io	scripts/node_pxc/node_pxc.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -20691,8 +20691,8 @@ S	I	fractional_frame	0
 I	attribute_project_length	attribute project_length	-1	Float	scalar	d 0	
 S	I	attribute_project_length	0
 D	7	1
-O	export_output	Export Output	0	image
-O	path	Path	1	text
+O	export_output	Export Output	0	image	i -4	s "noone"
+O	path	Path	1	text	s ""	s "\"\""
 N	pc.pack_sprites	Node_Pack_Sprites	Pack Sprites	compose	scripts/node_pack_sprites/node_pack_sprites.gml
 I	sprites	Sprites	0	Surface	image		
 S	I	sprites	0
@@ -20710,8 +20710,8 @@ I	max_width	Max Width	2	Int	integer	i 128
 S	I	max_width	0
 I	max_height	Max Height	3	Int	integer	i 128	
 S	I	max_height	0
-O	packed_image	Packed Image	0	image
-O	atlas_data	Atlas Data	1	atlas
+O	packed_image	Packed Image	0	image	i -4	s "noone"
+O	atlas_data	Atlas Data	1	atlas	a any 0	s "[]"
 N	pc.padding	Node_Padding	Padding	transform	scripts/node_padding/node_padding.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20756,7 +20756,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.padding_data	Node_Padding_Data	Padding Data	values	scripts/node_padding_data/node_padding_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20774,7 +20774,7 @@ I	bottom	Bottom	3	Float	scalar	d 0
 S	I	bottom	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	padding	Padding	0	vector4
+O	padding	Padding	0	vector4	w 0 0 0 0	s "[ 0, 0, 0, 0 ]"
 N	pc.palette	Node_Palette	Palette	color	scripts/node_palette/node_palette.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20786,7 +20786,7 @@ S	I	trim_range	1
 A	I	trim_range	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	palette	Palette	0	colour
+O	palette	Palette	0	colour	a any 0	s "[]"
 N	pc.palette_extract	Node_Palette_Extract	Palette Extract	color	scripts/node_palette_extract/node_palette_extract.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20819,7 +20819,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	palette	Palette	0	colour
+O	palette	Palette	0	colour	a any 0	s "[]"
 N	pc.palette_replace	Node_Palette_Replace	Palette Replace	color	scripts/node_palette_replace/node_palette_replace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20836,7 +20836,7 @@ I	threshold	Threshold	3	Slider	scalar	d 0.1
 S	I	threshold	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	colour
+O	surface_out	Surface Out	0	colour	a any 0	s "[ ]"
 N	pc.palette_shift	Node_Palette_Shift	Palette Shift	filter	scripts/node_palette_shift/node_palette_shift.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20865,7 +20865,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.palette_shrink	Node_Palette_Shrink	Shrink Palette	color	scripts/node_palette_shrink/node_palette_shrink.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20898,7 +20898,7 @@ I	shift	Shift	6	Int	integer	i 0
 S	I	shift	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	palette	Palette	0	colour
+O	palette	Palette	0	colour	a any 0	s "[]"
 N	pc.palette_sort	Node_Palette_Sort	Sort Palette	color	scripts/node_palette_sort/node_palette_sort.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -20926,7 +20926,7 @@ I	sort_order	Sort Order	3	Text	text	s "RGB"
 S	I	sort_order	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	sorted_palette	Sorted palette	0	colour
+O	sorted_palette	Sorted palette	0	colour	a any 0	s "[]"
 N	pc.particle	Node_Particle	Particle	generate	scripts/node_particle/node_particle.gml
 I	seed	Seed	32	Seed	scalar		
 S	I	seed	0
@@ -21205,8 +21205,8 @@ I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic
 S	I	interpolate	?
 I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat XY;;Repeat X Empty Y;Repeat X Black Y;Repeat X Clamp Y;;Repeat Y Empty X;Repeat Y Black X;Repeat Y Clamp X
 S	I	oversample	?
-O	surface_out	Surface Out	0	image
-O	data	Data	1	particle
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	data	Data	1	particle	a any 0	s "[]"
 N	pc.path	Node_Path	Path	values	scripts/node_path/node_path.gml
 I	loop	Loop	1	Bool	boolean	b 0	
 S	I	loop	0
@@ -21236,10 +21236,10 @@ S	T	anchor	1
 A	T	anchor	?
 T	anchor_unit	Anchor Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	anchor_unit	?
-O	position_out	Position out	0	vector2
-O	path_data	Path data	1	path2d
-O	anchors	Anchors	2	array
-O	weights	Weights	3	array
+O	position_out	Position out	0	vector2	v 0 0	s "[0,0]"
+O	path_data	Path data	1	path2d	i -4	s "noone"
+O	anchors	Anchors	2	array	a any 0	s "[]"
+O	weights	Weights	3	array	a any 0	s "[]"
 N	pc.path_3_d	Node_Path_3D	3D Path	values	scripts/node_path_3d/node_path_3d.gml
 I	loop	Loop	1	Bool	boolean	b 0	
 S	I	loop	0
@@ -21261,9 +21261,9 @@ D	4	1
 T	anchor	Anchor	0	Path_Anchor_3D	array		
 S	T	anchor	1
 A	T	anchor	1
-O	position_out	Position out	0	vector3
-O	path_data	Path data	1	path3d
-O	anchors	Anchors	2	array
+O	position_out	Position out	0	vector3	a any 2 d 0 d 0	s "[0,0]"
+O	path_data	Path data	1	path3d		s "self"
+O	anchors	Anchors	2	array	a any 0	s "[]"
 N	pc.path_3_d_camera	Node_Path_3D_Camera	3D Path Camera	values	scripts/node_path_3d_camera/node_path_3d_camera.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21321,7 +21321,7 @@ S	I	depth_range	1
 A	I	depth_range	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rendered	Rendered	0	path3d
+O	rendered	Rendered	0	path3d		s "self"
 N	pc.path_3_d_transform	Node_Path_3D_Transform	Transform Path 3D	values	scripts/node_path_3d_transform/node_path_3d_transform.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21341,7 +21341,7 @@ S	I	anchor	1
 A	I	anchor	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path3d
+O	path	Path	0	path3d	i -4	s "noone"
 N	pc.path_anchor	Node_Path_Anchor	Path Anchor	values	scripts/node_path_anchor/node_path_anchor.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21358,12 +21358,12 @@ I	mirror_control_point	Mirror control point	3	Bool	boolean	b 1
 S	I	mirror_control_point	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	anchor	Anchor	0	array
+O	anchor	Anchor	0	array	a any 6 d 0 d 0 d 0 d 0 d 0 d 0	s "[ 0, 0, 0, 0, 0, 0 ]"
 N	pc.path_array	Node_Path_Array	Path Combine	values	scripts/node_path_array/node_path_array.gml
 D	0	1
 T	path	Path	0	Path	path2d	p 0 0 0	
 S	T	path	0
-O	combined_path	Combined Path	0	path2d
+O	combined_path	Combined Path	0	path2d		s "self"
 N	pc.path_bake	Node_Path_Bake	Bake Path	values	scripts/node_path_bake/node_path_bake.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -21381,8 +21381,8 @@ I	segment_length	Segment Length	1	Float	scalar	d 1
 S	I	segment_length	0
 I	output_amount	Output Amount	4	Int	integer	i 1	
 S	I	output_amount	0
-O	segments	Segments	0	array
-O	path	Path	1	path2d
+O	segments	Segments	0	array	a any 0	s "[]"
+O	path	Path	1	path2d	i -4	s "noone"
 N	pc.path_blend	Node_Path_Blend	Blend Path	values	scripts/node_path_blend/node_path_blend.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21402,7 +21402,7 @@ I	amount	Amount	2	Slider	scalar	d 0
 S	I	amount	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_bridge	Node_Path_Bridge	Bridge Path	values	scripts/node_path_bridge/node_path_bridge.gml
 I	seed	Seed	4	Seed	scalar		
 S	I	seed	0
@@ -21428,7 +21428,7 @@ S	I	path	0
 D	8	1
 T	path	Path	0	Path	path2d	p 0 0 0	
 S	T	path	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_builder	Node_Path_Builder	Path Builder	values	scripts/node_path_builder/node_path_builder.gml
 I	point_array	Point array	0	Float	array	a scalar 0	
 S	I	point_array	0
@@ -21439,7 +21439,7 @@ D	2	1
 T	points	Points	0	Float	array	a scalar 0	
 S	T	points	0
 A	T	points	2
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_extends	Node_Path_Extends	Path Extends	values	scripts/node_path_extends/node_path_extends.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -21451,7 +21451,7 @@ Q	I	side	0	0	s "Start"
 Q	I	side	1	0	s "End"
 I	length	Length	2	Float	scalar	d 16	
 S	I	length	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_fill	Node_Path_Fill	Fill Path	values	scripts/node_path_fill/node_path_fill.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21499,7 +21499,7 @@ I	bg_surface	BG Surface	8	Surface	image
 S	I	bg_surface	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.path_flattern	Node_Path_Flattern	Path Flatten	values	scripts/node_path_flattern/node_path_flattern.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -21510,7 +21510,7 @@ S	I	ping_pong	0
 D	3	1
 T	path	Path	0	Path	path2d	p 0 0 0	
 S	T	path	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_from_mask	Node_Path_From_Mask	Path from Mask	values	scripts/node_path_from_mask/node_path_from_mask.gml
 I	mask	Mask	0	Surface	image		
 S	I	mask	0
@@ -21522,14 +21522,14 @@ I	smoothness	Smoothness	1	Float	scalar	d 2
 S	I	smoothness	0
 I	attribute_maximum_points	attribute maximum_points	-1	Float	scalar	d 4096	
 S	I	attribute_maximum_points	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_join	Node_Path_Join	Join Path	values	scripts/node_path_join/node_path_join.gml
 D	0	2
 T	path	Path	0	Path	path2d	p 0 0 0	
 S	T	path	0
 T	reverse	Reverse	1	Bool	boolean	b 0	
 S	T	reverse	0
-O	joined_path	Joined Path	0	path2d
+O	joined_path	Joined Path	0	path2d		s "self"
 N	pc.path_l_system	Node_Path_L_System	L system	values	scripts/node_path_l_system/node_path_l_system.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21573,7 +21573,7 @@ T	name_idx	Name {_idx}	0	Text	text	s ""
 S	T	name_idx	0
 T	rule_idx	Rule {_idx}	1	Text	text	s ""	
 S	T	rule_idx	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_length	Node_Path_Length	Path Length	values	scripts/node_path_length/node_path_length.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21581,7 +21581,7 @@ I	path	Path	0	Path	path2d	p 0 0 0
 S	I	path	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	scalar
+O	surface_out	Surface Out	0	scalar	d 0	s "0"
 N	pc.path_map	Node_Path_Map	Map Path	values	scripts/node_path_map/node_path_map.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21671,7 +21671,7 @@ S	I	attribute_array_process	?
 D	24	1
 T	path	Path	0	Path	path2d	p 0 0 0	
 S	T	path	0
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.path_map_area	Node_Path_Map_Area	Remap Path	values	scripts/node_path_map_area/node_path_map_area.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21712,7 +21712,7 @@ S	I	bbox_to	1
 A	I	bbox_to	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_morph	Node_Path_Morph	Morph Path	values	scripts/node_path_morph/node_path_morph.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21738,7 +21738,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.path_offset	Node_Path_Offset	Offset Path	values	scripts/node_path_offset/node_path_offset.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21750,7 +21750,7 @@ I	clamp	Clamp	2	Bool	boolean	b 0
 S	I	clamp	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_plot	Node_Path_Plot	Plot Path	values	scripts/node_path_plot/node_path_plot.gml
 I	origin	Origin	5	Vec2	vector2		
 S	I	origin	1
@@ -21792,7 +21792,7 @@ I	3_d	3D	12	Bool	boolean	b 0
 S	I	3_d	0
 I	z_x	z(x)	11	Text	text	s ""	
 S	I	z_x	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_profile	Node_Path_Profile	Draw Path Profile	generate	scripts/node_path_profile/node_path_profile.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21849,7 +21849,7 @@ I	bg_color	BG Color	8	Color	colour	c 0 0 0 255
 S	I	bg_color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	output	Output	0	image
+O	output	Output	0	image	i -4	s "noone"
 N	pc.path_redistribute	Node_Path_Redistribute	Path Redistribute	undocumented	scripts/node_path_redistribute/node_path_redistribute.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21860,7 +21860,7 @@ S	I	curve	1
 A	I	curve	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_remap	Node_Path_Remap	Path UV Remap	values	scripts/node_path_remap/node_path_remap.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21872,7 +21872,7 @@ I	amount	Amount	2	Slider	scalar	d 1
 S	I	amount	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_repeat	Node_Path_Repeat	Repeat Path	values	scripts/node_path_repeat/node_path_repeat.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21925,7 +21925,7 @@ S	I	shift_scale	1
 A	I	shift_scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_reverse	Node_Path_Reverse	Reverse Path	values	scripts/node_path_reverse/node_path_reverse.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -21933,7 +21933,7 @@ I	path	Path	0	Path	path2d	p 0 0 0
 S	I	path	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_revolve	Node_Path_Revolve	Revolve Path	values	scripts/node_path_revolve/node_path_revolve.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22069,9 +22069,9 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rendered	Rendered	0	image
-O	start_cap	Start Cap	1	image
-O	end_cap	End Cap	2	image
+O	rendered	Rendered	0	image	i -4	s "noone"
+O	start_cap	Start Cap	1	image	i -4	s "noone"
+O	end_cap	End Cap	2	image	i -4	s "noone"
 N	pc.path_sdf	Node_Path_SDF	Path To SDF	values	scripts/node_path_sdf/node_path_sdf.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22110,7 +22110,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.path_sample	Node_Path_Sample	Sample Path	values	scripts/node_path_sample/node_path_sample.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22134,9 +22134,9 @@ I	ratio	Ratio	1	Float	scalar	d 0
 S	I	ratio	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	position	Position	0	vector2
-O	direction	Direction	1	scalar
-O	weight	Weight	2	scalar
+O	position	Position	0	vector2	v 0 0	s "[0,0]"
+O	direction	Direction	1	scalar	d 0	s "0"
+O	weight	Weight	2	scalar	d 0	s "0"
 N	pc.path_scatter	Node_Path_Scatter	Scatter Path	values	scripts/node_path_scatter/node_path_scatter.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22182,7 +22182,7 @@ S	I	scale_over_length	1
 A	I	scale_over_length	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_separate_folder	Node_Path_Separate_Folder	Separate File Path	values	scripts/node_path_separate_folder/node_path_separate_folder.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22192,8 +22192,8 @@ I	keep_extension	Keep Extension	1	Bool	boolean	b 1
 S	I	keep_extension	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	directory	Directory	0	text
-O	file_name	File Name	1	text
+O	directory	Directory	0	text	s ""	s "\"\""
+O	file_name	File Name	1	text	s ""	s "\"\""
 N	pc.path_shape	Node_Path_Shape	Shape Path	values	scripts/node_path_shape/node_path_shape.gml
 I	position	Position	0	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
@@ -22252,7 +22252,7 @@ S	I	custom_curve	1
 A	I	custom_curve	1
 I	resolution	Resolution	14	Int	integer	i 64	
 S	I	resolution	0
-O	path_data	Path data	0	path2d
+O	path_data	Path data	0	path2d	i -4	s "noone"
 N	pc.path_shape_3_d	Node_Path_Shape_3D	Shape Path 3D	values	scripts/node_path_shape_3d/node_path_shape_3d.gml
 I	position	Position	0	Vec3	vector3	3 0 0 0	
 S	I	position	1
@@ -22294,7 +22294,7 @@ I	inner_radius	Inner Radius	8	Slider	scalar	d 0.5
 S	I	inner_radius	0
 I	resolution	Resolution	10	Int	integer	i 64	
 S	I	resolution	0
-O	path_data	Path data	0	path3d
+O	path_data	Path data	0	path3d		s "self"
 N	pc.path_shift	Node_Path_Shift	Shift Path	values	scripts/node_path_shift/node_path_shift.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -22305,7 +22305,7 @@ S	I	range	1
 A	I	range	1
 I	distance	Distance	1	Float	scalar	d 0	
 S	I	distance	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_skew	Node_Path_Skew	Path Skew	values	scripts/node_path_skew/node_path_skew.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -22322,7 +22322,7 @@ S	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_smooth	Node_Path_Smooth	Smooth Path	values	scripts/node_path_smooth/node_path_smooth.gml
 I	loop	Loop	0	Bool	boolean	b 0	
 S	I	loop	0
@@ -22344,8 +22344,8 @@ D	6	1
 T	anchor	Anchor	0	Vec2	vector2		
 S	T	anchor	1
 A	T	anchor	1
-O	path_data	Path data	0	path2d
-O	position_out	Position out	1	vector2
+O	path_data	Path data	0	path2d		s "self"
+O	position_out	Position out	1	vector2	v 0 0	s "[0,0]"
 N	pc.path_smoothen	Node_Path_Smoothen	Smoothen Path	values	scripts/node_path_smoothen/node_path_smoothen.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22366,7 +22366,7 @@ I	step	Step	5	Int	integer	i 1
 S	I	step	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_spiral	Node_Path_Spiral	Spiral Path	values	scripts/node_path_spiral/node_path_spiral.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22420,7 +22420,7 @@ S	I	range_2	1
 A	I	range_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_transform	Node_Path_Transform	Transform Path	values	scripts/node_path_transform/node_path_transform.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22443,7 +22443,7 @@ I	anchor_unit	Anchor Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	anchor_unit	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_trim	Node_Path_Trim	Trim Path	values	scripts/node_path_trim/node_path_trim.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22461,7 +22461,7 @@ S	I	range_2	1
 A	I	range_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_wave	Node_Path_Wave	Wave Path	values	scripts/node_path_wave/node_path_wave.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22549,7 +22549,7 @@ S	I	range_2	1
 A	I	range_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_weight_adjust	Node_Path_Weight_Adjust	Path Weight Adjust	values	scripts/node_path_weight_adjust/node_path_weight_adjust.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -22579,7 +22579,7 @@ S	I	direction_shift	0
 I	value_range	Value Range	5	Vec2	vector2	v 0 1	
 S	I	value_range	1
 A	I	value_range	1
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.path_to_curve	Node_Path_to_Curve	Path to Curve	values	scripts/node_path_to_curve/node_path_to_curve.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -22601,7 +22601,7 @@ A	I	output_range	1
 I	y_range	Y Range	6	Range	vector2	v 0 1	
 S	I	y_range	1
 A	I	y_range	1
-O	curve	Curve	0	curve
+O	curve	Curve	0	curve		s "CURVE_DEF_01"
 N	pc.perlin	Node_Perlin	Perlin Noise	generate	scripts/node_perlin/node_perlin.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22690,7 +22690,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.perlin_cube	Node_Perlin_Cube	Perlin Noise Cube	generate	scripts/node_perlin_cube/node_perlin_cube.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22748,8 +22748,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	cross_section	Cross Section	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	cross_section	Cross Section	1	image	i -4	s "noone"
 N	pc.perlin_extra	Node_Perlin_Extra	Extra Perlins	generate	scripts/node_perlin_extra/node_perlin_extra.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22841,7 +22841,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pin	Node_Pin	Pin	misc	scripts/node_pin/node_pin.gml
 I	in	In	0	Generic_any	any		
 S	I	in	?
@@ -22857,7 +22857,7 @@ I	label_scale	Label Scale	2	Float	scalar	d 1
 S	I	label_scale	0
 I	label_color	Label Color	3	Color	colour		
 S	I	label_color	0
-O	out	Out	0	any
+O	out	Out	0	any	d 0	s "0"
 N	pc.pixel_builder	Node_Pixel_Builder	Pixel Builder	generate	scripts/node_pixel_builder/node_pixel_builder.gml
 I	attribute_input_display_list	attribute input_display_list	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_input_display_list	?
@@ -22886,8 +22886,8 @@ I	thickness	Thickness	2	Int	integer	i 0
 S	I	thickness	0
 I	color	Color	3	Color	colour	c 255 255 255 255	
 S	I	color	0
-O	surface_out	Surface Out	0	image
-O	dynamic_builder	Dynamic Builder	1	dynamic_surface
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	dynamic_builder	Dynamic Builder	1	dynamic_surface		s "dynamicBuilder"
 N	pc.pixel_cloud	Node_Pixel_Cloud	Pixel Cloud	filter	scripts/node_pixel_cloud/node_pixel_cloud.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22927,7 +22927,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pixel_extract	Node_Pixel_Extract	Pixel Extract	color	scripts/node_pixel_extract/node_pixel_extract.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22942,7 +22942,7 @@ Q	I	skip	1	0	s "Black"
 Q	I	skip	2	0	s "Empty"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	colors	Colors	0	colour
+O	colors	Colors	0	colour	a any 0	s "[ ]"
 N	pc.pixel_math	Node_Pixel_Math	Pixel Math	filter	scripts/node_pixel_math/node_pixel_math.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -22989,7 +22989,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pixel_sampler	Node_Pixel_Sampler	Pixel Sampler	generate	scripts/node_pixel_sampler/node_pixel_sampler.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23034,7 +23034,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pixel_sort	Node_Pixel_Sort	Pixel Sort	filter	scripts/node_pixel_sort/node_pixel_sort.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23064,7 +23064,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.plot_linear	Node_Plot_Linear	Draw Bar / Graph	animation	scripts/node_plot_linear/node_plot_linear.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23176,7 +23176,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.point_3_d_camera	Node_Point_3D_Camera	3D Point Camera	3d	scripts/node_points_3d_camera/node_points_3d_camera.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23250,7 +23250,7 @@ I	depth_to_unit	Depth To Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	depth_to_unit	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	points	Points	0	vector3
+O	points	Points	0	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
 N	pc.point_in_area	Node_Point_In_Area	Point in Area	values	scripts/node_point_in_area/node_point_in_area.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23264,7 +23264,7 @@ I	include_boundary	Include Boundary	2	Bool	boolean	b 1
 S	I	include_boundary	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	is_in	Is in	0	boolean
+O	is_in	Is in	0	boolean	b 0	s "false"
 N	pc.point_sdf	Node_Point_SDF	Point to SDF	values	scripts/node_points_sdf/node_points_sdf.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23290,7 +23290,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.points_remap	Node_Points_Remap	Points Remap	values	scripts/node_points_remap/node_points_remap.gml
 I	points	Points	0	Vec2	array	a vector2 1 v 0 0	
 S	I	points	1
@@ -23299,12 +23299,12 @@ I	uv_map	UV Map	1	Surface	image
 S	I	uv_map	0
 I	amount	Amount	2	Slider	scalar	d 1	
 S	I	amount	0
-O	points	Points	0	vector2
+O	points	Points	0	vector2	v 0 0	s "[0,0]"
 N	pc.points_triangulate	Node_Points_Triangulate	Triangulate Points	values	scripts/node_points_triangulate/node_points_triangulate.gml
 I	points	Points	0	Vec2	vector2	v 0 0	
 S	I	points	1
 A	I	points	2
-O	triangles	Triangles	0	vector2
+O	triangles	Triangles	0	vector2	v 0 0	s "[0,0]"
 N	pc.polar	Node_Polar	Polar	transform	scripts/node_polar/node_polar.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23378,7 +23378,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.posterize	Node_Posterize	Posterize	filter	scripts/node_posterize/node_posterize.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23430,18 +23430,18 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.print	Node_Print	Print	misc	scripts/node_print/node_print.gml
 I	active	Active	0	Active	boolean	b 1	
 S	I	active	0
 I	text	Text	1	Text	text	s ""	
 S	I	text	0
 N	pc.project_data	Node_Project_Data	Project Data	misc	scripts/node_project_data/node_project_data.gml
-O	name	Name	0	text
-O	description	Description	1	text
-O	author	Author	2	text
-O	contact	Contact	3	text
-O	path	Path	4	text
+O	name	Name	0	text	s ""	s "\"\""
+O	description	Description	1	text	s ""	s "\"\""
+O	author	Author	2	text	s ""	s "\"\""
+O	contact	Contact	3	text	s ""	s "\"\""
+O	path	Path	4	text	s ""	s "\"\""
 N	pc.project_layer	Node_Project_Layer	Layer	misc	scripts/node_project_layer/node_project_layer.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
@@ -23465,7 +23465,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	animated	Animated	1	Bool	boolean	b 0	
 S	I	animated	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.pytagorean_tile	Node_Pytagorean_Tile	Pytagorean Tile	generate	scripts/node_pytagorean_tile/node_pytagorean_tile.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23571,7 +23571,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.quarternion_from_euler	Node_Quarternion_From_Euler	Quaternion From Euler	values	scripts/node_quarternion_from_euler/node_quarternion_from_euler.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23580,7 +23580,7 @@ S	I	euler_rotation	1
 A	I	euler_rotation	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rotation	Rotation	0	vector4
+O	rotation	Rotation	0	vector4	w 0 0 0 1	s "[0,0,0,1]"
 N	pc.quarternion_lookat	Node_Quarternion_Lookat	Lookat	values	scripts/node_quarternion_lookat/node_quarternion_lookat.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23601,7 +23601,7 @@ Q	I	unit	0	0	s "Quaternion"
 Q	I	unit	1	0	s "Euler"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rotation	Rotation	0	vector4
+O	rotation	Rotation	0	vector4	w 0 0 0 1	s "[0,0,0,1]"
 N	pc.quarternion_to_euler	Node_Quarternion_To_Euler	Quaternion To Euler	values	scripts/node_quarternion_to_euler/node_quarternion_to_euler.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23610,7 +23610,7 @@ S	I	rotation	1
 A	I	rotation	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	euler_angles	Euler Angles	0	vector3
+O	euler_angles	Euler Angles	0	vector3	3 0 0 0	s "[0,0,0]"
 N	pc.quasicrystal	Node_Quasicrystal	Quasicrystal	generate	scripts/node_quasicrystal/node_quasicrystal.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23669,7 +23669,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.rd	Node_RD	Reaction Diffusion	generate	scripts/node_rd/node_rd.gml
 I	seed	Seed	0	Surface	image		
 S	I	seed	0
@@ -23719,8 +23719,8 @@ I	timestep_map	Timestep Map	10	Surface	image
 S	I	timestep_map	0
 I	iteration	Iteration	4	Int	integer	i 16	
 S	I	iteration	0
-O	reacted	Reacted	0	image
-O	rendered	Rendered	1	image
+O	reacted	Reacted	0	image	i -4	s "noone"
+O	rendered	Rendered	1	image	i -4	s "noone"
 N	pc.rgb_channel	Node_RGB_Channel	RGBA Extract	filter	scripts/node_rgb_channel/node_rgb_channel.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23740,10 +23740,10 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	red	Red	0	image
-O	green	Green	1	image
-O	blue	Blue	2	image
-O	alpha	Alpha	3	image
+O	red	Red	0	image	i -4	s "noone"
+O	green	Green	1	image	i -4	s "noone"
+O	blue	Blue	2	image	i -4	s "noone"
+O	alpha	Alpha	3	image	i -4	s "noone"
 N	pc.rm_cloud	Node_RM_Cloud	RM Cloud	3d	scripts/node_rm_cloud/node_rm_cloud.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23787,7 +23787,7 @@ I	use_fog	Use Fog	12	Bool	boolean	b 0
 S	I	use_fog	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.rm_combine	Node_RM_Combine	RM Combine	3d	scripts/node_rm_combine/node_rm_combine.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -23857,8 +23857,8 @@ I	color	Color	19	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	sdf_object	SDF Object	1	sdf
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	sdf_object	SDF Object	1	sdf	i -4	s "noone"
 N	pc.rm_primitive	Node_RM_Primitive	RM Primitive	3d	scripts/node_rm_primitive/node_rm_primitive.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24012,8 +24012,8 @@ I	density	Density	33	Slider	scalar	d 0.3
 S	I	density	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	sdf_object	SDF Object	1	sdf
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	sdf_object	SDF Object	1	sdf	i -4	s "noone"
 N	pc.rm_render	Node_RM_Render	RM Render	3d	scripts/node_rm_render/node_rm_render.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24074,7 +24074,7 @@ I	color	Color	15	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.rm_render_cross	Node_RM_Render_Cross	RM Render Cross	3d	scripts/node_rm_render_cross/node_rm_render_cross.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24107,7 +24107,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.rm_render_scatter	Node_RM_Render_Scatter	RM Render Scatter	3d	scripts/node_rm_render_scatter/node_rm_render_scatter.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24195,7 +24195,7 @@ I	color	Color	15	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.rm_terrain	Node_RM_Terrain	RM Terrain	3d	scripts/node_rm_terrain/node_rm_terrain.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24240,7 +24240,7 @@ I	shadow	Shadow	15	Slider	scalar	d 0.2
 S	I	shadow	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.rm_to_mesh	Node_RM_to_Mesh	RM to Mesh	3d	scripts/node_rm_to_mesh/node_rm_to_mesh.gml
 I	sdf_object	SDF Object	0	SDF	sdf		
 S	I	sdf_object	0
@@ -24254,7 +24254,7 @@ I	resolution	Resolution	3	Float	scalar	d 8
 S	I	resolution	0
 I	material	Material	4	D3Material	material3d		
 S	I	material	0
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.rm_to_voxel	Node_RM_to_Voxel	RM to Voxel	3d	scripts/node_rm_to_voxel/node_rm_to_voxel.gml
 I	sdf_object	SDF Object	0	SDF	sdf		
 S	I	sdf_object	0
@@ -24268,7 +24268,7 @@ I	resolution	Resolution	3	Float	scalar	d 8
 S	I	resolution	0
 I	material	Material	4	D3Material	material3d		
 S	I	material	0
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.random	Node_Random	Random	values	scripts/node_random/node_random.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24345,7 +24345,7 @@ I	lerp_ratio	Lerp Ratio	19	Slider	scalar	d 0.5
 S	I	lerp_ratio	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	scalar
+O	result	Result	0	scalar	d 0	s "0"
 N	pc.random_shape	Node_Random_Shape	Draw Random Shape	generate	scripts/node_random_shape/node_random_shape.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24397,7 +24397,7 @@ Q	I	ssaa	2	0	s "4x"
 Q	I	ssaa	3	0	s "8x"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.random_tile	Node_Random_Tile	Random Tile	generate	scripts/node_random_tile/node_random_tile.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24501,7 +24501,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.rate_remap	Node_Rate_Remap	Rate Remap	animation	scripts/node_rate_remap/node_rate_remap.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24513,7 +24513,7 @@ I	framerate	Framerate	1	Float	scalar	d 10
 S	I	framerate	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.recursive_subdiv	Node_Recursive_Subdiv	Recursive Subdivision	generate	scripts/node_recursive_subdiv/node_recursive_subdiv.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24564,7 +24564,7 @@ S	I	gap_thickness_over_iteration	1
 A	I	gap_thickness_over_iteration	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.refract	Node_Refract	Refract	filter	scripts/node_refract/node_refract.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24626,7 +24626,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.region_fill	Node_Region_Fill	Region Fill	generate	scripts/node_region_fill/node_region_fill.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24693,7 +24693,7 @@ I	output_index	Output Index	17	Bool	boolean	b 0
 S	I	output_index	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.render_sprite_sheet	Node_Render_Sprite_Sheet	Render Spritesheet	compose	scripts/node_render_sprite_sheet/node_render_sprite_sheet.gml
 I	sprites	Sprites	0	Surface	image		
 S	I	sprites	0
@@ -24738,8 +24738,8 @@ S	I	custom_range	0
 I	range	Range	8	SliRange	vector2	v 0 0	
 S	I	range	1
 A	I	range	1
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas Data	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas Data	1	atlas	a any 0	s "[]"
 N	pc.repeat	Node_Repeat	Repeat	generate	scripts/node_repeat/node_repeat.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -24991,8 +24991,8 @@ T	alpha	Alpha	8	Slider	scalar	d 0
 S	T	alpha	0
 T	strength	Strength	15	Slider	scalar	d 0	
 S	T	strength	0
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas Data	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas Data	1	atlas	a any 0	s "[]"
 N	pc.repeat_texture	Node_Repeat_Texture	Repeat Texture	generate	scripts/node_repeat_texture/node_repeat_texture.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25018,11 +25018,11 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.revert	Node_Revert	Reverse	animation	scripts/node_revert/node_revert.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
-O	output	Output	0	image
+O	output	Output	0	image	i -4	s "noone"
 N	pc.ribbon	Node_Ribbon	Draw Ribbon	generate	scripts/node_ribbon/node_ribbon.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25085,7 +25085,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.ridge_noise	Node_Ridge_Noise	Ridge Noise	generate	scripts/node_ridge_noise/node_ridge_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25157,13 +25157,13 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.rigid_activate	Node_Rigid_Activate	Activate Physics	simulation	scripts/node_rigid_activate/node_rigid_activate.gml
 I	object	Object	0	Generic_rigid	rigid		
 S	I	object	0
 I	activated	Activated	1	Bool	boolean	b 1	
 S	I	activated	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid	i -4	s "noone"
 N	pc.rigid_explode	Node_Rigid_Explode	Explode	simulation	scripts/node_rigid_explode/node_rigid_explode.gml
 I	object	Object	0	Generic_rigid	rigid		
 S	I	object	0
@@ -25184,7 +25184,7 @@ I	strength	Strength	4	Slider	scalar	d 1
 S	I	strength	0
 I	torqe	Torqe	6	Slider	scalar	d 0	
 S	I	torqe	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid	i -4	s "noone"
 N	pc.rigid_force_apply	Node_Rigid_Force_Apply	Apply Force	simulation	scripts/node_rigid_force_apply/node_rigid_force_apply.gml
 I	object	Object	0	Generic_rigid	rigid		
 S	I	object	0
@@ -25227,7 +25227,7 @@ I	attribute_show_objects	attribute show_objects	-1	Bool	boolean	b 1
 S	I	attribute_show_objects	0
 I	attribute_display_scale	attribute display_scale	-1	Float	scalar	d 512	
 S	I	attribute_display_scale	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid	i -4	s "noone"
 N	pc.rigid_fracture	Node_Rigid_Fracture	Fracture	simulation	scripts/node_rigid_fracture/node_rigid_fracture.gml
 I	base_texture	Base Texture	0	Surface	image		
 S	I	base_texture	0
@@ -25264,7 +25264,7 @@ I	damping	Damping	12	Slider	scalar	d 0.5
 S	I	damping	0
 I	breaking_force	Breaking Force	13	Float	scalar	d 0	
 S	I	breaking_force	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid		s "objects"
 N	pc.rigid_group_inline	Node_Rigid_Group_Inline	RigidSim	generate	scripts/node_rigid_group_inline/node_rigid_group_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -25315,7 +25315,7 @@ I	damping	Damping	5	Slider	scalar	d 0.5
 S	I	damping	0
 I	breaking_force	Breaking Force	6	Float	scalar	d 0	
 S	I	breaking_force	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid	i -4	s "noone"
 N	pc.rigid_joint_rotate	Node_Rigid_Joint_Rotate	Rotate Joint	simulation	scripts/node_rigid_joint_rotate/node_rigid_joint_rotate.gml
 I	object_a	Object A	0	Generic_rigid	rigid		
 S	I	object_a	0
@@ -25332,7 +25332,7 @@ I	max_torque	Max Torque	4	Float	scalar	d 100
 S	I	max_torque	0
 I	breaking_force	Breaking Force	5	Float	scalar	d 0	
 S	I	breaking_force	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid	i -4	s "noone"
 N	pc.rigid_object	Node_Rigid_Object	Object	simulation	scripts/node_rigid_object/node_rigid_object.gml
 I	spawn	Spawn	8	Bool	boolean	b 1	
 S	I	spawn	0
@@ -25394,18 +25394,18 @@ S	I	activate_on_spawn	0
 I	attribute_mesh	attribute mesh	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_mesh	?
 A	I	attribute_mesh	?
-O	object	Object	0	rigid
+O	object	Object	0	rigid		s "objects"
 N	pc.rigid_object_get_collision	Node_Rigid_Object_Get_Collision	Get Collisions	simulation	scripts/node_rigid_object_get_collision/node_rigid_object_get_collision.gml
 I	objects	Objects	0	Generic_rigid	rigid		
 S	I	objects	0
 I	filter_object	Filter Object	1	Generic_rigid	rigid		
 S	I	filter_object	0
-O	collision_data	Collision Data	0	struct
-O	collision_points	Collision Points	1	vector2
-O	collision_normals	Collision Normals	4	vector2
-O	new_collision_trigger	New Collision Trigger	2	boolean
-O	new_collision_points	New Collision Points	3	vector2
-O	new_collision_normals	New Collision Normals	5	vector2
+O	collision_data	Collision Data	0	struct	a any 0	s "[]"
+O	collision_points	Collision Points	1	vector2	v 0 0	s "[0,0]"
+O	collision_normals	Collision Normals	4	vector2	v 0 0	s "[0,0]"
+O	new_collision_trigger	New Collision Trigger	2	boolean	b 0	s "false"
+O	new_collision_points	New Collision Points	3	vector2	v 0 0	s "[0,0]"
+O	new_collision_normals	New Collision Normals	5	vector2	v 0 0	s "[0,0]"
 N	pc.rigid_object_segment	Node_Rigid_Object_Segment	Segment	simulation	scripts/node_rigid_object_segment/node_rigid_object_segment.gml
 I	segment_start	Segment Start	0	Vec2	vector2	v 0 0	
 S	I	segment_start	1
@@ -25421,7 +25421,7 @@ I	friction	Friction	2	Float	scalar	d 0.2
 S	I	friction	0
 I	bounciness	Bounciness	3	Slider	scalar	d 0.2	
 S	I	bounciness	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid		s "objects"
 N	pc.rigid_object_spawner	Node_Rigid_Object_Spawner	Object Spawner	simulation	scripts/node_rigid_object_spawner/node_rigid_object_spawner.gml
 I	object	Object	0	Generic_rigid	rigid		
 S	I	object	0
@@ -25453,7 +25453,7 @@ S	I	alpha	1
 A	I	alpha	1
 I	attribute_show_objects	attribute show_objects	-1	Bool	boolean	b 1	
 S	I	attribute_show_objects	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid		s "objects"
 N	pc.rigid_override	Node_Rigid_Override	Rigidbody Override	simulation	scripts/node_rigid_override/node_rigid_override.gml
 I	object	Object	0	Generic_rigid	rigid		
 S	I	object	0
@@ -25552,7 +25552,7 @@ Q	I	mode_8	1	0	s "Relative Add"
 Q	I	mode_8	2	0	s "Relative Muliply"
 I	gravity_scale	Gravity Scale	28	Float	scalar	d 1	
 S	I	gravity_scale	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid	i -4	s "noone"
 N	pc.rigid_path_collider	Node_Rigid_Path_Collider	Path Collider	simulation	scripts/node_rigid_path_collider/node_rigid_path_collider.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -25562,7 +25562,7 @@ I	friction	Friction	1	Float	scalar	d 0.2
 S	I	friction	0
 I	bounciness	Bounciness	2	Slider	scalar	d 0.2	
 S	I	bounciness	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid		s "objects"
 N	pc.rigid_render	Node_Rigid_Render	Render	simulation	scripts/node_rigid_render/node_rigid_render.gml
 I	simulate	Simulate	3	Bool	boolean	b 1	
 S	I	simulate	0
@@ -25577,8 +25577,8 @@ S	I	attribute_show_debug	0
 D	4	1
 T	object	Object	0	Generic_rigid	rigid		
 S	T	object	0
-O	surface_out	Surface Out	0	image
-O	atlas_out	Atlas Out	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_out	Atlas Out	1	atlas	a any 0	s "[]"
 N	pc.rigid_render_id	Node_Rigid_Render_ID	Render ID	simulation	scripts/node_rigid_render_id/node_rigid_render_id.gml
 I	simulate	Simulate	3	Bool	boolean	b 0	
 S	I	simulate	0
@@ -25593,8 +25593,8 @@ S	I	normalize_output	0
 D	5	1
 T	object	Object	0	Generic_rigid	rigid		
 S	T	object	0
-O	surface_out	Surface Out	0	image
-O	amounts	Amounts	1	integer
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	amounts	Amounts	1	integer	i 0	s "0"
 N	pc.rigid_sensor	Node_Rigid_Sensor	Sensor	simulation	scripts/node_rigid_sensor/node_rigid_sensor.gml
 I	detect_objects	Detect Objects	0	Generic_rigid	rigid		
 S	I	detect_objects	0
@@ -25618,18 +25618,18 @@ I	radius	Radius	4	Float	scalar	d 0.5
 S	I	radius	0
 I	radius_unit	Radius Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	radius_unit	?
-O	detected_objects	Detected Objects	0	rigid
+O	detected_objects	Detected Objects	0	rigid	a any 0	s "[]"
 N	pc.rigid_variable	Node_Rigid_Variable	Rigidbody Variable	simulation	scripts/node_rigid_variable/node_rigid_variable.gml
 I	objects	Objects	0	Generic_rigid	rigid		
 S	I	objects	0
-O	positions	Positions	0	vector2
-O	scales	Scales	1	vector2
-O	rotations	Rotations	2	scalar
-O	blends	Blends	3	colour
-O	alpha	Alpha	4	scalar
-O	velocity	Velocity	5	vector2
-O	center_of_mass	Center of Mass	6	vector2
-O	velocity_magnitude	Velocity Magnitude	7	scalar
+O	positions	Positions	0	vector2	v 0 0	s "[0,0]"
+O	scales	Scales	1	vector2	v 0 0	s "[0,0]"
+O	rotations	Rotations	2	scalar	d 0	s "0"
+O	blends	Blends	3	colour	d 0	s "0"
+O	alpha	Alpha	4	scalar	d 0	s "0"
+O	velocity	Velocity	5	vector2	v 0 0	s "[0,0]"
+O	center_of_mass	Center of Mass	6	vector2	v 0 0	s "[0,0]"
+O	velocity_magnitude	Velocity Magnitude	7	scalar	d 0	s "0"
 N	pc.rigid_wall	Node_Rigid_Wall	Wall	simulation	scripts/node_rigid_wall/node_rigid_wall.gml
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -25647,7 +25647,7 @@ I	contact_friction	Contact Friction	1	Float	scalar	d 0.2
 S	I	contact_friction	0
 I	bounciness	Bounciness	4	Slider	scalar	d 0.2	
 S	I	bounciness	0
-O	object	Object	0	rigid
+O	object	Object	0	rigid		s "objects"
 N	pc.rotation_random_data	Node_Rotation_Random_Data	Rotation Random	values	scripts/node_rotation_random_data/node_rotation_random_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25665,7 +25665,7 @@ I	range_2_end	Range 2 End	4	Rotation	scalar	d 360
 S	I	range_2_end	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rotation_random	Rotation Random	0	array
+O	rotation_random	Rotation Random	0	array	a any 5 d 0 d 0 d 360 d 0 d 0	s "[ 0, 0, 360, 0, 0 ]"
 N	pc.rotation_range_data	Node_Rotation_Range_Data	Rotation Range	values	scripts/node_rotation_range_data/node_rotation_range_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25675,7 +25675,7 @@ I	end	End	1	Rotation	scalar	d 360
 S	I	end	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rotation_range	Rotation Range	0	vector2
+O	rotation_range	Rotation Range	0	vector2	v 0 0	s "[ 0, 0 ]"
 N	pc.sdf	Node_SDF	SDF	filter	scripts/node_sdf/node_sdf.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25730,7 +25730,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.svg	Node_SVG	SVG	io	scripts/node_svg/node_svg.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -25747,9 +25747,9 @@ S	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
-O	surface_out	Surface Out	0	image
-O	svg_object	SVG Object	1	dynamic_surface
-O	dimension	Dimension	2	vector2
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	svg_object	SVG Object	1	dynamic_surface		s "{}"
+O	dimension	Dimension	2	vector2	v 1 1	s "[1,1]"
 N	pc.sampler	Node_Sampler	Sampler	color	scripts/node_sampler/node_sampler.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25770,7 +25770,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	color	Color	0	colour
+O	color	Color	0	colour		s "c_white"
 N	pc.scale	Node_Scale	Scale	transform	scripts/node_scale/node_scale.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25808,7 +25808,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.scale_algo	Node_Scale_Algo	Scale Algorithm	transform	scripts/node_scale_algo/node_scale_algo.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25835,7 +25835,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.scale_content_aware	Node_Scale_Content_Aware	Content-Aware Scale	transform	scripts/node_scale_content_aware/node_scale_content_aware.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -25863,7 +25863,7 @@ Q	I	seam	0	0	s "Minimum"
 Q	I	seam	1	0	s "Maximum"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.scatter	Node_Scatter	Scatter	generate	scripts/node_scatter/node_scatter.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26065,8 +26065,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas Data	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas Data	1	atlas	a any 0	s "[]"
 N	pc.scatter_point_fibonacci	Node_Scatter_Point_Fibonacci	Fibonacci Points	values	scripts/node_scatter_point_fibo/node_scatter_point_fibo.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26090,7 +26090,7 @@ I	step	Step	5	Float	scalar	d 1
 S	I	step	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	points	Points	0	vector2
+O	points	Points	0	vector2	v 0 0	s "[ 0, 0 ]"
 N	pc.scatter_point_lattice	Node_Scatter_Point_Lattice	Lattice Point	values	scripts/node_scatter_point_lattice/node_scatter_point_lattice.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26106,7 +26106,7 @@ S	I	subdivision	1
 A	I	subdivision	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	points	Points	0	vector2
+O	points	Points	0	vector2	v 0 0	s "[ 0, 0 ]"
 N	pc.scatter_point_lattice_3_d	Node_Scatter_Point_Lattice_3D	Lattice Point 3D	3d	scripts/node_scatter_point_lattice_3d/node_scatter_point_lattice_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26123,7 +26123,7 @@ S	I	subdivision	1
 A	I	subdivision	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	points	Points	0	vector3
+O	points	Points	0	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
 N	pc.scatter_points	Node_Scatter_Points	Scatter Points	values	scripts/node_scatter_points/node_scatter_points.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26177,7 +26177,7 @@ I	reference_value	Reference Value	8	Surface	image
 S	I	reference_value	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	points	Points	0	vector2
+O	points	Points	0	vector2	v 0 0	s "[ 0, 0 ]"
 N	pc.scatter_points_3_d	Node_Scatter_Points_3D	Scatter Points 3D	3d	scripts/node_scatter_points_3d/node_scatter_points_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26199,7 +26199,7 @@ S	I	half_size	1
 A	I	half_size	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	points	Points	0	vector3
+O	points	Points	0	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
 N	pc.scatter_sampler	Node_Scatter_Sampler	Scatter Sampler	generate	scripts/node_scatter_sampler/node_scatter_sampler.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26271,7 +26271,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum		Input;Inherited;4 bit RGB
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.sec_convert	Node_Sec_Convert	Seconds Convert	values	scripts/node_sec_convert/node_sec_convert.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26283,11 +26283,11 @@ I	seconds_decimal	Seconds Decimal	2	Bool	boolean	b 1
 S	I	seconds_decimal	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	format_string	Format String	0	text
-O	seconds	Seconds	1	scalar
-O	minutes	Minutes	2	scalar
-O	hours	Hours	3	scalar
-O	days	DAys	4	scalar
+O	format_string	Format String	0	text	s ""	s "\"\""
+O	seconds	Seconds	1	scalar	d 0	s "0"
+O	minutes	Minutes	2	scalar	d 0	s "0"
+O	hours	Hours	3	scalar	d 0	s "0"
+O	days	DAys	4	scalar	d 0	s "0"
 N	pc.segment_filter	Node_Segment_Filter	Filter Segments	values	scripts/node_segment_filter/node_segment_filter.gml
 I	segment	Segment	0	Vector	array	a vector2 0	
 S	I	segment	0
@@ -26298,7 +26298,7 @@ I	spread	Spread	2	Float	scalar	d 15
 S	I	spread	0
 I	both_side	Both side	3	Bool	boolean	b 1	
 S	I	both_side	0
-O	segments	Segments	0	scalar
+O	segments	Segments	0	scalar	a any 1 a any 0	s "[[]]"
 N	pc.separate	Node_Separate	Separate	compose	scripts/node_separate/node_separate.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26312,8 +26312,8 @@ I	attribute_display_mask	attribute display_mask	-1	Bool	boolean	b 1
 S	I	attribute_display_mask	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_0	Surface 0	0	image
-O	surface_1	Surface 1	1	image
+O	surface_0	Surface 0	0	image	i -4	s "noone"
+O	surface_1	Surface 1	1	image	i -4	s "noone"
 N	pc.seperate_shape	Node_Seperate_Shape	Separate Shape	compose	scripts/node_seperate_shape/node_seperate_shape.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26347,8 +26347,8 @@ I	crop	Crop	6	Bool	boolean	b 1
 S	I	crop	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	atlas	Atlas	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas	Atlas	1	atlas	a any 0	s "[]"
 N	pc.sequence_anim	Node_Sequence_Anim	Array to Anim	io	scripts/node_sequence_anim/node_sequence_anim.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
@@ -26366,7 +26366,7 @@ Q	I	overflow	2	0	s "Ping Pong"
 Q	I	overflow	3	0	s "Empty"
 I	speed	Speed	1	Float	scalar	d 1	
 S	I	speed	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.shadow	Node_Shadow	Shadow	filter	scripts/node_shadow/node_shadow.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26429,8 +26429,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	shadow_only	Shadow Only	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	shadow_only	Shadow Only	1	image	i -4	s "noone"
 N	pc.shadow_cast	Node_Shadow_Cast	Cast Shadow	filter	scripts/node_shadow_cast/node_shadow_cast.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26491,9 +26491,9 @@ T	ao_radius	AO Radius	11	ISlider	integer	i 0
 S	T	ao_radius	0
 T	ao_strength	AO Strength	12	Slider	scalar	d 0.1	
 S	T	ao_strength	0
-O	surface_out	Surface Out	0	image
-O	light_mask	Light mask	1	image
-O	solid_sdf	Solid SDF	2	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	light_mask	Light mask	1	image	i -4	s "noone"
+O	solid_sdf	Solid SDF	2	image	i -4	s "noone"
 N	pc.shape	Node_Shape	Draw Shape	generate	scripts/node_shape/node_shape.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26664,10 +26664,10 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	colored	Colored	0	image
-O	mask	Mask	1	image
-O	height	Height	2	image
-O	uv	UV	3	image
+O	colored	Colored	0	image	i -4	s "noone"
+O	mask	Mask	1	image	i -4	s "noone"
+O	height	Height	2	image	i -4	s "noone"
+O	uv	UV	3	image	i -4	s "noone"
 N	pc.shape_3_d	Node_Shape_3D	Draw Shape 3D	3d	scripts/node_shape_3d/node_shape_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26742,9 +26742,9 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth	Depth	1	image
-O	rim_normal	Rim Normal	2	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth	Depth	1	image	i -4	s "noone"
+O	rim_normal	Rim Normal	2	image	i -4	s "noone"
 N	pc.shape_ellipse	Node_Shape_Ellipse	Draw Ellipse	generate	scripts/node_shape_ellipse/node_shape_ellipse.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 0	
 S	I	attribute_process	0
@@ -26777,7 +26777,7 @@ I	color	Color	7	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.shape_fast	Node_Shape_Fast	Draw Shape Fast	generate	scripts/node_shape_fast/node_shape_fast.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -26906,9 +26906,9 @@ I	background	Background	1	Bool	boolean	b 0
 S	I	background	0
 I	background_color	Background color	11	Color	colour	c 0 0 0 255	
 S	I	background_color	0
-O	colored	Colored	0	image
-O	mask	Mask	1	image
-O	height	Height	2	image
+O	colored	Colored	0	image	i -4	s "noone"
+O	mask	Mask	1	image	i -4	s "noone"
+O	height	Height	2	image	i -4	s "noone"
 N	pc.shape_half	Node_Shape_Half	Draw Half	generate	scripts/node_shape_half/node_shape_half.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 0	
 S	I	attribute_process	0
@@ -26941,7 +26941,7 @@ I	color	Color	7	Color	colour	c 255 255 255 255
 S	I	color	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.shape_map	Node_Shape_Map	Shape Map	filter	scripts/node_shape_map/node_shape_map.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -26974,7 +26974,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.shape_polygon	Node_Shape_Polygon	Draw Shape Polygon	generate	scripts/node_shape_polygon/node_shape_polygon.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27090,9 +27090,9 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	mesh	Mesh	1	mesh2d
-O	path	Path	2	path2d
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	mesh	Mesh	1	mesh2d	i -4	s "noone"
+O	path	Path	2	path2d	i -4	s "noone"
 N	pc.shape_rectangle	Node_Shape_Rectangle	Draw Rectangle	generate	scripts/node_shape_rectangle/node_shape_rectangle.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 0	
 S	I	attribute_process	0
@@ -27127,7 +27127,7 @@ I	corner	Corner	8	Slider	scalar	d 0
 S	I	corner	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.shard_noise	Node_Shard_Noise	Shard Noise	generate	scripts/node_shard_noise/node_shard_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27188,7 +27188,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.shell	Node_Shell	Execute Shell	misc	scripts/node_shell/node_shell.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -27221,7 +27221,7 @@ S	I	block_count	1
 A	I	block_count	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.simple_pattern	Node_Simple_Pattern	Simple Pattern	generate	scripts/node_simple_pattern/node_simple_pattern.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27252,7 +27252,7 @@ S	I	attribute_pattern	?
 A	I	attribute_pattern	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.simplex_cube	Node_Simplex_Cube	Simplex Noise Cube	generate	scripts/node_simplex_cube/node_simplex_cube.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27310,8 +27310,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	cross_section	Cross Section	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	cross_section	Cross Section	1	image	i -4	s "noone"
 N	pc.skew	Node_Skew	Skew	transform	scripts/node_skew/node_skew.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27372,7 +27372,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.sky	Node_Sky	Sky	generate	scripts/node_sky/node_sky.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27439,7 +27439,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.slideshow	Node_Slideshow	Slideshow	misc	scripts/node_slideshow/node_slideshow.gml
 I	title	Title	1	Text	text	s ""	
 S	I	title	0
@@ -27559,8 +27559,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth_pass	Depth Pass	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth_pass	Depth Pass	1	image	i -4	s "noone"
 N	pc.smoke_add	Node_Smoke_Add	Add Emitter	simulation	scripts/node_smoke_add/node_smoke_add.gml
 I	input_3		3	Active	boolean		
 S	I	input_3	0
@@ -27608,7 +27608,7 @@ I	spokes	Spokes	13	Float	scalar	d 0
 S	I	spokes	0
 I	twist	Twist	14	Rotation	scalar	d 0	
 S	I	twist	0
-O	domain	Domain	0	smoke_domain
+O	domain	Domain	0	smoke_domain	i -4	s "noone"
 N	pc.smoke_add_collider	Node_Smoke_Add_Collider	Add Collider	simulation	scripts/node_smoke_add_collider/node_smoke_add_collider.gml
 I	input_0		0	Sdomain	smoke_domain		
 S	I	input_0	0
@@ -27619,7 +27619,7 @@ S	I	area	1
 A	I	area	1
 I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
-O	domain	Domain	0	smoke_domain
+O	domain	Domain	0	smoke_domain	i -4	s "noone"
 N	pc.smoke_apply_velocity	Node_Smoke_Apply_Velocity	Apply Velocity	simulation	scripts/node_smoke_apply_velocity/node_smoke_apply_velocity.gml
 I	active	Active	4	Active	boolean	b 1	
 S	I	active	0
@@ -27648,7 +27648,7 @@ S	I	velocity	1
 A	I	velocity	1
 I	strength	Strength	7	Float	scalar	d 1	
 S	I	strength	0
-O	domain	Domain	0	smoke_domain
+O	domain	Domain	0	smoke_domain	i -4	s "noone"
 N	pc.smoke_domain	Node_Smoke_Domain	Domain	simulation	scripts/node_smoke_domain/node_smoke_domain.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
@@ -27694,9 +27694,9 @@ I	material_maccormack_weight	Material Maccormack weight	9	Slider	scalar	d 1
 S	I	material_maccormack_weight	0
 I	velocity_maccormack_weight	Velocity Maccormack weight	10	Slider	scalar	d 0	
 S	I	velocity_maccormack_weight	0
-O	domain	Domain	0	smoke_domain
-O	velocity	Velocity	1	image
-O	pressure	Pressure	2	image
+O	domain	Domain	0	smoke_domain	i -4	s "noone"
+O	velocity	Velocity	1	image	i -4	s "noone"
+O	pressure	Pressure	2	image	i -4	s "noone"
 N	pc.smoke_domain_queue	Node_Smoke_Domain_Queue	Queue Domain	simulation	scripts/node_smoke_domain_queue/node_smoke_domain_queue.gml
 I	input_0		0	Sdomain	smoke_domain		
 S	I	input_0	0
@@ -27734,8 +27734,8 @@ S	I	density_remap	1
 A	I	density_remap	1
 I	transparent	Transparent	8	Bool	boolean	b 0	
 S	I	transparent	0
-O	smoke	Smoke	0	image
-O	domain	Domain	1	image
+O	smoke	Smoke	0	image	i -4	s "noone"
+O	domain	Domain	1	image	i -4	s "noone"
 N	pc.smoke_repulse	Node_Smoke_Repulse	Repulse	simulation	scripts/node_smoke_repulse/node_smoke_repulse.gml
 I	input_0		0	Sdomain	smoke_domain		
 S	I	input_0	0
@@ -27754,7 +27754,7 @@ I	spokes	Spokes	4	Float	scalar	d 0
 S	I	spokes	0
 I	twist	Twist	5	Rotation	scalar	d 0	
 S	I	twist	0
-O	domain	Domain	0	smoke_domain
+O	domain	Domain	0	smoke_domain	i -4	s "noone"
 N	pc.smoke_turbulence	Node_Smoke_Turbulence	Turbulence	simulation	scripts/node_smoke_turbulence/node_smoke_turbulence.gml
 I	input_0		0	Sdomain	smoke_domain		
 S	I	input_0	0
@@ -27769,7 +27769,7 @@ I	seed	Seed	4	Seed	scalar
 S	I	seed	0
 I	scale	Scale	3	Slider	scalar	d 4	
 S	I	scale	0
-O	domain	Domain	0	smoke_domain
+O	domain	Domain	0	smoke_domain	i -4	s "noone"
 N	pc.smoke_update	Node_Smoke_Update	Update Domain	simulation	scripts/node_smoke_update/node_smoke_update.gml
 I	active	Active	1	Active	boolean	b 1	
 S	I	active	0
@@ -27779,7 +27779,7 @@ I	update_step	Update Step	2	Int	integer	i 1
 S	I	update_step	0
 I	subdivide_timestep	Subdivide Timestep	3	Bool	boolean	b 0	
 S	I	subdivide_timestep	0
-O	domain	Domain	0	smoke_domain
+O	domain	Domain	0	smoke_domain	i -4	s "noone"
 N	pc.smoke_vortex	Node_Smoke_Vortex	Vortex	simulation	scripts/node_smoke_vortex/node_smoke_vortex.gml
 I	input_0		0	Sdomain	smoke_domain		
 S	I	input_0	0
@@ -27796,8 +27796,8 @@ I	strength	Strength	3	Slider	scalar	d 0.1
 S	I	strength	0
 I	attraction	Attraction	4	Slider	scalar	d 0	
 S	I	attraction	0
-O	domain	Domain	0	smoke_domain
-O	domain_2	Domain	1	image
+O	domain	Domain	0	smoke_domain	i -4	s "noone"
+O	domain_2	Domain	1	image	i -4	s "noone"
 N	pc.solid	Node_Solid	Solid	generate	scripts/node_solid/node_solid.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27822,7 +27822,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.spherize	Node_Spherize	Spherize	filter	scripts/node_spherize/node_spherize.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27895,19 +27895,19 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.spout_receive	Node_Spout_Receive	Spout Receive	undocumented	scripts/node_spout_receive/node_spout_receive.gml
 I	receiver_name	Receiver name	0	Text	text	s "PixelComposer"	
 S	I	receiver_name	0
 I	animated	Animated	1	Bool	boolean	b 1	
 S	I	animated	0
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.spout_send	Node_Spout_Send	Spout Sender	io	scripts/node_spout_send/node_spout_send.gml
 I	sender_name	Sender Name	0	Text	text	s "PixelComposer"	
 S	I	sender_name	0
 I	surface	Surface	1	Surface	image		
 S	I	surface	0
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.sprite_stack	Node_Sprite_Stack	Sprite Stack	3d	scripts/node_sprite_stack/node_sprite_stack.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -27965,7 +27965,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.stack	Node_Stack	Stack	compose	scripts/node_stack/node_stack.gml
 I	axis	Axis	0	EScroll	enum	e 0	Horizontal;Vertical;On top
 S	I	axis	0
@@ -28024,8 +28024,8 @@ Q	I	blend_mode	30	0	s "Unequal"
 D	5	1
 T	input	Input	0	Surface	image		
 S	T	input	0
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas data	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas data	1	atlas	a any 0	s "[]"
 N	pc.stagger	Node_Stagger	Stagger	animation	scripts/node_stagger/node_stagger.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28047,7 +28047,7 @@ Q	I	overflow	1	0	s "Clamp"
 Q	I	overflow	2	0	s "Loop"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.statistic	Node_Statistic	Statistic	values	scripts/node_statistic/node_statistic.gml
 I	type	Type	0	EScroll	enum	e 0	Sum;Mean;Median;Max;Min
 S	I	type	0
@@ -28061,7 +28061,7 @@ Q	I	type	4	0	s "Min"
 D	1	1
 T	input	Input	0	Float	scalar	d -1	
 S	T	input	0
-O	statistic	Statistic	0	scalar
+O	statistic	Statistic	0	scalar	d -1	s "-1"
 N	pc.straighten	Node_Straighten	Straighten	transform	scripts/node_straighten/node_straighten.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28125,7 +28125,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.strand_break	Node_Strand_Break	Strand Break	simulation	scripts/node_strand_break/node_strand_break.gml
 I	seed	Seed	-1	Seed	scalar		
 S	I	seed	0
@@ -28136,7 +28136,7 @@ I	input_0		0	Strand	strand
 S	I	input_0	0
 I	collision_mesh	Collision mesh	1	Mesh	mesh2d		
 S	I	collision_mesh	0
-O	strands	Strands	0	strand
+O	strands	Strands	0	strand	i -4	s "noone"
 N	pc.strand_create	Node_Strand_Create	Strand Create	simulation	scripts/node_strand_create/node_strand_create.gml
 I	seed	Seed	10	Seed	scalar		
 S	I	seed	0
@@ -28202,7 +28202,7 @@ I	attribute_use_groom	attribute use_groom	-1	Bool	boolean	b 0
 S	I	attribute_use_groom	0
 I	attribute_show_strand	attribute show_strand	-1	Bool	boolean	b 1	
 S	I	attribute_show_strand	0
-O	strands	Strands	0	strand
+O	strands	Strands	0	strand	i -4	s "noone"
 N	pc.strand_force_apply	Node_Strand_Force_Apply	Strand Force Apply	simulation	scripts/node_strand_force_apply/node_strand_force_apply.gml
 I	strength	Strength	-1	Slider	scalar	d 1	
 S	I	strength	0
@@ -28221,7 +28221,7 @@ I	gravity	Gravity	1	Float	scalar	d 1
 S	I	gravity	0
 I	direction	Direction	2	Rotation	scalar	d -90	
 S	I	direction	0
-O	strands	Strands	0	strand
+O	strands	Strands	0	strand	i -4	s "noone"
 N	pc.strand_group_inline	Node_Strand_Group_Inline	StrandSim	generate	scripts/node_strand_group_inline/node_strand_group_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -28275,7 +28275,7 @@ I	attribute_use_cache	attribute use_cache	-1	Bool	boolean	b 0
 S	I	attribute_use_cache	0
 I	attribute_show_strand	attribute show_strand	-1	Bool	boolean	b 1	
 S	I	attribute_show_strand	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.strand_render_texture	Node_Strand_Render_Texture	Strand Render Texture	simulation	scripts/node_strand_render_texture/node_strand_render_texture.gml
 I	seed	Seed	5	Seed	scalar		
 S	I	seed	0
@@ -28295,7 +28295,7 @@ I	random_color	Random Color	3	Gradient	gradient	g 0 1 0 255 255 255 255
 S	I	random_color	0
 I	shift	Shift	6	Slider	scalar	d 0	
 S	I	shift	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.strand_update	Node_Strand_Update	Strand Update	simulation	scripts/node_strand_update/node_strand_update.gml
 I	input_0		0	Strand	strand		
 S	I	input_0	0
@@ -28303,7 +28303,7 @@ I	step	Step	1	Int	integer	i 4
 S	I	step	0
 I	iteration	Iteration	2	Int	integer	i 8	
 S	I	iteration	0
-O	strands	Strands	0	strand
+O	strands	Strands	0	strand	i -4	s "noone"
 N	pc.stretch	Node_Stretch	Stretch	transform	scripts/node_stretch/node_stretch.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28339,7 +28339,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.string	Node_String	Text	values	scripts/node_string/node_string.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28347,7 +28347,7 @@ I	text	Text	0	Text	text	s ""
 S	I	text	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_change_case	Node_String_Change_Case	Change Case	values	scripts/node_string_change_case/node_string_change_case.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28362,7 +28362,7 @@ Q	I	type	1	0	s "Uppercase"
 Q	I	type	2	0	s "Titlecase"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_count	Node_String_Count	Count Text	values	scripts/node_string_count/node_string_count.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28372,7 +28372,7 @@ I	count_text	Count Text	1	Text	text	s ""
 S	I	count_text	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	amount	Amount	0	integer
+O	amount	Amount	0	integer	i 0	s "0"
 N	pc.string_delete	Node_String_Delete	Delete Text	values	scripts/node_string_delete/node_string_delete.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28384,7 +28384,7 @@ I	amount	Amount	2	Int	integer	i 1
 S	I	amount	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_format	Node_String_Format	Format Text	values	scripts/node_string_format/node_string_format.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28397,7 +28397,7 @@ T	key_in_amo	Key {inAmo}	0	Text	text	s ""
 S	T	key_in_amo	0
 T	value	Value	1	Text	text	s ""	
 S	T	value	0
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_get_char	Node_String_Get_Char	Get Character	values	scripts/node_string_get_char/node_string_get_char.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28409,7 +28409,7 @@ I	amount	Amount	2	Int	integer	i 1
 S	I	amount	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_insert	Node_String_Insert	Insert Text	undocumented	scripts/node_string_insert/node_string_insert.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28421,13 +28421,13 @@ I	position	Position	2	Int	integer	i 0
 S	I	position	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_join	Node_String_Join	Join Text Array	values	scripts/node_string_join/node_string_join.gml
 I	text_array	Text Array	0	Text	array	a text 0	
 S	I	text_array	0
 I	divider	Divider	1	Text	text	s ""	
 S	I	divider	0
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_length	Node_String_Length	Text Length	values	scripts/node_string_length/node_string_length.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28441,7 +28441,7 @@ Q	I	mode	0	0	s "Character"
 Q	I	mode	1	0	s "Word"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	length	Length	0	integer
+O	length	Length	0	integer	i 0	s "0"
 N	pc.string_merge	Node_String_Merge	Combine Texts	values	scripts/node_string_merge/node_string_merge.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28450,7 +28450,7 @@ S	I	attribute_array_process	?
 D	0	1
 T	text	Text	0	Text	text	s ""	
 S	T	text	0
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_regex_match	Node_String_Regex_Match	RegEx Match	values	scripts/node_string_regex_match/node_string_regex_match.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28460,7 +28460,7 @@ I	regex	Regex	1	Text	text	s ""
 S	I	regex	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	results	Results	0	boolean
+O	results	Results	0	boolean	b 0	s "false"
 N	pc.string_regex_replace	Node_String_Regex_Replace	RegEx Replace	values	scripts/node_string_regex_replace/node_string_regex_replace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28472,7 +28472,7 @@ I	replacement	Replacement	2	Text	text	s ""
 S	I	replacement	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	results	Results	0	text
+O	results	Results	0	text	s ""	s "\"\""
 N	pc.string_regex_search	Node_String_Regex_Search	RegEx Search	values	scripts/node_string_regex_search/node_string_regex_search.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28482,7 +28482,7 @@ I	regex	Regex	1	Text	text	s ""
 S	I	regex	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	results	Results	0	text
+O	results	Results	0	text	a any 0	s "[]"
 N	pc.string_replace	Node_String_Replace	Replace Text	values	scripts/node_string_replace/node_string_replace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28496,7 +28496,7 @@ I	all	All	3	Bool	boolean	b 1
 S	I	all	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	results	Results	0	text
+O	results	Results	0	text	s ""	s "\"\""
 N	pc.string_split	Node_String_Split	Split Text	values	scripts/node_string_split/node_string_split.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28516,7 +28516,7 @@ I	trim_white_space	Trim White-Space	4	Bool	boolean	b 0
 S	I	trim_white_space	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.string_trim	Node_String_Trim	Trim Text	values	scripts/node_string_trim/node_string_trim.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28543,7 +28543,7 @@ I	text_2	Text	5	Text	text	s ""
 S	I	text_2	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.stripe	Node_Stripe	Stripe	generate	scripts/node_stripe/node_stripe.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28643,14 +28643,14 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.struct	Node_Struct	Struct	values	scripts/node_struct/node_struct.gml
 D	0	2
 T	key	Key	0	Text	text	s ""	
 S	T	key	0
 T	value	value	1	Generic_any	any		
 S	T	value	0
-O	struct	Struct	0	struct
+O	struct	Struct	0	struct		s "{}"
 N	pc.struct_get	Node_Struct_Get	Struct Get	values	scripts/node_struct_get/node_struct_get.gml
 I	struct	Struct	0	Struct	struct		
 S	I	struct	0
@@ -28667,11 +28667,11 @@ Q	I	type	3	0	s "Surface"
 Q	I	type	4	0	s "Buffer"
 Q	I	type	5	0	s "Struct"
 Q	I	type	6	0	s "Gradient"
-O	value	Value	0	any
+O	value	Value	0	any	i -4	s "noone"
 N	pc.struct_json_parse	Node_Struct_JSON_Parse	Parse JSON	values	scripts/node_struct_json_parse/node_struct_json_parse.gml
 I	json_string	JSON String	0	Text	text	s ""	
 S	I	json_string	0
-O	struct	Struct	0	struct
+O	struct	Struct	0	struct		s "{}"
 N	pc.struct_set	Node_Struct_Set	Struct Set	values	scripts/node_struct_set/node_struct_set.gml
 I	struct	Struct	0	Struct	struct		
 S	I	struct	0
@@ -28679,7 +28679,7 @@ I	key	Key	1	Text	text	s ""
 S	I	key	0
 I	value	Value	2	Generic_any	any		
 S	I	value	?
-O	struct	Struct	0	struct
+O	struct	Struct	0	struct		s "{}"
 N	pc.surface_cube	Node_Surface_Cube	Surface Cube	generate	scripts/node_surface_cube/node_surface_cube.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28731,8 +28731,8 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	cross_section	Cross Section	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	cross_section	Cross Section	1	image	i -4	s "noone"
 N	pc.surface_from_buffer	Node_Surface_From_Buffer	Surface from Buffer	values	scripts/node_surface_from_buffer/node_surface_from_buffer.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28740,7 +28740,7 @@ I	input_0		0	Buffer	buffer
 S	I	input_0	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface	Surface	0	image
+O	surface	Surface	0	image	i -4	s "noone"
 N	pc.surface_is_empty	Node_Surface_Is_Empty	Surface is Empty	values	scripts/node_surface_is_empty/node_surface_is_empty.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28748,7 +28748,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	is_empty	Is Empty	0	boolean
+O	is_empty	Is Empty	0	boolean	b 0	s "false"
 N	pc.surface_project_3_d	Node_Surface_Project_3D	Surface Project 3D	3d	scripts/node_surface_project_3d/node_surface_project_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28823,9 +28823,9 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth_pass	Depth Pass	1	image
-O	normal_pass	Normal Pass	2	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth_pass	Depth Pass	1	image	i -4	s "noone"
+O	normal_pass	Normal Pass	2	image	i -4	s "noone"
 N	pc.surface_project_cylinder_3_d	Node_Surface_Project_Cylinder_3D	Surface Project Cylinder 3D	3d	scripts/node_surface_project_cylinder_3d/node_surface_project_cylinder_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28887,9 +28887,9 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	depth_pass	Depth Pass	1	image
-O	normal_pass	Normal Pass	2	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	depth_pass	Depth Pass	1	image	i -4	s "noone"
+O	normal_pass	Normal Pass	2	image	i -4	s "noone"
 N	pc.surface_project_volume_3_d	Node_Surface_Project_Volume_3D	Surface Project Volume 3D	3d	scripts/node_surface_project_volume_3d/node_surface_project_volume_3d.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28945,7 +28945,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.surface_replace	Node_Surface_Replace	Replace Image	filter	scripts/node_surface_replace/node_surface_replace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28977,7 +28977,7 @@ I	replace_empty	Replace Empty	9	Bool	boolean	b 0
 S	I	replace_empty	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.surface_tag	Node_Surface_Tag	Tag Surface	compose	scripts/node_surface_tag/node_surface_tag.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28991,7 +28991,7 @@ S	T	tag	0
 T	position	Position	1	Vec2Arr	array		
 S	T	position	1
 A	T	position	1
-O	tagged_surface	Tagged Surface	0	dynamic_surface
+O	tagged_surface	Tagged Surface	0	dynamic_surface	i -4	s "noone"
 N	pc.surface_to_buffer	Node_Surface_To_Buffer	Buffer from Surface	values	scripts/node_surface_to_buffer/node_surface_to_buffer.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -28999,7 +28999,7 @@ I	surface	Surface	0	Surface	image
 S	I	surface	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	buffer	Buffer	0	buffer
+O	buffer	Buffer	0	buffer	i -4	s "noone"
 N	pc.surface_to_points	Node_Surface_To_Points	Points from Surface	values	scripts/node_surface_to_points/node_surface_to_points.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29019,7 +29019,7 @@ I	max_amount	Max Amount	3	Int	integer	i 0
 S	I	max_amount	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	points	Points	0	array
+O	points	Points	0	array	a any 0	s "[]"
 N	pc.surface_data	Node_Surface_data	Surface Data	values	scripts/node_surface_data/node_surface_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29027,12 +29027,12 @@ I	surface	Surface	0	Surface	image
 S	I	surface	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	dimension	Dimension	0	vector2
-O	width	Width	1	integer
-O	height	Height	2	integer
-O	format_string	Format String	3	text
-O	bit_depth	Bit Depth	4	integer
-O	channels	Channels	5	integer
+O	dimension	Dimension	0	vector2	v 1 1	s "[1,1]"
+O	width	Width	1	integer	i 1	s "1"
+O	height	Height	2	integer	i 1	s "1"
+O	format_string	Format String	3	text	s ""	s "\"\""
+O	bit_depth	Bit Depth	4	integer	i 8	s "8"
+O	channels	Channels	5	integer	i 4	s "4"
 N	pc.switch	Node_Switch	Switch	misc	scripts/node_switch/node_switch.gml
 I	index	Index	0	Text	text	s ""	
 S	I	index	?
@@ -29043,7 +29043,7 @@ T	case	Case	0	Text	text	s ""
 S	T	case	0
 T	value	Value	1	Generic_any	any		
 S	T	value	0
-O	result	Result	0	any
+O	result	Result	0	any	d 0	s "0"
 N	pc.symmetric_nn	Node_Symmetric_NN	Symmetric NN	filter	scripts/node_symmetric_nn/node_symmetric_nn.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29087,9 +29087,9 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.terminal_trigger	Node_Terminal_Trigger	Terminal trigger	misc	scripts/node_terminal_trigger/node_terminal_trigger.gml
-O	terminal	Terminal	0	boolean
+O	terminal	Terminal	0	boolean	b 0	s "false"
 N	pc.text	Node_Text	Draw Text	generate	scripts/node_text/node_text.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29216,13 +29216,13 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	draw_data	Draw Data	1	atlas
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	draw_data	Draw Data	1	atlas	a any 0	s "[]"
 N	pc.text_file_read	Node_Text_File_Read	Text File In	io	scripts/node_text_file_read/node_text_file_read.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
-O	content	Content	0	text
-O	path	Path	1	text
+O	content	Content	0	text	s ""	s "\"\""
+O	path	Path	1	text	s ""	s "\"\""
 N	pc.text_file_write	Node_Text_File_Write	Text File Out	io	scripts/node_text_file_write/node_text_file_write.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -29266,7 +29266,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.threshold	Node_Threshold	Threshold	filter	scripts/node_threshold/node_threshold.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29349,7 +29349,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.threshold_switch	Node_Threshold_Switch	Threshold Switch	misc	scripts/node_threshold_switch/node_threshold_switch.gml
 I	type	Type	2	EButton	enum	e 0	Number;Frame
 S	I	type	?
@@ -29366,7 +29366,7 @@ T	value	Value	0	Float	scalar	d 0
 S	T	value	0
 T	value_2	Value	1	Generic_any	any		
 S	T	value_2	0
-O	result	Result	0	any
+O	result	Result	0	any	d 0	s "0"
 N	pc.tile	Node_Tile	Tile	transform	scripts/node_tile/node_tile.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29424,7 +29424,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.tile_convert	Node_Tile_Convert	Convert to Tilemap	io	scripts/node_tiler_convert/node_tiler_convert.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29438,9 +29438,9 @@ I	animated	Animated	2	Bool	boolean	b 0
 S	I	animated	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	rendered	Rendered	0	image
-O	tilemap	Tilemap	1	image
-O	tileset	Tileset	2	tileset
+O	rendered	Rendered	0	image	i -4	s "noone"
+O	tilemap	Tilemap	1	image	i -4	s "noone"
+O	tileset	Tileset	2	tileset	i -4	s "noone"
 N	pc.tile_drawer	Node_Tile_Drawer	Tile Drawer	generate	scripts/node_tiler/node_tiler.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29459,10 +29459,10 @@ I	animation_offset	Animation Offset	5	Float	scalar	d 0
 S	I	animation_offset	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	tileset	Tileset	2	tileset
-O	tilemap	Tilemap	1	image
-O	rendered	Rendered	0	image
-O	tile_data	Tile Data	3	struct
+O	tileset	Tileset	2	tileset	i -4	s "noone"
+O	tilemap	Tilemap	1	image	i -4	s "noone"
+O	rendered	Rendered	0	image	i -4	s "noone"
+O	tile_data	Tile Data	3	struct		s "{}"
 N	pc.tile_random	Node_Tile_Random	Tile Random	transform	scripts/node_tile_random/node_tile_random.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29477,7 +29477,7 @@ I	randomness	Randomness	2	Slider	scalar	d 0.5
 S	I	randomness	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.tile_render	Node_Tile_Render	Render Tilemap	io	scripts/node_tiler_render/node_tiler_render.gml
 I	input_0		0	Tileset	tileset		
 S	I	input_0	0
@@ -29485,7 +29485,7 @@ I	tilemap	Tilemap	1	Surface	image
 S	I	tilemap	0
 I	animated	Animated	2	Bool	boolean	b 0	
 S	I	animated	0
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.tile_rule	Node_Tile_Rule	Tile Rule	io	scripts/node_tiler_rule/node_tiler_rule.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -29493,9 +29493,9 @@ I	input_0		0	Tileset	tileset
 S	I	input_0	0
 I	tilemap	Tilemap	1	Surface	image		
 S	I	tilemap	0
-O	rendered	Rendered	0	image
-O	tilemap	Tilemap	1	image
-O	tileset	Tileset	2	tileset
+O	rendered	Rendered	0	image	i -4	s "noone"
+O	tilemap	Tilemap	1	image	i -4	s "noone"
+O	tileset	Tileset	2	tileset	i -4	s "noone"
 N	pc.tile_tilemap_export	Node_Tile_Tilemap_Export	Export Tilemap	io	scripts/node_tiler_export/node_tiler_export.gml
 I	input_7		7	Tileset	tileset		
 S	I	input_7	0
@@ -29528,7 +29528,7 @@ S	I	texture	0
 I	tile_size	Tile Size	1	Vec2	vector2	v 16 16	
 S	I	tile_size	1
 A	I	tile_size	1
-O	tileset	Tileset	0	tileset
+O	tileset	Tileset	0	tileset		s "self"
 N	pc.time_remap	Node_Time_Remap	Time Remap	filter	scripts/node_time_remap/node_time_remap.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
@@ -29540,7 +29540,7 @@ I	loop	Loop	3	Bool	boolean	b 0
 S	I	loop	0
 I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
 S	I	attribute_color_depth	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.to_number	Node_To_Number	To Number	values	scripts/node_to_number/node_to_number.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29548,7 +29548,7 @@ I	text	Text	0	Text	text	s ""
 S	I	text	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	number	Number	0	scalar
+O	number	Number	0	scalar	d 0	s "0"
 N	pc.to_text	Node_To_Text	To Text	values	scripts/node_to_text/node_to_text.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29556,7 +29556,7 @@ I	value	Value	0	Generic_any	any
 S	I	value	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	text	Text	0	text
+O	text	Text	0	text	s ""	s "\"\""
 N	pc.tonemap_ace	Node_Tonemap_ACE	ACE	filter	scripts/node_tonemap_ace/node_tonemap_ace.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29580,7 +29580,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.track_pixel	Node_Track_Pixel	Track Pixel	values	scripts/node_track_pixel/node_track_pixel.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
@@ -29601,8 +29601,8 @@ I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic
 S	I	interpolate	?
 I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat XY;;Repeat X Empty Y;Repeat X Black Y;Repeat X Clamp Y;;Repeat Y Empty X;Repeat Y Black X;Repeat Y Clamp X
 S	I	oversample	?
-O	position	Position	0	vector2
-O	all_positions	All Positions	1	array
+O	position	Position	0	vector2	v 0 0	s "[0,0]"
+O	all_positions	All Positions	1	array	a any 0	s "[]"
 N	pc.trail	Node_Trail	Trail	filter	scripts/node_trail/node_trail.gml
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
@@ -29623,7 +29623,7 @@ S	I	shift	0
 I	alpha_per_frame	Alpha per Frame	6	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	alpha_per_frame	1
 A	I	alpha_per_frame	1
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.transform	Node_Transform	Transform	transform	scripts/node_transform/node_transform.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29711,12 +29711,12 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	atlas_data	Atlas data	2	atlas
-O	dimension	Dimension	1	vector2
-O	velocity	Velocity	3	vector2
-O	direction	Direction	4	scalar
-O	speed	Speed	5	scalar
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	atlas_data	Atlas data	2	atlas	a any 0	s "[]"
+O	dimension	Dimension	1	vector2	v 1 1	s "[1,1]"
+O	velocity	Velocity	3	vector2	v 0 0	s "[0,0]"
+O	direction	Direction	4	scalar	d 0	s "0"
+O	speed	Speed	5	scalar	d 0	s "0"
 N	pc.transform_array	Node_Transform_Array	Transform Array	values	scripts/node_transform_array/node_transform_array.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29730,11 +29730,11 @@ S	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	transform	Transform	0	array
+O	transform	Transform	0	array	a any 5 d 0 d 0 d 0 d 1 d 1	s "[ 0, 0, 0, 1, 1 ]"
 N	pc.trigger	Node_Trigger	Trigger	values	scripts/node_trigger/node_trigger.gml
 I	trigger	Trigger	0	Trigger	boolean	b 0	
 S	I	trigger	0
-O	trigger	Trigger	0	boolean
+O	trigger	Trigger	0	boolean	b 0	s "false"
 N	pc.trigger_bool	Node_Trigger_Bool	Boolean Trigger	values	scripts/node_trigger_bool/node_trigger_bool.gml
 I	boolean	Boolean	0	Bool	boolean	b 0	
 S	I	boolean	0
@@ -29746,7 +29746,7 @@ Q	I	trigger_condition	0	0	s "True Frame"
 Q	I	trigger_condition	1	0	s "False to True"
 Q	I	trigger_condition	2	0	s "True to False"
 Q	I	trigger_condition	3	0	s "Value Changed"
-O	trigger	Trigger	0	boolean
+O	trigger	Trigger	0	boolean	b 0	s "false"
 N	pc.tunnel_in	Node_Tunnel_In	Tunnel Sender	misc	scripts/node_tunnel_in/node_tunnel_in.gml
 I	name	Name	0	Text	text		
 S	I	name	0
@@ -29790,13 +29790,13 @@ I	label_color	Label Color	3	Color	colour
 S	I	label_color	0
 I	label_alpha	Label Alpha	4	Slider	scalar	d 1	
 S	I	label_alpha	0
-O	value_out	Value out	0	any
+O	value_out	Value out	0	any	i -4	s "noone"
 N	pc.ui_delay	Node_UI_Delay	UI Lagger	misc	scripts/node_ui_delay/node_ui_delay.gml
 I	input	Input	0	Any	any		
 S	I	input	?
 I	delay_s	Delay (s)	1	Float	scalar	d 0	
 S	I	delay_s	0
-O	nothing	Nothing	0	any
+O	nothing	Nothing	0	any	i -4	s "noone"
 N	pc.uv_area	Node_UV_Area	UV Area	generate	scripts/node_uv_area/node_uv_area.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29845,7 +29845,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.uv_blend	Node_UV_Blend	UV Blend	compose	scripts/node_uv_blend/node_uv_blend.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29861,7 +29861,7 @@ I	amount	Amount	2	Slider	scalar	d 0.5
 S	I	amount	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.uv_cartesian	Node_UV_Cartesian	UV Cartesian	generate	scripts/node_uv_cartesian/node_uv_cartesian.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29911,7 +29911,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.uv_height	Node_UV_Height	UV Height	generate	scripts/node_uv_height/node_uv_height.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -29943,7 +29943,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.uv_isometric	Node_UV_Isometric	UV Isometric	generate	scripts/node_uv_isometric/node_uv_isometric.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30007,7 +30007,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.uv_perspective	Node_UV_Perspective	UV Perspective	generate	scripts/node_uv_perspective/node_uv_perspective.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30081,7 +30081,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.uv_polar	Node_UV_Polar	UV Polar	generate	scripts/node_uv_polar/node_uv_polar.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30122,7 +30122,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.unicode	Node_Unicode	Unicode	values	scripts/node_unicode/node_unicode.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30130,7 +30130,7 @@ I	unicode	Unicode	0	Int	integer	i 64
 S	I	unicode	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	character	Character	0	text
+O	character	Character	0	text	d 0	s "0"
 N	pc.vfx_accelerate	Node_VFX_Accelerate	Accelerate	particle	scripts/node_VFX_accelerate/node_VFX_accelerate.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30157,7 +30157,7 @@ A	I	rotate_particle	1
 I	scale_particle	Scale particle	7	Vec2_Range	vector4	w 0 0 0 0	
 S	I	scale_particle	1
 A	I	scale_particle	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	d -1	s "-1"
 N	pc.vfx_attract	Node_VFX_Attract	Attract	particle	scripts/node_VFX_attract/node_VFX_attract.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30186,7 +30186,7 @@ S	I	scale_particle	1
 A	I	scale_particle	1
 I	destroy_when_reach_middle	Destroy when reach middle	9	Bool	boolean	b 0	
 S	I	destroy_when_reach_middle	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	d -1	s "-1"
 N	pc.vfx_boids	Node_VFX_Boids	Boids	particle	scripts/node_VFX_boids/node_VFX_boids.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30219,7 +30219,7 @@ I	point_unit	Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_unit	?
 I	influence_4	Influence	10	Slider	scalar	d 0.1	
 S	I	influence_4	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.vfx_destroy	Node_VFX_Destroy	Destroy	particle	scripts/node_VFX_destroy/node_VFX_destroy.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30246,7 +30246,7 @@ A	I	rotate_particle	1
 I	scale_particle	Scale particle	7	Vec2_Range	vector4	w 0 0 0 0	
 S	I	scale_particle	1
 A	I	scale_particle	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	d -1	s "-1"
 N	pc.vfx_group_inline	Node_VFX_Group_Inline	VFX	generate	scripts/node_VFX_group_inline/node_VFX_group_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -30294,7 +30294,7 @@ I	frequency	Frequency	10	Float	scalar	d 0.2
 S	I	frequency	0
 I	multiply_by_speed	Multiply by speed	11	Bool	boolean	b 0	
 S	I	multiply_by_speed	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	d -1	s "-1"
 N	pc.vfx_override	Node_VFX_Override	VFX Override	particle	scripts/node_VFX_override/node_VFX_override.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30349,7 +30349,7 @@ I	set_surface	Set Surface	15	Bool	boolean	b 0
 S	I	set_surface	0
 I	surface	Surface	16	Surface	image		
 S	I	surface	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.vfx_renderer	Node_VFX_Renderer	Renderer	particle	scripts/node_VFX_renderer/node_VFX_renderer.gml
 I	output_dimension	Output dimension	0	Vec2	vector2	v 32 32	
 S	I	output_dimension	1
@@ -30378,7 +30378,7 @@ Q	T	blend_mode	1	0	s "Alpha"
 Q	T	blend_mode	2	0	s "Additive"
 T	input_1		1	Particle	particle		
 S	T	input_1	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.vfx_repel	Node_VFX_Repel	Repel	particle	scripts/node_VFX_repel/node_VFX_repel.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30405,7 +30405,7 @@ A	I	rotate_particle	1
 I	scale_particle	Scale particle	7	Vec2_Range	vector4	w 0 0 0 0	
 S	I	scale_particle	1
 A	I	scale_particle	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	d -1	s "-1"
 N	pc.vfx_spawner	Node_VFX_Spawner	Spawner	particle	scripts/node_VFX_spawner/node_VFX_spawner.gml
 I	seed	Seed	32	Seed	scalar		
 S	I	seed	0
@@ -30640,10 +30640,10 @@ I	spawn_trigger	Spawn trigger	71	Generic_node	node_ref
 S	I	spawn_trigger	0
 I	step_interval	Step interval	72	Int	integer	i 1	
 S	I	step_interval	0
-O	particles	Particles	0	particle
-O	on_create	On create	1	node_ref
-O	on_step	On step	2	node_ref
-O	on_destroy	On destroy	3	node_ref
+O	particles	Particles	0	particle	a any 0	s "[]"
+O	on_create	On create	1	node_ref	i -4	s "noone"
+O	on_step	On step	2	node_ref	i -4	s "noone"
+O	on_destroy	On destroy	3	node_ref	i -4	s "noone"
 N	pc.vfx_trail	Node_VFX_Trail	VFX Trail	particle	scripts/node_VFX_trail/node_VFX_trail.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30651,7 +30651,7 @@ I	life	Life	1	Int	integer	i 4
 S	I	life	0
 I	color	Color	2	Bool	boolean	b 0	
 S	I	color	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.vfx_triangulate	Node_VFX_Triangulate	VFX Triangulate	particle	scripts/node_VFX_triangulate/node_VFX_triangulate.gml
 I	output_dimension	Output dimension	0	Vec2	vector2	v 32 32	
 S	I	output_dimension	1
@@ -30673,7 +30673,7 @@ I	color_over_length	Color over Length	8	Gradient	gradient	g 0 1 0 255 255 255 25
 S	I	color_over_length	0
 I	segments	Segments	6	Int	integer	i 1	
 S	I	segments	0
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.vfx_turbulence	Node_VFX_Turbulence	Turbulence	particle	scripts/node_VFX_turbulence/node_VFX_turbulence.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30704,21 +30704,21 @@ I	turbulence_scale	Turbulence scale	9	Float	scalar	d 1
 S	I	turbulence_scale	0
 I	constant_seed	Constant seed	10	Bool	boolean	b 0	
 S	I	constant_seed	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	d -1	s "-1"
 N	pc.vfx_variable	Node_VFX_Variable	VFX Variable	particle	scripts/node_VFX_variable/node_VFX_variable.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
-O	positions	Positions	0	array
-O	scales	Scales	1	array
-O	rotations	Rotations	2	scalar
-O	blending	Blending	3	colour
-O	alpha	Alpha	4	scalar
-O	life	Life	5	scalar
-O	max_life	Max life	6	scalar
-O	surface	Surface	7	image
-O	velocity	Velocity	8	array
-O	seed	Seed	9	scalar
-O	spawn_positions	Spawn Positions	10	array
+O	positions	Positions	0	array	a any 0	s "[]"
+O	scales	Scales	1	array	a any 0	s "[]"
+O	rotations	Rotations	2	scalar	d 0	s "0"
+O	blending	Blending	3	colour	d 0	s "0"
+O	alpha	Alpha	4	scalar	d 0	s "0"
+O	life	Life	5	scalar	d 0	s "0"
+O	max_life	Max life	6	scalar	d 0	s "0"
+O	surface	Surface	7	image	i -4	s "noone"
+O	velocity	Velocity	8	array	a any 0	s "[]"
+O	seed	Seed	9	scalar	d 0	s "0"
+O	spawn_positions	Spawn Positions	10	array	a any 0	s "[]"
 N	pc.vfx_vortex	Node_VFX_Vortex	Vortex	particle	scripts/node_VFX_vortex/node_VFX_vortex.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30751,7 +30751,7 @@ I	clockwise	Clockwise	10	Bool	boolean	b 1
 S	I	clockwise	0
 I	destroy_when_reach_middle	Destroy when reach middle	11	Bool	boolean	b 0	
 S	I	destroy_when_reach_middle	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	d -1	s "-1"
 N	pc.vfx_wind	Node_VFX_Wind	Wind	particle	scripts/node_VFX_wind/node_VFX_wind.gml
 I	input_0		0	Particle	particle		
 S	I	input_0	0
@@ -30778,7 +30778,7 @@ A	I	rotate_particle	1
 I	scale_particle	Scale particle	7	Vec2_Range	vector4	w 0 0 0 0	
 S	I	scale_particle	1
 A	I	scale_particle	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	d -1	s "-1"
 N	pc.vector2	Node_Vector2	Vector2	values	scripts/node_vector2/node_vector2.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30823,9 +30823,9 @@ I	relative_unit	Relative Unit	11	Bool	boolean	b 0
 S	I	relative_unit	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	vector	Vector	0	vector2
-O	x	x	1	scalar
-O	y	y	2	scalar
+O	vector	Vector	0	vector2	v 0 0	s "[ 0, 0 ]"
+O	x	x	1	scalar	d 0	s "0"
+O	y	y	2	scalar	d 0	s "0"
 N	pc.vector3	Node_Vector3	Vector3	values	scripts/node_vector3/node_vector3.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30839,10 +30839,10 @@ I	integer	Integer	3	Bool	boolean	b 0
 S	I	integer	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	vector	Vector	0	vector3
-O	x	x	1	scalar
-O	y	y	2	scalar
-O	z	z	3	scalar
+O	vector	Vector	0	vector3	3 0 0 0	s "[ 0, 0, 0 ]"
+O	x	x	1	scalar	d 0	s "0"
+O	y	y	2	scalar	d 0	s "0"
+O	z	z	3	scalar	d 0	s "0"
 N	pc.vector4	Node_Vector4	Vector4	values	scripts/node_vector4/node_vector4.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30858,11 +30858,11 @@ I	integer	Integer	4	Bool	boolean	b 0
 S	I	integer	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	vector	Vector	0	vector4
-O	x	x	1	scalar
-O	y	y	2	scalar
-O	z	z	3	scalar
-O	w	w	4	scalar
+O	vector	Vector	0	vector4	w 0 0 0 0	s "[ 0, 0, 0, 0 ]"
+O	x	x	1	scalar	d 0	s "0"
+O	y	y	2	scalar	d 0	s "0"
+O	z	z	3	scalar	d 0	s "0"
+O	w	w	4	scalar	d 0	s "0"
 N	pc.vector_cart_to_polar	Node_Vector_Cart_To_Polar	Cart. to Polar	values	scripts/node_vec2_cart_to_polar/node_vec2_cart_to_polar.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30882,7 +30882,7 @@ I	invert_y	Invert Y	2	Bool	boolean	b 0
 S	I	invert_y	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	polar_coord	Polar Coord	0	vector2
+O	polar_coord	Polar Coord	0	vector2	v 0 0	s "[0,0]"
 N	pc.vector_cross_2_d	Node_Vector_Cross_2D	Cross product 2D	values	scripts/node_vector_cross_2D/node_vector_cross_2D.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30894,7 +30894,7 @@ S	I	point_2	1
 A	I	point_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	scalar
+O	result	Result	0	scalar	d 0	s "0"
 N	pc.vector_cross_3_d	Node_Vector_Cross_3D	Cross product 3D	values	scripts/node_vector_cross_3D/node_vector_cross_3D.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30906,7 +30906,7 @@ S	I	point_2	1
 A	I	point_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	vector3
+O	result	Result	0	vector3	3 0 0 0	s "[0,0,0]"
 N	pc.vector_direction	Node_Vector_Direction	Vector Direction	values	scripts/node_vector_direction/node_vector_direction.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30921,7 +30921,7 @@ Q	I	unit	0	0	s "Degree"
 Q	I	unit	1	0	s "Radians"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	direction	Direction	0	scalar
+O	direction	Direction	0	scalar	d 0	s "0"
 N	pc.vector_dot	Node_Vector_Dot	Dot product	values	scripts/node_vector_dot/node_vector_dot.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30933,7 +30933,7 @@ S	I	point_2	0
 A	I	point_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	scalar
+O	result	Result	0	scalar	d 0	s "0"
 N	pc.vector_magnitude	Node_Vector_Magnitude	Magnitude	values	scripts/node_vector_magnitude/node_vector_magnitude.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30942,7 +30942,7 @@ S	I	vector	0
 A	I	vector	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	magnitude	Magnitude	0	scalar
+O	magnitude	Magnitude	0	scalar	d 0	s "0"
 N	pc.vector_math	Node_Vector_Math	Vector Math	values	scripts/node_vector_math/node_vector_math.gml
 I	type	Type	0	EScroll	enum	e 0	Add;Subtract;Multiply;Divide;Power;Root;Length;Distance
 S	I	type	0
@@ -30970,7 +30970,7 @@ Q	I	angle	0	0	s "Radians"
 Q	I	angle	1	0	s "Degree"
 I	scalar_b	Scalar B	4	Bool	boolean	b 1	
 S	I	scalar_b	0
-O	result	Result	0	scalar
+O	result	Result	0	scalar	d 0	s "0"
 N	pc.vector_normalize	Node_Vector_Normalize	Normalize	values	scripts/node_vector_normalize/node_vector_normalize.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30978,7 +30978,7 @@ I	vector	Vector	0	Generic_float	array	a scalar 0
 S	I	vector	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	normalized_vector	Normalized Vector	0	array
+O	normalized_vector	Normalized Vector	0	array	a any 0	s "[]"
 N	pc.vector_polar_to_cart	Node_Vector_Polar_To_Cart	Polar to Cart.	values	scripts/node_vec2_polar_to_cart/node_vec2_polar_to_cart.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -30998,7 +30998,7 @@ I	invert_y	Invert Y	2	Bool	boolean	b 0
 S	I	invert_y	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	cartesian_coord	Cartesian Coord	0	vector2
+O	cartesian_coord	Cartesian Coord	0	vector2	v 0 0	s "[ 0, 0 ]"
 N	pc.vector_split	Node_Vector_Split	Vector Split	values	scripts/node_vector_split/node_vector_split.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -31007,10 +31007,10 @@ S	I	vector	1
 A	I	vector	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	x	x	0	scalar
-O	y	y	1	scalar
-O	z	z	2	scalar
-O	w	w	3	scalar
+O	x	x	0	scalar	d 0	s "0"
+O	y	y	1	scalar	d 0	s "0"
+O	z	z	2	scalar	d 0	s "0"
+O	w	w	3	scalar	d 0	s "0"
 N	pc.vector_swizzle	Node_Vector_Swizzle	Swizzle	values	scripts/node_vector_swizzle/node_vector_swizzle.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -31020,7 +31020,7 @@ I	swizzle	Swizzle	1	Text	text	s "yxz"
 S	I	swizzle	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	result	Result	0	array
+O	result	Result	0	array	a any 0	s "[]"
 N	pc.verlet_sim_bloat	Node_VerletSim_Bloat	Bloat	simulation	scripts/node_verletSim_bloat/node_verletSim_bloat.gml
 I	active	Active	1	Active	boolean	b 1	
 S	I	active	0
@@ -31040,7 +31040,7 @@ I	strength	Strength	5	Float	scalar	d 1
 S	I	strength	0
 I	use_origin	Use Origin	6	Bool	boolean	b 1	
 S	I	use_origin	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_collide	Node_VerletSim_Collide	Collide	simulation	scripts/node_verletSim_collide/node_verletSim_collide.gml
 I	active	Active	1	Active	boolean	b 1	
 S	I	active	0
@@ -31057,7 +31057,7 @@ B	I	shape	0	general	1	default	2
 C	I	shape	resolved
 Q	I	shape	0	0	s "Rectangle"
 Q	I	shape	1	0	s "Circle"
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_drag	Node_VerletSim_Drag	Drag Mesh	simulation	scripts/node_verletSim_drag/node_verletSim_drag.gml
 I	active	Active	1	Active	boolean	b 1	
 S	I	active	0
@@ -31075,7 +31075,7 @@ I	drag_unit	Drag Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	drag_unit	?
 I	rotation	Rotation	5	Rotation	scalar	d 0	
 S	I	rotation	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_force	Node_VerletSim_Force	Push Mesh	simulation	scripts/node_verletSim_force/node_verletSim_force.gml
 I	active	Active	6	Active	boolean	b 1	
 S	I	active	0
@@ -31096,7 +31096,7 @@ S	I	push	1
 A	I	push	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_inline	Node_VerletSim_Inline	VerletSim	generate	scripts/node_verletSim_group_inline/node_verletSim_group_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -31115,7 +31115,7 @@ S	I	substep	0
 I	gravity	Gravity	1	Vec2	vector2	v 0 0.5	
 S	I	gravity	1
 A	I	gravity	1
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh	Node_VerletSim_Mesh	Verlet Mesh	simulation	scripts/node_verletSim_mesh/node_verletSim_mesh.gml
 I	mesh	Mesh	0	Mesh	mesh2d		
 S	I	mesh	0
@@ -31132,7 +31132,7 @@ S	I	uv_map	1
 A	I	uv_map	1
 I	uv_map_unit	UV Map Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	uv_map_unit	?
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh_bridge	Node_VerletSim_Mesh_Bridge	Bridge Mesh	simulation	scripts/node_verletSim_mesh_bridge/node_verletSim_mesh_bridge.gml
 I	subdivision	Subdivision	0	IVec2	vector2	v 4 4	
 S	I	subdivision	1
@@ -31154,7 +31154,7 @@ S	I	pin_first	0
 D	8	1
 T	path	Path	0	Path	path2d	p 0 0 0	
 S	T	path	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh_cache	Node_VerletSim_Mesh_Cache	Cache Mesh	simulation	scripts/node_verletSim_mesh_cache/node_verletSim_mesh_cache.gml
 I	mesh	Mesh	0	Mesh	mesh2d		
 S	I	mesh	0
@@ -31162,7 +31162,7 @@ I	autocache	Autocache	1	Bool	boolean	b 0
 S	I	autocache	0
 I	frame	Frame	2	Int	integer	i 1	
 S	I	frame	0
-O	cached_data	Cached Data	0	struct
+O	cached_data	Cached Data	0	struct	i -4	s "noone"
 N	pc.verlet_sim_mesh_cache_lerp	Node_VerletSim_Mesh_Cache_Lerp	Mesh Mix Cache	simulation	scripts/node_verletSim_mesh_cache_lerp/node_verletSim_mesh_cache_lerp.gml
 I	mesh	Mesh	0	Mesh	mesh2d		
 S	I	mesh	0
@@ -31170,7 +31170,7 @@ I	cache_mesh	Cache Mesh	1	Struct	struct
 S	I	cache_mesh	0
 I	amount	Amount	2	Slider	scalar	d 0.5	
 S	I	amount	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh_disk	Node_VerletSim_Mesh_Disk	Disk Mesh	simulation	scripts/node_verletSim_mesh_disk/node_verletSim_mesh_disk.gml
 I	area	Area	0	Area	area	r 0.5 0.5 0.5 0.5 0 0	
 S	I	area	1
@@ -31190,7 +31190,7 @@ I	stiffness	Stiffness	5	Slider	scalar	d 0
 S	I	stiffness	0
 I	cartesian	Cartesian	6	Bool	boolean	b 0	
 S	I	cartesian	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh_grid	Node_VerletSim_Mesh_Grid	Grid Mesh	simulation	scripts/node_verletSim_mesh_grid/node_verletSim_mesh_grid.gml
 I	area	Area	0	Area	area	r 0.5 0.5 0.5 0.5 0 0	
 S	I	area	1
@@ -31208,7 +31208,7 @@ I	drag	Drag	3	Slider	scalar	d 0
 S	I	drag	0
 I	stiffness	Stiffness	5	Slider	scalar	d 0	
 S	I	stiffness	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh_pin	Node_VerletSim_Mesh_Pin	Pin Mesh	simulation	scripts/node_verletSim_mesh_pin/node_verletSim_mesh_pin.gml
 I	active	Active	5	Active	boolean	b 1	
 S	I	active	0
@@ -31237,7 +31237,7 @@ I	surface	Surface	4	Surface	image
 S	I	surface	0
 I	edge_index	Edge Index	6	Int	integer	i 0	
 S	I	edge_index	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh_pleat	Node_VerletSim_Mesh_Pleat	Pleat Mesh	simulation	scripts/node_verletSim_mesh_pleat/node_verletSim_mesh_pleat.gml
 I	mesh	Mesh	0	Mesh	mesh2d		
 S	I	mesh	0
@@ -31268,7 +31268,7 @@ S	I	offset	0
 I	offset_falloff	Offset Falloff	5	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 0.3333333333333333 1 0 0 0	
 S	I	offset_falloff	1
 A	I	offset_falloff	1
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh_tear	Node_VerletSim_Mesh_Tear	Tear Mesh	simulation	scripts/node_verletSim_mesh_tear/node_verletSim_mesh_tear.gml
 I	active	Active	4	Active	boolean	b 1	
 S	I	active	0
@@ -31296,7 +31296,7 @@ I	chance	Chance	6	Slider	scalar	d 1
 S	I	chance	0
 I	break_mesh	Break Mesh	8	Bool	boolean	b 0	
 S	I	break_mesh	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_path	Node_VerletSim_Path	Verlet Path	simulation	scripts/node_verletSim_path/node_verletSim_path.gml
 I	path	Path	0	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -31306,7 +31306,7 @@ I	tension	Tension	2	Slider	scalar	d 0.5
 S	I	tension	0
 I	drag	Drag	3	Slider	scalar	d 0	
 S	I	drag	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_render	Node_VerletSim_Render	Render	simulation	scripts/node_verletSim_render/node_verletSim_render.gml
 I	mesh	Mesh	0	Mesh	mesh2d		
 S	I	mesh	0
@@ -31335,7 +31335,7 @@ I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic
 S	I	interpolate	?
 I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat XY;;Repeat X Empty Y;Repeat X Black Y;Repeat X Clamp Y;;Repeat Y Empty X;Repeat Y Black X;Repeat Y Clamp X
 S	I	oversample	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.verlet_sim_step	Node_VerletSim_Step	Step	simulation	scripts/node_verletSim_step/node_verletSim_step.gml
 I	mesh	Mesh	0	Mesh	mesh2d		
 S	I	mesh	0
@@ -31343,7 +31343,7 @@ I	pre_render	Pre-Render	1	Bool	boolean	b 0
 S	I	pre_render	0
 I	step	Step	2	Int	integer	i 1	
 S	I	step	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_wind	Node_VerletSim_Wind	Wind	simulation	scripts/node_verletSim_wind/node_verletSim_wind.gml
 I	active	Active	7	Active	boolean	b 1	
 S	I	active	0
@@ -31365,11 +31365,11 @@ S	I	falloff_curve	1
 A	I	falloff_curve	1
 I	strength	Strength	6	Float	scalar	d 1	
 S	I	strength	0
-O	mesh	Mesh	0	mesh2d
+O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_to_path	Node_VerletSim_to_Path	Mesh to Path	simulation	scripts/node_verletSim_to_path/node_verletSim_to_path.gml
 I	mesh	Mesh	0	Mesh	mesh2d		
 S	I	mesh	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.vignette	Node_Vignette	Vignette	filter	scripts/node_vignette/node_vignette.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -31431,7 +31431,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.voronoi_extra	Node_Voronoi_Extra	Extra Voronoi	generate	scripts/node_voronoi_extra/node_voronoi_extra.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -31482,7 +31482,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.wav_file_read	Node_WAV_File_Read	WAV File In	animation	scripts/node_wav_file_read/node_wav_file_read.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -31496,11 +31496,11 @@ I	attribute_preview_gain	attribute preview_gain	-1	Float	scalar	d 0.5
 S	I	attribute_preview_gain	0
 I	attribute_play	attribute play	-1	Bool	boolean	b 1	
 S	I	attribute_play	0
-O	data	Data	0	audiobit
-O	path	Path	1	text
-O	sample_rate	Sample rate	2	integer
-O	channels	Channels	3	integer
-O	duration	Duration	4	scalar
+O	data	Data	0	audiobit	i -4	s "noone"
+O	path	Path	1	text	s ""	s "\"\""
+O	sample_rate	Sample rate	2	integer	i 44100	s "44100"
+O	channels	Channels	3	integer	i 2	s "2"
+O	duration	Duration	4	scalar	d 0	s "0"
 N	pc.wav_file_write	Node_WAV_File_Write	WAV File Out	animation	scripts/node_wav_file_write/node_wav_file_write.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -31587,7 +31587,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum		Input;Inherited;4 bit RGB
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.wave_interfere	Node_Wave_Interfere	Wave Interfere	generate	scripts/node_wave_interfere/node_wave_interfere.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -31668,7 +31668,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.wavelet_noise	Node_Wavelet_Noise	Wavelet Noise	generate	scripts/node_wavelet_noise/node_wavelet_noise.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -31729,7 +31729,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.weave	Node_Weave	Weave	generate	scripts/node_weave/node_weave.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -31804,7 +31804,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.websocket_receiver	Node_Websocket_Receiver	Websocket Receiver	io	scripts/node_websocket_receiver/node_websocket_receiver.gml
 I	active	Active	1	Active	boolean	b 1	
 S	I	active	0
@@ -31818,8 +31818,8 @@ I	port	Port	0	Int	integer	i 22400
 S	I	port	0
 I	url	Url	3	Text	text	s ""	
 S	I	url	0
-O	data	Data	0	struct
-O	receive_data	Receive data	1	boolean
+O	data	Data	0	struct		s "{}"
+O	receive_data	Receive data	1	boolean	b 0	s "false"
 N	pc.websocket_sender	Node_Websocket_Sender	Websocket Sender	io	scripts/node_websocket_sender/node_websocket_sender.gml
 I	target	Target	5	Text	text	s "127.0.0.1"	
 S	I	target	0
@@ -31899,7 +31899,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.widget_test	Node_Widget_Test	Widget Test	misc	scripts/node_widget_test/node_widget_test.gml
 I	float_box	floatBox	0	Float	scalar	d 0	
 S	I	float_box	0
@@ -32007,7 +32007,7 @@ I	clip	Clip	4	Toggle	integer	i 3
 S	I	clip	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	output	Output	0	scalar
+O	output	Output	0	scalar	d 0	s "0"
 N	pc.wrap_area	Node_Wrap_Area	Area Warp	transform	scripts/node_wrap_area/node_wrap_area.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32028,7 +32028,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.xdo_g_threshold	Node_XDoG_Threshold	XDoG Threshold	filter	scripts/node_xdog_threshold/node_xdog_threshold.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32088,13 +32088,13 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 0	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
-O	do_g	DoG	1	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
+O	do_g	DoG	1	image	i -4	s "noone"
 N	pc.xml_file_read	Node_XML_File_Read	XML File In	io	scripts/node_xml_file_read/node_xml_file_read.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
-O	content	Content	0	struct
-O	path	Path	1	text
+O	content	Content	0	struct		s "{}"
+O	path	Path	1	text	s ""	s "\"\""
 N	pc.xml_file_write	Node_XML_File_Write	XML File Out	io	scripts/node_xml_file_write/node_xml_file_write.gml
 I	path	Path	0	FPath	text	s ""	
 S	I	path	0
@@ -32162,7 +32162,7 @@ I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit 
 S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	surface_out	Surface Out	0	image
+O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.p_system_3_d_acceleration	Node_pSystem_3D_Acceleration	Accelerate	particle	scripts/node_psystem_3d_acceleration/node_psystem_3d_acceleration.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32182,7 +32182,7 @@ S	I	acceleration_over_lifespan	1
 A	I	acceleration_over_lifespan	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_align_to_velocity	Node_pSystem_3D_Align_to_Velocity	Align Velocity	particle	scripts/node_psystem_3d_align_to_velocity/node_psystem_3d_align_to_velocity.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32201,7 +32201,7 @@ Q	I	axis	1	0	s "Y"
 Q	I	axis	2	0	s "Z"
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_attract	Node_pSystem_3D_Attract	Attract	particle	scripts/node_psystem_3d_attract/node_psystem_3d_attract.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32240,7 +32240,7 @@ S	I	vortex_angle_over_lifespan	1
 A	I	vortex_angle_over_lifespan	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_blend	Node_pSystem_3D_Blend	Blend	particle	scripts/node_psystem_3d_blend/node_psystem_3d_blend.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32299,7 +32299,7 @@ S	I	color_by_index_over_lifespan	1
 A	I	color_by_index_over_lifespan	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_boids	Node_pSystem_3D_Boids	Boids	particle	scripts/node_psystem_3d_boids/node_psystem_3d_boids.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32336,7 +32336,7 @@ I	influence_4	Influence	14	Slider	scalar	d 0.1
 S	I	influence_4	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_clone	Node_pSystem_3D_Clone	Clone	particle	scripts/node_psystem_3d_clone/node_psystem_3d_clone.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32348,8 +32348,8 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	original	Original	0	particle
-O	cloned	Cloned	1	particle
+O	original	Original	0	particle	i -4	s "noone"
+O	cloned	Cloned	1	particle	i -4	s "noone"
 N	pc.p_system_3_d_collision	Node_pSystem_3D_Collision	Collide	particle	scripts/node_psystem_3d_collision/node_psystem_3d_collision.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32387,9 +32387,9 @@ I	threshold	Threshold	11	Slider	scalar	d 0.05
 S	I	threshold	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
-O	on_collide	On Collide	1	boolean
-O	collision_mask	Collision Mask	2	buffer
+O	particles	Particles	0	particle	i -4	s "noone"
+O	on_collide	On Collide	1	boolean	b 0	s "false"
+O	collision_mask	Collision Mask	2	buffer	b 0	s "false"
 N	pc.p_system_3_d_destroy	Node_pSystem_3D_Destroy	Destroy	particle	scripts/node_psystem_3d_destroy/node_psystem_3d_destroy.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32409,8 +32409,8 @@ S	I	chance_over_lifespan	1
 A	I	chance_over_lifespan	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
-O	on_destroy	On Destroy	1	boolean
+O	particles	Particles	0	particle	i -4	s "noone"
+O	on_destroy	On Destroy	1	boolean	b 0	s "false"
 N	pc.p_system_3_d_follow_path	Node_pSystem_3D_Follow_Path	Follow Path	particle	scripts/node_psystem_3d_follow_path/node_psystem_3d_follow_path.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32448,7 +32448,7 @@ S	I	spiral_over_lifespan	1
 A	I	spiral_over_lifespan	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_gravity	Node_pSystem_3D_Gravity	Gravity	particle	scripts/node_psystem_3d_gravity/node_psystem_3d_gravity.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32470,7 +32470,7 @@ I	direction	Direction	5	Rotation	scalar	d -90
 S	I	direction	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_inline	Node_pSystem_3D_Inline	3D Particle System	generate	scripts/node_psystem_3d_inline/node_psystem_3d_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -32524,8 +32524,8 @@ S	I	falloff_distance_curve	1
 A	I	falloff_distance_curve	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
-O	mask	Mask	1	buffer
+O	particles	Particles	0	particle	i -4	s "noone"
+O	mask	Mask	1	buffer	i -4	s "noone"
 N	pc.p_system_3_d_mask_data	Node_pSystem_3D_Mask_Data	Mask Data	particle	scripts/node_psystem_3d_mask_data/node_psystem_3d_mask_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32585,8 +32585,8 @@ S	I	curve_x_range	1
 A	I	curve_x_range	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
-O	mask	Mask	1	buffer
+O	particles	Particles	0	particle	i -4	s "noone"
+O	mask	Mask	1	buffer	i -4	s "noone"
 N	pc.p_system_3_d_render_model	Node_pSystem_3D_Render_Model	Render Model	particle	scripts/node_psystem_3d_render_model/node_psystem_3d_render_model.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32610,7 +32610,7 @@ I	billboard	Billboard	5	Bool	boolean	b 0
 S	I	billboard	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	mesh	Mesh	0	mesh
+O	mesh	Mesh	0	mesh	i -4	s "noone"
 N	pc.p_system_3_d_snap_transform	Node_pSystem_3D_Snap_Transform	Snap Transform	particle	scripts/node_psystem_3d_snap_transform/node_psystem_3d_snap_transform.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32672,7 +32672,7 @@ I	override_scale	Override Scale	15	Bool	boolean
 S	I	override_scale	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_spawn	Node_pSystem_3D_Spawn	Spawn	particle	scripts/node_psystem_3d_spawn/node_psystem_3d_spawn.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32764,10 +32764,10 @@ S	I	step_period_over_lifespan	1
 A	I	step_period_over_lifespan	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
-O	on_spawn	On Spawn	1	boolean
-O	on_step	On Step	2	boolean
-O	on_destroy	On Destroy	3	boolean
+O	particles	Particles	0	particle	i -4	s "noone"
+O	on_spawn	On Spawn	1	boolean	b 0	s "false"
+O	on_step	On Step	2	boolean	b 0	s "false"
+O	on_destroy	On Destroy	3	boolean	b 0	s "false"
 N	pc.p_system_3_d_trail	Node_pSystem_3D_Trail	Trail Path	particle	scripts/node_psystem_3d_trail_path/node_psystem_3d_trail_path.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -32783,7 +32783,7 @@ S	I	frames_curved	?
 I	frames_over_lifespan	Frames Over Lifespan	4	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	frames_over_lifespan	1
 A	I	frames_over_lifespan	1
-O	path	Path	0	path2d
+O	path	Path	0	path2d		s "self"
 N	pc.p_system_3_d_transform	Node_pSystem_3D_Transform	Transform	particle	scripts/node_psystem_3d_transform/node_psystem_3d_transform.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32852,7 +32852,7 @@ S	I	scale_over_lifespan	1
 A	I	scale_over_lifespan	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_wiggle	Node_pSystem_3D_Wiggle	Wiggle	particle	scripts/node_psystem_3d_wiggle/node_psystem_3d_wiggle.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
@@ -32920,7 +32920,7 @@ I	octave_4	Octave	18	Float	scalar	d 1
 S	I	octave_4	0
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_3_d_from_points	Node_pSystem_3D_from_Points	From Points	particle	scripts/node_psystem_3d_from_points/node_psystem_3d_from_points.gml
 I	points_data	Points Data	0	Vec3	vector3	3 0 0 0	
 S	I	points_data	1
@@ -32929,7 +32929,7 @@ I	index_start	Index Start	1	Float	scalar	d 0
 S	I	index_start	0
 I	index_step	Index Step	2	Float	scalar	d 1	
 S	I	index_step	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_acceleration	Node_pSystem_Acceleration	Accelerate	particle	scripts/node_psystem_acceleration/node_psystem_acceleration.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -32945,7 +32945,7 @@ S	I	acceleration_curved	?
 I	acceleration_over_lifespan	Acceleration Over Lifespan	4	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	acceleration_over_lifespan	1
 A	I	acceleration_over_lifespan	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_align_to_velocity	Node_pSystem_Align_to_Velocity	Align Velocity	particle	scripts/node_psystem_align_to_velocity/node_psystem_align_to_velocity.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -32956,7 +32956,7 @@ S	I	mask	0
 I	offset_rotation	Offset Rotation	3	Range	vector2	v 0 0	
 S	I	offset_rotation	1
 A	I	offset_rotation	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_attract	Node_pSystem_Attract	Attract	particle	scripts/node_psystem_attract/node_psystem_attract.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -32993,7 +32993,7 @@ S	I	vortex_angle_curved	?
 I	vortex_angle_over_lifespan	Vortex Angle Over Lifespan	9	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	vortex_angle_over_lifespan	1
 A	I	vortex_angle_over_lifespan	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_blend	Node_pSystem_Blend	Blend	particle	scripts/node_psystem_blend/node_psystem_blend.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33048,7 +33048,7 @@ S	I	color_by_index_curved	?
 I	color_by_index_over_lifespan	Color by Index Over Lifespan	6	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	color_by_index_over_lifespan	1
 A	I	color_by_index_over_lifespan	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_boids	Node_pSystem_Boids	Boids	particle	scripts/node_psystem_boids/node_psystem_boids.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33083,7 +33083,7 @@ I	point_unit	Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_unit	?
 I	influence_4	Influence	14	Slider	scalar	d 0.1	
 S	I	influence_4	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_clone	Node_pSystem_Clone	Clone	particle	scripts/node_psystem_clone/node_psystem_clone.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33091,8 +33091,8 @@ I	particles	Particles	0	Particle	particle
 S	I	particles	0
 I	mask	Mask	1	Buffer	buffer		
 S	I	mask	0
-O	original	Original	0	particle
-O	cloned	Cloned	1	particle
+O	original	Original	0	particle	i -4	s "noone"
+O	cloned	Cloned	1	particle	i -4	s "noone"
 N	pc.p_system_collision	Node_pSystem_Collision	Collide	particle	scripts/node_psystem_collision/node_psystem_collision.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33129,9 +33129,9 @@ I	friction	Friction	9	Slider	scalar	d 0.5
 S	I	friction	0
 I	restitution	Restitution	10	Slider	scalar	d 0.05	
 S	I	restitution	0
-O	particles	Particles	0	particle
-O	on_collide	On Collide	1	boolean
-O	collision_mask	Collision Mask	2	buffer
+O	particles	Particles	0	particle	i -4	s "noone"
+O	on_collide	On Collide	1	boolean	b 0	s "false"
+O	collision_mask	Collision Mask	2	buffer	b 0	s "false"
 N	pc.p_system_destroy	Node_pSystem_Destroy	Destroy	particle	scripts/node_psystem_destroy/node_psystem_destroy.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33147,8 +33147,8 @@ S	I	chance_curved	?
 I	chance_over_lifespan	Chance Over Lifespan	4	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	chance_over_lifespan	1
 A	I	chance_over_lifespan	1
-O	particles	Particles	0	particle
-O	on_destroy	On Destroy	1	boolean
+O	particles	Particles	0	particle	i -4	s "noone"
+O	on_destroy	On Destroy	1	boolean	b 0	s "false"
 N	pc.p_system_follow_path	Node_pSystem_Follow_Path	Follow Path	particle	scripts/node_psystem_follow_path/node_psystem_follow_path.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33182,7 +33182,7 @@ S	I	spiral_curved	?
 I	spiral_over_lifespan	Spiral Over Lifespan	10	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	spiral_over_lifespan	1
 A	I	spiral_over_lifespan	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_gravity	Node_pSystem_Gravity	Gravity	particle	scripts/node_psystem_gravity/node_psystem_gravity.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33202,7 +33202,7 @@ I	direction	Direction	5	Rotation	scalar	d -90
 S	I	direction	0
 I	apply_position	Apply Position	6	Bool	boolean	b 0	
 S	I	apply_position	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_inline	Node_pSystem_Inline	Particle System	generate	scripts/node_psystem_inline/node_psystem_inline.gml
 I	attribute_members	attribute members	-1	AttributeArray	array	a scalar 0	
 S	I	attribute_members	?
@@ -33253,8 +33253,8 @@ S	I	falloff_distance_curved	?
 I	falloff_distance_curve	Falloff Distance Curve	6	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	falloff_distance_curve	1
 A	I	falloff_distance_curve	1
-O	particles	Particles	0	particle
-O	mask	Mask	1	buffer
+O	particles	Particles	0	particle	i -4	s "noone"
+O	mask	Mask	1	buffer	i -4	s "noone"
 N	pc.p_system_mask_data	Node_pSystem_Mask_Data	Mask Data	particle	scripts/node_psystem_mask_data/node_psystem_mask_data.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33306,8 +33306,8 @@ A	I	modifier_curve	1
 I	curve_x_range	Curve X Range	7	Range	vector2	v 0 1	
 S	I	curve_x_range	1
 A	I	curve_x_range	1
-O	particles	Particles	0	particle
-O	mask	Mask	1	buffer
+O	particles	Particles	0	particle	i -4	s "noone"
+O	mask	Mask	1	buffer	i -4	s "noone"
 N	pc.p_system_mask_distance	Node_pSystem_Mask_Distance	Mask Distance	particle	scripts/node_psystem_mask_distance/node_psystem_mask_distance.gml
 I	particles	Particles	0	Particle	particle		
 S	I	particles	0
@@ -33326,8 +33326,8 @@ S	I	distance_range_unit	?
 I	remap_curve	Remap Curve	4	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	I	remap_curve	1
 A	I	remap_curve	1
-O	particles	Particles	0	particle
-O	mask	Mask	1	buffer
+O	particles	Particles	0	particle	i -4	s "noone"
+O	mask	Mask	1	buffer	i -4	s "noone"
 N	pc.p_system_oscillate	Node_pSystem_Oscillate	Oscillate	particle	scripts/node_psystem_oscillate/node_psystem_oscillate.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33362,7 +33362,7 @@ A	I	frequency_over_lifespan	1
 I	phase	Phase	9	Range	vector2	v 0 0	
 S	I	phase	1
 A	I	phase	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_render	Node_pSystem_Render	Render	particle	scripts/node_psystem_render/node_psystem_render.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33392,7 +33392,7 @@ C	I	on_animation_end	resolved
 Q	I	on_animation_end	0	0	s "Loop"
 Q	I	on_animation_end	1	0	s "Ping pong"
 Q	I	on_animation_end	2	0	s "Destroy"
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_render_line	Node_pSystem_Render_Line	Render Line	particle	scripts/node_psystem_render_line/node_psystem_render_line.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33436,7 +33436,7 @@ Q	I	thickness_type	1	0	s "Fixed"
 I	target_thickness	Target Thickness	10	Range	vector2	v 1 1	
 S	I	target_thickness	1
 A	I	target_thickness	1
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_render_path	Node_pSystem_Render_Path	Render Path	particle	scripts/node_psystem_render_path/node_psystem_render_path.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33454,13 +33454,13 @@ S	I	frames_over_lifespan	1
 A	I	frames_over_lifespan	1
 I	end_trail	End Trail	5	Bool	boolean	b 1	
 S	I	end_trail	0
-O	path	Path	0	path2d
+O	path	Path	0	path2d	i -4	s "noone"
 N	pc.p_system_render_point	Node_pSystem_Render_Point	Render Point	particle	scripts/node_psystem_render_point/node_psystem_render_point.gml
 I	particles	Particles	0	Particle	particle		
 S	I	particles	0
 I	mask	Mask	1	Buffer	buffer		
 S	I	mask	0
-O	points	Points	0	vector2
+O	points	Points	0	vector2	v 0 0	s "[0,0]"
 N	pc.p_system_render_trail	Node_pSystem_Render_Trail	Render Trail	particle	scripts/node_psystem_render_trail/node_psystem_render_trail.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33483,7 +33483,7 @@ S	I	1px_mode	0
 I	thickness	Thickness	6	Range	vector2	v 1 1	
 S	I	thickness	1
 A	I	thickness	1
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_render_triangle	Node_pSystem_Render_Triangle	Render Triangle	particle	scripts/node_psystem_render_triangle/node_psystem_render_triangle.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33526,7 +33526,7 @@ Q	I	thickness_type	1	0	s "Fixed"
 I	target_thickness	Target Thickness	10	Range	vector2	v 1 1	
 S	I	target_thickness	1
 A	I	target_thickness	1
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_sample_color	Node_pSystem_Sample_Color	Sample Color	particle	scripts/node_psystem_sample_color/node_psystem_sample_color.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33545,7 +33545,7 @@ I	on_spawn	On Spawn	5	Bool	boolean	b 1
 S	I	on_spawn	0
 I	override_color	Override Color	6	Bool	boolean	b 0	
 S	I	override_color	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_snap_transform	Node_pSystem_Snap_Transform	Snap Transform	particle	scripts/node_psystem_snap_transform/node_psystem_snap_transform.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33607,7 +33607,7 @@ I	snap_direction	Snap Direction	19	Bool	boolean	b 0
 S	I	snap_direction	0
 I	direction_snap	Direction Snap	20	Rotation	scalar	d 0	
 S	I	direction_snap	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_spawn	Node_pSystem_Spawn	Spawn	particle	scripts/node_psystem_spawn/node_psystem_spawn.gml
 I	seed	Seed	13	Seed	scalar		
 S	I	seed	0
@@ -33724,10 +33724,10 @@ S	I	step_period_curved	?
 I	step_period_over_lifespan	Step Period Over Lifespan	22	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	step_period_over_lifespan	1
 A	I	step_period_over_lifespan	1
-O	particles	Particles	0	particle
-O	on_spawn	On Spawn	1	boolean
-O	on_step	On Step	2	boolean
-O	on_destroy	On Destroy	3	boolean
+O	particles	Particles	0	particle	i -4	s "noone"
+O	on_spawn	On Spawn	1	boolean	b 0	s "false"
+O	on_step	On Step	2	boolean	b 0	s "false"
+O	on_destroy	On Destroy	3	boolean	b 0	s "false"
 N	pc.p_system_transform	Node_pSystem_Transform	Transform	particle	scripts/node_psystem_transform/node_psystem_transform.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33796,7 +33796,7 @@ S	I	scale_curved	?
 I	scale_over_lifespan	Scale Over Lifespan	8	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	scale_over_lifespan	1
 A	I	scale_over_lifespan	1
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_triangulate	Node_pSystem_Triangulate	Triangulate	particle	scripts/node_psystem_triangulate/node_psystem_triangulate.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33807,7 +33807,7 @@ S	I	mask	0
 I	thickness	Thickness	3	Range	vector2	v 1 1	
 S	I	thickness	1
 A	I	thickness	1
-O	rendered	Rendered	0	image
+O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_trigger_event	Node_pSystem_Trigger_Event	Trigger	particle	scripts/node_psystem_trigger_event/node_psystem_trigger_event.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33831,7 +33831,7 @@ S	I	chance_curved	?
 I	chance_over_lifespan	Chance Over Lifespan	6	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	chance_over_lifespan	1
 A	I	chance_over_lifespan	1
-O	on_event	On Event	0	boolean
+O	on_event	On Event	0	boolean	b 0	s "false"
 N	pc.p_system_vector_field	Node_pSystem_Vector_Field	Vector Field	particle	scripts/node_psystem_vector_field/node_psystem_vector_field.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33857,7 +33857,7 @@ B	I	overflow	0	general	1	default	2
 C	I	overflow	resolved
 Q	I	overflow	0	0	s "Repeat"
 Q	I	overflow	1	0	s "Clamp"
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_vector_gradient	Node_pSystem_Vector_Gradient	Vector Gradient	particle	scripts/node_psystem_vector_gradient/node_psystem_vector_gradient.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33885,7 +33885,7 @@ Q	I	overflow	0	0	s "Repeat"
 Q	I	overflow	1	0	s "Clamp"
 I	rotate	Rotate	8	Rotation	scalar	d 0	
 S	I	rotate	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_wiggle	Node_pSystem_Wiggle	Wiggle	particle	scripts/node_psystem_wiggle/node_psystem_wiggle.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33949,7 +33949,7 @@ I	period_4	Period	17	Float	scalar	d 4
 S	I	period_4	0
 I	octave_4	Octave	18	Float	scalar	d 1	
 S	I	octave_4	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_wrap	Node_pSystem_Wrap	Wrap	particle	scripts/node_psystem_wrap/node_psystem_wrap.gml
 I	seed	Seed	2	Seed	scalar		
 S	I	seed	0
@@ -33959,7 +33959,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	wrap	Wrap	3	Toggle	integer	i 0	
 S	I	wrap	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_from_points	Node_pSystem_from_Points	From Points	particle	scripts/node_psystem_from_points/node_psystem_from_points.gml
 I	points_data	Points Data	0	Vec2	vector2		
 S	I	points_data	1
@@ -33968,5 +33968,5 @@ I	index_start	Index Start	1	Float	scalar	d 0
 S	I	index_start	0
 I	index_step	Index Step	2	Float	scalar	d 1	
 S	I	index_step	0
-O	particles	Particles	0	particle
+O	particles	Particles	0	particle	i -4	s "noone"
 )CATALOGUE"

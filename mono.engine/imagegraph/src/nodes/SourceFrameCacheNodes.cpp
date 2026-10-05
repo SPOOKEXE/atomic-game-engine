@@ -6,7 +6,7 @@
 
 namespace engine::imagegraph::detail {
 	namespace {
-		bool Metadata(NodeContext &c) {
+		bool Metadata(NodeContext &c, const std::string *&saved) {
 			if (!c.Request.SourceCachePlayback || !c.Request.SourceCachePlayback->SynchronousProducer)
 				return c.Fail(
 					Status::UnsupportedExecution,
@@ -20,8 +20,8 @@ namespace engine::imagegraph::detail {
 				return c.Fail(Status::InvalidValue, "native played-prefix sampling requires Playing=true");
 			bool serialize = true;
 			const ArrayValue *group = nullptr;
-			bool saved = false;
-			std::array<bool, 3> seen{};
+			saved = nullptr;
+			std::array<bool, 5> seen{};
 			for (const auto &property : c.Authored.SourceProperties) {
 				size_t index;
 				if (property.Port == "serialize")
@@ -30,6 +30,10 @@ namespace engine::imagegraph::detail {
 					index = 1;
 				else if (property.Port == "cache")
 					index = 2;
+				else if (property.Port == SOURCE_FRAME_CACHE_NATIVE_TEXT)
+					index = 3;
+				else if (property.Port == SOURCE_FRAME_CACHE_NATIVE_DATA)
+					index = 4;
 				else
 					return c.Fail(Status::InvalidValue, "unknown source frame-cache metadata", property.Port);
 				if (seen[index])
@@ -52,19 +56,25 @@ namespace engine::imagegraph::detail {
 						return c.Fail(
 							Status::InvalidValue, "Cache Group must be a bounded string array", property.Port
 						);
-				} else {
-					if (!std::holds_alternative<std::string>(property.Data))
+				} else if (index == 2 || index == 3) {
+					const auto *text = std::get_if<std::string>(&property.Data);
+					if (!text)
 						return c.Fail(
 							Status::InvalidValue, "serialized source cache must be text", property.Port
 						);
-					saved = true;
-				}
+					if (index == 2) saved = text;
+				} else if (!std::holds_alternative<ArrayValue>(property.Data))
+					return c.Fail(
+						Status::InvalidValue, "native frame cache packet must be an array", property.Port
+					);
 			}
-			if (serialize && (saved || (group && !group->Elements.empty())))
+			if (serialize && group && !group->Elements.empty())
 				return c.Fail(
-					Status::UnsupportedExecution,
-					"source cache-group scheduling or serialized loading requires host capture"
+					Status::UnsupportedExecution, "source cache-group scheduling requires host capture"
 				);
+			if (!serialize) saved = nullptr;
+			if (saved && saved->empty())
+				return c.Fail(Status::InvalidValue, "enabled serialized source cache text is empty", "cache");
 			if (c.Request.NegativeFrame || c.Request.Subframe != 0)
 				return c.Fail(
 					Status::UnsupportedExecution,
@@ -163,7 +173,7 @@ namespace engine::imagegraph::detail {
 			c.SetValue(port, value);
 			return c.FailureCode == Status::Ok;
 		}
-		const Value *FindFrame(const DataReplayEntry *state, uint64_t tick) {
+		const Value *FindStoredFrame(const DataReplayEntry *state, uint64_t tick) {
 			if (!state) return nullptr;
 			const auto key = tick + 2;
 			const auto position = std::lower_bound(
@@ -173,9 +183,18 @@ namespace engine::imagegraph::detail {
 			);
 			return position != state->Values.end() && position->Frame == key ? &position->Data : nullptr;
 		}
+		const Value *FindFrame(const DataReplayEntry *state, uint64_t tick) {
+			const auto *value = FindStoredFrame(state, tick);
+			// Source cacheExist accepts an array or an existing surface, never its noone sentinel.
+			return value && (std::holds_alternative<SurfaceValue>(*value) ||
+							 std::holds_alternative<ArrayValue>(*value))
+					   ? value
+					   : nullptr;
+		}
 		bool Execute(NodeContext &c, bool array) {
 			ENGINE_PROFILE("imagegraph.source.frame_cache");
-			if (!Metadata(c)) return false;
+			const std::string *saved = nullptr;
+			if (!Metadata(c, saved)) return false;
 			const auto *owner = c.CurrentData ? c.CurrentData : c.Request.DataReplay;
 			if (!owner || owner->Entries.size() > Limits::MaximumArrayElements)
 				return c.Fail(
@@ -190,13 +209,62 @@ namespace engine::imagegraph::detail {
 					return c.Fail(diagnostic);
 			}
 			const DataReplayEntry *previous = nullptr;
-			for (const auto &entry : owner->Entries)
+			bool loadedNow = false;
+			bool constructorCleared = false;
+			for (const auto &entry : owner->Entries) {
+				if (entry.NodeId == c.Authored.Id && entry.FrameCacheConstructorCleared &&
+					SourceFrameCacheRowType(entry) == c.Authored.Type &&
+					entry.LoadedCacheData == (saved ? *saved : std::string_view{}))
+					constructorCleared = true;
 				if (entry.NodeId == c.Authored.Id && entry.ProcessorRow == c.ProcessorRow) {
 					if (SourceFrameCacheRowType(entry) == c.Authored.Type)
 						previous = &entry;
 					else if (SourceFrameCacheRowType(entry).empty())
 						return c.Fail(Status::InvalidValue, "source frame-cache replay tag is invalid");
 				}
+			}
+			if (previous && previous->LoadedCacheData != (saved ? *saved : std::string_view{}))
+				previous = nullptr;
+			if (saved && !previous && !constructorCleared && c.Request.SourceFrameCacheLoads) {
+				for (const auto &entry : c.Request.SourceFrameCacheLoads->Entries)
+					if (entry.NodeId == c.Authored.Id && entry.ProcessorRow == c.ProcessorRow) {
+						if (SourceFrameCacheRowType(entry) != c.Authored.Type ||
+							entry.LoadedCacheData != *saved || entry.NegativeFrame || entry.Subframe != 0)
+							return c.Fail(
+								Status::InvalidValue,
+								"saved frame cache receipt does not match authored source"
+							);
+						previous = &entry;
+						loadedNow = true;
+					}
+			}
+			auto nativeCharge = c.ReserveWorkspace(0, "cache");
+			if (!nativeCharge) return false;
+			DataReplayEntry nativeRow;
+			if (saved && !previous && !constructorCleared) {
+				uint64_t bytes = 0;
+				Diagnostic diagnostic;
+				const auto measured = MeasureSourceFrameCacheReceipt(c.Authored, bytes, diagnostic);
+				if (measured != Status::Ok && measured != Status::UnsupportedExecution)
+					return c.Fail(diagnostic);
+				if (measured == Status::Ok) {
+					bytes += RetainedDataReplayEntryBytes(nativeRow);
+					if (bytes > c.AvailableBytes() || !nativeCharge->Resize(bytes))
+						return c.Fail(
+							Status::LimitExceeded, "native frame cache load exceeds live byte budget", "cache"
+						);
+					if (DecodeSourceFrameCacheReceipt(c.Authored, nativeRow, diagnostic, bytes) != Status::Ok)
+						return c.Fail(diagnostic);
+					nativeRow.ProcessorRow = c.ProcessorRow;
+					previous = &nativeRow;
+					loadedNow = true;
+				}
+			}
+			if (saved && !previous && !constructorCleared)
+				return c.Fail(
+					Status::UnsupportedExecution,
+					"serialized source cache requires an exact-data decoded load receipt"
+				);
 			const uint64_t total = c.Timeline ? c.Timeline->Frames : 1;
 			if (total > Limits::MaximumArrayElements - 2)
 				return c.Fail(
@@ -206,7 +274,9 @@ namespace engine::imagegraph::detail {
 			const Value *output = previous ? SourceFrameCacheLastOutput(*previous) : &empty;
 			bool capture = false;
 			uint64_t count = 0, first = 0, last = 0, step = 1;
-			const auto *hit = c.Request.Tick <= total ? FindFrame(previous, c.Request.Tick) : nullptr;
+			// Cache loads exactly TOTAL_FRAMES slots. Cache Array restores every serialized slot.
+			const uint64_t loadLimit = loadedNow && !array ? total + 2 : UINT64_MAX;
+			const auto *hit = c.Request.Tick + 2 < loadLimit ? FindFrame(previous, c.Request.Tick) : nullptr;
 			double animated = previous ? previous->PreviousValue : 1;
 			if (!array && !hit) {
 				animated = c.Boolean("animated") ? 1 : 0;
@@ -240,19 +310,27 @@ namespace engine::imagegraph::detail {
 			InputView input;
 			if (useInput && !ReadInput(c, input)) return false;
 			const bool writeFrame = capture && c.Request.Tick <= total;
-			const bool replace = writeFrame && hit;
-			const size_t records = (previous ? previous->Values.size() : 2) + (writeFrame && !replace);
+			// Auto-cache hits skip cacheCurrentFrame. Misses resize first, including paused misses
+			// and captures beyond the current duration; manual Cache Array resizes only on capture.
+			const uint64_t frameLimit = capture ? std::min(loadLimit, total + 3) : loadLimit;
+			size_t records = 2 + (writeFrame ? 1 : 0);
+			if (previous)
+				for (size_t i = 2; i < previous->Values.size(); ++i)
+					if (previous->Values[i].Frame < frameLimit &&
+						(!writeFrame || previous->Values[i].Frame != c.Request.Tick + 2))
+						++records;
 			if (records > Limits::MaximumArrayElements)
 				return c.Fail(Status::LimitExceeded, "frame-cache history exceeds native frame count");
 			const uint64_t oldBytes = previous ? RetainedDataReplayEntryBytes(*previous) : 0;
 			const auto lastBytes = ValueClonePayloadBytes(*output);
 			if (!lastBytes)
 				return c.Fail(Status::LimitExceeded, "frame-cache latest output exceeds clone bounds");
-			const uint64_t fixed = sizeof(DataReplayEntry) +
-								   std::max(c.Authored.Id.size(), std::string{}.capacity()) +
-								   records * sizeof(DataReplayValueFrame) +
-								   2 * (c.Authored.Type.size() + std::string{}.capacity()) +
-								   (count + total) * 2 * sizeof(SourceArrayItem);
+			const uint64_t fixed =
+				sizeof(DataReplayEntry) + std::max(c.Authored.Id.size(), std::string{}.capacity()) +
+				records * sizeof(DataReplayValueFrame) +
+				(saved ? std::max(saved->size(), std::string{}.capacity()) : std::string{}.capacity()) +
+				2 * (c.Authored.Type.size() + std::string{}.capacity()) +
+				(count + total) * 2 * sizeof(SourceArrayItem);
 			uint64_t normalization = NormalizationBytes(*output);
 			if (previous)
 				for (const auto &frame : previous->Values) {
@@ -277,9 +355,11 @@ namespace engine::imagegraph::detail {
 			if (!c.ReserveOutput(fixed + each * 6, array ? "cache_array" : "cache_surface")) return false;
 			DataReplayEntry state;
 			state.NodeId = c.Authored.Id;
+			if (saved) state.LoadedCacheData = *saved;
 			state.ProcessorRow = c.ProcessorRow;
 			state.Tick = c.Request.Tick;
 			state.Initialized = true;
+			state.FrameCacheConstructorCleared = constructorCleared;
 			state.PreviousValue = animated;
 			state.PreviousFrame = double(c.Request.Tick);
 			state.Values.reserve(records);
@@ -289,7 +369,7 @@ namespace engine::imagegraph::detail {
 				for (size_t i = 2; i < previous->Values.size(); ++i) {
 					if (previous->Values[i].Frame < 2)
 						return c.Fail(Status::InvalidValue, "frame-cache retained position is invalid");
-					if (previous->Values[i].Frame >= total + 3) continue;
+					if (previous->Values[i].Frame >= frameLimit) continue;
 					if (!writeFrame || previous->Values[i].Frame != c.Request.Tick + 2)
 						state.Values.push_back(previous->Values[i]);
 				}
@@ -300,7 +380,7 @@ namespace engine::imagegraph::detail {
 			});
 			if (!array) {
 				if (writeFrame)
-					state.Values[1].Data = *FindFrame(&state, c.Request.Tick);
+					state.Values[1].Data = *FindStoredFrame(&state, c.Request.Tick);
 				else if (useInput)
 					state.Values[1].Data = CopyInput(input);
 			} else if (capture) {

@@ -36,7 +36,7 @@ namespace engine::imagegraph::detail {
 		DataReplayEntry State;
 		const ArrayValue *PreviousRows = nullptr;
 		size_t ExpectedRows = 0, PreparedRows = 0;
-		uint64_t Work = 0, CaseWork = 0, MeasurementWork = 0;
+		uint64_t Work = 0, CaseWork = 0, MeasurementWork = 0, TrimWork = 0;
 		bool Admitted = false;
 	};
 	bool BeginFontTextBatch(NodeContext &, size_t rows, FontTextBatch &);

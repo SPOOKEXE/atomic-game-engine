@@ -32,6 +32,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> MeshModifyExecutors();
 	std::span<const ExecutorEntry> SourceMesh2DExecutors();
 	std::span<const ExecutorEntry> Source2DExecutors();
+	std::span<const ExecutorEntry> SourceHilbertExecutors();
 	std::span<const ExecutorEntry> SourceAmbientOcclusionExecutors();
 	std::span<const ExecutorEntry> SourceSimpleShapeExecutors();
 	std::span<const ExecutorEntry> SourceTextExecutors();

@@ -839,3 +839,75 @@ TEST_CASE(
 	CHECK(Evaluate(document, plan, "image", request, output, diagnostic) == Status::UnsupportedExecution);
 	CHECK(output == previousOutput);
 }
+
+TEST_CASE(
+	"persisted Text graph draws signed character trims and preserves pixels on refusal", "[source_font_trim]"
+) {
+	const auto images = TextImages();
+	EvaluationRequest request;
+	request.SourceFonts = &TextNativeNamespace();
+	request.ImageSources = images;
+	for (const auto &[range, expectedWidth] :
+		 std::array<std::pair<Vector2, uint32_t>, 3>{{{{-.25, .5}, 3}, {{.75, .25}, 2}, {{-1, 2}, 4}}}) {
+		auto document = TextGraph("AAAA");
+		TextSet(document, "trim", true);
+		TextSet(document, "range", range);
+		document = TextRestore(document);
+		const auto plan = TextPlan(document);
+		Image result;
+		Diagnostic diagnostic;
+		REQUIRE(Evaluate(document, plan, "image", request, result, diagnostic) == Status::Ok);
+		CHECK(result.Width == expectedWidth);
+		CHECK(result.Height == 1);
+		CHECK(result.Pixels == std::vector<uint8_t>(expectedWidth * 4, 255));
+		const auto prior = result;
+		CHECK(Evaluate(document, plan, "image", request, result, diagnostic, 1) == Status::LimitExceeded);
+		CHECK(result == prior);
+		REQUIRE(Evaluate(document, plan, "image", request, result, diagnostic) == Status::Ok);
+		CHECK(result == prior);
+	}
+}
+
+TEST_CASE("Text trims admit all processor rows before any file font provider", "[source_font_trim]") {
+	struct Forbidden final : SourceFontProvider {
+		size_t Calls = 0;
+		bool
+		Observe(const SourceFontRequest &, uint64_t, SourceFontObservation &, std::string &failure) override {
+			++Calls;
+			failure = "font provider must not run before whole-batch trim admission";
+			return false;
+		}
+	} provider;
+	auto document = TextGraph();
+	document.Links.erase(document.Links.begin() + 1);
+	TextSet(document, "font", std::string("/not-opened/font.bdf"));
+	TextSet(document, "trim", true);
+	TextSet(document, "range", Vector2{0, 0});
+	document.Nodes.insert(
+		document.Nodes.begin(), {"rows", "pc.array_uniform", "", {}, {{"length", int64_t{768}}}}
+	);
+	document.Nodes.insert(
+		document.Nodes.begin(), {"literal", "value.text", "", {}, {{"value", std::string(3000, 'A')}}}
+	);
+	document.Links.push_back({"literal", "text", "rows", "data"});
+	document.Links.push_back({"rows", "array_out", "text", "text"});
+	document = TextRestore(document);
+	const auto plan = TextPlan(document);
+	EvaluationRequest request;
+	request.SourceFonts = &TextNativeNamespace();
+	request.FontProvider = &provider;
+	ImageArray output;
+	output.Images = {{1, 1, {1, 2, 3, 4}}};
+	const auto prior = output;
+	Diagnostic diagnostic;
+	// 768*3000 UTF8 bytes fit a 4 MiB typed array, but eight linear trim passes exceed 16 Mi work.
+	const auto status = EvaluateArray(document, plan, "image", request, output, diagnostic);
+	INFO(diagnostic.NodeId << ':' << diagnostic.Port << ':' << diagnostic.Message);
+	CHECK(status == Status::LimitExceeded);
+	CHECK(diagnostic.NodeId == "text");
+	CHECK(diagnostic.Port == "range");
+	CHECK(diagnostic.Message.find("trim batch") != std::string::npos);
+	CHECK(provider.Calls == 0);
+	CHECK(output.Images == prior.Images);
+	CHECK(output.Items == prior.Items);
+}

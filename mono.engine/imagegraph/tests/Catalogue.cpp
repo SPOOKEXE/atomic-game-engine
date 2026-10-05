@@ -1,4 +1,5 @@
 #include "../src/SourceChoice.hpp"
+#include "../src/ValueText.hpp"
 
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
@@ -63,16 +64,55 @@ TEST_CASE("Catalogue covers reviewed selected pinned source declarations", "[ima
 			INFO(input.Id);
 			const auto value = CatalogueDefault(input);
 			REQUIRE(value);
-			CHECK((
-				IsAuthoredValueType(input.Type) ||
-				(entry.Type == "pc.group_input" && input.Id == "parent_value" && input.Type == ValueType::Any) ||
-				(entry.Type == "pc.argument" && input.Id == "default_value" && input.SourceIndex == 2 &&
-				 input.SourceKind == "Text" && input.Type == ValueType::Any)
-			));
+			CHECK(
+				(IsAuthoredValueType(input.Type) ||
+				 (entry.Type == "pc.group_input" && input.Id == "parent_value" &&
+				  input.Type == ValueType::Any) ||
+				 (entry.Type == "pc.argument" && input.Id == "default_value" && input.SourceIndex == 2 &&
+				  input.SourceKind == "Text" && input.Type == ValueType::Any))
+			);
 		}
-		for (const CatalogueOutput &output : entry.Outputs)
+		for (const CatalogueOutput &output : entry.Outputs) {
 			CHECK(outputs.insert(output.Id).second);
+			if (!output.ConstructorDefault.empty()) {
+				Value value;
+				INFO(output.Id);
+				CHECK(detail::ReadValueText(output.ConstructorDefault, value));
+			}
+		}
 	}
+}
+
+TEST_CASE("Catalogue retains cold constructor values and unresolved expressions", "[imagegraph]") {
+	const auto output = [](std::string_view source) -> const CatalogueOutput & {
+		const CatalogueEntry *entry = FindCatalogueSource(source);
+		REQUIRE(entry);
+		REQUIRE(!entry->Outputs.empty());
+		return entry->Outputs.front();
+	};
+	const CatalogueOutput &cache = output("Node_Cache");
+	CHECK(cache.Type == ValueType::Image);
+	CHECK(cache.ConstructorExpression == "noone");
+	Value initial;
+	REQUIRE(detail::ReadValueText(cache.ConstructorDefault, initial));
+	CHECK(initial == Value{int64_t{-4}});
+	const CatalogueOutput &array = output("Node_Cache_Array");
+	CHECK(array.ConstructorExpression == "[]");
+	REQUIRE(detail::ReadValueText(array.ConstructorDefault, initial));
+	const auto *empty = std::get_if<ArrayValue>(&initial);
+	REQUIRE(empty);
+	CHECK(empty->ElementType == ValueType::Any);
+	CHECK(empty->Items.empty());
+	CHECK(empty->Elements.empty());
+	CHECK(output("Node_Number").ConstructorDefault == "d 0");
+	CHECK(output("Node_Vector2").ConstructorDefault == "v 0 0");
+	CHECK(output("Node_String").ConstructorDefault == "s \"\"");
+	const CatalogueOutput &path = output("Node_Path_Join");
+	CHECK(path.ConstructorExpression == "self");
+	CHECK(path.ConstructorDefault.empty());
+	const CatalogueOutput &matrix = output("Node_Matrix");
+	CHECK(matrix.ConstructorExpression == "new Matrix(3)");
+	CHECK(matrix.ConstructorDefault.empty());
 }
 
 TEST_CASE("Catalogue keeps source input indices, mask modifiers and map inputs", "[imagegraph]") {

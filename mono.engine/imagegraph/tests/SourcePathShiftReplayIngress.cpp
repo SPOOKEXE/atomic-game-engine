@@ -65,6 +65,51 @@ namespace {
 	}
 }
 TEST_CASE(
+	"Frozen cache-group path snapshots clear evaluation-local identities on replay and Pixel Builder copies",
+	"[imagegraph][source_path_shift][frame_cache_groups]"
+) {
+	DataReplayState prior;
+	std::vector<CacheGroupReplayOutput> outputs{{"path", Value{ReplayBlob(77)}, {}, {}}};
+	REQUIRE(
+		RetainCacheGroupReplayNode(
+			prior.CacheGroups, "producer", "pc.path_reverse", outputs, Limits::MaximumEvaluationBytes
+		)
+			.Code == Status::Ok
+	);
+	prior.CacheGroups.Nodes.front().RenderActive = false;
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {{"producer", "pc.path_reverse", "", {}, {{"path", ReplayLine()}}}};
+	document.Outputs = {{"out", "producer", "path"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	StatefulEvaluationResult result;
+	EvaluationRequest request;
+	request.DataReplay = &prior;
+	REQUIRE(EvaluateStateful(document, plan, "out", request, result, diagnostic) == Status::Ok);
+	CHECK(
+		std::get<Path2D>(*prior.CacheGroups.Nodes.front().Outputs.front().Data)
+			.SourceOperation->EvaluationMemoId == 77
+	);
+	CHECK(
+		std::get<Path2D>(*result.Data.CacheGroups.Nodes.front().Outputs.front().Data)
+			.SourceOperation->EvaluationMemoId == 0
+	);
+	DynamicSurfaceValue recipe;
+	recipe.Data.emplace().DataHistory = prior;
+	Value owned = recipe;
+	detail::StripSourcePathShiftIdentities(owned);
+	const auto &copied = std::get<DynamicSurfaceValue>(owned).Data->DataHistory->CacheGroups;
+	CHECK(
+		std::get<Path2D>(*copied.Nodes.front().Outputs.front().Data).SourceOperation->EvaluationMemoId == 0
+	);
+	CHECK(
+		std::get<Path2D>(*recipe.Data->DataHistory->CacheGroups.Nodes.front().Outputs.front().Data)
+			.SourceOperation->EvaluationMemoId == 77
+	);
+}
+TEST_CASE(
 	"Shift cached and delayed prior values enter a fresh memo namespace in both evaluator APIs",
 	"[source_path_shift_replay_ingress]"
 ) {

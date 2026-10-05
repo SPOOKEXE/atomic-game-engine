@@ -69,6 +69,10 @@ namespace engine::imagegraph {
 		std::string_view Name;
 		int32_t SourceIndex = -1;
 		ValueType Type = ValueType::Any;
+		// Initial source value in document ValueText, empty when unresolved. Its type may differ from Type.
+		std::string_view ConstructorDefault = {};
+		// Exact source constructor expression, including unresolved runtime objects.
+		std::string_view ConstructorExpression = {};
 	};
 
 	struct CatalogueEntry {

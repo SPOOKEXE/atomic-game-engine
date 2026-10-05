@@ -5,8 +5,12 @@
 #include "FontUnicode.hpp"
 #include "SourceGradient.hpp"
 
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
+
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <new>
 #include <stdexcept>
 
@@ -92,6 +96,14 @@ namespace engine::imagegraph::detail {
 			4 * (text.size() + (options.ObservedCasedText ? options.ObservedCasedText->size() : 0) +
 				 characters + 32) +
 			maximumLines * (sizeof(FontTextLine) + 32);
+		// Word/line trimming retains the source delimiter tokens. Admit its index before reserve.
+		const uint64_t trimWorkspace =
+			options.Trim && options.TrimType
+				? sizeof(std::vector<std::string_view>) + (characters + 1) * sizeof(std::string_view)
+				: 0;
+		if (trimWorkspace > maximumBytes || admitted > maximumBytes - trimWorkspace)
+			return fail(Status::LimitExceeded, "text trim token workspace exceeds byte budget");
+		admitted += trimWorkspace;
 		uint64_t nativeMeasurementBytes = 0;
 		if (options.FullTextSize && options.MaximumLineWidth != 0) {
 			const auto extra = FontTextNativeMeasurementAdmissionBytes(
@@ -140,42 +152,83 @@ namespace engine::imagegraph::detail {
 		}
 		candidate.Text = candidate.RawText;
 		if (options.Trim) {
-			if (options.Range.X < 0 || options.Range.X > 1 || options.Range.Y < 0 || options.Range.Y > 1)
-				return fail(
-					Status::UnsupportedExecution,
-					"out-of-range source trim slicing requires an observed source result"
-				);
+			ENGINE_PROFILE("imagegraph.font.trim");
+			const auto inputBytes = candidate.Text.size();
 			const auto delimiter = [&](char c) { return c == '\n' || (options.TrimType == 1 && c == ' '); };
-			size_t tokens = characters;
+			size_t count = characters;
+			std::vector<std::string_view> tokens;
 			if (options.TrimType) {
-				tokens = 1;
-				for (char c : candidate.Text)
-					if (delimiter(c)) ++tokens;
+				tokens.reserve(characters + 1);
+				if (sizeof(tokens) + tokens.capacity() * sizeof(std::string_view) > trimWorkspace)
+					return fail(Status::LimitExceeded, "text trim token capacity exceeds admission");
+				size_t start = 0;
+				for (size_t byte = 0; byte < candidate.Text.size(); ++byte)
+					if (delimiter(candidate.Text[byte])) {
+						tokens.emplace_back(std::string_view(candidate.Text).substr(start, byte + 1 - start));
+						start = byte + 1;
+					}
+				tokens.emplace_back(std::string_view(candidate.Text).substr(start));
+				count = tokens.size();
 			}
-			const size_t begin = static_cast<size_t>(SourceRoundEven(options.Range.X * tokens));
-			const size_t end = static_cast<size_t>(SourceRoundEven(options.Range.Y * tokens));
-			size_t byteBegin = candidate.Text.size(), byteEnd = candidate.Text.size(), index = 0,
-				   consumed = 0;
-			cursor = FontScalarCursor{candidate.Text};
-			// Word and line token indices stay unchanged between delimiters.
-			bool beginCaptured = false;
-			while (!cursor.Bytes.empty()) {
-				if (index == begin && !beginCaptured) {
-					byteBegin = consumed;
-					beginCaptured = true;
+			const double first = SourceRoundEven(options.Range.X * count);
+			const double last = SourceRoundEven(options.Range.Y * count);
+			const double length = last - first;
+			// Keep the source signed indices; reject unrepresentable int32 arguments before conversion.
+			constexpr double minimum = std::numeric_limits<int32_t>::min();
+			constexpr double maximum = std::numeric_limits<int32_t>::max();
+			if (!std::isfinite(first) || !std::isfinite(last) || !std::isfinite(length) || first < minimum ||
+				first >= maximum || last < minimum || last > maximum || length < minimum || length > maximum)
+				return fail(Status::LimitExceeded, "text trim source indices exceed int32 bounds");
+			const int64_t begin = static_cast<int64_t>(first), amount = static_cast<int64_t>(length);
+			if (!options.TrimType) {
+				// string_copy clamps its one-based start, then substring clamps and swaps its endpoints.
+				const int64_t start = std::max<int64_t>(begin, 0);
+				const auto clamp = [&](int64_t value) { return std::clamp<int64_t>(value, 0, count); };
+				const size_t low = static_cast<size_t>(std::min(clamp(start), clamp(start + amount)));
+				const size_t high = static_cast<size_t>(std::max(clamp(start), clamp(start + amount)));
+				size_t offset = 0, byteBegin = candidate.Text.size(), byteEnd = candidate.Text.size(),
+					   index = 0;
+				cursor = FontScalarCursor{candidate.Text};
+				while (!cursor.Bytes.empty()) {
+					if (index == low) byteBegin = offset;
+					if (index == high) {
+						byteEnd = offset;
+						break;
+					}
+					const size_t before = cursor.Bytes.size();
+					(void)cursor.Next(point);
+					offset += before - cursor.Bytes.size();
+					++index;
 				}
-				if (index == end) {
-					byteEnd = consumed;
-					break;
+				candidate.Text = candidate.Text.substr(byteBegin, byteEnd - byteBegin);
+			} else {
+				// computeIterationValues indexes negative offsets from the end and walks negative lengths
+				// backward.
+				int64_t offset = std::clamp<int64_t>(begin, -int64_t(count), int64_t(count) - 1);
+				if (offset < 0) offset += count;
+				const int64_t loops = amount < 0 ? std::min(offset + 1, -amount)
+												 : std::min<int64_t>(offset + amount, count) - offset;
+				std::string trimmed;
+				trimmed.reserve(candidate.Text.size());
+				if (trimmed.capacity() > candidate.Text.capacity())
+					return fail(
+						Status::LimitExceeded, "text trim result capacity exceeds admitted source storage"
+					);
+				for (int64_t iteration = 0; iteration < loops; ++iteration) {
+					trimmed.append(tokens[static_cast<size_t>(offset)]);
+					offset += amount < 0 ? -1 : 1;
 				}
-				const size_t before = cursor.Bytes.size();
-				(void)cursor.Next(point);
-				consumed += before - cursor.Bytes.size();
-				if (!options.TrimType || (point == 10 || (options.TrimType == 1 && point == 32))) ++index;
+				candidate.Text = std::move(trimmed);
 			}
-			candidate.Text =
-				end > begin ? candidate.Text.substr(byteBegin, byteEnd - byteBegin) : std::string{};
+			core::Metrics::Count("imagegraph.font.trim_input_bytes", inputBytes);
+			core::Metrics::Count("imagegraph.font.trim_output_bytes", candidate.Text.size());
+			core::Metrics::Count(
+				"imagegraph.font.trim_workspace_bytes",
+				options.TrimType ? sizeof(tokens) + tokens.capacity() * sizeof(std::string_view) : 0
+			);
+			core::Metrics::Count("imagegraph.font.trim_tokens", count);
 		}
+
 		candidate.MonoWidth = FontScalarAdvance(font, 'W');
 		candidate.Lines.reserve(maximumLines);
 		const auto measure = [&](std::string_view value, size_t &count) {
