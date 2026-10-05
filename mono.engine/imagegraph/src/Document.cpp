@@ -11,6 +11,7 @@
 #include "PaletteOps.hpp"
 #include "ParticleCodec.hpp"
 #include "PcxControls.hpp"
+#include "PendingGraph.hpp"
 #include "PixelBoxMath.hpp"
 #include "PixelOps.hpp"
 #include "PixelOpsBasicFilters.hpp"
@@ -10263,14 +10264,8 @@ namespace engine::imagegraph {
 			return diagnostic.Code;
 		}
 		const uint64_t graphBytes =
-			document.Nodes.size() * (sizeof(std::pair<std::string_view, size_t>) +
-									 sizeof(std::vector<size_t>) + 2 * sizeof(uint8_t) + 2 * sizeof(size_t) +
-									 sizeof(detail::AllocationReservation) + sizeof(NodeResult)) +
-			(2 * (plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size() +
-				  plan.InlineOwnerDependencies.size() + plan.InlineControlDependencies.size() +
-				  plan.PcxNamedDependencies.size()) +
-			 1 + (batch ? batch->Ids.size() : 0) + request.SimulationCacheCaptures.size()) *
-				sizeof(size_t);
+			document.Nodes.size() * (sizeof(std::pair<std::string_view, size_t>) + sizeof(uint8_t) +
+									 sizeof(detail::AllocationReservation) + sizeof(NodeResult));
 		auto graphCharge = budget.Reserve(graphBytes);
 		if (!graphCharge) {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "graph workspace exceeds the live byte budget");
@@ -10387,99 +10382,32 @@ namespace engine::imagegraph {
 				retainedTargets[nodeIndices.at(selected->NodeId)] = 1;
 			}
 		}
-		std::vector<std::vector<size_t>> upstream(document.Nodes.size());
-		std::vector<size_t> sourceCounts(document.Nodes.size(), 0);
-		for (const Link &link : plan.EffectiveLinks)
-			++sourceCounts[nodeIndices.at(link.ToNode)];
-		for (const auto &route : plan.GroupSurfaceDependencies)
-			++sourceCounts[route.Consumer];
-		for (const auto &route : plan.InlineOwnerDependencies)
-			if (!route.ControlsOnly) ++sourceCounts[route.Consumer];
-		for (const auto &route : plan.InlineControlDependencies)
-			++sourceCounts[route.Consumer];
-		for (const auto &route : plan.PcxNamedDependencies)
-			++sourceCounts[route.Consumer];
-		for (size_t index = 0; index < upstream.size(); ++index)
-			upstream[index].reserve(sourceCounts[index]);
-		for (const Link &link : plan.EffectiveLinks) {
-			upstream[nodeIndices.at(link.ToNode)].push_back(nodeIndices.at(link.FromNode));
-		}
-		for (const auto &route : plan.GroupSurfaceDependencies) {
-			auto &sources = upstream[route.Consumer];
-			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
-				sources.push_back(route.Producer);
-		}
-		for (const auto &route : plan.InlineOwnerDependencies) {
-			if (route.ControlsOnly) continue;
-			auto &sources = upstream[route.Consumer];
-			if (std::find(sources.begin(), sources.end(), route.Owner) == sources.end())
-				sources.push_back(route.Owner);
-		}
-		for (const auto &route : plan.InlineControlDependencies) {
-			auto &sources = upstream[route.Consumer];
-			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
-				sources.push_back(route.Producer);
-		}
-		for (const auto &route : plan.PcxNamedDependencies) {
-			auto &sources = upstream[route.Consumer];
-			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
-				sources.push_back(route.Producer);
-		}
-		const auto pruneUnreadInputs = [&] {
-			for (const auto &link : plan.EffectiveLinks) {
-				const size_t consumer = nodeIndices.at(link.ToNode);
-				if (frameCacheReads(consumer) != detail::SourceFrameCacheInputReads::ControlsOnly ||
-					link.ToPort != "surface_in")
-					continue;
-				auto &sources = upstream[consumer];
-				const auto source = std::find(sources.begin(), sources.end(), nodeIndices.at(link.FromNode));
-				if (source != sources.end()) sources.erase(source);
-			}
-			// Implicit dependencies may have shared the removed surface edge's producer.
-			const auto retainImplicit = [&](size_t producer, size_t consumer) {
-				if (frameCacheReads(consumer) != detail::SourceFrameCacheInputReads::ControlsOnly) return;
-				auto &sources = upstream[consumer];
-				if (std::find(sources.begin(), sources.end(), producer) == sources.end())
-					sources.push_back(producer);
-			};
-			for (const auto &route : plan.GroupSurfaceDependencies)
-				retainImplicit(route.Producer, route.Consumer);
-			for (const auto &route : plan.InlineOwnerDependencies)
-				if (!route.ControlsOnly) retainImplicit(route.Owner, route.Consumer);
-			for (const auto &route : plan.InlineControlDependencies)
-				retainImplicit(route.Producer, route.Consumer);
-			for (const auto &route : plan.PcxNamedDependencies)
-				retainImplicit(route.Producer, route.Consumer);
-			for (size_t index = 0; index < upstream.size(); ++index)
-				if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
-					upstream[index].clear();
-		};
-		// Frozen getters and source early returns cut unread inputs. Inspection retains structural
-		// reachability before applying this cut.
-		if (requiredOutput == document.Outputs.end()) pruneUnreadInputs();
-		std::vector<uint8_t> needed(document.Nodes.size(), 0);
-		std::vector<size_t> pending;
-		pending.reserve(
-			plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size() +
-			plan.InlineOwnerDependencies.size() + plan.InlineControlDependencies.size() +
-			plan.PcxNamedDependencies.size() + 1 + selectedOutputs.size() +
-			request.SimulationCacheCaptures.size()
-		);
-		pending.push_back(
+		uint64_t scheduleWork = 0;
+		detail::EvaluationVector<size_t> pendingRoots{detail::EvaluationAllocator<size_t>(budget)};
+		pendingRoots.push_back(
 			requiredOutput == document.Outputs.end() ? targetIndex : nodeIndices.at(requiredOutput->NodeId)
 		);
 		for (const auto *selected : selectedOutputs)
-			pending.push_back(nodeIndices.at(selected->NodeId));
+			pendingRoots.push_back(nodeIndices.at(selected->NodeId));
 		for (const auto id : request.SimulationCacheCaptures)
-			pending.push_back(nodeIndices.at(id));
-		while (!pending.empty()) {
-			const size_t current = pending.back();
-			pending.pop_back();
-			if (needed[current]) continue;
-			needed[current] = 1;
-			for (const size_t source : upstream[current])
-				pending.push_back(source);
-		}
+			pendingRoots.push_back(nodeIndices.at(id));
+		detail::PendingGraph pendingGraph(budget);
+		auto &upstream = pendingGraph.Upstream;
+		auto &needed = pendingGraph.Needed;
+		auto &remainingConsumers = pendingGraph.RemainingConsumers;
+		if (pendingGraph.Rebuild(
+				document,
+				plan,
+				frameCacheInputReads,
+				frozen,
+				pendingRoots,
+				{},
+				{},
+				requiredOutput == document.Outputs.end(),
+				scheduleWork,
+				diagnostic
+			) != Status::Ok)
+			return diagnostic.Code;
 		if (requiredOutput != document.Outputs.end()) {
 			if (!needed[targetIndex]) {
 				SetDiagnostic(
@@ -10490,19 +10418,23 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			pruneUnreadInputs();
-			std::fill(needed.begin(), needed.end(), 0);
-			pending.clear();
-			pending.push_back(targetIndex);
-			while (!pending.empty()) {
-				const size_t current = pending.back();
-				pending.pop_back();
-				if (needed[current]) continue;
-				needed[current] = 1;
-				for (const size_t source : upstream[current])
-					pending.push_back(source);
-			}
+			pendingRoots.clear();
+			pendingRoots.push_back(targetIndex);
+			if (pendingGraph.Rebuild(
+					document,
+					plan,
+					frameCacheInputReads,
+					frozen,
+					pendingRoots,
+					{},
+					{},
+					true,
+					scheduleWork,
+					diagnostic
+				) != Status::Ok)
+				return diagnostic.Code;
 		}
+		detail::EvaluationVector<size_t> pending{detail::EvaluationAllocator<size_t>(budget)};
 		const bool deferredTimeline =
 			!nodeValues && cacheGroups &&
 			std::any_of(cacheGroups->Owners.begin(), cacheGroups->Owners.end(), [](const auto &owner) {
@@ -10511,7 +10443,6 @@ namespace engine::imagegraph {
 		detail::EvaluationVector<uint8_t> timelineNeeded(
 			document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
 		);
-		uint64_t scheduleWork = 0;
 		const auto admitTimelineWork = [&](uint64_t work) -> bool {
 			if (work > 64'000'000 - scheduleWork) {
 				SetDiagnostic(
@@ -10575,13 +10506,6 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			return Status::Ok;
 		}
-		std::vector<size_t> remainingConsumers(document.Nodes.size(), 0);
-		for (size_t index = 0; index < upstream.size(); index++) {
-			if (!needed[index]) continue;
-			for (const size_t source : upstream[index])
-				remainingConsumers[source]++;
-		}
-
 		std::vector<detail::AllocationReservation> resultCharges(document.Nodes.size());
 		std::vector<NodeResult> results(document.Nodes.size());
 		std::optional<detail::HostCaptureReceiptSink> hostReceipts;
@@ -10671,25 +10595,20 @@ namespace engine::imagegraph {
 				return false;
 			}
 			dynamicPcxRoutes.push_back(route);
-			auto &sources = upstream[route.Consumer];
-			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
-				sources.push_back(route.Producer);
-			pending.clear();
-			pending.push_back(route.Producer);
-			while (!pending.empty()) {
-				const auto current = pending.back();
-				pending.pop_back();
-				if (++scheduleWork > 64'000'000) {
-					SetDiagnostic(
-						diagnostic, Status::LimitExceeded, "PCX scheduling exceeds its work budget"
-					);
-					return false;
-				}
-				if (needed[current]) continue;
-				needed[current] = 1;
-				for (const auto source : upstream[current])
-					pending.push_back(source);
-			}
+			completed[route.Consumer] = 0;
+			if (pendingGraph.Rebuild(
+					document,
+					plan,
+					frameCacheInputReads,
+					frozen,
+					pendingRoots,
+					dynamicPcxRoutes,
+					completed,
+					true,
+					scheduleWork,
+					diagnostic
+				) != Status::Ok)
+				return false;
 			if (!deferredTimeline) {
 				if (!selectTimelineInputs(needed)) return false;
 				const auto status = detail::ExtendTimelineOverrides(
@@ -10697,7 +10616,6 @@ namespace engine::imagegraph {
 				);
 				if (status != Status::Ok) return false;
 			}
-			completed[route.Consumer] = 0;
 			pendingPcxRoute.reset();
 			diagnostic = {};
 			return true;
