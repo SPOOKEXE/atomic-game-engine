@@ -73,7 +73,7 @@
     ]
   },
   "native_evidence": {
-    "current_gap": "Cache Array paused, unlinked and inactive-producer early returns skip connected range/surface getters. Cache retains Animated reads while skipping unlinked/inactive Surface getters, preserving its outer auto capture of latest output. Read admission governs dependency pruning, kernel input resolution and connected refusal propagation. Automatic update-loop transitions remain refused for enabled nonempty authored groups.",
+    "current_gap": "Source Cache Array no-read early returns skip authored control timeline sampling, both initially and after dynamic PCX route discovery. Masking precedes instance-base expansion; inline owner control tracks are admitted by consumer read policy. Explicit input inspection remains All and independent inherited/inline consumers retain their tracks. Automatic update-loop transitions remain refused for enabled nonempty authored groups.",
     "inspection": [
       "mono.engine/imagegraph/src/Document.cpp:7965-7972 NodeResult alternatives",
       "mono.engine/imagegraph/src/Document.cpp:9856-9859 dependency closure",
@@ -87,7 +87,7 @@
       "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
       "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
-      "Check source timeline projection ordering separately; this batch proves linked getter admission, not every animated authored property."
+      "Cache hit/loading branch getter admission and complete source update-loop scheduling remain to audit and integrate before enabling nonempty groups."
     ],
     "bounded_policy_implementation": {
       "scope": "Bounded caller-owned named producer snapshots and source membership/activity policy. Evaluator and host journal integration remains outstanding; nonempty enabled source groups remain refused.",
@@ -550,6 +550,59 @@
         "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
         "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
         "Check source timeline projection ordering separately; this batch proves linked getter admission, not every animated authored property."
+      ]
+    },
+    "timeline_input_implementation": {
+      "scope": "Source Cache Array no-read early returns skip authored control timeline sampling, both initially and after dynamic PCX route discovery. Masking precedes instance-base expansion; inline owner control tracks are admitted by consumer read policy. Explicit input inspection remains All and independent inherited/inline consumers retain their tracks.",
+      "head_before_commit": "be30f3f1c25e01e8e590556c411e43384defc546",
+      "coverage": [
+        "Compiled source Step track with an runtime-invalid numeric driver stays unread for paused, unlinked and inactive-producer Array branches. Prior output and caller journals remain unchanged.",
+        "The same control is sampled, and refusal remains atomic, once active playback/link/producer admission resumes.",
+        "Explicit input inspection samples the control even while ordinary Array output execution would early-return.",
+        "Existing joined group, inline owner, instance, PCX and timeline suites pass; no claim of a separate dynamic-PCX early-return fixture."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-timeline-inputs-batch4-results.json",
+      "native_cases": 4830,
+      "native_assertions": 1991389,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "approved_vulkan_cases": 15,
+      "architecture": "Passed: 55 modules, 6 programs, 39 layered.",
+      "format": "clang-format-21 dry run and git diff --check passed.",
+      "binary_hashes": "All eleven native suite binaries and assetc/imagegraph child hashes stable during tests and matched afterwards.",
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-timeline-inputs-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-timeline-inputs-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-timeline-inputs-build3.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-timeline-inputs-build4.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-timeline-inputs-issues.json",
+      "review": "Sol read-only review found no confirmed defect in both timeline admission passes, instance-base expansion order, explicit inspection or fixture.",
+      "profiling": "No fresh isolated performance measurement or sanitizer run. No performance claim.",
+      "source_sha256": {
+        "mono.engine/imagegraph/src/Document.cpp": "68e21da4d8874b1f7e8694c9237bdac8a388738c31354337cc4d2dfdf1f3d812",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp": "fc5cc64e02d0a667c8edd65feed305a360ba49b58881d507e1e1ef3e8f255a22",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "af1d074846729442edc6fbbb6f6b421304bafa42449d899082ead83f3a772fd3"
+      },
+      "remaining": [
+        "Implement source Cache/Cache Array update-loop branch-local enable/disable and frame-clear. Enabled nonempty authored groups remain refused.",
+        "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
+        "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
+        "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
+        "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
+        "Cache hit/loading branch getter admission and complete source update-loop scheduling remain to audit and integrate before enabling nonempty groups."
       ]
     }
   },

@@ -10485,9 +10485,11 @@ namespace engine::imagegraph {
 			needed.begin(), needed.end(), detail::EvaluationAllocator<uint8_t>(budget)
 		);
 		for (size_t index = 0; index < frozen.size(); ++index)
-			if (frozen[index]) timelineNeeded[index] = 0;
+			if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
+				timelineNeeded[index] = 0;
 		for (const auto &route : plan.InlineOwnerDependencies)
-			if (route.ControlsOnly && needed[route.Consumer] && !frozen[route.Consumer])
+			if (route.ControlsOnly && needed[route.Consumer] && !frozen[route.Consumer] &&
+				frameCacheReads(route.Consumer) != detail::SourceFrameCacheInputReads::None)
 				timelineNeeded[route.Owner] = 1;
 		for (size_t index = 0; index < needed.size(); ++index) {
 			if (!timelineNeeded[index]) continue;
@@ -10642,9 +10644,12 @@ namespace engine::imagegraph {
 			}
 			std::copy(needed.begin(), needed.end(), timelineNeeded.begin());
 			for (size_t index = 0; index < frozen.size(); ++index)
-				if (frozen[index]) timelineNeeded[index] = 0;
+				if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
+					timelineNeeded[index] = 0;
 			for (const auto &inlineRoute : plan.InlineOwnerDependencies)
-				if (inlineRoute.ControlsOnly && needed[inlineRoute.Consumer] && !frozen[inlineRoute.Consumer])
+				if (inlineRoute.ControlsOnly && needed[inlineRoute.Consumer] &&
+					!frozen[inlineRoute.Consumer] &&
+					frameCacheReads(inlineRoute.Consumer) != detail::SourceFrameCacheInputReads::None)
 					timelineNeeded[inlineRoute.Owner] = 1;
 			for (size_t index = 0; index < needed.size(); ++index) {
 				if (!timelineNeeded[index]) continue;

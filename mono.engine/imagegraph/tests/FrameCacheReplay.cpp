@@ -1674,3 +1674,56 @@ TEST_CASE(
 		CHECK(state == original);
 	}
 }
+
+TEST_CASE(
+	"Cache Array early returns do not sample authored animated controls",
+	"[imagegraph][source_frame_cache][timeline]"
+) {
+	for (int branch = 0; branch < 3; ++branch) {
+		auto document = Scene(true);
+		const auto earlier = Run(document, Clock(0));
+		auto state = earlier.Data;
+		if (branch == 1) document.Links.clear();
+		if (branch == 2) {
+			document.Nodes[1].SourceProperties = {{"serialize", false}};
+			FreezeInputForAnotherOwner(document, state);
+		}
+		document.Keyframes = {
+			{"cache", "step", 0, int64_t{1}, "source", KeyframeEase{}},
+			{"cache", "step", 5, int64_t{2}, "source", KeyframeEase{}}
+		};
+		for (auto &key : document.Keyframes)
+			key.SourceDriver = KeyframeAudioDriver{"unavailable-capture", "rms", 0, 1, 0};
+		document.Tracks = {{"cache", "step", "hold", -1}};
+		const auto original = state;
+		auto request = Clock(1, branch != 0);
+		const auto result = Run(document, request, &state);
+		CHECK(Slots(result) == Slots(earlier));
+		CHECK(state == original);
+		CHECK(result.Data.CacheGroups == original.CacheGroups);
+		request.DataReplay = &state;
+		EvaluationSnapshot snapshot;
+		Diagnostic inspectionDiagnostic;
+		CHECK(
+			EvaluateNodeInputs(
+				document, Compiled(document), "cache", request, snapshot, inspectionDiagnostic
+			) == Status::InvalidValue
+		);
+		CHECK(inspectionDiagnostic.NodeId == "cache");
+		CHECK(inspectionDiagnostic.Port == "step");
+		if (branch == 0) request.SourceCachePlayback->Playing = true;
+		if (branch == 1) document.Links.push_back({"input", "image", "cache", "surface_in"});
+		if (branch == 2) state.CacheGroups.Nodes[1].RenderActive = true;
+		request.DataReplay = &state;
+		StatefulEvaluationResult refused = result;
+		Diagnostic diagnostic;
+		CHECK(
+			EvaluateStateful(document, Compiled(document), "out", request, refused, diagnostic) ==
+			Status::InvalidValue
+		);
+		CHECK(diagnostic.NodeId == "cache");
+		CHECK(diagnostic.Port == "step");
+		SameOutput(refused, result);
+		CHECK(refused.Data == result.Data);
+	}
+}
