@@ -2,12 +2,13 @@
 #include "ArraySource.hpp"
 
 #include <engine/imagegraph/FrameCacheReplay.hpp>
+#include <engine/imagegraph/SourceFrameCacheProject.hpp>
 
 #include <algorithm>
 
 namespace engine::imagegraph::detail {
 	namespace {
-		bool Metadata(NodeContext &c, const std::string *&saved) {
+		bool Metadata(NodeContext &c, const std::string *&saved, bool &serialize, bool &nonemptyGroup) {
 			if (!c.Request.SourceCachePlayback || !c.Request.SourceCachePlayback->SynchronousProducer)
 				return c.Fail(
 					Status::UnsupportedExecution,
@@ -19,7 +20,7 @@ namespace engine::imagegraph::detail {
 				return c.Fail(Status::InvalidValue, "invalid source frame-cache sampling profile");
 			if (observation.Sampling == SourceCacheSampling::NativePlayedPrefix && !observation.Playing)
 				return c.Fail(Status::InvalidValue, "native played-prefix sampling requires Playing=true");
-			bool serialize = true;
+			serialize = true;
 			const ArrayValue *group = nullptr;
 			saved = nullptr;
 			std::array<bool, 5> seen{};
@@ -69,10 +70,7 @@ namespace engine::imagegraph::detail {
 						Status::InvalidValue, "native frame cache packet must be an array", property.Port
 					);
 			}
-			if (serialize && group && !group->Elements.empty())
-				return c.Fail(
-					Status::UnsupportedExecution, "source cache-group scheduling requires host capture"
-				);
+			nonemptyGroup = group && !group->Elements.empty();
 			if (!serialize) saved = nullptr;
 			if (saved && saved->empty())
 				return c.Fail(Status::InvalidValue, "enabled serialized source cache text is empty", "cache");
@@ -82,6 +80,23 @@ namespace engine::imagegraph::detail {
 					"native frame-cache storage requires integer nonnegative source frames"
 				);
 			return true;
+		}
+		bool GroupActionAvailable(NodeContext &c, bool enabled, bool disable) {
+			if (!enabled) return true;
+			const auto &project = c.Request.SourceCacheProject;
+			if (!project)
+				return c.Fail(
+					Status::UnsupportedExecution,
+					"source cache-group action requires authoritative project observations",
+					"cache_group"
+				);
+			if (project->ProjectLoading || project->ProjectAppending) return true;
+			if (disable && !SourceFrameCacheIsLastProjectFrame(*project)) return true;
+			return c.Fail(
+				Status::UnsupportedExecution,
+				"source cache-group scheduling requires host capture",
+				"cache_group"
+			);
 		}
 		struct InputView {
 			const Value *Data = nullptr;
@@ -177,7 +192,8 @@ namespace engine::imagegraph::detail {
 		bool Execute(NodeContext &c, bool array) {
 			ENGINE_PROFILE("imagegraph.source.frame_cache");
 			const std::string *saved = nullptr;
-			if (!Metadata(c, saved)) return false;
+			bool serialize = true, nonemptyGroup = false;
+			if (!Metadata(c, saved, serialize, nonemptyGroup)) return false;
 			const auto *owner = c.CurrentData ? c.CurrentData : c.Request.DataReplay;
 			if (!owner || owner->Entries.size() > Limits::MaximumArrayElements)
 				return c.Fail(
@@ -191,6 +207,9 @@ namespace engine::imagegraph::detail {
 				if (ValidateDataReplay(*owner, c.ByteBudget, diagnostic) != Status::Ok)
 					return c.Fail(diagnostic);
 			}
+			for (const auto &group : owner->CacheGroups.Owners)
+				if (group.NodeId == c.Authored.Id && !group.Members.empty()) nonemptyGroup = true;
+			const bool groupEnabled = serialize && nonemptyGroup;
 			const DataReplayEntry *previous = nullptr;
 			bool loadedNow = false;
 			bool constructorCleared = false;
@@ -267,6 +286,9 @@ namespace engine::imagegraph::detail {
 				animated = c.Boolean("animated") ? 1 : 0;
 				if (c.FailureCode != Status::Ok) return false;
 			}
+			const bool enableGroup = (!hit || array) && c.Request.SourceCachePlayback->Playing &&
+									 c.FrameCacheSurfaceLinked && !c.FrameCacheProducerActive;
+			if (enableGroup && !GroupActionAvailable(c, groupEnabled, false)) return false;
 			if (!array) {
 				if (hit)
 					output = hit;
@@ -280,6 +302,9 @@ namespace engine::imagegraph::detail {
 				const int64_t begin = start < 0 ? 0 : start - 1, end = stop < 0 ? int64_t(total) : stop;
 				// Source checks invalid range before the clock, and leaves the output unchanged on every
 				// return.
+				if (end >= begin && stride > 0) {
+					if (!GroupActionAvailable(c, groupEnabled, true)) return false;
+				}
 				if (end >= begin && stride > 0 && int64_t(c.Request.Tick) >= begin &&
 					int64_t(c.Request.Tick) < end) {
 
@@ -296,6 +321,7 @@ namespace engine::imagegraph::detail {
 								  c.FrameCacheInputReads == SourceFrameCacheInputReads::All;
 			InputView input;
 			if (useInput && !ReadInput(c, input)) return false;
+			if (!array && useInput && !GroupActionAvailable(c, groupEnabled, true)) return false;
 			const bool writeFrame = capture && c.Request.Tick <= total;
 			// Auto-cache hits skip cacheCurrentFrame. Misses resize first, including paused misses
 			// and captures beyond the current duration; manual Cache Array resizes only on capture.

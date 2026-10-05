@@ -11341,6 +11341,16 @@ namespace engine::imagegraph {
 					simulation && simulation->Random ? simulation->Random : request.RandomReplay;
 				context.CurrentData = simulation && simulation->Data ? simulation->Data : request.DataReplay;
 				context.FrameCacheInputReads = frameCacheReads(index);
+				if (node.Type == "pc.cache" || node.Type == "pc.cache_array") {
+					const auto surface = std::find_if(
+						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &link) {
+							return link.ToNode == node.Id && link.ToPort == "surface_in";
+						}
+					);
+					context.FrameCacheSurfaceLinked = surface != plan.EffectiveLinks.end();
+					context.FrameCacheProducerActive =
+						!context.FrameCacheSurfaceLinked || !frozen[nodeIndices.at(surface->FromNode)];
+				}
 				context.CurrentRigid = currentRigid;
 				context.CurrentRigidCharge = rigidCharge;
 				context.CurrentSurfaces =

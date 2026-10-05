@@ -160,6 +160,7 @@ namespace engine::imagegraph::detail {
 		const RandomReplayState *CurrentRandom = nullptr;
 		const DataReplayState *CurrentData = nullptr;
 		SourceFrameCacheInputReads FrameCacheInputReads = SourceFrameCacheInputReads::All;
+		bool FrameCacheSurfaceLinked = false, FrameCacheProducerActive = true;
 		SourcePathShiftMemo *PathShiftMemo = nullptr;
 		FontTextBatch *TextBatch = nullptr;
 		AllocationReservation PathMemoInputsCharge;
