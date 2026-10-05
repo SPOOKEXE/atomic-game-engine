@@ -1,5 +1,6 @@
 #include "ArrayOps.hpp"
 #include "AudioPayload.hpp"
+#include "CacheGroupReplayClone.hpp"
 #include "EvaluationAllocator.hpp"
 #include "GroupInputDepth.hpp"
 #include "GroupReplayInternal.hpp"
@@ -9990,6 +9991,23 @@ namespace engine::imagegraph {
 		return Status::Ok;
 	}
 
+	static bool HasAuthoredCacheGroups(const Document &document) {
+		return std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+			if ((node.Type != "pc.cache" && node.Type != "pc.cache_array") ||
+				node.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
+				return false;
+			return std::any_of(
+				node.SourceProperties.begin(),
+				node.SourceProperties.end(),
+				[](const AuthoredValue &property) {
+					const auto *group = std::get_if<ArrayValue>(&property.Data);
+					return property.Port == "cache_group" && group && group->ElementType == ValueType::Text &&
+						   !group->Elements.empty();
+				}
+			);
+		});
+	}
+
 	static Status EvaluateGraph(
 		const Document &document,
 		const Plan &plan,
@@ -10011,42 +10029,101 @@ namespace engine::imagegraph {
 		StatefulOutputCapture *batch = nullptr
 	) {
 
-		detail::AllocationReservation cacheGroupCharge;
-		CacheGroupReplayState temporaryCacheGroups;
-		const CacheGroupReplayState *cacheGroups =
-			simulation && simulation->Data ? &simulation->Data->CacheGroups : nullptr;
-		if (!cacheGroups && request.DataReplay && !request.DataReplay->CacheGroups.Nodes.empty()) {
-			const auto &source = request.DataReplay->CacheGroups;
-			const uint64_t available = budget.Available();
-			const uint64_t retained = RetainedCacheGroupReplayBytes(source);
-			if (source.Nodes.size() > Limits::MaximumNodes) {
-				SetDiagnostic(diagnostic, Status::LimitExceeded, "cache-group owner exceeds node bounds");
-				return diagnostic.Code;
-			}
-			size_t ports = 0;
-			for (const auto &node : source.Nodes)
-				ports = std::max(ports, node.Outputs.size());
-			if (retained > available / 2) {
+		const bool hasFrameCaches =
+			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+				return node.Type == "pc.cache" || node.Type == "pc.cache_array";
+			});
+		detail::AllocationReservation temporaryDataShadow, temporaryDataCharge;
+		DataReplayState temporaryData;
+		DataReplayState *currentData = simulation ? simulation->Data : nullptr;
+		detail::AllocationReservation *dataCharge = currentData ? simulation->Charge : nullptr;
+		if (!currentData &&
+			(hasFrameCaches || (request.DataReplay && !request.DataReplay->CacheGroups.Nodes.empty()))) {
+			const uint64_t retained =
+				request.DataReplay ? RetainedDataReplayBytes(*request.DataReplay) : sizeof(DataReplayState);
+			auto shadow = budget.Reserve(request.DataReplay ? retained : 0),
+				 copied = budget.Reserve(retained);
+			if (!shadow || !copied) {
 				SetDiagnostic(
-					diagnostic, Status::LimitExceeded, "cache-group owners exceed live byte budget"
+					diagnostic, Status::LimitExceeded, "temporary data journal exceeds the live byte budget"
 				);
 				return diagnostic.Code;
 			}
-			auto charge = budget.Reserve(2 * retained);
-			auto workspace = budget.Reserve(ports * sizeof(size_t));
-			if (!charge || !workspace) {
-				SetDiagnostic(
-					diagnostic, Status::LimitExceeded, "cache-group workspace exceeds live byte budget"
-				);
-				return diagnostic.Code;
+			temporaryDataShadow = std::move(*shadow);
+			temporaryDataCharge = std::move(*copied);
+			if (request.DataReplay) {
+				auto workspace = budget.Reserve(DataReplayValidationWorkspaceBytes(*request.DataReplay));
+				if (!workspace) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"temporary data validation exceeds the live byte budget"
+					);
+					return diagnostic.Code;
+				}
+				if (ValidateDataReplay(*request.DataReplay, Limits::MaximumEvaluationBytes, diagnostic) !=
+					Status::Ok)
+					return diagnostic.Code;
+				temporaryData = *request.DataReplay;
 			}
-			cacheGroupCharge = std::move(*charge);
-			if (ReconcileCacheGroupReplay(
-					document, source, temporaryCacheGroups, request.SourceCacheProject, available, diagnostic
-				) != Status::Ok)
-				return diagnostic.Code;
-			cacheGroups = &temporaryCacheGroups;
+			if (!temporaryData.CacheGroups.Nodes.empty()) {
+				const uint64_t groupBytes = RetainedCacheGroupReplayBytes(temporaryData.CacheGroups);
+				const uint64_t cloneBytes = detail::CacheGroupReplayCloneBytes(temporaryData.CacheGroups);
+				size_t ports = 0;
+				for (const auto &node : temporaryData.CacheGroups.Nodes)
+					ports = std::max(ports, node.Outputs.size());
+				const uint64_t workspaceBytes = ports * sizeof(size_t);
+				auto replacement = budget.Reserve(cloneBytes), workspace = budget.Reserve(workspaceBytes);
+				if (!replacement || !workspace || groupBytes > Limits::MaximumEvaluationBytes ||
+					cloneBytes > Limits::MaximumEvaluationBytes - groupBytes ||
+					workspaceBytes > Limits::MaximumEvaluationBytes - groupBytes - cloneBytes) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"temporary group replacement exceeds the live byte budget"
+					);
+					return diagnostic.Code;
+				}
+				if (ReconcileCacheGroupReplay(
+						document,
+						temporaryData.CacheGroups,
+						temporaryData.CacheGroups,
+						request.SourceCacheProject,
+						groupBytes + cloneBytes + workspaceBytes,
+						diagnostic
+					) != Status::Ok)
+					return diagnostic.Code;
+				if (!temporaryDataCharge.Resize(RetainedDataReplayBytes(temporaryData))) std::terminate();
+			}
+			if (HasAuthoredCacheGroups(document) && temporaryData.CacheGroups.Owners.empty()) {
+				CacheGroupReplayState initialized;
+				if (InitializeAuthoredCacheGroupReplay(
+						document, temporaryData.CacheGroups, initialized, budget.Available(), diagnostic
+					) != Status::Ok)
+					return diagnostic.Code;
+				auto initializedCharge = budget.Reserve(RetainedCacheGroupReplayBytes(initialized));
+				if (!initializedCharge || !temporaryDataCharge.Merge(std::move(*initializedCharge))) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"temporary group initialization exceeds the live byte budget"
+					);
+					return diagnostic.Code;
+				}
+				temporaryData.CacheGroups = std::move(initialized);
+			}
+			for (auto &node : temporaryData.CacheGroups.Nodes)
+				for (auto &output : node.Outputs)
+					if (output.Data) detail::StripSourcePathShiftIdentities(*output.Data);
+			for (auto &entry : temporaryData.Entries)
+				for (auto &frame : entry.Values)
+					detail::StripSourcePathShiftIdentities(frame.Data);
+			if (!temporaryDataCharge.Resize(RetainedDataReplayBytes(temporaryData))) std::terminate();
+			currentData = &temporaryData;
+			dataCharge = &temporaryDataCharge;
 		}
+		const CacheGroupReplayState *cacheGroups = currentData ? &currentData->CacheGroups : nullptr;
+
 		const uint64_t loadBytes =
 			request.SourceFrameCacheLoads ? RetainedDataReplayBytes(*request.SourceFrameCacheLoads) : 0;
 		auto frameCacheLoadShadow = budget.Reserve(loadBytes);
@@ -10279,18 +10356,14 @@ namespace engine::imagegraph {
 			for (const auto &node : cacheGroups->Nodes)
 				if (!node.RenderActive) frozen[nodeIndices.at(node.NodeId)] = &node;
 		detail::EvaluationVector<CacheGroupReplayNode *> tracked(
-			simulation && simulation->Data ? document.Nodes.size() : 0,
+			currentData ? document.Nodes.size() : 0,
 			nullptr,
 			detail::EvaluationAllocator<CacheGroupReplayNode *>(budget)
 		);
-		if (simulation && simulation->Data)
-			for (auto &node : simulation->Data->CacheGroups.Nodes)
+		if (currentData)
+			for (auto &node : currentData->CacheGroups.Nodes)
 				tracked[nodeIndices.at(node.NodeId)] = &node;
 
-		const bool hasFrameCaches =
-			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
-				return node.Type == "pc.cache" || node.Type == "pc.cache_array";
-			});
 		detail::EvaluationVector<detail::SourceFrameCacheInputReads> frameCacheInputReads(
 			hasFrameCaches ? document.Nodes.size() : 0,
 			detail::SourceFrameCacheInputReads::All,
@@ -10298,8 +10371,7 @@ namespace engine::imagegraph {
 		);
 		const bool cachePlaying = request.SourceCachePlayback && request.SourceCachePlayback->Playing;
 		const auto refreshFrameCacheReads = [&] {
-			const auto *currentFrameCacheData =
-				simulation && simulation->Data ? simulation->Data : request.DataReplay;
+			const auto *currentFrameCacheData = currentData ? currentData : request.DataReplay;
 			const detail::SourceFrameCacheInputIndex currentFrameCacheIndex(
 				hasFrameCaches ? currentFrameCacheData : nullptr, budget
 			);
@@ -10527,7 +10599,7 @@ namespace engine::imagegraph {
 					   );
 			});
 		const bool mutableDispatch =
-			dynamicPcx || (simulation && simulation->Data && cacheGroups && !cacheGroups->Owners.empty());
+			dynamicPcx || (currentData && cacheGroups && !cacheGroups->Owners.empty());
 		bool groupActivityChanged = false;
 		detail::EvaluationVector<PcxNamedDependency> dynamicPcxRoutes{
 			detail::EvaluationAllocator<PcxNamedDependency>(budget)
@@ -11319,9 +11391,9 @@ namespace engine::imagegraph {
 				context.CurrentSimulation = simulation ? simulation->Replay : request.SimulationReplay;
 				context.CurrentRandom =
 					simulation && simulation->Random ? simulation->Random : request.RandomReplay;
-				context.CurrentData = simulation && simulation->Data ? simulation->Data : request.DataReplay;
+				context.CurrentData = currentData ? currentData : request.DataReplay;
 				context.FrameCacheInputReads = frameCacheReads(index);
-				context.FrameCacheGroupActionsAvailable = simulation && simulation->Data && mutableDispatch;
+				context.FrameCacheGroupActionsAvailable = currentData && mutableDispatch;
 				if (node.Type == "pc.cache" || node.Type == "pc.cache_array") {
 					const auto surface = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &link) {
@@ -13028,7 +13100,7 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				if (context.FrameCacheGroupAction) {
-					auto &data = *simulation->Data;
+					auto &data = *currentData;
 					const uint64_t retained = RetainedDataReplayBytes(data);
 					const uint64_t replacement =
 						*context.FrameCacheGroupAction == CacheGroupReplayAction::Enable
@@ -13066,9 +13138,8 @@ namespace engine::imagegraph {
 						) != Status::Ok)
 						return diagnostic.Code;
 					if (!replacementCharge->Resize(RetainedDataReplayBytes(data))) std::terminate();
-					auto released = simulation->Charge->Split(retained);
-					if (!released || !simulation->Charge->Merge(std::move(*replacementCharge)))
-						std::terminate();
+					auto released = dataCharge->Split(retained);
+					if (!released || !dataCharge->Merge(std::move(*replacementCharge))) std::terminate();
 					std::fill(frozen.begin(), frozen.end(), nullptr);
 					std::fill(tracked.begin(), tracked.end(), nullptr);
 					for (auto &member : data.CacheGroups.Nodes) {
@@ -13202,13 +13273,13 @@ namespace engine::imagegraph {
 						}
 					}
 				}
-				if (simulation && simulation->Data) {
+				if (currentData) {
 					for (auto &update : context.DataUpdates) {
 						// Current evaluation tags remain private until the complete source
 						// sampling journal is synchronized into owned candidate receipts.
 						const uint64_t bytes = RetainedDataReplayEntryBytes(update);
 						auto admitted = context.OutputCharge.Split(bytes);
-						if (!admitted || !simulation->Charge->Merge(std::move(*admitted))) {
+						if (!admitted || !dataCharge->Merge(std::move(*admitted))) {
 							SetDiagnostic(
 								diagnostic,
 								Status::LimitExceeded,
@@ -13217,7 +13288,7 @@ namespace engine::imagegraph {
 							);
 							return diagnostic.Code;
 						}
-						auto &entries = simulation->Data->Entries;
+						auto &entries = currentData->Entries;
 						const auto found =
 							std::find_if(entries.begin(), entries.end(), [&](const auto &entry) {
 								return entry.NodeId == update.NodeId &&
@@ -13226,10 +13297,10 @@ namespace engine::imagegraph {
 						if (found != entries.end()) {
 							const uint64_t oldBytes = RetainedDataReplayEntryBytes(*found);
 							*found = std::move(update);
-							auto released = simulation->Charge->Split(oldBytes);
+							auto released = dataCharge->Split(oldBytes);
 							if (!released) std::terminate();
 						} else {
-							if (!GrowReplayEntries(entries, budget, *simulation->Charge, diagnostic, node.Id))
+							if (!GrowReplayEntries(entries, budget, *dataCharge, diagnostic, node.Id))
 								return diagnostic.Code;
 							entries.push_back(std::move(update));
 						}
@@ -15787,7 +15858,7 @@ namespace engine::imagegraph {
 					results[index],
 					*tracked[index],
 					budget,
-					*simulation->Charge,
+					*dataCharge,
 					captureComparisonWork,
 					diagnostic
 				))
@@ -15802,18 +15873,18 @@ namespace engine::imagegraph {
 				}
 			}
 		}
-		if (simulation && simulation->Data) {
-			for (auto &node : simulation->Data->CacheGroups.Nodes)
+		if (currentData) {
+			for (auto &node : currentData->CacheGroups.Nodes)
 				for (auto &output : node.Outputs)
 					if (output.Data && !std::holds_alternative<SurfaceValue>(*output.Data) &&
 						!detail::SyncSourcePathSequentialValue(
-							pathShiftMemo, *output.Data, budget, *simulation->Charge, diagnostic
+							pathShiftMemo, *output.Data, budget, *dataCharge, diagnostic
 						))
 						return diagnostic.Code;
-			for (auto &entry : simulation->Data->Entries)
+			for (auto &entry : currentData->Entries)
 				for (auto &frame : entry.Values) {
 					if (!detail::SyncSourcePathSequentialValue(
-							pathShiftMemo, frame.Data, budget, *simulation->Charge, diagnostic
+							pathShiftMemo, frame.Data, budget, *dataCharge, diagnostic
 						))
 						return diagnostic.Code;
 					detail::StripSourcePathShiftIdentities(frame.Data);
@@ -16854,21 +16925,7 @@ namespace engine::imagegraph {
 				) != Status::Ok)
 				return diagnostic.Code;
 			// Load authored membership once; observation ticks preserve interactive ownership and activity.
-			const bool authoredGroups =
-				std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
-					if ((node.Type != "pc.cache" && node.Type != "pc.cache_array") ||
-						node.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
-						return false;
-					return std::any_of(
-						node.SourceProperties.begin(),
-						node.SourceProperties.end(),
-						[](const AuthoredValue &property) {
-							const auto *group = std::get_if<ArrayValue>(&property.Data);
-							return property.Port == "cache_group" && group &&
-								   group->ElementType == ValueType::Text && !group->Elements.empty();
-						}
-					);
-				});
+			const bool authoredGroups = HasAuthoredCacheGroups(document);
 			if (authoredGroups && candidate.Data.CacheGroups.Owners.empty()) {
 				CacheGroupReplayState initialized;
 				if (InitializeAuthoredCacheGroupReplay(

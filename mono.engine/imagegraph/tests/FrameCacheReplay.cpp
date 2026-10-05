@@ -2619,3 +2619,116 @@ TEST_CASE(
 	CHECK(Red(frozen) == 10);
 	CHECK(frozen.Data == result.Data);
 }
+
+TEST_CASE(
+	"Read-only Cache outputs use private group journals without changing supplied history",
+	"[imagegraph][source_frame_cache][cache_group]"
+) {
+	for (const bool array : {false, true}) {
+		auto document = Scene(array);
+		document.Timeline = TimelineSettings{1, 0, 0, "loop", 24};
+		document.Nodes[1].SourceProperties = {
+			{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}
+		};
+		auto request = Clock(0);
+		request.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 0, false, false};
+		const auto captured = Run(document, request);
+		const auto plan = Compiled(document);
+		Diagnostic diagnostic;
+		const auto read = [&] {
+			if (array) {
+				ImageArray result;
+				REQUIRE(EvaluateArray(document, plan, "out", request, result, diagnostic) == Status::Ok);
+				const auto &expected = std::get<ImageArray>(captured.Output);
+				CHECK(result.Items == expected.Items);
+				REQUIRE(result.Images.size() == expected.Images.size());
+				CHECK(result.Images[0].Pixels == expected.Images[0].Pixels);
+			} else {
+				Image result;
+				REQUIRE(Evaluate(document, plan, "out", request, result, diagnostic) == Status::Ok);
+				CHECK(result.Pixels == std::get<Image>(captured.Output).Pixels);
+			}
+		};
+		read();
+		auto prior = captured.Data;
+		auto extra = Row(prior);
+		extra.ProcessorRow = 9;
+		prior.Entries.push_back(std::move(extra));
+		const auto original = prior;
+		request.Tick = 1;
+		request.DataReplay = &prior;
+		request.SourceCacheProject = SourceFrameCacheProjectObservation{{1, 0, false}, 5, false, false};
+		document.Keyframes = {{"input", "width", 0, int64_t{2}, "source", KeyframeEase{}}};
+		document.Keyframes.front().SourceDriver =
+			KeyframeAudioDriver{"unavailable-private-input", "rms", 0, 1, 0};
+		document.Tracks = {{"input", "width", "hold", -1}};
+		const auto frozenPlan = Compiled(document);
+		if (array) {
+			ImageArray result;
+			REQUIRE(EvaluateArray(document, frozenPlan, "out", request, result, diagnostic) == Status::Ok);
+			CHECK(result.Images[0].Pixels[0] == 10);
+		} else {
+			Image result;
+			REQUIRE(Evaluate(document, frozenPlan, "out", request, result, diagnostic) == Status::Ok);
+			CHECK(result.Pixels[0] == 10);
+			const auto before = result;
+			CHECK(
+				Evaluate(document, frozenPlan, "out", request, result, diagnostic, 1) == Status::LimitExceeded
+			);
+			CHECK(result.Pixels == before.Pixels);
+		}
+		CHECK(prior == original);
+		request.SourceCacheProject.reset();
+		if (array) {
+			ImageArray result;
+			CHECK(
+				EvaluateArray(document, frozenPlan, "out", request, result, diagnostic) ==
+				Status::UnsupportedExecution
+			);
+		} else {
+			Image result;
+			CHECK(
+				Evaluate(document, frozenPlan, "out", request, result, diagnostic) ==
+				Status::UnsupportedExecution
+			);
+		}
+		CHECK(diagnostic.NodeId == "cache");
+		CHECK(diagnostic.Port == "cache_group");
+		CHECK(prior == original);
+	}
+}
+
+TEST_CASE(
+	"Read-only endpoint groups freeze downstream PCX getters before their dispatch",
+	"[imagegraph][source_frame_cache][cache_group][pcx]"
+) {
+	auto document = Scene(true);
+	document.Timeline = TimelineSettings{1, 0, 0, "loop", 24};
+	document.Nodes.push_back({"late", "pc.array_length", "", {}, {}});
+	document.Nodes.back().SourceInputExpressions = {{"array", "draw(value,0,0)", true}};
+	document.Links.push_back({"cache", "cache_array", "late", "array"});
+	document.Outputs.push_back({"late-out", "late", "size"});
+	document.Nodes[1].SourceProperties = {
+		{"cache_group", ArrayValue{ValueType::Text, {std::string{"late"}}}}
+	};
+	auto first = Clock(0);
+	first.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 5, false, false};
+	const auto prior = Run(document, first);
+	const auto original = prior.Data;
+	auto request = Clock(1);
+	request.DataReplay = &prior.Data;
+	request.SourceCacheProject = SourceFrameCacheProjectObservation{{1, 0, false}, 1, false, false};
+	EvaluatedValue value;
+	Diagnostic diagnostic;
+	const auto plan = Compiled(document);
+	const auto status = EvaluateValue(document, plan, "late-out", request, value, diagnostic);
+	INFO(diagnostic.NodeId << ":" << diagnostic.Port << " " << diagnostic.Message);
+	REQUIRE(status == Status::Ok);
+	CHECK(std::get<int64_t>(value.Data) == 0);
+	CHECK(prior.Data == original);
+	request.SourceCacheProject->ProjectLastFrame = 5;
+	CHECK(
+		EvaluateValue(document, plan, "late-out", request, value, diagnostic) == Status::UnsupportedExecution
+	);
+	CHECK(prior.Data == original);
+}

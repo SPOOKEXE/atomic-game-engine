@@ -1,3 +1,4 @@
+#include "CacheGroupReplayClone.hpp"
 #include "EvaluationAllocator.hpp"
 #include "MeshPayload.hpp"
 #include "ValuePayload.hpp"
@@ -813,6 +814,10 @@ namespace engine::imagegraph {
 	} catch (const std::bad_alloc &) {
 		diagnostic = {Status::LimitExceeded, {}, {}, "cache-group initialization allocation refused"};
 		return diagnostic.Code;
+	}
+
+	uint64_t detail::CacheGroupReplayCloneBytes(const CacheGroupReplayState &state) {
+		return StateBytes(state, false);
 	}
 
 	Status ReconcileCacheGroupReplay(

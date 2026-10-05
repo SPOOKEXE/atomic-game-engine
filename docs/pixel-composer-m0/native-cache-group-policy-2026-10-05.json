@@ -1,7 +1,7 @@
 {
   "source_pin": "b69eca232217360cf1502ef0223523d818606652",
   "recorded_date": "2026-10-05",
-  "result": "Bounded policy, journal transport/reconciliation, frozen getters, live capture, authored membership/literal initialization, manual Clear and automatic stateful update-loop actions verified by joined native CPU checks. Runtime constructors, ordinary read-only activity actions and host edit/load workflows remain incomplete.",
+  "result": "Bounded policy, journal transport/reconciliation, frozen getters, live capture, authored membership/literal initialization, manual Clear and automatic stateful/read-only update-loop actions verified by joined native checks. Runtime constructors and host edit/load workflows remain incomplete.",
   "scheduler_profiles": {
     "ordinary_graph": {
       "rules": [
@@ -73,15 +73,14 @@
     ]
   },
   "native_evidence": {
-    "current_gap": "Stateful dispatch applies branch-selected Enable/Disable after borrowed kernel reads and before emitted row merge. Enable clears all owner rows while preserving Cache outer capture and Cache Array latest output. Pending dependencies and activity pointers refresh; completed actors retain outputs. Runtime constructors, ordinary read-only activity actions and host workflow integration remain incomplete.",
+    "current_gap": "Stateful and ordinary output dispatch apply branch-selected Enable/Disable after borrowed kernel reads and before emitted row merge. Ordinary outputs own a temporary full journal and preserve caller history. Runtime constructors, seek/revision activity policy and host workflows remain incomplete.",
     "inspection": [
-      "mono.engine/imagegraph/src/Document.cpp: completed readiness dispatch, selected action transaction, pointer refresh and PendingGraph rebuild",
+      "mono.engine/imagegraph/src/Document.cpp: owned temporary data journal, completed readiness dispatch, selected action transaction, pointer refresh and PendingGraph rebuild",
       "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp: GroupActionAvailable and Execute early-return history handling",
       "mono.engine/imagegraph/src/FrameCacheReplay.cpp: ApplySourceFrameCacheGroupReplay owned replacement",
       "mono.engine/imagegraph/src/CacheGroupReplay.cpp: InitializeAuthoredCacheGroupReplay literal constructors and named runtime refusals"
     ],
     "required_next_steps": [
-      "Ordinary read-only activity actions still require an owned temporary/host journal. Stateful actions are verified in automatic_group_validation; Enable clears before outer capture and does not rerun completed disabled producers in the same observation.",
       "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
       "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
