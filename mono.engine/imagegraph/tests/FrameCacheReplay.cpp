@@ -1727,3 +1727,263 @@ TEST_CASE(
 		CHECK(refused.Data == result.Data);
 	}
 }
+
+TEST_CASE(
+	"Group Enable clears every cache row only after its source gates admit the action",
+	"[imagegraph][source_frame_cache][cache_group]"
+) {
+	for (const bool array : {false, true})
+		for (int gate = 0; gate < 4; ++gate)
+			for (const bool inPlace : {false, true}) {
+				const bool serialize = gate != 1;
+				auto document = Scene(array);
+				document.Nodes[1].SourceProperties = {{"serialize", serialize}};
+				auto source = FrozenButtonGroup(array, serialize);
+				source.Entries.push_back(source.Entries.front());
+				source.Entries.back().ProcessorRow = 7;
+				const auto original = source;
+				DataReplayState distinct = source;
+				auto &output = inPlace ? source : distinct;
+				const SourceFrameCacheProjectObservation project{{1, 0, false}, 5, gate == 2, gate == 3};
+				Diagnostic diagnostic;
+				REQUIRE(
+					ApplySourceFrameCacheGroupReplay(
+						document.Nodes[1],
+						CacheGroupReplayAction::Enable,
+						source,
+						output,
+						false,
+						project,
+						diagnostic
+					) == Status::Ok
+				);
+				if (!inPlace) CHECK(source == original);
+				auto expectedGroups = original.CacheGroups;
+				if (gate == 0) expectedGroups.Nodes[2].RenderActive = true;
+				CHECK(output.CacheGroups == expectedGroups);
+				REQUIRE(output.Entries.size() == original.Entries.size());
+				for (size_t index = 0; index < output.Entries.size(); ++index) {
+					const auto &row = output.Entries[index];
+					CHECK(row.Values[1] == original.Entries[index].Values[1]);
+					CHECK(row.ProcessorRow == original.Entries[index].ProcessorRow);
+					if (gate == 0) {
+						CHECK(row.Values.size() == 2);
+						CHECK(row.FrameCacheConstructorCleared);
+					} else
+						CHECK(row == original.Entries[index]);
+				}
+			}
+}
+
+TEST_CASE(
+	"Group Disable uses authoritative rounded project endpoints and retains frames and getters",
+	"[imagegraph][source_frame_cache][cache_group]"
+) {
+	for (const bool array : {false, true})
+		for (int branch = 0; branch < 8; ++branch) {
+			const bool serialize = branch != 1;
+			auto document = Scene(array);
+			document.Nodes[1].SourceProperties = {{"serialize", serialize}};
+			auto source = FrozenButtonGroup(array, serialize);
+			source.CacheGroups.Nodes[2].RenderActive = true;
+			const auto original = source;
+			SourceFrameCacheProjectObservation project{{5, 0, false}, 5, branch == 2, branch == 3};
+			if (branch == 5) project.ProjectFrame = {4, .5, false};
+			if (branch == 6) {
+				project.ProjectFrame = {5, .5, false};
+				project.ProjectLastFrame = 6;
+			}
+			if (branch == 7) project.ProjectFrame = {5, .5, false};
+			const bool admitted = branch == 0 || branch == 6;
+			DataReplayState output = source;
+			Diagnostic diagnostic;
+			REQUIRE(
+				ApplySourceFrameCacheGroupReplay(
+					document.Nodes[1],
+					CacheGroupReplayAction::Disable,
+					source,
+					output,
+					branch != 4,
+					project,
+					diagnostic
+				) == Status::Ok
+			);
+			CHECK(source == original);
+			CHECK(output.Entries == original.Entries);
+			auto expected = original.CacheGroups;
+			if (admitted) expected.Nodes[2].RenderActive = false;
+			CHECK(output.CacheGroups == expected);
+			REQUIRE(
+				ApplySourceFrameCacheGroupReplay(
+					document.Nodes[1],
+					CacheGroupReplayAction::Disable,
+					output,
+					output,
+					branch != 4,
+					project,
+					diagnostic
+				) == Status::Ok
+			);
+			CHECK(output.CacheGroups == expected);
+			CHECK(output.Entries == original.Entries);
+		}
+}
+
+TEST_CASE(
+	"Group actions reject unknown observations malformed clocks and stale source types atomically",
+	"[imagegraph][source_frame_cache][cache_group]"
+) {
+	for (const auto action : {CacheGroupReplayAction::Enable, CacheGroupReplayAction::Disable}) {
+		auto document = Scene();
+		const auto source = FrozenButtonGroup(false, true);
+		DataReplayState output = source;
+		const auto original = output;
+		Diagnostic diagnostic;
+		SourceFrameCacheProjectObservation project{{5, 0, false}, 5, false, false};
+		CHECK(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1], action, source, output, true, {}, diagnostic
+			) == Status::UnsupportedExecution
+		);
+		CHECK(output == original);
+		document.Nodes[1].Type = "pc.cache_array";
+		CHECK(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1], action, source, output, true, project, diagnostic
+			) == Status::InvalidValue
+		);
+		CHECK(output == original);
+		document.Nodes[1].Type = "pc.cache";
+		document.Nodes[1].SourceProperties = {{"serialize", true}, {"serialize", true}};
+		CHECK(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1], action, source, output, true, project, diagnostic
+			) == Status::InvalidValue
+		);
+		CHECK(output == original);
+		document.Nodes[1].SourceProperties = {
+			{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}
+		};
+		DataReplayState cold;
+		CHECK(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1], action, cold, output, true, project, diagnostic
+			) == Status::UnsupportedExecution
+		);
+		CHECK(output == original);
+		if (action == CacheGroupReplayAction::Disable) {
+			project.ProjectFrame.Subframe = 1;
+			CHECK(
+				ApplySourceFrameCacheGroupReplay(
+					document.Nodes[1], action, source, output, true, project, diagnostic
+				) == Status::InvalidValue
+			);
+			CHECK(output == original);
+		}
+		CHECK(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1],
+				CacheGroupReplayAction::TransferMember,
+				source,
+				output,
+				true,
+				project,
+				diagnostic
+			) == Status::InvalidValue
+		);
+		CHECK(output == original);
+	}
+}
+
+TEST_CASE(
+	"Group actions admit validation beside both owned replay copies",
+	"[imagegraph][source_frame_cache][cache_group][evaluation_budget]"
+) {
+	for (const auto action : {CacheGroupReplayAction::Enable, CacheGroupReplayAction::Disable}) {
+		auto document = Scene();
+		auto source = FrozenButtonGroup(false, true);
+		DataReplayState output = source;
+		const auto original = output;
+		const uint64_t replacement = action == CacheGroupReplayAction::Enable
+										 ? ClearedSourceFrameCacheReplayBytes(document.Nodes[1], source)
+										 : RetainedDataReplayBytes(source);
+		const uint64_t cap = RetainedDataReplayBytes(source) + RetainedDataReplayBytes(output) -
+							 sizeof(output) + replacement + DataReplayValidationWorkspaceBytes(source);
+		const SourceFrameCacheProjectObservation project{{5, 0, false}, 5, false, false};
+		Diagnostic diagnostic;
+		CHECK(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1], action, source, output, true, project, diagnostic, cap - 1
+			) == Status::LimitExceeded
+		);
+		CHECK(output == original);
+		REQUIRE(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1], action, source, output, true, project, diagnostic, cap
+			) == Status::Ok
+		);
+	}
+	for (const auto action : {CacheGroupReplayAction::Enable, CacheGroupReplayAction::Disable}) {
+		auto document = Scene();
+		document.Nodes[1].SourceProperties = {{"serialize", false}};
+		auto source = Run(document, Clock(0)).Data;
+		const auto row = source.Entries.front();
+		source.Entries.assign(Limits::MaximumArrayElements, row);
+		for (size_t index = 0; index < source.Entries.size(); ++index) {
+			source.Entries[index].NodeId = "unrelated";
+			source.Entries[index].ProcessorRow = index;
+		}
+		const auto original = source;
+		Diagnostic diagnostic;
+		REQUIRE(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1], action, source, source, false, {}, diagnostic
+			) == Status::Ok
+		);
+		CHECK(source == original);
+	}
+}
+
+TEST_CASE(
+	"Group Enable clears history before a later paused Cache outer capture",
+	"[imagegraph][source_frame_cache][cache_group]"
+) {
+	for (const bool array : {false, true}) {
+		auto document = Scene(array);
+		const auto initial = Run(document, Clock(0));
+		auto source = initial.Data;
+		source.CacheGroups.Nodes = {
+			{"cache", document.Nodes[1].Type, "", true, {}},
+			{"input",
+			 "image.solid",
+			 "cache",
+			 false,
+			 {{"image", Value{SurfaceValue{std::get<Image>(Run(Scene(), Clock(0)).Output)}}, {}, {}}}}
+		};
+		source.CacheGroups.Owners = {{"cache", true, {"input"}}};
+		const auto original = source;
+		DataReplayState enabled;
+		Diagnostic diagnostic;
+		const SourceFrameCacheProjectObservation project{{1, 0, false}, 5, false, false};
+		REQUIRE(
+			ApplySourceFrameCacheGroupReplay(
+				document.Nodes[1], CacheGroupReplayAction::Enable, source, enabled, false, project, diagnostic
+			) == Status::Ok
+		);
+		CHECK(source == original);
+		REQUIRE(enabled.Entries.front().Values.size() == 2);
+		const auto observed = Run(document, Clock(1, false), &enabled);
+		if (array) {
+			CHECK(Slots(observed) == Slots(initial));
+			CHECK(observed.Data.Entries.front().Values.size() == 2);
+		} else {
+			CHECK(Red(observed) == Red(initial));
+			REQUIRE(observed.Data.Entries.front().Values.size() == 3);
+			CHECK(observed.Data.Entries.front().Values.back().Frame == 3);
+			CHECK(
+				observed.Data.Entries.front().Values.back().Data == original.Entries.front().Values[1].Data
+			);
+		}
+		CHECK(enabled.Entries.front().Values.size() == 2);
+	}
+}

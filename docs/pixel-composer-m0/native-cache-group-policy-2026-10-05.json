@@ -73,7 +73,7 @@
     ]
   },
   "native_evidence": {
-    "current_gap": "Source Cache Array no-read early returns skip authored control timeline sampling, both initially and after dynamic PCX route discovery. Masking precedes instance-base expansion; inline owner control tracks are admitted by consumer read policy. Explicit input inspection remains All and independent inherited/inline consumers retain their tracks. Automatic update-loop transitions remain refused for enabled nonempty authored groups.",
+    "current_gap": "Bounded branch-selected ApplySourceFrameCacheGroupReplay Enable/Disable transactions share the existing manual button mutation path. Enable obeys Serialize/loading/appending gates and force-clears all processor rows while retaining latest outputs and waking loaded member lists. Disable uses Playing and the authoritative rounded project endpoint, preserving frames and latest getters. Caller scheduling is not implemented by this API; enabled nonempty automatic groups remain guarded.",
     "inspection": [
       "mono.engine/imagegraph/src/Document.cpp:7965-7972 NodeResult alternatives",
       "mono.engine/imagegraph/src/Document.cpp:9856-9859 dependency closure",
@@ -82,7 +82,7 @@
       "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp:71-74 unsupported group gate"
     ],
     "required_next_steps": [
-      "Implement source Cache/Cache Array update-loop branch-local enable/disable and frame-clear. Enabled nonempty authored groups remain refused.",
+      "Integrate branch-selected group actions into source Cache/Array update loops, update pending dispatch activity and defer getter admission. Enable must clear before outer capture and must not rerun its disabled producer in the same observation. Enabled nonempty groups remain refused until this scheduling integration is verified.",
       "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
       "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
@@ -598,6 +598,50 @@
       },
       "remaining": [
         "Implement source Cache/Cache Array update-loop branch-local enable/disable and frame-clear. Enabled nonempty authored groups remain refused.",
+        "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
+        "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
+        "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
+        "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
+        "Cache hit/loading branch getter admission and complete source update-loop scheduling remain to audit and integrate before enabling nonempty groups."
+      ]
+    },
+    "group_action_implementation": {
+      "scope": "Bounded branch-selected ApplySourceFrameCacheGroupReplay Enable/Disable transactions share the existing manual button mutation path. Enable obeys Serialize/loading/appending gates and force-clears all processor rows while retaining latest outputs and waking loaded member lists. Disable uses Playing and the authoritative rounded project endpoint, preserving frames and latest getters. Caller scheduling is not implemented by this API; enabled nonempty automatic groups remain guarded.",
+      "head_before_commit": "66b12f5de917ef2f7a36c5f9eb8cfd7a33bd80a8",
+      "coverage": [
+        "Enable gate matrix for Cache and Array, in-place and distinct destinations, multiple processor rows, duplicate/overlapping loaded lists, retained getters/refusals and separate last-owner pointers.",
+        "Disable gate matrix for both node types: Serialize, loading, appending, Playing, authoritative endpoint and half-to-even project rounding; repeated in-place application retains frame storage.",
+        "Unknown observations, stale source node types, duplicate metadata, cold nonempty uninitialized groups, malformed clocks and unsupported action kinds refuse atomically.",
+        "Exact admitted copy+validation byte boundary and one-byte-short refusal; gated full unrelated 4096-row journals need no constructor row.",
+        "Enable followed by a later paused observation proves Cache outer capture retains latest output without resurrecting cleared history, while Array retains only its latest output.",
+        "Existing manual button and selected host Clear suites pass through the shared operation."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-action-batch1-results.json",
+      "native_cases": 4835,
+      "native_assertions": 1991795,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "approved_vulkan_cases": 15,
+      "architecture": "Passed: 55 modules, 6 programs, 39 layered.",
+      "format": "clang-format-21 dry run and git diff --check passed.",
+      "binary_hashes": "All eleven native suite binaries and assetc/imagegraph child hashes stable during tests and matched afterwards.",
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-action-build1.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-group-action-issues.json",
+      "review": "Sol read-only review found no confirmed defect in source gates, authoritative endpoint handling, stale types, bounded copy admission or atomic publication.",
+      "profiling": "Shared operation carries ENGINE_PROFILE. No fresh isolated performance measurement or sanitizer run. No performance claim.",
+      "source_sha256": {
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp": "fcf3f1d8eedec879417a1286b38b5763f0eaac5901945abbc2746bd89910ec87",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp": "8d31772b00242022bef2b1135cd02960817f978dc487a0b24413560a3469a07f",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp": "ec189d197234700a736d814f3249c950fd0004ff7b31c3d9a1f660491650bd0b",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "0371112b7f40fddf684235dfcb9819752978c3f8917e3f4528f5357440f5b75d"
+      },
+      "remaining": [
+        "Integrate branch-selected group actions into source Cache/Array update loops, update pending dispatch activity and defer getter admission. Enable must clear before outer capture and must not rerun its disabled producer in the same observation. Enabled nonempty groups remain refused until this scheduling integration is verified.",
         "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
         "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
         "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",

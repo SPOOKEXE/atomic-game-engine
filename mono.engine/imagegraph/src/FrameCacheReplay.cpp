@@ -2,8 +2,10 @@
 
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/FrameCacheReplay.hpp>
+#include <engine/imagegraph/SourceFrameCacheProject.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <new>
 
 namespace engine::imagegraph {
@@ -125,6 +127,166 @@ namespace engine::imagegraph {
 		diagnostic = {Status::LimitExceeded, node.Id, {}, "frame-cache clear allocation refused"};
 		return diagnostic.Code;
 	}
+	namespace {
+		enum class FrameCacheOperation { ClearButton, Enable, Disable };
+		Status ApplyFrameCacheOperation(
+			const Node &node,
+			FrameCacheOperation operation,
+			const DataReplayState &source,
+			DataReplayState &output,
+			bool playing,
+			const std::optional<SourceFrameCacheProjectObservation> &project,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes
+		) try {
+			ENGINE_PROFILE("imagegraph.frame_cache.group_action");
+			const auto fail = [&](Status code, const char *message) {
+				diagnostic = {code, node.Id, {}, message};
+				return code;
+			};
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes)
+				return fail(Status::LimitExceeded, "frame-cache action byte cap is outside bounds");
+			if ((node.Type != "pc.cache" && node.Type != "pc.cache_array") || node.Id.empty() ||
+				node.Id.size() > Limits::MaximumTextBytes ||
+				node.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
+				return fail(Status::InvalidValue, "frame-cache action requires a bounded cache node");
+			bool serialize = true, seenSerialize = false, seenCache = false;
+			const ArrayValue *authoredGroup = nullptr;
+			for (const auto &property : node.SourceProperties) {
+				if (property.Port == "serialize") {
+					const auto *flag = std::get_if<bool>(&property.Data);
+					if (!flag || seenSerialize)
+						return fail(
+							Status::InvalidValue, "frame-cache action requires one typed Serialize flag"
+						);
+					serialize = *flag;
+					seenSerialize = true;
+				}
+				if (property.Port == "cache") {
+					if (seenCache || !std::holds_alternative<std::string>(property.Data))
+						return fail(
+							Status::InvalidValue, "frame-cache action requires one typed cache receipt"
+						);
+					seenCache = true;
+				}
+				if (property.Port != "cache_group") continue;
+				const auto *group = std::get_if<ArrayValue>(&property.Data);
+				if (authoredGroup || !group || group->ElementType != ValueType::Text ||
+					!group->Items.empty() || !group->Nested.empty() ||
+					group->Elements.size() > Limits::MaximumNodes ||
+					!detail::ValidValuePayload(property.Data, true))
+					return fail(Status::InvalidValue, "frame-cache action requires one bounded string group");
+				authoredGroup = group;
+			}
+			const bool button = operation == FrameCacheOperation::ClearButton;
+			if (!button && serialize && !project)
+				return fail(
+					Status::UnsupportedExecution, "frame-cache group action requires project observations"
+				);
+			if (operation == FrameCacheOperation::Disable && project &&
+				(!ValidFrameTime(project->ProjectFrame) || !std::isfinite(project->ProjectLastFrame)))
+				return fail(Status::InvalidValue, "frame-cache group disable project clock is invalid");
+			const bool allowed =
+				serialize && (!project || (!project->ProjectLoading && !project->ProjectAppending));
+			const bool enable = operation != FrameCacheOperation::Disable && allowed;
+			const bool disable = operation == FrameCacheOperation::Disable && allowed && playing && project &&
+								 SourceFrameCacheIsLastProjectFrame(*project);
+			const bool activityChange = enable || disable;
+			const bool clearFrames = enable || (button && node.Type == "pc.cache");
+			const uint64_t retained = RetainedDataReplayBytes(source);
+			const uint64_t clearedBytes =
+				clearFrames ? ClearedSourceFrameCacheReplayBytes(node, source) : retained;
+			if (clearedBytes == UINT64_MAX)
+				return fail(Status::InvalidValue, "frame-cache action requires matching typed source rows");
+			const uint64_t oldOutput =
+				&source == &output ? 0 : RetainedDataReplayBytes(output) - sizeof(output);
+			const bool additionalRow =
+				clearFrames &&
+				std::none_of(source.Entries.begin(), source.Entries.end(), [&](const auto &row) {
+					return row.NodeId == node.Id;
+				});
+			const uint64_t replacement = clearFrames ? clearedBytes : retained;
+			const uint64_t workspace = DataReplayValidationWorkspaceBytes(source, additionalRow ? 1 : 0);
+			if (retained > maximumBytes || oldOutput > maximumBytes - retained ||
+				replacement > maximumBytes - retained - oldOutput ||
+				workspace > maximumBytes - retained - oldOutput - replacement)
+				return fail(Status::LimitExceeded, "frame-cache action replacement exceeds live byte bounds");
+			if (ValidateDataReplay(source, maximumBytes - oldOutput - replacement, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			const auto owner = std::find_if(
+				source.CacheGroups.Owners.begin(), source.CacheGroups.Owners.end(), [&](const auto &item) {
+					return item.NodeId == node.Id;
+				}
+			);
+			if (!button) {
+				if (owner != source.CacheGroups.Owners.end()) {
+					const auto ownedNode = std::find_if(
+						source.CacheGroups.Nodes.begin(),
+						source.CacheGroups.Nodes.end(),
+						[&](const auto &item) { return item.NodeId == node.Id; }
+					);
+					if (ownedNode->NodeType != node.Type)
+						return fail(
+							Status::InvalidValue, "frame-cache group owner type does not match the action"
+						);
+				}
+				if (std::any_of(
+						source.Entries.begin(),
+						source.Entries.end(),
+						[&](const auto &row) { return row.NodeId == node.Id; }
+					) &&
+					ClearedSourceFrameCacheReplayBytes(node, source) == UINT64_MAX)
+					return fail(
+						Status::InvalidValue, "frame-cache group action requires matching typed source rows"
+					);
+			}
+			const bool nonempty = (authoredGroup && !authoredGroup->Elements.empty()) ||
+								  (owner != source.CacheGroups.Owners.end() && !owner->Members.empty());
+			if (serialize && nonempty && !project)
+				return fail(
+					Status::UnsupportedExecution, "frame-cache group action requires project observations"
+				);
+			if (activityChange && nonempty && owner == source.CacheGroups.Owners.end() &&
+				(!button || !source.CacheGroups.Nodes.empty()))
+				return fail(
+					Status::UnsupportedExecution,
+					"frame-cache group must be initialized before a group action"
+				);
+			if (activityChange && owner != source.CacheGroups.Owners.end()) {
+				uint64_t nodeNames = 0, memberNames = 0;
+				for (const auto &member : source.CacheGroups.Nodes)
+					nodeNames += member.NodeId.size() + 1;
+				for (const auto &member : owner->Members)
+					memberNames += member.size() + 1;
+				constexpr uint64_t WORK_LIMIT = 64ull * 1024 * 1024;
+				if (nodeNames > WORK_LIMIT / std::max(size_t{1}, owner->Members.size()) ||
+					memberNames > (WORK_LIMIT - nodeNames * owner->Members.size()) /
+									  std::max(size_t{1}, source.CacheGroups.Nodes.size()))
+					return fail(Status::LimitExceeded, "frame-cache group action exceeds name work bounds");
+			}
+			if (clearFrames) {
+				if (ClearSourceFrameCacheReplay(node, source, output, diagnostic, maximumBytes) != Status::Ok)
+					return diagnostic.Code;
+			} else {
+				DataReplayState candidate = source;
+				output = std::move(candidate);
+			}
+			// Admitted copies own all strings and getters; activity changes allocate nothing.
+			for (auto &current : output.CacheGroups.Owners) {
+				if (current.NodeId != node.Id) continue;
+				current.Serialize = serialize;
+				if (!activityChange) continue;
+				for (const auto &id : current.Members)
+					for (auto &member : output.CacheGroups.Nodes)
+						if (member.NodeId == id) member.RenderActive = enable;
+			}
+			diagnostic = {};
+			return Status::Ok;
+		} catch (const std::bad_alloc &) {
+			diagnostic = {Status::LimitExceeded, node.Id, {}, "frame-cache action allocation refused"};
+			return diagnostic.Code;
+		}
+	}
 	Status ClearSourceFrameCacheButtonReplay(
 		const Node &node,
 		const DataReplayState &source,
@@ -132,111 +294,38 @@ namespace engine::imagegraph {
 		const std::optional<SourceFrameCacheProjectObservation> &project,
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes
-	) try {
-		ENGINE_PROFILE("imagegraph.frame_cache.clear_button");
-		const auto fail = [&](Status code, const char *message) {
-			diagnostic = {code, node.Id, {}, message};
-			return code;
-		};
-		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes)
-			return fail(Status::LimitExceeded, "frame-cache button byte cap is outside bounds");
-		if ((node.Type != "pc.cache" && node.Type != "pc.cache_array") || node.Id.empty() ||
-			node.Id.size() > Limits::MaximumTextBytes ||
-			node.SourceProperties.size() > Limits::MaximumPropertiesPerNode)
-			return fail(Status::InvalidValue, "frame-cache button requires a bounded cache node");
-		bool serialize = true, seenSerialize = false, seenCache = false;
-		const ArrayValue *authoredGroup = nullptr;
-		for (const auto &property : node.SourceProperties) {
-			if (property.Port == "serialize") {
-				const auto *flag = std::get_if<bool>(&property.Data);
-				if (!flag || seenSerialize)
-					return fail(Status::InvalidValue, "frame-cache button requires one typed Serialize flag");
-				serialize = *flag;
-				seenSerialize = true;
-			}
-			if (property.Port == "cache") {
-				if (seenCache || !std::holds_alternative<std::string>(property.Data))
-					return fail(Status::InvalidValue, "frame-cache button requires one typed cache receipt");
-				seenCache = true;
-			}
-			if (property.Port != "cache_group") continue;
-			const auto *group = std::get_if<ArrayValue>(&property.Data);
-			if (authoredGroup || !group || group->ElementType != ValueType::Text || !group->Items.empty() ||
-				!group->Nested.empty() || group->Elements.size() > Limits::MaximumNodes ||
-				!detail::ValidValuePayload(property.Data, true))
-				return fail(Status::InvalidValue, "frame-cache button requires one bounded string group");
-			authoredGroup = group;
-		}
-		const bool enable =
-			serialize && (!project || (!project->ProjectLoading && !project->ProjectAppending));
-		const bool clearFrames = node.Type == "pc.cache" || enable;
-		const uint64_t retained = RetainedDataReplayBytes(source);
-		const uint64_t clearedBytes =
-			clearFrames ? ClearedSourceFrameCacheReplayBytes(node, source) : retained;
-		if (clearedBytes == UINT64_MAX)
-			return fail(Status::InvalidValue, "frame-cache button requires matching typed source rows");
-		const uint64_t oldOutput = &source == &output ? 0 : RetainedDataReplayBytes(output) - sizeof(output);
-		const bool additionalRow =
-			clearFrames && std::none_of(source.Entries.begin(), source.Entries.end(), [&](const auto &row) {
-				return row.NodeId == node.Id;
-			});
-		const uint64_t replacement = clearFrames ? clearedBytes : retained;
-		const uint64_t workspace = DataReplayValidationWorkspaceBytes(source, additionalRow ? 1 : 0);
-		if (retained > maximumBytes || oldOutput > maximumBytes - retained ||
-			replacement > maximumBytes - retained - oldOutput ||
-			workspace > maximumBytes - retained - oldOutput - replacement)
-			return fail(Status::LimitExceeded, "frame-cache button replacement exceeds live byte bounds");
-		if (ValidateDataReplay(source, maximumBytes - oldOutput - replacement, diagnostic) != Status::Ok)
-			return diagnostic.Code;
-		const auto owner = std::find_if(
-			source.CacheGroups.Owners.begin(), source.CacheGroups.Owners.end(), [&](const auto &item) {
-				return item.NodeId == node.Id;
-			}
+	) {
+		return ApplyFrameCacheOperation(
+			node, FrameCacheOperation::ClearButton, source, output, false, project, diagnostic, maximumBytes
 		);
-		const bool nonempty = (authoredGroup && !authoredGroup->Elements.empty()) ||
-							  (owner != source.CacheGroups.Owners.end() && !owner->Members.empty());
-		if (serialize && nonempty && !project)
-			return fail(
-				Status::UnsupportedExecution, "frame-cache group enabling requires project observations"
-			);
-		if (enable && nonempty && owner == source.CacheGroups.Owners.end() &&
-			!source.CacheGroups.Nodes.empty())
-			return fail(
-				Status::UnsupportedExecution, "frame-cache group must be initialized before enabling"
-			);
-		if (enable && owner != source.CacheGroups.Owners.end()) {
-			uint64_t nodeNames = 0, memberNames = 0;
-			for (const auto &member : source.CacheGroups.Nodes)
-				nodeNames += member.NodeId.size() + 1;
-			for (const auto &member : owner->Members)
-				memberNames += member.size() + 1;
-			constexpr uint64_t WORK_LIMIT = 64ull * 1024 * 1024;
-			if (nodeNames > WORK_LIMIT / std::max(size_t{1}, owner->Members.size()) ||
-				memberNames > (WORK_LIMIT - nodeNames * owner->Members.size()) /
-								  std::max(size_t{1}, source.CacheGroups.Nodes.size()))
-				return fail(Status::LimitExceeded, "frame-cache group enabling exceeds name work bounds");
+	}
+	Status ApplySourceFrameCacheGroupReplay(
+		const Node &node,
+		CacheGroupReplayAction action,
+		const DataReplayState &source,
+		DataReplayState &output,
+		bool playing,
+		const std::optional<SourceFrameCacheProjectObservation> &project,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		if (action != CacheGroupReplayAction::Enable && action != CacheGroupReplayAction::Disable) {
+			diagnostic = {
+				Status::InvalidValue, node.Id, {}, "frame-cache group action must enable or disable"
+			};
+			return diagnostic.Code;
 		}
-		if (clearFrames) {
-			if (ClearSourceFrameCacheReplay(node, source, output, diagnostic, maximumBytes) != Status::Ok)
-				return diagnostic.Code;
-		} else {
-			DataReplayState candidate = source;
-			output = std::move(candidate);
-		}
-		// The admitted copies already own all strings and getters; waking members allocates nothing.
-		for (auto &current : output.CacheGroups.Owners) {
-			if (current.NodeId != node.Id) continue;
-			current.Serialize = serialize;
-			if (!enable) continue;
-			for (const auto &id : current.Members)
-				for (auto &member : output.CacheGroups.Nodes)
-					if (member.NodeId == id) member.RenderActive = true;
-		}
-		diagnostic = {};
-		return Status::Ok;
-	} catch (const std::bad_alloc &) {
-		diagnostic = {Status::LimitExceeded, node.Id, {}, "frame-cache button allocation refused"};
-		return diagnostic.Code;
+		return ApplyFrameCacheOperation(
+			node,
+			action == CacheGroupReplayAction::Enable ? FrameCacheOperation::Enable
+													 : FrameCacheOperation::Disable,
+			source,
+			output,
+			playing,
+			project,
+			diagnostic,
+			maximumBytes
+		);
 	}
 	Status OverlaySourceFrameCacheRows(
 		const Document &document,

@@ -28,6 +28,19 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
 	);
+	// Branch-selected Enable clears every owner row before a caller's subsequent auto capture;
+	// Disable keeps captured frames and changes activity only at the authoritative playing endpoint.
+	// The caller owns scheduler ordering. Both operations retain latest getters and publish atomically.
+	Status ApplySourceFrameCacheGroupReplay(
+		const Node &node,
+		CacheGroupReplayAction action,
+		const DataReplayState &source,
+		DataReplayState &output,
+		bool playing,
+		const std::optional<SourceFrameCacheProjectObservation> &project,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
 	inline constexpr std::string_view SOURCE_FRAME_CACHE_NATIVE_TEXT = "composer_frame_cache_text";
 	inline constexpr std::string_view SOURCE_FRAME_CACHE_NATIVE_DATA = "composer_frame_cache_data";
 	// Native constructor receipts carry named node types, sparse frame indices and
