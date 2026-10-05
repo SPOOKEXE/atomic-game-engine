@@ -71,8 +71,7 @@ namespace engine::imagegraph::detail {
 					);
 			}
 			nonemptyGroup = group && !group->Elements.empty();
-			if (!serialize) saved = nullptr;
-			if (saved && saved->empty())
+			if (serialize && saved && saved->empty())
 				return c.Fail(Status::InvalidValue, "enabled serialized source cache text is empty", "cache");
 			if (c.Request.NegativeFrame || c.Request.Subframe != 0)
 				return c.Fail(
@@ -199,6 +198,7 @@ namespace engine::imagegraph::detail {
 			const std::string *saved = nullptr;
 			bool serialize = true, nonemptyGroup = false;
 			if (!Metadata(c, saved, serialize, nonemptyGroup)) return false;
+			const auto *loadSaved = serialize ? saved : nullptr;
 			const auto *owner = c.CurrentData ? c.CurrentData : c.Request.DataReplay;
 			if (!owner || owner->Entries.size() > Limits::MaximumArrayElements)
 				return c.Fail(
@@ -232,7 +232,7 @@ namespace engine::imagegraph::detail {
 			}
 			if (previous && previous->LoadedCacheData != (saved ? *saved : std::string_view{}))
 				previous = nullptr;
-			if (saved && !previous && !constructorCleared && c.Request.SourceFrameCacheLoads) {
+			if (loadSaved && !previous && !constructorCleared && c.Request.SourceFrameCacheLoads) {
 				for (const auto &entry : c.Request.SourceFrameCacheLoads->Entries)
 					if (entry.NodeId == c.Authored.Id && entry.ProcessorRow == c.ProcessorRow) {
 						if (SourceFrameCacheRowType(entry) != c.Authored.Type ||
@@ -248,7 +248,7 @@ namespace engine::imagegraph::detail {
 			auto nativeCharge = c.ReserveWorkspace(0, "cache");
 			if (!nativeCharge) return false;
 			DataReplayEntry nativeRow;
-			if (saved && !previous && !constructorCleared) {
+			if (loadSaved && !previous && !constructorCleared) {
 				uint64_t bytes = 0;
 				Diagnostic diagnostic;
 				const auto measured = MeasureSourceFrameCacheReceipt(c.Authored, bytes, diagnostic);
@@ -267,7 +267,7 @@ namespace engine::imagegraph::detail {
 					loadedNow = true;
 				}
 			}
-			if (saved && !previous && !constructorCleared)
+			if (loadSaved && !previous && !constructorCleared)
 				return c.Fail(
 					Status::UnsupportedExecution,
 					"serialized source cache requires an exact-data decoded load receipt"

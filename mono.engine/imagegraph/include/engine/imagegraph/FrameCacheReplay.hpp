@@ -5,6 +5,8 @@ namespace engine::imagegraph {
 	inline constexpr uint64_t SOURCE_FRAME_CACHE_EDIT_WORK_BYTES = 64ull * 1024 * 1024;
 	// Private replay tags identify the source node type without adding authored schema fields.
 	std::string_view SourceFrameCacheRowType(const DataReplayEntry &entry);
+	// grug keep owned row identity when Serialize changes; only constructor loading uses the flag.
+	std::string_view SourceFrameCacheIdentity(const Node &node);
 	// Empty when serialization is disabled or no typed saved payload is authored.
 	std::string_view SourceFrameCacheSavedText(const Node &node);
 	const Value *SourceFrameCacheLastOutput(const DataReplayEntry &entry);

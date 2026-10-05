@@ -1254,6 +1254,79 @@
         "turning Serialize off after nonempty saved-source loading still gates the saved identity, allowing later overlays/kernel selection to retire loaded rows. read-only trace confirmed the path; current toggle fixtures use empty saved identities. raw identity/load eligibility separation and integration check are next.",
         "source runtime constructors, live Studio gestures, source host workflows and licensed-reference captures remain incomplete/unverified."
       ]
+    },
+    "serialize_saved_identity": {
+      "scope": "grug preserve owned frame caches across Serialize changes while disabled cold constructors stay unloaded.",
+      "official_source_files": [
+        {
+          "path": "scripts/__node_cache_base/__node_cache_base.gml",
+          "sha256": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb",
+          "git_blob_sha1": "251252e9867bc8406aba016217fe0764fe0fe295",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/node_cache/node_cache.gml",
+          "sha256": "4f333ac660485560b57d86f99f87d767dff094a7d635e83383b155e83ebed71b",
+          "git_blob_sha1": "a2e76048d6e7891d7eeaf4f0bb7c10eaef0c92af",
+          "verified_local_match": true
+        },
+        {
+          "path": "scripts/node_cache_array/node_cache_array.gml",
+          "sha256": "bd90b08058183361d0349a2c16f398a053b2391720c61970e6942da54fdd630b",
+          "git_blob_sha1": "4425cb28f6442ba17dbe88af8779ae1d2ab048a8",
+          "verified_local_match": true
+        }
+      ],
+      "source_calls": [
+        "__node_cache_base.gml:11-13",
+        "node_cache.gml:67-81",
+        "node_cache_array.gml:83-96"
+      ],
+      "native_policy": "raw authored cache text identifies owned rows independent of Serialize. the flag controls cold decoded/native receipt loading and source group actions. changed text/type keep existing retirement checks. packet codec utilities use raw identity; runtime callers own load eligibility.",
+      "coverage": [
+        "loaded hits retain frames, Animated and unread getter cuts across false/true flags with external and native receipts, grouped/ungrouped and playing/paused.",
+        "Cache and Cache Array retain rows, latest output, overlay history and Clear identity.",
+        "cold disabled captures retain and charge opaque identity, use current input, and ignore damaged unused native packets.",
+        "captured host authored revisions retain Clear tombstones through off/on; subsequent capture uses live pixel99 rather than cooked pixel0.",
+        "disabled packet codec measurement/decode retains raw identity. malformed/stale packet and IO disabled-text checks pass."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-identity-batch3-results.json",
+      "preceding_results": [
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-identity-batch1-results.json",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-identity-batch2-results.json"
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-identity-issues.json",
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-identity-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-identity-build2.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-identity-build3.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-identity-build4.log",
+          "exit_code": 0
+        }
+      ],
+      "native_cases": 4937,
+      "native_assertions": 1994724,
+      "approved_vulkan_cases": 15,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "review": "Sol audited all identity consumers, precharge and host Clear retirement; caught external-vs-authored revision test gap and reviewed corrected cases. no remaining confirmed concern reported.",
+      "binary_hashes": "twelve native binaries and assetc/imagegraph child hashes stayed stable during checks and matched afterwards.",
+      "profiling": "existing ENGINE_PROFILE scopes retained. no fresh isolated profiling or sanitizer run; no speed claim.",
+      "uncommitted_owned_adjustment": "mono.engine/imagegraphio/tests/SourceFrameCache.cpp has one updated assertion inside prior untracked work; surrounding file is excluded from this commit.",
+      "remaining": [
+        "prepublication History.Undo/Redo admission and Studio inspector controls remain unfinished.",
+        "source runtime constructors, live Studio workflows and licensed-reference captures remain incomplete/unverified."
+      ]
     }
   },
   "source_sha256": {

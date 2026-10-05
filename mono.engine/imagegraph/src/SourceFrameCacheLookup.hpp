@@ -45,7 +45,7 @@ namespace engine::imagegraph::detail {
 					return row->NodeId < id;
 				}
 			);
-			const auto saved = SourceFrameCacheSavedText(node);
+			const auto saved = SourceFrameCacheIdentity(node);
 			const DataReplayEntry *result = nullptr;
 			for (auto position = first; position != Rows.end() && (*position)->NodeId == node.Id;
 				 ++position) {

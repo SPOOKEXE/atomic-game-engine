@@ -158,7 +158,7 @@ namespace engine::imagegraph {
 						return property.Port;
 					});
 				if (!AdmitClearWork(work, matching * 2, metadataWork)) return failWork();
-				const auto saved = SourceFrameCacheSavedText(node);
+				const auto saved = SourceFrameCacheIdentity(node);
 				if (saved.size() > CLEAR_WORK_LIMIT - identities) return failWork();
 				identities += saved.size();
 			}
@@ -170,7 +170,7 @@ namespace engine::imagegraph {
 						   const auto type = SourceFrameCacheRowType(entry);
 						   return type.empty() ? node.Type == "pc.cache_results"
 											   : node.Type == type &&
-													 entry.LoadedCacheData == SourceFrameCacheSavedText(node);
+													 entry.LoadedCacheData == SourceFrameCacheIdentity(node);
 					   });
 			};
 			size_t count = 0;
@@ -928,7 +928,7 @@ namespace engine::imagegraph {
 							)
 						))
 						return fail(Status::LimitExceeded, "source cache clear metadata work exceeds bounds");
-					const auto saved = SourceFrameCacheSavedText(node);
+					const auto saved = SourceFrameCacheIdentity(node);
 					if (saved.size() > CLEAR_WORK_LIMIT - identities)
 						return fail(Status::LimitExceeded, "source cache clear identity work exceeds bounds");
 					identities += saved.size();
@@ -1381,7 +1381,7 @@ namespace engine::imagegraph {
 							const auto type = SourceFrameCacheRowType(row);
 							return type.empty() ? node->Type == "pc.cache_results"
 												: node->Type == type &&
-													  row.LoadedCacheData == SourceFrameCacheSavedText(*node);
+													  row.LoadedCacheData == SourceFrameCacheIdentity(*node);
 						}
 					);
 				});

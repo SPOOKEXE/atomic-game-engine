@@ -17,18 +17,21 @@ namespace engine::imagegraph {
 		return type && (*type == "pc.cache" || *type == "pc.cache_array") ? std::string_view(*type)
 																		  : std::string_view{};
 	}
+	std::string_view SourceFrameCacheIdentity(const Node &node) {
+		const std::string *saved = nullptr;
+		for (const auto &property : node.SourceProperties)
+			if (property.Port == "cache") saved = std::get_if<std::string>(&property.Data);
+		return saved ? std::string_view(*saved) : std::string_view{};
+	}
 	std::string_view SourceFrameCacheSavedText(const Node &node) {
 		bool serialize = true;
-		const std::string *saved = nullptr;
-		for (const auto &property : node.SourceProperties) {
+		for (const auto &property : node.SourceProperties)
 			if (property.Port == "serialize") {
 				const auto *flag = std::get_if<bool>(&property.Data);
 				if (!flag) return {};
 				serialize = *flag;
-			} else if (property.Port == "cache")
-				saved = std::get_if<std::string>(&property.Data);
-		}
-		return serialize && saved ? std::string_view(*saved) : std::string_view{};
+			}
+		return serialize ? SourceFrameCacheIdentity(node) : std::string_view{};
 	}
 	const Value *SourceFrameCacheLastOutput(const DataReplayEntry &entry) {
 		return SourceFrameCacheRowType(entry).empty() ? nullptr : &entry.Values[1].Data;
@@ -49,7 +52,7 @@ namespace engine::imagegraph {
 				seenCache = true;
 			}
 		}
-		const auto saved = SourceFrameCacheSavedText(node);
+		const auto saved = SourceFrameCacheIdentity(node);
 		if (saved.size() > Limits::MaximumTextBytes) return UINT64_MAX;
 		uint64_t bytes = RetainedDataReplayBytes(source);
 		if (bytes > Limits::MaximumEvaluationBytes) return UINT64_MAX;
@@ -115,7 +118,7 @@ namespace engine::imagegraph {
 			row.Initialized = true;
 			row.FrameCacheConstructorCleared = true;
 			row.PreviousValue = 1;
-			row.LoadedCacheData = SourceFrameCacheSavedText(node);
+			row.LoadedCacheData = SourceFrameCacheIdentity(node);
 			row.Values = {
 				{0, node.Type},
 				{1, node.Type == "pc.cache" ? Value{int64_t{-4}} : Value{ArrayValue{ValueType::Any, {}}}}
@@ -698,7 +701,7 @@ namespace engine::imagegraph {
 				   std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
 					   return node.Id == entry.NodeId && node.Type == type &&
 							  (entry.LoadedCacheData.empty() ||
-							   SourceFrameCacheSavedText(node) == entry.LoadedCacheData);
+							   SourceFrameCacheIdentity(node) == entry.LoadedCacheData);
 				   });
 		};
 		const uint64_t targetGroups = RetainedCacheGroupReplayBytes(target.CacheGroups);

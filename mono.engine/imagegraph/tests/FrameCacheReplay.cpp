@@ -942,6 +942,12 @@ TEST_CASE(
 			CHECK(inspection.DecodedBytes == measured);
 			CHECK(inspection.HasFrame == (tick == 0 || tick == 2));
 		}
+		roundtrip.Nodes[1].SourceProperties.push_back({"serialize", false});
+		uint64_t disabledBytes = 0;
+		REQUIRE(MeasureSourceFrameCacheReceipt(roundtrip.Nodes[1], disabledBytes, diagnostic) == Status::Ok);
+		CHECK(disabledBytes == measured);
+		REQUIRE(DecodeSourceFrameCacheReceipt(roundtrip.Nodes[1], decoded, diagnostic) == Status::Ok);
+		CHECK(decoded == row);
 		const auto frozen = decoded;
 		CHECK(
 			DecodeSourceFrameCacheReceipt(roundtrip.Nodes[1], decoded, diagnostic, measured - 1) ==
@@ -2206,6 +2212,20 @@ TEST_CASE("Cache hits skip connected getters and preserve Animated", "[imagegrap
 				CHECK(Row(result.Data).Values == Row(saved ? loads : prior.Data).Values);
 				CHECK(prior.Data == original);
 				CHECK(loads == originalLoads);
+				if (saved) {
+					document.Nodes[1].SourceProperties.push_back({"serialize", false});
+					request.DataReplay = &result.Data;
+					const auto disabled = Run(document, request, &result.Data);
+					SameOutput(disabled, result);
+					CHECK(Row(disabled.Data).LoadedCacheData == Row(result.Data).LoadedCacheData);
+					CHECK(Row(disabled.Data).Values == Row(result.Data).Values);
+					CHECK(Row(disabled.Data).PreviousValue == 1);
+					document.Nodes[1].SourceProperties.back().Data = true;
+					const auto enabled = Run(document, request, &disabled.Data);
+					SameOutput(enabled, result);
+					CHECK(Row(enabled.Data).Values == Row(result.Data).Values);
+					request.DataReplay = nullptr;
+				}
 				request.Tick = 1;
 				StatefulEvaluationResult refused = result;
 				CHECK(
@@ -3021,4 +3041,98 @@ TEST_CASE(
 	REQUIRE(code == Status::Ok);
 	CHECK_FALSE(first.CacheGroups.Owners.front().Serialize);
 	CHECK(first == second);
+}
+
+TEST_CASE(
+	"Serialize revisions preserve owned cache rows and clear identity", "[imagegraph][source_frame_cache]"
+) {
+	for (const bool array : {false, true}) {
+		auto document = Scene(array);
+		auto initial = Run(document, Clock(0));
+		auto &row = initial.Data.Entries[0];
+		row.LoadedCacheData = "[saved authored source]";
+		document.Nodes[1].SourceProperties = NativeNode(row).SourceProperties;
+		document.Nodes[1].SourceProperties.push_back({"serialize", false});
+		const auto disabled = Run(document, Clock(0, false), &initial.Data);
+		SameOutput(disabled, initial);
+		CHECK(Row(disabled.Data).LoadedCacheData == row.LoadedCacheData);
+		CHECK(Row(disabled.Data).Values == row.Values);
+		DataReplayState overlay;
+		Diagnostic diagnostic;
+		REQUIRE(
+			OverlaySourceFrameCacheRows(
+				document, initial.Data, overlay, FrameCacheOutputPolicy::RetainedObservation, diagnostic
+			) == Status::Ok
+		);
+		CHECK(overlay.Entries == initial.Data.Entries);
+		DataReplayState cleared;
+		REQUIRE(
+			ClearSourceFrameCacheReplay(document.Nodes[1], initial.Data, cleared, diagnostic) == Status::Ok
+		);
+		CHECK(Row(cleared).LoadedCacheData == row.LoadedCacheData);
+		CHECK(Row(cleared).Values.size() == 2);
+		CHECK(Row(cleared).FrameCacheConstructorCleared);
+		document.Nodes[1].SourceProperties.back().Data = true;
+		const auto enabled = Run(document, Clock(0, false), &disabled.Data);
+		SameOutput(enabled, initial);
+		CHECK(Row(enabled.Data).Values == row.Values);
+	}
+}
+TEST_CASE(
+	"Disabled cold constructors capture without loading saved frames", "[imagegraph][source_frame_cache]"
+) {
+	for (const bool array : {false, true}) {
+		auto document = Scene(array);
+		const auto saved = CookRow(array);
+		document.Nodes[1].SourceProperties = NativeNode(saved).SourceProperties;
+		document.Nodes[1].SourceProperties.push_back({"serialize", false});
+		const auto disabled = Run(document, Clock(0));
+		CHECK(Row(disabled.Data).LoadedCacheData == saved.LoadedCacheData);
+		auto damaged = document;
+		std::get<ArrayValue>(damaged.Nodes[1].SourceProperties[2].Data).Elements.front() =
+			std::string{"unused damaged native receipt"};
+		const auto ignoredPacket = Run(damaged, Clock(0));
+		SameOutput(ignoredPacket, disabled);
+		CHECK(Row(ignoredPacket.Data).Values == Row(disabled.Data).Values);
+
+		if (array)
+			CHECK(Slots(disabled) == std::vector<int>{10, -1, -1, -1, -1, -1});
+		else
+			CHECK(Red(disabled) == 10);
+		document.Nodes[1].SourceProperties.back().Data = true;
+		const auto enabled = Run(document, Clock(0, false), &disabled.Data);
+		SameOutput(enabled, disabled);
+		CHECK(Row(enabled.Data).Values == Row(disabled.Data).Values);
+	}
+}
+
+TEST_CASE(
+	"Captured host retains Clear through saved-cache Serialize revisions", "[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene();
+	document.Nodes[0].Values.back().Data = Colour{99, 0, 0, 255};
+	document.Nodes[1].SourceProperties = NativeNode(CookRow()).SourceProperties;
+	auto plan = Compiled(document);
+	CapturedFeedbackHost host;
+	Diagnostic diagnostic;
+	auto request = Clock(2);
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	REQUIRE(host.Output("out"));
+	CHECK(host.Output("out")->Pixels[0] == 0);
+	const auto before = Row(*request.DataReplay).Values;
+	document.Nodes[1].SourceProperties.push_back({"serialize", false});
+	plan = Compiled(document);
+	request = Clock(2);
+	REQUIRE(host.Prepare(document, plan, 2, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	CHECK(Row(*request.DataReplay).Values == before);
+	REQUIRE(host.ClearSourceCache(document, plan, "cache", 2, 1, diagnostic));
+	CHECK(Row(*request.DataReplay).FrameCacheConstructorCleared);
+	document.Nodes[1].SourceProperties.back().Data = true;
+	plan = Compiled(document);
+	request = Clock(0);
+	REQUIRE(host.Prepare(document, plan, 3, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	REQUIRE(host.Output("out"));
+	CHECK(host.Output("out")->Pixels[0] == 99);
+	CHECK(Row(*request.DataReplay).FrameCacheConstructorCleared);
+	CHECK(Row(*request.DataReplay).LoadedCacheData == CookRow().LoadedCacheData);
 }

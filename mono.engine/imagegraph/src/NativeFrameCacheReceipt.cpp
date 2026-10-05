@@ -182,14 +182,13 @@ namespace engine::imagegraph {
 			if (cursor.UInt() != 1 || !cursor.Name(node.Type)) return false;
 			const auto count = cursor.UInt();
 			if (!cursor.Good || count > Limits::MaximumArrayElements - 2) return false;
-			shape.Decoded = sizeof(DataReplayEntry) + node.Id.size() +
-							SourceFrameCacheSavedText(node).size() +
+			shape.Decoded = sizeof(DataReplayEntry) + node.Id.size() + SourceFrameCacheIdentity(node).size() +
 							(count + 2) * sizeof(DataReplayValueFrame) + node.Type.size() + 128;
 			if (row) {
 				row->NodeId = node.Id;
 				row->Initialized = true;
 				row->PreviousValue = 1;
-				row->LoadedCacheData = SourceFrameCacheSavedText(node);
+				row->LoadedCacheData = SourceFrameCacheIdentity(node);
 				row->Values.reserve(count + 2);
 				row->Values.push_back({0, node.Type});
 				row->Values.push_back(
@@ -255,7 +254,7 @@ namespace engine::imagegraph {
 			if (!identity && !chunks)
 				return fail(Status::UnsupportedExecution, "no cooked frame cache receipt");
 			if (!identity || !chunks || identity->empty() || identity->size() > Limits::MaximumTextBytes ||
-				*identity != SourceFrameCacheSavedText(node) ||
+				*identity != SourceFrameCacheIdentity(node) ||
 				(node.Type != "pc.cache" && node.Type != "pc.cache_array") ||
 				chunks->ElementType != ValueType::Text || !chunks->Items.empty() || !chunks->Nested.empty() ||
 				chunks->Elements.empty() ||
