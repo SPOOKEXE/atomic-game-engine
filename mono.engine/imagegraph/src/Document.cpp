@@ -10291,6 +10291,30 @@ namespace engine::imagegraph {
 			for (auto &node : simulation->Data->CacheGroups.Nodes)
 				tracked[nodeIndices.at(node.NodeId)] = &node;
 
+		const bool hasFrameCaches =
+			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+				return node.Type == "pc.cache" || node.Type == "pc.cache_array";
+			});
+		detail::EvaluationVector<detail::SourceFrameCacheInputReads> frameCacheInputReads(
+			hasFrameCaches ? document.Nodes.size() : 0,
+			detail::SourceFrameCacheInputReads::All,
+			detail::EvaluationAllocator<detail::SourceFrameCacheInputReads>(budget)
+		);
+		const bool cachePlaying = request.SourceCachePlayback && request.SourceCachePlayback->Playing;
+		for (size_t index = 0; index < frameCacheInputReads.size(); ++index)
+			frameCacheInputReads[index] =
+				detail::SourceFrameCacheReadPolicy(document.Nodes[index].Type, cachePlaying, false, true);
+		for (const auto &link : plan.EffectiveLinks) {
+			if (frameCacheInputReads.empty() || link.ToPort != "surface_in") continue;
+			const size_t target = nodeIndices.at(link.ToNode), producer = nodeIndices.at(link.FromNode);
+			frameCacheInputReads[target] = detail::SourceFrameCacheReadPolicy(
+				document.Nodes[target].Type, cachePlaying, true, !frozen[producer]
+			);
+		}
+		const auto frameCacheReads = [&](size_t index) {
+			return frameCacheInputReads.empty() ? detail::SourceFrameCacheInputReads::All
+												: frameCacheInputReads[index];
+		};
 		const auto targetNode =
 			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
 				return node.Id == targetNodeId;
@@ -10302,6 +10326,8 @@ namespace engine::imagegraph {
 			return diagnostic.Code;
 		}
 		const size_t targetIndex = nodeIndices.at(captureTarget ? targetNodeId : output->NodeId);
+		if (captureTarget && !frameCacheInputReads.empty())
+			frameCacheInputReads[targetIndex] = detail::SourceFrameCacheInputReads::All;
 		if (captureTarget && frozen[targetIndex]) {
 			SetDiagnostic(
 				diagnostic,
@@ -10377,11 +10403,38 @@ namespace engine::imagegraph {
 			if (std::find(sources.begin(), sources.end(), route.Producer) == sources.end())
 				sources.push_back(route.Producer);
 		}
-		// Frozen output getters do not read inputs or run their upstream producers.
-		// Input inspection retains structural reachability before applying this cut.
-		if (requiredOutput == document.Outputs.end())
+		const auto pruneUnreadInputs = [&] {
+			for (const auto &link : plan.EffectiveLinks) {
+				const size_t consumer = nodeIndices.at(link.ToNode);
+				if (frameCacheReads(consumer) != detail::SourceFrameCacheInputReads::ControlsOnly ||
+					link.ToPort != "surface_in")
+					continue;
+				auto &sources = upstream[consumer];
+				const auto source = std::find(sources.begin(), sources.end(), nodeIndices.at(link.FromNode));
+				if (source != sources.end()) sources.erase(source);
+			}
+			// Implicit dependencies may have shared the removed surface edge's producer.
+			const auto retainImplicit = [&](size_t producer, size_t consumer) {
+				if (frameCacheReads(consumer) != detail::SourceFrameCacheInputReads::ControlsOnly) return;
+				auto &sources = upstream[consumer];
+				if (std::find(sources.begin(), sources.end(), producer) == sources.end())
+					sources.push_back(producer);
+			};
+			for (const auto &route : plan.GroupSurfaceDependencies)
+				retainImplicit(route.Producer, route.Consumer);
+			for (const auto &route : plan.InlineOwnerDependencies)
+				if (!route.ControlsOnly) retainImplicit(route.Owner, route.Consumer);
+			for (const auto &route : plan.InlineControlDependencies)
+				retainImplicit(route.Producer, route.Consumer);
+			for (const auto &route : plan.PcxNamedDependencies)
+				retainImplicit(route.Producer, route.Consumer);
 			for (size_t index = 0; index < upstream.size(); ++index)
-				if (frozen[index]) upstream[index].clear();
+				if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
+					upstream[index].clear();
+		};
+		// Frozen getters and source early returns cut unread inputs. Inspection retains structural
+		// reachability before applying this cut.
+		if (requiredOutput == document.Outputs.end()) pruneUnreadInputs();
 		std::vector<uint8_t> needed(document.Nodes.size(), 0);
 		std::vector<size_t> pending;
 		pending.reserve(
@@ -10415,8 +10468,7 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			for (size_t index = 0; index < upstream.size(); ++index)
-				if (frozen[index]) upstream[index].clear();
+			pruneUnreadInputs();
 			std::fill(needed.begin(), needed.end(), 0);
 			pending.clear();
 			pending.push_back(targetIndex);
@@ -10899,9 +10951,10 @@ namespace engine::imagegraph {
 										  : nullptr;
 				return detail::SourceGetterPort(node, port, binding);
 			};
-			// Every connected input is resolved before executing this node, including animator aliases.
+			// Only admitted connected getters propagate their refusals, including animator aliases.
 			for (const auto &link : plan.EffectiveLinks) {
 				if (link.ToNode != node.Id && inputOwner(link.ToPort).Id != link.ToNode) continue;
+				if (!detail::SourceFrameCacheReadsPort(frameCacheReads(index), link.ToPort)) continue;
 				const size_t producer = nodeIndices.at(link.FromNode);
 				if (!produced[producer]) continue;
 				if (const auto *refusal = FindOutputDiagnostic(results[producer], link.FromPort)) {
@@ -11260,13 +11313,16 @@ namespace engine::imagegraph {
 				context.CurrentRandom =
 					simulation && simulation->Random ? simulation->Random : request.RandomReplay;
 				context.CurrentData = simulation && simulation->Data ? simulation->Data : request.DataReplay;
+				context.FrameCacheInputReads = frameCacheReads(index);
 				context.CurrentRigid = currentRigid;
 				context.CurrentRigidCharge = rigidCharge;
 				context.CurrentSurfaces =
 					simulation && simulation->Surfaces ? simulation->Surfaces : request.SurfaceReplay;
 				context.GroupReplay = request.GroupReplay ? request.GroupReplay->Find(node.Id) : nullptr;
 				const auto depthRoute = detail::FindGroupInputDepth(document, valueNode.GroupId);
-				if (depthRoute.Source == detail::GroupInputDepth::Kind::Concrete)
+				if (context.FrameCacheInputReads == detail::SourceFrameCacheInputReads::None)
+					context.InheritedSurfaceFormat.reset();
+				else if (depthRoute.Source == detail::GroupInputDepth::Kind::Concrete)
 					context.InheritedSurfaceFormat = SourceSurfaceFormat(depthRoute.Choice);
 				else if (depthRoute.Source == detail::GroupInputDepth::Kind::AuthoredValue)
 					context.InheritedSurfaceFormat = SurfaceFormat::RGBA8Unorm;
@@ -11415,6 +11471,7 @@ namespace engine::imagegraph {
 					}
 				}
 				for (const CatalogueInput &input : catalogueEntry->Inputs) {
+					if (!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, input.Id)) continue;
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
 							return candidate.ToNode == node.Id && candidate.ToPort == input.Id;
@@ -12403,6 +12460,7 @@ namespace engine::imagegraph {
 				// Dynamic group inputs follow the same order: a link, then the instance
 				// default.
 				for (const DynamicInput &input : node.DynamicInputs) {
+					if (!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, input.Id)) continue;
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
 							return candidate.ToNode == node.Id && candidate.ToPort == input.Id;

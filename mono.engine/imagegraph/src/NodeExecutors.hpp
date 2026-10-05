@@ -1,11 +1,13 @@
 #pragma once
 
+#include "SourceFrameCacheInputs.hpp"
+
 // Native CPU executors for source catalogue nodes.
 //
-// The evaluator resolves every input before calling an executor: linked image inputs, and for each authored
-// input the linked value, junction default, authored value or catalogue default in that order. An executor
-// reads those through NodeContext, writes typed outputs, and reports a failure with a durable port name. It
-// borrows resolved producer identities when source behavior depends on its linked node.
+// The evaluator resolves admitted inputs before calling an executor: linked image inputs, and for each
+// authored input the linked value, junction default, authored value or catalogue default in that order. An
+// executor reads those through NodeContext, writes typed outputs, and reports a failure with a durable port
+// name. It borrows resolved producer identities when source behavior depends on its linked node.
 
 #include "EvaluationBudget.hpp"
 #include "SourceChoice.hpp"
@@ -157,6 +159,7 @@ namespace engine::imagegraph::detail {
 		const SurfaceFrameReplayState *CurrentSurfaces = nullptr;
 		const RandomReplayState *CurrentRandom = nullptr;
 		const DataReplayState *CurrentData = nullptr;
+		SourceFrameCacheInputReads FrameCacheInputReads = SourceFrameCacheInputReads::All;
 		SourcePathShiftMemo *PathShiftMemo = nullptr;
 		FontTextBatch *TextBatch = nullptr;
 		AllocationReservation PathMemoInputsCharge;

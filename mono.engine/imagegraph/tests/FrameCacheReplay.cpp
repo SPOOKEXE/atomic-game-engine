@@ -1511,3 +1511,166 @@ TEST_CASE(
 		CHECK(host.Output("member")->Pixels[0] == 10);
 	}
 }
+
+namespace {
+	void AddUnreadableRangeGetter(Document &document) {
+		document.Nodes.push_back(
+			{"unreadable-range",
+			 "pc.lua_compute",
+			 "",
+			 {},
+			 {{"function_name", std::string{"range_trap"}}, {"return_type", EnumValue{0}}}}
+		);
+		document.Links.push_back({"unreadable-range", "return_value", "cache", "step"});
+	}
+	void FreezeInputForAnotherOwner(Document &document, DataReplayState &state) {
+		document.Nodes.push_back({"input-owner", "pc.cache", "", {}, {}});
+		state.CacheGroups.Nodes = {
+			{"input-owner", "pc.cache", "", true, {}},
+			{"input",
+			 "image.solid",
+			 "input-owner",
+			 false,
+			 {{"image",
+			   {},
+			   {},
+			   Diagnostic{Status::UnsupportedExecution, "input", "image", "unreadable frozen getter"}}}}
+		};
+		state.CacheGroups.Owners = {{"input-owner", true, {"input"}}};
+	}
+}
+TEST_CASE(
+	"Cache Array early returns do not read range or surface getters", "[imagegraph][source_frame_cache]"
+) {
+	for (int branch = 0; branch < 3; ++branch) {
+		auto document = Scene(true);
+		const auto earlier = Run(document, Clock(0));
+		auto state = earlier.Data;
+		if (branch == 1) document.Links.clear();
+		if (branch == 2) {
+			document.Nodes[1].SourceProperties = {{"serialize", false}};
+			FreezeInputForAnotherOwner(document, state);
+		}
+		AddUnreadableRangeGetter(document);
+		ColourAt(document, 99);
+		const auto original = state;
+		auto request = Clock(1, branch != 0);
+		const auto result = Run(document, request, &state);
+		CHECK(Slots(result) == Slots(earlier));
+		CHECK(Row(result.Data).Values == Row(earlier.Data).Values);
+		CHECK(result.Data.CacheGroups == state.CacheGroups);
+		CHECK(state == original);
+		StatefulEvaluationResult refused = result;
+		Diagnostic diagnostic;
+		request.DataReplay = &state;
+		if (branch == 0) request.SourceCachePlayback->Playing = true;
+		if (branch == 1) document.Links.push_back({"input", "image", "cache", "surface_in"});
+		if (branch == 2) state.CacheGroups.Nodes[1].RenderActive = true;
+		CHECK(
+			EvaluateStateful(document, Compiled(document), "out", request, refused, diagnostic) ==
+			Status::UnsupportedExecution
+		);
+		SameOutput(refused, result);
+		CHECK(refused.Data == result.Data);
+	}
+}
+TEST_CASE(
+	"Unlinked and disabled Cache inputs leave latest output for outer auto capture",
+	"[imagegraph][source_frame_cache]"
+) {
+	for (const bool disabled : {false, true}) {
+		auto document = Scene();
+		const auto earlier = Run(document, Clock(0));
+		auto state = earlier.Data;
+		if (disabled) {
+			document.Nodes[1].SourceProperties = {{"serialize", false}};
+			FreezeInputForAnotherOwner(document, state);
+		} else
+			document.Links.clear();
+		const auto original = state;
+		const auto result = Run(document, Clock(1), &state);
+		CHECK(Red(result) == 10);
+		REQUIRE(Row(result.Data).Values.size() == 4);
+		CHECK(Row(result.Data).Values.back().Frame == 3);
+		CHECK(Row(result.Data).Values.back().Data == Row(earlier.Data).Values[1].Data);
+		CHECK(result.Data.CacheGroups == state.CacheGroups);
+		CHECK(state == original);
+	}
+}
+TEST_CASE(
+	"Cache Array early-return pruning preserves independent roots and input inspection",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene(true);
+	AddUnreadableRangeGetter(document);
+	document.Outputs.push_back({"range", "unreadable-range", "return_value"});
+	const auto plan = Compiled(document);
+	EvaluationRequest request = Clock(0, false);
+	StatefulEvaluationResult cold;
+	Diagnostic diagnostic;
+	REQUIRE(EvaluateStateful(document, plan, "out", request, cold, diagnostic) == Status::Ok);
+	CHECK(Slots(cold).empty());
+	StatefulOutputEvaluationResult batch;
+	const std::vector<std::string> selected{"out", "range"};
+	CHECK(
+		EvaluateStatefulOutputs(document, plan, selected, request, batch, diagnostic) ==
+		Status::UnsupportedExecution
+	);
+	CHECK(batch.Outputs.empty());
+	EvaluationSnapshot snapshot;
+	CHECK(
+		EvaluateNodeInputs(document, plan, "cache", request, snapshot, diagnostic) ==
+		Status::UnsupportedExecution
+	);
+	CHECK(snapshot.Images().empty());
+}
+
+TEST_CASE("Cache still reads Animated before its missing-input return", "[imagegraph][source_frame_cache]") {
+	auto document = Scene();
+	const auto earlier = Run(document, Clock(0));
+	document.Links.clear();
+	document.Nodes.push_back(
+		{"unreadable-animated",
+		 "pc.lua_compute",
+		 "",
+		 {},
+		 {{"function_name", std::string{"animated_trap"}}, {"return_type", EnumValue{0}}}}
+	);
+	document.Links.push_back({"unreadable-animated", "return_value", "cache", "animated"});
+	auto request = Clock(1);
+	request.DataReplay = &earlier.Data;
+	StatefulEvaluationResult result = earlier;
+	Diagnostic diagnostic;
+	CHECK(
+		EvaluateStateful(document, Compiled(document), "out", request, result, diagnostic) ==
+		Status::UnsupportedExecution
+	);
+	SameOutput(result, earlier);
+	CHECK(result.Data == earlier.Data);
+}
+
+TEST_CASE(
+	"Disabled cache input getters are not restored under the current request dimension cap",
+	"[imagegraph][source_frame_cache]"
+) {
+	for (const bool array : {false, true}) {
+		auto document = Scene(array);
+		const auto earlier = Run(document, Clock(0));
+		auto state = earlier.Data;
+		document.Nodes[1].SourceProperties = {{"serialize", false}};
+		FreezeInputForAnotherOwner(document, state);
+		auto &getter = state.CacheGroups.Nodes[1].Outputs[0];
+		getter.Data = SurfaceValue{Image{3, 1, {1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255}}};
+		getter.Refusal.reset();
+		const auto original = state;
+		auto request = Clock(1);
+		request.MaximumImageDimension = 2;
+		const auto result = Run(document, request, &state);
+		if (array)
+			CHECK(Slots(result) == Slots(earlier));
+		else
+			CHECK(Red(result) == 10);
+		CHECK(result.Data.CacheGroups == original.CacheGroups);
+		CHECK(state == original);
+	}
+}

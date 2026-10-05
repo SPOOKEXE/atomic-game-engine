@@ -202,7 +202,7 @@ namespace engine::imagegraph::detail {
 					"source frame cache needs a bounded caller-owned data replay ledger"
 				);
 			{
-				auto workspace = c.ReserveWorkspace(owner->Entries.size() * sizeof(size_t));
+				auto workspace = c.ReserveWorkspace(DataReplayValidationWorkspaceBytes(*owner));
 				if (!workspace) return false;
 				Diagnostic diagnostic;
 				if (ValidateDataReplay(*owner, c.ByteBudget, diagnostic) != Status::Ok)
@@ -287,7 +287,8 @@ namespace engine::imagegraph::detail {
 					output = hit;
 				else
 					capture = true;
-			} else if (c.Request.SourceCachePlayback->Playing) {
+			} else if (c.Request.SourceCachePlayback->Playing &&
+					   c.FrameCacheInputReads == SourceFrameCacheInputReads::All) {
 				const int64_t start = c.Integer("start_frame", -1), stop = c.Integer("stop_frame", -1),
 							  stride = c.Integer("step", 1);
 				if (c.FailureCode != Status::Ok) return false;
@@ -306,7 +307,8 @@ namespace engine::imagegraph::detail {
 					capture = true;
 				}
 			}
-			const bool useInput = capture && c.Request.SourceCachePlayback->Playing;
+			const bool useInput = capture && c.Request.SourceCachePlayback->Playing &&
+								  c.FrameCacheInputReads == SourceFrameCacheInputReads::All;
 			InputView input;
 			if (useInput && !ReadInput(c, input)) return false;
 			const bool writeFrame = capture && c.Request.Tick <= total;

@@ -73,7 +73,7 @@
     ]
   },
   "native_evidence": {
-    "current_gap": "Manual Cache button force-clears frames then enables retained members. Cache Array guards nonforced clear by Serialize/loading/appending, then applies the same enable gates. Host publishes current/preframe candidates together, invalidates member/consumer previews and input captures, and initializes authored group journals for an ordinary selected member. Automatic update-loop transitions remain refused for enabled nonempty authored groups.",
+    "current_gap": "Cache Array paused, unlinked and inactive-producer early returns skip connected range/surface getters. Cache retains Animated reads while skipping unlinked/inactive Surface getters, preserving its outer auto capture of latest output. Read admission governs dependency pruning, kernel input resolution and connected refusal propagation. Automatic update-loop transitions remain refused for enabled nonempty authored groups.",
     "inspection": [
       "mono.engine/imagegraph/src/Document.cpp:7965-7972 NodeResult alternatives",
       "mono.engine/imagegraph/src/Document.cpp:9856-9859 dependency closure",
@@ -82,11 +82,12 @@
       "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp:71-74 unsupported group gate"
     ],
     "required_next_steps": [
-      "Implement source Cache/Cache Array update-loop branch-local enable/disable and frame-clear, including disabled-input early return before control normalization.",
+      "Implement source Cache/Cache Array update-loop branch-local enable/disable and frame-clear. Enabled nonempty authored groups remain refused.",
       "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
       "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
       "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
-      "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile."
+      "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
+      "Check source timeline projection ordering separately; this batch proves linked getter admission, not every animated authored property."
     ],
     "bounded_policy_implementation": {
       "scope": "Bounded caller-owned named producer snapshots and source membership/activity policy. Evaluator and host journal integration remains outstanding; nonempty enabled source groups remain refused.",
@@ -501,6 +502,54 @@
         "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
         "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
         "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile."
+      ]
+    },
+    "early_input_implementation": {
+      "scope": "Cache Array paused, unlinked and inactive-producer early returns skip connected range/surface getters. Cache retains Animated reads while skipping unlinked/inactive Surface getters, preserving its outer auto capture of latest output. Read admission governs dependency pruning, kernel input resolution and connected refusal propagation.",
+      "head_before_commit": "626c6ce59604062c3bb1dfa39f34ca9d13f5de4c",
+      "coverage": [
+        "Paused, missing-link and disabled-producer Array branches retain prior slots and refuse unreadable Lua range getters once active reads resume.",
+        "Unlinked/disabled Cache preserves latest output for outer auto capture and leaves original journals unchanged.",
+        "Independent selected roots and explicit input inspection still read their getters; Cache still reads Animated before the missing-link return.",
+        "Ignored frozen Surface getters exceeding current request dimensions are not restored; cache output remains within the request cap."
+      ],
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-early-inputs-batch2-results.json",
+      "native_cases": 4829,
+      "native_assertions": 1991403,
+      "python_cases": 100,
+      "cli_ctest_cases": 16,
+      "approved_vulkan_cases": 15,
+      "architecture": "Passed: 55 modules, 6 programs, 39 layered.",
+      "format": "clang-format-21 dry run and git diff --check passed.",
+      "binary_hashes": "All eleven native suite binaries and assetc/imagegraph child hashes stable during tests and matched afterwards.",
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-early-inputs-build1.log",
+          "exit_code": 0
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-early-inputs-build2.log",
+          "exit_code": 0
+        }
+      ],
+      "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-early-inputs-issues.json",
+      "review": "Sol read-only review found no confirmed defect in the repaired refusal preflight, shared-control edge removal or implicit dependency retention.",
+      "profiling": "No fresh isolated performance measurement or sanitizer run. No performance claim.",
+      "source_sha256": {
+        "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp": "0644a54f17b9ed7570bdeffd4e72a26f793fa0d1f270317a8807d96fa7d55539",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp": "09d6b33019ce30b7b2ace4498af12c712bc21376758fa4bf02f0b5f6227fb90a",
+        "mono.engine/imagegraph/src/Document.cpp": "d5d52fd38dd2a890308da3c62557dede4461790ce13177794b84961a5e50acfa",
+        "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp": "809cde663036cd9752f27320bbca1cb7306dececed63c93e0ca65423ddc0cddb",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp": "62621ece2113f2f5e5aae7ba0c52a8a44e24636e41ef8845e749afe98844b503",
+        "mono.engine/imagegraph/docs/SOURCE_FRAME_CACHE_CPU_CONTRACT.md": "62e70ba1c31d6fb8c884a6df45e7319afd1887101d78ecc54399928f50549243"
+      },
+      "remaining": [
+        "Implement source Cache/Cache Array update-loop branch-local enable/disable and frame-clear. Enabled nonempty authored groups remain refused.",
+        "Initialize unresolved runtime resource and dynamic constructors through their exact native owner semantics; current cold ports carry explicit refusals.",
+        "Integrate authored load refresh for append/revision, source host edit callbacks and seek/restart activity policy.",
+        "Frozen node input inspection remains refused until an explicit source render-list execution profile is implemented.",
+        "Native image-array snapshots keep the typed 4 MiB nested payload bound; broader source array admission remains outside the current profile.",
+        "Check source timeline projection ordering separately; this batch proves linked getter admission, not every animated authored property."
       ]
     }
   },
