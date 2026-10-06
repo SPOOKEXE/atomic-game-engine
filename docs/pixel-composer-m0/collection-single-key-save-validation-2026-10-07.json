@@ -1,0 +1,192 @@
+{
+  "phase": "grug compact source Collection single keys before time scaling",
+  "date": "2026-10-07",
+  "base_commit": "56402a61",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_contract": [
+    "grug valueAnimator.serialize returns {d: value} for one nontrigger key without a driver",
+    "grug fixed source constructor kind determines eligibility; native Boolean also represents Trigger",
+    "grug inspector inputs 0/1 are Action, 2 is Trigger, 3 is output-only, and 4 is Float",
+    "grug split axes use parent socket type; source saves axes when sep_axis is true"
+  ],
+  "scope": [
+    "grug compact one known nontrigger key and preserve its raw serialized value",
+    "grug accept one-frame or missing-frame projects when every expanded key can compact",
+    "grug keep Trigger, object drivers, Any, dynamic/unknown sockets and opaque tails expanded",
+    "grug preserve aggregate physical key accounting before compaction and charge copied values",
+    "grug leave source archive and prior result unchanged on refusal"
+  ],
+  "owned_files": {
+    "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp": "418cfdc213a8bedc37317f5f5a938bced0440d483e6de6e54ec7ea444dd028c6",
+    "mono.engine/imagegraphio/src/PxcxAppend.cpp": "d56b27cd6c2d6c03fe14ce7de01040557c0a23f44e6feacade33dc9ed484ae33",
+    "mono.engine/imagegraphio/tests/PxcxAppend.cpp": "b717c3be1028c0364a1597b596ae089aa38535f0b8caa332554e3a0df0530099"
+  },
+  "checks": {
+    "joined_build": "grug 17 release-tests targets with j6 passed in build2",
+    "batch": "20/20 passed",
+    "cpp_cases": 5213,
+    "cpp_assertions": 2004215,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "grug approved offscreen Vulkan; Studio, client and render serialized",
+    "frozen_sources_unchanged": 1834,
+    "peer_files_unchanged": 43,
+    "test_binaries_unchanged": 13,
+    "child_binaries_unchanged": 2,
+    "review": "grug Sol read source eligibility, bounded work, runtime kinds and corrected fixtures; root repaired Luna test drafts before build",
+    "standalone_performance_profile": "grug not run; existing ENGINE_PROFILE scope covers the adapter",
+    "sanitizers": "grug not run"
+  },
+  "failures_and_repairs": [
+    {
+      "stage": "read review before build1",
+      "result": "grug caught fixture defects before testing",
+      "repair": "grug remove duplicate node ID, use truly unknown source index 99, singleton opaque tails, actual Bool/Trigger kinds and actual Dimension axes"
+    },
+    {
+      "stage": "read review during build1",
+      "result": "grug found axis flag and runtime parent fixture omissions",
+      "repair": "grug finish all twenty batch1 gates first; set sep_axis and place runtime Trigger input on parent; rebuild and rerun all twenty gates"
+    },
+    {
+      "stage": "builds and batches",
+      "result": "grug both builds and both full batches passed; no test failure"
+    }
+  ],
+  "limitations": [
+    "grug opaque key and marker tails deliberately stay expanded rather than being discarded by source serializer",
+    "grug runtime typed and unknown nontrigger inputs may still need complete source constructor state to compact",
+    "grug one-frame saves requiring expanded keys still refuse without guessing normalization",
+    "grug preview PNG, PXZ packaging and base Node_Collection native child membership remain open",
+    "grug standalone profile, sanitizers, headed Studio and licensed reference parity were not run",
+    "grug whole Composer goal remains active"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "builds": [
+      "collection-compact-build1.log",
+      "collection-compact-build2.log"
+    ],
+    "batches": [
+      "collection-compact-batch1-results.json",
+      "collection-compact-batch2-results.json"
+    ],
+    "source_integrity": "collection-compact-source-integrity-batch2.json",
+    "peer_integrity": "collection-compact-peer-integrity-batch2.json",
+    "child_integrity": "collection-compact-child-hashes-batch2.json"
+  },
+  "results_summary": [
+    {
+      "name": "bake",
+      "exit_code": 0,
+      "cases": 157,
+      "assertions": 15875
+    },
+    {
+      "name": "physics",
+      "exit_code": 0,
+      "cases": 43,
+      "assertions": 715
+    },
+    {
+      "name": "runner",
+      "exit_code": 0,
+      "cases": 29,
+      "assertions": 296
+    },
+    {
+      "name": "font",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 1686
+    },
+    {
+      "name": "export",
+      "exit_code": 0,
+      "cases": 77,
+      "assertions": 3132
+    },
+    {
+      "name": "render",
+      "exit_code": 0,
+      "cases": 15,
+      "assertions": 477
+    },
+    {
+      "name": "cli",
+      "exit_code": 0,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "exit_code": 0,
+      "cases": 301,
+      "assertions": 12860
+    },
+    {
+      "name": "core",
+      "exit_code": 0,
+      "cases": 2980,
+      "assertions": 1895147
+    },
+    {
+      "name": "assetc",
+      "exit_code": 0,
+      "cases": 45,
+      "assertions": 509
+    },
+    {
+      "name": "client",
+      "exit_code": 0,
+      "cases": 358,
+      "assertions": 23821
+    },
+    {
+      "name": "studio",
+      "exit_code": 0,
+      "cases": 1094,
+      "assertions": 48648
+    },
+    {
+      "name": "nodegraph",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 345
+    },
+    {
+      "name": "ui",
+      "exit_code": 0,
+      "cases": 40,
+      "assertions": 704
+    },
+    {
+      "name": "startup",
+      "exit_code": 0,
+      "cases": 1,
+      "assertions": 5
+    },
+    {
+      "name": "lint",
+      "exit_code": 0
+    },
+    {
+      "name": "architecture",
+      "exit_code": 0
+    },
+    {
+      "name": "python",
+      "exit_code": 0,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "exit_code": 0
+    }
+  ]
+}

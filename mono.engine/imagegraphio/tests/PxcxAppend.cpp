@@ -949,6 +949,191 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"PXC Collection save compacts eligible single expanded keys and preserves opaque tails",
+	"[imagegraphio][pxcx_append][collection_save][animation]"
+) {
+	const auto expanded = [](Json marker, Json value, bool driverObject = false) {
+		Json key = Json::array(
+			{std::move(marker),
+			 std::move(value),
+			 Json::array({0.25, 0.75}),
+			 Json::array({0.5, 0.5}),
+			 "ease-in",
+			 "ease-out",
+			 true,
+			 driverObject ? Json{{"type", 77}} : Json(0),
+			 17}
+		);
+		return Json::array({std::move(key)});
+	};
+	const auto source = [](std::string id, std::string type, Json data) {
+		return Json{
+			{"id", std::move(id)},
+			{"type", std::move(type)},
+			{"x", 0},
+			{"y", 0},
+			{"group", "root"},
+			{"inputs", Json::array({Json{{"r", std::move(data)}}})}
+		};
+	};
+	Json root = Collection("root");
+	root["inputs"].push_back(Json{{"r", expanded(Json::array({0, 16}), true)}});
+	root["attri"]["custom_input_list"] = Json::array({"group-input"});
+	Json vector2 = source("vector", "Node_Vector2", expanded(Json::array({0, 5}), 2.5));
+	Json boolean = source("boolean", "Node_Trigger_Bool", expanded(Json::array({1, 7}), true));
+	Json driven = source("driven", "Node_Vector2", expanded(Json::array({1, 8}), 3.5, true));
+	Json trigger = source("trigger", "Node_Trigger", expanded(Json::array({0, 9}), true));
+	Json opaque = source("opaque", "Node_Vector2", expanded(Json::array({0, 18}), 4.5));
+	opaque["inputs"][0]["r"][0].push_back("future-key-field");
+	opaque["inputs"].push_back(Json{{"r", expanded(Json::array({0, 19, 0, 99}), 5.5)}});
+	for (size_t index = 1; index < 99; ++index)
+		vector2["inputs"].push_back(ValueJson(0));
+	vector2["inputs"].push_back(Json{{"r", expanded(Json::array({0, 17}), "unknown-slot")}});
+	Json any = source("any", "Node_Tunnel_In", expanded(Json::array({0, 18}), "name"));
+	any["inputs"].push_back(Json{{"r", expanded(Json::array({0, 19}), "runtime-value")}});
+	Json axes = SolidNode("axes");
+	axes["group"] = "root";
+	axes["inputs"][0]["sep_axis"] = true;
+	axes["inputs"][0]["r"] = expanded(Json::array({0, 5}), Json::array({2, 4}));
+	axes["inputs"][0]["animators"] =
+		Json::array({expanded(Json::array({0, 6}), 2), expanded(Json::array({1, 8, 0}), 4, true)});
+	Json groupInput = GroupInputNode("group-input", "root");
+	groupInput["inputs"][2] = ValueJson(19);
+	Json inspectors = Collection("inspectors", "root");
+	inspectors["inspectInputs"] = Json::array(
+		{Json{{"r", expanded(Json::array({0, 10}), "inspect-action-zero")}},
+		 Json{{"r", expanded(Json::array({0, 11}), "inspect-action-one")}},
+		 Json{{"r", expanded(Json::array({0, 12}), true)}},
+		 Json{{"r", expanded(Json::array({0, 13}), "output-trigger")}},
+		 Json{{"r", expanded(Json::array({1, 14}), 14.0)}},
+		 Json{{"r", expanded(Json::array({0, 15}), "surplus")}}}
+	);
+	inspectors["outputs"] = Json::array({Json{{"r", expanded(Json::array({0, 16}), "output")}}});
+	inspectors["future_input"] = {{"r", expanded(Json::array({0, 17}), "future")}};
+	Json graph = {
+		{"animator", {{"frames_total", 21}}},
+		{"nodes",
+		 Json::array({root, vector2, boolean, driven, trigger, inspectors, opaque, groupInput, axes, any})}
+	};
+	const auto archive = Archive(graph.dump());
+	const auto originalBytes = archive.OriginalBytes;
+	PxcxCollectionSave result;
+	engine::imagegraph::Diagnostic diagnostic;
+	const bool prepared = PreparePxcxCollectionSave(archive, "root", std::nullopt, result, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(prepared);
+	CHECK(archive.OriginalBytes == originalBytes);
+	const auto saved = Json::parse(result.GraphJson);
+	const auto findNode = [&](std::string_view id) -> const Json & {
+		const auto found = std::find_if(saved["nodes"].begin(), saved["nodes"].end(), [&](const Json &node) {
+			return node["id"] == id;
+		});
+		REQUIRE(found != saved["nodes"].end());
+		return *found;
+	};
+	CHECK((findNode("vector")["inputs"][0]["r"] == Json{{"d", 2.5}}));
+	CHECK((findNode("boolean")["inputs"][0]["r"] == Json{{"d", true}}));
+	CHECK(findNode("driven")["inputs"][0]["r"][0][0][1].get<double>() == Catch::Approx(0.4));
+	CHECK(findNode("driven")["inputs"][0]["r"][0][7] == driven["inputs"][0]["r"][0][7]);
+	CHECK(findNode("trigger")["inputs"][0]["r"][0][0][1].get<double>() == Catch::Approx(0.45));
+	const auto &savedInspect = findNode("inspectors")["inspectInputs"];
+	CHECK((savedInspect[0]["r"] == Json{{"d", "inspect-action-zero"}}));
+	CHECK((savedInspect[1]["r"] == Json{{"d", "inspect-action-one"}}));
+	CHECK(savedInspect[2]["r"][0][0][1].get<double>() == Catch::Approx(0.6));
+	CHECK(savedInspect[3] == inspectors["inspectInputs"][3]);
+	CHECK((savedInspect[4]["r"] == Json{{"d", 14.0}}));
+	CHECK(savedInspect[5] == inspectors["inspectInputs"][5]);
+	CHECK(findNode("inspectors")["outputs"] == inspectors["outputs"]);
+	CHECK(findNode("inspectors")["future_input"] == inspectors["future_input"]);
+	CHECK(findNode("opaque")["inputs"][0]["r"][0][0][1].get<double>() == Catch::Approx(0.9));
+	CHECK(findNode("opaque")["inputs"][0]["r"][0][9] == "future-key-field");
+	CHECK(findNode("opaque")["inputs"][1]["r"][0][0][1].get<double>() == Catch::Approx(0.95));
+	CHECK(findNode("opaque")["inputs"][1]["r"][0][0][3] == 99);
+	CHECK(findNode("vector")["inputs"][99]["r"][0][1] == "unknown-slot");
+	CHECK(findNode("vector")["inputs"][99]["r"][0][0][1].get<double>() == Catch::Approx(0.85));
+	CHECK(findNode("any")["inputs"][1]["r"][0][0][1].get<double>() == Catch::Approx(0.95));
+	CHECK(findNode("group-input")["inputs"] == groupInput["inputs"]);
+	CHECK(findNode("root")["inputs"][0]["r"][0][0][1].get<double>() == Catch::Approx(0.8));
+	CHECK(findNode("root")["inputs"][0]["r"][0][1] == true);
+	const auto &savedAxes = findNode("axes")["inputs"][0];
+	CHECK(savedAxes["sep_axis"] == true);
+	CHECK((savedAxes["r"] == Json{{"d", Json::array({2, 4})}}));
+	CHECK((savedAxes["animators"][0] == Json{{"d", 2}}));
+	CHECK(savedAxes["animators"][1][0][0][1].get<double>() == Catch::Approx(0.4));
+	CHECK(savedAxes["animators"][1][0][7] == axes["inputs"][0]["animators"][1][0][7]);
+}
+
+TEST_CASE(
+	"PXC Collection save permits one-frame and missing-frame projects when expanded keys compact",
+	"[imagegraphio][pxcx_append][collection_save][animation]"
+) {
+	for (const auto frameCount : {std::optional<int>{1}, std::optional<int>{}}) {
+		Json root = Collection("root");
+		Json child = SolidNode("axes");
+		child["group"] = "root";
+		child["inputs"][0]["sep_axis"] = true;
+		child["inputs"][0]["r"] = Json::array({Json::array({Json::array({1, 6, 0}), Json::array({2, 4})})});
+		child["inputs"][0]["animators"] = Json::array(
+			{Json::array({Json::array({Json::array({0, 3}), 2})}),
+			 Json::array({Json::array({Json::array({1, 6, 0}), 4})})}
+		);
+		Json graph = {{"nodes", Json::array({root, child})}};
+		if (frameCount) graph["animator"] = {{"frames_total", *frameCount}};
+		const auto archive = Archive(graph.dump());
+		PxcxCollectionSave result;
+		engine::imagegraph::Diagnostic diagnostic;
+		CAPTURE(frameCount);
+		const bool prepared = PreparePxcxCollectionSave(archive, "root", std::nullopt, result, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(prepared);
+		const auto saved = Json::parse(result.GraphJson);
+		CHECK((saved["nodes"][0]["inputs"][0]["r"] == Json{{"d", Json::array({2, 4})}}));
+		CHECK((saved["nodes"][0]["inputs"][0]["animators"][0] == Json{{"d", 2}}));
+		CHECK((saved["nodes"][0]["inputs"][0]["animators"][1] == Json{{"d", 4}}));
+	}
+}
+
+TEST_CASE(
+	"PXC Collection save still needs multiple frames for keys that cannot compact",
+	"[imagegraphio][pxcx_append][collection_save][animation][atomic]"
+) {
+	Json root = Collection("root");
+	Json key = Json::array({Json::array({0, 3}), 3.0});
+	std::string type = "Node_Vector2";
+	SECTION("a source Trigger stays expanded") {
+		type = "Node_Trigger";
+		key[1] = true;
+	}
+	SECTION("a driver stays expanded") {
+		key = Json::array({Json::array({0, 3}), 3.0, 0, 0, 0, 0, false, Json{{"type", 77}}});
+	}
+	SECTION("an opaque key tail stays expanded") {
+		key = Json::array({Json::array({0, 3}), 3.0, 0, 0, 0, 0, false, 0, 17, "opaque-tail"});
+	}
+	SECTION("an opaque marker tail stays expanded") {
+		key[0].push_back(99);
+	}
+	SECTION("an unknown source node stays expanded") {
+		type = "Node_Future";
+	}
+	Json child = {
+		{"id", "child"},
+		{"type", type},
+		{"x", 0},
+		{"y", 0},
+		{"group", "root"},
+		{"inputs", Json::array({Json{{"r", Json::array({key})}}})}
+	};
+	const auto archive =
+		Archive(Json{{"animator", {{"frames_total", 1}}}, {"nodes", Json::array({root, child})}}.dump());
+	PxcxCollectionSave result{"previous graph", std::string("previous metadata")};
+	const auto prior = result;
+	engine::imagegraph::Diagnostic diagnostic;
+	CHECK_FALSE(PreparePxcxCollectionSave(archive, "root", std::nullopt, result, diagnostic));
+	CHECK(result == prior);
+}
+
+TEST_CASE(
 	"PXC Collection save recognizes every pinned Collection family as a root",
 	"[imagegraphio][pxcx_append][collection_save][families]"
 ) {

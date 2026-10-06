@@ -54,6 +54,8 @@ namespace engine::imagegraphio {
 	// grug save one Collection and its descendants in source postorder, relative to its position.
 	// detach its saved parent, preserve external connection references and source-only fields.
 	// expanded animator times use the checked project frame count, never a guessed default.
+	// grug a lone known nontrigger key without a driver saves as a compact value before time scaling.
+	// unknown/runtime-typed sockets and opaque key tails keep their expanded records.
 	// manager fields use source defaults; both files carry the pinned serializer version.
 	// this does not render a preview, create PXZ, execute callbacks or prove licensed parity.
 	[[nodiscard]] bool PreparePxcxCollectionSave(

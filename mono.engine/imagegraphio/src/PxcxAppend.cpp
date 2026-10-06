@@ -1,6 +1,7 @@
 #include "ImportBudget.hpp"
 
 #include <engine/core/Profiling.hpp>
+#include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraphio/PxcxAppend.hpp>
 
 #include <algorithm>
@@ -647,7 +648,7 @@ namespace engine::imagegraphio {
 			}
 		}
 		size_t keyCount = 0;
-		const auto normalizeAnimator = [&](AppendJson &data) {
+		const auto normalizeAnimator = [&](AppendJson &data, bool canCompact) {
 			if (data.is_object()) {
 				if (data.contains("d") && ++keyCount > Limits::MaximumKeyframes)
 					return fail(Status::LimitExceeded, "PXC collection aggregate key count exceeds bounds");
@@ -658,6 +659,22 @@ namespace engine::imagegraphio {
 			if (data.size() > Limits::MaximumKeyframes - keyCount)
 				return fail(Status::LimitExceeded, "PXC collection aggregate key count exceeds bounds");
 			keyCount += data.size();
+			if (canCompact && data.size() == 1) {
+				const auto &key = data.front();
+				if (key.is_array() && key.size() >= 2 && key.size() <= 9 && key[0].is_array() &&
+					key[0].size() >= 2 && key[0][0].is_number() && key[0][1].is_number() &&
+					std::isfinite(key[0][1].get<double>()) &&
+					((key[0][0] == 0 && key[0].size() == 2) ||
+					 (key[0][0] == 1 && (key[0].size() == 2 || (key[0].size() == 3 && key[0][2] == 0)))) &&
+					(key.size() <= 7 || !key[7].is_object())) {
+					// grug source drops a lone nontrigger key's time and known ease/color fields.
+					// opaque tails remain expanded; their meaning cannot be inferred from value type.
+					RecordWork(key[1], work);
+					AppendJson compact = {{"d", key[1]}};
+					data = std::move(compact);
+					return true;
+				}
+			}
 			for (auto &key : data) {
 				work.Charge(1, 1);
 				if (!key.is_array() || key.size() < 2 || !key[0].is_array() || key[0].size() < 2 ||
@@ -676,6 +693,13 @@ namespace engine::imagegraphio {
 			return true;
 		};
 		const auto normalizeInputs = [&](AppendJson &record) {
+			const CatalogueEntry *entry = nullptr;
+			const auto type = record.find("type");
+			if (type != record.end() && type->is_string()) {
+				const auto &name = type->get_ref<const JsonString &>();
+				work.Charge(1, name.size() + 1);
+				entry = FindCatalogueSource({name.data(), name.size()});
+			}
 			for (const char *field : {"inputs", "inspectInputs"}) {
 				const auto inputs = record.find(field);
 				if (inputs == record.end()) continue;
@@ -685,17 +709,25 @@ namespace engine::imagegraphio {
 					work.Charge(1, 1);
 					// grug source output trigger and surplus inspector fields have no saved animator.
 					if (std::string_view(field) == "inspectInputs" && (index == 3 || index >= 5)) continue;
+					bool canCompact = std::string_view(field) == "inspectInputs" && index != 2;
+					if (std::string_view(field) == "inputs" && entry && index <= INT32_MAX) {
+						work.Charge(1, entry->Inputs.size() + 1);
+						const auto *declared = FindCatalogueInputIndex(*entry, static_cast<int32_t>(index));
+						// grug Trigger is boolean in native schemas. constructor kind owns this rule.
+						canCompact =
+							declared && declared->SourceKind != "Trigger" && declared->Type != ValueType::Any;
+					}
 					auto &input = (*inputs)[index];
 					if (!input.is_object())
 						return fail(Status::InvalidValue, "PXC collection socket record is invalid");
 					const auto data = input.find("r");
-					if (data != input.end() && !normalizeAnimator(*data)) return false;
+					if (data != input.end() && !normalizeAnimator(*data, canCompact)) return false;
 					const auto axes = input.find("animators");
 					if (axes == input.end()) continue;
 					if (!axes->is_array())
 						return fail(Status::InvalidValue, "PXC collection axis storage is invalid");
 					for (auto &axis : *axes)
-						if (!normalizeAnimator(axis)) return false;
+						if (!normalizeAnimator(axis, canCompact)) return false;
 				}
 			}
 			return true;
