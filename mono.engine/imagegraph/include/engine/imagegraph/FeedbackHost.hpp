@@ -289,13 +289,38 @@ namespace engine::imagegraph {
 			Diagnostic &diagnostic,
 			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
 		) {
+			return RefreshLoadedSourceCacheGroups(
+				document, owners, diagnostic, CacheGroupLoadAdmission{}, maximumBytes
+			);
+		}
+		// grug source/history admission runs after both loaded journals are ready.
+		// refusal preserves current-frame and frame-start cache ownership and frozen producer outputs.
+		[[nodiscard]] bool RefreshLoadedSourceCacheGroups(
+			const Document &document,
+			std::span<const std::string_view> owners,
+			Diagnostic &diagnostic,
+			const CacheGroupLoadAdmission &admit,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) {
 			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
 				diagnostic = {Status::LimitExceeded, {}, {}, "loaded cache group host cap is outside bounds"};
 				return false;
 			}
 			if (owners.empty()) {
-				diagnostic = {};
-				return true;
+				if (!admit) {
+					diagnostic = {};
+					return true;
+				}
+				const auto resident = RetainedBytes();
+				if (resident > maximumBytes) {
+					diagnostic = {
+						Status::LimitExceeded, {}, {}, "loaded cache group admission exceeds live bytes"
+					};
+					return false;
+				}
+				return RefreshLoadedCacheGroupReplay(
+						   document, owners, {}, maximumBytes - resident, diagnostic, admit
+					   ) == Status::Ok;
 			}
 			const auto resident = RetainedBytes();
 			const auto groups = RetainedCacheGroupReplayBytes(State.Data.CacheGroups) +
@@ -308,7 +333,7 @@ namespace engine::imagegraph {
 			}
 			const std::array journals{&State.Data.CacheGroups, &FrameStart.Data.CacheGroups};
 			return RefreshLoadedCacheGroupReplay(
-					   document, owners, journals, maximumBytes - resident + groups, diagnostic
+					   document, owners, journals, maximumBytes - resident + groups, diagnostic, admit
 				   ) == Status::Ok;
 		}
 		// grug admit history while candidates stay private. false or bad_alloc must preserve admission state.

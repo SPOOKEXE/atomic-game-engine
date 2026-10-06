@@ -6,6 +6,7 @@
 #include <engine/imagegraph/Document.hpp>
 
 #include <array>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -97,6 +98,19 @@ namespace engine::imagegraph {
 		std::span<CacheGroupReplayState *const> journals,
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic
+	);
+	// grug admit source/history only after both journals are ready. refusal leaves both journals intact.
+	// successful admission is followed only by no-throw publication; caller preserves its own state on
+	// refusal.
+	// remaining bytes exclude the borrowed document, original journals and staged journals.
+	using CacheGroupLoadAdmission = std::function<bool(uint64_t)>;
+	[[nodiscard]] Status RefreshLoadedCacheGroupReplay(
+		const Document &document,
+		std::span<const std::string_view> owners,
+		std::span<CacheGroupReplayState *const> journals,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic,
+		const CacheGroupLoadAdmission &admit
 	);
 	// grug prepare owned candidates first. caller can admit authoring history before publication.
 	struct PreparedCacheGroupMembership {

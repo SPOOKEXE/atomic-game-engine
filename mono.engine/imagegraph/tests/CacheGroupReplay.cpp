@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <new>
 
 TEST_SUITE_ID("engine.imagegraph.cache_group_replay")
 using namespace engine::imagegraph;
@@ -1553,6 +1554,189 @@ TEST_CASE(
 	CHECK(RefreshLoadedCacheGroupReplay(document, owners, alias, BYTE_BUDGET, error) == Status::InvalidValue);
 	CHECK(state == old);
 	CHECK(checkpoint == start);
+}
+
+TEST_CASE(
+	"loaded owner admission runs after refresh staging and preserves frozen producers on refusal",
+	"[imagegraph][cache_group][load][admission]"
+) {
+	auto document = AuthoredGroups();
+	document.Nodes[1].SourceProperties[1].Data = true;
+	CacheGroupReplayState state;
+	Diagnostic error;
+	REQUIRE(InitializeAuthoredCacheGroupReplay(document, {}, state, BYTE_BUDGET, error) == Status::Ok);
+	REQUIRE(state.Owners.size() == 2);
+	REQUIRE(ApplyCacheGroupReplay(state, Disable("cache-b"), BYTE_BUDGET).Code == Status::Ok);
+	const std::vector<CacheGroupReplayOutput> outputs = {{"number", Value{17.0}, {}, {}}};
+	REQUIRE(
+		RetainCacheGroupReplayNode(state, "number", "pc.number_simple", outputs, BYTE_BUDGET).Code ==
+		Status::Ok
+	);
+	const auto priorNumberPosition =
+		std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+			return node.NodeId == "number";
+		});
+	REQUIRE(priorNumberPosition != state.Nodes.end());
+	const auto priorNumber = *priorNumberPosition;
+	CHECK_FALSE(priorNumber.RenderActive);
+	const auto priorPathPosition = std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "path";
+	});
+	REQUIRE(priorPathPosition != state.Nodes.end());
+	const auto priorPath = *priorPathPosition;
+	const auto priorOwnerA = state.Owners[0];
+	const auto priorOwnerB = state.Owners[1];
+	auto checkpoint = state;
+	document.Nodes.push_back({"loaded", "pc.cache_array", "", {}, {}});
+	document.Nodes.back().SourceProperties = {
+		{"cache_group", GroupIds({"number", "new-number"})}, {"serialize", false}
+	};
+	document.Nodes.push_back({"new-number", "pc.number_simple", "", {}, {}});
+	const std::array<std::string_view, 1> owners{"loaded"};
+	const std::array journals{&state, &checkpoint};
+	int admissions = 0;
+	const auto priorNumberState = state;
+	const uint64_t originalBytes =
+		RetainedCacheGroupReplayBytes(state) + RetainedCacheGroupReplayBytes(checkpoint);
+	uint64_t admittedBytes = 0;
+	const auto admit = [&](uint64_t remainingBytes) {
+		++admissions;
+		admittedBytes = remainingBytes;
+		CHECK(state == priorNumberState);
+		CHECK(checkpoint == priorNumberState);
+		CHECK(remainingBytes > 0);
+		CHECK(remainingBytes < BYTE_BUDGET);
+		return true;
+	};
+	const auto status = RefreshLoadedCacheGroupReplay(document, owners, journals, BYTE_BUDGET, error, admit);
+	INFO(error.Message);
+	REQUIRE(status == Status::Ok);
+	CHECK(admissions == 1);
+	CHECK(state == checkpoint);
+	CHECK(
+		admittedBytes == BYTE_BUDGET - *DocumentRetainedPayloadBytes(document) - originalBytes -
+							 RetainedCacheGroupReplayBytes(state) - RetainedCacheGroupReplayBytes(checkpoint)
+	);
+	CHECK(state.Owners[0] == priorOwnerA);
+	CHECK(state.Owners[1] == priorOwnerB);
+	CHECK_FALSE(state.Owners.back().Serialize);
+	const auto number = std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "number";
+	});
+	REQUIRE(number != state.Nodes.end());
+	CHECK(number->OwnerId == "loaded");
+	CHECK(number->Outputs == priorNumber.Outputs);
+	CHECK(number->RenderActive == priorNumber.RenderActive);
+	const auto path = std::find_if(state.Nodes.begin(), state.Nodes.end(), [](const auto &node) {
+		return node.NodeId == "path";
+	});
+	REQUIRE(path != state.Nodes.end());
+	CHECK(path->OwnerId == priorPath.OwnerId);
+	CHECK(path->Outputs == priorPath.Outputs);
+	CHECK(path->RenderActive == priorPath.RenderActive);
+
+	const auto loadedOwner = std::find_if(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+		return node.Id == "loaded";
+	});
+	REQUIRE(loadedOwner != document.Nodes.end());
+	loadedOwner->SourceProperties[0].Data = GroupIds({"number", "new-number", "path"});
+	const auto beforeRefusal = state;
+	const auto checkpointBeforeRefusal = checkpoint;
+	const auto refuse = [&](uint64_t remainingBytes) {
+		++admissions;
+		CHECK(remainingBytes > 0);
+		CHECK(state == beforeRefusal);
+		CHECK(checkpoint == checkpointBeforeRefusal);
+		return false;
+	};
+	CHECK(
+		RefreshLoadedCacheGroupReplay(document, owners, journals, BYTE_BUDGET, error, refuse) ==
+		Status::LimitExceeded
+	);
+	CHECK(admissions == 2);
+	CHECK(state == beforeRefusal);
+	CHECK(checkpoint == checkpointBeforeRefusal);
+	const auto throwAllocation = [&](uint64_t) -> bool {
+		++admissions;
+		throw std::bad_alloc{};
+	};
+	CHECK(
+		RefreshLoadedCacheGroupReplay(document, owners, journals, BYTE_BUDGET, error, throwAllocation) ==
+		Status::LimitExceeded
+	);
+	CHECK(admissions == 3);
+	CHECK(state == beforeRefusal);
+	CHECK(checkpoint == checkpointBeforeRefusal);
+}
+
+TEST_CASE(
+	"loaded owner admission handles empty selection and skips callbacks on invalid or over-budget input",
+	"[imagegraph][cache_group][load][admission]"
+) {
+	auto document = AuthoredGroups();
+	document.Nodes.push_back({"loaded", "pc.cache", "", {}, {}});
+	document.Nodes.back().SourceProperties = {{"cache_group", GroupIds({"number"})}};
+	CacheGroupReplayState state = Journal();
+	auto checkpoint = state;
+	const std::array journals{&state, &checkpoint};
+	Diagnostic error;
+	int admissions = 0;
+	const auto priorState = state;
+	const auto priorCheckpoint = checkpoint;
+	const auto admit = [&](uint64_t remainingBytes) {
+		++admissions;
+		CHECK(state == priorState);
+		CHECK(checkpoint == priorCheckpoint);
+		CHECK(remainingBytes > 0);
+		CHECK(remainingBytes < BYTE_BUDGET);
+		CHECK(
+			remainingBytes == BYTE_BUDGET - *DocumentRetainedPayloadBytes(document) -
+								  RetainedCacheGroupReplayBytes(state) -
+								  RetainedCacheGroupReplayBytes(checkpoint)
+		);
+		return true;
+	};
+	const std::span<const std::string_view> noOwners;
+	REQUIRE(
+		RefreshLoadedCacheGroupReplay(document, noOwners, journals, BYTE_BUDGET, error, admit) == Status::Ok
+	);
+	CHECK(admissions == 1);
+	CHECK(state == priorState);
+	CHECK(checkpoint == priorCheckpoint);
+
+	document.Nodes.back().SourceProperties[0].Data = Value{7.0};
+	const std::array<std::string_view, 1> owners{"loaded"};
+	CHECK(
+		RefreshLoadedCacheGroupReplay(document, owners, journals, BYTE_BUDGET, error, admit) ==
+		Status::InvalidValue
+	);
+	CHECK(admissions == 1);
+	CHECK(state == priorState);
+	CHECK(checkpoint == priorCheckpoint);
+	document.Nodes.back().SourceProperties[0].Data = GroupIds({"number"});
+	CHECK(
+		RefreshLoadedCacheGroupReplay(document, owners, journals, 1, error, admit) == Status::LimitExceeded
+	);
+	CHECK(admissions == 1);
+	CHECK(state == priorState);
+	CHECK(checkpoint == priorCheckpoint);
+	auto largeDocument = document;
+	largeDocument.Nodes.back().SourceProperties.push_back({"opaque", std::string(1024 * 1024, 'x')});
+	const auto largeDocumentBytes = DocumentRetainedPayloadBytes(largeDocument);
+	REQUIRE(largeDocumentBytes);
+	CHECK(
+		RefreshLoadedCacheGroupReplay(
+			largeDocument,
+			owners,
+			journals,
+			*largeDocumentBytes + 2 * sizeof(CacheGroupReplayState) - 1,
+			error,
+			admit
+		) == Status::LimitExceeded
+	);
+	CHECK(admissions == 1);
+	CHECK(state == priorState);
+	CHECK(checkpoint == priorCheckpoint);
 }
 
 TEST_CASE("Loaded cache journals share one comparison work cap", "[imagegraph][cache_group][load][bounds]") {

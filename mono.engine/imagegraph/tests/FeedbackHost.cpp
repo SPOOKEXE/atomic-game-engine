@@ -421,7 +421,42 @@ TEST_CASE(
 	CHECK_FALSE(host.RefreshLoadedSourceCacheGroups(document, loaded, error, 1));
 	CHECK(*host.PreparedData(1, 1) == prior);
 	CHECK(*host.Output("out") == pixels);
-	REQUIRE(host.RefreshLoadedSourceCacheGroups(document, loaded, error));
+	int admissions = 0;
+	for (const bool throws : {false, true}) {
+		CHECK_FALSE(host.RefreshLoadedSourceCacheGroups(
+			document, loaded, error, [&](uint64_t remainingBytes) -> bool {
+				++admissions;
+				CHECK(remainingBytes > 0);
+				CHECK(
+					remainingBytes < Limits::MaximumEvaluationBytes - host.RetainedBytes() -
+										 *DocumentRetainedPayloadBytes(document)
+				);
+				CHECK(*host.PreparedData(1, 1) == prior);
+				if (throws) throw std::bad_alloc{};
+				return false;
+			}
+		));
+		CHECK(error.Code == Status::LimitExceeded);
+		CHECK(*host.PreparedData(1, 1) == prior);
+		CHECK(*host.Output("out") == pixels);
+	}
+	CHECK(admissions == 2);
+	REQUIRE(host.RefreshLoadedSourceCacheGroups(document, {}, error, [&](uint64_t remainingBytes) {
+		++admissions;
+		CHECK(
+			remainingBytes ==
+			Limits::MaximumEvaluationBytes - host.RetainedBytes() - *DocumentRetainedPayloadBytes(document)
+		);
+		return true;
+	}));
+	CHECK(*host.PreparedData(1, 1) == prior);
+	CHECK(*host.Output("out") == pixels);
+	REQUIRE(host.RefreshLoadedSourceCacheGroups(document, loaded, error, [&](uint64_t) {
+		++admissions;
+		CHECK(*host.PreparedData(1, 1) == prior);
+		return true;
+	}));
+	CHECK(admissions == 4);
 	REQUIRE(host.PreparedData(1, 1));
 	const auto refreshed = *host.PreparedData(1, 1);
 	CHECK(refreshed.Entries == prior.Entries);

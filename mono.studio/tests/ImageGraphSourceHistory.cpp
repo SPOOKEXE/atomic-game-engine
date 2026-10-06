@@ -1,3 +1,5 @@
+#include <engine/imagegraph/FeedbackHost.hpp>
+#include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraphio/PxcxAppend.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/testing/Suite.hpp>
@@ -5,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -13,6 +16,7 @@
 
 TEST_SUITE_ID("studio.imagegraph.source_history")
 TEST_DEPENDS("engine.imagegraphio.pxcxappend")
+TEST_DEPENDS("engine.imagegraph.feedback_host")
 
 namespace {
 	using namespace engine::imagegraph;
@@ -298,4 +302,71 @@ TEST_CASE(
 	CHECK(current == base.Graph);
 	CHECK(history.CurrentSourceBytes() == sourceB);
 	CHECK_FALSE(history.Undo(current, allow));
+}
+
+TEST_CASE(
+	"PXC append cache loading admits source history before publishing either host journal",
+	"[studio][source_history][append][cache_group]"
+) {
+	const auto destination = Archive(
+		R"JSON({"attri":{"future_root":{"keep":1}},"nodes":[{"id":"number","type":"Node_Number_Simple","x":1,"y":2,"inputs":[{"r":{"d":4}}]},{"id":"existing","type":"Node_Cache_Array","x":0,"y":0,"inputs":[],"attri":{"serialize":true,"cache_group":["number"]}}],"aRegion":[{"l":"old","c":16777215,"fs":-1.5,"fe":4.25,"future":17}]})JSON"
+	);
+	const auto incoming = Archive(
+		R"JSON({"nodes":[{"id":"cache","type":"Node_Cache_Array","x":0,"y":0,"inputs":[],"attri":{"serialize":false,"cache_group":["number"]}}]})JSON"
+	);
+	const auto sourceBefore = Snapshot(destination.OriginalBytes);
+	PxcxAppendOptions options;
+	options.Namespace = "loaded";
+	PxcxAppendResult appended;
+	Diagnostic error;
+	REQUIRE(engine::imagegraphio::AppendPxcxProject(destination, incoming, options, appended, error));
+	const auto sourceAfter = Snapshot(appended.Project.Source.OriginalBytes);
+	REQUIRE(appended.Nodes.size() == 1);
+	const std::array<std::string_view, 1> owners{appended.Nodes.front().NodeId};
+	auto before = Import(destination).Graph;
+	before.Outputs = {{"result", "number", "number"}};
+	auto after = appended.Project.Graph;
+	after.Outputs = before.Outputs;
+	Plan plan;
+	REQUIRE(Compile(before, plan, error) == Status::Ok);
+	for (const bool refuse : {true, false}) {
+		CapturedFeedbackHost host;
+		EvaluationRequest request;
+		REQUIRE(SetFrameTime(request, {1, .25, false}));
+		request.SourceCachePlayback =
+			SourceCachePlaybackObservation{false, SourceCacheSampling::ObservedFrame, false};
+		request.SourceCacheProject = SourceFrameCacheProjectObservation{{1, .25, false}, 4.25, false, false};
+		REQUIRE(host.Prepare(before, plan, 1, 1, request, error, Limits::MaximumEvaluationBytes, "result"));
+		REQUIRE(host.PreparedData(1, 1));
+		const auto prior = *host.PreparedData(1, 1);
+		const auto frame = host.PreparedFrame(1, 1);
+		History history(8, refuse ? 1 : 16 * 1024 * 1024);
+		int admissions = 0;
+		const bool accepted =
+			host.RefreshLoadedSourceCacheGroups(after, owners, error, [&](uint64_t remainingBytes) {
+				++admissions;
+				CHECK(*host.PreparedData(1, 1) == prior);
+				CHECK(remainingBytes > sourceBefore->capacity() + sourceAfter->capacity());
+				return history.TryRecord(before, after, sourceBefore, sourceAfter);
+			});
+		CHECK(admissions == 1);
+		CHECK(accepted == !refuse);
+		CHECK(host.PreparedFrame(1, 1) == frame);
+		CHECK(history.CanUndo() == !refuse);
+		if (refuse) {
+			CHECK(error.Code == Status::LimitExceeded);
+			CHECK(*host.PreparedData(1, 1) == prior);
+			CHECK_FALSE(history.CurrentSourceBytes());
+			continue;
+		}
+		CHECK(history.CurrentSourceBytes() == sourceAfter);
+		CHECK(host.PreparedData(1, 1)->Entries == prior.Entries);
+		REQUIRE(host.PreparedData(1, 1)->CacheGroups.Owners.size() == 2);
+		CHECK(host.PreparedData(1, 1)->CacheGroups.Owners.front() == prior.CacheGroups.Owners.front());
+		CHECK(host.PreparedData(1, 1)->CacheGroups.Owners.back().NodeId == owners.front());
+		auto current = after;
+		REQUIRE(history.Undo(current));
+		CHECK(current == before);
+		CHECK(history.CurrentSourceBytes() == sourceBefore);
+	}
 }

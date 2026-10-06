@@ -14,6 +14,7 @@
 #include <cmath>
 #include <new>
 #include <numeric>
+#include <type_traits>
 
 namespace engine::imagegraph {
 	namespace {
@@ -906,17 +907,42 @@ namespace engine::imagegraph {
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic,
 		uint64_t &work,
-		bool retireOmitted
+		bool retireOmitted,
+		const CacheGroupLoadAdmission &admit = {}
 	) try {
 		ENGINE_PROFILE("imagegraph.cache_group.loaded_refresh");
 		const auto fail = [&](Status code, const char *message) {
 			diagnostic = {code, {}, {}, message};
 			return code;
 		};
+		const auto admission = [&](uint64_t held) {
+			if (!admit) return true;
+			if (held > maximumBytes) {
+				(void)fail(
+					Status::LimitExceeded, "loaded cache group admission leaves no callback allowance"
+				);
+				return false;
+			}
+			diagnostic = {};
+			if (!admit(maximumBytes - held)) {
+				(void)fail(Status::LimitExceeded, "loaded cache group admission refused");
+				return false;
+			}
+			return true;
+		};
 		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || journals.size() > 2 ||
 			owners.size() > Limits::MaximumNodes || serializeOwners.size() > Limits::MaximumNodes ||
 			document.Nodes.size() > Limits::MaximumNodes || work > COMPARISON_WORK_LIMIT)
 			return fail(Status::LimitExceeded, "loaded cache group transaction cap is outside bounds");
+		if (admit) {
+			// grug keep borrowed document residency outside every candidate and scratch allocation.
+			const auto documentBytes = DocumentRetainedPayloadBytes(document);
+			if (!documentBytes || *documentBytes > maximumBytes)
+				return fail(
+					Status::LimitExceeded, "loaded cache group admission document exceeds live bytes"
+				);
+			maximumBytes -= *documentBytes;
+		}
 		for (size_t i = 0; i < journals.size(); ++i) {
 			if (!journals[i]) return fail(Status::InvalidValue, "loaded cache group journal is absent");
 			for (size_t j = 0; j < i; ++j)
@@ -926,6 +952,10 @@ namespace engine::imagegraph {
 				return fail(Status::LimitExceeded, "loaded cache group journal exceeds count or work bounds");
 		}
 		if ((owners.empty() && serializeOwners.empty()) || journals.empty()) {
+			uint64_t held = 0;
+			for (const auto *journal : journals)
+				held = MeshAddBytes(held, RetainedCacheGroupReplayBytes(*journal));
+			if (!admission(held)) return diagnostic.Code;
 			diagnostic = {};
 			return Status::Ok;
 		}
@@ -1042,6 +1072,10 @@ namespace engine::imagegraph {
 					return fail(Status::LimitExceeded, "cache Serialize journal exceeds work bounds");
 			}
 		}
+		// grug all candidate work finished. accepted source/history publication cannot be followed by
+		// allocation.
+		static_assert(std::is_nothrow_move_assignable_v<CacheGroupReplayState>);
+		if (!admission(held)) return diagnostic.Code;
 		for (size_t i = 0; i < journals.size(); ++i)
 			*journals[i] = std::move(candidates[i]);
 		diagnostic = {};
@@ -1061,6 +1095,19 @@ namespace engine::imagegraph {
 		uint64_t work = COMPARISON_WORK_LIMIT;
 		return RefreshCacheGroupMetadata(
 			document, owners, {}, journals, maximumBytes, diagnostic, work, false
+		);
+	}
+	Status RefreshLoadedCacheGroupReplay(
+		const Document &document,
+		std::span<const std::string_view> owners,
+		std::span<CacheGroupReplayState *const> journals,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic,
+		const CacheGroupLoadAdmission &admit
+	) {
+		uint64_t work = COMPARISON_WORK_LIMIT;
+		return RefreshCacheGroupMetadata(
+			document, owners, {}, journals, maximumBytes, diagnostic, work, false, admit
 		);
 	}
 	Status detail::SynchronizeAuthoredCacheGroupMetadata(

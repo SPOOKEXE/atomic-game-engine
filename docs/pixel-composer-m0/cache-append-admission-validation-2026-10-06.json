@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-06",
+  "scope": "grug admit source-aware append history after loaded cache journals finish staging and before either journal publishes",
+  "owned_files": {
+    "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp": "b993af74b7eb48bfe039ccee966364d04d148324f800b652903a672225559298",
+    "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp": "6021fc1184f0ee3fff108f1ab333f79e4940642ecb766691675c67dc492b883a",
+    "mono.engine/imagegraph/src/CacheGroupReplay.cpp": "1548b694d501f74fbb075eba410c995a7e4e079c4171ba442d430de2e59adbb2",
+    "mono.engine/imagegraph/tests/CacheGroupReplay.cpp": "5c4fc72a20feecb6b50925bd4d33bc5e4bd00aee4633848764cc3abb2e0816c2",
+    "mono.engine/imagegraph/tests/FeedbackHost.cpp": "b3ce5b1a15ed37afdee65a218c10c111c70d85c0fb221003e2424395181f5392",
+    "mono.studio/tests/ImageGraphSourceHistory.cpp": "1e68c054244f157688054e7af8c4481126969e469b09ea04e7a17e17423e1df7"
+  },
+  "behavior": [
+    "callback receives remaining logical payload allowance after document, original journals and staged journals",
+    "document residency is reserved before candidate allocation",
+    "false or bad_alloc admission preserves both live journals",
+    "successful admission is followed only by no-throw journal moves",
+    "legacy callers keep their existing refresh behavior",
+    "empty owner selection admits once without journal changes"
+  ],
+  "build": {
+    "preset": "release-tests",
+    "targets": 17,
+    "final_exit_code": 0,
+    "final_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-append-admission-build2.log",
+    "first_exit_code": 0,
+    "first_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-append-admission-build1.log"
+  },
+  "validation": {
+    "checks": 20,
+    "all_exit_codes_zero": true,
+    "cpp_cases": 5169,
+    "cpp_assertions": 2002813,
+    "new_cases": 3,
+    "new_assertions": 122,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup": true,
+    "gpu": "approved SDL offscreen Vulkan suites included",
+    "final_results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-append-admission-batch2-results.json",
+    "failed_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-append-admission-batch1-issues.json"
+  },
+  "proof": [
+    "prior frozen producer outputs and existing owner state survive loaded-owner refresh",
+    "callback observes old current-frame and frame-start journals until acceptance",
+    "invalid membership and insufficient document residency skip admission",
+    "source-history quota refusal preserves host state and creates no undo entry",
+    "accepted archive-backed append records source epochs and restores the prior native document and source bytes on undo"
+  ],
+  "freeze": {
+    "source_paths": 84,
+    "unchanged_peer_files": 43,
+    "test_binary_hashes": "13 unchanged",
+    "child_binary_hashes": "assetc and imagegraph unchanged",
+    "before": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-append-admission-source-before-build2.json",
+    "after": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cache-append-admission-source-after-batch2.json"
+  },
+  "review": "Sol read review caught late document accounting before tests; grug reserved document bytes before staging and review found no further blocker",
+  "limits": [
+    "grug did not capture a performance profile; no speed claim",
+    "allowance covers retained logical payload, not full process heap; caller must account for its other staged state",
+    "first joined batch exposed two fixture assumptions; grug corrected both together before final joined build and checks",
+    "full Studio append publication and runtime restoration on history undo remain open",
+    "headed Studio, licensed reference comparison, dev/server/ci builds and sanitizers not run"
+  ],
+  "remaining": "full host append and original 33-item Composer goal remain active"
+}
