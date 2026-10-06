@@ -1,6 +1,7 @@
 #include "EvaluationAllocator.hpp"
 #include "GroupBoundary.hpp"
 #include "GroupReplayInternal.hpp"
+#include "SourceAnimatorPersistence.hpp"
 #include "SourceAxisStorage.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourceVec2Defaults.hpp"
@@ -2781,6 +2782,9 @@ namespace engine::imagegraph {
 			return fail(
 				Status::LimitExceeded, "Group authored projection replacement overlap exceeds bounds"
 			);
+		if (replay.InstancesBound() && !replay.Bindings().empty() &&
+			!add(replay.RetainedBytes() + sizeof(SourceAnimatorState)))
+			return fail(Status::LimitExceeded, "captured source animator snapshot exceeds projection budget");
 		detail::EvaluationBudget budget(maximumBytes);
 		auto reservation = budget.Reserve(admitted);
 		if (!reservation) return fail(Status::LimitExceeded, "Group authored projection admission failed");
@@ -3191,6 +3195,28 @@ namespace engine::imagegraph {
 		if (workExceeded) return diagnostic.Code;
 		candidate.Keyframes.swap(finalKeys);
 		candidate.Tracks.swap(finalTracks);
+		if (replay.InstancesBound() && !replay.Bindings().empty()) {
+			candidate.FormatVersion = std::max(candidate.FormatVersion, uint32_t{10});
+			candidate.SourceAnimators.emplace();
+			auto &state = *candidate.SourceAnimators;
+			state.Bindings.assign(replay.Bindings().begin(), replay.Bindings().end());
+			state.Detached.assign(replay.DetachedAnimators().begin(), replay.DetachedAnimators().end());
+			state.DetachedValues.reserve(state.Detached.size());
+			for (const auto &metadata : state.Detached) {
+				const auto *payload = replay.SharedSubtype(metadata.OwnerId, metadata.Id);
+				if (!payload)
+					return fail(
+						Status::InvalidGroup,
+						"captured retired animator has no payload",
+						metadata.OwnerId,
+						metadata.Id
+					);
+				state.DetachedValues.push_back(*payload);
+			}
+			if (detail::ValidateSourceAnimatorState(candidate, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+		} else
+			candidate.SourceAnimators = {};
 		const auto retained = DocumentRetainedPayloadBytes(candidate);
 		if (!retained || *retained > maximumBytes)
 			return fail(Status::LimitExceeded, "Group authored projection retained result exceeds bounds");

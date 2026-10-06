@@ -438,6 +438,20 @@ TEST_CASE(
 	CHECK(graph["nodes"][2]["inputs"][1]["future_control"] == 73);
 	CHECK(graph["nodes"][2]["inputs"][1]["r"] == Json::array());
 	CHECK(graph["nodes"][3]["inputs"][1]["r"] == Json::array());
+	REQUIRE(candidate.SourceAnimators);
+	auto unreconstructable = candidate;
+	unreconstructable.SourceAnimators->Bindings.front().AnimatorPort = "layer_index";
+	const auto retainedBytes = bytes;
+	CHECK_FALSE(WritePxcxProjection(imported, unreconstructable, {3, .5, true}, bytes, diagnostic));
+	CHECK(diagnostic.Message.find("cannot reconstruct captured animator generations") != std::string::npos);
+	CHECK(bytes == retainedBytes);
+	unreconstructable = candidate;
+	auto &captured = unreconstructable.SourceAnimators->Bindings.front();
+	captured.Writer = captured.Writer == GroupSubtypeAnimator::Animated ? GroupSubtypeAnimator::Static
+																		: GroupSubtypeAnimator::Animated;
+	CHECK_FALSE(WritePxcxProjection(imported, unreconstructable, {3, .5, true}, bytes, diagnostic));
+	CHECK(diagnostic.Message.find("cannot reconstruct captured animator generations") != std::string::npos);
+	CHECK(bytes == retainedBytes);
 
 	CHECK(graph["nodes"][1]["inputs"][1]["r"][1].back() == "opaque-key-tail");
 	CHECK(bound.AuthoringRevision() == 7);

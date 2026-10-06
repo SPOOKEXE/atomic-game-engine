@@ -556,3 +556,62 @@ TEST_CASE(
 	observations.Capture(1, FrameTime{8}, "scene", 8, calendar);
 	CHECK(cadence.Begin(identity, FrameTime{8}, observations) == FrameTime{8});
 }
+
+TEST_CASE(
+	"Studio native history restores captured scalar sharing before sampling",
+	"[studio][group_host][source_animator_persistence]"
+) {
+	auto document = ColdGetterDocument();
+	document.Nodes.front().Id = "base";
+	Node copy = document.Nodes.front();
+	copy.Id = "copy";
+	copy.InstanceBase = "base";
+	copy.InstanceOverrides = {"point_i_0"};
+	document.Nodes.push_back(std::move(copy));
+	document.Outputs.front().NodeId = "base";
+	Diagnostic error;
+	Plan plan;
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	studio::ImageGraphGroupHost host;
+	EvaluationRequest request;
+	REQUIRE(host.Prepare(document, plan, 1, request, error));
+	CHECK(host.Replay.Binding("copy", "point_i_0")->Axes.Storage == GroupAxisStorage::Uninitialized);
+	document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Initialized = true;
+	document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys = {
+		{"base", "point_i_0", 0, 42.0, "source", KeyframeEase{}}
+	};
+	document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys = {
+		{"base", "point_i_0", 0, 43.0, "source", KeyframeEase{}}
+	};
+	Document before;
+	REQUIRE(ProjectGroupReplay(document, host.Replay, 1, before, error) == Status::Ok);
+	const std::array targets{GroupInstanceRecapture{"copy", "point_i_0"}};
+	GroupReplayState recaptured;
+	REQUIRE(RecaptureGroupInstances(document, targets, host.Replay, 1, recaptured, error) == Status::Ok);
+	Document after;
+	REQUIRE(ProjectGroupReplay(document, recaptured, 1, after, error) == Status::Ok);
+	studio::ImageGraphHistory history;
+	REQUIRE(history.TryRecord(before, after));
+	document = after;
+	host.Clear();
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	REQUIRE(host.Prepare(document, plan, 2, request, error));
+	CHECK(host.Replay.Binding("copy", "point_i_0")->Axes.Storage == GroupAxisStorage::Shared);
+	REQUIRE(history.Undo(document));
+	host.Clear();
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	REQUIRE(host.Prepare(document, plan, 3, request, error));
+	CHECK(host.Replay.Binding("copy", "point_i_0")->Axes.Storage == GroupAxisStorage::Uninitialized);
+	REQUIRE(history.Redo(document));
+	host.Clear();
+	REQUIRE(Compile(document, plan, error) == Status::Ok);
+	REQUIRE(host.Prepare(document, plan, 4, request, error));
+	CHECK(host.Replay.Binding("copy", "point_i_0")->Axes.Storage == GroupAxisStorage::Shared);
+	EvaluationSnapshot snapshot;
+	REQUIRE(EvaluateNodeInputs(document, plan, "copy", request, snapshot, error) == Status::Ok);
+	const auto value = std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &item) {
+		return item.Port == "point_i_0";
+	});
+	REQUIRE(value != snapshot.Values().end());
+	CHECK(value->Data == Value{Vector2{42, 43}});
+}

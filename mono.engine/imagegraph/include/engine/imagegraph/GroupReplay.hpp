@@ -11,7 +11,6 @@ namespace engine::imagegraph {
 		struct GroupReplayAccess;
 	}
 	enum class GroupRefreshReason { Load, Edit, Connect, ParentEdit, Restore };
-	enum class GroupSubtypeAnimator { Static, Animated };
 	// One explicit source refresh callback, in caller event order. Sampling alone
 	// is not an event.
 	struct GroupRefreshEvent {
@@ -40,52 +39,6 @@ namespace engine::imagegraph {
 		std::optional<Value> SubtypeStatic;
 		std::vector<Keyframe> SubtypeKeys;
 		std::vector<Keyframe> ParentKeys;
-	};
-	enum class GroupAxisStorage : uint8_t { None, Uninitialized, Local, Shared };
-	// group binding copies the current scalar array, independently from the combined animator.
-	// an uninitialized array keeps its local constructor owner even if the base creates axes later.
-	struct GroupAxisBinding {
-		GroupAxisStorage Storage = GroupAxisStorage::None;
-		std::string OwnerId;
-		std::string Port;
-		std::string InstanceBase;
-		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
-		bool operator==(const GroupAxisBinding &) const = default;
-	};
-	struct GroupSubtypeBinding {
-		std::string NodeId;
-		std::string OwnerId;
-		// Getter mode belongs to the target when overridden, otherwise the delegated owner.
-		GroupSubtypeAnimator Getter = GroupSubtypeAnimator::Static;
-		// Animator.prop remains the original property after its animator is aliased.
-		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
-		// Actual source child input. Group.inputs parent_value remains local.
-		std::string Port = "subtype";
-		// The retained animator can keep its original socket after a physical input move.
-		// Empty uses Port. An admitted detached animator uses its native Id.
-		// Inherited getters still resolve their current input index.
-		std::string AnimatorPort{};
-		GroupAxisBinding Axes{};
-	};
-	// Metadata for one retained animator whose original physical input was removed.
-	// The shared overlay owns its values and keys; this record never duplicates them.
-	struct DetachedSourceAnimator {
-		std::string Id;
-		std::string OwnerId;
-		std::string OriginalPort;
-		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
-		ValueType Type = ValueType::Any;
-		std::optional<bool> ArrayClassification;
-		std::optional<AnimationTrack> Track;
-		bool operator==(const DetachedSourceAnimator &) const = default;
-	};
-	struct GroupSubtypeOverlay {
-		std::string NodeId;
-		std::optional<Value> Fixed;
-		std::vector<Keyframe> Keys;
-		std::string Port = "subtype";
-		// scalar storage may have a different owner from the combined animator.
-		OwnedPayload3D<SourceSeparatedVec2Animator> SeparatedVec2{};
 	};
 	// The host owns this immutable replay result. It never mutates the authored
 	// document.
@@ -117,6 +70,15 @@ namespace engine::imagegraph {
 		std::unique_ptr<Storage> Data;
 		friend struct detail::GroupReplayAccess;
 	};
+	// restores admitted native capture identities without recapturing current base animators.
+	Status RestoreSourceAnimatorBindings(
+		const Document &,
+		const GroupReplayState &declarations,
+		uint64_t revision,
+		GroupReplayState &result,
+		Diagnostic &,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
 	// installs or reconciles source aliases without running refresh callbacks.
 	// unchanged immediate bases keep captured axes; new bindings resolve parent before child.
 	// explicit source setInstance uses RecaptureGroupInstances instead of reconciliation.

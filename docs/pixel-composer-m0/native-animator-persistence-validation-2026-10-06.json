@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "backend": "offscreen Vulkan",
+  "scope": "native animator capture persistence through save/reopen and Studio undo/redo",
+  "changes": [
+    "native format 10 stores source binding identities, cold/warm scalar captures and detached generations",
+    "restore validates references and canonical retained payloads before atomic replay publication",
+    "document and replay budgets charge capture payloads and replacement overlap",
+    "Studio fresh preparation restores authored captures after reopening and history changes",
+    "source mode transitions retain native format and refresh saved binding modes",
+    "PXC saves omit native capture records only when an independently derived fresh foreign bind reconstructs them; lost generations refuse without publishing bytes"
+  ],
+  "first_batch": {
+    "build_exit_code": 0,
+    "checks_passed": 18,
+    "checks_total": 20,
+    "failed_cpp_cases": 6,
+    "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/animator-persistence-batch1-issues.json",
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/animator-persistence-batch1-results.json"
+  },
+  "repairs": [
+    "retain format 10 during source mode changes and refresh getter/writer metadata",
+    "prove source capture reconstruction before inverse comparison omits native records",
+    "derive proof modes from foreign flags and keys, with bounded inheritance and weighted name comparisons"
+  ],
+  "final_build": {
+    "exit_code": 0,
+    "steps": 24,
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/animator-persistence-build2.log"
+  },
+  "final_batch": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "cpp_suite_cases": 5075,
+    "core_cases": 2954,
+    "io_cases": 280,
+    "studio_cases": 1006,
+    "vulkan_render_cases": 15,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/animator-persistence-batch2-results.json",
+    "source_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/animator-persistence-source-hashes-build2.json",
+    "child_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/animator-persistence-child-hashes-batch2.json",
+    "owned_source_changes_during_build_and_tests": [],
+    "binaries_changed_during_tests": false
+  },
+  "covered": [
+    "combined detached aliases remain distinct after native save/reopen",
+    "cold scalar captures stay cold after the physical base warms",
+    "explicit same-base recapture restores its warm array while siblings keep old captures",
+    "retired scalar values survive native reopening",
+    "malformed capture owner and serialized references refuse atomically",
+    "small restore byte allowance refuses without replacing destination",
+    "Studio fresh preparation, undo and redo restore captures and evaluate expected inputs",
+    "source mode transition and source artwork inverse suites",
+    "unreconstructable PXC capture identity and writer mode refuse without replacing output bytes"
+  ],
+  "limits": [
+    "no dedicated profile capture; no performance claim",
+    "no licensed reference-build matched captures or headed Studio verification",
+    "verification used the shared working tree with pending peer changes; standalone commit was not separately built",
+    "generic vector and HLSL constructor domains remain open",
+    "full 33-item Composer objective remains active"
+  ]
+}

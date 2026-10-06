@@ -1546,6 +1546,14 @@ TEST_CASE(
 	GroupReplayState savedReplay;
 	REQUIRE(RebindProjectedGroupReplay(saved, constructed, 4, savedReplay, error) == Status::Ok);
 	CHECK(SamplePoint(saved, savedReplay, "child", Point0, 0) == oldValue);
+	Document reopened;
+	REQUIRE(Read(Write(saved), reopened, error) == Status::Ok);
+	GroupReplayState emptyDeclarations, nativeDeclarations, restored;
+	REQUIRE(RebindGroupReplay(reopened, emptyDeclarations, 8, nativeDeclarations, error) == Status::Ok);
+	REQUIRE(RestoreSourceAnimatorBindings(reopened, nativeDeclarations, 8, restored, error) == Status::Ok);
+	CHECK(restored.Binding("child", Point0)->Axes.Port == retired);
+	CHECK(SamplePoint(reopened, restored, "child", Point0, 0) == oldValue);
+	CHECK(restored.Binding("copy", Point0)->Axes.Port != retired);
 }
 
 TEST_CASE(
@@ -1649,4 +1657,106 @@ TEST_CASE(
 	CHECK(RecaptureGroupInstances(document, targets, bound, 1, bound, error) == Status::LimitExceeded);
 	CHECK(bound.RetainedBytes() == before);
 	CHECK(bound.Binding(nodeId, Point0)->Axes.OwnerId == "base");
+}
+
+TEST_CASE(
+	"Native saves restore moved combined animator sharing and detached generations",
+	"[source_animator_persistence]"
+) {
+	auto original = MakeMoveGraph();
+	for (auto &node : original.Nodes)
+		if (node.Id == "copy" || node.Id == "sibling") node.InstanceOverrides = {"argument_value_1"};
+	auto bound = BindMoveGraph(original);
+	auto document = original;
+	StageMove(document, "base");
+	SourceInputMove moves[6];
+	std::copy(std::begin(CopyMoves), std::end(CopyMoves), moves);
+	for (auto &move : moves)
+		move.NodeId = "base";
+	Diagnostic error;
+	GroupReplayState moved, recaptured;
+	REQUIRE(RebindGroupReplayWithInputMoves(original, document, moves, bound, 2, moved, error) == Status::Ok);
+	const std::array targets{GroupInstanceRecapture{"copy", "argument_value_1"}};
+	REQUIRE(RecaptureGroupInstances(document, targets, moved, 2, recaptured, error) == Status::Ok);
+	Document projected, reopened;
+	const auto projection = ProjectGroupReplay(document, recaptured, 2, projected, error);
+	INFO(error.Message);
+	REQUIRE(projection == Status::Ok);
+	REQUIRE(projected.SourceAnimators);
+	CHECK(projected.FormatVersion == 10);
+	const auto text = Write(projected);
+	REQUIRE(!text.empty());
+	REQUIRE(Read(text, reopened, error) == Status::Ok);
+	CHECK(reopened == projected);
+	GroupReplayState empty, initial, restored;
+	REQUIRE(RebindGroupReplay(reopened, empty, 10, initial, error) == Status::Ok);
+	REQUIRE(RestoreSourceAnimatorBindings(reopened, initial, 10, restored, error) == Status::Ok);
+	CHECK(CaptureMove(reopened, restored, "copy", "argument_value_1") == Value{30.});
+	CHECK(CaptureMove(reopened, restored, "sibling", "argument_value_1") == Value{20.});
+	CHECK(*restored.Binding("copy", "argument_value_1") == *recaptured.Binding("copy", "argument_value_1"));
+	CHECK(
+		*restored.Binding("sibling", "argument_value_1") == *recaptured.Binding("sibling", "argument_value_1")
+	);
+	Value editedValue = 77.;
+	GroupRefreshEvent edit;
+	edit.NodeId = "sibling";
+	edit.Reason = GroupRefreshReason::Edit;
+	edit.EditedPort = "argument_value_1";
+	edit.LocalValue = &editedValue;
+	edit.LocalAnimated = true;
+	edit.At.Tick = 1;
+	GroupReplayState edited;
+	REQUIRE(ReplayGroupAnimatorEdits(reopened, {&edit, 1}, restored, 10, edited, error) == Status::Ok);
+	CHECK(CaptureMove(reopened, edited, "copy", "argument_value_1", 1) == Value{30.});
+	CHECK(CaptureMove(reopened, edited, "sibling", "argument_value_1", 1) == editedValue);
+	const auto previousBinding = *restored.Binding("sibling", "argument_value_1");
+	auto corrupted = reopened;
+	corrupted.SourceAnimators->Bindings[0].OwnerId = "missing";
+	CHECK(Write(corrupted).empty());
+	CHECK(RestoreSourceAnimatorBindings(corrupted, initial, 10, restored, error) == Status::InvalidGroup);
+	CHECK(*restored.Binding("sibling", "argument_value_1") == previousBinding);
+	CHECK(RestoreSourceAnimatorBindings(reopened, initial, 10, restored, error, 1) == Status::LimitExceeded);
+	CHECK(*restored.Binding("sibling", "argument_value_1") == previousBinding);
+	auto malformed = text;
+	const auto marker = malformed.find("source_binding ");
+	REQUIRE(marker != std::string::npos);
+	malformed.insert(
+		marker,
+		"source_binding \"absent\" \"base\" \"argument_value_1\" \"\" animated animated none \"\" \"\" \"\" "
+		"static\n"
+	);
+	auto destination = reopened;
+	CHECK(Read(malformed, destination, error) == Status::InvalidGroup);
+	CHECK(destination == reopened);
+}
+
+TEST_CASE(
+	"Native scalar captures preserve cold instances after their base warms", "[source_animator_persistence]"
+) {
+	auto document = MakeGradientPointMoveGraph();
+	Node sibling = document.Nodes[1];
+	sibling.Id = "sibling";
+	document.Nodes.push_back(std::move(sibling));
+	auto warm = *document.Nodes[0].SourceSeparatedVec2Animators;
+	document.Nodes[0].SourceSeparatedVec2Animators = {};
+	Diagnostic error;
+	GroupReplayState empty, initial, cold;
+	REQUIRE(RebindGroupReplay(document, empty, 1, initial, error) == Status::Ok);
+	auto bindings = GradientPointBindings();
+	bindings.push_back(GradientPointBinding("sibling"));
+	REQUIRE(BindGroupReplay(document, bindings, initial, 1, cold, error) == Status::Ok);
+	document.Nodes[0].SourceSeparatedVec2Animators.emplace() = std::move(warm);
+	Document projected, reopened;
+	REQUIRE(ProjectGroupReplay(document, cold, 1, projected, error) == Status::Ok);
+	REQUIRE(Read(Write(projected), reopened, error) == Status::Ok);
+	GroupReplayState declarations, restored;
+	REQUIRE(RebindGroupReplay(reopened, empty, 4, declarations, error) == Status::Ok);
+	REQUIRE(RestoreSourceAnimatorBindings(reopened, declarations, 4, restored, error) == Status::Ok);
+	CHECK(restored.Binding("copy", Point0)->Axes.Storage == GroupAxisStorage::Uninitialized);
+	const std::array targets{GroupInstanceRecapture{"copy", Point0}};
+	GroupReplayState changed;
+	REQUIRE(RecaptureGroupInstances(reopened, targets, restored, 4, changed, error) == Status::Ok);
+	CHECK(changed.Binding("copy", Point0)->Axes.Storage == GroupAxisStorage::Shared);
+	CHECK(changed.Binding("sibling", Point0)->Axes.Storage == GroupAxisStorage::Uninitialized);
+	CHECK(SamplePoint(reopened, changed, "copy", Point0, 5) == Value{Vector2{15, 2}});
 }

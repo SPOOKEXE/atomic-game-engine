@@ -10,6 +10,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/GroupReplay.hpp>
 #include <engine/imagegraph/SourceAnimatorCapture.hpp>
 #include <engine/imagegraphio/PxcxEdit.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
@@ -2109,6 +2110,102 @@ namespace engine::imagegraphio {
 		return true;
 	}
 
+	namespace edit_detail {
+		// foreign saves may omit native capture records only when a fresh bind reconstructs them.
+		bool ReconstructsSourceAnimators(
+			const Document &authored, const Document &foreign, Diagnostic &diagnostic
+		) {
+			if (!authored.SourceAnimators) return true;
+			const auto reject = [&]() {
+				return Reject(
+					diagnostic,
+					"PXC cannot reconstruct captured animator generations; save the native document"
+				);
+			};
+			if (!authored.SourceAnimators->Detached.empty() ||
+				!authored.SourceAnimators->DetachedValues.empty())
+				return reject();
+			const auto authoredBytes = DocumentRetainedPayloadBytes(authored);
+			const auto foreignBytes = DocumentRetainedPayloadBytes(foreign);
+			if (!authoredBytes || !foreignBytes || *authoredBytes > Limits::MaximumEvaluationBytes / 2 ||
+				*foreignBytes >= Limits::MaximumEvaluationBytes - 2 * *authoredBytes)
+				return reject();
+			const uint64_t allowance = Limits::MaximumEvaluationBytes - 2 * *authoredBytes - *foreignBytes;
+			std::vector<GroupSubtypeBinding> declarations = authored.SourceAnimators->Bindings;
+			struct WorkExceeded {};
+			uint64_t work = 0;
+			const auto same = [&](std::string_view left, std::string_view right) {
+				const uint64_t charge = 1 + std::min(left.size(), right.size());
+				if (charge > 64'000'000 - work) throw WorkExceeded{};
+				work += charge;
+				return left == right;
+			};
+			const auto findNode = [&](std::string_view id) -> const Node * {
+				for (const auto &node : foreign.Nodes)
+					if (same(node.Id, id)) return &node;
+				return nullptr;
+			};
+			const auto contains = [&](const auto &names, std::string_view port) {
+				return std::any_of(names.begin(), names.end(), [&](const auto &name) {
+					return same(name, port);
+				});
+			};
+			const auto mode = [&](const Node &node, std::string_view port) {
+				if (contains(node.SourceStaticInputs, port)) return GroupSubtypeAnimator::Static;
+				const bool animated =
+					contains(node.SourceAnimatedInputs, port) ||
+					std::any_of(foreign.Keyframes.begin(), foreign.Keyframes.end(), [&](const auto &key) {
+						return same(key.NodeId, node.Id) && same(key.Port, port);
+					});
+				return animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+			};
+			try {
+				for (auto &binding : declarations) {
+					const Node *owner = findNode(binding.NodeId);
+					if (!owner) return reject();
+					const Node *getter = owner;
+					bool inheritedGetter = true;
+					for (size_t hop = 0; !owner->InstanceBase.empty(); ++hop) {
+						if (hop >= foreign.Nodes.size()) return reject();
+						if (inheritedGetter) {
+							const bool linked = std::any_of(
+								foreign.Links.begin(), foreign.Links.end(), [&](const auto &link) {
+									return same(link.ToNode, getter->Id) && same(link.ToPort, binding.Port);
+								}
+							);
+							inheritedGetter = !linked && !contains(getter->InstanceOverrides, binding.Port);
+						}
+						owner = findNode(owner->InstanceBase);
+						if (!owner) return reject();
+						if (inheritedGetter) getter = owner;
+					}
+					if (!same(owner->Id, binding.OwnerId)) return reject();
+					binding.Getter = mode(*getter, binding.Port);
+					binding.Writer = mode(*owner, binding.Port);
+					binding.AnimatorPort.clear();
+					binding.Axes = {};
+				}
+			} catch (const WorkExceeded &) {
+				return reject();
+			}
+			GroupReplayState empty, initial, inferred;
+			if (RebindGroupReplay(foreign, empty, 1, initial, diagnostic, allowance) != Status::Ok ||
+				BindGroupReplay(foreign, declarations, initial, 1, inferred, diagnostic, allowance) !=
+					Status::Ok)
+				return false;
+			if (inferred.Bindings().size() != authored.SourceAnimators->Bindings.size()) return reject();
+			for (size_t index = 0; index < inferred.Bindings().size(); ++index) {
+				const auto &actual = inferred.Bindings()[index];
+				const auto &expected = authored.SourceAnimators->Bindings[index];
+				if (actual.NodeId != expected.NodeId || actual.OwnerId != expected.OwnerId ||
+					actual.Port != expected.Port || actual.Getter != expected.Getter ||
+					actual.Writer != expected.Writer || actual.Axes != expected.Axes ||
+					(!expected.AnimatorPort.empty() && expected.AnimatorPort != expected.Port))
+					return reject();
+			}
+			return true;
+		}
+	}
 	bool WritePxcxProjection(
 		const PxcxImport &imported,
 		const imagegraph::Document &authored,
@@ -4053,6 +4150,9 @@ namespace engine::imagegraphio {
 		detail::RebaseKeyProvenance(desired, projected.Graph);
 		detail::CanonicalizeKeyOrder(desired);
 		detail::CanonicalizeKeyOrder(projected.Graph);
+		if (!ReconstructsSourceAnimators(authored, projected.Graph, diagnostic)) return false;
+		desired.SourceAnimators = {};
+		desired.FormatVersion = projected.Graph.FormatVersion;
 		if (projected.Graph != desired) {
 			std::string field = "document fields";
 			std::string nodeId;

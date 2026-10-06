@@ -275,15 +275,20 @@ namespace studio {
 					) != Status::Ok)
 					return false;
 				rebound = {};
-				if (BindGroupReplay(
-						document,
-						bindings,
-						restored,
-						revision,
-						bound,
-						error,
-						Budget(error, {}, {&Replay}, scratch)
-					) != Status::Ok)
+				if (document.SourceAnimators && !Replay.InstancesBound()) {
+					if (RestoreSourceAnimatorBindings(
+							document, restored, revision, bound, error, Budget(error, {}, {&Replay}, scratch)
+						) != Status::Ok)
+						return false;
+				} else if (BindGroupReplay(
+							   document,
+							   bindings,
+							   restored,
+							   revision,
+							   bound,
+							   error,
+							   Budget(error, {}, {&Replay}, scratch)
+						   ) != Status::Ok)
 					return false;
 				Replay = std::move(bound);
 				Revision = revision;

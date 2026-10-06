@@ -261,6 +261,15 @@ namespace engine::imagegraph {
 				binding.Getter = *mode ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
 		};
 
+		if (candidate.SourceAnimators)
+			for (auto &binding : candidate.SourceAnimators->Bindings) {
+				refreshGetterMode(binding);
+				if (combinedWriterChanges && binding.OwnerId == ownerId &&
+					detail::BindingAnimatorPort(binding) == animatorPort)
+					binding.Writer =
+						transition.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+			}
+
 		if (sourceAxes.Separated) {
 			if (sourceAxes.Detached)
 				return fail(
@@ -356,7 +365,7 @@ namespace engine::imagegraph {
 					input = std::move(replacement);
 					break;
 				}
-			candidate.FormatVersion = 9;
+			candidate.FormatVersion = std::max(candidate.FormatVersion, uint32_t{9});
 			if (!DocumentRetainedPayloadBytes(candidate))
 				return fail(Status::LimitExceeded, "source split mode retained candidate exceeds bounds");
 			if (replayResult) {
@@ -677,7 +686,7 @@ namespace engine::imagegraph {
 			if (!held->Merge(std::move(*trackCharge))) std::terminate();
 		}
 		candidate.Keyframes.swap(finalKeys);
-		candidate.FormatVersion = 9;
+		candidate.FormatVersion = std::max(candidate.FormatVersion, uint32_t{9});
 		if (replayResult) {
 			auto next = detail::CloneGroupReplay(
 				replay,

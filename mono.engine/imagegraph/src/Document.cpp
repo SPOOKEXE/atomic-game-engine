@@ -37,6 +37,7 @@
 #include "SimulationAliases.hpp"
 #include "SnapshotAudioMoves.hpp"
 #include "SourceAnimatorIdentity.hpp"
+#include "SourceAnimatorPersistence.hpp"
 #include "SourceArgumentTransport.hpp"
 #include "SourceAtlasCodec.hpp"
 #include "SourceAxisStorage.hpp"
@@ -2763,6 +2764,8 @@ namespace engine::imagegraph {
 	}
 
 	std::string Write(const Document &document) {
+		Diagnostic sourceAnimatorDiagnostic;
+		if (detail::ValidateSourceAnimatorState(document, sourceAnimatorDiagnostic) != Status::Ok) return {};
 		for (const auto &node : document.Nodes) {
 			if (detail::ValidateNativeSamplerBindings(node, document.FormatVersion)) return {};
 			Diagnostic defaultsDiagnostic;
@@ -3056,6 +3059,89 @@ namespace engine::imagegraph {
 			}
 		}
 
+		if (document.SourceAnimators) {
+			stream << "source_animators\n";
+			const auto mode = [](GroupSubtypeAnimator value) {
+				return value == GroupSubtypeAnimator::Static ? "static" : "animated";
+			};
+			const auto quoted = [&](std::string_view value) {
+				WriteQuoted(stream, std::string(value));
+				stream << ' ';
+			};
+			for (const auto &binding : document.SourceAnimators->Bindings) {
+				stream << "source_binding ";
+				quoted(binding.NodeId);
+				quoted(binding.OwnerId);
+				quoted(binding.Port);
+				quoted(binding.AnimatorPort);
+				stream << mode(binding.Getter) << ' ' << mode(binding.Writer) << ' ';
+				constexpr std::array storageNames{"none", "cold", "local", "shared"};
+				stream << storageNames[static_cast<size_t>(binding.Axes.Storage)] << ' ';
+				quoted(binding.Axes.OwnerId);
+				quoted(binding.Axes.Port);
+				quoted(binding.Axes.InstanceBase);
+				stream << mode(binding.Axes.Writer) << '\n';
+			}
+			for (const auto &metadata : document.SourceAnimators->Detached) {
+				stream << "source_detached ";
+				quoted(metadata.OwnerId);
+				quoted(metadata.Id);
+				quoted(metadata.OriginalPort);
+				stream << mode(metadata.Writer) << ' ' << TypeName(metadata.Type) << ' ';
+				stream << (!metadata.ArrayClassification   ? "unspecified"
+						   : *metadata.ArrayClassification ? "array"
+														   : "scalar")
+					   << '\n';
+				if (metadata.Track) {
+					stream << "source_detached_track ";
+					quoted(metadata.OwnerId);
+					quoted(metadata.Id);
+					quoted(metadata.Track->NodeId);
+					quoted(metadata.Track->Port);
+					quoted(metadata.Track->End);
+					stream << metadata.Track->LoopRange << ' ' << metadata.Track->QuaternionMode.value_or(-1)
+						   << '\n';
+				}
+			}
+			for (const auto &payload : document.SourceAnimators->DetachedValues) {
+				if (payload.Fixed) {
+					stream << "source_detached_value ";
+					quoted(payload.NodeId);
+					quoted(payload.Port);
+					WriteValue(stream, *payload.Fixed);
+					stream << '\n';
+				}
+				if (!payload.Keys.empty()) {
+					stream << "source_detached_keys ";
+					quoted(payload.NodeId);
+					quoted(payload.Port);
+					stream << '\n';
+					if (!detail::WriteKeyframeText(stream, payload.Keys, document.FormatVersion)) return {};
+					stream << "source_animator_keys_end\n";
+				}
+				if (payload.SeparatedVec2) {
+					const auto &axes = *payload.SeparatedVec2;
+					if (!axes.Initialized) {
+						stream << "source_detached_axes_cold ";
+						quoted(payload.NodeId);
+						quoted(payload.Port);
+						stream << axes.Separated << '\n';
+					} else
+						for (size_t axis = 0; axis < 2; ++axis) {
+							stream << "source_detached_axis ";
+							quoted(payload.NodeId);
+							quoted(payload.Port);
+							stream << (axis ? "y" : "x") << ' ' << axes.Separated << '\n';
+							if (!detail::WriteKeyframeText(
+									stream, axes.Axes[axis].Keys, document.FormatVersion
+								))
+								return {};
+							stream << "source_animator_keys_end\n";
+						}
+				}
+			}
+		}
+
 		if (!document.ProjectGlobalNodeId.empty()) {
 			stream << "project_global_node ";
 			WriteQuoted(stream, document.ProjectGlobalNodeId);
@@ -3304,7 +3390,7 @@ namespace engine::imagegraph {
 			);
 			return diagnostic.Code;
 		}
-		if (parsed.FormatVersion < 1 || parsed.FormatVersion > 9) {
+		if (parsed.FormatVersion < 1 || parsed.FormatVersion > 10) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
@@ -3427,6 +3513,8 @@ namespace engine::imagegraph {
 			rowReleasedTextBytes = 0;
 			return true;
 		};
+		bool detachedKeyBlock = false;
+		uint64_t sourceAnimatorLookupWork = 0;
 		size_t totalKeys = 0;
 		const auto keyframes = [&]() -> std::vector<Keyframe> & {
 			return axisKeys ? *axisKeys : parsed.Keyframes;
@@ -3455,9 +3543,10 @@ namespace engine::imagegraph {
 			row.imbue(std::locale::classic());
 			std::string marker;
 			if (!(row >> token(marker))) continue;
-			if (axisKeys && marker != "source_vec2_axis_end" && marker != "keyframe" &&
-				marker != "key_source_id" && marker != "key_time" && marker != "key_kind" &&
-				marker != "key_ease" && marker != "key_driver" && marker != "key_source_driver")
+			if (axisKeys && marker != "source_animator_keys_end" && marker != "source_vec2_axis_end" &&
+				marker != "keyframe" && marker != "key_source_id" && marker != "key_time" &&
+				marker != "key_kind" && marker != "key_ease" && marker != "key_driver" &&
+				marker != "key_source_driver")
 				goto malformed;
 			if (marker == "node") {
 				Node node;
@@ -4050,8 +4139,202 @@ namespace engine::imagegraph {
 				remember(axisNode);
 				remember(axisPort);
 			} else if (marker == "source_vec2_axis_end" && parsed.FormatVersion >= 9) {
-				if (!axisKeys || HasTrailing(row)) goto malformed;
+				if (!axisKeys || detachedKeyBlock || HasTrailing(row)) goto malformed;
 				axisKeys = nullptr;
+			} else if (marker == "source_animators" && parsed.FormatVersion >= 10) {
+				if (parsed.SourceAnimators || HasTrailing(row)) goto malformed;
+				if (budget &&
+					!candidateCharge->Resize(candidateCharge->Bytes() + sizeof(SourceAnimatorState)))
+					goto limited;
+				parsed.SourceAnimators.emplace();
+			} else if (marker == "source_binding" && parsed.FormatVersion >= 10) {
+				if (!parsed.SourceAnimators) goto malformed;
+				GroupSubtypeBinding binding;
+				std::string getter, writer, storage, axisWriter;
+				if (!readQuoted(row, binding.NodeId) || !readQuoted(row, binding.OwnerId) ||
+					!readQuoted(row, binding.Port) || !readQuoted(row, binding.AnimatorPort) ||
+					!(row >> token(getter) >> token(writer) >> token(storage)) ||
+					!readQuoted(row, binding.Axes.OwnerId) || !readQuoted(row, binding.Axes.Port) ||
+					!readQuoted(row, binding.Axes.InstanceBase) || !(row >> token(axisWriter)) ||
+					HasTrailing(row))
+					goto malformed;
+				const auto mode = [](const std::string &name, GroupSubtypeAnimator &value) {
+					if (name != "static" && name != "animated") return false;
+					value = name == "static" ? GroupSubtypeAnimator::Static : GroupSubtypeAnimator::Animated;
+					return true;
+				};
+				if (!mode(getter, binding.Getter) || !mode(writer, binding.Writer) ||
+					!mode(axisWriter, binding.Axes.Writer))
+					goto malformed;
+				if (storage == "none")
+					binding.Axes.Storage = GroupAxisStorage::None;
+				else if (storage == "cold")
+					binding.Axes.Storage = GroupAxisStorage::Uninitialized;
+				else if (storage == "local")
+					binding.Axes.Storage = GroupAxisStorage::Local;
+				else if (storage == "shared")
+					binding.Axes.Storage = GroupAxisStorage::Shared;
+				else
+					goto malformed;
+				auto &bindings = parsed.SourceAnimators->Bindings;
+				if (bindings.size() >= Limits::MaximumEvaluationBytes / sizeof(GroupSubtypeBinding) ||
+					!reserveSlots(bindings, bindings.size() + 1))
+					goto limited;
+				bindings.push_back(std::move(binding));
+				const auto &saved = bindings.back();
+				for (const auto *name :
+					 {&saved.NodeId,
+					  &saved.OwnerId,
+					  &saved.Port,
+					  &saved.AnimatorPort,
+					  &saved.Axes.OwnerId,
+					  &saved.Axes.Port,
+					  &saved.Axes.InstanceBase})
+					remember(*name);
+			} else if (marker == "source_detached" && parsed.FormatVersion >= 10) {
+				if (!parsed.SourceAnimators) goto malformed;
+				DetachedSourceAnimator metadata;
+				std::string writer, type, classification;
+				if (!readQuoted(row, metadata.OwnerId) || !readQuoted(row, metadata.Id) ||
+					!readQuoted(row, metadata.OriginalPort) ||
+					!(row >> token(writer) >> token(type) >> token(classification)) || HasTrailing(row))
+					goto malformed;
+				if (writer != "static" && writer != "animated") goto malformed;
+				metadata.Writer =
+					writer == "static" ? GroupSubtypeAnimator::Static : GroupSubtypeAnimator::Animated;
+				const auto parsedType = ParseType(type);
+				if (!parsedType) goto malformed;
+				metadata.Type = *parsedType;
+				if (classification == "array")
+					metadata.ArrayClassification = true;
+				else if (classification == "scalar")
+					metadata.ArrayClassification = false;
+				else if (classification != "unspecified")
+					goto malformed;
+				auto &state = *parsed.SourceAnimators;
+				if (state.Detached.size() >= Limits::MaximumArrayElements ||
+					!reserveSlots(state.Detached, state.Detached.size() + 1) ||
+					!reserveSlots(state.DetachedValues, state.DetachedValues.size() + 1))
+					goto limited;
+				auto copiedNames = budget ? budget->Reserve(
+												std::max<size_t>(metadata.OwnerId.size(), 15) +
+												std::max<size_t>(metadata.Id.size(), 15)
+											)
+										  : std::optional<detail::AllocationReservation>{};
+				if (budget && !copiedNames) goto limited;
+				GroupSubtypeOverlay payload;
+				payload.NodeId = metadata.OwnerId;
+				payload.Port = metadata.Id;
+				if (budget && (!copiedNames->Resize(
+								   OwnedTextCapacity(payload.NodeId) + OwnedTextCapacity(payload.Port)
+							   ) ||
+							   !rowQuoteCharge.Merge(std::move(*copiedNames))))
+					goto limited;
+				state.Detached.push_back(std::move(metadata));
+				state.DetachedValues.push_back(std::move(payload));
+				remember(state.Detached.back().OwnerId);
+				remember(state.Detached.back().Id);
+				remember(state.Detached.back().OriginalPort);
+				remember(state.DetachedValues.back().NodeId);
+				remember(state.DetachedValues.back().Port);
+			} else if ((marker == "source_detached_value" || marker == "source_detached_track" ||
+						marker == "source_detached_keys" || marker == "source_detached_axis" ||
+						marker == "source_detached_axes_cold") &&
+					   parsed.FormatVersion >= 10) {
+				if (!parsed.SourceAnimators) goto malformed;
+				std::string owner, port;
+				if (!readQuoted(row, owner) || !readQuoted(row, port)) goto malformed;
+				auto &state = *parsed.SourceAnimators;
+				const uint64_t visits = state.Detached.size() * (1 + owner.size() + port.size());
+				if (visits > 64'000'000 - sourceAnimatorLookupWork) goto limited;
+				sourceAnimatorLookupWork += visits;
+				const auto found =
+					std::find_if(state.Detached.begin(), state.Detached.end(), [&](const auto &metadata) {
+						return metadata.OwnerId == owner && metadata.Id == port;
+					});
+				if (found == state.Detached.end()) goto malformed;
+				auto &payload = state.DetachedValues[size_t(found - state.Detached.begin())];
+				if (marker == "source_detached_value") {
+					if (payload.Fixed || !payload.Keys.empty()) goto malformed;
+					Value fixed;
+					if (!ReadValue(
+							row,
+							fixed,
+							parsed.FormatVersion,
+							true,
+							budget,
+							candidateCharge,
+							&allocationRefused
+						) ||
+						HasTrailing(row))
+						goto malformed;
+					payload.Fixed = std::move(fixed);
+				} else if (marker == "source_detached_track") {
+					if (found->Track) goto malformed;
+					AnimationTrack track;
+					int64_t quaternion;
+					if (!readQuoted(row, track.NodeId) || !readQuoted(row, track.Port) ||
+						!readQuoted(row, track.End) || !(row >> track.LoopRange >> quaternion) ||
+						HasTrailing(row) || quaternion < -1 || quaternion > 1)
+						goto malformed;
+					if (quaternion >= 0) track.QuaternionMode = quaternion;
+					found->Track = std::move(track);
+					remember(found->Track->NodeId);
+					remember(found->Track->Port);
+					remember(found->Track->End);
+				} else {
+					if (marker == "source_detached_keys") {
+						if (payload.Fixed || !payload.Keys.empty() || !insertAxis(owner, port, "combined") ||
+							HasTrailing(row))
+							goto malformed;
+						axisKeys = &payload.Keys;
+					} else {
+						std::string axis;
+						int separated;
+						if ((marker == "source_detached_axis" && !(row >> token(axis))) ||
+							!(row >> separated) || (separated != 0 && separated != 1) || HasTrailing(row))
+							goto malformed;
+						if (marker == "source_detached_axes_cold") {
+							if (payload.SeparatedVec2 || !insertAxis(owner, port, "cold")) goto malformed;
+						} else if ((axis != "x" && axis != "y") || !insertAxis(owner, port, axis))
+							goto malformed;
+						if (!payload.SeparatedVec2) {
+							auto names = budget ? budget->Reserve(std::max<size_t>(port.size(), 15))
+												: std::optional<detail::AllocationReservation>{};
+							if (budget &&
+								(!names || !candidateCharge->Resize(
+											   candidateCharge->Bytes() + sizeof(SourceSeparatedVec2Animator)
+										   )))
+								goto limited;
+							payload.SeparatedVec2.emplace();
+							payload.SeparatedVec2->Port = port;
+							payload.SeparatedVec2->Separated = separated;
+							payload.SeparatedVec2->Initialized = marker != "source_detached_axes_cold";
+							if (budget && (!names->Resize(OwnedTextCapacity(payload.SeparatedVec2->Port)) ||
+										   !rowQuoteCharge.Merge(std::move(*names))))
+								goto limited;
+							remember(payload.SeparatedVec2->Port);
+						}
+						if (payload.SeparatedVec2->Separated != (separated != 0) ||
+							payload.SeparatedVec2->Initialized != (marker != "source_detached_axes_cold"))
+							goto malformed;
+						if (marker == "source_detached_axis")
+							axisKeys = &payload.SeparatedVec2->Axes[axis == "x" ? 0 : 1].Keys;
+					}
+					if (axisKeys) {
+						release(axisNode);
+						release(axisPort);
+						axisNode = std::move(owner);
+						axisPort = std::move(port);
+						remember(axisNode);
+						remember(axisPort);
+						detachedKeyBlock = true;
+					}
+				}
+			} else if (marker == "source_animator_keys_end" && parsed.FormatVersion >= 10) {
+				if (!axisKeys || !detachedKeyBlock || HasTrailing(row)) goto malformed;
+				axisKeys = nullptr;
+				detachedKeyBlock = false;
 			} else if (marker == "keyframe") {
 				Keyframe keyframe;
 				if (!readQuoted(row, keyframe.NodeId) || !readQuoted(row, keyframe.Port) ||
@@ -4510,6 +4793,7 @@ namespace engine::imagegraph {
 			const uint64_t remaining = *retained - (persistedTextCharge->Bytes() - axisScratchBytes);
 			if (remaining > candidateCharge->Bytes() && !candidateCharge->Resize(remaining)) goto limited;
 		}
+		if (detail::ValidateSourceAnimatorState(parsed, diagnostic) != Status::Ok) return diagnostic.Code;
 		document = std::move(parsed);
 		diagnostic = {};
 		return Status::Ok;
@@ -4609,7 +4893,7 @@ namespace engine::imagegraph {
 	}
 
 	Status Migrate(Document &document, Diagnostic &diagnostic) {
-		if (document.FormatVersion < 1 || document.FormatVersion > 9) {
+		if (document.FormatVersion < 1 || document.FormatVersion > 10) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
@@ -4697,10 +4981,11 @@ namespace engine::imagegraph {
 		detail::EvaluationBudget &budget,
 		detail::AllocationReservation &planCharge
 	) try {
-		if (document.FormatVersion < 1 || document.FormatVersion > 9) {
+		if (document.FormatVersion < 1 || document.FormatVersion > 10) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
+		if (detail::ValidateSourceAnimatorState(document, diagnostic) != Status::Ok) return diagnostic.Code;
 		if (document.Nodes.size() > Limits::MaximumNodes || document.Links.size() > Limits::MaximumLinks ||
 			document.Groups.size() > Limits::MaximumGroups ||
 			document.Junctions.size() > Limits::MaximumJunctions ||

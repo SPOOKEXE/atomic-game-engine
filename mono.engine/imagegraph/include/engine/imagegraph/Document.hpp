@@ -1489,6 +1489,62 @@ namespace engine::imagegraph {
 		uint32_t WorkPixels = 256;
 		bool operator==(const SliceStackAction &) const = default;
 	};
+	enum class GroupSubtypeAnimator { Static, Animated };
+	enum class GroupAxisStorage : uint8_t { None, Uninitialized, Local, Shared };
+	// group binding copies the current scalar array, independently from the combined animator.
+	// an uninitialized array keeps its local constructor owner even if the base creates axes later.
+	struct GroupAxisBinding {
+		GroupAxisStorage Storage = GroupAxisStorage::None;
+		std::string OwnerId;
+		std::string Port;
+		std::string InstanceBase;
+		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
+		bool operator==(const GroupAxisBinding &) const = default;
+	};
+	struct GroupSubtypeBinding {
+		std::string NodeId;
+		std::string OwnerId;
+		// Getter mode belongs to the target when overridden, otherwise the delegated owner.
+		GroupSubtypeAnimator Getter = GroupSubtypeAnimator::Static;
+		// Animator.prop remains the original property after its animator is aliased.
+		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
+		// Actual source child input. Group.inputs parent_value remains local.
+		std::string Port = "subtype";
+		// The retained animator can keep its original socket after a physical input move.
+		// Empty uses Port. An admitted detached animator uses its native Id.
+		// Inherited getters still resolve their current input index.
+		std::string AnimatorPort{};
+		GroupAxisBinding Axes{};
+		bool operator==(const GroupSubtypeBinding &) const = default;
+	};
+	// Metadata for one retained animator whose original physical input was removed.
+	// The shared overlay owns its values and keys; this record never duplicates them.
+	struct DetachedSourceAnimator {
+		std::string Id;
+		std::string OwnerId;
+		std::string OriginalPort;
+		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
+		ValueType Type = ValueType::Any;
+		std::optional<bool> ArrayClassification;
+		std::optional<AnimationTrack> Track;
+		bool operator==(const DetachedSourceAnimator &) const = default;
+	};
+	struct GroupSubtypeOverlay {
+		std::string NodeId;
+		std::optional<Value> Fixed;
+		std::vector<Keyframe> Keys;
+		std::string Port = "subtype";
+		// scalar storage may have a different owner from the combined animator.
+		OwnedPayload3D<SourceSeparatedVec2Animator> SeparatedVec2{};
+		bool operator==(const GroupSubtypeOverlay &) const = default;
+	};
+	// durable capture identities and one payload per retired physical animator.
+	struct SourceAnimatorState {
+		std::vector<GroupSubtypeBinding> Bindings;
+		std::vector<DetachedSourceAnimator> Detached;
+		std::vector<GroupSubtypeOverlay> DetachedValues;
+		bool operator==(const SourceAnimatorState &) const = default;
+	};
 	// The versioned, lossless authored graph document.
 	struct Document {
 		// Text format version.
@@ -1514,6 +1570,7 @@ namespace engine::imagegraph {
 		// Project attributes, written from format version 7.
 		std::optional<ProjectSettings> Project;
 		std::vector<SliceStackAction> SliceStackActions;
+		OwnedPayload3D<SourceAnimatorState> SourceAnimators{};
 		// Compares the complete authored document.
 		bool operator==(const Document &) const = default;
 	};

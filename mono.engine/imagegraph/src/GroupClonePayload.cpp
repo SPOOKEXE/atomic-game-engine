@@ -1,4 +1,5 @@
 #include "NativeSamplerBindings.hpp"
+#include "SourceAnimatorPersistence.hpp"
 #include "SourceSeparatedVec2.hpp"
 #include "SourceVec2Defaults.hpp"
 #include "ValuePayload.hpp"
@@ -225,6 +226,10 @@ namespace engine::imagegraph {
 		if (document.Project)
 			for (const AnimationRegion &region : document.Project->AnimationRegions)
 				if (!text(region.Label) || !text(region.SourceRegionId) || !add(1)) return std::nullopt;
+		if (document.SourceAnimators) {
+			const auto animators = detail::SourceAnimatorStateBytes(*document.SourceAnimators, false);
+			if (!animators || !add(*animators)) return std::nullopt;
+		}
 		return bytes;
 	}
 
