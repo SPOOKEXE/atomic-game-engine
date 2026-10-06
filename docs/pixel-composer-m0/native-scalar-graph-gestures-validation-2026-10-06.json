@@ -1,0 +1,85 @@
+{
+  "date": "2026-10-06",
+  "evidence_scope": "Visible scalar Dopesheet tracks and measured mouse/keyboard gestures for initialized local arrays and captured aliases with local projections. The broader Composer goal remains active.",
+  "tested_behavior": [
+    "Show combined, X and Y as distinct tracks. Markers retain logical channel names and exact clocks, with no copies of authored values in the display cache.",
+    "Use component identity for actual box/Shift selection, move ghosts, scale ghosts, Alt copy, Ctrl+D copy, between-key selection, focused tracks and keyboard Delete.",
+    "Move mixed selected X/Y keys and update canonical owners and captured alias projections together. Preserve combined keys and unselected keys.",
+    "Replace a Y collision at the same clock as X while preserving the complete X channel. Publish selection with the correct axis and clock.",
+    "Ctrl+Alt scaling and Ctrl+D multi-axis copying retain component channels. Copies clear source IDs and drivers while originals retain them.",
+    "Ctrl+A captures every displayed combined/scalar channel. One Delete transaction deduplicates canonical physical keys selected through owner and alias identities.",
+    "Undo/redo recover exact documents. Stale full pins and refused history admission preserve authored data and selection, and allow a later retry.",
+    "A combined clipboard focused onto a scalar row refuses before gesture staging, preserving clipboard, document and history until component-target paste is supported.",
+    "Rebuild the display cache atomically under total-key, byte and weighted name-work admission. Invalid scalar clocks refuse without replacing the retained cache.",
+    "The existing Composer workflow now locates its trigger by full marker identity instead of a removed combined-array index.",
+    "Double-click between two keys selects both endpoints on the same alias Y channel; Ctrl+C captures both correct component pins without changing history."
+  ],
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "scalar-graph-gestures-batch2-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5129,
+    "cpp_assertions": 2001500,
+    "studio_test_cases": 1043,
+    "studio_assertions": 47102,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "totals_method": "Sum result rows reporting C++ cases/assertions, including the startup fixture. Python and CLI totals are separate.",
+    "final_build": {
+      "iteration": 3,
+      "exit_code": 0,
+      "targets": 17,
+      "steps": 3,
+      "log": "scalar-graph-gestures-build3.log"
+    },
+    "backend": "SDL offscreen with Vulkan for approved GPU checks; headless ImGui contexts for measured gestures.",
+    "profiling": "No new timing was collected and no performance improvement is claimed.",
+    "build_warning": "Build 1 emitted the existing GCC -Wmaybe-uninitialized warning in TimelineRegions.hpp through ImageComposer.cpp. Those files were not edited in this phase."
+  },
+  "iteration_history": [
+    {
+      "stage": "build 1",
+      "result": "one compile failure in ComposerWorkflow.cpp; remaining queued build work completed with Ninja -k0",
+      "output": "ComposerWorkflow.cpp:175:69: error: studio::TimelineDopesheet::Marker has no member named Key",
+      "repair": "Update the workflow trigger lookup to MatchesMarker using logical node, port, exact clock and combined-axis identity."
+    },
+    {
+      "stage": "build 2 and batch 1",
+      "result": "all 17 targets built and all 20 checks passed"
+    },
+    {
+      "stage": "additional alias check",
+      "result": "Added a measured scalar between-key double-click case before commit. It verifies endpoint identities and copies them through Ctrl+C."
+    },
+    {
+      "stage": "build 3 and batch 2",
+      "result": "all 17 targets built and all 20 checks passed"
+    }
+  ],
+  "unchanged_evidence": {
+    "before": "scalar-graph-gestures-source-before-build3.json",
+    "after": "scalar-graph-gestures-source-after-batch2.json",
+    "frozen_relevant_source_paths": 52,
+    "source_hashes_equal": true,
+    "previous_verified_source_paths_unchanged_except_dopesheet": 49,
+    "peer_whole_files_unchanged": 42,
+    "shared_composer_worktree_unchanged": true,
+    "test_binaries_unchanged": 13,
+    "child_hashes_file": "scalar-graph-gestures-child-hashes-batch2.json",
+    "child_hashes_equal": true
+  },
+  "tested_owned_file_hashes": {
+    "mono.studio/src/TimelineDopesheet.hpp": "90ea7131378686e36e870fc1d527c0664e77e82250c9d8dd2f20ef9a245aa8e9",
+    "mono.studio/tests/TimelineScalarDopesheet.cpp": "10f06efa60dba192d2261777367210c69363e63b6271eb91895170bfe13c13c3",
+    "mono.studio/tests/ComposerWorkflow.cpp": "9afa29055326102082c1b5c7a47927808d261d6a3fe8e5a492a0af4b2569970b"
+  },
+  "remaining_gaps": [
+    "Effective canonical alias rows without local scalar projections remain open.",
+    "Initial uncaptured alias routing still needs completion of the source-capture envelope.",
+    "Component-target paste and scalar key metadata authoring remain open.",
+    "Duplicate-clock scalar key selection has not been qualified against the licensed reference.",
+    "Licensed-reference parity and headed Studio verification remain open.",
+    "The broader Composer goal remains active."
+  ]
+}

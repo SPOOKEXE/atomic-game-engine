@@ -170,11 +170,10 @@ namespace {
 		void DragTrigger() {
 			Frame();
 			Frame();
+			const studio::ImageGraphKeyframeIdentity target{"trigger", "parent_value", {5, 0, false}};
 			auto find = [&] {
-				return std::find_if(Sheet.Markers.begin(), Sheet.Markers.end(), [&](auto &m) {
-					auto &key = Doc.Keyframes[m.Key];
-					return key.NodeId == "trigger" && key.Port == "parent_value" &&
-						   GetFrameTime(key) == FrameTime{5, 0, false};
+				return std::find_if(Sheet.Markers.begin(), Sheet.Markers.end(), [&](const auto &marker) {
+					return Sheet.MatchesMarker(marker, target);
 				});
 			};
 			auto marker = find();

@@ -11,6 +11,7 @@
 #include <limits>
 #include <map>
 #include <new>
+#include <tuple>
 
 namespace studio {
 	// The display cache contains identities and marker geometry, never authored values.
@@ -18,10 +19,12 @@ namespace studio {
 	struct TimelineDopesheet {
 		struct Track {
 			std::string NodeId, Port;
+			int8_t Axis = -1;
 		};
 		struct Marker {
-			size_t Key = 0, Row = 0;
+			size_t Row = 0;
 			ImVec2 Position;
+			engine::imagegraph::FrameTime Time;
 		};
 		std::vector<Track> Tracks;
 		std::optional<Track> FocusedTrack;
@@ -68,7 +71,8 @@ namespace studio {
 			const Track &track, const TimelineKeyEditor &editor, engine::imagegraph::Diagnostic &error
 		) {
 			using namespace engine::imagegraph;
-			if (FocusedTrack && FocusedTrack->NodeId == track.NodeId && FocusedTrack->Port == track.Port)
+			if (FocusedTrack && FocusedTrack->NodeId == track.NodeId && FocusedTrack->Port == track.Port &&
+				FocusedTrack->Axis == track.Axis)
 				return true;
 			const auto budget = editor.Remaining(true, true), held = CacheBytes();
 			// The old focus remains alive until the fully admitted candidate is
@@ -81,7 +85,7 @@ namespace studio {
 			};
 			if (!budget || !held || *held > *budget || candidateBytes > *budget - *held) return refuse();
 			try {
-				Track candidate{track.NodeId, track.Port};
+				Track candidate{track.NodeId, track.Port, track.Axis};
 				const uint64_t actual =
 					sizeof(Track) + candidate.NodeId.capacity() + candidate.Port.capacity() + 2;
 				if (actual > *budget - *held) return refuse();
@@ -91,24 +95,70 @@ namespace studio {
 				return refuse();
 			}
 		}
+		ImageGraphKeyframeIdentity MarkerIdentity(const Marker &marker) const {
+			const auto &track = Tracks[marker.Row];
+			return {track.NodeId, track.Port, marker.Time, track.Axis};
+		}
+		bool MatchesMarker(const Marker &marker, const ImageGraphKeyframeIdentity &identity) const {
+			const auto &track = Tracks[marker.Row];
+			return identity.NodeId == track.NodeId && identity.Port == track.Port &&
+				   identity.Time == marker.Time && identity.Axis == track.Axis;
+		}
+		// grug keep clocks and names in the display cache, never copies of authored key values.
+		template <class Visit>
+		static bool VisitMarkers(const engine::imagegraph::Document &document, const Visit &visit) {
+			using namespace engine::imagegraph;
+			uint64_t work = 0;
+			for (const auto &key : document.Keyframes)
+				if (++work > 64'000'000 || !visit(key, key.NodeId, key.Port, int8_t{-1})) return false;
+			for (const auto &node : document.Nodes) {
+				if (++work > 64'000'000) return false;
+				if (!node.SourceSeparatedVec2Animators) continue;
+				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+					if (++work > 64'000'000) return false;
+					if (!input.Initialized) continue;
+					for (int8_t axis = 0; axis < 2; ++axis) {
+						const auto &keys = input.Axes[size_t(axis)].Keys;
+						for (const auto &key : keys)
+							if (++work > 64'000'000 || !visit(key, node.Id, input.Port, axis)) return false;
+					}
+				}
+			}
+			return true;
+		}
 		bool UpdateBox(
-			const engine::imagegraph::Document &document,
+			const engine::imagegraph::Document &,
 			TimelineKeyEditor &editor,
 			const ImVec2 &a,
 			const ImVec2 &b,
 			engine::imagegraph::Diagnostic &error
-		) {
+		) try {
 			using namespace engine::imagegraph;
 			const auto budget = editor.Remaining(true, true), retained = CacheBytes();
 			if (!budget || !retained || *retained > *budget) return false;
 			uint64_t remaining = *budget - *retained;
+			uint64_t workRemaining = 64'000'000;
+			if (BoxSelection.size() > Limits::MaximumKeyframes) return false;
+			for (const auto &marker : Markers) {
+				if (marker.Row >= Tracks.size()) return false;
+				const auto &track = Tracks[marker.Row];
+				const uint64_t names = 1 + track.NodeId.size() + track.Port.size();
+				const uint64_t scans = 2 * BoxSelection.size();
+				if (scans && names > workRemaining / scans) {
+					error = {Status::LimitExceeded, {}, {}, "key box selection exceeds the work bound"};
+					return false;
+				}
+				workRemaining -= names * scans;
+			}
 			const auto inside = [&](const Marker &marker) {
 				return marker.Position.x >= a.x && marker.Position.x <= b.x && marker.Position.y >= a.y &&
 					   marker.Position.y <= b.y;
 			};
-			const auto saved = [&](const Keyframe &key) {
+			const auto saved = [&](const Marker &marker) {
+				const auto &track = Tracks[marker.Row];
 				return std::any_of(BoxSelection.begin(), BoxSelection.end(), [&](const auto &id) {
-					return id.NodeId == key.NodeId && id.Port == key.Port && id.Time == GetFrameTime(key);
+					return id.Axis == track.Axis && id.NodeId == track.NodeId && id.Port == track.Port &&
+						   id.Time == marker.Time;
 				});
 			};
 			size_t count = BoxSelection.size();
@@ -117,77 +167,93 @@ namespace studio {
 				if (bytes > remaining) return false;
 				remaining -= bytes;
 			}
-			for (const auto &marker : Markers)
-				if (marker.Key < document.Keyframes.size() && inside(marker) &&
-					!saved(document.Keyframes[marker.Key])) {
-					const auto &key = document.Keyframes[marker.Key];
-					const uint64_t bytes =
-						sizeof(ImageGraphKeyframeIdentity) + key.NodeId.size() + key.Port.size();
-					if (bytes > remaining || count >= Limits::MaximumKeyframes) {
-						error = {
-							Status::LimitExceeded, {}, {}, "key selection exceeds the timeline payload budget"
-						};
-						return false;
-					}
-					remaining -= bytes;
-					++count;
+			for (const auto &marker : Markers) {
+				if (marker.Row >= Tracks.size()) return false;
+				if (!inside(marker) || saved(marker)) continue;
+				const auto &track = Tracks[marker.Row];
+				const uint64_t bytes =
+					sizeof(ImageGraphKeyframeIdentity) + track.NodeId.size() + track.Port.size();
+				if (bytes > remaining || count >= Limits::MaximumKeyframes) {
+					error = {
+						Status::LimitExceeded, {}, {}, "key selection exceeds the timeline payload budget"
+					};
+					return false;
 				}
+				remaining -= bytes;
+				++count;
+			}
 			std::vector<ImageGraphKeyframeIdentity> candidate;
 			candidate.reserve(count);
+			if ((candidate.capacity() - count) * sizeof(ImageGraphKeyframeIdentity) > remaining) return false;
 			candidate.insert(candidate.end(), BoxSelection.begin(), BoxSelection.end());
 			for (const auto &marker : Markers)
-				if (marker.Key < document.Keyframes.size() && inside(marker) &&
-					!saved(document.Keyframes[marker.Key]))
-					candidate.push_back(TimelineKeyEditor::Identity(document.Keyframes[marker.Key]));
+				if (inside(marker) && !saved(marker)) candidate.push_back(MarkerIdentity(marker));
 			editor.Selection = std::move(candidate);
 			return true;
+		} catch (const std::bad_alloc &) {
+			error = {engine::imagegraph::Status::LimitExceeded, {}, {}, "key selection allocation failed"};
+			return false;
 		}
 		bool Rebuild(
 			const engine::imagegraph::Document &document,
 			uint64_t revision,
 			const TimelineKeyEditor &editor,
 			engine::imagegraph::Diagnostic &error
-		) {
+		) try {
 			using namespace engine::imagegraph;
 			if (Revision == revision) return true;
-			const auto budget = editor.Remaining(true, true);
-			uint64_t remaining = budget.value_or(0);
-			const auto retained = CacheBytes();
-			if (!retained || *retained > remaining) return false;
-			remaining -= *retained;
-			if (document.Keyframes.size() > Limits::MaximumKeyframes ||
-				document.Keyframes.size() *
-						(sizeof(Marker) + sizeof(Track) +
-						 sizeof(std::pair<std::pair<std::string_view, std::string_view>, size_t>)) >
-					remaining)
+			const auto budget = editor.Remaining(true, true), retained = CacheBytes();
+			uint64_t remaining = budget.value_or(0), workRemaining = 64'000'000;
+			const auto refuse = [&] {
+				error = {Status::LimitExceeded, {}, {}, "timeline display exceeds payload or work bounds"};
 				return false;
-			remaining -= document.Keyframes.size() *
-						 (sizeof(Marker) + sizeof(Track) +
-						  sizeof(std::pair<std::pair<std::string_view, std::string_view>, size_t>));
-			for (const auto &key : document.Keyframes) {
-				if (!ValidFrameTime(GetFrameTime(key)) || key.NodeId.size() > Limits::MaximumTextBytes ||
-					key.Port.size() > Limits::MaximumTextBytes ||
-					key.NodeId.size() + key.Port.size() > remaining) {
-					error = {
-						Status::LimitExceeded, {}, {}, "timeline display exceeds the key payload budget"
-					};
-					return false;
-				}
-				remaining -= key.NodeId.size() + key.Port.size();
-			}
-			Tracks.clear();
-			Markers.clear();
-			std::map<std::pair<std::string_view, std::string_view>, size_t> rows;
-			for (size_t index = 0; index < document.Keyframes.size(); ++index) {
-				const auto &key = document.Keyframes[index];
-				const auto [entry, inserted] = rows.emplace(
-					std::pair<std::string_view, std::string_view>{key.NodeId, key.Port}, Tracks.size()
-				);
-				if (inserted) Tracks.push_back({key.NodeId, key.Port});
-				Markers.push_back({index, entry->second, {}});
-			}
+			};
+			if (!retained || *retained > remaining) return refuse();
+			remaining -= *retained;
+			using RowKey = std::tuple<std::string_view, std::string_view, int8_t>;
+			constexpr uint64_t perKey =
+				sizeof(Marker) + sizeof(Track) + sizeof(std::pair<const RowKey, size_t>) + 4 * sizeof(void *);
+			size_t count = 0;
+			if (!VisitMarkers(
+					document, [&](const Keyframe &key, std::string_view node, std::string_view port, int8_t) {
+						const uint64_t names = node.size() + port.size() + 2;
+						if (count >= Limits::MaximumKeyframes || !ValidFrameTime(GetFrameTime(key)) ||
+							node.size() > Limits::MaximumTextBytes ||
+							port.size() > Limits::MaximumTextBytes || perKey > remaining ||
+							names > remaining - perKey || names > workRemaining / 128)
+							return false;
+						remaining -= perKey + names;
+						workRemaining -= 128 * names;
+						++count;
+						return true;
+					}
+				))
+				return refuse();
+			std::vector<Track> tracks;
+			std::vector<Marker> markers;
+			tracks.reserve(count);
+			markers.reserve(count);
+			const uint64_t spare =
+				(tracks.capacity() - count) * sizeof(Track) + (markers.capacity() - count) * sizeof(Marker);
+			if (spare > remaining) return refuse();
+			std::map<RowKey, size_t> rows;
+			if (!VisitMarkers(
+					document,
+					[&](const Keyframe &key, std::string_view node, std::string_view port, int8_t axis) {
+						const auto [entry, inserted] = rows.emplace(RowKey{node, port, axis}, tracks.size());
+						if (inserted) tracks.push_back({std::string(node), std::string(port), axis});
+						markers.push_back({entry->second, {}, GetFrameTime(key)});
+						return true;
+					}
+				))
+				return refuse();
+			Tracks = std::move(tracks);
+			Markers = std::move(markers);
 			Revision = revision;
 			return true;
+		} catch (const std::bad_alloc &) {
+			error = {engine::imagegraph::Status::LimitExceeded, {}, {}, "timeline display allocation failed"};
+			return false;
 		}
 		void Cancel() {
 			Dragging = Scaling = Copying = Boxing = Deleting = Prepared = Transforming = KeyboardCopy = false;
@@ -198,7 +264,7 @@ namespace studio {
 			std::vector<ImageGraphKeyframeIdentity>().swap(PreparedSelection);
 		}
 		bool SelectAll(
-			const engine::imagegraph::Document &document,
+			const engine::imagegraph::Document &,
 			TimelineKeyEditor &editor,
 			engine::imagegraph::Diagnostic &error
 		) try {
@@ -210,13 +276,13 @@ namespace studio {
 			}
 			uint64_t remaining = *budget - *held;
 			for (const auto &marker : Markers) {
-				if (marker.Key >= document.Keyframes.size()) {
+				if (marker.Row >= Tracks.size()) {
 					error = {Status::InvalidValue, {}, {}, "key selection display is stale"};
 					return false;
 				}
-				const auto &key = document.Keyframes[marker.Key];
+				const auto &track = Tracks[marker.Row];
 				const uint64_t bytes =
-					sizeof(ImageGraphKeyframeIdentity) + key.NodeId.size() + key.Port.size();
+					sizeof(ImageGraphKeyframeIdentity) + track.NodeId.size() + track.Port.size();
 				if (bytes > remaining) {
 					error = {
 						Status::LimitExceeded, {}, {}, "key selection exceeds the timeline payload budget"
@@ -228,7 +294,7 @@ namespace studio {
 			std::vector<ImageGraphKeyframeIdentity> selected;
 			selected.reserve(Markers.size());
 			for (const auto &marker : Markers)
-				selected.push_back(TimelineKeyEditor::Identity(document.Keyframes[marker.Key]));
+				selected.push_back(MarkerIdentity(marker));
 			editor.Selection = std::move(selected);
 			error = {};
 			return true;
@@ -300,20 +366,21 @@ namespace studio {
 			};
 			return false;
 		}
-		bool Begin(
+		bool BeginIdentity(
 			const engine::imagegraph::Document &document,
 			TimelineKeyEditor &editor,
-			size_t index,
+			const ImageGraphKeyframeIdentity &identity,
 			bool scale,
 			bool copy,
 			engine::imagegraph::Diagnostic &error,
 			bool keepCopySelection = false
 		) {
 			using namespace engine::imagegraph;
-			if (index >= document.Keyframes.size()) return false;
-			const auto &key = document.Keyframes[index];
-			if ((copy && !keepCopySelection) || !editor.Selected(key))
-				editor.Selection = {TimelineKeyEditor::Identity(key)};
+			const FrameTime anchor = identity.Time;
+			if ((copy && !keepCopySelection) ||
+				std::find(editor.Selection.begin(), editor.Selection.end(), identity) ==
+					editor.Selection.end())
+				editor.Selection = {identity};
 			const auto budget = editor.Remaining(true, true);
 			const auto retained = CacheBytes();
 			const uint64_t clocks = editor.Selection.size() * sizeof(FrameTime);
@@ -322,7 +389,7 @@ namespace studio {
 					document, editor.Selection, Originals, OriginalAxes, error, *budget - *retained - clocks
 				))
 				return false;
-			Anchor = GetFrameTime(key);
+			Anchor = anchor;
 			Fixed = GetFrameTime(Originals.front());
 			FrameTime first = Fixed, last = Fixed;
 			for (const auto &original : Originals) {
@@ -611,7 +678,10 @@ namespace studio {
 			for (size_t row = 0; row < Tracks.size(); ++row) {
 				const float y = start.y + header + (row + .5f) * rowHeight + float(PanY);
 				if (y < start.y + header || y > start.y + size.y) continue;
-				const std::string label = Tracks[row].NodeId + "." + Tracks[row].Port;
+				const std::string label = Tracks[row].NodeId + "." + Tracks[row].Port +
+										  (Tracks[row].Axis < 0	   ? ""
+										   : Tracks[row].Axis == 0 ? ".x"
+																   : ".y");
 				draw->PushClipRect({start.x, start.y + header}, {float(timelineX), start.y + size.y}, true);
 				draw->AddText({start.x + 4, y - ImGui::GetFontSize() * .5f}, IM_COL32_WHITE, label.c_str());
 				if (hovered && io.MousePos.x < timelineX && std::abs(io.MousePos.y - y) < rowHeight * .5f &&
@@ -642,15 +712,16 @@ namespace studio {
 				{cursorX, start.y + header}, {cursorX, start.y + size.y}, IM_COL32(255, 255, 255, 150)
 			);
 			std::optional<size_t> hit;
-			for (auto &marker : Markers) {
-				if (marker.Key >= document.Keyframes.size()) continue;
-				const auto &key = document.Keyframes[marker.Key];
-				FrameTime time = GetFrameTime(key);
+			for (size_t markerIndex = 0; markerIndex < Markers.size(); ++markerIndex) {
+				auto &marker = Markers[markerIndex];
+				if (marker.Row >= Tracks.size()) continue;
+				const auto &track = Tracks[marker.Row];
+				FrameTime time = marker.Time;
 				if (Dragging && !Copying)
 					for (size_t index = 0; index < Originals.size(); ++index)
-						if ((OriginalAxes.empty() || OriginalAxes[index] < 0) &&
-							key.NodeId == Originals[index].NodeId && key.Port == Originals[index].Port &&
-							GetFrameTime(key) == GetFrameTime(Originals[index]))
+						if ((OriginalAxes.empty() ? int8_t{-1} : OriginalAxes[index]) == track.Axis &&
+							track.NodeId == Originals[index].NodeId && track.Port == Originals[index].Port &&
+							marker.Time == GetFrameTime(Originals[index]))
 							time = Destinations[index];
 				marker.Position = {
 					float(timelineX + PanX + (FrameTimeToReal(time) + 1) * PixelsPerFrame),
@@ -659,7 +730,13 @@ namespace studio {
 				if (marker.Position.x < timelineX || marker.Position.y < start.y + header ||
 					marker.Position.y > start.y + size.y)
 					continue;
-				const auto colour = editor.Selected(key) ? IM_COL32_WHITE : IM_COL32(255, 255, 255, 160);
+				const auto colour = std::any_of(
+										editor.Selection.begin(),
+										editor.Selection.end(),
+										[&](const auto &identity) { return MatchesMarker(marker, identity); }
+									)
+										? IM_COL32_WHITE
+										: IM_COL32(255, 255, 255, 160);
 				draw->AddQuad(
 					{marker.Position.x, marker.Position.y - 6},
 					{marker.Position.x + 6, marker.Position.y},
@@ -669,13 +746,14 @@ namespace studio {
 				);
 				if (hovered && std::abs(io.MousePos.x - marker.Position.x) <= 8 &&
 					std::abs(io.MousePos.y - marker.Position.y) <= 8)
-					hit = marker.Key;
+					hit = markerIndex;
 			}
 			if (Dragging && Copying)
 				for (size_t index = 0; index < Originals.size(); ++index) {
-					if (!OriginalAxes.empty() && OriginalAxes[index] >= 0) continue;
 					const auto track = std::find_if(Tracks.begin(), Tracks.end(), [&](const auto &entry) {
-						return entry.NodeId == Originals[index].NodeId && entry.Port == Originals[index].Port;
+						return entry.NodeId == Originals[index].NodeId &&
+							   entry.Port == Originals[index].Port &&
+							   entry.Axis == (OriginalAxes.empty() ? int8_t{-1} : OriginalAxes[index]);
 					});
 					if (track == Tracks.end()) continue;
 					const ImVec2 point{
@@ -693,17 +771,14 @@ namespace studio {
 				}
 			if (keyboardAvailable && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false) &&
 				!editor.Selection.empty()) {
-				const auto found =
-					std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
-						return TimelineKeyEditor::Identity(key) == editor.Selection.front();
-					});
+				const auto found = std::find_if(Markers.begin(), Markers.end(), [&](const auto &marker) {
+					return marker.Row < Tracks.size() && MatchesMarker(marker, editor.Selection.front());
+				});
 				FrameTime mouse;
-				if (found != document.Keyframes.end() &&
+				if (found != Markers.end() &&
 					SplitFrameTime((io.MousePos.x - timelineX - PanX) / PixelsPerFrame, mouse, true) &&
 					ShiftFrameTime(mouse, {1, 0, false}, {}, mouse, false) &&
-					Begin(
-						document, editor, size_t(found - document.Keyframes.begin()), false, true, error, true
-					)) {
+					BeginIdentity(document, editor, MarkerIdentity(*found), false, true, error, true)) {
 					KeyboardCopy = true;
 					MouseAnchor = mouse;
 				}
@@ -712,8 +787,7 @@ namespace studio {
 				editor.Selection.clear();
 			if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !Dragging) {
 				if (hit) {
-					const auto &key = document.Keyframes[*hit];
-					const auto identity = TimelineKeyEditor::Identity(key);
+					const auto identity = MarkerIdentity(Markers[*hit]);
 					if (io.KeyShift) {
 						const auto found =
 							std::find(editor.Selection.begin(), editor.Selection.end(), identity);
@@ -725,15 +799,15 @@ namespace studio {
 						const bool scale =
 							io.KeyCtrl && io.KeyAlt && !io.KeySuper && editor.Selection.size() > 1;
 						const bool copy = io.KeyAlt && !io.KeyCtrl && !io.KeySuper;
-						if (!io.KeyCtrl || scale) (void)Begin(document, editor, *hit, scale, copy, error);
+						if (!io.KeyCtrl || scale)
+							(void)BeginIdentity(document, editor, identity, scale, copy, error);
 					}
 				} else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && io.MousePos.x >= timelineX &&
 						   io.MousePos.x < start.x + size.x && io.MousePos.y >= start.y + header &&
 						   io.MousePos.y < start.y + size.y) {
 					const Marker *left = nullptr, *right = nullptr;
 					for (const auto &marker : Markers) {
-						if (marker.Key >= document.Keyframes.size() ||
-							std::abs(io.MousePos.y - marker.Position.y) > 8)
+						if (marker.Row >= Tracks.size() || std::abs(io.MousePos.y - marker.Position.y) > 8)
 							continue;
 						if (marker.Position.x < io.MousePos.x &&
 							(!left || marker.Position.x > left->Position.x))
@@ -744,10 +818,7 @@ namespace studio {
 					}
 					if (left && right && left->Row == right->Row && io.MousePos.x > left->Position.x + 8 &&
 						io.MousePos.x < right->Position.x - 8) {
-						editor.Selection = {
-							TimelineKeyEditor::Identity(document.Keyframes[left->Key]),
-							TimelineKeyEditor::Identity(document.Keyframes[right->Key])
-						};
+						editor.Selection = {MarkerIdentity(*left), MarkerIdentity(*right)};
 					} else if (io.MousePos.x >= timelineX && io.MousePos.y >= start.y + header) {
 						if (!io.KeyShift) editor.Selection.clear();
 						BoxSelection = std::move(editor.Selection);
@@ -793,16 +864,23 @@ namespace studio {
 					if (!apply()) Cancel();
 				}
 			}
-			if (pasteRequested && paste && FocusedTrack && editor.Begin(document, true, cursor, error)) {
-				const auto found = std::find_if(Tracks.begin(), Tracks.end(), [&](const auto &track) {
-					return track.NodeId == FocusedTrack->NodeId && track.Port == FocusedTrack->Port;
-				});
-				if (found != Tracks.end()) {
-					editor.TargetNode = FocusedTrack->NodeId;
-					editor.TargetPort = FocusedTrack->Port;
-					if (!paste()) editor.Cancel();
-				} else
-					editor.Cancel();
+			if (pasteRequested && paste && FocusedTrack) {
+				if (FocusedTrack->Axis >= 0)
+					error = {
+						Status::TypeMismatch, {}, {}, "scalar timeline paste requires a component target"
+					};
+				else if (editor.Begin(document, true, cursor, error)) {
+					const auto found = std::find_if(Tracks.begin(), Tracks.end(), [&](const auto &track) {
+						return track.NodeId == FocusedTrack->NodeId && track.Port == FocusedTrack->Port &&
+							   track.Axis == FocusedTrack->Axis;
+					});
+					if (found != Tracks.end()) {
+						editor.TargetNode = FocusedTrack->NodeId;
+						editor.TargetPort = FocusedTrack->Port;
+						if (!paste()) editor.Cancel();
+					} else
+						editor.Cancel();
+				}
 			}
 			if (requestedAction && BeginAction(document, editor, *requestedAction, error)) {
 				if (!apply()) Cancel();
