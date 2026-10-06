@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-06",
+  "scope": "grug prepare authoritative PXC append source and native projection in memory; host callback execution stays separate",
+  "owned_files": {
+    "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp": "e8e1cbdb3090d8cc400b1490521a1fd8ce701f62774b5796048514d21e66bd36",
+    "mono.engine/imagegraphio/src/PxcxAppend.cpp": "dacfe7c097743570b1b6d3b8d37c441528d6229137443ce07f74ccf5f0e0465a",
+    "mono.engine/imagegraphio/tests/PxcxAppend.cpp": "7bc2dcd8ea9d2e02d8f68776881600ca53682ec1e15136803492560b1a41aa55"
+  },
+  "source_pin": {
+    "save_version": 121092,
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "files": {
+      "scripts/append_function/append_function.gml": "8fb2ce8d08edb15c3247ba668b11e70f7ea0864d601ee524f351f3427bf87144",
+      "scripts/node_data/node_data.gml": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d",
+      "scripts/node_value/node_value.gml": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "scripts/node_collection/node_collection.gml": "d62b8986eb03e296e74598387746bb23197ed38bd44f15d48fb10ebacdf6630c",
+      "scripts/node_collection_inline/node_collection_inline.gml": "6da76cc94d1c5293883bdd8c1c3da71478dffab0e9d8ede62d4776b3d79e58d2",
+      "scripts/__node_cache_base/__node_cache_base.gml": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb"
+    }
+  },
+  "behavior": [
+    "fresh stable namespace IDs preserve declaration order",
+    "root placement and existing collection contexts preserve nested coordinates",
+    "remap source group, inline context, nested instance, collection sockets and inline member identities",
+    "root instance bases, names, expressions and cache member strings keep saved text",
+    "connect ordinary inputs and inspector slots0,1,2,4 only inside loaded set",
+    "preserve outputs, output metadata, inspector slot3 and surplus inspector records",
+    "preserve destination globals, settings, animation regions, thumbnail and unknown fields",
+    "retain incoming metadata for post-APPENDING host callbacks",
+    "bound tracked JSON allocations, retained result, weighted comparisons and reserved checked codec scratch",
+    "publish one complete candidate only after source readback and native import"
+  ],
+  "build": {
+    "preset": "release-tests",
+    "targets": 17,
+    "final_exit_code": 0,
+    "final_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pxc-append-build5.log",
+    "first_failure": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pxc-append-build1-issues.json",
+    "successful_builds": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "build3_note": "final fixture inspection caught an unapplied substitution; repaired before tests in build4"
+  },
+  "validation": {
+    "checks": 20,
+    "all_exit_codes_zero": true,
+    "cpp_cases": 5161,
+    "cpp_assertions": 2002562,
+    "new_cases": 3,
+    "new_assertions": 139,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup": true,
+    "gpu": "approved SDL offscreen Vulkan suites included",
+    "final_results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pxc-append-batch3-results.json",
+    "failed_batches": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pxc-append-batch1-issues.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pxc-append-batch2-issues.json"
+    ]
+  },
+  "proof": [
+    "appended scalar evaluates to9 with imported animator state retained",
+    "nested and root instances obey different saved base-ID policies",
+    "nested collection sockets and inline member/context IDs remap; opaque field tails remain unchanged",
+    "destination global inputs survive an incoming conflicting global definition",
+    "collection metadata survives as callback data",
+    "namespace collision, stale source, invalid context, invalid namespace, finite-coordinate overflow and 12000-object low-cap refusal preserve prior result"
+  ],
+  "freeze": {
+    "source_paths": 78,
+    "unchanged_peer_files": 43,
+    "test_binary_hashes": "13 unchanged",
+    "child_binary_hashes": "assetc and imagegraph unchanged",
+    "before": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pxc-append-source-before-build5.json",
+    "after": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pxc-append-source-after-batch3.json"
+  },
+  "review": "Sol read review found no confirmed blocker in final three append files",
+  "limits": [
+    "grug did not capture a performance profile; no speed claim",
+    "native group cloning still refuses opaque children; append refuses when native projection cannot be built",
+    "host constructor callbacks, ordered lifecycle, undo admission and Studio append action remain open",
+    "headed Studio, licensed reference comparison, dev/server/ci builds and sanitizers not run"
+  ],
+  "remaining": "full host append and original33-item Composer goal remain active"
+}
