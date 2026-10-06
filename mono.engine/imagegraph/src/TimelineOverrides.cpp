@@ -846,6 +846,22 @@ namespace engine::imagegraph::detail {
 					const auto mode = configured != configuredTracks.end()
 										  ? configured->second->QuaternionMode
 										  : std::nullopt;
+					bool rawQuaternion = rawSourceQuaternion && !port.empty();
+					if (rawSourceQuaternion && !rawQuaternion) {
+						const auto *entry = FindCatalogueEntry(sampled.Type);
+						const auto *input = entry ? FindCatalogueInput(*entry, property.second) : nullptr;
+						if (!input && request.GroupReplay) {
+							if (!admitGetterWork(request.GroupReplay->DetachedAnimators().size()))
+								return diagnostic.Code;
+							const auto *detached =
+								request.GroupReplay->DetachedAnimator(sampled.Id, property.second);
+							// retired writer has no live socket; its getter still needs raw angles.
+							if (entry && detached && detached->Type == ValueType::Quaternion)
+								input = FindCatalogueInput(*entry, detached->OriginalPort);
+						}
+						rawQuaternion =
+							input && input->SourceIndex >= 0 && input->Type == ValueType::Quaternion;
+					}
 					Value enumFirst, enumLast;
 					if (sourceEnum &&
 						(!detail::SourceEnumNumericPayload(left->Data, enumFirst) ||
@@ -907,15 +923,7 @@ namespace engine::imagegraph::detail {
 						static_cast<double>(
 							document.Timeline ? document.Timeline->Frames : keys.back()->Tick + 1
 						),
-						rawSourceQuaternion && (!port.empty() ||
-												[&] {
-													const auto *entry = FindCatalogueEntry(sampled.Type);
-													const auto *input =
-														entry ? FindCatalogueInput(*entry, property.second)
-															  : nullptr;
-													return input && input->SourceIndex >= 0 &&
-														   input->Type == ValueType::Quaternion;
-												}()),
+						rawQuaternion,
 						&request
 					);
 					if (status != Status::Ok) {

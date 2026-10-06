@@ -274,6 +274,26 @@ namespace engine::imagegraph {
 				finalBytes, (document.Tracks.size() + newTracks.size()) * sizeof(AnimationTrack)
 			))
 			throw std::bad_alloc{};
+		detail::EvaluationVector<size_t> newDetachedTracks{detail::EvaluationAllocator<size_t>(budget)};
+		if (document.SourceAnimators)
+			for (const auto &writer : writers) {
+				if (writer.Detached == SIZE_MAX) continue;
+				bool source = false;
+				for (const auto &key : writer.Keys)
+					if (same(key.Data->Interpolation, "source")) source = true;
+				if (!source) continue;
+				for (size_t index = 0; index < document.SourceAnimators->Detached.size(); ++index) {
+					const auto &metadata = document.SourceAnimators->Detached[index];
+					if (metadata.Track || !same(metadata.OwnerId, writer.Node) ||
+						!same(metadata.Id, writer.Port))
+						continue;
+					newDetachedTracks.push_back(index);
+					if (!detail::SourceAnimatorAdd(
+							finalBytes, sizeof(AnimationTrack) + writer.Node.size() + writer.Port.size() + 64
+						))
+						throw std::bad_alloc{};
+				}
+			}
 		if (*oldBytes > UINT64_MAX / 2 || !detail::SourceAnimatorAdd(finalBytes, 2 * *oldBytes))
 			return fail(Status::LimitExceeded, "source key clone overlap overflows");
 		auto owned = budget.Reserve(finalBytes);
@@ -282,6 +302,10 @@ namespace engine::imagegraph {
 		candidate.Tracks.reserve(candidate.Tracks.size() + newTracks.size());
 		for (const auto &[node, port] : newTracks)
 			candidate.Tracks.push_back({std::string(node), std::string(port), "hold", -1});
+		for (const auto index : newDetachedTracks) {
+			auto &metadata = candidate.SourceAnimators->Detached[index];
+			metadata.Track = AnimationTrack{metadata.OwnerId, metadata.Id, "hold", -1};
+		}
 		const auto clone = [](const KeyView &view, std::string_view node, std::string_view port, bool alias) {
 			Keyframe key = *view.Data;
 			key.NodeId = node;

@@ -12092,7 +12092,7 @@ namespace engine::imagegraph {
 						}
 						if (request.GroupReplay && request.GroupReplay->Binding(node.Id, input.Id)) {
 							const Node &owner = inputOwner(input.Id);
-							if (const auto *value = FindValue(owner, input.Id)) {
+							if (const auto *value = FindValue(owner, inputAnimatorPort(input.Id))) {
 								if (const auto converted = SourceQuaternionGetterProjection(
 										document, node.Id, input.Id, value->Data
 									)) {
@@ -12844,7 +12844,8 @@ namespace engine::imagegraph {
 						} else if (resolved != plan.ResolvedInputs.end()) {
 							context.LinkedValues.emplace_back(input.Id);
 							value = &resolved->Data;
-						} else if (const AuthoredValue *authored = FindValue(inputOwner(input.Id), input.Id))
+						} else if (const AuthoredValue *authored =
+									   FindValue(inputOwner(input.Id), inputAnimatorPort(input.Id)))
 							value = &authored->Data;
 					}
 					if (value) {

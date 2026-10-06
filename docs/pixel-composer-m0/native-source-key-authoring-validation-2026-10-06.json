@@ -1,0 +1,221 @@
+{
+  "date": "2026-10-06",
+  "scope": "Captured combined source animator new-key authoring and track settings",
+  "implementation": [
+    "New keys and same-time replacements update the captured combined writer and all captured alias rows atomically.",
+    "Shared end, loop-range and quaternion controls update canonical physical or retired tracks without replacing their writer generation.",
+    "The first source key materializes a missing retired hold track before publication.",
+    "Catalogue getters read the captured physical port. Retired source quaternion sampling retains raw angles for receiving getter conversion.",
+    "Borrowed drafts, clones, fanout and bounded compile are admitted before publication."
+  ],
+  "source_reference": {
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "verified_bytes_sha256_git_blob": [
+      "scripts/node_value/node_value.gml",
+      "scripts/node_keyframe/node_keyframe.gml"
+    ],
+    "contract": "Node_Value initializes hold/-1 track policy; Node_Keyframe reads original animator property end and loop-range settings.",
+    "licensed_reference_capture_parity": false
+  },
+  "validation": {
+    "joined_checks": 20,
+    "all_exit_codes_zero": true,
+    "cpp_cases_including_startup": 5092,
+    "cpp_assertions": 2000438,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "offscreen_backend": "SDL offscreen / Vulkan",
+    "test_binary_hashes_unchanged": true,
+    "child_binary_hashes_unchanged": true,
+    "sources_frozen": true,
+    "owned_source_sha256": {
+      "mono.engine/imagegraph/src/Document.cpp": "cbe34fc3faa99ed15f8c86099768d77af1c765f095284779bcd9c5b6f3870574",
+      "mono.engine/imagegraph/include/engine/imagegraph/SourceTrackTransition.hpp": "7ff91685acfc1a1378b817cbdbaed4cdb0ead1e8f08b7d733f84dbdaaae14e11",
+      "mono.engine/imagegraph/src/SourceTrackTransition.cpp": "82374f5bb895a917590ecffdabbc095607d98bdca0234a14874e51692fe8c7fa",
+      "mono.engine/imagegraph/tests/SourceTrackTransition.cpp": "7482bee509d9c9131cdf97b54fde2b5aa3e3517bca61673b70fdada8681f406d",
+      "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp": "232b46718c9fbb6d63293928e8834afc16bba982a84df13513b8a14633ecb281",
+      "mono.studio/src/ImageGraph.cpp": "3c6cd9dcce93d9c8be2fd55f581373a1033e55396f989560007177b27f0c143a",
+      "mono.studio/tests/TimelineSourceAliases.cpp": "86aa8e5586bf968443bc218ce8b082a7ba55d171827156f8ab64930a0c5be755",
+      "mono.engine/imagegraph/src/TimelineOverrides.cpp": "6c8d736b51fa66fb430cdc67f12ba322f1e2a5f7c95a1ebde0d8ae427d17cdab"
+    },
+    "checks": [
+      {
+        "name": "bake",
+        "exit_code": 0,
+        "cases": 157,
+        "assertions": 15875,
+        "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129"
+      },
+      {
+        "name": "physics",
+        "exit_code": 0,
+        "cases": 43,
+        "assertions": 715,
+        "binary_sha256": "17b102d4da3de15608c8f824db367983b1c9831836152611b33378149aa18245"
+      },
+      {
+        "name": "runner",
+        "exit_code": 0,
+        "cases": 29,
+        "assertions": 296,
+        "binary_sha256": "b060b17a1aa3280492a5aa50a564a86237b53f643bd704214fdae515284b1ab0"
+      },
+      {
+        "name": "font",
+        "exit_code": 0,
+        "cases": 37,
+        "assertions": 1686,
+        "binary_sha256": "cac56df95d7f1ece7caa65cf3c0d389d4c05b7abcf4840825d3628f0961cdcb2"
+      },
+      {
+        "name": "export",
+        "exit_code": 0,
+        "cases": 77,
+        "assertions": 3132,
+        "binary_sha256": "9824dc0d83ae4246ac60faaa05cc7000135962d6150ddbdb1dbad52ae9f58d01"
+      },
+      {
+        "name": "render",
+        "exit_code": 0,
+        "cases": 15,
+        "assertions": 477,
+        "binary_sha256": "434c9204b9bfbc0b16c5dbc179cd2cdf8164f016060af410536103b9bacfd448"
+      },
+      {
+        "name": "cli",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "io",
+        "exit_code": 0,
+        "cases": 280,
+        "assertions": 11938,
+        "binary_sha256": "888235e30e6ab7ec15f53013355359374998c7cf883903db7e046e68a101df1c"
+      },
+      {
+        "name": "core",
+        "exit_code": 0,
+        "cases": 2961,
+        "assertions": 1894755,
+        "binary_sha256": "90b8fa02dcbfb338b3911618e1193ea720e01266082c1553700752eb53fcb597"
+      },
+      {
+        "name": "assetc",
+        "exit_code": 0,
+        "cases": 45,
+        "assertions": 509,
+        "binary_sha256": "cf0833bfe128be893588a6b25334579a25ea8664d3aa345c71b7925cd8098c60"
+      },
+      {
+        "name": "client",
+        "exit_code": 0,
+        "cases": 358,
+        "assertions": 23821,
+        "binary_sha256": "c5c6088d462544f1eef7db367a82865732ba3a727c60576601d633148468e95a"
+      },
+      {
+        "name": "studio",
+        "exit_code": 0,
+        "cases": 1015,
+        "assertions": 46239,
+        "binary_sha256": "4e0c67663769e800a9b3d426db91f1d8c92577ff2109d4fda799fb4b258a6ec1"
+      },
+      {
+        "name": "nodegraph",
+        "exit_code": 0,
+        "cases": 34,
+        "assertions": 286,
+        "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952"
+      },
+      {
+        "name": "ui",
+        "exit_code": 0,
+        "cases": 40,
+        "assertions": 704,
+        "binary_sha256": "1600feabd56351850c55804a15c492080683c46bea8ba9bc46684958d3644f3f"
+      },
+      {
+        "name": "startup",
+        "exit_code": 0,
+        "cases": 1,
+        "assertions": 5,
+        "binary_sha256": null
+      },
+      {
+        "name": "lint",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "architecture",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "python",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "format",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "diff",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      }
+    ]
+  },
+  "observed_failures": [
+    {
+      "batches": [
+        1,
+        2
+      ],
+      "check": "core",
+      "failure": "Retired quaternion tick2 sampled 0 instead of -45. A local getter override alone did not repair it."
+    },
+    {
+      "batch": 3,
+      "check": "core",
+      "failure": "Physical-port lookup exposed double conversion: 0.383 instead of -45. Timeline source-kind lookup did not recognize the retired physical port."
+    },
+    {
+      "batch": 4,
+      "check": "all",
+      "result": "All joined checks passed after captured-port lookup and retired source quaternion provenance fixes."
+    }
+  ],
+  "build": {
+    "targets": 17,
+    "exit_code": 0,
+    "steps": 21,
+    "source_edits_during_build_or_tests": false
+  },
+  "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+  "results": "source-key-authoring-batch4-results.json",
+  "build_log": "source-key-authoring-build4.log",
+  "review": "Read-only Sol review found no additional confirmed issue in the final diff.",
+  "remaining": [
+    "Scalar-axis timeline identities and gestures.",
+    "Initial imported aliases without durable native captures.",
+    "Removed dynamic quaternion inputs require separate validated source-kind provenance.",
+    "Licensed reference parity and headed Studio interaction remain unverified."
+  ],
+  "profiling": "Core key and track transactions retain ENGINE_PROFILE scopes. No new timing result or performance improvement is claimed."
+}

@@ -9,6 +9,7 @@
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/SourceKeyframeTransition.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
+#include <engine/imagegraph/SourceTrackTransition.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraph/WavClip.hpp>
@@ -2064,7 +2065,16 @@ namespace studio {
 			return fail(engine::imagegraph::Status::InvalidValue, "initialize the property before keying it");
 		const auto declaredType = dynamic != node->DynamicInputs.end() ? dynamic->Type : declared->Type;
 		const auto valueType = TypeOf(*data);
-		if (declaredType != engine::imagegraph::ValueType::Any && (!valueType || *valueType != declaredType))
+		const auto *sourceInput = imagegraph_choices::Input(node->Type, property);
+		const auto *sourceEntry = engine::imagegraph::FindCatalogueEntry(node->Type);
+		const auto *array = std::get_if<engine::imagegraph::ArrayValue>(data);
+		const bool sourceValue =
+			sourceInput && (engine::imagegraph::CatalogueSourceEnumValue(*sourceInput, *data) ||
+							engine::imagegraph::CatalogueSourceRawValue(*sourceInput, *data) ||
+							(sourceEntry && array &&
+							 engine::imagegraph::CatalogueAuthoredArray(*sourceEntry, *sourceInput, *array)));
+		if (!sourceValue && declaredType != engine::imagegraph::ValueType::Any &&
+			(!valueType || *valueType != declaredType))
 			return fail(engine::imagegraph::Status::TypeMismatch, "authored value does not match the schema");
 		auto frame =
 			std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &entry) {
@@ -2074,6 +2084,59 @@ namespace studio {
 		if (frame == document.Keyframes.end()) {
 			if (document.Keyframes.size() >= engine::imagegraph::Limits::MaximumKeyframes)
 				return fail(engine::imagegraph::Status::LimitExceeded, "keyframe limit reached");
+		}
+		if (document.SourceAnimators) {
+			using namespace engine::imagegraph;
+			const auto resident = DocumentRetainedPayloadBytes(document),
+					   valueBytes = ValueClonePayloadBytes(*data);
+			if (!resident || !valueBytes || *resident > Limits::MaximumEvaluationBytes ||
+				*valueBytes > Limits::MaximumEvaluationBytes - *resident)
+				return fail(Status::LimitExceeded, "captured key value draft exceeds the payload budget");
+			uint64_t remaining = Limits::MaximumEvaluationBytes - *resident - *valueBytes;
+			size_t count = 0;
+			for (const auto &key : document.Keyframes) {
+				if (key.NodeId != nodeId || key.Port != property) continue;
+				const auto bytes = KeyframePayloadBytes(key);
+				if (!bytes || *bytes > remaining / 2)
+					return fail(Status::LimitExceeded, "captured key track draft exceeds the payload budget");
+				remaining -= 2 * *bytes;
+				++count;
+			}
+			const bool fresh = frame == document.Keyframes.end();
+			const uint64_t extra = (count + size_t(fresh)) * sizeof(SourceKeyframeEdit) +
+								   2 * sizeof(Keyframe) + 2 * (nodeId.size() + property.size() + 128);
+			if (extra > remaining)
+				return fail(Status::LimitExceeded, "captured key draft records exceed the payload budget");
+			std::optional<Keyframe> created;
+			if (fresh) {
+				created.emplace(
+					std::string(nodeId), std::string(property), tick, *data, std::string(interpolation)
+				);
+				(void)SetFrameTime(*created, time);
+				if (interpolation == "source") created->Ease = KeyframeEase{};
+			}
+			std::vector<Keyframe> replacements;
+			std::vector<SourceKeyframeEdit> edits;
+			replacements.reserve(count);
+			edits.reserve(count + size_t(fresh));
+			for (const auto &key : document.Keyframes) {
+				if (key.NodeId != nodeId || key.Port != property) continue;
+				replacements.push_back(key);
+				auto &replacement = replacements.back();
+				replacement.Interpolation = interpolation;
+				if (interpolation == "source") {
+					if (!replacement.Ease) replacement.Ease = KeyframeEase{};
+				} else
+					replacement.Ease.reset();
+				if (GetFrameTime(key) == time) replacement.Data = *data;
+				edits.push_back({&key, &replacement});
+			}
+			if (fresh) edits.push_back({&*created, &*created, true});
+			const uint64_t spareSlots = (replacements.capacity() - replacements.size()) * sizeof(Keyframe) +
+										(edits.capacity() - edits.size()) * sizeof(SourceKeyframeEdit);
+			return ApplySourceKeyframeEdits(
+					   document, edits, document, error, Limits::MaximumEvaluationBytes - spareSlots
+				   ) == Status::Ok;
 		}
 		if (interpolation == "source" && !EnsureSourceAnimationTrack(document, nodeId, property, error))
 			return false;
@@ -2758,6 +2821,19 @@ namespace studio {
 			SetDiagnostic(error, Status::InvalidValue, nodeId, property, "quaternion mode is raw or Euler");
 			return false;
 		}
+		if (document.SourceAnimators) {
+			const auto existing =
+				std::find_if(document.Tracks.begin(), document.Tracks.end(), [&](const auto &track) {
+					return track.NodeId == nodeId && track.Port == property;
+				});
+			AnimationTrack replacement =
+				existing != document.Tracks.end()
+					? *existing
+					: AnimationTrack{std::string(nodeId), std::string(property), "hold", -1};
+			replacement.QuaternionMode = mode;
+			const SourceTrackTransition transition{nodeId, property, &replacement, mode.has_value()};
+			return ApplySourceTrackTransition(document, transition, document, error) == Status::Ok;
+		}
 		Document candidate = document;
 		if (!EnsureSourceAnimationTrack(candidate, nodeId, property, error)) return false;
 		if (mode) SetTrackInterpolation(candidate, nodeId, property, "source");
@@ -2957,6 +3033,18 @@ namespace studio {
 		auto track = std::find_if(document.Tracks.begin(), document.Tracks.end(), [&](const auto &candidate) {
 			return candidate.NodeId == nodeId && candidate.Port == property;
 		});
+		if (document.SourceAnimators) {
+			engine::imagegraph::AnimationTrack replacement =
+				track != document.Tracks.end() ? *track
+											   : engine::imagegraph::AnimationTrack{
+													 std::string(nodeId), std::string(property), "hold", -1
+												 };
+			replacement.End = std::move(end);
+			replacement.LoopRange = loopRange;
+			const engine::imagegraph::SourceTrackTransition transition{nodeId, property, &replacement};
+			return engine::imagegraph::ApplySourceTrackTransition(document, transition, document, error) ==
+				   engine::imagegraph::Status::Ok;
+		}
 		if (track == document.Tracks.end()) {
 			if (document.Tracks.size() >= engine::imagegraph::Limits::MaximumTracks)
 				return fail(engine::imagegraph::Status::LimitExceeded, "animation track limit reached");
@@ -3004,6 +3092,11 @@ namespace studio {
 				"source easing requires an animation track; change interpolation before removing it"
 			);
 			return false;
+		}
+		if (document.SourceAnimators) {
+			const engine::imagegraph::SourceTrackTransition transition{nodeId, property};
+			return engine::imagegraph::ApplySourceTrackTransition(document, transition, document, error) ==
+				   engine::imagegraph::Status::Ok;
 		}
 		document.Tracks.erase(found);
 		return true;

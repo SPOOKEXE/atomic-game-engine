@@ -311,3 +311,157 @@ TEST_CASE(
 	);
 	CHECK(document == before);
 }
+TEST_CASE(
+	"Set Key inserts and replaces the captured writer without replacing its generation",
+	"[studio][timeline][source_aliases]"
+) {
+	for (bool retired : {false, true}) {
+		auto document = MetadataWriters(retired);
+		const auto before = document;
+		studio::ImageGraphHistory history;
+		Diagnostic error;
+		REQUIRE(studio::ApplyImageGraphDocumentEdit(document, history, [&](Document &candidate) {
+			return studio::SetImageGraphKeyframe(candidate, "alias", "mix", 3, "source", error, .5, true);
+		}));
+		const auto &canonical =
+			retired ? document.SourceAnimators->DetachedValues[0].Keys : document.Keyframes;
+		const auto inserted = std::find_if(canonical.begin(), canonical.end(), [&](const auto &key) {
+			return key.NodeId == "owner" && GetFrameTime(key) == FrameTime{3, .5, true};
+		});
+		REQUIRE(inserted != canonical.end());
+		CHECK(inserted->Data == Value{.25});
+		CHECK(inserted->SourceKeyId.empty());
+		CHECK_FALSE(inserted->SourceDriver);
+		CHECK(document.Keyframes[MetadataIndex(document, "sibling", 3)].NegativeFrame);
+		CHECK(document.SourceAnimators->Bindings == before.SourceAnimators->Bindings);
+		CHECK(document.SourceAnimators->Detached == before.SourceAnimators->Detached);
+		const auto accepted = document;
+		REQUIRE(history.Undo(document));
+		CHECK(document == before);
+		REQUIRE(history.Redo(document));
+		CHECK(document == accepted);
+		document.Nodes[1].Values[0].Data = .6;
+		REQUIRE(studio::SetImageGraphKeyframe(document, "alias", "mix", 1, "source", error));
+		CHECK(MetadataCanonical(document, retired).Data == Value{.6});
+		CHECK(MetadataCanonical(document, retired).SourceKeyId == "retained-key");
+		CHECK(
+			MetadataCanonical(document, retired).SourceDriver ==
+			MetadataCanonical(before, retired).SourceDriver
+		);
+		MetadataValid(document);
+	}
+}
+TEST_CASE(
+	"Track policy controls update captured aliases through one undo transaction",
+	"[studio][timeline][source_aliases]"
+) {
+	for (bool retired : {false, true}) {
+		auto document = MetadataWriters(retired);
+		const auto before = document;
+		studio::ImageGraphHistory history;
+		Diagnostic error;
+		REQUIRE(studio::ApplyImageGraphDocumentEdit(document, history, [&](Document &candidate) {
+			return studio::SetImageGraphAnimationTrack(candidate, "alias", "mix", "ping", 0, error);
+		}));
+		for (const auto &track : document.Tracks)
+			if (track.NodeId != "owner" || !retired) {
+				CHECK(track.End == "ping");
+				CHECK(track.LoopRange == 0);
+			}
+		if (retired) CHECK(document.SourceAnimators->Detached[0].Track->End == "ping");
+		CHECK(document.SourceAnimators->Bindings == before.SourceAnimators->Bindings);
+		const auto accepted = document;
+		REQUIRE(history.Undo(document));
+		CHECK(document == before);
+		REQUIRE(history.Redo(document));
+		CHECK(document == accepted);
+		MetadataValid(document);
+		REQUIRE(
+			studio::SetImageGraphKeyframeSourceDriver(document, MetadataIndex(document), std::nullopt, error)
+		);
+		REQUIRE(
+			studio::SetImageGraphKeyframeInterpolation(document, MetadataIndex(document), "linear", error)
+		);
+		REQUIRE(studio::RemoveImageGraphAnimationTrack(document, "sibling", "mix", error));
+		CHECK(document.Tracks.size() == size_t(retired));
+		if (retired) CHECK_FALSE(document.SourceAnimators->Detached[0].Track);
+		MetadataValid(document);
+	}
+}
+TEST_CASE(
+	"First source key retains its track on an empty retired writer", "[studio][timeline][source_aliases]"
+) {
+	auto document = RetiredWriter();
+	document.SourceAnimators->Detached[0].Track.reset();
+	document.SourceAnimators->DetachedValues[0].Keys.clear();
+	document.SourceAnimators->DetachedValues[0].Fixed = .25;
+	document.Keyframes.erase(document.Keyframes.begin() + 1);
+	document.Tracks.erase(document.Tracks.begin() + 1);
+	Diagnostic error;
+	REQUIRE(studio::SetImageGraphKeyframe(document, "alias", "mix", 3, "source", error));
+	CHECK_FALSE(document.SourceAnimators->DetachedValues[0].Fixed);
+	REQUIRE(document.SourceAnimators->DetachedValues[0].Keys.size() == 1);
+	const auto &metadata = document.SourceAnimators->Detached[0];
+	REQUIRE(metadata.Track);
+	CHECK(metadata.Track->NodeId == "owner");
+	CHECK(metadata.Track->Port == metadata.Id);
+	CHECK(metadata.Track->End == "hold");
+	MetadataValid(document);
+	GroupReplayState replay;
+	REQUIRE(RestoreSourceAnimatorBindings(document, {}, 2, replay, error) == Status::Ok);
+	Document projected;
+	REQUIRE(ProjectGroupReplay(document, replay, 2, projected, error) == Status::Ok);
+	CHECK(projected.SourceAnimators->Detached[0].Track == metadata.Track);
+}
+TEST_CASE(
+	"Quaternion controls share captured policy and preserve its undo snapshot",
+	"[studio][timeline][source_aliases]"
+) {
+	for (bool retired : {false, true}) {
+		auto document = MetadataWriters(retired);
+		for (auto &node : document.Nodes) {
+			node.Type = "pc.quarternion_to_euler";
+			node.Values = {{"rotation", Quaternion{}}};
+			node.SourceAnimatedInputs = {"rotation"};
+		}
+		for (auto &key : document.Keyframes) {
+			key.Port = "rotation";
+			key.Data = Quaternion{double(key.Tick) * 18, 0, 0, 0};
+			key.SourceDriver.reset();
+		}
+		for (auto &track : document.Tracks)
+			track.Port = "rotation";
+		for (auto &binding : document.SourceAnimators->Bindings)
+			binding.Port = "rotation";
+		if (retired) {
+			document.SourceAnimators->Detached[0].OriginalPort = "rotation";
+			document.SourceAnimators->Detached[0].Type = ValueType::Quaternion;
+			for (auto &key : document.SourceAnimators->DetachedValues[0].Keys) {
+				key.Data = Quaternion{double(key.Tick) * 18, 0, 0, 0};
+				key.SourceDriver.reset();
+			}
+		}
+		document.Outputs = {{"result", "alias", "euler_angles"}};
+		const auto before = document;
+		Diagnostic error;
+		studio::ImageGraphHistory history;
+		REQUIRE(studio::ApplyImageGraphDocumentEdit(document, history, [&](Document &candidate) {
+			return studio::SetImageGraphTrackQuaternionMode(candidate, "alias", "rotation", 1, error);
+		}));
+		for (const auto &track : document.Tracks)
+			if (!retired || track.NodeId != "owner") CHECK(track.QuaternionMode == 1);
+		if (retired) CHECK(document.SourceAnimators->Detached[0].Track->QuaternionMode == 1);
+		const auto accepted = document;
+		REQUIRE(history.Undo(document));
+		CHECK(document == before);
+		REQUIRE(history.Redo(document));
+		CHECK(document == accepted);
+		MetadataValid(document);
+		REQUIRE(
+			studio::SetImageGraphTrackQuaternionMode(document, "sibling", "rotation", std::nullopt, error)
+		);
+		for (const auto &track : document.Tracks)
+			CHECK_FALSE(track.QuaternionMode);
+		if (retired) CHECK_FALSE(document.SourceAnimators->Detached[0].Track->QuaternionMode);
+	}
+}
