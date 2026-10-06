@@ -38,6 +38,8 @@ Milestone labels describe development scope, not release versions.
 
 ### v0.25
 
+- [_] Add custom profiles such as RenderPipeline: let RunProfileWorkflow select a workflow, expose its inputs and outputs as node ports, and open its inspector popup on double-click.
+
 Pixel Composer foundations:
 
 - [x] Retain the source licence, pinned metadata, enum choices and typed shader inputs; preserve static selectors and source records; save instance ports, graph selectors and cooked-shader references.
@@ -137,7 +139,6 @@ Isolated passes do not establish combined acceptance. See the [native validation
 - [_] Check whether shaderc needs glslang's deprecated HLSL front-end; disable `ENABLE_HLSL` if unused.
 - [_] Remove dead engine code and obsolete compatibility paths.
 - [_] Consolidate render hooks, nodes, graphs and graph visualization.
-- [_] Add custom profiles such as RenderPipeline: let RunProfileWorkflow select a workflow, expose its inputs and outputs as node ports, and open its inspector popup on double-click.
 - [_] Profile CPU, GPU and memory costs; evaluate channel packing, cheaper computation and reduced precision against output quality.
 - [_] Finish typed render hook acceptance:
 
