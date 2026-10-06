@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EvaluationBudget.hpp"
+#include "SourceFrameCacheInputs.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -10,6 +11,8 @@ namespace engine::imagegraph::detail {
 	struct TimelineNodeOverride {
 		size_t NodeIndex = 0;
 		Node Authored;
+		// ports borrow the immutable document/replay for this one evaluation.
+		std::vector<std::string_view> SampledPorts;
 	};
 
 	// Only animated nodes in the selected dependency cone own sampled replacements.
@@ -30,7 +33,10 @@ namespace engine::imagegraph::detail {
 		TimelineOverrides &result,
 		Diagnostic &diagnostic,
 		std::string_view port = {},
-		bool rawSourceQuaternion = false
+		bool rawSourceQuaternion = false,
+		std::span<const uint8_t> getters = {},
+		std::span<const SourceFrameCacheInputReads> getterReads = {},
+		const TimelineOverrides *previous = nullptr
 	);
 	// Adds newly needed nodes within the same immutable document/request observation.
 	// Already sampled nodes survive; all old/new payloads and replacement tables coexist under budget.
@@ -41,6 +47,8 @@ namespace engine::imagegraph::detail {
 		EvaluationBudget &budget,
 		TimelineOverrides &result,
 		Diagnostic &diagnostic,
-		bool rawSourceQuaternion = false
+		bool rawSourceQuaternion = false,
+		std::span<const uint8_t> getters = {},
+		std::span<const SourceFrameCacheInputReads> getterReads = {}
 	);
 }

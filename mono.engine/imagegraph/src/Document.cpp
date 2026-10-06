@@ -10523,6 +10523,9 @@ namespace engine::imagegraph {
 		detail::EvaluationVector<uint8_t> timelineNeeded(
 			document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
 		);
+		detail::EvaluationVector<uint8_t> timelineGetters(
+			document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
+		);
 		const auto admitTimelineWork = [&](uint64_t work) -> bool {
 			if (work > 64'000'000 - scheduleWork) {
 				SetDiagnostic(
@@ -10541,10 +10544,13 @@ namespace engine::imagegraph {
 			for (size_t index = 0; index < frozen.size(); ++index)
 				if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
 					timelineNeeded[index] = 0;
+			// storage owners added below must not choose a getter mode for their borrowers.
+			for (size_t index = 0; index < timelineNeeded.size(); ++index)
+				timelineGetters[index] |= timelineNeeded[index];
 			for (const auto &route : plan.InlineOwnerDependencies)
 				if (route.ControlsOnly && selected[route.Consumer] && !frozen[route.Consumer] &&
 					frameCacheReads(route.Consumer) != detail::SourceFrameCacheInputReads::None)
-					timelineNeeded[route.Owner] = 1;
+					timelineNeeded[route.Owner] = timelineGetters[route.Owner] = 1;
 			for (size_t index = 0; index < needed.size(); ++index) {
 				if (!timelineNeeded[index]) continue;
 				const Node *current = &document.Nodes[index];
@@ -10561,7 +10567,16 @@ namespace engine::imagegraph {
 		if (!deferredTimeline) {
 			if (!selectTimelineInputs(needed)) return diagnostic.Code;
 			const Status timelineStatus = detail::ResolveTimelineOverrides(
-				document, timelineNeeded, request, budget, timelineOverrides, diagnostic, {}, true
+				document,
+				timelineNeeded,
+				request,
+				budget,
+				timelineOverrides,
+				diagnostic,
+				{},
+				true,
+				timelineGetters,
+				frameCacheInputReads
 			);
 			if (timelineStatus != Status::Ok) return timelineStatus;
 		}
@@ -10695,7 +10710,15 @@ namespace engine::imagegraph {
 			if (!deferredTimeline) {
 				if (!selectTimelineInputs(needed)) return false;
 				const auto status = detail::ExtendTimelineOverrides(
-					document, timelineNeeded, request, budget, timelineOverrides, diagnostic, true
+					document,
+					timelineNeeded,
+					request,
+					budget,
+					timelineOverrides,
+					diagnostic,
+					true,
+					timelineGetters,
+					frameCacheInputReads
 				);
 				if (status != Status::Ok) return false;
 			}
@@ -10940,7 +10963,15 @@ namespace engine::imagegraph {
 			}
 			if (!admitTimelineWork(scanWork)) return false;
 			const auto status = detail::ExtendTimelineOverrides(
-				document, timelineNeeded, request, budget, timelineOverrides, diagnostic, true
+				document,
+				timelineNeeded,
+				request,
+				budget,
+				timelineOverrides,
+				diagnostic,
+				true,
+				timelineGetters,
+				frameCacheInputReads
 			);
 			if (status != Status::Ok) return false;
 			for (size_t candidate = 0; candidate < timelineSelected.size(); ++candidate)
@@ -12700,7 +12731,11 @@ namespace engine::imagegraph {
 					const auto *axes = overlay && overlay->SeparatedVec2
 										   ? &*overlay->SeparatedVec2
 										   : detail::FindSeparatedVec2(owner, ownerPort);
-					return axes && axes->Separated ? axes : nullptr;
+					return axes && detail::SourcePropertyGetterSeparated(
+									   document, document.Nodes[index], port, request.GroupReplay
+								   )
+							   ? axes
+							   : nullptr;
 				};
 				size_t separatedCount = 0;
 				for (const auto &input : catalogueEntry->Inputs)
@@ -12804,7 +12839,9 @@ namespace engine::imagegraph {
 						const auto *axes = sharedAxes && sharedAxes->SeparatedVec2
 											   ? &*sharedAxes->SeparatedVec2
 											   : detail::FindSeparatedVec2(rawNode, rawPort);
-						if (axes && axes->Separated) {
+						if (axes && detail::SourcePropertyGetterSeparated(
+										document, document.Nodes[index], port, request.GroupReplay
+									)) {
 							const AnimationTrack *track = nullptr;
 							for (const auto &candidate : document.Tracks)
 								if (candidate.NodeId == rawNode.Id && candidate.Port == rawPort) {

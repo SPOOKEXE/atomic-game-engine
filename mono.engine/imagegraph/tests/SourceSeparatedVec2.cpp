@@ -1,13 +1,18 @@
 #include "../src/SourceSeparatedVec2.hpp"
 
+#include "../src/TimelineOverrides.hpp"
+
 #include <engine/imagegraph/BuiltinRandomCaptureCodec.hpp>
 #include <engine/imagegraph/SourceModeTransition.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <span>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 TEST_SUITE_ID("engine.imagegraph.source_separated_vec2")
@@ -457,6 +462,54 @@ namespace {
 		REQUIRE(status == Status::Ok);
 		return output.Data;
 	}
+	Value EvaluateCell(const Document &document, uint64_t tick, const GroupReplayState &replay) {
+		Diagnostic diagnostic;
+		Plan plan;
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		EvaluationRequest request;
+		request.Tick = tick;
+		request.GroupReplay = &replay;
+		request.GroupAuthoringRevision = 1;
+		EvaluatedValue output;
+		const auto status = EvaluateValue(document, plan, "cell", request, output, diagnostic);
+		INFO(diagnostic.NodeId << ':' << diagnostic.Port << ':' << diagnostic.Message);
+		REQUIRE(status == Status::Ok);
+		return output.Data;
+	}
+	Document MatrixGetAlias(bool writerSeparated, bool localSeparated, bool overridePosition = true) {
+		auto document = MatrixGetAxes();
+		auto &writer = document.Nodes.front();
+		writer.SourceSeparatedVec2Animators->Inputs.front().Separated = writerSeparated;
+		for (auto &key : writer.SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys)
+			key.Data = 0.0;
+		document.Keyframes = {
+			{"get", "position", 0, Vector2{0, 0}, "source", KeyframeEase{}},
+			{"get", "position", 10, Vector2{1, 0}, "source", KeyframeEase{}}
+		};
+		Node alias = writer;
+		alias.Id = "alias";
+		alias.InstanceBase = "get";
+		alias.InstanceOverrides =
+			overridePosition ? std::vector<std::string>{"position"} : std::vector<std::string>{};
+		alias.SourceSeparatedVec2Animators.emplace().Inputs.clear();
+		SourceSeparatedVec2Animator local;
+		local.Port = "position";
+		local.Separated = localSeparated;
+		alias.SourceSeparatedVec2Animators->Inputs.push_back(std::move(local));
+		document.Nodes.push_back(std::move(alias));
+		document.Outputs.front().NodeId = "alias";
+		return document;
+	}
+	void BindMatrixGetAlias(
+		const Document &document, std::span<const GroupSubtypeBinding> bindings, GroupReplayState &replay
+	) {
+		GroupReplayState empty, local;
+		Diagnostic diagnostic;
+		REQUIRE(RebindGroupReplay(document, empty, 1, local, diagnostic) == Status::Ok);
+		const auto status = BindGroupReplay(document, bindings, local, 1, replay, diagnostic);
+		INFO(diagnostic.NodeId << ':' << diagnostic.Port << ':' << diagnostic.Message);
+		REQUIRE(status == Status::Ok);
+	}
 }
 
 TEST_CASE("Catalogue IVec2 axes drive a matrix getter", "[mirror_axes]") {
@@ -601,4 +654,127 @@ TEST_CASE("Separated IVec2 axes round fractional source coordinates", "[mirror_a
 	CHECK(EvaluateCell(document, 7) == Value{29.0});
 	CHECK(EvaluateCell(document, 3) == Value{13.0});
 	CHECK(EvaluateCell(document, 5) == Value{13.0});
+}
+
+TEST_CASE("Instance override separation mode selects the shared writer axes", "[mirror_axes][groups]") {
+	for (const auto &[writerSeparated, localSeparated, expected] :
+		 {std::tuple{true, false, 29.0}, std::tuple{false, true, 13.0}}) {
+		auto document = MatrixGetAlias(writerSeparated, localSeparated);
+		const GroupSubtypeBinding binding{
+			"alias", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"
+		};
+		GroupReplayState replay;
+		BindMatrixGetAlias(document, std::span{&binding, 1}, replay);
+		CHECK(EvaluateCell(document, 10, replay) == Value{expected});
+	}
+}
+
+TEST_CASE(
+	"Instance without a local override delegates separation mode to its writer", "[mirror_axes][groups]"
+) {
+	auto document = MatrixGetAlias(true, false, false);
+	CHECK(EvaluateCell(document, 10) == Value{13.0});
+}
+
+TEST_CASE(
+	"Selected split instance does not evaluate unrelated combined key drivers", "[mirror_axes][groups]"
+) {
+	auto document = MatrixGetAlias(false, true);
+	document.Keyframes.resize(1);
+	document.Keyframes.front().SourceDriver = KeyframeAudioDriver{"missing", "rms"};
+	Node other = document.Nodes.back();
+	other.Id = "other";
+	other.SourceSeparatedVec2Animators->Inputs.front().Separated = false;
+	document.Nodes.push_back(std::move(other));
+	const GroupSubtypeBinding bindings[] = {
+		{"alias", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"},
+		{"other", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"}
+	};
+	GroupReplayState replay;
+	BindMatrixGetAlias(document, bindings, replay);
+	CHECK(EvaluateCell(document, 10, replay) == Value{13.0});
+}
+
+TEST_CASE(
+	"Timeline extension samples an overridden combined Vec2 without losing prior samples",
+	"[mirror_axes][timeline_overrides]"
+) {
+	auto document = MatrixGetAlias(true, false);
+	auto &writer = document.Nodes.front();
+	writer.Values.push_back({"ignore_invalid", false});
+	writer.SourceAnimatedInputs.push_back("ignore_invalid");
+	Keyframe priorKey{"get", "ignore_invalid", 0, .25, "source", KeyframeEase{}};
+	priorKey.SourceDriver = KeyframeLinearDriver{.125};
+	document.Keyframes.push_back(priorKey);
+	const GroupSubtypeBinding binding{
+		"alias", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"
+	};
+	GroupReplayState replay;
+	BindMatrixGetAlias(document, std::span{&binding, 1}, replay);
+	EvaluationRequest request;
+	request.Tick = 10;
+	request.GroupReplay = &replay;
+	request.GroupAuthoringRevision = 1;
+	const std::array<uint8_t, 2> ownerOnly{1, 0}, ownerAndAlias{1, 1};
+	uint64_t peak = 0;
+	for (size_t attempt = 0; attempt < 3; ++attempt) {
+		const uint64_t limit = attempt == 0 ? Limits::MaximumEvaluationBytes : attempt == 1 ? peak - 1 : peak;
+		detail::EvaluationBudget budget(limit);
+		detail::TimelineOverrides result;
+		Diagnostic diagnostic;
+		REQUIRE(
+			detail::ResolveTimelineOverrides(
+				document, ownerOnly, request, budget, result, diagnostic, {}, false, ownerOnly
+			) == Status::Ok
+		);
+		REQUIRE(result.Nodes.size() == 1);
+		const auto retained = result.Nodes.front().Authored;
+		const auto retainedCharge = result.Charge.Bytes();
+		const auto retainedObservation = result.Observation;
+		const auto status = detail::ExtendTimelineOverrides(
+			document, ownerAndAlias, request, budget, result, diagnostic, false, ownerAndAlias
+		);
+		INFO(diagnostic.NodeId << ':' << diagnostic.Port << ':' << diagnostic.Message);
+		if (attempt == 1) {
+			CHECK(status == Status::LimitExceeded);
+			REQUIRE(result.Nodes.size() == 1);
+			CHECK(result.Nodes.front().Authored == retained);
+			CHECK(result.Charge.Bytes() == retainedCharge);
+			CHECK(result.Observation == retainedObservation);
+			CHECK(budget.Used() == retainedCharge);
+		} else {
+			REQUIRE(status == Status::Ok);
+			REQUIRE(result.Nodes.size() == 1);
+			const auto &sampled = result.Nodes.front();
+			CHECK(sampled.NodeIndex == 0);
+			CHECK(
+				std::find(sampled.SampledPorts.begin(), sampled.SampledPorts.end(), "ignore_invalid") !=
+				sampled.SampledPorts.end()
+			);
+			CHECK(
+				std::find(sampled.SampledPorts.begin(), sampled.SampledPorts.end(), "position") !=
+				sampled.SampledPorts.end()
+			);
+			const auto value = [&](std::string_view port) -> const Value * {
+				const auto found = std::find_if(
+					sampled.Authored.Values.begin(), sampled.Authored.Values.end(), [&](const auto &item) {
+						return item.Port == port;
+					}
+				);
+				return found == sampled.Authored.Values.end() ? nullptr : &found->Data;
+			};
+			REQUIRE(value("ignore_invalid"));
+			const auto priorValue =
+				std::find_if(retained.Values.begin(), retained.Values.end(), [](const auto &item) {
+					return item.Port == "ignore_invalid";
+				});
+			REQUIRE(priorValue != retained.Values.end());
+			CHECK(*value("ignore_invalid") == priorValue->Data);
+			REQUIRE(value("position"));
+			CHECK(*value("position") == Value{Vector2{1, 0}});
+			CHECK(budget.Used() == result.Charge.Bytes());
+			if (attempt == 0) peak = budget.Peak();
+			CHECK(budget.Peak() == peak);
+		}
+	}
 }

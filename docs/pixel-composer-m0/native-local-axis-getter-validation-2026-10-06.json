@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "Independent X/Y getter modes over original shared animator storage and bounded late admission of combined timeline properties.",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "verified_source_scripts": [
+    {
+      "path": "scripts/node_group/node_group.gml",
+      "bytes": 5083,
+      "sha256": "12bcf43c0bfcb6d84ea8c788c4ff84bae4f805d1290ede309222f2cd03bbb019",
+      "git_blob_sha1": "b180d800ed992381c99f92c5c222cf1a9d78718d",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/node_value/node_value.gml",
+      "bytes": 111774,
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125",
+      "manifest_match": true
+    }
+  ],
+  "source_contract": [
+    "node_group.setInstance borrows animator and animators without copying sep_axis.",
+    "An overridden input uses its own separation flag; a nonoverridden input delegates through its instance chain.",
+    "Borrowed key storage does not activate an independent getter on the original writer."
+  ],
+  "native_checks": [
+    "Opposite local/writer separation modes select combined tuples or borrowed scalar axes.",
+    "A nonoverridden instance delegates the separation choice to its base.",
+    "A selected split getter leaves the original combined single-key audio driver dormant even when an unrelated combined alias exists.",
+    "Later combined getter admission adds a previously unsampled writer port without discarding prior driven values.",
+    "Peak-minus-one byte refusal preserves prior samples, charge and observation; exact peak succeeds."
+  ],
+  "builds": {
+    "initial": "local-axis-build1.log",
+    "initial_result": "Failed: work admission guard was placed in the animation-mode helper; corrected into getter-chain helper.",
+    "final": "local-axis-build4.log",
+    "final_exit_code": 0
+  },
+  "initial_batch": {
+    "results": "local-axis-batch1-results.json",
+    "failures": "Three new fixture assertions failed because writer axes were still animated. Corrected them to constant zero; strengthened dormant-driver case to one key."
+  },
+  "final_batch": {
+    "results": "local-axis-batch2-results.json",
+    "checks": 20,
+    "all_passed": true,
+    "native_cpu_cases": 4978,
+    "render_cases": 15,
+    "startup_cases": 1,
+    "binary_hashes_stable": true,
+    "child_binary_hashes_stable": true,
+    "child_hashes": "local-axis-child-hashes-batch2.json",
+    "network_cases_excluded": 21
+  },
+  "limits": [
+    "Mixed separation mode authoring, separate/combine controls and retained getter provenance after physical input removal remain unfinished.",
+    "No licensed GameMaker runner comparison or live Studio verification was performed.",
+    "This pass does not establish full Composer acceptance."
+  ],
+  "commit": "The filesystem refuses .git/index.lock; owned patch retained without staging other workspace edits."
+}

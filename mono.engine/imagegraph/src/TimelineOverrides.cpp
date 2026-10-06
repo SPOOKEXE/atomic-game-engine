@@ -91,10 +91,16 @@ namespace engine::imagegraph::detail {
 		TimelineOverrides &result,
 		Diagnostic &diagnostic,
 		std::string_view port,
-		bool rawSourceQuaternion
+		bool rawSourceQuaternion,
+		std::span<const uint8_t> getters,
+		std::span<const SourceFrameCacheInputReads> getterReads,
+		const TimelineOverrides *previous
 	) try {
 		ENGINE_PROFILE("imagegraph.timeline");
-		if (needed.size() != document.Nodes.size() || !ValidFrameTime(GetFrameTime(request))) {
+		if (needed.size() != document.Nodes.size() ||
+			(!getters.empty() && getters.size() != document.Nodes.size()) ||
+			(!getterReads.empty() && getterReads.size() != document.Nodes.size()) ||
+			!ValidFrameTime(GetFrameTime(request))) {
 			SetDiagnostic(
 				diagnostic,
 				Status::InvalidValue,
@@ -123,6 +129,87 @@ namespace engine::imagegraph::detail {
 			diagnostic = {};
 			return Status::Ok;
 		}
+		using SourceWriter = std::pair<std::string_view, std::string_view>;
+		auto combinedWriters = MakeEvaluationMap<SourceWriter, bool>(budget);
+		uint64_t sourceGetterWork = 0;
+		const auto consumers = getters.empty() ? needed : getters;
+		const auto admitGetterWork = [&](uint64_t count) {
+			if (count > 64'000'000 - sourceGetterWork) {
+				SetDiagnostic(
+					diagnostic, Status::LimitExceeded, "source getter selection exceeds work bounds"
+				);
+				return false;
+			}
+			sourceGetterWork += count;
+			return true;
+		};
+		for (size_t index = 0; index < document.Nodes.size(); ++index) {
+			if (!consumers[index]) continue;
+			const auto &consumer = document.Nodes[index];
+			const auto selectWriter = [&](std::string_view port) {
+				if (!getterReads.empty() && !SourceFrameCacheReadsPort(getterReads[index], port)) return true;
+				const auto *getter = SourcePropertyGetterNode(document, consumer, port, &sourceGetterWork);
+				if (!getter) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"source getter chain exceeds work bounds",
+						consumer.Id,
+						port
+					);
+					return false;
+				}
+				if (!admitGetterWork(
+						document.Links.size() +
+						(getter->SourceSeparatedVec2Animators
+							 ? getter->SourceSeparatedVec2Animators->Inputs.size()
+							 : 0) +
+						(request.GroupReplay ? request.GroupReplay->Bindings().size() +
+												   request.GroupReplay->SharedSubtypes().size()
+											 : 0)
+					))
+					return false;
+				if (std::any_of(document.Links.begin(), document.Links.end(), [&](const auto &link) {
+						return link.ToNode == getter->Id && link.ToPort == port;
+					}))
+					return true;
+				const auto *overlay =
+					request.GroupReplay ? request.GroupReplay->SharedSubtype(getter->Id, port) : nullptr;
+				const auto *axes = overlay && overlay->SeparatedVec2 ? &*overlay->SeparatedVec2
+																	 : FindSeparatedVec2(*getter, port);
+				if (axes && axes->Separated) return true;
+				const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
+										  ? request.GroupReplay->Binding(consumer.Id, port)
+										  : nullptr;
+				const bool shared = binding && !InheritedMovedSourceGetter(consumer, port, binding);
+				const SourceWriter writer =
+					shared ? SourceWriter{binding->OwnerId, BindingAnimatorPort(*binding)}
+						   : SourceWriter{getter->Id, port};
+				combinedWriters.emplace(writer, true);
+				return true;
+			};
+			const auto *entry = FindCatalogueEntry(consumer.Type);
+			if (entry)
+				for (const auto &input : entry->Inputs)
+					if (SourceSeparatedVec2Input(consumer, input.Id) && !selectWriter(input.Id))
+						return diagnostic.Code;
+			for (const auto &input : consumer.DynamicInputs)
+				if (SourceSeparatedVec2Input(consumer, input.Id) && !selectWriter(input.Id))
+					return diagnostic.Code;
+			if (request.GroupReplay) {
+				if (!admitGetterWork(request.GroupReplay->Bindings().size())) return diagnostic.Code;
+				for (const auto &binding : request.GroupReplay->Bindings())
+					if (binding.NodeId == consumer.Id && !selectWriter(binding.Port)) return diagnostic.Code;
+			}
+		}
+		const auto alreadySampled = [&](const Keyframe &key) {
+			if (!previous) return false;
+			for (const auto &node : previous->Nodes)
+				if (node.Authored.Id == key.NodeId)
+					return std::find(node.SampledPorts.begin(), node.SampledPorts.end(), key.Port) !=
+						   node.SampledPorts.end();
+			return false;
+		};
 		const auto staticSourceKey = [&](const Keyframe &key) {
 			const auto node =
 				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
@@ -133,7 +220,7 @@ namespace engine::imagegraph::detail {
 				request.GroupReplay ? request.GroupReplay->SharedSubtype(node->Id, key.Port) : nullptr;
 			const auto *axes = axisOverlay && axisOverlay->SeparatedVec2 ? &*axisOverlay->SeparatedVec2
 																		 : FindSeparatedVec2(*node, key.Port);
-			if (axes && axes->Separated) return true;
+			if (axes && !combinedWriters.contains({key.NodeId, key.Port})) return true;
 			const auto mirrorMode =
 				SourceMirrorGetterAnimated(document, *node, key.Port, request.GroupReplay);
 			if (mirrorMode && !*mirrorMode) return true;
@@ -185,7 +272,7 @@ namespace engine::imagegraph::detail {
 		};
 		const auto suppressed = [&](const Keyframe &key) {
 			// Source Trigger maps own key positions. Sampling boolean easing here preempts that getter.
-			if (staticSourceKey(key) || sourceTriggerKey(key)) return true;
+			if (alreadySampled(key) || staticSourceKey(key) || sourceTriggerKey(key)) return true;
 			if (request.GroupReplay && request.GroupReplay->Binding(key.NodeId, key.Port)) return true;
 			const auto *entry = request.GroupReplay ? request.GroupReplay->Find(key.NodeId) : nullptr;
 			const auto *shared =
@@ -200,14 +287,17 @@ namespace engine::imagegraph::detail {
 			for (const auto &overlay : request.GroupReplay->SharedSubtypes())
 				if (!overlay.Fixed)
 					for (const auto &key : overlay.Keys)
-						if (!staticSourceKey(key) && !sourceTriggerKey(key)) visit(key);
+						if (!alreadySampled(key) && !staticSourceKey(key) && !sourceTriggerKey(key))
+							visit(key);
 			for (const auto &entry : request.GroupReplay->Entries()) {
 				if (!entry.SubtypeStatic)
 					for (const auto &key : entry.SubtypeKeys)
-						if (!staticSourceKey(key) && !sourceTriggerKey(key)) visit(key);
+						if (!alreadySampled(key) && !staticSourceKey(key) && !sourceTriggerKey(key))
+							visit(key);
 				if (!entry.ParentReset)
 					for (const auto &key : entry.ParentKeys)
-						if (!staticSourceKey(key) && !sourceTriggerKey(key)) visit(key);
+						if (!alreadySampled(key) && !staticSourceKey(key) && !sourceTriggerKey(key))
+							visit(key);
 			}
 		};
 		size_t extraKeys = 0;
@@ -292,7 +382,8 @@ namespace engine::imagegraph::detail {
 				++nodeCount;
 				previousIndex = property.first;
 			}
-		uint64_t cloneBytes = nodeCount * sizeof(TimelineNodeOverride);
+		uint64_t cloneBytes =
+			nodeCount * sizeof(TimelineNodeOverride) + tracks.size() * sizeof(std::string_view);
 		const auto add = [&](uint64_t bytes) {
 			if (bytes > budget.Available() || cloneBytes > budget.Available() - bytes) return false;
 			cloneBytes += bytes;
@@ -366,10 +457,11 @@ namespace engine::imagegraph::detail {
 			if (property.first == previousIndex) continue;
 			previousIndex = property.first;
 			const Node &original = document.Nodes[property.first];
-			size_t fresh = 0;
+			size_t fresh = 0, sampledPortCount = 0;
 			for (auto iterator = tracks.lower_bound({property.first, {}});
 				 iterator != tracks.end() && iterator->first.first == property.first;
 				 ++iterator) {
+				++sampledPortCount;
 				const auto &other = iterator->first;
 				const bool dynamic = std::any_of(
 					original.DynamicInputs.begin(), original.DynamicInputs.end(), [&](const auto &input) {
@@ -400,9 +492,17 @@ namespace engine::imagegraph::detail {
 				copy.Values.push_back(value);
 			for (const auto &input : original.DynamicInputs)
 				copy.DynamicInputs.push_back(input);
-			candidate.Nodes.push_back({property.first, std::move(copy)});
+			candidate.Nodes.push_back({property.first, std::move(copy), {}});
+			candidate.Nodes.back().SampledPorts.reserve(sampledPortCount);
 		}
 		for (auto &[property, track] : tracks) {
+			const auto sampledNode = std::lower_bound(
+				candidate.Nodes.begin(),
+				candidate.Nodes.end(),
+				property.first,
+				[](const auto &item, size_t index) { return item.NodeIndex < index; }
+			);
+			sampledNode->SampledPorts.push_back(property.second);
 			auto &keys = track.second;
 			Node &sampled = std::lower_bound(
 								candidate.Nodes.begin(),
@@ -1017,11 +1117,15 @@ namespace engine::imagegraph::detail {
 		EvaluationBudget &budget,
 		TimelineOverrides &result,
 		Diagnostic &diagnostic,
-		bool rawSourceQuaternion
+		bool rawSourceQuaternion,
+		std::span<const uint8_t> getters,
+		std::span<const SourceFrameCacheInputReads> getterReads
 	) try {
 		ENGINE_PROFILE("imagegraph.timeline.extend");
 		const auto clock = GetFrameTime(request);
-		if (needed.size() != document.Nodes.size() || !ValidFrameTime(clock) ||
+		if (needed.size() != document.Nodes.size() ||
+			(!getters.empty() && getters.size() != document.Nodes.size()) ||
+			(!getterReads.empty() && getterReads.size() != document.Nodes.size()) || !ValidFrameTime(clock) ||
 			(result.Observation && *result.Observation != clock) ||
 			(!result.Nodes.empty() && !result.Observation)) {
 			SetDiagnostic(diagnostic, Status::InvalidValue, "timeline extension needs the same observation");
@@ -1038,7 +1142,7 @@ namespace engine::imagegraph::detail {
 				return diagnostic.Code;
 			}
 			previous = node.NodeIndex;
-			fresh[node.NodeIndex] = 0;
+			if (getters.empty()) fresh[node.NodeIndex] = 0;
 		}
 		if (std::none_of(fresh.begin(), fresh.end(), [](uint8_t value) { return value != 0; })) {
 			diagnostic = {};
@@ -1046,7 +1150,17 @@ namespace engine::imagegraph::detail {
 		}
 		TimelineOverrides additions;
 		const auto status = ResolveTimelineOverrides(
-			document, fresh, request, budget, additions, diagnostic, {}, rawSourceQuaternion
+			document,
+			fresh,
+			request,
+			budget,
+			additions,
+			diagnostic,
+			{},
+			rawSourceQuaternion,
+			getters,
+			getterReads,
+			&result
 		);
 		if (status != Status::Ok) return status;
 		if (additions.Nodes.empty()) {
@@ -1055,14 +1169,38 @@ namespace engine::imagegraph::detail {
 		}
 		const uint64_t oldTables =
 			(result.Nodes.size() + additions.Nodes.size()) * sizeof(TimelineNodeOverride);
-		auto combinedCharge = budget.Reserve(oldTables);
+		uint64_t mergeBytes = 0;
+		for (auto &addition : additions.Nodes) {
+			const auto old = std::lower_bound(
+				result.Nodes.begin(),
+				result.Nodes.end(),
+				addition.NodeIndex,
+				[](const auto &item, size_t index) { return item.NodeIndex < index; }
+			);
+			if (old == result.Nodes.end() || old->NodeIndex != addition.NodeIndex) continue;
+			mergeBytes +=
+				(old->Authored.Values.size() + addition.Authored.Values.size()) * sizeof(AuthoredValue) +
+				(old->SampledPorts.size() + addition.SampledPorts.size()) * sizeof(std::string_view);
+		}
+		auto combinedCharge = budget.Reserve(oldTables + mergeBytes);
 		if (!combinedCharge) {
 			SetDiagnostic(diagnostic, Status::LimitExceeded, "timeline extension table exceeds live bytes");
 			return diagnostic.Code;
 		}
 		std::vector<TimelineNodeOverride> combined;
 		combined.reserve(result.Nodes.size() + additions.Nodes.size());
-		// All allocations finish before moving payload ownership. No sampled node is replaced.
+		for (auto &addition : additions.Nodes) {
+			const auto old = std::lower_bound(
+				result.Nodes.begin(),
+				result.Nodes.end(),
+				addition.NodeIndex,
+				[](const auto &item, size_t index) { return item.NodeIndex < index; }
+			);
+			if (old == result.Nodes.end() || old->NodeIndex != addition.NodeIndex) continue;
+			addition.Authored.Values.reserve(old->Authored.Values.size() + addition.Authored.Values.size());
+			addition.SampledPorts.reserve(old->SampledPorts.size() + addition.SampledPorts.size());
+		}
+		// finish all allocations before moving earlier samples into the merged node.
 		static_assert(std::is_nothrow_move_constructible_v<TimelineNodeOverride>);
 		if (!combinedCharge->Merge(std::move(result.Charge))) {
 			SetDiagnostic(diagnostic, Status::InvalidValue, "timeline extension uses another byte ledger");
@@ -1074,8 +1212,41 @@ namespace engine::imagegraph::detail {
 			if (added == additions.Nodes.end() ||
 				(old != result.Nodes.end() && old->NodeIndex < added->NodeIndex))
 				combined.push_back(std::move(*old++));
-			else
+			else if (old == result.Nodes.end() || added->NodeIndex < old->NodeIndex)
 				combined.push_back(std::move(*added++));
+			else {
+				const auto newlySampled = [&](std::string_view port) {
+					return std::find(added->SampledPorts.begin(), added->SampledPorts.end(), port) !=
+						   added->SampledPorts.end();
+				};
+				for (auto &value : old->Authored.Values) {
+					if (newlySampled(value.Port)) continue;
+					const auto destination = std::find_if(
+						added->Authored.Values.begin(), added->Authored.Values.end(), [&](const auto &item) {
+							return item.Port == value.Port;
+						}
+					);
+					if (destination == added->Authored.Values.end())
+						added->Authored.Values.push_back(std::move(value));
+					else
+						destination->Data = std::move(value.Data);
+				}
+				for (auto &input : old->Authored.DynamicInputs) {
+					if (newlySampled(input.Id)) continue;
+					const auto destination = std::find_if(
+						added->Authored.DynamicInputs.begin(),
+						added->Authored.DynamicInputs.end(),
+						[&](const auto &item) { return item.Id == input.Id; }
+					);
+					if (destination != added->Authored.DynamicInputs.end())
+						destination->Default = std::move(input.Default);
+				}
+				added->SampledPorts.insert(
+					added->SampledPorts.end(), old->SampledPorts.begin(), old->SampledPorts.end()
+				);
+				combined.push_back(std::move(*added++));
+				++old;
+			}
 		}
 		result.Nodes.swap(combined);
 		std::vector<TimelineNodeOverride>().swap(combined);

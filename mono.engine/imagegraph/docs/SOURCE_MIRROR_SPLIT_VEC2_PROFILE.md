@@ -10,9 +10,17 @@ Each input owns its original X/Y scalar key lists. Shared property flags, end
 mode and loop range stay on the existing input and animation track. Dormant
 unsplit tuples and keys remain authored and survive saves unchanged.
 
-retained axis storage carries its own `Separated` flag. when false, ordinary
-Vec2 keys supply values and receive mode changes and group edits. inactive scalar
-keys still count toward bounds and survive projection, native saves and PXC edits.
+retained axis storage carries the property's `Separated` flag. an overridden
+instance chooses its own flag and borrows the original writer's key lists.
+without an override, the getter delegates the choice through its instance chain.
+a missing local flag means combined mode. the writer's flag does not prevent an
+independent split getter from reading its stored axes. inactive scalar keys still
+count toward bounds and survive projection, native saves and PXC edits.
+
+only admitted getters choose whether timeline sampling needs a combined track.
+a storage owner borrowed by a split getter does not activate its combined driver.
+late getter admission adds previously unsampled ports while preserving earlier
+samples under the same live byte budget.
 
 unlinked raw axes are sampled before PCX expressions. linked producers retain
 priority. consumer processing follows raw sampling; inactive combined drivers
@@ -74,7 +82,8 @@ the requested axes rather than retaining a sampled vector as authored state.
 Missing animation flags preserve static values. Explicit source animation
 enables sampled axis changes; both modes have literal client pixel fixtures.
 
-separate/combine authoring controls are still unfinished. this flag preserves
+mixed-mode instance authoring and separate/combine controls are still unfinished.
+this flag preserves
 the source storage distinction needed by those controls. generic Vector, dynamic
 HLSL property kinds and source constructors with unresolved defaults still need
 separate source-backed handling.
