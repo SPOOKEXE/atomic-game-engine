@@ -1,4 +1,6 @@
 #include <engine/bake/ComposerModel.hpp>
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/imagegraphexport/GraphMeshHost.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
 
@@ -14,6 +16,7 @@
 #include <iomanip>
 #include <locale>
 #include <sstream>
+#include <unordered_map>
 
 namespace engine::imagegraphexport {
 	namespace {
@@ -42,18 +45,39 @@ namespace engine::imagegraphexport {
 		bool Finite(glm::dvec3 value) {
 			return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 		}
-		HostNodeCapture Bind(const HostNodeInvocation &invocation) {
-			HostNodeCapture capture;
-			capture.Authored = invocation.Authored;
-			capture.Tick = invocation.Request.Tick;
-			capture.Subframe = invocation.Request.Subframe;
-			capture.NegativeFrame = invocation.Request.NegativeFrame;
-			capture.Inputs.assign(invocation.Inputs.begin(), invocation.Inputs.end());
-			for (const auto &image : invocation.Images)
-				if (image.Data)
-					capture.InputImages.push_back({std::string(image.Port), SurfaceHash(*image.Data)});
-			return capture;
-		}
+		struct ObjIndexBudget {
+			uint64_t Maximum = 0, Used = 4096;
+			bool Spend(uint64_t bytes) {
+				if (Used > Maximum || bytes > Maximum - Used) return false;
+				Used += bytes;
+				return true;
+			}
+		};
+		struct ObjIndices {
+			std::unordered_map<std::string, uint32_t> Records;
+			bool Reserve(size_t count, ObjIndexBudget &budget) {
+				// grug reserve the bounded buckets before inserting first-seen source records.
+				const uint64_t quote = (2 * uint64_t{count} + 8) * 4 * sizeof(void *);
+				if (!budget.Spend(quote)) return false;
+				Records.reserve(count);
+				return Records.bucket_count() <= 2 * count + 8;
+			}
+			bool Intern(std::string record, ObjIndexBudget &budget, uint32_t &index, bool &added) {
+				const auto found = Records.find(record);
+				if (found != Records.end()) {
+					index = found->second;
+					added = false;
+					return true;
+				}
+				// grug charge key capacity and node links beside the already reserved bucket table.
+				const uint64_t node = sizeof(decltype(Records)::value_type) + 4 * sizeof(void *);
+				if (!budget.Spend(record.capacity() + 1 + node)) return false;
+				index = static_cast<uint32_t>(Records.size() + 1);
+				Records.emplace(std::move(record), index);
+				added = true;
+				return true;
+			}
+		};
 		bool Import(
 			const HostNodeInvocation &invocation,
 			const GraphFileGrant &grant,
@@ -179,42 +203,59 @@ namespace engine::imagegraphexport {
 				}
 				staged.push_back(path);
 			}
+			std::vector<std::filesystem::path> backups;
+			backups.reserve(files.size());
+			for (size_t index = 0; index < files.size(); index++)
+				backups.push_back(directory / ("previous" + std::to_string(index)));
 			std::vector<bool> backed(files.size(), false), published(files.size(), false);
-			const auto restore = [&] {
+			// grug prepare paths before first rename and restore on every failed exit.
+			const auto restore = [&]() noexcept {
+				bool failed = false;
 				for (size_t index = files.size(); index > 0; index--) {
 					const auto i = index - 1;
-					std::error_code rollback;
-					if (published[i]) std::filesystem::remove(files[i].Target, rollback);
-					if (backed[i])
-						std::filesystem::rename(
-							directory / ("previous" + std::to_string(i)), files[i].Target, rollback
-						);
-					if (rollback) {
-						failure += "; prior export recovery remains at " + directory.string();
-						cleanup.Path.clear();
+					try {
+						std::error_code rollback;
+						if (published[i]) {
+							std::filesystem::remove(files[i].Target, rollback);
+							failed |= bool(rollback);
+						}
+						if (backed[i]) {
+							std::filesystem::rename(backups[i], files[i].Target, rollback);
+							failed |= bool(rollback);
+						}
+					} catch (...) {
+						failed = true;
 					}
 				}
+				if (failed) {
+					cleanup.Path.clear();
+					try {
+						failure += "; prior export recovery remains at " + directory.string();
+					} catch (...) {}
+				}
 			};
+			struct Rollback {
+				const decltype(restore) &Restore;
+				bool Active = true;
+				~Rollback() {
+					if (Active) Restore();
+				}
+			} rollback{restore};
 			for (size_t index = 0; index < files.size(); index++) {
 				const auto status = std::filesystem::symlink_status(files[index].Target, error);
 				if (error && error != std::errc::no_such_file_or_directory) {
 					failure = "mesh host: cannot inspect prior export target";
-					restore();
 					return false;
 				}
 				error.clear();
 				if (std::filesystem::exists(status)) {
 					if (status.type() != std::filesystem::file_type::regular) {
 						failure = "mesh host: prior export target is not a regular file";
-						restore();
 						return false;
 					}
-					std::filesystem::rename(
-						files[index].Target, directory / ("previous" + std::to_string(index)), error
-					);
+					std::filesystem::rename(files[index].Target, backups[index], error);
 					if (error) {
 						failure = "mesh host: cannot stage prior export target";
-						restore();
 						return false;
 					}
 					backed[index] = true;
@@ -222,14 +263,15 @@ namespace engine::imagegraphexport {
 				std::filesystem::rename(staged[index], files[index].Target, error);
 				if (error) {
 					failure = "mesh host: cannot publish complete export set";
-					restore();
 					return false;
 				}
 				published[index] = true;
 			}
+			rollback.Active = false;
 			return true;
 		}
 		bool Export(const HostNodeInvocation &invocation, const GraphFileGrant &grant, std::string &failure) {
+			ENGINE_PROFILE("imagegraphexport.mesh.obj");
 			const auto *mesh = Get<MeshValue3D>(invocation, "mesh");
 			const auto *textures = Get<bool>(invocation, "export_texture"),
 					   *invertUv = Get<bool>(invocation, "invert_uv"),
@@ -264,6 +306,13 @@ namespace engine::imagegraphexport {
 			// Fixed-point double text may need hundreds of digits per component.
 			if (boundedVertices > invocation.MaximumOperationBytes / 4096)
 				return Fail(failure, "export text working set exceeds its operation budget");
+			if (!boundedVertices) return Fail(failure, "export mesh has no triangles");
+			ObjIndexBudget indexBudget{invocation.MaximumOperationBytes / 4};
+			ObjIndices positions, normals, coordinates;
+			if (!positions.Reserve(boundedVertices, indexBudget) ||
+				!normals.Reserve(boundedVertices, indexBudget) ||
+				!coordinates.Reserve(boundedVertices, indexBudget))
+				return Fail(failure, "OBJ index storage exceeds its operation budget");
 			std::ostringstream obj, mtl;
 			obj.imbue(std::locale::classic());
 			obj << std::fixed << std::setprecision(5);
@@ -300,7 +349,9 @@ namespace engine::imagegraphexport {
 						mtl << "map_Kd " << path.filename().string() << "\n";
 					}
 				}
-				for (const auto &vertex : part.Vertices) {
+				std::array<std::array<uint32_t, 3>, 3> corners{};
+				for (size_t vertexIndex = 0; vertexIndex < part.Vertices.size(); ++vertexIndex) {
+					const auto &vertex = part.Vertices[vertexIndex];
 					auto p = Point(vertex.Position), n = Point(vertex.Normal);
 					if (*apply) {
 						p = rotation * ((p - anchor) * scale) + position;
@@ -313,24 +364,59 @@ namespace engine::imagegraphexport {
 					if (!Finite(p) || !Finite(n) || !std::isfinite(vertex.UV.X) ||
 						!std::isfinite(vertex.UV.Y))
 						return Fail(failure, "export vertex is not finite");
-					obj << "v " << p.x << ' ' << p.y << ' ' << p.z << "\n"
-						<< "vn " << n.x << ' ' << n.y << ' ' << n.z << "\n"
-						<< "vt " << vertex.UV.X << ' ' << (*invertUv ? 1 - vertex.UV.Y : vertex.UV.Y) << "\n";
-				}
-				for (size_t index = 0; index < part.Vertices.size(); index += 3) {
-					obj << "f";
-					for (size_t corner = 0; corner < 3; corner++) {
-						const auto id = vertexCount + index + corner + 1;
-						obj << ' ' << id << '/' << id << '/' << id;
+					auto &indices = corners[vertexIndex % 3];
+					const auto emit = [&](ObjIndices &table, std::string record, uint32_t &index) {
+						if (record.size() > 1024) return false;
+						bool added = false;
+						if (!table.Intern(record, indexBudget, index, added)) return false;
+						if (added) {
+							const uint64_t textBytes =
+								static_cast<uint64_t>(obj.tellp()) + static_cast<uint64_t>(mtl.tellp());
+							if (textBytes > invocation.MaximumOperationBytes / 4 ||
+								record.size() + 1 > invocation.MaximumOperationBytes / 4 - textBytes)
+								return false;
+							obj << record << '\n';
+						}
+						return true;
+					};
+					std::ostringstream record;
+					record.imbue(std::locale::classic());
+					record << std::fixed << std::setprecision(5);
+					record << "v " << p.x << ' ' << p.y << ' ' << p.z;
+					if (!emit(positions, record.str(), indices[0]))
+						return Fail(failure, "OBJ position records exceed byte budget");
+					record.str({});
+					record << "vn " << n.x << ' ' << n.y << ' ' << n.z;
+					if (!emit(normals, record.str(), indices[2]))
+						return Fail(failure, "OBJ normal records exceed byte budget");
+					record.str({});
+					record << "vt " << vertex.UV.X << ' ' << (*invertUv ? 1 - vertex.UV.Y : vertex.UV.Y);
+					if (!emit(coordinates, record.str(), indices[1]))
+						return Fail(failure, "OBJ UV records exceed byte budget");
+					if (vertexIndex % 3 == 2) {
+						const uint64_t textBytes =
+							static_cast<uint64_t>(obj.tellp()) + static_cast<uint64_t>(mtl.tellp());
+						if (textBytes > invocation.MaximumOperationBytes / 4 ||
+							64 > invocation.MaximumOperationBytes / 4 - textBytes)
+							return Fail(failure, "OBJ face records exceed byte budget");
+						obj << "f";
+						for (const auto &corner : corners)
+							obj << ' ' << corner[0] << '/' << corner[1] << '/' << corner[2];
+						obj << '\n';
 					}
-					obj << "\n";
 				}
 				vertexCount += part.Vertices.size();
 				if (static_cast<uint64_t>(obj.tellp()) + static_cast<uint64_t>(mtl.tellp()) >
 					invocation.MaximumOperationBytes / 4)
 					return Fail(failure, "serialized mesh exceeds its byte budget");
 			}
-			if (!vertexCount) return Fail(failure, "export mesh has no triangles");
+			core::Metrics::Count("imagegraphexport.mesh.obj_vertices", vertexCount);
+			core::Metrics::Count("imagegraphexport.mesh.obj_positions", positions.Records.size());
+			core::Metrics::Count("imagegraphexport.mesh.obj_normals", normals.Records.size());
+			core::Metrics::Count("imagegraphexport.mesh.obj_uvs", coordinates.Records.size());
+			core::Metrics::Count(
+				"imagegraphexport.mesh.obj_payload_bytes", static_cast<uint64_t>(obj.tellp())
+			);
 			files.push_back({base, obj.str(), nullptr});
 			if (*textures) files.push_back({mtlPath, mtl.str(), nullptr});
 			return Publish(files, failure);
@@ -342,7 +428,8 @@ namespace engine::imagegraphexport {
 		const HostNodeInvocation &invocation,
 		HostNodeCapture &output,
 		std::string &failure
-	) {
+	) try {
+		ENGINE_PROFILE("imagegraphexport.mesh.capture");
 		const auto &type = invocation.Authored.Type;
 		const bool write = type == "pc.3_d_mesh_export";
 		if (!write && type != "pc.3_d_mesh_obj" && type != "pc.3_d_mesh_json")
@@ -357,10 +444,29 @@ namespace engine::imagegraphexport {
 		if (!path || !grant || *path != grant->File.string() || write != grant->Write ||
 			!policy.AllowsName(*path))
 			return Fail(failure, "model requires an exact node, path and operation grant");
-		auto capture = Bind(invocation);
-		if (!(write ? Export(invocation, *grant, failure) : Import(invocation, *grant, capture, failure)))
+		const uint64_t maximum = std::min(invocation.MaximumOperationBytes, Limits::MaximumEvaluationBytes);
+		const auto prior = HostCaptureRetainedPayloadBytes(output);
+		if (!prior || *prior > maximum) return Fail(failure, "prior model receipt exceeds operation budget");
+		HostNodeCapture capture;
+		uint64_t retained = 0;
+		Diagnostic diagnostic;
+		if (PrepareResolvedHostCapture(invocation, maximum - *prior, capture, retained, diagnostic) !=
+			Status::Ok)
+			return Fail(failure, diagnostic.Message);
+		auto operation = invocation;
+		if (retained > (maximum - *prior) / 2)
+			return Fail(failure, "model receipt coexistence exceeds operation budget");
+		// grug keep borrowed controls, admitted receipt and prior receipt outside encoding workspace.
+		operation.MaximumOperationBytes = maximum - *prior - 2 * retained;
+		if (!(write ? Export(operation, *grant, failure) : Import(operation, *grant, capture, failure)))
 			return false;
 		output = std::move(capture);
 		return true;
+	} catch (const std::bad_alloc &) {
+		if (failure.find("; prior export recovery remains at ") != std::string::npos) return false;
+		return Fail(failure, "model allocation failed");
+	} catch (const std::length_error &) {
+		if (failure.find("; prior export recovery remains at ") != std::string::npos) return false;
+		return Fail(failure, "model allocation exceeds length bound");
 	}
 }

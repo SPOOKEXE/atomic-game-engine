@@ -1,0 +1,286 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug share native OBJ position, normal and UV indices independently across mesh parts. licensed byte parity remains unverified.",
+  "contract": {
+    "pixel_composer_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source": "https://github.com/Ttanasart-pt/Pixel-Composer/blob/b69eca232217360cf1502ef0223523d818606652/scripts/node_3d_mesh_export/node_3d_mesh_export.gml",
+    "source_lines": {
+      "formatted_keys": [
+        152,
+        154
+      ],
+      "independent_indices": [
+        158,
+        192
+      ],
+      "global_maps": [
+        248,
+        250
+      ]
+    },
+    "native_vertex_limit": 65536,
+    "formatted_decimal_places": 5
+  },
+  "behavior": [
+    "grug reuse first-seen formatted positions, normals and UVs independently across parts",
+    "grug merge five-decimal collisions while keeping UV and normal seams",
+    "grug retain source transform, axis and UV control order",
+    "grug bound index buckets, keys and nodes before growth",
+    "grug admit receipt storage before encoding and include anonymous prior receipts",
+    "grug prepare backup paths before publishing and restore on failed exits; retain recovery files if restore fails"
+  ],
+  "iterations": [
+    {
+      "stage": "build1",
+      "exit_code": 0
+    },
+    {
+      "stage": "joined batch1",
+      "passed_checks": 19,
+      "failed_check": "export",
+      "exit_code": 42,
+      "failed_cases": 4,
+      "failed_assertions": 11
+    },
+    {
+      "stage": "build2",
+      "exit_code": 0
+    },
+    {
+      "stage": "joined batch2",
+      "passed_checks": 20,
+      "failed_checks": []
+    }
+  ],
+  "checks": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-bake-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.283,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-physics-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "55c7bd3496681a803d5d9db6ea5c7e3c412912f8d23257731aa346698e6312e6",
+      "exit_code": 0,
+      "elapsed_seconds": 0.366,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "55c7bd3496681a803d5d9db6ea5c7e3c412912f8d23257731aa346698e6312e6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-runner-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "a96782d166bdca4c47b1c5b0160fa3eaf070e677c4d08ad093737db40e23c98f",
+      "exit_code": 0,
+      "elapsed_seconds": 0.301,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "a96782d166bdca4c47b1c5b0160fa3eaf070e677c4d08ad093737db40e23c98f",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-font-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "c172f499551bdd406fcbcf96c01d811271e805ac09d2f1caa1619494b49aa94a",
+      "exit_code": 0,
+      "elapsed_seconds": 0.544,
+      "assertions": 1845,
+      "cases": 43,
+      "binary_sha256_after": "c172f499551bdd406fcbcf96c01d811271e805ac09d2f1caa1619494b49aa94a",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-export-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "b6f970e8a4b1a362b36d166f831c25e7e3bd8cf8046d0484b62df13acc427de1",
+      "exit_code": 0,
+      "elapsed_seconds": 0.622,
+      "assertions": 3342,
+      "cases": 91,
+      "binary_sha256_after": "b6f970e8a4b1a362b36d166f831c25e7e3bd8cf8046d0484b62df13acc427de1",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-render-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "eb22b32d0cc49d931a6c1fb58809b332480a40b4e8661401da04faacad175239",
+      "exit_code": 0,
+      "elapsed_seconds": 3.02,
+      "assertions": 1987,
+      "cases": 31,
+      "binary_sha256_after": "eb22b32d0cc49d931a6c1fb58809b332480a40b4e8661401da04faacad175239",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-cli-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 3.248,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-io-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "3252405b27e0084f532bf18c11e2b7bc020b4435d969a19ccb8b4891fbad9f99",
+      "exit_code": 0,
+      "elapsed_seconds": 3.837,
+      "assertions": 13101,
+      "cases": 313,
+      "binary_sha256_after": "3252405b27e0084f532bf18c11e2b7bc020b4435d969a19ccb8b4891fbad9f99",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-core-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "8a1d9cb5bbb8e2eac1bf8a79955bae1e402ba511b223c90ed6aefe86b28c9d28",
+      "exit_code": 0,
+      "elapsed_seconds": 3.864,
+      "assertions": 1895759,
+      "cases": 2989,
+      "binary_sha256_after": "8a1d9cb5bbb8e2eac1bf8a79955bae1e402ba511b223c90ed6aefe86b28c9d28",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-assetc-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "998ead1a961c33ae0870d0ce3c5006bb52c21a9908f5d3e205035b05a3193227",
+      "exit_code": 0,
+      "elapsed_seconds": 6.14,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "998ead1a961c33ae0870d0ce3c5006bb52c21a9908f5d3e205035b05a3193227",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-client-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "cd2233adcf547c2b73fb851c07a2abe0755f71d45352ec2833575ff53b66e6cb",
+      "exit_code": 0,
+      "elapsed_seconds": 4.574,
+      "assertions": 23853,
+      "cases": 359,
+      "binary_sha256_after": "cd2233adcf547c2b73fb851c07a2abe0755f71d45352ec2833575ff53b66e6cb",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-studio-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "1a925a45318643fd9a573242e6727bd9692a17f95f0405be5199ca5e694a165c",
+      "exit_code": 0,
+      "elapsed_seconds": 7.844,
+      "assertions": 49029,
+      "cases": 1100,
+      "binary_sha256_after": "1a925a45318643fd9a573242e6727bd9692a17f95f0405be5199ca5e694a165c",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-nodegraph-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "exit_code": 0,
+      "elapsed_seconds": 1.324,
+      "assertions": 345,
+      "cases": 37,
+      "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-ui-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "47e1d169da46566e446fa879c5cd8a7892fa30ce3fd81ed2bb814686c5b60af6",
+      "exit_code": 0,
+      "elapsed_seconds": 0.507,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "47e1d169da46566e446fa879c5cd8a7892fa30ce3fd81ed2bb814686c5b60af6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-startup-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.272,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-lint-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.011
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-architecture-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.398
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-python-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 1.558,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-format-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 3.704
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-diff-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.087
+    }
+  ],
+  "aggregate": {
+    "checks": 20,
+    "cpp_cases": 5277,
+    "startup_cases": 1,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "render_cases": 31
+  },
+  "freeze": {
+    "source_files": 3564,
+    "changed_sources": [],
+    "changed_test_binaries": [],
+    "source_manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-source-frozen-batch2.json",
+    "child_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/mesh-indices-cpu-child-hashes-batch2.json",
+    "child_binaries_stable": true
+  },
+  "profile": {
+    "scope": "imagegraphexport.mesh.obj",
+    "observation": "grug check retained FrameGraph scope without dropped spans and boundary counters: six vertices produce three positions, one normal and three UVs; byte count equals emitted OBJ payload. no throughput or speed claim.",
+    "benchmark_run": false
+  },
+  "limits": [
+    "grug verify native structure, controls and bounds against pinned source; no licensed GameMaker capture available",
+    "grug retain native OBJ record ordering and whitespace; no exact exported byte parity claim",
+    "grug did not run headed Studio verification",
+    "allocation-exception rollback reviewed; no allocator fault injection performed"
+  ]
+}
