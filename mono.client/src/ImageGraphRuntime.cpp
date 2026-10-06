@@ -552,6 +552,9 @@ namespace client {
 			LuaMessageDrain drain{lua.get()};
 			engine::imagegraph::SourceArgumentHost emptyArguments;
 			ArgumentProvider argumentProvider(arguments ? *arguments : emptyArguments, lua.get());
+			detail::ComposerProvider composer(
+				renderer, engine::core::Name("client.imagegraph.sdf-snapshot"), &argumentProvider
+			);
 			engine::render::imagegraph::SourceSdfRequest request;
 			if (!detail::BuildSdfRequest(
 					document,
@@ -563,7 +566,7 @@ namespace client {
 					false,
 					request,
 					result.Diagnostic,
-					&argumentProvider,
+					&composer,
 					nullptr,
 					1,
 					fonts,

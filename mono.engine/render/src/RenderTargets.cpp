@@ -1,4 +1,5 @@
 #include "SourceCamera3DCapture.hpp"
+#include "SourceSdf.hpp"
 #include "TextureFormatSupport.hpp"
 // Every texture this module allocates, and when it lets one go.
 //
@@ -477,6 +478,38 @@ namespace engine::render {
 				);
 				const bool obsolete = published != GraphResources.PublishedTransform3DOutputs.end() &&
 									  published->Generation >= slot.Generation;
+				if (slot.SdfCaptureReadback) {
+					auto capture = std::find_if(
+						ComposerCaptures.begin(), ComposerCaptures.end(), [&](const auto &entry) {
+							return entry.Owner == slot.Owner && entry.Name == slot.Name &&
+								   entry.Generation == slot.Generation;
+						}
+					);
+					if (capture != ComposerCaptures.end() && slot.Succeeded && !slot.Cancelled &&
+						!superseded && !obsolete && slot.SdfRequest) {
+						const auto support = detail::TextureFormatForUpload(slot.SdfRequest->Format);
+						const auto download = slot.CameraResources.Downloads[0];
+						void *mapped =
+							download && support ? SDL_MapGPUTransferBuffer(Device, download, false) : nullptr;
+						if (mapped) {
+							const size_t bytes =
+								uint64_t(slot.Width) * slot.Height * support->UploadBytesPerPixel;
+							if (imagegraph::CompleteSourceSdfCapture(
+									*slot.SdfRequest,
+									{static_cast<const std::byte *>(mapped), bytes},
+									capture->MaximumBytes,
+									capture->Receipt
+								)) {
+								capture->Complete = true;
+								core::Metrics::Count("render.sdf.host_readback_bytes", bytes);
+								core::Metrics::Count("render.sdf.host_readbacks", 1);
+							}
+							SDL_UnmapGPUTransferBuffer(Device, download);
+						}
+					}
+					ReleaseTransform3D(slot);
+					continue;
+				}
 				if (slot.ComposerRequest) {
 					uint64_t revision = 0;
 					const auto *installed =

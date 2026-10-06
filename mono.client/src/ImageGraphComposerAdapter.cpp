@@ -15,7 +15,8 @@ namespace client::detail {
 		const bool raster = invocation.Authored.Type == "pc.3_d_camera" ||
 							invocation.Authored.Type == "pc.3_d_camera_set" ||
 							invocation.Authored.Type == "pc.3_d_transform_image" ||
-							invocation.Authored.Type == "image.transform_3d";
+							invocation.Authored.Type == "image.transform_3d" ||
+							engine::render::imagegraph::IsSourceSdfRenderNode(invocation.Authored.Type);
 		if (raster && Observations && CaptureNamespace.IsValid()) {
 			struct DeviceProvider final : engine::imagegraph::HostNodeProvider {
 				ComposerProvider &Host;
@@ -38,6 +39,7 @@ namespace client::detail {
 		engine::imagegraph::HostNodeCapture &output,
 		std::string &failure
 	) {
+		const bool sdf = engine::render::imagegraph::IsSourceSdfRenderNode(invocation.Authored.Type);
 		const bool camera =
 			invocation.Authored.Type == "pc.3_d_camera" || invocation.Authored.Type == "pc.3_d_camera_set";
 		engine::imagegraph::HostNodeInvocation rendererInvocation = invocation;
@@ -54,8 +56,11 @@ namespace client::detail {
 			}
 			rendererInvocation.MaximumOperationBytes -= bytes;
 		}
-		if (camera || (invocation.Authored.Type == "pc.3_d_transform_image" ||
-					   invocation.Authored.Type == "image.transform_3d")) {
+		if (sdf || camera ||
+			(invocation.Authored.Type == "pc.3_d_transform_image" ||
+			 invocation.Authored.Type == "image.transform_3d")) {
+			if (sdf && !CaptureNamespace.IsValid())
+				return Render.CaptureSourceSdf(rendererInvocation, Owner, output, failure);
 			if (!CaptureNamespace.IsValid() && Fallback)
 				return Fallback->Capture(invocation, output, failure);
 			if (!CaptureNamespace.IsValid()) {
@@ -73,12 +78,14 @@ namespace client::detail {
 				Captures->push_back(name);
 			}
 			bool pending = false;
-			const bool captured = camera ? Render.CaptureSourceCamera3DAsync(
-											   rendererInvocation, Owner, name, output, failure, &pending
-										   )
-										 : Render.CaptureTransformImage3DAsync(
-											   rendererInvocation, Owner, name, output, failure, &pending
-										   );
+			const bool captured =
+				sdf ? Render.CaptureSourceSdfAsync(rendererInvocation, Owner, name, output, failure, &pending)
+				: camera ? Render.CaptureSourceCamera3DAsync(
+							   rendererInvocation, Owner, name, output, failure, &pending
+						   )
+						 : Render.CaptureTransformImage3DAsync(
+							   rendererInvocation, Owner, name, output, failure, &pending
+						   );
 			Pending = Pending || pending;
 			return captured;
 		}

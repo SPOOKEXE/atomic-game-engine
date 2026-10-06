@@ -2,6 +2,7 @@
 
 #include "ImageGraphTransform3DFormats.hpp"
 #include "RendererState.hpp"
+#include "TextureFormatSupport.hpp"
 #include "nodes/ComposerNodes.hpp"
 
 #include <engine/render/Renderer.hpp>
@@ -25,13 +26,18 @@ namespace engine::render {
 		for (GraphResourceCache::Transform3DSlot &slot : GraphResources.Transform3D) {
 			if (slot.Phase != GraphResourceCache::Transform3DPhase::Queued ||
 				(composerOnly && !slot.ComposerRequest && !slot.TransformCaptureReadback &&
-				 !slot.CameraCaptureReadback))
+				 !slot.CameraCaptureReadback && !slot.SdfCaptureReadback))
 				continue;
 			const uint64_t scratch =
 				slot.ComposerRequest
 					? hlsl::SurfaceScratchBytes(*slot.ComposerRequest) +
 						  (slot.ComposerCaptureReadback ? uint64_t(slot.Width) * slot.Height * 8 : 0)
-				: slot.SdfRequest ? imagegraph::SourceSdfScratchBytes(*slot.SdfRequest)
+				: slot.SdfRequest ? imagegraph::SourceSdfScratchBytes(*slot.SdfRequest) +
+										(slot.SdfCaptureReadback
+											 ? uint64_t(slot.Width) * slot.Height *
+												   detail::TextureFormatForUpload(slot.SdfRequest->Format)
+													   ->UploadBytesPerPixel
+											 : 0)
 				: slot.CameraRequest
 					? imagegraph::SourceCamera3DScratchBytes(*slot.CameraRequest) +
 						  (slot.CameraCaptureReadback ? uint64_t(slot.Width) * slot.Height * 7 * 16 : 0)
@@ -73,7 +79,9 @@ namespace engine::render {
 																 slot.ComposerCaptureReadback
 															 ))
 				: slot.SdfRequest
-					? imagegraph::RecordSourceSdf(Device, command, *slot.SdfRequest, slot.CameraResources)
+					? imagegraph::RecordSourceSdf(
+						  Device, command, *slot.SdfRequest, slot.CameraResources, slot.SdfCaptureReadback
+					  )
 				: slot.CameraRequest
 					? imagegraph::RecordSourceCamera3D(
 						  Device,

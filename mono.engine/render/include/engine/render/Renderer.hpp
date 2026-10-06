@@ -2772,6 +2772,22 @@ namespace engine::render {
 			std::string &failure,
 			bool *pending = nullptr
 		);
+		// grug blocking graph snapshots share RM shaders and owned receipt packing.
+		bool CaptureSourceSdf(
+			const engine::imagegraph::HostNodeInvocation &,
+			core::Name owner,
+			engine::imagegraph::HostNodeCapture &,
+			std::string &failure
+		);
+		// grug resolved RM rows publish raw surfaces after their exact GPU fence completes.
+		bool CaptureSourceSdfAsync(
+			const engine::imagegraph::HostNodeInvocation &,
+			core::Name owner,
+			core::Name captureName,
+			engine::imagegraph::HostNodeCapture &,
+			std::string &failure,
+			bool *pending = nullptr
+		);
 		bool CaptureTransformImage3DAsync(
 			const engine::imagegraph::HostNodeInvocation &,
 			core::Name owner,

@@ -50,7 +50,9 @@ namespace engine::imagegraph::detail {
 				capture = &record;
 			}
 			std::optional<SourceCameraEvaluationPolicy> cameraPolicy;
-			if (context.Authored.Type == "pc.3_d_camera" || context.Authored.Type == "pc.3_d_camera_set")
+			if (context.Authored.Type == "pc.3_d_camera" || context.Authored.Type == "pc.3_d_camera_set" ||
+				context.Authored.Type == "pc.rm_render" || context.Authored.Type == "pc.rm_render_scatter" ||
+				context.Authored.Type == "pc.rm_cloud" || context.Authored.Type == "pc.rm_terrain")
 				cameraPolicy = SourceCameraEvaluationPolicy{
 					context.Project.SurfaceWidth,
 					context.Project.SurfaceHeight,
@@ -438,6 +440,10 @@ namespace engine::imagegraph::detail {
 			{"pc.3_d_camera", RecordedHost, true},
 			{"pc.3_d_camera_set", RecordedHost, true},
 			{"pc.3_d_transform_image", RecordedHost, true},
+			{"pc.rm_render", RecordedHost, true},
+			{"pc.rm_render_scatter", RecordedHost, true},
+			{"pc.rm_cloud", RecordedHost, true},
+			{"pc.rm_terrain", RecordedHost, true},
 			{"pc.image_mp4", RecordedHost, true},
 			{"pc.image_gif", RecordedHost, true},
 			{"pc.3_d_mesh_obj", RecordedHost, true},

@@ -8,6 +8,7 @@
 #include <engine/imagegraphexport/GraphDirectoryHost.hpp>
 #include <engine/imagegraphexport/GraphFileHost.hpp>
 #include <engine/imagegraphexport/GraphImageCache.hpp>
+#include <engine/render/SourceSdf.hpp>
 
 #include <algorithm>
 #include <array>
@@ -153,7 +154,8 @@ namespace studio::detail {
 			}
 			HostNodeInvocation invocation = originalInvocation;
 			invocation.MaximumOperationBytes -= argumentBytes;
-			if (invocation.Authored.Type == "pc.hlsl" || invocation.Authored.Type == "pc.3_d_camera" ||
+			if (engine::render::imagegraph::IsSourceSdfRenderNode(invocation.Authored.Type) ||
+				invocation.Authored.Type == "pc.hlsl" || invocation.Authored.Type == "pc.3_d_camera" ||
 				invocation.Authored.Type == "pc.3_d_camera_set" ||
 				(invocation.Authored.Type == "pc.3_d_transform_image" ||
 				 invocation.Authored.Type == "image.transform_3d")) {

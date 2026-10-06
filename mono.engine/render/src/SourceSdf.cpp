@@ -382,7 +382,8 @@ namespace engine::render::imagegraph {
 		SDL_GPUDevice *device,
 		SDL_GPUCommandBuffer *command,
 		const SourceSdfRequest &request,
-		SourceCamera3DResources &resources
+		SourceCamera3DResources &resources,
+		bool captureReadback
 	) try {
 		ENGINE_PROFILE_CAT("render imagegraph sdf", core::ProfileCategory::Render);
 		if (!device || !command || ValidateSourceSdfRequest(request) != SourceSdfStatus::Ok) return false;
@@ -464,6 +465,24 @@ namespace engine::render::imagegraph {
 		if (request.Render) SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
 		SDL_EndGPURenderPass(pass);
 		resources.CommandReferenced = true;
+		if (captureReadback) {
+			const uint64_t bytes = uint64_t(request.Width) * request.Height * support->UploadBytesPerPixel;
+			resources.Downloads[0] = Transfer(device, bytes, SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, resources);
+			if (!resources.Downloads[0]) return false;
+			auto *copy = SDL_BeginGPUCopyPass(command);
+			if (!copy) return false;
+			SDL_GPUTextureRegion from{};
+			from.texture = resources.Output;
+			from.w = request.Width;
+			from.h = request.Height;
+			from.d = 1;
+			SDL_GPUTextureTransferInfo to{};
+			to.transfer_buffer = resources.Downloads[0];
+			to.pixels_per_row = request.Width;
+			to.rows_per_layer = request.Height;
+			SDL_DownloadFromGPUTexture(copy, &from, &to);
+			SDL_EndGPUCopyPass(copy);
+		}
 		return true;
 	} catch (const std::bad_alloc &) {
 		return false;

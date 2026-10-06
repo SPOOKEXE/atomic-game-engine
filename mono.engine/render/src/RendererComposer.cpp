@@ -156,7 +156,7 @@ namespace engine::render {
 		for (auto &slot : State->GraphResources.Transform3D)
 			if (slot.Owner == owner && slot.Name == name &&
 				(slot.ComposerCaptureReadback || slot.TransformCaptureReadback ||
-				 slot.CameraCaptureReadback)) {
+				 slot.CameraCaptureReadback || slot.SdfCaptureReadback)) {
 				if (slot.Phase == Impl::GraphResourceCache::Transform3DPhase::Queued)
 					State->ReleaseTransform3D(slot);
 				else
@@ -184,6 +184,86 @@ namespace engine::render {
 		if (pending) *pending = false;
 		if (invocation.Authored.Type != "pc.3_d_camera" && invocation.Authored.Type != "pc.3_d_camera_set") {
 			failure = "camera host requires an explicit source camera node";
+			return false;
+		}
+		return CaptureResolvedSurfaceAsync(invocation, owner, name, output, failure, pending);
+	}
+	bool Renderer::CaptureSourceSdf(
+		const engine::imagegraph::HostNodeInvocation &invocation,
+		core::Name owner,
+		engine::imagegraph::HostNodeCapture &output,
+		std::string &failure
+	) try {
+		RequireOwningThread("CaptureSourceSdf");
+		ENGINE_PROFILE("source sdf blocking host capture");
+		if (!State || !State->Device || !owner.IsValid()) {
+			failure = "sdf snapshot requires an explicit renderer owner and device";
+			return false;
+		}
+		using namespace engine::imagegraph;
+		const uint64_t maximum = std::min(invocation.MaximumOperationBytes, hlsl::MAXIMUM_SURFACE_JOB_BYTES);
+		const auto previous = HostCaptureRetainedPayloadBytes(output);
+		if (!previous || *previous >= maximum) {
+			failure = "sdf previous receipt exceeds operation budget";
+			return false;
+		}
+		HostNodeCapture receipt;
+		Diagnostic diagnostic;
+		uint64_t retained = 0;
+		if (PrepareResolvedHostCapture(invocation, maximum - *previous, receipt, retained, diagnostic) !=
+			Status::Ok) {
+			failure = diagnostic.Message;
+			return false;
+		}
+		if (retained >= maximum - *previous) {
+			failure = "sdf resolved receipt exceeds operation budget";
+			return false;
+		}
+		HostNodeInvocation bounded = invocation;
+		bounded.MaximumOperationBytes = maximum - *previous - retained;
+		imagegraph::SourceSdfRequest request;
+		if (!imagegraph::BuildSourceSdfRequest(bounded, false, request, failure)) return false;
+		const uint64_t held = imagegraph::SourceSdfSourceBytes(request),
+					   pixels = uint64_t(request.Width) * request.Height;
+		const uint64_t completion =
+			pixels * assets::BytesPerPixel(request.Format) * 2 + sizeof(HostCapturedImage) + 32;
+		if (held > bounded.MaximumOperationBytes || completion > bounded.MaximumOperationBytes - held) {
+			failure = "sdf request and snapshot outputs exceed operation budget";
+			return false;
+		}
+		imagegraph::SourceSdfResult result;
+		if (imagegraph::ExecuteSourceSdf(*this, request, result) != imagegraph::SourceSdfStatus::Ok) {
+			failure = "sdf snapshot GPU execution failed";
+			return false;
+		}
+		if (result.Pixels.capacity() > maximum - *previous - held) {
+			failure = "sdf actual snapshot capacity exceeds operation budget";
+			return false;
+		}
+		if (!imagegraph::CompleteSourceSdfCapture(
+				request, result.Pixels, maximum - *previous - held - result.Pixels.capacity(), receipt, true
+			)) {
+			failure = "sdf snapshot receipt packing failed";
+			return false;
+		}
+		output = std::move(receipt);
+		failure.clear();
+		return true;
+	} catch (const std::bad_alloc &) {
+		failure = "sdf snapshot allocation failed";
+		return false;
+	}
+	bool Renderer::CaptureSourceSdfAsync(
+		const engine::imagegraph::HostNodeInvocation &invocation,
+		core::Name owner,
+		core::Name name,
+		engine::imagegraph::HostNodeCapture &output,
+		std::string &failure,
+		bool *pending
+	) {
+		if (pending) *pending = false;
+		if (!imagegraph::IsSourceSdfRenderNode(invocation.Authored.Type)) {
+			failure = "sdf host requires an explicit RM renderer node";
 			return false;
 		}
 		return CaptureResolvedSurfaceAsync(invocation, owner, name, output, failure, pending);
@@ -225,6 +305,7 @@ namespace engine::render {
 							   invocation.Authored.Type == "image.transform_3d";
 		const bool camera =
 			invocation.Authored.Type == "pc.3_d_camera" || invocation.Authored.Type == "pc.3_d_camera_set";
+		const bool sdf = imagegraph::IsSourceSdfRenderNode(invocation.Authored.Type);
 		const uint64_t maximum = std::min(invocation.MaximumOperationBytes, hlsl::MAXIMUM_SURFACE_JOB_BYTES);
 		const auto previousBytes = HostCaptureRetainedPayloadBytes(output);
 		uint64_t held = sizeof(State->ComposerCaptures) +
@@ -255,7 +336,7 @@ namespace engine::render {
 				return entry.Owner == owner && entry.Name == name;
 			}
 		);
-		if (found != State->ComposerCaptures.end() &&
+		if (found != State->ComposerCaptures.end() && found->Seed == invocation.Request.Seed &&
 			detail::SameComposerCaptureInputs(
 				found->Receipt, receipt, found->Interpolation, invocation.Interpolation
 			) &&
@@ -278,7 +359,7 @@ namespace engine::render {
 				[&](const auto &slot) {
 					return slot.Owner == owner && slot.Name == name && slot.Generation == found->Generation &&
 						   (slot.ComposerCaptureReadback || slot.TransformCaptureReadback ||
-							slot.CameraCaptureReadback) &&
+							slot.CameraCaptureReadback || slot.SdfCaptureReadback) &&
 						   !slot.Cancelled;
 				}
 			);
@@ -304,8 +385,11 @@ namespace engine::render {
 		hlsl::SurfaceRequest request;
 		imagegraph::TransformImage3DRequest transformRequest;
 		imagegraph::SourceCamera3DRequest cameraRequest;
+		imagegraph::SourceSdfRequest sdfRequest;
 		MeshValue3D mesh;
-		if (camera) {
+		if (sdf) {
+			if (!imagegraph::BuildSourceSdfRequest(bounded, false, sdfRequest, failure)) return false;
+		} else if (camera) {
 			if (!imagegraph::BuildSourceCamera3DRequest(bounded, "rendered", false, cameraRequest, failure))
 				return false;
 		} else if (transform) {
@@ -315,13 +399,15 @@ namespace engine::render {
 			failure = *error;
 			return false;
 		}
-		const uint64_t pixels = camera ? uint64_t(cameraRequest.Width) * cameraRequest.Height
+		const uint64_t pixels = sdf		 ? uint64_t(sdfRequest.Width) * sdfRequest.Height
+								: camera ? uint64_t(cameraRequest.Width) * cameraRequest.Height
 								: transform
 									? uint64_t(transformRequest.Front.Width) * transformRequest.Front.Height
 									: uint64_t(request.Textures[0].Width) * request.Textures[0].Height;
 		const uint64_t completionBytes =
-			camera ? pixels * 7 * assets::BytesPerPixel(cameraRequest.Format) +
-						 7 * sizeof(HostCapturedImage) + 256
+			sdf		 ? pixels * assets::BytesPerPixel(sdfRequest.Format) + sizeof(HostCapturedImage) + 32
+			: camera ? pixels * 7 * assets::BytesPerPixel(cameraRequest.Format) +
+						   7 * sizeof(HostCapturedImage) + 256
 			: transform ? pixels * ((transformRequest.SourcePlane
 										 ? 4
 										 : assets::BytesPerPixel(transformRequest.Front.Format)) +
@@ -339,7 +425,8 @@ namespace engine::render {
 		}
 		const uint64_t cameraBytes =
 			camera ? imagegraph::SourceCamera3DRetainedBytes(cameraRequest).value_or(UINT64_MAX) : 0;
-		const uint64_t ownedRequest = camera	  ? cameraBytes
+		const uint64_t ownedRequest = sdf		  ? imagegraph::SourceSdfSourceBytes(sdfRequest)
+									  : camera	  ? cameraBytes
 									  : transform ? sizeof(transformRequest) +
 														transformRequest.Front.Pixels.capacity() +
 														transformRequest.Back.Pixels.capacity()
@@ -354,8 +441,8 @@ namespace engine::render {
 			failure = "Composer preview output reservation exceeds cache budget";
 			return false;
 		}
-		const auto shader = (camera || transform) ? core::Name{} : request.Shader;
-		const auto revision = (camera || transform) ? 0 : request.ShaderRevision;
+		const auto shader = (camera || transform || sdf) ? core::Name{} : request.Shader;
+		const auto revision = (camera || transform || sdf) ? 0 : request.ShaderRevision;
 		const size_t wanted = State->ComposerCaptures.size() + (found == State->ComposerCaptures.end());
 		std::vector<Impl::ComposerCaptureEntry> grown;
 		if (wanted > State->ComposerCaptures.capacity()) {
@@ -393,7 +480,8 @@ namespace engine::render {
 		static_assert(std::is_nothrow_move_constructible_v<Impl::ComposerCaptureEntry>);
 		static_assert(std::is_nothrow_move_assignable_v<Impl::ComposerCaptureEntry>);
 		const auto result =
-			camera		? QueueCameraResolved({owner, name, generation, std::move(cameraRequest)}, true)
+			sdf			? QueueSourceSdf({owner, name, generation, std::move(sdfRequest)})
+			: camera	? QueueCameraResolved({owner, name, generation, std::move(cameraRequest)}, true)
 			: transform ? QueueTransformImage3D(
 							  {owner,
 							   name,
@@ -426,7 +514,8 @@ namespace engine::render {
 			receiptBytes + completionBytes,
 			std::move(receipt),
 			false,
-			invocation.Interpolation
+			invocation.Interpolation,
+			invocation.Request.Seed
 		};
 		++State->NextComposerCaptureGeneration;
 		if (found == State->ComposerCaptures.end())
@@ -435,7 +524,9 @@ namespace engine::render {
 			*found = std::move(entry);
 		for (auto &slot : State->GraphResources.Transform3D)
 			if (slot.Owner == owner && slot.Name == name && slot.Generation == generation) {
-				if (camera)
+				if (sdf)
+					slot.SdfCaptureReadback = true;
+				else if (camera)
 					slot.CameraCaptureReadback = true;
 				else if (transform)
 					slot.TransformCaptureReadback = true;

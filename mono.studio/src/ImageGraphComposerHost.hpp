@@ -34,10 +34,12 @@ namespace studio::detail {
 				failure = "Composer shader evaluation requires an active world owner";
 				return false;
 			}
+			const bool sdf = render::imagegraph::IsSourceSdfRenderNode(invocation.Authored.Type);
 			const bool camera = invocation.Authored.Type == "pc.3_d_camera" ||
 								invocation.Authored.Type == "pc.3_d_camera_set";
-			if (camera || (invocation.Authored.Type == "pc.3_d_transform_image" ||
-						   invocation.Authored.Type == "image.transform_3d")) {
+			if (sdf || camera ||
+				(invocation.Authored.Type == "pc.3_d_transform_image" ||
+				 invocation.Authored.Type == "image.transform_3d")) {
 				const core::Name name(std::string(CapturePrefix) + invocation.Authored.Id);
 				if (CaptureNames &&
 					std::find(CaptureNames->begin(), CaptureNames->end(), name) == CaptureNames->end()) {
@@ -48,12 +50,14 @@ namespace studio::detail {
 					CaptureNames->push_back(name);
 				}
 				bool pending = false;
-				const bool captured = camera ? Renderer.CaptureSourceCamera3DAsync(
-												   invocation, Owner, name, output, failure, &pending
-											   )
-											 : Renderer.CaptureTransformImage3DAsync(
-												   invocation, Owner, name, output, failure, &pending
-											   );
+				const bool captured =
+					sdf ? Renderer.CaptureSourceSdfAsync(invocation, Owner, name, output, failure, &pending)
+					: camera ? Renderer.CaptureSourceCamera3DAsync(
+								   invocation, Owner, name, output, failure, &pending
+							   )
+							 : Renderer.CaptureTransformImage3DAsync(
+								   invocation, Owner, name, output, failure, &pending
+							   );
 				Pending = Pending || pending;
 				HavePendingJobs = HavePendingJobs || pending;
 				return captured;

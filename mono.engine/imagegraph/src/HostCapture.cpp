@@ -29,8 +29,10 @@ namespace engine::imagegraph {
 		prepared.Tick = request.Tick;
 		prepared.Subframe = request.Subframe;
 		prepared.NegativeFrame = request.NegativeFrame;
-		if (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set") {
-			prepared.CameraRow = 0;
+		if (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set" ||
+			node->Type == "pc.rm_render" || node->Type == "pc.rm_render_scatter" ||
+			node->Type == "pc.rm_cloud" || node->Type == "pc.rm_terrain") {
+			if (node->Type == "pc.3_d_camera" || node->Type == "pc.3_d_camera_set") prepared.CameraRow = 0;
 			auto &policy = prepared.CameraPolicy.emplace();
 			policy.InheritedSurfaceFormat = snapshot.InheritedSurfaceFormat();
 			if (document.Project) {

@@ -2,6 +2,7 @@
 
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/imagegraph/HostCapture.hpp>
 #include <engine/imagegraph/SourceSdf.hpp>
 
 #include <array>
@@ -92,6 +93,25 @@ namespace engine::render::imagegraph {
 		uint64_t Generation = 0;
 		SourceSdfRequest Request;
 	};
+	bool IsSourceSdfRenderNode(std::string_view type);
+	// grug one control mapping serves selected previews and resolved graph host rows.
+	bool BuildSourceSdfRequest(
+		const engine::imagegraph::HostNodeInvocation &,
+		bool displayColorSpace,
+		SourceSdfRequest &,
+		std::string &failure
+	);
+	bool BuildSourceSdfRequest(
+		const engine::imagegraph::Node &,
+		const engine::imagegraph::EvaluationSnapshot &,
+		const engine::imagegraph::SourceCameraEvaluationPolicy &,
+		std::string_view outputPort,
+		uint64_t seed,
+		bool displayColorSpace,
+		SourceSdfRequest &,
+		engine::imagegraph::Diagnostic &,
+		uint64_t maximumBytes = 64ull * 1024 * 1024
+	);
 	SourceSdfStatus ValidateSourceSdfRequest(const SourceSdfRequest &request);
 	// Blocking export uses the same source shader and texture packing as live publication.
 	SourceSdfStatus

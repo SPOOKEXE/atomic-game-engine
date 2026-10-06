@@ -782,7 +782,7 @@ namespace engine::render {
 				std::vector<uint8_t> ComposerDisplayPixels;
 				bool ComposerDisplayUploaded = false;
 				bool ComposerCaptureReadback = false, TransformCaptureReadback = false,
-					 CameraCaptureReadback = false;
+					 CameraCaptureReadback = false, SdfCaptureReadback = false;
 				imagegraph::SourceCamera3DResources CameraResources;
 				uint32_t Width = 0, Height = 0;
 				uint64_t SourceBytes = 0;
@@ -874,6 +874,7 @@ namespace engine::render {
 			engine::imagegraph::HostNodeCapture Receipt;
 			bool Complete = false;
 			int64_t Interpolation = 1;
+			uint64_t Seed = 0;
 		};
 		std::vector<ComposerCaptureEntry> ComposerCaptures;
 		uint64_t NextComposerCaptureGeneration = 1;
