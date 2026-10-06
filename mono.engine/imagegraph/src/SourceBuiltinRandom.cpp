@@ -2,6 +2,7 @@
 #include "SourceInputOrigin.hpp"
 #include "SourcePathShiftMemo.hpp"
 #include "SourceSeparatedVec2.hpp"
+#include "SourceVec2Defaults.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/FrameTime.hpp>
@@ -36,6 +37,9 @@ namespace engine::imagegraph {
 			for (const auto &input : node.DynamicInputs)
 				if (input.Default && !detail::ValidPixelBuilderRecordingValue(*input.Default))
 					return Status::InvalidValue;
+			Diagnostic defaultsDiagnostic;
+			const auto defaultsStatus = detail::ValidateSourceVec2Defaults(node, defaultsDiagnostic);
+			if (defaultsStatus != Status::Ok) return defaultsStatus;
 			size_t axisKeys = 0;
 			Diagnostic axesDiagnostic;
 			const Status axesStatus = detail::ValidateSeparatedVec2(node, axisKeys, axesDiagnostic);
@@ -62,6 +66,11 @@ namespace engine::imagegraph {
 				!add(capture.InputImages.capacity() * sizeof(SourceBuiltinRandomInputImage)))
 				return std::nullopt;
 			const auto &node = capture.Authored;
+			const auto defaultsClone = detail::SourceVec2DefaultsBytes(node, false);
+			const auto defaultsRetained = detail::SourceVec2DefaultsBytes(node, true);
+			if (!defaultsClone || !defaultsRetained ||
+				(*defaultsRetained > *defaultsClone && !add(*defaultsRetained - *defaultsClone)))
+				return std::nullopt;
 			const auto axisClone = detail::SeparatedVec2Bytes(node, false);
 			const auto axisRetained = detail::SeparatedVec2Bytes(node, true);
 			if (!axisClone || !axisRetained ||

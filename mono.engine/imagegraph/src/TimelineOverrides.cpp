@@ -7,6 +7,7 @@
 #include "SourceArgumentTransport.hpp"
 #include "SourceMirrorAnimator.hpp"
 #include "SourceSeparatedVec2.hpp"
+#include "SourceVec2Defaults.hpp"
 #include "Timeline.hpp"
 #include "TimelineDrivers.hpp"
 #include "TimelineSchedule.hpp"
@@ -423,6 +424,8 @@ namespace engine::imagegraph::detail {
 					goto clone_refused;
 				const auto samplers = NativeSamplerBindingsPayloadBytes(node, false);
 				if (!samplers || !add(*samplers)) goto clone_refused;
+				const auto defaults = SourceVec2DefaultsBytes(node, false);
+				if (!defaults || !add(*defaults)) goto clone_refused;
 				const auto axes = SeparatedVec2Bytes(node, false);
 				if (!axes || !add(*axes)) goto clone_refused;
 				for (const auto &port : node.InstanceOverrides)
@@ -493,6 +496,7 @@ namespace engine::imagegraph::detail {
 			copy.SourceAnimatedInputs = original.SourceAnimatedInputs;
 			copy.SourceStaticInputs = original.SourceStaticInputs;
 			copy.SourceSeparatedVec2Animators = original.SourceSeparatedVec2Animators;
+			copy.SourceVec2Defaults = original.SourceVec2Defaults;
 			copy.DynamicOutputs = original.DynamicOutputs;
 			copy.SourceDisplayName = original.SourceDisplayName;
 			copy.SourceInternalName = original.SourceInternalName;

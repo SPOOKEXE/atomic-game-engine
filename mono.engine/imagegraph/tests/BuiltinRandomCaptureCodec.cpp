@@ -121,6 +121,44 @@ TEST_CASE(
 	CHECK(BuiltinRandomOperationName(static_cast<SourceBuiltinRandomOperation>(255)).empty());
 	CHECK_FALSE(ParseBuiltinRandomOperationName("5"));
 }
+TEST_CASE(
+	"Builtin capture v5 preserves local Vec2 defaults, inactive axes and prior outputs on budget refusal",
+	"[builtin_random_codec]"
+) {
+	SourceBuiltinRandomCapture capture;
+	capture.Authored = {"mirror", "pc.mirror_polar", "", {}, {{"center", Vector2{.9, .9}}}};
+	capture.Authored.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	capture.Authored.SourceSeparatedVec2Animators->Inputs.front().Separated = false;
+	capture.Authored.SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys = {
+		{"mirror", "center", 0, .25, "source", KeyframeEase{}}
+	};
+	capture.Authored.SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys = {
+		{"mirror", "center", 0, 3.0, "source", KeyframeEase{}}
+	};
+	for (size_t axis = 0; axis < 2; ++axis)
+		capture.Authored.SourceSeparatedVec2Animators->Inputs.front().Axes[axis].Keys.front().SourceKeyId =
+			"mirror-axis-" + std::to_string(axis);
+	capture.Authored.SourceVec2Defaults.emplace().Inputs.push_back({"center", Vector2{7, 8}});
+	capture.Inputs = {{"center", Vector2{4, 2}}};
+
+	std::string text;
+	Diagnostic diagnostic;
+	REQUIRE(WriteBuiltinRandomCapture({&capture, 1}, text, diagnostic) == Status::Ok);
+	CHECK(text.starts_with("imagegraph-builtin-random 5\n"));
+	std::vector<SourceBuiltinRandomCapture> restored;
+	REQUIRE(ReadBuiltinRandomCapture(text, restored, diagnostic) == Status::Ok);
+	REQUIRE(restored.size() == 1);
+	CHECK(restored.front() == capture);
+	CHECK_FALSE(restored.front().Authored.SourceSeparatedVec2Animators->Inputs.front().Separated);
+	CHECK(restored.front().Authored.SourceVec2Defaults->Inputs.front().Data == Vector2{7, 8});
+
+	std::string priorText = "last good capture";
+	CHECK(WriteBuiltinRandomCapture({&capture, 1}, priorText, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(priorText == "last good capture");
+	auto priorCaptures = restored;
+	CHECK(ReadBuiltinRandomCapture(text, priorCaptures, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(priorCaptures == restored);
+}
 TEST_CASE("Malformed durable builtin observations preserve prior owned captures", "[builtin_random_codec]") {
 	std::vector<SourceBuiltinRandomCapture> source{Fixture()}, prior{Fixture()};
 	prior[0].Authored.Id = "prior";
@@ -439,7 +477,7 @@ TEST_CASE(
 	CHECK(prior == before);
 	auto future = text;
 	future.replace(
-		0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 5\n"
+		0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 6\n"
 	);
 	CHECK(ReadBuiltinRandomCapture(future, prior, d) == Status::UnsupportedVersion);
 	CHECK(prior == before);

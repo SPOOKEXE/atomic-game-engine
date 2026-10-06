@@ -131,13 +131,19 @@ replace that independent owner, track and writer. changing a physical property's
 mode updates scalar aliases independently from combined aliases. linked numeric
 inputs bypass local axes; Mirror linked Paths still read local X as their ratio.
 cold aliases refuse execution before source-backed retained initialization.
-detached scalar mode changes remain unrepresented. source-backed constructor
-defaults are still needed before separate/combine controls cover those cases. repeated explicit source `setInstance` must
+detached scalar mode changes remain unrepresented. retained initialization is still needed before separate/combine controls cover
+those cases. repeated explicit source `setInstance` must
 recopy the immediate base's current array even when its ID is unchanged; that
 transition remains separate from host reconciliation and is unfinished.
 source saves and restores local `def_val` separately from animator rows.
-import currently overwrites dynamic defaults with represented animator values;
-those values cannot supply constructor provenance. separated reads lazily store
+import retains finite two-element saved constructor pairs separately from
+current socket values. native v9 text and capture envelope v5 preserve these
+pairs; clone, replay and recording byte ledgers charge their owned storage.
+mismatched saved lengths keep the catalogue constructor; matching unsupported
+pairs retain an opaque source node. missing or empty scalar rows use the saved
+constructor pair before the catalogue fallback. these records do not initialize
+axis storage or warm an existing cold group binding.
+current socket values cannot supply constructor provenance. separated reads lazily store
 an axis array that later group binding can observe. native pure evaluation needs
 a retained initialization transition or receipt to preserve that history.
 

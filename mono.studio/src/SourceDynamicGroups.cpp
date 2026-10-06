@@ -53,6 +53,12 @@ namespace studio {
 			size_t group = 0;
 			if (FindDynamicTemplate(*entry, input.Id, group) && group >= groups) removed.insert(input.Id);
 		}
+		if (node.SourceVec2Defaults) {
+			std::erase_if(node.SourceVec2Defaults->Inputs, [&](const auto &input) {
+				return removed.contains(input.Port);
+			});
+			if (node.SourceVec2Defaults->Inputs.empty()) node.SourceVec2Defaults = {};
+		}
 		std::erase_if(node.DynamicInputs, [&](const auto &input) { return removed.contains(input.Id); });
 		std::erase_if(node.Values, [&](const auto &input) { return removed.contains(input.Port); });
 		std::erase_if(node.SourceProperties, [&](const auto &input) { return removed.contains(input.Port); });

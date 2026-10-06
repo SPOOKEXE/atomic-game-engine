@@ -1,6 +1,7 @@
 #include "EvaluationBudget.hpp"
 #include "KeyframeText.hpp"
 #include "SourceSeparatedVec2.hpp"
+#include "SourceVec2Defaults.hpp"
 #include "ValueText.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -19,6 +20,7 @@
 #include <type_traits>
 namespace engine::imagegraph {
 	namespace {
+		constexpr std::string_view DefaultsHeader = "imagegraph-builtin-random 5\n";
 		constexpr std::string_view InactiveAxesHeader = "imagegraph-builtin-random 4\n";
 		constexpr std::string_view Header = "imagegraph-builtin-random 3\n";
 		constexpr std::string_view PreviousHeader = "imagegraph-builtin-random 2\n";
@@ -207,6 +209,15 @@ namespace engine::imagegraph {
 					Bool(expression.Enabled);
 				});
 				Values(n.SourceProperties);
+				if (ConstructorDefaults) {
+					Bool(bool(n.SourceVec2Defaults));
+					if (n.SourceVec2Defaults)
+						List(n.SourceVec2Defaults->Inputs, [&](const auto &input) {
+							Text(input.Port);
+							Number(input.Data.X);
+							Number(input.Data.Y);
+						});
+				}
 				Bool(bool(n.SourceSeparatedVec2Animators));
 				if (n.SourceSeparatedVec2Animators)
 					List(n.SourceSeparatedVec2Animators->Inputs, [&](const auto &input) {
@@ -253,12 +264,18 @@ namespace engine::imagegraph {
 				});
 			}
 			bool InactiveAxes = false;
+			bool ConstructorDefaults = false;
 			void All(std::span<const SourceBuiltinRandomCapture> captures) {
 				for (const auto &capture : captures)
 					if (capture.Authored.SourceSeparatedVec2Animators)
 						for (const auto &input : capture.Authored.SourceSeparatedVec2Animators->Inputs)
 							if (!input.Separated) InactiveAxes = true;
-				const auto header = InactiveAxes ? InactiveAxesHeader : Header;
+				for (const auto &capture : captures)
+					if (capture.Authored.SourceVec2Defaults) ConstructorDefaults = true;
+				if (ConstructorDefaults) InactiveAxes = true;
+				const auto header = ConstructorDefaults ? DefaultsHeader
+									: InactiveAxes		? InactiveAxesHeader
+														: Header;
 				Out.write(header.data(), header.size());
 				Number(captures.size());
 				for (const auto &capture : captures)
@@ -453,6 +470,24 @@ namespace engine::imagegraph {
 					))
 					return false;
 				if (!Values(n.SourceProperties)) return false;
+				if (Version >= 5) {
+					bool defaults = false;
+					if (!Bool(defaults)) return false;
+					if (defaults) {
+						if (!Admit(sizeof(SourceVec2DefaultsData))) return false;
+						auto &data = n.SourceVec2Defaults.emplace();
+						if (!List(
+								data.Inputs,
+								std::min(
+									Limits::MaximumArrayElements, detail::SourceSeparatedVec2InputCount(n)
+								),
+								[&](auto &input) {
+									return Text(input.Port) && Number(input.Data.X) && Number(input.Data.Y);
+								}
+							))
+							return false;
+					}
+				}
 				if (Version < 3) return true;
 				bool present = false;
 				if (!Bool(present)) return false;
@@ -633,11 +668,12 @@ namespace engine::imagegraph {
 			if (prior > budget.Available() || !charge->Resize(prior) || text.size() > budget.Available() ||
 				!charge->Resize(prior + text.size()))
 				return Fail(diagnostic, Status::LimitExceeded, "Builtin RNG replacement exceeds residency");
-			const uint8_t version = text.starts_with(InactiveAxesHeader) ? 4
-									: text.starts_with(Header)			 ? 3
-									: text.starts_with(PreviousHeader)	 ? 2
-									: text.starts_with(LegacyHeader)	 ? 1
-																		 : 0;
+			const uint8_t version = text.starts_with(DefaultsHeader)	   ? 5
+									: text.starts_with(InactiveAxesHeader) ? 4
+									: text.starts_with(Header)			   ? 3
+									: text.starts_with(PreviousHeader)	   ? 2
+									: text.starts_with(LegacyHeader)	   ? 1
+																		   : 0;
 			if (!version)
 				return Fail(
 					diagnostic, Status::UnsupportedVersion, "Builtin RNG capture header is unsupported"

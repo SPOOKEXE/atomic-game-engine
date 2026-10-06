@@ -1745,6 +1745,12 @@ namespace studio {
 			);
 			return false;
 		}
+		if (node->SourceVec2Defaults) {
+			std::erase_if(node->SourceVec2Defaults->Inputs, [&](const auto &value) {
+				return value.Port == inputId;
+			});
+			if (node->SourceVec2Defaults->Inputs.empty()) node->SourceVec2Defaults = {};
+		}
 		node->DynamicInputs.erase(input);
 		std::erase_if(document.Links, [&](const engine::imagegraph::Link &link) {
 			return link.ToNode == nodeId && link.ToPort == inputId;

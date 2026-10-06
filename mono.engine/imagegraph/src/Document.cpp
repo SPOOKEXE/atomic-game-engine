@@ -55,6 +55,7 @@
 #include "SourceRigidCodec.hpp"
 #include "SourceSeparatedVec2.hpp"
 #include "SourceTilesetCodec.hpp"
+#include "SourceVec2Defaults.hpp"
 #include "SourceVerletPathCodec.hpp"
 #include "StrandCodec.hpp"
 #include "Timeline.hpp"
@@ -2762,8 +2763,13 @@ namespace engine::imagegraph {
 	}
 
 	std::string Write(const Document &document) {
-		for (const auto &node : document.Nodes)
+		for (const auto &node : document.Nodes) {
 			if (detail::ValidateNativeSamplerBindings(node, document.FormatVersion)) return {};
+			Diagnostic defaultsDiagnostic;
+			if ((node.SourceVec2Defaults && document.FormatVersion < 9) ||
+				detail::ValidateSourceVec2Defaults(node, defaultsDiagnostic) != Status::Ok)
+				return {};
+		}
 		if (document.Timeline && document.Timeline->SourceBounds &&
 			(document.FormatVersion < 9 ||
 			 !ValidSourceAuthoringFrameBounds(*document.Timeline->SourceBounds)))
@@ -2927,6 +2933,15 @@ namespace engine::imagegraph {
 			WriteQuoted(stream, link.ToPort);
 			stream << '\n';
 		}
+		for (const auto &node : document.Nodes)
+			if (node.SourceVec2Defaults)
+				for (const auto &input : node.SourceVec2Defaults->Inputs) {
+					stream << "source_vec2_default ";
+					WriteQuoted(stream, node.Id);
+					stream << ' ';
+					WriteQuoted(stream, input.Port);
+					stream << ' ' << std::setprecision(17) << input.Data.X << ' ' << input.Data.Y << '\n';
+				}
 		for (const Group &group : document.Groups) {
 			stream << "group ";
 			WriteQuoted(stream, group.Id);
@@ -3916,6 +3931,33 @@ namespace engine::imagegraph {
 				remember(parsed.Outputs.back().Id);
 				remember(parsed.Outputs.back().NodeId);
 				remember(parsed.Outputs.back().Port);
+			} else if (marker == "source_vec2_default" && parsed.FormatVersion >= 9) {
+				std::string id;
+				SourceVec2Default value;
+				if (axisKeys || !readQuoted(row, id) || !readQuoted(row, value.Port) ||
+					!(row >> value.Data.X >> value.Data.Y) || !std::isfinite(value.Data.X) ||
+					!std::isfinite(value.Data.Y) || HasTrailing(row))
+					goto malformed;
+				const auto node = std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const auto &n) {
+					return n.Id == id;
+				});
+				if (node == parsed.Nodes.end() || !detail::SourceSeparatedVec2Input(*node, value.Port))
+					goto malformed;
+				if (!node->SourceVec2Defaults) {
+					if (budget) {
+						auto storage = budget->Reserve(sizeof(SourceVec2DefaultsData));
+						if (!storage) goto limited;
+						if (!candidateCharge->Merge(std::move(*storage))) std::terminate();
+					}
+					node->SourceVec2Defaults.emplace();
+				}
+				auto &inputs = node->SourceVec2Defaults->Inputs;
+				if (inputs.size() >= Limits::MaximumArrayElements ||
+					inputs.size() >= detail::SourceSeparatedVec2InputCount(*node))
+					goto limited;
+				if (!reserveSlots(inputs, inputs.size() + 1)) goto limited;
+				inputs.push_back(std::move(value));
+				remember(inputs.back().Port);
 			} else if (marker == "source_vec2_axis" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, axis;
 				if (axisKeys || !readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> token(axis)) ||
@@ -4412,6 +4454,8 @@ namespace engine::imagegraph {
 						std::get<2>(lookup) = "y";
 						if (!axesSeen.contains(lookup)) goto malformed;
 					}
+				const auto defaultsStatus = detail::ValidateSourceVec2Defaults(node, diagnostic);
+				if (defaultsStatus != Status::Ok) return defaultsStatus;
 				const Status status = detail::ValidateSeparatedVec2(node, aggregateKeys, diagnostic);
 				if (status != Status::Ok) return status;
 			}
@@ -4628,6 +4672,15 @@ namespace engine::imagegraph {
 		{
 			size_t aggregateKeys = document.Keyframes.size();
 			for (const auto &node : document.Nodes) {
+				if (node.SourceVec2Defaults && document.FormatVersion < 9) {
+					SetDiagnostic(
+						diagnostic,
+						Status::UnsupportedVersion,
+						"source constructor defaults require document version 9",
+						node.Id
+					);
+					return diagnostic.Code;
+				}
 				if (node.SourceSeparatedVec2Animators && document.FormatVersion < 9) {
 					SetDiagnostic(
 						diagnostic,
@@ -4637,6 +4690,8 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
+				const auto defaultsStatus = detail::ValidateSourceVec2Defaults(node, diagnostic);
+				if (defaultsStatus != Status::Ok) return defaultsStatus;
 				const Status status = detail::ValidateSeparatedVec2(node, aggregateKeys, diagnostic);
 				if (status != Status::Ok) return status;
 			}

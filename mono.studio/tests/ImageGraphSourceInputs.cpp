@@ -66,6 +66,34 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"Truncating and removing source Vec2 inputs drops only their constructor defaults",
+	"[studio][source_inputs]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	document.Nodes = {
+		{"node",
+		 "pc.gradient_points_n",
+		 {},
+		 {},
+		 {{"dimension", Vector2{32, 32}}, {"dimension_unit", EnumValue{0}}, {"blend_mode", EnumValue{0}}}}
+	};
+	Diagnostic error;
+	REQUIRE(studio::SetSourceImageGraphDynamicGroupCount(document, "node", 2, error));
+	document.Nodes.front().SourceVec2Defaults.emplace().Inputs = {
+		{"point_i_0", Vector2{7, 8}}, {"point_i_1", Vector2{9, 10}}
+	};
+	REQUIRE(studio::SetSourceImageGraphDynamicGroupCount(document, "node", 1, error));
+	const auto &truncated = document.Nodes.front();
+	REQUIRE(truncated.SourceVec2Defaults);
+	REQUIRE(truncated.SourceVec2Defaults->Inputs.size() == 1);
+	CHECK(truncated.SourceVec2Defaults->Inputs.front() == SourceVec2Default{"point_i_0", Vector2{7, 8}});
+
+	REQUIRE(studio::RemoveImageGraphDynamicInput(document, "node", "point_i_0", error));
+	CHECK_FALSE(document.Nodes.front().SourceVec2Defaults);
+}
+
+TEST_CASE(
 	"Struct source groups author literal values while retaining Any sockets across save and canvas",
 	"[studio][source_inputs]"
 ) {

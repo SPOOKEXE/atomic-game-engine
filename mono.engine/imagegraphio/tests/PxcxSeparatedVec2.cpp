@@ -5,7 +5,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <nlohmann/json.hpp>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 TEST_SUITE_ID("engine.imagegraphio.pxcx_separated_vec2")
 using namespace engine::imagegraph;
@@ -122,4 +128,101 @@ TEST_CASE("PXC IVec2 preserves only represented constant unit modes", "[pxcx_vec
 		CHECK(imported.Diagnostics.front().Message.find("unit") != std::string::npos);
 		CHECK(imported.Source.GraphJson == root.dump() + '\0');
 	}
+}
+
+TEST_CASE("PXC Vec2 constructor defaults stay separate from the current animator value", "[pxcx_vec2_axes]") {
+	const auto *entry = FindCatalogueEntry("pc.solid");
+	REQUIRE(entry);
+	const auto *input = FindCatalogueInput(*entry, "dimension");
+	REQUIRE(input);
+	const auto importRecord = [&](Json defaultValue, bool separated = false) {
+		Json inputs = Json::array();
+		for (int32_t i = 0; i <= input->SourceIndex; ++i)
+			inputs.push_back(Json::object());
+		Json record = {
+			{"anim", false},
+			{"sep_axis", separated},
+			{"def_val", std::move(defaultValue)},
+			{"r", {{"d", Json::array({99, 88})}}}
+		};
+		if (separated) record["animators"] = Json::array({Json::array(), Json::array()});
+		inputs[input->SourceIndex] = std::move(record);
+		return Checked(
+			{{"nodes",
+			  Json::array(
+				  {Json{{"id", "node"}, {"type", entry->SourceNode}, {"x", 0}, {"y", 0}, {"inputs", inputs}}}
+			  )}}
+		);
+	};
+	const auto currentDimension = [](Document &document) -> AuthoredValue * {
+		auto &values = document.Nodes.front().Values;
+		const auto found = std::find_if(values.begin(), values.end(), [](const auto &value) {
+			return value.Port == "dimension";
+		});
+		return found == values.end() ? nullptr : &*found;
+	};
+
+	auto imported = importRecord(Json::array({7, 8}));
+	REQUIRE(imported.Graph.Nodes.size() == 1);
+	const auto &node = imported.Graph.Nodes.front();
+	REQUIRE(node.Type == "pc.solid");
+	REQUIRE(node.SourceVec2Defaults);
+	REQUIRE(node.SourceVec2Defaults->Inputs.size() == 1);
+	CHECK(node.SourceVec2Defaults->Inputs.front() == SourceVec2Default{"dimension", Vector2{7, 8}});
+	CHECK_FALSE(node.SourceSeparatedVec2Animators);
+	REQUIRE(currentDimension(imported.Graph));
+	CHECK(currentDimension(imported.Graph)->Data == Value{Vector2{99, 88}});
+	auto separated = importRecord(Json::array({7, 8}), true);
+	REQUIRE(separated.Graph.Nodes.size() == 1);
+	const auto &separatedNode = separated.Graph.Nodes.front();
+	REQUIRE(separatedNode.Type == "pc.solid");
+	REQUIRE(separatedNode.SourceVec2Defaults);
+	CHECK(separatedNode.SourceVec2Defaults->Inputs.front().Data == Vector2{7, 8});
+	REQUIRE(separatedNode.SourceSeparatedVec2Animators);
+	REQUIRE(separatedNode.SourceSeparatedVec2Animators->Inputs.size() == 1);
+	const auto &axes = separatedNode.SourceSeparatedVec2Animators->Inputs.front().Axes;
+	REQUIRE(axes[0].Keys.size() == 1);
+	REQUIRE(axes[1].Keys.size() == 1);
+	CHECK(axes[0].Keys.front().Data == Value{7.0});
+	CHECK(axes[1].Keys.front().Data == Value{8.0});
+	REQUIRE(currentDimension(separated.Graph));
+	CHECK(currentDimension(separated.Graph)->Data == Value{Vector2{99, 88}});
+	Document restored;
+	Diagnostic diagnostic;
+	REQUIRE(Read(Write(imported.Graph), restored, diagnostic) == Status::Ok);
+	CHECK(restored == imported.Graph);
+
+	Document edited = imported.Graph;
+	auto *dimension = currentDimension(edited);
+	REQUIRE(dimension);
+	dimension->Data = Vector2{101, 102};
+	std::vector<std::byte> bytes;
+	REQUIRE(WritePxcxProjection(imported, edited, {}, bytes, diagnostic));
+	engine::bake::PxcxArchive checked;
+	std::string failure;
+	REQUIRE(engine::bake::ReadPxcx(bytes, checked, failure));
+	PxcxImport reopened;
+	REQUIRE(ImportPxcxImageGraph(checked, reopened, failure));
+	REQUIRE(reopened.Graph.Nodes.front().SourceVec2Defaults);
+	CHECK(reopened.Graph.Nodes.front().SourceVec2Defaults->Inputs.front().Data == Vector2{7, 8});
+	REQUIRE(currentDimension(reopened.Graph));
+	CHECK(currentDimension(reopened.Graph)->Data == Value{Vector2{101, 102}});
+	const auto saved = Json::parse(std::string_view(checked.GraphJson.data(), checked.GraphJson.size() - 1));
+	const auto &savedDimension = saved["nodes"][0]["inputs"][input->SourceIndex];
+	CHECK(savedDimension["def_val"] == Json::array({7, 8}));
+	CHECK(savedDimension["r"]["d"] == Json::array({101, 102}));
+
+	for (const auto &mismatched : std::array<Json, 3>{Json::array({7}), Json::array({7, 8, 9}), Json(7)}) {
+		auto ignored = importRecord(mismatched);
+		REQUIRE(ignored.Graph.Nodes.size() == 1);
+		CHECK(ignored.Graph.Nodes.front().Type == "pc.solid");
+		CHECK_FALSE(ignored.Graph.Nodes.front().SourceVec2Defaults);
+		REQUIRE(currentDimension(ignored.Graph));
+		CHECK(currentDimension(ignored.Graph)->Data == Value{Vector2{99, 88}});
+	}
+	const auto unsupported = importRecord(Json::array({7, "unknown"}));
+	REQUIRE(unsupported.Graph.Nodes.size() == 1);
+	CHECK(unsupported.Graph.Nodes.front().Type != "pc.solid");
+	CHECK_FALSE(unsupported.Diagnostics.empty());
+	CHECK(unsupported.Diagnostics.front().Message.find("constructor default pair") != std::string::npos);
 }

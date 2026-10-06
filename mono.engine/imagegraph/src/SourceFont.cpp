@@ -1,6 +1,7 @@
 #include "FontPayload.hpp"
 #include "FontUnicode.hpp"
 #include "SourceSeparatedVec2.hpp"
+#include "SourceVec2Defaults.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/FrameTime.hpp>
@@ -29,6 +30,11 @@ namespace engine::imagegraph {
 		bool FontAuthoredBytes(const Node &node, FontBytes &bytes) {
 			const auto cloned = NodeClonePayloadBytes(node);
 			if (!cloned || !bytes.Add(*cloned)) return false;
+			const auto defaultsClone = detail::SourceVec2DefaultsBytes(node, false);
+			const auto defaultsRetained = detail::SourceVec2DefaultsBytes(node, true);
+			if (!defaultsClone || !defaultsRetained ||
+				(*defaultsRetained > *defaultsClone && !bytes.Add(*defaultsRetained - *defaultsClone)))
+				return false;
 			const auto separated = detail::SeparatedVec2Bytes(node, false);
 			const auto retainedSeparated = detail::SeparatedVec2Bytes(node, true);
 			if (!separated || !retainedSeparated ||

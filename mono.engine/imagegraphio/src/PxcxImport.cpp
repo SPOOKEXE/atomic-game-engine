@@ -1756,7 +1756,14 @@ namespace engine::imagegraphio {
 			if (needsConstructor) {
 				if (budget && !budget->Hold(256 + 3 * input.Default.size())) return false;
 				const auto authoredDefault = imagegraph::CatalogueDefault(input);
-				if (node.Type == "pc.mirror_polar" && input.Id == "constant_dimension" && document.Project)
+				const imagegraph::SourceVec2Default *savedDefault = nullptr;
+				if (node.SourceVec2Defaults)
+					for (const auto &value : node.SourceVec2Defaults->Inputs)
+						if (value.Port == input.Id) savedDefault = &value;
+				if (savedDefault)
+					defaults = savedDefault->Data;
+				else if (node.Type == "pc.mirror_polar" && input.Id == "constant_dimension" &&
+						 document.Project)
 					defaults = {
 						double(document.Project->SurfaceWidth), double(document.Project->SurfaceHeight)
 					};
@@ -1867,6 +1874,32 @@ namespace engine::imagegraphio {
 				(input.SourceKind == "Vec2" || input.SourceKind == "IVec2" ||
 				 input.SourceKind == "Dimension" || input.SourceKind == "Range")) {
 				parseLinkedLocalAnimator = true;
+				const auto constructorDefault = record.find("def_val");
+				if (constructorDefault != record.end() && constructorDefault->is_array() &&
+					constructorDefault->size() == 2) {
+					const auto &value = *constructorDefault;
+					if (!value[0].is_number() || !value[1].is_number() ||
+						!std::isfinite(value[0].get<double>()) || !std::isfinite(value[1].get<double>())) {
+						reason = "source constructor default pair has no finite scalar representation";
+						return false;
+					}
+					if (!node.SourceVec2Defaults) {
+						if (budget && !budget->Hold(sizeof(imagegraph::SourceVec2DefaultsData))) {
+							reason = "source constructor default storage exceeds native operation bounds";
+							return false;
+						}
+						node.SourceVec2Defaults.emplace();
+					}
+					auto &defaults = node.SourceVec2Defaults->Inputs;
+					if (defaults.size() >= imagegraph::Limits::MaximumArrayElements ||
+						!AdmitNativeSlots(defaults, defaults.size() + 1, budget) ||
+						!AdmitNativeText(id, budget)) {
+						reason = "source constructor default pair exceeds native operation bounds";
+						return false;
+					}
+					defaults.push_back({id, {value[0].get<double>(), value[1].get<double>()}});
+					animation.FormatVersion = 9;
+				}
 				const auto separated = record.find("sep_axis");
 				if (separated != record.end() && !separated->is_boolean()) {
 					reason = "source Vec2 separated axis flag is malformed";

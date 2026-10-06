@@ -1109,6 +1109,16 @@ namespace engine::imagegraph {
 	};
 
 	struct SourceSeparatedVec2Data;
+	// local source def_val stays separate from current animator storage.
+	struct SourceVec2Default {
+		std::string Port;
+		Vector2 Data;
+		bool operator==(const SourceVec2Default &) const = default;
+	};
+	struct SourceVec2DefaultsData {
+		std::vector<SourceVec2Default> Inputs;
+		bool operator==(const SourceVec2DefaultsData &) const = default;
+	};
 
 	// Native bindings identify source sampler arguments by text without adding source archive properties.
 	struct NativeSamplerBinding {
@@ -1151,6 +1161,8 @@ namespace engine::imagegraph {
 		OwnedPayload3D<SourceSeparatedVec2Data> SourceSeparatedVec2Animators{};
 		// Literal texture assets bound to named native HLSL sampler arguments.
 		std::vector<NativeSamplerBinding> NativeSamplerBindings{};
+		// saved local constructor pairs do not initialize or share scalar axes.
+		OwnedPayload3D<SourceVec2DefaultsData> SourceVec2Defaults{};
 		// Compares all authored node fields.
 		bool operator==(const Node &) const = default;
 	};

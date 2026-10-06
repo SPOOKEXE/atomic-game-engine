@@ -1,0 +1,84 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "retain local source Vec2 constructor defaults apart from current values and scalar storage.",
+  "function_logic": [
+    "finite saved two-element def_val pairs have independent optional document storage; current socket values never supply constructor provenance.",
+    "native format9 source_vec2_default records and builtin capture envelope5 preserve the payload; captures without defaults continue to write existing envelope3/4.",
+    "clone, document, timeline, font and builtin recording ledgers charge defaults including retained capacity. manual timeline copies preserve the payload.",
+    "PXC import ignores mismatched saved lengths; matching unsupported pairs keep an opaque source node with a diagnostic. missing or empty scalar rows select saved defaults before catalogue fallback.",
+    "Studio group truncation and dynamic input removal delete corresponding constructor records. defaults alone never warm cold captured scalar storage."
+  ],
+  "native_checks": [
+    "native roundtrip with current99,88 and saved7,8; represented catalogue fallback0,0.",
+    "duplicate, unknown-port and nonfinite refusal; retained versus cloned capacity charge.",
+    "cold group binding remains uninitialized despite saved constructor metadata.",
+    "capture envelope5 preserves defaults and inactive axes; tiny byte budgets preserve prior outputs; future-version fixture now uses6.",
+    "PXC native roundtrip and current-value edit preserve saved def_val; mismatched lengths ignored and unsupported matching pair stays opaque.",
+    "empty separated rows initialize scalar7,8 while combined remains99,88.",
+    "Studio truncation retains surviving port default then removal clears empty payload."
+  ],
+  "issues_and_repairs": [
+    "read-only review found catalogue ValueText prefix is v rather than vec2; fixed bounded pair parser.",
+    "read-only review found empty imported axes ignored saved constructor defaults; choose retained saved pair first.",
+    "pre-build review fixed mutable test pointer and advanced unsupported future capture version fixture."
+  ],
+  "builds": [
+    {
+      "log": "axis-defaults-build1.log",
+      "exit_code": 0
+    }
+  ],
+  "joined_batches": [
+    {
+      "results": "axis-defaults-batch1-results.json",
+      "checks": 20,
+      "passed_checks": 20,
+      "all_passed": true,
+      "native_cpu_cases": 5005,
+      "render_cases": 15,
+      "render_assertions": 887,
+      "startup_cases": 1,
+      "cli_cases": 16,
+      "python_cases": 100,
+      "binary_hashes_stable": true,
+      "child_hashes_stable": true,
+      "socket_cases_excluded": 21
+    }
+  ],
+  "source_review": {
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "facts": [
+      "node_value serializes def_val separately and restores non-null overrides only when saved and local constructor array lengths match.",
+      "node_value getAnimators creates local scalar animators from def_val; valueAnimator creates initial key at time zero.",
+      "gradient point constructor default is0,0; catalogue constants use ValueText v syntax."
+    ],
+    "scripts": [
+      {
+        "path": "scripts/node_value/node_value.gml",
+        "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd"
+      },
+      {
+        "path": "scripts/node_keyframe/node_keyframe.gml",
+        "sha256": "73a7fe4c85562db01192ae88c7ab35ebd16684f9d3831641e53a572b1480a49b"
+      },
+      {
+        "path": "scripts/node_group/node_group.gml",
+        "sha256": "12bcf43c0bfcb6d84ea8c788c4ff84bae4f805d1290ede309222f2cd03bbb019"
+      },
+      {
+        "path": "scripts/node_gradient_point_n/node_gradient_point_n.gml",
+        "sha256": "4bf3c140c198df497f338f56132ca8aa517da39ba8bbe03818e18c8e7ad3f739"
+      }
+    ]
+  },
+  "limits": [
+    "retained lazy axis initialization and separate/combine controls remain unfinished; imported defaults do not establish binding or constructor history.",
+    "generic Vector, unresolved runtime constructor expressions and matching nonfinite or nested constructor payloads remain unrepresented.",
+    "detached scalar mode changes and explicit same-base source setInstance recapture remain unfinished.",
+    "licensed runtime parity, headed Studio verification, profiling for these changes and sanitizer checks were not run.",
+    "21 socket cases retain previously reproduced sandbox exclusions; offscreen Vulkan was approved.",
+    "git metadata is read-only; owned patches are prepared but this pass cannot commit in this environment."
+  ],
+  "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05"
+}
