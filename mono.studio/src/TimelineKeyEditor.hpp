@@ -13,24 +13,26 @@ namespace studio {
 		std::vector<ImageGraphKeyframeIdentity> Selection, PreparedSelection;
 		bool Prepared = false;
 		std::vector<engine::imagegraph::Keyframe> Clipboard, Originals;
+		std::vector<int8_t> ClipboardAxes, OriginalAxes;
 		engine::imagegraph::FrameTime Anchor, Destination;
 		bool Active = false, Copying = false;
 		std::string TargetNode, TargetPort;
 
-		static ImageGraphKeyframeIdentity Identity(const engine::imagegraph::Keyframe &key) {
-			return {key.NodeId, key.Port, engine::imagegraph::GetFrameTime(key)};
+		static ImageGraphKeyframeIdentity
+		Identity(const engine::imagegraph::Keyframe &key, int8_t axis = -1) {
+			return {key.NodeId, key.Port, engine::imagegraph::GetFrameTime(key), axis};
 		}
-		bool Selected(const engine::imagegraph::Keyframe &key) const {
+		bool Selected(const engine::imagegraph::Keyframe &key, int8_t axis = -1) const {
 			return std::any_of(Selection.begin(), Selection.end(), [&](const auto &identity) {
-				return identity.NodeId == key.NodeId && identity.Port == key.Port &&
+				return identity.Axis == axis && identity.NodeId == key.NodeId && identity.Port == key.Port &&
 					   identity.Time == engine::imagegraph::GetFrameTime(key);
 			});
 		}
-		bool DrawRow(const engine::imagegraph::Keyframe &key) {
+		bool DrawRow(const engine::imagegraph::Keyframe &key, int8_t axis = -1) {
 			using namespace engine::imagegraph;
 			const auto time = GetFrameTime(key);
-			if (!ValidFrameTime(time) || key.NodeId.size() > Limits::MaximumTextBytes ||
-				key.Port.size() > Limits::MaximumTextBytes)
+			if (axis < -1 || axis > 1 || !ValidFrameTime(time) ||
+				key.NodeId.size() > Limits::MaximumTextBytes || key.Port.size() > Limits::MaximumTextBytes)
 				return false;
 			// The entire authored identity scopes the row, including keys on the same property.
 			ImGuiID id = ImGui::GetCurrentWindow()->IDStack.back();
@@ -39,16 +41,17 @@ namespace studio {
 			id = ImHashData(key.NodeId.data(), key.NodeId.size(), id);
 			id = ImHashData(&portLength, sizeof(portLength), id);
 			id = ImHashData(key.Port.data(), key.Port.size(), id);
+			id = ImHashData(&axis, sizeof(axis), id);
 			id = ImHashData(&time.Tick, sizeof(time.Tick), id);
 			const uint64_t fraction = std::bit_cast<uint64_t>(time.Subframe == 0 ? 0.0 : time.Subframe);
 			id = ImHashData(&fraction, sizeof(fraction), id);
 			id = ImHashData(&time.NegativeFrame, sizeof(time.NegativeFrame), id);
 			ImGui::PushOverrideID(id);
-			const std::string label = key.NodeId + "." + key.Port;
-			const bool clicked =
-				ImGui::Selectable(label.c_str(), Selected(key), ImGuiSelectableFlags_SpanAllColumns);
+			const std::string label = key.NodeId + "." + key.Port + (axis < 0 ? "" : axis == 0 ? ".x" : ".y");
+			// grug keep selection in this column so later controls own their clicks.
+			const bool clicked = ImGui::Selectable(label.c_str(), Selected(key, axis));
 			if (clicked) {
-				const auto identity = Identity(key);
+				const auto identity = Identity(key, axis);
 				const auto found = std::find(Selection.begin(), Selection.end(), identity);
 				if (ImGui::GetIO().KeyShift) {
 					if (found != Selection.end())
@@ -67,6 +70,57 @@ namespace studio {
 			ImGui::PopID();
 			return clicked;
 		}
+		// grug capture keys and component selectors together; refusal preserves the previous snapshot.
+		static bool CaptureSelection(
+			const engine::imagegraph::Document &document,
+			std::span<const ImageGraphKeyframeIdentity> selection,
+			std::vector<engine::imagegraph::Keyframe> &keys,
+			std::vector<int8_t> &axes,
+			engine::imagegraph::Diagnostic &error,
+			uint64_t maximumBytes
+		) try {
+			using namespace engine::imagegraph;
+			const auto refuse = [&](Status code, const char *message) {
+				error = {code, {}, {}, message};
+				return false;
+			};
+			if (selection.empty() || selection.size() > Limits::MaximumKeyframes ||
+				keys.size() > Limits::MaximumKeyframes || (!axes.empty() && axes.size() != keys.size()))
+				return refuse(Status::InvalidValue, "key snapshot has invalid component selectors");
+			uint64_t remaining = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
+			const uint64_t slots =
+				axes.capacity() + selection.size() + (keys.capacity() - keys.size()) * sizeof(Keyframe);
+			if (slots > remaining)
+				return refuse(Status::LimitExceeded, "key snapshot selectors exceed the payload budget");
+			remaining -= slots;
+			for (const auto &key : keys) {
+				const auto bytes = KeyframePayloadBytes(key);
+				if (!bytes || *bytes > remaining)
+					return refuse(Status::LimitExceeded, "retained key snapshot exceeds the payload budget");
+				remaining -= *bytes;
+			}
+			std::vector<int8_t> candidateAxes;
+			candidateAxes.reserve(selection.size());
+			if (candidateAxes.capacity() - selection.size() > remaining)
+				return refuse(
+					Status::LimitExceeded, "key snapshot selector capacity exceeds the payload budget"
+				);
+			remaining -= candidateAxes.capacity() - selection.size();
+			for (const auto &identity : selection) {
+				if (identity.Axis < -1 || identity.Axis > 1)
+					return refuse(Status::InvalidValue, "key snapshot component selector is invalid");
+				candidateAxes.push_back(identity.Axis);
+			}
+			std::vector<Keyframe> candidate;
+			if (!CaptureImageGraphKeyframes(document, selection, candidate, error, remaining)) return false;
+			keys = std::move(candidate);
+			axes = std::move(candidateAxes);
+			return true;
+		} catch (const std::bad_alloc &) {
+			error = {engine::imagegraph::Status::LimitExceeded, {}, {}, "key snapshot allocation failed"};
+			return false;
+		}
+
 		std::optional<uint64_t> Remaining(
 			bool includeClipboard,
 			bool includeOriginals,
@@ -101,26 +155,40 @@ namespace studio {
 					remaining -= *bytes;
 				}
 			}
+			const uint64_t axisBytes = (includeClipboard ? ClipboardAxes.capacity() : 0) +
+									   (includeOriginals ? OriginalAxes.capacity() : 0);
+			if (axisBytes > remaining) return std::nullopt;
+			remaining -= axisBytes;
+
 			return remaining;
 		}
 		bool Copy(const engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error) {
 			const auto remaining = Remaining(false, true);
 			if (!remaining) return false;
-			return CaptureImageGraphKeyframes(document, Selection, Clipboard, error, *remaining);
+			return CaptureSelection(document, Selection, Clipboard, ClipboardAxes, error, *remaining);
 		}
 		bool Begin(
 			const engine::imagegraph::Document &document,
 			bool paste,
 			const engine::imagegraph::FrameTime &cursor,
 			engine::imagegraph::Diagnostic &error
-		) {
+		) try {
 			using namespace engine::imagegraph;
 			if (!ValidFrameTime(cursor)) return false;
 			if (paste) {
 				if (Clipboard.empty()) return false;
+				if ((!ClipboardAxes.empty() && ClipboardAxes.size() != Clipboard.size()) ||
+					std::any_of(ClipboardAxes.begin(), ClipboardAxes.end(), [](int8_t axis) {
+						return axis < -1 || axis > 1;
+					})) {
+					error = {Status::InvalidValue, {}, {}, "clipboard has invalid component selectors"};
+					return false;
+				}
 				const auto budget = Remaining(true, true);
 				if (!budget) return false;
 				uint64_t remaining = *budget;
+				if (ClipboardAxes.size() > remaining) return false;
+				remaining -= ClipboardAxes.size();
 				for (const auto &key : Clipboard) {
 					const auto bytes = KeyframePayloadBytes(key);
 					if (!bytes || *bytes > remaining) {
@@ -131,11 +199,14 @@ namespace studio {
 					}
 					remaining -= *bytes;
 				}
-				Originals = Clipboard;
+				std::vector<Keyframe> candidate = Clipboard;
+				std::vector<int8_t> candidateAxes = ClipboardAxes;
+				Originals = std::move(candidate);
+				OriginalAxes = std::move(candidateAxes);
 			} else {
 				const auto remaining = Remaining(true, false);
 				if (!remaining ||
-					!CaptureImageGraphKeyframes(document, Selection, Originals, error, *remaining))
+					!CaptureSelection(document, Selection, Originals, OriginalAxes, error, *remaining))
 					return false;
 			}
 			Anchor = GetFrameTime(Originals.front());
@@ -147,6 +218,11 @@ namespace studio {
 			TargetPort.clear();
 			Active = true;
 			return true;
+		} catch (const std::bad_alloc &) {
+			error = {
+				engine::imagegraph::Status::LimitExceeded, {}, {}, "staged key snapshot allocation failed"
+			};
+			return false;
 		}
 		// Stage the document without closing the popup or replacing its pinned selection.
 		bool PrepareCommit(
@@ -161,9 +237,25 @@ namespace studio {
 			Prepared = false;
 			const auto budget = Remaining(true, true, maximumBytes);
 			if (!Active || !budget) return false;
+			if (originals.size() != Originals.size() ||
+				(!OriginalAxes.empty() && OriginalAxes.size() != originals.size()) ||
+				std::any_of(OriginalAxes.begin(), OriginalAxes.end(), [](int8_t axis) {
+					return axis < -1 || axis > 1;
+				})) {
+				error = {Status::InvalidValue, {}, {}, "staged keys have invalid component selectors"};
+				return false;
+			}
 			uint64_t remaining = *budget;
 			std::vector<ImageGraphKeyframeIdentity> selection;
 			if (Copying && !TargetNode.empty()) {
+				if (std::any_of(OriginalAxes.begin(), OriginalAxes.end(), [](int8_t axis) {
+						return axis != -1;
+					})) {
+					error = {
+						Status::TypeMismatch, {}, {}, "scalar axis keys require a component paste target"
+					};
+					return false;
+				}
 				if (!PasteImageGraphKeyframesToProperty(
 						document, originals, Destination, TargetNode, TargetPort, error, remaining
 					))
@@ -181,7 +273,8 @@ namespace studio {
 					remaining -= bytes;
 				}
 				selection.reserve(originals.size());
-				for (const auto &key : originals) {
+				for (size_t index = 0; index < originals.size(); ++index) {
+					const auto &key = originals[index];
 					FrameTime time;
 					if (!ShiftFrameTime(GetFrameTime(key), Anchor, Destination, time)) {
 						error = {
@@ -189,12 +282,15 @@ namespace studio {
 						};
 						return false;
 					}
-					ImageGraphKeyframeIdentity identity{key.NodeId, key.Port, time};
+					if (time.NegativeFrame) time = {};
+					ImageGraphKeyframeIdentity identity{
+						key.NodeId, key.Port, time, OriginalAxes.empty() ? int8_t{-1} : OriginalAxes[index]
+					};
 					if (std::find(selection.begin(), selection.end(), identity) == selection.end())
 						selection.push_back(std::move(identity));
 				}
 				if (!TransferImageGraphKeyframes(
-						document, originals, Anchor, Destination, Copying, error, remaining
+						document, originals, Anchor, Destination, Copying, error, remaining, OriginalAxes
 					))
 					return false;
 			}
@@ -215,6 +311,7 @@ namespace studio {
 		void Cancel() {
 			Active = Prepared = false;
 			std::vector<engine::imagegraph::Keyframe>().swap(Originals);
+			std::vector<int8_t>().swap(OriginalAxes);
 			std::vector<ImageGraphKeyframeIdentity>().swap(PreparedSelection);
 		}
 

@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-06",
+  "evidence_scope": "Studio scalar timeline state, visible scalar table rows and mixed scalar/combined Dopesheet actions. The broader Composer goal remains active.",
+  "tested_behavior": [
+    "Distinct full-identity combined, X and Y rows at the same socket and clock retain explicit axis selectors through selection, clipboard copy, popup move/paste, and history.",
+    "Capture keys and axis selectors atomically. Refused invalid-selector or byte-budget captures preserve the previous clipboard and staged originals.",
+    "A real eight-column headless ImGui table deletes a captured alias Y key through its measured Delete button. Canonical owner and alias projections change together while X and combined keys are preserved.",
+    "Return immediately after table publication invalidates borrowed keys. A refused edit or undo-history admission leaves the document unchanged and allows retry.",
+    "Project scalar pins through the source-writer capture envelope and refuse stale full payloads. Dopesheet actions and deletion retain axis selectors through history publication.",
+    "Reverse treats combined, X and Y as distinct channels. Mixed alias actions preserve singleton channels, move multi-key channels, and publish exact component selections.",
+    "Undo and redo recover exact documents. A rejected metadata cardinality clears Prepared before any later selection publication.",
+    "A scalar clipboard explicitly refuses a vector property paste target until a component target is available.",
+    "Use column-scoped selectable hitboxes so row selection and later-column controls retain ordinary independent click behavior."
+  ],
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "scalar-timeline-state-batch3-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5120,
+    "cpp_assertions": 2001357,
+    "studio_test_cases": 1034,
+    "studio_assertions": 46959,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "totals_method": "Sum result rows reporting C++ cases/assertions, including the startup fixture. Python and CLI totals are separate.",
+    "final_build": {
+      "iteration": 3,
+      "exit_code": 0,
+      "targets": 17,
+      "steps": 14,
+      "log": "scalar-timeline-state-build3.log"
+    },
+    "backend": "SDL offscreen with Vulkan for approved GPU checks; headless ImGui contexts for the table and editor.",
+    "profiling": "No new timing was collected and no performance improvement is claimed.",
+    "build_warning": "The existing GCC -Wmaybe-uninitialized warning in TimelineRegions.hpp was emitted through ImageComposer.cpp. TimelineRegions.hpp was not edited in this phase."
+  },
+  "iteration_history": [
+    {
+      "stage": "build 1",
+      "result": "all 17 targets built; 15 Ninja steps"
+    },
+    {
+      "stage": "batch 1",
+      "result": "19 checks passed; Studio had 3 failing cases and 5 failing assertions",
+      "issues_file": "scalar-timeline-state-batch1-issues.json",
+      "repair": "Full-row selection intercepted the Delete button; mixed-key sorting also made a vector-order assertion unsuitable. Compare complete combined keys by identity."
+    },
+    {
+      "stage": "build 2 and batch 2",
+      "result": "all 17 targets built; 19 checks passed; Studio had 7 failing cases and 9 failing assertions",
+      "issues_file": "scalar-timeline-state-batch2-issues.json",
+      "repair": "AllowOverlap fixed table clicks but altered existing row hover admission. Replace the full-row hitbox with a property-column selectable using default click behavior."
+    },
+    {
+      "stage": "build 3 and batch 3",
+      "result": "all 17 targets built and all 20 checks passed"
+    }
+  ],
+  "unchanged_evidence": {
+    "before": "scalar-timeline-state-source-before-build3.json",
+    "after": "scalar-timeline-state-source-after-batch3.json",
+    "frozen_modified_or_untracked_source_paths": 50,
+    "source_hashes_equal": true,
+    "peer_whole_files_unchanged": 42,
+    "shared_composer_peer_hunks_preserved": true,
+    "shared_composer_method": "Owned patch is the diff against the pre-phase snapshot whose hash matches the previous verified peer file. Only that patch is staged.",
+    "previous_committed_scalar_capture_files_unchanged": 6,
+    "test_binaries_unchanged": 13,
+    "child_hashes_file": "scalar-timeline-state-child-hashes-batch3.json",
+    "child_hashes_equal": true
+  },
+  "tested_owned_worktree_file_hashes": {
+    "mono.studio/src/ImageComposer.cpp": "c6536ba3d6090f94919ee657ee5fe857e4be301238251e1b4f300ac1a49f8612",
+    "mono.studio/src/ImageGraphKeyPinProjection.hpp": "3d52ef0742e7a953d46ac4dde59a6131ad75894dc10b58bc54fd8dd13007c1a2",
+    "mono.studio/src/TimelineDopesheet.hpp": "b3e42e69e4d2083cc0c0ea2959366b560b26014daa7c22a83d9675d0e35ea09b",
+    "mono.studio/src/TimelineKeyActions.hpp": "e3f3e5ef8b102036918c0bba99d91c54fc94432c3f9b7b89006c2739121b104d",
+    "mono.studio/src/TimelineKeyEditor.hpp": "7bd7bfd89e45b1183e6b096ab257e14e569416d0b154a6ec665714800c5c8b80",
+    "mono.studio/src/TimelineScalarKeys.hpp": "28331dd785e4593f2bfab8c585120a7e0764a89107e676135d19ea0454927261",
+    "mono.studio/tests/TimelineKeyEditor.cpp": "efcb505a46e1f84dd390cecea2ad8307a953f2247ed30e0ddbfcf00b4285ecda",
+    "mono.studio/tests/TimelineScalarKeys.cpp": "b11c9d7c5b0e75df482af41fd3965932218d152674721235fee74672dc1c7927"
+  },
+  "remaining_gaps": [
+    "Scalar-axis graph markers, mouse gestures and effective alias rows without local projections remain open.",
+    "Scalar key metadata authoring and component-target paste remain open.",
+    "Initial uncaptured alias routing still needs completion of the source-capture envelope.",
+    "Licensed-reference parity and headed Studio verification remain open.",
+    "The broader Composer goal remains active."
+  ]
+}

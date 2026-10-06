@@ -44,6 +44,7 @@ namespace {
 		FrameTime Cursor{5, .25, false};
 		std::vector<ImVec2> Rows;
 		std::vector<ImGuiID> RowIds;
+		std::vector<int8_t> RowAxes;
 		unsigned Changes = 0;
 		bool ReconcileSplit = false;
 		size_t SplitCount = 1;
@@ -65,6 +66,37 @@ namespace {
 				{"number", "value", 3, 3.0, "linear"},
 				{"number", "value", 7, 7.0, "linear"}
 			};
+		}
+		void UseSourceGraph() {
+			Doc = {};
+			Doc.FormatVersion = 10;
+			Node owner{"owner", "pc.mirror_polar", {}, {}, {{"center", Vector2{.2, .3}}}};
+			owner.SourceAnimatedInputs = {"center"};
+			SourceSeparatedVec2Animator axes;
+			axes.Port = "center";
+			axes.Initialized = true;
+			axes.Separated = true;
+			axes.Axes[0].Keys = {
+				{"owner", "center", 0, .25, "source", KeyframeEase{}},
+				{"owner", "center", 4, .75, "source", KeyframeEase{}}
+			};
+			axes.Axes[1].Keys = {
+				{"owner", "center", 0, 2.0, "source", KeyframeEase{}},
+				{"owner", "center", 4, 4.0, "source", KeyframeEase{}}
+			};
+			for (size_t axis = 0; axis < axes.Axes.size(); ++axis)
+				for (auto &key : axes.Axes[axis].Keys)
+					key.SourceKeyId = std::string(axis == 0 ? "x-" : "y-") + (key.Tick == 0 ? "0" : "4");
+			owner.SourceSeparatedVec2Animators.emplace().Inputs.push_back(std::move(axes));
+			Doc.Nodes = {std::move(owner)};
+			Doc.Keyframes = {
+				{"owner", "center", 0, Vector2{.2, .3}, "source", KeyframeEase{}},
+				{"owner", "center", 4, Vector2{.7, .8}, "source", KeyframeEase{}}
+			};
+			Doc.Keyframes[0].SourceKeyId = "combined-0";
+			Doc.Keyframes[1].SourceKeyId = "combined-4";
+			Doc.Tracks = {{"owner", "center", "hold", -1}};
+			Doc.Outputs = {{"out", "owner", "surface_out"}};
 		}
 		~Timeline() {
 			ImGui::SetCurrentContext(Context);
@@ -95,11 +127,25 @@ namespace {
 			});
 			Rows.clear();
 			RowIds.clear();
+			RowAxes.clear();
 			for (const auto &key : Doc.Keyframes) {
-				(void)Editor.DrawRow(key);
+				(void)Editor.DrawRow(key, -1);
 				const auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
 				Rows.push_back({(a.x + b.x) * .5f, (a.y + b.y) * .5f});
 				RowIds.push_back(Context->LastItemData.ID);
+				RowAxes.push_back(-1);
+			}
+			for (const auto &node : Doc.Nodes) {
+				if (!node.SourceSeparatedVec2Animators) continue;
+				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
+					for (size_t axis = 0; axis < input.Axes.size(); ++axis)
+						for (const auto &key : input.Axes[axis].Keys) {
+							(void)Editor.DrawRow(key, static_cast<int8_t>(axis));
+							const auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+							Rows.push_back({(a.x + b.x) * .5f, (a.y + b.y) * .5f});
+							RowIds.push_back(Context->LastItemData.ID);
+							RowAxes.push_back(static_cast<int8_t>(axis));
+						}
 			}
 			ImGui::End();
 			ImGui::Render();
@@ -482,4 +528,143 @@ TEST_CASE("timeline no-op follows actual split reconciliation admission", "[stud
 		CHECK(ui.Editor.Selection == selected);
 		CHECK_FALSE(ui.History.CanUndo());
 	}
+}
+
+TEST_CASE(
+	"timeline mixed source rows keep axis pins through copy paste and history",
+	"[studio][timeline_source_axes]"
+) {
+	Timeline ui;
+	ui.UseSourceGraph();
+	ui.Frame();
+	ui.Frame();
+	REQUIRE(ui.RowIds.size() == 6);
+	for (size_t left = 0; left < ui.RowIds.size(); ++left)
+		for (size_t right = left + 1; right < ui.RowIds.size(); ++right)
+			CHECK(ui.RowIds[left] != ui.RowIds[right]);
+	CHECK(ui.RowAxes == std::vector<int8_t>{-1, -1, 0, 0, 1, 1});
+	ui.Click(0);
+	ui.Click(2, true);
+	ui.Click(4, true);
+	REQUIRE(ui.Editor.Selection.size() == 3);
+	CHECK(ui.Editor.Selection[0].Axis == -1);
+	CHECK(ui.Editor.Selection[1].Axis == 0);
+	CHECK(ui.Editor.Selection[2].Axis == 1);
+	const auto before = ui.Doc;
+	ui.Button("Copy keys");
+	REQUIRE(ui.Editor.Clipboard.size() == 3);
+	CHECK(ui.Editor.ClipboardAxes == std::vector<int8_t>{-1, 0, 1});
+	CHECK(ui.Doc == before);
+	ui.Click(5);
+	CHECK(ui.Editor.ClipboardAxes == std::vector<int8_t>{-1, 0, 1});
+	ui.Button("Paste keys");
+	ui.Button("Apply");
+	INFO(ui.Error.Message);
+	REQUIRE(ui.Changes == 1);
+	REQUIRE(ui.Doc.Keyframes.size() == 3);
+	CHECK(GetFrameTime(ui.Doc.Keyframes.back()) == FrameTime{5, .25, false});
+	for (size_t axis = 0; axis < 2; ++axis) {
+		const auto &keys = ui.Doc.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[axis].Keys;
+		REQUIRE(keys.size() == 3);
+		CHECK(GetFrameTime(keys.back()) == FrameTime{5, .25, false});
+		CHECK(keys.back().SourceKeyId.empty());
+	}
+	const auto after = ui.Doc;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == after);
+}
+
+TEST_CASE(
+	"timeline mixed source move pins axes and refuses stale or overbudget commits",
+	"[studio][timeline_source_axes]"
+) {
+	Timeline ui;
+	ui.UseSourceGraph();
+	ui.Frame();
+	ui.Frame();
+	ui.Click(0);
+	ui.Click(2, true);
+	ui.Click(4, true);
+	const auto selected = ui.Editor.Selection;
+	ui.Button("Move keys");
+	REQUIRE(ui.Editor.Active);
+	REQUIRE(ui.Editor.OriginalAxes == std::vector<int8_t>{-1, 0, 1});
+	const auto originals = ui.Editor.Originals;
+	const auto pinnedAxes = ui.Editor.OriginalAxes;
+	ui.Doc.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys[0].Data = .5;
+	const auto changed = ui.Doc;
+	ui.Button("Apply");
+	CHECK(ui.Doc == changed);
+	CHECK(ui.Editor.Active);
+	CHECK(ui.Editor.Selection == selected);
+	CHECK(ui.Editor.Originals == originals);
+	CHECK(ui.Editor.OriginalAxes == pinnedAxes);
+	CHECK(ui.Error.Code == Status::InvalidValue);
+	ui.Button("Cancel");
+	CHECK_FALSE(ui.Editor.Active);
+
+	Timeline capped;
+	capped.UseSourceGraph();
+	capped.History = studio::ImageGraphHistory(128, 1);
+	capped.Frame();
+	capped.Frame();
+	capped.Click(0);
+	capped.Click(2, true);
+	capped.Click(4, true);
+	const auto capBefore = capped.Doc;
+	const auto capSelection = capped.Editor.Selection;
+	capped.Button("Move keys");
+	capped.Whole("8");
+	capped.Button("Apply");
+	CHECK(capped.Doc == capBefore);
+	CHECK(capped.Editor.Selection == capSelection);
+	CHECK(capped.Editor.Active);
+	CHECK(capped.Editor.OriginalAxes == std::vector<int8_t>{-1, 0, 1});
+	CHECK_FALSE(capped.History.CanUndo());
+}
+
+TEST_CASE(
+	"scalar clipboard and staged pins survive refused capture and incompatible target paste",
+	"[studio][timeline_source_axes]"
+) {
+	Timeline ui;
+	ui.UseSourceGraph();
+	const auto &axisKey = ui.Doc.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys[0];
+	ui.Editor.Selection = {studio::TimelineKeyEditor::Identity(axisKey, 0)};
+	REQUIRE(ui.Editor.Copy(ui.Doc, ui.Error));
+	const auto clipboard = ui.Editor.Clipboard;
+	const auto axes = ui.Editor.ClipboardAxes;
+	CHECK_FALSE(
+		studio::TimelineKeyEditor::CaptureSelection(
+			ui.Doc, ui.Editor.Selection, ui.Editor.Clipboard, ui.Editor.ClipboardAxes, ui.Error, 1
+		)
+	);
+	CHECK(ui.Editor.Clipboard == clipboard);
+	CHECK(ui.Editor.ClipboardAxes == axes);
+	ui.Editor.Selection[0].Axis = 2;
+	CHECK_FALSE(ui.Editor.Copy(ui.Doc, ui.Error));
+	CHECK(ui.Editor.Clipboard == clipboard);
+	CHECK(ui.Editor.ClipboardAxes == axes);
+	REQUIRE(ui.Editor.Begin(ui.Doc, true, {8, .25, false}, ui.Error));
+	const auto before = ui.Doc;
+	const auto pinned = ui.Editor.Originals;
+	ui.Editor.TargetNode = "owner";
+	ui.Editor.TargetPort = "center";
+	CHECK_FALSE(ui.Editor.PrepareCommit(ui.Doc, ui.Error));
+	CHECK(ui.Error.Code == Status::TypeMismatch);
+	CHECK(ui.Doc == before);
+	CHECK(ui.Editor.Active);
+	CHECK(ui.Editor.Originals == pinned);
+	CHECK(ui.Editor.OriginalAxes == axes);
+	ui.Editor.TargetNode.clear();
+	REQUIRE(ui.Editor.PrepareCommit(ui.Doc, ui.Error));
+	ui.Editor.OriginalAxes.push_back(1);
+	CHECK_FALSE(ui.Editor.PrepareCommit(ui.Doc, ui.Error));
+	CHECK_FALSE(ui.Editor.Prepared);
+	const auto selected = ui.Editor.Selection;
+	ui.Editor.PublishCommit();
+	CHECK(ui.Editor.Selection == selected);
+	CHECK(ui.Editor.Active);
 }

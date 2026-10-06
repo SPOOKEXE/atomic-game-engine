@@ -47,6 +47,7 @@
 #include "TimelineKeyDelete.hpp"
 #include "TimelineKeyEditor.hpp"
 #include "TimelineRegions.hpp"
+#include "TimelineScalarKeys.hpp"
 #include "Vector2Panel.hpp"
 #include "WavExport.hpp"
 #include "WavFileChecker.hpp"
@@ -6590,7 +6591,8 @@ namespace studio {
 									document, state.LastDiagnostic, remaining, pins
 								);
 							},
-							state.LastDiagnostic
+							state.LastDiagnostic,
+							state.Keys.OriginalAxes
 						);
 					},
 					&unchanged
@@ -6621,7 +6623,8 @@ namespace studio {
 										document, state.Keys, state.LastDiagnostic, remaining, pins
 									);
 								},
-								state.LastDiagnostic
+								state.LastDiagnostic,
+								state.Dopesheet.OriginalAxes
 							);
 						});
 					if (accepted) state.Dopesheet.PublishCommit(state.Keys);
@@ -6744,6 +6747,22 @@ namespace studio {
 					);
 					ImGui::PopID();
 				}
+				(void)detail::DrawTimelineScalarKeys(
+					state.Authored,
+					state.Keys,
+					state.LastDiagnostic,
+					[&](const Keyframe &key) {
+						if (SetImageGraphAuthorFrame(state.Playback, GetFrameTime(key)))
+							RequestPreview(state);
+						if (const auto found = state.Ids.ToCanvas.find(key.NodeId);
+							found != state.Ids.ToCanvas.end()) {
+							state.Canvas.Select(found->second);
+							state.Canvas.Centre(state.Graph, found->second);
+						}
+					},
+					[&](const auto &edit) { return ApplyKeyEdit(state, edit); }
+				);
+
 				ImGui::EndTable();
 			}
 		}

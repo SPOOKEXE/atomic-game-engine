@@ -16,13 +16,17 @@ namespace studio {
 		TimelineKeyAction action,
 		std::vector<engine::imagegraph::FrameTime> &output,
 		engine::imagegraph::Diagnostic &error,
-		uint64_t maximumBytes
+		uint64_t maximumBytes,
+		std::span<const int8_t> axes = {}
 	) try {
 		using namespace engine::imagegraph;
 		const auto fail = [&](Status code, const char *message) {
 			error = {code, {}, {}, message};
 			return false;
 		};
+		if ((!axes.empty() && axes.size() != keys.size()) ||
+			std::any_of(axes.begin(), axes.end(), [](int8_t axis) { return axis < -1 || axis > 1; }))
+			return fail(Status::InvalidValue, "key action has invalid component selectors");
 		if (keys.empty() || keys.size() > Limits::MaximumKeyframes)
 			return fail(Status::InvalidValue, "key action has no bounded selection");
 		if (uint64_t(keys.size()) * keys.size() > 64'000'000)
@@ -94,10 +98,11 @@ namespace studio {
 					candidate[i] = last;
 					break;
 				case TimelineKeyAction::Reverse: {
-					const size_t channelCount =
-						std::count_if(keys.begin(), keys.end(), [&](const auto &other) {
-							return other.NodeId == keys[i].NodeId && other.Port == keys[i].Port;
-						});
+					size_t channelCount = 0;
+					for (size_t other = 0; other < keys.size(); ++other)
+						if (keys[other].NodeId == keys[i].NodeId && keys[other].Port == keys[i].Port &&
+							(axes.empty() || axes[other] == axes[i]))
+							++channelCount;
 					if (channelCount > 1 &&
 						!SplitFrameTime(
 							double(FrameTimeToReal(last)) -

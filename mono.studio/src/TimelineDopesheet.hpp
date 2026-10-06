@@ -27,6 +27,7 @@ namespace studio {
 		std::optional<Track> FocusedTrack;
 		std::vector<Marker> Markers;
 		std::vector<engine::imagegraph::Keyframe> Originals;
+		std::vector<int8_t> OriginalAxes;
 		std::vector<engine::imagegraph::FrameTime> Destinations;
 		std::vector<ImageGraphKeyframeIdentity> BoxSelection, PreparedSelection;
 		bool Prepared = false;
@@ -44,7 +45,7 @@ namespace studio {
 			using namespace engine::imagegraph;
 			uint64_t bytes =
 				Tracks.capacity() * sizeof(Track) + Markers.capacity() * sizeof(Marker) +
-				Destinations.capacity() * sizeof(FrameTime) +
+				OriginalAxes.capacity() + Destinations.capacity() * sizeof(FrameTime) +
 				(BoxSelection.capacity() + PreparedSelection.capacity()) * sizeof(ImageGraphKeyframeIdentity);
 			if (FocusedTrack) bytes += FocusedTrack->NodeId.capacity() + FocusedTrack->Port.capacity() + 2;
 			for (const auto &track : Tracks)
@@ -191,6 +192,7 @@ namespace studio {
 		void Cancel() {
 			Dragging = Scaling = Copying = Boxing = Deleting = Prepared = Transforming = KeyboardCopy = false;
 			std::vector<engine::imagegraph::Keyframe>().swap(Originals);
+			std::vector<int8_t>().swap(OriginalAxes);
 			std::vector<engine::imagegraph::FrameTime>().swap(Destinations);
 			std::vector<ImageGraphKeyframeIdentity>().swap(BoxSelection);
 			std::vector<ImageGraphKeyframeIdentity>().swap(PreparedSelection);
@@ -252,12 +254,14 @@ namespace studio {
 				error = {Status::LimitExceeded, {}, {}, "key action exceeds timeline payload or work bound"};
 				return false;
 			}
-			if (!CaptureImageGraphKeyframes(document, editor.Selection, Originals, error, *budget - *held))
+			if (!TimelineKeyEditor::CaptureSelection(
+					document, editor.Selection, Originals, OriginalAxes, error, *budget - *held
+				))
 				return false;
 			const auto captured = CacheBytes();
 			if (!captured || *captured > *budget ||
 				!PrepareTimelineKeyDestinations(
-					Originals, action, Destinations, error, *budget - *captured
+					Originals, action, Destinations, error, *budget - *captured, OriginalAxes
 				)) {
 				Cancel();
 				return false;
@@ -284,8 +288,8 @@ namespace studio {
 				error = {Status::LimitExceeded, {}, {}, "key deletion exceeds the timeline payload budget"};
 				return false;
 			}
-			if (!CaptureImageGraphKeyframes(
-					document, editor.Selection, Originals, error, *budget - *retained
+			if (!TimelineKeyEditor::CaptureSelection(
+					document, editor.Selection, Originals, OriginalAxes, error, *budget - *retained
 				))
 				return false;
 			Deleting = true;
@@ -314,8 +318,8 @@ namespace studio {
 			const auto retained = CacheBytes();
 			const uint64_t clocks = editor.Selection.size() * sizeof(FrameTime);
 			if (!budget || !retained || *retained > *budget || clocks > *budget - *retained ||
-				!CaptureImageGraphKeyframes(
-					document, editor.Selection, Originals, error, *budget - *retained - clocks
+				!TimelineKeyEditor::CaptureSelection(
+					document, editor.Selection, Originals, OriginalAxes, error, *budget - *retained - clocks
 				))
 				return false;
 			Anchor = GetFrameTime(key);
@@ -373,9 +377,21 @@ namespace studio {
 			std::span<const engine::imagegraph::Keyframe> projectedPins = {}
 		) {
 			using namespace engine::imagegraph;
+			Prepared = false;
 			const auto originals =
 				projectedPins.empty() ? std::span<const Keyframe>{Originals} : projectedPins;
-			Prepared = false;
+			if (originals.size() != Originals.size() ||
+				(!OriginalAxes.empty() && OriginalAxes.size() != originals.size()) ||
+				std::any_of(OriginalAxes.begin(), OriginalAxes.end(), [](int8_t axis) {
+					return axis < -1 || axis > 1;
+				})) {
+				error = {Status::InvalidValue, {}, {}, "timeline keys have invalid component selectors"};
+				return false;
+			}
+			const bool sourceKeys =
+				document.SourceAnimators ||
+				std::any_of(OriginalAxes.begin(), OriginalAxes.end(), [](int8_t axis) { return axis != -1; });
+
 			const auto budget = editor.Remaining(true, true, maximumBytes);
 			uint64_t remaining = budget.value_or(0);
 			const auto retained = CacheBytes();
@@ -388,7 +404,7 @@ namespace studio {
 				error = {Status::LimitExceeded, {}, {}, "key deletion exceeds the work bound"};
 				return false;
 			}
-			if (!document.SourceAnimators)
+			if (!sourceKeys)
 				for (const auto &original : originals)
 					if (std::find(document.Keyframes.begin(), document.Keyframes.end(), original) ==
 						document.Keyframes.end()) {
@@ -400,7 +416,7 @@ namespace studio {
 						};
 						return false;
 					}
-			if (Deleting && document.SourceAnimators) {
+			if (Deleting && sourceKeys) {
 				remaining -= *retained;
 				const uint64_t scratch = originals.size() * sizeof(SourceKeyframeEdit);
 				if (scratch > remaining) {
@@ -414,8 +430,13 @@ namespace studio {
 				}
 				std::vector<SourceKeyframeEdit> edits;
 				edits.reserve(originals.size());
-				for (const auto &original : originals)
-					edits.push_back({&original});
+				for (size_t index = 0; index < originals.size(); ++index)
+					edits.push_back(
+						{&originals[index],
+						 nullptr,
+						 false,
+						 OriginalAxes.empty() ? int8_t{-1} : OriginalAxes[index]}
+					);
 				Document candidate;
 				if (ApplySourceKeyframeEdits(document, edits, candidate, error, remaining - scratch) !=
 					Status::Ok)
@@ -452,7 +473,10 @@ namespace studio {
 			selection.reserve(originals.size());
 			for (size_t index = 0; index < originals.size(); ++index) {
 				ImageGraphKeyframeIdentity identity{
-					originals[index].NodeId, originals[index].Port, Destinations[index]
+					originals[index].NodeId,
+					originals[index].Port,
+					!Transforming && Destinations[index].NegativeFrame ? FrameTime{} : Destinations[index],
+					OriginalAxes.empty() ? int8_t{-1} : OriginalAxes[index]
 				};
 				if (std::find(selection.begin(), selection.end(), identity) == selection.end())
 					selection.push_back(std::move(identity));
@@ -472,7 +496,7 @@ namespace studio {
 				});
 			}
 			if (!RetimeImageGraphKeyframes(
-					document, originals, Destinations, Copying, error, remaining, !Transforming
+					document, originals, Destinations, Copying, error, remaining, !Transforming, OriginalAxes
 				))
 				return false;
 			PreparedSelection = std::move(selection);
@@ -624,7 +648,8 @@ namespace studio {
 				FrameTime time = GetFrameTime(key);
 				if (Dragging && !Copying)
 					for (size_t index = 0; index < Originals.size(); ++index)
-						if (key.NodeId == Originals[index].NodeId && key.Port == Originals[index].Port &&
+						if ((OriginalAxes.empty() || OriginalAxes[index] < 0) &&
+							key.NodeId == Originals[index].NodeId && key.Port == Originals[index].Port &&
 							GetFrameTime(key) == GetFrameTime(Originals[index]))
 							time = Destinations[index];
 				marker.Position = {
@@ -648,6 +673,7 @@ namespace studio {
 			}
 			if (Dragging && Copying)
 				for (size_t index = 0; index < Originals.size(); ++index) {
+					if (!OriginalAxes.empty() && OriginalAxes[index] >= 0) continue;
 					const auto track = std::find_if(Tracks.begin(), Tracks.end(), [&](const auto &entry) {
 						return entry.NodeId == Originals[index].NodeId && entry.Port == Originals[index].Port;
 					});
