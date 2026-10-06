@@ -16,13 +16,19 @@ namespace studio {
 		engine::imagegraph::Diagnostic &error,
 		uint64_t extraPerKey = 0,
 		uint64_t borrowedExtraBytes = 0,
-		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+		std::span<const int8_t> axes = {}
 	) try {
 		using namespace engine::imagegraph;
 		const auto fail = [&] {
 			error = {Status::LimitExceeded, {}, {}, "captured key draft exceeds the payload budget"};
 			return false;
 		};
+		if ((!axes.empty() && axes.size() != originals.size()) ||
+			std::any_of(axes.begin(), axes.end(), [](int8_t axis) { return axis < -1 || axis > 1; })) {
+			error = {Status::InvalidValue, {}, {}, "captured metadata component selectors are invalid"};
+			return false;
+		}
 		const auto resident = DocumentRetainedPayloadBytes(document);
 		maximumBytes = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
 		if (borrowedExtraBytes > maximumBytes) return fail();
@@ -54,7 +60,9 @@ namespace studio {
 			if (!select(original, index)) continue;
 			replacements.push_back(original);
 			change(replacements.back(), index);
-			edits.push_back({&original, &replacements.back()});
+			edits.push_back(
+				{&original, &replacements.back(), false, axes.empty() ? int8_t{-1} : axes[index]}
+			);
 		}
 		const uint64_t spareSlots = (replacements.capacity() - replacements.size()) * sizeof(Keyframe) +
 									(edits.capacity() - edits.size()) * sizeof(SourceKeyframeEdit);

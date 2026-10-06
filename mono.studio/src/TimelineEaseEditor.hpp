@@ -11,6 +11,7 @@ namespace studio {
 	// other key fields and publish only after the host accepts its transaction.
 	struct TimelineEaseEditor {
 		std::vector<engine::imagegraph::Keyframe> Originals;
+		std::vector<int8_t> OriginalAxes;
 		double Delta = 0;
 		int Sides = 3;
 		bool Active = false;
@@ -18,6 +19,7 @@ namespace studio {
 
 		void Cancel() {
 			std::vector<engine::imagegraph::Keyframe>().swap(Originals);
+			std::vector<int8_t>().swap(OriginalAxes);
 			Active = false;
 		}
 		bool Begin(
@@ -37,8 +39,9 @@ namespace studio {
 				return false;
 			}
 			std::vector<Keyframe> captured;
-			if (!CaptureImageGraphKeyframes(
-					document, selection.Selection, captured, error, std::min(*remaining, maximumBytes)
+			std::vector<int8_t> axes;
+			if (!TimelineKeyEditor::CaptureSelection(
+					document, selection.Selection, captured, axes, error, std::min(*remaining, maximumBytes)
 				))
 				return false;
 			for (const auto &key : captured) {
@@ -59,6 +62,7 @@ namespace studio {
 				}
 			}
 			Originals = std::move(captured);
+			OriginalAxes = std::move(axes);
 			Delta = 0;
 			Sides = 3;
 			Active = true;
@@ -88,7 +92,16 @@ namespace studio {
 				error = {Status::LimitExceeded, {}, {}, "easing comparison exceeds its work budget"};
 				return false;
 			}
-			if (document.SourceAnimators)
+			if (originals.size() != Originals.size() ||
+				(!OriginalAxes.empty() && OriginalAxes.size() != originals.size()) ||
+				std::any_of(OriginalAxes.begin(), OriginalAxes.end(), [](int8_t axis) {
+					return axis < -1 || axis > 1;
+				})) {
+				error = {Status::InvalidValue, {}, {}, "easing component pins are invalid"};
+				return false;
+			}
+			if (document.SourceAnimators ||
+				std::any_of(OriginalAxes.begin(), OriginalAxes.end(), [](int8_t axis) { return axis >= 0; }))
 				return EditCapturedImageGraphKeys(
 					document,
 					originals,
@@ -106,8 +119,9 @@ namespace studio {
 					},
 					error,
 					0,
-					(Originals.capacity() - Originals.size()) * sizeof(Keyframe),
-					maximumBytes
+					(Originals.capacity() - Originals.size()) * sizeof(Keyframe) + OriginalAxes.capacity(),
+					maximumBytes,
+					OriginalAxes
 				);
 			// Validate every full original before the first staged mutation.
 			for (const auto &original : originals) {

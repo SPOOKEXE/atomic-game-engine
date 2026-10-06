@@ -7,6 +7,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <imgui_internal.h>
+
 TEST_SUITE_ID("studio.timeline_scalar_keys")
 TEST_DEPENDS("studio.imagegraph")
 
@@ -22,6 +24,8 @@ namespace {
 		ImVec2 DeleteCenter{};
 		ImGuiID DeleteId = 0;
 		ImGuiID PublishedRowId = 0;
+		ImGuiID SelectedRowId = 0;
+		unsigned EditCalls = 0;
 		bool Changed = false;
 		uint64_t EditBudget = Limits::MaximumEvaluationBytes;
 		unsigned SelectCalls = 0;
@@ -29,6 +33,7 @@ namespace {
 		ScalarTimeline() {
 			ImGui::SetCurrentContext(Context);
 			auto &io = ImGui::GetIO();
+			io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 			io.DisplaySize = {800, 600};
 			io.DeltaTime = 1.f / 60;
 			io.IniFilename = nullptr;
@@ -92,8 +97,12 @@ namespace {
 					 {"Key", "Frame", "Interpolation", "Ease in", "Ease out", "Driver", "Kind", "Action"})
 					ImGui::TableSetupColumn(name);
 				ImGui::TableHeadersRow();
-				const auto select = [&](const studio::ImageGraphKeyframeIdentity &) { ++SelectCalls; };
+				const auto select = [&](const studio::ImageGraphKeyframeIdentity &) {
+					++SelectCalls;
+					SelectedRowId = ImGui::GetItemID();
+				};
 				const auto apply = [&](const auto &edit, uint64_t borrowedBytes) {
+					++EditCalls;
 					if (borrowedBytes >= EditBudget) {
 						Error = {Status::LimitExceeded, {}, {}, "scalar table staging exceeds edit budget"};
 						return false;
@@ -128,6 +137,62 @@ namespace {
 			Frame();
 			if (Changed) PublishedRowId = DeleteId;
 			return published || Changed;
+		}
+		void Key(ImGuiKey key) {
+			auto &io = Context->IO;
+			io.AddKeyEvent(key, true);
+			Frame();
+			io.AddKeyEvent(key, false);
+			Frame();
+		}
+		bool FocusDelete() {
+			for (unsigned step = 0; step < 128; ++step) {
+				if (Context->NavWindow && Context->NavId == DeleteId) return true;
+				Key(ImGuiKey_Tab);
+			}
+			return Context->NavWindow && Context->NavId == DeleteId;
+		}
+		void ClickLastRow() {
+			auto &io = Context->IO;
+			io.AddMousePosEvent(45, DeleteCenter.y);
+			Frame();
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			Frame();
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			Frame();
+		}
+		bool FocusControl(ImGuiID id) {
+			for (unsigned step = 0; step < 192; ++step) {
+				if (Context->NavWindow && Context->NavId == id) return true;
+				Key(ImGuiKey_Tab);
+			}
+			return Context->NavWindow && Context->NavId == id;
+		}
+		bool FocusPopupChoice(const char *label) {
+			for (unsigned step = 0; step < 8; ++step) {
+				if (Context->OpenPopupStack.empty()) return false;
+				auto *popup = Context->OpenPopupStack.back().Window;
+				if (popup && Context->NavWindow == popup && Context->NavId == popup->GetID(label))
+					return true;
+				Key(ImGuiKey_DownArrow);
+			}
+			return false;
+		}
+		ImGuiID ControlId(const char *label) const {
+			return ImHashStr(label, 0, SelectedRowId);
+		}
+		ImGuiID EaseOutTypeId() const {
+			return ImHashStr("##type", 0, ImHashStr("ease-out", 0, SelectedRowId));
+		}
+		void ShiftTab() {
+			auto &io = Context->IO;
+			io.AddKeyEvent(ImGuiMod_Shift, true);
+			io.AddKeyEvent(ImGuiKey_Tab, true);
+			Frame();
+			io.AddKeyEvent(ImGuiKey_Tab, false);
+			Frame();
+			io.AddKeyEvent(ImGuiMod_Shift, false);
+			Frame();
 		}
 	};
 }
@@ -306,4 +371,149 @@ TEST_CASE("scalar table deletes through aliases without local arrays", "[studio]
 	CHECK(ui.Doc == before);
 	REQUIRE(ui.History.Redo(ui.Doc));
 	CHECK(ui.Doc == deleted);
+}
+
+TEST_CASE(
+	"scalar kind combo edits the last alias Y key through keyboard navigation and history",
+	"[studio][timeline_scalar_keys]"
+) {
+	ScalarTimeline ui;
+	Diagnostic compileError;
+	Plan plan;
+	REQUIRE(Compile(ui.Doc, plan, compileError) == Status::Ok);
+	const auto before = ui.Doc;
+	ui.Frame();
+	const auto lastRowDelete = ui.DeleteId;
+	REQUIRE(ui.FocusDelete());
+	CHECK(ui.Context->NavId == lastRowDelete);
+	ui.ShiftTab();
+	REQUIRE(ui.Context->NavWindow);
+	CHECK(ui.Context->NavId != lastRowDelete);
+	ui.Key(ImGuiKey_Enter);
+	ui.Key(ImGuiKey_DownArrow);
+	ui.Key(ImGuiKey_Enter);
+	REQUIRE(ui.Doc.Nodes[0].SourceSeparatedVec2Animators);
+	REQUIRE(ui.Doc.Nodes[1].SourceSeparatedVec2Animators);
+	auto expected = before;
+	expected.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys.back().Kind =
+		KeyframeKind::Adder;
+	expected.Nodes[1].SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys.back().Kind =
+		KeyframeKind::Adder;
+	CHECK(ui.Doc == expected);
+	CHECK(ui.Doc.Keyframes == before.Keyframes);
+	CHECK(
+		ui.Doc.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys ==
+		before.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys
+	);
+	CHECK(
+		ui.Doc.Nodes[1].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys ==
+		before.Nodes[1].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys
+	);
+	CHECK(
+		ui.Doc.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys[0] ==
+		before.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys[0]
+	);
+	CHECK(
+		ui.Doc.Nodes[1].SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys[0] ==
+		before.Nodes[1].SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys[0]
+	);
+	REQUIRE(ui.History.CanUndo());
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == expected);
+}
+
+TEST_CASE(
+	"scalar table edits alias interpolation and easing without crossing axes",
+	"[studio][timeline_scalar_keys]"
+) {
+	ScalarTimeline ui;
+	const auto before = ui.Doc;
+	ui.Frame();
+	ui.ClickLastRow();
+	REQUIRE(ui.SelectedRowId);
+	auto expected = before;
+	SECTION("outgoing easing side") {
+		REQUIRE(ui.FocusControl(ui.EaseOutTypeId()));
+		ui.Key(ImGuiKey_Enter);
+		REQUIRE(ui.FocusPopupChoice("bezier"));
+		ui.Key(ImGuiKey_Enter);
+		for (auto &node : expected.Nodes)
+			node.SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys.back().Ease->OutType = "bezier";
+	}
+	SECTION("interpolation") {
+		REQUIRE(ui.FocusControl(ui.ControlId("##interpolation")));
+		ui.Key(ImGuiKey_Enter);
+		REQUIRE(ui.FocusPopupChoice("linear"));
+		ui.Key(ImGuiKey_Enter);
+		for (auto &node : expected.Nodes) {
+			auto &key = node.SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys.back();
+			key.Interpolation = "linear";
+			key.Ease.reset();
+		}
+	}
+	INFO(ui.Error.Message);
+	CHECK(ui.Doc == expected);
+	REQUIRE(ui.History.CanUndo());
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == expected);
+}
+
+TEST_CASE(
+	"scalar table chooses each source driver on an alias with no local array",
+	"[studio][timeline_scalar_keys]"
+) {
+	for (size_t kind = 1; kind <= 7; ++kind) {
+		ScalarTimeline ui;
+		ui.Doc.Nodes[1].SourceSeparatedVec2Animators = {};
+		const auto before = ui.Doc;
+		ui.Frame();
+		REQUIRE(ui.FocusDelete());
+		ui.ShiftTab();
+		ui.ShiftTab();
+		ui.Key(ImGuiKey_Enter);
+		REQUIRE(ui.Context->OpenPopupStack.size() == 1);
+		ui.Key(ImGuiKey_Enter);
+		REQUIRE(ui.Context->OpenPopupStack.size() == 2);
+		for (size_t step = 0; step < kind; ++step)
+			ui.Key(ImGuiKey_DownArrow);
+		ui.Key(ImGuiKey_Enter);
+		INFO(ui.Error.Message);
+		CAPTURE(kind);
+		const auto &key = ui.Doc.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys.back();
+		REQUIRE(key.SourceDriver);
+		CHECK(key.SourceDriver->index() == kind - 1);
+		CHECK(key.SourceKeyId == "y-4");
+		CHECK_FALSE(ui.Doc.Nodes[1].SourceSeparatedVec2Animators);
+		CHECK(ui.Doc.Keyframes == before.Keyframes);
+		CHECK(
+			ui.Doc.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[0] ==
+			before.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[0]
+		);
+		Document reopened;
+		Diagnostic error;
+		REQUIRE(Read(Write(ui.Doc), reopened, error) == Status::Ok);
+		CHECK(reopened == ui.Doc);
+		REQUIRE(ui.History.Undo(ui.Doc));
+		CHECK(ui.Doc == before);
+	}
+}
+
+TEST_CASE("scalar metadata refusal retains document and history", "[studio][timeline_scalar_keys]") {
+	ScalarTimeline ui;
+	ui.History = studio::ImageGraphHistory(128, 1);
+	const auto before = ui.Doc;
+	ui.Frame();
+	ui.ClickLastRow();
+	REQUIRE(ui.SelectedRowId);
+	REQUIRE(ui.FocusControl(ui.ControlId("##kind")));
+	ui.Key(ImGuiKey_Enter);
+	ui.Key(ImGuiKey_DownArrow);
+	ui.Key(ImGuiKey_Enter);
+	CHECK(ui.Doc == before);
+	CHECK(ui.EditCalls > 0);
+	CHECK_FALSE(ui.History.CanUndo());
 }

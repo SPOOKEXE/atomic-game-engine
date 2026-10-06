@@ -1,0 +1,531 @@
+{
+  "date": "2026-10-06",
+  "evidence_scope": "grug add scalar timeline metadata and mixed-axis easing. broader Composer goal still active.",
+  "changes": [
+    "grug expose interpolation, incoming and outgoing easing, all seven source drivers and Normal/Adder kinds on effective X/Y rows.",
+    "grug route one pinned scalar metadata edit through the existing bounded source writer and host history. shared aliases update their canonical storage without adding missing local arrays.",
+    "grug share driver parameter controls with combined keys, including curve editing and captured audio controls.",
+    "grug preserve component selectors while selected easing captures mixed combined and scalar keys. invalid selectors and stale pins refuse before publication.",
+    "grug cover actual headless ImGui gestures, history refusal, undo/redo and native roundtrip beside mixed-axis identity checks."
+  ],
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "scalar-metadata-batch3-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5153,
+    "cpp_assertions": 2002070,
+    "studio_test_cases": 1061,
+    "studio_assertions": 47591,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "final_build": {
+      "iteration": 4,
+      "exit_code": 0,
+      "targets": 17,
+      "steps": 3,
+      "log": "scalar-metadata-build4.log"
+    },
+    "backend": "grug run approved SDL offscreen Vulkan checks and headless ImGui mouse and keyboard gestures.",
+    "profiling": "existing source edit host scope covers these edits. no new profile captured and no speed claim made.",
+    "skipped": "headed Studio and matched licensed reference parity remain open. dev/server/ci builds and sanitizers not run in this scoped release-tests batch."
+  },
+  "iteration_history": [
+    {
+      "stage": "build 1",
+      "exit_code": 1,
+      "log": "scalar-metadata-build1.log",
+      "output": [
+        "Curve has not been declared"
+      ],
+      "repair": "grug qualify the Composer curve callback type."
+    },
+    {
+      "stage": "build 2 and batch 1",
+      "build_exit_code": 0,
+      "failed_checks": 1,
+      "failed_studio_cases": 4,
+      "failed_assertions": 8,
+      "results_file": "scalar-metadata-batch1-results.json",
+      "repair": "grug compare combined keys by durable identity after sorting and shared fanout; cancel refused popup before reopening; target measured row control IDs and assert actual history callback refusal."
+    },
+    {
+      "stage": "build 3 and batch 2",
+      "build_exit_code": 0,
+      "failed_checks": 1,
+      "failed_studio_cases": 1,
+      "failed_assertions": 2,
+      "results_file": "scalar-metadata-batch2-results.json",
+      "output": [
+        "CHECK(ui.Doc == expected) failed before and after redo"
+      ],
+      "repair": "grug target popup entry by real label ID rather than assuming initial focus."
+    },
+    {
+      "stage": "build 4 and batch 3",
+      "result": "all 17 targets built and all 20 checks passed."
+    }
+  ],
+  "unchanged_evidence": {
+    "before": "scalar-metadata-source-before-build4.json",
+    "after": "scalar-metadata-source-after-batch3.json",
+    "frozen_relevant_source_paths": 70,
+    "source_hashes_equal": true,
+    "peer_files_unchanged": 42,
+    "shared_composer_peer_hunks_unchanged": 8,
+    "test_binaries_unchanged": 13,
+    "child_hashes_file": "scalar-metadata-child-hashes-batch3.json",
+    "child_hashes_equal": true
+  },
+  "remaining_scope": [
+    "headed Studio and licensed reference parity remain open.",
+    "other items in the original 33-item goal remain active."
+  ],
+  "checks": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-bake-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_bake"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.304,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-physics-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "9bce7a548e6058fb87e49534b66ca6299bf416fb67c22411c57139e639ef4d4f",
+      "exit_code": 0,
+      "elapsed_seconds": 0.348,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "9bce7a548e6058fb87e49534b66ca6299bf416fb67c22411c57139e639ef4d4f",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-runner-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph_runner"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "c26394d0fe89989fddd8029f9a50b0e91b7d7bcece9bd59bbc8e607e8dee6385",
+      "exit_code": 0,
+      "elapsed_seconds": 0.344,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "c26394d0fe89989fddd8029f9a50b0e91b7d7bcece9bd59bbc8e607e8dee6385",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-font-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphfont"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "96bfa2b46d329267df7dddce9405cec6a4ce28a5fdb4679d218c13b5605cdd4a",
+      "exit_code": 0,
+      "elapsed_seconds": 0.548,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "96bfa2b46d329267df7dddce9405cec6a4ce28a5fdb4679d218c13b5605cdd4a",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-export-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphexport"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "4d0272770910c3c66c7de98ce1640d327d75ee0ebfe51d7245e99eb5a26e10e7",
+      "exit_code": 0,
+      "elapsed_seconds": 0.644,
+      "assertions": 3132,
+      "cases": 77,
+      "binary_sha256_after": "4d0272770910c3c66c7de98ce1640d327d75ee0ebfe51d7245e99eb5a26e10e7",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-render-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_render",
+        "[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "53bd83c52fdd305743461abdafebb9b31d8d58e7bd32973b98c4db391627af74",
+      "exit_code": 0,
+      "elapsed_seconds": 1.474,
+      "assertions": 477,
+      "cases": 15,
+      "binary_sha256_after": "53bd83c52fdd305743461abdafebb9b31d8d58e7bd32973b98c4db391627af74",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-cli-batch3.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_)",
+        "--output-on-failure",
+        "-j8"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.317,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-io-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "4dfb7ddeab1fb5fe0bc63b543d078b8ab5589abe0e4f1dddeef444e069bf9834",
+      "exit_code": 0,
+      "elapsed_seconds": 3.528,
+      "assertions": 11938,
+      "cases": 280,
+      "binary_sha256_after": "4dfb7ddeab1fb5fe0bc63b543d078b8ab5589abe0e4f1dddeef444e069bf9834",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-core-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "31e9609af382f3b3c5ca1432a00e9909da94e97c855e00a1b75400b3441f18c6",
+      "exit_code": 0,
+      "elapsed_seconds": 3.755,
+      "assertions": 1895035,
+      "cases": 2976,
+      "binary_sha256_after": "31e9609af382f3b3c5ca1432a00e9909da94e97c855e00a1b75400b3441f18c6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-assetc-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_assetc"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "2f155201b8bb3d185c24b740b1a1cd9aa1ce3a18da49460925167da05e6d9e47",
+      "exit_code": 0,
+      "elapsed_seconds": 6.121,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "2f155201b8bb3d185c24b740b1a1cd9aa1ce3a18da49460925167da05e6d9e47",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-client-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_client",
+        "~[.],[argument_binding][gpu],[argument-transform-gpu]"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "e48844fd0fe8f50b244d455f07097bc4b40e831fe3cc9202db6872db93285bbe",
+      "exit_code": 0,
+      "elapsed_seconds": 4.675,
+      "assertions": 23821,
+      "cases": 358,
+      "binary_sha256_after": "e48844fd0fe8f50b244d455f07097bc4b40e831fe3cc9202db6872db93285bbe",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-studio-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_studio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "bc56cfefe40029f8ed58a15c47cdeebc7c6105703da4c0315677750aa1ce6479",
+      "exit_code": 0,
+      "elapsed_seconds": 7.837,
+      "assertions": 47591,
+      "cases": 1061,
+      "binary_sha256_after": "bc56cfefe40029f8ed58a15c47cdeebc7c6105703da4c0315677750aa1ce6479",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-nodegraph-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_nodegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "exit_code": 0,
+      "elapsed_seconds": 1.326,
+      "assertions": 286,
+      "cases": 34,
+      "binary_sha256_after": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-ui-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_ui"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "aae297bc4de74ab39f49d8c0b83c63a6d3555f5cf4056f436c471d2e0961991f",
+      "exit_code": 0,
+      "elapsed_seconds": 0.465,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "aae297bc4de74ab39f49d8c0b83c63a6d3555f5cf4056f436c471d2e0961991f",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-startup-batch3.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^studio_composer_startup_arguments$",
+        "-V"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.28,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-lint-batch3.log",
+      "command": [
+        "ruff",
+        "check",
+        "scripts/pixel-composer/generate-catalogue.py",
+        "scripts/tests/pixel_composer_catalogue_metadata_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.013
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-architecture-batch3.log",
+      "command": [
+        "cmake",
+        "-DGRAPH=.cache/build/release-tests/target-graph.json",
+        "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+        "-P",
+        "mono.tools/architecture/CheckTargetGraph.cmake"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.477
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-python-batch3.log",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "pixel_composer_*_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.676,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-format-batch3.log",
+      "command": [
+        "/usr/bin/clang-format-21",
+        "--dry-run",
+        "--Werror",
+        "mono.studio/src/ImageGraphCacheBackground.hpp",
+        "mono.studio/src/ImageGraphCacheBackground.cpp",
+        "mono.studio/tests/ImageGraphCacheBackground.cpp",
+        "mono.studio/src/ImageGraphCacheControls.hpp",
+        "mono.studio/tests/ImageGraphCacheControls.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+        "mono.studio/nodegraph/src/Editor.cpp",
+        "mono.studio/nodegraph/tests/Editor.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+        "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+        "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+        "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+        "mono.engine/imagegraph/src/DataReplay.cpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+        "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+        "mono.engine/imagegraph/tests/DataReplay.cpp",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+        "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+        "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+        "mono.engine/ui/src/Interface.cpp",
+        "mono.engine/ui/tests/Interface.cpp",
+        "mono.engine/ui/include/engine/ui/Interface.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+        "mono.engine/imagegraph/src/nodes/Path.hpp",
+        "mono.engine/imagegraph/tests/Catalogue.cpp",
+        "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+        "mono.studio/tests/ImageGraphPatternGroups.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+        "mono.engine/imagegraph/src/SourceModeTransition.cpp",
+        "mono.engine/imagegraph/src/GroupReplay.cpp",
+        "mono.engine/imagegraph/src/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/BuiltinRandomCaptureCodec.hpp",
+        "mono.engine/imagegraph/tests/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/tests/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/tests/SourceMirrorPathProjection.cpp",
+        "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "mono.engine/imagegraphio/tests/PxcxMirrorPathRatio.cpp",
+        "mono.engine/imagegraph/src/SourceSeparatedVec2.hpp",
+        "mono.engine/imagegraph/src/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorIdentity.hpp",
+        "mono.engine/imagegraph/src/SourceMirrorAnimator.hpp",
+        "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+        "mono.engine/imagegraph/src/SourceGetterProjection.cpp",
+        "mono.engine/imagegraph/tests/SourceGetterProjection.cpp",
+        "mono.engine/imagegraph/src/SourceInputSelection.hpp",
+        "mono.engine/imagegraph/src/SourceInputEvaluation.hpp",
+        "mono.engine/imagegraph/src/PcxControls.cpp",
+        "mono.engine/imagegraph/tests/SourceInputEvaluation.cpp",
+        "mono.engine/imagegraph/tests/SourceInputMoves.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+        "mono.engine/imagegraph/src/PixelBuilderGroups.cpp",
+        "mono.engine/imagegraph/tests/GroupReplay.cpp",
+        "mono.engine/imagegraph/src/SourceAxisStorage.hpp",
+        "mono.engine/imagegraph/src/SourceVec2Defaults.hpp",
+        "mono.engine/imagegraph/src/SourceVec2Defaults.cpp",
+        "mono.engine/imagegraph/tests/SourceVec2Defaults.cpp",
+        "mono.engine/imagegraph/src/GroupClonePayload.cpp",
+        "mono.engine/imagegraph/src/SourceFont.cpp",
+        "mono.engine/imagegraph/src/SourceBuiltinRandom.cpp",
+        "mono.studio/src/SourceDynamicGroups.cpp",
+        "mono.studio/tests/ImageGraphSourceInputs.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisInitialization.cpp",
+        "mono.engine/imagegraph/src/Catalogue.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp",
+        "mono.studio/src/ImageGraphGroupHost.hpp",
+        "mono.studio/tests/ImageGraphGroupHost.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisReadRequests.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceAxisTransition.hpp",
+        "mono.engine/imagegraph/src/SourceAxisTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisTransition.cpp",
+        "mono.studio/src/ImageGraphAxisControls.hpp",
+        "mono.studio/tests/ImageGraphAxisControls.cpp",
+        "mono.engine/imagegraph/src/GroupInstanceRecapture.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorPersistence.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorPersistence.hpp",
+        "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp",
+        "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/src/TimelineDopesheet.hpp",
+        "mono.studio/tests/TimelineSourceAliases.cpp",
+        "mono.studio/src/ImageGraphCapturedKeyEdit.hpp",
+        "mono.studio/src/TimelineEaseEditor.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceTrackTransition.hpp",
+        "mono.engine/imagegraph/src/SourceTrackTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceTrackTransition.cpp",
+        "mono.studio/src/TimelineKeyDelete.hpp",
+        "mono.studio/tests/TimelineKeyDelete.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/AnimationTrackPolicyEditor.hpp",
+        "mono.studio/src/ImageGraphSourceKeyEdit.hpp",
+        "mono.studio/src/ImageGraphKeyPinProjection.hpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.studio/src/KeyframeKindEditor.hpp",
+        "mono.studio/src/TimelineKeyEditor.hpp",
+        "mono.studio/tests/ImageGraphSourceKeyEdit.cpp",
+        "mono.studio/src/TimelineKeyActions.hpp",
+        "mono.studio/src/TimelineScalarKeys.hpp",
+        "mono.studio/tests/TimelineScalarKeys.cpp",
+        "mono.studio/tests/TimelineKeyEditor.cpp",
+        "mono.studio/tests/TimelineScalarDopesheet.cpp",
+        "mono.studio/tests/ComposerWorkflow.cpp",
+        "mono.studio/src/ImageGraphTimelineRead.hpp",
+        "mono.studio/tests/ImageGraphTimelineRead.cpp",
+        "mono.engine/imagegraph/src/GroupReplayInternal.hpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/tests/TimelineDopesheetActions.cpp",
+        "mono.studio/src/TimelineScalarKeyControls.hpp",
+        "mono.studio/src/KeyframeSourceDriverControls.hpp",
+        "mono.studio/tests/TimelineEaseEditor.cpp"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.839
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-metadata-diff-batch3.log",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.109
+    }
+  ],
+  "source_sha256": {
+    "mono.studio/src/ImageGraphCapturedKeyEdit.hpp": "8be25ce2d77f01cb83f92a5b0f9ac79d6e01d072a47dac2d23797050b71fb354",
+    "mono.studio/src/TimelineEaseEditor.hpp": "5c5abd704a4ffeccc4082c090780ade67de04601e9cb24fb60671cf8c15b3266",
+    "mono.studio/src/TimelineScalarKeys.hpp": "9573e340251d1b48c75371210b2534d258d92e8df70657f92d3bda0d523fb3ae",
+    "mono.studio/src/TimelineScalarKeyControls.hpp": "f94740c5de542375b0eefb9afa786165987a605b69c49a6f931f6dee371a90ec",
+    "mono.studio/src/KeyframeSourceDriverControls.hpp": "47a1448887438a12fb3d933b369146bfe71396d3f55753da079639c2b1412183",
+    "mono.studio/tests/TimelineEaseEditor.cpp": "51709fc32ccb78dadb321104d0e6a8cb482852ce0032a54d339dbfb71a735b87",
+    "mono.studio/tests/TimelineScalarKeys.cpp": "60cca512615bd162728af210e8064efd99e72eddbd7ccf6225225cf1d1f40cf9",
+    "mono.studio/src/ImageComposer.cpp": "73662dc163cc0e805459a8c978cb3743e9ca5877a6fe1f3ef8a5802b1f133038"
+  }
+}
