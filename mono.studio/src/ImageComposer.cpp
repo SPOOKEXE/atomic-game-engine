@@ -24,7 +24,9 @@
 #include "ImageGraphFontArtifact.hpp"
 #include "ImageGraphFontBindings.hpp"
 #include "ImageGraphGroupHost.hpp"
+#include "ImageGraphHistoryCanvas.hpp"
 #include "ImageGraphHistoryKeys.hpp"
+#include "ImageGraphHistorySource.hpp"
 #include "ImageGraphHlslGroups.hpp"
 #include "ImageGraphHost.hpp"
 #include "ImageGraphImageActions.hpp"
@@ -2762,8 +2764,91 @@ namespace studio {
 			}
 		}
 
-		void ApplyHistory(State &state, bool redo) {
+		void ApplyHistory(State &state, bool redo) try {
 			if (!RetryCacheEdit(state)) return;
+			detail::ImageGraphHistorySource source;
+			nodegraph::Graph graph;
+			ImageGraphCanvasIds ids;
+			std::vector<nodegraph::NodeId> selection;
+			std::string output;
+			const detail::ImageGraphHistoryPreparation prepare =
+				[&](const Document &,
+					const Document &restored,
+					const ImageGraphHistory::SourceSnapshot &currentSource,
+					const ImageGraphHistory::SourceSnapshot &restoredSource,
+					uint64_t &remaining) {
+					const auto charge = [&](std::optional<uint64_t> bytes) {
+						if (!bytes || *bytes >= remaining) {
+							state.LastDiagnostic = {
+								Status::LimitExceeded,
+								{},
+								{},
+								"Studio history owners exceed live payload bounds"
+							};
+							return false;
+						}
+						remaining -= *bytes;
+						return true;
+					};
+					if (!charge(engine::imagegraph::DocumentRetainedPayloadBytes(state.PxcxProjection)) ||
+						!charge(detail::ImageGraphHistoryCanvasBytes(state.Graph, state.Ids)) ||
+						!charge(state.GroupHost.Replay.RetainedBytes()) ||
+						!charge(state.TimelineRead.RetainedBytes()) ||
+						!charge(detail::ImageGraphHistoryDiagnosticBytes(state.PxcxDiagnostics)) ||
+						!charge(state.SelectedOutput.capacity()) ||
+						!charge(state.Canvas.Selection().capacity() * sizeof(nodegraph::NodeId)) ||
+						!charge(state.PxcxReferenceThumbnail.Pixels.capacity()))
+						return false;
+					if (state.ImportedPxcx &&
+						!charge(detail::ImageGraphHistoryArchiveBytes(*state.ImportedPxcx)))
+						return false;
+					const auto restoredBytes = engine::imagegraph::DocumentRetainedPayloadBytes(restored);
+					const auto observerBytes =
+						engine::imagegraph::DocumentRetainedPayloadBytes(state.CacheEditObservation.Inputs);
+					const auto beforeBorrowed = remaining;
+					if (!charge(restoredBytes) || !charge(observerBytes) ||
+						!charge(state.FeedbackHost.RetainedBytes()))
+						return false;
+					const auto borrowed = beforeBorrowed - remaining;
+					if (!source.Prepare(
+							currentSource, restoredSource, state.ImportedPxcx, remaining, state.LastDiagnostic
+						))
+						return false;
+					std::string error;
+					if (!LoadImageGraphCanvas(restored, graph, ids, error)) {
+						state.LastDiagnostic = {Status::InvalidValue, {}, {}, std::move(error)};
+						return false;
+					}
+					ids.IssuedNodeIds.insert(state.Ids.IssuedNodeIds.begin(), state.Ids.IssuedNodeIds.end());
+					ids.IssuedGroupIds.insert(
+						state.Ids.IssuedGroupIds.begin(), state.Ids.IssuedGroupIds.end()
+					);
+					ids.NextNodeId = std::max(ids.NextNodeId, state.Ids.NextNodeId);
+					ids.NextGroupId = std::max(ids.NextGroupId, state.Ids.NextGroupId);
+					while (ids.IssuedNodeIds.contains("node-" + std::to_string(ids.NextNodeId)))
+						++ids.NextNodeId;
+					while (ids.IssuedGroupIds.contains("group-" + std::to_string(ids.NextGroupId)))
+						++ids.NextGroupId;
+					if (!state.Canvas.Selection().empty()) {
+						const auto old = state.Ids.ToDocument.find(state.Canvas.Selection().front());
+						if (old != state.Ids.ToDocument.end()) {
+							const auto selected = ids.ToCanvas.find(old->second);
+							if (selected != ids.ToCanvas.end()) selection.push_back(selected->second);
+						}
+					}
+					output = state.SelectedOutput;
+					if (std::none_of(restored.Outputs.begin(), restored.Outputs.end(), [&](const auto &row) {
+							return row.Id == output;
+						}))
+						output = restored.Outputs.empty() ? std::string{} : restored.Outputs.front().Id;
+					if (!charge(detail::ImageGraphHistoryCanvasBytes(graph, ids)) ||
+						!charge(selection.capacity() * sizeof(nodegraph::NodeId)) ||
+						!charge(output.capacity()))
+						return false;
+					// grug cache observer accounts borrowed owners itself after all staging finishes.
+					remaining += borrowed;
+					return true;
+				};
 			if (!detail::ApplyImageGraphCacheHistory(
 					state.Authored,
 					state.History,
@@ -2771,14 +2856,38 @@ namespace studio {
 					state.CacheEditObservation,
 					state.Playback,
 					redo,
-					state.LastDiagnostic
+					state.LastDiagnostic,
+					prepare
 				))
 				return;
+			static_assert(std::is_nothrow_move_assignable_v<nodegraph::Graph>);
+			static_assert(std::is_nothrow_move_assignable_v<ImageGraphCanvasIds>);
+			static_assert(std::is_nothrow_move_assignable_v<decltype(state.ImportedPxcx)>);
+			state.Graph = std::move(graph);
+			state.Ids = std::move(ids);
+			state.Canvas.Select(std::move(selection));
+			state.SelectedOutput = std::move(output);
+			state.CanvasNeedsReload = false;
+			state.AdapterError.clear();
+			if (source.Changed) {
+				state.ImportedPxcx = std::move(source.Archive);
+				state.PxcxProjection = std::move(source.Projection);
+				state.PxcxDiagnostics = std::move(source.Diagnostics);
+				state.PxcxReferenceThumbnail = std::move(source.Thumbnail);
+				state.RetiredPxcxThumbnailTexture = state.CurrentPxcxThumbnailTexture;
+				state.CurrentPxcxThumbnailTexture = {};
+				state.PxcxThumbnailTextureHash = 0;
+				state.PxcxThumbnailMessage.clear();
+			}
 			state.GroupHost.Clear();
 			state.CacheEditBlocked = false;
 			state.CacheEditRetryKind = detail::ImageGraphCacheEditKind::AnimatorUndo;
 			PublishAuthoredDocumentChanged(state);
-			ReloadCanvas(state);
+			RequestPreview(state, true);
+		} catch (const std::bad_alloc &) {
+			state.LastDiagnostic = {
+				Status::LimitExceeded, {}, {}, "Studio history staging allocation refused"
+			};
 		}
 
 		bool ApplyDocumentEdit(State &state, const auto &edit, bool *unchanged = nullptr) {

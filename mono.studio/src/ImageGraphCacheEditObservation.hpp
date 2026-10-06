@@ -2,6 +2,8 @@
 
 #include <engine/imagegraph/FeedbackHost.hpp>
 
+#include <studio/ImageGraph.hpp>
+
 namespace studio {
 	class ImageGraphHistory;
 	struct ImageGraphPlayback;
@@ -72,6 +74,27 @@ namespace studio::detail {
 		ImageGraphPlayback &playback,
 		bool redo,
 		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
+	// grug stage source owners before cache admission. callback only changes private candidates.
+	// caller publishes candidates with no-throw moves after this function returns true.
+	// remaining starts after current document residency; callback deducts its retained staging bytes.
+	using ImageGraphHistoryPreparation = std::function<bool(
+		const engine::imagegraph::Document &,
+		const engine::imagegraph::Document &,
+		const ImageGraphHistory::SourceSnapshot &,
+		const ImageGraphHistory::SourceSnapshot &,
+		uint64_t &
+	)>;
+	[[nodiscard]] bool ApplyImageGraphCacheHistory(
+		engine::imagegraph::Document &document,
+		ImageGraphHistory &history,
+		engine::imagegraph::CapturedFeedbackHost &host,
+		ImageGraphCacheEditObservation &observation,
+		ImageGraphPlayback &playback,
+		bool redo,
+		engine::imagegraph::Diagnostic &diagnostic,
+		const ImageGraphHistoryPreparation &prepare,
 		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 	// Admission or action failure preserves prior inputs and replay journals. A failed value edit

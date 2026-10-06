@@ -1,9 +1,12 @@
 #include "ImageGraphCacheEditObservation.hpp"
 
+#include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
+#include <new>
 #include <studio/ImageGraph.hpp>
 
 TEST_SUITE_ID("studio.imagegraph.cache_edit_observation")
@@ -57,6 +60,22 @@ namespace {
 		request.SourceCacheProject =
 			SourceFrameCacheProjectObservation{{0, 0, false}, endpoint ? 0.0 : 5.0, false, false};
 		return request;
+	}
+	studio::ImageGraphHistory::SourceSnapshot PxcxSource(uint32_t epoch) {
+		engine::bake::PxcxArchive archive;
+		archive.MetadataNumber = 121092;
+		archive.MetadataText = "1.22.10.201";
+		archive.GraphJson = "{\"nodes\":[{\"id\":\"foreign\",\"type\":\"Vendor_Future\",\"x\":0,\"y\":0,"
+							"\"inputs\":[]}],\"future\":{\"epoch\":" +
+							std::to_string(epoch) + "}}";
+		archive.GraphJson.push_back('\0');
+		std::vector<std::byte> bytes;
+		std::string failure;
+		REQUIRE(engine::bake::WritePxcx(archive, bytes, failure));
+		engine::bake::PxcxArchive checked;
+		REQUIRE(engine::bake::ReadPxcx(bytes, checked, failure));
+		REQUIRE(checked.OriginalBytes == bytes);
+		return std::make_shared<const std::vector<std::byte>>(std::move(bytes));
 	}
 	struct Fixture {
 		Document Authored;
@@ -708,6 +727,238 @@ TEST_CASE(
 		CHECK(restored.CacheGroups.Owners[0].Serialize == !redo);
 		CHECK(restored.CacheGroups.Owners[0].Members == data.CacheGroups.Owners[0].Members);
 	}
+}
+
+TEST_CASE(
+	"Studio source cache history stages archive epochs before undo and redo observation",
+	"[studio][imagegraph][cache_group][history][source]"
+) {
+	Fixture fixture;
+	const auto original = fixture.Authored;
+	fixture.Authored.Nodes[0].Values[2].Data = Colour{70, 20, 30, 255};
+	REQUIRE(fixture.Observe());
+	const auto edited = fixture.Authored;
+	const auto sourceA = PxcxSource(1);
+	const auto sourceB = PxcxSource(2);
+	REQUIRE(sourceA != sourceB);
+	studio::ImageGraphHistory history;
+	REQUIRE(history.TryRecord(original, edited, sourceA, sourceB));
+	studio::ImageGraphPlayback playback;
+	playback.Playing = true;
+	playback.CurrentTick = 4;
+	playback.Subframe = 0.25;
+	playback.SelectedRegion = std::pair{FrameTime{1, 0, false}, FrameTime{3, 0, false}};
+	const auto observationBefore = fixture.Observation.Inputs;
+	auto callerSource = sourceB;
+	studio::ImageGraphHistory::SourceSnapshot stagedSource;
+	int preparations = 0;
+	const auto prepare = [&](const Document &current,
+							 const Document &restored,
+							 const studio::ImageGraphHistory::SourceSnapshot &currentSource,
+							 const studio::ImageGraphHistory::SourceSnapshot &restoredSource,
+							 uint64_t &remaining) {
+		++preparations;
+		CHECK(current == edited);
+		CHECK(restored == original);
+		CHECK(currentSource == sourceB);
+		CHECK(restoredSource == sourceA);
+		CHECK(callerSource == sourceB);
+		CHECK(remaining == Limits::MaximumEvaluationBytes - *DocumentRetainedPayloadBytes(current));
+		CHECK(fixture.Authored == edited);
+		stagedSource = restoredSource;
+		--remaining;
+		return true;
+	};
+	REQUIRE(ApplyImageGraphCacheHistory(
+		fixture.Authored, history, fixture.Host, fixture.Observation, playback, false, fixture.Error, prepare
+	));
+	CHECK(preparations == 1);
+	CHECK(fixture.Authored == original);
+	CHECK(history.CanRedo());
+	CHECK(history.CurrentSourceBytes() == sourceA);
+	CHECK(callerSource == sourceB);
+	CHECK(stagedSource == sourceA);
+	callerSource = stagedSource;
+	CHECK(callerSource == sourceA);
+	CHECK_FALSE(playback.Playing);
+	CHECK_FALSE(playback.SelectedRegion.has_value());
+	CHECK(fixture.Observation.Inputs != observationBefore);
+	REQUIRE(fixture.Host.PreparedData(1, 1));
+	CHECK(fixture.Member("input").RenderActive);
+
+	stagedSource.reset();
+	const auto redo = [&](const Document &current,
+						  const Document &restored,
+						  const studio::ImageGraphHistory::SourceSnapshot &currentSource,
+						  const studio::ImageGraphHistory::SourceSnapshot &restoredSource,
+						  uint64_t &remaining) {
+		++preparations;
+		CHECK(current == original);
+		CHECK(restored == edited);
+		CHECK(currentSource == sourceA);
+		CHECK(restoredSource == sourceB);
+		CHECK(remaining > 0);
+		stagedSource = restoredSource;
+		return true;
+	};
+	REQUIRE(ApplyImageGraphCacheHistory(
+		fixture.Authored, history, fixture.Host, fixture.Observation, playback, true, fixture.Error, redo
+	));
+	CHECK(preparations == 2);
+	CHECK(fixture.Authored == edited);
+	CHECK(history.CurrentSourceBytes() == sourceB);
+	callerSource = stagedSource;
+	CHECK(callerSource == sourceB);
+}
+
+TEST_CASE(
+	"Studio source history preparation refusal and cache budget failure preserve all live state",
+	"[studio][imagegraph][cache_group][history][source]"
+) {
+	Fixture fixture;
+	const auto original = fixture.Authored;
+	fixture.Authored.Nodes[0].Values[2].Data = Colour{70, 20, 30, 255};
+	REQUIRE(fixture.Observe());
+	const auto edited = fixture.Authored;
+	const auto sourceA = PxcxSource(3);
+	const auto sourceB = PxcxSource(4);
+	studio::ImageGraphHistory history;
+	REQUIRE(history.TryRecord(original, edited, sourceA, sourceB));
+	studio::ImageGraphPlayback playback;
+	playback.Playing = true;
+	playback.Subframe = 0.25;
+	playback.Accumulator = 0.125;
+	playback.SelectedRegion = std::pair{FrameTime{1, 0, false}, FrameTime{3, 0, false}};
+	auto callerSource = sourceB;
+	const auto documentBefore = fixture.Authored;
+	const auto dataBefore = *fixture.Host.PreparedData(1, 1);
+	const auto observationBefore = fixture.Observation;
+	const auto undoBefore = history.CanUndo();
+	const auto redoBefore = history.CanRedo();
+	const auto checkUnchanged = [&] {
+		CHECK(fixture.Authored == documentBefore);
+		CHECK(*fixture.Host.PreparedData(1, 1) == dataBefore);
+		CHECK(fixture.Observation.Inputs == observationBefore.Inputs);
+		CHECK(fixture.Observation.Ready == observationBefore.Ready);
+		CHECK(fixture.Observation.PendingValueEdit == observationBefore.PendingValueEdit);
+		CHECK(fixture.Observation.PendingValueKind == observationBefore.PendingValueKind);
+		CHECK(history.CanUndo() == undoBefore);
+		CHECK(history.CanRedo() == redoBefore);
+		CHECK(history.CurrentSourceBytes() == sourceB);
+		CHECK(callerSource == sourceB);
+		CHECK(playback.Playing);
+		CHECK(playback.Subframe == 0.25);
+		CHECK(playback.Accumulator == 0.125);
+		CHECK(playback.SelectedRegion.has_value());
+	};
+	int preparations = 0;
+	studio::ImageGraphHistory::SourceSnapshot staged;
+	const auto refuse = [&](const Document &current,
+							const Document &restored,
+							const studio::ImageGraphHistory::SourceSnapshot &currentSource,
+							const studio::ImageGraphHistory::SourceSnapshot &restoredSource,
+							uint64_t &remaining) {
+		++preparations;
+		CHECK(current == edited);
+		CHECK(restored == original);
+		CHECK(currentSource == sourceB);
+		CHECK(restoredSource == sourceA);
+		CHECK(remaining > 0);
+		staged = restoredSource;
+		return false;
+	};
+	CHECK_FALSE(ApplyImageGraphCacheHistory(
+		fixture.Authored, history, fixture.Host, fixture.Observation, playback, false, fixture.Error, refuse
+	));
+	CHECK(preparations == 1);
+	checkUnchanged();
+
+	const auto throwAllocation = [&](const Document &,
+									 const Document &,
+									 const studio::ImageGraphHistory::SourceSnapshot &,
+									 const studio::ImageGraphHistory::SourceSnapshot &,
+									 uint64_t &) -> bool {
+		++preparations;
+		throw std::bad_alloc{};
+	};
+	CHECK_FALSE(ApplyImageGraphCacheHistory(
+		fixture.Authored,
+		history,
+		fixture.Host,
+		fixture.Observation,
+		playback,
+		false,
+		fixture.Error,
+		throwAllocation
+	));
+	CHECK(preparations == 2);
+	checkUnchanged();
+
+	const auto currentBytes = DocumentRetainedPayloadBytes(fixture.Authored);
+	REQUIRE(currentBytes);
+	const auto cacheBudget = [&](const Document &,
+								 const Document &,
+								 const studio::ImageGraphHistory::SourceSnapshot &,
+								 const studio::ImageGraphHistory::SourceSnapshot &restoredSource,
+								 uint64_t &remaining) {
+		++preparations;
+		CHECK(restoredSource == sourceA);
+		CHECK(remaining == 1);
+		staged = restoredSource;
+		return true;
+	};
+	CHECK_FALSE(ApplyImageGraphCacheHistory(
+		fixture.Authored,
+		history,
+		fixture.Host,
+		fixture.Observation,
+		playback,
+		false,
+		fixture.Error,
+		cacheBudget,
+		*currentBytes + 1
+	));
+	CHECK(preparations == 3);
+	checkUnchanged();
+
+	const auto zeroAllowance = [](const Document &,
+								  const Document &,
+								  const studio::ImageGraphHistory::SourceSnapshot &,
+								  const studio::ImageGraphHistory::SourceSnapshot &,
+								  uint64_t &remaining) {
+		remaining = 0;
+		return true;
+	};
+	CHECK_FALSE(ApplyImageGraphCacheHistory(
+		fixture.Authored,
+		history,
+		fixture.Host,
+		fixture.Observation,
+		playback,
+		false,
+		fixture.Error,
+		zeroAllowance
+	));
+	checkUnchanged();
+	const auto overgrownAllowance = [](const Document &,
+									   const Document &,
+									   const studio::ImageGraphHistory::SourceSnapshot &,
+									   const studio::ImageGraphHistory::SourceSnapshot &,
+									   uint64_t &remaining) {
+		++remaining;
+		return true;
+	};
+	CHECK_FALSE(ApplyImageGraphCacheHistory(
+		fixture.Authored,
+		history,
+		fixture.Host,
+		fixture.Observation,
+		playback,
+		false,
+		fixture.Error,
+		overgrownAllowance
+	));
+	checkUnchanged();
 }
 
 TEST_CASE(

@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-06",
+  "scope": "grug stage source archive and canvas owners before Studio undo or redo cache admission",
+  "owned_files": {
+    "mono.studio/src/ImageGraphCacheEditObservation.hpp": "4fc777911b5e59ad3a8ccb015d66f8d570ee21a693250be4cab1b605dfb51e18",
+    "mono.studio/src/ImageGraphCacheEditObservation.cpp": "26e93792753e7222f4502a3a97dc19714df3ed63efdc626962eec0981dd01c86",
+    "mono.studio/src/ImageGraphHistorySource.hpp": "dcb08e9bc0a0ab067b244ec6a7358e4a60aee61b58232140121c9ea012996f10",
+    "mono.studio/src/ImageGraphHistoryCanvas.hpp": "0236f49d4982ea19b9ffe48e37215b425e53d273d7ac6359b1a42e7e8cb6f2bb",
+    "mono.studio/tests/ImageGraphCacheEditObservation.cpp": "76d6cdc090fa1a069e5c899f0f8e88234a51b3567970ae336c29a58911fc3145",
+    "mono.studio/tests/ImageGraphSourceHistory.cpp": "4744a839ba21a73dcf9ab5e0dd59e44029471626fdcf94ae31cb57b78a9c8615"
+  },
+  "shared_composer": {
+    "path": "mono.studio/src/ImageComposer.cpp",
+    "owned_index_sha256": "697b943b78b22416ce1a7f3119b7de909f0e020aa8dd2fac72830642e018af9d",
+    "tested_worktree_sha256": "402ffe7f04d7e07f30390850c9f93b5965d9c03cb40fad5fdc8495408e98ba98",
+    "original_peer_patch_sha256": "478e2cddbd1278cedcb71d7ccfc157cb01c40b24279697488841c7aacd04e428",
+    "owned_index_plus_original_peer_patch_matches_tested_worktree": true
+  },
+  "behavior": [
+    "source-aware preparation sees current and restored native documents and immutable source epochs before cache observation",
+    "preparation may reduce remaining retained-payload allowance; zero or increased allowance refuses",
+    "changed source bytes decode privately; stale baseline and malformed archive refuse before publication",
+    "source projection comes from target archive while restored authored document retains unsaved native edits",
+    "thumbnail copy is admitted after decoded and unused import storage release",
+    "canvas model, durable ID maps, issued IDs, selection and selected output stage before cache and history publication",
+    "accepted restore publishes archive, source projection, thumbnail, diagnostics and canvas with owned moves; preview invalidation follows",
+    "native-only history and same source handle skip archive decoding"
+  ],
+  "build": {
+    "preset": "release-tests",
+    "targets": 17,
+    "exit_code": 0,
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-restore-build1.log",
+    "warnings": "one existing TimelineRegions.hpp optional maybe-uninitialized warning; no owned helper warnings"
+  },
+  "validation": {
+    "checks": 20,
+    "all_exit_codes_zero": true,
+    "cpp_cases": 5174,
+    "cpp_assertions": 2003053,
+    "new_cases": 5,
+    "new_assertions": 240,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup": true,
+    "gpu": "approved SDL offscreen Vulkan suites included",
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-restore-batch1-results.json"
+  },
+  "proof": [
+    "archive-backed undo/redo preparation sees exact source handles while cache rows still belong to old state",
+    "false and bad_alloc preparation, exhausted cache allowance, zero allowance and increased allowance preserve document/history/source/playback/observation/replay",
+    "opaque source-only changes retain exact source archive bytes with equal native projection",
+    "source restoration preserves original live archive and candidate sentinel fields on refusal",
+    "target thumbnail pixels and hash match source reference",
+    "canvas accounting includes opaque nodes, unmapped links and retained growth from widget text, issued IDs and output ports; oversized text refuses"
+  ],
+  "freeze": {
+    "source_paths": 89,
+    "other_peer_files_unchanged": 42,
+    "shared_peer_hunks": "owned index plus original peer patch reconstructs tested worktree byte for byte",
+    "test_binary_hashes": "13 unchanged",
+    "child_binary_hashes": "assetc and imagegraph unchanged",
+    "before": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-restore-source-before-build1.json",
+    "after": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-restore-source-after-batch1.json"
+  },
+  "review": "Sol read review caught thumbnail and retained canvas allowance gaps; grug fixed both before joined build/checks. Review identified canvas construction peak limit recorded below.",
+  "limits": [
+    "grug did not capture a performance profile; no speed claim",
+    "retained payload allowance is not full process heap or allocator bookkeeping",
+    "archive decoding uses independent bake PxcxLimits; transient decoder workspace is outside this retained payload allowance",
+    "canvas construction uses existing document/canvas count limits before measuring final retained candidate bytes; this is not a hard staging-peak byte quota",
+    "source restore helper and combined cache/history admission are tested; actual Composer undo wiring is compiled but headed UI behavior remains unverified",
+    "GroupHost keeps existing clear then native captured-animator restore policy; full source append constructor lifecycle and action remain open",
+    "headed Studio, licensed reference comparison, dev/server/ci builds and sanitizers not run"
+  ],
+  "remaining": "full host append and original 33-item Composer goal remain active"
+}

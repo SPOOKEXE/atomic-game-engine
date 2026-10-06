@@ -362,6 +362,30 @@ namespace studio::detail {
 		bool redo,
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes
+	) {
+		return ApplyImageGraphCacheHistory(
+			document,
+			history,
+			host,
+			observation,
+			playback,
+			redo,
+			diagnostic,
+			ImageGraphHistoryPreparation{},
+			maximumBytes
+		);
+	}
+
+	bool ApplyImageGraphCacheHistory(
+		Document &document,
+		ImageGraphHistory &history,
+		CapturedFeedbackHost &host,
+		ImageGraphCacheEditObservation &observation,
+		ImageGraphPlayback &playback,
+		bool redo,
+		Diagnostic &diagnostic,
+		const ImageGraphHistoryPreparation &prepare,
+		uint64_t maximumBytes
 	) try {
 		ENGINE_PROFILE("studio.imagegraph.cache_history");
 		if (redo ? !history.CanRedo() : !history.CanUndo()) return false;
@@ -378,31 +402,38 @@ namespace studio::detail {
 		auto stagedPlayback = playback;
 		const auto frame = GetImageGraphFrame(playback);
 		diagnostic = {};
-		const auto admit = [&](const Document &, const Document &restored) {
-			ApplyImageGraphTimeline(restored, stagedPlayback);
-			(void)SetImageGraphAuthorFrame(stagedPlayback, frame);
-			stagedPlayback.SelectedRegion.reset();
-			struct PendingEditRollback {
-				ImageGraphCacheEditObservation &Observation;
-				bool Pending;
-				ImageGraphCacheEditKind Kind;
-				bool Accepted = false;
-				~PendingEditRollback() noexcept {
-					if (Accepted) return;
-					Observation.PendingValueEdit = Pending;
-					Observation.PendingValueKind = Kind;
-				}
-			} pending{observation, observation.PendingValueEdit, observation.PendingValueKind};
-			pending.Accepted = ObserveImageGraphCacheEdits(
-				restored,
-				observation,
-				host,
-				ImageGraphCacheEditKind::AnimatorUndo,
-				diagnostic,
-				maximumBytes - *currentBytes
-			);
-			return pending.Accepted;
-		};
+		const ImageGraphHistory::SourceAdmission admit =
+			[&](const Document &current,
+				const Document &restored,
+				const ImageGraphHistory::SourceSnapshot &currentSource,
+				const ImageGraphHistory::SourceSnapshot &restoredSource) {
+				ApplyImageGraphTimeline(restored, stagedPlayback);
+				(void)SetImageGraphAuthorFrame(stagedPlayback, frame);
+				stagedPlayback.SelectedRegion.reset();
+				const uint64_t allowance = maximumBytes - *currentBytes;
+				uint64_t remaining = allowance;
+				if (prepare && !prepare(current, restored, currentSource, restoredSource, remaining))
+					return false;
+				if (!remaining || remaining > allowance)
+					return fail(
+						Status::LimitExceeded, "Source history preparation allowance is outside bounds"
+					);
+				struct PendingEditRollback {
+					ImageGraphCacheEditObservation &Observation;
+					bool Pending;
+					ImageGraphCacheEditKind Kind;
+					bool Accepted = false;
+					~PendingEditRollback() noexcept {
+						if (Accepted) return;
+						Observation.PendingValueEdit = Pending;
+						Observation.PendingValueKind = Kind;
+					}
+				} pending{observation, observation.PendingValueEdit, observation.PendingValueKind};
+				pending.Accepted = ObserveImageGraphCacheEdits(
+					restored, observation, host, ImageGraphCacheEditKind::AnimatorUndo, diagnostic, remaining
+				);
+				return pending.Accepted;
+			};
 		if (!(redo ? history.Redo(document, admit) : history.Undo(document, admit))) {
 			if (diagnostic.Code == Status::Ok)
 				return fail(Status::LimitExceeded, "Image graph history could not retain the transition");

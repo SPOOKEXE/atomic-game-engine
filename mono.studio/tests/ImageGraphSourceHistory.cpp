@@ -1,3 +1,6 @@
+#include "ImageGraphHistoryCanvas.hpp"
+#include "ImageGraphHistorySource.hpp"
+
 #include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraphio/PxcxAppend.hpp>
@@ -26,10 +29,14 @@ namespace {
 	using engine::imagegraphio::PxcxImport;
 	using History = studio::ImageGraphHistory;
 
-	PxcxArchive Archive(std::string graph) {
+	PxcxArchive Archive(std::string graph, bool thumbnail = false) {
 		PxcxArchive archive;
 		archive.MetadataNumber = 121092;
 		archive.MetadataText = "1.22.10.201";
+		if (thumbnail) {
+			archive.HasThumbnailBlock = true;
+			archive.ThumbnailRgba.assign(256 * 256 * 4, 17);
+		}
 		archive.GraphJson = std::move(graph);
 		archive.GraphJson.push_back('\0');
 		std::vector<std::byte> bytes;
@@ -305,6 +312,129 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"source restore preparation stages the exact target archive projection and thumbnail",
+	"[studio][source_history][restore]"
+) {
+	const auto currentArchive = Destination();
+	const auto targetArchive = Archive(
+		R"JSON({"attri":{"future_root":{"keep":99}},"nodes":[{"id":"number","type":"Node_Number_Simple","x":1,"y":2,"inputs":[{"r":{"d":4},"future_input":{"keep":2}}],"future_node":{"keep":3}}],"aRegion":[{"l":"old","c":16777215,"fs":-1.5,"fe":4.25,"future":99}]})JSON",
+		true
+	);
+	const auto current = Snapshot(currentArchive.OriginalBytes);
+	const auto target = Snapshot(targetArchive.OriginalBytes);
+	const auto currentImport = Import(currentArchive);
+	const auto targetImport = Import(targetArchive);
+	REQUIRE(currentImport.Graph == targetImport.Graph);
+	REQUIRE(current != target);
+	Document unsaved = currentImport.Graph;
+	unsaved.Nodes.front().Position = {900, -400};
+	REQUIRE(unsaved != targetImport.Graph);
+	std::optional<PxcxArchive> live = currentArchive;
+	studio::detail::ImageGraphHistorySource candidate;
+	uint64_t remaining = Limits::MaximumEvaluationBytes;
+	Diagnostic error;
+	REQUIRE(candidate.Prepare(current, target, live, remaining, error));
+	CHECK(candidate.Changed);
+	REQUIRE(candidate.Archive);
+	CHECK(candidate.Archive->OriginalBytes == targetArchive.OriginalBytes);
+	CHECK(candidate.Archive->GraphJson == targetArchive.GraphJson);
+	Document expected = targetImport.Graph;
+	REQUIRE(Migrate(expected, error) == Status::Ok);
+	CHECK(candidate.Projection == expected);
+	CHECK(candidate.Projection != unsaved);
+	CHECK(candidate.Diagnostics == targetImport.Diagnostics);
+	const auto preview = targetImport.ReferencePreview();
+	REQUIRE(preview);
+	CHECK(candidate.Thumbnail.Width == preview->Width);
+	CHECK(candidate.Thumbnail.Height == preview->Height);
+	CHECK(candidate.Thumbnail.Pixels == targetArchive.ThumbnailRgba);
+	CHECK(candidate.Thumbnail.Hash == preview->Hash);
+	const auto archiveBytes = studio::detail::ImageGraphHistoryArchiveBytes(*candidate.Archive);
+	const auto projectionBytes = DocumentRetainedPayloadBytes(candidate.Projection);
+	REQUIRE(archiveBytes);
+	REQUIRE(projectionBytes);
+	uint64_t held =
+		candidate.Thumbnail.Pixels.capacity() + candidate.Diagnostics.capacity() * sizeof(Diagnostic);
+	for (const auto &item : candidate.Diagnostics)
+		held += item.NodeId.capacity() + item.Port.capacity() + item.Message.capacity();
+	const uint64_t expectedRemaining =
+		Limits::MaximumEvaluationBytes - *archiveBytes - *projectionBytes - held;
+	CHECK(remaining == expectedRemaining);
+
+	const auto opaqueTarget = Archive(
+		R"JSON({"attri":{"future_root":{"keep":100}},"nodes":[{"id":"number","type":"Node_Number_Simple","x":1,"y":2,"inputs":[{"r":{"d":4},"future_input":{"keep":2}}],"future_node":{"keep":3}}],"aRegion":[{"l":"old","c":16777215,"fs":-1.5,"fe":4.25,"future":100}]})JSON"
+	);
+	const auto opaqueBytes = Snapshot(opaqueTarget.OriginalBytes);
+	CHECK(Import(opaqueTarget).Graph == currentImport.Graph);
+	studio::detail::ImageGraphHistorySource opaqueCandidate;
+	remaining = Limits::MaximumEvaluationBytes;
+	REQUIRE(opaqueCandidate.Prepare(current, opaqueBytes, live, remaining, error));
+	CHECK(opaqueCandidate.Changed);
+	CHECK(opaqueCandidate.Projection == currentImport.Graph);
+	CHECK(opaqueCandidate.Archive->OriginalBytes == opaqueTarget.OriginalBytes);
+}
+
+TEST_CASE(
+	"source restore preparation refusals preserve candidate fields and the byte allowance",
+	"[studio][source_history][restore][atomic]"
+) {
+	const auto currentArchive = Destination();
+	const auto targetArchive = Archive(
+		R"JSON({"attri":{"future_root":{"keep":42}},"nodes":[{"id":"number","type":"Node_Number_Simple","x":1,"y":2,"inputs":[{"r":{"d":4}}]}]})JSON"
+	);
+	const auto current = Snapshot(currentArchive.OriginalBytes);
+	const auto target = Snapshot(targetArchive.OriginalBytes);
+	const auto makeCandidate = [&] {
+		studio::detail::ImageGraphHistorySource candidate;
+		candidate.Archive = currentArchive;
+		candidate.Projection = Import(currentArchive).Graph;
+		candidate.Diagnostics = {{Status::UnsupportedExecution, "old", "port", "keep"}};
+		candidate.Thumbnail = {1, 1, {1, 2, 3, 4}, 5};
+		return candidate;
+	};
+	const auto assertUnchanged = [&](const studio::detail::ImageGraphHistorySource &candidate,
+									 const studio::detail::ImageGraphHistorySource &before,
+									 uint64_t beforeRemaining,
+									 uint64_t remaining) {
+		CHECK(candidate.Changed == before.Changed);
+		REQUIRE(candidate.Archive);
+		REQUIRE(before.Archive);
+		CHECK(candidate.Archive->OriginalBytes == before.Archive->OriginalBytes);
+		CHECK(candidate.Archive->GraphJson == before.Archive->GraphJson);
+		CHECK(candidate.Projection == before.Projection);
+		CHECK(candidate.Diagnostics == before.Diagnostics);
+		CHECK(candidate.Thumbnail == before.Thumbnail);
+		CHECK(remaining == beforeRemaining);
+	};
+	const auto runRefusal = [&](const History::SourceSnapshot &liveSource,
+								const History::SourceSnapshot &targetSource,
+								const std::optional<PxcxArchive> &liveArchive,
+								uint64_t initialRemaining) {
+		auto candidate = makeCandidate();
+		const auto before = candidate;
+		const uint64_t remainingBefore = initialRemaining;
+		Diagnostic error;
+		CHECK_FALSE(candidate.Prepare(liveSource, targetSource, liveArchive, initialRemaining, error));
+		assertUnchanged(candidate, before, remainingBefore, initialRemaining);
+	};
+	std::optional<PxcxArchive> wrongLive = targetArchive;
+	runRefusal(current, target, wrongLive, Limits::MaximumEvaluationBytes);
+	std::optional<PxcxArchive> correctLive = currentArchive;
+	const auto malformed = Snapshot(std::vector<std::byte>{std::byte{0x01}});
+	runRefusal(current, malformed, correctLive, Limits::MaximumEvaluationBytes);
+	const uint64_t tooSmall = target->capacity() * 2 - 1;
+	runRefusal(current, target, correctLive, tooSmall);
+
+	studio::detail::ImageGraphHistorySource unchanged;
+	uint64_t remaining = 1234;
+	Diagnostic error;
+	REQUIRE(unchanged.Prepare(current, current, std::nullopt, remaining, error));
+	CHECK_FALSE(unchanged.Changed);
+	CHECK_FALSE(unchanged.Archive);
+	CHECK(remaining == 1234);
+}
+
+TEST_CASE(
 	"PXC append cache loading admits source history before publishing either host journal",
 	"[studio][source_history][append][cache_group]"
 ) {
@@ -369,4 +499,55 @@ TEST_CASE(
 		CHECK(current == before);
 		CHECK(history.CurrentSourceBytes() == sourceBefore);
 	}
+}
+
+TEST_CASE(
+	"image graph history canvas accounting includes opaque links widgets identifiers and output ports",
+	"[studio][source_history][canvas_budget]"
+) {
+	const auto source =
+		Archive(R"JSON({"nodes":[{"id":"future","type":"Vendor_Future","x":0,"y":0,"inputs":[]}]})JSON");
+	const auto imported = Import(source);
+	REQUIRE(imported.Graph.Nodes.size() == 1);
+	CHECK(imported.Graph.Nodes.front().Type == "pxcx.opaque/Vendor_Future");
+	Document document = imported.Graph;
+	document.Links.push_back({"missing-source", "missing-output", "future", "missing-input"});
+	studio::RegisterPxcxCanvasNodeTypes(source);
+	nodegraph::Graph graph;
+	studio::ImageGraphCanvasIds ids;
+	std::string error;
+	REQUIRE(studio::LoadImageGraphCanvas(document, graph, ids, error));
+	REQUIRE(ids.UnmappedLinks == document.Links);
+	auto retained = studio::detail::ImageGraphHistoryCanvasBytes(graph, ids);
+	REQUIRE(retained);
+	const uint64_t baseline = *retained;
+
+	auto *canvasNode = graph.Find(ids.ToCanvas.at("future"));
+	REQUIRE(canvasNode);
+	nodegraph::Value widget;
+	widget.Kind = nodegraph::WidgetKind::Text;
+	widget.Text = std::string(1024, 'w');
+	canvasNode->Widgets.emplace("notes", std::move(widget));
+	retained = studio::detail::ImageGraphHistoryCanvasBytes(graph, ids);
+	REQUIRE(retained);
+	CHECK(*retained > baseline);
+	const uint64_t withWidget = *retained;
+
+	ids.IssuedNodeIds.emplace(std::string(1024, 'i'));
+	retained = studio::detail::ImageGraphHistoryCanvasBytes(graph, ids);
+	REQUIRE(retained);
+	CHECK(*retained > withWidget);
+	const uint64_t withIds = *retained;
+
+	canvasNode->OutputPorts =
+		std::vector<nodegraph::PortSpec>{{std::string(1024, 'p'), std::string(128, 't')}};
+	retained = studio::detail::ImageGraphHistoryCanvasBytes(graph, ids);
+	REQUIRE(retained);
+	CHECK(*retained > withIds);
+
+	nodegraph::Value oversized;
+	oversized.Kind = nodegraph::WidgetKind::Text;
+	oversized.Text.assign(Limits::MaximumEvaluationBytes + 1, 'x');
+	canvasNode->Widgets.emplace("oversized", std::move(oversized));
+	CHECK_FALSE(studio::detail::ImageGraphHistoryCanvasBytes(graph, ids));
 }
