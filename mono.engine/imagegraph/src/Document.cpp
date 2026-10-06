@@ -43,6 +43,7 @@
 #include "SourceFontTransport.hpp"
 #include "SourceFrameCacheLookup.hpp"
 #include "SourceGetterProjection.hpp"
+#include "SourceInputEvaluation.hpp"
 #include "SourceInputOrigin.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourceMirrorPathProjection.hpp"
@@ -8788,6 +8789,9 @@ namespace engine::imagegraph {
 		std::vector<SnapshotImageArray> *ImageArrays = nullptr;
 		int64_t *InterpolationPolicy = nullptr;
 		bool ExternalBoundary = true;
+		std::string_view SourcePort = {};
+		std::optional<std::span<const AuthoredValue>> ObservedSourceInputs = std::nullopt;
+		std::string_view ObservedSourceInputOwner = {};
 	};
 	struct InlineOwnerInputs {
 		detail::AllocationReservation Charge;
@@ -8809,6 +8813,7 @@ namespace engine::imagegraph {
 		std::span<const InlineOwnerInputs> Inputs;
 		std::span<const PcxNamedDependency> DynamicRoutes;
 		std::optional<PcxNamedDependency> *PendingRoute = nullptr;
+		std::span<const uint8_t> Produced;
 		detail::EvaluationBudget *RouteBudget = nullptr;
 		detail::AllocationReservation *RouteCharge = nullptr;
 		PcxEvaluationNames(
@@ -8981,6 +8986,9 @@ namespace engine::imagegraph {
 				value = double{0};
 				return true;
 			}
+			if (!Produced.empty() &&
+				!(found->Input ? Inputs[found->Producer].Captured : bool(Produced[found->Producer])))
+				return Await(found->Producer, found->Name, found->Port, found->Input, diagnostic);
 			if (found->Input) {
 				const auto &inputs = Inputs[found->Producer];
 				if (!inputs.Captured) {
@@ -10462,6 +10470,11 @@ namespace engine::imagegraph {
 				retainedTargets[nodeIndices.at(selected->NodeId)] = 1;
 			}
 		}
+		const std::array selectedInputPorts{nodeInputs ? nodeInputs->SourcePort : std::string_view{}};
+		const detail::SourceInputSelection inputSelection =
+			nodeInputs && !nodeInputs->SourcePort.empty()
+				? detail::SourceInputSelection{targetIndex, selectedInputPorts}
+				: detail::SourceInputSelection{};
 		uint64_t scheduleWork = 0;
 		detail::EvaluationVector<size_t> pendingRoots{detail::EvaluationAllocator<size_t>(budget)};
 		pendingRoots.push_back(
@@ -10485,7 +10498,8 @@ namespace engine::imagegraph {
 				{},
 				requiredOutput == document.Outputs.end(),
 				scheduleWork,
-				diagnostic
+				diagnostic,
+				inputSelection
 			) != Status::Ok)
 			return diagnostic.Code;
 		if (requiredOutput != document.Outputs.end()) {
@@ -10510,7 +10524,8 @@ namespace engine::imagegraph {
 					{},
 					true,
 					scheduleWork,
-					diagnostic
+					diagnostic,
+					inputSelection
 				) != Status::Ok)
 				return diagnostic.Code;
 		}
@@ -10576,7 +10591,10 @@ namespace engine::imagegraph {
 				{},
 				true,
 				timelineGetters,
-				frameCacheInputReads
+				frameCacheInputReads,
+				nullptr,
+				false,
+				inputSelection
 			);
 			if (timelineStatus != Status::Ok) return timelineStatus;
 		}
@@ -10704,7 +10722,8 @@ namespace engine::imagegraph {
 					completed,
 					true,
 					scheduleWork,
-					diagnostic
+					diagnostic,
+					inputSelection
 				) != Status::Ok)
 				return false;
 			if (!deferredTimeline) {
@@ -10718,7 +10737,8 @@ namespace engine::imagegraph {
 					diagnostic,
 					true,
 					timelineGetters,
-					frameCacheInputReads
+					frameCacheInputReads,
+					inputSelection
 				);
 				if (status != Status::Ok) return false;
 			}
@@ -10971,7 +10991,8 @@ namespace engine::imagegraph {
 				diagnostic,
 				true,
 				timelineGetters,
-				frameCacheInputReads
+				frameCacheInputReads,
+				inputSelection
 			);
 			if (status != Status::Ok) return false;
 			for (size_t candidate = 0; candidate < timelineSelected.size(); ++candidate)
@@ -11361,13 +11382,21 @@ namespace engine::imagegraph {
 					&budget,
 					&dynamicPcxCharge
 				);
+				pcxNames.Produced = produced;
 				context.PcxNames = &pcxNames;
+				const bool sourceInputCapture = index == inputSelection.NodeIndex;
+				if (sourceInputCapture) {
+					context.ObservedSourceInputs = nodeInputs->ObservedSourceInputs;
+					context.RequireObservedSourceInputs = true;
+					context.SelectedSourceInput = nodeInputs->SourcePort;
+					context.ObservedSourceInputOwner = nodeInputs->ObservedSourceInputOwner;
+				}
 				const auto inlineRoute = std::find_if(
 					plan.InlineOwnerDependencies.begin(),
 					plan.InlineOwnerDependencies.end(),
 					[&](const auto &route) { return route.Consumer == index; }
 				);
-				if (inlineRoute != plan.InlineOwnerDependencies.end()) {
+				if (!sourceInputCapture && inlineRoute != plan.InlineOwnerDependencies.end()) {
 					if (inlineRoute->ControlsOnly && !prepareBuilderControls(inlineRoute->Owner))
 						return diagnostic.Code;
 					const auto &owner = inlineInputs[inlineRoute->Owner];
@@ -11394,7 +11423,7 @@ namespace engine::imagegraph {
 				detail::EvaluationVector<detail::PixelBuilderLayer> builderLayers{
 					detail::EvaluationAllocator<detail::PixelBuilderLayer>(budget)
 				};
-				if (node.Type == "pc.pixel_builder") {
+				if (!sourceInputCapture && node.Type == "pc.pixel_builder") {
 					if (!prepareBuilderControls(index)) return diagnostic.Code;
 					context.PixelBuilderCanvas = std::get<Vector2>(inlineInputs[index].Values.front().Data);
 					const size_t layerCount = std::count_if(
@@ -11454,7 +11483,8 @@ namespace engine::imagegraph {
 					context.InheritedSurfaceFormat = SourceSurfaceFormat(depthRoute.Choice);
 				else if (depthRoute.Source == detail::GroupInputDepth::Kind::AuthoredValue)
 					context.InheritedSurfaceFormat = SurfaceFormat::RGBA8Unorm;
-				else if (depthRoute.Source == detail::GroupInputDepth::Kind::NodeOutput &&
+				else if (!sourceInputCapture &&
+						 depthRoute.Source == detail::GroupInputDepth::Kind::NodeOutput &&
 						 std::any_of(
 							 plan.GroupSurfaceDependencies.begin(),
 							 plan.GroupSurfaceDependencies.end(),
@@ -11555,7 +11585,8 @@ namespace engine::imagegraph {
 				context.ByteBudget = budget.Available();
 				detail::AllocationReservation colliderIdsCharge;
 				std::vector<std::string_view> colliderIds;
-				if (node.Type == "pc.verlet_sim_step" || node.Type == "pc.verlet_sim_render") {
+				if (!sourceInputCapture &&
+					(node.Type == "pc.verlet_sim_step" || node.Type == "pc.verlet_sim_render")) {
 					const size_t count = std::count_if(
 						plan.InlineControlDependencies.begin(),
 						plan.InlineControlDependencies.end(),
@@ -11599,6 +11630,7 @@ namespace engine::imagegraph {
 					}
 				}
 				for (const CatalogueInput &input : catalogueEntry->Inputs) {
+					if (!detail::ReadsSourceInput(inputSelection, index, input.Id)) continue;
 					if (!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, input.Id)) continue;
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
@@ -12588,6 +12620,7 @@ namespace engine::imagegraph {
 				// Dynamic group inputs follow the same order: a link, then the instance
 				// default.
 				for (const DynamicInput &input : node.DynamicInputs) {
+					if (!detail::ReadsSourceInput(inputSelection, index, input.Id)) continue;
 					if (!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, input.Id)) continue;
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
@@ -12718,7 +12751,8 @@ namespace engine::imagegraph {
 				detail::EvaluationVector<Value> separatedSamples{detail::EvaluationAllocator<Value>(budget)};
 				const auto separatedInput =
 					[&](std::string_view port) -> const SourceSeparatedVec2Animator * {
-					if ((node.Type == "pc.mirror_polar" && detail::SourceMirrorVectorIndex(port)) ||
+					if (!detail::ReadsSourceInput(inputSelection, index, port) ||
+						(node.Type == "pc.mirror_polar" && detail::SourceMirrorVectorIndex(port)) ||
 						context.IsLinked(port) ||
 						!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, port))
 						return nullptr;
@@ -12807,6 +12841,7 @@ namespace engine::imagegraph {
 				if (node.Type == "pc.mirror_polar") {
 					for (size_t i = 0; i < detail::SourceMirrorVectorPorts.size(); ++i) {
 						const auto port = detail::SourceMirrorVectorPorts[i];
+						if (!detail::ReadsSourceInput(inputSelection, index, port)) continue;
 						const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
 												  ? request.GroupReplay->Binding(node.Id, port)
 												  : nullptr;
@@ -12891,6 +12926,7 @@ namespace engine::imagegraph {
 				};
 				pcxPrograms.reserve(inputCount);
 				const auto appendPcxProgram = [&](std::string_view port) {
+					if (!detail::ReadsSourceInput(inputSelection, index, port)) return;
 					const auto *binding =
 						request.GroupReplay ? request.GroupReplay->Binding(node.Id, port) : nullptr;
 					const Node *expressionOwner = &inputOwner(port);
@@ -13288,7 +13324,8 @@ namespace engine::imagegraph {
 							completed,
 							true,
 							scheduleWork,
-							diagnostic
+							diagnostic,
+							inputSelection
 						) != Status::Ok)
 						return diagnostic.Code;
 					groupActivityChanged = true;
@@ -16533,6 +16570,127 @@ namespace engine::imagegraph {
 		if (evaluated != Status::Ok) return evaluated;
 		result = std::move(capture.Controls);
 		return Status::Ok;
+	}
+
+	Status detail::EvaluateSourceInput(
+		const Document &document,
+		const Plan &plan,
+		std::string_view nodeId,
+		std::string_view port,
+		const EvaluationRequest &request,
+		EvaluationBudget &budget,
+		Value &result,
+		AllocationReservation &resultCharge,
+		Diagnostic &diagnostic,
+		std::optional<std::span<const AuthoredValue>> observedInputs,
+		std::string_view observedInputOwner
+	) try {
+		ENGINE_PROFILE("imagegraph.source_input_getter");
+		const auto fail = [&](Status code, std::string_view message) {
+			SetDiagnostic(
+				diagnostic,
+				code,
+				std::string(message),
+				nodeId.size() <= Limits::MaximumTextBytes ? nodeId : std::string_view{},
+				port.size() <= Limits::MaximumTextBytes ? port : std::string_view{}
+			);
+			return code;
+		};
+		if (document.Nodes.size() > Limits::MaximumNodes || nodeId.size() > Limits::MaximumTextBytes ||
+			port.size() > Limits::MaximumTextBytes)
+			return fail(Status::LimitExceeded, "source input target exceeds text bounds");
+		const auto node =
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &candidate) {
+				return candidate.Id == nodeId;
+			});
+		if (node == document.Nodes.end()) return fail(Status::UnknownNode, "source input node is absent");
+		if (node->DynamicInputs.size() > MaximumDynamicInputsForNode(*node))
+			return fail(Status::LimitExceeded, "source input declaration count exceeds bounds");
+		if (!SourceSeparatedVec2Input(*node, port))
+			return fail(Status::UnknownPort, "source input is not a declared two-axis getter");
+		const auto requestStatus = ValidateEvaluationRequest(request, diagnostic);
+		if (requestStatus != Status::Ok) return requestStatus;
+		uint64_t observedBytes = 0, mapWork = 0;
+		if (observedInputs) {
+			if (observedInputs->size() > Limits::MaximumKeyframes)
+				return fail(Status::LimitExceeded, "observed input map exceeds port bounds");
+			for (size_t i = 0; i < observedInputs->size(); ++i) {
+				const auto &input = (*observedInputs)[i];
+				const auto bytes = ValueClonePayloadBytes(input.Data);
+				if (input.Port.empty() || input.Port.size() > Limits::MaximumTextBytes || !bytes ||
+					!AddBytes(
+						observedBytes,
+						detail::RetainedPayloadBytes(input.Data) + sizeof(AuthoredValue) +
+							input.Port.capacity()
+					))
+					return fail(Status::LimitExceeded, "observed input map payload exceeds bounds");
+				for (size_t j = 0; j < i; ++j) {
+					const uint64_t comparison =
+						1 + std::min((*observedInputs)[j].Port.size(), input.Port.size());
+					if (comparison > 64'000'000 - mapWork)
+						return fail(Status::LimitExceeded, "observed input map lookup exceeds work bounds");
+					mapWork += comparison;
+					if ((*observedInputs)[j].Port == input.Port)
+						return fail(Status::InvalidValue, "observed input map has duplicate ports");
+				}
+			}
+		}
+		auto observedShadow = budget.Reserve(observedBytes);
+		if (!observedShadow) return fail(Status::LimitExceeded, "observed input map overlap exceeds budget");
+		AllocationReservation charge;
+		std::vector<EvaluationInputValue> values;
+		std::vector<EvaluationInputImage> images;
+		std::vector<SnapshotImageArray> arrays;
+		std::optional<SurfaceFormat> surfacePolicy;
+		NodeInputCapture capture{
+			nodeId,
+			&values,
+			&images,
+			&surfacePolicy,
+			&charge,
+			&arrays,
+			nullptr,
+			false,
+			port,
+			observedInputs,
+			observedInputOwner.empty() ? nodeId : observedInputOwner
+		};
+		NodeResult ignored;
+		const auto status = EvaluateGraph(
+			document,
+			plan,
+			{},
+			request,
+			ignored,
+			diagnostic,
+			budget,
+			charge,
+			nullptr,
+			nullptr,
+			&capture,
+			nullptr,
+			nodeId
+		);
+		if (status != Status::Ok) return status;
+		const auto found =
+			std::find_if(values.begin(), values.end(), [&](const auto &input) { return input.Port == port; });
+		if (found == values.end())
+			return fail(Status::UnsupportedExecution, "source getter has no represented value");
+		const auto retained = sizeof(Value) + detail::RetainedPayloadBytes(found->Data);
+		if (retained > charge.Bytes())
+			return fail(Status::LimitExceeded, "source getter result exceeds its admitted payload");
+		static_assert(std::is_nothrow_move_assignable_v<Value>);
+		result = std::move(found->Data);
+		std::vector<EvaluationInputValue>{}.swap(values);
+		std::vector<EvaluationInputImage>{}.swap(images);
+		std::vector<SnapshotImageArray>{}.swap(arrays);
+		if (!charge.Resize(retained)) std::terminate();
+		resultCharge = std::move(charge);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		SetDiagnostic(diagnostic, Status::LimitExceeded, "source input allocation was refused", nodeId, port);
+		return diagnostic.Code;
 	}
 
 	Status EvaluateNodeInputs(

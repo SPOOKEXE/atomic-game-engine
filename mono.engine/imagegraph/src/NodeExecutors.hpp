@@ -99,6 +99,11 @@ namespace engine::imagegraph::detail {
 		// The executor may copy a bounded recipe; published values never retain this borrowed pointer.
 		const Document *EvaluationDocument = nullptr;
 		const PcxNameResolver *PcxNames = nullptr;
+		// one-property source reads use the host's retained map, never fresh sibling getters.
+		std::optional<std::span<const AuthoredValue>> ObservedSourceInputs;
+		bool RequireObservedSourceInputs = false;
+		std::string_view SelectedSourceInput;
+		std::string_view ObservedSourceInputOwner;
 		AllocationReservation PcxControlCharge;
 		std::vector<PcxMessage> PcxControlMessages;
 		HostCaptureReceiptSink *HostReceipts = nullptr;

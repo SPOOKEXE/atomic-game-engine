@@ -40,12 +40,31 @@ namespace engine::imagegraph::detail {
 				if (image) scratchBytes += image->Pixels.size() + port.size();
 			for (const auto &[port, images] : context.ImageArrays)
 				if (images) scratchBytes += Limits::MaximumArrayBytes + port.size();
+			if (context.ObservedSourceInputs)
+				for (const auto &input : *context.ObservedSourceInputs)
+					scratchBytes +=
+						RetainedPayloadBytes(input.Data) + input.Port.size() + sizeof(AuthoredValue);
 			auto scratch = context.ReserveWorkspace(scratchBytes, expression.Port);
 			if (!scratch) return false;
 			PcxExpressionValue tree;
 			Diagnostic diagnostic;
 			if (CompilePcxProgram(expression.Code, tree, diagnostic) != Status::Ok)
 				return context.Fail(diagnostic.Code, diagnostic.Message, expression.Port);
+			if (context.RequireObservedSourceInputs) {
+				for (const auto &instruction : tree.Data->Instructions) {
+					const auto *name = std::get_if<std::string>(&instruction.Literal);
+					if (instruction.Operation == "name" && name &&
+						(*name == "self" || name->starts_with("self.") || *name == "node_values" ||
+						 name->starts_with("node_values.")) &&
+						(!context.ObservedSourceInputs ||
+						 context.ObservedSourceInputOwner != program.Owner->Id))
+						return context.Fail(
+							Status::UnsupportedExecution,
+							"source property expression requires an observed input map",
+							expression.Port
+						);
+				}
+			}
 			const Value *original = context.Find(expression.Port);
 			Value current = original ? *original : Value{double{0}};
 			if (const auto *surface = context.Input(expression.Port)) current = SurfaceValue{*surface};
@@ -60,21 +79,26 @@ namespace engine::imagegraph::detail {
 				}
 			StructValue values;
 			values.Data.emplace();
-			for (const auto &[port, value] : context.Values)
-				values.Data->Fields.emplace_back(std::string(port), value);
-			for (const auto &[port, value] : context.ValueViews)
-				if (value) values.Data->Fields.emplace_back(std::string(port), *value);
-			for (const auto &[port, image] : context.Images)
-				if (image) values.Data->Fields.emplace_back(std::string(port), SurfaceValue{*image});
-			for (const auto &[port, images] : context.ImageArrays)
-				if (images) {
-					ArrayValue array;
-					if (!ArraySnapshot(*images, array))
-						return context.Fail(
-							Status::LimitExceeded, "PCX self image array exceeds snapshot bounds", port
-						);
-					values.Data->Fields.emplace_back(std::string(port), std::move(array));
-				}
+			if (context.ObservedSourceInputs) {
+				for (const auto &input : *context.ObservedSourceInputs)
+					values.Data->Fields.emplace_back(input.Port, input.Data);
+			} else {
+				for (const auto &[port, value] : context.Values)
+					values.Data->Fields.emplace_back(std::string(port), value);
+				for (const auto &[port, value] : context.ValueViews)
+					if (value) values.Data->Fields.emplace_back(std::string(port), *value);
+				for (const auto &[port, image] : context.Images)
+					if (image) values.Data->Fields.emplace_back(std::string(port), SurfaceValue{*image});
+				for (const auto &[port, images] : context.ImageArrays)
+					if (images) {
+						ArrayValue array;
+						if (!ArraySnapshot(*images, array))
+							return context.Fail(
+								Status::LimitExceeded, "PCX self image array exceeds snapshot bounds", port
+							);
+						values.Data->Fields.emplace_back(std::string(port), std::move(array));
+					}
+			}
 			const auto *input = FindCatalogueInput(context.Entry, expression.Port);
 			const std::array parameters{
 				AuthoredValue{"name", std::string(input ? input->Name : expression.Port)},

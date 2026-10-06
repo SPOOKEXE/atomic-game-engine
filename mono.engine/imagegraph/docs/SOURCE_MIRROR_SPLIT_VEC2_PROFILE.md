@@ -86,6 +86,20 @@ the requested axes rather than retaining a sampled vector as authored state.
 Missing animation flags preserve static values. Explicit source animation
 enables sampled axis changes; both modes have literal client pixel fixtures.
 
+the private selected-input sampler reads one declared Vec2, IVec2, Dimension or
+Range getter with units disabled. its target processor, sibling inputs and
+unread links remain asleep. required upstream getters and dynamically requested
+PCX outputs still run. IVec2 rounds after PCX; Dimension and Range retain their
+source pair resizing; Vec2 keeps long rows and pads short depth-two rows.
+projection admits final row storage before copying and refuses image-array
+shapes whose conversion is unrepresented.
+
+source `self` and `node_values` read the host's retained input map. this sampler
+requires an explicit observed map and matching expression owner when either is
+used. it does not evaluate sibling getters to invent a fresh map. borrowed map,
+prior result and replacement result share one byte ledger; refused evaluation
+leaves the prior result and its reservation unchanged.
+
 separate/combine controls and missing shared-axis constructor storage are still unfinished.
 this flag preserves
 the source storage distinction needed by those controls. generic Vector, dynamic

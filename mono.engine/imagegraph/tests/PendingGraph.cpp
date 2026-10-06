@@ -4,7 +4,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <string_view>
 
 TEST_SUITE_ID("engine.imagegraph.pending_graph")
 using namespace engine::imagegraph;
@@ -176,4 +178,71 @@ TEST_CASE(
 			CHECK(budget.Used() == retained);
 		}
 	}
+}
+
+TEST_CASE(
+	"Pending graph selected inputs skip unrelated producers and processor routes",
+	"[imagegraph][pending_graph][source_input]"
+) {
+	const auto document = Scene();
+	auto plan = Compiled(document);
+	plan.EffectiveLinks = {
+		{"unsupported", "out", "cache", "unused"}, {"control", "boolean", "cache", "animated"}
+	};
+	plan.PcxNamedDependencies.push_back({2, 3, "static", "boolean", false});
+	detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+	detail::PendingGraph graph(budget);
+	std::array<const CacheGroupReplayNode *, 4> frozen{};
+	const std::array<size_t, 1> roots{2};
+	const std::array<std::string_view, 1> ports{"animated"};
+	const std::array<PcxNamedDependency, 1> dynamic{{{2, 0, "dynamic", "image", false}}};
+	Diagnostic diagnostic;
+	uint64_t work = 0;
+	REQUIRE(
+		graph.Rebuild(document, plan, {}, frozen, roots, dynamic, {}, false, work, diagnostic, {2, ports}) ==
+		Status::Ok
+	);
+	CHECK(graph.Upstream[2].size() == 2);
+	CHECK(std::find(graph.Upstream[2].begin(), graph.Upstream[2].end(), 1) != graph.Upstream[2].end());
+	CHECK(std::find(graph.Upstream[2].begin(), graph.Upstream[2].end(), 0) != graph.Upstream[2].end());
+	CHECK(std::find(graph.Upstream[2].begin(), graph.Upstream[2].end(), 3) == graph.Upstream[2].end());
+	CHECK_FALSE(graph.Needed[3]);
+}
+
+TEST_CASE(
+	"Pending graph rejects invalid selected inputs without replacing its graph",
+	"[imagegraph][pending_graph][source_input][evaluation_budget]"
+) {
+	const auto document = Scene();
+	const auto plan = Compiled(document);
+	detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+	detail::PendingGraph graph(budget);
+	std::array<const CacheGroupReplayNode *, 4> frozen{};
+	const std::array<size_t, 1> roots{2};
+	Diagnostic diagnostic;
+	uint64_t work = 0;
+	REQUIRE(graph.Rebuild(document, plan, {}, frozen, roots, {}, {}, true, work, diagnostic) == Status::Ok);
+	const auto retained = budget.Used();
+	const auto oldUpstreamSize = graph.Upstream[2].size();
+	const std::array<std::string_view, 2> duplicate{"animated", "animated"};
+	CHECK(
+		graph.Rebuild(document, plan, {}, frozen, roots, {}, {}, true, work, diagnostic, {2, duplicate}) ==
+		Status::InvalidValue
+	);
+	CHECK(graph.Upstream[2].size() == oldUpstreamSize);
+	CHECK(budget.Used() == retained);
+	CHECK(
+		graph.Rebuild(
+			document, plan, {}, frozen, roots, {}, {}, true, work, diagnostic, {document.Nodes.size(), {}}
+		) == Status::InvalidValue
+	);
+	CHECK(graph.Upstream[2].size() == oldUpstreamSize);
+	CHECK(budget.Used() == retained);
+	uint64_t exhausted = 64'000'000;
+	CHECK(
+		graph.Rebuild(document, plan, {}, frozen, roots, {}, {}, true, exhausted, diagnostic, {2, {}}) ==
+		Status::LimitExceeded
+	);
+	CHECK(graph.Upstream[2].size() == oldUpstreamSize);
+	CHECK(budget.Used() == retained);
 }

@@ -2,6 +2,7 @@
 
 #include "EvaluationAllocator.hpp"
 #include "SourceFrameCacheInputs.hpp"
+#include "SourceInputSelection.hpp"
 
 #include <engine/imagegraph/CacheGroupReplay.hpp>
 
@@ -26,7 +27,8 @@ namespace engine::imagegraph::detail {
 			std::span<const uint8_t> completed,
 			bool cutInputs,
 			uint64_t &work,
-			Diagnostic &diagnostic
+			Diagnostic &diagnostic,
+			SourceInputSelection selection = {}
 		);
 	};
 }

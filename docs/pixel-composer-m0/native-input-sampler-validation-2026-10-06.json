@@ -1,0 +1,148 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "Private selected-source-input evaluation for unitless two-axis getters, with dependency isolation and one shared byte ledger.",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "verified_source_scripts": [
+    {
+      "path": "scripts/node_value/node_value.gml",
+      "bytes": 111774,
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/node_value_vec2/node_value_vec2.gml",
+      "bytes": 11175,
+      "sha256": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112",
+      "git_blob_sha1": "0be29adbff288676aef0c4fca68d801d299ba4cf",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/node_value_dimension/node_value_dimension.gml",
+      "bytes": 6400,
+      "sha256": "7a31f24df14a2fe19f5566ab7d2e919f792faccac83ecbdff7f59a91e93f54e9",
+      "git_blob_sha1": "9fca516968acc32235a3b7db15197887a6d73aff",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/node_value_range/node_value_range.gml",
+      "bytes": 591,
+      "sha256": "a3d7d5932d5b50deac06c7c18a9953e954750347cbc15dfeaaa8eb09217392ff",
+      "git_blob_sha1": "f2e1e82c9bb5ce640d6c59ae598abac9074a42e5",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/__node_value_array/__node_value_array.gml",
+      "bytes": 2285,
+      "sha256": "03d55ab761a484368a582adfe4ac7fb05aee2b30a5a708797b03494c67a577f2",
+      "git_blob_sha1": "8c7eb63d68518b698fb76272d73df01a7a76d0eb",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/node_data/node_data.gml",
+      "bytes": 119599,
+      "sha256": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d",
+      "git_blob_sha1": "7488016460777a298599fe2219006e5d233bf4d4",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/node_processor/node_processor.gml",
+      "bytes": 11806,
+      "sha256": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc",
+      "git_blob_sha1": "a3115c9066cea8bb1edf560614cff42af391d214",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/pcx_ast/pcx_ast.gml",
+      "bytes": 32392,
+      "sha256": "9525d61b039065fe4098d5c5dd1e3674ac5a87471ab091455a81fb3a2a819554",
+      "git_blob_sha1": "eddd97d341b73e96cd67ab5caf4f4f63c63903ff",
+      "manifest_match": true
+    }
+  ],
+  "source_contract": [
+    "Vec2 getter sampling uses the selected property with units disabled; IVec2 rounding follows PCX evaluation.",
+    "Dimension and Range normalize fixed pairs; Vec2 preserves longer rows and pads short depth-two rows.",
+    "self and node_values use the retained owner input map. The sampler requires an explicit map rather than recursively sampling sibling getters."
+  ],
+  "native_checks": [
+    "Selected Polar Mirror position leaves its sibling rotation expression, missing-audio key driver and unread linked file producer asleep.",
+    "Dimension scalar duplication and pair resizing do not apply project units.",
+    "Selected IVec2 rounds separated axes after PCX and admits linked and dynamically requested named output dependencies.",
+    "Observed maps are validated and charged; missing or duplicate maps preserve the prior result.",
+    "Vec2 row storage is admitted at final capacity; exact-peak admission succeeds and peak minus one refuses atomically.",
+    "Unrepresented image-array and direct SurfaceValue shapes refuse atomically."
+  ],
+  "initial_batch": {
+    "results": "input-sampler-batch1-results.json",
+    "checks_passed": 19,
+    "checks_total": 20,
+    "failures": "The new Solid fixture named an undeclared rotation source input. Replaced isolation with declared Transform position and rotation inputs; retained separate valid Dimension tests."
+  },
+  "fixes_before_final_batch": [
+    "Removed unchecked ElementValue access for Image array items and refused that unrepresented shape.",
+    "Constructed padded Vec2 rows at final capacity rather than cloning and resizing; added preallocation count and byte bounds."
+  ],
+  "review": "Read-only review found no additional confirmed defect in the row admission and construction delta.",
+  "limits": [
+    "Separate/combine authoring transactions and Studio controls remain unfinished.",
+    "Shared-axis constructor storage and detached animator control behavior remain unfinished.",
+    "No licensed runner comparison, performance measurement, sanitizers or live headed Studio verification was performed.",
+    "Twenty-one socket-dependent cases remain excluded in the restricted environment.",
+    "This pass does not establish full Composer acceptance."
+  ],
+  "commit": "The filesystem refuses .git/index.lock; isolated owned patch retained.",
+  "second_batch": {
+    "results": "input-sampler-batch2-results.json",
+    "checks_passed": 19,
+    "checks_total": 20,
+    "failures": "Three new tests shared pc.transform, whose declared position input is refused by source animation-mode admission because the node has no native CPU executor. Replaced the test fixture with the verified native pc.mirror_polar node and declared position, rotation and surface_in ports."
+  },
+  "third_batch": {
+    "results": "input-sampler-batch3-results.json",
+    "checks_passed": 19,
+    "checks_total": 20,
+    "failures": "The image-items fixture used ElementType Image although general Items require Any. Corrected the fixture representation so it reaches the intended unsupported-image projection path."
+  },
+  "builds": [
+    {
+      "log": "input-sampler-build1.log",
+      "exit_code": 0
+    },
+    {
+      "log": "input-sampler-build2.log",
+      "exit_code": 0
+    },
+    {
+      "log": "input-sampler-build3.log",
+      "exit_code": 0
+    },
+    {
+      "log": "input-sampler-build4.log",
+      "exit_code": 0
+    },
+    {
+      "log": "input-sampler-build5.log",
+      "exit_code": 0
+    },
+    {
+      "log": "input-sampler-build6.log",
+      "exit_code": 0
+    }
+  ],
+  "final_batch": {
+    "results": "input-sampler-batch4-results.json",
+    "checks": 20,
+    "all_passed": true,
+    "native_cpu_cases": 4991,
+    "render_cases": 15,
+    "startup_cases": 1,
+    "cli_cases": 16,
+    "python_cases": 100,
+    "binary_hashes_stable": true,
+    "child_binary_hashes_stable": true,
+    "child_hashes": "input-sampler-child-hashes-batch4.json",
+    "network_cases_excluded": 21
+  }
+}

@@ -95,10 +95,12 @@ namespace engine::imagegraph::detail {
 		std::span<const uint8_t> getters,
 		std::span<const SourceFrameCacheInputReads> getterReads,
 		const TimelineOverrides *previous,
-		bool rawSourceAnimator
+		bool rawSourceAnimator,
+		SourceInputSelection selection
 	) try {
 		ENGINE_PROFILE("imagegraph.timeline");
-		if (needed.size() != document.Nodes.size() ||
+		if ((Active(selection) && selection.NodeIndex >= document.Nodes.size()) ||
+			needed.size() != document.Nodes.size() ||
 			(!getters.empty() && getters.size() != document.Nodes.size()) ||
 			(!getterReads.empty() && getterReads.size() != document.Nodes.size()) ||
 			!ValidFrameTime(GetFrameTime(request))) {
@@ -148,7 +150,9 @@ namespace engine::imagegraph::detail {
 			if (!consumers[index]) continue;
 			const auto &consumer = document.Nodes[index];
 			const auto selectWriter = [&](std::string_view port) {
-				if (!getterReads.empty() && !SourceFrameCacheReadsPort(getterReads[index], port)) return true;
+				if (!ReadsSourceInput(selection, index, port) ||
+					(!getterReads.empty() && !SourceFrameCacheReadsPort(getterReads[index], port)))
+					return true;
 				const auto *getter = SourcePropertyGetterNode(document, consumer, port, &sourceGetterWork);
 				if (!getter) {
 					SetDiagnostic(
@@ -192,10 +196,16 @@ namespace engine::imagegraph::detail {
 			const auto *entry = FindCatalogueEntry(consumer.Type);
 			if (entry)
 				for (const auto &input : entry->Inputs)
-					if (SourceSeparatedVec2Input(consumer, input.Id) && !selectWriter(input.Id))
+					if ((Active(selection) || SourceSeparatedVec2Input(consumer, input.Id)) &&
+						!selectWriter(input.Id))
 						return diagnostic.Code;
+			if (Active(selection) && !entry)
+				if (const auto *schema = FindSchema(consumer.Type))
+					for (const auto &property : schema->Properties)
+						if (!selectWriter(property.Id)) return diagnostic.Code;
 			for (const auto &input : consumer.DynamicInputs)
-				if (SourceSeparatedVec2Input(consumer, input.Id) && !selectWriter(input.Id))
+				if ((Active(selection) || SourceSeparatedVec2Input(consumer, input.Id)) &&
+					!selectWriter(input.Id))
 					return diagnostic.Code;
 			if (request.GroupReplay) {
 				if (!admitGetterWork(request.GroupReplay->Bindings().size())) return diagnostic.Code;
@@ -221,7 +231,9 @@ namespace engine::imagegraph::detail {
 				request.GroupReplay ? request.GroupReplay->SharedSubtype(node->Id, key.Port) : nullptr;
 			const auto *axes = axisOverlay && axisOverlay->SeparatedVec2 ? &*axisOverlay->SeparatedVec2
 																		 : FindSeparatedVec2(*node, key.Port);
-			if (!rawSourceAnimator && axes && !combinedWriters.contains({key.NodeId, key.Port})) return true;
+			if (!rawSourceAnimator && (axes || Active(selection)) &&
+				!combinedWriters.contains({key.NodeId, key.Port}))
+				return true;
 			const auto mirrorMode =
 				SourceMirrorGetterAnimated(document, *node, key.Port, request.GroupReplay);
 			if (mirrorMode && !*mirrorMode) return true;
@@ -1120,11 +1132,13 @@ namespace engine::imagegraph::detail {
 		Diagnostic &diagnostic,
 		bool rawSourceQuaternion,
 		std::span<const uint8_t> getters,
-		std::span<const SourceFrameCacheInputReads> getterReads
+		std::span<const SourceFrameCacheInputReads> getterReads,
+		SourceInputSelection selection
 	) try {
 		ENGINE_PROFILE("imagegraph.timeline.extend");
 		const auto clock = GetFrameTime(request);
-		if (needed.size() != document.Nodes.size() ||
+		if ((Active(selection) && selection.NodeIndex >= document.Nodes.size()) ||
+			needed.size() != document.Nodes.size() ||
 			(!getters.empty() && getters.size() != document.Nodes.size()) ||
 			(!getterReads.empty() && getterReads.size() != document.Nodes.size()) || !ValidFrameTime(clock) ||
 			(result.Observation && *result.Observation != clock) ||
@@ -1161,7 +1175,9 @@ namespace engine::imagegraph::detail {
 			rawSourceQuaternion,
 			getters,
 			getterReads,
-			&result
+			&result,
+			false,
+			selection
 		);
 		if (status != Status::Ok) return status;
 		if (additions.Nodes.empty()) {

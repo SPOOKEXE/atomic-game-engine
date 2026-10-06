@@ -2,6 +2,7 @@
 
 #include "EvaluationBudget.hpp"
 #include "SourceFrameCacheInputs.hpp"
+#include "SourceInputSelection.hpp"
 
 #include <engine/imagegraph/Document.hpp>
 
@@ -38,7 +39,8 @@ namespace engine::imagegraph::detail {
 		std::span<const uint8_t> getters = {},
 		std::span<const SourceFrameCacheInputReads> getterReads = {},
 		const TimelineOverrides *previous = nullptr,
-		bool rawSourceAnimator = false
+		bool rawSourceAnimator = false,
+		SourceInputSelection selection = {}
 	);
 	// Adds newly needed nodes within the same immutable document/request observation.
 	// Already sampled nodes survive; all old/new payloads and replacement tables coexist under budget.
@@ -51,6 +53,7 @@ namespace engine::imagegraph::detail {
 		Diagnostic &diagnostic,
 		bool rawSourceQuaternion = false,
 		std::span<const uint8_t> getters = {},
-		std::span<const SourceFrameCacheInputReads> getterReads = {}
+		std::span<const SourceFrameCacheInputReads> getterReads = {},
+		SourceInputSelection selection = {}
 	);
 }

@@ -20,24 +20,47 @@ namespace engine::imagegraph::detail {
 		std::span<const uint8_t> completed,
 		bool cutInputs,
 		uint64_t &work,
-		Diagnostic &diagnostic
+		Diagnostic &diagnostic,
+		SourceInputSelection selection
 	) try {
 		ENGINE_PROFILE("imagegraph.pending.rebuild");
 		const auto fail = [&](Status code, std::string_view message) {
 			diagnostic = {code, {}, {}, std::string(message)};
 			return code;
 		};
-		const size_t count = document.Nodes.size();
-		if (count > Limits::MaximumNodes || (!reads.empty() && reads.size() != count) ||
-			frozen.size() != count || (!completed.empty() && completed.size() != count) ||
-			roots.size() > Limits::MaximumOutputs + Limits::MaximumNodes + 1 ||
-			dynamicRoutes.size() > Limits::MaximumLinks)
-			return fail(Status::InvalidValue, "pending graph masks and roots do not match the document");
 		const auto visit = [&](uint64_t units = 1) -> bool {
 			if (work > 64'000'000 || units > 64'000'000 - work) return false;
 			work += units;
 			return true;
 		};
+		const size_t count = document.Nodes.size();
+		if (count > Limits::MaximumNodes || (!reads.empty() && reads.size() != count) ||
+			frozen.size() != count || (!completed.empty() && completed.size() != count) ||
+			roots.size() > Limits::MaximumOutputs + Limits::MaximumNodes + 1 ||
+			dynamicRoutes.size() > Limits::MaximumLinks ||
+			(Active(selection) && (selection.NodeIndex >= count ||
+								   selection.Ports.size() > Limits::MaximumSourceInputExpressionsPerNode)))
+			return fail(Status::InvalidValue, "pending graph masks and roots do not match the document");
+		if (Active(selection)) {
+			for (size_t index = 0; index < selection.Ports.size(); ++index) {
+				const auto port = selection.Ports[index];
+				if (port.empty() || port.size() > Limits::MaximumTextBytes)
+					return fail(Status::InvalidValue, "selected source input ports are invalid");
+				if (!visit(1 + port.size()))
+					return fail(
+						Status::LimitExceeded, "selected source input validation exceeds its work budget"
+					);
+				for (size_t prior = 0; prior < index; ++prior) {
+					const auto earlier = selection.Ports[prior];
+					if (!visit(1 + std::min(port.size(), earlier.size())))
+						return fail(
+							Status::LimitExceeded, "selected source input validation exceeds its work budget"
+						);
+					if (earlier == port)
+						return fail(Status::InvalidValue, "selected source input ports are invalid");
+				}
+			}
+		}
 		if (!visit(count)) return fail(Status::LimitExceeded, "pending graph exceeds its work budget");
 		using Index = std::pair<std::string_view, size_t>;
 		EvaluationVector<Index> indices{EvaluationAllocator<Index>(Budget)};
@@ -82,31 +105,35 @@ namespace engine::imagegraph::detail {
 			);
 		};
 		for (const auto &link : plan.EffectiveLinks) {
-			const auto status =
-				append(indexOf(link.FromNode), indexOf(link.ToNode), link.ToPort == "surface_in");
+			const auto consumer = indexOf(link.ToNode);
+			if (!ReadsSourceInput(selection, consumer, link.ToPort)) continue;
+			const auto status = append(indexOf(link.FromNode), consumer, link.ToPort == "surface_in");
 			if (status != Status::Ok) return edgeFailure(status);
 		}
 		for (const auto &route : plan.GroupSurfaceDependencies) {
+			if (Active(selection) && route.Consumer == selection.NodeIndex) continue;
 			const auto status = append(route.Producer, route.Consumer, false);
 			if (status != Status::Ok) return edgeFailure(status);
 		}
 		for (const auto &route : plan.InlineOwnerDependencies) {
-			if (route.ControlsOnly) continue;
+			if (route.ControlsOnly || (Active(selection) && route.Consumer == selection.NodeIndex)) continue;
 			const auto status = append(route.Owner, route.Consumer, false);
 			if (status != Status::Ok) return edgeFailure(status);
 		}
-		const auto routes = [&](const auto &entries) -> Status {
+		const auto routes = [&](const auto &entries, bool processorDependencies) -> Status {
 			for (const auto &route : entries) {
+				if (processorDependencies && Active(selection) && route.Consumer == selection.NodeIndex)
+					continue;
 				const auto status = append(route.Producer, route.Consumer, false);
 				if (status != Status::Ok) return status;
 			}
 			return Status::Ok;
 		};
-		auto status = routes(plan.InlineControlDependencies);
+		auto status = routes(plan.InlineControlDependencies, true);
 		if (status != Status::Ok) return edgeFailure(status);
-		status = routes(plan.PcxNamedDependencies);
+		status = routes(plan.PcxNamedDependencies, true);
 		if (status != Status::Ok) return edgeFailure(status);
-		status = routes(dynamicRoutes);
+		status = routes(dynamicRoutes, false);
 		if (status != Status::Ok) return edgeFailure(status);
 		Sources pending{EvaluationAllocator<size_t>(Budget)};
 		pending.assign(roots.begin(), roots.end());
