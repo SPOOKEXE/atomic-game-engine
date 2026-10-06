@@ -409,7 +409,8 @@ namespace engine::imagegraphio {
 			const auto parent = node.find("group");
 			const bool topLevel =
 				parent == node.end() || parent->is_null() ||
-				(parent->is_number_integer() && parent->template get<int64_t>() == -1) ||
+				(parent->is_number_integer() &&
+				 (parent->template get<int64_t>() == -1 || parent->template get<int64_t>() == -4)) ||
 				(parent->is_string() && parent->template get_ref<const JsonString &>().empty());
 			candidate.Nodes.push_back({std::move(oldId), std::move(newId), topLevel});
 			Field(node, "id", ids, work, maximumIdBytes);
@@ -518,6 +519,164 @@ namespace engine::imagegraphio {
 		return false;
 	} catch (const AppendJson::exception &) {
 		diagnostic = {Status::InvalidValue, {}, {}, "PXC append source record is malformed"};
+		return false;
+	}
+
+	bool PreparePxcxCollectionLoad(
+		const PxcxCollectionSave &files,
+		const TimelineSettings &timeline,
+		bake::PxcxArchive &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraphio.collection_load");
+		diagnostic = {};
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return false;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || !ArchiveBounds(result) ||
+			files.GraphJson.empty() || files.GraphJson.size() > bake::PxcxLimits::MaximumGraphJsonBytes ||
+			(files.MetadataJson && files.MetadataJson->size() > bake::PxcxLimits::MaximumMetadataBytes))
+			return fail(Status::LimitExceeded, "PXC collection load counts or bytes exceed bounds");
+		if (!timeline.Frames || timeline.Frames > Limits::MaximumTick ||
+			!std::isfinite(timeline.FramesPerSecond) || timeline.FramesPerSecond <= 0 ||
+			(timeline.Playback != "loop" && timeline.Playback != "stop" && timeline.Playback != "pingpong"))
+			return fail(Status::InvalidValue, "PXC collection needs a valid destination timeline");
+		detail::ImportBudget budget(maximumBytes);
+		if (!budget.Hold(ArchiveBytes(result)) || !budget.Hold(files.GraphJson.capacity() + 1) ||
+			(files.MetadataJson && !budget.Hold(files.MetadataJson->capacity() + 1)) ||
+			!budget.Hold(timeline.Playback.capacity() + 1))
+			return fail(Status::LimitExceeded, "PXC collection load owners exceed allowance");
+		JsonScope scope(budget);
+		AppendWork work;
+		auto graph = ParseText(files.GraphJson, work);
+		if (!graph || !graph->contains("nodes") || !graph->at("nodes").is_array() ||
+			!graph->contains("version") || graph->at("version") != 121092 || !graph->contains("versionStr") ||
+			!graph->at("versionStr").is_string())
+			return fail(Status::InvalidValue, "PXC collection JSON or pinned save version is invalid");
+		if (graph->at("nodes").size() > Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "PXC collection node count exceeds bounds");
+		RecordWork(*graph, work);
+		std::optional<AppendJson> metadata;
+		if (files.MetadataJson) {
+			metadata = ParseText(*files.MetadataJson, work);
+			if (!metadata || !metadata->is_object())
+				return fail(Status::InvalidValue, "PXC collection metadata is invalid");
+			RecordWork(*metadata, work);
+			(*graph)["metadata"] = std::move(*metadata);
+		}
+		size_t keys = 0;
+		const auto scaleAnimator = [&](AppendJson &data) {
+			if (data.is_object()) {
+				if (!data.contains("d"))
+					return fail(Status::InvalidValue, "PXC collection compact animator has no value");
+				if (++keys > Limits::MaximumKeyframes)
+					return fail(Status::LimitExceeded, "PXC collection aggregate keys exceed bounds");
+				return true;
+			}
+			if (!data.is_array())
+				return fail(Status::InvalidValue, "PXC collection animator storage is invalid");
+			if (data.size() > Limits::MaximumKeyframes - keys)
+				return fail(Status::LimitExceeded, "PXC collection aggregate keys exceed bounds");
+			keys += data.size();
+			for (auto &key : data) {
+				work.Charge(1, 1);
+				if (!key.is_array() || key.size() < 2)
+					return fail(Status::InvalidValue, "PXC collection key record is invalid");
+				auto &marker = key[0];
+				AppendJson *time = &marker;
+				if (marker.is_array()) {
+					if (marker.size() < 2 || (marker[0] != 0 && marker[0] != 1))
+						return fail(Status::InvalidValue, "PXC collection key marker is unsupported");
+					time = &marker[1];
+				}
+				if (!time->is_number())
+					return fail(Status::InvalidValue, "PXC collection normalized key time is invalid");
+				const double raw = time->get<double>();
+				const double scaled = raw * double(timeline.Frames - 1);
+				if (!std::isfinite(raw) || !std::isfinite(scaled) || std::abs(scaled) > Limits::MaximumTick)
+					return fail(Status::InvalidValue, "PXC collection scaled key time exceeds bounds");
+				const double lower = std::floor(scaled), fraction = scaled - lower;
+				// grug GML round chooses the even neighbour on exact halves, including negatives.
+				*time = fraction < .5	? lower
+						: fraction > .5 ? lower + 1
+										: (std::fmod(lower, 2.) == 0 ? lower : lower + 1);
+			}
+			return true;
+		};
+		for (auto &node : graph->at("nodes")) {
+			if (!node.is_object()) return fail(Status::InvalidValue, "PXC collection node is invalid");
+			for (const char *field : {"inputs", "inspectInputs"}) {
+				const auto sockets = node.find(field);
+				if (sockets == node.end()) continue;
+				if (!sockets->is_array())
+					return fail(Status::InvalidValue, "PXC collection sockets are invalid");
+				for (size_t index = 0; index < sockets->size(); ++index) {
+					work.Charge(1, 1);
+					if (std::string_view(field) == "inspectInputs" && (index == 3 || index >= 5)) continue;
+					auto &socket = (*sockets)[index];
+					if (!socket.is_object()) continue;
+					for (const char *stored : {"raw_value", "r"}) {
+						const auto data = socket.find(stored);
+						if (data != socket.end() && !scaleAnimator(*data)) return false;
+					}
+					const auto axes = socket.find("animators");
+					if (axes == socket.end() || !socket.value("sep_axis", false)) continue;
+					if (!axes->is_array())
+						return fail(Status::InvalidValue, "PXC collection axes are invalid");
+					for (auto &axis : *axes)
+						if (!scaleAnimator(axis)) return false;
+				}
+			}
+		}
+
+		auto &animator = (*graph)["animator"];
+		if (animator.is_null()) animator = AppendJson::object();
+		if (!animator.is_object())
+			return fail(Status::InvalidValue, "PXC collection animator context is invalid");
+		animator["frames_total"] = timeline.Frames;
+		animator["framerate"] = timeline.FramesPerSecond;
+		animator["playback"] = timeline.Playback == "loop" ? 0 : timeline.Playback == "stop" ? 1 : 2;
+		const std::string_view version = {
+			graph->at("versionStr").get_ref<const JsonString &>().data(),
+			graph->at("versionStr").get_ref<const JsonString &>().size()
+		};
+		if (version.size() > bake::PxcxLimits::MaximumMetadataBytes)
+			return fail(Status::LimitExceeded, "PXC collection version text exceeds bounds");
+		const auto text = graph->dump();
+		const uint64_t encodedBound = uint64_t(bake::PxcxLimits::MaximumGraphCompressedBytes) +
+									  bake::PxcxLimits::MaximumMetadataBytes + 24;
+		if (text.size() >= bake::PxcxLimits::MaximumGraphJsonBytes ||
+			!budget.Hold(
+				text.size() * 4 + version.size() * 4 + encodedBound * 2 + CodecDomBytes(*graph) +
+				2 * 1024 * 1024
+			))
+			return fail(Status::LimitExceeded, "PXC collection checked codec staging exceeds allowance");
+		bake::PxcxArchive candidate;
+		candidate.MetadataNumber = 121092;
+		candidate.MetadataText.assign(version.data(), version.size());
+		candidate.GraphJson.assign(text.data(), text.size());
+		candidate.GraphJson.push_back('\0');
+		std::vector<std::byte> written;
+		std::string failure;
+		if (!bake::WritePxcx(candidate, written, failure) || !bake::ReadPxcx(written, candidate, failure)) {
+			diagnostic = {Status::InvalidValue, {}, {}, std::move(failure)};
+			return false;
+		}
+		result = std::move(candidate);
+		return true;
+	} catch (const AppendWorkExceeded &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC collection load work exceeds bounds"};
+		return false;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC collection load allocation exceeds allowance"};
+		return false;
+	} catch (const std::length_error &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC collection load JSON depth exceeds bounds"};
+		return false;
+	} catch (const AppendJson::exception &) {
+		diagnostic = {Status::InvalidValue, {}, {}, "PXC collection load source record is malformed"};
 		return false;
 	}
 
@@ -823,7 +982,8 @@ namespace engine::imagegraphio {
 		const bake::PxcxArchive &archive,
 		std::vector<PxcxCollectionMetadata> &result,
 		Diagnostic &diagnostic,
-		uint64_t maximumBytes
+		uint64_t maximumBytes,
+		bool applyRootMetadata
 	) try {
 		ENGINE_PROFILE("imagegraphio.collection_metadata_defaults");
 		const auto fail = [&](Status code, const char *message) {
@@ -866,8 +1026,21 @@ namespace engine::imagegraphio {
 		}
 		budget.Release(validationBytes);
 		AppendJson defaults = CollectionDefaults();
-		const auto metadataJson = defaults.dump();
-		if (metadataJson.size() > bake::PxcxLimits::MaximumMetadataBytes)
+		AppendJson rootDefaults = defaults;
+		if (applyRootMetadata && graph->contains("metadata")) {
+			const auto &metadata = graph->at("metadata");
+			if (!metadata.is_object())
+				return fail(Status::InvalidValue, "PXC collection root metadata is invalid");
+			for (auto &field : rootDefaults.items()) {
+				const auto value = metadata.find(field.key());
+				if (value != metadata.end() && !value->is_null()) field.value() = *value;
+			}
+		}
+		const auto defaultMetadataJson = defaults.dump();
+		const auto rootMetadataJson = rootDefaults.dump();
+		const auto &metadataJson = defaultMetadataJson;
+		if (metadataJson.size() > bake::PxcxLimits::MaximumMetadataBytes ||
+			rootMetadataJson.size() > bake::PxcxLimits::MaximumMetadataBytes)
 			return fail(Status::LimitExceeded, "PXC collection metadata exceeds field bounds");
 		size_t collectionCount = 0;
 		for (const auto &node : graph->at("nodes"))
@@ -881,6 +1054,13 @@ namespace engine::imagegraphio {
 			return fail(Status::LimitExceeded, "PXC collection metadata table capacity exceeds live bounds");
 		for (const auto &node : graph->at("nodes")) {
 			if (GroupType(node)) {
+				const auto parent = node.find("group");
+				const bool topLevel =
+					parent == node.end() || parent->is_null() ||
+					(parent->is_number_integer() && (*parent == -1 || *parent == -4)) ||
+					(parent->is_string() && parent->template get_ref<const JsonString &>().empty());
+				const auto &metadataJson =
+					applyRootMetadata && topLevel ? rootMetadataJson : defaultMetadataJson;
 				const auto id = node.find("id");
 				if (id == node.end() || !id->is_string()) throw std::invalid_argument("collection identity");
 				const auto &nodeId = id->template get_ref<const JsonString &>();

@@ -72,6 +72,7 @@
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
 #include <engine/imagegraphexport/GraphExportSession.hpp>
+#include <engine/imagegraphexport/PxcxCollectionLoad.hpp>
 #include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
@@ -258,6 +259,7 @@ namespace studio {
 			Document Authored;
 			Document PxcxProjection;
 			std::optional<engine::bake::PxcxArchive> ImportedPxcx;
+			std::optional<engine::imagegraphio::PxcxCollectionSave> ImportedCollectionFiles;
 			ImageGraphHistory::CollectionSnapshot CollectionManagers;
 			PxcxPublishedSave PublishedPxcx;
 			std::optional<PxcxPreviewIdentity> PxcxCompletedPreview;
@@ -714,35 +716,6 @@ namespace studio {
 				state.LastDiagnostic
 			);
 			ReloadCanvas(state);
-		}
-
-		bool
-		ReadPxcxFile(const std::filesystem::path &path, std::vector<std::byte> &bytes, std::string &failure) {
-			std::error_code filesystemError;
-			const uintmax_t size = std::filesystem::file_size(path, filesystemError);
-			if (filesystemError) {
-				failure = "could not read PXCX file size: " + filesystemError.message();
-				return false;
-			}
-			if (size > engine::bake::PxcxLimits::MaximumArchiveBytes) {
-				failure = "PXCX archive exceeds the 64 MiB Studio import limit";
-				return false;
-			}
-			std::ifstream file(path, std::ios::binary);
-			if (!file) {
-				failure = "could not open PXCX archive";
-				return false;
-			}
-			bytes.resize(static_cast<size_t>(size));
-			if (!bytes.empty()) {
-				file.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-				if (!file || static_cast<size_t>(file.gcount()) != bytes.size()) {
-					failure = "PXCX archive changed or ended while it was being read";
-					bytes.clear();
-					return false;
-				}
-			}
-			return true;
 		}
 
 		constexpr uint64_t FONT_ARTIFACT_LIMIT_BYTES = 16 * 1024 * 1024;
@@ -1890,6 +1863,11 @@ namespace studio {
 				return {};
 			for (const auto &key : state.EaseKeys.Originals)
 				if (!charge(KeyframePayloadBytes(key))) return {};
+			if (state.ImportedCollectionFiles &&
+				(!charge(state.ImportedCollectionFiles->GraphJson.capacity() + 1) ||
+				 (state.ImportedCollectionFiles->MetadataJson &&
+				  !charge(state.ImportedCollectionFiles->MetadataJson->capacity() + 1))))
+				return {};
 			if (!charge(scratchBytes) || !charge(state.PreviewSequence.RetainedBytes()) ||
 				!charge(state.PreviewCache.RetainedBytes()) ||
 				!charge(ValueClonePayloadBytes(state.ValuePreview)) ||
@@ -2021,6 +1999,7 @@ namespace studio {
 			state.GroupHost.Clear();
 			AuthoredDocumentChanged(state, detail::ImageGraphCacheEditKind::FreshDocument);
 			state.ImportedPxcx.reset();
+			state.ImportedCollectionFiles.reset();
 			state.CollectionManagers.reset();
 			state.PublishedPxcx = {};
 			state.PxcxCompletedPreview.reset();
@@ -2060,21 +2039,33 @@ namespace studio {
 		bool OpenPxcx(State &state) {
 			const std::filesystem::path path(state.PxcxPath);
 			if (path.empty()) {
-				state.PxcxOpenError = "enter a PXCX archive path";
+				state.PxcxOpenError = "enter a .pxcx, .pxcc or .pxz path";
 				return false;
 			}
-			std::vector<std::byte> bytes;
-			if (!ReadPxcxFile(path, bytes, state.PxcxOpenError)) return false;
-
-			engine::bake::PxcxArchive archive;
-			if (!engine::bake::ReadPxcx(bytes, archive, state.PxcxOpenError)) return false;
+			engine::imagegraphexport::PxcxSourceRead source;
+			Diagnostic readDiagnostic;
+			if (!engine::imagegraphexport::ReadPxcxSourceFile(
+					path,
+					state.Authored.Timeline.value_or(engine::imagegraph::TimelineSettings{}),
+					source,
+					readDiagnostic
+				)) {
+				state.PxcxOpenError = readDiagnostic.Message;
+				return false;
+			}
+			auto &archive = source.Archive;
 			engine::imagegraphio::PxcxImport imported;
 			if (!engine::imagegraphio::ImportPxcxImageGraph(archive, imported, state.PxcxOpenError))
 				return false;
 			std::vector<engine::imagegraphio::PxcxCollectionMetadata> managers;
 			Diagnostic managerDiagnostic;
-			if (archive.MetadataNumber == 121092 &&
-				!engine::imagegraphio::PreparePxcxCollectionMetadata(archive, managers, managerDiagnostic)) {
+			if (archive.MetadataNumber == 121092 && !engine::imagegraphio::PreparePxcxCollectionMetadata(
+														archive,
+														managers,
+														managerDiagnostic,
+														engine::imagegraph::Limits::MaximumEvaluationBytes,
+														source.Collection.has_value()
+													)) {
 				state.PxcxOpenError = managerDiagnostic.Message;
 				return false;
 			}
@@ -2093,8 +2084,8 @@ namespace studio {
 
 			const std::optional<engine::imagegraphio::PxcxReferencePreview> reference =
 				imported.ReferencePreview();
-			Image sourceThumbnail;
-			if (reference.has_value() &&
+			Image sourceThumbnail = std::move(source.Preview);
+			if (sourceThumbnail.Pixels.empty() && reference.has_value() &&
 				reference->Rgba.size() == engine::bake::PxcxLimits::ThumbnailRgbaBytes) {
 				sourceThumbnail = {
 					reference->Width,
@@ -2105,6 +2096,7 @@ namespace studio {
 			}
 			state.CollectionManagers = std::move(collections);
 			state.ImportedPxcx = std::move(imported.Source);
+			state.ImportedCollectionFiles = std::move(source.Collection);
 			state.PublishedPxcx = {};
 			state.PxcxCompletedPreview.reset();
 			state.PxcxReferenceThumbnail = std::move(sourceThumbnail);
@@ -2209,9 +2201,13 @@ namespace studio {
 			const Image &image = state.PublishedPxcx.Archive.OriginalBytes.empty()
 									 ? state.PxcxReferenceThumbnail
 									 : state.PublishedPxcx.ReferencePreview;
-			constexpr size_t MaximumBytes = engine::bake::PxcxLimits::ThumbnailRgbaBytes;
-			if (image.Width != 256 || image.Height != 256 || image.Pixels.size() != MaximumBytes) {
-				state.PxcxThumbnailMessage = "PXCX source thumbnail has invalid RGBA8 dimensions";
+			const uint64_t bytes = uint64_t(image.Width) * image.Height * 4;
+			if (!image.Width || !image.Height || image.Width > engine::imagegraph::Limits::MaximumDimension ||
+				image.Height > engine::imagegraph::Limits::MaximumDimension ||
+				bytes > engine::imagegraph::Limits::MaximumOutputBytes ||
+				image.Format != engine::imagegraph::SurfaceFormat::RGBA8Unorm ||
+				image.Pixels.size() != bytes) {
+				state.PxcxThumbnailMessage = "source preview has invalid RGBA8 dimensions";
 				return false;
 			}
 			if (state.CurrentPxcxThumbnailTexture.IsValid() && state.PxcxThumbnailTextureHash == image.Hash)
@@ -2636,7 +2632,7 @@ namespace studio {
 			if (state.HaveActiveEdit || state.Playback.Rendering || state.RangeExport)
 				return fail(Status::InvalidValue, "finish the active edit or render before appending");
 			const std::filesystem::path path(state.PxcxAppendPath);
-			if (path.empty()) return fail(Status::InvalidValue, "enter a PXCX append path");
+			if (path.empty()) return fail(Status::InvalidValue, "enter a .pxcx, .pxcc or .pxz append path");
 			PxcxAppendOptions options;
 			options.Namespace = state.PxcxAppendNamespace;
 			options.Context = state.PxcxAppendContext;
@@ -2647,11 +2643,21 @@ namespace studio {
 					return fail(Status::InvalidValue, "canvas append context has no source identity");
 				options.Context = context->second;
 			}
-			std::vector<std::byte> bytes;
-			if (!ReadPxcxFile(path, bytes, state.PxcxOpenError)) return false;
-			engine::bake::PxcxArchive incoming;
-			if (!engine::bake::ReadPxcx(bytes, incoming, state.PxcxOpenError)) return false;
-			bytes = {};
+			engine::imagegraphexport::PxcxSourceRead read;
+			Diagnostic readDiagnostic;
+			if (!engine::imagegraphexport::ReadPxcxSourceFile(
+					path,
+					state.Authored.Timeline.value_or(engine::imagegraph::TimelineSettings{}),
+					read,
+					readDiagnostic,
+					Limits::MaximumEvaluationBytes,
+					false
+				)) {
+				state.PxcxOpenError = readDiagnostic.Message;
+				return false;
+			}
+			engine::bake::PxcxArchive incoming = std::move(read.Archive);
+			read = {};
 			const auto allowance = GroupConstructorAllowance(state);
 			if (!allowance) return fail(Status::LimitExceeded, "retained owners leave no append allowance");
 			uint64_t remaining = *allowance;
@@ -7429,11 +7435,11 @@ namespace studio {
 				"evaluator."
 			);
 			ImGui::Separator();
-			ImGui::TextUnformatted("PXCX archive");
+			ImGui::TextUnformatted("Composer source");
 			ImGui::InputTextWithHint(
-				"##image-pxcx-path", "Path to .pxcx archive", state.PxcxPath, sizeof(state.PxcxPath)
+				"##image-pxcx-path", "Path to .pxcx, .pxcc or .pxz", state.PxcxPath, sizeof(state.PxcxPath)
 			);
-			if (ImGui::Button("Open PXCX")) OpenPxcx(state);
+			if (ImGui::Button("Open source")) OpenPxcx(state);
 			if (state.ImportedPxcx) {
 				ImGui::SameLine();
 				if (ImGui::Button("Save PXCX") && SavePxcx(state, false))
@@ -7445,7 +7451,7 @@ namespace studio {
 			if (state.ImportedPxcx) {
 				ImGui::InputTextWithHint(
 					"##image-pxcx-append-path",
-					"Path to append",
+					".pxcx, .pxcc or .pxz to append",
 					state.PxcxAppendPath,
 					sizeof(state.PxcxAppendPath)
 				);
@@ -7459,7 +7465,7 @@ namespace studio {
 					sizeof(state.PxcxAppendContext)
 				);
 				ImGui::InputScalarN("Append offset", ImGuiDataType_Double, state.PxcxAppendOffset, 2);
-				if (ImGui::Button("Append PXCX")) AppendPxcx(state);
+				if (ImGui::Button("Append source")) AppendPxcx(state);
 				if (state.CollectionManagers && !state.CollectionManagers->empty()) {
 					const auto &collections = *state.CollectionManagers;
 					if (std::none_of(collections.begin(), collections.end(), [&](const auto &item) {
@@ -7500,15 +7506,20 @@ namespace studio {
 				if ((state.PublishedPxcx.Archive.OriginalBytes.empty() ? state.PxcxReferenceThumbnail
 																	   : state.PublishedPxcx.ReferencePreview)
 						.Pixels.empty()) {
-					ImGui::TextDisabled("This archive has no decoded embedded thumbnail.");
+					ImGui::TextDisabled("This source has no reference preview.");
 				} else {
-					ImGui::TextUnformatted(
-						"Embedded PXCX thumbnail, reference only, not a live graph render."
-					);
+					ImGui::TextUnformatted("Source preview, reference only.");
 					if (UploadPxcxReferenceThumbnail(state, renderer)) {
 						void *handle = renderer.TextureHandle(state.CurrentPxcxThumbnailTexture);
 						if (handle != nullptr) {
-							ImGui::Image(reinterpret_cast<ImTextureID>(handle), ImVec2(256.0f, 256.0f));
+							const auto &preview = state.PublishedPxcx.Archive.OriginalBytes.empty()
+													  ? state.PxcxReferenceThumbnail
+													  : state.PublishedPxcx.ReferencePreview;
+							const float scale = 256.f / float(std::max(preview.Width, preview.Height));
+							ImGui::Image(
+								reinterpret_cast<ImTextureID>(handle),
+								ImVec2(preview.Width * scale, preview.Height * scale)
+							);
 						} else {
 							ImGui::TextDisabled("PXCX source thumbnail texture is unavailable.");
 						}

@@ -1,3 +1,5 @@
+#include "PxcxCodecHeap.hpp"
+
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Surface.hpp>
@@ -28,40 +30,7 @@ namespace engine::imagegraphexport {
 			diagnostic = {status, {}, {}, std::string(message)};
 			return false;
 		}
-		// grug vendor heap shares one fixed reservation, including transient realloc copies.
-		struct CodecHeap {
-			struct alignas(std::max_align_t) Block {
-				size_t Bytes;
-			};
-			size_t Remaining = CodecBytes;
-			static void *Allocate(void *opaque, size_t count, size_t width) noexcept {
-				auto &heap = *static_cast<CodecHeap *>(opaque);
-				if (!width || count > (SIZE_MAX - sizeof(Block)) / width) return nullptr;
-				const size_t bytes = count * width + sizeof(Block);
-				if (bytes > heap.Remaining) return nullptr;
-				auto *block = static_cast<Block *>(std::malloc(bytes));
-				if (!block) return nullptr;
-				block->Bytes = bytes;
-				heap.Remaining -= bytes;
-				return block + 1;
-			}
-			static void Release(void *opaque, void *address) noexcept {
-				if (!address) return;
-				auto *block = static_cast<Block *>(address) - 1;
-				static_cast<CodecHeap *>(opaque)->Remaining += block->Bytes;
-				std::free(block);
-			}
-			static void *Resize(void *opaque, void *address, size_t count, size_t width) noexcept {
-				void *replacement = Allocate(opaque, count, width);
-				if (!replacement) return nullptr;
-				if (address) {
-					const auto *block = static_cast<Block *>(address) - 1;
-					std::memcpy(replacement, address, std::min(block->Bytes - sizeof(Block), count * width));
-					Release(opaque, address);
-				}
-				return replacement;
-			}
-		};
+		using CodecHeap = detail::PxcxCodecHeap;
 		bool Admit(uint64_t &remaining, uint64_t bytes) {
 			if (bytes > remaining) return false;
 			remaining -= bytes;

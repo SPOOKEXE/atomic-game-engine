@@ -25,7 +25,7 @@ namespace studio {
 		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
 		const PxcxPreparedSavePreview *preview = nullptr
 	);
-	// Validates all source edits before creating a temporary file, then atomically replaces the path.
+	// grug validate all source edits before atomic publication; .pxcc/.pxz need Collection save.
 	// The retained archive remains the authoring baseline so undo can restore opaque source records.
 	[[nodiscard]] bool SavePxcxProjection(
 		const std::filesystem::path &destination,
@@ -55,6 +55,7 @@ namespace studio {
 		engine::imagegraph::Image ReferencePreview;
 		std::optional<PxcxPreviewIdentity> ThumbnailIdentity;
 	};
+	// grug refuse .pxcc/.pxz paths before writes; those need Collection save.
 	// Optional preview explicitly replaces THMB. Otherwise retain the last published thumbnail,
 	// or the original source thumbnail on the first save. Never evaluates the graph or waits for GPU.
 	// Replaces published only after all encoding/readback succeeds and the file is atomically replaced.

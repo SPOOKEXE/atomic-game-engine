@@ -51,6 +51,16 @@ namespace engine::imagegraphio {
 		std::optional<std::string> MetadataJson;
 		bool operator==(const PxcxCollectionSave &) const = default;
 	};
+	// grug load normalized Collection text in an explicit destination timeline context.
+	// derived checked archive stores absolute callback times, metadata and contextual frame settings.
+	// source-only records stay intact. caller retains original files; refusal preserves prior archive.
+	[[nodiscard]] bool PreparePxcxCollectionLoad(
+		const PxcxCollectionSave &files,
+		const imagegraph::TimelineSettings &timeline,
+		bake::PxcxArchive &result,
+		imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = imagegraph::Limits::MaximumEvaluationBytes
+	);
 	// grug save one Collection and its descendants in source postorder, relative to its position.
 	// detach its saved parent, preserve external connection references and source-only fields.
 	// expanded animator times use the checked project frame count, never a guessed default.
@@ -74,12 +84,14 @@ namespace engine::imagegraphio {
 		std::optional<bake::PxcxArchive> Source;
 	};
 	// grug prepare constructor defaults for every Collection-family node in a checked archive.
-	// Root project metadata and Collection paths are deliberately ignored.
+	// grug project metadata stays ignored by default; collection loads may apply root metadata.
+	// Collection paths stay unchanged.
 	[[nodiscard]] bool PreparePxcxCollectionMetadata(
 		const bake::PxcxArchive &archive,
 		std::vector<PxcxCollectionMetadata> &result,
 		imagegraph::Diagnostic &diagnostic,
-		uint64_t maximumBytes = imagegraph::Limits::MaximumEvaluationBytes
+		uint64_t maximumBytes = imagegraph::Limits::MaximumEvaluationBytes,
+		bool applyRootMetadata = false
 	);
 	// grug call after APPENDING callbacks end, before source, canvas and history publication.
 	// prepare default managers with non-null root overrides and the optional observed append path.

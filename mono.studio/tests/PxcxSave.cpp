@@ -749,3 +749,24 @@ TEST_CASE(
 	CHECK(source.OriginalBytes == original);
 	CHECK(imported.Source.OriginalBytes == original);
 }
+
+TEST_CASE("Project saves refuse Collection paths before replacing files", "[studio][pxcx][save]") {
+	Directory directory;
+	const auto imported = Source();
+	const auto &source = imported.Source;
+	for (const auto *extension : {".pxcc", ".pxz"}) {
+		const auto path = directory.Path / (std::string("collection") + extension);
+		WriteText(path, "original collection");
+		engine::imagegraph::Diagnostic diagnostic;
+		CHECK_FALSE(studio::SavePxcxProjection(path, source, imported.Graph, {}, diagnostic));
+		studio::PxcxPublishedSave published;
+		CHECK_FALSE(
+			studio::SavePxcxProjectionAndAdopt(
+				path, source, imported.Graph, {}, published, nullptr, diagnostic
+			)
+		);
+		std::ifstream file(path, std::ios::binary);
+		CHECK(std::string(std::istreambuf_iterator<char>(file), {}) == "original collection");
+		CHECK(published.Archive.OriginalBytes.empty());
+	}
+}

@@ -137,6 +137,8 @@ namespace studio {
 			return false;
 		};
 		if (destination.empty()) return reject("enter a PXC archive path");
+		if (destination.extension() == ".pxcc" || destination.extension() == ".pxz")
+			return reject("use a .pxcx path for project saves; use Collection save for .pxcc or .pxz");
 		engine::imagegraphio::PxcxImport imported;
 		std::string failure;
 		if (!engine::imagegraphio::ImportPxcxImageGraph(source, imported, failure)) return reject(failure);
@@ -162,6 +164,10 @@ namespace studio {
 		using namespace engine::imagegraph;
 		diagnostic = {};
 		if (destination.empty()) return Reject(diagnostic, "enter a PXC archive path");
+		if (destination.extension() == ".pxcc" || destination.extension() == ".pxz")
+			return Reject(
+				diagnostic, "use a .pxcx path for project saves; use Collection save for .pxcc or .pxz"
+			);
 		if (!maxBytes || maxBytes > Limits::MaximumEvaluationBytes)
 			return Reject(diagnostic, "PXC save budget is outside native bounds", Status::LimitExceeded);
 		if (preview) {
