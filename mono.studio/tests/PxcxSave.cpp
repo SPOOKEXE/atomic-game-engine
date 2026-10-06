@@ -1,5 +1,6 @@
 #include "ImageGraphAppendProject.hpp"
 
+#include <engine/bake/Image.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -9,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <fstream>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -19,6 +21,7 @@ TEST_SUITE_ID("studio.pxcxsave")
 TEST_DEPENDS("engine.imagegraphio.pxcxstructureedit")
 TEST_DEPENDS("engine.imagegraphio.pxcxappend")
 TEST_DEPENDS("engine.imagegraphexport.pxcx_thumbnail")
+TEST_DEPENDS("engine.imagegraphexport.pxcx_collection_files")
 
 namespace {
 	using Json = nlohmann::ordered_json;
@@ -129,6 +132,172 @@ namespace {
 		const auto bytes = Read(path);
 		return {reinterpret_cast<const char *>(bytes.data()), bytes.size()};
 	}
+	std::map<std::string, std::vector<std::byte>> StoredEntries(const std::vector<std::byte> &bytes) {
+		const auto word = [&](size_t offset, size_t width) {
+			REQUIRE(offset + width <= bytes.size());
+			uint32_t value = 0;
+			for (size_t i = 0; i < width; ++i)
+				value |= uint32_t(std::to_integer<uint8_t>(bytes[offset + i])) << (i * 8);
+			return value;
+		};
+		REQUIRE(bytes.size() >= 22);
+		const size_t end = bytes.size() - 22;
+		REQUIRE(word(end, 4) == 0x06054b50);
+		REQUIRE(word(end + 20, 2) == 0);
+		const size_t count = word(end + 10, 2);
+		std::map<std::string, std::vector<std::byte>> entries;
+		size_t offset = word(end + 16, 4);
+		for (size_t index = 0; index < count; ++index) {
+			REQUIRE(word(offset, 4) == 0x02014b50);
+			REQUIRE(word(offset + 10, 2) == 0);
+			const size_t length = word(offset + 20, 4);
+			REQUIRE(word(offset + 24, 4) == length);
+			const size_t nameLength = word(offset + 28, 2);
+			const size_t local = word(offset + 42, 4);
+			REQUIRE(word(local, 4) == 0x04034b50);
+			const size_t data = local + 30 + word(local + 26, 2) + word(local + 28, 2);
+			REQUIRE(data + length <= bytes.size());
+			REQUIRE(offset + 46 + nameLength <= bytes.size());
+			const std::string name(reinterpret_cast<const char *>(bytes.data() + offset + 46), nameLength);
+			entries.emplace(
+				name, std::vector<std::byte>(bytes.begin() + data, bytes.begin() + data + length)
+			);
+			offset += 46 + nameLength + word(offset + 30, 2) + word(offset + 32, 2);
+		}
+		REQUIRE(offset == end);
+		return entries;
+	}
+}
+
+TEST_CASE(
+	"Studio Collection saves full-size preview siblings and PXZ entries", "[studio][pxcx_save][collection]"
+) {
+	const auto source = CollectionSource();
+	const auto sourceBytes = source.OriginalBytes;
+	Directory directory;
+	engine::imagegraph::Image pixels{2, 1, {20, 30, 40, 50, 60, 70, 80, 90}, 0};
+	studio::PxcxPreviewIdentity identity{7, 9, {"image", "selected", "image"}, {3, .25}};
+	studio::PxcxPreparedSavePreview preview{pixels, identity, identity};
+	engine::imagegraph::Diagnostic diagnostic;
+	const auto cap = engine::imagegraph::Limits::MaximumEvaluationBytes;
+	const auto path = directory.Path / "collection.pxcc";
+	REQUIRE(
+		studio::SavePxcxCollection(
+			path, source, "selected", R"({"description":"shown"})", diagnostic, cap, &preview
+		)
+	);
+	const auto png = Read(directory.Path / "collection.png");
+	engine::assets::TextureData decoded;
+	std::string failure;
+	REQUIRE(engine::bake::ReadImage(png, decoded, failure));
+	CHECK(decoded.Width == 2);
+	CHECK(decoded.Height == 1);
+	REQUIRE(decoded.Pixels.size() == pixels.Pixels.size());
+	for (size_t i = 0; i < pixels.Pixels.size(); ++i)
+		CHECK(std::to_integer<uint8_t>(decoded.Pixels[i]) == pixels.Pixels[i]);
+	const auto packagePath = directory.Path / "collection.pxz";
+	REQUIRE(
+		studio::SavePxcxCollection(
+			packagePath, source, "selected", R"({"description":"shown"})", diagnostic, cap, &preview
+		)
+	);
+	const auto entries = StoredEntries(Read(packagePath));
+	REQUIRE(entries.size() == 3);
+	CHECK(entries.at("collection.pxcc") == Read(path));
+	CHECK(entries.at("collection.meta") == Read(directory.Path / "collection.meta"));
+	CHECK(entries.at("collection.png") == png);
+	const auto metadata = Read(directory.Path / "collection.meta");
+	REQUIRE(studio::SavePxcxCollection(path, source, "selected", {}, diagnostic));
+	CHECK(Read(directory.Path / "collection.png") == png);
+	CHECK(Read(directory.Path / "collection.meta") == metadata);
+	REQUIRE(studio::SavePxcxCollection(packagePath, source, "selected", {}, diagnostic));
+	const auto minimal = StoredEntries(Read(packagePath));
+	CHECK(minimal.size() == 1);
+	CHECK(minimal.contains("collection.pxcc"));
+	CHECK(source.OriginalBytes == sourceBytes);
+}
+
+TEST_CASE(
+	"Studio refuses stale Collection preview before touching any output",
+	"[studio][pxcx_save][collection][atomic]"
+) {
+	const auto source = CollectionSource();
+	Directory directory;
+	const auto path = directory.Path / "collection.pxcc";
+	WriteText(path, "prior graph");
+	WriteText(directory.Path / "collection.meta", "prior metadata");
+	WriteText(directory.Path / "collection.png", "prior preview");
+	engine::imagegraph::Image pixels{1, 1, {20, 30, 40, 50}, 0};
+	studio::PxcxPreviewIdentity completed{7, 9, {"image", "selected", "image"}, {3, .25}};
+	auto current = completed;
+	SECTION("changed document") {
+		++current.DocumentRevision;
+	}
+	SECTION("changed inputs") {
+		++current.InputRevision;
+	}
+	SECTION("changed frame") {
+		++current.Frame.Tick;
+	}
+	SECTION("changed output") {
+		current.Binding.Port = "other";
+	}
+	SECTION("changed playback") {
+		++current.PlaybackObservation;
+	}
+	SECTION("missing revision") {
+		current = completed;
+		current.DocumentRevision = 0;
+		completed = current;
+	}
+	studio::PxcxPreparedSavePreview preview{pixels, completed, current};
+	engine::imagegraph::Diagnostic diagnostic;
+	CHECK_FALSE(
+		studio::SavePxcxCollection(
+			path,
+			source,
+			"selected",
+			{},
+			diagnostic,
+			engine::imagegraph::Limits::MaximumEvaluationBytes,
+			&preview
+		)
+	);
+	CHECK(ReadText(path) == "prior graph");
+	CHECK(ReadText(directory.Path / "collection.meta") == "prior metadata");
+	CHECK(ReadText(directory.Path / "collection.png") == "prior preview");
+}
+
+TEST_CASE(
+	"Studio Collection third sibling failure preserves prior graph and metadata",
+	"[studio][pxcx_save][collection][atomic]"
+) {
+	const auto source = CollectionSource();
+	Directory directory;
+	const auto path = directory.Path / "collection.pxcc";
+	WriteText(path, "prior graph");
+	WriteText(directory.Path / "collection.meta", "prior metadata");
+	REQUIRE(std::filesystem::create_directory(directory.Path / "collection.png"));
+	engine::imagegraph::Image pixels{1, 1, {20, 30, 40, 50}, 0};
+	studio::PxcxPreviewIdentity identity{7, 9, {"image", "selected", "image"}, {3, .25}};
+	studio::PxcxPreparedSavePreview preview{pixels, identity, identity};
+	engine::imagegraph::Diagnostic diagnostic;
+	CHECK_FALSE(
+		studio::SavePxcxCollection(
+			path,
+			source,
+			"selected",
+			R"({"description":"new"})",
+			diagnostic,
+			engine::imagegraph::Limits::MaximumEvaluationBytes,
+			&preview
+		)
+	);
+	CHECK(ReadText(path) == "prior graph");
+	CHECK(ReadText(directory.Path / "collection.meta") == "prior metadata");
+	CHECK(std::filesystem::is_directory(directory.Path / "collection.png"));
+	for (const auto &entry : std::filesystem::directory_iterator(directory.Path))
+		CHECK_FALSE(entry.path().filename().string().starts_with(".atomic-graph-set-"));
 }
 
 TEST_CASE(

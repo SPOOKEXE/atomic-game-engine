@@ -172,25 +172,56 @@ TEST_CASE(
 	Diagnostic diagnostic;
 	const auto first = directory.Path / "collection.pxcc";
 	const auto second = directory.Path / "collection.meta";
+	const auto third = directory.Path / "collection.png";
+	bool preview = false;
+	SECTION("metadata replacement refuses") {}
+	SECTION("preview replacement refuses") {
+		preview = true;
+	}
 	REQUIRE(Publish(first, "old collection", diagnostic));
 	REQUIRE(Publish(second, "old metadata", diagnostic));
+	if (preview) REQUIRE(Publish(third, "old preview", diagnostic));
 	const auto staging = directory.Path / "staging";
 	REQUIRE(std::filesystem::create_directory(staging));
 	{
 		studio::detail::ImageGraphFileSetStage stage;
 		stage.Directory = staging;
-		stage.Count = 2;
+		stage.Count = preview ? 3 : 2;
 		stage.Files[0] = {first, staging / "0.new", staging / "0.old"};
 		stage.Files[1] = {second, staging / "missing.new", staging / "1.old"};
 		REQUIRE(Publish(stage.Files[0].Temporary, "new collection", diagnostic));
+		if (preview) {
+			stage.Files[1].Temporary = staging / "1.new";
+			stage.Files[2] = {third, staging / "missing.new", staging / "2.old"};
+			REQUIRE(Publish(stage.Files[1].Temporary, "new metadata", diagnostic));
+		}
 		CHECK_FALSE(stage.Commit());
 		CHECK(ReadFile(first) == "new collection");
 		CHECK(std::filesystem::exists(stage.Files[0].Backup));
 		REQUIRE(stage.Rollback());
 		CHECK(ReadFile(first) == "old collection");
 		CHECK(ReadFile(second) == "old metadata");
+		if (preview) CHECK(ReadFile(third) == "old preview");
 	}
 	CHECK_FALSE(std::filesystem::exists(staging));
+	CHECK(Entries(directory) == (preview ? 3 : 2));
+}
+
+TEST_CASE("collection file set rejects repeated later destinations", "[studio][imagegraph][save]") {
+	Directory directory;
+	Diagnostic diagnostic;
+	const auto graph = directory.Path / "collection.pxcc";
+	const auto sidecar = directory.Path / "collection.meta";
+	REQUIRE(Publish(graph, "old graph", diagnostic));
+	REQUIRE(Publish(sidecar, "old metadata", diagnostic));
+	const std::string replacement = "new";
+	const auto bytes = std::as_bytes(std::span(replacement.data(), replacement.size()));
+	const std::array<studio::detail::ImageGraphFilePublication, 3> files{
+		{{graph, bytes}, {sidecar, bytes}, {sidecar, bytes}}
+	};
+	CHECK_FALSE(studio::detail::PublishImageGraphFileSet(files, diagnostic, Limits::MaximumEvaluationBytes));
+	CHECK(ReadFile(graph) == "old graph");
+	CHECK(ReadFile(sidecar) == "old metadata");
 	CHECK(Entries(directory) == 2);
 }
 

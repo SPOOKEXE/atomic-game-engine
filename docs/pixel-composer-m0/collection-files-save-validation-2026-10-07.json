@@ -1,0 +1,208 @@
+{
+  "phase": "grug save Collection PNG siblings and PXZ packages",
+  "date": "2026-10-07",
+  "base_commit": "fbcffa54",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_contract": [
+    "grug SAVE_COLLECTION writes basename.pxcc, optional full-size basename.png and optional basename.meta",
+    "grug source leaves older omitted .pxcc siblings untouched; native host preserves this behavior",
+    "grug SAVE_PXZ_COLLECTION bundles explicit preview PNG, required collection text and optional metadata under destination basename",
+    "grug neither native encoder starts rendering or mutates the source archive"
+  ],
+  "scope": [
+    "grug encode prepared immutable previews as full-size straight RGBA8 PNG with native finite conversion",
+    "grug encode stored ZIP packages preserving graph and metadata text and optional PNG bytes",
+    "grug bound input, prior output, scanlines, encoded backing, names and miniz heap before publication",
+    "grug Stage all three .pxcc siblings or one .pxz before replacement; rollback earlier replacements on later failure",
+    "grug reject any repeated sibling destination, including second and third aliases",
+    "grug Studio Include selected preview uses current revision, input generation, output, frame and playback cache identity"
+  ],
+  "owned_files": {
+    "mono.engine/imagegraphexport/CMakeLists.txt": "147304f91b6a33b45bb7ae39fbe03b44b7c0112681673810ea2c6cce94dde5b2",
+    "mono.engine/imagegraphexport/include/engine/imagegraphexport/PxcxCollectionFiles.hpp": "8e8cc77c8434fb3f0e30e1782d6aaf6ae417779df04d871581bb25eeb8a82c37",
+    "mono.engine/imagegraphexport/src/PxcxCollectionFiles.cpp": "43517c99660ecf5a6bec44b73cf78e65ab8289ccea307d6d47f4de584f3589ea",
+    "mono.engine/imagegraphexport/tests/PxcxCollectionFiles.cpp": "1e72d6ce3c555b4f4faa13072046071606e8c73ba5b989d20fcef09547c4b34b",
+    "mono.studio/include/studio/PxcxSave.hpp": "8e8e58a1ebfb5bf4f98398dec9d9caf644ec6b96b8f6e5070a8fffbe3f563fc9",
+    "mono.studio/src/PxcxSave.cpp": "92d1d3eea3465f04fa7d013392211b988285f1dc9be47575baa8d34fd1ae9de5",
+    "mono.studio/src/ImageGraphFileSetPublish.hpp": "58903eddca984dc515686045046c06368e71dba8e424a12be19109cf79d3dab7",
+    "mono.studio/tests/PxcxSave.cpp": "d0e916ca582e6a57f0d23aed9f623980769a115bf1fde225c985a563b2ed03eb",
+    "mono.studio/tests/ImageGraphFilePublish.cpp": "14132d31ae934d0ed03dd29a9c2b442287028b874a94d4ed6cf35f062ca7fefc"
+  },
+  "shared_file": {
+    "path": "mono.studio/src/ImageComposer.cpp",
+    "owned_patch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/collection-files-owned-ImageComposer.patch",
+    "peer_changes_excluded_from_commit": true
+  },
+  "checks": {
+    "joined_build": "grug 17 release-tests targets with j6 passed in build2",
+    "batch": "20/20 passed",
+    "cpp_cases": 5226,
+    "cpp_assertions": 2004760,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "grug approved offscreen Vulkan; Studio, client and render serialized",
+    "frozen_source_and_build_inputs_unchanged": 1839,
+    "peer_files_unchanged": 43,
+    "peer_comparison": "grug 42 whole files plus shared ImageComposer with owned patch reversed on a temporary copy",
+    "test_binaries_unchanged": 13,
+    "child_binaries_unchanged": 2,
+    "review": "grug Sol checked pinned save functions, miniz heap lifetime, preview provenance, duplicate paths and corrected ZIP parser; root repaired Luna tests",
+    "standalone_performance_profile": "grug not run; encoder and publication scopes report bytes, with no performance claim",
+    "sanitizers": "grug not run",
+    "build_warnings": "grug warnings in existing GraphRasterHost, GraphMeshHost, Runner and TimelineRegions code; none reported for new codec"
+  },
+  "failures_and_repairs": [
+    {
+      "stage": "read review before build1",
+      "result": "grug found later destinations could alias in expanded three-file publisher",
+      "repair": "grug compare every earlier path; add duplicate-path and third-file rollback checks"
+    },
+    {
+      "stage": "batch1",
+      "result": "grug 19/20 gates passed; Studio 1098 cases had one failed case, 48890 assertions had one failure",
+      "failure": "grug independent test parser assumed local ZIP sizes were populated; miniz writes data descriptors, leaving zero local sizes",
+      "repair": "grug use end record and central directory sizes with local data offsets; source code unchanged"
+    },
+    {
+      "stage": "batch2",
+      "result": "grug all twenty gates passed after joined rebuild; source repairs followed terminal full batch"
+    }
+  ],
+  "limitations": [
+    "grug native .pxcc/.pxz loading still needs a reader; current native Open/Append uses ReadPxcx",
+    "grug .pxcc optional siblings retain prior files when omitted, matching source; PXZ rewrite contains only supplied entries",
+    "grug public save caller attests Current corresponds to its source; this host checks Completed equality and Studio validates live provenance",
+    "grug package API accepts caller-prepared PNG bytes and checks signature; it does not decode an arbitrary supplied PNG",
+    "grug stored ZIP and PNG pixels are native profile evidence, not exact GameMaker encoder byte parity",
+    "grug standalone profile, sanitizers, headed Studio and licensed reference parity were not run",
+    "grug whole Composer goal remains active"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "builds": [
+      "collection-files-build1.log",
+      "collection-files-build2.log"
+    ],
+    "batches": [
+      "collection-files-batch1-results.json",
+      "collection-files-batch2-results.json"
+    ],
+    "source_integrity": "collection-files-source-integrity-batch2.json",
+    "peer_integrity": "collection-files-peer-integrity-batch2.json",
+    "child_integrity": "collection-files-child-hashes-batch2.json"
+  },
+  "results_summary": [
+    {
+      "name": "bake",
+      "exit_code": 0,
+      "cases": 157,
+      "assertions": 15875
+    },
+    {
+      "name": "physics",
+      "exit_code": 0,
+      "cases": 43,
+      "assertions": 715
+    },
+    {
+      "name": "runner",
+      "exit_code": 0,
+      "cases": 29,
+      "assertions": 296
+    },
+    {
+      "name": "font",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 1686
+    },
+    {
+      "name": "export",
+      "exit_code": 0,
+      "cases": 81,
+      "assertions": 3218
+    },
+    {
+      "name": "render",
+      "exit_code": 0,
+      "cases": 15,
+      "assertions": 477
+    },
+    {
+      "name": "cli",
+      "exit_code": 0,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "exit_code": 0,
+      "cases": 306,
+      "assertions": 12974
+    },
+    {
+      "name": "core",
+      "exit_code": 0,
+      "cases": 2980,
+      "assertions": 1895147
+    },
+    {
+      "name": "assetc",
+      "exit_code": 0,
+      "cases": 45,
+      "assertions": 509
+    },
+    {
+      "name": "client",
+      "exit_code": 0,
+      "cases": 358,
+      "assertions": 23821
+    },
+    {
+      "name": "studio",
+      "exit_code": 0,
+      "cases": 1098,
+      "assertions": 48993
+    },
+    {
+      "name": "nodegraph",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 345
+    },
+    {
+      "name": "ui",
+      "exit_code": 0,
+      "cases": 40,
+      "assertions": 704
+    },
+    {
+      "name": "startup",
+      "exit_code": 0,
+      "cases": 1,
+      "assertions": 5
+    },
+    {
+      "name": "lint",
+      "exit_code": 0
+    },
+    {
+      "name": "architecture",
+      "exit_code": 0
+    },
+    {
+      "name": "python",
+      "exit_code": 0,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "exit_code": 0
+    }
+  ]
+}

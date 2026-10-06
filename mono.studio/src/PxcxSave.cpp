@@ -4,6 +4,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Surface.hpp>
+#include <engine/imagegraphexport/PxcxCollectionFiles.hpp>
 #include <engine/imagegraphexport/PxcxThumbnail.hpp>
 #include <engine/imagegraphio/PxcxAppend.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
@@ -50,18 +51,53 @@ namespace studio {
 		std::string_view collectionId,
 		std::optional<std::string_view> managerJson,
 		engine::imagegraph::Diagnostic &diagnostic,
-		uint64_t maximumBytes
+		uint64_t maximumBytes,
+		const PxcxPreparedSavePreview *preview
 	) try {
 		ENGINE_PROFILE("studio pxc collection save");
 		diagnostic = {};
-		if (destination.empty() || destination.native().size() > 4096 || destination.extension() != ".pxcc")
-			return Reject(diagnostic, "enter a .pxcc collection path");
+		const bool package = destination.extension() == ".pxz";
+		if (destination.empty() || destination.native().size() > 4096 ||
+			(!package && destination.extension() != ".pxcc"))
+			return Reject(diagnostic, "enter a .pxcc or .pxz collection path");
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes)
+			return Reject(diagnostic, "collection save allowance is outside bounds", Status::LimitExceeded);
+		if (preview && (!preview->Current.DocumentRevision || !preview->Current.InputRevision ||
+						!ValidFrameTime(preview->Current.Frame) || preview->Completed != preview->Current ||
+						preview->Current.Binding.Id.empty() || preview->Current.Binding.NodeId.empty() ||
+						preview->Current.Binding.Port.empty()))
+			return Reject(diagnostic, "refresh the selected image preview before saving the collection");
 		engine::imagegraphio::PxcxCollectionSave prepared;
 		if (!engine::imagegraphio::PreparePxcxCollectionSave(
 				source, collectionId, managerJson, prepared, diagnostic, maximumBytes
 			))
 			return false;
-		std::array<detail::ImageGraphFilePublication, 2> files;
+		uint64_t remaining = maximumBytes;
+		const auto charge = [&](uint64_t bytes) {
+			if (bytes > remaining) return false;
+			remaining -= bytes;
+			return true;
+		};
+		const auto sourceBytes = RetainedArchiveBytes(source);
+		if (!sourceBytes || !charge(*sourceBytes) || !charge(prepared.GraphJson.capacity()) ||
+			!charge(prepared.MetadataJson ? prepared.MetadataJson->capacity() : 0))
+			return Reject(diagnostic, "collection save owners exceed allowance", Status::LimitExceeded);
+		std::vector<std::byte> png;
+		if (preview && !engine::imagegraphexport::WritePxcxCollectionPreview(
+						   preview->Pixels, png, diagnostic, remaining
+					   ))
+			return false;
+		if (!charge(png.capacity()) || (preview && !charge(preview->Pixels.Pixels.capacity())))
+			return Reject(diagnostic, "collection preview owners exceed allowance", Status::LimitExceeded);
+		if (package) {
+			std::vector<std::byte> bytes;
+			if (!engine::imagegraphexport::WritePxcxCollectionPackage(
+					destination.stem().string(), prepared, png, bytes, diagnostic, remaining
+				))
+				return false;
+			return detail::PublishImageGraphFile(destination, bytes, diagnostic, remaining);
+		}
+		std::array<detail::ImageGraphFilePublication, 3> files;
 		files[0] = {
 			destination, std::as_bytes(std::span(prepared.GraphJson.data(), prepared.GraphJson.size()))
 		};
@@ -73,7 +109,12 @@ namespace studio {
 			files[1] = {std::move(metadataPath), std::as_bytes(std::span(metadata.data(), metadata.size()))};
 			count = 2;
 		}
-		return detail::PublishImageGraphFileSet(std::span(files.data(), count), diagnostic, maximumBytes);
+		if (preview) {
+			auto pngPath = destination;
+			pngPath.replace_extension(".png");
+			files[count++] = {std::move(pngPath), png};
+		}
+		return detail::PublishImageGraphFileSet(std::span(files.data(), count), diagnostic, remaining);
 	} catch (const std::bad_alloc &) {
 		return Reject(
 			diagnostic, "collection save allocation failed", engine::imagegraph::Status::LimitExceeded

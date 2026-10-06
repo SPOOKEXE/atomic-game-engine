@@ -227,6 +227,7 @@ namespace studio {
 			char GraphName[256] = {};
 			char PxcxPath[4096] = {};
 			char PxcxCollectionPath[4096] = {};
+			bool PxcxCollectionPreview = false;
 			std::string PxcxCollectionId;
 			char PxcxAppendPath[4096] = {};
 			char PxcxAppendNamespace[256] = "appended";
@@ -2954,8 +2955,42 @@ namespace studio {
 					Status::InvalidValue, "finish the active edit or render before saving a collection"
 				);
 			const std::filesystem::path destination(state.PxcxCollectionPath);
-			if (destination.empty() || destination.extension() != ".pxcc")
-				return fail(Status::InvalidValue, "enter a .pxcc collection path");
+			if (destination.empty() ||
+				(destination.extension() != ".pxcc" && destination.extension() != ".pxz"))
+				return fail(Status::InvalidValue, "enter a .pxcc or .pxz collection path");
+			std::optional<PxcxPreviewIdentity> currentPreview;
+			const Image *previewPixels = nullptr;
+			if (state.PxcxCollectionPreview) {
+				const auto selected = std::find_if(
+					state.Authored.Outputs.begin(), state.Authored.Outputs.end(), [&](const Output &output) {
+						return output.Id == state.SelectedOutput;
+					}
+				);
+				if (selected != state.Authored.Outputs.end()) {
+					currentPreview = PxcxPreviewIdentity{
+						state.DocumentRevision,
+						state.EvaluationInputRevision,
+						*selected,
+						GetImageGraphFrame(state.Playback),
+						detail::ImageGraphPlaybackObservation(state.Authored, state.Playback)
+					};
+					if (state.PxcxCompletedPreview == currentPreview && !state.PreviewDirty &&
+						state.LastDiagnostic.Code == Status::Ok)
+						previewPixels = state.PreviewCache.Find(
+							state.DocumentRevision,
+							size_t(selected - state.Authored.Outputs.begin()),
+							currentPreview->Frame.Tick,
+							currentPreview->Frame.Subframe,
+							currentPreview->Frame.NegativeFrame,
+							currentPreview->PlaybackObservation
+						);
+				}
+				if (!previewPixels)
+					return fail(
+						Status::InvalidValue,
+						"refresh the selected image preview before saving the collection"
+					);
+			}
 			const auto manager =
 				state.CollectionManagers
 					? std::find_if(
@@ -3015,13 +3050,17 @@ namespace studio {
 					))
 					return fail(diagnostic.Code, diagnostic.Message);
 			}
+			std::optional<PxcxPreparedSavePreview> preparedPreview;
+			if (previewPixels)
+				preparedPreview.emplace(*previewPixels, *state.PxcxCompletedPreview, *currentPreview);
 			if (!SavePxcxCollection(
 					destination,
 					checked,
 					manager->NodeId,
 					std::string_view(manager->MetadataJson),
 					diagnostic,
-					remaining
+					remaining,
+					preparedPreview ? &*preparedPreview : nullptr
 				))
 				return fail(diagnostic.Code, diagnostic.Message);
 			state.PxcxOpenError.clear();
@@ -7435,13 +7474,14 @@ namespace studio {
 					}
 					ImGui::InputTextWithHint(
 						"##image-pxcc-path",
-						"Path to .pxcc collection",
+						"Path to .pxcc or .pxz collection",
 						state.PxcxCollectionPath,
 						sizeof(state.PxcxCollectionPath)
 					);
 					ImGui::BeginDisabled(
 						state.HaveActiveEdit || state.Playback.Rendering || bool(state.RangeExport)
 					);
+					ImGui::Checkbox("Include selected preview", &state.PxcxCollectionPreview);
 					if (ImGui::Button("Save collection")) SaveCollection(state);
 					ImGui::EndDisabled();
 				}

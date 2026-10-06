@@ -26,7 +26,7 @@ namespace studio::detail {
 			bool Published = false;
 		};
 		std::filesystem::path Directory;
-		std::array<Entry, 2> Files;
+		std::array<Entry, 3> Files;
 		size_t Count = 0;
 		bool Committed = false;
 		bool RestoreFailed = false;
@@ -87,7 +87,7 @@ namespace studio::detail {
 		}
 	};
 
-	// grug stage both collection files on the destination filesystem before moving any old file.
+	// grug stage all collection siblings before moving any old file.
 	[[nodiscard]] inline bool PublishImageGraphFileSet(
 		std::span<const ImageGraphFilePublication> files,
 		engine::imagegraph::Diagnostic &diagnostic,
@@ -100,8 +100,8 @@ namespace studio::detail {
 			diagnostic = {code, {}, "path", message};
 			return false;
 		};
-		if (files.empty() || files.size() > 2)
-			return fail(Status::InvalidValue, "graph file set must contain one or two files");
+		if (files.empty() || files.size() > 3)
+			return fail(Status::InvalidValue, "graph file set must contain one to three files");
 		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes)
 			return fail(Status::LimitExceeded, "graph file set allowance is outside bounds");
 		uint64_t remaining = maximumBytes;
@@ -118,9 +118,11 @@ namespace studio::detail {
 			auto &entry = stage.Files[index];
 			entry.Destination = std::filesystem::absolute(file.Destination, error).lexically_normal();
 			if (error) return fail(Status::InvalidValue, "graph file set path is invalid");
-			if (index && (entry.Destination.parent_path() != stage.Files[0].Destination.parent_path() ||
-						  entry.Destination == stage.Files[0].Destination))
+			if (index && entry.Destination.parent_path() != stage.Files[0].Destination.parent_path())
 				return fail(Status::InvalidValue, "graph file set needs distinct sibling paths");
+			for (size_t earlier = 0; earlier < index; ++earlier)
+				if (entry.Destination == stage.Files[earlier].Destination)
+					return fail(Status::InvalidValue, "graph file set needs distinct sibling paths");
 			const auto status = std::filesystem::symlink_status(entry.Destination, error);
 			if ((error && error != std::errc::no_such_file_or_directory) ||
 				(std::filesystem::exists(status) && !std::filesystem::is_regular_file(status)))

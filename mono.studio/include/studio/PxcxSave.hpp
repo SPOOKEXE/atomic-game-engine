@@ -9,16 +9,21 @@
 #include <string_view>
 
 namespace studio {
-	// grug save a checked source Collection as .pxcc and optional .meta siblings. both are prepared
+	struct PxcxPreparedSavePreview;
+	// grug save a checked source Collection as .pxcc siblings or one .pxz package.
+	// optional completed preview adds a full-size PNG. every file is prepared
 	// before publication; failed replacement restores old files or reports retained backup paths.
 	// caller supplies source containing current edits. this leaves authoring and undo unchanged.
+	// grug source-compatible .pxcc saves leave omitted older PNG/meta siblings untouched.
+	// preview caller attests Current describes source; this host verifies Completed matches it.
 	[[nodiscard]] bool SavePxcxCollection(
 		const std::filesystem::path &destination,
 		const engine::bake::PxcxArchive &source,
 		std::string_view collectionId,
 		std::optional<std::string_view> managerJson,
 		engine::imagegraph::Diagnostic &diagnostic,
-		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+		const PxcxPreparedSavePreview *preview = nullptr
 	);
 	// Validates all source edits before creating a temporary file, then atomically replaces the path.
 	// The retained archive remains the authoring baseline so undo can restore opaque source records.
