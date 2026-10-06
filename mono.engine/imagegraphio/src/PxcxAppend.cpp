@@ -194,6 +194,21 @@ namespace engine::imagegraphio {
 				   type == "Node_Iterate_Sort" || type == "Node_Iterator" || type == "Node_Pixel_Builder" ||
 				   type == "Node_Smoke_Group" || type == "Node_Strand_Group" || type == "Node_VFX_Group";
 		}
+		AppendJson CollectionDefaults() {
+			return {
+				{"description", ""},
+				{"author", ""},
+				{"contact", ""},
+				{"alias", ""},
+				{"file_id", 0},
+				{"tags", AppendJson::array()},
+				{"version", 121092},
+				{"isDefault", false},
+				{"preview_frames", 1},
+				{"deprecated", false},
+				{"aut_id", 0}
+			};
+		}
 		void Remap(AppendJson &value, const AppendJson &ids, AppendWork &work, size_t maximumIdBytes) {
 			if (!value.is_string()) return;
 			work.Charge(
@@ -503,6 +518,108 @@ namespace engine::imagegraphio {
 		return false;
 	}
 
+	bool PreparePxcxCollectionMetadata(
+		const bake::PxcxArchive &archive,
+		std::vector<PxcxCollectionMetadata> &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraphio.collection_metadata_defaults");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return false;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || !ArchiveBounds(archive) ||
+			archive.Nodes.size() > Limits::MaximumNodes || result.size() > Limits::MaximumNodes ||
+			result.capacity() > Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "PXC collection metadata counts or bytes exceed bounds");
+		if (archive.MetadataNumber != 121092)
+			return fail(Status::InvalidValue, "PXC collection metadata save version is invalid");
+		detail::ImportBudget budget(maximumBytes);
+		if (!budget.Hold(ArchiveBytes(archive)) ||
+			!budget.Hold(result.capacity() * sizeof(PxcxCollectionMetadata)))
+			return fail(Status::LimitExceeded, "PXC collection metadata owners exceed live bounds");
+		for (const auto &manager : result) {
+			if (manager.NodeId.size() > bake::PxcxLimits::MaximumNodeTextBytes ||
+				manager.MetadataJson.size() > bake::PxcxLimits::MaximumMetadataBytes ||
+				!budget.Hold(manager.NodeId.capacity() + manager.MetadataJson.capacity()))
+				return fail(Status::LimitExceeded, "PXC prior collection metadata exceeds live bounds");
+		}
+		JsonScope scope(budget);
+		AppendWork work;
+		auto graph = Parse(archive, work);
+		if (!graph) return fail(Status::InvalidValue, "PXC collection metadata source JSON is invalid");
+		RecordWork(*graph, work);
+		const uint64_t domBytes = CodecDomBytes(*graph);
+		constexpr uint64_t codecFixedBytes = 2ull * 1024 * 1024;
+		const uint64_t validationBytes = ArchiveBytes(archive) * 4 + domBytes + codecFixedBytes;
+		if (!budget.Hold(validationBytes))
+			return fail(
+				Status::LimitExceeded, "PXC collection metadata archive validation exceeds live bounds"
+			);
+		{
+			std::vector<std::byte> checked;
+			std::string failure;
+			if (!bake::WritePxcx(archive, checked, failure) || checked != archive.OriginalBytes)
+				return fail(Status::InvalidValue, "PXC collection metadata archive has untracked changes");
+		}
+		budget.Release(validationBytes);
+		AppendJson defaults = CollectionDefaults();
+		const auto metadataJson = defaults.dump();
+		if (metadataJson.size() > bake::PxcxLimits::MaximumMetadataBytes)
+			return fail(Status::LimitExceeded, "PXC collection metadata exceeds field bounds");
+		size_t collectionCount = 0;
+		for (const auto &node : graph->at("nodes"))
+			if (GroupType(node) && ++collectionCount > Limits::MaximumNodes)
+				throw std::length_error("collection count");
+		std::vector<PxcxCollectionMetadata> candidate;
+		if (!budget.Hold(collectionCount * sizeof(PxcxCollectionMetadata)))
+			return fail(Status::LimitExceeded, "PXC collection metadata table exceeds live bounds");
+		candidate.reserve(collectionCount);
+		if (!budget.Hold((candidate.capacity() - collectionCount) * sizeof(PxcxCollectionMetadata)))
+			return fail(Status::LimitExceeded, "PXC collection metadata table capacity exceeds live bounds");
+		for (const auto &node : graph->at("nodes")) {
+			if (GroupType(node)) {
+				const auto id = node.find("id");
+				if (id == node.end() || !id->is_string()) throw std::invalid_argument("collection identity");
+				const auto &nodeId = id->template get_ref<const JsonString &>();
+				if (nodeId.empty() || nodeId.size() > bake::PxcxLimits::MaximumNodeTextBytes ||
+					candidate.size() == collectionCount)
+					throw std::length_error("collection identity bounds");
+				work.Charge(1, nodeId.size() + metadataJson.size() + 2);
+				const uint64_t copyBytes = std::max(nodeId.size(), std::string{}.capacity()) + 1 +
+										   std::max(metadataJson.size(), std::string{}.capacity()) + 1;
+				if (!budget.Hold(copyBytes)) throw std::bad_alloc{};
+				candidate.push_back(
+					{{nodeId.data(), nodeId.size()}, {metadataJson.data(), metadataJson.size()}}
+				);
+			}
+		}
+		static_assert(std::is_nothrow_move_assignable_v<std::vector<PxcxCollectionMetadata>>);
+		result = std::move(candidate);
+		diagnostic = {};
+		return true;
+	} catch (const AppendWorkExceeded &) {
+		diagnostic = {
+			Status::LimitExceeded, {}, {}, "PXC collection metadata comparison work exceeds bounds"
+		};
+		return false;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {
+			Status::LimitExceeded, {}, {}, "PXC collection metadata allocation exceeds live bounds"
+		};
+		return false;
+	} catch (const std::length_error &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC collection metadata counts exceed bounds"};
+		return false;
+	} catch (const std::invalid_argument &) {
+		diagnostic = {Status::InvalidValue, {}, {}, "PXC collection metadata identity is invalid"};
+		return false;
+	} catch (const AppendJson::exception &) {
+		diagnostic = {Status::InvalidValue, {}, {}, "PXC collection metadata source record is malformed"};
+		return false;
+	}
+
 	bool PreparePxcxAppendPostLoad(
 		const PxcxAppendResult &append,
 		std::string_view sourcePath,
@@ -573,19 +690,7 @@ namespace engine::imagegraphio {
 			RecordWork(*parsed, work);
 			metadata = std::move(*parsed);
 		}
-		AppendJson defaults = {
-			{"description", ""},
-			{"author", ""},
-			{"contact", ""},
-			{"alias", ""},
-			{"file_id", 0},
-			{"tags", AppendJson::array()},
-			{"version", 121092},
-			{"isDefault", false},
-			{"preview_frames", 1},
-			{"deprecated", false},
-			{"aut_id", 0}
-		};
+		AppendJson defaults = CollectionDefaults();
 		// grug source deserialize keeps constructor values for missing or null fields.
 		for (auto &field : defaults.items()) {
 			const auto value = metadata.find(field.key());

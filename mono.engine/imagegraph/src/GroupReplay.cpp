@@ -2814,6 +2814,34 @@ namespace engine::imagegraph {
 		size_t keyCount = 0, extraTracks = 0;
 		for (const auto &key : authored.Keyframes)
 			if (!changed(key.NodeId, key.Port)) ++keyCount;
+		const auto admitBoundaryNameWork = [&](uint64_t bytes) {
+			if (bytes > 64'000'000 - projectionWork) {
+				projectionWork = 64'000'000;
+				return admitVisit();
+			}
+			projectionWork += bytes;
+			return true;
+		};
+		const auto visitParentJunctions = [&](auto &document, std::string_view id, const auto &visit) {
+			for (const auto &group : document.Groups)
+				for (const auto &port : group.Ports) {
+					if (!admitVisit()) return false;
+					if (port.Direction != PortDirection::Input) continue;
+					if (!admitBoundaryNameWork(std::min(port.ControlNodeId.size(), id.size()) + 1))
+						return false;
+					if (port.ControlNodeId != id) continue;
+					for (auto &junction : document.Junctions) {
+						if (!admitVisit() || !admitBoundaryNameWork(
+												 std::min(junction.Id.size(), port.JunctionId.size()) +
+												 std::min(junction.GroupId.size(), group.Id.size()) + 2
+											 ))
+							return false;
+						if (junction.Id == port.JunctionId && junction.GroupId == group.Id)
+							if (!visit(junction)) return false;
+					}
+				}
+			return true;
+		};
 		size_t projectedValueIndex = 0;
 		uint64_t replacementCapacitySlots = 0;
 		if (!effects([&](std::string_view id,
@@ -2861,6 +2889,16 @@ namespace engine::imagegraph {
 					if (!payload || !add(*payload)) {
 						fail(
 							Status::LimitExceeded, "Group authored fixed replacement exceeds bounds", id, port
+						);
+						return false;
+					}
+					if (port == "parent_value" &&
+						!visitParentJunctions(authored, id, [&](const auto &) { return add(*payload); })) {
+						fail(
+							Status::LimitExceeded,
+							"Group parent boundary replacement exceeds bounds",
+							id,
+							port
 						);
 						return false;
 					}
@@ -3155,6 +3193,12 @@ namespace engine::imagegraph {
 					std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const auto &node) {
 						return node.Id == id;
 					});
+				// grug keeps both copies of the source parent socket equal when callbacks reset it.
+				if (port == "parent_value" && !visitParentJunctions(candidate, id, [&](auto &junction) {
+						junction.Default = *replacement;
+						return true;
+					}))
+					return false;
 				const auto dynamic = std::find_if(
 					node->DynamicInputs.begin(), node->DynamicInputs.end(), [&](const auto &input) {
 						return input.Id == port;

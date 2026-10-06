@@ -1,5 +1,6 @@
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraphio/PxcxEdit.hpp>
+#include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -350,4 +351,42 @@ TEST_CASE(
 		CHECK(bytes == initial);
 		CHECK(diagnostic.Message == "PXC value inverse codec cannot retain source representation");
 	}
+}
+
+TEST_CASE(
+	"PXC projection compares track policies independently of source node order", "[imagegraphio][pxcx_edit]"
+) {
+	auto source = Import(R"JSON({"r":{"d":4}})JSON").Source;
+	const auto type = source.GraphJson.find("Unknown_Future_Node");
+	REQUIRE(type != std::string::npos);
+	source.GraphJson.replace(type, std::string_view("Unknown_Future_Node").size(), "Node_Number_Simple");
+	const auto group = source.GraphJson.find(",\"group\":\"future-group\"");
+	REQUIRE(group != std::string::npos);
+	source.GraphJson.erase(group, std::string_view(",\"group\":\"future-group\"").size());
+	const auto inputs = source.GraphJson.find("\"inputs\":[]");
+	REQUIRE(inputs != std::string::npos);
+	source.GraphJson.replace(
+		inputs, std::string_view("\"inputs\":[]").size(), R"JSON("inputs":[{"r":{"d":8}}])JSON"
+	);
+	source.Nodes.clear();
+	source.Links.clear();
+	std::vector<std::byte> original;
+	std::string failure;
+	REQUIRE(engine::bake::WritePxcx(source, original, failure));
+	const auto imported = Reimport(original, {});
+	auto authored = imported.Graph;
+	Diagnostic diagnostic;
+	REQUIRE(Migrate(authored, diagnostic) == Status::Ok);
+	REQUIRE(authored.Tracks.size() == 2);
+	std::reverse(authored.Tracks.begin(), authored.Tracks.end());
+	const auto before = authored;
+	std::vector<std::byte> written;
+	const bool saved = WritePxcxProjection(imported, authored, {}, written, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(saved);
+	CHECK(written == original);
+	CHECK(authored == before);
+	authored.Tracks.push_back(authored.Tracks.front());
+	CHECK_FALSE(WritePxcxProjection(imported, authored, {}, written, diagnostic));
+	CHECK(written == original);
 }

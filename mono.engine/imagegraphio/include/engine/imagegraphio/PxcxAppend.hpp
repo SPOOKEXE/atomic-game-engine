@@ -52,6 +52,14 @@ namespace engine::imagegraphio {
 		// present only when the single top-level Collection's source-backed path changed.
 		std::optional<bake::PxcxArchive> Source;
 	};
+	// grug prepare constructor defaults for every Collection-family node in a checked archive.
+	// Root project metadata and Collection paths are deliberately ignored.
+	[[nodiscard]] bool PreparePxcxCollectionMetadata(
+		const bake::PxcxArchive &archive,
+		std::vector<PxcxCollectionMetadata> &result,
+		imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = imagegraph::Limits::MaximumEvaluationBytes
+	);
 	// grug call after APPENDING callbacks end, before source, canvas and history publication.
 	// prepare default managers with non-null root overrides and the optional observed append path.
 	// failure preserves result; the caller retains the original native projection and Group captures.

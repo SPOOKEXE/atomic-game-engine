@@ -1,0 +1,613 @@
+{
+  "phase": "grug append checked source projects in Composer",
+  "date": "2026-10-07",
+  "scope": [
+    "grug stage unsaved destination edits before merging incoming source archive",
+    "grug expose append path, namespace, source group context and offset controls in Composer",
+    "grug prepare callback host, native and opaque canvas, managers, cache observation and source history before publication",
+    "grug initialize all fourteen Collection families with source defaults; apply incoming file metadata only to incoming top-level Collections after callbacks",
+    "grug preserve old managers and source bytes across atomic undo and redo",
+    "grug let native output connect to retained opaque positional sockets",
+    "grug save current Group callback state, including matching static parent boundary defaults",
+    "grug compare inverse tracks by identity while preserving all policies, duplicate refusal and caller order"
+  ],
+  "source_contract": {
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "facts": [
+      "grug Collection constructors create defaults even for nested collections",
+      "grug source Open applies root metadata to project manager, not collection managers",
+      "grug source Append applies incoming root metadata to top-level collections after callbacks",
+      "grug source path changes only for one incoming top-level Collection node"
+    ]
+  },
+  "owned_files": {
+    "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp": "64ba9776ae1065d2452fbe19a02e4177d986b8f21fff368f7536fab7a73778dd",
+    "mono.engine/imagegraphio/src/PxcxAppend.cpp": "be8b66b2b662f34387c963bd15575e755412c55f2f688fa4c1a9a9716257c2be",
+    "mono.engine/imagegraphio/tests/PxcxAppend.cpp": "7691afb57e1cdd1a81f23f493ad47425562961c5d33c7323ad6814a030754590",
+    "mono.studio/src/ImageGraphAppendProject.hpp": "bfdd849daadaa63dacabcc72f9cc230c6d82fc114d48bbd9a8e18bb01feeaab3",
+    "mono.studio/src/ImageComposer.cpp": "ab88e623eb3a04f3293c7a94775b2e0b2bc493cacfbb1596bfb1a54390bd4e27",
+    "mono.studio/tests/ImageGraphSourceHistory.cpp": "fe3e2ff86e8b35ba498bd12c5a399bd2aba9ce1b7258c8b91fee8341fdba2541",
+    "mono.studio/src/ImageGraph.cpp": "178a1c95f8e5521ffc81696f1ca40b8d111f27dcbc6094f8f6c02f23a5ec8490",
+    "mono.studio/src/ImageGraphAppendGroups.hpp": "94d6897a35c03a65f5076bc0817aa0f78acb5bf18caf0e5443564eccf130245d",
+    "mono.engine/imagegraphio/src/PxcxEdit.cpp": "5bce84eed9e79558942be70220f7302adea93d62dfdf2dcb03463f9bcc894a55",
+    "mono.engine/imagegraphio/tests/PxcxEdit.cpp": "dd2b412987ca15ebef6da2d32f5a60a1be44ecd48d503851830dc884b7a0e8cf",
+    "mono.engine/imagegraph/src/GroupReplay.cpp": "8b7080601c31bf3a4cdc33d76c78bc4bf235eb9b5148beb74263b5fa69307e8b",
+    "mono.engine/imagegraph/tests/GroupReplay.cpp": "1b8cec896f5fb37ddd866bddb4bca45556b62c46f97bfa3bd215b32486c07421"
+  },
+  "shared_ui_owned_view_sha256": "d35dee78172cd359cc66e94f071bbf0ee48132907a44a5e3c4efc2060a705a17",
+  "checks": {
+    "joined_build": "grug 17 release-tests targets with j6; final build11 passed",
+    "batch": "20/20 passed",
+    "cpp_cases": 5200,
+    "cpp_assertions": 2003777,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "grug approved offscreen Vulkan, Studio/client/render serialized",
+    "frozen_source_files_unchanged": 1833,
+    "peer_files_unchanged": 43,
+    "test_binaries_unchanged": 13,
+    "child_binaries_unchanged": 2,
+    "review": "grug Sol read checked source metadata contract, writer budget, declared boundary mapping, weighted lookup work and shared UI ownership; Luna edited Collection default helper",
+    "standalone_performance_profile": "grug not run",
+    "sanitizers": "grug not run"
+  },
+  "failures_and_repairs": [
+    {
+      "stage": "build1",
+      "failure": "grug private FindNode helper unavailable and Catch2 conjunction invalid",
+      "repair": "grug use local lookup and separate checks"
+    },
+    {
+      "stage": "batch1",
+      "failure": "grug fixture put native child under unsupported opaque Collection",
+      "repair": "grug keep linked native fixture on supported root and check single Collection path separately; unsupported source remains refused"
+    },
+    {
+      "stage": "batch2",
+      "failure": "grug native Group callback compiler lacked output and opaque datatype blocked connection",
+      "repair": "grug add transient compiler output and preserve opaque physical ports as ANY_TYPE"
+    },
+    {
+      "stage": "batch3 and batch4",
+      "failure": "PXC source inverse would change tracks",
+      "repair": "grug confirmed same policies in different order and canonicalized only private comparison tables"
+    },
+    {
+      "stage": "build6",
+      "failure": "grug attempted edit script stopped before mutation, then no-op build ran",
+      "repair": "grug inspected successful mutation before next build"
+    },
+    {
+      "stage": "build8",
+      "failure": "WritePxcxProjection was not declared in this scope",
+      "repair": "grug add defining header to new test"
+    },
+    {
+      "stage": "batch5",
+      "failure": "grug fixture archive facts stale after JSON edit; Group parent reset left boundary default stale",
+      "repair": "grug refresh fixture facts and update declared input boundary default with admitted parent replacement"
+    },
+    {
+      "stage": "read review after build10",
+      "failure": "grug new mapping scans counted visits but ignored long names",
+      "repair": "grug charge name comparison work in both admission and copy scans"
+    },
+    {
+      "stage": "batch6",
+      "result": "grug all twenty checks passed"
+    }
+  ],
+  "limitations": [
+    "grug source writer scratch allowance is conservative reservation around legacy writer, not proof of a process-wide allocator cap; large projects may refuse",
+    "grug private append host borrows prepared arguments and stages files/fonts/audio/source captures; unsupported callback host dependencies refuse",
+    "grug native children under unsupported opaque Collection parents remain refused by semantic import",
+    "grug headed Studio interaction and licensed reference parity remain unverified",
+    "grug Collection export/save manager lifecycle beyond this append action remains open",
+    "grug whole Composer goal remains active; this evidence covers append slice"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "final_build": "append-project-build11.log",
+    "results": "append-project-batch6-results.json",
+    "source_integrity": "append-project-source-integrity-batch6.json",
+    "peer_integrity": "append-project-peer-integrity-batch6.json",
+    "child_integrity": "append-project-child-hashes-batch6.json",
+    "prior_build_logs": [
+      "append-project-build1.log",
+      "append-project-build2.log",
+      "append-project-build3.log",
+      "append-project-build4.log",
+      "append-project-build5.log",
+      "append-project-build6.log",
+      "append-project-build7.log",
+      "append-project-build8.log",
+      "append-project-build9.log",
+      "append-project-build10.log"
+    ],
+    "prior_results": [
+      "append-project-batch1-results.json",
+      "append-project-batch2-results.json",
+      "append-project-batch3-results.json",
+      "append-project-batch4-results.json",
+      "append-project-batch5-results.json"
+    ]
+  },
+  "results_summary": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-bake-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_bake"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.283,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-physics-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "3b2f2ea690b061d7a5ada43b0ca989c48c429909de81acf945034ae63561482b",
+      "exit_code": 0,
+      "elapsed_seconds": 0.375,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "3b2f2ea690b061d7a5ada43b0ca989c48c429909de81acf945034ae63561482b",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-runner-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph_runner"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "c1e26713c91cadde2d2ca518e726cc3974babcac50fd31a5a74af6c0ae432395",
+      "exit_code": 0,
+      "elapsed_seconds": 0.316,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "c1e26713c91cadde2d2ca518e726cc3974babcac50fd31a5a74af6c0ae432395",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-font-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphfont"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "93cd8d70799454ad3d95b4746a472edd2b76f815b6e1ea13329dcd596ee8e765",
+      "exit_code": 0,
+      "elapsed_seconds": 0.502,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "93cd8d70799454ad3d95b4746a472edd2b76f815b6e1ea13329dcd596ee8e765",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-export-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphexport"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "deef051eba6728365ee3e96a3f655a29b2e179c1795fcb327a0580553712d200",
+      "exit_code": 0,
+      "elapsed_seconds": 0.622,
+      "assertions": 3132,
+      "cases": 77,
+      "binary_sha256_after": "deef051eba6728365ee3e96a3f655a29b2e179c1795fcb327a0580553712d200",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-render-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_render",
+        "[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "0751bc59aa1384a0c152f2678978a528d8b97e9d218f313584da026c0f33932e",
+      "exit_code": 0,
+      "elapsed_seconds": 1.454,
+      "assertions": 477,
+      "cases": 15,
+      "binary_sha256_after": "0751bc59aa1384a0c152f2678978a528d8b97e9d218f313584da026c0f33932e",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-cli-batch6.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_)",
+        "--output-on-failure",
+        "-j8"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.248,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-io-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "10e87a8661285cbcce0e3c7d1840c19aadd06d4500d0abae5c5bc6d9173e2cad",
+      "exit_code": 0,
+      "elapsed_seconds": 3.698,
+      "assertions": 12587,
+      "cases": 294,
+      "binary_sha256_after": "10e87a8661285cbcce0e3c7d1840c19aadd06d4500d0abae5c5bc6d9173e2cad",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-core-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "3b509b33c79312c0727322c2207c7038cf49be2bd5b343fc425ca33731ca3348",
+      "exit_code": 0,
+      "elapsed_seconds": 3.753,
+      "assertions": 1895147,
+      "cases": 2980,
+      "binary_sha256_after": "3b509b33c79312c0727322c2207c7038cf49be2bd5b343fc425ca33731ca3348",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-assetc-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_assetc"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "7182b77f87897d6cee3e9550ffb23486e58b173b7a9900e651063834b99f00de",
+      "exit_code": 0,
+      "elapsed_seconds": 6.139,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "7182b77f87897d6cee3e9550ffb23486e58b173b7a9900e651063834b99f00de",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-client-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_client",
+        "~[.],[argument_binding][gpu],[argument-transform-gpu]"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "903972ead44ee7bffdd6e5dd3a13490f69e7377739bd31b433141d5269b14039",
+      "exit_code": 0,
+      "elapsed_seconds": 4.626,
+      "assertions": 23821,
+      "cases": 358,
+      "binary_sha256_after": "903972ead44ee7bffdd6e5dd3a13490f69e7377739bd31b433141d5269b14039",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-studio-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_studio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "98efdbee7000ea564ec52076103bb2693a7117cc405688dd7d8fa046b73425c1",
+      "exit_code": 0,
+      "elapsed_seconds": 7.927,
+      "assertions": 48483,
+      "cases": 1088,
+      "binary_sha256_after": "98efdbee7000ea564ec52076103bb2693a7117cc405688dd7d8fa046b73425c1",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-nodegraph-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_nodegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "exit_code": 0,
+      "elapsed_seconds": 1.326,
+      "assertions": 345,
+      "cases": 37,
+      "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-ui-batch6.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_ui"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "f7d3ff41ad81bcb10ed941b8f40081e188ef4c05f1fd65e353e44ee3b9cc026c",
+      "exit_code": 0,
+      "elapsed_seconds": 0.588,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "f7d3ff41ad81bcb10ed941b8f40081e188ef4c05f1fd65e353e44ee3b9cc026c",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-startup-batch6.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^studio_composer_startup_arguments$",
+        "-V"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.272,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-lint-batch6.log",
+      "command": [
+        "ruff",
+        "check",
+        "scripts/pixel-composer/generate-catalogue.py",
+        "scripts/tests/pixel_composer_catalogue_metadata_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.009
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-architecture-batch6.log",
+      "command": [
+        "cmake",
+        "-DGRAPH=.cache/build/release-tests/target-graph.json",
+        "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+        "-P",
+        "mono.tools/architecture/CheckTargetGraph.cmake"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.393
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-python-batch6.log",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "pixel_composer_*_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.577,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-format-batch6.log",
+      "command": [
+        "/usr/bin/clang-format-21",
+        "--dry-run",
+        "--Werror",
+        "mono.studio/src/ImageGraphCacheBackground.hpp",
+        "mono.studio/src/ImageGraphCacheBackground.cpp",
+        "mono.studio/tests/ImageGraphCacheBackground.cpp",
+        "mono.studio/src/ImageGraphCacheControls.hpp",
+        "mono.studio/tests/ImageGraphCacheControls.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+        "mono.studio/nodegraph/src/Editor.cpp",
+        "mono.studio/nodegraph/tests/Editor.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+        "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+        "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+        "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+        "mono.engine/imagegraph/src/DataReplay.cpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+        "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+        "mono.engine/imagegraph/tests/DataReplay.cpp",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+        "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+        "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+        "mono.engine/ui/src/Interface.cpp",
+        "mono.engine/ui/tests/Interface.cpp",
+        "mono.engine/ui/include/engine/ui/Interface.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+        "mono.engine/imagegraph/src/nodes/Path.hpp",
+        "mono.engine/imagegraph/tests/Catalogue.cpp",
+        "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+        "mono.studio/tests/ImageGraphPatternGroups.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+        "mono.engine/imagegraph/src/SourceModeTransition.cpp",
+        "mono.engine/imagegraph/src/GroupReplay.cpp",
+        "mono.engine/imagegraph/src/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/BuiltinRandomCaptureCodec.hpp",
+        "mono.engine/imagegraph/tests/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/tests/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/tests/SourceMirrorPathProjection.cpp",
+        "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "mono.engine/imagegraphio/tests/PxcxMirrorPathRatio.cpp",
+        "mono.engine/imagegraph/src/SourceSeparatedVec2.hpp",
+        "mono.engine/imagegraph/src/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorIdentity.hpp",
+        "mono.engine/imagegraph/src/SourceMirrorAnimator.hpp",
+        "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+        "mono.engine/imagegraph/src/SourceGetterProjection.cpp",
+        "mono.engine/imagegraph/tests/SourceGetterProjection.cpp",
+        "mono.engine/imagegraph/src/SourceInputSelection.hpp",
+        "mono.engine/imagegraph/src/SourceInputEvaluation.hpp",
+        "mono.engine/imagegraph/src/PcxControls.cpp",
+        "mono.engine/imagegraph/tests/SourceInputEvaluation.cpp",
+        "mono.engine/imagegraph/tests/SourceInputMoves.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+        "mono.engine/imagegraph/src/PixelBuilderGroups.cpp",
+        "mono.engine/imagegraph/tests/GroupReplay.cpp",
+        "mono.engine/imagegraph/src/SourceAxisStorage.hpp",
+        "mono.engine/imagegraph/src/SourceVec2Defaults.hpp",
+        "mono.engine/imagegraph/src/SourceVec2Defaults.cpp",
+        "mono.engine/imagegraph/tests/SourceVec2Defaults.cpp",
+        "mono.engine/imagegraph/src/GroupClonePayload.cpp",
+        "mono.engine/imagegraph/src/SourceFont.cpp",
+        "mono.engine/imagegraph/src/SourceBuiltinRandom.cpp",
+        "mono.studio/src/SourceDynamicGroups.cpp",
+        "mono.studio/tests/ImageGraphSourceInputs.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisInitialization.cpp",
+        "mono.engine/imagegraph/src/Catalogue.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp",
+        "mono.studio/src/ImageGraphGroupHost.hpp",
+        "mono.studio/tests/ImageGraphGroupHost.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisReadRequests.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceAxisTransition.hpp",
+        "mono.engine/imagegraph/src/SourceAxisTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisTransition.cpp",
+        "mono.studio/src/ImageGraphAxisControls.hpp",
+        "mono.studio/tests/ImageGraphAxisControls.cpp",
+        "mono.engine/imagegraph/src/GroupInstanceRecapture.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorPersistence.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorPersistence.hpp",
+        "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp",
+        "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/src/TimelineDopesheet.hpp",
+        "mono.studio/tests/TimelineSourceAliases.cpp",
+        "mono.studio/src/ImageGraphCapturedKeyEdit.hpp",
+        "mono.studio/src/TimelineEaseEditor.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceTrackTransition.hpp",
+        "mono.engine/imagegraph/src/SourceTrackTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceTrackTransition.cpp",
+        "mono.studio/src/TimelineKeyDelete.hpp",
+        "mono.studio/tests/TimelineKeyDelete.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/AnimationTrackPolicyEditor.hpp",
+        "mono.studio/src/ImageGraphSourceKeyEdit.hpp",
+        "mono.studio/src/ImageGraphKeyPinProjection.hpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.studio/src/KeyframeKindEditor.hpp",
+        "mono.studio/src/TimelineKeyEditor.hpp",
+        "mono.studio/tests/ImageGraphSourceKeyEdit.cpp",
+        "mono.studio/src/TimelineKeyActions.hpp",
+        "mono.studio/src/TimelineScalarKeys.hpp",
+        "mono.studio/tests/TimelineScalarKeys.cpp",
+        "mono.studio/tests/TimelineKeyEditor.cpp",
+        "mono.studio/tests/TimelineScalarDopesheet.cpp",
+        "mono.studio/tests/ComposerWorkflow.cpp",
+        "mono.studio/src/ImageGraphTimelineRead.hpp",
+        "mono.studio/tests/ImageGraphTimelineRead.cpp",
+        "mono.engine/imagegraph/src/GroupReplayInternal.hpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/tests/TimelineDopesheetActions.cpp",
+        "mono.studio/src/TimelineScalarKeyControls.hpp",
+        "mono.studio/src/KeyframeSourceDriverControls.hpp",
+        "mono.studio/tests/TimelineEaseEditor.cpp",
+        "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "mono.studio/src/ImageGraphFilePublish.hpp",
+        "mono.studio/tests/ImageGraphFilePublish.cpp",
+        "mono.studio/src/PxcxSave.cpp",
+        "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+        "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+        "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+        "mono.studio/tests/ImageGraphSourceHistory.cpp",
+        "mono.studio/src/ImageGraphHistorySource.hpp",
+        "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+        "mono.studio/src/ImageGraphAppendGroups.hpp",
+        "mono.studio/tests/ImageGraphAppendGroups.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/src/GroupCallbackDocument.cpp",
+        "mono.engine/imagegraph/src/GroupCallbackOpaque.hpp",
+        "mono.engine/imagegraph/tests/GroupCallbackDocument.cpp",
+        "mono.studio/src/ImageGraphAppendGroups.hpp",
+        "mono.studio/tests/ImageGraphAppendGroups.cpp",
+        "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+        "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+        "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Graph.hpp",
+        "mono.studio/nodegraph/src/Graph.cpp",
+        "mono.studio/nodegraph/src/Layout.cpp",
+        "mono.studio/nodegraph/src/Serialize.cpp",
+        "mono.studio/nodegraph/src/Editor.cpp",
+        "mono.studio/nodegraph/tests/Graph.cpp",
+        "mono.studio/nodegraph/tests/Layout.cpp",
+        "mono.studio/nodegraph/tests/Serialize.cpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/tests/ImageGraphSourceHistory.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.studio/src/ImageGraphAppendProject.hpp",
+        "mono.engine/imagegraphio/tests/PxcxEdit.cpp"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.745
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/append-project-diff-batch6.log",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.084
+    }
+  ]
+}

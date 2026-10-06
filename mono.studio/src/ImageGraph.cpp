@@ -854,12 +854,6 @@ namespace studio {
 	}
 
 	void RegisterImageGraphNodeTypes() {
-		nodegraph::DataType opaque;
-		opaque.Id = "pxcx.opaque";
-		opaque.Label = "Opaque PXCX";
-		opaque.Tint = nodegraph::Colour::Hex(0x858585);
-		opaque.Description = "Positional archive connection; native execution is unavailable";
-		nodegraph::DataTypes::Register(opaque);
 		RegisterDataType(engine::imagegraph::ValueType::Boolean, "Boolean");
 		RegisterDataType(engine::imagegraph::ValueType::Integer, "Integer");
 		RegisterDataType(engine::imagegraph::ValueType::Scalar, "Scalar");
@@ -1102,8 +1096,9 @@ namespace studio {
 				error = "opaque canvas port exceeds text bounds";
 				return false;
 			}
-			if (from != opaquePorts.end()) from->second.second.push_back({link.FromPort, "pxcx.opaque"});
-			if (to != opaquePorts.end()) to->second.first.push_back({link.ToPort, "pxcx.opaque"});
+			if (from != opaquePorts.end())
+				from->second.second.push_back({link.FromPort, nodegraph::ANY_TYPE});
+			if (to != opaquePorts.end()) to->second.first.push_back({link.ToPort, nodegraph::ANY_TYPE});
 		}
 		const auto physicalIndex = [](std::string_view name) -> std::optional<uint32_t> {
 			if (name.starts_with("input-"))

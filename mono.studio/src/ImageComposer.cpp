@@ -3,6 +3,7 @@
 #include "ImageComposerInternal.hpp"
 #include "ImageComposerPanels.hpp"
 #include "ImageGraphAnimationControl.hpp"
+#include "ImageGraphAppendProject.hpp"
 #include "ImageGraphArguments.hpp"
 #include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphArtworkEdit.hpp"
@@ -73,6 +74,7 @@
 #include <engine/imagegraphexport/GraphExportSession.hpp>
 #include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
+#include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scripthost/ComposerLua.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -224,6 +226,10 @@ namespace studio {
 			char Search[96] = {};
 			char GraphName[256] = {};
 			char PxcxPath[4096] = {};
+			char PxcxAppendPath[4096] = {};
+			char PxcxAppendNamespace[256] = "appended";
+			char PxcxAppendContext[256] = {};
+			double PxcxAppendOffset[2]{};
 			char AudioCapturePath[4096] = {};
 			char WavSourceId[4096] = {};
 			char WavFilePath[4096] = {};
@@ -249,6 +255,7 @@ namespace studio {
 			Document Authored;
 			Document PxcxProjection;
 			std::optional<engine::bake::PxcxArchive> ImportedPxcx;
+			ImageGraphHistory::CollectionSnapshot CollectionManagers;
 			PxcxPublishedSave PublishedPxcx;
 			std::optional<PxcxPreviewIdentity> PxcxCompletedPreview;
 			uint64_t PxcxPreviewCacheInputRevision = 0;
@@ -2011,6 +2018,7 @@ namespace studio {
 			state.GroupHost.Clear();
 			AuthoredDocumentChanged(state, detail::ImageGraphCacheEditKind::FreshDocument);
 			state.ImportedPxcx.reset();
+			state.CollectionManagers.reset();
 			state.PublishedPxcx = {};
 			state.PxcxCompletedPreview.reset();
 			state.PxcxProjection = {};
@@ -2058,18 +2066,20 @@ namespace studio {
 			engine::bake::PxcxArchive archive;
 			if (!engine::bake::ReadPxcx(bytes, archive, state.PxcxOpenError)) return false;
 			engine::imagegraphio::PxcxImport imported;
-			if (!engine::imagegraphio::ImportPxcxImageGraph(archive, imported, state.PxcxOpenError)) {
-				state.ImportedPxcx = std::move(archive);
-				state.PxcxPathDisplay = path.string();
-				state.PxcxReferenceThumbnail = {};
-				state.RetiredPxcxThumbnailTexture = state.CurrentPxcxThumbnailTexture;
-				state.CurrentPxcxThumbnailTexture = engine::core::Name{};
-				state.PxcxThumbnailTextureHash = 0;
-				state.PxcxThumbnailMessage.clear();
-				state.PxcxProjection = {};
-				state.PxcxDiagnostics.clear();
+			if (!engine::imagegraphio::ImportPxcxImageGraph(archive, imported, state.PxcxOpenError))
+				return false;
+			std::vector<engine::imagegraphio::PxcxCollectionMetadata> managers;
+			Diagnostic managerDiagnostic;
+			if (archive.MetadataNumber == 121092 &&
+				!engine::imagegraphio::PreparePxcxCollectionMetadata(archive, managers, managerDiagnostic)) {
+				state.PxcxOpenError = managerDiagnostic.Message;
 				return false;
 			}
+			auto collections =
+				std::make_shared<const std::vector<engine::imagegraphio::PxcxCollectionMetadata>>(
+					std::move(managers)
+				);
+
 			engine::imagegraph::Diagnostic migrationDiagnostic;
 			if (engine::imagegraph::Migrate(imported.Graph, migrationDiagnostic) != Status::Ok) {
 				state.PxcxOpenError = migrationDiagnostic.Message.empty()
@@ -2090,6 +2100,7 @@ namespace studio {
 					reference->Hash
 				};
 			}
+			state.CollectionManagers = std::move(collections);
 			state.ImportedPxcx = std::move(imported.Source);
 			state.PublishedPxcx = {};
 			state.PxcxCompletedPreview.reset();
@@ -2610,13 +2621,249 @@ namespace studio {
 			}
 		}
 
+		bool AppendPxcx(State &state) try {
+			using namespace engine::imagegraph;
+			using namespace engine::imagegraphio;
+			if (!state.ImportedPxcx || !RetryCacheEdit(state)) return false;
+			const auto fail = [&](Status status, const char *message) {
+				state.LastDiagnostic = {status, {}, {}, message};
+				state.PxcxOpenError = message;
+				return false;
+			};
+			if (state.HaveActiveEdit || state.Playback.Rendering || state.RangeExport)
+				return fail(Status::InvalidValue, "finish the active edit or render before appending");
+			const std::filesystem::path path(state.PxcxAppendPath);
+			if (path.empty()) return fail(Status::InvalidValue, "enter a PXCX append path");
+			PxcxAppendOptions options;
+			options.Namespace = state.PxcxAppendNamespace;
+			options.Context = state.PxcxAppendContext;
+			options.Offset = {state.PxcxAppendOffset[0], state.PxcxAppendOffset[1]};
+			if (state.Canvas.Inside() != nodegraph::NO_NODE) {
+				const auto context = state.Ids.ToDocument.find(state.Canvas.Inside());
+				if (context == state.Ids.ToDocument.end())
+					return fail(Status::InvalidValue, "canvas append context has no source identity");
+				options.Context = context->second;
+			}
+			std::vector<std::byte> bytes;
+			if (!ReadPxcxFile(path, bytes, state.PxcxOpenError)) return false;
+			engine::bake::PxcxArchive incoming;
+			if (!engine::bake::ReadPxcx(bytes, incoming, state.PxcxOpenError)) return false;
+			bytes = {};
+			const auto allowance = GroupConstructorAllowance(state);
+			if (!allowance) return fail(Status::LimitExceeded, "retained owners leave no append allowance");
+			uint64_t remaining = *allowance;
+			const auto charge = [&](std::optional<uint64_t> amount) {
+				if (!amount || *amount >= remaining) return false;
+				remaining -= *amount;
+				return true;
+			};
+			if (!charge(DocumentRetainedPayloadBytes(state.Authored)) ||
+				!charge(DocumentRetainedPayloadBytes(state.PxcxProjection)) ||
+				!charge(detail::ImageGraphHistoryCanvasBytes(state.Graph, state.Ids)) ||
+				!charge(state.GroupHost.Replay.RetainedBytes()) ||
+				!charge(DocumentRetainedPayloadBytes(state.CacheEditObservation.Inputs)) ||
+				!charge(detail::ImageGraphHistoryArchiveBytes(incoming)) ||
+				!charge(detail::ImageGraphHistoryArchiveBytes(*state.ImportedPxcx)))
+				return fail(Status::LimitExceeded, "append host owners exceed live bytes");
+			// grug private observations and host keep refused callbacks out of live state.
+			detail::ImageGraphAppendHost host;
+			host.Arguments = &state.Host.SourceArguments;
+			host.Files.Grants = state.FileGrants;
+			host.Files.Directories = state.DirectoryGrants;
+			host.Files.ImageCaches = state.ImageCacheLayouts;
+			EvaluationRequest clock;
+			clock.HostProvider = &host;
+			clock.AudioFrames = state.AudioFrames;
+			clock.AudioClips = state.AudioClips;
+			detail::ImageGraphObservations observations = state.PcxObservations;
+			const auto frame = GetImageGraphFrame(state.Playback);
+			const std::string project = std::filesystem::path(state.PxcxPathDisplay).stem().string();
+			if (!observations.Matches(state.DocumentRevision, frame, project)) {
+				const auto now = std::time(nullptr);
+				std::tm calendar{};
+#ifdef _WIN32
+				localtime_s(&calendar, &now);
+#else
+				localtime_r(&now, &calendar);
+#endif
+				observations.Capture(
+					state.DocumentRevision,
+					frame,
+					project,
+					std::chrono::duration<double>(std::chrono::steady_clock::now() - state.SessionStart)
+						.count(),
+					calendar
+				);
+			}
+			observations.Bind(clock);
+			SourceFontContext fonts;
+			if (state.FontInputsActive && !detail::BindImageGraphFontInputs(
+											  *state.FontInputs,
+											  true,
+											  state.Playback.Playing,
+											  fonts,
+											  clock,
+											  remaining,
+											  state.LastDiagnostic
+										  ))
+				return false;
+			if (!charge(SourceFontContextRetainedBytes(fonts)))
+				return fail(Status::LimitExceeded, "append font owners exceed live bytes");
+			engine::imagegraphphysics::RigidProvider rigid;
+			detail::BindImageGraphRigid(clock, rigid, state.Playback);
+			(void)SetFrameTime(clock, frame);
+			Document callbacks;
+			if (PrepareGroupCallbackDocument(state.Authored, callbacks, state.LastDiagnostic, remaining) !=
+				Status::Ok)
+				return false;
+			detail::AddImageGraphAppendCallbackOutput(callbacks);
+			const auto callbackBytes = DocumentRetainedPayloadBytes(callbacks);
+			if (!charge(callbackBytes))
+				return fail(Status::LimitExceeded, "append callback document exceeds live bytes");
+			ImageGraphGroupHost prepared;
+			if (RebindGroupReplay(
+					callbacks,
+					state.GroupHost.Replay,
+					state.DocumentRevision,
+					prepared.Replay,
+					state.LastDiagnostic,
+					remaining
+				) != Status::Ok)
+				return false;
+			prepared.Revision = state.GroupHost.Revision;
+			prepared.BorrowedBytes = Limits::MaximumEvaluationBytes - remaining;
+			if (callbacks.Nodes.empty())
+				prepared.Revision = state.DocumentRevision;
+			else {
+				Plan plan;
+				const uint64_t planBytes =
+					prepared.Budget(state.LastDiagnostic, {&callbacks}, {&prepared.Replay}) / 2;
+				if (!planBytes || Compile(callbacks, plan, state.LastDiagnostic, planBytes) != Status::Ok)
+					return false;
+				prepared.BorrowedBytes += planBytes;
+				if (!prepared.Prepare(callbacks, plan, state.DocumentRevision, clock, state.LastDiagnostic))
+					return false;
+				prepared.BorrowedBytes -= planBytes;
+			}
+			prepared.BorrowedBytes = 0;
+			callbacks = {};
+			remaining += *callbackBytes;
+			if (!charge(prepared.Replay.RetainedBytes()))
+				return fail(Status::LimitExceeded, "append prepared Group owner exceeds live bytes");
+			Document saved;
+			if (state.Authored.Nodes.empty())
+				saved = state.Authored;
+			else if (!prepared.ProjectForSave(
+						 state.Authored, state.DocumentRevision, saved, state.LastDiagnostic, remaining
+					 ))
+				return false;
+			const auto savedBytes = DocumentRetainedPayloadBytes(saved);
+			if (!charge(savedBytes))
+				return fail(Status::LimitExceeded, "append save projection exceeds live bytes");
+			PxcxImport imported;
+			std::string error;
+			PxcxImportOptions importOptions;
+			importOptions.MaximumOperationBytes = remaining;
+			if (!ImportPxcxImageGraph(*state.ImportedPxcx, imported, error, importOptions)) {
+				state.PxcxOpenError = std::move(error);
+				return false;
+			}
+			engine::bake::PxcxArchive destination;
+			if (!detail::PrepareImageGraphAppendDestination(
+					imported, saved, frame, destination, state.LastDiagnostic, remaining
+				))
+				return false;
+			imported = {};
+			saved = {};
+			remaining += *savedBytes;
+			if (!charge(host.Files.RetainedObservationBytes()))
+				return fail(Status::LimitExceeded, "append callback owners exceed live bytes");
+			const uint64_t revision = state.DocumentRevision == std::numeric_limits<uint64_t>::max()
+										  ? 1
+										  : state.DocumentRevision + 1;
+			detail::ImageGraphAppendProject candidate;
+			if (!candidate.Prepare(
+					*state.ImportedPxcx,
+					destination,
+					incoming,
+					std::move(options),
+					path.string(),
+					state.Authored,
+					prepared,
+					state.CollectionManagers,
+					state.Ids,
+					revision,
+					clock,
+					state.LastDiagnostic,
+					remaining
+				)) {
+				state.PxcxOpenError = state.LastDiagnostic.Message;
+				return false;
+			}
+			nodegraph::Canvas canvas = state.Canvas;
+			canvas.Ascend(candidate.Graph, 0);
+			canvas.Select(std::move(candidate.Selection));
+			if (!candidate.Admit(
+					state.Authored,
+					state.History,
+					state.FeedbackHost,
+					state.CollectionManagers,
+					state.LastDiagnostic
+				)) {
+				state.PxcxOpenError = state.LastDiagnostic.Message;
+				return false;
+			}
+			static_assert(std::is_nothrow_move_assignable_v<nodegraph::Canvas>);
+			static_assert(std::is_nothrow_move_assignable_v<detail::ImageGraphAppendProject>);
+			CancelComposerPreview(state);
+			state.ImportedPxcx = std::move(candidate.Source);
+			state.PxcxProjection = std::move(candidate.Projection);
+			state.PxcxDiagnostics = std::move(candidate.Diagnostics);
+			state.Authored = std::move(candidate.Groups.Authored);
+			state.Graph = std::move(candidate.Graph);
+			state.Ids = std::move(candidate.Ids);
+			state.Canvas = std::move(canvas);
+			state.CacheEditObservation = std::move(candidate.Observation);
+			state.CollectionManagers = std::move(candidate.Collections);
+			state.PublishedPxcx = {};
+			state.CanvasNeedsReload = false;
+			state.AdapterError.clear();
+			state.PxcxOpenError.clear();
+			state.CacheEditBlocked = false;
+			PublishAuthoredDocumentChanged(state);
+			state.GroupHost = std::move(candidate.Groups.Host);
+			RequestPreview(state, true);
+			return true;
+		} catch (const std::bad_alloc &) {
+			state.LastDiagnostic = {Status::LimitExceeded, {}, {}, "Studio append allocation refused"};
+			state.PxcxOpenError = state.LastDiagnostic.Message;
+			return false;
+		}
+
 		bool SavePxcx(State &state, bool withPreview) {
 			Diagnostic diagnostic;
+			Document projected;
+			const Document *savedDocument = &state.Authored;
+			if (state.GroupHost.Revision == state.DocumentRevision &&
+				state.GroupHost.Replay.InstancesBound()) {
+				const auto allowance = GroupConstructorAllowance(state);
+				if (!allowance ||
+					!state.GroupHost.ProjectForSave(
+						state.Authored, state.DocumentRevision, projected, diagnostic, allowance.value_or(0)
+					)) {
+					state.PxcxOpenError = diagnostic.Message.empty()
+											  ? "retained owners leave no source save allowance"
+											  : diagnostic.Message;
+					return false;
+				}
+				savedDocument = &projected;
+			}
+
 			if (!withPreview && state.PublishedPxcx.Archive.OriginalBytes.empty()) {
 				const bool saved = SavePxcxProjection(
 					std::filesystem::path(state.PxcxPath),
 					*state.ImportedPxcx,
-					state.Authored,
+					*savedDocument,
 					GetImageGraphFrame(state.Playback),
 					diagnostic
 				);
@@ -2661,7 +2908,7 @@ namespace studio {
 			if (!SavePxcxProjectionAndAdopt(
 					std::filesystem::path(state.PxcxPath),
 					*state.ImportedPxcx,
-					state.Authored,
+					*savedDocument,
 					GetImageGraphFrame(state.Playback),
 					state.PublishedPxcx,
 					prepared ? &*prepared : nullptr,
@@ -2878,6 +3125,9 @@ namespace studio {
 				state.PxcxThumbnailTextureHash = 0;
 				state.PxcxThumbnailMessage.clear();
 			}
+			if (state.History.CurrentCollections())
+				state.CollectionManagers = state.History.CurrentCollections();
+			state.PublishedPxcx = {};
 			state.GroupHost.Clear();
 			state.CacheEditBlocked = false;
 			state.CacheEditRetryKind = detail::ImageGraphCacheEditKind::AnimatorUndo;
@@ -7039,6 +7289,25 @@ namespace studio {
 				ImGui::SameLine();
 				if (ImGui::Button("Save PXCX with preview") && SavePxcx(state, true))
 					RunAuthoredExports(state, detail::ImageGraphExportEvent::Save);
+			}
+			if (state.ImportedPxcx) {
+				ImGui::InputTextWithHint(
+					"##image-pxcx-append-path",
+					"Path to append",
+					state.PxcxAppendPath,
+					sizeof(state.PxcxAppendPath)
+				);
+				ImGui::InputText(
+					"Append namespace", state.PxcxAppendNamespace, sizeof(state.PxcxAppendNamespace)
+				);
+				ImGui::InputTextWithHint(
+					"Append group",
+					"Root, or source group ID",
+					state.PxcxAppendContext,
+					sizeof(state.PxcxAppendContext)
+				);
+				ImGui::InputScalarN("Append offset", ImGuiDataType_Double, state.PxcxAppendOffset, 2);
+				if (ImGui::Button("Append PXCX")) AppendPxcx(state);
 			}
 			if (!state.PxcxOpenError.empty()) ImGui::TextWrapped("PXCX: %s", state.PxcxOpenError.c_str());
 			if (state.ImportedPxcx.has_value()) {

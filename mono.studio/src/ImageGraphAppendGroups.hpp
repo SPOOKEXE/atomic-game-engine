@@ -10,6 +10,21 @@
 #include <type_traits>
 
 namespace studio::detail {
+	// grug callbacks need a compiler root even when the project has no chosen preview.
+	// this output belongs only to the private callback document.
+	inline void AddImageGraphAppendCallbackOutput(engine::imagegraph::Document &document) {
+		using namespace engine::imagegraph;
+		if (!document.Outputs.empty()) return;
+		for (const auto &node : document.Nodes) {
+			const auto *schema = FindSchema(node.Type);
+			if (!schema) continue;
+			for (const auto &port : schema->Ports)
+				if (port.Direction == PortDirection::Output) {
+					document.Outputs.push_back({"append-callback", node.Id, std::string(port.Id)});
+					return;
+				}
+		}
+	}
 	// grug load only incoming boundaries in source order, then bind the whole merged project.
 	// caller still owns source/cache/history admission and publishes this candidate after those accept.
 	// maximumBytes excludes caller-owned archives and import metadata; grug counts documents and replay here.
@@ -228,6 +243,7 @@ namespace studio::detail {
 			remaining += reservedCopies - *actualCallbacks - *actualMerged;
 			if (PrepareGroupCallbackDocument(callbacks, callbacks, diagnostic, remaining) != Status::Ok)
 				return false;
+			AddImageGraphAppendCallbackOutput(callbacks);
 			const auto opaqueCallbacks = DocumentRetainedPayloadBytes(callbacks);
 			if (!opaqueCallbacks || *opaqueCallbacks >= remaining + *actualCallbacks)
 				return fail(

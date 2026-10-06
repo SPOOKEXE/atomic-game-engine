@@ -1,3 +1,4 @@
+#include "ImageGraphAppendProject.hpp"
 #include "ImageGraphHistoryCanvas.hpp"
 #include "ImageGraphHistorySource.hpp"
 
@@ -5,6 +6,7 @@
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraphio/PxcxAppend.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
+#include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -822,4 +824,278 @@ TEST_CASE(
 	oversized.Text.assign(Limits::MaximumEvaluationBytes + 1, 'x');
 	canvasNode->Widgets.emplace("oversized", std::move(oversized));
 	CHECK_FALSE(studio::detail::ImageGraphHistoryCanvasBytes(graph, ids));
+}
+
+TEST_CASE(
+	"Studio append stages unsaved source edits opaque links and metadata before history",
+	"[studio][source_history][append_project]"
+) {
+	using namespace engine::imagegraphio;
+	const auto baseline = Destination();
+	auto imported = Import(baseline);
+	auto live = imported.Graph;
+	Diagnostic error;
+	REQUIRE(Migrate(live, error) == Status::Ok);
+	live.Nodes.front().Values.front().Data = 21.;
+	std::vector<std::byte> savedBytes;
+	REQUIRE(WritePxcxProjection(imported, live, {}, savedBytes, error));
+	PxcxArchive destination;
+	std::string failure;
+	REQUIRE(engine::bake::ReadPxcx(savedBytes, destination, failure));
+	live.Outputs = {{"preview", "number", "number"}};
+	const auto incoming = Archive(
+		R"JSON({"metadata":{"description":"incoming manager"},"nodes":[{"id":"root","type":"Node_Collection","x":10,"y":20,"inputs":[],"attri":{"path":"old.pxcx","custom_input_list":[],"custom_output_list":[]}},{"id":"nested","type":"Node_Collection","group":"root","x":3,"y":4,"inputs":[],"attri":{"custom_input_list":[],"custom_output_list":[]}},{"id":"number","type":"Node_Number_Simple","x":0,"y":0,"inputs":[{"r":{"d":9}}]},{"id":"foreign","type":"Vendor_Future","x":0,"y":0,"inputs":[{"from_node":"number","from_index":0,"r":{"d":9}}]}]})JSON"
+	);
+	std::vector<PxcxCollectionMetadata> managers;
+	REQUIRE(PreparePxcxCollectionMetadata(baseline, managers, error));
+	const auto beforeManagers =
+		std::make_shared<const std::vector<PxcxCollectionMetadata>>(std::move(managers));
+	studio::ImageGraphCanvasIds ids;
+	ids.NextNodeId = 81;
+	ids.IssuedNodeIds.insert("retired-node");
+	studio::ImageGraphGroupHost host;
+	PxcxAppendOptions options;
+	options.Namespace = "joined";
+	options.Offset = {7, -2};
+	studio::detail::ImageGraphAppendProject candidate;
+	const bool prepared = candidate.Prepare(
+		baseline,
+		destination,
+		incoming,
+		options,
+		"incoming.pxcx",
+		live,
+		host,
+		beforeManagers,
+		ids,
+		2,
+		{},
+		error
+	);
+	INFO(error.Message);
+	REQUIRE(prepared);
+	const auto savedNumber = std::find_if(
+		candidate.Groups.Authored.Nodes.begin(), candidate.Groups.Authored.Nodes.end(), [](const auto &node) {
+			return node.Id == "number";
+		}
+	);
+	REQUIRE(savedNumber != candidate.Groups.Authored.Nodes.end());
+	CHECK(savedNumber->Values.front().Data == Value{21.});
+	CHECK(candidate.Groups.Authored.Outputs == live.Outputs);
+	CHECK(candidate.Observation.Inputs == candidate.Groups.Authored);
+	CHECK(candidate.Observation.Ready);
+	CHECK(candidate.Ids.NextNodeId >= 81);
+	CHECK(candidate.Ids.IssuedNodeIds.contains("retired-node"));
+	CHECK(candidate.Graph.Links().size() == candidate.Groups.Authored.Links.size());
+	CHECK(candidate.Selection.size() == 3);
+	REQUIRE(candidate.Collections);
+	REQUIRE(candidate.Collections->size() == 2);
+	CHECK(candidate.Collections->front().NodeId == "joined/root");
+	CHECK(candidate.Collections->front().MetadataJson.find("incoming manager") != std::string::npos);
+	CHECK(candidate.Collections->back().NodeId == "joined/nested");
+	CHECK(candidate.Collections->back().MetadataJson.find("incoming manager") == std::string::npos);
+	CHECK(candidate.Source.GraphJson.find("old.pxcx") != std::string::npos);
+	CHECK(candidate.Source.GraphJson.find("incoming.pxcx") == std::string::npos);
+	REQUIRE(candidate.BeforeSource);
+	CHECK(*candidate.BeforeSource == baseline.OriginalBytes);
+	REQUIRE(candidate.AfterSource);
+	CHECK(*candidate.AfterSource == candidate.Source.OriginalBytes);
+	CapturedFeedbackHost feedback;
+	History refused(8, 1);
+	CHECK_FALSE(candidate.Admit(live, refused, feedback, beforeManagers, error));
+	CHECK_FALSE(refused.CanUndo());
+	History history;
+	REQUIRE(candidate.Admit(live, history, feedback, beforeManagers, error));
+	CHECK(history.CurrentCollections() == candidate.Collections);
+	auto current = candidate.Groups.Authored;
+	REQUIRE(history.Undo(current));
+	CHECK(current == live);
+	CHECK(*history.CurrentSourceBytes() == baseline.OriginalBytes);
+	CHECK(history.CurrentCollections() == beforeManagers);
+	REQUIRE(history.Redo(current));
+	CHECK(current == candidate.Groups.Authored);
+	CHECK(history.CurrentCollections() == candidate.Collections);
+	// grug a second append keeps earlier managers and source history.
+	PxcxAppendOptions next;
+	next.Namespace = "second";
+	studio::detail::ImageGraphAppendProject second;
+	REQUIRE(second.Prepare(
+		candidate.Source,
+		candidate.Source,
+		Incoming(),
+		next,
+		"other.pxcx",
+		current,
+		candidate.Groups.Host,
+		candidate.Collections,
+		candidate.Ids,
+		3,
+		{},
+		error
+	));
+	REQUIRE(second.Collections);
+	CHECK(*second.Collections == *candidate.Collections);
+	REQUIRE(second.Admit(current, history, feedback, candidate.Collections, error));
+	CHECK(history.CurrentCollections() == second.Collections);
+	current = second.Groups.Authored;
+	REQUIRE(history.Undo(current));
+	CHECK(current == candidate.Groups.Authored);
+	CHECK(history.CurrentCollections() == candidate.Collections);
+}
+
+TEST_CASE(
+	"Studio append refuses malformed source and low allowance without replacing candidate",
+	"[studio][source_history][append_project][atomic]"
+) {
+	const auto baseline = Destination();
+	const auto incoming = Incoming();
+	const auto live = Import(baseline).Graph;
+	studio::ImageGraphGroupHost host;
+	studio::ImageGraphCanvasIds ids;
+	PxcxAppendOptions options;
+	options.Namespace = "check";
+	Diagnostic error;
+	studio::detail::ImageGraphAppendProject candidate;
+	candidate.Source = baseline;
+	candidate.Projection = live;
+	candidate.Selection = {17};
+	const auto beforeBytes = candidate.Source.OriginalBytes;
+	CHECK_FALSE(
+		candidate.Prepare(baseline, baseline, incoming, options, {}, live, host, {}, ids, 2, {}, error, 1)
+	);
+	CHECK(candidate.Source.OriginalBytes == beforeBytes);
+	CHECK(candidate.Projection == live);
+	CHECK(candidate.Selection == std::vector<nodegraph::NodeId>{17});
+	CHECK(candidate.Remaining == 0);
+	auto malformed = incoming;
+	malformed.GraphJson = "{}";
+	CHECK_FALSE(
+		candidate.Prepare(baseline, baseline, malformed, options, {}, live, host, {}, ids, 2, {}, error)
+	);
+	CHECK(candidate.Source.OriginalBytes == beforeBytes);
+	CHECK(candidate.Projection == live);
+	CHECK(candidate.Selection == std::vector<nodegraph::NodeId>{17});
+}
+
+TEST_CASE(
+	"Studio single root Collection append retains checked path and nested default managers",
+	"[studio][source_history][append_project]"
+) {
+	const auto destination = Destination();
+	const auto incoming = Archive(
+		R"JSON({"metadata":{"description":"file manager"},"nodes":[{"id":"root","type":"Node_Collection","x":0,"y":0,"inputs":[],"attri":{"path":"old.pxcx","custom_input_list":[],"custom_output_list":[]}},{"id":"nested","type":"Node_Collection","group":"root","x":0,"y":0,"inputs":[],"attri":{"custom_input_list":[],"custom_output_list":[]}}]})JSON"
+	);
+	const auto live = Import(destination).Graph;
+	studio::ImageGraphGroupHost host;
+	studio::ImageGraphCanvasIds ids;
+	PxcxAppendOptions options;
+	options.Namespace = "single";
+	Diagnostic error;
+	studio::detail::ImageGraphAppendProject candidate;
+	const bool prepared = candidate.Prepare(
+		destination, destination, incoming, options, "incoming.pxcx", live, host, {}, ids, 2, {}, error
+	);
+	INFO(error.Message);
+	REQUIRE(prepared);
+	CHECK(candidate.Source.GraphJson.find("incoming.pxcx") != std::string::npos);
+	REQUIRE(candidate.Collections);
+	REQUIRE(candidate.Collections->size() == 2);
+	CHECK(candidate.Collections->front().MetadataJson.find("file manager") != std::string::npos);
+	CHECK(candidate.Collections->back().MetadataJson.find("file manager") == std::string::npos);
+	CHECK(candidate.Selection.size() == 1);
+	CHECK(candidate.Projection == Import(candidate.Source).Graph);
+}
+
+TEST_CASE(
+	"Studio append admits native Group load callbacks with the source archive",
+	"[studio][source_history][append_project][group]"
+) {
+	const auto destination = Destination();
+	const auto incoming = Archive(
+		R"JSON({"metadata":{"description":"group manager"},"nodes":[{"id":"group","type":"Node_Group","x":0,"y":0,"inputs":[{"r":{"d":["kept",4,true]}}],"attri":{"custom_input_list":["input"],"custom_output_list":["output"],"color_depth":1,"interpolate":0,"oversample":0}},{"id":"input","type":"Node_Group_Input","group":"group","x":0,"y":0,"inputs":[{"r":{"d":0}},{"r":{"d":[0,10]}},{"r":{"d":11}},{},{},{},{},{},{},{},{},{},{},{},{},{}]},{"id":"output","type":"Node_Group_Output","group":"group","x":0,"y":0,"inputs":[{"from_node":"input","from_index":0,"from_tag":0}]}]})JSON"
+	);
+	const auto live = Import(destination).Graph;
+	studio::ImageGraphGroupHost host;
+	studio::ImageGraphCanvasIds ids;
+	PxcxAppendOptions options;
+	options.Namespace = "native";
+	Diagnostic error;
+	studio::detail::ImageGraphAppendProject candidate;
+	const bool prepared =
+		candidate.Prepare(destination, destination, incoming, options, {}, live, host, {}, ids, 2, {}, error);
+	INFO(error.Message);
+	REQUIRE(prepared);
+	REQUIRE(candidate.Groups.Host.Replay.Find("native/input"));
+	CHECK(candidate.Groups.Host.Replay.InstancesBound());
+	CHECK(candidate.Groups.Host.Revision == 2);
+	Document saved;
+	REQUIRE(candidate.Groups.Host.ProjectForSave(candidate.Groups.Authored, 2, saved, error));
+	std::vector<std::byte> written;
+	INFO("saved constructor document: " << Text(saved));
+	INFO("imported source document: " << Text(Import(candidate.Source).Graph));
+	const bool serializable =
+		engine::imagegraphio::WritePxcxProjection(Import(candidate.Source), saved, {}, written, error);
+	INFO(error.Message);
+	REQUIRE(serializable);
+	PxcxArchive reopened;
+	std::string failure;
+	REQUIRE(engine::bake::ReadPxcx(written, reopened, failure));
+	CHECK(Import(reopened).Graph.Groups.size() == 1);
+}
+
+TEST_CASE(
+	"Studio append source writer reserves scratch before preserving or replacing destination",
+	"[studio][source_history][append_project][atomic]"
+) {
+	const auto source = Destination();
+	auto imported = Import(source);
+	auto saved = imported.Graph;
+	Diagnostic error;
+	REQUIRE(Migrate(saved, error) == Status::Ok);
+	saved.Nodes.front().Position = {-3, 8};
+	auto destination = source;
+	CHECK_FALSE(
+		studio::detail::PrepareImageGraphAppendDestination(imported, saved, {}, destination, error, 1)
+	);
+	CHECK(error.Code == Status::LimitExceeded);
+	CHECK(destination.OriginalBytes == source.OriginalBytes);
+	REQUIRE(studio::detail::PrepareImageGraphAppendDestination(imported, saved, {}, destination, error));
+	CHECK(destination.OriginalBytes != source.OriginalBytes);
+	CHECK(Import(destination).Graph.Nodes.front().Position == saved.Nodes.front().Position);
+	imported.Source.GraphJson.insert(0, " ");
+	const auto prior = destination.OriginalBytes;
+	CHECK_FALSE(studio::detail::PrepareImageGraphAppendDestination(imported, saved, {}, destination, error));
+	CHECK(destination.OriginalBytes == prior);
+}
+
+TEST_CASE(
+	"Studio append callbacks borrow prepared arguments without changing the argument host",
+	"[studio][source_history][append_project][argument]"
+) {
+	Document graph;
+	graph.FormatVersion = 9;
+	graph.Nodes = {
+		{"argument",
+		 "pc.argument",
+		 "",
+		 {},
+		 {{"tag", std::string{"width"}}, {"type", EnumValue{1}}, {"default_value", 3.}}}
+	};
+	graph.Outputs = {{"result", "argument", "value"}};
+	engine::imagegraph::SourceArgumentHost arguments;
+	const std::array<AuthoredValue, 1> values{{{"width", 17.}}};
+	Diagnostic error;
+	REQUIRE(arguments.Prepare(values, Limits::MaximumEvaluationBytes, error) == Status::Ok);
+	const auto held = arguments.RetainedBytes();
+	studio::detail::ImageGraphAppendHost host;
+	host.Arguments = &arguments;
+	Plan plan;
+	REQUIRE(Compile(graph, plan, error) == Status::Ok);
+	EvaluationRequest request;
+	request.HostProvider = &host;
+	EvaluatedValue result;
+	REQUIRE(EvaluateValue(graph, plan, "result", request, result, error) == Status::Ok);
+	CHECK(result.Data == Value{17.});
+	CHECK(arguments.RetainedBytes() == held);
+	CHECK(host.Files.SourceArguments.RetainedBytes() < held);
 }

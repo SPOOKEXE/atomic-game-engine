@@ -1849,6 +1849,10 @@ TEST_CASE(
 		Document projected, restored;
 		REQUIRE(ProjectGroupReplay(document, loaded, 1, projected, diagnostic) == Status::Ok);
 		CHECK(projected.Keyframes == std::vector<Keyframe>{reset});
+		if (animated)
+			CHECK(projected.Junctions.front().Default == document.Junctions.front().Default);
+		else
+			CHECK(projected.Junctions.front().Default == std::optional<Value>{reset.Data});
 		CHECK(projected.Tracks == document.Tracks);
 		CHECK(projected.Nodes.front().SourceAnimatedInputs == document.Nodes.front().SourceAnimatedInputs);
 		CHECK(projected.Nodes.front().SourceStaticInputs == document.Nodes.front().SourceStaticInputs);

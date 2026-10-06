@@ -713,6 +713,78 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"PXC collection metadata defaults cover nested pinned collection types and ignore source metadata",
+	"[imagegraphio][pxcx_append][collection_metadata]"
+) {
+	const std::vector<std::string> types = {
+		"Node_Group",
+		"Node_Collection",
+		"Node_Canvas_Group",
+		"Node_DynaSurf",
+		"Node_Feedback",
+		"Node_Iterate",
+		"Node_Iterate_Each",
+		"Node_Iterate_Filter",
+		"Node_Iterate_Sort",
+		"Node_Iterator",
+		"Node_Pixel_Builder",
+		"Node_Smoke_Group",
+		"Node_Strand_Group",
+		"Node_VFX_Group"
+	};
+	Json nodes = Json::array();
+	for (size_t index = 0; index < types.size(); ++index)
+		nodes.push_back(
+			{{"id", "group-" + std::to_string(index)},
+			 {"type", types[index]},
+			 {"x", 0},
+			 {"y", 0},
+			 {"inputs", Json::array()}}
+		);
+	nodes[0]["attri"] = {{"future_payload", Collection("attri-lookalike")}};
+	nodes.push_back(Collection("nested-collection", "group-1"));
+	Json graph = {
+		{"metadata", {{"description", "root override"}, {"author", "root author"}}},
+		{"nodes", std::move(nodes)},
+		{"future_payload", {{"nodes", Json::array({Collection("payload-lookalike")})}}}
+	};
+	auto archive = Archive(graph.dump());
+	std::vector<PxcxCollectionMetadata> result;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(PreparePxcxCollectionMetadata(archive, result, diagnostic));
+	INFO(diagnostic.Message);
+	REQUIRE(result.size() == types.size() + 1);
+	for (size_t index = 0; index < result.size(); ++index) {
+		const auto metadata = Json::parse(result[index].MetadataJson);
+		CHECK(metadata["description"] == "");
+		CHECK(metadata["author"] == "");
+		CHECK(metadata["version"] == 121092);
+	}
+	CHECK(result.back().NodeId == "nested-collection");
+	CHECK(std::none_of(result.begin(), result.end(), [](const auto &entry) {
+		return entry.NodeId == "attri-lookalike" || entry.NodeId == "payload-lookalike";
+	}));
+}
+
+TEST_CASE(
+	"PXC collection metadata refuses untracked archives and low budgets atomically",
+	"[imagegraphio][pxcx_append][collection_metadata][atomic]"
+) {
+	auto archive = Archive(Json{{"nodes", Json::array({Collection("only")})}}.dump());
+	std::vector<PxcxCollectionMetadata> result{{"prior", "unchanged"}};
+	const auto prior = result;
+	engine::imagegraph::Diagnostic diagnostic;
+	archive.GraphJson.insert(0, " ");
+	CHECK_FALSE(PreparePxcxCollectionMetadata(archive, result, diagnostic));
+	CHECK(diagnostic.Code == engine::imagegraph::Status::InvalidValue);
+	CHECK(result == prior);
+	archive.GraphJson.erase(0, 1);
+	CHECK_FALSE(PreparePxcxCollectionMetadata(archive, result, diagnostic, 1));
+	CHECK(diagnostic.Code == engine::imagegraph::Status::LimitExceeded);
+	CHECK(result == prior);
+}
+
+TEST_CASE(
 	"PXC post-load metadata, budget, and stale mapping refusals preserve the prior result",
 	"[imagegraphio][pxcx_append][post_load][atomic]"
 ) {

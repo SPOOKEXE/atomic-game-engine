@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <cmath>
 #include <nlohmann/json.hpp>
@@ -2246,6 +2247,7 @@ namespace engine::imagegraphio {
 		}
 		if (authored.Nodes.size() > Limits::MaximumNodes || authored.Links.size() > Limits::MaximumLinks ||
 			authored.Keyframes.size() > Limits::MaximumKeyframes ||
+			authored.Tracks.size() > Limits::MaximumTracks ||
 			authored.Groups.size() > Limits::MaximumGroups ||
 			authored.Junctions.size() > Limits::MaximumJunctions)
 			return Reject(diagnostic, "PXC authored projection exceeds its structural limits");
@@ -4147,6 +4149,32 @@ namespace engine::imagegraphio {
 			}
 		detail::RebaseInputProvenance(desired, projected.Graph);
 		detail::RebaseKeyProvenance(desired, projected.Graph);
+		// grug compares track identities and policies. source node order need not match callback order.
+		const auto canonicalizeTracks = [&](Document &comparison) {
+			const size_t count = comparison.Tracks.size();
+			if (count > Limits::MaximumTracks)
+				return Reject(diagnostic, "PXC track comparison exceeds its count limit");
+			size_t identityBytes = 1;
+			for (const auto &track : comparison.Tracks) {
+				if (track.NodeId.size() > Limits::MaximumTextBytes ||
+					track.Port.size() > Limits::MaximumTextBytes)
+					return Reject(diagnostic, "PXC track comparison exceeds its text limit");
+				identityBytes = std::max(identityBytes, track.NodeId.size() + track.Port.size() + 1);
+			}
+			const uint64_t comparisons = uint64_t(count) * (std::bit_width(count) + 1) * 4;
+			if (comparisons > compactWorkRemaining / identityBytes)
+				return Reject(diagnostic, "PXC track comparison exceeds its transaction work limit");
+			compactWorkRemaining -= comparisons * identityBytes;
+			std::sort(comparison.Tracks.begin(), comparison.Tracks.end(), [](const auto &a, const auto &b) {
+				return std::tie(a.NodeId, a.Port) < std::tie(b.NodeId, b.Port);
+			});
+			for (size_t index = 1; index < count; ++index)
+				if (comparison.Tracks[index - 1].NodeId == comparison.Tracks[index].NodeId &&
+					comparison.Tracks[index - 1].Port == comparison.Tracks[index].Port)
+					return Reject(diagnostic, "PXC track comparison has a duplicate identity");
+			return true;
+		};
+		if (!canonicalizeTracks(desired) || !canonicalizeTracks(projected.Graph)) return false;
 		detail::CanonicalizeKeyOrder(desired);
 		detail::CanonicalizeKeyOrder(projected.Graph);
 		if (!ReconstructsSourceAnimators(authored, projected.Graph, diagnostic)) return false;
@@ -4186,6 +4214,10 @@ namespace engine::imagegraphio {
 					field = "tracks";
 				else if (projected.Graph.Links != desired.Links)
 					field = "links";
+				else if (projected.Graph.Groups != desired.Groups)
+					field = "groups";
+				else if (projected.Graph.Junctions != desired.Junctions)
+					field = "boundary junctions";
 				else if (projected.Graph.Project != desired.Project)
 					field = "project settings";
 			}
@@ -4204,6 +4236,7 @@ namespace engine::imagegraphio {
 		detail::RebaseInputProvenance(unchanged, projected.Graph);
 		detail::RebaseKeyProvenance(unchanged, projected.Graph);
 		detail::CanonicalizeKeyOrder(unchanged);
+		if (!canonicalizeTracks(unchanged)) return false;
 		out = desired == unchanged && !regionRecordsChanged ? imported.Source.OriginalBytes
 															: std::move(written);
 		return true;
