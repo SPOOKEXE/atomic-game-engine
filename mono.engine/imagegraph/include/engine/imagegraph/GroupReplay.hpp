@@ -132,6 +132,23 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
 	);
+	struct SourceAxisInitialization {
+		std::string_view NodeId;
+		std::string_view Port;
+	};
+	// explicit local getAnimators events create frame-zero scalar storage from constructor defaults.
+	// combined aliases and local separation flags stay unchanged; warm arrays retain their contents.
+	// existing cold descendants stay cold; new bindings can share the created local array.
+	// failed batches preserve both states, including an aliased result.
+	Status InitializeSourceVec2Axes(
+		const Document &document,
+		std::span<const SourceAxisInitialization> targets,
+		const GroupReplayState &previous,
+		uint64_t authoringRevision,
+		GroupReplayState &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
 	// Rebind unchanged callback effects after an unrelated authored edit. This
 	// performs no refresh and removes effects owned by deleted boundary nodes.
 	// The byte bound includes the borrowed document and old/new owner overlap.

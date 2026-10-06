@@ -60,7 +60,8 @@ namespace engine::imagegraph::detail {
 					return std::isfinite(value.Data.X) && std::isfinite(value.Data.Y)
 							   ? std::optional<Vector2>{value.Data}
 							   : std::nullopt;
-		// parse only represented constant pairs; runtime constructor expressions remain unresolved.
+		// preview defaults can substitute project dimensions; they are not constructor provenance.
+		if (!input->SourceConstructorConstant) return std::nullopt;
 		auto text = input->Default;
 		if (!text.starts_with("v ")) return std::nullopt;
 		text.remove_prefix(2);

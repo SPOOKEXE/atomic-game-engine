@@ -5,6 +5,7 @@ mono.engine/imagegraph/src/SourceCatalogue.inc. Each record is one tab-separated
 
     N <type> <source node> <title> <family> <source file>
     I <id> <name> <source index> <source kind> <value type> <default or empty> <choices joined by ';'>
+    V <I|T> <id> <constructor default is independent of project surface: 0|1>
 
 A Dimension or unit-bearing input is followed by its "<id>_unit" enum. A mappable input is followed by its "<id>_mapped" toggle, which the source keeps as an input attribute, and
 for setMappable numeric inputs its "<id>_map_range" [low, high] pair. A curvable input is followed by its
@@ -387,6 +388,37 @@ def default_text(kind, value_type, raw, extra, array_element_type=None):
     return None
 
 
+SURFACE_DEFAULT_NAMES = {"PROJ_SURF", "DEF_SURF", "PROJ_SURF_W", "PROJ_SURF_H", "DEF_SURF_W", "DEF_SURF_H"}
+SOURCE_VEC2_KINDS = {"Vec2", "IVec2", "Dimension", "Range"}
+
+
+def constructor_default_is_surface_independent(raw, depth=0, visiting=frozenset()):
+    """Keep expanded preview values separate from source constructor provenance."""
+    if depth > 6:
+        return False
+    for identifier in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", raw):
+        if identifier in SURFACE_DEFAULT_NAMES:
+            return False
+        if identifier not in MACROS:
+            continue
+        if identifier in visiting:
+            return False
+        if not constructor_default_is_surface_independent(MACROS[identifier], depth + 1, visiting | {identifier}):
+            return False
+    return True
+
+
+def source_vec2_provenance_record(record_kind, identifier, item, value_type, default):
+    if item["kind"] not in SOURCE_VEC2_KINDS or value_type != "vector2" or not re.fullmatch(r"\d+", item["index"]):
+        return None
+    raw = item["default"].strip()
+    independent = default is not None and default.startswith("v ") and constructor_default_is_surface_independent(raw)
+    # Dimension's omitted constructor default is source-defined as [1, 1].
+    if item["kind"] == "Dimension" and not raw and default == "v 1 1":
+        independent = True
+    return "\t".join(["V", record_kind, identifier, "1" if independent else "0"])
+
+
 def refine(kind, value_type, raw):
     """Numeric inputs with array defaults are vectors or arrays in the source."""
     if value_type in ("vector2", "vector3", "vector4") and (raw.strip() == "[]" or (kind == "Vector" and not raw.strip())):
@@ -615,6 +647,9 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
         if labels and not labels.replace(";", ""):
             labels = ""
         lines.append("\t".join(["I", identifier, clean(item.get("display_name", item["name"])), index, item["kind"], value_type, default or "", labels]))
+        provenance = source_vec2_provenance_record("I", identifier, item, value_type, default)
+        if provenance is not None:
+            lines.append(provenance)
         source_classifications[(native, "I", identifier)] = item.get("source_array_classification")
         array_depth = item.get("array_depth", 0)
         if array_depth is None or array_depth != 0:
@@ -704,6 +739,9 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
             if labels and not labels.replace(";", ""):
                 labels = ""
             lines.append("\t".join(["T", identifier, clean(item.get("display_name", item["name"])), index, item["kind"], value_type, default or "", labels]))
+            provenance = source_vec2_provenance_record("T", identifier, item, value_type, default)
+            if provenance is not None:
+                lines.append(provenance)
             source_classifications[(native, "T", identifier)] = item.get("source_array_classification")
             array_depth = item.get("array_depth", 0)
             if array_depth is None or array_depth != 0:

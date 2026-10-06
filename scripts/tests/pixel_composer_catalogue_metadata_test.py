@@ -13,7 +13,7 @@ ENUM_VALUES = REPOSITORY / "scripts/pixel-composer/enum_values.py"
 
 
 class PixelComposerCatalogueMetadataTest(unittest.TestCase):
-    def run_generator(self, root: Path, extra_nodes: dict | None = None) -> list[str]:
+    def run_generator(self, root: Path, extra_nodes: dict | None = None, macros: dict | None = None) -> list[str]:
         script = root / "scripts/pixel-composer/generate-catalogue.py"
         script.parent.mkdir(parents=True)
         shutil.copy2(GENERATOR, script)
@@ -101,7 +101,7 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     },
                 }
             },
-            "macros": {},
+            "macros": macros or {},
             "enums": {},
             "enum_values": {},
         }
@@ -467,6 +467,45 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
         self.assertIn("I\tattribute_wavetable\tattribute wavetable\t-1\tAttributeArray\tarray\ta scalar 3 d 0 d 1 d 2\t", lines)
         self.assertIn("A\tI\tattribute_wavetable\t1", lines)
         self.assertFalse(any("Node_VerletSim_Simple" in line for line in lines))
+
+    def test_vec2_constructor_provenance_tracks_surface_dependencies(self):
+        node = {
+            "display_name": "Vector Defaults", "family": "values",
+            "file": "scripts/node_vector_defaults/node_vector_defaults.gml", "base": "Node",
+            "inputs": [
+                {"index": "0", "kind": "Vec2", "name": "Constant", "default": "[2,3]", "extra": []},
+                {"index": "1", "kind": "Vec2", "name": "Fixed Macro", "default": "UNIT_PAIR", "extra": []},
+                {"index": "2", "kind": "Vec2", "name": "Project Surface", "default": "PROJ_SURF", "extra": []},
+                {"index": "3", "kind": "Vec2", "name": "Nested Surface", "default": "NESTED_SURFACE", "extra": []},
+                {"index": "4", "kind": "Dimension", "name": "Default Dimension", "default": "", "extra": []},
+                {"index": "-1", "kind": "Vec2", "name": "Synthetic", "default": "[2,3]", "extra": []},
+            ],
+            "outputs": [],
+            "dynamic": {
+                "fixed_length": 6, "data_length": 1,
+                "template": [{"index": "5", "kind": "Range", "name": "Template", "default": "UNIT_PAIR", "extra": []}],
+            },
+        }
+        macros = {
+            "UNIT_PAIR": "[1,1]",
+            "NESTED_SURFACE": "SURFACE_ALIAS",
+            "SURFACE_ALIAS": "[PROJ_SURF_W,PROJ_SURF_H]",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            lines = self.run_generator(Path(temporary), {"Node_Vector_Defaults": node}, macros)
+
+        self.assertIn("I\tconstant\tConstant\t0\tVec2\tvector2\tv 2 3\t", lines)
+        self.assertIn("V\tI\tconstant\t1", lines)
+        self.assertIn("I\tfixed_macro\tFixed Macro\t1\tVec2\tvector2\tv 1 1\t", lines)
+        self.assertIn("V\tI\tfixed_macro\t1", lines)
+        self.assertIn("I\tproject_surface\tProject Surface\t2\tVec2\tvector2\tv 32 32\t", lines)
+        self.assertIn("V\tI\tproject_surface\t0", lines)
+        self.assertIn("I\tnested_surface\tNested Surface\t3\tVec2\tvector2\tv 32 32\t", lines)
+        self.assertIn("V\tI\tnested_surface\t0", lines)
+        self.assertIn("I\tdefault_dimension\tDefault Dimension\t4\tDimension\tvector2\tv 1 1\t", lines)
+        self.assertIn("V\tI\tdefault_dimension\t1", lines)
+        self.assertNotIn("V\tI\tsynthetic\t1", lines)
+        self.assertIn("V\tT\ttemplate\t1", lines)
 
     def test_bounded_integer_array_rejects_values_outside_its_source_enum(self):
         node = {

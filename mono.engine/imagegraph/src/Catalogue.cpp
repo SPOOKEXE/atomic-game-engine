@@ -97,6 +97,12 @@ namespace engine::imagegraph {
 					storage.Nodes.back().Template.push_back(
 						{fields[1], fields[2], RecordIndex(fields[3]), fields[4], *type, fields[6], fields[7]}
 					);
+				} else if (fields[0] == "V" && fields.size() == 4 && !storage.Nodes.empty() &&
+						   (fields[1] == "I" || fields[1] == "T")) {
+					auto &inputs =
+						fields[1] == "T" ? storage.Nodes.back().Template : storage.Nodes.back().Inputs;
+					for (CatalogueInput &input : inputs)
+						if (input.Id == fields[2]) input.SourceConstructorConstant = fields[3] == "1";
 				} else if (fields[0] == "S" && fields.size() == 4 && !storage.Nodes.empty() &&
 						   (fields[1] == "I" || fields[1] == "T")) {
 					auto &inputs =

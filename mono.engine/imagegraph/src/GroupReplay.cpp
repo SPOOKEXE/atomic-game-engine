@@ -3,6 +3,7 @@
 #include "GroupReplayInternal.hpp"
 #include "SourceAxisStorage.hpp"
 #include "SourceLuaSockets.hpp"
+#include "SourceVec2Defaults.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/FrameTime.hpp>
@@ -2118,17 +2119,23 @@ namespace engine::imagegraph {
 							total += axis.Keys.size();
 					}
 			for (const auto &overlay : owner.SharedSubtypes) {
-				if (!admit(owner.DetachedAnimators.size())) return false;
-				if (overlay.SeparatedVec2 && std::any_of(
-												 owner.DetachedAnimators.begin(),
-												 owner.DetachedAnimators.end(),
-												 [&](const auto &animator) {
-													 return animator.OwnerId == overlay.NodeId &&
-															animator.Id == overlay.Port;
-												 }
-											 ))
-					for (const auto &axis : overlay.SeparatedVec2->Axes)
-						total += axis.Keys.size();
+				if (!overlay.SeparatedVec2) continue;
+				if (!admit(document.Nodes.size())) return false;
+				const auto node =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
+						return item.Id == overlay.NodeId;
+					});
+				if (node != document.Nodes.end()) {
+					if (!admit(
+							node->SourceSeparatedVec2Animators
+								? node->SourceSeparatedVec2Animators->Inputs.size()
+								: 0
+						))
+						return false;
+					if (FindSeparatedVec2(*node, overlay.Port)) continue;
+				}
+				for (const auto &axis : overlay.SeparatedVec2->Axes)
+					total += axis.Keys.size();
 			}
 			const auto time = GetFrameTime(event.At);
 			for (const auto &axis : axes->Axes) {
@@ -2264,6 +2271,311 @@ namespace engine::imagegraph {
 	} // namespace detail
 } // namespace engine::imagegraph
 namespace engine::imagegraph {
+	Status InitializeSourceVec2Axes(
+		const Document &document,
+		std::span<const SourceAxisInitialization> targets,
+		const GroupReplayState &previous,
+		uint64_t revision,
+		GroupReplayState &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraph.source_axis_initialize");
+		const auto fail =
+			[&](Status code, std::string_view message, std::string_view id = {}, std::string_view port = {}) {
+				diagnostic = {code, std::string(id), std::string(port), std::string(message)};
+				return code;
+			};
+		if (document.FormatVersion < 9 || targets.size() > Limits::MaximumArrayElements)
+			return fail(Status::LimitExceeded, "source axis initialization format or count exceeds bounds");
+		if (!previous.InstancesBound() || previous.AuthoringRevision() != revision)
+			return fail(
+				Status::InvalidValue, "source axis initialization requires bound replay at this revision"
+			);
+		const auto available = AdmitGroupReplayDocument(document, previous, result, maximumBytes, diagnostic);
+		if (!available) return diagnostic.Code;
+		uint64_t work = 0;
+		const auto admit = [&](uint64_t visits) { return detail::AdmitSourceAxisWork(work, visits); };
+		struct Creation {
+			Vector2 Default;
+			size_t Binding = SIZE_MAX;
+			bool Separated = false;
+			bool Animated = false;
+			bool Needed = false;
+		};
+		std::array<Creation, Limits::MaximumArrayElements> creations{};
+		size_t needed = 0;
+		for (size_t index = 0; index < targets.size(); ++index) {
+			const auto &target = targets[index];
+			if (target.NodeId.empty() || target.Port.empty() ||
+				target.NodeId.size() > Limits::MaximumTextBytes ||
+				target.Port.size() > Limits::MaximumTextBytes)
+				return fail(Status::LimitExceeded, "source axis initialization names exceed bounds");
+			if (!admit(
+					index + document.Nodes.size() + previous.Bindings().size() +
+					previous.SharedSubtypes().size()
+				))
+				return fail(Status::LimitExceeded, "source axis initialization batch exceeds work bounds");
+			for (size_t prior = 0; prior < index; ++prior)
+				if (targets[prior].NodeId == target.NodeId && targets[prior].Port == target.Port)
+					return fail(
+						Status::DuplicateId,
+						"source axis initialization repeats a property",
+						target.NodeId,
+						target.Port
+					);
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
+					return item.Id == target.NodeId;
+				});
+			if (node == document.Nodes.end())
+				return fail(
+					Status::UnknownNode, "source axis property is absent", target.NodeId, target.Port
+				);
+			if (!admit(
+					2 * node->DynamicInputs.size() + node->SourceAnimatedInputs.size() +
+					node->SourceStaticInputs.size() +
+					(node->SourceVec2Defaults ? node->SourceVec2Defaults->Inputs.size() : 0) +
+					(node->SourceSeparatedVec2Animators ? node->SourceSeparatedVec2Animators->Inputs.size()
+														: 0)
+				))
+				return fail(Status::LimitExceeded, "source axis constructor lookup exceeds work bounds");
+			if (!detail::SourceSeparatedVec2Input(*node, target.Port))
+				return fail(
+					Status::UnknownPort,
+					"source axis initialization needs a two-axis property",
+					target.NodeId,
+					target.Port
+				);
+			const auto *binding = previous.Binding(target.NodeId, target.Port);
+			if (!node->InstanceBase.empty() && !binding)
+				return fail(
+					Status::InvalidGroup,
+					"source axis instance has no retained binding",
+					target.NodeId,
+					target.Port
+				);
+			if (binding && binding->Axes.Storage == GroupAxisStorage::None)
+				return fail(
+					Status::UnsupportedExecution,
+					"source axis initialization needs captured array identity",
+					target.NodeId,
+					target.Port
+				);
+			const auto *localOverlay = previous.SharedSubtype(target.NodeId, target.Port);
+			const auto *local = localOverlay && localOverlay->SeparatedVec2
+									? &*localOverlay->SeparatedVec2
+									: detail::FindSeparatedVec2(*node, target.Port);
+			if (binding && binding->Axes.Storage != GroupAxisStorage::Uninitialized) {
+				if (!admit(document.Nodes.size() + previous.SharedSubtypes().size()))
+					return fail(Status::LimitExceeded, "source warm axis lookup exceeds work bounds");
+				const auto physical =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
+						return item.Id == binding->Axes.OwnerId;
+					});
+				const auto *overlay = previous.SharedSubtype(binding->Axes.OwnerId, binding->Axes.Port);
+				if (physical == document.Nodes.end())
+					return fail(
+						Status::UnknownNode, "source warm scalar owner is absent", target.NodeId, target.Port
+					);
+				if (!admit(
+						physical->SourceSeparatedVec2Animators
+							? physical->SourceSeparatedVec2Animators->Inputs.size()
+							: 0
+					))
+					return fail(Status::LimitExceeded, "source warm axis lookup exceeds work bounds");
+				const auto *axes = overlay && overlay->SeparatedVec2
+									   ? &*overlay->SeparatedVec2
+									   : detail::FindSeparatedVec2(*physical, binding->Axes.Port);
+				if (axes && !admit(axes->Axes[0].Keys.size() + axes->Axes[1].Keys.size()))
+					return fail(Status::LimitExceeded, "source warm axis validation exceeds work bounds");
+				if (!axes || !detail::SeparatedAnimatorBytes(*axes, false))
+					return fail(
+						Status::UnsupportedExecution,
+						"source warm scalar storage is absent",
+						target.NodeId,
+						target.Port
+					);
+				continue;
+			}
+			if (!binding && local) continue;
+			if (binding && (binding->Axes.OwnerId != node->Id || binding->Axes.Port != target.Port ||
+							binding->Axes.InstanceBase != node->InstanceBase))
+				return fail(
+					Status::InvalidGroup,
+					"source cold scalar identity differs from its local property",
+					target.NodeId,
+					target.Port
+				);
+			if (binding && localOverlay && localOverlay->SeparatedVec2)
+				return fail(
+					Status::InvalidValue,
+					"source cold scalar identity already has retained storage",
+					target.NodeId,
+					target.Port
+				);
+			const auto defaults = detail::SourceVec2ConstructorDefault(*node, target.Port);
+			if (!defaults)
+				return fail(
+					Status::UnsupportedExecution,
+					"source axis constructor default is not represented",
+					target.NodeId,
+					target.Port
+				);
+			creations[index] = {
+				*defaults,
+				binding ? size_t(binding - previous.Bindings().data()) : SIZE_MAX,
+				local && local->Separated,
+				std::find(
+					node->SourceAnimatedInputs.begin(), node->SourceAnimatedInputs.end(), target.Port
+				) != node->SourceAnimatedInputs.end(),
+				true
+			};
+			++needed;
+		}
+		// count the effective scalar storage, including local overlays with no authored array.
+		size_t keys = 0;
+		for (const auto &key : document.Keyframes) {
+			if (!admit(
+					1 + previous.SharedSubtypes().size() + previous.Entries().size() +
+					previous.Bindings().size()
+				))
+				return fail(Status::LimitExceeded, "source combined key scan exceeds work bounds");
+			const auto *overlay = previous.SharedSubtype(key.NodeId, key.Port);
+			bool replaced = overlay && (overlay->Fixed || !overlay->Keys.empty());
+			const auto *entry = previous.Find(key.NodeId);
+			if (entry && key.Port == "parent_value")
+				replaced |= entry->ParentReset.has_value() || !entry->ParentKeys.empty();
+			if (entry && key.Port == "subtype" && !previous.Binding(key.NodeId))
+				replaced |= entry->SubtypeStatic.has_value() || !entry->SubtypeKeys.empty();
+			if (!replaced) ++keys;
+		}
+		const auto addCombinedKeys = [&](size_t count) {
+			if (count > Limits::MaximumKeyframes - keys) return false;
+			keys += count;
+			return true;
+		};
+		for (const auto &overlay : previous.SharedSubtypes())
+			if (!admit(1) || !addCombinedKeys(overlay.Keys.size()))
+				return fail(Status::LimitExceeded, "source retained combined keys exceed bounds");
+		for (const auto &entry : previous.Entries()) {
+			if (!admit(1 + previous.Bindings().size()) || !addCombinedKeys(entry.ParentKeys.size()) ||
+				(!previous.Binding(entry.NodeId) && !addCombinedKeys(entry.SubtypeKeys.size())))
+				return fail(Status::LimitExceeded, "source retained boundary keys exceed bounds");
+		}
+		const auto addKeys = [&](const SourceSeparatedVec2Animator &axes) {
+			for (const auto &axis : axes.Axes) {
+				if (axis.Keys.size() > Limits::MaximumKeyframes - keys) return false;
+				keys += axis.Keys.size();
+			}
+			return true;
+		};
+		for (const auto &node : document.Nodes) {
+			if (!admit(1)) return fail(Status::LimitExceeded, "source axis key scan exceeds work bounds");
+			if (node.SourceSeparatedVec2Animators)
+				for (const auto &axes : node.SourceSeparatedVec2Animators->Inputs) {
+					if (!admit(1 + previous.SharedSubtypes().size() + targets.size()))
+						return fail(Status::LimitExceeded, "source axis key scan exceeds work bounds");
+					bool replaced = false;
+					for (size_t index = 0; index < targets.size(); ++index)
+						replaced |= creations[index].Needed && targets[index].NodeId == node.Id &&
+									targets[index].Port == axes.Port;
+					if (replaced) continue;
+					const auto *overlay = previous.SharedSubtype(node.Id, axes.Port);
+					if (!addKeys(overlay && overlay->SeparatedVec2 ? *overlay->SeparatedVec2 : axes))
+						return fail(Status::LimitExceeded, "source axis keys exceed aggregate bounds");
+				}
+		}
+		for (const auto &overlay : previous.SharedSubtypes()) {
+			if (!overlay.SeparatedVec2) continue;
+			if (!admit(document.Nodes.size()))
+				return fail(Status::LimitExceeded, "source retained axis key scan exceeds work bounds");
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
+					return item.Id == overlay.NodeId;
+				});
+			if (node != document.Nodes.end()) {
+				if (!admit(
+						node->SourceSeparatedVec2Animators ? node->SourceSeparatedVec2Animators->Inputs.size()
+														   : 0
+					))
+					return fail(Status::LimitExceeded, "source retained axis key scan exceeds work bounds");
+				if (detail::FindSeparatedVec2(*node, overlay.Port)) continue;
+			}
+			if (!addKeys(*overlay.SeparatedVec2))
+				return fail(Status::LimitExceeded, "source axis keys exceed aggregate bounds");
+		}
+		if (needed > (Limits::MaximumKeyframes - keys) / 2)
+			return fail(Status::LimitExceeded, "source initialized axes exceed aggregate key bounds");
+		auto candidate = detail::CloneGroupReplay(
+			previous,
+			needed,
+			revision,
+			*available,
+			&previous == &result ? 0 : result.RetainedBytes(),
+			diagnostic
+		);
+		if (!candidate) return diagnostic.Code;
+		for (size_t index = 0; index < targets.size(); ++index) {
+			const auto &creation = creations[index];
+			if (!creation.Needed) continue;
+			const auto &target = targets[index];
+			if (!admit(candidate->SharedSubtypes.size()))
+				return fail(Status::LimitExceeded, "source axis installation exceeds work bounds");
+			auto overlay = std::find_if(
+				candidate->SharedSubtypes.begin(), candidate->SharedSubtypes.end(), [&](const auto &item) {
+					return item.NodeId == target.NodeId && item.Port == target.Port;
+				}
+			);
+			const bool added = overlay == candidate->SharedSubtypes.end();
+			uint64_t bytes =
+				sizeof(SourceSeparatedVec2Animator) + detail::TextBytes(target.Port) +
+				2 * (sizeof(Keyframe) + detail::TextBytes(target.NodeId) + detail::TextBytes(target.Port) +
+					 detail::TextBytes("source") + detail::TextBytes("") + 2 * detail::TextBytes("linear"));
+			if (added) bytes += detail::TextBytes(target.NodeId) + detail::TextBytes(target.Port);
+			auto charge = candidate->Budget.Reserve(bytes);
+			if (!charge)
+				return fail(
+					Status::LimitExceeded,
+					"source scalar initialization exceeds operation bytes",
+					target.NodeId,
+					target.Port
+				);
+			if (added) {
+				GroupSubtypeOverlay fresh;
+				fresh.NodeId = std::string(target.NodeId);
+				fresh.Port = std::string(target.Port);
+				candidate->SharedSubtypes.push_back(std::move(fresh));
+				overlay = std::prev(candidate->SharedSubtypes.end());
+			}
+			auto &axes = overlay->SeparatedVec2.emplace();
+			axes.Port = std::string(target.Port);
+			axes.Separated = creation.Separated;
+			for (size_t axis = 0; axis < 2; ++axis)
+				axes.Axes[axis].Keys.push_back(
+					{std::string(target.NodeId),
+					 std::string(target.Port),
+					 0,
+					 axis == 0 ? creation.Default.X : creation.Default.Y,
+					 "source",
+					 KeyframeEase{}}
+				);
+			if (!candidate->Charge.Merge(std::move(*charge))) std::terminate();
+			if (creation.Binding != SIZE_MAX) {
+				auto &binding = candidate->Bindings[creation.Binding].Axes;
+				binding.Storage = GroupAxisStorage::Local;
+				binding.Writer =
+					creation.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+			}
+		}
+		detail::GroupReplayAccess::Install(result, std::move(candidate));
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "source axis initialization allocation failed"};
+		return diagnostic.Code;
+	}
+
 	Status ReplayGroupAnimatorEdits(
 		const Document &document,
 		std::span<const GroupRefreshEvent> edits,
@@ -2686,7 +2998,6 @@ namespace engine::imagegraph {
 				))
 				return false;
 			if (node == authored.Nodes.end() || !detail::SourceSeparatedVec2Input(*node, port) ||
-				(!detached && !detail::FindSeparatedVec2(*node, port)) ||
 				std::any_of(axisTargets.begin(), axisTargets.end(), [&](const auto &target) {
 					return target.NodeId == id && target.Port == port;
 				})) {

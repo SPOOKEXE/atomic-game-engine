@@ -49,7 +49,7 @@ namespace engine::imagegraph {
 		// Source value constructor, such as "Slider" or "EScroll".
 		std::string_view SourceKind;
 		ValueType Type = ValueType::Any;
-		// Source default in document value text form, empty when the source computes it at runtime.
+		// catalogue preview default in value text; surface expressions use a reference extent.
 		std::string_view Default;
 		// Enum labels separated by ';', empty when the source builds them at runtime.
 		std::string_view Choices;
@@ -61,6 +61,8 @@ namespace engine::imagegraph {
 		// Source typeArray classification from declaration type/display, absent when unresolved.
 		// This does not describe payload shape or processor ArrayDepth.
 		std::optional<bool> SourceArrayClassification = std::nullopt;
+		// preview defaults may substitute a project surface; only fixed pairs can seed local axes.
+		bool SourceConstructorConstant = false;
 	};
 
 	// One source-declared output.

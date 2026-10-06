@@ -55,6 +55,7 @@ Q	I	clone_color	1	0	s "Multiply"
 Q	I	clone_color	2	0	s "Additive"
 I	depth_range	Depth Range	10	Range	vector2	v 0 1	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	draw_original	Draw Original	17	Bool	boolean	b 1	
 S	I	draw_original	0
@@ -94,6 +95,7 @@ B	T	light_shape	0	general	1	default	?
 C	T	light_shape	unknown
 T	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
+V	T	position	1
 A	T	position	1
 T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	position_unit	?
@@ -103,11 +105,13 @@ T	radius_unit	Radius Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	radius_unit	?
 T	start	Start	5	Vec2	vector2	v 0.25 0.5	
 S	T	start	1
+V	T	start	1
 A	T	start	1
 T	start_unit	Start Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	start_unit	?
 T	finish	Finish	6	Vec2	vector2	v 0.75 0.5	
 S	T	finish	1
+V	T	finish	1
 A	T	finish	1
 T	finish_unit	Finish Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	finish_unit	?
@@ -217,6 +221,7 @@ I	scene	Scene	8	D3Scene	scene3d
 S	I	scene	0
 I	dimension	Dimension	6	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -254,6 +259,7 @@ I	fov	FOV	4	ISlider	integer	i 60
 S	I	fov	0
 I	clipping_distance	Clipping Distance	5	Vec2	vector2	v 1 10	
 S	I	clipping_distance	1
+V	I	clipping_distance	1
 A	I	clipping_distance	1
 I	shader	Shader	36	EButton	enum	e 0	Inherited;Phong;PBR
 S	I	shader	0
@@ -346,6 +352,7 @@ I	scene	Scene	8	D3Scene	scene3d
 S	I	scene	0
 I	dimension	Dimension	6	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -383,6 +390,7 @@ I	fov	FOV	4	ISlider	integer	i 60
 S	I	fov	0
 I	clipping_distance	Clipping Distance	5	Vec2	vector2	v 1 10	
 S	I	clipping_distance	1
+V	I	clipping_distance	1
 A	I	clipping_distance	1
 I	shader	Shader	36	EButton	enum	e 0	Inherited;Phong;PBR
 S	I	shader	0
@@ -535,6 +543,7 @@ I	shift_path	Shift Path	23	Path	path2d	p 0 0 0
 S	I	shift_path	0
 I	path_range	Path Range	27	Range	vector2	v 0 1	
 S	I	path_range	1
+V	I	path_range	1
 A	I	path_range	1
 I	follow_path	Follow Path	24	Bool	boolean	b 0	
 S	I	follow_path	0
@@ -664,9 +673,11 @@ Q	I	interpolation	1	0	s "Bilinear"
 Q	I	interpolation	2	0	s "CleanEdge"
 I	scale	Scale	9	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	shift	Shift	10	Vec2	vector2	v 0 0	
 S	I	shift	1
+V	I	shift	1
 A	I	shift	1
 I	shader	Shader	11	EScroll	enum	e 0	Inherited;Phong;PBR
 S	I	shader	0
@@ -1023,6 +1034,7 @@ I	material_cap	Material Cap	7	D3Material	material3d
 S	I	material_cap	0
 I	texture_scale	Texture Scale	13	Vec2	vector2	v 1 1	
 S	I	texture_scale	1
+V	I	texture_scale	1
 A	I	texture_scale	1
 I	use_path_color	Use Path Color	18	Bool	boolean	b 0	
 S	I	use_path_color	0
@@ -1065,6 +1077,7 @@ Q	I	revolve_axis	0	0	s "X"
 Q	I	revolve_axis	1	0	s "Y"
 I	revolve_origin	Revolve Origin	6	Vec2	vector2	v 0 0	
 S	I	revolve_origin	1
+V	I	revolve_origin	1
 A	I	revolve_origin	1
 I	caps	Caps	7	Toggle	integer	i 0	
 S	I	caps	0
@@ -1178,6 +1191,7 @@ S	I	bbox_padding	1
 A	I	bbox_padding	1
 I	output_dimension	Output Dimension	1	Vec2	vector2	v 16 16	
 S	I	output_dimension	1
+V	I	output_dimension	1
 A	I	output_dimension	1
 I	scale	Scale	2	Float	scalar	d 1	
 S	I	scale	0
@@ -1364,9 +1378,11 @@ I	burst_duration	Burst Duration	6	Int	integer	i 1
 S	I	burst_duration	0
 I	spawn_amount	Spawn Amount	7	Range	vector2	v 2 2	
 S	I	spawn_amount	1
+V	I	spawn_amount	1
 A	I	spawn_amount	1
 I	lifespan	Lifespan	12	Range	vector2	v 20 30	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	spawn_source	Spawn Source	8	EScroll	enum	e 0	
 S	I	spawn_source	0
@@ -1412,6 +1428,7 @@ S	I	acceleration	1
 A	I	acceleration	1
 I	follow_spawn_shape	Follow Spawn Shape	16	Range	vector2	v 0 0	
 S	I	follow_spawn_shape	1
+V	I	follow_spawn_shape	1
 A	I	follow_spawn_shape	1
 I	rotation	Rotation	17	Range3	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	rotation	1
@@ -1433,6 +1450,7 @@ S	I	scale	1
 A	I	scale	1
 I	size	Size	22	Range	vector2	v 1 1	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	size_curved	Size curved	-1	CurveToggle	boolean	b 0	
 S	I	size_curved	?
@@ -1448,6 +1466,7 @@ S	I	color_by_index	1
 A	I	color_by_index	1
 I	alpha	Alpha	55	Range	vector2	v 1 1	
 S	I	alpha	1
+V	I	alpha	1
 A	I	alpha	1
 I	alpha_curved	Alpha curved	-1	CurveToggle	boolean	b 0	
 S	I	alpha_curved	?
@@ -1484,11 +1503,13 @@ I	use_physics	Use Physics	37	Bool	boolean	b 0
 S	I	use_physics	0
 I	gravity	Gravity	38	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	gravity_direction	Gravity Direction	39	Rotation	scalar	d -90	
 S	I	gravity_direction	0
 I	turning	Turning	40	Range	vector2	v 0 0	
 S	I	turning	1
+V	I	turning	1
 A	I	turning	1
 I	turn_both_directions	Turn Both Directions	41	Bool	boolean	b 0	
 S	I	turn_both_directions	0
@@ -1504,6 +1525,7 @@ Q	I	ground_offset_type	0	0	s "Relative"
 Q	I	ground_offset_type	1	0	s "Absolute"
 I	ground_offset	Ground Offset	45	Range	vector2	v 0 0	
 S	I	ground_offset	1
+V	I	ground_offset	1
 A	I	ground_offset	1
 I	bounce_amount	Bounce Amount	46	Slider	scalar	d 0.5	
 S	I	bounce_amount	0
@@ -1513,15 +1535,19 @@ I	use_wiggles	Use Wiggles	48	Bool	boolean	b 0
 S	I	use_wiggles	0
 I	direction_wiggle	Direction Wiggle	49	Vec2	vector2	v 0 0	
 S	I	direction_wiggle	1
+V	I	direction_wiggle	1
 A	I	direction_wiggle	1
 I	position_wiggle	Position Wiggle	50	Vec2	vector2	v 0 0	
 S	I	position_wiggle	1
+V	I	position_wiggle	1
 A	I	position_wiggle	1
 I	rotation_wiggle	Rotation Wiggle	51	Vec2	vector2	v 0 0	
 S	I	rotation_wiggle	1
+V	I	rotation_wiggle	1
 A	I	rotation_wiggle	1
 I	scale_wiggle	Scale Wiggle	52	Vec2	vector2	v 0 0	
 S	I	scale_wiggle	1
+V	I	scale_wiggle	1
 A	I	scale_wiggle	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -1775,6 +1801,7 @@ I	back_surface	Back Surface	10	Surface	image
 S	I	back_surface	0
 I	texture_tiling	Texture Tiling	7	Vec2	vector2	v 1 1	
 S	I	texture_tiling	1
+V	I	texture_tiling	1
 A	I	texture_tiling	1
 I	projection	Projection	5	EButton	enum	e 1	Perspective;Orthographic
 S	I	projection	0
@@ -1786,9 +1813,11 @@ I	fov	FOV	6	Float	scalar	d 45
 S	I	fov	0
 I	view_range	View Range	8	Vec2	vector2	v 0.001 10	
 S	I	view_range	1
+V	I	view_range	1
 A	I	view_range	1
 I	depth_range	Depth Range	9	Vec2	vector2	v 0 1	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -1867,6 +1896,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -1949,6 +1979,7 @@ O	opacity	Opacity	2	scalar	d 1	s "1"
 N	pc.active_canvas	Node_Active_Canvas	Active Canvas	io	scripts/node_active_canvas/node_active_canvas.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -1958,12 +1989,15 @@ I	active	Active	7	Active	boolean	b 1
 S	I	active	0
 I	position	Position	2	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_jitter	Position Jitter	13	Range	vector2	v 0 0	
 S	I	position_jitter	1
+V	I	position_jitter	1
 A	I	position_jitter	1
 I	distance	Distance	8	Range	vector2	v 1 1	
 S	I	distance	1
+V	I	distance	1
 A	I	distance	1
 I	base_rotation	Base Rotation	3	Rotation	scalar	d 0	
 S	I	base_rotation	0
@@ -1973,12 +2007,15 @@ I	direction_shift	Direction Shift	10	Rotation	scalar	d 0
 S	I	direction_shift	0
 I	rotation_jitter	Rotation Jitter	11	Range	vector2	v 0 0	
 S	I	rotation_jitter	1
+V	I	rotation_jitter	1
 A	I	rotation_jitter	1
 I	scale	Scale	4	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_jitter	Scale Jitter	14	Range	vector2	v 0 0	
 S	I	scale_jitter	1
+V	I	scale_jitter	1
 A	I	scale_jitter	1
 I	texture	Texture	1	Surface	image		
 S	I	texture	0
@@ -2191,9 +2228,11 @@ Q	I	type	0	0	s "Center Span"
 Q	I	type	1	0	s "Two Point"
 I	position	Position	0	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	span	Span	1	Vec2	vector2	v 16 16	
 S	I	span	1
+V	I	span	1
 A	I	span	1
 I	shape	Shape	2	EScroll	enum	e 0	Rectangle;Elipse
 S	I	shape	0
@@ -2228,11 +2267,13 @@ S	I	bind_data	0
 A	I	bind_data	1
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	bone_transform	Bone transform	3	Vec2	vector2	v 0 0	
 S	I	bone_transform	1
+V	I	bone_transform	1
 A	I	bone_transform	1
 I	bone_scale	Bone scale	4	Slider	scalar	d 1	
 S	I	bone_scale	0
@@ -2272,6 +2313,7 @@ I	name	Name	6	Text	text	s "Bone"
 S	I	name	0
 I	origin	Origin	0	Vec2	vector2	v 0 0	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
@@ -2287,6 +2329,7 @@ I	direction	Direction	3	Rotation	scalar	d 0
 S	I	direction	0
 I	tail	Tail	4	Vec2	vector2	v 0 0	
 S	I	tail	1
+V	I	tail	1
 A	I	tail	1
 I	tail_unit	Tail Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	tail_unit	?
@@ -2368,6 +2411,7 @@ Q	I	position_mode	0	0	s "Absolute"
 Q	I	position_mode	1	0	s "Relative"
 I	position	Position	2	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	rotation_mode	Rotation Mode	6	EButton	enum	e 1	Absolute;Relative
 S	I	rotation_mode	0
@@ -2417,6 +2461,7 @@ O	position	Position	0	vector2	v 0 0	s "[ 0, 0 ]"
 N	pc.armature_skin	Node_Armature_Skin	Armature Skin	compose	scripts/node_armature_skin/node_armature_skin.gml
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -2427,6 +2472,7 @@ S	I	thickness	0
 D	3	3
 T	radius	Radius	0	Range	vector2	v 1 1	
 S	T	radius	1
+V	T	radius	1
 A	T	radius	1
 T	color	Color	1	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	T	color	0
@@ -2818,6 +2864,7 @@ I	use_base_dimension	Use Base Dimension	25	Bool	boolean	b 1
 S	I	use_base_dimension	0
 I	dimension	Dimension	26	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -2837,6 +2884,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	wipe_origin	Wipe Origin	3	Vec2	vector2	v 0.5 0.5	
 S	I	wipe_origin	1
+V	I	wipe_origin	1
 A	I	wipe_origin	1
 I	wipe_origin_unit	Wipe Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	wipe_origin_unit	?
@@ -2867,6 +2915,7 @@ Q	I	mode	0	0	s "Absolute"
 Q	I	mode	1	0	s "Relative"
 I	position	Position	9	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	axis	Axis	28	Toggle	integer	i 3	
 S	I	axis	0
@@ -2893,6 +2942,7 @@ Q	I	mode_3	1	0	s "Additive"
 Q	I	mode_3	2	0	s "Multiplicative"
 I	scale	Scale	16	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	anchor	Anchor	17	Anchor	vector2	v 0.5 0.5	
 S	I	anchor	1
@@ -2941,6 +2991,7 @@ I	use_base_dimension	Use Base Dimension	3	Bool	boolean	b 1
 S	I	use_base_dimension	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -2986,6 +3037,7 @@ Q	I	mode	0	0	s "Absolute"
 Q	I	mode	1	0	s "Relative"
 I	position	Position	5	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	set_rotation	Set Rotation	6	Bool	boolean	b 0	
 S	I	set_rotation	0
@@ -3010,9 +3062,11 @@ Q	I	mode_3	1	0	s "Additive"
 Q	I	mode_3	2	0	s "Multiplicative"
 I	scale	Scale	12	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	anchor	Anchor	19	Vec2	vector2	v 0.5 0.5	
 S	I	anchor	1
+V	I	anchor	1
 A	I	anchor	?
 I	set_blending	Set Blending	13	Bool	boolean	b 0	
 S	I	set_blending	0
@@ -3186,6 +3240,7 @@ I	mask_feather	Mask feather	4	Slider	scalar	d 0
 S	I	mask_feather	0
 I	center	Center	8	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -3199,6 +3254,7 @@ I	intensity_map	Intensity Map	11	Surface	image
 S	I	intensity_map	0
 I	scale	Scale	9	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	distance_methods	Distance Methods	10	EScroll	enum	e 0	Cartesian;Taxicap;Max;Min
 S	I	distance_methods	0
@@ -3242,6 +3298,7 @@ Q	I	dimension_type	0	0	s "Fixed"
 Q	I	dimension_type	1	0	s "Dynamic"
 I	dimension	Dimension	10	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -3267,12 +3324,15 @@ I	keep_ratio	Keep ratio	12	Bool	boolean	b 1
 S	I	keep_ratio	0
 I	scale_2	Scale	11	Vec2	vector2	v 1 1	
 S	I	scale_2	1
+V	I	scale_2	1
 A	I	scale_2	1
 I	uv_shift	UV Shift	7	Vec2	vector2	v 0 0	
 S	I	uv_shift	1
+V	I	uv_shift	1
 A	I	uv_shift	1
 I	uv_scale	UV Scale	8	Vec2	vector2	v 1 1	
 S	I	uv_scale	1
+V	I	uv_scale	1
 A	I	uv_scale	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -3331,11 +3391,13 @@ I	highres	Highres	12	Bool	boolean	b 0
 S	I	highres	0
 I	shift	Shift	2	Vec2	vector2	v 0 0	
 S	I	shift	1
+V	I	shift	1
 A	I	shift	1
 I	shift_unit	Shift Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	shift_unit	?
 I	scale	Scale	3	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	shift_multiply	Shift Multiply	14	Bool	boolean	b 0	
 S	I	shift_multiply	0
@@ -3418,6 +3480,7 @@ Q	I	output_dimension	3	0	s "Maximum"
 Q	I	output_dimension	4	0	s "Constant"
 I	constant_dimension	Constant dimension	7	Vec2	vector2	v 32 32	
 S	I	constant_dimension	1
+V	I	constant_dimension	0
 A	I	constant_dimension	1
 I	blend_mode	Blend mode	2	EScroll	enum	e 0	Normal;Replace;Multiply;Color Burn;Linear Burn;Minimum;Add;Screen;Color Dodge;Maximum;Overlay;Soft Light;Hard Light;Vivid Light;Linear Light;Pin Light;Difference;Exclusion;Subtract;Divide;Hue;Saturation;Luminosity;Equal;Unequal
 S	I	blend_mode	0
@@ -3467,6 +3530,7 @@ Q	I	fill_mode	1	0	s "Stretch"
 Q	I	fill_mode	2	0	s "Tile"
 I	position	Position	14	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -3504,9 +3568,11 @@ I	depth_1	Depth 1	1	Surface	image
 S	I	depth_1	0
 I	depth_range_1	Depth Range 1	4	Range	vector2	v 0 1	
 S	I	depth_range_1	1
+V	I	depth_range_1	1
 A	I	depth_range_1	1
 I	position_1	Position 1	6	Vec2	vector2	v 0 0	
 S	I	position_1	1
+V	I	position_1	1
 A	I	position_1	1
 I	position_1_unit	Position 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_1_unit	?
@@ -3517,6 +3583,7 @@ I	rotation_1	Rotation 1	8	Rot	scalar	d 0
 S	I	rotation_1	0
 I	scale_1	Scale 1	9	Vec2	vector2	v 1 1	
 S	I	scale_1	1
+V	I	scale_1	1
 A	I	scale_1	1
 I	surface_2	Surface 2	2	Surface	image		
 S	I	surface_2	0
@@ -3524,9 +3591,11 @@ I	depth_2	Depth 2	3	Surface	image
 S	I	depth_2	0
 I	depth_range_2	Depth Range 2	5	Range	vector2	v 0 1	
 S	I	depth_range_2	1
+V	I	depth_range_2	1
 A	I	depth_range_2	1
 I	position_2	Position 2	10	Vec2	vector2	v 0 0	
 S	I	position_2	1
+V	I	position_2	1
 A	I	position_2	1
 I	position_2_unit	Position 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_2_unit	?
@@ -3537,6 +3606,7 @@ I	rotation_2	Rotation 2	12	Rot	scalar	d 0
 S	I	rotation_2	0
 I	scale_2	Scale 2	13	Vec2	vector2	v 1 1	
 S	I	scale_2	1
+V	I	scale_2	1
 A	I	scale_2	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3;;CleanEdge
 S	I	interpolate	?
@@ -3740,6 +3810,7 @@ I	direction	Direction	12	Rotation	scalar	d 0
 S	I	direction	0
 I	zoom_origin	Zoom Origin	14	Vec2	vector2	v 0.5 0.5	
 S	I	zoom_origin	1
+V	I	zoom_origin	1
 A	I	zoom_origin	1
 I	zoom_origin_unit	Zoom Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	zoom_origin_unit	?
@@ -4195,6 +4266,7 @@ S	I	strength_curve	1
 A	I	strength_curve	1
 I	center	Center	2	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -4438,6 +4510,7 @@ S	I	strength_curve	1
 A	I	strength_curve	1
 I	center	Center	2	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -4499,6 +4572,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -4518,6 +4592,7 @@ Q	I	pattern	0	0	s "Cross"
 Q	I	pattern	1	0	s "Xor"
 I	position	Position	3	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -4695,16 +4770,19 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	scene_size	Scene Size	7	Dimension	vector2	v 1 1	
 S	I	scene_size	1
+V	I	scene_size	1
 A	I	scene_size	1
 I	scene_size_unit	Scene Size Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	scene_size_unit	?
 I	camera_size	Camera Size	6	Dimension	vector2	v 1 1	
 S	I	camera_size	1
+V	I	camera_size	1
 A	I	camera_size	1
 I	camera_size_unit	Camera Size Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	camera_size_unit	?
 I	focus_center	Focus Center	0	Vec2	vector2	v 0.5 0.5	
 S	I	focus_center	1
+V	I	focus_center	1
 A	I	focus_center	1
 I	focus_center_unit	Focus Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	focus_center_unit	?
@@ -4733,6 +4811,7 @@ Q	T	positioning_s	0	0	s "Space"
 Q	T	positioning_s	1	0	s "Camera"
 T	position_s	Position {_s}	2	Vec2	vector2	v 0 0	
 S	T	position_s	1
+V	T	position_s	1
 A	T	position_s	1
 T	position_s_unit	Position {_s} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	position_s_unit	?
@@ -4746,6 +4825,7 @@ Q	T	oversample_s	2	0	s "Repeat X"
 Q	T	oversample_s	3	0	s "Repeat Y"
 T	parallax_s	Parallax {_s}	4	Vec2	vector2	v 0 0	
 S	T	parallax_s	1
+V	T	parallax_s	1
 A	T	parallax_s	1
 T	depth_s	Depth {_s}	5	Float	scalar	d 0	
 S	T	depth_s	0
@@ -4753,6 +4833,7 @@ O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.canvas	Node_Canvas	Canvas Ext	generate	scripts/node_canvas/node_canvas.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -4802,6 +4883,7 @@ I	brush_surface	Brush Surface	6	Surface	image
 S	I	brush_surface	0
 I	brush_distance	Brush Distance	15	Range	vector2	v 1 1	
 S	I	brush_distance	1
+V	I	brush_distance	1
 A	I	brush_distance	1
 I	random_direction	Random Direction	17	RotRand	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	random_direction	1
@@ -4850,6 +4932,7 @@ O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.canvas_s	Node_Canvas_S	Canvas	io	scripts/node_canvas_s/node_canvas_s.gml
 I	dimension	Dimension	0	Vec2	vector2	v 32 32	
 S	I	dimension	1
+V	I	dimension	0
 A	I	dimension	1
 I	use_bg	Use BG	1	Bool	boolean	b 1	
 S	I	use_bg	0
@@ -4857,9 +4940,11 @@ I	resource_index	Resource Index	2	Int	integer	i 0
 S	I	resource_index	0
 I	shift	Shift	3	Vec2	vector2	v 0 0	
 S	I	shift	1
+V	I	shift	1
 A	I	shift	1
 I	scale	Scale	4	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	alpha	Alpha	5	Slider	scalar	d 1	
 S	I	alpha	0
@@ -4876,6 +4961,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -4909,11 +4995,13 @@ I	detail	Detail	5	Int	integer	i 1
 S	I	detail	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	scale	Scale	2	Vec2	vector2	v 0.5 0.5	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -4929,6 +5017,7 @@ I	seed	Seed	3	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -4963,6 +5052,7 @@ I	gap	Gap	25	Slider	scalar	d 0
 S	I	gap	0
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -4978,6 +5068,7 @@ I	scale_map	Scale Map	11	Surface	image
 S	I	scale_map	0
 I	size	Size	24	Vec2	vector2	v 1 1	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	radial_scale	Radial Scale	8	Slider	scalar	d 2	
 S	I	radial_scale	0
@@ -5022,6 +5113,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -5081,6 +5173,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -5116,6 +5209,7 @@ I	angle_map	Angle Map	7	Surface	image
 S	I	angle_map	0
 I	position	Position	3	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -5169,6 +5263,7 @@ I	shift	Shift	22	Slider	scalar	d 0
 S	I	shift	0
 I	center	Center	1	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -5758,6 +5853,7 @@ I	mask_feather	Mask feather	9	Slider	scalar	d 0
 S	I	mask_feather	0
 I	color_range	Color Range	14	Range	vector2	v 0 1	
 S	I	color_range	1
+V	I	color_range	1
 A	I	color_range	1
 I	gradient	Gradient	1	Gradient	gradient	g 0 2 0 0 0 0 255 1 255 255 255 255	
 S	I	gradient	0
@@ -5922,6 +6018,7 @@ T	texture	Texture	0	Surface	image
 S	T	texture	0
 T	offset	Offset	2	Vec2	vector2	v 0 0	
 S	T	offset	1
+V	T	offset	1
 A	T	offset	1
 T	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	offset_unit	?
@@ -5929,6 +6026,7 @@ T	rotation	Rotation	3	Rotation	scalar	d 0
 S	T	rotation	0
 T	scale	Scale	4	Vec2	vector2	v 1 1	
 S	T	scale	1
+V	T	scale	1
 A	T	scale	1
 O	composed	Composed	0	image	i -4	s "noone"
 N	pc.composite	Node_Composite	Composite	compose	scripts/node_composite/node_composite.gml
@@ -5946,6 +6044,7 @@ Q	I	output_dimension	1	0	s "Largest surface"
 Q	I	output_dimension	2	0	s "Constant"
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -6006,6 +6105,7 @@ T	order	Order	7	Float	scalar
 S	T	order	0
 T	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
+V	T	position	1
 A	T	position	1
 T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	position_unit	?
@@ -6016,6 +6116,7 @@ T	rotation	Rotation	2	Rotation	scalar	d 0
 S	T	rotation	0
 T	scale	Scale	3	Vec2	vector2	v 1 1	
 S	T	scale	1
+V	T	scale	1
 A	T	scale	1
 O	surface_out	Surface Out	0	image	i -4	s "noone"
 O	atlas_data	Atlas data	1	atlas	a any 0	s "[]"
@@ -6025,6 +6126,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -6195,6 +6297,7 @@ I	seed	Seed	2	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -6208,6 +6311,7 @@ I	amount	Amount	3	Int	integer	i 5
 S	I	amount	0
 I	origin	Origin	5	Vec2	vector2	v 0.5 0.5	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
@@ -6220,17 +6324,21 @@ I	both_side	Both Side	24	Bool	boolean	b 0
 S	I	both_side	0
 I	segments	Segments	4	Range	vector2	v 3 6	
 S	I	segments	1
+V	I	segments	1
 A	I	segments	1
 I	scale	Scale	11	Range	vector2	v 0.5 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	length	Length	6	Range	vector2	v 8 10	
 S	I	length	1
+V	I	length	1
 A	I	length	1
 I	length_scale	Length Scale	15	Float	scalar	d 1.1	
 S	I	length_scale	0
 I	width	Width	7	Range	vector2	v 4 8	
 S	I	width	1
+V	I	width	1
 A	I	width	1
 I	width_curved	Width curved	-1	CurveToggle	boolean	b 0	
 S	I	width_curved	?
@@ -6253,6 +6361,7 @@ I	trim	Trim	18	Slider	scalar	d 0
 S	I	trim	0
 I	thickness	Thickness	10	Range	vector2	v 4 4	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -6296,6 +6405,7 @@ Q	I	aspect_ratio	4	0	s "4:3"
 Q	I	aspect_ratio	5	0	s "16:9"
 I	ratio	Ratio	4	Vec2	vector2	v 1 1	
 S	I	ratio	1
+V	I	ratio	1
 A	I	ratio	1
 I	crop	Crop	1	Padding	vector4	w 0 0 0 0	
 S	I	crop	1
@@ -6312,6 +6422,7 @@ Q	I	fit_mode	2	0	s "Height"
 Q	I	fit_mode	3	0	s "Minimum"
 I	center	Center	5	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -6476,6 +6587,7 @@ Q	I	type	3	0	s "Saw"
 Q	I	type	4	0	s "Step"
 I	range	Range	5	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	frequency	Frequency	6	Float	scalar	d 1	
 S	I	frequency	0
@@ -6491,9 +6603,11 @@ I	scale	Scale	2	Float	scalar	d 1
 S	I	scale	0
 I	output_range	Output Range	3	Range	vector2	v 0 1	
 S	I	output_range	1
+V	I	output_range	1
 A	I	output_range	1
 I	y_range	Y Range	4	Range	vector2	v 0 1	
 S	I	y_range	1
+V	I	y_range	1
 A	I	y_range	1
 O	curve	Curve	0	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	s "CURVE_DEF_01"
 N	pc.curve_hsv	Node_Curve_HSV	HSV Curve	filter	scripts/node_curve_hsv/node_curve_hsv.gml
@@ -6760,6 +6874,7 @@ I	external_force	External Force	7	Surface	image
 S	I	external_force	0
 I	position	Position	19	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -6821,6 +6936,7 @@ I	mask_feather	Mask feather	10	Slider	scalar	d 0
 S	I	mask_feather	0
 I	center	Center	1	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -6941,11 +7057,13 @@ I	separate_axis	Separate Axis	16	Bool	boolean	b 0
 S	I	separate_axis	0
 I	position	Position	2	Vec2	vector2	v 1 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	mid_point	Mid Point	26	Vec2	vector2	v 0.5 0.5	
 S	I	mid_point	1
+V	I	mid_point	1
 A	I	mid_point	1
 I	mid_point_unit	Mid Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	mid_point_unit	?
@@ -6987,9 +7105,11 @@ I	path	Path	0	FPath	text	s ""
 S	I	path	0
 I	position	Position	1	Vec2	vector2		
 S	I	position	1
+V	I	position	0
 A	I	position	1
 I	scale	Scale	2	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	smooth_transform	Smooth Transform	3	Bool	boolean	b 1	
 S	I	smooth_transform	0
@@ -7013,6 +7133,7 @@ I	line_height	Line height	6	Float	scalar	d 0
 S	I	line_height	0
 I	position	Position	5	Vec2	vector2		
 S	I	position	1
+V	I	position	0
 A	I	position	1
 N	pc.dither	Node_Dither	Dither	filter	scripts/node_dither/node_dither.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
@@ -7058,6 +7179,7 @@ S	I	dither_matrix	1
 A	I	dither_matrix	1
 I	dither_scale	Dither Scale	16	Vec2	vector2	v 1 1	
 S	I	dither_scale	1
+V	I	dither_scale	1
 A	I	dither_scale	1
 I	invert	Invert	17	Bool	boolean	b 0	
 S	I	invert	0
@@ -7140,6 +7262,7 @@ I	seed	Seed	20	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -7153,6 +7276,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	14	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -7182,6 +7306,7 @@ I	size_map	Size Map	3	Surface	image
 S	I	size_map	0
 I	spacing	Spacing	15	Vec2	vector2	v 1 1	
 S	I	spacing	1
+V	I	spacing	1
 A	I	spacing	1
 I	dot_size	Dot Size	9	Slider	scalar	d 0.5	
 S	I	dot_size	0
@@ -7304,9 +7429,11 @@ Q	I	color	1	0	s "Greyscale"
 Q	I	color	2	0	s "BW"
 I	level_in	Level In	10	Range	vector2	v 0 1	
 S	I	level_in	1
+V	I	level_in	1
 A	I	level_in	1
 I	level_out	Level Out	11	Range	vector2	v 0 1	
 S	I	level_out	1
+V	I	level_out	1
 A	I	level_out	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -7533,11 +7660,13 @@ Q	I	type	1	0	s "Point"
 Q	I	type	2	0	s "Path"
 I	point_1	Point 1	8	Vec2	vector2	v 0.5 0	
 S	I	point_1	1
+V	I	point_1	1
 A	I	point_1	1
 I	point_1_unit	Point 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_1_unit	?
 I	point_2	Point 2	9	Vec2	vector2	v 0.5 1	
 S	I	point_2	1
+V	I	point_2	1
 A	I	point_2	1
 I	point_2_unit	Point 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_2_unit	?
@@ -7615,9 +7744,11 @@ I	radius	Radius	2	Slider	scalar	d 4
 S	I	radius	0
 I	size	Size	4	Vec2	vector2	v 4 4	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -7635,6 +7766,7 @@ Q	I	shape	0	0	s "Circle"
 Q	I	shape	1	0	s "Rectangle"
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -7642,9 +7774,11 @@ I	radius	Radius	2	Slider	scalar	d 4
 S	I	radius	0
 I	size	Size	5	Vec2	vector2	v 4 4	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	velocity	Velocity	3	Vec2	vector2	v 0 0	
 S	I	velocity	1
+V	I	velocity	1
 A	I	velocity	1
 O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_destroy	Node_FLIP_Destroy	Destroy	simulation	scripts/node_FLIP_destroy/node_FLIP_destroy.gml
@@ -7659,6 +7793,7 @@ Q	I	shape	1	0	s "Rectangle"
 Q	I	shape	2	0	s "Surface"
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -7666,6 +7801,7 @@ I	radius	Radius	3	Slider	scalar	d 4
 S	I	radius	0
 I	size	Size	4	Vec2	vector2	v 4 4	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	mask	Mask	6	Surface	image		
 S	I	mask	0
@@ -7681,6 +7817,7 @@ O	domain	Domain	0	fluid_domain	i -4	s "noone"
 N	pc.flip_domain	Node_FLIP_Domain	Domain	simulation	scripts/node_FLIP_domain/node_FLIP_domain.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -7780,9 +7917,11 @@ I	shift	Shift	15	Slider	scalar	d 0
 S	I	shift	0
 I	velocity_map	Velocity Map	12	Range	vector2	v 0 10	
 S	I	velocity_map	1
+V	I	velocity_map	1
 A	I	velocity_map	1
 I	lifespan	Lifespan	2	Range	vector2	v 0 0	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	additive	Additive	8	Bool	boolean	b 1	
 S	I	additive	0
@@ -7798,6 +7937,7 @@ I	domain	Domain	0	Fdomain	fluid_domain
 S	I	domain	0
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -7834,9 +7974,11 @@ I	spawn_radius	Spawn Radius	8	Slider	scalar	d 2
 S	I	spawn_radius	0
 I	spawn_size	Spawn Size	13	Vec2	vector2	v 2 2	
 S	I	spawn_size	1
+V	I	spawn_size	1
 A	I	spawn_size	1
 I	spawn_position	Spawn Position	2	Vec2	vector2	v 0.5 0.25	
 S	I	spawn_position	1
+V	I	spawn_position	1
 A	I	spawn_position	1
 I	spawn_position_unit	Spawn Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	spawn_position_unit	?
@@ -7859,6 +8001,7 @@ S	I	spawn_direction	1
 A	I	spawn_direction	1
 I	spawn_velocity	Spawn Velocity	6	Range	vector2	v 0 0	
 S	I	spawn_velocity	1
+V	I	spawn_velocity	1
 A	I	spawn_velocity	1
 I	inherit_velocity	Inherit Velocity	11	Slider	scalar	d 0	
 S	I	inherit_velocity	0
@@ -7878,6 +8021,7 @@ I	domain	Domain	0	Fdomain	fluid_domain
 S	I	domain	0
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -8012,6 +8156,7 @@ Q	I	vector_size	1	0	s "3"
 Q	I	vector_size	2	0	s "4"
 I	range	Range	1	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	step	Step	7	Float	scalar	d 0.01	
 S	I	step	0
@@ -8025,6 +8170,7 @@ I	display_preview_gizmo	Display Preview Gizmo	6	Bool	boolean	b 1
 S	I	display_preview_gizmo	0
 I	gizmo_position	Gizmo Position	12	Vec2	vector2	v 0 0	
 S	I	gizmo_position	1
+V	I	gizmo_position	1
 A	I	gizmo_position	1
 I	gizmo_scale	Gizmo Scale	13	Float	scalar	d 1	
 S	I	gizmo_scale	0
@@ -8111,6 +8257,7 @@ Q	I	fill_mode	1	0	s "Path"
 Q	I	fill_mode	2	0	s "Mask"
 I	position	Position	4	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -8167,6 +8314,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -8185,6 +8333,7 @@ S	I	detail	1
 A	I	detail	1
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -8192,6 +8341,7 @@ I	rotation	Rotation	5	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 2 2	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	level_in	Level In	9	SliRange	vector2	v 0 1	
 S	I	level_in	1
@@ -8306,6 +8456,7 @@ I	radius_modify	Radius Modify	12	Slider	scalar	d 1
 S	I	radius_modify	0
 I	offset	Offset	20	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	blend_mode	Blend Mode	13	EScroll	enum	e 0	Maximum;Override
 S	I	blend_mode	0
@@ -8421,6 +8572,7 @@ I	pattern	Pattern	1	Float	scalar	d 0
 S	I	pattern	0
 I	range	Range	2	Vec2	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	speed_control	Speed Control	5	EButton	enum	e 0	Frequency;Period
 S	I	speed_control	0
@@ -8447,6 +8599,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -8466,9 +8619,11 @@ I	amplitude	Amplitude	5	Slider	scalar	d 1.3
 S	I	amplitude	0
 I	detail	Detail	13	Vec2	vector2	v 3 1	
 S	I	detail	1
+V	I	detail	1
 A	I	detail	1
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -8476,6 +8631,7 @@ I	rotation	Rotation	7	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 2 2	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	level_in	Level In	11	SliRange	vector2	v 0 1	
 S	I	level_in	1
@@ -8516,6 +8672,7 @@ O	font	Font	0	text	i -4	s "noone"
 N	pc.frame	Node_Frame	Frame	misc	scripts/node_frame/node_frame.gml
 I	size	Size	0	Vec2	vector2	v 240 160	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	reframe	Reframe	4	Bool	boolean	b 1	
 S	I	reframe	0
@@ -8538,6 +8695,7 @@ I	seed	Seed	4	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -8565,6 +8723,7 @@ I	fur_amount	Fur Amount	6	Int	integer	i 2
 S	I	fur_amount	0
 I	length	Length	7	Range	vector2	v 2 4	
 S	I	length	1
+V	I	length	1
 A	I	length	1
 I	length_mapped	Length Mapped	-1	MapToggle	boolean	b 0	
 S	I	length_mapped	?
@@ -8580,6 +8739,7 @@ I	wiggle	Wiggle	13	Float	scalar	d 10
 S	I	wiggle	0
 I	position	Position	15	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -8634,6 +8794,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -8673,9 +8834,11 @@ I	sharpness_map	Sharpness Map	10	Surface	image
 S	I	sharpness_map	0
 I	augment	Augment	6	Vec2	vector2	v 11 31	
 S	I	augment	1
+V	I	augment	1
 A	I	augment	1
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -8683,6 +8846,7 @@ I	rotation	Rotation	12	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 4 4	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
@@ -8835,6 +8999,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -8912,19 +9077,23 @@ I	radius_map	Radius Map	11	Surface	image
 S	I	radius_map	0
 I	center	Center	6	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	shape	Shape	17	Vec2	vector2	v 1 1	
 S	I	shape	1
+V	I	shape	1
 A	I	shape	1
 I	uniform_ratio	Uniform ratio	14	Bool	boolean	b 1	
 S	I	uniform_ratio	0
 I	level_in	Level In	23	Range	vector2	v 0 1	
 S	I	level_in	1
+V	I	level_in	1
 A	I	level_in	1
 I	level_out	Level Out	25	Range	vector2	v 0 1	
 S	I	level_out	1
+V	I	level_out	1
 A	I	level_out	1
 I	curve	Curve	24	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	I	curve	1
@@ -8939,6 +9108,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9011,11 +9181,13 @@ I	radius	Radius	16	Float	scalar	d 0.5
 S	I	radius	0
 I	center	Center	17	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	shape	Shape	18	Vec2	vector2	v 1 1	
 S	I	shape	1
+V	I	shape	1
 A	I	shape	1
 I	uniform_ratio	Uniform ratio	19	Bool	boolean	b 1	
 S	I	uniform_ratio	0
@@ -9029,6 +9201,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9089,11 +9262,13 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	grid	Grid	1	IVec2	vector2	v 2 2	
 S	I	grid	1
+V	I	grid	1
 A	I	grid	1
 I	subdivision	Subdivision	2	Int	integer	i 4	
 S	I	subdivision	0
@@ -9112,6 +9287,7 @@ S	I	attribute_array_process	?
 D	5	2
 T	anchor_i	Anchor {i}	0	Vec2	vector2	v 0 0	
 S	T	anchor_i	1
+V	T	anchor_i	1
 A	T	anchor_i	1
 T	anchor_i_unit	Anchor {i} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	anchor_i_unit	?
@@ -9157,6 +9333,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9200,6 +9377,7 @@ I	path	Path	10	Path	path2d	p 0 0 0
 S	I	path	0
 I	range	Range	11	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	shift_2	Shift	12	Slider	scalar	d 0	
 S	I	shift_2	0
@@ -9221,6 +9399,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9230,21 +9409,25 @@ I	uv_mix	UV Mix	18	Slider	scalar	d 1
 S	I	uv_mix	0
 I	center_1	Center 1	1	Vec2	vector2	v 0 0	
 S	I	center_1	1
+V	I	center_1	1
 A	I	center_1	1
 I	center_1_unit	Center 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_1_unit	?
 I	center_2	Center 2	3	Vec2	vector2	v 1 0	
 S	I	center_2	1
+V	I	center_2	1
 A	I	center_2	1
 I	center_2_unit	Center 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_2_unit	?
 I	center_3	Center 3	5	Vec2	vector2	v 0 1	
 S	I	center_3	1
+V	I	center_3	1
 A	I	center_3	1
 I	center_3_unit	Center 3 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_3_unit	?
 I	center_4	Center 4	7	Vec2	vector2	v 1 1	
 S	I	center_4	1
+V	I	center_4	1
 A	I	center_4	1
 I	center_4_unit	Center 4 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_4_unit	?
@@ -9287,6 +9470,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9304,6 +9488,7 @@ S	I	attribute_array_process	?
 D	2	3
 T	point_i	Point {i}	0	Vec2	vector2	v 0 0	
 S	T	point_i	1
+V	T	point_i	1
 A	T	point_i	1
 T	point_i_unit	Point {i} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	point_i_unit	?
@@ -9507,6 +9692,7 @@ I	surface	Surface	0	Surface	image
 S	I	surface	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	scale	Scale	2	Float	scalar	d 1	
 S	I	scale	0
@@ -9582,6 +9768,7 @@ I	seed	Seed	11	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9595,6 +9782,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -9610,6 +9798,7 @@ I	invert_size	Invert Size	36	Bool	boolean	b 0
 S	I	invert_size	0
 I	grid_size	Grid Size	2	Vec2	vector2	v 0.25 0.25	
 S	I	grid_size	1
+V	I	grid_size	1
 A	I	grid_size	1
 I	grid_size_unit	Grid Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	grid_size_unit	?
@@ -9731,6 +9920,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9744,6 +9934,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -9757,6 +9948,7 @@ I	angle_map	Angle Map	12	Surface	image
 S	I	angle_map	0
 I	scale	Scale	2	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -9839,6 +10031,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9852,6 +10045,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -9865,6 +10059,7 @@ I	angle_map	Angle Map	13	Surface	image
 S	I	angle_map	0
 I	scale	Scale	2	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -9928,6 +10123,7 @@ I	seed	Seed	9	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -9941,6 +10137,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -9954,6 +10151,7 @@ I	angle_map	Angle Map	13	Surface	image
 S	I	angle_map	0
 I	scale	Scale	2	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -10053,6 +10251,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	grid	Grid	2	IVec2	vector2	v 2 2	
 S	I	grid	1
+V	I	grid	1
 A	I	grid	1
 I	subdivision	Subdivision	3	Int	integer	i 4	
 S	I	subdivision	0
@@ -10156,6 +10355,7 @@ Q	I	vector_size	1	0	s "3"
 Q	I	vector_size	2	0	s "4"
 I	range	Range	1	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	step	Step	7	Float	scalar	d 0.01	
 S	I	step	0
@@ -10169,6 +10369,7 @@ I	display_preview_gizmo	Display Preview Gizmo	6	Bool	boolean	b 1
 S	I	display_preview_gizmo	0
 I	gizmo_position	Gizmo Position	12	Vec2	vector2	v 0 0	
 S	I	gizmo_position	1
+V	I	gizmo_position	1
 A	I	gizmo_position	1
 I	gizmo_scale	Gizmo Scale	13	Float	scalar	d 1	
 S	I	gizmo_scale	0
@@ -10267,6 +10468,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -10298,6 +10500,7 @@ I	scale	Scale	7	Float	scalar	d 3.46
 S	I	scale	0
 I	height_range	Height Range	12	Range	vector2	v 0 1	
 S	I	height_range	1
+V	I	height_range	1
 A	I	height_range	1
 I	tiled	Tiled	14	Bool	boolean	b 0	
 S	I	tiled	0
@@ -10309,6 +10512,7 @@ I	normalize_height	Normalize Height	15	Bool	boolean	b 0
 S	I	normalize_height	0
 I	depth_range	Depth Range	13	Range	vector2	v 0 1	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -10326,6 +10530,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -10339,6 +10544,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -10352,6 +10558,7 @@ I	angle_map	Angle Map	12	Surface	image
 S	I	angle_map	0
 I	scale	Scale	2	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -10476,6 +10683,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -10505,6 +10713,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -10528,6 +10737,7 @@ I	iteration	Iteration	6	Int	integer	i 1
 S	I	iteration	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -10535,6 +10745,7 @@ I	rotation	Rotation	3	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 2 2	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	level_in	Level In	10	SliRange	vector2	v 0 1	
 S	I	level_in	1
@@ -10670,6 +10881,7 @@ Q	I	origin	2	0	s "Bottom Left"
 Q	I	origin	3	0	s "Bottom Right"
 I	spacing	Spacing	2	Vec2	vector2	v 0 0	
 S	I	spacing	1
+V	I	spacing	1
 A	I	spacing	1
 I	padding	Padding	3	IPadding	vector4	w 0 0 0 0	
 S	I	padding	1
@@ -10680,6 +10892,7 @@ I	fix_amount	Fix Amount	6	Int	integer	i 1
 S	I	fix_amount	0
 I	empty_size	Empty Size	7	Vec2	vector2	v 1 1	
 S	I	empty_size	1
+V	I	empty_size	1
 A	I	empty_size	1
 I	empty_size_unit	Empty Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	empty_size_unit	?
@@ -10700,6 +10913,7 @@ I	column	Column	1	Int	integer	i 4
 S	I	column	0
 I	spacing	Spacing	2	Vec2	vector2	v 0 0	
 S	I	spacing	1
+V	I	spacing	1
 A	I	spacing	1
 I	padding	Padding	3	IPadding	vector4	w 0 0 0 0	
 S	I	padding	1
@@ -10710,11 +10924,13 @@ I	texts	Texts	0	Surface	image
 S	I	texts	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	origin	Origin	2	Vec2	vector2	v 200 500	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	spacing	Spacing	5	Float	scalar	d 8	
 S	I	spacing	0
@@ -10754,6 +10970,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	sprite_size	Sprite Size	1	Vec2	vector2	v 32 32	
 S	I	sprite_size	1
+V	I	sprite_size	1
 A	I	sprite_size	1
 I	padding	Padding	6	IPadding	vector4	w 0 0 0 0	
 S	I	padding	1
@@ -10762,6 +10979,7 @@ I	row	Row	2	Int	integer	i 1
 S	I	row	0
 I	amount	Amount	3	Vec2	vector2	v 1 1	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	auto_fill	Auto Fill	10	Trigger	boolean	b 0	
 S	I	auto_fill	0
@@ -10773,9 +10991,11 @@ Q	I	main_axis	0	0	s "Horizontal"
 Q	I	main_axis	1	0	s "Vertical"
 I	offset	Offset	4	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	spacing	Spacing	5	Vec2	vector2	v 0 0	
 S	I	spacing	1
+V	I	spacing	1
 A	I	spacing	1
 I	output	Output	7	EScroll	enum	e 1	Animation;Array
 S	I	output	0
@@ -10910,6 +11130,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	6	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -10918,6 +11139,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	offset	Offset	8	IVec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	mode	Mode	1	EButton	enum	e 0	Greyscale;Palette;Gradient
 S	I	mode	0
@@ -10928,6 +11150,7 @@ Q	I	mode	1	0	s "Palette"
 Q	I	mode	2	0	s "Gradient"
 I	range	Range	2	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	palette	Palette	7	Palette	array	a colour 2 c 255 255 255 255 c 0 0 0 255	
 S	I	palette	1
@@ -10963,6 +11186,7 @@ Q	I	mode	1	0	s "Palette"
 Q	I	mode	2	0	s "Gradient"
 I	range	Range	2	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	palette	Palette	6	Palette	array	a colour 2 c 255 255 255 255 c 0 0 0 255	
 S	I	palette	1
@@ -11151,6 +11375,7 @@ Q	I	vector_size	1	0	s "3"
 Q	I	vector_size	2	0	s "4"
 I	range	Range	1	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	step	Step	7	Float	scalar	d 0.01	
 S	I	step	0
@@ -11164,6 +11389,7 @@ I	display_preview_gizmo	Display Preview Gizmo	6	Bool	boolean	b 1
 S	I	display_preview_gizmo	0
 I	gizmo_position	Gizmo Position	12	Vec2	vector2	v 0 0	
 S	I	gizmo_position	1
+V	I	gizmo_position	1
 A	I	gizmo_position	1
 I	gizmo_scale	Gizmo Scale	13	Float	scalar	d 1	
 S	I	gizmo_scale	0
@@ -11249,6 +11475,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -11262,6 +11489,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	c	C	1	Vec2	vector2	v -1 0	
 S	I	c	1
+V	I	c	1
 A	I	c	1
 I	c_unit	C Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	c_unit	?
@@ -11271,6 +11499,7 @@ I	diverge_threshold	Diverge Threshold	6	Float	scalar	d 4
 S	I	diverge_threshold	0
 I	position	Position	2	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -11278,6 +11507,7 @@ I	rotation	Rotation	4	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	3	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -11287,6 +11517,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -11302,6 +11533,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	4	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -11309,6 +11541,7 @@ I	angle	Angle	6	Rotation	scalar	d 0
 S	I	angle	0
 I	scale	Scale	5	Vec2	vector2	v 0.125 0.125	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -11541,6 +11774,7 @@ I	seed	Seed	39	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -11594,11 +11828,13 @@ S	I	segment	0
 A	I	segment	3
 I	start_point	Start Point	32	Vec2	vector2	v 0 0.5	
 S	I	start_point	1
+V	I	start_point	1
 A	I	start_point	1
 I	start_point_unit	Start Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	start_point_unit	?
 I	end_point	End Point	33	Vec2	vector2	v 1 0.5	
 S	I	end_point	1
+V	I	end_point	1
 A	I	end_point	1
 I	end_point_unit	End Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	end_point_unit	?
@@ -11614,6 +11850,7 @@ I	1px_mode	1px Mode	17	Bool	boolean	b 0
 S	I	1px_mode	0
 I	width	Width	3	Range	vector2	v 2 2	
 S	I	width	1
+V	I	width	1
 A	I	width	1
 I	width_curved	Width curved	-1	CurveToggle	boolean	b 0	
 S	I	width_curved	?
@@ -11626,6 +11863,7 @@ I	apply_weight	Apply Weight	36	Bool	boolean	b 0
 S	I	apply_weight	0
 I	normalized_range	Normalized Range	62	Range	vector2	v 0 1	
 S	I	normalized_range	1
+V	I	normalized_range	1
 A	I	normalized_range	1
 I	normalized_range_curved	Normalized Range curved	-1	CurveToggle	boolean	b 0	
 S	I	normalized_range_curved	?
@@ -11654,6 +11892,7 @@ I	wiggle_seed	Wiggle Seed	5	Seed	scalar
 S	I	wiggle_seed	0
 I	amplitude	Amplitude	4	Range	vector2	v 4 4	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -11679,6 +11918,7 @@ I	separate_segments	Separate Segments	67	Bool	boolean	b 0
 S	I	separate_segments	0
 I	extension	Extension	68	Range	vector2	v 1 1	
 S	I	extension	1
+V	I	extension	1
 A	I	extension	1
 I	random_angle	Random Angle	69	RotRand	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	random_angle	1
@@ -11712,6 +11952,7 @@ S	I	angles	1
 A	I	angles	1
 I	offset	Offset	61	Range	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	color_over_length	Color over Length	10	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	color_over_length	0
@@ -11729,16 +11970,19 @@ I	shift_4	Shift	66	Slider	scalar	d 0
 S	I	shift_4	0
 I	color_weight_range	Color Weight Range	38	Vec2	vector2	v 0 1	
 S	I	color_weight_range	1
+V	I	color_weight_range	1
 A	I	color_weight_range	1
 I	texture	Texture	18	Surface	image		
 S	I	texture	0
 I	texture_position	Texture Position	21	Vec2	vector2	v 0 0	
 S	I	texture_position	1
+V	I	texture_position	1
 A	I	texture_position	1
 I	texture_rotation	Texture Rotation	22	Rotation	scalar	d 0	
 S	I	texture_rotation	0
 I	texture_scale	Texture Scale	23	Vec2	vector2	v 1 1	
 S	I	texture_scale	1
+V	I	texture_scale	1
 A	I	texture_scale	1
 I	scale_texture_to_length	Scale Texture to Length	29	Bool	boolean	b 1	
 S	I	scale_texture_to_length	0
@@ -11766,6 +12010,7 @@ I	seed	Seed	1	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -11780,16 +12025,19 @@ Q	I	point_mode	1	0	s "Start + Offset"
 Q	I	point_mode	2	0	s "Start + Polar"
 I	start_point	Start Point	2	Vec2	vector2	v 0 0.5	
 S	I	start_point	1
+V	I	start_point	1
 A	I	start_point	1
 I	start_point_unit	Start Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	start_point_unit	?
 I	end_point	End Point	3	Vec2	vector2	v 1 0.5	
 S	I	end_point	1
+V	I	end_point	1
 A	I	end_point	1
 I	end_point_unit	End Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	end_point_unit	?
 I	offset	Offset	17	Vec2	vector2	v 0 1	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	offset_unit	?
@@ -11803,6 +12051,7 @@ I	1px_mode	1px Mode	4	Bool	boolean	b 0
 S	I	1px_mode	0
 I	width	Width	5	Range	vector2	v 2 2	
 S	I	width	1
+V	I	width	1
 A	I	width	1
 I	width_curved	Width curved	-1	CurveToggle	boolean	b 0	
 S	I	width_curved	?
@@ -11832,9 +12081,11 @@ I	texture	Texture	13	Surface	image
 S	I	texture	0
 I	uv_position	UV Position	14	Vec2	vector2	v 0 0	
 S	I	uv_position	1
+V	I	uv_position	1
 A	I	uv_position	1
 I	uv_scale	UV Scale	15	Vec2	vector2	v 1 1	
 S	I	uv_scale	1
+V	I	uv_scale	1
 A	I	uv_scale	1
 O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.line_match	Node_Line_Match	Line Match	filter	scripts/node_line_match/node_line_match.gml
@@ -11952,11 +12203,13 @@ B	T	type	0	general	1	default	?
 C	T	type	unknown
 T	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
+V	T	position	1
 A	T	position	1
 T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	position_unit	?
 T	position_2	Position 2	2	Vec2	vector2	v 1 0	
 S	T	position_2	1
+V	T	position_2	1
 A	T	position_2	1
 T	position_2_unit	Position 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	position_2_unit	?
@@ -12105,6 +12358,7 @@ S	I	function_name	0
 A	I	function_name	?
 I	output_dimension	Output Dimension	1	Vec2	vector2	v 32 32	
 S	I	output_dimension	?
+V	I	output_dimension	0
 A	I	output_dimension	?
 I	lua_code	Lua Code	2	Text	text	s ""	
 S	I	lua_code	0
@@ -12172,6 +12426,7 @@ S	I	falloff_curve	1
 A	I	falloff_curve	1
 I	target	Target	3	Vec2	vector2	v 0.5 0.5	
 S	I	target	1
+V	I	target	1
 A	I	target	1
 I	target_unit	Target Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	target_unit	?
@@ -12179,14 +12434,17 @@ I	target_mapped	Target Mapped	-1	MapToggle	boolean	b 0
 S	I	target_mapped	?
 I	target_scatter	Target Scatter	11	Range	vector2	v 0 0	
 S	I	target_scatter	1
+V	I	target_scatter	1
 A	I	target_scatter	1
 I	strength	Strength	2	Range	vector2	v 0 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	overshoot	Overshoot	9	Bool	boolean	b 0	
 S	I	overshoot	0
 I	spiral	Spiral	4	Range	vector2	v 0 0	
 S	I	spiral	1
+V	I	spiral	1
 A	I	spiral	1
 O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_combine	Node_MK_Blast_Combine	Combine	mk_blast	scripts/node_mk_blast_combine/node_mk_blast_combine.gml
@@ -12209,27 +12467,33 @@ I	layers	Layers	1	Float	scalar	d 3
 S	I	layers	0
 I	frame	Frame	2	Range	vector2	v 0 0	
 S	I	frame	1
+V	I	frame	1
 A	I	frame	1
 I	lifespan	Lifespan	3	Range	vector2	v 6 8	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	lifespan_mapped	Lifespan Mapped	-1	MapToggle	boolean	b 0	
 S	I	lifespan_mapped	?
 I	lifespan_group_varience	Lifespan Group Varience	40	Range	vector2	v 0 0	
 S	I	lifespan_group_varience	1
+V	I	lifespan_group_varience	1
 A	I	lifespan_group_varience	1
 I	position	Position	4	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	area	Area	5	Vec2	vector2	v 0 0	
 S	I	area	1
+V	I	area	1
 A	I	area	1
 I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	radius	Radius	6	Vec2	vector2	v 0.1 0.15	
 S	I	radius	1
+V	I	radius	1
 A	I	radius	1
 I	radius_unit	Radius Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	radius_unit	?
@@ -12237,12 +12501,15 @@ I	radius_mapped	Radius Mapped	-1	MapToggle	boolean	b 0
 S	I	radius_mapped	?
 I	radius_group_varience	Radius Group Varience	41	Range	vector2	v 0 0	
 S	I	radius_group_varience	1
+V	I	radius_group_varience	1
 A	I	radius_group_varience	1
 I	group_size	Group Size	7	Range	vector2	v 6 9	
 S	I	group_size	1
+V	I	group_size	1
 A	I	group_size	1
 I	scale	Scale	49	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	angle_span	Angle Span	10	RotRange	vector2	v 360 360	
 S	I	angle_span	1
@@ -12255,49 +12522,59 @@ Q	I	type	0	0	s "Increment"
 Q	I	type	1	0	s "Fix Curve"
 I	speed	Speed	11	Range	vector2	v 0.2 0.6	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	speed_mapped	Speed Mapped	-1	MapToggle	boolean	b 0	
 S	I	speed_mapped	?
 I	speed_group_varience	Speed Group Varience	9	Range	vector2	v 0 0	
 S	I	speed_group_varience	1
+V	I	speed_group_varience	1
 A	I	speed_group_varience	1
 I	movemenet_curve	Movemenet Curve	39	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	I	movemenet_curve	1
 A	I	movemenet_curve	1
 I	friction	Friction	24	Range	vector2	v 0 0	
 S	I	friction	1
+V	I	friction	1
 A	I	friction	1
 I	friction_mapped	Friction Mapped	-1	MapToggle	boolean	b 0	
 S	I	friction_mapped	?
 I	friction_group_varience	Friction Group Varience	42	Range	vector2	v 0 0	
 S	I	friction_group_varience	1
+V	I	friction_group_varience	1
 A	I	friction_group_varience	1
 I	direction	Direction	12	RotRand	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	direction	1
 A	I	direction	1
 I	gravity	Gravity	22	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	rotate	Rotate	26	Range	vector2	v 0 0	
 S	I	rotate	1
+V	I	rotate	1
 A	I	rotate	1
 I	rotate_mapped	Rotate Mapped	-1	MapToggle	boolean	b 0	
 S	I	rotate_mapped	?
 I	rotate_group_varience	Rotate Group Varience	8	Range	vector2	v 0 0	
 S	I	rotate_group_varience	1
+V	I	rotate_group_varience	1
 A	I	rotate_group_varience	1
 I	flip_rotate	Flip Rotate	27	Bool	boolean	b 0	
 S	I	flip_rotate	0
 I	size	Size	13	Range	vector2	v 6 10	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	size_mapped	Size Mapped	-1	MapToggle	boolean	b 0	
 S	I	size_mapped	?
 I	size_group_varience	Size Group Varience	43	Range	vector2	v 0 0	
 S	I	size_group_varience	1
+V	I	size_group_varience	1
 A	I	size_group_varience	1
 I	spawn_size	Spawn Size	28	Range	vector2	v 0.5 0.5	
 S	I	spawn_size	1
+V	I	spawn_size	1
 A	I	spawn_size	1
 I	aspect_ratio	Aspect Ratio	48	Range2	vector4	w 1 1 1 1	
 S	I	aspect_ratio	1
@@ -12306,15 +12583,19 @@ I	spiral_use	Spiral Use	32	Bool	boolean	b 0
 S	I	spiral_use	0
 I	phase	Phase	34	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	size_2	Size	29	Range	vector2	v 4 4	
 S	I	size_2	1
+V	I	size_2	1
 A	I	size_2	1
 I	intensity	Intensity	30	Range	vector2	v 0.5 0.5	
 S	I	intensity	1
+V	I	intensity	1
 A	I	intensity	1
 I	rotation	Rotation	33	Range	vector2	v 5 5	
 S	I	rotation	1
+V	I	rotation	1
 A	I	rotation	1
 I	multiply	Multiply	31	Bool	boolean	b 1	
 S	I	multiply	0
@@ -12322,11 +12603,13 @@ I	do_decay	Do Decay	25	Bool	boolean	b 1
 S	I	do_decay	0
 I	decay_offset	Decay Offset	14	Range	vector2	v 4 6	
 S	I	decay_offset	1
+V	I	decay_offset	1
 A	I	decay_offset	1
 I	decay_offset_mapped	Decay Offset Mapped	-1	MapToggle	boolean	b 0	
 S	I	decay_offset_mapped	?
 I	decay_offset_group_varience	Decay Offset Group Varience	44	Range	vector2	v 0 0	
 S	I	decay_offset_group_varience	1
+V	I	decay_offset_group_varience	1
 A	I	decay_offset_group_varience	1
 I	texture	Texture	21	Surface	image		
 S	I	texture	0
@@ -12342,6 +12625,7 @@ Q	I	shape	2	0	s "Line"
 Q	I	shape	3	0	s "Path"
 I	arrow_offset	Arrow Offset	35	Range	vector2	v 0 0	
 S	I	arrow_offset	1
+V	I	arrow_offset	1
 A	I	arrow_offset	1
 I	path	Path	46	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -12349,11 +12633,13 @@ I	path_sample	Path Sample	47	Int	integer	i 8
 S	I	path_sample	0
 I	thickness	Thickness	36	Range	vector2	v 2 2	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_mapped	Thickness Mapped	-1	MapToggle	boolean	b 0	
 S	I	thickness_mapped	?
 I	thickness_group_varience	Thickness Group Varience	45	Range	vector2	v 0 0	
 S	I	thickness_group_varience	1
+V	I	thickness_group_varience	1
 A	I	thickness_group_varience	1
 I	shape_2	Shape	37	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	shape_2	1
@@ -12365,20 +12651,25 @@ S	I	shift	1
 A	I	shift	1
 I	level	Level	18	Range	vector2	v 0 1	
 S	I	level	1
+V	I	level	1
 A	I	level	1
 I	view_origin	View Origin	15	Vec2	vector2	v 0.25 0.25	
 S	I	view_origin	1
+V	I	view_origin	1
 A	I	view_origin	1
 I	view_origin_unit	View Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	view_origin_unit	?
 I	perspective	Perspective	16	Range	vector2	v 2 2	
 S	I	perspective	1
+V	I	perspective	1
 A	I	perspective	1
 I	depth_darken	Depth Darken	52	Range	vector2	v 0 0	
 S	I	depth_darken	1
+V	I	depth_darken	1
 A	I	depth_darken	1
 I	depth_darken_range	Depth Darken Range	53	Range	vector2	v 0 1	
 S	I	depth_darken_range	1
+V	I	depth_darken_range	1
 A	I	depth_darken_range	1
 O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_force	Node_MK_Blast_Force	Move	mk_blast	scripts/node_mk_blast_force/node_mk_blast_force.gml
@@ -12404,6 +12695,7 @@ S	I	falloff_curve	1
 A	I	falloff_curve	1
 I	strength	Strength	2	Range	vector2	v 0 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	direction	Direction	3	RotRand	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	direction	1
@@ -12415,6 +12707,7 @@ S	I	move_curve	1
 A	I	move_curve	1
 I	life_range	Life Range	6	Range	vector2	v 0 1	
 S	I	life_range	1
+V	I	life_range	1
 A	I	life_range	1
 O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_gravity	Node_MK_Blast_Gravity	Gravity	mk_blast	scripts/node_mk_blast_gravity/node_mk_blast_gravity.gml
@@ -12440,6 +12733,7 @@ S	I	falloff_curve	1
 A	I	falloff_curve	1
 I	strength	Strength	2	Range	vector2	v 0 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	direction	Direction	3	RotRand	array	a scalar 5 d 0 d -90 d -90 d 0 d 0	
 S	I	direction	1
@@ -12457,6 +12751,7 @@ I	gravity	Gravity	1	Rotation	scalar	d -90
 S	I	gravity	0
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -12473,39 +12768,48 @@ I	layer	Layer	4	Float	scalar	d 1
 S	I	layer	0
 I	scatter	Scatter	23	Range	vector2	v 0 0	
 S	I	scatter	1
+V	I	scatter	1
 A	I	scatter	1
 I	period	Period	5	Float	scalar	d 2	
 S	I	period	0
 I	frame	Frame	6	Range	vector2	v 0 0	
 S	I	frame	1
+V	I	frame	1
 A	I	frame	1
 I	lifespan	Lifespan	7	Range	vector2	v 0 0	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	particle	Particle	3	Particle	particle		
 S	I	particle	0
 I	speed	Speed	8	Range	vector2	v 0 0	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	friction	Friction	9	Range	vector2	v 0 0	
 S	I	friction	1
+V	I	friction	1
 A	I	friction	1
 I	direction	Direction	10	RotRand	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	direction	1
 A	I	direction	1
 I	gravity	Gravity	11	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	rotate	Rotate	21	Range	vector2	v 0 0	
 S	I	rotate	1
+V	I	rotate	1
 A	I	rotate	1
 I	flip_rotate	Flip Rotate	22	Bool	boolean	b 0	
 S	I	flip_rotate	0
 I	size	Size	12	Range	vector2	v 6 10	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	spawn_size	Spawn Size	24	Range	vector2	v 0.5 0.5	
 S	I	spawn_size	1
+V	I	spawn_size	1
 A	I	spawn_size	1
 I	aspect_ratio	Aspect Ratio	36	Range2	vector4	w 1 1 1 1	
 S	I	aspect_ratio	1
@@ -12514,15 +12818,19 @@ I	spiral_use	Spiral Use	25	Bool	boolean	b 0
 S	I	spiral_use	0
 I	phase	Phase	30	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	size_2	Size	26	Range	vector2	v 4 4	
 S	I	size_2	1
+V	I	size_2	1
 A	I	size_2	1
 I	intensity	Intensity	27	Range	vector2	v 0.5 0.5	
 S	I	intensity	1
+V	I	intensity	1
 A	I	intensity	1
 I	rotation	Rotation	29	Range	vector2	v 5 5	
 S	I	rotation	1
+V	I	rotation	1
 A	I	rotation	1
 I	multiply	Multiply	28	Bool	boolean	b 1	
 S	I	multiply	0
@@ -12530,6 +12838,7 @@ I	do_decay	Do Decay	13	Bool	boolean	b 1
 S	I	do_decay	0
 I	decay	Decay	14	Range	vector2	v 4 6	
 S	I	decay	1
+V	I	decay	1
 A	I	decay	1
 I	texture	Texture	16	Surface	image		
 S	I	texture	0
@@ -12545,6 +12854,7 @@ Q	I	shape	2	0	s "Line"
 Q	I	shape	3	0	s "Path"
 I	arrow_offset	Arrow Offset	31	Range	vector2	v 0 0	
 S	I	arrow_offset	1
+V	I	arrow_offset	1
 A	I	arrow_offset	1
 I	path	Path	32	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -12552,6 +12862,7 @@ I	path_sample	Path Sample	33	Int	integer	i 8
 S	I	path_sample	0
 I	thickness	Thickness	34	Range	vector2	v 2 2	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	shape_2	Shape	35	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	shape_2	1
@@ -12562,14 +12873,17 @@ I	shift	Shift	38	Slider	scalar	d 0
 S	I	shift	0
 I	level	Level	18	Range	vector2	v 0 1	
 S	I	level	1
+V	I	level	1
 A	I	level	1
 I	view_origin	View Origin	19	Vec2	vector2	v 0.5 0.5	
 S	I	view_origin	1
+V	I	view_origin	1
 A	I	view_origin	1
 I	view_origin_unit	View Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	view_origin_unit	?
 I	perspective	Perspective	20	Range	vector2	v 2 2	
 S	I	perspective	1
+V	I	perspective	1
 A	I	perspective	1
 O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blast_render	Node_MK_Blast_Render	Render	mk_blast	scripts/node_mk_blast_render/node_mk_blast_render.gml
@@ -12592,34 +12906,43 @@ I	blast	Blast	0	Struct	struct
 S	I	blast	0
 I	amount	Amount	5	Range	vector2	v 1 1	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	scatter	Scatter	18	Range	vector2	v 0 0	
 S	I	scatter	1
+V	I	scatter	1
 A	I	scatter	1
 I	life_offset	Life Offset	1	Range	vector2	v 2 4	
 S	I	life_offset	1
+V	I	life_offset	1
 A	I	life_offset	1
 I	life_scale	Life Scale	6	Range	vector2	v 0.75 1	
 S	I	life_scale	1
+V	I	life_scale	1
 A	I	life_scale	1
 I	speed_offset	Speed Offset	7	Range	vector2	v -0.2 0.2	
 S	I	speed_offset	1
+V	I	speed_offset	1
 A	I	speed_offset	1
 I	direction_override	Direction Override	14	Bool	boolean	b 0	
 S	I	direction_override	0
 I	direction_offset	Direction Offset	9	Range	vector2	v -15 15	
 S	I	direction_offset	1
+V	I	direction_offset	1
 A	I	direction_offset	1
 I	rotate	Rotate	15	Range	vector2	v 0 0	
 S	I	rotate	1
+V	I	rotate	1
 A	I	rotate	1
 I	flip_rotate	Flip Rotate	16	Bool	boolean	b 0	
 S	I	flip_rotate	0
 I	scale_offset	Scale Offset	8	Range	vector2	v 0.75 1	
 S	I	scale_offset	1
+V	I	scale_offset	1
 A	I	scale_offset	1
 I	spawn_size	Spawn Size	19	Range	vector2	v 0.5 0.5	
 S	I	spawn_size	1
+V	I	spawn_size	1
 A	I	spawn_size	1
 I	aspect_ratio	Aspect Ratio	31	Vec2_Range	vector4	w 1 1 1 1	
 S	I	aspect_ratio	1
@@ -12628,15 +12951,19 @@ I	spiral_use	Spiral Use	20	Bool	boolean	b 0
 S	I	spiral_use	0
 I	phase	Phase	25	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	size	Size	21	Range	vector2	v 4 4	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	intensity	Intensity	22	Range	vector2	v 0.5 0.5	
 S	I	intensity	1
+V	I	intensity	1
 A	I	intensity	1
 I	rotation	Rotation	24	Range	vector2	v 5 5	
 S	I	rotation	1
+V	I	rotation	1
 A	I	rotation	1
 I	multiply	Multiply	23	Bool	boolean	b 1	
 S	I	multiply	0
@@ -12644,6 +12971,7 @@ I	do_decay	Do Decay	13	Bool	boolean	b 1
 S	I	do_decay	0
 I	decay	Decay	17	Range	vector2	v 4 6	
 S	I	decay	1
+V	I	decay	1
 A	I	decay	1
 I	overlay	Overlay	4	Bool	boolean	b 0	
 S	I	overlay	0
@@ -12661,6 +12989,7 @@ Q	I	shape	2	0	s "Line"
 Q	I	shape	3	0	s "Path"
 I	arrow_offset	Arrow Offset	26	Range	vector2	v 0 0	
 S	I	arrow_offset	1
+V	I	arrow_offset	1
 A	I	arrow_offset	1
 I	path	Path	27	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -12668,6 +12997,7 @@ I	path_sample	Path Sample	28	Int	integer	i 8
 S	I	path_sample	0
 I	thickness	Thickness	29	Range	vector2	v 2 2	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	shape_2	Shape	30	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	shape_2	1
@@ -12678,6 +13008,7 @@ I	shift	Shift	33	Slider	scalar	d 0
 S	I	shift	0
 I	level	Level	10	Range	vector2	v 0 1	
 S	I	level	1
+V	I	level	1
 A	I	level	1
 O	blast	Blast	0	struct	a any 0	s "[]"
 O	smoke	Smoke	1	struct	a any 0	s "[]"
@@ -12704,12 +13035,15 @@ S	I	falloff_curve	1
 A	I	falloff_curve	1
 I	strength	Strength	2	Range	vector2	v 0 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	frequency	Frequency	3	Range	vector2	v 4 4	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	phase	Phase	4	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 O	blast	Blast	0	struct	a any 0	s "[]"
 N	pc.mk_blinker	Node_MK_Blinker	MK Blinker	generate	scripts/node_mk_blinker/node_mk_blinker.gml
@@ -12752,6 +13086,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	12	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -12771,20 +13106,24 @@ I	amount	Amount	2	Int	integer	i 10
 S	I	amount	0
 I	speed	Speed	5	Range	vector2	v 1 1	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	direction	Direction	4	RotRand	array	a scalar 5 d 0 d 45 d 135 d 0 d 0	
 S	I	direction	1
 A	I	direction	1
 I	angular_speed	Angular Speed	9	Range	vector2	v -45 45	
 S	I	angular_speed	1
+V	I	angular_speed	1
 A	I	angular_speed	1
 I	turn	Turn	11	Bool	boolean	b 0	
 S	I	turn	0
 I	angular_acceleration	Angular Acceleration	10	Range	vector2	v -2 2	
 S	I	angular_acceleration	1
+V	I	angular_acceleration	1
 A	I	angular_acceleration	1
 I	size	Size	13	Range	vector2	v 1 1	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	color	Color	6	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	color	0
@@ -12792,6 +13131,7 @@ I	shift	Shift	17	Slider	scalar	d 0
 S	I	shift	0
 I	alpha	Alpha	16	Range	vector2	v 1 1	
 S	I	alpha	1
+V	I	alpha	1
 A	I	alpha	1
 I	alpha_curved	Alpha curved	-1	CurveToggle	boolean	b 0	
 S	I	alpha_curved	?
@@ -12813,6 +13153,7 @@ I	bg_surface	BG Surface	0	Surface	image
 S	I	bg_surface	0
 I	dimension	Dimension	19	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -12827,11 +13168,13 @@ Q	I	type	3	0	s "Path Sample"
 Q	I	type	4	0	s "Areas"
 I	point_1	Point 1	1	Vec2	vector2	v 0 0.5	
 S	I	point_1	1
+V	I	point_1	1
 A	I	point_1	1
 I	point_1_unit	Point 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_1_unit	?
 I	point_2	Point 2	2	Vec2	vector2	v 1 0.5	
 S	I	point_2	1
+V	I	point_2	1
 A	I	point_2	1
 I	point_2_unit	Point 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_2_unit	?
@@ -12862,6 +13205,7 @@ I	gravity	Gravity	14	Rotation	scalar	d -90
 S	I	gravity	0
 I	tension	Tension	4	Range	vector2	v 1 1	
 S	I	tension	1
+V	I	tension	1
 A	I	tension	1
 I	segments	Segments	8	Int	integer	i 16	
 S	I	segments	0
@@ -12869,9 +13213,11 @@ I	swing	Swing	11	Bool	boolean	b 0
 S	I	swing	0
 I	amplitude	Amplitude	12	Range	vector2	v 0.5 0.5	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	frequency	Frequency	13	Range	vector2	v 1 1	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	phase	Phase	33	Rotation	scalar	d 0	
 S	I	phase	0
@@ -12885,6 +13231,7 @@ I	ratio	Ratio	26	Slider	scalar	d 0.5
 S	I	ratio	0
 I	thickness	Thickness	6	Range	vector2	v 1 1	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -12901,9 +13248,11 @@ I	texture	Texture	28	Surface	image
 S	I	texture	0
 I	uv_position	UV Position	29	Vec2	vector2	v 0 0	
 S	I	uv_position	1
+V	I	uv_position	1
 A	I	uv_position	1
 I	uv_scale	UV Scale	30	Vec2	vector2	v 1 1	
 S	I	uv_scale	1
+V	I	uv_scale	1
 A	I	uv_scale	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3;;CleanEdge
 S	I	interpolate	?
@@ -12921,6 +13270,7 @@ I	seed	Seed	2	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -12930,9 +13280,11 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	cell_count	Cell Count	1	IVec2	vector2	v 8 8	
 S	I	cell_count	1
+V	I	cell_count	1
 A	I	cell_count	1
 I	clamp_distance	Clamp Distance	3	Vec2	vector2	v -1 -1	
 S	I	clamp_distance	1
+V	I	clamp_distance	1
 A	I	clamp_distance	1
 I	diagonal	Diagonal	15	Bool	boolean	b 0	
 S	I	diagonal	0
@@ -12995,6 +13347,7 @@ I	positional	Positional	57	Bool	boolean	b 0
 S	I	positional	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -13008,16 +13361,19 @@ I	layers	Layers	12	Int	integer	i 2
 S	I	layers	0
 I	position	Position	11	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	layer_shift	Layer Shift	28	Vec2	vector2	v 0 0	
 S	I	layer_shift	1
+V	I	layer_shift	1
 A	I	layer_shift	1
 I	layer_shift_unit	Layer Shift Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	layer_shift_unit	?
 I	size	Size	3	Vec2	vector2	v 0.3 0.3	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	size_unit	Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	size_unit	?
@@ -13053,6 +13409,7 @@ S	I	amount_over_layer	1
 A	I	amount_over_layer	1
 I	puff_size	Puff Size	4	Range	vector2	v 4 8	
 S	I	puff_size	1
+V	I	puff_size	1
 A	I	puff_size	1
 I	puff_size_curved	Puff Size curved	-1	CurveToggle	boolean	b 0	
 S	I	puff_size_curved	?
@@ -13066,6 +13423,7 @@ S	I	puff_size_over_layer	1
 A	I	puff_size_over_layer	1
 I	aspect	Aspect	51	Vec2	vector2	v 1 1	
 S	I	aspect	1
+V	I	aspect	1
 A	I	aspect	1
 I	angle	Angle	52	RotRange	vector2	v 0 0	
 S	I	angle	1
@@ -13076,6 +13434,7 @@ I	subtract_chance	Subtract Chance	46	Slider	scalar	d 0.5
 S	I	subtract_chance	0
 I	size_padding	Size Padding	47	Range	vector2	v 2 2	
 S	I	size_padding	1
+V	I	size_padding	1
 A	I	size_padding	1
 I	offset	Offset	48	Float	scalar	d 4	
 S	I	offset	0
@@ -13112,6 +13471,7 @@ I	use_shade	Use Shade	35	Bool	boolean	b 1
 S	I	use_shade	0
 I	inner_radius	Inner Radius	5	Range	vector2	v 0.6 0.8	
 S	I	inner_radius	1
+V	I	inner_radius	1
 A	I	inner_radius	1
 I	inner_radius_curved	Inner Radius curved	-1	CurveToggle	boolean	b 0	
 S	I	inner_radius_curved	?
@@ -13232,6 +13592,7 @@ I	invert	Invert	9	Bool	boolean	b 0
 S	I	invert	0
 I	position	Position	10	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -13239,6 +13600,7 @@ I	rotation	Rotation	11	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	12	Vec2	vector2	v 0 0	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	blend_over_delay	Blend over Delay	3	Palette	array	a colour 1 c 255 255 255 255	
 S	I	blend_over_delay	1
@@ -13288,6 +13650,7 @@ Q	I	output_dimension	0	0	s "Fixed"
 Q	I	output_dimension	1	0	s "Dynamic"
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -13385,11 +13748,13 @@ Q	T	animation	2	0	s "Wiggle"
 Q	T	animation	3	0	s "Wave"
 T	position	Position	5	Vec2	vector2	v 0 0	
 S	T	position	1
+V	T	position	1
 A	T	position	1
 T	rotation	Rotation	6	Rotation	scalar	d 0	
 S	T	rotation	0
 T	scale	Scale	7	Vec2	vector2	v 0 0	
 S	T	scale	1
+V	T	scale	1
 A	T	scale	1
 T	anchor_type	Anchor type	8	EButton	enum	e 1	Global;Local
 S	T	anchor_type	0
@@ -13406,12 +13771,15 @@ T	alpha	Alpha	11	Slider	scalar	d 1
 S	T	alpha	0
 T	amplitude	Amplitude	12	Vec2	vector2	v 4 4	
 S	T	amplitude	1
+V	T	amplitude	1
 A	T	amplitude	1
 T	frequency	Frequency	15	Vec2	vector2	v 4 4	
 S	T	frequency	1
+V	T	frequency	1
 A	T	frequency	1
 T	speed	Speed	16	Vec2	vector2	v 4 4	
 S	T	speed	1
+V	T	speed	1
 A	T	speed	1
 O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.mk_drip	Node_MK_Drip	MK Drip	mkfx	scripts/node_mk_drip/node_mk_drip.gml
@@ -13429,6 +13797,7 @@ I	density	Density	2	Float	scalar	d 5
 S	I	density	0
 I	offset	Offset	9	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	randomness	Randomness	15	Slider	scalar	d 1	
 S	I	randomness	0
@@ -13445,11 +13814,13 @@ I	direction	Direction	4	Rotation	scalar	d -90
 S	I	direction	0
 I	center	Center	24	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	distance	Distance	5	Range	vector2	v 0.25 0.25	
 S	I	distance	1
+V	I	distance	1
 A	I	distance	1
 I	distance_mapped	Distance Mapped	-1	MapToggle	boolean	b 0	
 S	I	distance_mapped	?
@@ -13457,6 +13828,7 @@ I	distance_map	Distance Map	19	Surface	image
 S	I	distance_map	0
 I	thickness	Thickness	6	Range	vector2	v 0.2 0.2	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -13465,6 +13837,7 @@ S	I	thickness_curve	1
 A	I	thickness_curve	1
 I	threshold	Threshold	8	Range	vector2	v 0.2 0.2	
 S	I	threshold	1
+V	I	threshold	1
 A	I	threshold	1
 I	dripping	Dripping	10	Bool	boolean	b 0	
 S	I	dripping	0
@@ -13472,6 +13845,7 @@ I	frequency	Frequency	11	Float	scalar	d 2
 S	I	frequency	0
 I	amplitude	Amplitude	12	Range	vector2	v 0.2 0.2	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -13507,6 +13881,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -13575,6 +13950,7 @@ I	background	Background	0	Surface	image
 S	I	background	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -13587,26 +13963,33 @@ I	amount	Amount	4	Int	integer	i 10
 S	I	amount	0
 I	speed	Speed	10	Range	vector2	v 1 1	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	gravity	Gravity	5	Float	scalar	d 0	
 S	I	gravity	0
 I	wind	Wind	12	Vec2	vector2	v 0 0	
 S	I	wind	1
+V	I	wind	1
 A	I	wind	1
 I	swing_frequency	Swing frequency	8	Range	vector2	v 1 1	
 S	I	swing_frequency	1
+V	I	swing_frequency	1
 A	I	swing_frequency	1
 I	x_swing	X Swing	6	Range	vector2	v 1 1	
 S	I	x_swing	1
+V	I	x_swing	1
 A	I	x_swing	1
 I	y_swing	Y Swing	7	Range	vector2	v 0.25 0.25	
 S	I	y_swing	1
+V	I	y_swing	1
 A	I	y_swing	1
 I	x_momentum	X Momentum	11	Range	vector2	v 0 0	
 S	I	x_momentum	1
+V	I	x_momentum	1
 A	I	x_momentum	1
 I	y_momentum	Y Momentum	17	Range	vector2	v 0 0	
 S	I	y_momentum	1
+V	I	y_momentum	1
 A	I	y_momentum	1
 I	shape	Shape	22	EScroll	enum	e 0	Leaf;Circle;Surface
 S	I	shape	0
@@ -13617,6 +14000,7 @@ Q	I	shape	1	0	s "Circle"
 Q	I	shape	2	0	s "Surface"
 I	size	Size	9	Vec2	vector2	v 4 2	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	surface	Surface	24	Surface	image		
 S	I	surface	0
@@ -13625,6 +14009,7 @@ S	I	rotation	1
 A	I	rotation	1
 I	scale	Scale	21	Range	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	color	Color	13	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	color	0
@@ -13637,6 +14022,7 @@ I	ground	Ground	15	Bool	boolean	b 0
 S	I	ground	0
 I	ground_levels	Ground Levels	16	Range	vector2		
 S	I	ground_levels	1
+V	I	ground_levels	0
 A	I	ground_levels	1
 I	twist	Twist	18	Bool	boolean	b 0	
 S	I	twist	0
@@ -13644,6 +14030,7 @@ I	twist_rate	Twist Rate	19	Slider	scalar	d 0.1
 S	I	twist_rate	0
 I	twist_speed	Twist Speed	20	Range	vector2	v 5 10	
 S	I	twist_speed	1
+V	I	twist_speed	1
 A	I	twist_speed	1
 I	twist_radius	Twist Radius	23	Slider	scalar	d 0.7	
 S	I	twist_radius	0
@@ -13653,6 +14040,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -13711,6 +14099,7 @@ I	seed	Seed	2	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -13725,6 +14114,7 @@ S	I	range	1
 A	I	range	1
 I	branches	Branches	4	Range	vector2	v 3 5	
 S	I	branches	1
+V	I	branches	1
 A	I	branches	1
 I	branch_position	Branch Position	11	SliRange	vector2	v 0 1	
 S	I	branch_position	1
@@ -13734,6 +14124,7 @@ S	I	branch_angle	1
 A	I	branch_angle	1
 I	branch_length	Branch Length	6	Range	vector2	v 0.2 1	
 S	I	branch_length	1
+V	I	branch_length	1
 A	I	branch_length	1
 I	cap_shape	Cap Shape	16	EScroll	enum	e 0	None;Diamond;Rectangle;Circle;Surface
 S	I	cap_shape	0
@@ -13748,11 +14139,13 @@ I	cap_texture	Cap Texture	18	Surface	image
 S	I	cap_texture	0
 I	cap_size	Cap Size	17	Vec2	vector2	v 4 4	
 S	I	cap_size	1
+V	I	cap_size	1
 A	I	cap_size	1
 I	branch_cap	Branch Cap	20	Slider	scalar	d 0	
 S	I	branch_cap	0
 I	offset	Offset	23	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	rotation_2	Rotation	13	Rotation	scalar	d 0	
 S	I	rotation_2	0
@@ -13767,6 +14160,7 @@ Q	I	blend_mode	1	0	s "Additive"
 Q	I	blend_mode	2	0	s "Maximum"
 I	thickness	Thickness	7	Range	vector2	v 2 2	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -13797,16 +14191,19 @@ I	background	Background	0	Surface	image
 S	I	background	0
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	origin	Origin	1	Vec2	vector2	v 0 0	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
 I	focus	Focus	6	Vec2	vector2	v 0.5 0.5	
 S	I	focus	1
+V	I	focus	1
 A	I	focus	1
 I	focus_unit	Focus Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	focus_unit	?
@@ -13848,6 +14245,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	subdivision	Subdivision	1	Vec2	vector2	v 4 4	
 S	I	subdivision	1
+V	I	subdivision	1
 A	I	subdivision	1
 I	progress	Progress	2	Slider	scalar	d 0.5	
 S	I	progress	0
@@ -13869,6 +14267,7 @@ I	skew	Skew	12	Slider	scalar	d 0
 S	I	skew	0
 I	movement	Movement	4	Vec2	vector2	v 0 0	
 S	I	movement	1
+V	I	movement	1
 A	I	movement	1
 I	movement_mapped	Movement Mapped	-1	MapToggle	boolean	b 0	
 S	I	movement_mapped	?
@@ -13913,6 +14312,7 @@ Q	I	type	1	0	s "Sun"
 Q	I	type	2	0	s "Infinite Sun"
 I	origin	Origin	4	Vec2	vector2	v 0.5 0.5	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
@@ -14020,6 +14420,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	picker	Picker	5	Vec2	vector2	v 0 0	
 S	I	picker	1
+V	I	picker	1
 A	I	picker	1
 I	picker_unit	Picker Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	picker_unit	?
@@ -14037,6 +14438,7 @@ I	ratio	Ratio	22	Slider	scalar	d 0.5
 S	I	ratio	0
 I	size	Size	8	Range	vector2	v 4 4	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	size_mapped	Size Mapped	-1	MapToggle	boolean	b 0	
 S	I	size_mapped	?
@@ -14048,6 +14450,7 @@ I	extra	Extra	20	Float	scalar	d 0
 S	I	extra	0
 I	sway_x	Sway X	21	Range	vector2	v -4 4	
 S	I	sway_x	1
+V	I	sway_x	1
 A	I	sway_x	1
 I	grass_surface	Grass Surface	27	Surface	image		
 S	I	grass_surface	0
@@ -14090,6 +14493,7 @@ I	seed	Seed	5	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -14097,9 +14501,11 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	amount	Amount	2	Vec2	vector2	v 4 4	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	position	Position	8	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -14113,6 +14519,7 @@ I	ball_size_map	Ball Size Map	32	Surface	image
 S	I	ball_size_map	0
 I	scale	Scale	35	Range	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
@@ -14238,6 +14645,7 @@ I	seed	Seed	3	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -14247,6 +14655,7 @@ I	surface_back	Surface Back	4	Surface	image
 S	I	surface_back	0
 I	amount	Amount	2	Vec2	vector2	v 4 4	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	axis	Axis	6	EButton	enum	e 0	X;Y
 S	I	axis	0
@@ -14285,6 +14694,7 @@ Q	I	dimension_type	0	0	s "Fixed"
 Q	I	dimension_type	1	0	s "Dynamic"
 I	dimension	Dimension	21	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -14293,6 +14703,7 @@ S	I	padding	1
 A	I	padding	1
 I	base	Base	0	Vec2	vector2	v 8 8	
 S	I	base	1
+V	I	base	1
 A	I	base	1
 I	base_offset	Base Offset	8	Vec4	vector4	w 0 0 0 0	
 S	I	base_offset	1
@@ -14343,6 +14754,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	19	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -14379,6 +14791,7 @@ I	rotation	Rotation	7	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	8	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	use_hole	Use Hole	13	Bool	boolean	b 0	
 S	I	use_hole	0
@@ -14420,6 +14833,7 @@ Q	I	pattern	0	0	s "Grid"
 Q	I	pattern	1	0	s "Polar"
 I	subdivide	Subdivide	2	IVec2	vector2	v 4 4	
 S	I	subdivide	1
+V	I	subdivide	1
 A	I	subdivide	1
 I	gap	Gap	4	Float	scalar	d 2	
 S	I	gap	0
@@ -14431,6 +14845,7 @@ Q	I	shape	0	0	s "Circular"
 Q	I	shape	1	0	s "Rectangle"
 I	size	Size	6	Vec2	vector2	v 0.33 0.25	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	recess	Recess	7	Float	scalar	d 0.5	
 S	I	recess	0
@@ -14448,6 +14863,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -14468,18 +14884,22 @@ I	min_size	Min Size	4	Slider	scalar	d 0.1
 S	I	min_size	0
 I	padding	Padding	10	Range	vector2	v 0 0	
 S	I	padding	1
+V	I	padding	1
 A	I	padding	1
 I	panel_colors	Panel Colors	5	Palette	array	a colour 2 c 255 255 255 255 c 0 0 0 255	
 S	I	panel_colors	1
 A	I	panel_colors	1
 I	inset_range	Inset Range	26	Range	vector2	v 0.05 0.1	
 S	I	inset_range	1
+V	I	inset_range	1
 A	I	inset_range	1
 I	split_ratio	Split Ratio	17	Range	vector2	v 0.2 0.8	
 S	I	split_ratio	1
+V	I	split_ratio	1
 A	I	split_ratio	1
 I	split_width	Split Width	20	Range	vector2	v 0 0	
 S	I	split_width	1
+V	I	split_width	1
 A	I	split_width	1
 I	split_alternate	Split Alternate	23	Bool	boolean	b 0	
 S	I	split_alternate	0
@@ -14503,6 +14923,7 @@ I	corner_shuffle	Corner Shuffle	24	Bool	boolean	b 0
 S	I	corner_shuffle	0
 I	pipe_size	Pipe Size	28	Range	vector2	v 4 4	
 S	I	pipe_size	1
+V	I	pipe_size	1
 A	I	pipe_size	1
 I	shape_offset	Shape Offset	25	Slider	scalar	d 0	
 S	I	shape_offset	0
@@ -14512,12 +14933,15 @@ I	slot_seed	Slot Seed	15	Seed	scalar
 S	I	slot_seed	0
 I	slot_size	Slot Size	11	Range	vector2	v 0.2 0.2	
 S	I	slot_size	1
+V	I	slot_size	1
 A	I	slot_size	1
 I	slot_width	Slot Width	14	Range	vector2	v 0.5 0.5	
 S	I	slot_width	1
+V	I	slot_width	1
 A	I	slot_width	1
 I	slot_count	Slot Count	13	Range	vector2	v 3 8	
 S	I	slot_count	1
+V	I	slot_count	1
 A	I	slot_count	1
 I	slot_spacing	Slot Spacing	12	Int	integer	i 2	
 S	I	slot_spacing	0
@@ -14545,6 +14969,7 @@ I	shine_chance	Shine Chance	40	Slider	scalar	d 0.5
 S	I	shine_chance	0
 I	shine_width	Shine Width	37	Range	vector2	v 0.1 0.1	
 S	I	shine_width	1
+V	I	shine_width	1
 A	I	shine_width	1
 I	shine_speed	Shine Speed	39	Float	scalar	d 1	
 S	I	shine_speed	0
@@ -14570,11 +14995,13 @@ T	surface_s	Surface {_s}	0	Surface	image
 S	T	surface_s	0
 T	position_s	Position {_s}	1	Vec2	vector2	v 0 0	
 S	T	position_s	1
+V	T	position_s	1
 A	T	position_s	1
 T	position_s_unit	Position {_s} Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	position_s_unit	?
 T	parallax_s	Parallax {_s}	2	Vec2	vector2	v 0 0	
 S	T	parallax_s	1
+V	T	parallax_s	1
 A	T	parallax_s	1
 T	depth_s	Depth {_s}	3	Float	scalar		
 S	T	depth_s	0
@@ -14584,6 +15011,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -14614,6 +15042,7 @@ I	depth_adjustment_unit	Depth Adjustment Unit	-1	ValueUnit	enum	e 1	Pixel;Refere
 S	I	depth_adjustment_unit	?
 I	origin	Origin	5	Vec2	vector2	v 0.5 0.8	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
@@ -14621,9 +15050,11 @@ I	amount	Amount	6	Int	integer	i 4
 S	I	amount	0
 I	angles_of_repose	Angles of Repose	7	Range	vector2	v 45 45	
 S	I	angles_of_repose	1
+V	I	angles_of_repose	1
 A	I	angles_of_repose	1
 I	column_shift	Column Shift	8	Vec2	vector2	v 0 0	
 S	I	column_shift	1
+V	I	column_shift	1
 A	I	column_shift	1
 I	column_shift_unit	Column Shift Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	column_shift_unit	?
@@ -14633,14 +15064,17 @@ I	shuffle	Shuffle	13	Slider	scalar	d 0
 S	I	shuffle	0
 I	x_offset	X Offset	15	Range	vector2	v 0 0	
 S	I	x_offset	1
+V	I	x_offset	1
 A	I	x_offset	1
 I	y_offset	Y Offset	16	Range	vector2	v 0 0	
 S	I	y_offset	1
+V	I	y_offset	1
 A	I	y_offset	1
 I	amount_2	Amount	11	Int	integer	i 0	
 S	I	amount_2	0
 I	range	Range	12	Range	vector2	v 0.75 1.5	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -14662,12 +15096,15 @@ Q	I	shape	1	0	s "Snow"
 Q	I	shape	2	0	s "Texture"
 I	raindrop_width	Raindrop Width	3	Range	vector2	v 1 1	
 S	I	raindrop_width	1
+V	I	raindrop_width	1
 A	I	raindrop_width	1
 I	raindrop_length	Raindrop Length	4	Range	vector2	v 5 10	
 S	I	raindrop_length	1
+V	I	raindrop_length	1
 A	I	raindrop_length	1
 I	snow_size	Snow Size	10	Range	vector2	v 3 4	
 S	I	snow_size	1
+V	I	snow_size	1
 A	I	snow_size	1
 I	texture	Texture	11	Surface	image		
 S	I	texture	0
@@ -14688,6 +15125,7 @@ I	direction	Direction	1	Rotation	scalar	d 45
 S	I	direction	0
 I	velocity	Velocity	7	Range	vector2	v 1 2	
 S	I	velocity	1
+V	I	velocity	1
 A	I	velocity	1
 I	track_extension	Track Extension	12	SliRange	vector2	v 0 0	
 S	I	track_extension	1
@@ -14715,6 +15153,7 @@ I	rip_lifespan	Rip. Lifespan	21	Float	scalar	d 2
 S	I	rip_lifespan	0
 I	rip_radius	Rip. Radius	22	Vec2	vector2	v 16 8	
 S	I	rip_radius	1
+V	I	rip_radius	1
 A	I	rip_radius	1
 I	rip_delay	Rip. Delay	24	Slider	scalar	d 0.2	
 S	I	rip_delay	0
@@ -14730,11 +15169,13 @@ I	seed	Seed	1	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	origin	Origin	8	Vec2	vector2	v 0.5 0.5	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
@@ -14751,6 +15192,7 @@ I	amount	Amount	2	Int	integer	i 3
 S	I	amount	0
 I	scatter	Scatter	5	Vec2	vector2	v 3 2	
 S	I	scatter	1
+V	I	scatter	1
 A	I	scatter	1
 I	shape	Shape	37	EScroll	enum	e 0	Ellipse;Rectangle;Quadrilateral;Polygon;Surface
 S	I	shape	0
@@ -14763,11 +15205,13 @@ Q	I	shape	3	0	s "Polygon"
 Q	I	shape	4	0	s "Surface"
 I	sides	Sides	40	Range	vector2	v 4 6	
 S	I	sides	1
+V	I	sides	1
 A	I	sides	1
 I	surface	Surface	43	Surface	image		
 S	I	surface	0
 I	size	Size	3	Range	vector2	v 4 8	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	size_curved	Size curved	-1	CurveToggle	boolean	b 0	
 S	I	size_curved	?
@@ -14776,6 +15220,7 @@ S	I	size_curve	1
 A	I	size_curve	1
 I	ratio	Ratio	4	Range	vector2	v 0.5 0.5	
 S	I	ratio	1
+V	I	ratio	1
 A	I	ratio	1
 I	ratio_curved	Ratio curved	-1	CurveToggle	boolean	b 0	
 S	I	ratio_curved	?
@@ -14784,6 +15229,7 @@ S	I	ratio_curve	1
 A	I	ratio_curve	1
 I	depth	Depth	7	Range	vector2	v 4 6	
 S	I	depth	1
+V	I	depth	1
 A	I	depth	1
 I	depth_curved	Depth curved	-1	CurveToggle	boolean	b 0	
 S	I	depth_curved	?
@@ -14795,6 +15241,7 @@ S	I	rock_angle	1
 A	I	rock_angle	1
 I	shape_scale	Shape Scale	16	Range	vector2	v 1 1	
 S	I	shape_scale	1
+V	I	shape_scale	1
 A	I	shape_scale	1
 I	shape_scale_curved	Shape Scale curved	-1	CurveToggle	boolean	b 0	
 S	I	shape_scale_curved	?
@@ -14803,6 +15250,7 @@ S	I	shape_scale_curve	1
 A	I	shape_scale_curve	1
 I	shear	Shear	34	Range	vector2	v 0 0	
 S	I	shear	1
+V	I	shear	1
 A	I	shear	1
 I	shear_curved	Shear curved	-1	CurveToggle	boolean	b 0	
 S	I	shear_curved	?
@@ -14826,6 +15274,7 @@ Q	I	shape_2	0	0	s "Ellipse"
 Q	I	shape_2	1	0	s "Rectangle"
 I	scale	Scale	39	Range	vector2	v 0 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	nugget	Nugget	20	Bool	boolean	b 0	
 S	I	nugget	0
@@ -14843,12 +15292,15 @@ I	span	Span	64	Slider	scalar	d 0.5
 S	I	span	0
 I	size_2	Size	21	Range	vector2	v 2 2	
 S	I	size_2	1
+V	I	size_2	1
 A	I	size_2	1
 I	height	Height	22	Range	vector2	v 1 2	
 S	I	height	1
+V	I	height	1
 A	I	height	1
 I	depth_2	Depth	23	Range	vector2	v 1 1	
 S	I	depth_2	1
+V	I	depth_2	1
 A	I	depth_2	1
 I	color	Color	19	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	color	0
@@ -14897,6 +15349,7 @@ Q	I	shape_4	0	0	s "Ellipse"
 Q	I	shape_4	1	0	s "Rectangle"
 I	size_3	Size	29	Range	vector2	v 0.5 0.5	
 S	I	size_3	1
+V	I	size_3	1
 A	I	size_3	1
 I	angle	Angle	56	RotRange	vector2	v 135 135	
 S	I	angle	1
@@ -14946,16 +15399,19 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	point_1	Point 1	1	Vec2	vector2	v 0 0	
 S	I	point_1	1
+V	I	point_1	1
 A	I	point_1	1
 I	point_1_unit	Point 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_1_unit	?
 I	point_2	Point 2	2	Vec2	vector2	v 16 16	
 S	I	point_2	1
+V	I	point_2	1
 A	I	point_2	1
 I	point_2_unit	Point 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_2_unit	?
@@ -14987,6 +15443,7 @@ I	seed	Seed	6	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -15014,6 +15471,7 @@ I	attempt	Attempt	31	Int	integer	i 0
 S	I	attempt	0
 I	lifespan	Lifespan	2	Range	vector2	v 64 64	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	direction	Direction	3	RotRand	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	direction	1
@@ -15039,12 +15497,15 @@ Q	I	shape	1	0	s "Wave"
 Q	I	shape	2	0	s "Zigzag"
 I	phase	Phase	11	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	frequency	Frequency	8	Range	vector2	v 4 4	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	amplitude	Amplitude	9	Range	vector2	v 2 2	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	life_range_2	Life Range	13	SliRange	vector2	v 0.3 1	
 S	I	life_range_2	1
@@ -15054,6 +15515,7 @@ S	I	spiral	1
 A	I	spiral	1
 I	velocity	Velocity	10	Range	vector2	v 20 20	
 S	I	velocity	1
+V	I	velocity	1
 A	I	velocity	1
 I	flip	Flip	14	EScroll	enum	e 0	None;Random;Ordered
 S	I	flip	0
@@ -15072,6 +15534,7 @@ S	I	offset_curve	1
 A	I	offset_curve	1
 I	thickness	Thickness	15	Range	vector2	v 2 2	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -15107,12 +15570,15 @@ S	I	animation	1
 A	I	animation	1
 I	anim_range	Anim Range	19	Range	vector2	v 1 1	
 S	I	anim_range	1
+V	I	anim_range	1
 A	I	anim_range	1
 I	anim_speed	Anim Speed	20	Range	vector2	v 1 1	
 S	I	anim_speed	1
+V	I	anim_speed	1
 A	I	anim_speed	1
 I	anim_shift	Anim Shift	24	Range	vector2	v 0 0	
 S	I	anim_shift	1
+V	I	anim_shift	1
 A	I	anim_shift	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -15164,6 +15630,7 @@ I	surface	Surface	7	Surface	image
 S	I	surface	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -15311,6 +15778,7 @@ O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_tree_branch	Node_MK_Tree_Branch	Branch	mk_tree	scripts/node_mk_tree_branch/node_mk_tree_branch.gml
 I	origin_position	Origin Position	1	Vec2	vector2	v 0.5 1	
 S	I	origin_position	1
+V	I	origin_position	1
 A	I	origin_position	1
 I	origin_wiggle	Origin Wiggle	2	Vec2_Range	vector4	w 0 0 0 0	
 S	I	origin_wiggle	1
@@ -15328,6 +15796,7 @@ I	chance	Chance	44	Slider	scalar	d 1
 S	I	chance	0
 I	amount	Amount	5	Range	vector2	v 4 8	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	distribution	Distribution	19	EButton	enum	e 0	Random;Uniform
 S	I	distribution	0
@@ -15344,6 +15813,7 @@ I	apply_to_property_curves	Apply to Property Curves	32	Bool	boolean	b 0
 S	I	apply_to_property_curves	0
 I	length	Length	3	Range	vector2	v 16 32	
 S	I	length	1
+V	I	length	1
 A	I	length	1
 I	length_curved	Length curved	-1	CurveToggle	boolean	b 0	
 S	I	length_curved	?
@@ -15352,6 +15822,7 @@ S	I	length_over_branch	1
 A	I	length_over_branch	1
 I	segments	Segments	7	Range	vector2	v 4 8	
 S	I	segments	1
+V	I	segments	1
 A	I	segments	1
 I	direction_type	Direction Type	31	EButton	enum	e 0	Random;Uniform;Spread
 S	I	direction_type	0
@@ -15365,6 +15836,7 @@ S	I	direction	1
 A	I	direction	1
 I	spread	Spread	40	Range	vector2	v 15 30	
 S	I	spread	1
+V	I	spread	1
 A	I	spread	1
 I	spread_curved	Spread curved	-1	CurveToggle	boolean	b 0	
 S	I	spread_curved	?
@@ -15389,9 +15861,11 @@ I	do_clamp_direction	Do Clamp Direction	53	Bool	boolean	b 0
 S	I	do_clamp_direction	0
 I	clamp_direction	Clamp Direction	54	Range	vector2	v 0 360	
 S	I	clamp_direction	1
+V	I	clamp_direction	1
 A	I	clamp_direction	1
 I	gravity	Gravity	9	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	gravity_curved	Gravity curved	-1	CurveToggle	boolean	b 0	
 S	I	gravity_curved	?
@@ -15409,6 +15883,7 @@ I	gravity_direction	Gravity Direction	51	Rot	scalar	d 0
 S	I	gravity_direction	0
 I	amplitude	Amplitude	10	Range	vector2	v 0 0	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -15422,12 +15897,15 @@ S	I	amplitude_over_branch	1
 A	I	amplitude_over_branch	1
 I	frequency	Frequency	42	Range	vector2	v 4 4	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	phase	Phase	43	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	amplitude_2	Amplitude	47	Range	vector2	v 0 0	
 S	I	amplitude_2	1
+V	I	amplitude_2	1
 A	I	amplitude_2	1
 I	amplitude_2_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_2_curved	?
@@ -15436,6 +15914,7 @@ S	I	amplitude_over_length_2	1
 A	I	amplitude_over_length_2	1
 I	frequency_2	Frequency	25	Range	vector2	v 4 4	
 S	I	frequency_2	1
+V	I	frequency_2	1
 A	I	frequency_2	1
 I	frequency_2_curved	Frequency curved	-1	CurveToggle	boolean	b 0	
 S	I	frequency_2_curved	?
@@ -15444,9 +15923,11 @@ S	I	frequency_over_length	1
 A	I	frequency_over_length	1
 I	phase_2	Phase	26	Range	vector2	v 0 0	
 S	I	phase_2	1
+V	I	phase_2	1
 A	I	phase_2	1
 I	wave	Wave	21	Range	vector2	v 0 0	
 S	I	wave	1
+V	I	wave	1
 A	I	wave	1
 I	wave_curved	Wave curved	-1	CurveToggle	boolean	b 0	
 S	I	wave_curved	?
@@ -15455,6 +15936,7 @@ S	I	wave_over_length	1
 A	I	wave_over_length	1
 I	curl	Curl	23	Range	vector2	v 0 0	
 S	I	curl	1
+V	I	curl	1
 A	I	curl	1
 I	curl_curved	Curl curved	-1	CurveToggle	boolean	b 0	
 S	I	curl_curved	?
@@ -15463,6 +15945,7 @@ S	I	curl_over_length	1
 A	I	curl_over_length	1
 I	thickness	Thickness	6	Range	vector2	v 2 2	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -15518,6 +16001,7 @@ Q	I	array_selection	0	0	s "Ordered"
 Q	I	array_selection	1	0	s "Random"
 I	grow_delay	Grow Delay	20	Range	vector2	v 0 0	
 S	I	grow_delay	1
+V	I	grow_delay	1
 A	I	grow_delay	1
 O	tree	Tree	0	struct	i -4	s "noone"
 O	branches	Branches	1	struct	i -4	s "noone"
@@ -15536,6 +16020,7 @@ I	chance	Chance	9	Slider	scalar	d 1
 S	I	chance	0
 I	amount	Amount	3	Range	vector2	v 2 2	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	distribution	Distribution	7	EButton	enum	e 0	Random;Uniform
 S	I	distribution	0
@@ -15552,9 +16037,11 @@ I	apply_to_property_curves	Apply to Property Curves	33	Bool	boolean	b 0
 S	I	apply_to_property_curves	0
 I	segments	Segments	4	Range	vector2	v 4 8	
 S	I	segments	1
+V	I	segments	1
 A	I	segments	1
 I	fan_amount	Fan Amount	14	Range	vector2	v 6 6	
 S	I	fan_amount	1
+V	I	fan_amount	1
 A	I	fan_amount	1
 I	fan_amount_curved	Fan Amount curved	-1	CurveToggle	boolean	b 0	
 S	I	fan_amount_curved	?
@@ -15563,6 +16050,7 @@ S	I	fan_amount_over_branch	1
 A	I	fan_amount_over_branch	1
 I	aspect	Aspect	18	Range	vector2	v 0.5 0.5	
 S	I	aspect	1
+V	I	aspect	1
 A	I	aspect	1
 I	aspect_curved	Aspect curved	-1	CurveToggle	boolean	b 0	
 S	I	aspect_curved	?
@@ -15571,9 +16059,11 @@ S	I	aspect_over_branch	1
 A	I	aspect_over_branch	1
 I	random	Random	36	Range	vector2	v 0 0	
 S	I	random	1
+V	I	random	1
 A	I	random	1
 I	inner_radius	Inner Radius	10	Range	vector2	v 0 0	
 S	I	inner_radius	1
+V	I	inner_radius	1
 A	I	inner_radius	1
 I	inner_radius_curved	Inner Radius curved	-1	CurveToggle	boolean	b 0	
 S	I	inner_radius_curved	?
@@ -15582,6 +16072,7 @@ S	I	inner_radius_over_branch	1
 A	I	inner_radius_over_branch	1
 I	outer_radius	Outer Radius	12	Range	vector2	v 16 32	
 S	I	outer_radius	1
+V	I	outer_radius	1
 A	I	outer_radius	1
 I	outer_radius_curved	Outer Radius curved	-1	CurveToggle	boolean	b 0	
 S	I	outer_radius_curved	?
@@ -15590,6 +16081,7 @@ S	I	outer_radius_over_branch	1
 A	I	outer_radius_over_branch	1
 I	cone_height	Cone Height	16	Range	vector2	v 8 8	
 S	I	cone_height	1
+V	I	cone_height	1
 A	I	cone_height	1
 I	cone_height_curved	Cone Height curved	-1	CurveToggle	boolean	b 0	
 S	I	cone_height_curved	?
@@ -15604,6 +16096,7 @@ S	I	cone_trim	1
 A	I	cone_trim	1
 I	phase	Phase	20	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	phase_curved	Phase curved	-1	CurveToggle	boolean	b 0	
 S	I	phase_curved	?
@@ -15614,6 +16107,7 @@ I	overlap	Overlap	22	Bool	boolean	b 0
 S	I	overlap	0
 I	thickness	Thickness	5	Range	vector2	v 2 2	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -15672,6 +16166,7 @@ I	branch	Branch	0	Struct	struct
 S	I	branch	0
 I	scatter	Scatter	2	Range	vector2	v 0 0	
 S	I	scatter	1
+V	I	scatter	1
 A	I	scatter	1
 I	scatter_curved	Scatter curved	-1	CurveToggle	boolean	b 0	
 S	I	scatter_curved	?
@@ -15710,6 +16205,7 @@ Q	I	scatter	1	0	s "Random"
 Q	I	scatter	2	0	s "Poisson"
 I	grid	Grid	6	IVec2	vector2	v 4 4	
 S	I	grid	1
+V	I	grid	1
 A	I	grid	1
 I	amount	Amount	3	Int	integer	i 32	
 S	I	amount	0
@@ -15727,9 +16223,11 @@ I	branch	Branch	0	Struct	struct
 S	I	branch	0
 I	offset	Offset	7	Range	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	spread	Spread	2	Range	vector2	v 0 1	
 S	I	spread	1
+V	I	spread	1
 A	I	spread	1
 I	spread_curved	Spread curved	-1	CurveToggle	boolean	b 0	
 S	I	spread_curved	?
@@ -15740,6 +16238,7 @@ I	modulate_thickness	Modulate Thickness	4	Bool	boolean	b 0
 S	I	modulate_thickness	0
 I	range	Range	6	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	thickness	Thickness	5	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	I	thickness	1
@@ -15754,15 +16253,19 @@ I	progress	Progress	2	Slider	scalar	d 1.5
 S	I	progress	0
 I	branch_speed	Branch Speed	5	Range	vector2	v 1 1	
 S	I	branch_speed	1
+V	I	branch_speed	1
 A	I	branch_speed	1
 I	thickness_effect	Thickness Effect	3	Range	vector2	v 0 0	
 S	I	thickness_effect	1
+V	I	thickness_effect	1
 A	I	thickness_effect	1
 I	leaves_delay	Leaves Delay	6	Range	vector2	v 0 0	
 S	I	leaves_delay	1
+V	I	leaves_delay	1
 A	I	leaves_delay	1
 I	leaves_falloff	Leaves Falloff	4	Range	vector2	v 4 4	
 S	I	leaves_falloff	1
+V	I	leaves_falloff	1
 A	I	leaves_falloff	1
 I	leaves_falloff_curved	Leaves Falloff curved	-1	CurveToggle	boolean	b 0	
 S	I	leaves_falloff_curved	?
@@ -15771,6 +16274,7 @@ S	I	leaves_falloff_falloff	1
 A	I	leaves_falloff_falloff	1
 I	whorled_delay	Whorled Delay	8	Range	vector2	v 0 0	
 S	I	whorled_delay	1
+V	I	whorled_delay	1
 A	I	whorled_delay	1
 I	whorled_delay_curved	Whorled Delay curved	-1	CurveToggle	boolean	b 0	
 S	I	whorled_delay_curved	?
@@ -15790,6 +16294,7 @@ I	gravity	Gravity	1	Rotation	scalar	d -90
 S	I	gravity	0
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -15805,6 +16310,7 @@ I	chance	Chance	55	Slider	scalar	d 1
 S	I	chance	0
 I	amount	Amount	2	Range	vector2	v 8 16	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	distribution	Distribution	19	EButton	enum	e 0	Random;Uniform
 S	I	distribution	0
@@ -15819,6 +16325,7 @@ S	I	distribution_remap	1
 A	I	distribution_remap	1
 I	offset	Offset	10	Range	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	offset_curved	Offset curved	-1	CurveToggle	boolean	b 0	
 S	I	offset_curved	?
@@ -15834,6 +16341,7 @@ I	apply_to_property_curves	Apply to Property Curves	35	Bool	boolean	b 0
 S	I	apply_to_property_curves	0
 I	spread	Spread	7	Range	vector2	v 90 90	
 S	I	spread	1
+V	I	spread	1
 A	I	spread	1
 I	spread_curved	Spread curved	-1	CurveToggle	boolean	b 0	
 S	I	spread_curved	?
@@ -15856,6 +16364,7 @@ Q	I	reflect_order	1	0	s "Odd"
 Q	I	reflect_order	2	0	s "Random"
 I	gravity	Gravity	27	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	gravity_curved	Gravity curved	-1	CurveToggle	boolean	b 0	
 S	I	gravity_curved	?
@@ -15868,6 +16377,7 @@ I	gravity_direction	Gravity Direction	58	Rot	scalar	d 0
 S	I	gravity_direction	0
 I	whorled	Whorled	15	Range	vector2	v 0 0	
 S	I	whorled	1
+V	I	whorled	1
 A	I	whorled	1
 I	whorled_curved	Whorled curved	-1	CurveToggle	boolean	b 0	
 S	I	whorled_curved	?
@@ -15930,6 +16440,7 @@ S	I	geometry2	1
 A	I	geometry2	1
 I	shape_gravity	Shape Gravity	31	Range	vector2	v 0.1 0.1	
 S	I	shape_gravity	1
+V	I	shape_gravity	1
 A	I	shape_gravity	1
 I	shape_gravity_curved	Shape Gravity curved	-1	CurveToggle	boolean	b 0	
 S	I	shape_gravity_curved	?
@@ -15943,6 +16454,7 @@ S	I	shape_gravity_over_whorled	1
 A	I	shape_gravity_over_whorled	1
 I	twist	Twist	40	Range	vector2	v 0 0	
 S	I	twist	1
+V	I	twist	1
 A	I	twist	1
 I	twist_curved	Twist curved	-1	CurveToggle	boolean	b 0	
 S	I	twist_curved	?
@@ -15956,6 +16468,7 @@ S	I	twist_over_whorled	1
 A	I	twist_over_whorled	1
 I	wiggle	Wiggle	48	Range	vector2	v 0 0	
 S	I	wiggle	1
+V	I	wiggle	1
 A	I	wiggle	1
 I	wiggle_curved	Wiggle curved	-1	CurveToggle	boolean	b 0	
 S	I	wiggle_curved	?
@@ -16021,6 +16534,7 @@ I	top_edge_color_map	Top Edge Color Map	26	Surface	image
 S	I	top_edge_color_map	0
 I	grow_delay	Grow Delay	22	Range	vector2	v 0 0	
 S	I	grow_delay	1
+V	I	grow_delay	1
 A	I	grow_delay	1
 O	branches	Branches	0	struct	i -4	s "noone"
 O	leaves	Leaves	1	struct	i -4	s "noone"
@@ -16038,6 +16552,7 @@ S	I	trim_path	1
 A	I	trim_path	1
 I	expands	Expands	5	Range	vector2	v 0 0	
 S	I	expands	1
+V	I	expands	1
 A	I	expands	1
 I	expands_curved	Expands curved	-1	CurveToggle	boolean	b 0	
 S	I	expands_curved	?
@@ -16071,9 +16586,11 @@ I	leaves	Leaves	0	Struct	struct
 S	I	leaves	0
 I	lifespan	Lifespan	13	Range	vector2	v 0 0	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	fall_time	Fall Time	2	Range	vector2	v 0 10	
 S	I	fall_time	1
+V	I	fall_time	1
 A	I	fall_time	1
 I	fall_time_mapped	Fall Time Mapped	-1	MapToggle	boolean	b 0	
 S	I	fall_time_mapped	?
@@ -16081,12 +16598,14 @@ I	fall_time_map	Fall Time Map	3	Surface	image
 S	I	fall_time_map	0
 I	fall_speed	Fall Speed	10	Range	vector2	v 0 0	
 S	I	fall_speed	1
+V	I	fall_speed	1
 A	I	fall_speed	1
 I	fall_direction	Fall Direction	11	RotRand	array	a scalar 5 d 0 d -90 d -90 d 0 d 0	
 S	I	fall_direction	1
 A	I	fall_direction	1
 I	rotate_speed	Rotate Speed	4	Range	vector2	v 0 0	
 S	I	rotate_speed	1
+V	I	rotate_speed	1
 A	I	rotate_speed	1
 I	random_direction	Random Direction	5	Bool	boolean	b 0	
 S	I	random_direction	0
@@ -16106,19 +16625,23 @@ I	color_over_life_fall	Color Over Life [fall]	15	Gradient	gradient	g 0 1 0 255 2
 S	I	color_over_life_fall	0
 I	gravity	Gravity	6	Range	vector2	v 0.25 0.25	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	grav_direction	Grav. Direction	7	Rotation	scalar	d -90	
 S	I	grav_direction	0
 I	swing_speed	Swing Speed	16	Range	vector2	v 0 0	
 S	I	swing_speed	1
+V	I	swing_speed	1
 A	I	swing_speed	1
 I	swing_amplitude	Swing Amplitude	17	Range	vector2	v 0 0	
 S	I	swing_amplitude	1
+V	I	swing_amplitude	1
 A	I	swing_amplitude	1
 I	ground	Ground	8	Bool	boolean	b 0	
 S	I	ground	0
 I	ground_range	Ground Range	9	Range	vector2	v 0.9 1	
 S	I	ground_range	1
+V	I	ground_range	1
 A	I	ground_range	1
 O	leaves	Leaves	0	struct	i -4	s "noone"
 N	pc.mk_tree_leaf_to_points	Node_MK_Tree_Leaf_to_Points	Leaves to Points	mk_tree	scripts/node_mk_tree_leaf_to_points/node_mk_tree_leaf_to_points.gml
@@ -16134,6 +16657,7 @@ I	sample	Sample	2	Int	integer	i 8
 S	I	sample	0
 I	wiggle	Wiggle	8	Range	vector2	v 0 0	
 S	I	wiggle	1
+V	I	wiggle	1
 A	I	wiggle	1
 I	wiggle_curved	Wiggle curved	-1	CurveToggle	boolean	b 0	
 S	I	wiggle_curved	?
@@ -16142,6 +16666,7 @@ S	I	wiggle_over_length	1
 A	I	wiggle_over_length	1
 I	gravity	Gravity	9	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	override	Override	22	Bool	boolean	b 0	
 S	I	override	0
@@ -16149,12 +16674,15 @@ I	gravity_direction	Gravity Direction	23	Rot	scalar	d 0
 S	I	gravity_direction	0
 I	frequency	Frequency	11	Range	vector2	v 4 4	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	phase	Phase	12	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	wave	Wave	13	Range	vector2	v 0 0	
 S	I	wave	1
+V	I	wave	1
 A	I	wave	1
 I	wave_curved	Wave curved	-1	CurveToggle	boolean	b 0	
 S	I	wave_curved	?
@@ -16163,6 +16691,7 @@ S	I	wave_over_length	1
 A	I	wave_over_length	1
 I	curl	Curl	15	Range	vector2	v 0 0	
 S	I	curl	1
+V	I	curl	1
 A	I	curl	1
 I	curl_curved	Curl curved	-1	CurveToggle	boolean	b 0	
 S	I	curl_curved	?
@@ -16177,6 +16706,7 @@ Q	I	draw_mode	0	0	s "Texture"
 Q	I	draw_mode	1	0	s "Line"
 I	thickness	Thickness	3	Range	vector2	v 4 4	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -16262,6 +16792,7 @@ I	filter_root_position	Filter Root Position	4	Bool	boolean	b 0
 S	I	filter_root_position	0
 I	range	Range	5	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	filter_random	Filter Random	6	Bool	boolean	b 0	
 S	I	filter_random	0
@@ -16299,6 +16830,7 @@ O	tree	Tree	0	struct	i -4	s "noone"
 N	pc.mk_tree_root	Node_MK_Tree_Root	Trunk	mk_tree	scripts/node_mk_tree_root/node_mk_tree_root.gml
 I	origin_ratio	Origin Ratio	8	Vec2	vector2	v 0.5 1	
 S	I	origin_ratio	1
+V	I	origin_ratio	1
 A	I	origin_ratio	1
 I	origin_wiggle	Origin Wiggle	2	Vec4	vector4	w 0 0 0 0	
 S	I	origin_wiggle	1
@@ -16314,6 +16846,7 @@ I	tree	Tree	0	Struct	struct
 S	I	tree	0
 I	position	Position	1	Vec2	vector2	v 0.5 1	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -16326,9 +16859,11 @@ Q	I	distribution	1	0	s "Grid"
 Q	I	distribution	2	0	s "Direct Data"
 I	amount	Amount	5	Range	vector2	v 1 1	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	scatter_area	Scatter Area	30	Vec2	vector2	v 0 0	
 S	I	scatter_area	1
+V	I	scatter_area	1
 A	I	scatter_area	1
 I	scatter_area_unit	Scatter Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scatter_area_unit	?
@@ -16340,21 +16875,26 @@ Q	I	scatter_shape	0	0	s "Rectangle"
 Q	I	scatter_shape	1	0	s "Ellipse"
 I	grid	Grid	41	IVec2	vector2	v 1 1	
 S	I	grid	1
+V	I	grid	1
 A	I	grid	1
 I	spawn_points	Spawn Points	42	Vec2	vector2	v 0 0	
 S	I	spawn_points	1
+V	I	spawn_points	1
 A	I	spawn_points	2
 I	length	Length	3	Range	vector2	v 24 24	
 S	I	length	1
+V	I	length	1
 A	I	length	1
 I	segments	Segments	7	Range	vector2	v 8 8	
 S	I	segments	1
+V	I	segments	1
 A	I	segments	1
 I	direction	Direction	4	RotRand	array	a scalar 5 d 0 d 80 d 100 d 0 d 0	
 S	I	direction	1
 A	I	direction	1
 I	gravity	Gravity	9	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	gravity_curved	Gravity curved	-1	CurveToggle	boolean	b 0	
 S	I	gravity_curved	?
@@ -16367,6 +16907,7 @@ I	gravity_direction	Gravity Direction	39	Rot	scalar	d 0
 S	I	gravity_direction	0
 I	amplitude	Amplitude	10	Range	vector2	v 0 0	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -16375,12 +16916,15 @@ S	I	amplitude_over_length	1
 A	I	amplitude_over_length	1
 I	frequency	Frequency	32	Range	vector2	v 4 4	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	phase	Phase	33	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	amplitude_2	Amplitude	36	Range	vector2	v 0 0	
 S	I	amplitude_2	1
+V	I	amplitude_2	1
 A	I	amplitude_2	1
 I	amplitude_2_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_2_curved	?
@@ -16389,6 +16933,7 @@ S	I	amplitude_over_length_2	1
 A	I	amplitude_over_length_2	1
 I	frequency_2	Frequency	22	Range	vector2	v 4 4	
 S	I	frequency_2	1
+V	I	frequency_2	1
 A	I	frequency_2	1
 I	frequency_2_curved	Frequency curved	-1	CurveToggle	boolean	b 0	
 S	I	frequency_2_curved	?
@@ -16397,9 +16942,11 @@ S	I	frequency_over_length	1
 A	I	frequency_over_length	1
 I	phase_2	Phase	23	Range	vector2	v 0 0	
 S	I	phase_2	1
+V	I	phase_2	1
 A	I	phase_2	1
 I	wave	Wave	18	Range	vector2	v 0 0	
 S	I	wave	1
+V	I	wave	1
 A	I	wave	1
 I	wave_curved	Wave curved	-1	CurveToggle	boolean	b 0	
 S	I	wave_curved	?
@@ -16408,6 +16955,7 @@ S	I	wave_over_length	1
 A	I	wave_over_length	1
 I	curl	Curl	20	Range	vector2	v 0 0	
 S	I	curl	1
+V	I	curl	1
 A	I	curl	1
 I	curl_curved	Curl curved	-1	CurveToggle	boolean	b 0	
 S	I	curl_curved	?
@@ -16416,6 +16964,7 @@ S	I	curl_over_length	1
 A	I	curl_over_length	1
 I	thickness	Thickness	6	Range	vector2	v 4 4	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -16490,6 +17039,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	center	Center	9	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -16506,6 +17056,7 @@ S	I	falloff_distance_curve	1
 A	I	falloff_distance_curve	1
 I	amplitude	Amplitude	2	Range	vector2	v 4 4	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -16547,6 +17098,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	center	Center	10	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -16563,9 +17115,11 @@ S	I	falloff_distance_curve	1
 A	I	falloff_distance_curve	1
 I	frequency	Frequency	2	Range	vector2	v 2 2	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	amplitude	Amplitude	3	Range	vector2	v 4 4	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -16595,6 +17149,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	center	Center	9	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -16611,9 +17166,11 @@ S	I	falloff_distance_curve	1
 A	I	falloff_distance_curve	1
 I	speed	Speed	4	Range	vector2	v 1 1	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	strength	Strength	2	Range	vector2	v 4 4	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	direction	Direction	3	RotRand	array	a scalar 5 d 0 d 0 d 360 d 0 d 0	
 S	I	direction	1
@@ -16638,6 +17195,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	center	Center	9	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -16654,9 +17212,11 @@ S	I	falloff_distance_curve	1
 A	I	falloff_distance_curve	1
 I	speed	Speed	4	Range	vector2	v 1 1	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	strength	Strength	2	Range	vector2	v 4 4	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	direction	Direction	3	RotRand	array	a scalar 5 d 0 d 0 d 360 d 0 d 0	
 S	I	direction	1
@@ -16667,6 +17227,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -16674,6 +17235,7 @@ I	path	Path	1	Path	path2d	p 0 0 0
 S	I	path	0
 I	range	Range	16	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	shift	Shift	7	Slider	scalar	d 0	
 S	I	shift	0
@@ -16683,6 +17245,7 @@ I	sample	Sample	2	Int	integer	i 16
 S	I	sample	0
 I	offset	Offset	3	Vec2	vector2	v 0.25 0.25	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	offset_unit	?
@@ -16749,9 +17312,11 @@ Q	I	tiling	1	0	s "Match Size"
 Q	I	tiling	2	0	s "Custom Size"
 I	tile_size	Tile Size	12	IVec2	vector2	v 1 1	
 S	I	tile_size	1
+V	I	tile_size	1
 A	I	tile_size	1
 I	tile_offset	Tile Offset	13	IVec2	vector2	v 0 0	
 S	I	tile_offset	1
+V	I	tile_offset	1
 A	I	tile_offset	1
 I	replace	Replace	2	Surface	image		
 S	I	replace	0
@@ -16837,9 +17402,11 @@ I	amount	Amount	5	Float	scalar	d 0
 S	I	amount	0
 I	from	From	6	Vec2	vector2	v 0 1	
 S	I	from	1
+V	I	from	1
 A	I	from	1
 I	to	To	7	Vec2	vector2	v 0 1	
 S	I	to	1
+V	I	to	1
 A	I	to	1
 I	angle	Angle	3	EButton	enum	e 1	Radians;Degree
 S	I	angle	0
@@ -16857,6 +17424,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	size	Size	0	IVec2	vector2	v 3 3	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	data	Data	1	Matrix	matrix	m 3 3 0 0 0 0 0 0 0 0 0	
 S	I	data	1
@@ -16901,9 +17469,11 @@ S	I	matrix	1
 A	I	matrix	1
 I	size	Size	1	IVec2	vector2	v 3 3	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	offset	Offset	2	IVec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	overflow	Overflow	3	EScroll	enum	e 0	Zero;Repeat;Clamp
 S	I	overflow	0
@@ -16940,6 +17510,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	position	Position	1	IVec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 O	output	Output	0	scalar	d 0	s "0"
 N	pc.matrix_get_vector	Node_Matrix_Get_Vector	Matrix Get Vector	values	scripts/node_matrix_get_vector/node_matrix_get_vector.gml
@@ -17021,6 +17592,7 @@ Q	I	projection	0	0	s "Perspective"
 Q	I	projection	1	0	s "Orthographic"
 I	view	View	1	Dimension	vector2	v 1 1	
 S	I	view	1
+V	I	view	1
 A	I	view	1
 I	view_unit	View Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	view_unit	?
@@ -17030,6 +17602,7 @@ I	fov	FOV	2	ISlider	integer	i 60
 S	I	fov	0
 I	clipping	Clipping	3	Vec2	vector2	v 1 10	
 S	I	clipping	1
+V	I	clipping	1
 A	I	clipping	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -17040,6 +17613,7 @@ S	I	matrix	1
 A	I	matrix	1
 I	position	Position	1	IVec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	value	Value	2	Float	scalar	d 0	
 S	I	value	0
@@ -17078,11 +17652,13 @@ I	affine	Affine	0	Bool	boolean	b 1
 S	I	affine	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	rotation	Rotation	2	Rotation	scalar	d 0	
 S	I	rotation	0
 I	scale	Scale	3	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -17120,6 +17696,7 @@ I	seed	Seed	3	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17137,6 +17714,7 @@ I	max_iteration	Max Iteration	4	Int	integer	i -1
 S	I	max_iteration	0
 I	origin	Origin	5	Vec2	vector2	v 0.5 0.5	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
@@ -17168,6 +17746,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	sample	Sample	1	IVec2	vector2	v 8 8	
 S	I	sample	1
+V	I	sample	1
 A	I	sample	1
 I	quad	Quad	2	Bool	boolean	b 0	
 S	I	quad	0
@@ -17190,14 +17769,17 @@ I	mesh	Mesh	0	Mesh	mesh2d
 S	I	mesh	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	rotation	Rotation	2	Rotation	scalar	d 0	
 S	I	rotation	0
 I	scale	Scale	3	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	anchor	Anchor	4	Vec2	vector2	v 0 0	
 S	I	anchor	1
+V	I	anchor	1
 A	I	anchor	1
 O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.mesh_warp	Node_Mesh_Warp	Mesh Warp	transform	scripts/node_mesh_warp/node_mesh_warp.gml
@@ -17269,6 +17851,7 @@ I	mask_feather	Mask feather	9	Slider	scalar	d 0
 S	I	mask_feather	0
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -17341,12 +17924,15 @@ Q	I	output_dimension	1	0	s "Relative"
 Q	I	output_dimension	2	0	s "Constant"
 I	relative_dimension	Relative Dimension	8	Vec2	vector2	v 1 1	
 S	I	relative_dimension	1
+V	I	relative_dimension	1
 A	I	relative_dimension	1
 I	constant_dimension	Constant Dimension	9	Vec2	vector2	v 32 32	
 S	I	constant_dimension	1
+V	I	constant_dimension	0
 A	I	constant_dimension	1
 I	position	Position	15	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -17354,6 +17940,7 @@ I	rotation	Rotation	14	Rotation	scalar	d 0
 S	I	rotation	0
 I	center	Center	1	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -17361,6 +17948,7 @@ I	angle	Angle	2	Rotation	scalar	d 0
 S	I	angle	0
 I	scale	Scale	6	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	radial_scale	Radial Scale	10	EScroll	enum	e 0	Linear;Exponential
 S	I	radial_scale	0
@@ -17434,19 +18022,23 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	point	Point	0	Vec2	vector2	v 0 0	
 S	I	point	1
+V	I	point	1
 A	I	point	1
 I	anchor_point	Anchor Point	1	Vec2	vector2	v 0.5 0.5	
 S	I	anchor_point	1
+V	I	anchor_point	1
 A	I	anchor_point	1
 I	anchor_point_unit	Anchor Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	anchor_point_unit	?
 I	position	Position	2	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	rotation	Rotation	3	Rot	scalar	d 0	
 S	I	rotation	0
 I	scale	Scale	4	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -17484,6 +18076,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17529,6 +18122,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17560,6 +18154,7 @@ I	y_amount_map	Y Amount Map	7	Surface	image
 S	I	y_amount_map	0
 I	position	Position	3	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -17595,6 +18190,7 @@ O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.noise_blue	Node_Noise_Blue	Blue Noise	generate	scripts/node_noise_blue/node_noise_blue.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17622,6 +18218,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17673,6 +18270,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17692,11 +18290,13 @@ I	iteration	Iteration	4	Int	integer	i 15
 S	I	iteration	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	scale	Scale	2	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	level_in	Level In	11	SliRange	vector2	v 0 1	
 S	I	level_in	1
@@ -17718,6 +18318,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17725,11 +18326,13 @@ I	seed	Seed	1	Seed	scalar
 S	I	seed	0
 I	position	Position	2	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	rotation	Rotation	3	Rotation	scalar	d 0	
 S	I	rotation	0
 I	scale	Scale	4	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	mean	Mean	6	Slider	scalar	d 0.5	
 S	I	mean	0
@@ -17757,6 +18360,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17772,6 +18376,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	10	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -17779,6 +18384,7 @@ I	rotation	Rotation	11	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	12	Vec2	vector2	v 0.5 0.5	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	thickness	Thickness	5	Float	scalar	d 0	
 S	I	thickness	0
@@ -17808,6 +18414,7 @@ I	octaves	Octaves	8	Int	integer	i 8
 S	I	octaves	0
 I	octave_shift	Octave Shift	13	Vec2	vector2	v 10 10	
 S	I	octave_shift	1
+V	I	octave_shift	1
 A	I	octave_shift	1
 I	octave_rotation	Octave Rotation	14	Rotation	scalar	d 30	
 S	I	octave_rotation	0
@@ -17823,6 +18430,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17848,6 +18456,7 @@ I	tile	Tile	17	Bool	boolean	b 1
 S	I	tile	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -17855,6 +18464,7 @@ I	rotation	Rotation	10	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -17900,6 +18510,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -17925,6 +18536,7 @@ I	slope	Slope	4	Slider	scalar	d 0.5
 S	I	slope	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -18053,6 +18665,7 @@ I	normal_1	Normal 1	0	Surface	image
 S	I	normal_1	0
 I	position_1	Position 1	2	Vec2	vector2	v 0 0	
 S	I	position_1	1
+V	I	position_1	1
 A	I	position_1	1
 I	position_1_unit	Position 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_1_unit	?
@@ -18063,11 +18676,13 @@ I	rotation_1	Rotation 1	4	Rot	scalar	d 0
 S	I	rotation_1	0
 I	scale_1	Scale 1	5	Vec2	vector2	v 1 1	
 S	I	scale_1	1
+V	I	scale_1	1
 A	I	scale_1	1
 I	surface_2	Surface 2	1	Surface	image		
 S	I	surface_2	0
 I	position_2	Position 2	6	Vec2	vector2	v 0 0	
 S	I	position_2	1
+V	I	position_2	1
 A	I	position_2	1
 I	position_2_unit	Position 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_2_unit	?
@@ -18078,6 +18693,7 @@ I	rotation_2	Rotation 2	8	Rot	scalar	d 0
 S	I	rotation_2	0
 I	scale_2	Scale 2	9	Vec2	vector2	v 1 1	
 S	I	scale_2	1
+V	I	scale_2	1
 A	I	scale_2	1
 I	mask	Mask	12	Surface	image		
 S	I	mask	0
@@ -18114,6 +18730,7 @@ B	T	type	0	general	1	default	?
 C	T	type	unknown
 T	position	Position	1	Vec2	vector2	v 0 0	
 S	T	position	1
+V	T	position	1
 A	T	position	1
 T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	position_unit	?
@@ -18121,6 +18738,7 @@ T	distance	Distance	7	Float	scalar	d 0
 S	T	distance	0
 T	end_position	End Position	5	Vec2	vector2	v 0 0	
 S	T	end_position	1
+V	T	end_position	1
 A	T	end_position	1
 T	end_position_unit	End Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	end_position_unit	?
@@ -18220,6 +18838,7 @@ S	I	knob_range	1
 A	I	knob_range	1
 I	range	Range	3	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	clamp_to_range	Clamp to Range	5	Bool	boolean	b 0	
 S	I	clamp_to_range	0
@@ -18256,9 +18875,11 @@ I	sprite	Sprite	13	Surface	image
 S	I	sprite	0
 I	size	Size	14	Vec2	vector2	v 32 32	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	offset	Offset	9	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	offset_unit	?
@@ -18521,6 +19142,7 @@ S	I	anchor	1
 A	I	anchor	1
 I	position	Position	2	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -18671,10 +19293,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -18819,10 +19443,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -18961,10 +19587,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -19111,10 +19739,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -19257,10 +19887,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -19403,10 +20035,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -19479,15 +20113,19 @@ I	pbbox_height	PBbox Height	7	Float	scalar	d 0
 S	I	pbbox_height	0
 I	top_left	Top Left	8	Vec2	vector2	v 0 0	
 S	I	top_left	1
+V	I	top_left	1
 A	I	top_left	1
 I	top_right	Top Right	9	Vec2	vector2	v 1 0	
 S	I	top_right	1
+V	I	top_right	1
 A	I	top_right	1
 I	bottom_left	Bottom Left	10	Vec2	vector2	v 0 1	
 S	I	bottom_left	1
+V	I	bottom_left	1
 A	I	bottom_left	1
 I	bottom_right	Bottom Right	11	Vec2	vector2	v 1 1	
 S	I	bottom_right	1
+V	I	bottom_right	1
 A	I	bottom_right	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -19557,10 +20195,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -19699,10 +20339,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -19852,10 +20494,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -20008,10 +20652,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -20186,10 +20832,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -20342,10 +20990,12 @@ T	pattern_intensity	Pattern Intensity	5	Slider	scalar	d 1
 S	T	pattern_intensity	?
 T	pattern_scale	Pattern Scale	6	Vec2	vector2	v 1 1	
 S	T	pattern_scale	?
+V	T	pattern_scale	1
 T	pattern_scale_unit	Pattern Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_scale_unit	?
 T	pattern_position	Pattern Position	7	Vec2	vector2	v 0 0	
 S	T	pattern_position	?
+V	T	pattern_position	1
 T	pattern_position_unit	Pattern Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	pattern_position_unit	?
 T	pattern_map	Map BBOX	8	Bool	boolean	b 0	
@@ -20518,6 +21168,7 @@ I	offset	Offset	11	Surface	image
 S	I	offset	0
 I	range	Range	12	Range	vector2	v 0 0.1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	colors	Colors	2	Palette	array	a colour 1 c 255 255 255 255	
 S	I	colors	1
@@ -20732,6 +21383,7 @@ I	padding_unit	Padding Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	padding_unit	?
 I	dimension	Dimension	6	Vec2	vector2	v 32 32	
 S	I	dimension	1
+V	I	dimension	0
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	ValueUnit	enum	e 0	Pixel;Reference
 S	I	dimension_unit	?
@@ -20932,6 +21584,7 @@ I	seed	Seed	32	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	71	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -20949,6 +21602,7 @@ Q	I	surface_array	2	0	s "Animation"
 Q	I	surface_array	3	0	s "Scale"
 I	animation_speed	Animation Speed	23	Range	vector2	v 1 1	
 S	I	animation_speed	1
+V	I	animation_speed	1
 A	I	animation_speed	1
 I	stretch_animation	Stretch Animation	49	Bool	boolean	b 0	
 S	I	stretch_animation	0
@@ -20976,9 +21630,11 @@ I	burst_duration	Burst Duration	51	Int	integer	i 1
 S	I	burst_duration	0
 I	spawn_amount	Spawn Amount	2	Range	vector2	v 2 2	
 S	I	spawn_amount	1
+V	I	spawn_amount	1
 A	I	spawn_amount	1
 I	lifespan	Lifespan	5	Range	vector2	v 20 30	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	spawn_source	Spawn Source	4	EScroll	enum	e 0	
 S	I	spawn_source	0
@@ -21014,6 +21670,7 @@ I	uniform_period	Uniform Period	52	Float	scalar	d 4
 S	I	uniform_period	0
 I	speed	Speed	18	Range	vector2	v 1 2	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	speed_curved	Speed curved	-1	CurveToggle	boolean	b 0	
 S	I	speed_curved	?
@@ -21071,6 +21728,7 @@ S	I	scale	1
 A	I	scale	1
 I	size	Size	17	Range	vector2	v 1 1	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	size_curved	Size curved	-1	CurveToggle	boolean	b 0	
 S	I	size_curved	?
@@ -21086,6 +21744,7 @@ I	color_over_lifetime	Color over Lifetime	12	Gradient	gradient	g 0 1 0 255 255 2
 S	I	color_over_lifetime	0
 I	alpha	Alpha	13	Range	vector2	v 1 1	
 S	I	alpha	1
+V	I	alpha	1
 A	I	alpha	1
 I	alpha_curved	Alpha curved	-1	CurveToggle	boolean	b 0	
 S	I	alpha_curved	?
@@ -21129,6 +21788,7 @@ S	I	path_range	1
 A	I	path_range	1
 I	range_shift	Range Shift	80	Range	vector2	v 0 0	
 S	I	range_shift	1
+V	I	range_shift	1
 A	I	range_shift	1
 I	path_speed	Path Speed	81	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	I	path_speed	1
@@ -21144,17 +21804,21 @@ I	use_physics	Use Physics	57	Bool	boolean	b 0
 S	I	use_physics	0
 I	friction	Friction	54	Range	vector2	v 0 0	
 S	I	friction	1
+V	I	friction	1
 A	I	friction	1
 I	acceleration	Acceleration	7	Range	vector2	v 0 0	
 S	I	acceleration	1
+V	I	acceleration	1
 A	I	acceleration	1
 I	gravity	Gravity	19	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	gravity_direction	Gravity Direction	33	Rot	scalar	d -90	
 S	I	gravity_direction	0
 I	turning	Turning	34	Range	vector2	v 0 0	
 S	I	turning	1
+V	I	turning	1
 A	I	turning	1
 I	turn_both_directions	Turn Both Directions	35	Bool	boolean	b 0	
 S	I	turn_both_directions	0
@@ -21170,6 +21834,7 @@ Q	I	ground_offset_type	0	0	s "Relative"
 Q	I	ground_offset_type	1	0	s "Absolute"
 I	ground_offset	Ground Offset	38	Range	vector2	v 0 0	
 S	I	ground_offset	1
+V	I	ground_offset	1
 A	I	ground_offset	1
 I	bounce_amount	Bounce Amount	39	Slider	scalar	d 0.5	
 S	I	bounce_amount	0
@@ -21179,15 +21844,19 @@ I	use_wiggles	Use Wiggles	58	Bool	boolean	b 0
 S	I	use_wiggles	0
 I	direction	Direction	20	Vec2	vector2	v 0 0	
 S	I	direction	1
+V	I	direction	1
 A	I	direction	1
 I	position	Position	41	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	rotation	Rotation	42	Vec2	vector2	v 0 0	
 S	I	rotation	1
+V	I	rotation	1
 A	I	rotation	1
 I	scale_2	Scale	43	Vec2	vector2	v 0 0	
 S	I	scale_2	1
+V	I	scale_2	1
 A	I	scale_2	1
 I	pre_render	Pre-Render	65	Int	integer	i -1	
 S	I	pre_render	0
@@ -21283,6 +21952,7 @@ I	path	Path	6	Path	path2d	p 0 0 0
 S	I	path	0
 I	dimension	Dimension	14	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -21318,6 +21988,7 @@ I	apply_depth_to_weight	Apply Depth to Weight	15	Bool	boolean	b 0
 S	I	apply_depth_to_weight	0
 I	depth_range	Depth Range	16	Vec2	vector2	v 0.1 100	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -21347,12 +22018,15 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	postion	Postion	0	Vec2	vector2	v 0 0	
 S	I	postion	1
+V	I	postion	1
 A	I	postion	1
 I	control_point_1	Control point 1	1	Vec2	vector2	v -16 0	
 S	I	control_point_1	1
+V	I	control_point_1	1
 A	I	control_point_1	1
 I	control_point_2	Control point 2	2	Vec2	vector2	v 16 0	
 S	I	control_point_2	1
+V	I	control_point_2	1
 A	I	control_point_2	1
 I	mirror_control_point	Mirror control point	3	Bool	boolean	b 1	
 S	I	mirror_control_point	0
@@ -21457,6 +22131,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -21464,6 +22139,7 @@ I	path	Path	1	Path	path2d	p 0 0 0
 S	I	path	0
 I	path_range	Path Range	12	Range	vector2	v 0 1	
 S	I	path_range	1
+V	I	path_range	1
 A	I	path_range	1
 I	path_shift	Path Shift	13	Slider	scalar	d 0	
 S	I	path_shift	0
@@ -21471,6 +22147,7 @@ I	resolution	Resolution	2	Int	integer	i 32
 S	I	resolution	0
 I	position	Position	9	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -21481,6 +22158,7 @@ I	rotation	Rotation	10	Rot	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	6	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	color	Color	3	Color	colour	c 255 255 255 255	
 S	I	color	0
@@ -21535,6 +22213,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	starting_position	Starting Position	2	Vec2	vector2	v 16 16	
 S	I	starting_position	1
+V	I	starting_position	0
 A	I	starting_position	1
 I	starting_position_2	Starting Position	10	Vec3	vector3	3 0 0 0	
 S	I	starting_position_2	1
@@ -21587,6 +22266,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -21599,6 +22279,7 @@ S	I	path_interpolation	1
 A	I	path_interpolation	1
 I	position	Position	8	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -21609,6 +22290,7 @@ I	rotation	Rotation	10	Rot	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	11	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	wave	Wave	14	Bool	boolean	b 0	
 S	I	wave	0
@@ -21647,12 +22329,15 @@ I	texture	Texture	2	Surface	image
 S	I	texture	0
 I	uv_position	UV Position	7	Vec2	vector2	v 0 0	
 S	I	uv_position	1
+V	I	uv_position	1
 A	I	uv_position	1
 I	uv_range	UV Range	6	Vec2	vector2	v 1 1	
 S	I	uv_range	1
+V	I	uv_range	1
 A	I	uv_range	1
 I	range	Range	12	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	shift	Shift	4	Slider	scalar	d 0	
 S	I	shift	0
@@ -21686,6 +22371,7 @@ Q	I	map_from	1	0	s "Fix Dimension"
 Q	I	map_from	2	0	s "BBOX"
 I	dimension_from	Dimension From	3	Dimension	vector2	v 1 1	
 S	I	dimension_from	1
+V	I	dimension_from	1
 A	I	dimension_from	1
 I	dimension_from_unit	Dimension From Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_from_unit	?
@@ -21704,6 +22390,7 @@ S	I	area	1
 A	I	area	1
 I	dimension_to	Dimension To	5	Dimension	vector2	v 1 1	
 S	I	dimension_to	1
+V	I	dimension_to	1
 A	I	dimension_to	1
 I	dimension_to_unit	Dimension To Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_to_unit	?
@@ -21722,6 +22409,7 @@ I	path_2	Path 2	1	Path	path2d	p 0 0 0
 S	I	path_2	0
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -21754,15 +22442,19 @@ O	path	Path	0	path2d	i -4	s "noone"
 N	pc.path_plot	Node_Path_Plot	Plot Path	values	scripts/node_path_plot/node_path_plot.gml
 I	origin	Origin	5	Vec2	vector2		
 S	I	origin	1
+V	I	origin	0
 A	I	origin	1
 I	input_scale	Input Scale	7	Vec2	vector2	v 1 1	
 S	I	input_scale	1
+V	I	input_scale	1
 A	I	input_scale	1
 I	input_shift	Input Shift	8	Vec2	vector2	v 0 0	
 S	I	input_shift	1
+V	I	input_shift	1
 A	I	input_shift	1
 I	output_scale	Output Scale	0	Vec2	vector2	v 8 8	
 S	I	output_scale	1
+V	I	output_scale	1
 A	I	output_scale	1
 I	coordinate	Coordinate	1	EScroll	enum	e 0	Cartesian;Polar
 S	I	coordinate	0
@@ -21798,6 +22490,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -21832,6 +22525,7 @@ I	anti_aliasing	Anti-aliasing	6	Bool	boolean	b 0
 S	I	anti_aliasing	0
 I	position	Position	10	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -21842,6 +22536,7 @@ I	rotation	Rotation	12	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	13	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	background	Background	7	Bool	boolean	b 0	
 S	I	background	0
@@ -21888,21 +22583,25 @@ I	amount	Amount	1	Int	integer	i 4
 S	I	amount	0
 I	center	Center	7	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	radius	Radius	8	Vec2	vector2	v 0.5 0.5	
 S	I	radius	1
+V	I	radius	1
 A	I	radius	1
 I	radius_unit	Radius Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	radius_unit	?
 I	position	Position	10	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	shift_position	Shift Position	2	Vec2	vector2	v 0 0	
 S	I	shift_position	1
+V	I	shift_position	1
 A	I	shift_position	1
 I	shift_position_unit	Shift Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	shift_position_unit	?
@@ -21912,6 +22611,7 @@ I	shift_rotation	Shift Rotation	3	Rotation	scalar	d 0
 S	I	shift_rotation	0
 I	anchor	Anchor	5	Vec2	vector2	v 0 0	
 S	I	anchor	1
+V	I	anchor	1
 A	I	anchor	1
 I	anchor_unit	Anchor Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	anchor_unit	?
@@ -21919,9 +22619,11 @@ I	rotate_along	Rotate Along	9	Bool	boolean	b 1
 S	I	rotate_along	0
 I	scale	Scale	12	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	shift_scale	Shift Scale	4	Vec2	vector2	v 1 1	
 S	I	shift_scale	1
+V	I	shift_scale	1
 A	I	shift_scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -21939,6 +22641,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -21946,6 +22649,7 @@ I	path	Path	0	Path	path2d	p 0 0 0
 S	I	path	0
 I	range	Range	14	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	shift	Shift	4	Slider	scalar	d 0	
 S	I	shift	0
@@ -21955,6 +22659,7 @@ I	resolution	Resolution	7	Int	integer	i 16
 S	I	resolution	0
 I	center	Center	8	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -21978,6 +22683,7 @@ I	subdivision	Subdivision	3	Int	integer	i 16
 S	I	subdivision	0
 I	position	Position	18	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -21988,6 +22694,7 @@ I	rotation	Rotation	20	Rot	scalar	d 0
 S	I	rotation	0
 I	scale_2	Scale	21	Vec2	vector2	v 1 1	
 S	I	scale_2	1
+V	I	scale_2	1
 A	I	scale_2	1
 I	depth_sort	Depth Sort	33	EButton	enum	e 1	Normal;Path;Path Invert
 S	I	depth_sort	0
@@ -22007,9 +22714,11 @@ I	texture	Texture	2	Surface	image
 S	I	texture	0
 I	uv_position	UV Position	12	Vec2	vector2	v 0 0	
 S	I	uv_position	1
+V	I	uv_position	1
 A	I	uv_position	1
 I	uv_range	UV Range	6	Vec2	vector2	v 1 1	
 S	I	uv_range	1
+V	I	uv_range	1
 A	I	uv_range	1
 I	scale_to_path_range	Scale to Path Range	30	Bool	boolean	b 0	
 S	I	scale_to_path_range	0
@@ -22077,6 +22786,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -22084,6 +22794,7 @@ I	path	Path	0	Path	path2d	p 0 0 0
 S	I	path	0
 I	path_range	Path Range	9	Range	vector2	v 0 1	
 S	I	path_range	1
+V	I	path_range	1
 A	I	path_range	1
 I	path_shift	Path Shift	10	Slider	scalar	d 0	
 S	I	path_shift	0
@@ -22091,6 +22802,7 @@ I	subdivision	Subdivision	2	Int	integer	i 64
 S	I	subdivision	0
 I	position	Position	5	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -22101,6 +22813,7 @@ I	rotation	Rotation	7	Rot	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	8	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	max_distance	Max Distance	3	Float	scalar	d 16	
 S	I	max_distance	0
@@ -22197,6 +22910,7 @@ O	file_name	File Name	1	text	s ""	s "\"\""
 N	pc.path_shape	Node_Path_Shape	Shape Path	values	scripts/node_path_shape/node_path_shape.gml
 I	position	Position	0	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -22204,6 +22918,7 @@ I	rotation	Rotation	2	Rotation	scalar	d 0
 S	I	rotation	0
 I	half_size	Half Size	1	Vec2	vector2	v 0.5 0.5	
 S	I	half_size	1
+V	I	half_size	1
 A	I	half_size	1
 I	half_size_unit	Half Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	half_size_unit	?
@@ -22302,6 +23017,7 @@ I	loop	Loop	3	Bool	boolean	b 0
 S	I	loop	0
 I	range	Range	2	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	distance	Distance	1	Float	scalar	d 0	
 S	I	distance	0
@@ -22319,6 +23035,7 @@ I	strength	Strength	2	Slider	scalar	d 0
 S	I	strength	0
 I	center	Center	3	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -22343,6 +23060,7 @@ Q	I	sample_mode	1	0	s "Segment"
 D	6	1
 T	anchor	Anchor	0	Vec2	vector2		
 S	T	anchor	1
+V	T	anchor	0
 A	T	anchor	1
 O	path_data	Path data	0	path2d		s "self"
 O	position_out	Position out	1	vector2	v 0 0	s "[0,0]"
@@ -22355,6 +23073,7 @@ I	loop	Loop	6	Bool	boolean	b 0
 S	I	loop	0
 I	range	Range	1	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	clamp_curve	Clamp Curve	2	Bool	boolean	b 0	
 S	I	clamp_curve	0
@@ -22374,6 +23093,7 @@ I	path	Path	0	Path	path2d	p 0 0 0
 S	I	path	0
 I	range	Range	6	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	clamp_curve	Clamp Curve	7	Bool	boolean	b 0	
 S	I	clamp_curve	0
@@ -22400,6 +23120,7 @@ Q	I	direction	0	0	s "Path Normal"
 Q	I	direction	1	0	s "Fixed"
 I	angle	Angle	13	Range	vector2	v 90 90	
 S	I	angle	1
+V	I	angle	1
 A	I	angle	1
 I	angle_curved	Angle curved	-1	CurveToggle	boolean	b 0	
 S	I	angle_curved	?
@@ -22417,6 +23138,7 @@ Q	I	weight_mode	1	0	s "Additive"
 Q	I	weight_mode	2	0	s "Multiplicative"
 I	range_2	Range	11	Range	vector2	v 0 1	
 S	I	range_2	1
+V	I	range_2	1
 A	I	range_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -22428,6 +23150,7 @@ I	path	Path	0	Path	path2d	p 0 0 0
 S	I	path	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -22435,9 +23158,11 @@ I	rotation	Rotation	2	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	3	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	anchor	Anchor	4	Vec2	vector2	v 0 0	
 S	I	anchor	1
+V	I	anchor	1
 A	I	anchor	1
 I	anchor_unit	Anchor Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	anchor_unit	?
@@ -22458,6 +23183,7 @@ I	clamp	Clamp	3	Bool	boolean	b 0
 S	I	clamp	0
 I	range_2	Range	4	Range	vector2	v 0 1	
 S	I	range_2	1
+V	I	range_2	1
 A	I	range_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -22471,6 +23197,7 @@ I	path	Path	0	Path	path2d	p 0 0 0
 S	I	path	0
 I	range	Range	11	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	clamp_curve	Clamp Curve	12	Bool	boolean	b 0	
 S	I	clamp_curve	0
@@ -22478,9 +23205,11 @@ I	loop	Loop	18	Bool	boolean	b 0
 S	I	loop	0
 I	frequency	Frequency	1	Range	vector2	v 4 4	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	amplitude	Amplitude	2	Range	vector2	v 4 4	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -22491,6 +23220,7 @@ I	shift	Shift	17	Slider	scalar	d 0
 S	I	shift	0
 I	phase	Phase	3	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 I	direction	Direction	22	EButton	enum	e 0	Path Normal;Fixed
 S	I	direction	0
@@ -22500,6 +23230,7 @@ Q	I	direction	0	0	s "Path Normal"
 Q	I	direction	1	0	s "Fixed"
 I	angle	Angle	23	Range	vector2	v 0 0	
 S	I	angle	1
+V	I	angle	1
 A	I	angle	1
 I	angle_curved	Angle curved	-1	CurveToggle	boolean	b 0	
 S	I	angle_curved	?
@@ -22532,6 +23263,7 @@ I	wiggle	Wiggle	6	Bool	boolean	b 0
 S	I	wiggle	0
 I	wiggle_amplitude	Wiggle Amplitude	7	Range	vector2	v -2 2	
 S	I	wiggle_amplitude	1
+V	I	wiggle_amplitude	1
 A	I	wiggle_amplitude	1
 I	wiggle_frequency	Wiggle Frequency	8	Float	scalar	d 8	
 S	I	wiggle_frequency	0
@@ -22546,6 +23278,7 @@ Q	I	weight_mode	1	0	s "Additive"
 Q	I	weight_mode	2	0	s "Multiplicative"
 I	range_2	Range	21	Range	vector2	v 0 1	
 S	I	range_2	1
+V	I	range_2	1
 A	I	range_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -22578,6 +23311,7 @@ I	direction_shift	Direction Shift	6	Rotation	scalar	d 0
 S	I	direction_shift	0
 I	value_range	Value Range	5	Vec2	vector2	v 0 1	
 S	I	value_range	1
+V	I	value_range	1
 A	I	value_range	1
 O	path	Path	0	path2d		s "self"
 N	pc.path_to_curve	Node_Path_to_Curve	Path to Curve	values	scripts/node_path_to_curve/node_path_to_curve.gml
@@ -22597,9 +23331,11 @@ I	scale	Scale	3	Float	scalar	d 1
 S	I	scale	0
 I	output_range	Output Range	4	Range	vector2	v 0 1	
 S	I	output_range	1
+V	I	output_range	1
 A	I	output_range	1
 I	y_range	Y Range	6	Range	vector2	v 0 1	
 S	I	y_range	1
+V	I	y_range	1
 A	I	y_range	1
 O	curve	Curve	0	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	s "CURVE_DEF_01"
 N	pc.perlin	Node_Perlin	Perlin Noise	generate	scripts/node_perlin/node_perlin.gml
@@ -22607,6 +23343,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -22628,6 +23365,7 @@ I	tile	Tile	4	Bool	boolean	b 1
 S	I	tile	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -22635,6 +23373,7 @@ I	rotation	Rotation	11	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 4 4	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
@@ -22696,6 +23435,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -22755,6 +23495,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -22801,6 +23542,7 @@ I	parameter_b_map	Parameter B Map	15	Surface	image
 S	I	parameter_b_map	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -22808,6 +23550,7 @@ I	rotation	Rotation	16	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 4 4	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
@@ -22877,6 +23620,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -22980,6 +23724,7 @@ I	color	Color	13	Color	colour	c 0 0 0 255
 S	I	color	0
 I	range	Range	9	Vec2	vector2	v 0 0	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	mix_2	Mix	12	Slider	scalar	d 0.5	
 S	I	mix_2	0
@@ -23070,6 +23815,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -23104,6 +23850,7 @@ Q	I	type	1	0	s "Graph"
 Q	I	type	2	0	s "Pie"
 I	origin	Origin	4	Vec2	vector2	v 0 0.5	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
@@ -23165,6 +23912,7 @@ I	shift_2	Shift	37	Slider	scalar	d 0
 S	I	shift_2	0
 I	value_range	Value range	25	Range	vector2	v 0 1	
 S	I	value_range	1
+V	I	value_range	1
 A	I	value_range	1
 I	absolute	Absolute	26	Bool	boolean	b 0	
 S	I	absolute	0
@@ -23197,6 +23945,7 @@ S	I	points	1
 A	I	points	2
 I	dimension	Dimension	14	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -23230,21 +23979,25 @@ I	orthographic_scale	Orthographic Scale	7	Slider	scalar	d 0.5
 S	I	orthographic_scale	0
 I	range_from	Range From	17	Vec2	vector2	v -1 1	
 S	I	range_from	1
+V	I	range_from	1
 A	I	range_from	1
 I	range_from_unit	Range From Unit	-1	ValueUnit	enum	e 0	Pixel;Reference
 S	I	range_from_unit	?
 I	range_to	Range To	18	Vec2	vector2	v 0 1	
 S	I	range_to	1
+V	I	range_to	1
 A	I	range_to	1
 I	range_to_unit	Range To Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	range_to_unit	?
 I	depth_from	Depth From	15	Vec2	vector2	v 0 1	
 S	I	depth_from	1
+V	I	depth_from	1
 A	I	depth_from	1
 I	depth_from_unit	Depth From Unit	-1	ValueUnit	enum	e 0	Pixel;Reference
 S	I	depth_from_unit	?
 I	depth_to	Depth To	16	Vec2	vector2	v 0 1	
 S	I	depth_to	1
+V	I	depth_to	1
 A	I	depth_to	1
 I	depth_to_unit	Depth To Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	depth_to_unit	?
@@ -23259,6 +24012,7 @@ S	I	area	1
 A	I	area	1
 I	point	Point	1	Vec2	vector2	v 0 0	
 S	I	point	1
+V	I	point	1
 A	I	point	1
 I	include_boundary	Include Boundary	2	Bool	boolean	b 1	
 S	I	include_boundary	0
@@ -23270,6 +24024,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -23303,6 +24058,7 @@ O	points	Points	0	vector2	v 0 0	s "[0,0]"
 N	pc.points_triangulate	Node_Points_Triangulate	Triangulate Points	values	scripts/node_points_triangulate/node_points_triangulate.gml
 I	points	Points	0	Vec2	vector2	v 0 0	
 S	I	points	1
+V	I	points	1
 A	I	points	2
 O	triangles	Triangles	0	vector2	v 0 0	s "[0,0]"
 N	pc.polar	Node_Polar	Polar	transform	scripts/node_polar/node_polar.gml
@@ -23326,9 +24082,11 @@ I	mask_feather	Mask feather	8	Slider	scalar	d 0
 S	I	mask_feather	0
 I	tile	Tile	12	Vec2	vector2	v 1 1	
 S	I	tile	1
+V	I	tile	1
 A	I	tile	1
 I	center	Center	18	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -23449,6 +24207,7 @@ I	depth	Depth	1	Int	integer	i 0
 S	I	depth	0
 I	position	Position	2	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -23459,6 +24218,7 @@ I	rotation	Rotation	4	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	5	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 N	pc.project_output	Node_Project_Output	Project Output	misc	scripts/node_project_output/node_project_output.gml
 I	surface_in	Surface In	0	Surface	image		
@@ -23471,6 +24231,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -23484,6 +24245,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -23497,6 +24259,7 @@ I	rotation_map	Rotation Map	12	Surface	image
 S	I	rotation_map	0
 I	scale	Scale	2	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -23616,6 +24379,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -23629,6 +24393,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	3	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -23749,6 +24514,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -23764,6 +24530,7 @@ I	fov	FOV	4	Slider	scalar	d 30
 S	I	fov	0
 I	view_range	View Range	5	Vec2	vector2	v 0 6	
 S	I	view_range	1
+V	I	view_range	1
 A	I	view_range	1
 I	shape	Shape	11	EScroll	enum	e 0	Volume;Plane
 S	I	shape	0
@@ -23799,6 +24566,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -23833,6 +24601,7 @@ I	ortho_scale	Ortho Scale	3	Float	scalar	d 5
 S	I	ortho_scale	0
 I	view_range	View Range	4	Vec2	vector2	v 3 6	
 S	I	view_range	1
+V	I	view_range	1
 A	I	view_range	1
 I	depth	Depth	5	Slider	scalar	d 0	
 S	I	depth	0
@@ -23870,6 +24639,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -23900,6 +24670,7 @@ S	I	corner	1
 A	I	corner	1
 I	2_d_size	2D Size	40	Vec2	vector2	v 0.5 0.5	
 S	I	2_d_size	1
+V	I	2_d_size	1
 A	I	2_d_size	1
 I	side	Side	41	Int	integer	i 3	
 S	I	side	0
@@ -23981,9 +24752,11 @@ I	fov	FOV	5	Slider	scalar	d 30
 S	I	fov	0
 I	view_range	View Range	6	Vec2	vector2	v 3 6	
 S	I	view_range	1
+V	I	view_range	1
 A	I	view_range	1
 I	depth_range	Depth Range	54	Vec2	vector2	v 1 10	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	depth	Depth	7	Slider	scalar	d 0	
 S	I	depth	0
@@ -24025,6 +24798,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -24047,9 +24821,11 @@ I	ortho_scale	Ortho Scale	3	Float	scalar	d 5
 S	I	ortho_scale	0
 I	view_range	View Range	4	Vec2	vector2	v 3 6	
 S	I	view_range	1
+V	I	view_range	1
 A	I	view_range	1
 I	depth_range	Depth Range	17	Vec2	vector2	v 1 10	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	depth	Depth	5	Slider	scalar	d 0	
 S	I	depth	0
@@ -24080,6 +24856,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -24094,14 +24871,17 @@ Q	I	axis	1	0	s "Y"
 Q	I	axis	2	0	s "Z"
 I	midpoint	Midpoint	3	Vec2	vector2	v 0 0	
 S	I	midpoint	1
+V	I	midpoint	1
 A	I	midpoint	1
 I	span	Span	4	Vec2	vector2	v 1 1	
 S	I	span	1
+V	I	span	1
 A	I	span	1
 I	offset	Offset	6	Float	scalar	d 0	
 S	I	offset	0
 I	range	Range	5	Range	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	attribute_color_depth	Color Depth	-1	Attribute	enum	e 1	Input;Inherited;4 bit RGBA;8 bit RGBA;16 bit RGBA;32 bit RGBA;8 bit Greyscale;16 bit Greyscale;32 bit Greyscale
 S	I	attribute_color_depth	?
@@ -24119,6 +24899,7 @@ I	oversample	Oversample	-1	Attribute	enum	e 0	Inherited;Empty;Black;Clamp;Repeat
 S	I	oversample	?
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -24128,14 +24909,17 @@ I	sdf_object	SDF Object	13	SDF	sdf
 S	I	sdf_object	0
 I	grid	Grid	17	Vec2	vector2	v 4 4	
 S	I	grid	1
+V	I	grid	1
 A	I	grid	1
 I	position	Position	25	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	random_offset	Random Offset	19	Vec2	vector2	v 0 0	
 S	I	random_offset	1
+V	I	random_offset	1
 A	I	random_offset	1
 I	random_offset_unit	Random Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	random_offset_unit	?
@@ -24150,6 +24934,7 @@ S	I	rot_random_max	1
 A	I	rot_random_max	1
 I	scale_range	Scale Range	12	Range	vector2	v 1 1	
 S	I	scale_range	1
+V	I	scale_range	1
 A	I	scale_range	1
 I	camera_rotation	Camera Rotation	21	Vec3	vector3	3 30 45 0	
 S	I	camera_rotation	1
@@ -24168,9 +24953,11 @@ I	ortho_scale	Ortho Scale	3	Float	scalar	d 5
 S	I	ortho_scale	0
 I	view_range	View Range	4	Vec2	vector2	v 1 10	
 S	I	view_range	1
+V	I	view_range	1
 A	I	view_range	1
 I	depth_range	Depth Range	22	Vec2	vector2	v 1 10	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	depth	Depth	5	Slider	scalar	d 0	
 S	I	depth	0
@@ -24201,6 +24988,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -24226,6 +25014,7 @@ I	fov	FOV	5	Slider	scalar	d 30
 S	I	fov	0
 I	view_range	View Range	6	Vec2	vector2	v 0 6	
 S	I	view_range	1
+V	I	view_range	1
 A	I	view_range	1
 I	background	Background	12	Color	colour	c 0 0 0 255	
 S	I	background	0
@@ -24353,6 +25142,7 @@ I	seed	Seed	1	SeedInt	integer
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -24367,9 +25157,11 @@ S	I	amount	1
 A	I	amount	1
 I	size	Size	6	Range	vector2	v 0.25 0.5	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	shift	Shift	8	Range	vector2	v 0 1	
 S	I	shift	1
+V	I	shift	1
 A	I	shift	1
 I	mirror	Mirror	9	Text	text	s "b"	
 S	I	mirror	0
@@ -24379,6 +25171,7 @@ I	size_2	Size	12	Slider	scalar	d 0.6
 S	I	size_2	0
 I	shift_2	Shift	13	Range	vector2	v 0 1	
 S	I	shift_2	1
+V	I	shift_2	1
 A	I	shift_2	1
 I	polar	Polar	14	Slider	scalar	d 0.5	
 S	I	polar	0
@@ -24403,6 +25196,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -24416,6 +25210,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -24429,6 +25224,7 @@ I	angle_map	Angle Map	12	Surface	image
 S	I	angle_map	0
 I	scale	Scale	2	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -24521,6 +25317,7 @@ I	seed	Seed	0	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -24727,6 +25524,7 @@ I	spacing	Spacing	6	Int	integer	i 0
 S	I	spacing	0
 I	spacing_2	Spacing	9	Vec2	vector2	v 0 0	
 S	I	spacing_2	1
+V	I	spacing_2	1
 A	I	spacing_2	1
 I	padding	Padding	7	IPadding	vector4	w 0 0 0 0	
 S	I	padding	1
@@ -24751,11 +25549,13 @@ B	I	output_dimension_type	0	general	1	default	4
 C	I	output_dimension_type	unknown
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	relative_dimension	Relative Dimension	36	Vec2	vector2	v 1 1	
 S	I	relative_dimension	1
+V	I	relative_dimension	1
 A	I	relative_dimension	1
 I	padding	Padding	37	IPadding	vector4	w 0 0 0 0	
 S	I	padding	1
@@ -24772,6 +25572,7 @@ Q	I	array_select	1	0	s "Random"
 Q	I	array_select	2	0	s "Spread"
 I	animated	Animated	55	Range	vector2	v 0 0	
 S	I	animated	1
+V	I	animated	1
 A	I	animated	1
 I	animated_end	Animated End	56	EScroll	enum	e 0	Loop;Ping Pong;Hide;Stop
 S	I	animated_end	0
@@ -24790,6 +25591,7 @@ Q	I	pattern	1	0	s "Grid"
 Q	I	pattern	2	0	s "Circular"
 I	start_position	Start Position	9	Vec2	vector2	v 0.5 0.5	
 S	I	start_position	1
+V	I	start_position	1
 A	I	start_position	1
 I	start_position_unit	Start Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	start_position_unit	?
@@ -24830,6 +25632,7 @@ I	offset_path_rotation	Offset Path Rotation	52	Bool	boolean	b 0
 S	I	offset_path_rotation	0
 I	shift_position	Shift Position	4	Vec2	vector2	v 0.5 0	
 S	I	shift_position	1
+V	I	shift_position	1
 A	I	shift_position	1
 I	shift_position_unit	Shift Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	shift_position_unit	?
@@ -24847,6 +25650,7 @@ Q	I	stack	1	0	s "X"
 Q	I	stack	2	0	s "Y"
 I	shift_column	Shift Column	19	Vec2	vector2	v 0 0.5	
 S	I	shift_column	1
+V	I	shift_column	1
 A	I	shift_column	1
 I	shift_column_unit	Shift Column Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	shift_column_unit	?
@@ -24920,6 +25724,7 @@ I	wrap_index	Wrap Index	28	Bool	boolean	b 1
 S	I	wrap_index	0
 I	animator_scale	Animator scale	24	Vec2	vector2	v 0 0	
 S	I	animator_scale	1
+V	I	animator_scale	1
 A	I	animator_scale	1
 I	animator_falloff	Animator falloff	25	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 0.3333333333333333 1 0 0 0	
 S	I	animator_falloff	1
@@ -24952,6 +25757,7 @@ T	select_surface	Select Surface	14	Surface	image
 S	T	select_surface	0
 T	select_position	Select Position	16	Vec2	vector2	v 0 0	
 S	T	select_position	1
+V	T	select_position	1
 A	T	select_position	1
 T	select_position_unit	Select Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	select_position_unit	?
@@ -24970,11 +25776,13 @@ Q	T	animator_type	0	0	s "Linear Transform"
 Q	T	animator_type	1	0	s "Blending"
 T	position	Position	2	Vec2	vector2	v 0 0	
 S	T	position	1
+V	T	position	1
 A	T	position	1
 T	rotation	Rotation	3	Rotation	scalar	d 0	
 S	T	rotation	0
 T	scale	Scale	4	Vec2	vector2	v 0 0	
 S	T	scale	1
+V	T	scale	1
 A	T	scale	1
 T	anchor_type	Anchor type	5	EButton	enum	e 1	Global;Local
 S	T	anchor_type	0
@@ -24984,6 +25792,7 @@ Q	T	anchor_type	0	0	s "Global"
 Q	T	anchor_type	1	0	s "Local"
 T	anchor_position	Anchor Position	6	Vec2	vector2	v 0.5 0.5	
 S	T	anchor_position	1
+V	T	anchor_position	1
 A	T	anchor_position	1
 T	color	Color	7	Color	colour	c 255 255 255 255	
 S	T	color	0
@@ -25002,6 +25811,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	target_dimension	Target Dimension	1	Dimension	vector2	v 1 1	
 S	I	target_dimension	1
+V	I	target_dimension	1
 A	I	target_dimension	1
 I	target_dimension_unit	Target Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	target_dimension_unit	?
@@ -25030,6 +25840,7 @@ I	seed	Seed	0	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -25071,11 +25882,13 @@ I	texture	Texture	12	Surface	image
 S	I	texture	0
 I	texture_position	Texture Position	13	Vec2	vector2	v 0 0	
 S	I	texture_position	1
+V	I	texture_position	1
 A	I	texture_position	1
 I	texture_rotation	Texture Rotation	16	Rotation	scalar	d 0	
 S	I	texture_rotation	0
 I	texture_scale	Texture Scale	14	Vec2	vector2	v 1 1	
 S	I	texture_scale	1
+V	I	texture_scale	1
 A	I	texture_scale	1
 I	shade_side	Shade Side	9	Bool	boolean	b 0	
 S	I	shade_side	0
@@ -25091,6 +25904,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -25128,6 +25942,7 @@ I	ridge_multiplier	Ridge Multiplier	19	Float	scalar	d 16
 S	I	ridge_multiplier	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -25135,6 +25950,7 @@ I	rotation	Rotation	3	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 2 2	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	iteration	Iteration	6	Int	integer	i 1	
 S	I	iteration	0
@@ -25173,6 +25989,7 @@ I	activate_physics	Activate Physics	5	Bool	boolean	b 1
 S	I	activate_physics	0
 I	position	Position	2	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -25209,6 +26026,7 @@ I	trigger	Trigger	9	Trigger	boolean	b 0
 S	I	trigger	0
 I	position	Position	2	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -25216,6 +26034,7 @@ I	torque	Torque	3	Float	scalar	d 0
 S	I	torque	0
 I	force	Force	5	Vec2	vector2	v 0.1 0	
 S	I	force	1
+V	I	force	1
 A	I	force	1
 I	range	Range	8	Float	scalar	d 0.25	
 S	I	range	0
@@ -25253,6 +26072,7 @@ I	gravity_scale	Gravity Scale	15	Float	scalar	d 1
 S	I	gravity_scale	0
 I	position	Position	9	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -25273,11 +26093,13 @@ I	attribute_shape	attribute shape	-1	Float	scalar	d 0
 S	I	attribute_shape	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	gravity	Gravity	0	Vec2	vector2	v 0 10	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	direction	Direction	3	Rotation	scalar	d -90	
 S	I	direction	0
@@ -25306,6 +26128,7 @@ I	custom_anchor	Custom Anchor	2	Bool	boolean	b 0
 S	I	custom_anchor	0
 I	anchor	Anchor	3	Vec2	vector2	v 0 0	
 S	I	anchor	1
+V	I	anchor	1
 A	I	anchor	1
 I	anchor_unit	Anchor Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	anchor_unit	?
@@ -25323,6 +26146,7 @@ I	object_b	Object B	1	Generic_rigid	rigid
 S	I	object_b	0
 I	offset	Offset	2	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	offset_unit	?
@@ -25340,6 +26164,7 @@ I	spawn_frame	Spawn Frame	20	Int	integer	i 0
 S	I	spawn_frame	0
 I	spawn_position	Spawn Position	7	Vec2	vector2	v 0.5 0.5	
 S	I	spawn_position	1
+V	I	spawn_position	1
 A	I	spawn_position	1
 I	spawn_position_unit	Spawn Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	spawn_position_unit	?
@@ -25351,6 +26176,7 @@ I	use_initial_velocity	Use Initial Velocity	18	Bool	boolean	b 0
 S	I	use_initial_velocity	0
 I	initial_velocity	Initial Velocity	19	Vec2	vector2	v 0 0	
 S	I	initial_velocity	1
+V	I	initial_velocity	1
 A	I	initial_velocity	1
 I	texture	Texture	6	Surface	image		
 S	I	texture	0
@@ -25409,11 +26235,13 @@ O	new_collision_normals	New Collision Normals	5	vector2	v 0 0	s "[0,0]"
 N	pc.rigid_object_segment	Node_Rigid_Object_Segment	Segment	simulation	scripts/node_rigid_object_segment/node_rigid_object_segment.gml
 I	segment_start	Segment Start	0	Vec2	vector2	v 0 0	
 S	I	segment_start	1
+V	I	segment_start	1
 A	I	segment_start	1
 I	segment_start_unit	Segment Start Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	segment_start_unit	?
 I	segment_end	Segment End	1	Vec2	vector2	v 1 0	
 S	I	segment_end	1
+V	I	segment_end	1
 A	I	segment_end	1
 I	segment_end_unit	Segment End Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	segment_end_unit	?
@@ -25450,6 +26278,7 @@ I	random_color	Random Color	8	Gradient	gradient	g 0 1 0 255 255 255 255
 S	I	random_color	0
 I	alpha	Alpha	9	Range	vector2	v 1 1	
 S	I	alpha	1
+V	I	alpha	1
 A	I	alpha	1
 I	attribute_show_objects	attribute show_objects	-1	Bool	boolean	b 1	
 S	I	attribute_show_objects	0
@@ -25471,6 +26300,7 @@ Q	I	mode	0	0	s "Absolute"
 Q	I	mode	1	0	s "Relative"
 I	positions	Positions	5	Vec2	vector2	v 0 0	
 S	I	positions	1
+V	I	positions	1
 A	I	positions	1
 I	set_rotations	Set Rotations	6	Bool	boolean	b 0	
 S	I	set_rotations	0
@@ -25493,6 +26323,7 @@ Q	I	mode_3	1	0	s "Relative Add"
 Q	I	mode_3	2	0	s "Relative Muliply"
 I	scales	Scales	11	Vec2	vector2	v 0 0	
 S	I	scales	1
+V	I	scales	1
 A	I	scales	1
 I	set_blends	Set Blends	12	Bool	boolean	b 0	
 S	I	set_blends	0
@@ -25606,11 +26437,13 @@ Q	I	shape	0	0	s "Rectangle"
 Q	I	shape	1	0	s "Elipse"
 I	position	Position	2	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	span	Span	3	Vec2	vector2	v 0.5 0.5	
 S	I	span	1
+V	I	span	1
 A	I	span	1
 I	span_unit	Span Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	span_unit	?
@@ -25633,6 +26466,7 @@ O	velocity_magnitude	Velocity Magnitude	7	scalar	d 0	s "0"
 N	pc.rigid_wall	Node_Rigid_Wall	Wall	simulation	scripts/node_rigid_wall/node_rigid_wall.gml
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -25744,6 +26578,7 @@ I	scale	Scale	1	Float	scalar	d 1
 S	I	scale	0
 I	dimension	Dimension	3	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -25757,6 +26592,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -25788,6 +26624,7 @@ I	scale	Scale	1	Float	scalar	d 1
 S	I	scale	0
 I	target_dimension	Target Dimension	3	Vec2	vector2	v 32 32	
 S	I	target_dimension	1
+V	I	target_dimension	0
 A	I	target_dimension	1
 I	target_dimension_unit	Target Dimension Unit	-1	ValueUnit	enum	e 0	Pixel;Reference
 S	I	target_dimension_unit	?
@@ -25849,9 +26686,11 @@ Q	I	type	0	0	s "Multiply"
 Q	I	type	1	0	s "Scale to Size"
 I	scale	Scale	1	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	target_size	Target Size	3	Dimension	vector2	v 1 1	
 S	I	target_size	1
+V	I	target_size	1
 A	I	target_size	1
 I	target_size_unit	Target Size Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	target_size_unit	?
@@ -25871,6 +26710,7 @@ I	seed	Seed	10	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -25888,6 +26728,7 @@ I	array_texture	Array Texture	25	Surface	image
 S	I	array_texture	0
 I	animated	Animated	26	Range	vector2	v 0 0	
 S	I	animated	1
+V	I	animated	1
 A	I	animated	1
 I	animated_end	Animated End	27	EScroll	enum	e 0	Loop;Ping Pong;Hide;Stop
 S	I	animated_end	0
@@ -25936,6 +26777,7 @@ I	amount	Amount	2	Int	integer	i 8
 S	I	amount	0
 I	uniform_amount	Uniform Amount	30	IVec2	vector2	v 4 4	
 S	I	uniform_amount	1
+V	I	uniform_amount	1
 A	I	uniform_amount	1
 I	distance	Distance	44	Float	scalar	d 8	
 S	I	distance	0
@@ -25954,6 +26796,7 @@ I	rotate_along_path	Rotate Along Path	20	Bool	boolean	b 1
 S	I	rotate_along_path	0
 I	path_range	Path Range	45	Range	vector2	v 0 1	
 S	I	path_range	1
+V	I	path_range	1
 A	I	path_range	1
 I	path_shift	Path Shift	21	Slider	scalar	d 0	
 S	I	path_shift	0
@@ -25974,6 +26817,7 @@ I	offset_position_map	Offset Position Map	51	Surface	image
 S	I	offset_position_map	0
 I	shift_position	Shift Position	36	Vec2	vector2	v 0 0	
 S	I	shift_position	1
+V	I	shift_position	1
 A	I	shift_position	1
 I	shift_position_mapped	Shift Position Mapped	-1	MapToggle	boolean	b 0	
 S	I	shift_position_mapped	?
@@ -25981,6 +26825,7 @@ I	shift_position_map	Shift Position Map	49	Surface	image
 S	I	shift_position_map	0
 I	shift_radial	Shift Radial	39	Range	vector2	v 0 0	
 S	I	shift_radial	1
+V	I	shift_radial	1
 A	I	shift_radial	1
 I	exact	Exact	37	Bool	boolean	b 0	
 S	I	exact	0
@@ -26016,11 +26861,13 @@ I	offset_scale_map	Offset Scale Map	55	Surface	image
 S	I	offset_scale_map	0
 I	scale_random	Scale Random	57	Range	vector2	v 1 1	
 S	I	scale_random	1
+V	I	scale_random	1
 A	I	scale_random	1
 I	uniform_scaling	Uniform Scaling	8	Bool	boolean	b 1	
 S	I	uniform_scaling	0
 I	scale_per_radius	Scale per Radius	34	Vec2	vector2	v 0 0	
 S	I	scale_per_radius	1
+V	I	scale_per_radius	1
 A	I	scale_per_radius	1
 I	random_blend	Random Blend	11	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	random_blend	0
@@ -26076,6 +26923,7 @@ I	amount	Amount	2	Int	integer	i 16
 S	I	amount	0
 I	center	Center	1	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -26083,6 +26931,7 @@ I	rotation	Rotation	6	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	3	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	rotation_2	Rotation	4	Float	scalar	d 1.618033988749895	
 S	I	rotation_2	0
@@ -26103,6 +26952,7 @@ I	point_area_unit	Point Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_area_unit	?
 I	subdivision	Subdivision	2	IVec2	vector2	v 2 2	
 S	I	subdivision	1
+V	I	subdivision	1
 A	I	subdivision	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -26133,6 +26983,7 @@ I	fixed_position	Fixed Position	6	Bool	boolean	b 0
 S	I	fixed_position	0
 I	reference_dimension	Reference Dimension	7	Vec2	vector2	v 32 32	
 S	I	reference_dimension	1
+V	I	reference_dimension	0
 A	I	reference_dimension	1
 I	point_area	Point area	0	Area	area	r 0.5 0.5 0.5 0.5 0 0	
 S	I	point_area	1
@@ -26205,6 +27056,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -26411,11 +27263,13 @@ Q	I	positioning	0	0	s "Shift"
 Q	I	positioning	1	0	s "Light"
 I	shift	Shift	3	Vec2	vector2	v 0 0	
 S	I	shift	1
+V	I	shift	1
 A	I	shift	1
 I	shift_unit	Shift Unit	-1	ValueUnit	enum	e 0	Pixel;Reference
 S	I	shift_unit	?
 I	light_position	Light Position	12	Vec2	vector2	v 0 0	
 S	I	light_position	1
+V	I	light_position	1
 A	I	light_position	1
 I	light_position_unit	Light Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	light_position_unit	?
@@ -26459,6 +27313,7 @@ B	T	type	0	general	1	default	?
 C	T	type	unknown
 T	position	Position	3	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
+V	T	position	1
 A	T	position	1
 T	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	T	position_unit	?
@@ -26499,6 +27354,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -26548,11 +27404,13 @@ I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	center	Center	16	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	half_size	Half Size	17	Vec2	vector2	v 0.5 0.5	
 S	I	half_size	1
+V	I	half_size	1
 A	I	half_size	1
 I	half_size_unit	Half Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	half_size_unit	?
@@ -26564,26 +27422,31 @@ I	shape	Shape	2	EString	text	s "Rectangle"
 S	I	shape	0
 I	point_1	Point 1	32	Vec2	vector2	v 0 0	
 S	I	point_1	1
+V	I	point_1	1
 A	I	point_1	1
 I	point_1_unit	Point 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_1_unit	?
 I	point_2	Point 2	33	Vec2	vector2	v 1 1	
 S	I	point_2	1
+V	I	point_2	1
 A	I	point_2	1
 I	point_2_unit	Point 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_2_unit	?
 I	point_3	Point 3	35	Vec2	vector2	v 1 0	
 S	I	point_3	1
+V	I	point_3	1
 A	I	point_3	1
 I	point_3_unit	Point 3 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_3_unit	?
 I	point_4	Point 4	52	Vec2	vector2	v 0.6 0.2	
 S	I	point_4	1
+V	I	point_4	1
 A	I	point_4	1
 I	point_4_unit	Point 4 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_4_unit	?
 I	half_point	Half Point	40	Vec2	vector2	v 0.5 0.5	
 S	I	half_point	1
+V	I	half_point	1
 A	I	half_point	1
 I	half_point_unit	Half Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	half_point_unit	?
@@ -26621,6 +27484,7 @@ I	teeth_amount	Teeth Amount	25	Int	integer	i 6
 S	I	teeth_amount	0
 I	teeth_size	Teeth Size	26	Vec2	vector2	v 0.2 0.2	
 S	I	teeth_size	1
+V	I	teeth_size	1
 A	I	teeth_size	1
 I	teeth_rotation	Teeth Rotation	27	Rotation	scalar	d 0	
 S	I	teeth_rotation	0
@@ -26645,6 +27509,7 @@ I	twist	Twist	41	Slider	scalar	d 0
 S	I	twist	0
 I	shear	Shear	42	Vec2	vector2	v 0 0	
 S	I	shear	1
+V	I	shear	1
 A	I	shear	1
 I	shape_color	Shape Color	10	Color	colour	c 255 255 255 255	
 S	I	shape_color	0
@@ -26673,6 +27538,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -26680,6 +27546,7 @@ I	background	Background	16	Surface	image
 S	I	background	0
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -26700,9 +27567,11 @@ I	caps	Caps	9	Bool	boolean	b 1
 S	I	caps	0
 I	radius	Radius	13	Vec2	vector2	v 0.75 0.25	
 S	I	radius	1
+V	I	radius	1
 A	I	radius	1
 I	side_2	Side	12	IVec2	vector2	v 16 8	
 S	I	side_2	1
+V	I	side_2	1
 A	I	side_2	1
 I	ratio	Ratio	14	Slider	scalar	d 0.5	
 S	I	ratio	0
@@ -26722,17 +27591,21 @@ S	I	texture	0
 A	I	texture	?
 I	uv_position	UV Position	17	Vec2	vector2	v 0 0	
 S	I	uv_position	1
+V	I	uv_position	1
 A	I	uv_position	1
 I	uv_scale	UV Scale	18	Vec2	vector2	v 1 1	
 S	I	uv_scale	1
+V	I	uv_scale	1
 A	I	uv_scale	1
 I	view_range	View Range	4	Range	vector2	v 0 0.25	
 S	I	view_range	1
+V	I	view_range	1
 A	I	view_range	1
 I	displacement_map	Displacement Map	19	Surface	image		
 S	I	displacement_map	0
 I	displacement_range	Displacement Range	20	Range	vector2	v 0 1	
 S	I	displacement_range	1
+V	I	displacement_range	1
 A	I	displacement_range	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -26750,6 +27623,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 0
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -26759,11 +27633,13 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	center	Center	4	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	half_size	Half Size	5	Vec2	vector2	v 0.5 0.5	
 S	I	half_size	1
+V	I	half_size	1
 A	I	half_size	1
 I	half_size_unit	Half Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	half_size_unit	?
@@ -26781,6 +27657,7 @@ O	surface_out	Surface Out	0	image	i -4	s "noone"
 N	pc.shape_fast	Node_Shape_Fast	Draw Shape Fast	generate	scripts/node_shape_fast/node_shape_fast.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -26800,11 +27677,13 @@ I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	center	Center	16	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	half_size	Half Size	17	Vec2	vector2	v 0.5 0.5	
 S	I	half_size	1
+V	I	half_size	1
 A	I	half_size	1
 I	half_size_unit	Half Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	half_size_unit	?
@@ -26816,21 +27695,25 @@ I	shape	Shape	2	EString	text
 S	I	shape	0
 I	point_1	Point 1	32	Vec2	vector2	v 0 0	
 S	I	point_1	1
+V	I	point_1	1
 A	I	point_1	1
 I	point_1_unit	Point 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_1_unit	?
 I	point_2	Point 2	33	Vec2	vector2	v 1 1	
 S	I	point_2	1
+V	I	point_2	1
 A	I	point_2	1
 I	point_2_unit	Point 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_2_unit	?
 I	point_3	Point 3	35	Vec2	vector2	v 1 0	
 S	I	point_3	1
+V	I	point_3	1
 A	I	point_3	1
 I	point_3_unit	Point 3 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_3_unit	?
 I	half_point	Half Point	40	Vec2	vector2	v 0.5 0.5	
 S	I	half_point	1
+V	I	half_point	1
 A	I	half_point	1
 I	half_point_unit	Half Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	half_point_unit	?
@@ -26868,6 +27751,7 @@ I	teeth_amount	Teeth Amount	25	Int	integer	i 6
 S	I	teeth_amount	0
 I	teeth_size	Teeth Size	26	Vec2	vector2	v 0.2 0.2	
 S	I	teeth_size	1
+V	I	teeth_size	1
 A	I	teeth_size	1
 I	teeth_rotation	Teeth Rotation	27	Rotation	scalar	d 0	
 S	I	teeth_rotation	0
@@ -26887,6 +27771,7 @@ I	twist	Twist	41	Slider	scalar	d 0
 S	I	twist	0
 I	shear	Shear	42	Vec2	vector2	v 0 0	
 S	I	shear	1
+V	I	shear	1
 A	I	shear	1
 I	shape_color	Shape color	10	Color	colour	c 255 255 255 255	
 S	I	shape_color	0
@@ -26914,6 +27799,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 0
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -26923,11 +27809,13 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	center	Center	4	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	half_size	Half Size	5	Vec2	vector2	v 0.5 0.5	
 S	I	half_size	1
+V	I	half_size	1
 A	I	half_size	1
 I	half_size_unit	Half Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	half_size_unit	?
@@ -26963,6 +27851,7 @@ I	angle	Angle	7	Rotation	scalar	d 0
 S	I	angle	0
 I	map_scale	Map Scale	3	Vec2	vector2	v 4 1	
 S	I	map_scale	1
+V	I	map_scale	1
 A	I	map_scale	1
 I	radius	Radius	4	Float	scalar	d 0.5	
 S	I	radius	0
@@ -26982,6 +27871,7 @@ I	mesh	Mesh	16	Mesh	mesh2d
 S	I	mesh	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27004,6 +27894,7 @@ Q	I	bg_blend_mode	0	0	s "Override"
 Q	I	bg_blend_mode	1	0	s "Max"
 I	position	Position	5	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -27011,6 +27902,7 @@ I	rotation	Rotation	6	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	7	Vec2	vector2	v 0.5 0.5	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -27098,6 +27990,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 0
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27107,11 +28000,13 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	center	Center	4	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	half_size	Half Size	5	Vec2	vector2	v 0.5 0.5	
 S	I	half_size	1
+V	I	half_size	1
 A	I	half_size	1
 I	half_size_unit	Half Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	half_size_unit	?
@@ -27133,6 +28028,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27164,6 +28060,7 @@ I	sharpness_map	Sharpness Map	7	Surface	image
 S	I	sharpness_map	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -27171,6 +28068,7 @@ I	rotation	Rotation	9	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 4 4	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
@@ -27218,6 +28116,7 @@ Q	I	axis	1	0	s "Vertical"
 Q	I	axis	2	0	s "Both"
 I	block_count	Block count	4	IVec2	vector2	v 4 4	
 S	I	block_count	1
+V	I	block_count	1
 A	I	block_count	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -27227,6 +28126,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27236,12 +28136,15 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	pattern_size	Pattern Size	5	IVec2	vector2	v 3 3	
 S	I	pattern_size	1
+V	I	pattern_size	1
 A	I	pattern_size	1
 I	shift	Shift	6	IVec2	vector2	v 0 0	
 S	I	shift	1
+V	I	shift	1
 A	I	shift	1
 I	scale	Scale	2	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	color_1	Color 1	3	Color	colour	c 0 0 0 255	
 S	I	color_1	0
@@ -27258,6 +28161,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27359,6 +28263,7 @@ S	I	strength_curve	1
 A	I	strength_curve	1
 I	center	Center	4	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -27378,6 +28283,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27391,11 +28297,13 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	offset	Offset	1	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	offset_unit	?
 I	scale	Scale	2	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	model	Model	3	EScroll	enum	e 0	Preetham;Basic scattering;Hosek
 S	I	model	0
@@ -27416,6 +28324,7 @@ I	albedo	Albedo	8	Float	scalar	d 1
 S	I	albedo	0
 I	sun	Sun	5	Vec2	vector2	v 0.2 0.2	
 S	I	sun	1
+V	I	sun	1
 A	I	sun	1
 I	sun_unit	Sun Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	sun_unit	?
@@ -27447,6 +28356,7 @@ I	order	Order	0	Int	integer
 S	I	order	0
 I	half_size	Half Size	5	Vec2	vector2	v 400 300	
 S	I	half_size	1
+V	I	half_size	1
 A	I	half_size	1
 I	anchor	Anchor	2	EScroll	enum	e 0	Center;Top left
 S	I	anchor	0
@@ -27585,11 +28495,13 @@ S	I	level	1
 A	I	level	1
 I	position	Position	2	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	scale	Scale	9	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -27599,6 +28511,7 @@ I	expand_velocity_mask	Expand velocity mask	6	Int	integer	i 1
 S	I	expand_velocity_mask	0
 I	velocity	Velocity	7	Vec2	vector2	v 0 0	
 S	I	velocity	1
+V	I	velocity	1
 A	I	velocity	1
 I	inherit_velocity	Inherit velocity	4	Slider	scalar	d 0	
 S	I	inherit_velocity	0
@@ -27635,16 +28548,19 @@ I	brush	Brush	1	Surface	image
 S	I	brush	0
 I	scale	Scale	6	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
 I	position	Position	2	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	velocity	Velocity	3	Vec2	vector2	v 1 0	
 S	I	velocity	1
+V	I	velocity	1
 A	I	velocity	1
 I	strength	Strength	7	Float	scalar	d 1	
 S	I	strength	0
@@ -27652,6 +28568,7 @@ O	domain	Domain	0	smoke_domain	i -4	s "noone"
 N	pc.smoke_domain	Node_Smoke_Domain	Domain	simulation	scripts/node_smoke_domain/node_smoke_domain.gml
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27670,9 +28587,11 @@ I	initial_pressure	Initial Pressure	8	Slider	scalar	d 0.75
 S	I	initial_pressure	0
 I	acceleration	Acceleration	6	Vec2	vector2	v 0 0	
 S	I	acceleration	1
+V	I	acceleration	1
 A	I	acceleration	1
 I	material_intertia	Material Intertia	7	Vec2	vector2	v 1 -0.2	
 S	I	material_intertia	1
+V	I	material_intertia	1
 A	I	material_intertia	1
 I	material_dissipation	Material Dissipation	3	Slider	scalar	d 0.02	
 S	I	material_dissipation	0
@@ -27712,6 +28631,7 @@ S	I	attribute_shape	0
 N	pc.smoke_render	Node_Smoke_Render	Render Domain	simulation	scripts/node_smoke_render/node_smoke_render.gml
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27741,6 +28661,7 @@ I	input_0		0	Sdomain	smoke_domain
 S	I	input_0	0
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -27785,6 +28706,7 @@ I	input_0		0	Sdomain	smoke_domain
 S	I	input_0	0
 I	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -27803,6 +28725,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -27851,11 +28774,13 @@ I	mask_feather	Mask feather	10	Slider	scalar	d 0
 S	I	mask_feather	0
 I	center	Center	1	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
 I	position	Position	15	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -27883,9 +28808,11 @@ I	trim_edge	Trim Edge	13	Slider	scalar	d 0
 S	I	trim_edge	0
 I	texture_offset	Texture Offset	16	Vec2	vector2	v 0 0	
 S	I	texture_offset	1
+V	I	texture_offset	1
 A	I	texture_offset	1
 I	texture_scale	Texture Scale	17	Vec2	vector2	v 1 1	
 S	I	texture_scale	1
+V	I	texture_scale	1
 A	I	texture_scale	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -27920,11 +28847,13 @@ B	I	output_dimension_type	0	general	1	default	4
 C	I	output_dimension_type	unknown
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	relative_dimension	Relative Dimension	14	Vec2	vector2	v 1 1	
 S	I	relative_dimension	1
+V	I	relative_dimension	1
 A	I	relative_dimension	1
 I	array_process	Array Process	12	EScroll	enum	e 1	Individual;Combined
 S	I	array_process	0
@@ -27936,11 +28865,13 @@ I	stack_amount	Stack Amount	2	Int	integer	i 4
 S	I	stack_amount	0
 I	stack_shift	Stack Shift	3	Vec2	vector2	v 0 1	
 S	I	stack_shift	1
+V	I	stack_shift	1
 A	I	stack_shift	1
 I	move_base	Move Base	8	Bool	boolean	b 0	
 S	I	move_base	0
 I	position	Position	4	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -28089,31 +29020,37 @@ Q	I	mode	0	0	s "2D"
 Q	I	mode	1	0	s "Perspective"
 I	point_start	Point Start	8	Vec2	vector2	v 0 0.5	
 S	I	point_start	1
+V	I	point_start	1
 A	I	point_start	1
 I	point_start_unit	Point Start Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_start_unit	?
 I	point_end	Point End	9	Vec2	vector2	v 1 0.5	
 S	I	point_end	1
+V	I	point_end	1
 A	I	point_end	1
 I	point_end_unit	Point End Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_end_unit	?
 I	guide_1_point_start	Guide 1 Point Start	10	Vec2	vector2	v 0 0	
 S	I	guide_1_point_start	1
+V	I	guide_1_point_start	1
 A	I	guide_1_point_start	1
 I	guide_1_point_start_unit	Guide 1 Point Start Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	guide_1_point_start_unit	?
 I	guide_1_point_end	Guide 1 Point End	11	Vec2	vector2	v 1 0	
 S	I	guide_1_point_end	1
+V	I	guide_1_point_end	1
 A	I	guide_1_point_end	1
 I	guide_1_point_end_unit	Guide 1 Point End Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	guide_1_point_end_unit	?
 I	guide_2_point_start	Guide 2 Point Start	12	Vec2	vector2	v 0 1	
 S	I	guide_2_point_start	1
+V	I	guide_2_point_start	1
 A	I	guide_2_point_start	1
 I	guide_2_point_start_unit	Guide 2 Point Start Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	guide_2_point_start_unit	?
 I	guide_2_point_end	Guide 2 Point End	13	Vec2	vector2	v 1 1	
 S	I	guide_2_point_end	1
+V	I	guide_2_point_end	1
 A	I	guide_2_point_end	1
 I	guide_2_point_end_unit	Guide 2 Point End Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	guide_2_point_end_unit	?
@@ -28153,6 +29090,7 @@ I	path	Path	5	Path	path2d	p 0 0 0
 S	I	path	0
 I	position	Position	6	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -28175,6 +29113,7 @@ I	bake_hair	Bake Hair	15	Trigger	boolean	b 0
 S	I	bake_hair	0
 I	length	Length	2	Range	vector2	v 4 4	
 S	I	length	1
+V	I	length	1
 A	I	length	1
 I	segment	Segment	3	Int	integer	i 4	
 S	I	segment	0
@@ -28189,6 +29128,7 @@ I	structure	Structure	9	Slider	scalar	d 0.2
 S	I	structure	0
 I	root_strength	Root Strength	17	Range	vector2	v -1 -1	
 S	I	root_strength	1
+V	I	root_strength	1
 A	I	root_strength	1
 I	restitution	Restitution	19	Float	scalar	d 0.01	
 S	I	restitution	0
@@ -28244,6 +29184,7 @@ I	update_step	Update Step	8	Int	integer	i 4
 S	I	update_step	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -28251,6 +29192,7 @@ I	input_1		1	Strand	strand
 S	I	input_1	0
 I	thickness	Thickness	2	Range	vector2	v 1 1	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	thickness_curved	Thickness curved	-1	CurveToggle	boolean	b 0	
 S	I	thickness_curved	?
@@ -28281,6 +29223,7 @@ I	seed	Seed	5	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -28288,6 +29231,7 @@ I	input_1		1	Strand	strand
 S	I	input_1	0
 I	thickness	Thickness	2	Range	vector2	v 8 8	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	texture	Texture	4	Surface	image		
 S	I	texture	0
@@ -28330,6 +29274,7 @@ I	direction	Direction	7	Rotation	scalar	d 0
 S	I	direction	0
 I	strength	Strength	8	Vec2	vector2	v 1 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -28551,6 +29496,7 @@ I	seed	Seed	19	Seed	scalar
 S	I	seed	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -28594,6 +29540,7 @@ I	angle_map	Angle Map	12	Surface	image
 S	I	angle_map	0
 I	position	Position	4	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -28685,6 +29632,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -28754,6 +29702,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -28814,6 +29763,7 @@ Q	I	except	1	0	s "Y"
 Q	I	except	2	0	s "Z"
 I	depth_range	Depth Range	14	Range	vector2	v 0 1	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -28831,6 +29781,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -28878,6 +29829,7 @@ Q	I	voxel_color	1	0	s "Face Average All"
 Q	I	voxel_color	2	0	s "Face Average Except"
 I	depth_range	Depth Range	14	Range	vector2	v 0 1	
 S	I	depth_range	1
+V	I	depth_range	1
 A	I	depth_range	1
 I	interpolate	Interpolate	-1	Attribute	enum	e 0	Inherited;Pixel;Bilinear;Bicubic;Lanczos3
 S	I	interpolate	?
@@ -28895,6 +29847,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -28934,6 +29887,7 @@ I	texture_side	Texture Side	14	Surface	image
 S	I	texture_side	0
 I	level	Level	13	Range	vector2	v 0 1	
 S	I	level	1
+V	I	level	1
 A	I	level	1
 I	color_threshold	Color Threshold	15	Slider	scalar	d 0.5	
 S	I	color_threshold	0
@@ -29007,11 +29961,13 @@ I	surface	Surface	0	Surface	image
 S	I	surface	0
 I	range_min	Range Min	1	Vec2	vector2	v 0 0	
 S	I	range_min	1
+V	I	range_min	1
 A	I	range_min	1
 I	range_min_unit	Range Min Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	range_min_unit	?
 I	range_max	Range Max	2	Vec2	vector2	v 1 1	
 S	I	range_max	1
+V	I	range_max	1
 A	I	range_max	1
 I	range_max_unit	Range Max Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	range_max_unit	?
@@ -29111,9 +30067,11 @@ Q	I	dimension	0	0	s "Fixed"
 Q	I	dimension	1	0	s "Dynamic"
 I	fixed_dimension	Fixed Dimension	6	Vec2	vector2	v 32 32	
 S	I	fixed_dimension	1
+V	I	fixed_dimension	0
 A	I	fixed_dimension	1
 I	offset	Offset	34	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	padding	Padding	10	IPadding	vector4	w 0 0 0 0	
 S	I	padding	1
@@ -29130,6 +30088,7 @@ I	fallback_font	Fallback Font	35	Font	text	s ""
 S	I	fallback_font	0
 I	character_range	Character Range	4	Vec2	vector2	v 32 128	
 S	I	character_range	1
+V	I	character_range	1
 A	I	character_range	1
 I	anti_aliasing	Anti-aliasing	3	Bool	boolean	b 0	
 S	I	anti_aliasing	0
@@ -29248,11 +30207,13 @@ I	blend	Blend	6	Slider	scalar	d 1
 S	I	blend	0
 I	offset	Offset	7	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	rotation	Rotation	8	Rotation	scalar	d 0	
 S	I	rotation	0
 I	scale	Scale	9	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	array_index	Array Index	4	Bool	boolean	b 0	
 S	I	array_index	0
@@ -29384,19 +30345,23 @@ Q	I	scaling_type	0	0	s "Fix Dimension"
 Q	I	scaling_type	1	0	s "Relative To Input"
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	amount	Amount	3	Vec2	vector2	v 2 2	
 S	I	amount	1
+V	I	amount	1
 A	I	amount	1
 I	spacing	Spacing	5	Vec2	vector2	v 0 0	
 S	I	spacing	1
+V	I	spacing	1
 A	I	spacing	1
 I	spacing_unit	Spacing Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	spacing_unit	?
 I	posiiton	Posiiton	4	Vec2	vector2	v 0 0	
 S	I	posiiton	1
+V	I	posiiton	1
 A	I	posiiton	1
 I	posiiton_unit	Posiiton Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	posiiton_unit	?
@@ -29404,6 +30369,7 @@ I	rotation	Rotation	8	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	12	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	shift_axis	Shift Axis	6	EButton	enum	e 0	X;Y
 S	I	shift_axis	0
@@ -29448,6 +30414,7 @@ I	seed	Seed	3	Seed	scalar
 S	I	seed	0
 I	map_size	Map size	1	IVec2	vector2	v 16 16	
 S	I	map_size	1
+V	I	map_size	1
 A	I	map_size	1
 I	input_0		0	Tileset	tileset		
 S	I	input_0	0
@@ -29468,6 +30435,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -29527,6 +30495,7 @@ I	texture	Texture	0	Surface	image
 S	I	texture	0
 I	tile_size	Tile Size	1	Vec2	vector2	v 16 16	
 S	I	tile_size	1
+V	I	tile_size	1
 A	I	tile_size	1
 O	tileset	Tileset	0	tileset		s "self"
 N	pc.time_remap	Node_Time_Remap	Time Remap	filter	scripts/node_time_remap/node_time_remap.gml
@@ -29586,6 +30555,7 @@ I	surface_in	Surface In	0	Surface	image
 S	I	surface_in	0
 I	origin	Origin	1	Vec2	vector2	v 0.5 0.5	
 S	I	origin	1
+V	I	origin	1
 A	I	origin	1
 I	origin_unit	Origin Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	origin_unit	?
@@ -29637,11 +30607,13 @@ B	I	output_dimension_type	0	general	1	default	4
 C	I	output_dimension_type	unknown
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	dimension_scale	Dimension Scale	15	Vec2	vector2	v 1 1	
 S	I	dimension_scale	1
+V	I	dimension_scale	1
 A	I	dimension_scale	1
 I	render_mode	Render Mode	7	EButton	enum	e 0	Normal;Tile;Wrap
 S	I	render_mode	0
@@ -29652,6 +30624,7 @@ Q	I	render_mode	1	0	s "Tile"
 Q	I	render_mode	2	0	s "Wrap"
 I	position	Position	2	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -29668,6 +30641,7 @@ I	rotate_by_velocity	Rotate by Velocity	8	Slider	scalar	d 0
 S	I	rotate_by_velocity	0
 I	scale	Scale	6	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	path	Path	21	Path	path2d	p 0 0 0	
 S	I	path	0
@@ -29722,11 +30696,13 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	postion	Postion	0	Vec2	vector2	v 0 0	
 S	I	postion	1
+V	I	postion	1
 A	I	postion	1
 I	rotation	Rotation	1	Rotation	scalar	d 0	
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -29802,6 +30778,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -29822,6 +30799,7 @@ I	rotation	Rotation	5	Rotation	scalar	d 0
 S	I	rotation	0
 I	tile_scale	Tile Scale	6	Vec2	vector2	v 1 1	
 S	I	tile_scale	1
+V	I	tile_scale	1
 A	I	tile_scale	1
 I	repeat	Repeat	7	EScroll	enum	e 1	Empty;Tile;Clamp;Ping Pong
 S	I	repeat	0
@@ -29867,6 +30845,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -29880,6 +30859,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	4	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -29890,6 +30870,7 @@ I	rotation	Rotation	5	Rotation	scalar	d 0
 S	I	rotation	0
 I	tile_scale	Tile Scale	6	Vec2	vector2	v 1 1	
 S	I	tile_scale	1
+V	I	tile_scale	1
 A	I	tile_scale	1
 I	repeat	Repeat	11	EScroll	enum	e 1	Empty;Tile;Clamp;Ping Pong
 S	I	repeat	0
@@ -29917,6 +30898,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -29932,6 +30914,7 @@ I	height_map	Height Map	4	Surface	image
 S	I	height_map	0
 I	position	Position	5	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -29949,6 +30932,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -29969,11 +30953,13 @@ Q	I	direction	1	0	s "Left"
 Q	I	direction	2	0	s "Right"
 I	position	Position	4	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	offset	Offset	13	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	offset_unit	?
@@ -29984,6 +30970,7 @@ I	rotation	Rotation	5	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	6	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	repeat	Repeat	11	EScroll	enum	e 1	Empty;Tile;Clamp;Ping Pong
 S	I	repeat	0
@@ -30013,6 +31000,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -30034,6 +31022,7 @@ Q	I	direction	2	0	s "Bottom"
 Q	I	direction	3	0	s "Right"
 I	perspective	Perspective	14	Vec2	vector2	v 1 1	
 S	I	perspective	1
+V	I	perspective	1
 A	I	perspective	1
 I	distance	Distance	15	Float	scalar	d 1	
 S	I	distance	0
@@ -30045,11 +31034,13 @@ I	distance_map	Distance Map	16	Surface	image
 S	I	distance_map	0
 I	position	Position	4	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	offset	Offset	13	Vec2	vector2	v 0 0	
 S	I	offset	1
+V	I	offset	1
 A	I	offset	1
 I	offset_unit	Offset Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	offset_unit	?
@@ -30060,6 +31051,7 @@ I	rotation	Rotation	5	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	6	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	repeat	Repeat	11	EScroll	enum	e 1	Empty;Tile;Clamp;Ping Pong
 S	I	repeat	0
@@ -30087,6 +31079,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -30100,6 +31093,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	4	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -30107,6 +31101,7 @@ I	rotation	Rotation	5	Rotation	scalar	d 0
 S	I	rotation	0
 I	tiling	Tiling	6	Vec2	vector2	v 1 1	
 S	I	tiling	1
+V	I	tiling	1
 A	I	tiling	1
 I	invert	Invert	10	Bool	boolean	b 0	
 S	I	invert	0
@@ -30148,6 +31143,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	effect_vector	Effect Vector	4	Vec2	vector2	v -1 0	
 S	I	effect_vector	1
+V	I	effect_vector	1
 A	I	effect_vector	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -30175,6 +31171,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	effect_vector	Effect Vector	4	Vec2	vector2	v -1 0	
 S	I	effect_vector	1
+V	I	effect_vector	1
 A	I	effect_vector	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -30214,6 +31211,7 @@ I	follow_point	Follow point	8	Bool	boolean	b 0
 S	I	follow_point	0
 I	point	Point	9	Vec2	vector2	v 0 0	
 S	I	point	1
+V	I	point	1
 A	I	point	1
 I	point_unit	Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_unit	?
@@ -30237,6 +31235,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	effect_vector	Effect Vector	4	Vec2	vector2	v -1 0	
 S	I	effect_vector	1
+V	I	effect_vector	1
 A	I	effect_vector	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -30255,6 +31254,7 @@ I	attribute_shape	attribute shape	-1	Float	scalar	d 0
 S	I	attribute_shape	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -30279,6 +31279,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	effect_vector	Effect Vector	4	Vec2	vector2	v -1 0	
 S	I	effect_vector	1
+V	I	effect_vector	1
 A	I	effect_vector	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -30308,6 +31309,7 @@ Q	I	mode	0	0	s "Absolute"
 Q	I	mode	1	0	s "Relative"
 I	positions	Positions	3	Vec2	vector2	v 0 0	
 S	I	positions	1
+V	I	positions	1
 A	I	positions	1
 I	set_rotations	Set Rotations	4	Bool	boolean	b 0	
 S	I	set_rotations	0
@@ -30330,6 +31332,7 @@ Q	I	mode_3	1	0	s "Relative Add"
 Q	I	mode_3	2	0	s "Relative Muliply"
 I	scales	Scales	9	Vec2	vector2	v 1 1	
 S	I	scales	1
+V	I	scales	1
 A	I	scales	1
 I	set_blend	Set Blend	10	Bool	boolean	b 0	
 S	I	set_blend	0
@@ -30353,6 +31356,7 @@ O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.vfx_renderer	Node_VFX_Renderer	Renderer	particle	scripts/node_VFX_renderer/node_VFX_renderer.gml
 I	output_dimension	Output dimension	0	Vec2	vector2	v 32 32	
 S	I	output_dimension	1
+V	I	output_dimension	0
 A	I	output_dimension	1
 I	round_position	Round position	1	Bool	boolean	b 1	
 S	I	round_position	0
@@ -30396,6 +31400,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	effect_vector	Effect Vector	4	Vec2	vector2	v -1 0	
 S	I	effect_vector	1
+V	I	effect_vector	1
 A	I	effect_vector	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -30421,6 +31426,7 @@ Q	I	surface_array	2	0	s "Animation"
 Q	I	surface_array	3	0	s "Scale"
 I	animation_speed	Animation Speed	23	Range	vector2	v 1 1	
 S	I	animation_speed	1
+V	I	animation_speed	1
 A	I	animation_speed	1
 I	stretch_animation	Stretch Animation	49	Bool	boolean	b 0	
 S	I	stretch_animation	0
@@ -30448,9 +31454,11 @@ I	burst_duration	Burst Duration	51	Int	integer	i 1
 S	I	burst_duration	0
 I	spawn_amount	Spawn Amount	2	Range	vector2	v 2 2	
 S	I	spawn_amount	1
+V	I	spawn_amount	1
 A	I	spawn_amount	1
 I	lifespan	Lifespan	5	Range	vector2	v 20 30	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	spawn_source	Spawn Source	4	EScroll	enum	e 0	
 S	I	spawn_source	0
@@ -30483,6 +31491,7 @@ I	uniform_period	Uniform Period	52	Float	scalar	d 4
 S	I	uniform_period	0
 I	speed	Speed	18	Range	vector2	v 1 2	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	speed_curved	Speed curved	-1	CurveToggle	boolean	b 0	
 S	I	speed_curved	?
@@ -30540,6 +31549,7 @@ S	I	scale	1
 A	I	scale	1
 I	size	Size	17	Range	vector2	v 1 1	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	size_curved	Size curved	-1	CurveToggle	boolean	b 0	
 S	I	size_curved	?
@@ -30555,6 +31565,7 @@ I	color_over_lifetime	Color over Lifetime	12	Gradient	gradient	g 0 1 0 255 255 2
 S	I	color_over_lifetime	0
 I	alpha	Alpha	13	Range	vector2	v 1 1	
 S	I	alpha	1
+V	I	alpha	1
 A	I	alpha	1
 I	alpha_curved	Alpha curved	-1	CurveToggle	boolean	b 0	
 S	I	alpha_curved	?
@@ -30577,17 +31588,21 @@ I	use_physics	Use Physics	57	Bool	boolean	b 0
 S	I	use_physics	0
 I	friction	Friction	54	Range	vector2	v 0 0	
 S	I	friction	1
+V	I	friction	1
 A	I	friction	1
 I	acceleration	Acceleration	7	Range	vector2	v 0 0	
 S	I	acceleration	1
+V	I	acceleration	1
 A	I	acceleration	1
 I	gravity	Gravity	19	Range	vector2	v 0 0	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 I	gravity_direction	Gravity Direction	33	Rotation	scalar	d -90	
 S	I	gravity_direction	0
 I	turning	Turning	34	Range	vector2	v 0 0	
 S	I	turning	1
+V	I	turning	1
 A	I	turning	1
 I	turn_both_directions	Turn Both Directions	35	Bool	boolean	b 0	
 S	I	turn_both_directions	0
@@ -30603,6 +31618,7 @@ Q	I	ground_offset_type	0	0	s "Relative"
 Q	I	ground_offset_type	1	0	s "Absolute"
 I	ground_offset	Ground Offset	38	Range	vector2	v 0 0	
 S	I	ground_offset	1
+V	I	ground_offset	1
 A	I	ground_offset	1
 I	bounce_amount	Bounce Amount	39	Slider	scalar	d 0.5	
 S	I	bounce_amount	0
@@ -30612,15 +31628,19 @@ I	use_wiggles	Use Wiggles	58	Bool	boolean	b 0
 S	I	use_wiggles	0
 I	direction	Direction	20	Vec2	vector2	v 0 0	
 S	I	direction	1
+V	I	direction	1
 A	I	direction	1
 I	position	Position	41	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	rotation	Rotation	42	Vec2	vector2	v 0 0	
 S	I	rotation	1
+V	I	rotation	1
 A	I	rotation	1
 I	scale_2	Scale	43	Vec2	vector2	v 0 0	
 S	I	scale_2	1
+V	I	scale_2	1
 A	I	scale_2	1
 I	loop	Loop	21	Bool	boolean	b 1	
 S	I	loop	0
@@ -30655,6 +31675,7 @@ O	path	Path	0	path2d		s "self"
 N	pc.vfx_triangulate	Node_VFX_Triangulate	VFX Triangulate	particle	scripts/node_VFX_triangulate/node_VFX_triangulate.gml
 I	output_dimension	Output dimension	0	Vec2	vector2	v 32 32	
 S	I	output_dimension	1
+V	I	output_dimension	0
 A	I	output_dimension	1
 I	input_1		1	Particle	particle		
 S	I	input_1	0
@@ -30691,6 +31712,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	effect_vector	Effect Vector	4	Vec2	vector2	v -1 0	
 S	I	effect_vector	1
+V	I	effect_vector	1
 A	I	effect_vector	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -30736,6 +31758,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	effect_vector	Effect Vector	4	Vec2	vector2	v -1 0	
 S	I	effect_vector	1
+V	I	effect_vector	1
 A	I	effect_vector	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -30769,6 +31792,7 @@ I	seed	Seed	8	Seed	scalar
 S	I	seed	0
 I	effect_vector	Effect Vector	4	Vec2	vector2	v -1 0	
 S	I	effect_vector	1
+V	I	effect_vector	1
 A	I	effect_vector	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -30798,6 +31822,7 @@ I	show_on_global	Show on global	4	Bool	boolean	b 0
 S	I	show_on_global	0
 I	gizmo_offset	Gizmo offset	5	Vec2	vector2	v 0 0	
 S	I	gizmo_offset	1
+V	I	gizmo_offset	1
 A	I	gizmo_offset	1
 I	gizmo_scale	Gizmo scale	6	Float	scalar	d 1	
 S	I	gizmo_scale	0
@@ -30818,6 +31843,7 @@ I	gizmo_sprite	Gizmo sprite	9	Surface	image
 S	I	gizmo_sprite	0
 I	gizmo_size	Gizmo size	10	Vec2	vector2	v 32 32	
 S	I	gizmo_size	1
+V	I	gizmo_size	1
 A	I	gizmo_size	1
 I	relative_unit	Relative Unit	11	Bool	boolean	b 0	
 S	I	relative_unit	0
@@ -30868,9 +31894,11 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	cartesian_coord	Cartesian Coord	0	Vec2	vector2	v 0 0	
 S	I	cartesian_coord	1
+V	I	cartesian_coord	1
 A	I	cartesian_coord	1
 I	cartesian_origin	Cartesian Origin	3	Vec2	vector2	v 0 0	
 S	I	cartesian_origin	1
+V	I	cartesian_origin	1
 A	I	cartesian_origin	1
 I	angle_unit	Angle Unit	1	EButton	enum	e 0	Degrees;Radians
 S	I	angle_unit	0
@@ -30888,9 +31916,11 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	point_1	Point 1	0	Vec2	vector2	v 0 0	
 S	I	point_1	1
+V	I	point_1	1
 A	I	point_1	1
 I	point_2	Point 2	1	Vec2	vector2	v 0 0	
 S	I	point_2	1
+V	I	point_2	1
 A	I	point_2	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -30912,6 +31942,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	vector	Vector	0	Vec2	vector2	v 0 0	
 S	I	vector	1
+V	I	vector	1
 A	I	vector	1
 I	unit	Unit	1	EButton	enum	e 0	Degree;Radians
 S	I	unit	0
@@ -30984,9 +32015,11 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	polar_coord	Polar Coord	0	Vec2	vector2	v 0 0	
 S	I	polar_coord	1
+V	I	polar_coord	1
 A	I	polar_coord	1
 I	cartesian_origin	Cartesian Origin	3	Vec2	vector2	v 0 0	
 S	I	cartesian_origin	1
+V	I	cartesian_origin	1
 A	I	cartesian_origin	1
 I	angle_unit	Angle Unit	1	EButton	enum	e 0	Degrees;Radians
 S	I	angle_unit	0
@@ -31067,9 +32100,11 @@ I	auto_anchor	Auto Anchor	3	Bool	boolean	b 1
 S	I	auto_anchor	0
 I	anchor	Anchor	4	Vec2	vector2	v 0 0	
 S	I	anchor	1
+V	I	anchor	1
 A	I	anchor	1
 I	drag	Drag	2	Vec2	vector2	v 0 0	
 S	I	drag	1
+V	I	drag	1
 A	I	drag	1
 I	drag_unit	Drag Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	drag_unit	?
@@ -31093,6 +32128,7 @@ S	I	falloff_curve	1
 A	I	falloff_curve	1
 I	push	Push	3	Vec2	vector2	v 0 0	
 S	I	push	1
+V	I	push	1
 A	I	push	1
 I	strength	Strength	5	Float	scalar	d 1	
 S	I	strength	0
@@ -31105,6 +32141,7 @@ I	attribute_shape	attribute shape	-1	Float	scalar	d 0
 S	I	attribute_shape	0
 I	dimension	Dimension	2	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -31114,6 +32151,7 @@ I	substep	Substep	0	Int	integer	i 8
 S	I	substep	0
 I	gravity	Gravity	1	Vec2	vector2	v 0 0.5	
 S	I	gravity	1
+V	I	gravity	1
 A	I	gravity	1
 O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh	Node_VerletSim_Mesh	Verlet Mesh	simulation	scripts/node_verletSim_mesh/node_verletSim_mesh.gml
@@ -31136,6 +32174,7 @@ O	mesh	Mesh	0	mesh2d	i -4	s "noone"
 N	pc.verlet_sim_mesh_bridge	Node_VerletSim_Mesh_Bridge	Bridge Mesh	simulation	scripts/node_verletSim_mesh_bridge/node_verletSim_mesh_bridge.gml
 I	subdivision	Subdivision	0	IVec2	vector2	v 4 4	
 S	I	subdivision	1
+V	I	subdivision	1
 A	I	subdivision	1
 I	quad	Quad	1	Bool	boolean	b 0	
 S	I	quad	0
@@ -31179,6 +32218,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	subdivision	Subdivision	1	IVec2	vector2	v 12 4	
 S	I	subdivision	1
+V	I	subdivision	1
 A	I	subdivision	1
 I	quad	Quad	4	Bool	boolean	b 0	
 S	I	quad	0
@@ -31199,6 +32239,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	subdivision	Subdivision	1	IVec2	vector2	v 4 4	
 S	I	subdivision	1
+V	I	subdivision	1
 A	I	subdivision	1
 I	quad	Quad	4	Bool	boolean	b 0	
 S	I	quad	0
@@ -31312,6 +32353,7 @@ I	mesh	Mesh	0	Mesh	mesh2d
 S	I	mesh	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -31351,6 +32393,7 @@ I	mesh	Mesh	0	Mesh	mesh2d
 S	I	mesh	0
 I	center	Center	1	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -31389,6 +32432,7 @@ I	mask_feather	Mask feather	14	Slider	scalar	d 0
 S	I	mask_feather	0
 I	center	Center	15	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -31437,6 +32481,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -31462,6 +32507,7 @@ I	parameter_a	Parameter A	6	Slider	scalar	d 0
 S	I	parameter_a	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -31469,6 +32515,7 @@ I	rotation	Rotation	7	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 4 4	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	level_in	Level In	11	SliRange	vector2	v 0 1	
 S	I	level_in	1
@@ -31519,6 +32566,7 @@ I	remap_data	Remap Data	4	Bool	boolean	b 0
 S	I	remap_data	0
 I	data_range	Data Range	5	Vec2	vector2	v 0 1	
 S	I	data_range	1
+V	I	data_range	1
 A	I	data_range	1
 N	pc.warp	Node_Warp	Warp	transform	scripts/node_warp/node_warp.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
@@ -31538,11 +32586,13 @@ Q	I	dimension_type	1	0	s "Absolute"
 Q	I	dimension_type	2	0	s "Relative"
 I	dimension	Dimension	7	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	relative_dimension	Relative Dimension	9	Vec2	vector2	v 1 1	
 S	I	relative_dimension	1
+V	I	relative_dimension	1
 A	I	relative_dimension	1
 I	area	Area	13	Area	area	r 0.5 0.5 0.5 0.5 0 0	
 S	I	area	1
@@ -31551,29 +32601,35 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	top_left	Top Left	1	Vec2	vector2	v 0 0	
 S	I	top_left	1
+V	I	top_left	1
 A	I	top_left	1
 I	top_left_unit	Top Left Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	top_left_unit	?
 I	top_right	Top Right	2	Vec2	vector2	v 1 0	
 S	I	top_right	1
+V	I	top_right	1
 A	I	top_right	1
 I	top_right_unit	Top Right Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	top_right_unit	?
 I	bottom_left	Bottom Left	3	Vec2	vector2	v 0 1	
 S	I	bottom_left	1
+V	I	bottom_left	1
 A	I	bottom_left	1
 I	bottom_left_unit	Bottom Left Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	bottom_left_unit	?
 I	bottom_right	Bottom Right	4	Vec2	vector2	v 1 1	
 S	I	bottom_right	1
+V	I	bottom_right	1
 A	I	bottom_right	1
 I	bottom_right_unit	Bottom Right Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	bottom_right_unit	?
 I	uv_position	UV Position	12	Vec2	vector2	v 0 0	
 S	I	uv_position	1
+V	I	uv_position	1
 A	I	uv_position	1
 I	uv_scale	UV Scale	11	Vec2	vector2	v 1 1	
 S	I	uv_scale	1
+V	I	uv_scale	1
 A	I	uv_scale	1
 I	tile	Tile	8	Toggle	integer	i 0	
 S	I	tile	0
@@ -31593,6 +32649,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -31612,16 +32669,19 @@ Q	I	pattern	0	0	s "Axis"
 Q	I	pattern	1	0	s "Polar"
 I	polar_center_1	Polar Center 1	12	Vec2	vector2	v 0 0.5	
 S	I	polar_center_1	1
+V	I	polar_center_1	1
 A	I	polar_center_1	1
 I	polar_center_1_unit	Polar Center 1 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	polar_center_1_unit	?
 I	polar_center_2	Polar Center 2	13	Vec2	vector2	v 1 0.5	
 S	I	polar_center_2	1
+V	I	polar_center_2	1
 A	I	polar_center_2	1
 I	polar_center_2_unit	Polar Center 2 Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	polar_center_2_unit	?
 I	phases	Phases	14	Vec2	vector2	v 0 0	
 S	I	phases	1
+V	I	phases	1
 A	I	phases	1
 I	wave	Wave	8	EScroll	enum	e 0	Sine;Zigzag;Square;Curve
 S	I	wave	0
@@ -31652,6 +32712,7 @@ Q	I	blend_mode	1	0	s "Multiply"
 Q	I	blend_mode	2	0	s "Max"
 I	position	Position	5	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -31659,6 +32720,7 @@ I	rotation	Rotation	6	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	4	Vec2	vector2	v 4 4	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	color	Color	16	Gradient	gradient	g 0 2 0 0 0 0 255 1 255 255 255 255	
 S	I	color	0
@@ -31674,6 +32736,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -31705,6 +32768,7 @@ I	detail_map	Detail Map	8	Surface	image
 S	I	detail_map	0
 I	position	Position	1	Vec2	vector2	v 0 0	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -31712,6 +32776,7 @@ I	rotation	Rotation	9	Rotation	scalar	d 0
 S	I	rotation	0
 I	scale	Scale	2	Vec2	vector2	v 4 4	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
@@ -31735,6 +32800,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -31750,6 +32816,7 @@ I	mask_alpha_only	Mask Alpha Only	-1	MaskAlphaOnly	boolean	b 0
 S	I	mask_alpha_only	?
 I	position	Position	4	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -31757,6 +32824,7 @@ I	angle	Angle	6	Rotation	scalar	d 0
 S	I	angle	0
 I	scale	Scale	5	Vec2	vector2	v 0.25 0.25	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
@@ -31771,6 +32839,7 @@ I	weave_map	Weave Map	19	Surface	image
 S	I	weave_map	0
 I	width	Width	10	Vec2	vector2	v 0.5 0.5	
 S	I	width	1
+V	I	width	1
 A	I	width	1
 I	bg_color	BG Color	7	Color	colour	c 0 0 0 255	
 S	I	bg_color	0
@@ -31905,9 +32974,11 @@ I	float_box	floatBox	0	Float	scalar	d 0
 S	I	float_box	0
 I	range_box	rangeBox	1	Range	vector2	v 0 0	
 S	I	range_box	1
+V	I	range_box	1
 A	I	range_box	1
 I	vector_box	vectorBox	2	Vec2	vector2	v 0 0	
 S	I	vector_box	1
+V	I	vector_box	1
 A	I	vector_box	1
 I	vector_range_box	vectorRangeBox	3	Vec2_Range	vector4	w 0 0 0 0	
 S	I	vector_range_box	1
@@ -32000,6 +33071,7 @@ I	seed	Seed	3	Seed	scalar
 S	I	seed	0
 I	range	Range	1	Vec2	vector2	v 0 1	
 S	I	range	1
+V	I	range	1
 A	I	range	1
 I	frequency	Frequency	2	Slider	scalar	d 4	
 S	I	frequency	0
@@ -32105,6 +33177,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	dimension	Dimension	0	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -32128,6 +33201,7 @@ I	size_map	Size Map	6	Surface	image
 S	I	size_map	0
 I	position	Position	2	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
@@ -32141,6 +33215,7 @@ I	angle_map	Angle Map	7	Surface	image
 S	I	angle_map	0
 I	scale	Scale	13	Vec2	vector2	v 1 1	
 S	I	scale	1
+V	I	scale	1
 A	I	scale	1
 I	offset	Offset	14	Slider	scalar	d 0	
 S	I	offset	0
@@ -32174,6 +33249,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	acceleration	Acceleration	3	Range	vector2	v 0 0	
 S	I	acceleration	1
+V	I	acceleration	1
 A	I	acceleration	1
 I	acceleration_curved	Acceleration curved	-1	CurveToggle	boolean	b 0	
 S	I	acceleration_curved	?
@@ -32213,6 +33289,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	strength	Strength	3	Range	vector2	v 1 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	strength_curved	Strength curved	-1	CurveToggle	boolean	b 0	
 S	I	strength_curved	?
@@ -32224,6 +33301,7 @@ S	I	target	1
 A	I	target	1
 I	vortex	Vortex	6	Range	vector2	v 0 0	
 S	I	vortex	1
+V	I	vortex	1
 A	I	vortex	1
 I	vortex_curved	Vortex curved	-1	CurveToggle	boolean	b 0	
 S	I	vortex_curved	?
@@ -32232,6 +33310,7 @@ S	I	vortex_over_lifespan	1
 A	I	vortex_over_lifespan	1
 I	vortex_angle	Vortex Angle	8	Range	vector2	v 90 90	
 S	I	vortex_angle	1
+V	I	vortex_angle	1
 A	I	vortex_angle	1
 I	vortex_angle_curved	Vortex Angle curved	-1	CurveToggle	boolean	b 0	
 S	I	vortex_angle_curved	?
@@ -32401,6 +33480,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	chance	Chance	3	Range	vector2	v 1 1	
 S	I	chance	1
+V	I	chance	1
 A	I	chance	1
 I	chance_curved	Chance curved	-1	CurveToggle	boolean	b 0	
 S	I	chance_curved	?
@@ -32432,6 +33512,7 @@ I	use_start_position	Use Start Position	6	Bool	boolean	b 1
 S	I	use_start_position	0
 I	stride	Stride	7	Range	vector2	v 0.1 0.1	
 S	I	stride	1
+V	I	stride	1
 A	I	stride	1
 I	stride_curved	Stride curved	-1	CurveToggle	boolean	b 0	
 S	I	stride_curved	?
@@ -32440,6 +33521,7 @@ S	I	stride_over_lifespan	1
 A	I	stride_over_lifespan	1
 I	spiral	Spiral	9	Range	vector2	v 0 0	
 S	I	spiral	1
+V	I	spiral	1
 A	I	spiral	1
 I	spiral_curved	Spiral curved	-1	CurveToggle	boolean	b 0	
 S	I	spiral_curved	?
@@ -32460,6 +33542,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	strength	Strength	3	Range	vector2	v 1 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	strength_curved	Strength curved	-1	CurveToggle	boolean	b 0	
 S	I	strength_curved	?
@@ -32566,14 +33649,17 @@ Q	I	data	23	1	s ""
 Q	I	data	24	0	s "Spawn Index"
 I	remap_from	Remap From	4	Range	vector2	v 0 1	
 S	I	remap_from	1
+V	I	remap_from	1
 A	I	remap_from	1
 I	remap_to	Remap To	5	Range	vector2	v 0 1	
 S	I	remap_to	1
+V	I	remap_to	1
 A	I	remap_to	1
 I	use_clamp	Use Clamp	9	Bool	boolean	b 0	
 S	I	use_clamp	0
 I	clamp	Clamp	10	Range	vector2	v 0 1	
 S	I	clamp	1
+V	I	clamp	1
 A	I	clamp	1
 I	use_curve	Use Curve	8	Bool	boolean	b 0	
 S	I	use_curve	0
@@ -32582,6 +33668,7 @@ S	I	modifier_curve	1
 A	I	modifier_curve	1
 I	curve_x_range	Curve X Range	7	Range	vector2	v 0 1	
 S	I	curve_x_range	1
+V	I	curve_x_range	1
 A	I	curve_x_range	1
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
@@ -32693,9 +33780,11 @@ I	burst_duration	Burst Duration	3	Int	integer	i 1
 S	I	burst_duration	0
 I	spawn_amount	Spawn Amount	4	Range	vector2	v 2 2	
 S	I	spawn_amount	1
+V	I	spawn_amount	1
 A	I	spawn_amount	1
 I	lifespan	Lifespan	5	Range	vector2	v 20 30	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	type	Type	7	EScroll	enum	e 0	
 S	I	type	0
@@ -32730,12 +33819,14 @@ S	I	data	0
 A	I	data	2
 I	inherit_velocity	Inherit Velocity	15	Range	vector2	v 0 0	
 S	I	inherit_velocity	1
+V	I	inherit_velocity	1
 A	I	inherit_velocity	1
 I	velocity	Velocity	16	Vec3_Range	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	velocity	1
 A	I	velocity	1
 I	follow_spawn_shape	Follow Spawn Shape	24	Range	vector2	v 0 0	
 S	I	follow_spawn_shape	1
+V	I	follow_spawn_shape	1
 A	I	follow_spawn_shape	1
 I	rotation_2	Rotation	17	Vec3_Range	array	a scalar 6 d 0 d 0 d 0 d 0 d 0 d 0	
 S	I	rotation_2	1
@@ -32745,6 +33836,7 @@ S	I	scale	1
 A	I	scale	1
 I	size	Size	25	Range	vector2	v 1 1	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	base_color	Base Color	19	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	base_color	0
@@ -32753,9 +33845,11 @@ S	I	color_by_index	1
 A	I	color_by_index	1
 I	alpha	Alpha	21	Range	vector2	v 1 1	
 S	I	alpha	1
+V	I	alpha	1
 A	I	alpha	1
 I	step_period	Step Period	22	Range	vector2	v 1 1	
 S	I	step_period	1
+V	I	step_period	1
 A	I	step_period	1
 I	step_period_curved	Step Period curved	-1	CurveToggle	boolean	b 0	
 S	I	step_period_curved	?
@@ -32777,6 +33871,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	frames	Frames	3	Range	vector2	v 4 4	
 S	I	frames	1
+V	I	frames	1
 A	I	frames	1
 I	frames_curved	Frames curved	-1	CurveToggle	boolean	b 0	
 S	I	frames_curved	?
@@ -32807,6 +33902,7 @@ I	do_vector_move	Do Vector Move	15	Bool	boolean	b 0
 S	I	do_vector_move	0
 I	speed	Speed	9	Range	vector2	v 0 0	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	speed_curved	Speed curved	-1	CurveToggle	boolean	b 0	
 S	I	speed_curved	?
@@ -32866,6 +33962,7 @@ I	use_wiggle	Use Wiggle	3	Bool	boolean	b 0
 S	I	use_wiggle	0
 I	amplitude	Amplitude	4	Range	vector2	v 0 0	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -32880,6 +33977,7 @@ I	use_wiggle_2	Use Wiggle	7	Bool	boolean	b 0
 S	I	use_wiggle_2	0
 I	amplitude_2	Amplitude	8	Range	vector2	v 0 0	
 S	I	amplitude_2	1
+V	I	amplitude_2	1
 A	I	amplitude_2	1
 I	amplitude_2_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_2_curved	?
@@ -32894,6 +33992,7 @@ I	use_wiggle_3	Use Wiggle	11	Bool	boolean	b 0
 S	I	use_wiggle_3	0
 I	amplitude_3	Amplitude	12	Range	vector2	v 0 0	
 S	I	amplitude_3	1
+V	I	amplitude_3	1
 A	I	amplitude_3	1
 I	amplitude_3_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_3_curved	?
@@ -32908,6 +34007,7 @@ I	use_wiggle_4	Use Wiggle	15	Bool	boolean	b 0
 S	I	use_wiggle_4	0
 I	amplitude_4	Amplitude	16	Range	vector2	v 0 0	
 S	I	amplitude_4	1
+V	I	amplitude_4	1
 A	I	amplitude_4	1
 I	amplitude_4_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_4_curved	?
@@ -32939,6 +34039,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	acceleration	Acceleration	3	Range	vector2	v 0 0	
 S	I	acceleration	1
+V	I	acceleration	1
 A	I	acceleration	1
 I	acceleration_curved	Acceleration curved	-1	CurveToggle	boolean	b 0	
 S	I	acceleration_curved	?
@@ -32955,6 +34056,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	offset_rotation	Offset Rotation	3	Range	vector2	v 0 0	
 S	I	offset_rotation	1
+V	I	offset_rotation	1
 A	I	offset_rotation	1
 O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_attract	Node_pSystem_Attract	Attract	particle	scripts/node_psystem_attract/node_psystem_attract.gml
@@ -32966,6 +34068,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	strength	Strength	3	Range	vector2	v 1 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	strength_curved	Strength curved	-1	CurveToggle	boolean	b 0	
 S	I	strength_curved	?
@@ -32974,11 +34077,13 @@ S	I	strength_over_lifespan	1
 A	I	strength_over_lifespan	1
 I	target	Target	5	Vec2	vector2	v 0.5 0.5	
 S	I	target	1
+V	I	target	1
 A	I	target	1
 I	target_unit	Target Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	target_unit	?
 I	vortex	Vortex	6	Range	vector2	v 0 0	
 S	I	vortex	1
+V	I	vortex	1
 A	I	vortex	1
 I	vortex_curved	Vortex curved	-1	CurveToggle	boolean	b 0	
 S	I	vortex_curved	?
@@ -32987,6 +34092,7 @@ S	I	vortex_over_lifespan	1
 A	I	vortex_over_lifespan	1
 I	vortex_angle	Vortex Angle	8	Range	vector2	v 90 90	
 S	I	vortex_angle	1
+V	I	vortex_angle	1
 A	I	vortex_angle	1
 I	vortex_angle_curved	Vortex Angle curved	-1	CurveToggle	boolean	b 0	
 S	I	vortex_angle_curved	?
@@ -33078,6 +34184,7 @@ I	follow	Follow	12	Bool	boolean	b 0
 S	I	follow	0
 I	point	Point	13	Vec2	vector2	v 0 0	
 S	I	point	1
+V	I	point	1
 A	I	point	1
 I	point_unit	Point Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	point_unit	?
@@ -33109,11 +34216,13 @@ Q	I	shape	1	0	s "Rectangle"
 Q	I	shape	2	0	s "Ellipse"
 I	position	Position	4	Vec2	vector2	v 0.5 0.5	
 S	I	position	1
+V	I	position	1
 A	I	position	1
 I	position_unit	Position Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	position_unit	?
 I	size	Size	5	Vec2	vector2	v 0.5 0.5	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	size_unit	Size Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	size_unit	?
@@ -33141,6 +34250,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	chance	Chance	3	Range	vector2	v 1 1	
 S	I	chance	1
+V	I	chance	1
 A	I	chance	1
 I	chance_curved	Chance curved	-1	CurveToggle	boolean	b 0	
 S	I	chance_curved	?
@@ -33168,6 +34278,7 @@ I	use_start_position	Use Start Position	6	Bool	boolean	b 1
 S	I	use_start_position	0
 I	stride	Stride	7	Range	vector2	v 0.1 0.1	
 S	I	stride	1
+V	I	stride	1
 A	I	stride	1
 I	stride_curved	Stride curved	-1	CurveToggle	boolean	b 0	
 S	I	stride_curved	?
@@ -33176,6 +34287,7 @@ S	I	stride_over_lifespan	1
 A	I	stride_over_lifespan	1
 I	spiral	Spiral	9	Range	vector2	v 0 0	
 S	I	spiral	1
+V	I	spiral	1
 A	I	spiral	1
 I	spiral_curved	Spiral curved	-1	CurveToggle	boolean	b 0	
 S	I	spiral_curved	?
@@ -33192,6 +34304,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	strength	Strength	3	Range	vector2	v 1 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	strength_curved	Strength curved	-1	CurveToggle	boolean	b 0	
 S	I	strength_curved	?
@@ -33211,6 +34324,7 @@ I	attribute_shape	attribute shape	-1	Float	scalar	d 0
 S	I	attribute_shape	0
 I	dimension	Dimension	1	Dimension	vector2	v 1 1	
 S	I	dimension	1
+V	I	dimension	1
 A	I	dimension	1
 I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
@@ -33239,6 +34353,7 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	center	Center	7	Vec2	vector2	v 0.5 0.5	
 S	I	center	1
+V	I	center	1
 A	I	center	1
 I	center_unit	Center Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	center_unit	?
@@ -33289,14 +34404,17 @@ Q	I	data	19	1	s ""
 Q	I	data	20	0	s "Spawn Index"
 I	remap_from	Remap From	4	Range	vector2	v 0 1	
 S	I	remap_from	1
+V	I	remap_from	1
 A	I	remap_from	1
 I	remap_to	Remap To	5	Range	vector2	v 0 1	
 S	I	remap_to	1
+V	I	remap_to	1
 A	I	remap_to	1
 I	use_clamp	Use Clamp	9	Bool	boolean	b 0	
 S	I	use_clamp	0
 I	clamp	Clamp	10	Range	vector2	v 0 1	
 S	I	clamp	1
+V	I	clamp	1
 A	I	clamp	1
 I	use_curve	Use Curve	8	Bool	boolean	b 0	
 S	I	use_curve	0
@@ -33305,6 +34423,7 @@ S	I	modifier_curve	1
 A	I	modifier_curve	1
 I	curve_x_range	Curve X Range	7	Range	vector2	v 0 1	
 S	I	curve_x_range	1
+V	I	curve_x_range	1
 A	I	curve_x_range	1
 O	particles	Particles	0	particle	i -4	s "noone"
 O	mask	Mask	1	buffer	i -4	s "noone"
@@ -33315,11 +34434,13 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	target	Target	2	Vec2	vector2	v 0 0	
 S	I	target	1
+V	I	target	1
 A	I	target	1
 I	target_unit	Target Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	target_unit	?
 I	distance_range	Distance Range	3	Range	vector2	v 0 1	
 S	I	distance_range	1
+V	I	distance_range	1
 A	I	distance_range	1
 I	distance_range_unit	Distance Range Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	distance_range_unit	?
@@ -33337,6 +34458,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	strength	Strength	3	Range	vector2	v 1 1	
 S	I	strength	1
+V	I	strength	1
 A	I	strength	1
 I	strength_curved	Strength curved	-1	CurveToggle	boolean	b 0	
 S	I	strength_curved	?
@@ -33345,6 +34467,7 @@ S	I	strength_over_lifespan	1
 A	I	strength_over_lifespan	1
 I	amplitude	Amplitude	5	Range	vector2	v 4 4	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -33353,6 +34476,7 @@ S	I	amplitude_over_lifespan	1
 A	I	amplitude_over_lifespan	1
 I	frequency	Frequency	7	Range	vector2	v 4 4	
 S	I	frequency	1
+V	I	frequency	1
 A	I	frequency	1
 I	frequency_curved	Frequency curved	-1	CurveToggle	boolean	b 0	
 S	I	frequency_curved	?
@@ -33361,6 +34485,7 @@ S	I	frequency_over_lifespan	1
 A	I	frequency_over_lifespan	1
 I	phase	Phase	9	Range	vector2	v 0 0	
 S	I	phase	1
+V	I	phase	1
 A	I	phase	1
 O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_render	Node_pSystem_Render	Render	particle	scripts/node_psystem_render/node_psystem_render.gml
@@ -33382,6 +34507,7 @@ Q	I	surface_array	2	0	s "Animation"
 Q	I	surface_array	3	0	s "Scale"
 I	animation_speed	Animation Speed	5	Range	vector2	v 1 1	
 S	I	animation_speed	1
+V	I	animation_speed	1
 A	I	animation_speed	1
 I	stretch_animation	Stretch Animation	6	Bool	boolean	b 0	
 S	I	stretch_animation	0
@@ -33410,14 +34536,17 @@ Q	I	type	2	0	s "Closest"
 Q	I	type	3	0	s "To Point"
 I	length	Length	3	Range	vector2	v 4 4	
 S	I	length	1
+V	I	length	1
 A	I	length	1
 I	target	Target	6	Vec2	vector2	v 0.5 0.5	
 S	I	target	1
+V	I	target	1
 A	I	target	1
 I	target_unit	Target Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	target_unit	?
 I	thickness	Thickness	4	Range	vector2	v 1 1	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	color_type	Color Type	7	EScroll	enum	e 0	Solid;Fixed
 S	I	color_type	0
@@ -33435,6 +34564,7 @@ Q	I	thickness_type	0	0	s "Uniform"
 Q	I	thickness_type	1	0	s "Fixed"
 I	target_thickness	Target Thickness	10	Range	vector2	v 1 1	
 S	I	target_thickness	1
+V	I	target_thickness	1
 A	I	target_thickness	1
 O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_render_path	Node_pSystem_Render_Path	Render Path	particle	scripts/node_psystem_render_path/node_psystem_render_path.gml
@@ -33446,6 +34576,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	frames	Frames	3	Range	vector2	v 4 4	
 S	I	frames	1
+V	I	frames	1
 A	I	frames	1
 I	frames_curved	Frames curved	-1	CurveToggle	boolean	b 0	
 S	I	frames_curved	?
@@ -33470,6 +34601,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	length	Length	3	Range	vector2	v 4 4	
 S	I	length	1
+V	I	length	1
 A	I	length	1
 I	length_curved	Length curved	-1	CurveToggle	boolean	b 0	
 S	I	length_curved	?
@@ -33482,6 +34614,7 @@ I	1px_mode	1px Mode	7	Bool	boolean	b 0
 S	I	1px_mode	0
 I	thickness	Thickness	6	Range	vector2	v 1 1	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_render_triangle	Node_pSystem_Render_Triangle	Render Triangle	particle	scripts/node_psystem_render_triangle/node_psystem_render_triangle.gml
@@ -33500,14 +34633,17 @@ Q	I	type	1	0	s "Index Fixed"
 Q	I	type	2	0	s "Closest"
 I	length	Length	3	Range	vector2	v 3 3	
 S	I	length	1
+V	I	length	1
 A	I	length	1
 I	target	Target	6	Vec2	vector2	v 0.5 0.5	
 S	I	target	1
+V	I	target	1
 A	I	target	1
 I	target_unit	Target Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	target_unit	?
 I	thickness	Thickness	4	Range	vector2	v 1 1	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 I	color_type	Color Type	7	EScroll	enum	e 0	Solid;Fixed
 S	I	color_type	0
@@ -33525,6 +34661,7 @@ Q	I	thickness_type	0	0	s "Uniform"
 Q	I	thickness_type	1	0	s "Fixed"
 I	target_thickness	Target Thickness	10	Range	vector2	v 1 1	
 S	I	target_thickness	1
+V	I	target_thickness	1
 A	I	target_thickness	1
 O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_sample_color	Node_pSystem_Sample_Color	Sample Color	particle	scripts/node_psystem_sample_color/node_psystem_sample_color.gml
@@ -33538,6 +34675,7 @@ I	sample_surface	Sample Surface	3	Surface	image
 S	I	sample_surface	0
 I	target_dimension	Target Dimension	4	Dimension	vector2	v 1 1	
 S	I	target_dimension	1
+V	I	target_dimension	1
 A	I	target_dimension	1
 I	target_dimension_unit	Target Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	target_dimension_unit	?
@@ -33572,6 +34710,7 @@ I	snap_angle	Snap Angle	17	Bool	boolean	b 0
 S	I	snap_angle	0
 I	angle_snap	Angle Snap	3	Range	vector2	v 1 1	
 S	I	angle_snap	1
+V	I	angle_snap	1
 A	I	angle_snap	1
 I	angle_snap_curved	Angle Snap curved	-1	CurveToggle	boolean	b 0	
 S	I	angle_snap_curved	?
@@ -33580,6 +34719,7 @@ S	I	angle_snap_over_lifespan	1
 A	I	angle_snap_over_lifespan	1
 I	angle_shift	Angle Shift	5	Range	vector2	v 0 0	
 S	I	angle_shift	1
+V	I	angle_shift	1
 A	I	angle_shift	1
 I	angle_shift_curved	Angle Shift curved	-1	CurveToggle	boolean	b 0	
 S	I	angle_shift_curved	?
@@ -33626,9 +34766,11 @@ I	burst_duration	Burst Duration	3	Int	integer	i 1
 S	I	burst_duration	0
 I	spawn_amount	Spawn Amount	4	Range	vector2	v 2 2	
 S	I	spawn_amount	1
+V	I	spawn_amount	1
 A	I	spawn_amount	1
 I	lifespan	Lifespan	5	Range	vector2	v 20 30	
 S	I	lifespan	1
+V	I	lifespan	1
 A	I	lifespan	1
 I	type	Type	6	EScroll	enum	e 0	Area;Border;Path;Mesh;Map;Data
 S	I	type	0
@@ -33671,11 +34813,13 @@ I	area_unit	Area Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	area_unit	?
 I	line_start	Line Start	26	Vec2	vector2	v 0 0	
 S	I	line_start	1
+V	I	line_start	1
 A	I	line_start	1
 I	line_start_unit	Line Start Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	line_start_unit	?
 I	line_end	Line End	27	Vec2	vector2	v 1 1	
 S	I	line_end	1
+V	I	line_end	1
 A	I	line_end	1
 I	line_end_unit	Line End Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	line_end_unit	?
@@ -33692,12 +34836,14 @@ I	attempt	Attempt	31	Int	integer	i 8
 S	I	attempt	0
 I	inherit_velocity	Inherit Velocity	24	Range	vector2	v 0 0	
 S	I	inherit_velocity	1
+V	I	inherit_velocity	1
 A	I	inherit_velocity	1
 I	direction	Direction	19	RotRand	array	a scalar 5 d 0 d 45 d 135 d 0 d 0	
 S	I	direction	1
 A	I	direction	1
 I	velocity	Velocity	20	Range	vector2	v 0 0	
 S	I	velocity	1
+V	I	velocity	1
 A	I	velocity	1
 I	rotation	Rotation	14	RotRand	array	a scalar 6 d 0 d 0 d 360 d 0 d 0 d 0	
 S	I	rotation	1
@@ -33707,6 +34853,7 @@ S	I	scale	1
 A	I	scale	1
 I	size	Size	30	Range	vector2	v 1 1	
 S	I	size	1
+V	I	size	1
 A	I	size	1
 I	base_color	Base Color	16	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	base_color	0
@@ -33715,9 +34862,11 @@ S	I	color_by_index	1
 A	I	color_by_index	1
 I	alpha	Alpha	18	Range	vector2	v 1 1	
 S	I	alpha	1
+V	I	alpha	1
 A	I	alpha	1
 I	step_period	Step Period	21	Range	vector2	v 1 1	
 S	I	step_period	1
+V	I	step_period	1
 A	I	step_period	1
 I	step_period_curved	Step Period curved	-1	CurveToggle	boolean	b 0	
 S	I	step_period_curved	?
@@ -33751,6 +34900,7 @@ I	vector_impulse	Vector Impulse	19	Bool	boolean	b 0
 S	I	vector_impulse	0
 I	speed	Speed	9	Range	vector2	v 0 0	
 S	I	speed	1
+V	I	speed	1
 A	I	speed	1
 I	speed_curved	Speed curved	-1	CurveToggle	boolean	b 0	
 S	I	speed_curved	?
@@ -33771,6 +34921,7 @@ Q	I	mode	1	0	s "Multiply"
 Q	I	mode	2	0	s "Override"
 I	rotate	Rotate	5	Range	vector2	v 0 0	
 S	I	rotate	1
+V	I	rotate	1
 A	I	rotate	1
 I	rotate_curved	Rotate curved	-1	CurveToggle	boolean	b 0	
 S	I	rotate_curved	?
@@ -33806,6 +34957,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	thickness	Thickness	3	Range	vector2	v 1 1	
 S	I	thickness	1
+V	I	thickness	1
 A	I	thickness	1
 O	rendered	Rendered	0	image	i -4	s "noone"
 N	pc.p_system_trigger_event	Node_pSystem_Trigger_Event	Trigger	particle	scripts/node_psystem_trigger_event/node_psystem_trigger_event.gml
@@ -33817,6 +34969,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	step_period	Step Period	3	Range	vector2	v 1 1	
 S	I	step_period	1
+V	I	step_period	1
 A	I	step_period	1
 I	step_period_curved	Step Period curved	-1	CurveToggle	boolean	b 0	
 S	I	step_period_curved	?
@@ -33825,6 +34978,7 @@ S	I	step_period_over_lifespan	1
 A	I	step_period_over_lifespan	1
 I	chance	Chance	5	Range	vector2	v 1 1	
 S	I	chance	1
+V	I	chance	1
 A	I	chance	1
 I	chance_curved	Chance curved	-1	CurveToggle	boolean	b 0	
 S	I	chance_curved	?
@@ -33843,6 +34997,7 @@ I	vector_field	Vector Field	3	Surface	image
 S	I	vector_field	0
 I	intensity	Intensity	4	Range	vector2	v 4 4	
 S	I	intensity	1
+V	I	intensity	1
 A	I	intensity	1
 I	intensity_curved	Intensity curved	-1	CurveToggle	boolean	b 0	
 S	I	intensity_curved	?
@@ -33869,6 +35024,7 @@ I	vector_field	Vector Field	3	Surface	image
 S	I	vector_field	0
 I	intensity	Intensity	4	Range	vector2	v 4 4	
 S	I	intensity	1
+V	I	intensity	1
 A	I	intensity	1
 I	intensity_curved	Intensity curved	-1	CurveToggle	boolean	b 0	
 S	I	intensity_curved	?
@@ -33897,6 +35053,7 @@ I	position	Position	3	Bool	boolean	b 0
 S	I	position	0
 I	amplitude	Amplitude	4	Range	vector2	v 4 4	
 S	I	amplitude	1
+V	I	amplitude	1
 A	I	amplitude	1
 I	amplitude_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_curved	?
@@ -33911,6 +35068,7 @@ I	rotation	Rotation	7	Bool	boolean	b 0
 S	I	rotation	0
 I	amplitude_2	Amplitude	8	Range	vector2	v 4 4	
 S	I	amplitude_2	1
+V	I	amplitude_2	1
 A	I	amplitude_2	1
 I	amplitude_2_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_2_curved	?
@@ -33925,6 +35083,7 @@ I	scale	Scale	11	Bool	boolean	b 0
 S	I	scale	0
 I	amplitude_3	Amplitude	12	Range	vector2	v 4 4	
 S	I	amplitude_3	1
+V	I	amplitude_3	1
 A	I	amplitude_3	1
 I	amplitude_3_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_3_curved	?
@@ -33939,6 +35098,7 @@ I	direction	Direction	15	Bool	boolean	b 0
 S	I	direction	0
 I	amplitude_4	Amplitude	16	Range	vector2	v 4 4	
 S	I	amplitude_4	1
+V	I	amplitude_4	1
 A	I	amplitude_4	1
 I	amplitude_4_curved	Amplitude curved	-1	CurveToggle	boolean	b 0	
 S	I	amplitude_4_curved	?
@@ -33963,6 +35123,7 @@ O	particles	Particles	0	particle	i -4	s "noone"
 N	pc.p_system_from_points	Node_pSystem_from_Points	From Points	particle	scripts/node_psystem_from_points/node_psystem_from_points.gml
 I	points_data	Points Data	0	Vec2	vector2		
 S	I	points_data	1
+V	I	points_data	0
 A	I	points_data	2
 I	index_start	Index Start	1	Float	scalar	d 0	
 S	I	index_start	0

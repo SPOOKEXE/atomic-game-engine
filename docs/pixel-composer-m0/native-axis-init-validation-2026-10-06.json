@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "explicit retained local source Vec2 scalar-array creation and fixed-constructor provenance.",
+  "function_logic": [
+    "InitializeSourceVec2Axes records explicit local getAnimators events. it does not delegate getters, change local separation flags or replace combined animators.",
+    "cold bound properties create local driverless frame-zero scalar keys from saved constructor pairs or fixed catalogue defaults. only the selected axis binding changes to Local.",
+    "warm arrays preserve their contents after physical storage checks. existing cold descendants remain cold; new bindings can share the retained local array.",
+    "fresh overlays project into missing authored carriers and survive projected replay rebind. split edits count overlay-only arrays alongside authored and detached arrays.",
+    "one work ledger and effective ordinary/scalar key admission cover the complete batch before candidate publication. byte admission includes borrowed document, old/new replay overlap, owned names, scalar slots and easing strings.",
+    "generated V records mark eligible fixed pair constructors. project/default surface expressions and their recursive macro dependencies remain preview values; without saved constructor provenance they refuse creation."
+  ],
+  "native_checks": [
+    "cold copy uses saved7,8 despite current99,88 and late ancestor301,401 axes. combined owner remains base; scalar owner becomes copy.",
+    "old cold descendant stays cold and a newly bound descendant shares the copy array. local catalogue constructor fallback initializes0,0.",
+    "fresh keys have source interpolation with represented linear headless handles, no source key identity or copied drivers.",
+    "edit then repeated initialization retains frame5 scalar values; projection and rebind preserve local axis identity.",
+    "ordinary base initializes inactive scalar storage; old binding remains cold while a newly bound copy shares base axes.",
+    "duplicate target, missing binding and same-state tiny-byte refusal preserve previous state.",
+    "runtime surface preview default refuses a mixed batch atomically; explicit saved17,19 permits creation.",
+    "65533 ordinary keys plus two retained scalar keys reject another two-key creation; removing one ordinary key admits the exact65536 limit.",
+    "generator fixture tests cover literals, constant macros, direct and nested surface macros, omitted Dimension defaults, synthetic inputs and dynamic templates."
+  ],
+  "issues_and_repairs": [
+    "review found fresh overlay projection incorrectly required existing authored axes; retained declared-port validation while permitting a new carrier.",
+    "review found scalar byte admission omitted both easing strings; included their charge before creation.",
+    "review found split edit key admission omitted newly created non-detached overlays; count every overlay without an authored carrier.",
+    "pre-build source review found catalogue32x32 previews cannot supply runtime constructor provenance; added generated fixed-pair flags and guarded fallback.",
+    "batch1 had two fixture setup failures: BindGroupReplay received revision-one operations before RebindGroupReplay initialized that revision. repaired both fixtures together.",
+    "removed a new fixture signed-to-unsigned Tick narrowing warning before batch2."
+  ],
+  "builds": [
+    {
+      "log": "axis-init-build1.log",
+      "exit_code": 0
+    },
+    {
+      "log": "axis-init-build2.log",
+      "exit_code": 0
+    },
+    {
+      "log": "axis-init-build3.log",
+      "exit_code": 0
+    }
+  ],
+  "joined_batches": [
+    {
+      "results": "axis-init-batch1-results.json",
+      "checks": 20,
+      "passed_checks": 19,
+      "failed_check": "core",
+      "failure_output": "test cases:2932 |2930 passed |2 failed; assertions:1894020 |1894018 passed |2 failed",
+      "failures": [
+        "SourceAxisInitialization.cpp:296 BindGroupReplay returned InvalidValue for an uninitialized revision-one replay.",
+        "SourceAxisInitialization.cpp:329 had the same fixture setup error."
+      ]
+    },
+    {
+      "results": "axis-init-batch2-results.json",
+      "checks": 20,
+      "passed_checks": 20,
+      "all_passed": true,
+      "native_cpu_cases": 5010,
+      "render_cases": 15,
+      "render_assertions": 887,
+      "startup_cases": 1,
+      "cli_cases": 16,
+      "python_cases": 101,
+      "binary_hashes_stable": true,
+      "child_hashes_stable": true,
+      "socket_cases_excluded": 21
+    }
+  ],
+  "review": "read-only review found no further confirmed defect after projection, byte, aggregate-count and provenance repairs.",
+  "source_review": {
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "facts": [
+      "node_value getAnimators creates local scalar arrays lazily from def_val without changing sep_axis or the combined animator.",
+      "valueAnimator starts with a frame-zero key for represented non-trigger scalar constructors.",
+      "node_group copies the immediate base current scalar array, so old cold copies do not warm after parent initialization.",
+      "Mirror Polar constant dimension uses PROJ_SURF; generator preview substitutions are not constructor provenance."
+    ],
+    "scripts": [
+      {
+        "path": "scripts/node_value/node_value.gml",
+        "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd"
+      },
+      {
+        "path": "scripts/node_keyframe/node_keyframe.gml",
+        "sha256": "73a7fe4c85562db01192ae88c7ab35ebd16684f9d3831641e53a572b1480a49b"
+      },
+      {
+        "path": "scripts/node_group/node_group.gml",
+        "sha256": "12bcf43c0bfcb6d84ea8c788c4ff84bae4f805d1290ede309222f2cd03bbb019"
+      },
+      {
+        "path": "scripts/node_mirror_polar/node_mirror_polar.gml",
+        "sha256": "cceddc871081734c16255e458edb2ec9afa4fa8e2dd6c46833f18d98005c0fd0"
+      },
+      {
+        "path": "scripts/node_gradient_point_n/node_gradient_point_n.gml",
+        "sha256": "4bf3c140c198df497f338f56132ca8aa517da39ba8bbe03818e18c8e7ad3f739"
+      }
+    ]
+  },
+  "limits": [
+    "automatic getter-driven initialization events, independent cold flag representation and separate/combine editor controls remain unfinished.",
+    "detached scalar mode transitions and explicit same-base source setInstance recapture remain unfinished.",
+    "generic Vector and constructors without finite saved pairs or fixed metadata remain unrepresented. runtime constructor history cannot be inferred from current project dimensions.",
+    "new keys use the existing documented headless linear handle policy; source widget preference history is not captured.",
+    "licensed runtime parity, headed Studio verification, profiling for this change and sanitizer checks were not run.",
+    "21 socket cases retain previously reproduced sandbox exclusions; offscreen Vulkan was approved.",
+    "git metadata is read-only; owned patch prepared but this pass cannot commit in this environment."
+  ],
+  "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05"
+}
