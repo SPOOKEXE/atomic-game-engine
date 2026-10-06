@@ -109,6 +109,8 @@ namespace studio::detail {
 		nodegraph::Graph Graph;
 		ImageGraphCanvasIds Ids;
 		std::vector<nodegraph::NodeId> Selection;
+		// grug empty Collections live in the Groups inspector, without a fake canvas node.
+		std::vector<std::string> SelectedGroups;
 		ImageGraphCacheEditObservation Observation;
 		ImageGraphHistory::CollectionSnapshot Collections;
 		ImageGraphHistory::SourceSnapshot BeforeSource, AfterSource;
@@ -233,7 +235,7 @@ namespace studio::detail {
 				postLoad.Source ? std::move(*postLoad.Source) : std::move(append.Project.Source);
 			candidate.Projection = std::move(append.Project.Graph);
 			candidate.Diagnostics = std::move(append.Project.Diagnostics);
-			// grug source path is opaque in native nodes. reimport that archive for the save baseline.
+			// grug source path stays in the archive. reimport it for the save baseline.
 			if (postLoad.Source) {
 				PxcxImport checked;
 				std::string error;
@@ -264,7 +266,14 @@ namespace studio::detail {
 			for (const auto &node : append.Nodes) {
 				if (node.TopLevel) {
 					const auto found = candidate.Ids.ToCanvas.find(node.NodeId);
-					if (found != candidate.Ids.ToCanvas.end()) candidate.Selection.push_back(found->second);
+					if (found != candidate.Ids.ToCanvas.end())
+						candidate.Selection.push_back(found->second);
+					else if (std::any_of(
+								 candidate.Groups.Authored.Groups.begin(),
+								 candidate.Groups.Authored.Groups.end(),
+								 [&](const auto &group) { return same(group.Id, node.NodeId); }
+							 ))
+						candidate.SelectedGroups.push_back(node.NodeId);
 				}
 				const auto loaded = std::find_if(
 					candidate.Groups.Authored.Nodes.begin(),
@@ -275,6 +284,8 @@ namespace studio::detail {
 					(loaded->Type == "pc.cache" || loaded->Type == "pc.cache_array"))
 					candidate.LoadedCacheOwners.push_back(node.NodeId);
 			}
+			if (!work)
+				return fail(Status::LimitExceeded, "Studio append group selection exceeds work bounds");
 			const auto observerBytes = DocumentRetainedPayloadBytes(candidate.Groups.Authored);
 			if (!observerBytes || !charge(*observerBytes * 2) || !charge(baseline.OriginalBytes.size()) ||
 				!charge(candidate.Source.OriginalBytes.size()))
@@ -288,8 +299,12 @@ namespace studio::detail {
 				!charge(DocumentRetainedPayloadBytes(candidate.Observation.Inputs)) ||
 				!charge(candidate.BeforeSource->capacity()) || !charge(candidate.AfterSource->capacity()) ||
 				!charge(candidate.Selection.capacity() * sizeof(nodegraph::NodeId)) ||
+				!charge(candidate.SelectedGroups.capacity() * sizeof(std::string)) ||
 				!charge(candidate.LoadedCacheOwners.capacity() * sizeof(std::string)))
 				return fail(Status::LimitExceeded, "Studio append publication exceeds live bytes");
+			for (const auto &group : candidate.SelectedGroups)
+				if (!charge(group.capacity()))
+					return fail(Status::LimitExceeded, "Studio append group selection exceeds live bytes");
 			for (const auto &owner : candidate.LoadedCacheOwners)
 				if (!charge(owner.capacity()))
 					return fail(Status::LimitExceeded, "Studio append cache owners exceed live bytes");

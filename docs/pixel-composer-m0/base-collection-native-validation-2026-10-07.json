@@ -1,0 +1,204 @@
+{
+  "phase": "grug import base Collections as native groups and select appended groups",
+  "date": "2026-10-07",
+  "base_commit": "405184f8",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_contract": [
+    "grug Node_Group inherits Node_Collection sockets, rendering and depth; base Collection name defaults to empty",
+    "grug only Node_Group owns the instance post-load callback; native recursive instance behavior cannot stand in for base Collection shallow cloning",
+    "grug Collection custom parent inputs start at zero; Pixel Builder starts at four",
+    "grug Collection path serializes as metadata and is opened only by explicit file host actions"
+  ],
+  "scope": [
+    "grug project ordinary base Collections into native groups with children, boundary links, inherited image depth and saved source type",
+    "grug roundtrip parent socket edits and native collection publication while retaining bounded path metadata",
+    "grug refuse unverified instance callbacks, shallow group cloning and malformed path metadata atomically",
+    "grug keep appended empty groups selectable by durable group ID in the Groups inspector",
+    "grug charge group selection work and retained bytes before admission"
+  ],
+  "owned_files": {
+    "mono.engine/imagegraphio/src/OrdinarySourceGroups.hpp": "1f678b24a1890b27bc9646c74308024ff93da467549e7fe4c1df81dbb2a81637",
+    "mono.engine/imagegraphio/src/PxcxImport.cpp": "496849c94b488154e280695fdbcbc195de919c21cbe08adac3470aeef896e525",
+    "mono.engine/imagegraphio/src/PxcxEdit.cpp": "3cc92c0150511b5277aec2495d43bba27d338dd04198e5ce1a67951531e69483",
+    "mono.engine/imagegraphio/tests/PxcxGroups.cpp": "2ed5c25b2e1df3d3d0fb13d16106bf88dee0c7a89762aea2b85edd543d898578",
+    "mono.studio/tests/PxcxSave.cpp": "a1baa73ba6e4d1913339526bfe294bd9a8785d1e08b225371f56896b01ba0886",
+    "mono.studio/src/ImageGraphAppendProject.hpp": "4d5b96296b588fc598cb15b2149042b90444a541b44164eb953d6a64e17784f8",
+    "mono.studio/tests/ImageGraphSourceHistory.cpp": "c5e7e8899131d281ea93b687c464e181faa2623e163062b8d81501f7ee264477"
+  },
+  "shared_file": {
+    "path": "mono.studio/src/ImageComposer.cpp",
+    "owned_patch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/base-collection-owned-ImageComposer.patch",
+    "owned_added_lines": 15,
+    "peer_changes_excluded_from_commit": true
+  },
+  "checks": {
+    "joined_build": "grug 17 release-tests targets with j6 passed in build3",
+    "batch": "20/20 passed",
+    "cpp_cases": 5218,
+    "cpp_assertions": 2004356,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "grug approved offscreen Vulkan; Studio, client and render serialized",
+    "frozen_sources_unchanged": 1835,
+    "peer_files_unchanged": 43,
+    "peer_comparison": "grug 42 whole files and shared ImageComposer after removing only owned addition",
+    "test_binaries_unchanged": 13,
+    "child_binaries_unchanged": 2,
+    "review": "grug Sol read source callbacks, depth, path ownership and final selection bounds; root repaired Luna fixture drafts before builds",
+    "standalone_performance_profile": "grug not run; no performance claim",
+    "sanitizers": "grug not run",
+    "build_warning": "grug GCC 13 reports maybe-uninitialized optional selected in unchanged TimelineRegions.hpp:109; build passed"
+  },
+  "failures_and_repairs": [
+    {
+      "stage": "batch1",
+      "result": "grug 18/20 gates passed; IO had one failed case and Studio had two failed cases",
+      "repair": "grug retain bounded Collection path metadata without opening it; remove one-byte vector copy producing a GCC array-bounds warning"
+    },
+    {
+      "stage": "batch2",
+      "result": "grug 19/20 gates passed; Studio had two failed selection assertions",
+      "repair": "grug carry native group IDs into append selection and Groups inspector; preserve selection on refusal and account retained bytes"
+    },
+    {
+      "stage": "batch3",
+      "result": "grug all twenty gates passed after joined rebuild; all batches completed before source repairs"
+    }
+  ],
+  "limitations": [
+    "grug base Collection instance callbacks and base Collections directly inside canonical instances still refuse until their shallow source behavior is represented",
+    "grug preview PNG and PXZ packaging remain open",
+    "grug standalone profile, sanitizers, headed Studio and licensed reference parity were not run",
+    "grug whole Composer goal remains active"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "builds": [
+      "base-collection-build1.log",
+      "base-collection-build2.log",
+      "base-collection-build3.log"
+    ],
+    "batches": [
+      "base-collection-batch1-results.json",
+      "base-collection-batch2-results.json",
+      "base-collection-batch3-results.json"
+    ],
+    "source_integrity": "base-collection-source-integrity-batch3.json",
+    "peer_integrity": "base-collection-peer-integrity-batch3.json",
+    "child_integrity": "base-collection-child-hashes-batch3.json"
+  },
+  "results_summary": [
+    {
+      "name": "bake",
+      "exit_code": 0,
+      "cases": 157,
+      "assertions": 15875
+    },
+    {
+      "name": "physics",
+      "exit_code": 0,
+      "cases": 43,
+      "assertions": 715
+    },
+    {
+      "name": "runner",
+      "exit_code": 0,
+      "cases": 29,
+      "assertions": 296
+    },
+    {
+      "name": "font",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 1686
+    },
+    {
+      "name": "export",
+      "exit_code": 0,
+      "cases": 77,
+      "assertions": 3132
+    },
+    {
+      "name": "render",
+      "exit_code": 0,
+      "cases": 15,
+      "assertions": 477
+    },
+    {
+      "name": "cli",
+      "exit_code": 0,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "exit_code": 0,
+      "cases": 306,
+      "assertions": 12974
+    },
+    {
+      "name": "core",
+      "exit_code": 0,
+      "cases": 2980,
+      "assertions": 1895147
+    },
+    {
+      "name": "assetc",
+      "exit_code": 0,
+      "cases": 45,
+      "assertions": 509
+    },
+    {
+      "name": "client",
+      "exit_code": 0,
+      "cases": 358,
+      "assertions": 23821
+    },
+    {
+      "name": "studio",
+      "exit_code": 0,
+      "cases": 1094,
+      "assertions": 48675
+    },
+    {
+      "name": "nodegraph",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 345
+    },
+    {
+      "name": "ui",
+      "exit_code": 0,
+      "cases": 40,
+      "assertions": 704
+    },
+    {
+      "name": "startup",
+      "exit_code": 0,
+      "cases": 1,
+      "assertions": 5
+    },
+    {
+      "name": "lint",
+      "exit_code": 0
+    },
+    {
+      "name": "architecture",
+      "exit_code": 0
+    },
+    {
+      "name": "python",
+      "exit_code": 0,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "exit_code": 0
+    }
+  ]
+}

@@ -887,7 +887,9 @@ TEST_CASE(
 	CHECK(candidate.Ids.NextNodeId >= 81);
 	CHECK(candidate.Ids.IssuedNodeIds.contains("retired-node"));
 	CHECK(candidate.Graph.Links().size() == candidate.Groups.Authored.Links.size());
-	CHECK(candidate.Selection.size() == 3);
+	CHECK(candidate.Selection.size() == 2);
+	CHECK(candidate.SelectedGroups == std::vector<std::string>{"joined/root"});
+	CHECK(candidate.Ids.EmptyGroups.contains("joined/root"));
 	REQUIRE(candidate.Collections);
 	REQUIRE(candidate.Collections->size() == 2);
 	CHECK(candidate.Collections->front().NodeId == "joined/root");
@@ -959,6 +961,7 @@ TEST_CASE(
 	candidate.Source = baseline;
 	candidate.Projection = live;
 	candidate.Selection = {17};
+	candidate.SelectedGroups = {"prior-group"};
 	const auto beforeBytes = candidate.Source.OriginalBytes;
 	CHECK_FALSE(
 		candidate.Prepare(baseline, baseline, incoming, options, {}, live, host, {}, ids, 2, {}, error, 1)
@@ -966,6 +969,7 @@ TEST_CASE(
 	CHECK(candidate.Source.OriginalBytes == beforeBytes);
 	CHECK(candidate.Projection == live);
 	CHECK(candidate.Selection == std::vector<nodegraph::NodeId>{17});
+	CHECK(candidate.SelectedGroups == std::vector<std::string>{"prior-group"});
 	CHECK(candidate.Remaining == 0);
 	auto malformed = incoming;
 	malformed.GraphJson = "{}";
@@ -975,6 +979,7 @@ TEST_CASE(
 	CHECK(candidate.Source.OriginalBytes == beforeBytes);
 	CHECK(candidate.Projection == live);
 	CHECK(candidate.Selection == std::vector<nodegraph::NodeId>{17});
+	CHECK(candidate.SelectedGroups == std::vector<std::string>{"prior-group"});
 }
 
 TEST_CASE(
@@ -1002,7 +1007,9 @@ TEST_CASE(
 	REQUIRE(candidate.Collections->size() == 2);
 	CHECK(candidate.Collections->front().MetadataJson.find("file manager") != std::string::npos);
 	CHECK(candidate.Collections->back().MetadataJson.find("file manager") == std::string::npos);
-	CHECK(candidate.Selection.size() == 1);
+	CHECK(candidate.Selection.empty());
+	CHECK(candidate.SelectedGroups == std::vector<std::string>{"single/root"});
+	CHECK(candidate.Ids.EmptyGroups.contains("single/root"));
 	CHECK(candidate.Projection == Import(candidate.Source).Graph);
 }
 

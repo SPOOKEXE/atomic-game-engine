@@ -1,6 +1,7 @@
 #include "CookedShaderAnnotation.hpp"
 #include "HlslSourceArguments.hpp"
 #include "ImageCacheAnnotation.hpp"
+#include "OrdinarySourceGroups.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "PxcxNativePorts.hpp"
 #include "SourceInputProvenance.hpp"
@@ -511,7 +512,7 @@ namespace engine::imagegraphio {
 			if (!list.is_array() || !inputs.is_array()) return nullptr;
 			const auto item = std::find(list.begin(), list.end(), *id);
 			if (item == list.end() || std::find(item + 1, list.end(), *id) != list.end()) return nullptr;
-			const size_t offset = group->value("type", "") == "Node_Group" ? 0 : 4;
+			const size_t offset = group->value("type", "") == "Node_Pixel_Builder" ? 4 : 0;
 			const size_t index = size_t(item - list.begin()) + offset;
 			return index < inputs.size() && inputs[index].is_object() ? &inputs[index] : nullptr;
 		}
@@ -1899,7 +1900,7 @@ namespace engine::imagegraphio {
 									root["nodes"].size() >= Limits::MaximumNodes)
 									return Reject(diagnostic, "PXC clone identity or position is invalid");
 								const Json *source = SourceNode(root, operation.TemplateId);
-								if (!source || source->value("type", "") == "Node_Group")
+								if (!source || detail::IsOrdinarySourceGroup(source->value("type", "")))
 									return Reject(
 										diagnostic,
 										"PXC group cloning requires explicit remapped source records"

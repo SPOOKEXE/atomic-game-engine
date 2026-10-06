@@ -3,6 +3,7 @@
 
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraphio/PxcxEdit.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/testing/Suite.hpp>
@@ -302,6 +303,185 @@ TEST_CASE("Saved group socket IDs project to persisted native boundary junctions
 	);
 	DiagnoseInvert(restored, plan, image, "saved-boundary");
 	CheckPixels(image, {239, 223, 191, 255});
+}
+TEST_CASE("Base Collection projects as an ordinary source group", "[imagegraphio][groups][collection]") {
+	auto collection = Graph();
+	collection["nodes"][1]["type"] = "Node_Collection";
+	collection["nodes"][1]["attri"]["path"] = "collections/source.pxcc";
+	const auto archive = Archive(collection);
+	const auto ordinaryArchive = Archive(Graph());
+	PxcxImport imported, ordinary;
+	std::string failure;
+	REQUIRE(ImportPxcxImageGraph(archive, imported, failure));
+	REQUIRE(ImportPxcxImageGraph(ordinaryArchive, ordinary, failure));
+	CHECK(imported.Source.OriginalBytes == archive.OriginalBytes);
+	CHECK(imported.Source.GraphJson == archive.GraphJson);
+	REQUIRE(imported.Graph.Groups.size() == 1);
+	const auto &group = imported.Graph.Groups.front();
+	CHECK(group.Id == "group");
+	CHECK(group.InstanceBase.empty());
+	REQUIRE(group.Ports.size() == 2);
+	CHECK(group.Ports[0].ControlNodeId == "input");
+	CHECK(group.Ports[1].ControlNodeId == "output");
+	for (const auto nodeId : {"input", "filter", "output"}) {
+		const auto node =
+			std::find_if(imported.Graph.Nodes.begin(), imported.Graph.Nodes.end(), [&](const auto &entry) {
+				return entry.Id == nodeId;
+			});
+		REQUIRE(node != imported.Graph.Nodes.end());
+		CHECK(node->GroupId == "group");
+	}
+	CHECK(std::any_of(imported.Graph.Links.begin(), imported.Graph.Links.end(), [&](const auto &link) {
+		return link.FromNode == group.Ports[0].JunctionId && link.ToNode == "input" &&
+			   link.ToPort == "parent_value";
+	}));
+	CHECK(std::any_of(imported.Graph.Links.begin(), imported.Graph.Links.end(), [&](const auto &link) {
+		return link.FromNode == "output" && link.ToNode == group.Ports[1].JunctionId;
+	}));
+	engine::imagegraph::Diagnostic diagnostic;
+	engine::imagegraph::Plan collectionPlan, ordinaryPlan;
+	REQUIRE(
+		engine::imagegraph::Compile(imported.Graph, collectionPlan, diagnostic) ==
+		engine::imagegraph::Status::Ok
+	);
+	REQUIRE(
+		engine::imagegraph::Compile(ordinary.Graph, ordinaryPlan, diagnostic) ==
+		engine::imagegraph::Status::Ok
+	);
+	engine::imagegraph::Image collectionImage, ordinaryImage;
+	REQUIRE(
+		engine::imagegraph::Evaluate(imported.Graph, collectionPlan, "sink", collectionImage, diagnostic) ==
+		engine::imagegraph::Status::Ok
+	);
+	REQUIRE(
+		engine::imagegraph::Evaluate(ordinary.Graph, ordinaryPlan, "sink", ordinaryImage, diagnostic) ==
+		engine::imagegraph::Status::Ok
+	);
+	CHECK(collectionImage == ordinaryImage);
+	CheckPixels(collectionImage, {239, 223, 191, 255});
+}
+TEST_CASE(
+	"Base Collection projection edits an unlinked parent socket and keeps source type",
+	"[imagegraphio][groups][collection]"
+) {
+	auto source = Graph();
+	source["nodes"][1]["type"] = "Node_Collection";
+	source["nodes"][1]["inputs"][0] = Value(0.0);
+	source["nodes"][2]["inputs"][2] = Value(1);
+	source["nodes"][3]["inputs"][0] = Wire("input");
+	source["nodes"].erase(source["nodes"].begin() + 4, source["nodes"].end());
+	const auto archive = Archive(source);
+	PxcxImport imported;
+	std::string failure;
+	REQUIRE(ImportPxcxImageGraph(archive, imported, failure));
+	auto authored = imported.Graph;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(engine::imagegraph::Migrate(authored, diagnostic) == engine::imagegraph::Status::Ok);
+	const auto input = std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [](const auto &node) {
+		return node.Id == "input";
+	});
+	REQUIRE(input != authored.Nodes.end());
+	auto parent = std::find_if(input->Values.begin(), input->Values.end(), [](const auto &value) {
+		return value.Port == "parent_value";
+	});
+	REQUIRE(parent != input->Values.end());
+	const engine::imagegraph::Value replacement = 0.75;
+	parent->Data = replacement;
+	for (auto &key : authored.Keyframes)
+		if (key.NodeId == "input" && key.Port == "parent_value") key.Data = replacement;
+	for (auto &junction : authored.Junctions)
+		if (junction.Id == "input/parent-value") junction.Default = replacement;
+	std::vector<std::byte> bytes;
+	REQUIRE(WritePxcxProjection(imported, authored, {}, bytes, diagnostic));
+	engine::bake::PxcxArchive savedArchive;
+	REQUIRE(engine::bake::ReadPxcx(bytes, savedArchive, failure));
+	const auto savedGraph = Json::parse(savedArchive.GraphJson.c_str());
+	CHECK(savedGraph["nodes"][1]["type"] == "Node_Collection");
+	CHECK(savedGraph["nodes"][1]["inputs"][0]["r"]["d"] == 0.75);
+	PxcxImport restored;
+	REQUIRE(ImportPxcxImageGraph(savedArchive, restored, failure));
+	const auto restoredInput =
+		std::find_if(restored.Graph.Nodes.begin(), restored.Graph.Nodes.end(), [](const auto &node) {
+			return node.Id == "input";
+		});
+	REQUIRE(restoredInput != restored.Graph.Nodes.end());
+	const auto restoredParent =
+		std::find_if(restoredInput->Values.begin(), restoredInput->Values.end(), [](const auto &value) {
+			return value.Port == "parent_value";
+		});
+	REQUIRE(restoredParent != restoredInput->Values.end());
+	CHECK(restoredParent->Data == replacement);
+	CHECK(restored.Source.GraphJson.find("\"type\":\"Node_Collection\"") != std::string::npos);
+}
+TEST_CASE("Base Collection does not infer instance callbacks", "[imagegraphio][groups][collection][atomic]") {
+	PxcxImport imported;
+	std::string failure;
+	REQUIRE(ImportPxcxImageGraph(Archive(Graph()), imported, failure));
+	const auto priorSource = imported.Source.OriginalBytes;
+	const auto priorGraph = engine::imagegraph::Write(imported.Graph);
+	auto source = Graph();
+	SECTION("base has no Group instance callback") {
+		source["nodes"][1]["type"] = "Node_Collection";
+		source["nodes"][1]["instanceBase"] = "group";
+	}
+	SECTION("enclosing Group instances need verified shallow Collection callbacks") {
+		auto nested = Node("nested", "Node_Collection");
+		nested["group"] = "group";
+		source["nodes"].push_back(nested);
+		auto instance = Node("instance", "Node_Group");
+		instance["instanceBase"] = "group";
+		source["nodes"].push_back(instance);
+	}
+	SECTION("path is a host field with a text bound") {
+		source["nodes"][1]["type"] = "Node_Collection";
+		source["nodes"][1]["attri"]["path"] =
+			std::string(engine::bake::PxcxLimits::MaximumNodeTextBytes + 1, 'p');
+	}
+	SECTION("path cannot be a host object") {
+		source["nodes"][1]["type"] = "Node_Collection";
+		source["nodes"][1]["attri"]["path"] = Json{{"future", "object"}};
+	}
+	CHECK_FALSE(ImportPxcxImageGraph(Archive(source), imported, failure));
+	CHECK_FALSE(failure.empty());
+	CHECK(imported.Source.OriginalBytes == priorSource);
+	CHECK(engine::imagegraph::Write(imported.Graph) == priorGraph);
+}
+TEST_CASE(
+	"Base Collection shallow cloning requires remapped children", "[imagegraphio][groups][collection][atomic]"
+) {
+	auto source = Graph();
+	source["nodes"][1]["type"] = "Node_Collection";
+	PxcxImport imported;
+	std::string failure;
+	const bool accepted = ImportPxcxImageGraph(Archive(source), imported, failure);
+	INFO(failure);
+	REQUIRE(accepted);
+	const std::array<PxcxStructureEdit, 1> edits{PxcxNodeClone{"group", "copy", {10, 20}}};
+	std::vector<std::byte> bytes{std::byte{0x42}};
+	engine::imagegraph::Diagnostic diagnostic;
+	CHECK_FALSE(WritePxcxStructureEdits(imported, imported.Source.OriginalBytes, edits, bytes, diagnostic));
+	CHECK(diagnostic.Message.find("remapped source records") != std::string::npos);
+	REQUIRE(bytes.size() == 1);
+	CHECK(bytes.front() == std::byte{0x42});
+}
+TEST_CASE("Nested base Collections retain their ordinary parent", "[imagegraphio][groups][collection]") {
+	auto source = Graph();
+	source["nodes"][1]["type"] = "Node_Collection";
+	auto nested = Node("nested", "Node_Collection");
+	nested["group"] = "group";
+	nested["attri"] = {{"custom_input_list", Json::array()}, {"custom_output_list", Json::array()}};
+	source["nodes"].push_back(nested);
+	const auto archive = Archive(source);
+	PxcxImport imported;
+	std::string failure;
+	REQUIRE(ImportPxcxImageGraph(archive, imported, failure));
+	CHECK(imported.Source.OriginalBytes == archive.OriginalBytes);
+	REQUIRE(imported.Graph.Groups.size() == 2);
+	CHECK(imported.Graph.Groups[0].Id == "group");
+	CHECK(imported.Graph.Groups[0].ParentId.empty());
+	CHECK(imported.Graph.Groups[1].Id == "nested");
+	CHECK(imported.Graph.Groups[1].ParentId == "group");
+	CHECK(imported.Graph.Groups[1].InstanceBase.empty());
 }
 TEST_CASE(
 	"Invalid saved group socket membership and parents preserve the "

@@ -3,6 +3,7 @@
 #include "HlslSourceArguments.hpp"
 #include "ImageCacheAnnotation.hpp"
 #include "InlineCollections.hpp"
+#include "OrdinarySourceGroups.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "PxcxNativePorts.hpp"
 #include "TileProperties.hpp"
@@ -2869,7 +2870,7 @@ namespace engine::imagegraphio {
 				if (depth != attributes->end() && !WholeNumber(*depth, choice)) return std::nullopt;
 				return choice >= 0 && choice <= 8 ? std::optional{choice} : std::nullopt;
 			}
-			if (source.at("type") == "Node_Group") return 1;
+			if (detail::IsOrdinarySourceGroup(source.at("type").get_ref<const std::string &>())) return 1;
 			const auto *entry =
 				imagegraph::FindCatalogueSource(source.at("type").get_ref<const std::string &>());
 			const auto *depth =
@@ -2920,7 +2921,9 @@ namespace engine::imagegraphio {
 				for (size_t steps = 0; steps <= Sources.size(); ++steps) {
 					if (!HasParent(*current)) return Project() == 3;
 					current = Parent(*current);
-					if (!current || current->at("type") != "Node_Group" || current->contains("instanceBase"))
+					if (!current ||
+						!detail::IsOrdinarySourceGroup(current->at("type").get_ref<const std::string &>()) ||
+						current->contains("instanceBase"))
 						return false;
 					const auto choice = SourceDepthChoice(*current);
 					if (!choice || *choice == 0) return false;
@@ -2937,7 +2940,10 @@ namespace engine::imagegraphio {
 					if (!producer) return false;
 					// Opaque producers cannot execute. Explicit subgraph cuts retain optional-input
 					// replacement.
-					if (!imagegraph::FindCatalogueSource(producer->at("type").get_ref<const std::string &>()))
+					if (!imagegraph::FindCatalogueSource(
+							producer->at("type").get_ref<const std::string &>()
+						) &&
+						!detail::IsOrdinarySourceGroup(producer->at("type").get_ref<const std::string &>()))
 						continue;
 
 					int64_t index = 0, tag = 0;
@@ -2985,8 +2991,8 @@ namespace engine::imagegraphio {
 						continue;
 					}
 					const auto &type = current->at("type").get_ref<const std::string &>();
-					if (output &&
-						(type == "Node_Group" || (type == "Node_Pixel_Builder" && outputIndex >= 2))) {
+					if (output && (detail::IsOrdinarySourceGroup(type) ||
+								   (type == "Node_Pixel_Builder" && outputIndex >= 2))) {
 						const auto attributes = current->find("attri");
 						if (attributes == current->end() || !attributes->is_object() ||
 							!attributes->contains("custom_output_list"))
@@ -3032,7 +3038,7 @@ namespace engine::imagegraphio {
 							break;
 						output = false;
 					}
-					if (!depth && type != "Node_Group") break;
+					if (!depth && !detail::IsOrdinarySourceGroup(type)) break;
 					if (const auto cached = Cache.find(current); cached != Cache.end()) {
 						result = cached->second;
 						break;
@@ -3053,7 +3059,9 @@ namespace engine::imagegraphio {
 						break;
 					}
 					current = Parent(*current);
-					if (!current || current->at("type") != "Node_Group") break;
+					if (!current ||
+						!detail::IsOrdinarySourceGroup(current->at("type").get_ref<const std::string &>()))
+						break;
 				}
 				for (const Json *node : Path)
 					Cache.emplace(node, result);
@@ -3102,6 +3110,7 @@ namespace engine::imagegraphio {
 		bool ProjectOrdinaryGroups(
 			const Json &root,
 			PxcxImport &result,
+			const GroupSourceSet &canonicalGroups,
 			std::string &failure,
 			uint64_t previousDocumentBytes,
 			detail::ImportBudget &operationBudget
@@ -3164,7 +3173,12 @@ namespace engine::imagegraphio {
 				};
 				for (const Json &source : sourceNodes) {
 					const bool builder = source.at("type") == "Node_Pixel_Builder";
-					if (source.at("type") != "Node_Group" && !builder) continue;
+					const auto &sourceType = source.at("type").get_ref<const std::string &>();
+					if (!detail::IsOrdinarySourceGroup(sourceType) && !builder) continue;
+					// grug base Collection has no Group instance post-load callback.
+					if (sourceType == "Node_Collection" && source.contains("instanceBase") &&
+						source.at("instanceBase") != "")
+						return Fail(failure, "base Collection instance callback is not represented");
 					if (builder &&
 						std::none_of(
 							result.Graph.Nodes.begin(), result.Graph.Nodes.end(), [&](const Node &node) {
@@ -3199,10 +3213,14 @@ namespace engine::imagegraphio {
 							return Fail(failure, "source group name exceeds the native limit");
 						group.Name = text;
 					} else
-						group.Name = "Group";
+						group.Name = sourceType == "Node_Collection" ? "" : "Group";
 					if (group.Name.size() > imagegraph::Limits::MaximumTextBytes ||
 						!parentOf(source, group.ParentId))
 						return Fail(failure, "source group identity exceeds the native limits");
+					if (sourceType == "Node_Collection" && canonicalGroups.contains(group.ParentId))
+						return Fail(
+							failure, "base Collection inside an instance needs verified shallow callbacks"
+						);
 					const auto attributes = source.find("attri");
 					if (attributes != source.end()) {
 						if (!attributes->is_object())
@@ -3228,10 +3246,17 @@ namespace engine::imagegraphio {
 							{"color", -1},
 							{"update_graph", true},
 							{"show_update_trigger", false},
-							{"array_process", 0},
-							{"path", ""}
+							{"array_process", 0}
 						};
 						for (const auto &[key, stored] : attributes->items()) {
+							// grug Collection path belongs to the file host. source retains it; importer
+							// never opens it.
+							if (key == "path") {
+								if (!stored.is_string() || stored.get_ref<const std::string &>().size() >
+															   bake::PxcxLimits::MaximumNodeTextBytes)
+									return Fail(failure, "source group path is not bounded text");
+								continue;
+							}
 							if (key == "color_depth" || key == "interpolate" || key == "oversample" ||
 								key == "custom_input_list" || key == "custom_output_list")
 								continue;
@@ -4481,7 +4506,9 @@ namespace engine::imagegraphio {
 			!ProjectGlobals(root, result.Graph, operationBudget, failure))
 			return false;
 		if (archive.MetadataNumber == SUPPORTED_VERSION &&
-			!ProjectOrdinaryGroups(root, result, failure, *previousDocumentBytes, operationBudget))
+			!ProjectOrdinaryGroups(
+				root, result, canonicalGroups, failure, *previousDocumentBytes, operationBudget
+			))
 			return false;
 		if (archive.MetadataNumber == SUPPORTED_VERSION) {
 			if (!detail::ProjectInlineCollections(root, result.Graph, operationBudget, failure)) return false;

@@ -513,10 +513,17 @@ TEST_CASE(
 	"[studio][pxcx_save][collection]"
 ) {
 	using namespace engine::imagegraph;
+	std::string_view containerType;
+	SECTION("ordinary Group") {
+		containerType = "Node_Group";
+	}
+	SECTION("base Collection") {
+		containerType = "Node_Collection";
+	}
 	auto source = CollectionSource();
 	auto graph = Json::parse(source.GraphJson.c_str());
-	graph["nodes"][0]["type"] = "Node_Group";
-	graph["nodes"][1]["type"] = "Node_Group";
+	graph["nodes"][0]["type"] = containerType;
+	graph["nodes"][1]["type"] = containerType;
 	graph["nodes"][0].erase("group");
 	graph["nodes"][2]["inputs"] = Json::array();
 	graph["nodes"][3]["inputs"] = Json::array();
@@ -569,6 +576,7 @@ TEST_CASE(
 	CHECK((*savedNumber)["x"] == 30);
 	CHECK((*savedNumber)["y"] == 50);
 	CHECK((*savedNumber)["inputs"][0]["r"]["d"] == 7.0);
+	CHECK(saved["nodes"].back()["type"] == containerType);
 	CHECK(source.OriginalBytes == original);
 	CHECK(imported.Source.OriginalBytes == original);
 }

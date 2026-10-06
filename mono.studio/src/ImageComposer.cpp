@@ -2825,6 +2825,21 @@ namespace studio {
 			state.Graph = std::move(candidate.Graph);
 			state.Ids = std::move(candidate.Ids);
 			state.Canvas = std::move(canvas);
+			if (!candidate.SelectedGroups.empty()) {
+				state.SelectedGroup = std::move(candidate.SelectedGroups.front());
+				std::fill(state.GroupName.begin(), state.GroupName.end(), '\0');
+				const auto selected = std::find_if(
+					state.Authored.Groups.begin(), state.Authored.Groups.end(), [&](const auto &group) {
+						return group.Id == state.SelectedGroup;
+					}
+				);
+				if (selected != state.Authored.Groups.end())
+					std::copy_n(
+						selected->Name.c_str(),
+						std::min(selected->Name.size(), state.GroupName.size() - 1),
+						state.GroupName.data()
+					);
+			}
 			state.CacheEditObservation = std::move(candidate.Observation);
 			state.CollectionManagers = std::move(candidate.Collections);
 			state.PublishedPxcx = {};
