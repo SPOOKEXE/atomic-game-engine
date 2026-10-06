@@ -1,0 +1,69 @@
+{
+  "evidence_scope": "Focused validation evidence for native timeline-key deletion. This does not claim the wider native animator or axis workflow is complete.",
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "timeline-key-delete-batch1-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5095,
+    "cpp_assertions": 2000476,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "totals_method": "Summed the cases and assertions in all result entries that report C++ cases; Python and CLI counts are recorded separately from their own result entries.",
+    "build_history": [
+      {
+        "build": 1,
+        "result": "failed before tests",
+        "reason": "The test fixture wrote private ImageGraphHistory::Capacity directly.",
+        "log": "timeline-key-delete-build1.log"
+      },
+      {
+        "build": 2,
+        "result": "exit 0",
+        "scope": "3 build steps, 17 targets",
+        "repair": "The fixture now constructs ImageGraphHistory with its public capacity argument.",
+        "log": "timeline-key-delete-build2.log"
+      }
+    ],
+    "test_result": "All 20 listed checks exited successfully. The Studio suite reported 1018 cases and 46277 assertions.",
+    "offscreen_backend": "SDL offscreen / Vulkan"
+  },
+  "tested_behavior": [
+    "A real headless ImGui click on the timeline table Delete control routes through DrawTimelineKeyDelete and the canonical document-edit transaction.",
+    "Deletion covers a physical shared key and a retired shared-alias key. The retired case retains the current owner's key and detached metadata while clearing the selected detached value key.",
+    "Native Write/Read roundtrip and RestoreSourceAnimatorBindings accept the resulting document.",
+    "Undo restores the exact prior document and Redo restores the deleted result.",
+    "History refusal leaves the document unchanged.",
+    "The legacy local-key case remains local and does not create SourceAnimators state."
+  ],
+  "unchanged_evidence": {
+    "source_hash_snapshots": {
+      "before": "timeline-key-delete-source-hashes-build2-before.json",
+      "after": "timeline-key-delete-source-hashes-after.json",
+      "equal": true,
+      "full_tested_file_hashes_after": {
+        "mono.studio/src/TimelineKeyDelete.hpp": "122db66d9f3abf38ceb389e2148e2b479748119861c2bd3441d5e71df56e3439",
+        "mono.studio/src/ImageComposer.cpp": "e043d98c79bed2841813e67a0ad38061425cc7306e35723dfeb137ae3fdad185",
+        "mono.studio/tests/TimelineKeyDelete.cpp": "225a9d6b6e1085ec4e685e35617f759009c4c74da32f4006f42a11d90cda5a87"
+      },
+      "hash_note": "These are full tested-file hashes from the after snapshot. ImageComposer.cpp includes peer edits present in the tested workspace."
+    },
+    "child_hash_snapshots": {
+      "file": "timeline-key-delete-child-hashes-batch1.json",
+      "equal": true,
+      "before_and_after": {
+        ".cache/build/release-tests/tools/assetc": "f0baa1d420dc550b2b08913588d67251ec6de3d482dff090beed7a669a426880",
+        ".cache/build/release-tests/tools/imagegraph": "23d04b92a3224013293f8f825bc6fd2d936d222054f1f5f622720b514f7107dc"
+      }
+    },
+    "test_binary_hashes_unchanged": true
+  },
+  "remaining_gaps": [
+    "Initial imported aliases without durable captures remain open.",
+    "Scalar-axis gesture coverage remains open.",
+    "Licensed-reference parity remains open.",
+    "Headed Studio verification remains open."
+  ],
+  "date": "2026-10-06",
+  "profiling": "Deletion uses the existing instrumented core key transaction. No new timing result or performance improvement is claimed."
+}

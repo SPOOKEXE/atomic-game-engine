@@ -43,6 +43,7 @@
 #include "KeyframeKindEditor.hpp"
 #include "TimelineDopesheet.hpp"
 #include "TimelineEaseEditor.hpp"
+#include "TimelineKeyDelete.hpp"
 #include "TimelineKeyEditor.hpp"
 #include "TimelineRegions.hpp"
 #include "Vector2Panel.hpp"
@@ -6565,15 +6566,11 @@ namespace studio {
 					ImGui::PopID();
 					ImGui::TableSetColumnIndex(7);
 					ImGui::PushID(static_cast<int>(index));
-					if (ImGui::SmallButton("Delete")) {
-						ApplyDocumentEdit(state, [&](Document &document) {
-							if (index < document.Keyframes.size()) {
-								document.Keyframes.erase(
-									document.Keyframes.begin() + static_cast<std::ptrdiff_t>(index)
-								);
-							}
-						});
-					}
+					(void)detail::DrawTimelineKeyDelete(
+						state.Authored, index, state.LastDiagnostic, [&](const auto &edit) {
+							return ApplyDocumentEdit(state, edit);
+						}
+					);
 					ImGui::PopID();
 				}
 				ImGui::EndTable();
