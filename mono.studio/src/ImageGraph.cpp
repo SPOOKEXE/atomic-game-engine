@@ -15,6 +15,7 @@
 #include <engine/imagegraph/WavClip.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -3624,109 +3625,220 @@ namespace studio {
 	ImageGraphHistory::ImageGraphHistory(size_t capacity, size_t byteCapacity)
 		: Capacity(capacity), ByteCapacity(byteCapacity) {}
 
-	void ImageGraphHistory::Record(
-		const engine::imagegraph::Document &before, const engine::imagegraph::Document &after
-	) {
+	bool ImageGraphHistory::Fits(
+		std::span<const Snapshot> undo,
+		std::span<const Snapshot> redo,
+		const SourceSnapshot &current,
+		const Snapshot *extra,
+		const SourceSnapshot &baseline,
+		size_t extraTextBytes
+	) const {
+		if (!ByteCapacity || extraTextBytes > ByteCapacity) return false;
+		size_t remaining = ByteCapacity - extraTextBytes;
+		// grug source epochs share bytes. pointer identity counts each retained vector once.
+		std::array<const std::vector<std::byte> *, engine::imagegraph::Limits::MaximumNodes + 2> sources{};
+		size_t sourceCount = 0;
+		const auto chargeSource = [&](const SourceSnapshot &source) {
+			if (!source) return true;
+			if (source->empty() || source->capacity() > engine::bake::PxcxLimits::MaximumArchiveBytes)
+				return false;
+			if (std::find(sources.begin(), sources.begin() + sourceCount, source.get()) !=
+				sources.begin() + sourceCount)
+				return true;
+			if (sourceCount == sources.size() || source->capacity() > remaining) return false;
+			remaining -= source->capacity();
+			sources[sourceCount++] = source.get();
+			return true;
+		};
+		const auto charge = [&](const Snapshot &entry) {
+			if (entry.Text.size() > remaining) return false;
+			remaining -= entry.Text.size();
+			return chargeSource(entry.Source ? entry.Source : baseline);
+		};
+		if (!chargeSource(current)) return false;
+		for (const auto &entry : undo)
+			if (!charge(entry)) return false;
+		for (const auto &entry : redo)
+			if (!charge(entry)) return false;
+		return !extra || charge(*extra);
+	}
+
+	void ImageGraphHistory::Record(const Document &before, const Document &after) {
 		if (before == after) return;
-		for (const std::string &entry : RedoText)
-			RetainedBytes -= entry.size();
-		RedoText.clear();
-		if (Capacity == 0 || ByteCapacity == 0) {
-			Clear();
+		const auto drop = [&] {
+			UndoSnapshots.clear();
+			RedoSnapshots.clear();
+		};
+		if (!Capacity || !ByteCapacity) {
+			drop();
 			return;
 		}
-		std::string snapshot = engine::imagegraph::Write(before);
-		if (snapshot.size() > ByteCapacity) {
-			Clear();
-			return;
+		// grug legacy Record stores before only. restoring an oversized after may still refuse.
+		Snapshot snapshot{engine::imagegraph::Write(before), CurrentSource};
+		size_t discard = UndoSnapshots.size() >= Capacity ? UndoSnapshots.size() - Capacity + 1 : 0;
+		while (!Fits(std::span(UndoSnapshots).subspan(discard), {}, CurrentSource, &snapshot)) {
+			if (discard == UndoSnapshots.size()) {
+				drop();
+				return;
+			}
+			++discard;
 		}
-		RetainedBytes += snapshot.size();
-		UndoText.push_back(std::move(snapshot));
-		while (UndoText.size() + RedoText.size() > Capacity || RetainedBytes > ByteCapacity) {
-			RetainedBytes -= UndoText.front().size();
-			UndoText.erase(UndoText.begin());
-		}
+		UndoSnapshots.reserve(UndoSnapshots.size() + 1);
+		RedoSnapshots.clear();
+		UndoSnapshots.erase(UndoSnapshots.begin(), UndoSnapshots.begin() + discard);
+		UndoSnapshots.push_back(std::move(snapshot));
 	}
 
 	bool ImageGraphHistory::TryRecord(const Document &before, const Document &after) {
-		return TryRecord(before, after, {});
+		return TryRecord(before, after, Admission{});
 	}
 	bool
 	ImageGraphHistory::TryRecord(const Document &before, const Document &after, const Admission &admit) try {
-		if (before == after) return true;
+		const SourceAdmission sourceAdmission =
+			admit ? SourceAdmission{[&](const Document &old,
+										const Document &changed,
+										const SourceSnapshot &,
+										const SourceSnapshot &) { return admit(old, changed); }}
+				  : SourceAdmission{};
+		return TryRecord(before, after, CurrentSource, CurrentSource, sourceAdmission);
+	} catch (const std::bad_alloc &) {
+		return false;
+	}
+
+	bool ImageGraphHistory::TryRecord(
+		const Document &before,
+		const Document &after,
+		const SourceSnapshot &beforeSource,
+		const SourceSnapshot &afterSource,
+		const SourceAdmission &admit
+	) try {
+		const auto sourceFits = [&](const SourceSnapshot &source) {
+			return !source || (!source->empty() && source->capacity() <= ByteCapacity &&
+							   source->capacity() <= engine::bake::PxcxLimits::MaximumArchiveBytes);
+		};
+		if (!sourceFits(beforeSource) || !sourceFits(afterSource)) return false;
+		const auto sameSource = [](const SourceSnapshot &a, const SourceSnapshot &b) {
+			return a == b || (a && b && *a == *b);
+		};
+		const bool initializeSource =
+			!CurrentSource && beforeSource &&
+			std::none_of(
+				UndoSnapshots.begin(),
+				UndoSnapshots.end(),
+				[](const auto &entry) { return bool(entry.Source); }
+			) &&
+			std::none_of(RedoSnapshots.begin(), RedoSnapshots.end(), [](const auto &entry) {
+				return bool(entry.Source);
+			});
+		if (!initializeSource && !sameSource(CurrentSource, beforeSource)) return false;
+		if (before == after && sameSource(beforeSource, afterSource)) return true;
 		if (!Capacity || !ByteCapacity) return false;
-		std::string snapshot = engine::imagegraph::Write(before);
-		if (snapshot.size() > ByteCapacity) return false;
-		const size_t afterBytes = engine::imagegraph::Write(after).size();
-		if (afterBytes > ByteCapacity) return false;
-		UndoText.reserve(UndoText.size() + 1);
-		if (admit && !admit(before, after)) return false;
-		static_assert(std::is_nothrow_move_assignable_v<std::string>);
-		static_assert(std::is_nothrow_move_constructible_v<std::string>);
-		for (const auto &entry : RedoText)
-			RetainedBytes -= entry.size();
-		RedoText.clear();
-		const size_t transitionBytes = std::max(snapshot.size(), afterBytes);
-		while (!UndoText.empty() &&
-			   (UndoText.size() >= Capacity || RetainedBytes > ByteCapacity - transitionBytes)) {
-			RetainedBytes -= UndoText.front().size();
-			UndoText.erase(UndoText.begin());
+		Snapshot snapshot{engine::imagegraph::Write(before), beforeSource};
+		const std::string afterText = engine::imagegraph::Write(after);
+		if (snapshot.Text.empty() || afterText.empty() || snapshot.Text.size() > ByteCapacity ||
+			afterText.size() > ByteCapacity)
+			return false;
+		const auto baseline = initializeSource ? beforeSource : SourceSnapshot{};
+		const size_t extraBytes =
+			afterText.size() > snapshot.Text.size() ? afterText.size() - snapshot.Text.size() : 0;
+		size_t discard = UndoSnapshots.size() >= Capacity ? UndoSnapshots.size() - Capacity + 1 : 0;
+		while (
+			!Fits(std::span(UndoSnapshots).subspan(discard), {}, afterSource, &snapshot, baseline, extraBytes)
+		) {
+			if (discard == UndoSnapshots.size()) return false;
+			++discard;
 		}
-		RetainedBytes += snapshot.size();
-		UndoText.push_back(std::move(snapshot));
+		UndoSnapshots.reserve(UndoSnapshots.size() + 1);
+		if (admit && !admit(before, after, beforeSource, afterSource)) return false;
+		// grug no fallible work follows admission. source and native history become one transition.
+		static_assert(std::is_nothrow_move_constructible_v<Snapshot>);
+		static_assert(std::is_nothrow_move_assignable_v<Snapshot>);
+		static_assert(std::is_nothrow_copy_assignable_v<SourceSnapshot>);
+		RedoSnapshots.clear();
+		UndoSnapshots.erase(UndoSnapshots.begin(), UndoSnapshots.begin() + discard);
+		if (initializeSource)
+			for (auto &entry : UndoSnapshots)
+				entry.Source = beforeSource;
+		UndoSnapshots.push_back(std::move(snapshot));
+		CurrentSource = afterSource;
 		return true;
 	} catch (const std::bad_alloc &) {
 		return false;
 	}
 
 	bool ImageGraphHistory::Undo(Document &document) {
-		return Restore(document, false, {});
+		return Restore(document, false, SourceAdmission{});
 	}
 	bool ImageGraphHistory::Redo(Document &document) {
-		return Restore(document, true, {});
+		return Restore(document, true, SourceAdmission{});
 	}
-	bool ImageGraphHistory::Undo(Document &document, const Admission &admit) {
+	bool ImageGraphHistory::Undo(Document &document, const Admission &admit) try {
+		return Undo(
+			document,
+			SourceAdmission{[&](const Document &before,
+								const Document &after,
+								const SourceSnapshot &,
+								const SourceSnapshot &) { return !admit || admit(before, after); }}
+		);
+	} catch (const std::bad_alloc &) {
+		return false;
+	}
+	bool ImageGraphHistory::Redo(Document &document, const Admission &admit) try {
+		return Redo(
+			document,
+			SourceAdmission{[&](const Document &before,
+								const Document &after,
+								const SourceSnapshot &,
+								const SourceSnapshot &) { return !admit || admit(before, after); }}
+		);
+	} catch (const std::bad_alloc &) {
+		return false;
+	}
+	bool ImageGraphHistory::Undo(Document &document, const SourceAdmission &admit) {
 		return Restore(document, false, admit);
 	}
-	bool ImageGraphHistory::Redo(Document &document, const Admission &admit) {
+	bool ImageGraphHistory::Redo(Document &document, const SourceAdmission &admit) {
 		return Restore(document, true, admit);
 	}
-	bool ImageGraphHistory::Restore(Document &document, bool redo, const Admission &admit) try {
-		auto &source = redo ? RedoText : UndoText;
-		auto &destination = redo ? UndoText : RedoText;
+	bool ImageGraphHistory::Restore(Document &document, bool redo, const SourceAdmission &admit) try {
+		auto &source = redo ? RedoSnapshots : UndoSnapshots;
+		auto &destination = redo ? UndoSnapshots : RedoSnapshots;
 		if (source.empty()) return false;
-		std::string currentText = engine::imagegraph::Write(document);
-		const size_t replacedBytes = source.back().size();
-		if (currentText.size() > ByteCapacity - (RetainedBytes - replacedBytes)) return false;
+		Snapshot current{engine::imagegraph::Write(document), CurrentSource};
+		if (current.Text.empty()) return false;
+		const auto targetSource = source.back().Source;
+		if (!Fits(std::span(source).first(source.size() - 1), destination, targetSource, &current))
+			return false;
 		Document restored;
 		engine::imagegraph::Diagnostic diagnostic;
-		if (engine::imagegraph::Read(source.back(), restored, diagnostic) != engine::imagegraph::Status::Ok)
+		if (engine::imagegraph::Read(source.back().Text, restored, diagnostic) !=
+			engine::imagegraph::Status::Ok)
 			return false;
 		destination.reserve(destination.size() + 1);
-		if (admit && !admit(document, restored)) return false;
-		// grug all fallible work finished before the runtime admission publishes its candidate.
+		if (admit && !admit(document, restored, CurrentSource, targetSource)) return false;
 		static_assert(std::is_nothrow_move_assignable_v<Document>);
-		static_assert(std::is_nothrow_move_constructible_v<std::string>);
-		RetainedBytes = RetainedBytes - replacedBytes + currentText.size();
-		destination.push_back(std::move(currentText));
+		static_assert(std::is_nothrow_move_constructible_v<Snapshot>);
+		destination.push_back(std::move(current));
 		document = std::move(restored);
+		CurrentSource = targetSource;
 		source.pop_back();
 		return true;
 	} catch (const std::bad_alloc &) {
 		return false;
 	}
 
+	ImageGraphHistory::SourceSnapshot ImageGraphHistory::CurrentSourceBytes() const {
+		return CurrentSource;
+	}
 	void ImageGraphHistory::Clear() {
-		UndoText.clear();
-		RedoText.clear();
-		RetainedBytes = 0;
+		UndoSnapshots.clear();
+		RedoSnapshots.clear();
+		CurrentSource.reset();
 	}
-
 	bool ImageGraphHistory::CanUndo() const {
-		return !UndoText.empty();
+		return !UndoSnapshots.empty();
 	}
-
 	bool ImageGraphHistory::CanRedo() const {
-		return !RedoText.empty();
+		return !RedoSnapshots.empty();
 	}
 }

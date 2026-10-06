@@ -1,0 +1,65 @@
+{
+  "date": "2026-10-06",
+  "scope": "grug keep immutable authoritative PXC source bytes and native document history in one admitted transition",
+  "owned_files": {
+    "mono.studio/include/studio/ImageGraph.hpp": "0996ad105f07020acaaa34227e6a6eb586122faf5aab19896604ae5b6b2892cb",
+    "mono.studio/src/ImageGraph.cpp": "b29a3717e5a92ff8b03bcc64a31d2d745513b73c5f4251a3bd886467228813eb",
+    "mono.studio/tests/ImageGraphSourceHistory.cpp": "fc6cd561aad4810ca5a342cfa80f54a371a72c848bd3333825ccf1fdb6ab06d7"
+  },
+  "behavior": [
+    "paired source-aware admission receives both native documents and both immutable source epochs",
+    "accepted first source transition binds older native-only entries to the original source baseline",
+    "ordinary native edits share the current source allocation",
+    "source-only opaque edits remain undoable even when native documents are equal",
+    "stale baseline and quota refusal preserve history and current source before runtime admission",
+    "quota counts serialized native text and each retained source vector capacity once by pointer identity",
+    "legacy Record still retains the prior document when the new document exceeds its quota"
+  ],
+  "build": {
+    "preset": "release-tests",
+    "targets": 17,
+    "final_exit_code": 0,
+    "final_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-history-build2.log",
+    "first_exit_code": 0,
+    "first_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-history-build1.log",
+    "fixture_initializer_warning": "grug repaired missing Context initializer warning before final build"
+  },
+  "validation": {
+    "checks": 20,
+    "all_exit_codes_zero": true,
+    "cpp_cases": 5166,
+    "cpp_assertions": 2002691,
+    "new_cases": 5,
+    "new_assertions": 129,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup": true,
+    "gpu": "approved SDL offscreen Vulkan suites included",
+    "final_results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-history-batch2-results.json",
+    "failed_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-history-batch1-issues.json"
+  },
+  "proof": [
+    "archive-backed append, older native-only edit and later native edit survive all undo/redo source admissions",
+    "opaque root and animation-region source edits restore exact byte handles",
+    "refused record and undo callbacks preserve source and both history stacks",
+    "shared-source exact quota retains two native undo steps across three edits",
+    "bounded third epoch evicts the oldest source transition; undo restores the retained prior epoch"
+  ],
+  "freeze": {
+    "source_paths": 79,
+    "unchanged_peer_files": 43,
+    "test_binary_hashes": "13 unchanged",
+    "child_binary_hashes": "assetc and imagegraph unchanged",
+    "before": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-history-source-before-build2.json",
+    "after": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-history-source-after-batch2.json"
+  },
+  "review": "Sol read review found no confirmed blocker in final history implementation and boundary tests",
+  "limits": [
+    "grug did not capture a performance profile; no speed claim",
+    "quota covers retained serialized text and immutable archive payload, not full process heap or transient codec workspace",
+    "TimelineRegions.hpp optional maybe-uninitialized warnings appeared in first build outside owned history edits",
+    "full host constructor lifecycle, source restore publication and Studio append action remain open",
+    "headed Studio, licensed reference comparison, dev/server/ci builds and sanitizers not run"
+  ],
+  "remaining": "full host append and original33-item Composer goal remain active"
+}

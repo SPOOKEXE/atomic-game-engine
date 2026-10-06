@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <nodegraph/Graph.hpp>
 #include <optional>
 #include <span>
@@ -663,9 +664,8 @@ namespace studio {
 	std::string PxcxInputPortId(uint32_t inputIndex);
 	std::string PxcxOutputPortId(uint32_t outputIndex);
 
-	// A whole-document undo log bounded by both transition count and serialized
-	// bytes. The text grammar is canonical, so every edit path restores the same
-	// authored fields.
+	// grug whole-document undo bounds transition count, native text and unique source vector capacity.
+	// canonical native text and immutable source bytes restore the same authoring epoch.
 	class ImageGraphHistory {
 	  public:
 		// @param capacity Maximum undo and redo transitions retained together.
@@ -697,6 +697,28 @@ namespace studio {
 		);
 		bool Undo(engine::imagegraph::Document &document, const Admission &admit);
 		bool Redo(engine::imagegraph::Document &document, const Admission &admit);
+		// grug keep immutable authoritative source bytes beside native history snapshots.
+		using SourceSnapshot = std::shared_ptr<const std::vector<std::byte>>;
+		// caller stages source/runtime together; refusal must preserve all external state.
+		using SourceAdmission = std::function<bool(
+			const engine::imagegraph::Document &,
+			const engine::imagegraph::Document &,
+			const SourceSnapshot &,
+			const SourceSnapshot &
+		)>;
+		// grug bind old native-only entries to beforeSource only after admission succeeds.
+		// later ordinary edits retain the current source epoch without copying archive bytes.
+		bool TryRecord(
+			const engine::imagegraph::Document &before,
+			const engine::imagegraph::Document &after,
+			const SourceSnapshot &beforeSource,
+			const SourceSnapshot &afterSource,
+			const SourceAdmission &admit = {}
+		);
+		bool Undo(engine::imagegraph::Document &document, const SourceAdmission &admit);
+		bool Redo(engine::imagegraph::Document &document, const SourceAdmission &admit);
+		// current immutable authoring baseline; source-aware hosts use SourceAdmission on restore.
+		SourceSnapshot CurrentSourceBytes() const;
 		void Clear();
 		bool CanUndo() const;
 		bool CanRedo() const;
@@ -704,10 +726,22 @@ namespace studio {
 	  private:
 		size_t Capacity = 128;
 		size_t ByteCapacity = 16 * 1024 * 1024;
-		size_t RetainedBytes = 0;
-		bool Restore(engine::imagegraph::Document &document, bool redo, const Admission &admit);
-		std::vector<std::string> UndoText;
-		std::vector<std::string> RedoText;
+		struct Snapshot {
+			std::string Text;
+			SourceSnapshot Source;
+		};
+		bool Fits(
+			std::span<const Snapshot> undo,
+			std::span<const Snapshot> redo,
+			const SourceSnapshot &current,
+			const Snapshot *extra,
+			const SourceSnapshot &baseline = {},
+			size_t extraTextBytes = 0
+		) const;
+		bool Restore(engine::imagegraph::Document &document, bool redo, const SourceAdmission &admit);
+		SourceSnapshot CurrentSource;
+		std::vector<Snapshot> UndoSnapshots;
+		std::vector<Snapshot> RedoSnapshots;
 	};
 
 }
