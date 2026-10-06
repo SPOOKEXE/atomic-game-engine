@@ -12,6 +12,7 @@
 
 TEST_SUITE_ID("studio.imagegraph.append_groups")
 TEST_DEPENDS("engine.imagegraph.group_replay")
+TEST_DEPENDS("engine.imagegraph.group_callback_document")
 TEST_DEPENDS("engine.imagegraphio.pxcxappend")
 TEST_DEPENDS("studio.imagegraph.group_host")
 
@@ -264,11 +265,60 @@ TEST_CASE(
 	opaque.Project.Graph.Nodes.push_back({"future", "Vendor_Future", {}, {}, {}});
 	opaque.Project.GroupPrebinding = opaque.Project.Graph;
 	opaque.Nodes.push_back({"future", "future", false});
-	CHECK_FALSE(candidate.Prepare(opaque, live, previous, 3, clock, diagnostic));
-	CHECK_FALSE(diagnostic.Message.empty());
-	CHECK(candidate.Authored == priorDocument);
-	CHECK(candidate.Host.Revision == priorRevision);
-	CHECK(candidate.Host.Replay.ObservationRevision() == priorObservation);
+	REQUIRE(candidate.Prepare(opaque, live, previous, 3, clock, diagnostic));
+	const auto future =
+		std::find_if(candidate.Authored.Nodes.begin(), candidate.Authored.Nodes.end(), [](const auto &node) {
+			return node.Id == "future";
+		});
+	REQUIRE(future != candidate.Authored.Nodes.end());
+	CHECK(future->Type == "Vendor_Future");
+	const auto opaqueDocument = candidate.Authored;
+	const auto opaqueRevision = candidate.Host.Revision;
+	const auto opaqueObservation = candidate.Host.Replay.ObservationRevision();
+	for (const bool viaExpression : {false, true}) {
+		INFO("opaque dependency viaExpression=" << viaExpression);
+		auto dependency = IncomingGroup(live);
+		Node futureNode{"future", "Vendor_Future", {}, {}, {}};
+		futureNode.GroupId = "new-group";
+		futureNode.SourceInternalName = "future";
+		futureNode.DynamicOutputs = {{"value", ValueType::Any}};
+		dependency.Project.Graph.Nodes.push_back(std::move(futureNode));
+		if (viaExpression) {
+			auto input = std::find_if(
+				dependency.Project.Graph.Nodes.begin(),
+				dependency.Project.Graph.Nodes.end(),
+				[](const auto &node) { return node.Id == "new-input"; }
+			);
+			REQUIRE(input != dependency.Project.Graph.Nodes.end());
+			input->SourceInputExpressions = {{"input_type", "future.outputs.value", true}};
+		} else {
+			dependency.Project.Graph.Links.push_back({"future", "value", "new-input", "input_type"});
+		}
+		dependency.Project.GroupPrebinding = dependency.Project.Graph;
+		dependency.Nodes.push_back({"future", "future", false});
+		CHECK_FALSE(candidate.Prepare(dependency, live, previous, 4, clock, diagnostic));
+		CHECK(diagnostic.Code == Status::UnsupportedExecution);
+		CHECK(diagnostic.NodeId == "future");
+		CHECK(candidate.Authored == opaqueDocument);
+		CHECK(candidate.Host.Revision == opaqueRevision);
+		CHECK(candidate.Host.Replay.ObservationRevision() == opaqueObservation);
+	}
+	auto junction = IncomingGroup(live);
+	Node futureNode{"future", "Vendor_Future", "new-group", {}, {}};
+	futureNode.SourceInternalName = "future";
+	futureNode.DynamicOutputs = {{"value", ValueType::Any}};
+	junction.Project.Graph.Nodes.push_back(std::move(futureNode));
+	junction.Project.Graph.Junctions.push_back({"opaque-route", "new-group", ValueType::Any, std::nullopt});
+	junction.Project.Graph.Links.push_back({"future", "value", "opaque-route", "value"});
+	junction.Project.Graph.Links.push_back({"opaque-route", "value", "new-input", "input_type"});
+	junction.Project.GroupPrebinding = junction.Project.Graph;
+	junction.Nodes.push_back({"future", "future", false});
+	CHECK_FALSE(candidate.Prepare(junction, live, previous, 4, clock, diagnostic));
+	CHECK(diagnostic.Code == Status::UnsupportedExecution);
+	CHECK(diagnostic.NodeId == "future");
+	CHECK(candidate.Authored == opaqueDocument);
+	CHECK(candidate.Host.Revision == opaqueRevision);
+	CHECK(candidate.Host.Replay.ObservationRevision() == opaqueObservation);
 }
 
 TEST_CASE(

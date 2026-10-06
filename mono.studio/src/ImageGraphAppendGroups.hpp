@@ -14,7 +14,7 @@ namespace studio::detail {
 	// caller still owns source/cache/history admission and publishes this candidate after those accept.
 	// maximumBytes excludes caller-owned archives and import metadata; grug counts documents and replay here.
 	// caller projects unsaved edits into the source archive before creating append.
-	// whole callback document must compile; opaque callback-cone selection still belongs in compiler.
+	// compiler sees opaque callback dependencies; only a required opaque producer refuses.
 	struct ImageGraphAppendGroups {
 		engine::imagegraph::Document Authored;
 		ImageGraphGroupHost Host;
@@ -226,6 +226,15 @@ namespace studio::detail {
 				*actualMerged > reservedCopies - *actualCallbacks)
 				return fail(Status::LimitExceeded, "Studio append patched documents exceed reserved payload");
 			remaining += reservedCopies - *actualCallbacks - *actualMerged;
+			if (PrepareGroupCallbackDocument(callbacks, callbacks, diagnostic, remaining) != Status::Ok)
+				return false;
+			const auto opaqueCallbacks = DocumentRetainedPayloadBytes(callbacks);
+			if (!opaqueCallbacks || *opaqueCallbacks >= remaining + *actualCallbacks)
+				return fail(
+					Status::LimitExceeded, "Studio append opaque callback scratch exceeds payload bounds"
+				);
+			remaining += *actualCallbacks;
+			remaining -= *opaqueCallbacks;
 			GroupReplayState rebound, loaded, bound, projected;
 			if (RebindGroupReplay(callbacks, previous.Replay, revision, rebound, diagnostic, remaining) !=
 				Status::Ok)

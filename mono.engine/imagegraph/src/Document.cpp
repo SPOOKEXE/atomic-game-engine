@@ -2,6 +2,7 @@
 #include "AudioPayload.hpp"
 #include "CacheGroupReplayClone.hpp"
 #include "EvaluationAllocator.hpp"
+#include "GroupCallbackOpaque.hpp"
 #include "GroupInputDepth.hpp"
 #include "GroupReplayInternal.hpp"
 #include "HostCaptureReceipts.hpp"
@@ -151,6 +152,12 @@ namespace engine::imagegraph {
 			return found && found->Interpolation == "source" && found->Kind == KeyframeKind::Normal &&
 				   !found->SourceDriver && !found->SineDriver && EmptySourceScalarArray(found->Data);
 		}
+		constexpr std::array<PropertySchema, 1> GROUP_CALLBACK_OPAQUE_PROPERTIES{
+			{{"source_type", ValueType::Text}}
+		};
+		const NodeSchema GROUP_CALLBACK_OPAQUE_SCHEMA{
+			detail::GroupCallbackOpaqueType, {}, GROUP_CALLBACK_OPAQUE_PROPERTIES
+		};
 		constexpr std::array<PortSchema, 1> CAPTURED_IMAGE_PORTS{
 			{{"image", ValueType::Image, PortDirection::Output}}
 		};
@@ -1030,6 +1037,10 @@ namespace engine::imagegraph {
 		constexpr std::string_view BYPASS_SUFFIX = ".bypass";
 
 		std::optional<ValueType> FindPortType(const Node &node, std::string_view id, PortDirection side) {
+			// grug PCX-only reads also need a dependency; undeclared ports must not hide an opaque producer.
+			if (detail::IsGroupCallbackOpaque(node) && !id.empty() && id.size() <= Limits::MaximumTextBytes &&
+				(side == PortDirection::Input || side == PortDirection::Output))
+				return ValueType::Any;
 			if (const PortSchema *port = FindPort(node.Type, id, side)) {
 				if (side == PortDirection::Output &&
 					(node.Type == "pc.rgb_channel" || node.Type == "pc.hsv_channel")) {
@@ -2564,6 +2575,7 @@ namespace engine::imagegraph {
 	} // namespace
 
 	const NodeSchema *FindSchema(std::string_view type) {
+		if (type == GROUP_CALLBACK_OPAQUE_SCHEMA.Type) return &GROUP_CALLBACK_OPAQUE_SCHEMA;
 		if (type == CAPTURED_IMAGE_SCHEMA.Type) return &CAPTURED_IMAGE_SCHEMA;
 		if (const NodeSchema *schema = detail::FindValueNodeSchema(type)) return schema;
 		if (type == SOLID_SCHEMA.Type) return &SOLID_SCHEMA;
@@ -7282,7 +7294,10 @@ namespace engine::imagegraph {
 			const bool catalogueLink =
 				(from != nodeIndices.end() && FindCatalogueEntry(document.Nodes[from->second].Type)) ||
 				(to != nodeIndices.end() && FindCatalogueEntry(document.Nodes[to->second].Type));
-			if (sourceType != targetType && !arrayElement && !heightBlendArrayInput &&
+			const bool opaqueCallbackLink =
+				(from != nodeIndices.end() && detail::IsGroupCallbackOpaque(document.Nodes[from->second])) ||
+				(to != nodeIndices.end() && detail::IsGroupCallbackOpaque(document.Nodes[to->second]));
+			if (sourceType != targetType && !opaqueCallbackLink && !arrayElement && !heightBlendArrayInput &&
 				!heightBlendArrayOutput && !catalogueArrayInput && !catalogueAtlasArrayInput &&
 				!catalogueStrandArrayInput && !sourceMaterialInput && !heightmapColourArrayInput &&
 				!sourceFontInput &&
@@ -11412,6 +11427,17 @@ namespace engine::imagegraph {
 			if (index == document.Nodes.size()) {
 				if (!unfinished) break;
 				SetDiagnostic(diagnostic, Status::Cycle, "computed PCX dependencies form a cycle");
+				return diagnostic.Code;
+			}
+			// grug refuse before frozen replay, input capture or placeholder values can stand in for source
+			// behavior.
+			if (detail::IsGroupCallbackOpaque(document.Nodes[index])) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedExecution,
+					"Group callback requires an opaque source producer",
+					document.Nodes[index].Id
+				);
 				return diagnostic.Code;
 			}
 			if (mutableDispatch) completed[index] = 1;

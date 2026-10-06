@@ -10,6 +10,15 @@ namespace engine::imagegraph {
 	namespace detail {
 		struct GroupReplayAccess;
 	}
+	// grug map unknown nodes only in callback scratch, preserving names and dependency routes.
+	// selected unknown producers refuse execution; caller publishes its original authored document.
+	// failure preserves result, including when document and result are the same object.
+	Status PrepareGroupCallbackDocument(
+		const Document &document,
+		Document &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
 	enum class GroupRefreshReason { Load, Edit, Connect, ParentEdit, Restore };
 	// One explicit source refresh callback, in caller event order. Sampling alone
 	// is not an event.
