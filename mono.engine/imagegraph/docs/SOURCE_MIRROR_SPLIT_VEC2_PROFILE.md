@@ -94,6 +94,13 @@ source pair resizing; Vec2 keeps long rows and pads short depth-two rows.
 projection admits final row storage before copying and refuses image-array
 shapes whose conversion is unrepresented.
 
+the sampler's document-only route compiles a local plan under the caller's live
+byte ledger and keeps it charged throughout sampling. that freshly compiled
+immutable document needs no second compile inside evaluation. supplied plans
+still undergo normal validation. compile or sampling refusal preserves the
+prior result and its reservation. the caller admits its retained document and
+prior result before the call.
+
 source `self` and `node_values` read the host's retained input map. this sampler
 requires an explicit observed map and matching expression owner when either is
 used. it does not evaluate sibling getters to invent a fresh map. borrowed map,
@@ -114,6 +121,9 @@ before initialization can create independent arrays later. axis storage can
 therefore have a different owner from the combined animator. the current
 shared-writer profile still needs that lazy ownership and default provenance
 before separate/combine controls can cover those constructor cases.
+the retained state must distinguish an uninitialized array from locally owned
+axes and a shared axis identity. looking only at the final document cannot
+recover whether group binding happened before or after axis creation.
 
 separate/combine controls and missing shared-axis constructor storage are still unfinished.
 this flag preserves

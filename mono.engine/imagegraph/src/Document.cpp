@@ -16582,6 +16582,138 @@ namespace engine::imagegraph {
 		return Status::Ok;
 	}
 
+	namespace detail {
+		static Status EvaluateSourceInputImpl(
+			const Document &document,
+			const Plan &plan,
+			std::string_view nodeId,
+			std::string_view port,
+			const EvaluationRequest &request,
+			EvaluationBudget &budget,
+			Value &result,
+			AllocationReservation &resultCharge,
+			Diagnostic &diagnostic,
+			bool planAlreadyValidated,
+			std::optional<std::span<const AuthoredValue>> observedInputs,
+			std::string_view observedInputOwner
+		) try {
+			ENGINE_PROFILE("imagegraph.source_input_getter");
+			const auto fail = [&](Status code, std::string_view message) {
+				SetDiagnostic(
+					diagnostic,
+					code,
+					std::string(message),
+					nodeId.size() <= Limits::MaximumTextBytes ? nodeId : std::string_view{},
+					port.size() <= Limits::MaximumTextBytes ? port : std::string_view{}
+				);
+				return code;
+			};
+			if (document.Nodes.size() > Limits::MaximumNodes || nodeId.size() > Limits::MaximumTextBytes ||
+				port.size() > Limits::MaximumTextBytes)
+				return fail(Status::LimitExceeded, "source input target exceeds text bounds");
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &candidate) {
+					return candidate.Id == nodeId;
+				});
+			if (node == document.Nodes.end()) return fail(Status::UnknownNode, "source input node is absent");
+			if (node->DynamicInputs.size() > MaximumDynamicInputsForNode(*node))
+				return fail(Status::LimitExceeded, "source input declaration count exceeds bounds");
+			if (!SourceSeparatedVec2Input(*node, port))
+				return fail(Status::UnknownPort, "source input is not a declared two-axis getter");
+			const auto requestStatus = ValidateEvaluationRequest(request, diagnostic);
+			if (requestStatus != Status::Ok) return requestStatus;
+			uint64_t observedBytes = 0, mapWork = 0;
+			if (observedInputs) {
+				if (observedInputs->size() > Limits::MaximumKeyframes)
+					return fail(Status::LimitExceeded, "observed input map exceeds port bounds");
+				for (size_t i = 0; i < observedInputs->size(); ++i) {
+					const auto &input = (*observedInputs)[i];
+					const auto bytes = ValueClonePayloadBytes(input.Data);
+					if (input.Port.empty() || input.Port.size() > Limits::MaximumTextBytes || !bytes ||
+						!AddBytes(
+							observedBytes,
+							detail::RetainedPayloadBytes(input.Data) + sizeof(AuthoredValue) +
+								input.Port.capacity()
+						))
+						return fail(Status::LimitExceeded, "observed input map payload exceeds bounds");
+					for (size_t j = 0; j < i; ++j) {
+						const uint64_t comparison =
+							1 + std::min((*observedInputs)[j].Port.size(), input.Port.size());
+						if (comparison > 64'000'000 - mapWork)
+							return fail(
+								Status::LimitExceeded, "observed input map lookup exceeds work bounds"
+							);
+						mapWork += comparison;
+						if ((*observedInputs)[j].Port == input.Port)
+							return fail(Status::InvalidValue, "observed input map has duplicate ports");
+					}
+				}
+			}
+			auto observedShadow = budget.Reserve(observedBytes);
+			if (!observedShadow)
+				return fail(Status::LimitExceeded, "observed input map overlap exceeds budget");
+			AllocationReservation charge;
+			std::vector<EvaluationInputValue> values;
+			std::vector<EvaluationInputImage> images;
+			std::vector<SnapshotImageArray> arrays;
+			std::optional<SurfaceFormat> surfacePolicy;
+			NodeInputCapture capture{
+				nodeId,
+				&values,
+				&images,
+				&surfacePolicy,
+				&charge,
+				&arrays,
+				nullptr,
+				false,
+				port,
+				observedInputs,
+				observedInputOwner.empty() ? nodeId : observedInputOwner
+			};
+			NodeResult ignored;
+			const auto status = EvaluateGraph(
+				document,
+				plan,
+				{},
+				request,
+				ignored,
+				diagnostic,
+				budget,
+				charge,
+				nullptr,
+				nullptr,
+				&capture,
+				nullptr,
+				nodeId,
+				{},
+				planAlreadyValidated
+			);
+			if (status != Status::Ok) return status;
+			const auto found = std::find_if(values.begin(), values.end(), [&](const auto &input) {
+				return input.Port == port;
+			});
+			if (found == values.end())
+				return fail(Status::UnsupportedExecution, "source getter has no represented value");
+			const auto retained = sizeof(Value) + detail::RetainedPayloadBytes(found->Data);
+			if (retained > charge.Bytes())
+				return fail(Status::LimitExceeded, "source getter result exceeds its admitted payload");
+			static_assert(std::is_nothrow_move_assignable_v<Value>);
+			result = std::move(found->Data);
+			std::vector<EvaluationInputValue>{}.swap(values);
+			std::vector<EvaluationInputImage>{}.swap(images);
+			std::vector<SnapshotImageArray>{}.swap(arrays);
+			if (!charge.Resize(retained)) std::terminate();
+			resultCharge = std::move(charge);
+			diagnostic = {};
+			return Status::Ok;
+		} catch (const std::bad_alloc &) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "source input allocation was refused", nodeId, port
+			);
+			return diagnostic.Code;
+		}
+	}
+
 	Status detail::EvaluateSourceInput(
 		const Document &document,
 		const Plan &plan,
@@ -16594,113 +16726,53 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic,
 		std::optional<std::span<const AuthoredValue>> observedInputs,
 		std::string_view observedInputOwner
-	) try {
-		ENGINE_PROFILE("imagegraph.source_input_getter");
-		const auto fail = [&](Status code, std::string_view message) {
-			SetDiagnostic(
-				diagnostic,
-				code,
-				std::string(message),
-				nodeId.size() <= Limits::MaximumTextBytes ? nodeId : std::string_view{},
-				port.size() <= Limits::MaximumTextBytes ? port : std::string_view{}
-			);
-			return code;
-		};
-		if (document.Nodes.size() > Limits::MaximumNodes || nodeId.size() > Limits::MaximumTextBytes ||
-			port.size() > Limits::MaximumTextBytes)
-			return fail(Status::LimitExceeded, "source input target exceeds text bounds");
-		const auto node =
-			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &candidate) {
-				return candidate.Id == nodeId;
-			});
-		if (node == document.Nodes.end()) return fail(Status::UnknownNode, "source input node is absent");
-		if (node->DynamicInputs.size() > MaximumDynamicInputsForNode(*node))
-			return fail(Status::LimitExceeded, "source input declaration count exceeds bounds");
-		if (!SourceSeparatedVec2Input(*node, port))
-			return fail(Status::UnknownPort, "source input is not a declared two-axis getter");
-		const auto requestStatus = ValidateEvaluationRequest(request, diagnostic);
-		if (requestStatus != Status::Ok) return requestStatus;
-		uint64_t observedBytes = 0, mapWork = 0;
-		if (observedInputs) {
-			if (observedInputs->size() > Limits::MaximumKeyframes)
-				return fail(Status::LimitExceeded, "observed input map exceeds port bounds");
-			for (size_t i = 0; i < observedInputs->size(); ++i) {
-				const auto &input = (*observedInputs)[i];
-				const auto bytes = ValueClonePayloadBytes(input.Data);
-				if (input.Port.empty() || input.Port.size() > Limits::MaximumTextBytes || !bytes ||
-					!AddBytes(
-						observedBytes,
-						detail::RetainedPayloadBytes(input.Data) + sizeof(AuthoredValue) +
-							input.Port.capacity()
-					))
-					return fail(Status::LimitExceeded, "observed input map payload exceeds bounds");
-				for (size_t j = 0; j < i; ++j) {
-					const uint64_t comparison =
-						1 + std::min((*observedInputs)[j].Port.size(), input.Port.size());
-					if (comparison > 64'000'000 - mapWork)
-						return fail(Status::LimitExceeded, "observed input map lookup exceeds work bounds");
-					mapWork += comparison;
-					if ((*observedInputs)[j].Port == input.Port)
-						return fail(Status::InvalidValue, "observed input map has duplicate ports");
-				}
-			}
-		}
-		auto observedShadow = budget.Reserve(observedBytes);
-		if (!observedShadow) return fail(Status::LimitExceeded, "observed input map overlap exceeds budget");
-		AllocationReservation charge;
-		std::vector<EvaluationInputValue> values;
-		std::vector<EvaluationInputImage> images;
-		std::vector<SnapshotImageArray> arrays;
-		std::optional<SurfaceFormat> surfacePolicy;
-		NodeInputCapture capture{
-			nodeId,
-			&values,
-			&images,
-			&surfacePolicy,
-			&charge,
-			&arrays,
-			nullptr,
-			false,
-			port,
-			observedInputs,
-			observedInputOwner.empty() ? nodeId : observedInputOwner
-		};
-		NodeResult ignored;
-		const auto status = EvaluateGraph(
+	) {
+		return EvaluateSourceInputImpl(
 			document,
 			plan,
-			{},
+			nodeId,
+			port,
 			request,
-			ignored,
-			diagnostic,
 			budget,
-			charge,
-			nullptr,
-			nullptr,
-			&capture,
-			nullptr,
-			nodeId
+			result,
+			resultCharge,
+			diagnostic,
+			false,
+			observedInputs,
+			observedInputOwner
 		);
-		if (status != Status::Ok) return status;
-		const auto found =
-			std::find_if(values.begin(), values.end(), [&](const auto &input) { return input.Port == port; });
-		if (found == values.end())
-			return fail(Status::UnsupportedExecution, "source getter has no represented value");
-		const auto retained = sizeof(Value) + detail::RetainedPayloadBytes(found->Data);
-		if (retained > charge.Bytes())
-			return fail(Status::LimitExceeded, "source getter result exceeds its admitted payload");
-		static_assert(std::is_nothrow_move_assignable_v<Value>);
-		result = std::move(found->Data);
-		std::vector<EvaluationInputValue>{}.swap(values);
-		std::vector<EvaluationInputImage>{}.swap(images);
-		std::vector<SnapshotImageArray>{}.swap(arrays);
-		if (!charge.Resize(retained)) std::terminate();
-		resultCharge = std::move(charge);
-		diagnostic = {};
-		return Status::Ok;
-	} catch (const std::bad_alloc &) {
-		SetDiagnostic(diagnostic, Status::LimitExceeded, "source input allocation was refused", nodeId, port);
-		return diagnostic.Code;
+	}
+
+	Status detail::EvaluateSourceInput(
+		const Document &document,
+		std::string_view nodeId,
+		std::string_view port,
+		const EvaluationRequest &request,
+		EvaluationBudget &budget,
+		Value &result,
+		AllocationReservation &resultCharge,
+		Diagnostic &diagnostic,
+		std::optional<std::span<const AuthoredValue>> observedInputs,
+		std::string_view observedInputOwner
+	) {
+		AllocationReservation planCharge;
+		Plan plan;
+		const auto compiled = CompileWithBudget(document, plan, diagnostic, budget, planCharge);
+		if (compiled != Status::Ok) return compiled;
+		return EvaluateSourceInputImpl(
+			document,
+			plan,
+			nodeId,
+			port,
+			request,
+			budget,
+			result,
+			resultCharge,
+			diagnostic,
+			true,
+			observedInputs,
+			observedInputOwner
+		);
 	}
 
 	Status EvaluateNodeInputs(

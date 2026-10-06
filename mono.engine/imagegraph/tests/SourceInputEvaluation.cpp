@@ -459,3 +459,121 @@ TEST_CASE(
 		CHECK(budget.Peak() == peak);
 	}
 }
+
+TEST_CASE(
+	"Plan-free source input evaluation compiles and samples under one atomic budget",
+	"[source_input][evaluation_budget][pcx]"
+) {
+	auto document = Getter();
+	document.Nodes.front().SourceInputExpressions = {{"position", "value * 2", true}};
+	EvaluationRequest request;
+	request.Tick = 3;
+	const auto documentBytes = DocumentRetainedPayloadBytes(document);
+	REQUIRE(documentBytes);
+	uint64_t peak = 0;
+	{
+		detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+		auto documentCharge = budget.Reserve(*documentBytes);
+		REQUIRE(documentCharge);
+		auto prior = budget.Reserve(sizeof(Value));
+		REQUIRE(prior);
+		detail::AllocationReservation charge = std::move(*prior);
+		Value result = Vector2{9, 8};
+		Diagnostic diagnostic;
+		REQUIRE(
+			detail::EvaluateSourceInput(
+				document, "get", "position", request, budget, result, charge, diagnostic
+			) == Status::Ok
+		);
+		CHECK(result == Value{Vector2{1, 0}});
+		peak = budget.Peak();
+	}
+	REQUIRE(peak > sizeof(Value));
+	{
+		detail::EvaluationBudget budget(peak - 1);
+		auto documentCharge = budget.Reserve(*documentBytes);
+		REQUIRE(documentCharge);
+		auto prior = budget.Reserve(sizeof(Value));
+		REQUIRE(prior);
+		detail::AllocationReservation charge = std::move(*prior);
+		Value result = Vector2{9, 8};
+		Diagnostic diagnostic;
+		CHECK(
+			detail::EvaluateSourceInput(
+				document, "get", "position", request, budget, result, charge, diagnostic
+			) == Status::LimitExceeded
+		);
+		CHECK(result == Value{Vector2{9, 8}});
+		CHECK(charge.Bytes() == sizeof(Value));
+		CHECK(budget.Used() == *documentBytes + sizeof(Value));
+	}
+	{
+		detail::EvaluationBudget budget(peak);
+		auto documentCharge = budget.Reserve(*documentBytes);
+		REQUIRE(documentCharge);
+		auto prior = budget.Reserve(sizeof(Value));
+		REQUIRE(prior);
+		detail::AllocationReservation charge = std::move(*prior);
+		Value result = Vector2{9, 8};
+		Diagnostic diagnostic;
+		REQUIRE(
+			detail::EvaluateSourceInput(
+				document, "get", "position", request, budget, result, charge, diagnostic
+			) == Status::Ok
+		);
+		CHECK(result == Value{Vector2{1, 0}});
+		CHECK(budget.Peak() == peak);
+	}
+
+	auto observedDocument = Getter();
+	observedDocument.Nodes.front().SourceInputExpressions = {{"position", "self.position", true}};
+	const std::array<AuthoredValue, 1> observed{{{"position", Vector2{.3, .7}}}};
+	detail::EvaluationBudget observedBudget(Limits::MaximumEvaluationBytes);
+	const auto observedBytes = DocumentRetainedPayloadBytes(observedDocument);
+	REQUIRE(observedBytes);
+	auto observedDocumentCharge = observedBudget.Reserve(*observedBytes);
+	REQUIRE(observedDocumentCharge);
+	detail::AllocationReservation observedCharge;
+	Value observedResult;
+	Diagnostic diagnostic;
+	REQUIRE(
+		detail::EvaluateSourceInput(
+			observedDocument,
+			"get",
+			"position",
+			request,
+			observedBudget,
+			observedResult,
+			observedCharge,
+			diagnostic,
+			std::span{observed}
+		) == Status::Ok
+	);
+	CHECK(observedResult == Value{Vector2{0, 1}});
+
+	auto malformed = document;
+	malformed.FormatVersion = 99;
+	detail::EvaluationBudget malformedBudget(Limits::MaximumEvaluationBytes);
+	auto malformedDocumentCharge = malformedBudget.Reserve(*documentBytes);
+	REQUIRE(malformedDocumentCharge);
+	auto malformedPrior = malformedBudget.Reserve(sizeof(Value));
+	REQUIRE(malformedPrior);
+	detail::AllocationReservation malformedCharge = std::move(*malformedPrior);
+	Value malformedResult = Vector2{9, 8};
+	const auto priorBytes = malformedBudget.Used();
+	CHECK(
+		detail::EvaluateSourceInput(
+			malformed,
+			"get",
+			"position",
+			request,
+			malformedBudget,
+			malformedResult,
+			malformedCharge,
+			diagnostic
+		) == Status::UnsupportedVersion
+	);
+	CHECK(malformedResult == Value{Vector2{9, 8}});
+	CHECK(malformedCharge.Bytes() == sizeof(Value));
+	CHECK(malformedBudget.Used() == priorBytes);
+}

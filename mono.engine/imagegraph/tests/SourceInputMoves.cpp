@@ -532,21 +532,20 @@ namespace {
 		std::string_view port,
 		uint64_t tick
 	) {
-		Plan plan;
 		Diagnostic diagnostic;
-		const auto compile = Compile(document, plan, diagnostic);
-		INFO(diagnostic.Message);
-		REQUIRE(compile == Status::Ok);
 		EvaluationRequest request;
 		request.Tick = tick;
 		request.GroupReplay = &replay;
 		request.GroupAuthoringRevision = replay.AuthoringRevision();
 		detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
-		Value result;
+		const auto documentBytes = DocumentRetainedPayloadBytes(document);
+		REQUIRE(documentBytes);
+		auto documentCharge = budget.Reserve(*documentBytes);
+		REQUIRE(documentCharge);
 		detail::AllocationReservation charge;
-		const auto status = detail::EvaluateSourceInput(
-			document, plan, nodeId, port, request, budget, result, charge, diagnostic
-		);
+		Value result;
+		const auto status =
+			detail::EvaluateSourceInput(document, nodeId, port, request, budget, result, charge, diagnostic);
 		INFO(diagnostic.Message);
 		REQUIRE(status == Status::Ok);
 		return result;
