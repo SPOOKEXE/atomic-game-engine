@@ -1,0 +1,200 @@
+{
+  "date": "2026-10-06",
+  "scope": "Captured combined source animator timeline move, copy and deletion transactions",
+  "implementation": [
+    "Logical selections resolve to captured physical or detached combined writers.",
+    "Whole move batches remove pinned originals before replacing destinations.",
+    "Moves retain physical key IDs and drivers; copies reset IDs and drivers.",
+    "Every captured combined alias is regenerated from the same writer.",
+    "Writer generations, binding modes and scalar storage remain unchanged.",
+    "Weighted comparison work, borrowed retained capacities, clone overlap and alias fanout are admitted before publication.",
+    "Bounded Compile validates the candidate before the document is replaced.",
+    "Studio retiming, Dopesheet deletion and single-key removal use the transaction when native captures are present."
+  ],
+  "validation": {
+    "joined_checks": 20,
+    "all_exit_codes_zero": true,
+    "cpp_cases_including_startup": 5082,
+    "cpp_assertions": 2000037,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "offscreen_backend": "SDL offscreen / Vulkan",
+    "test_binary_hashes_unchanged": true,
+    "sources_frozen": true,
+    "owned_source_sha256": {
+      "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp": "0b4954447591461fc2f85c93eaa5738dfa4477cdd9535aea1268456756393081",
+      "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp": "2f93025337b245b2eda0bd63c11c5ec19c23627b7098b3291da52731179af06a",
+      "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp": "84ab10463b05d14b4a63d2b486b72ff84f526135a085fca89d964c16ac1305e4",
+      "mono.studio/src/ImageGraph.cpp": "9b40e00a07eb5c60b235a55c5de695903dc97d42833344421245dc6895d6e2be",
+      "mono.studio/src/TimelineDopesheet.hpp": "b5eb9510df403b0755a4b2fa832fe26f20d0e1d15a91c96aca528f69e3d0d4ad",
+      "mono.studio/tests/TimelineSourceAliases.cpp": "423a83bb17afcf8494eba39edb6c04c45c845353f2a949966a1cee1b351e5022"
+    },
+    "checks": [
+      {
+        "name": "bake",
+        "exit_code": 0,
+        "cases": 157,
+        "assertions": 15875,
+        "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129"
+      },
+      {
+        "name": "physics",
+        "exit_code": 0,
+        "cases": 43,
+        "assertions": 715,
+        "binary_sha256": "4ef77cab22739d91e9611a9231e479ec3e3314b1c3c6c30d93c8473113ecb2be"
+      },
+      {
+        "name": "runner",
+        "exit_code": 0,
+        "cases": 29,
+        "assertions": 296,
+        "binary_sha256": "19284acb54aa635b7bbb52f9fdadd5e72484898d83dcffdb2f532e801b9a1ddc"
+      },
+      {
+        "name": "font",
+        "exit_code": 0,
+        "cases": 37,
+        "assertions": 1686,
+        "binary_sha256": "0af4d7637e9dacd46e5be5e316bbe291f147f23b463f3f7f3fdcff3fc71f2e9a"
+      },
+      {
+        "name": "export",
+        "exit_code": 0,
+        "cases": 77,
+        "assertions": 3132,
+        "binary_sha256": "227594696d1f7e8616f60a3342a18462410b752a4189c310065818b6c266e17a"
+      },
+      {
+        "name": "render",
+        "exit_code": 0,
+        "cases": 15,
+        "assertions": 477,
+        "binary_sha256": "d6919feb43395285a1bcb4653ca7eda65f61e179922fe3ff9618eeb9db0caa15"
+      },
+      {
+        "name": "cli",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "io",
+        "exit_code": 0,
+        "cases": 280,
+        "assertions": 11938,
+        "binary_sha256": "e813343dc149679f23119b193bc668a887a6d961826b7dd95b53c82b9fe23d6e"
+      },
+      {
+        "name": "core",
+        "exit_code": 0,
+        "cases": 2958,
+        "assertions": 1894645,
+        "binary_sha256": "c85b0537dbbb114760d21b64e1e4bf1720422a394ba17daf9a962419b618be5b"
+      },
+      {
+        "name": "assetc",
+        "exit_code": 0,
+        "cases": 45,
+        "assertions": 509,
+        "binary_sha256": "7b9c35c1111c3f73bc13b2573d995d73373b0e38b2c22cb08d81e434295bf64d"
+      },
+      {
+        "name": "client",
+        "exit_code": 0,
+        "cases": 358,
+        "assertions": 23821,
+        "binary_sha256": "9f25231d48b5b8421b2edef74b8d3f4292ebf39542d7d7b4f11f8a2e54f0d2f7"
+      },
+      {
+        "name": "studio",
+        "exit_code": 0,
+        "cases": 1008,
+        "assertions": 45948,
+        "binary_sha256": "973aa2066a2ac245872b46699646dd3886043a2b95921df1b61a8c12738dc9e6"
+      },
+      {
+        "name": "nodegraph",
+        "exit_code": 0,
+        "cases": 34,
+        "assertions": 286,
+        "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952"
+      },
+      {
+        "name": "ui",
+        "exit_code": 0,
+        "cases": 40,
+        "assertions": 704,
+        "binary_sha256": "2eea1ec453626fdd1feb55952a5efeefc8b51d6222b60db4b779936f306766d8"
+      },
+      {
+        "name": "startup",
+        "exit_code": 0,
+        "cases": 1,
+        "assertions": 5,
+        "binary_sha256": null
+      },
+      {
+        "name": "lint",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "architecture",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "python",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "format",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "diff",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      }
+    ]
+  },
+  "build": {
+    "targets": 17,
+    "first_exit_code": 1,
+    "first_issues": [
+      "Two test fixtures assigned SourceAnimatorState directly to OwnedPayload3D; both now call emplace()."
+    ],
+    "second_exit_code": 0,
+    "second_steps": 23,
+    "source_edits_during_build_or_tests": false
+  },
+  "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+  "results": "source-keyframes-batch2-results.json",
+  "build_logs": [
+    "source-keyframes-build1.log",
+    "source-keyframes-build2.log"
+  ],
+  "child_hashes": "source-keyframes-child-hashes-batch2.json",
+  "remaining": [
+    "Scalar-axis timeline markers and edits need explicit axis identities.",
+    "Initial imported aliases without durable native captures still need gesture routing.",
+    "Other key authoring controls need the same captured-writer transaction.",
+    "Collision and clamp rules here are explicit native batch policy, not a claim of universal source gesture parity.",
+    "Licensed reference parity and headed Studio interaction remain unverified."
+  ],
+  "profiling": "The transaction has an ENGINE_PROFILE scope; no performance improvement or timing result is claimed."
+}

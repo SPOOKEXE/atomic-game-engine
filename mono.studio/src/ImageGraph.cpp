@@ -6,6 +6,7 @@
 
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/SourceKeyframeTransition.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/Surface.hpp>
@@ -2120,6 +2121,21 @@ namespace studio {
 			})) {
 			return fail(engine::imagegraph::Status::UnknownPort, "property is not declared");
 		}
+		if (document.SourceAnimators) {
+			const auto found =
+				std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &key) {
+					return key.NodeId == nodeId && key.Port == property &&
+						   engine::imagegraph::GetFrameTime(key) == time;
+				});
+			if (found == document.Keyframes.end()) return false;
+			const engine::imagegraph::SourceKeyframeEdit edit{&*found};
+			Document candidate;
+			if (engine::imagegraph::ApplySourceKeyframeEdits(document, {&edit, 1}, candidate, error) !=
+				engine::imagegraph::Status::Ok)
+				return false;
+			document = std::move(candidate);
+			return true;
+		}
 		const size_t before = document.Keyframes.size();
 		std::erase_if(document.Keyframes, [&](const auto &entry) {
 			return entry.NodeId == nodeId && entry.Port == property &&
@@ -2261,6 +2277,37 @@ namespace studio {
 			if (!bytes || *bytes > remaining)
 				return fail(Status::LimitExceeded, "key transfer exceeds the payload budget");
 			remaining -= *bytes;
+		}
+		if (document.SourceAnimators) {
+			for (size_t index = 0; index < originals.size(); ++index) {
+				const auto bytes = KeyframePayloadBytes(originals[index]);
+				if (!bytes || *bytes > remaining)
+					return fail(Status::LimitExceeded, "source key gesture copies exceed the payload budget");
+				remaining -= *bytes;
+				if (!ValidFrameTime(destinations[index]))
+					return fail(Status::InvalidValue, "source key destination exceeds the authored range");
+			}
+			const uint64_t scratch = originals.size() * (sizeof(Keyframe) + sizeof(SourceKeyframeEdit));
+			if (scratch > remaining)
+				return fail(Status::LimitExceeded, "source key gesture scratch exceeds the payload budget");
+			std::vector<Keyframe> replacements;
+			std::vector<SourceKeyframeEdit> edits;
+			replacements.reserve(originals.size());
+			edits.reserve(originals.size());
+			for (size_t index = 0; index < originals.size(); ++index) {
+				replacements.push_back(originals[index]);
+				(void)SetFrameTime(
+					replacements.back(),
+					clampZero && destinations[index].NegativeFrame ? FrameTime{} : destinations[index]
+				);
+				edits.push_back({&originals[index], &replacements.back(), copy});
+			}
+			Document candidate;
+			if (ApplySourceKeyframeEdits(document, edits, candidate, error, remaining - scratch) !=
+				Status::Ok)
+				return false;
+			document = std::move(candidate);
+			return true;
 		}
 		for (size_t index = 0; index < originals.size(); ++index) {
 			const auto &key = originals[index];

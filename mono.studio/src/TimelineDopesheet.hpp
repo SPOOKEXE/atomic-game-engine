@@ -3,6 +3,8 @@
 #include "TimelineKeyActions.hpp"
 #include "TimelineKeyEditor.hpp"
 
+#include <engine/imagegraph/SourceKeyframeTransition.hpp>
+
 #include <cmath>
 #include <cstdio>
 #include <functional>
@@ -382,17 +384,43 @@ namespace studio {
 				error = {Status::LimitExceeded, {}, {}, "key deletion exceeds the work bound"};
 				return false;
 			}
-			for (const auto &original : Originals)
-				if (std::find(document.Keyframes.begin(), document.Keyframes.end(), original) ==
-					document.Keyframes.end()) {
+			if (!document.SourceAnimators)
+				for (const auto &original : Originals)
+					if (std::find(document.Keyframes.begin(), document.Keyframes.end(), original) ==
+						document.Keyframes.end()) {
+						error = {
+							Status::InvalidValue,
+							original.NodeId,
+							original.Port,
+							"key changed during its timeline gesture"
+						};
+						return false;
+					}
+			if (Deleting && document.SourceAnimators) {
+				remaining -= *retained;
+				const uint64_t scratch = Originals.size() * sizeof(SourceKeyframeEdit);
+				if (scratch > remaining) {
 					error = {
-						Status::InvalidValue,
-						original.NodeId,
-						original.Port,
-						"key changed during its timeline gesture"
+						Status::LimitExceeded,
+						{},
+						{},
+						"source key deletion scratch exceeds the payload budget"
 					};
 					return false;
 				}
+				std::vector<SourceKeyframeEdit> edits;
+				edits.reserve(Originals.size());
+				for (const auto &original : Originals)
+					edits.push_back({&original});
+				Document candidate;
+				if (ApplySourceKeyframeEdits(document, edits, candidate, error, remaining - scratch) !=
+					Status::Ok)
+					return false;
+				document = std::move(candidate);
+				std::vector<ImageGraphKeyframeIdentity>{}.swap(PreparedSelection);
+				Prepared = true;
+				return true;
+			}
 			if (Deleting) {
 				std::erase_if(document.Keyframes, [&](const auto &key) {
 					return std::any_of(Originals.begin(), Originals.end(), [&](const auto &original) {
