@@ -1,0 +1,277 @@
+{
+  "date": "2026-10-06",
+  "evidence_scope": "grug finish initial scalar alias timeline reads. broader Composer goal still active.",
+  "changes": [
+    "grug add an object-local replay observation token. publication, move assignment and clearing invalidate reads even at the same authoring revision.",
+    "grug prepare constructor declarations before timeline drawing and cache one bounded host-projected document. authored data stays unchanged during reads; cold axes stay cold until a getter receipt.",
+    "grug route graph, key popup, easing popup and scalar table reads through that snapshot. stale pin stamps refuse before history staging; successful edits stop stale rows in the current frame.",
+    "grug charge snapshot overlap and retained editor payload before staging. allowance is calculated after host observations bind.",
+    "grug cover initial alias mouse copy, move and Delete through the source edit envelope, history reset, revision-zero preparation, same-revision replay refusal and cold getter refresh."
+  ],
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "initial-alias-timeline-batch1-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5143,
+    "cpp_assertions": 2001760,
+    "studio_test_cases": 1051,
+    "core_test_cases": 2976,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "final_build": {
+      "iteration": 1,
+      "exit_code": 0,
+      "targets": 17,
+      "steps": 320,
+      "log": "initial-alias-timeline-build1.log"
+    },
+    "backend": "grug use approved SDL offscreen Vulkan checks and headless ImGui gestures.",
+    "profiling": "grug mark timeline projection with ENGINE_PROFILE. no new profile captured and no speed claim made.",
+    "skipped": "headed Studio and licensed-reference checks remain open. dev/server/ci builds and sanitizers not run in this scoped release-tests batch.",
+    "compiler_warning": "existing TimelineRegions.hpp maybe-uninitialized warning remains; no compiler errors."
+  },
+  "iteration_history": [
+    {
+      "stage": "read review",
+      "finding": "host inputs could grow after allowance calculation",
+      "repair": "grug calculate allowance after binding observations and charge current UI caches."
+    },
+    {
+      "stage": "build 1 and batch 1",
+      "result": "all 17 targets built and all 20 checks passed. no build or test failures."
+    }
+  ],
+  "unchanged_evidence": {
+    "before": "initial-alias-timeline-source-before-build1.json",
+    "after": "initial-alias-timeline-source-after-batch1.json",
+    "frozen_relevant_source_paths": 61,
+    "source_hashes_equal": true,
+    "peer_whole_files_unchanged": 42,
+    "shared_composer_peer_hunks_preserved": true,
+    "test_binaries_unchanged": 13,
+    "child_hashes_file": "initial-alias-timeline-child-hashes-batch1.json",
+    "child_hashes_equal": true
+  },
+  "remaining_scope": [
+    "component paste and scalar metadata controls still need work.",
+    "headed Studio and matched licensed reference parity remain open.",
+    "other items in the original 33-item goal remain active."
+  ],
+  "checks": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-bake-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.273,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-physics-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "9bce7a548e6058fb87e49534b66ca6299bf416fb67c22411c57139e639ef4d4f",
+      "exit_code": 0,
+      "elapsed_seconds": 0.381,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "9bce7a548e6058fb87e49534b66ca6299bf416fb67c22411c57139e639ef4d4f",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-runner-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "c26394d0fe89989fddd8029f9a50b0e91b7d7bcece9bd59bbc8e607e8dee6385",
+      "exit_code": 0,
+      "elapsed_seconds": 0.351,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "c26394d0fe89989fddd8029f9a50b0e91b7d7bcece9bd59bbc8e607e8dee6385",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-font-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "96bfa2b46d329267df7dddce9405cec6a4ce28a5fdb4679d218c13b5605cdd4a",
+      "exit_code": 0,
+      "elapsed_seconds": 0.526,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "96bfa2b46d329267df7dddce9405cec6a4ce28a5fdb4679d218c13b5605cdd4a",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-export-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "4d0272770910c3c66c7de98ce1640d327d75ee0ebfe51d7245e99eb5a26e10e7",
+      "exit_code": 0,
+      "elapsed_seconds": 0.607,
+      "assertions": 3132,
+      "cases": 77,
+      "binary_sha256_after": "4d0272770910c3c66c7de98ce1640d327d75ee0ebfe51d7245e99eb5a26e10e7",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-render-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "53bd83c52fdd305743461abdafebb9b31d8d58e7bd32973b98c4db391627af74",
+      "exit_code": 0,
+      "elapsed_seconds": 1.453,
+      "assertions": 477,
+      "cases": 15,
+      "binary_sha256_after": "53bd83c52fdd305743461abdafebb9b31d8d58e7bd32973b98c4db391627af74",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-cli-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 3.275,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-io-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "4dfb7ddeab1fb5fe0bc63b543d078b8ab5589abe0e4f1dddeef444e069bf9834",
+      "exit_code": 0,
+      "elapsed_seconds": 3.43,
+      "assertions": 11938,
+      "cases": 280,
+      "binary_sha256_after": "4dfb7ddeab1fb5fe0bc63b543d078b8ab5589abe0e4f1dddeef444e069bf9834",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-core-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "31e9609af382f3b3c5ca1432a00e9909da94e97c855e00a1b75400b3441f18c6",
+      "exit_code": 0,
+      "elapsed_seconds": 3.722,
+      "assertions": 1895035,
+      "cases": 2976,
+      "binary_sha256_after": "31e9609af382f3b3c5ca1432a00e9909da94e97c855e00a1b75400b3441f18c6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-assetc-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "2f155201b8bb3d185c24b740b1a1cd9aa1ce3a18da49460925167da05e6d9e47",
+      "exit_code": 0,
+      "elapsed_seconds": 6.158,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "2f155201b8bb3d185c24b740b1a1cd9aa1ce3a18da49460925167da05e6d9e47",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-client-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "e48844fd0fe8f50b244d455f07097bc4b40e831fe3cc9202db6872db93285bbe",
+      "exit_code": 0,
+      "elapsed_seconds": 4.674,
+      "assertions": 23821,
+      "cases": 358,
+      "binary_sha256_after": "e48844fd0fe8f50b244d455f07097bc4b40e831fe3cc9202db6872db93285bbe",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-studio-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "4c564ebdc7bcc75db61d88948803e44bed74dbdea04407ead3afc03e55551c63",
+      "exit_code": 0,
+      "elapsed_seconds": 7.305,
+      "assertions": 47281,
+      "cases": 1051,
+      "binary_sha256_after": "4c564ebdc7bcc75db61d88948803e44bed74dbdea04407ead3afc03e55551c63",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-nodegraph-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "exit_code": 0,
+      "elapsed_seconds": 1.323,
+      "assertions": 286,
+      "cases": 34,
+      "binary_sha256_after": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-ui-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "aae297bc4de74ab39f49d8c0b83c63a6d3555f5cf4056f436c471d2e0961991f",
+      "exit_code": 0,
+      "elapsed_seconds": 0.475,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "aae297bc4de74ab39f49d8c0b83c63a6d3555f5cf4056f436c471d2e0961991f",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-startup-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.281,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-lint-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.013
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-architecture-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.389
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-python-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 1.557,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-format-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 1.696
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/initial-alias-timeline-diff-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.084
+    }
+  ],
+  "tested_owned_file_hashes": {
+    "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp": "03e56fe47f1ff36331457a43f58e2810d3aae0ade084eba6c45021608d4800b7",
+    "mono.engine/imagegraph/src/GroupReplay.cpp": "538569987b348a22ae0171a81a7cca7aef31579084d73b9cc0fe742f84e80ae1",
+    "mono.engine/imagegraph/src/GroupReplayInternal.hpp": "f53cca923ae374c41116f0671c1d9143297eafeb4c0e2729d1d1e0b45601f682",
+    "mono.engine/imagegraph/tests/GroupReplay.cpp": "3326be129ea5ee6726398e08efbbb8a81d6f36613fae8fd5abb3b9dda228f224",
+    "mono.studio/src/ImageGraphTimelineRead.hpp": "1da054e3645fedfc523456485516396ac8c0229ffea61ea5210055718752ae47",
+    "mono.studio/tests/ImageGraphTimelineRead.cpp": "6080f6ad72dbbd0e443300106a238897fdb1939fab23d20b91740a9bc5e1aa76",
+    "mono.studio/src/TimelineKeyEditor.hpp": "c1178fd9912d7cc9b2c9c665dc36be1d33918fec60b1905b02cc8c75af1b934a",
+    "mono.studio/src/TimelineDopesheet.hpp": "c7d55f63c029c162a1e0b134826130b0021be93c88459cc4c31380ff3b75c7b1",
+    "mono.studio/tests/TimelineScalarDopesheet.cpp": "d5d05d98cbde2b29a5868a25c968288f5b882f0a5c2b355c52c3402cfd6b3454",
+    "mono.studio/src/ImageComposer.cpp": "f1fa392ce99f66b2a92262801860254d8273db9ae843b7f130827661a8c2da8a"
+  }
+}

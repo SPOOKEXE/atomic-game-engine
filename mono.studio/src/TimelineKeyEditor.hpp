@@ -16,6 +16,7 @@ namespace studio {
 		std::vector<int8_t> ClipboardAxes, OriginalAxes;
 		engine::imagegraph::FrameTime Anchor, Destination;
 		bool Active = false, Copying = false;
+		uint64_t BorrowedBytes = 0, ObservationRevision = 0, OriginalObservationRevision = 0;
 		std::string TargetNode, TargetPort;
 
 		static ImageGraphKeyframeIdentity
@@ -135,10 +136,15 @@ namespace studio {
 		std::optional<uint64_t> Remaining(
 			bool includeClipboard,
 			bool includeOriginals,
-			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+			bool includeBorrowed = true
 		) const {
 			using namespace engine::imagegraph;
 			uint64_t remaining = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
+			if (includeBorrowed) {
+				if (BorrowedBytes > remaining) return std::nullopt;
+				remaining -= BorrowedBytes;
+			}
 			const uint64_t pendingBytes = PreparedSelection.capacity() * sizeof(ImageGraphKeyframeIdentity);
 			if (pendingBytes > remaining) return std::nullopt;
 			remaining -= pendingBytes;
@@ -227,6 +233,7 @@ namespace studio {
 			Copying = paste;
 			TargetNode.clear();
 			TargetPort.clear();
+			OriginalObservationRevision = ObservationRevision;
 			Active = true;
 			return true;
 		} catch (const std::bad_alloc &) {

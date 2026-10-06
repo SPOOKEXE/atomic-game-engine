@@ -64,10 +64,15 @@ namespace engine::imagegraph {
 		bool InstancesBound() const noexcept;
 		uint64_t RetainedBytes() const noexcept;
 		uint64_t AuthoringRevision() const noexcept;
+		// grug invalidate local observations on publication, including same-authoring-revision changes.
+		// token belongs to this object, is not serialized and has no meaning across worlds.
+		uint64_t ObservationRevision() const noexcept;
 
 	  private:
 		struct Storage;
 		std::unique_ptr<Storage> Data;
+		uint64_t ObservationVersion = 0;
+		void AdvanceObservation() noexcept;
 		friend struct detail::GroupReplayAccess;
 	};
 	// restores admitted native capture identities without recapturing current base animators.

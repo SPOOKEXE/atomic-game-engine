@@ -21,8 +21,23 @@
 namespace engine::imagegraph {
 	GroupReplayState::GroupReplayState() = default;
 	GroupReplayState::~GroupReplayState() = default;
-	GroupReplayState::GroupReplayState(GroupReplayState &&) noexcept = default;
-	GroupReplayState &GroupReplayState::operator=(GroupReplayState &&) noexcept = default;
+	GroupReplayState::GroupReplayState(GroupReplayState &&other) noexcept : Data(std::move(other.Data)) {
+		AdvanceObservation();
+		other.AdvanceObservation();
+	}
+	GroupReplayState &GroupReplayState::operator=(GroupReplayState &&other) noexcept {
+		if (this == &other) return *this;
+		Data = std::move(other.Data);
+		AdvanceObservation();
+		other.AdvanceObservation();
+		return *this;
+	}
+	void GroupReplayState::AdvanceObservation() noexcept {
+		ObservationVersion = ObservationVersion == UINT64_MAX ? 1 : ObservationVersion + 1;
+	}
+	uint64_t GroupReplayState::ObservationRevision() const noexcept {
+		return ObservationVersion;
+	}
 	const GroupReplayEntry *GroupReplayState::Find(std::string_view nodeId) const noexcept {
 		if (!Data) return nullptr;
 		const auto found = std::find_if(Data->Entries.begin(), Data->Entries.end(), [&](const auto &entry) {

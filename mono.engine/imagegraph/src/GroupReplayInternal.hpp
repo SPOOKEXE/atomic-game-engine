@@ -34,6 +34,7 @@ namespace engine::imagegraph {
 			}
 			static void Install(GroupReplayState &state, std::unique_ptr<Owner> candidate) {
 				state.Data = std::move(candidate);
+				state.AdvanceObservation();
 			}
 		};
 		// Attributes have no source input index. They never join child animator aliases.

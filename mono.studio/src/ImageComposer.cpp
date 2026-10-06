@@ -40,6 +40,7 @@
 #include "ImageGraphSourceEdit.hpp"
 #include "ImageGraphSourceKeyEdit.hpp"
 #include "ImageGraphSourceTimelineTransition.hpp"
+#include "ImageGraphTimelineRead.hpp"
 #include "ImagePreviewPanel.hpp"
 #include "KeyframeKindEditor.hpp"
 #include "TimelineDopesheet.hpp"
@@ -257,6 +258,7 @@ namespace studio {
 			Diagnostic LastDiagnostic;
 			ImageGraphHistory History{MAXIMUM_HISTORY};
 			ImageGraphGroupHost GroupHost;
+			ImageGraphTimelineRead TimelineRead;
 			engine::imagegraph::CapturedFeedbackHost FeedbackHost;
 			detail::ImageGraphCacheEditObservation CacheEditObservation;
 			detail::ImageGraphCacheGroupEdit CacheGroupEdit;
@@ -1865,11 +1867,21 @@ namespace studio {
 				remaining -= *bytes;
 				return true;
 			};
+			const auto keyAllowance = state.Keys.Remaining(true, true, Limits::MaximumEvaluationBytes, false);
+			if (!keyAllowance || !charge(Limits::MaximumEvaluationBytes - *keyAllowance) ||
+				!charge(state.Dopesheet.CacheBytes()) ||
+				!charge(
+					(state.EaseKeys.Originals.capacity() - state.EaseKeys.Originals.size()) * sizeof(Keyframe)
+				))
+				return {};
+			for (const auto &key : state.EaseKeys.Originals)
+				if (!charge(KeyframePayloadBytes(key))) return {};
 			if (!charge(scratchBytes) || !charge(state.PreviewSequence.RetainedBytes()) ||
 				!charge(state.PreviewCache.RetainedBytes()) ||
 				!charge(ValueClonePayloadBytes(state.ValuePreview)) ||
 				!charge(ValueClonePayloadBytes(state.ArrayPreview)) ||
 				!charge(state.FeedbackHost.RetainedBytes()) || !charge(FontEditorHeldBytes(state)) ||
+				!charge(state.TimelineRead.RetainedBytes()) ||
 				!charge(state.Host.RetainedObservationBytes()) || !charge(state.Host.LuaReceipts.Bytes) ||
 				!charge(state.PreviewObservations.Receipts.RetainedPayloadBytes()) ||
 				!charge(Limits::MaximumEvaluationBytes / 8))
@@ -2794,6 +2806,14 @@ namespace studio {
 
 		bool
 		ApplyKeyEdit(State &state, const auto &edit, bool *unchanged = nullptr, uint64_t borrowedBytes = 0) {
+			struct RestoreDrawBudget {
+				TimelineKeyEditor &Editor;
+				uint64_t Bytes;
+				~RestoreDrawBudget() {
+					Editor.BorrowedBytes = Bytes;
+				}
+			} restoreDrawBudget{state.Keys, state.Keys.BorrowedBytes};
+			state.Keys.BorrowedBytes = 0;
 			if (!RetryCacheEdit(state)) return false;
 			CancelComposerPreview(state);
 			engine::imagegraph::EvaluationRequest request;
@@ -6274,6 +6294,61 @@ namespace studio {
 			});
 		}
 
+		bool PrepareTimelineRead(State &state) {
+			using namespace engine::imagegraph;
+			EvaluationRequest request;
+			SourceFontContext fonts;
+			request.HostProvider = &HostFor(state);
+			request.AudioFrames = state.AudioFrames;
+			request.AudioClips = state.AudioClips;
+			if (!state.TimelineRead.Matches(state.GroupHost, state.DocumentRevision) &&
+				!BindObservations(state, request, &fonts))
+				return false;
+			const auto snapshotBytes = state.TimelineRead.RetainedBytes();
+			const auto allowance = GroupConstructorAllowance(state);
+			if (!snapshotBytes || !allowance ||
+				*snapshotBytes > Limits::MaximumEvaluationBytes - *allowance) {
+				state.LastDiagnostic = {
+					Status::LimitExceeded, {}, {}, "timeline read host payload exceeds budget"
+				};
+				return false;
+			}
+			const auto fontBytes = SourceFontContextRetainedBytes(fonts);
+			if (!fontBytes || *fontBytes >= *allowance) return false;
+			Diagnostic error;
+			if (!PrepareImageGraphTimelineRead(
+					state.Authored,
+					state.GroupHost,
+					state.DocumentRevision,
+					request,
+					state.TimelineRead,
+					error,
+					*allowance + *snapshotBytes - *fontBytes
+				)) {
+				state.LastDiagnostic = std::move(error);
+				return false;
+			}
+			const auto authorBytes = DocumentRetainedPayloadBytes(state.Authored);
+			const auto readBytes = state.TimelineRead.RetainedBytes();
+			const auto currentAllowance = GroupConstructorAllowance(state);
+			if (!authorBytes || !readBytes || !currentAllowance) return false;
+			const uint64_t held = Limits::MaximumEvaluationBytes - *currentAllowance - *readBytes;
+			const uint64_t replayBytes = state.GroupHost.Replay.RetainedBytes();
+			if (*authorBytes >= Limits::MaximumEvaluationBytes - held ||
+				replayBytes >= Limits::MaximumEvaluationBytes - held - *authorBytes)
+				return false;
+			state.Keys.BorrowedBytes = held + *authorBytes + replayBytes;
+			state.Keys.ObservationRevision = state.TimelineRead.DisplayRevision;
+			return true;
+		}
+		bool TimelinePinsCurrent(State &state, uint64_t observationRevision) {
+			if (state.TimelineRead.Matches(state.GroupHost, state.DocumentRevision) &&
+				observationRevision == state.TimelineRead.DisplayRevision)
+				return true;
+			state.LastDiagnostic = {Status::InvalidValue, {}, {}, "timeline source changed while editing"};
+			return false;
+		}
+
 		void DrawTimeline(State &state) {
 			detail::ImageGraphCacheEditScope editKind(
 				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
@@ -6579,7 +6654,9 @@ namespace studio {
 					"with incoming and outgoing handles."
 				);
 			}
+			if (!state.TimelineRead.Matches(state.GroupHost, state.DocumentRevision)) return;
 			const auto applyKeyTransfer = [&] {
+				if (!TimelinePinsCurrent(state, state.Keys.OriginalObservationRevision)) return false;
 				bool unchanged = false;
 				const bool accepted = ApplyKeyEdit(
 					state,
@@ -6587,7 +6664,7 @@ namespace studio {
 						if (state.Keys.Copying)
 							return state.Keys.PrepareCommit(document, state.LastDiagnostic, availableBytes);
 						return WithImageGraphProjectedKeyPins(
-							state.Authored,
+							*state.TimelineRead.Snapshot,
 							document,
 							state.Keys.Originals,
 							availableBytes,
@@ -6606,12 +6683,14 @@ namespace studio {
 				return accepted || unchanged;
 			};
 			state.Dopesheet.Draw(
-				state.Authored,
-				state.DocumentRevision,
+				*state.TimelineRead.Snapshot,
+				state.TimelineRead.DisplayRevision,
 				state.Keys,
 				GetImageGraphFrame(state.Playback),
 				state.LastDiagnostic,
 				[&] {
+					if (!TimelinePinsCurrent(state, state.Dopesheet.OriginalObservationRevision))
+						return false;
 					const bool accepted =
 						ApplyKeyEdit(state, [&](Document &document, uint64_t availableBytes) {
 							if (state.Dopesheet.Copying)
@@ -6619,7 +6698,7 @@ namespace studio {
 									document, state.Keys, state.LastDiagnostic, availableBytes
 								);
 							return WithImageGraphProjectedKeyPins(
-								state.Authored,
+								*state.TimelineRead.Snapshot,
 								document,
 								state.Dopesheet.Originals,
 								availableBytes,
@@ -6637,17 +6716,27 @@ namespace studio {
 				},
 				applyKeyTransfer
 			);
+			if (!state.TimelineRead.Matches(state.GroupHost, state.DocumentRevision)) return;
 			state.Keys.Draw(
-				state.Authored, GetImageGraphFrame(state.Playback), state.LastDiagnostic, applyKeyTransfer
+				*state.TimelineRead.Snapshot,
+				GetImageGraphFrame(state.Playback),
+				state.LastDiagnostic,
+				applyKeyTransfer
 			);
+			if (!state.TimelineRead.Matches(state.GroupHost, state.DocumentRevision)) return;
 			state.EaseKeys.Draw(
-				state.Authored, state.DocumentRevision, state.Keys, state.LastDiagnostic, [&] {
+				*state.TimelineRead.Snapshot,
+				state.TimelineRead.DisplayRevision,
+				state.Keys,
+				state.LastDiagnostic,
+				[&] {
+					if (!TimelinePinsCurrent(state, state.EaseKeys.Revision)) return false;
 					bool unchanged = false;
 					const bool accepted = ApplyKeyEdit(
 						state,
 						[&](Document &document, uint64_t availableBytes) {
 							return WithImageGraphProjectedKeyPins(
-								state.Authored,
+								*state.TimelineRead.Snapshot,
 								document,
 								state.EaseKeys.Originals,
 								availableBytes,
@@ -6664,6 +6753,7 @@ namespace studio {
 					return accepted || unchanged;
 				}
 			);
+			if (!state.TimelineRead.Matches(state.GroupHost, state.DocumentRevision)) return;
 			if (ImGui::BeginTable("##keyframes", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
 				ImGui::TableSetupColumn("Property");
 				ImGui::TableSetupColumn("Frame");
@@ -6752,22 +6842,23 @@ namespace studio {
 					);
 					ImGui::PopID();
 				}
-				(void)detail::DrawTimelineScalarKeys(
-					state.Authored,
-					state.Keys,
-					state.LastDiagnostic,
-					[&](const ImageGraphKeyframeIdentity &key) {
-						if (SetImageGraphAuthorFrame(state.Playback, key.Time)) RequestPreview(state);
-						if (const auto found = state.Ids.ToCanvas.find(key.NodeId);
-							found != state.Ids.ToCanvas.end()) {
-							state.Canvas.Select(found->second);
-							state.Canvas.Centre(state.Graph, found->second);
+				if (state.TimelineRead.Matches(state.GroupHost, state.DocumentRevision))
+					(void)detail::DrawTimelineScalarKeys(
+						*state.TimelineRead.Snapshot,
+						state.Keys,
+						state.LastDiagnostic,
+						[&](const ImageGraphKeyframeIdentity &key) {
+							if (SetImageGraphAuthorFrame(state.Playback, key.Time)) RequestPreview(state);
+							if (const auto found = state.Ids.ToCanvas.find(key.NodeId);
+								found != state.Ids.ToCanvas.end()) {
+								state.Canvas.Select(found->second);
+								state.Canvas.Centre(state.Graph, found->second);
+							}
+						},
+						[&](const auto &edit, uint64_t borrowedBytes) {
+							return ApplyKeyEdit(state, edit, nullptr, borrowedBytes);
 						}
-					},
-					[&](const auto &edit, uint64_t borrowedBytes) {
-						return ApplyKeyEdit(state, edit, nullptr, borrowedBytes);
-					}
-				);
+					);
 
 				ImGui::EndTable();
 			}
@@ -7488,7 +7579,10 @@ namespace studio {
 						DrawFontInputs(state);
 						break;
 					case 7:
-						DrawTimeline(state);
+						if (PrepareTimelineRead(state))
+							DrawTimeline(state);
+						else
+							ImGui::TextWrapped("%s", state.LastDiagnostic.Message.c_str());
 						break;
 					case 8:
 						RefreshPreview(state, renderer);

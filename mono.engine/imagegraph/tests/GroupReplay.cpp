@@ -511,6 +511,65 @@ TEST_CASE(
 	CHECK(loaded.Find("input"));
 }
 
+TEST_CASE("Group replay observation revisions track publication and refusal", "[imagegraph][groups]") {
+	auto document = Boundary();
+	const auto plan = Checked(document);
+	const GroupBootstrapTarget order[] = {{"input"}};
+	EvaluationRequest clock;
+	Diagnostic diagnostic;
+	GroupReplayState empty, state;
+	const auto initial = state.ObservationRevision();
+	REQUIRE(ReplayGroupBootstrap(document, plan, order, clock, empty, 1, state, diagnostic) == Status::Ok);
+	const auto published = state.ObservationRevision();
+	CHECK(published != initial);
+	CHECK(state.AuthoringRevision() == 1);
+
+	// same authoring revision still publishes a new observation snapshot.
+	REQUIRE(ReplayGroupBootstrap(document, plan, order, clock, empty, 1, state, diagnostic) == Status::Ok);
+	CHECK(state.ObservationRevision() != published);
+	const auto beforeRefusal = state.ObservationRevision();
+	const auto retained = state.RetainedBytes();
+	CHECK(
+		ReplayGroupBootstrap(document, plan, order, clock, empty, 1, state, diagnostic, retained) ==
+		Status::LimitExceeded
+	);
+	CHECK(state.ObservationRevision() == beforeRefusal);
+	CHECK(state.Find("input"));
+}
+
+TEST_CASE("Group replay moves and clear invalidate object-local observations", "[imagegraph][groups]") {
+	auto document = Boundary();
+	const auto plan = Checked(document);
+	const GroupBootstrapTarget order[] = {{"input"}};
+	EvaluationRequest clock;
+	Diagnostic diagnostic;
+	GroupReplayState empty, source;
+	REQUIRE(ReplayGroupBootstrap(document, plan, order, clock, empty, 1, source, diagnostic) == Status::Ok);
+
+	GroupReplayState destination;
+	const auto destinationBefore = destination.ObservationRevision();
+	const auto sourceBefore = source.ObservationRevision();
+	destination = std::move(source);
+	CHECK(destination.ObservationRevision() != destinationBefore);
+	CHECK(source.ObservationRevision() != sourceBefore);
+	CHECK(destination.Find("input"));
+
+	const auto beforeSelfMove = destination.ObservationRevision();
+	destination = std::move(destination);
+	CHECK(destination.ObservationRevision() == beforeSelfMove);
+
+	const auto beforeMoveConstruction = destination.ObservationRevision();
+	GroupReplayState moved(std::move(destination));
+	CHECK(destination.ObservationRevision() != beforeMoveConstruction);
+	CHECK(moved.ObservationRevision() != 0);
+	CHECK(moved.Find("input"));
+
+	const auto beforeClear = moved.ObservationRevision();
+	moved = GroupReplayState{};
+	CHECK(moved.ObservationRevision() != beforeClear);
+	CHECK(moved.Entries().empty());
+}
+
 namespace {
 	Document AliasedBoundaries() {
 		auto document = Boundary();

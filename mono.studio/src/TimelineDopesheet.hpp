@@ -35,6 +35,7 @@ namespace studio {
 		std::vector<ImageGraphKeyframeIdentity> BoxSelection, PreparedSelection;
 		bool Prepared = false;
 		uint64_t Revision = std::numeric_limits<uint64_t>::max();
+		uint64_t OriginalObservationRevision = 0;
 		double PixelsPerFrame = 20, PanX = 0, PanY = 0;
 		ImVec2 BoxStart, BoxEnd;
 		engine::imagegraph::FrameTime Anchor, Fixed;
@@ -336,6 +337,7 @@ namespace studio {
 				Cancel();
 				return false;
 			}
+			OriginalObservationRevision = Revision;
 			StagedAction = action;
 			Transforming = TargetsValid = true;
 			return true;
@@ -362,6 +364,7 @@ namespace studio {
 					document, editor.Selection, Originals, OriginalAxes, error, *budget - *retained
 				))
 				return false;
+			OriginalObservationRevision = Revision;
 			Deleting = true;
 			return true;
 		} catch (const std::bad_alloc &) {
@@ -393,6 +396,7 @@ namespace studio {
 					document, editor.Selection, Originals, OriginalAxes, error, *budget - *retained - clocks
 				))
 				return false;
+			OriginalObservationRevision = Revision;
 			Anchor = anchor;
 			Fixed = GetFrameTime(Originals.front());
 			FrameTime first = Fixed, last = Fixed;

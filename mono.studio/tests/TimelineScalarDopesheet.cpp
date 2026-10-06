@@ -1,5 +1,7 @@
 #include "../src/ImageGraphDocumentEdit.hpp"
 #include "../src/ImageGraphKeyPinProjection.hpp"
+#include "../src/ImageGraphSourceKeyEdit.hpp"
+#include "../src/ImageGraphTimelineRead.hpp"
 #include "../src/TimelineDopesheet.hpp"
 
 #include <engine/testing/Suite.hpp>
@@ -67,6 +69,9 @@ namespace {
 		Diagnostic Error;
 		FrameTime Cursor{12, .25, false};
 		uint64_t Revision = 0;
+		bool UseSourceRead = false;
+		studio::ImageGraphTimelineRead Read;
+		studio::ImageGraphGroupHost Host;
 		unsigned Changes = 0;
 		unsigned PasteCalls = 0;
 		ImVec2 CanvasMin, CanvasMax;
@@ -87,20 +92,39 @@ namespace {
 			ImGui::SetCurrentContext(Previous);
 		}
 		bool Apply() {
-			const bool accepted = studio::ApplyImageGraphDocumentEdit(Doc, History, [&](Document &staged) {
-				if (View.Copying) return View.PrepareCommit(staged, Keys, Error);
+			if (UseSourceRead &&
+				(!Read.Matches(Host, Revision) || View.OriginalObservationRevision != Read.DisplayRevision)) {
+				Error = {Status::InvalidValue, {}, {}, "timeline source changed while editing"};
+				return false;
+			}
+			const auto edit = [&](Document &staged, uint64_t available) {
+				if (View.Copying) return View.PrepareCommit(staged, Keys, Error, available);
 				return studio::WithImageGraphProjectedKeyPins(
-					Doc,
+					UseSourceRead ? *Read.Snapshot : Doc,
 					staged,
 					View.Originals,
-					Limits::MaximumEvaluationBytes,
+					available,
 					[&](std::span<const Keyframe> pins, uint64_t remaining) {
 						return View.PrepareCommit(staged, Keys, Error, remaining, pins);
 					},
 					Error,
 					View.OriginalAxes
 				);
-			});
+			};
+			const bool accepted =
+				UseSourceRead ? studio::ApplyImageGraphSourceKeyEdit(
+									Doc,
+									History,
+									Host,
+									Revision,
+									{},
+									edit,
+									Error,
+									Limits::MaximumEvaluationBytes - *Read.RetainedBytes()
+								)
+							  : studio::ApplyImageGraphDocumentEdit(Doc, History, [&](Document &staged) {
+									return edit(staged, Limits::MaximumEvaluationBytes);
+								});
 			if (accepted) {
 				View.PublishCommit(Keys);
 				++Changes;
@@ -109,6 +133,10 @@ namespace {
 			return accepted;
 		}
 		void Frame() {
+			if (UseSourceRead) {
+				REQUIRE(studio::PrepareImageGraphTimelineRead(Doc, Host, Revision, {}, Read, Error));
+				Keys.ObservationRevision = Read.DisplayRevision;
+			}
 			ImGui::SetCurrentContext(Context);
 			ImGui::NewFrame();
 			ImGui::SetNextWindowPos({20, 20});
@@ -127,7 +155,15 @@ namespace {
 				}
 				return accepted;
 			};
-			View.Draw(Doc, Revision, Keys, Cursor, Error, [&] { return Apply(); }, paste);
+			View.Draw(
+				UseSourceRead ? *Read.Snapshot : Doc,
+				UseSourceRead ? Read.DisplayRevision : Revision,
+				Keys,
+				Cursor,
+				Error,
+				[&] { return Apply(); },
+				paste
+			);
 			CanvasMin = ImGui::GetItemRectMin();
 			CanvasMax = ImGui::GetItemRectMax();
 			ImGui::End();
@@ -603,4 +639,93 @@ TEST_CASE(
 	CHECK(ui.Marker("alias", 0, {5}) == ui.View.Markers.size());
 	REQUIRE(ui.History.Undo(ui.Doc));
 	CHECK(ui.Doc == moved);
+}
+
+TEST_CASE(
+	"initial scalar alias mouse gestures use host reads and survive history reset",
+	"[studio][timeline_scalar_dopesheet]"
+) {
+	Sheet ui;
+	ui.UseSourceRead = true;
+	ui.Revision = 1;
+	ui.Doc.SourceAnimators = {};
+	ui.Doc.Nodes[1].SourceSeparatedVec2Animators = {};
+	const auto authored = ui.Doc;
+	ui.Frame();
+	ui.Frame();
+	CHECK(ui.Doc == authored);
+	REQUIRE(ui.Read.Snapshot);
+	const auto before = *ui.Read.Snapshot;
+	const auto x = ui.Marker("alias", 0, {1});
+	REQUIRE(x < ui.View.Markers.size());
+	ui.Click(x);
+	ui.Chord(ImGuiKey_C);
+	REQUIRE(ui.Keys.Clipboard.size() == 1);
+	CHECK(ui.Keys.Clipboard.front().NodeId == "alias");
+	CHECK(ui.Keys.Clipboard.front().SourceKeyId.empty());
+	CHECK(ui.Keys.ClipboardAxes == std::vector<int8_t>{0});
+	const auto point = ui.View.Markers[x].Position;
+	ui.Down(point);
+	ui.Mouse({point.x + 4 * float(ui.View.PixelsPerFrame), point.y});
+	ui.Up();
+	INFO(ui.Error.Message);
+	REQUIRE(ui.Changes == 1);
+	CHECK(ui.Marker("alias", 0, {5}) < ui.View.Markers.size());
+	CHECK(ui.Doc.Keyframes == before.Keyframes);
+	const auto moved = ui.Doc;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	++ui.Revision;
+	ui.Host.Clear();
+	ui.Frame();
+	CHECK(ui.Doc == before);
+	CHECK(ui.Marker("alias", 0, {1}) < ui.View.Markers.size());
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	++ui.Revision;
+	ui.Host.Clear();
+	ui.Frame();
+	CHECK(ui.Doc == moved);
+	const auto y = ui.Marker("alias", 1, {4});
+	REQUIRE(y < ui.View.Markers.size());
+	ui.Click(y);
+	ui.Key(ImGuiKey_Delete);
+	REQUIRE(ui.Changes == 2);
+	CHECK(ui.Marker("alias", 1, {4}) == ui.View.Markers.size());
+	CHECK(ui.Marker("alias", 0, {5}) < ui.View.Markers.size());
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == moved);
+}
+
+TEST_CASE(
+	"scalar alias drag refuses same-revision replay changes before history",
+	"[studio][timeline_scalar_dopesheet]"
+) {
+	Sheet ui;
+	ui.UseSourceRead = true;
+	ui.Revision = 1;
+	ui.Doc.SourceAnimators = {};
+	ui.Doc.Nodes[1].SourceSeparatedVec2Animators = {};
+	ui.Frame();
+	ui.Frame();
+	const auto x = ui.Marker("alias", 0, {1});
+	REQUIRE(x < ui.View.Markers.size());
+	const auto point = ui.View.Markers[x].Position;
+	ui.Down(point);
+	REQUIRE(ui.View.Dragging);
+	const auto pins = ui.View.Originals;
+	const auto stamp = ui.View.OriginalObservationRevision;
+	const auto before = ui.Doc;
+	GroupReplayState replacement;
+	REQUIRE(RebindGroupReplay(ui.Doc, ui.Host.Replay, ui.Revision, replacement, ui.Error) == Status::Ok);
+	ui.Host.Replay = std::move(replacement);
+	ui.Mouse({point.x + 4 * float(ui.View.PixelsPerFrame), point.y});
+	CHECK(ui.Read.DisplayRevision != stamp);
+	CHECK_FALSE(ui.Apply());
+	CHECK(ui.Error.Code == Status::InvalidValue);
+	CHECK(ui.Doc == before);
+	CHECK(ui.View.Originals == pins);
+	CHECK(ui.Changes == 0);
+	CHECK_FALSE(ui.History.CanUndo());
+	ui.View.Cancel();
+	ui.Up();
 }
