@@ -45,6 +45,25 @@ namespace engine::imagegraphio {
 		std::string MetadataJson;
 		bool operator==(const PxcxCollectionMetadata &) const = default;
 	};
+	// grug prepare legacy .pxcc text and optional .meta sidecar. host owns file publication.
+	struct PxcxCollectionSave {
+		std::string GraphJson;
+		std::optional<std::string> MetadataJson;
+		bool operator==(const PxcxCollectionSave &) const = default;
+	};
+	// grug save one Collection and its descendants in source postorder, relative to its position.
+	// detach its saved parent, preserve external connection references and source-only fields.
+	// expanded animator times use the checked project frame count, never a guessed default.
+	// manager fields use source defaults; both files carry the pinned serializer version.
+	// this does not render a preview, create PXZ, execute callbacks or prove licensed parity.
+	[[nodiscard]] bool PreparePxcxCollectionSave(
+		const bake::PxcxArchive &archive,
+		std::string_view collectionId,
+		std::optional<std::string_view> metadataJson,
+		PxcxCollectionSave &result,
+		imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = imagegraph::Limits::MaximumEvaluationBytes
+	);
 	// grug stage metadata and the source path without changing the prepared append or live host.
 	struct PxcxAppendPostLoad {
 		// one manager per incoming top-level Collection, in source declaration order.

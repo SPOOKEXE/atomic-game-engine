@@ -1,0 +1,243 @@
+{
+  "phase": "grug prepare legacy Collection save text and metadata",
+  "date": "2026-10-07",
+  "base_commit": "9c955cef",
+  "scope": [
+    "grug extract selected Collection descendants in source postorder with sibling declaration order",
+    "grug offset every saved node by selected Collection position and detach only its saved parent",
+    "grug preserve external links, instance bases, inline contexts, tool identities and opaque fields",
+    "grug normalize expanded input and axis animator markers by checked project frame count",
+    "grug leave compact values, outputs, output metadata and source-only inspector fields unchanged",
+    "grug prepare optional eleven-field metadata manager sidecar with pinned save version fields",
+    "grug validate checked archive, aggregate keys, weighted work and tracked JSON allocations before replacing old result"
+  ],
+  "source_contract": {
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "facts": [
+      {
+        "file": "scripts/save_function/save_function.gml:259",
+        "fact": "grug SAVE_NODE recursively writes Collection children before parent and subtracts provided position"
+      },
+      {
+        "file": "scripts/save_function/save_function.gml:277",
+        "fact": "grug SAVE_COLLECTION emits version, versionStr and nodes; manager metadata belongs to optional .meta sidecar"
+      },
+      {
+        "file": "scripts/collection_data/collection_data.gml:125",
+        "fact": "grug saveCollection uses .pxcc and passes selected node parent as context"
+      },
+      {
+        "file": "scripts/node_data/node_data.gml:12",
+        "fact": "grug getNodeID returns -4 for non-node; SAVE_NODE uses noone when removing context parent"
+      },
+      {
+        "file": "scripts/node_keyframe/node_keyframe.gml:657",
+        "fact": "grug scale serialization divides marker times by NODE_TOTAL_FRAMES minus one"
+      },
+      {
+        "file": "scripts/animation_controller/animation_controller.gml:25",
+        "fact": "grug NODE_TOTAL_FRAMES reads node.project.animator.frames_total"
+      },
+      {
+        "file": "scripts/node_value/node_value.gml:2993",
+        "fact": "grug output sockets return before animator serialization"
+      },
+      {
+        "file": "scripts/node_data/node_data.gml:181",
+        "fact": "grug inspector updatedOutTrigger is an output socket"
+      },
+      {
+        "file": "scripts/globals/globals.gml:42",
+        "fact": "grug pinned SAVE_VERSION is121092 and VERSION_STRING is1.21.10.203"
+      },
+      {
+        "file": "scripts/meta_data/meta_data.gml:48",
+        "fact": "grug manager serializer writes eleven fields, then Collection save adds current versionStr"
+      }
+    ]
+  },
+  "owned_files": {
+    "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp": "cc1019a55010aae8ae336e34218fc8a4526ab2e1df3b6d0f2cb248e26bdfcbcc",
+    "mono.engine/imagegraphio/src/PxcxAppend.cpp": "74cfa08dfb373ea5558c2c7d87f0d58a3f6553b36895186f17cb75b9baadd015",
+    "mono.engine/imagegraphio/tests/PxcxAppend.cpp": "3f0fc516d02ee193ce6d526004cb2fe2138a5565654012d87f86bc97b221a2dc"
+  },
+  "checks": {
+    "joined_build": "grug 17 release-tests targets with j6 passed",
+    "batch": "20/20 passed",
+    "cpp_cases": 5204,
+    "cpp_assertions": 2003967,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "grug approved offscreen Vulkan, Studio/client/render serialized",
+    "frozen_source_files_unchanged": 1833,
+    "peer_files_unchanged": 43,
+    "test_binaries_unchanged": 13,
+    "child_binaries_unchanged": 2,
+    "review": "grug Sol read checked source save contract and caught time scaling and opaque output domains; Luna edited tests; root corrected marker fixture and preserved driver/easing fields",
+    "standalone_performance_profile": "grug not run",
+    "sanitizers": "grug not run"
+  },
+  "pretest_repairs": [
+    "grug first draft copied absolute animator times; source inspection required normalized markers",
+    "grug source output sockets and surplus inspector fields have no known saved animator; preserve their opaque lookalikes",
+    "grug test initially expected exported globals and removed an existing fixture; corrected before build",
+    "grug test initially used flat marker records; corrected to actual nested source markers before build"
+  ],
+  "limitations": [
+    "grug this is pure preparation; transactional .pxcc/.meta publication and Studio controls remain next",
+    "grug preview PNG and PXZ packaging remain open",
+    "grug keyed exports require saved project frame count greater than one; no guessed defaults",
+    "grug source single-key compaction and one-frame keyed exports still need complete serializer coverage",
+    "grug bounded reservation around bake validation is not a process-wide allocator proof",
+    "grug headed Studio interaction and licensed reference parity remain unverified",
+    "grug whole Composer goal remains active"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "build": "collection-save-build1.log",
+    "results": "collection-save-batch1-results.json",
+    "source_integrity": "collection-save-source-integrity-batch1.json",
+    "peer_integrity": "collection-save-peer-integrity-batch1.json",
+    "child_integrity": "collection-save-child-hashes-batch1.json"
+  },
+  "results_summary": [
+    {
+      "name": "bake",
+      "exit_code": 0,
+      "cases": 157,
+      "assertions": 15875,
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129"
+    },
+    {
+      "name": "physics",
+      "exit_code": 0,
+      "cases": 43,
+      "assertions": 715,
+      "binary_sha256": "3b2f2ea690b061d7a5ada43b0ca989c48c429909de81acf945034ae63561482b",
+      "binary_sha256_after": "3b2f2ea690b061d7a5ada43b0ca989c48c429909de81acf945034ae63561482b"
+    },
+    {
+      "name": "runner",
+      "exit_code": 0,
+      "cases": 29,
+      "assertions": 296,
+      "binary_sha256": "f59edd4f18106826ac463dc11ea2c29632f58d0be5350566b82f7d3fa1cac4ad",
+      "binary_sha256_after": "f59edd4f18106826ac463dc11ea2c29632f58d0be5350566b82f7d3fa1cac4ad"
+    },
+    {
+      "name": "font",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 1686,
+      "binary_sha256": "93cd8d70799454ad3d95b4746a472edd2b76f815b6e1ea13329dcd596ee8e765",
+      "binary_sha256_after": "93cd8d70799454ad3d95b4746a472edd2b76f815b6e1ea13329dcd596ee8e765"
+    },
+    {
+      "name": "export",
+      "exit_code": 0,
+      "cases": 77,
+      "assertions": 3132,
+      "binary_sha256": "ef61f29063e438232d596f350be1e2fada17ad3b79e6e0097faa41ba60952814",
+      "binary_sha256_after": "ef61f29063e438232d596f350be1e2fada17ad3b79e6e0097faa41ba60952814"
+    },
+    {
+      "name": "render",
+      "exit_code": 0,
+      "cases": 15,
+      "assertions": 477,
+      "binary_sha256": "0751bc59aa1384a0c152f2678978a528d8b97e9d218f313584da026c0f33932e",
+      "binary_sha256_after": "0751bc59aa1384a0c152f2678978a528d8b97e9d218f313584da026c0f33932e"
+    },
+    {
+      "name": "cli",
+      "exit_code": 0,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "exit_code": 0,
+      "cases": 298,
+      "assertions": 12777,
+      "binary_sha256": "dfd843e4a1c99dfaf48d699c2b5f9a34c63e7a4d5f2493329c09e3faafb22207",
+      "binary_sha256_after": "dfd843e4a1c99dfaf48d699c2b5f9a34c63e7a4d5f2493329c09e3faafb22207"
+    },
+    {
+      "name": "core",
+      "exit_code": 0,
+      "cases": 2980,
+      "assertions": 1895147,
+      "binary_sha256": "3b509b33c79312c0727322c2207c7038cf49be2bd5b343fc425ca33731ca3348",
+      "binary_sha256_after": "3b509b33c79312c0727322c2207c7038cf49be2bd5b343fc425ca33731ca3348"
+    },
+    {
+      "name": "assetc",
+      "exit_code": 0,
+      "cases": 45,
+      "assertions": 509,
+      "binary_sha256": "7182b77f87897d6cee3e9550ffb23486e58b173b7a9900e651063834b99f00de",
+      "binary_sha256_after": "7182b77f87897d6cee3e9550ffb23486e58b173b7a9900e651063834b99f00de"
+    },
+    {
+      "name": "client",
+      "exit_code": 0,
+      "cases": 358,
+      "assertions": 23821,
+      "binary_sha256": "903972ead44ee7bffdd6e5dd3a13490f69e7377739bd31b433141d5269b14039",
+      "binary_sha256_after": "903972ead44ee7bffdd6e5dd3a13490f69e7377739bd31b433141d5269b14039"
+    },
+    {
+      "name": "studio",
+      "exit_code": 0,
+      "cases": 1088,
+      "assertions": 48483,
+      "binary_sha256": "2f9aa241d72063e5d51ca1226f6fde369ec9c350b6d7d1268e4a0667133e9129",
+      "binary_sha256_after": "2f9aa241d72063e5d51ca1226f6fde369ec9c350b6d7d1268e4a0667133e9129"
+    },
+    {
+      "name": "nodegraph",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 345,
+      "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc"
+    },
+    {
+      "name": "ui",
+      "exit_code": 0,
+      "cases": 40,
+      "assertions": 704,
+      "binary_sha256": "f7d3ff41ad81bcb10ed941b8f40081e188ef4c05f1fd65e353e44ee3b9cc026c",
+      "binary_sha256_after": "f7d3ff41ad81bcb10ed941b8f40081e188ef4c05f1fd65e353e44ee3b9cc026c"
+    },
+    {
+      "name": "startup",
+      "exit_code": 0,
+      "cases": 1,
+      "assertions": 5
+    },
+    {
+      "name": "lint",
+      "exit_code": 0
+    },
+    {
+      "name": "architecture",
+      "exit_code": 0
+    },
+    {
+      "name": "python",
+      "exit_code": 0,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "exit_code": 0
+    }
+  ]
+}

@@ -2,11 +2,13 @@
 #include <engine/imagegraphio/PxcxAppend.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -781,6 +783,252 @@ TEST_CASE(
 	archive.GraphJson.erase(0, 1);
 	CHECK_FALSE(PreparePxcxCollectionMetadata(archive, result, diagnostic, 1));
 	CHECK(diagnostic.Code == engine::imagegraph::Status::LimitExceeded);
+	CHECK(result == prior);
+}
+
+TEST_CASE(
+	"PXC Collection save emits descendants postorder with relative positions and source references",
+	"[imagegraphio][pxcx_append][collection_save]"
+) {
+	Json root = Collection("selected", "outside");
+	root["x"] = 100;
+	root["y"] = 200;
+	root["attri"]["future_root"] = {{"id", "keep-root"}, {"type", "Node_Collection"}};
+	Json firstChild = Collection("child-a", "selected");
+	firstChild["x"] = 110;
+	firstChild["y"] = 220;
+	firstChild["attri"]["future_node"] = "keep-child";
+	Json grandchild = {
+		{"id", "grandchild"},
+		{"type", "Node_Feedback"},
+		{"x", 111},
+		{"y", 222},
+		{"group", "child-a"},
+		{"inputs", Json::array({WireJson("external-source")})},
+		{"instanceBase", "external-base"},
+		{"ictx", "external-context"},
+		{"tool", "external-tool"},
+		{"future_node", {{"identity", "external-reference"}}}
+	};
+	Json secondChild = Collection("child-b", "selected");
+	secondChild["x"] = 120;
+	secondChild["y"] = 230;
+	Json external = {
+		{"id", "external-source"},
+		{"type", "Node_Number_Simple"},
+		{"x", 5},
+		{"y", 7},
+		{"inputs", Json::array({ValueJson(9)})}
+	};
+	Json graph = {
+		{"global_node",
+		 {{"inputs",
+		   Json::array(
+			   {Json{{"global_name", "speed"}, {"global_type", 1}, {"global_disp", 0}, {"r", {{"d", 3}}}}}
+		   )}}},
+		{"attri", {{"description", "project metadata must not leak"}}},
+		{"timelines", {{"contents", Json::array({"project timeline"})}}},
+		{"nodes", Json::array({root, firstChild, grandchild, secondChild, external})}
+	};
+	auto archive = Archive(graph.dump());
+	PxcxCollectionSave result;
+	engine::imagegraph::Diagnostic diagnostic;
+	const std::string manager =
+		R"JSON({"description":"collection description","author":null,"file_id":41,"version":3,"versionStr":"old","future_manager":"drop"})JSON";
+	REQUIRE(PreparePxcxCollectionSave(archive, "selected", manager, result, diagnostic));
+	INFO(diagnostic.Message);
+	const auto saved = Json::parse(result.GraphJson);
+	CHECK(saved.size() == 3);
+	CHECK(saved["version"] == 121092);
+	CHECK(saved["versionStr"] == "1.21.10.203");
+	CHECK_FALSE(saved.contains("global_node"));
+	CHECK_FALSE(saved.contains("attri"));
+	CHECK_FALSE(saved.contains("timelines"));
+	REQUIRE(saved["nodes"].size() == 4);
+	for (const auto &node : saved["nodes"])
+		CHECK(node["version"] == 121092);
+	CHECK(saved["nodes"][0]["id"] == "grandchild");
+	CHECK(saved["nodes"][1]["id"] == "child-a");
+	CHECK(saved["nodes"][2]["id"] == "child-b");
+	CHECK(saved["nodes"][3]["id"] == "selected");
+	CHECK(saved["nodes"][0]["x"] == 11);
+	CHECK(saved["nodes"][0]["y"] == 22);
+	CHECK(saved["nodes"][1]["x"] == 10);
+	CHECK(saved["nodes"][1]["y"] == 20);
+	CHECK(saved["nodes"][2]["x"] == 20);
+	CHECK(saved["nodes"][2]["y"] == 30);
+	CHECK(saved["nodes"][3]["x"] == 0);
+	CHECK(saved["nodes"][3]["y"] == 0);
+	CHECK(saved["nodes"][3]["group"] == -4);
+	CHECK(saved["nodes"][0]["group"] == "child-a");
+	CHECK(saved["nodes"][0]["inputs"][0]["from_node"] == "external-source");
+	CHECK(saved["nodes"][0]["instanceBase"] == "external-base");
+	CHECK(saved["nodes"][0]["ictx"] == "external-context");
+	CHECK(saved["nodes"][0]["tool"] == "external-tool");
+	CHECK(saved["nodes"][0]["future_node"]["identity"] == "external-reference");
+	CHECK(saved["nodes"][1]["attri"]["future_node"] == "keep-child");
+	CHECK(saved["nodes"][3]["attri"]["future_root"] == root["attri"]["future_root"]);
+	REQUIRE(result.MetadataJson.has_value());
+	const auto metadata = Json::parse(*result.MetadataJson);
+	CHECK(metadata.size() == 12);
+	CHECK(metadata["description"] == "collection description");
+	CHECK(metadata["author"] == "");
+	CHECK(metadata["file_id"] == 41);
+	CHECK(metadata["version"] == 121092);
+	CHECK(metadata["versionStr"] == "1.21.10.203");
+	CHECK_FALSE(metadata.contains("future_manager"));
+}
+
+TEST_CASE(
+	"PXC Collection save scales only expanded source input animators by the project frame count",
+	"[imagegraphio][pxcx_append][collection_save][animation]"
+) {
+	const auto keys = [](double before, double after, std::string value) {
+		return Json::array(
+			{Json::array({Json::array({0, before}), value}),
+			 Json::array({Json::array({1, after}), value + "-after"})}
+		);
+	};
+	Json node = Collection("animated");
+	node["inputs"] = Json::array(
+		{Json{{"r", keys(5.5, -2.75, "normal")}},
+		 Json{{"r", {{"d", Json::array({2, 4, 8})}}}},
+		 Json{{"r", keys(10, 20, "kind-one")}, {"animators", Json::array({keys(2.5, 20, "axis")})}}}
+	);
+	const Json driver = {
+		{"type", 77}, {"r", Json::array({Json::array({Json::array({0, 9}), "opaque-driver"})})}
+	};
+	for (auto &key : node["inputs"][0]["r"]) {
+		key.push_back(Json::array({0.25, 0.75}));
+		key.push_back(Json::array({0.5, 0.5}));
+		key.push_back("ease-in");
+		key.push_back("ease-out");
+		key.push_back(true);
+		key.push_back(driver);
+		key.push_back(17);
+	}
+	node["inspectInputs"] = Json::array(
+		{Json{{"r", keys(1, 2, "inspect-zero")}},
+		 Json{{"r", keys(3, 4, "inspect-one")}},
+		 Json{{"r", keys(5, 6, "inspect-two")}},
+		 Json{{"r", keys(7, 8, "output-trigger")}},
+		 Json{{"r", keys(9, 10, "inspect-four")}, {"animators", Json::array({keys(4, 8, "inspect-axis")})}},
+		 Json{{"r", keys(11, 12, "surplus-inspector")}}}
+	);
+	node["outputs"] = Json::array({Json{{"r", keys(2, 4, "opaque-output")}}});
+	node["outputMeta"] = {{"r", keys(3, 6, "opaque-output-meta")}};
+	node["attri"]["animator_lookalike"] = keys(4, 8, "opaque-attribute");
+	auto archive = Archive(Json{{"animator", {{"frames_total", 11}}}, {"nodes", Json::array({node})}}.dump());
+	PxcxCollectionSave result;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(PreparePxcxCollectionSave(archive, "animated", std::nullopt, result, diagnostic));
+	INFO(diagnostic.Message);
+	const auto saved = Json::parse(result.GraphJson);
+	const auto &exported = saved["nodes"][0];
+	CHECK(exported["inputs"][0]["r"][0][0][0] == 0);
+	CHECK(exported["inputs"][0]["r"][0][0][1].get<double>() == Catch::Approx(0.55));
+	CHECK(exported["inputs"][0]["r"][0][1] == "normal");
+	CHECK(exported["inputs"][0]["r"][1][0][0] == 1);
+	CHECK(exported["inputs"][0]["r"][1][0][1].get<double>() == Catch::Approx(-0.275));
+	for (size_t index = 0; index < node["inputs"][0]["r"].size(); ++index)
+		for (size_t field = 1; field < node["inputs"][0]["r"][index].size(); ++field)
+			CHECK(exported["inputs"][0]["r"][index][field] == node["inputs"][0]["r"][index][field]);
+	CHECK(exported["inputs"][1]["r"]["d"] == Json::array({2, 4, 8}));
+	CHECK(exported["inputs"][2]["r"][0][0][1].get<double>() == Catch::Approx(1.0));
+	CHECK(exported["inputs"][2]["animators"][0][0][0][1].get<double>() == Catch::Approx(0.25));
+	CHECK(exported["inspectInputs"][0]["r"][0][0][1].get<double>() == Catch::Approx(0.1));
+	CHECK(exported["inspectInputs"][1]["r"][0][0][1].get<double>() == Catch::Approx(0.3));
+	CHECK(exported["inspectInputs"][2]["r"][0][0][1].get<double>() == Catch::Approx(0.5));
+	CHECK(exported["inspectInputs"][4]["r"][0][0][1].get<double>() == Catch::Approx(0.9));
+	CHECK(exported["inspectInputs"][4]["animators"][0][0][0][1].get<double>() == Catch::Approx(0.4));
+	CHECK(exported["inspectInputs"][3]["r"] == node["inspectInputs"][3]["r"]);
+	CHECK(exported["inspectInputs"][5]["r"] == node["inspectInputs"][5]["r"]);
+	CHECK(exported["outputs"] == node["outputs"]);
+	CHECK(exported["outputMeta"] == node["outputMeta"]);
+	CHECK(exported["attri"] == node["attri"]);
+}
+
+TEST_CASE(
+	"PXC Collection save recognizes every pinned Collection family as a root",
+	"[imagegraphio][pxcx_append][collection_save][families]"
+) {
+	const std::vector<std::string> types = {
+		"Node_Group",
+		"Node_Collection",
+		"Node_Canvas_Group",
+		"Node_DynaSurf",
+		"Node_Feedback",
+		"Node_Iterate",
+		"Node_Iterate_Each",
+		"Node_Iterate_Filter",
+		"Node_Iterate_Sort",
+		"Node_Iterator",
+		"Node_Pixel_Builder",
+		"Node_Smoke_Group",
+		"Node_Strand_Group",
+		"Node_VFX_Group"
+	};
+	for (const auto &type : types) {
+		Json node = Collection("root");
+		node["type"] = type;
+		auto archive = Archive(Json{{"nodes", Json::array({node})}}.dump());
+		PxcxCollectionSave result;
+		engine::imagegraph::Diagnostic diagnostic;
+		CAPTURE(type);
+		REQUIRE(PreparePxcxCollectionSave(archive, "root", std::nullopt, result, diagnostic));
+		CHECK_FALSE(result.MetadataJson.has_value());
+		const auto saved = Json::parse(result.GraphJson);
+		REQUIRE(saved["nodes"].size() == 1);
+		CHECK(saved["nodes"][0]["id"] == "root");
+	}
+}
+
+TEST_CASE(
+	"PXC Collection save refusals preserve the prior result",
+	"[imagegraphio][pxcx_append][collection_save][atomic]"
+) {
+	auto archive = Archive(Json{{"nodes", Json::array({Collection("root")})}}.dump());
+	PxcxCollectionSave prior{"previous graph", std::string("previous metadata")};
+	PxcxCollectionSave result = prior;
+	engine::imagegraph::Diagnostic diagnostic;
+	CHECK_FALSE(PreparePxcxCollectionSave(archive, "missing", std::nullopt, result, diagnostic));
+	CHECK(result == prior);
+	Json ordinary = {
+		{"id", "root"},
+		{"type", "Node_Number_Simple"},
+		{"x", 0},
+		{"y", 0},
+		{"inputs", Json::array({ValueJson(1)})}
+	};
+	auto nonCollection = Archive(Json{{"nodes", Json::array({ordinary})}}.dump());
+	CHECK_FALSE(PreparePxcxCollectionSave(nonCollection, "root", std::nullopt, result, diagnostic));
+	CHECK(result == prior);
+	CHECK_FALSE(
+		PreparePxcxCollectionSave(archive, "root", std::string_view("{bad json"), result, diagnostic)
+	);
+	CHECK(result == prior);
+	CHECK_FALSE(PreparePxcxCollectionSave(archive, "root", std::nullopt, result, diagnostic, 1));
+	CHECK(result == prior);
+	Json cyclicRoot = Collection("root", "child");
+	Json cyclicChild = Collection("child", "root");
+	auto cyclic = Archive(Json{{"nodes", Json::array({cyclicRoot, cyclicChild})}}.dump());
+	CHECK_FALSE(PreparePxcxCollectionSave(cyclic, "root", std::nullopt, result, diagnostic));
+	CHECK(result == prior);
+	const auto keyed = [](std::optional<int> frameCount) {
+		Json source = Collection("root");
+		source["inputs"] =
+			Json::array({Json{{"r", Json::array({Json::array({Json::array({0, 5}), "keyed"})})}}});
+		Json root = {{"nodes", Json::array({source})}};
+		if (frameCount) root["animator"] = {{"frames_total", *frameCount}};
+		return Archive(root.dump());
+	};
+	for (const auto &keyedArchive : {keyed(std::nullopt), keyed(1)}) {
+		CHECK_FALSE(PreparePxcxCollectionSave(keyedArchive, "root", std::nullopt, result, diagnostic));
+		CHECK(result == prior);
+	}
+	auto stale = archive;
+	stale.GraphJson.insert(0, " ");
+	CHECK_FALSE(PreparePxcxCollectionSave(stale, "root", std::nullopt, result, diagnostic));
 	CHECK(result == prior);
 }
 

@@ -4,7 +4,9 @@
 #include <engine/imagegraphio/PxcxAppend.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <type_traits>
@@ -515,6 +517,273 @@ namespace engine::imagegraphio {
 		return false;
 	} catch (const AppendJson::exception &) {
 		diagnostic = {Status::InvalidValue, {}, {}, "PXC append source record is malformed"};
+		return false;
+	}
+
+	bool PreparePxcxCollectionSave(
+		const bake::PxcxArchive &archive,
+		std::string_view collectionId,
+		std::optional<std::string_view> metadataJson,
+		PxcxCollectionSave &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraphio.collection_save");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return false;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || !ArchiveBounds(archive) ||
+			archive.Nodes.size() > Limits::MaximumNodes || collectionId.empty() ||
+			collectionId.size() > bake::PxcxLimits::MaximumNodeTextBytes ||
+			(metadataJson && metadataJson->size() > bake::PxcxLimits::MaximumMetadataBytes) ||
+			result.GraphJson.capacity() > bake::PxcxLimits::MaximumGraphJsonBytes ||
+			(result.MetadataJson && result.MetadataJson->capacity() > bake::PxcxLimits::MaximumMetadataBytes))
+			return fail(Status::LimitExceeded, "PXC collection save counts or bytes exceed bounds");
+		if (archive.MetadataNumber != 121092)
+			return fail(Status::InvalidValue, "PXC collection save version is invalid");
+		detail::ImportBudget budget(maximumBytes);
+		if (!budget.Hold(ArchiveBytes(archive)) || !budget.Hold(result.GraphJson.capacity() + 1) ||
+			(result.MetadataJson && !budget.Hold(result.MetadataJson->capacity() + 1)) ||
+			!budget.Hold(collectionId.size() + (metadataJson ? metadataJson->size() : 0)))
+			return fail(Status::LimitExceeded, "PXC collection save owners exceed live bounds");
+		JsonScope scope(budget);
+		AppendWork work;
+		auto graph = Parse(archive, work);
+		if (!graph) return fail(Status::InvalidValue, "PXC collection source JSON is invalid");
+		RecordWork(*graph, work);
+		const uint64_t validationBytes =
+			ArchiveBytes(archive) * 4 + CodecDomBytes(*graph) + 2ull * 1024 * 1024;
+		if (!budget.Hold(validationBytes))
+			return fail(Status::LimitExceeded, "PXC collection archive validation exceeds live bounds");
+		{
+			std::vector<std::byte> checked;
+			std::string failure;
+			if (!bake::WritePxcx(archive, checked, failure) || checked != archive.OriginalBytes)
+				return fail(Status::InvalidValue, "PXC collection archive has untracked changes");
+		}
+		budget.Release(validationBytes);
+		const auto &nodes = graph->at("nodes");
+		const size_t count = nodes.size();
+		if (count > Limits::MaximumNodes)
+			return fail(Status::LimitExceeded, "PXC collection node count exceeds bounds");
+		struct NodeIndex {
+			std::string_view Id;
+			size_t Index = 0;
+		};
+		struct Visit {
+			size_t Index = 0, Next = 0;
+		};
+		struct Traversal {
+			std::array<NodeIndex, Limits::MaximumNodes> Index;
+			std::array<size_t, Limits::MaximumNodes> First, Last, Next;
+			std::array<bool, Limits::MaximumNodes> Visited{};
+			std::array<Visit, Limits::MaximumNodes> Stack;
+		};
+		if (!budget.Hold(sizeof(Traversal)))
+			return fail(Status::LimitExceeded, "PXC collection traversal exceeds live bounds");
+		auto traversalStorage = std::make_unique<Traversal>();
+		auto &traversal = *traversalStorage;
+		traversal.First.fill(count);
+		traversal.Last.fill(count);
+		traversal.Next.fill(count);
+		for (size_t index = 0; index < count; ++index) {
+			const auto &node = nodes[index];
+			if (!node.is_object() || !node.contains("id") || !node["id"].is_string())
+				return fail(Status::InvalidValue, "PXC collection node identity is invalid");
+			const auto &id = node["id"].get_ref<const JsonString &>();
+			if (id.empty() || id.size() > bake::PxcxLimits::MaximumNodeTextBytes)
+				return fail(Status::InvalidValue, "PXC collection node identity is outside bounds");
+			traversal.Index[index] = {{id.data(), id.size()}, index};
+		}
+		const auto compare = [&](const NodeIndex &a, const NodeIndex &b) {
+			work.Charge(1, std::min(a.Id.size(), b.Id.size()) + 1);
+			return a.Id < b.Id;
+		};
+		std::sort(traversal.Index.begin(), traversal.Index.begin() + count, compare);
+		for (size_t index = 1; index < count; ++index)
+			if (!compare(traversal.Index[index - 1], traversal.Index[index]))
+				return fail(Status::InvalidValue, "PXC collection node identity is duplicated");
+		const auto find = [&](std::string_view id) {
+			const auto found = std::lower_bound(
+				traversal.Index.begin(), traversal.Index.begin() + count, NodeIndex{id, 0}, compare
+			);
+			work.Charge(1, id.size() + 1);
+			return found != traversal.Index.begin() + count && found->Id == id ? found->Index : count;
+		};
+		const size_t selected = find(collectionId);
+		if (selected == count || !GroupType(nodes[selected]))
+			return fail(Status::InvalidValue, "select a source Collection to save");
+		const auto position = [&](const AppendJson &node, const char *name) -> std::optional<double> {
+			const auto value = node.find(name);
+			if (value == node.end() || !value->is_number()) return {};
+			const double number = value->get<double>();
+			return std::isfinite(number) ? std::optional<double>{number} : std::nullopt;
+		};
+		const auto originX = position(nodes[selected], "x"), originY = position(nodes[selected], "y");
+		if (!originX || !originY)
+			return fail(Status::InvalidValue, "PXC collection has no finite saved position");
+		for (size_t index = 0; index < count; ++index) {
+			const auto parent = nodes[index].find("group");
+			if (parent == nodes[index].end() || !parent->is_string()) continue;
+			const auto &parentName = parent->get_ref<const JsonString &>();
+			const size_t owner = find({parentName.data(), parentName.size()});
+			if (owner == count || !GroupType(nodes[owner])) continue;
+			if (traversal.First[owner] == count)
+				traversal.First[owner] = index;
+			else
+				traversal.Next[traversal.Last[owner]] = index;
+			traversal.Last[owner] = index;
+		}
+		std::optional<double> frameCount;
+		const auto animator = graph->find("animator");
+		if (animator != graph->end() && animator->is_object()) {
+			const auto total = animator->find("frames_total");
+			if (total != animator->end() && total->is_number()) {
+				const double value = total->get<double>();
+				if (std::isfinite(value) && value > 1 && value <= Limits::MaximumTick &&
+					std::trunc(value) == value)
+					frameCount = value;
+			}
+		}
+		size_t keyCount = 0;
+		const auto normalizeAnimator = [&](AppendJson &data) {
+			if (data.is_object()) {
+				if (data.contains("d") && ++keyCount > Limits::MaximumKeyframes)
+					return fail(Status::LimitExceeded, "PXC collection aggregate key count exceeds bounds");
+				return true;
+			}
+			if (!data.is_array())
+				return fail(Status::InvalidValue, "PXC collection animator storage is invalid");
+			if (data.size() > Limits::MaximumKeyframes - keyCount)
+				return fail(Status::LimitExceeded, "PXC collection aggregate key count exceeds bounds");
+			keyCount += data.size();
+			for (auto &key : data) {
+				work.Charge(1, 1);
+				if (!key.is_array() || key.size() < 2 || !key[0].is_array() || key[0].size() < 2 ||
+					!key[0][0].is_number() || !key[0][1].is_number() || (key[0][0] != 0 && key[0][0] != 1))
+					return fail(Status::InvalidValue, "PXC collection key marker is invalid");
+				if (!frameCount)
+					return fail(
+						Status::InvalidValue,
+						"PXC collection keyed save needs a checked project frame count greater than one"
+					);
+				const double time = key[0][1].get<double>() / (*frameCount - 1);
+				if (!std::isfinite(time))
+					return fail(Status::InvalidValue, "PXC collection scaled key time is invalid");
+				key[0][1] = time;
+			}
+			return true;
+		};
+		const auto normalizeInputs = [&](AppendJson &record) {
+			for (const char *field : {"inputs", "inspectInputs"}) {
+				const auto inputs = record.find(field);
+				if (inputs == record.end()) continue;
+				if (!inputs->is_array())
+					return fail(Status::InvalidValue, "PXC collection socket list is invalid");
+				for (size_t index = 0; index < inputs->size(); ++index) {
+					work.Charge(1, 1);
+					// grug source output trigger and surplus inspector fields have no saved animator.
+					if (std::string_view(field) == "inspectInputs" && (index == 3 || index >= 5)) continue;
+					auto &input = (*inputs)[index];
+					if (!input.is_object())
+						return fail(Status::InvalidValue, "PXC collection socket record is invalid");
+					const auto data = input.find("r");
+					if (data != input.end() && !normalizeAnimator(*data)) return false;
+					const auto axes = input.find("animators");
+					if (axes == input.end()) continue;
+					if (!axes->is_array())
+						return fail(Status::InvalidValue, "PXC collection axis storage is invalid");
+					for (auto &axis : *axes)
+						if (!normalizeAnimator(axis)) return false;
+				}
+			}
+			return true;
+		};
+		constexpr std::string_view versionText = "1.21.10.203";
+		AppendJson content = {
+			{"version", 121092}, {"versionStr", versionText}, {"nodes", AppendJson::array()}
+		};
+		size_t depth = 1;
+		traversal.Visited[selected] = true;
+		traversal.Stack[0] = {selected, traversal.First[selected]};
+		while (depth) {
+			work.Charge(1, 1);
+			auto &frame = traversal.Stack[depth - 1];
+			if (frame.Next != count) {
+				const size_t child = frame.Next;
+				frame.Next = traversal.Next[child];
+				if (traversal.Visited[child] || depth == traversal.Stack.size())
+					return fail(Status::InvalidValue, "PXC collection contains cyclic source groups");
+				traversal.Visited[child] = true;
+				traversal.Stack[depth++] = {child, GroupType(nodes[child]) ? traversal.First[child] : count};
+				continue;
+			}
+			const auto x = position(nodes[frame.Index], "x"), y = position(nodes[frame.Index], "y");
+			if (!x || !y || !std::isfinite(*x - *originX) || !std::isfinite(*y - *originY))
+				return fail(Status::InvalidValue, "PXC collection saved position exceeds finite bounds");
+			RecordWork(nodes[frame.Index], work);
+			AppendJson record = nodes[frame.Index];
+			record["version"] = 121092;
+			record["x"] = *x - *originX;
+			record["y"] = *y - *originY;
+			// grug SAVE_COLLECTION passes selected parent as context; GameMaker noone is -4.
+			if (frame.Index == selected && record.contains("group")) {
+				const auto &parent = record["group"];
+				if (parent.is_string() && !parent.get_ref<const JsonString &>().empty())
+					record["group"] = -4;
+				else if (parent.is_null() || parent.is_string() ||
+						 (parent.is_number_integer() &&
+						  (parent.get<int64_t>() == -1 || parent.get<int64_t>() == -4)))
+					record.erase("group");
+				else
+					return fail(Status::InvalidValue, "PXC collection saved parent is invalid");
+			}
+			if (!normalizeInputs(record)) return false;
+			content["nodes"].push_back(std::move(record));
+			--depth;
+		}
+		std::optional<AppendJson> manager;
+		if (metadataJson) {
+			auto supplied = ParseText(*metadataJson, work);
+			if (!supplied) return fail(Status::InvalidValue, "PXC collection manager JSON is invalid");
+			RecordWork(*supplied, work);
+			manager = CollectionDefaults();
+			for (auto &field : manager->items()) {
+				const auto value = supplied->find(field.key());
+				if (value != supplied->end() && !value->is_null()) field.value() = *value;
+			}
+			(*manager)["version"] = 121092;
+			(*manager)["versionStr"] = versionText;
+		}
+		const auto serialized = content.dump();
+		if (serialized.size() > bake::PxcxLimits::MaximumGraphJsonBytes ||
+			!budget.Hold(2 * std::max(serialized.size(), std::string{}.capacity()) + 1))
+			return fail(Status::LimitExceeded, "PXC collection text exceeds live bounds");
+		PxcxCollectionSave candidate;
+		candidate.GraphJson.assign(serialized.data(), serialized.size());
+		if (manager) {
+			const auto metadata = manager->dump();
+			if (metadata.size() > bake::PxcxLimits::MaximumMetadataBytes ||
+				!budget.Hold(2 * std::max(metadata.size(), std::string{}.capacity()) + 1))
+				return fail(Status::LimitExceeded, "PXC collection sidecar exceeds live bounds");
+			candidate.MetadataJson.emplace(metadata.data(), metadata.size());
+		}
+		static_assert(std::is_nothrow_move_assignable_v<PxcxCollectionSave>);
+		result = std::move(candidate);
+		diagnostic = {};
+		return true;
+	} catch (const AppendWorkExceeded &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC collection comparison work exceeds bounds"};
+		return false;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC collection allocation exceeds operation bounds"};
+		return false;
+	} catch (const std::length_error &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC collection string or JSON depth exceeds bounds"};
+		return false;
+	} catch (const AppendJson::exception &) {
+		diagnostic = {Status::InvalidValue, {}, {}, "PXC collection source record is malformed"};
 		return false;
 	}
 
