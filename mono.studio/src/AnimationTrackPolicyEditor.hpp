@@ -66,13 +66,16 @@ namespace studio::detail {
 			if (ImGui::BeginCombo("Quaternion", modes[std::clamp(selected, 0, 2)])) {
 				for (int choice = 0; choice < 3; choice++) {
 					if (ImGui::Selectable(modes[choice], choice == selected)) {
-						apply([&](Document &document) {
-							SetImageGraphTrackQuaternionMode(
+						apply([&](Document &document,
+								  uint64_t availableBytes =
+									  engine::imagegraph::Limits::MaximumEvaluationBytes) {
+							return SetImageGraphTrackQuaternionMode(
 								document,
 								nodeId,
 								propertyId,
 								choice == 0 ? std::nullopt : std::optional<int64_t>{choice - 1},
-								error
+								error,
+								availableBytes
 							);
 						});
 					}
@@ -81,9 +84,11 @@ namespace studio::detail {
 			}
 		}
 		const auto savePolicy = [&] {
-			apply([&](Document &document) {
-				if (SetImageGraphAnimationTrack(document, nodeId, propertyId, end, loopRange, error))
-					error = {};
+			apply([&](Document &document,
+					  uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes) {
+				return SetImageGraphAnimationTrack(
+					document, nodeId, propertyId, end, loopRange, error, availableBytes
+				);
 			});
 		};
 		if (hasTrack && policyChanged) savePolicy();
@@ -91,8 +96,9 @@ namespace studio::detail {
 			ImGui::TextDisabled("No track override. Preview holds the final keyed value.");
 			if (ImGui::SmallButton("Add track policy")) savePolicy();
 		} else if (ImGui::SmallButton("Remove track policy")) {
-			apply([&](Document &document) {
-				if (RemoveImageGraphAnimationTrack(document, nodeId, propertyId, error)) error = {};
+			apply([&](Document &document,
+					  uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes) {
+				return RemoveImageGraphAnimationTrack(document, nodeId, propertyId, error, availableBytes);
 			});
 		}
 		ImGui::TreePop();

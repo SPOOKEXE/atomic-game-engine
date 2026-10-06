@@ -356,6 +356,7 @@ namespace studio {
 	// @param tick        Fixed authored timeline tick.
 	// @param interpolation Interpolation rule stored with the key: step, linear, cubic or source.
 	// @param error       Receives a diagnostic when the key cannot be authored.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool SetImageGraphKeyframe(
 		engine::imagegraph::Document &document,
 		std::string_view nodeId,
@@ -364,7 +365,8 @@ namespace studio {
 		std::string_view interpolation,
 		engine::imagegraph::Diagnostic &error,
 		double subframe = 0,
-		bool negativeFrame = false
+		bool negativeFrame = false,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Removes one key at the given tick.
@@ -373,6 +375,7 @@ namespace studio {
 	// @param property Durable schema property identifier.
 	// @param tick     Fixed authored timeline tick.
 	// @param error    Receives a diagnostic when the target property is invalid.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	// @return Whether a matching key was removed.
 	bool RemoveImageGraphKeyframe(
 		engine::imagegraph::Document &document,
@@ -381,15 +384,18 @@ namespace studio {
 		uint64_t tick,
 		engine::imagegraph::Diagnostic &error,
 		double subframe = 0,
-		bool negativeFrame = false
+		bool negativeFrame = false,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Authors the retained source marker without changing interpolation or arithmetic.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool SetImageGraphKeyframeKind(
 		engine::imagegraph::Document &document,
 		size_t index,
 		engine::imagegraph::KeyframeKind kind,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	struct ImageGraphKeyframeIdentity {
@@ -448,11 +454,13 @@ namespace studio {
 	// @param index    Keyframe declaration index.
 	// @param rule     Supported rule: step, linear, cubic or source.
 	// @param error    Receives a diagnostic when the index or rule is invalid.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool SetImageGraphKeyframeInterpolation(
 		engine::imagegraph::Document &document,
 		size_t index,
 		std::string_view rule,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Authors source-side ease handles for one key and keeps its track's interpolation compatible.
@@ -460,27 +468,33 @@ namespace studio {
 	// @param index    Keyframe declaration index.
 	// @param ease     Incoming and outgoing side types and handles.
 	// @param error    Receives a diagnostic when the index or ease data is invalid.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool SetImageGraphKeyframeEase(
 		engine::imagegraph::Document &document,
 		size_t index,
 		engine::imagegraph::KeyframeEase ease,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Source controls are checked by the core validator before a transactional document edit.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool SetImageGraphKeyframeSourceDriver(
 		engine::imagegraph::Document &document,
 		size_t index,
 		const std::optional<engine::imagegraph::KeyframeSourceDriver> &driver,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 	// Authors an explicit source quaternion interpretation without converting the stored tuples.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool SetImageGraphTrackQuaternionMode(
 		engine::imagegraph::Document &document,
 		std::string_view nodeId,
 		std::string_view property,
 		std::optional<int64_t> mode,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Adds or removes a bounded scalar sine driver on one keyframe.
@@ -488,11 +502,13 @@ namespace studio {
 	// @param index    Keyframe declaration index.
 	// @param driver   Sine parameters, or no value to remove the driver.
 	// @param error    Receives a diagnostic when the index or parameters are invalid.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool SetImageGraphKeyframeSineDriver(
 		engine::imagegraph::Document &document,
 		size_t index,
 		std::optional<engine::imagegraph::KeyframeSineDriver> driver,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Stores a checked v4 timeline range and playback end mode.
@@ -507,21 +523,25 @@ namespace studio {
 	RemoveImageGraphTimeline(engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error);
 
 	// Adds or replaces the end and loop-tail policy for one keyed property.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool SetImageGraphAnimationTrack(
 		engine::imagegraph::Document &document,
 		std::string_view nodeId,
 		std::string_view property,
 		std::string end,
 		int64_t loopRange,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Removes an authored end and loop-tail override for one keyed property.
+	// @param availableBytes Remaining live transaction budget for captured edits.
 	bool RemoveImageGraphAnimationTrack(
 		engine::imagegraph::Document &document,
 		std::string_view nodeId,
 		std::string_view property,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 	);
 
 	// Selects an existing preview output's source by durable node and port ids.

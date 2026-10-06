@@ -38,6 +38,7 @@
 #include "ImageGraphRigid.hpp"
 #include "ImageGraphRigidMeshAction.hpp"
 #include "ImageGraphSourceEdit.hpp"
+#include "ImageGraphSourceKeyEdit.hpp"
 #include "ImageGraphSourceTimelineTransition.hpp"
 #include "ImagePreviewPanel.hpp"
 #include "KeyframeKindEditor.hpp"
@@ -72,6 +73,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -475,7 +477,10 @@ namespace studio {
 
 		void ReloadCanvas(State &state);
 		bool ReconcileSplitOutputs(
-			State &state, Document &document, const engine::imagegraph::GroupReplayState *replay = nullptr
+			State &state,
+			Document &document,
+			const engine::imagegraph::GroupReplayState *replay = nullptr,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 		) {
 			std::vector<std::string> splitIds;
 			for (const auto &node : document.Nodes)
@@ -483,8 +488,26 @@ namespace studio {
 			if (splitIds.empty()) return true;
 			engine::imagegraph::Plan plan;
 			engine::imagegraph::Diagnostic error;
-			if (engine::imagegraph::Compile(document, plan, error) != engine::imagegraph::Status::Ok)
+			const auto documentBytes = engine::imagegraph::DocumentRetainedPayloadBytes(document);
+			uint64_t scratch = splitIds.capacity() * sizeof(std::string);
+			for (const auto &id : splitIds)
+				scratch += id.capacity();
+			if (!documentBytes || *documentBytes >= maximumBytes ||
+				scratch >= maximumBytes - *documentBytes) {
+				state.LastDiagnostic = {
+					Status::LimitExceeded, {}, {}, "split output reconciliation exceeds budget"
+				};
+				return false;
+			}
+			const auto workspace = (maximumBytes - *documentBytes - scratch) / 2;
+			if (engine::imagegraph::Compile(document, plan, error, workspace) !=
+				engine::imagegraph::Status::Ok) {
+				if (error.Code == Status::LimitExceeded) {
+					state.LastDiagnostic = error;
+					return false;
+				}
 				return true;
+			}
 			engine::imagegraphphysics::RigidProvider requestRigidProvider;
 			engine::imagegraph::EvaluationRequest request;
 			request.HostProvider = &HostFor(state);
@@ -499,9 +522,15 @@ namespace studio {
 			std::vector<std::pair<std::string, size_t>> resized;
 			for (const auto &id : splitIds) {
 				engine::imagegraph::EvaluationSnapshot snapshot;
-				if (engine::imagegraph::EvaluateNodeInputs(document, plan, id, request, snapshot, error) !=
-					engine::imagegraph::Status::Ok)
+				if (engine::imagegraph::EvaluateNodeInputs(
+						document, plan, id, request, snapshot, error, workspace
+					) != engine::imagegraph::Status::Ok) {
+					if (error.Code == Status::LimitExceeded) {
+						state.LastDiagnostic = error;
+						return false;
+					}
 					continue;
+				}
 				size_t count = 0, minimum = 0;
 				for (const auto &input : snapshot.Values()) {
 					if (input.Port == "minimum_outputs") {
@@ -2762,6 +2791,56 @@ namespace studio {
 			return accepted;
 		}
 
+		bool ApplyKeyEdit(State &state, const auto &edit, bool *unchanged = nullptr) {
+			if (!RetryCacheEdit(state)) return false;
+			CancelComposerPreview(state);
+			engine::imagegraph::EvaluationRequest request;
+			request.HostProvider = &HostFor(state);
+			request.AudioFrames = state.AudioFrames;
+			request.AudioClips = state.AudioClips;
+			engine::imagegraph::SourceFontContext fontContext;
+			if (NeedsImageGraphSourceKeyCapture(state.Authored) &&
+				!BindObservations(state, request, &fontContext))
+				return false;
+			(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+			const auto fontBytes = engine::imagegraph::SourceFontContextRetainedBytes(fontContext);
+			const auto allowance = fontBytes ? GroupConstructorAllowance(state, *fontBytes) : std::nullopt;
+			if (!allowance) {
+				state.LastDiagnostic = {
+					Status::LimitExceeded, {}, {}, "source key edit host payload exceeds budget"
+				};
+				return false;
+			}
+			const bool accepted = ApplyImageGraphSourceKeyEdit(
+				state.Authored,
+				state.History,
+				state.GroupHost,
+				state.DocumentRevision,
+				request,
+				edit,
+				state.LastDiagnostic,
+				*allowance,
+				unchanged,
+				[&](Document &document,
+					const engine::imagegraph::GroupReplayState *replay,
+					uint64_t availableBytes) {
+					return ReconcileSplitOutputs(state, document, replay, availableBytes);
+				}
+			);
+			if (accepted) AuthoredDocumentChanged(state);
+			return accepted;
+		}
+
+		bool ApplyPinnedKeyEdit(State &state, size_t index, const auto &edit) {
+			if (index >= state.Authored.Keyframes.size()) return false;
+			const auto &original = state.Authored.Keyframes[index];
+			return ApplyKeyEdit(state, [&](Document &document, uint64_t availableBytes) {
+				return EditImageGraphPinnedKey(
+					document, state.Authored, original, availableBytes, edit, state.LastDiagnostic
+				);
+			});
+		}
+
 		engine::imagegraph::TimelineSettings PlaybackTimeline(const ImageGraphPlayback &playback) {
 			return {
 				playback.TotalFrames,
@@ -4468,7 +4547,7 @@ namespace studio {
 			}
 			detail::DrawAnimationTrackPolicy(
 				state.Authored, node, property, state.LastDiagnostic, [&](const auto &edit) {
-					return ApplyDocumentEdit(state, edit);
+					return ApplyKeyEdit(state, edit);
 				}
 			);
 		}
@@ -5919,19 +5998,18 @@ namespace studio {
 		}
 
 		void AddKeyframe(State &state, const std::string &nodeId, const std::string &port) {
-			ApplyDocumentEdit(state, [&](Document &document) {
-				if (!SetImageGraphKeyframe(
-						document,
-						nodeId,
-						port,
-						state.Playback.CurrentTick,
-						"step",
-						state.LastDiagnostic,
-						state.Playback.Subframe,
-						state.Playback.NegativeFrame
-					))
-					return;
-				state.LastDiagnostic = {};
+			ApplyKeyEdit(state, [&](Document &document, uint64_t availableBytes) {
+				return SetImageGraphKeyframe(
+					document,
+					nodeId,
+					port,
+					state.Playback.CurrentTick,
+					"step",
+					state.LastDiagnostic,
+					state.Playback.Subframe,
+					state.Playback.NegativeFrame,
+					availableBytes
+				);
 			});
 		}
 
@@ -5967,10 +6045,13 @@ namespace studio {
 			changed |= ImGui::InputDouble("##ease-y", &handle.Y, 0.05, 0.25, "%.2f");
 			if (!changed) return;
 
-			ApplyDocumentEdit(state, [&](Document &document) {
-				if (SetImageGraphKeyframeEase(document, index, ease, state.LastDiagnostic))
-					state.LastDiagnostic = {};
-			});
+			ApplyPinnedKeyEdit(
+				state, index, [&](Document &document, size_t keyIndex, uint64_t availableBytes) {
+					return SetImageGraphKeyframeEase(
+						document, keyIndex, ease, state.LastDiagnostic, availableBytes
+					);
+				}
+			);
 		}
 
 		void DrawKeyframeSineDriver(State &state, size_t index, const Keyframe &frame) {
@@ -5984,15 +6065,17 @@ namespace studio {
 			const auto sine = frame.SineDriver;
 			if (ImGui::SmallButton(sine ? "Sine..." : "Add sine")) {
 				if (!sine) {
-					ApplyDocumentEdit(state, [&](Document &document) {
-						if (SetImageGraphKeyframeSineDriver(
+					ApplyPinnedKeyEdit(
+						state, index, [&](Document &document, size_t keyIndex, uint64_t availableBytes) {
+							return SetImageGraphKeyframeSineDriver(
 								document,
-								index,
+								keyIndex,
 								engine::imagegraph::KeyframeSineDriver{},
-								state.LastDiagnostic
-							))
-							state.LastDiagnostic = {};
-					});
+								state.LastDiagnostic,
+								availableBytes
+							);
+						}
+					);
 				}
 				ImGui::OpenPopup("##sine-driver");
 			}
@@ -6009,16 +6092,22 @@ namespace studio {
 			ImGui::SetNextItemWidth(120.0f);
 			changed |= ImGui::InputDouble("Smooth", &driver.Smooth, 0.05, 0.1, "%.4f");
 			if (changed) {
-				ApplyDocumentEdit(state, [&](Document &document) {
-					if (SetImageGraphKeyframeSineDriver(document, index, driver, state.LastDiagnostic))
-						state.LastDiagnostic = {};
-				});
+				ApplyPinnedKeyEdit(
+					state, index, [&](Document &document, size_t keyIndex, uint64_t availableBytes) {
+						return SetImageGraphKeyframeSineDriver(
+							document, keyIndex, driver, state.LastDiagnostic, availableBytes
+						);
+					}
+				);
 			}
 			if (ImGui::SmallButton("Remove sine")) {
-				ApplyDocumentEdit(state, [&](Document &document) {
-					if (SetImageGraphKeyframeSineDriver(document, index, std::nullopt, state.LastDiagnostic))
-						state.LastDiagnostic = {};
-				});
+				ApplyPinnedKeyEdit(
+					state, index, [&](Document &document, size_t keyIndex, uint64_t availableBytes) {
+						return SetImageGraphKeyframeSineDriver(
+							document, keyIndex, std::nullopt, state.LastDiagnostic, availableBytes
+						);
+					}
+				);
 				ImGui::CloseCurrentPopup();
 			}
 			ImGui::EndPopup();
@@ -6029,6 +6118,7 @@ namespace studio {
 				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
 			);
 			using namespace engine::imagegraph;
+			const auto rowRevision = state.DocumentRevision;
 			if (state.Authored.Keyframes[index].SineDriver) {
 				DrawKeyframeSineDriver(state, index, state.Authored.Keyframes[index]);
 				return;
@@ -6069,11 +6159,19 @@ namespace studio {
 					default:
 						break;
 					}
-					ApplyDocumentEdit(state, [&](Document &document) {
-						SetImageGraphKeyframeSourceDriver(document, index, driver, state.LastDiagnostic);
-					});
+					ApplyPinnedKeyEdit(
+						state, index, [&](Document &document, size_t keyIndex, uint64_t availableBytes) {
+							return SetImageGraphKeyframeSourceDriver(
+								document, keyIndex, driver, state.LastDiagnostic, availableBytes
+							);
+						}
+					);
 				}
 				ImGui::EndCombo();
+			}
+			if (rowRevision != state.DocumentRevision) {
+				ImGui::EndPopup();
+				return;
 			}
 			// Curve data is copied only while its controls are open, never for an idle
 			// timeline row.
@@ -6127,15 +6225,25 @@ namespace studio {
 					*driver
 				);
 				if (changed)
-					ApplyDocumentEdit(state, [&](Document &document) {
-						SetImageGraphKeyframeSourceDriver(document, index, driver, state.LastDiagnostic);
-					});
+					ApplyPinnedKeyEdit(
+						state, index, [&](Document &document, size_t keyIndex, uint64_t availableBytes) {
+							return SetImageGraphKeyframeSourceDriver(
+								document, keyIndex, driver, state.LastDiagnostic, availableBytes
+							);
+						}
+					);
+				if (rowRevision != state.DocumentRevision) {
+					ImGui::EndPopup();
+					return;
+				}
 				if (ImGui::SmallButton("Remove driver")) {
-					ApplyDocumentEdit(state, [&](Document &document) {
-						SetImageGraphKeyframeSourceDriver(
-							document, index, std::nullopt, state.LastDiagnostic
-						);
-					});
+					ApplyPinnedKeyEdit(
+						state, index, [&](Document &document, size_t keyIndex, uint64_t availableBytes) {
+							return SetImageGraphKeyframeSourceDriver(
+								document, keyIndex, std::nullopt, state.LastDiagnostic, availableBytes
+							);
+						}
+					);
 					ImGui::CloseCurrentPopup();
 				}
 			}
@@ -6147,11 +6255,16 @@ namespace studio {
 				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
 			);
 			state.KeyKind.Draw(state.Authored, index, [&] {
-				bool accepted = false;
-				ApplyDocumentEdit(state, [&](Document &document) {
-					accepted = state.KeyKind.Commit(document, state.LastDiagnostic);
-				});
-				return accepted;
+				bool unchanged = false;
+				const bool accepted = ApplyKeyEdit(
+					state,
+					[&](Document &document, uint64_t availableBytes) {
+						return state.KeyKind.PrepareCommit(document, state.LastDiagnostic, availableBytes);
+					},
+					&unchanged
+				);
+				if (accepted || unchanged) state.KeyKind.Cancel();
+				return accepted || unchanged;
 			});
 		}
 
@@ -6414,27 +6527,32 @@ namespace studio {
 			Node *node = FindNode(state.Authored, selectedNode);
 			if (node != nullptr) {
 				for (AuthoredValue &value : node->Values) {
+					const auto rowRevision = state.DocumentRevision;
 					ImGui::PushID(value.Port.c_str());
 					ImGui::TextUnformatted(value.Port.c_str());
 					ImGui::SameLine(96.0f);
 					if (ImGui::Button("Set key")) AddKeyframe(state, node->Id, value.Port);
+					if (rowRevision != state.DocumentRevision) {
+						ImGui::PopID();
+						break;
+					}
 					ImGui::SameLine();
 					if (ImGui::Button("Remove at frame")) {
-						ApplyDocumentEdit(state, [&](Document &document) {
-							if (!RemoveImageGraphKeyframe(
-									document,
-									node->Id,
-									value.Port,
-									state.Playback.CurrentTick,
-									state.LastDiagnostic,
-									state.Playback.Subframe,
-									state.Playback.NegativeFrame
-								))
-								return;
-							state.LastDiagnostic = {};
+						ApplyKeyEdit(state, [&](Document &document, uint64_t availableBytes) {
+							return RemoveImageGraphKeyframe(
+								document,
+								node->Id,
+								value.Port,
+								state.Playback.CurrentTick,
+								state.LastDiagnostic,
+								state.Playback.Subframe,
+								state.Playback.NegativeFrame,
+								availableBytes
+							);
 						});
 					}
 					ImGui::PopID();
+					if (rowRevision != state.DocumentRevision) break;
 				}
 			}
 			ImGui::Separator();
@@ -6457,10 +6575,23 @@ namespace studio {
 			}
 			const auto applyKeyTransfer = [&] {
 				bool unchanged = false;
-				const bool accepted = ApplyDocumentEdit(
+				const bool accepted = ApplyKeyEdit(
 					state,
-					[&](Document &document) {
-						return state.Keys.PrepareCommit(document, state.LastDiagnostic);
+					[&](Document &document, uint64_t availableBytes) {
+						if (state.Keys.Copying)
+							return state.Keys.PrepareCommit(document, state.LastDiagnostic, availableBytes);
+						return WithImageGraphProjectedKeyPins(
+							state.Authored,
+							document,
+							state.Keys.Originals,
+							availableBytes,
+							[&](auto pins, uint64_t remaining) {
+								return state.Keys.PrepareCommit(
+									document, state.LastDiagnostic, remaining, pins
+								);
+							},
+							state.LastDiagnostic
+						);
 					},
 					&unchanged
 				);
@@ -6474,9 +6605,25 @@ namespace studio {
 				GetImageGraphFrame(state.Playback),
 				state.LastDiagnostic,
 				[&] {
-					const bool accepted = ApplyDocumentEdit(state, [&](Document &document) {
-						return state.Dopesheet.PrepareCommit(document, state.Keys, state.LastDiagnostic);
-					});
+					const bool accepted =
+						ApplyKeyEdit(state, [&](Document &document, uint64_t availableBytes) {
+							if (state.Dopesheet.Copying)
+								return state.Dopesheet.PrepareCommit(
+									document, state.Keys, state.LastDiagnostic, availableBytes
+								);
+							return WithImageGraphProjectedKeyPins(
+								state.Authored,
+								document,
+								state.Dopesheet.Originals,
+								availableBytes,
+								[&](auto pins, uint64_t remaining) {
+									return state.Dopesheet.PrepareCommit(
+										document, state.Keys, state.LastDiagnostic, remaining, pins
+									);
+								},
+								state.LastDiagnostic
+							);
+						});
 					if (accepted) state.Dopesheet.PublishCommit(state.Keys);
 					return accepted;
 				},
@@ -6488,10 +6635,21 @@ namespace studio {
 			state.EaseKeys.Draw(
 				state.Authored, state.DocumentRevision, state.Keys, state.LastDiagnostic, [&] {
 					bool unchanged = false;
-					const bool accepted = ApplyDocumentEdit(
+					const bool accepted = ApplyKeyEdit(
 						state,
-						[&](Document &document) {
-							return state.EaseKeys.PrepareCommit(document, state.LastDiagnostic);
+						[&](Document &document, uint64_t availableBytes) {
+							return WithImageGraphProjectedKeyPins(
+								state.Authored,
+								document,
+								state.EaseKeys.Originals,
+								availableBytes,
+								[&](auto pins, uint64_t remaining) {
+									return state.EaseKeys.PrepareCommit(
+										document, state.LastDiagnostic, remaining, pins
+									);
+								},
+								state.LastDiagnostic
+							);
 						},
 						&unchanged
 					);
@@ -6509,7 +6667,12 @@ namespace studio {
 				ImGui::TableSetupColumn("Action");
 				ImGui::TableHeadersRow();
 				for (size_t index = 0; index < state.Authored.Keyframes.size(); index++) {
+					const auto rowRevision = state.DocumentRevision;
 					const Keyframe &frame = state.Authored.Keyframes[index];
+					const std::string rowId = frame.NodeId + "\n" + frame.Port + "\n" +
+											  std::to_string(frame.Tick) + "\n" +
+											  std::to_string(std::bit_cast<uint64_t>(frame.Subframe)) +
+											  (frame.NegativeFrame ? "-" : "+");
 					const std::string interpolation = frame.Interpolation;
 					ImGui::TableNextRow();
 					ImGui::TableSetColumnIndex(0);
@@ -6527,48 +6690,56 @@ namespace studio {
 						"%.20Lg", engine::imagegraph::FrameTimeToReal(engine::imagegraph::GetFrameTime(frame))
 					);
 					ImGui::TableSetColumnIndex(2);
-					ImGui::PushID(static_cast<int>(index));
+					ImGui::PushID(rowId.c_str());
 					if (ImGui::BeginCombo("##interpolation", interpolation.c_str())) {
 						for (const char *choice : {"step", "linear", "cubic", "source"}) {
 							const bool selected = interpolation == choice;
 							if (ImGui::Selectable(choice, selected)) {
-								ApplyDocumentEdit(state, [&](Document &document) {
-									if (SetImageGraphKeyframeInterpolation(
-											document, index, choice, state.LastDiagnostic
-										))
-										state.LastDiagnostic = {};
-								});
+								ApplyPinnedKeyEdit(
+									state,
+									index,
+									[&](Document &document, size_t keyIndex, uint64_t availableBytes) {
+										return SetImageGraphKeyframeInterpolation(
+											document, keyIndex, choice, state.LastDiagnostic, availableBytes
+										);
+									}
+								);
 							}
 							if (selected) ImGui::SetItemDefaultFocus();
 						}
 						ImGui::EndCombo();
 					}
 					ImGui::PopID();
+					if (rowRevision != state.DocumentRevision) break;
 					ImGui::TableSetColumnIndex(3);
-					ImGui::PushID(static_cast<int>(index));
+					ImGui::PushID(rowId.c_str());
 					ImGui::PushID("ease-in");
 					DrawKeyframeEaseSide(state, index, state.Authored.Keyframes[index], true);
 					ImGui::PopID();
 					ImGui::PopID();
+					if (rowRevision != state.DocumentRevision) break;
 					ImGui::TableSetColumnIndex(4);
-					ImGui::PushID(static_cast<int>(index));
+					ImGui::PushID(rowId.c_str());
 					ImGui::PushID("ease-out");
 					DrawKeyframeEaseSide(state, index, state.Authored.Keyframes[index], false);
 					ImGui::PopID();
 					ImGui::PopID();
+					if (rowRevision != state.DocumentRevision) break;
 					ImGui::TableSetColumnIndex(5);
-					ImGui::PushID(static_cast<int>(index));
+					ImGui::PushID(rowId.c_str());
 					DrawKeyframeSourceDriver(state, index);
 					ImGui::PopID();
+					if (rowRevision != state.DocumentRevision) break;
 					ImGui::TableSetColumnIndex(6);
-					ImGui::PushID(static_cast<int>(index));
+					ImGui::PushID(rowId.c_str());
 					DrawKeyframeKind(state, index);
 					ImGui::PopID();
+					if (rowRevision != state.DocumentRevision) break;
 					ImGui::TableSetColumnIndex(7);
-					ImGui::PushID(static_cast<int>(index));
+					ImGui::PushID(rowId.c_str());
 					(void)detail::DrawTimelineKeyDelete(
 						state.Authored, index, state.LastDiagnostic, [&](const auto &edit) {
-							return ApplyDocumentEdit(state, edit);
+							return ApplyKeyEdit(state, edit);
 						}
 					);
 					ImGui::PopID();

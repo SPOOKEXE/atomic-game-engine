@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ImageGraphKeyPinProjection.hpp"
+
 #include <engine/imagegraph/SourceKeyframeTransition.hpp>
 
 #include <imgui.h>
@@ -15,11 +17,21 @@ namespace studio::detail {
 	) {
 		if (index >= document.Keyframes.size() || !ImGui::SmallButton("Delete")) return false;
 		const auto &original = document.Keyframes[index];
-		return apply([&](engine::imagegraph::Document &candidate) {
-			const engine::imagegraph::SourceKeyframeEdit edit{&original};
-			return engine::imagegraph::ApplySourceKeyframeEdits(
-					   candidate, {&edit, 1}, candidate, diagnostic
-				   ) == engine::imagegraph::Status::Ok;
+		return apply([&](engine::imagegraph::Document &candidate,
+						 uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes) {
+			return studio::WithImageGraphProjectedKeyPins(
+				document,
+				candidate,
+				{&original, 1},
+				availableBytes,
+				[&](std::span<const engine::imagegraph::Keyframe> pins, uint64_t remaining) {
+					const engine::imagegraph::SourceKeyframeEdit edit{&pins.front()};
+					return engine::imagegraph::ApplySourceKeyframeEdits(
+							   candidate, {&edit, 1}, candidate, diagnostic, remaining
+						   ) == engine::imagegraph::Status::Ok;
+				},
+				diagnostic
+			);
 		});
 	}
 }

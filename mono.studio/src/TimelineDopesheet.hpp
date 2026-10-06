@@ -368,24 +368,28 @@ namespace studio {
 		bool PrepareCommit(
 			engine::imagegraph::Document &document,
 			const TimelineKeyEditor &editor,
-			engine::imagegraph::Diagnostic &error
+			engine::imagegraph::Diagnostic &error,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+			std::span<const engine::imagegraph::Keyframe> projectedPins = {}
 		) {
 			using namespace engine::imagegraph;
+			const auto originals =
+				projectedPins.empty() ? std::span<const Keyframe>{Originals} : projectedPins;
 			Prepared = false;
-			const auto budget = editor.Remaining(true, true);
+			const auto budget = editor.Remaining(true, true, maximumBytes);
 			uint64_t remaining = budget.value_or(0);
 			const auto retained = CacheBytes();
 			if ((!Dragging && !Deleting && !Transforming) || (!Deleting && !TargetsValid) || !retained ||
 				*retained > remaining)
 				return false;
-			if (Deleting && (Originals.empty() || document.Keyframes.size() > Limits::MaximumKeyframes ||
-							 Originals.size() > Limits::MaximumKeyframes ||
-							 uint64_t(Originals.size()) * document.Keyframes.size() * 2 > 64'000'000)) {
+			if (Deleting && (originals.empty() || document.Keyframes.size() > Limits::MaximumKeyframes ||
+							 originals.size() > Limits::MaximumKeyframes ||
+							 uint64_t(originals.size()) * document.Keyframes.size() * 2 > 64'000'000)) {
 				error = {Status::LimitExceeded, {}, {}, "key deletion exceeds the work bound"};
 				return false;
 			}
 			if (!document.SourceAnimators)
-				for (const auto &original : Originals)
+				for (const auto &original : originals)
 					if (std::find(document.Keyframes.begin(), document.Keyframes.end(), original) ==
 						document.Keyframes.end()) {
 						error = {
@@ -398,7 +402,7 @@ namespace studio {
 					}
 			if (Deleting && document.SourceAnimators) {
 				remaining -= *retained;
-				const uint64_t scratch = Originals.size() * sizeof(SourceKeyframeEdit);
+				const uint64_t scratch = originals.size() * sizeof(SourceKeyframeEdit);
 				if (scratch > remaining) {
 					error = {
 						Status::LimitExceeded,
@@ -409,8 +413,8 @@ namespace studio {
 					return false;
 				}
 				std::vector<SourceKeyframeEdit> edits;
-				edits.reserve(Originals.size());
-				for (const auto &original : Originals)
+				edits.reserve(originals.size());
+				for (const auto &original : originals)
 					edits.push_back({&original});
 				Document candidate;
 				if (ApplySourceKeyframeEdits(document, edits, candidate, error, remaining - scratch) !=
@@ -423,7 +427,7 @@ namespace studio {
 			}
 			if (Deleting) {
 				std::erase_if(document.Keyframes, [&](const auto &key) {
-					return std::any_of(Originals.begin(), Originals.end(), [&](const auto &original) {
+					return std::any_of(originals.begin(), originals.end(), [&](const auto &original) {
 						return key.NodeId == original.NodeId && key.Port == original.Port &&
 							   GetFrameTime(key) == GetFrameTime(original);
 					});
@@ -433,7 +437,7 @@ namespace studio {
 				return true;
 			}
 			remaining -= *retained;
-			for (const auto &original : Originals) {
+			for (const auto &original : originals) {
 				const uint64_t bytes =
 					sizeof(ImageGraphKeyframeIdentity) + original.NodeId.size() + original.Port.size();
 				if (bytes > remaining) {
@@ -445,10 +449,10 @@ namespace studio {
 				remaining -= bytes;
 			}
 			std::vector<ImageGraphKeyframeIdentity> selection;
-			selection.reserve(Originals.size());
-			for (size_t index = 0; index < Originals.size(); ++index) {
+			selection.reserve(originals.size());
+			for (size_t index = 0; index < originals.size(); ++index) {
 				ImageGraphKeyframeIdentity identity{
-					Originals[index].NodeId, Originals[index].Port, Destinations[index]
+					originals[index].NodeId, originals[index].Port, Destinations[index]
 				};
 				if (std::find(selection.begin(), selection.end(), identity) == selection.end())
 					selection.push_back(std::move(identity));
@@ -468,7 +472,7 @@ namespace studio {
 				});
 			}
 			if (!RetimeImageGraphKeyframes(
-					document, Originals, Destinations, Copying, error, remaining, !Transforming
+					document, originals, Destinations, Copying, error, remaining, !Transforming
 				))
 				return false;
 			PreparedSelection = std::move(selection);

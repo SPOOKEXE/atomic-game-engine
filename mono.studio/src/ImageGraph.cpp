@@ -330,6 +330,57 @@ namespace studio {
 			diagnostic = {code, std::string(nodeId), std::string(port), std::move(message)};
 		}
 
+		bool ValidateCapturedEditBudget(
+			uint64_t availableBytes,
+			engine::imagegraph::Diagnostic &diagnostic,
+			std::string_view nodeId = {},
+			std::string_view port = {}
+		) {
+			if (availableBytes && availableBytes <= engine::imagegraph::Limits::MaximumEvaluationBytes)
+				return true;
+			SetDiagnostic(
+				diagnostic,
+				engine::imagegraph::Status::LimitExceeded,
+				nodeId,
+				port,
+				"captured edit transaction budget is outside bounds"
+			);
+			return false;
+		}
+
+		bool AdmitCapturedTrackDraft(
+			const Document &document,
+			const engine::imagegraph::AnimationTrack *existing,
+			std::string_view nodeId,
+			std::string_view port,
+			uint64_t availableBytes,
+			engine::imagegraph::Diagnostic &error,
+			uint64_t borrowedBytes = 0
+		) {
+			using namespace engine::imagegraph;
+			if (!ValidateCapturedEditBudget(availableBytes, error, nodeId, port)) return false;
+			const auto resident = DocumentRetainedPayloadBytes(document);
+			uint64_t remaining = availableBytes;
+			const auto admit = [&](uint64_t bytes) {
+				if (bytes > remaining) return false;
+				remaining -= bytes;
+				return true;
+			};
+			const auto text = [&](std::string_view value) {
+				return value.size() <= Limits::MaximumTextBytes &&
+					   admit(std::max(value.size(), std::string{}.capacity()) + 1);
+			};
+			if (resident && admit(*resident) && admit(borrowedBytes) && admit(sizeof(AnimationTrack)) &&
+				text(existing ? std::string_view(existing->NodeId) : nodeId) &&
+				text(existing ? std::string_view(existing->Port) : port) &&
+				text(existing ? std::string_view(existing->End) : std::string_view("hold")))
+				return true;
+			SetDiagnostic(
+				error, Status::LimitExceeded, nodeId, port, "captured track draft exceeds the payload budget"
+			);
+			return false;
+		}
+
 		bool EnsureSourceAnimationTrack(
 			Document &document,
 			std::string_view nodeId,
@@ -2027,7 +2078,8 @@ namespace studio {
 		std::string_view interpolation,
 		engine::imagegraph::Diagnostic &error,
 		double subframe,
-		bool negativeFrame
+		bool negativeFrame,
+		uint64_t availableBytes
 	) {
 		error = {};
 		const auto fail = [&](engine::imagegraph::Status code, std::string message) {
@@ -2087,12 +2139,13 @@ namespace studio {
 		}
 		if (document.SourceAnimators) {
 			using namespace engine::imagegraph;
+			if (!ValidateCapturedEditBudget(availableBytes, error, nodeId, property)) return false;
 			const auto resident = DocumentRetainedPayloadBytes(document),
 					   valueBytes = ValueClonePayloadBytes(*data);
-			if (!resident || !valueBytes || *resident > Limits::MaximumEvaluationBytes ||
-				*valueBytes > Limits::MaximumEvaluationBytes - *resident)
+			if (!resident || !valueBytes || *resident > availableBytes ||
+				*valueBytes > availableBytes - *resident)
 				return fail(Status::LimitExceeded, "captured key value draft exceeds the payload budget");
-			uint64_t remaining = Limits::MaximumEvaluationBytes - *resident - *valueBytes;
+			uint64_t remaining = availableBytes - *resident - *valueBytes;
 			size_t count = 0;
 			for (const auto &key : document.Keyframes) {
 				if (key.NodeId != nodeId || key.Port != property) continue;
@@ -2134,9 +2187,12 @@ namespace studio {
 			if (fresh) edits.push_back({&*created, &*created, true});
 			const uint64_t spareSlots = (replacements.capacity() - replacements.size()) * sizeof(Keyframe) +
 										(edits.capacity() - edits.size()) * sizeof(SourceKeyframeEdit);
-			return ApplySourceKeyframeEdits(
-					   document, edits, document, error, Limits::MaximumEvaluationBytes - spareSlots
-				   ) == Status::Ok;
+			if (spareSlots > availableBytes)
+				return fail(
+					Status::LimitExceeded, "captured key draft allocation exceeds the payload budget"
+				);
+			return ApplySourceKeyframeEdits(document, edits, document, error, availableBytes - spareSlots) ==
+				   Status::Ok;
 		}
 		if (interpolation == "source" && !EnsureSourceAnimationTrack(document, nodeId, property, error))
 			return false;
@@ -2166,7 +2222,8 @@ namespace studio {
 		uint64_t tick,
 		engine::imagegraph::Diagnostic &error,
 		double subframe,
-		bool negativeFrame
+		bool negativeFrame,
+		uint64_t availableBytes
 	) {
 		error = {};
 		const auto fail = [&](engine::imagegraph::Status code, std::string message) {
@@ -2194,8 +2251,9 @@ namespace studio {
 			if (found == document.Keyframes.end()) return false;
 			const engine::imagegraph::SourceKeyframeEdit edit{&*found};
 			Document candidate;
-			if (engine::imagegraph::ApplySourceKeyframeEdits(document, {&edit, 1}, candidate, error) !=
-				engine::imagegraph::Status::Ok)
+			if (engine::imagegraph::ApplySourceKeyframeEdits(
+					document, {&edit, 1}, candidate, error, availableBytes
+				) != engine::imagegraph::Status::Ok)
 				return false;
 			document = std::move(candidate);
 			return true;
@@ -2573,7 +2631,8 @@ namespace studio {
 		Document &document,
 		size_t index,
 		engine::imagegraph::KeyframeKind kind,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
 	) {
 		using engine::imagegraph::KeyframeKind;
 		error = {};
@@ -2590,13 +2649,17 @@ namespace studio {
 			);
 			return false;
 		}
+		if (document.SourceAnimators && !ValidateCapturedEditBudget(availableBytes, error)) return false;
 		if (document.SourceAnimators)
 			return EditCapturedImageGraphKeys(
 				document,
 				document.Keyframes,
 				[&](const auto &, size_t current) { return current == index; },
 				[&](auto &key, size_t) { key.Kind = kind; },
-				error
+				error,
+				0,
+				0,
+				availableBytes
 			);
 		document.Keyframes[index].Kind = kind;
 		if (kind == KeyframeKind::Adder)
@@ -2605,7 +2668,11 @@ namespace studio {
 	}
 
 	bool SetImageGraphKeyframeInterpolation(
-		Document &document, size_t index, std::string_view rule, engine::imagegraph::Diagnostic &error
+		Document &document,
+		size_t index,
+		std::string_view rule,
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
 	) {
 		error = {};
 		if (index >= document.Keyframes.size()) {
@@ -2649,6 +2716,9 @@ namespace studio {
 				return false;
 			}
 		}
+		if (document.SourceAnimators &&
+			!ValidateCapturedEditBudget(availableBytes, error, frame.NodeId, frame.Port))
+			return false;
 		if (document.SourceAnimators)
 			return EditCapturedImageGraphKeys(
 				document,
@@ -2661,7 +2731,10 @@ namespace studio {
 					} else
 						key.Ease.reset();
 				},
-				error
+				error,
+				0,
+				0,
+				availableBytes
 			);
 		if (rule == "source" && !EnsureSourceAnimationTrack(document, frame.NodeId, frame.Port, error))
 			return false;
@@ -2673,7 +2746,8 @@ namespace studio {
 		Document &document,
 		size_t index,
 		engine::imagegraph::KeyframeEase ease,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
 	) {
 		error = {};
 		if (index >= document.Keyframes.size()) {
@@ -2699,6 +2773,7 @@ namespace studio {
 		}
 		if (document.SourceAnimators) {
 			const auto &frame = document.Keyframes[index];
+			if (!ValidateCapturedEditBudget(availableBytes, error, frame.NodeId, frame.Port)) return false;
 			return EditCapturedImageGraphKeys(
 				document,
 				document.Keyframes,
@@ -2708,7 +2783,10 @@ namespace studio {
 					if (!key.Ease) key.Ease = engine::imagegraph::KeyframeEase{};
 					if (current == index) key.Ease = ease;
 				},
-				error
+				error,
+				0,
+				0,
+				availableBytes
 			);
 		}
 		const std::string nodeId = document.Keyframes[index].NodeId;
@@ -2723,7 +2801,8 @@ namespace studio {
 		Document &document,
 		size_t index,
 		const std::optional<engine::imagegraph::KeyframeSourceDriver> &driver,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
 	) {
 		using namespace engine::imagegraph;
 		error = {};
@@ -2743,6 +2822,7 @@ namespace studio {
 			return false;
 		}
 		if (document.SourceAnimators) {
+			if (!ValidateCapturedEditBudget(availableBytes, error, frame.NodeId, frame.Port)) return false;
 			uint64_t extra = 0;
 			if (driver) {
 				if (const auto *curve = std::get_if<KeyframeCurveDriver>(&*driver)) {
@@ -2790,7 +2870,8 @@ namespace studio {
 				},
 				error,
 				extra,
-				extra + sizeof(driver)
+				extra + sizeof(driver),
+				availableBytes
 			);
 		}
 		Document candidate = document;
@@ -2813,7 +2894,8 @@ namespace studio {
 		std::string_view nodeId,
 		std::string_view property,
 		std::optional<int64_t> mode,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
 	) {
 		using namespace engine::imagegraph;
 		error = {};
@@ -2826,13 +2908,23 @@ namespace studio {
 				std::find_if(document.Tracks.begin(), document.Tracks.end(), [&](const auto &track) {
 					return track.NodeId == nodeId && track.Port == property;
 				});
+			if (!AdmitCapturedTrackDraft(
+					document,
+					existing != document.Tracks.end() ? &*existing : nullptr,
+					nodeId,
+					property,
+					availableBytes,
+					error
+				))
+				return false;
 			AnimationTrack replacement =
 				existing != document.Tracks.end()
 					? *existing
 					: AnimationTrack{std::string(nodeId), std::string(property), "hold", -1};
 			replacement.QuaternionMode = mode;
 			const SourceTrackTransition transition{nodeId, property, &replacement, mode.has_value()};
-			return ApplySourceTrackTransition(document, transition, document, error) == Status::Ok;
+			return ApplySourceTrackTransition(document, transition, document, error, availableBytes) ==
+				   Status::Ok;
 		}
 		Document candidate = document;
 		if (!EnsureSourceAnimationTrack(candidate, nodeId, property, error)) return false;
@@ -2855,7 +2947,8 @@ namespace studio {
 		Document &document,
 		size_t index,
 		std::optional<engine::imagegraph::KeyframeSineDriver> driver,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
 	) {
 		error = {};
 		if (index >= document.Keyframes.size()) {
@@ -2900,13 +2993,17 @@ namespace studio {
 				return false;
 			}
 		}
+		if (document.SourceAnimators && !ValidateCapturedEditBudget(availableBytes, error)) return false;
 		if (document.SourceAnimators)
 			return EditCapturedImageGraphKeys(
 				document,
 				document.Keyframes,
 				[&](const auto &, size_t current) { return current == index; },
 				[&](auto &key, size_t) { key.SineDriver = driver; },
-				error
+				error,
+				0,
+				0,
+				availableBytes
 			);
 		document.Keyframes[index].SineDriver = std::move(driver);
 		if (document.Keyframes[index].SineDriver)
@@ -2981,7 +3078,8 @@ namespace studio {
 		std::string_view property,
 		std::string end,
 		int64_t loopRange,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
 	) {
 		error = {};
 		const auto fail = [&](engine::imagegraph::Status code, std::string message) {
@@ -3034,6 +3132,16 @@ namespace studio {
 			return candidate.NodeId == nodeId && candidate.Port == property;
 		});
 		if (document.SourceAnimators) {
+			if (!AdmitCapturedTrackDraft(
+					document,
+					track != document.Tracks.end() ? &*track : nullptr,
+					nodeId,
+					property,
+					availableBytes,
+					error,
+					end.capacity()
+				))
+				return false;
 			engine::imagegraph::AnimationTrack replacement =
 				track != document.Tracks.end() ? *track
 											   : engine::imagegraph::AnimationTrack{
@@ -3042,8 +3150,9 @@ namespace studio {
 			replacement.End = std::move(end);
 			replacement.LoopRange = loopRange;
 			const engine::imagegraph::SourceTrackTransition transition{nodeId, property, &replacement};
-			return engine::imagegraph::ApplySourceTrackTransition(document, transition, document, error) ==
-				   engine::imagegraph::Status::Ok;
+			return engine::imagegraph::ApplySourceTrackTransition(
+					   document, transition, document, error, availableBytes
+				   ) == engine::imagegraph::Status::Ok;
 		}
 		if (track == document.Tracks.end()) {
 			if (document.Tracks.size() >= engine::imagegraph::Limits::MaximumTracks)
@@ -3063,7 +3172,8 @@ namespace studio {
 		Document &document,
 		std::string_view nodeId,
 		std::string_view property,
-		engine::imagegraph::Diagnostic &error
+		engine::imagegraph::Diagnostic &error,
+		uint64_t availableBytes
 	) {
 		error = {};
 		const auto found =
@@ -3095,8 +3205,9 @@ namespace studio {
 		}
 		if (document.SourceAnimators) {
 			const engine::imagegraph::SourceTrackTransition transition{nodeId, property};
-			return engine::imagegraph::ApplySourceTrackTransition(document, transition, document, error) ==
-				   engine::imagegraph::Status::Ok;
+			return engine::imagegraph::ApplySourceTrackTransition(
+					   document, transition, document, error, availableBytes
+				   ) == engine::imagegraph::Status::Ok;
 		}
 		document.Tracks.erase(found);
 		return true;

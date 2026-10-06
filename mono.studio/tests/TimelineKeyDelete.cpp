@@ -1,6 +1,7 @@
 #include "../src/TimelineKeyDelete.hpp"
 
 #include "../src/ImageGraphDocumentEdit.hpp"
+#include "../src/ImageGraphSourceKeyEdit.hpp"
 
 #include <engine/imagegraph/GroupReplay.hpp>
 #include <engine/testing/Suite.hpp>
@@ -63,11 +64,13 @@ namespace {
 		ImGuiContext *Context = ImGui::CreateContext();
 		Document Graph;
 		studio::ImageGraphHistory History;
+		studio::ImageGraphGroupHost Host;
+		bool SourceEnvelope = false;
 		Diagnostic Error;
 		ImVec2 Center;
 		unsigned Calls = 0, Accepted = 0;
-		Button(Document document, size_t historyCapacity = 128)
-			: Graph(std::move(document)), History(historyCapacity) {
+		Button(Document document, size_t historyCapacity = 128, bool sourceEnvelope = false)
+			: Graph(std::move(document)), History(historyCapacity), SourceEnvelope(sourceEnvelope) {
 			ImGui::SetCurrentContext(Context);
 			auto &io = ImGui::GetIO();
 			io.DisplaySize = {640, 480};
@@ -90,6 +93,8 @@ namespace {
 			ImGui::Begin("Timeline delete", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 			if (studio::detail::DrawTimelineKeyDelete(Graph, 1, Error, [&](const auto &edit) {
 					++Calls;
+					if (SourceEnvelope)
+						return studio::ApplyImageGraphSourceKeyEdit(Graph, History, Host, 1, {}, edit, Error);
 					return studio::ApplyImageGraphDocumentEdit(Graph, History, edit);
 				}))
 				++Accepted;
@@ -156,4 +161,27 @@ TEST_CASE("Timeline table Delete keeps legacy keys local", "[studio][timeline]")
 	REQUIRE(button.Graph.Keyframes.size() == 1);
 	CHECK(button.Graph.Keyframes[0] == owner);
 	CHECK_FALSE(button.Graph.SourceAnimators);
+}
+
+TEST_CASE(
+	"Timeline Delete captures the initial imported writer before undo", "[studio][timeline][source_aliases]"
+) {
+	auto document = Keys(false, false);
+	document.Keyframes[1].SourceKeyId = "local-alias-id";
+	Button ui(std::move(document), 128, true);
+	ui.Click();
+	INFO(ui.Error.Message);
+	REQUIRE(ui.Accepted == 1);
+	CHECK(ui.Graph.Keyframes.empty());
+	REQUIRE(ui.Graph.SourceAnimators);
+	REQUIRE(ui.History.Undo(ui.Graph));
+	CHECK(ui.Graph.Keyframes.size() == 2);
+	REQUIRE(ui.Graph.SourceAnimators);
+	ui.Host.Clear();
+	GroupReplayState restored;
+	REQUIRE(RestoreSourceAnimatorBindings(ui.Graph, {}, 3, restored, ui.Error) == Status::Ok);
+	REQUIRE(restored.Binding("alias", "mix"));
+	CHECK(restored.Binding("alias", "mix")->OwnerId == "owner");
+	REQUIRE(ui.History.Redo(ui.Graph));
+	CHECK(ui.Graph.Keyframes.empty());
 }

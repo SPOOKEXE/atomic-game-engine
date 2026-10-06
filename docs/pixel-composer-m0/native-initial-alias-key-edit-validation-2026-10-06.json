@@ -1,0 +1,105 @@
+{
+  "evidence_scope": "Focused validation for the first edit of imported aliases with shared source key writers. This qualifies the tested key-edit path only and does not claim completion of the broader native timeline or axis goal.",
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "initial-alias-key-edit-batch5-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5104,
+    "cpp_assertions": 2000950,
+    "studio_test_cases": 1027,
+    "studio_assertions": 46751,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "totals_method": "Summed result entries that report C++ cases and assertions. Studio values are the corresponding suite row; Python and CLI are separate reported case totals.",
+    "final_build": {
+      "build": 7,
+      "result": "exit 0",
+      "scope": "3 build steps, 17 targets",
+      "log": "initial-alias-key-edit-build7.log"
+    },
+    "test_result": "All 20 final checks exited successfully. All 13 test binaries with before/after hashes were unchanged during their test runs.",
+    "backend": "SDL offscreen with Vulkan.",
+    "profiling": "The transaction envelope has ENGINE_PROFILE instrumentation. No timing was collected and no performance result is claimed."
+  },
+  "tested_behavior": [
+    "The native importer fixture uses the source parser's eight-field key row shape for pc.invert.mix. It is a parser-verified fixture, not licensed-reference parity evidence.",
+    "The first edit of an imported alias captures shared writer declarations before key authoring and maps projected pins while clearing only the newly captured alias identity.",
+    "The transaction clears group overlays before restoring declarations, and tests cover shared move, delete, easing, metadata, track changes, new-key authoring, and no-op or stale-pin refusal.",
+    "History and host state remain unchanged on refusal. Tests exercise callback refusal, history refusal, admission refusal, and a bounded transaction budget before callback execution.",
+    "Captured key API limits are threaded through draft pre-admission. This documents only captured authoring limits. Legacy uncaptured API paths retain their existing behavior, and ImageGraphHistory has a separate capacity."
+  ],
+  "iteration_history": [
+    {
+      "stage": "build 1",
+      "result": "compile failed",
+      "cause": "A HasNativeExecutor call used the wrong argument form, and the fixture treated OwnedPayload as if it had has_value()."
+    },
+    {
+      "stage": "build 2",
+      "result": "compile failed",
+      "cause": "The standalone key-pin helper needed the FrameTime.hpp declaration."
+    },
+    {
+      "stage": "batch 1",
+      "result": "Studio suite had 7 failures",
+      "cause": "Six failures came from malformed importer rows. One assertion treated a keyed Boolean false payload as no trigger, but trigger presence follows keyed state; the fixture was changed to a Float control for value semantics."
+    },
+    {
+      "stage": "batches 2 and 3",
+      "result": "Studio suite had 6 failures in each batch",
+      "cause": "The importer fixture still used malformed key rows."
+    },
+    {
+      "stage": "batch 4",
+      "result": "Studio suite had 1 failure",
+      "cause": "The authoring fixture had no initialized static value."
+    },
+    {
+      "stage": "batch 5",
+      "result": "all 20 checks passed",
+      "repair": "The fixture now uses the validated eight-field rows and has an initialized authored value where required."
+    }
+  ],
+  "unchanged_evidence": {
+    "source_snapshots": {
+      "before": "initial-alias-key-edit-source-hashes-build7-before.json",
+      "after": "initial-alias-key-edit-source-hashes-after.json",
+      "build7_equal": true,
+      "initial_before_after_path_count": 55,
+      "peer_files_unchanged_count": 42,
+      "comparison_note": "The final build-7 snapshots match across all 55 watched paths. In the initial before/after comparison, the 42 paths outside the staged feature set retained their hashes."
+    },
+    "child_hashes": {
+      "file": "initial-alias-key-edit-child-hashes-batch5.json",
+      "equal": true
+    },
+    "test_binary_hashes": {
+      "unchanged_count": 13,
+      "changed_count": 0
+    }
+  },
+  "full_tested_file_hashes_from_after_snapshot": {
+    "mono.studio/include/studio/ImageGraph.hpp": "ab6fec8bfc721512f72829e50c2402c12e86b990e66be99a49ee94d6c7c47631",
+    "mono.studio/src/AnimationTrackPolicyEditor.hpp": "a7c78ef5c2926d351e2b5cb2f02ded066425fa2d6ea17ad77abbecfe4de84181",
+    "mono.studio/src/ImageComposer.cpp": "278ba80183ed0e6a6bb2e8ca44abf93c48e742d9ea8976637a49d35d4ad023e3",
+    "mono.studio/src/ImageGraph.cpp": "bbe241827541b568ffff73d041d4746c16121bb7f76566360dc572da714394f8",
+    "mono.studio/src/ImageGraphKeyPinProjection.hpp": "f7dd29b6c0a0b89c98314bff487f70ba185777a833375e26956e954f05b8b092",
+    "mono.studio/src/ImageGraphSourceKeyEdit.hpp": "8cbf0881567e5c10a5f632e3a4c849a22839213f6b1c9069fe79f3b02cff16c9",
+    "mono.studio/src/KeyframeKindEditor.hpp": "d2fba1dc39c4057aeb405012b47f46bb9ca4d79c87cd934131b7be7b6539ba10",
+    "mono.studio/src/TimelineDopesheet.hpp": "df0477928d6b077d94fe65c9765654572904b5555b72b1e57a7dcd1915de1525",
+    "mono.studio/src/TimelineEaseEditor.hpp": "569ef2edd43aaf345355946a1c4bbb816d4add709bd378cae3a1be89e85efaf8",
+    "mono.studio/src/TimelineKeyDelete.hpp": "343c13db0add44e5224515737f92c658c4e85119d6300520ee02f98b2b5a0c7d",
+    "mono.studio/src/TimelineKeyEditor.hpp": "0412f661a4d59d83a3002df5890740f020fdc8e92c972664cd03a044498384ad",
+    "mono.studio/tests/ImageGraphSourceKeyEdit.cpp": "d932c889ca2e3b254d96ce452510bb569a19542de04d3e5fa84595562ea56a72",
+    "mono.studio/tests/TimelineKeyDelete.cpp": "71ed7e9714b4d510e7596f182dd5ca3416981c45ce696f79801cbe57371aca8b"
+  },
+  "hash_note": "These are full tested-file hashes from the after snapshot, including the entire ImageComposer.cpp file. The ImageComposer.cpp diff in the staged feature set was selective because that file also contains peer edits.",
+  "date": "2026-10-06",
+  "remaining_gaps": [
+    "Scalar-axis gesture coverage remains open.",
+    "Licensed-reference parity remains open.",
+    "Headed Studio verification remains open.",
+    "The broader native timeline and axis goal remains active."
+  ]
+}

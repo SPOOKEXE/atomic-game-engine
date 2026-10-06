@@ -41,7 +41,11 @@ namespace studio {
 			return Active && NodeId == key.NodeId && Port == key.Port &&
 				   Time == engine::imagegraph::GetFrameTime(key);
 		}
-		bool Commit(engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error) {
+		bool PrepareCommit(
+			engine::imagegraph::Document &document,
+			engine::imagegraph::Diagnostic &error,
+			uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		) const {
 			const auto key =
 				std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [&](const auto &entry) {
 					return Targets(entry);
@@ -56,9 +60,17 @@ namespace studio {
 				return false;
 			}
 			if (!SetImageGraphKeyframeKind(
-					document, static_cast<size_t>(key - document.Keyframes.begin()), Draft, error
+					document,
+					static_cast<size_t>(key - document.Keyframes.begin()),
+					Draft,
+					error,
+					availableBytes
 				))
 				return false;
+			return true;
+		}
+		bool Commit(engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error) {
+			if (!PrepareCommit(document, error)) return false;
 			Cancel();
 			return true;
 		}

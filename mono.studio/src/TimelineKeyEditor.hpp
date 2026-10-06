@@ -67,9 +67,13 @@ namespace studio {
 			ImGui::PopID();
 			return clicked;
 		}
-		std::optional<uint64_t> Remaining(bool includeClipboard, bool includeOriginals) const {
+		std::optional<uint64_t> Remaining(
+			bool includeClipboard,
+			bool includeOriginals,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		) const {
 			using namespace engine::imagegraph;
-			uint64_t remaining = Limits::MaximumEvaluationBytes;
+			uint64_t remaining = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
 			const uint64_t pendingBytes = PreparedSelection.capacity() * sizeof(ImageGraphKeyframeIdentity);
 			if (pendingBytes > remaining) return std::nullopt;
 			remaining -= pendingBytes;
@@ -145,20 +149,27 @@ namespace studio {
 			return true;
 		}
 		// Stage the document without closing the popup or replacing its pinned selection.
-		bool PrepareCommit(engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error) {
+		bool PrepareCommit(
+			engine::imagegraph::Document &document,
+			engine::imagegraph::Diagnostic &error,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+			std::span<const engine::imagegraph::Keyframe> projectedPins = {}
+		) {
 			using namespace engine::imagegraph;
+			const auto originals =
+				projectedPins.empty() ? std::span<const Keyframe>{Originals} : projectedPins;
 			Prepared = false;
-			const auto budget = Remaining(true, true);
+			const auto budget = Remaining(true, true, maximumBytes);
 			if (!Active || !budget) return false;
 			uint64_t remaining = *budget;
 			std::vector<ImageGraphKeyframeIdentity> selection;
 			if (Copying && !TargetNode.empty()) {
 				if (!PasteImageGraphKeyframesToProperty(
-						document, Originals, Destination, TargetNode, TargetPort, error, remaining
+						document, originals, Destination, TargetNode, TargetPort, error, remaining
 					))
 					return false;
 			} else {
-				for (const auto &key : Originals) {
+				for (const auto &key : originals) {
 					const uint64_t bytes =
 						sizeof(ImageGraphKeyframeIdentity) + key.NodeId.size() + key.Port.size();
 					if (bytes > remaining) {
@@ -169,8 +180,8 @@ namespace studio {
 					}
 					remaining -= bytes;
 				}
-				selection.reserve(Originals.size());
-				for (const auto &key : Originals) {
+				selection.reserve(originals.size());
+				for (const auto &key : originals) {
 					FrameTime time;
 					if (!ShiftFrameTime(GetFrameTime(key), Anchor, Destination, time)) {
 						error = {
@@ -183,7 +194,7 @@ namespace studio {
 						selection.push_back(std::move(identity));
 				}
 				if (!TransferImageGraphKeyframes(
-						document, Originals, Anchor, Destination, Copying, error, remaining
+						document, originals, Anchor, Destination, Copying, error, remaining
 					))
 					return false;
 			}

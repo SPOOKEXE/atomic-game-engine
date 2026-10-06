@@ -69,23 +69,29 @@ namespace studio {
 			error = {engine::imagegraph::Status::LimitExceeded, {}, {}, "easing capture allocation failed"};
 			return false;
 		}
-		bool
-		PrepareCommit(engine::imagegraph::Document &document, engine::imagegraph::Diagnostic &error) const {
+		bool PrepareCommit(
+			engine::imagegraph::Document &document,
+			engine::imagegraph::Diagnostic &error,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+			std::span<const engine::imagegraph::Keyframe> projectedPins = {}
+		) const {
 			using namespace engine::imagegraph;
+			const auto originals =
+				projectedPins.empty() ? std::span<const Keyframe>{Originals} : projectedPins;
 			if (!Active || !std::isfinite(Delta) || Sides < 1 || Sides > 3) {
 				error = {Status::InvalidValue, {}, {}, "easing needs finite width and a selected side"};
 				return false;
 			}
-			if (Originals.size() > Limits::MaximumKeyframes ||
+			if (originals.size() > Limits::MaximumKeyframes ||
 				document.Keyframes.size() > Limits::MaximumKeyframes ||
-				2 * uint64_t(Originals.size()) * document.Keyframes.size() > 64'000'000) {
+				2 * uint64_t(originals.size()) * document.Keyframes.size() > 64'000'000) {
 				error = {Status::LimitExceeded, {}, {}, "easing comparison exceeds its work budget"};
 				return false;
 			}
 			if (document.SourceAnimators)
 				return EditCapturedImageGraphKeys(
 					document,
-					Originals,
+					originals,
 					[](const auto &, size_t) { return true; },
 					[&](auto &key, size_t) {
 						auto &ease = *key.Ease;
@@ -100,10 +106,11 @@ namespace studio {
 					},
 					error,
 					0,
-					(Originals.capacity() - Originals.size()) * sizeof(Keyframe)
+					(Originals.capacity() - Originals.size()) * sizeof(Keyframe),
+					maximumBytes
 				);
 			// Validate every full original before the first staged mutation.
-			for (const auto &original : Originals) {
+			for (const auto &original : originals) {
 				if (std::find(document.Keyframes.begin(), document.Keyframes.end(), original) ==
 					document.Keyframes.end()) {
 					error = {
@@ -115,7 +122,7 @@ namespace studio {
 					return false;
 				}
 			}
-			for (const auto &original : Originals) {
+			for (const auto &original : originals) {
 				auto &key = *std::find(document.Keyframes.begin(), document.Keyframes.end(), original);
 				auto &ease = *key.Ease;
 				if (Sides & 2) {
