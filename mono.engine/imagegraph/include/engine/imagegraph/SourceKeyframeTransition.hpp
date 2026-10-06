@@ -2,6 +2,7 @@
 
 #include <engine/imagegraph/FrameTime.hpp>
 
+#include <cstdint>
 #include <span>
 
 namespace engine::imagegraph {
@@ -10,11 +11,13 @@ namespace engine::imagegraph {
 		// Null removes the pinned key. Replacement keeps the original logical socket.
 		const Keyframe *Replacement = nullptr;
 		bool Copy = false;
+		// -1 selects the combined animator; 0 and 1 select its independently captured X/Y arrays.
+		int8_t Axis = -1;
 	};
-	// Edits captured combined writers and their compatibility projections in one transaction.
+	// Edits combined and scalar-axis writers and their compatibility projections in one transaction.
 	// Moves keep physical key IDs; copies reset IDs and drivers. Duplicate alias selections must
 	// agree. All originals are removed before insertion; the first moved collision wins.
-	// Clocks are used verbatim. Scalar axes require a separate axis-aware editor.
+	// Clocks are used verbatim. Warm axes can be edited while combined; cold arrays require initialization.
 	// Failure preserves result. A bounded Compile validates the candidate before publication.
 	Status ApplySourceKeyframeEdits(
 		const Document &document,

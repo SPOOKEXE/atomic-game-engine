@@ -1,10 +1,12 @@
 #include "EvaluationAllocator.hpp"
 #include "SourceAnimatorPersistence.hpp"
+#include "SourceAxisStorage.hpp"
 
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/SourceKeyframeTransition.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <tuple>
 
 namespace engine::imagegraph {
@@ -18,9 +20,13 @@ namespace engine::imagegraph {
 		struct WriterEdit {
 			std::string_view Node, Port;
 			size_t Detached = SIZE_MAX;
+			int8_t Axis = -1;
 			detail::EvaluationVector<KeyView> Keys;
 			explicit WriterEdit(detail::EvaluationBudget &budget)
 				: Keys(detail::EvaluationAllocator<KeyView>(budget)) {}
+		};
+		struct AxisTarget {
+			size_t Writer = 0, Node = SIZE_MAX, Input = SIZE_MAX, Overlay = SIZE_MAX;
 		};
 		struct ResolvedEdit {
 			size_t Writer = 0;
@@ -50,8 +56,8 @@ namespace engine::imagegraph {
 		uint64_t maximumBytes
 	) try {
 		ENGINE_PROFILE("imagegraph.source_keyframe_transition");
-		const auto fail = [&](Status code, const char *message) {
-			diagnostic = {code, {}, {}, message};
+		const auto fail = [&](Status code, std::string_view message) {
+			diagnostic = {code, {}, {}, std::string(message)};
 			return code;
 		};
 		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || edits.empty() ||
@@ -66,7 +72,7 @@ namespace engine::imagegraph {
 		if (!oldBytes || !resultBytes || !detail::SourceAnimatorAdd(borrowed, *resultBytes))
 			return fail(Status::LimitExceeded, "source key document payload exceeds bounds");
 		for (const auto &edit : edits) {
-			if (!edit.Original || (edit.Copy && !edit.Replacement))
+			if (!edit.Original || (edit.Copy && !edit.Replacement) || edit.Axis < -1 || edit.Axis > 1)
 				return fail(Status::InvalidValue, "source key edit has no original or copy destination");
 			for (const auto *key : {edit.Original, edit.Replacement}) {
 				if (!key) continue;
@@ -99,40 +105,158 @@ namespace engine::imagegraph {
 			admit(*aBytes + *bBytes);
 			return KeyPayload(a) == KeyPayload(b);
 		};
+		uint64_t axisLookupRecords = 0, axisNameBytes = 0;
+		if (std::any_of(edits.begin(), edits.end(), [](const auto &edit) { return edit.Axis >= 0; })) {
+			axisLookupRecords = document.Nodes.size() + document.Tracks.size();
+			const auto name = [&](std::string_view text) {
+				admit(1);
+				axisNameBytes = std::max(axisNameBytes, uint64_t(text.size()));
+			};
+			for (const auto &node : document.Nodes) {
+				name(node.Id);
+				axisLookupRecords += node.SourceAnimatedInputs.size();
+				for (const auto &port : node.SourceAnimatedInputs)
+					name(port);
+				if (node.SourceSeparatedVec2Animators) {
+					axisLookupRecords += 2 * node.SourceSeparatedVec2Animators->Inputs.size();
+					for (const auto &axes : node.SourceSeparatedVec2Animators->Inputs)
+						name(axes.Port);
+				}
+			}
+			for (const auto &track : document.Tracks) {
+				name(track.NodeId);
+				name(track.Port);
+			}
+			if (document.SourceAnimators) {
+				const auto &state = *document.SourceAnimators;
+				axisLookupRecords +=
+					state.Bindings.size() + 2 * state.DetachedValues.size() + state.Detached.size();
+				for (const auto &binding : state.Bindings) {
+					name(binding.NodeId);
+					name(binding.OwnerId);
+					name(binding.Port);
+					name(binding.AnimatorPort);
+					name(binding.Axes.OwnerId);
+					name(binding.Axes.Port);
+				}
+				for (const auto &overlay : state.DetachedValues) {
+					name(overlay.NodeId);
+					name(overlay.Port);
+				}
+				for (const auto &retired : state.Detached) {
+					name(retired.OwnerId);
+					name(retired.Id);
+				}
+			}
+		}
 		detail::EvaluationVector<WriterEdit> writers{detail::EvaluationAllocator<WriterEdit>(budget)};
 		detail::EvaluationVector<ResolvedEdit> resolved{detail::EvaluationAllocator<ResolvedEdit>(budget)};
 		for (const auto &edit : edits) {
 			const auto &original = *edit.Original;
-			if (!edit.Copy) {
-				bool pinned = false;
-				for (const auto &key : document.Keyframes)
-					if (same(key.NodeId, original.NodeId) && same(key.Port, original.Port) &&
-						equivalent(key, original) && same(key.SourceKeyId, original.SourceKeyId))
-						pinned = true;
-				if (!pinned) return fail(Status::InvalidValue, "source key changed during its gesture");
-			}
 			std::string_view owner = original.NodeId, port = original.Port;
-			if (document.SourceAnimators)
-				for (const auto &binding : document.SourceAnimators->Bindings)
-					if (same(binding.NodeId, owner) && same(binding.Port, port)) {
-						owner = binding.OwnerId;
-						port = binding.AnimatorPort.empty() ? binding.Port : binding.AnimatorPort;
-						break;
-					}
+			const SourceSeparatedVec2Animator *axes = nullptr;
+			if (edit.Axis >= 0) {
+				const Node *selected = nullptr;
+				for (const auto &node : document.Nodes)
+					if (same(node.Id, original.NodeId)) selected = &node;
+				if (!selected) return fail(Status::UnknownNode, "source axis target is absent");
+				const auto bindings =
+					document.SourceAnimators
+						? std::span<const GroupSubtypeBinding>{document.SourceAnimators->Bindings}
+						: std::span<const GroupSubtypeBinding>{};
+				if (!selected->InstanceBase.empty()) {
+					bool captured = false;
+					for (const auto &binding : bindings)
+						if (same(binding.NodeId, original.NodeId) && same(binding.Port, original.Port))
+							captured = true;
+					if (!captured)
+						return fail(Status::InvalidValue, "source axis alias requires captured bindings");
+				}
+				// grug charge name comparisons before the resolver's separate row-visit ledger.
+				const uint64_t lookupNameBytes =
+					2 *
+					(1 + std::max(
+							 {axisNameBytes, uint64_t(original.NodeId.size()), uint64_t(original.Port.size())}
+						 ));
+				if (axisLookupRecords > (64'000'000 - work) / lookupNameBytes) throw KeyEditWorkExceeded{};
+				admit(axisLookupRecords * lookupNameBytes);
+				uint64_t lookupVisits = 0;
+				const auto view = detail::ResolveLocalSourceAxes(
+					document,
+					*selected,
+					original.Port,
+					bindings,
+					document.SourceAnimators
+						? std::span<const GroupSubtypeOverlay>{document.SourceAnimators->DetachedValues}
+						: std::span<const GroupSubtypeOverlay>{},
+					document.SourceAnimators
+						? std::span<const DetachedSourceAnimator>{document.SourceAnimators->Detached}
+						: std::span<const DetachedSourceAnimator>{},
+					{},
+					{},
+					false,
+					lookupVisits,
+					false
+				);
+				if (view.Code != Status::Ok) return fail(view.Code, view.Message);
+				owner = view.Owner->Id;
+				port = view.Port;
+				axes = view.Axes;
+				for (const auto *key : {edit.Original, edit.Replacement}) {
+					if (!key) continue;
+					const auto *scalar = std::get_if<double>(&key->Data);
+					if ((!scalar || !std::isfinite(*scalar)) && !std::holds_alternative<int64_t>(key->Data))
+						return fail(Status::TypeMismatch, "source axis key must contain a finite scalar");
+				}
+				if (!edit.Copy) {
+					bool pinned = false;
+					const bool alias = owner != original.NodeId || port != original.Port;
+					for (const auto &key : axes->Axes[size_t(edit.Axis)].Keys)
+						if (GetFrameTime(key) == GetFrameTime(original) && equivalent(key, original) &&
+							same(
+								alias ? std::string_view{} : std::string_view(key.SourceKeyId),
+								original.SourceKeyId
+							))
+							pinned = true;
+					if (!pinned)
+						return fail(Status::InvalidValue, "source axis key changed during its gesture");
+				}
+			} else {
+				if (!edit.Copy) {
+					bool pinned = false;
+					for (const auto &key : document.Keyframes)
+						if (same(key.NodeId, original.NodeId) && same(key.Port, original.Port) &&
+							equivalent(key, original) && same(key.SourceKeyId, original.SourceKeyId))
+							pinned = true;
+					if (!pinned) return fail(Status::InvalidValue, "source key changed during its gesture");
+				}
+				if (document.SourceAnimators)
+					for (const auto &binding : document.SourceAnimators->Bindings)
+						if (same(binding.NodeId, owner) && same(binding.Port, port)) {
+							owner = binding.OwnerId;
+							port = binding.AnimatorPort.empty() ? binding.Port : binding.AnimatorPort;
+							break;
+						}
+			}
+
 			size_t writer = 0;
 			for (; writer < writers.size(); ++writer)
-				if (same(writers[writer].Node, owner) && same(writers[writer].Port, port)) break;
+				if (writers[writer].Axis == edit.Axis && same(writers[writer].Node, owner) &&
+					same(writers[writer].Port, port))
+					break;
 			if (writer == writers.size()) {
 				WriterEdit next(budget);
 				next.Node = owner;
 				next.Port = port;
-				const std::vector<Keyframe> *keys = &document.Keyframes;
+				next.Axis = edit.Axis;
+				const std::vector<Keyframe> *keys =
+					axes ? &axes->Axes[size_t(edit.Axis)].Keys : &document.Keyframes;
 				if (document.SourceAnimators)
 					for (size_t index = 0; index < document.SourceAnimators->DetachedValues.size(); ++index) {
 						const auto &record = document.SourceAnimators->DetachedValues[index];
 						if (same(record.NodeId, owner) && same(record.Port, port)) {
 							next.Detached = index;
-							keys = &record.Keys;
+							if (!axes) keys = &record.Keys;
 							break;
 						}
 					}
@@ -195,13 +319,14 @@ namespace engine::imagegraph {
 			});
 		const auto writerFor = [&](std::string_view node, std::string_view port) -> const WriterEdit * {
 			for (const auto &writer : writers)
-				if (writer.Detached == SIZE_MAX && same(writer.Node, node) && same(writer.Port, port))
+				if (writer.Axis < 0 && writer.Detached == SIZE_MAX && same(writer.Node, node) &&
+					same(writer.Port, port))
 					return &writer;
 			if (document.SourceAnimators)
 				for (const auto &binding : document.SourceAnimators->Bindings)
 					if (same(binding.NodeId, node) && same(binding.Port, port))
 						for (const auto &writer : writers)
-							if (same(binding.OwnerId, writer.Node) &&
+							if (writer.Axis < 0 && same(binding.OwnerId, writer.Node) &&
 								same(
 									binding.AnimatorPort.empty() ? binding.Port : binding.AnimatorPort,
 									writer.Port
@@ -214,6 +339,7 @@ namespace engine::imagegraph {
 			detail::EvaluationAllocator<std::pair<std::string_view, std::string_view>>(budget)
 		};
 		for (const auto &writer : writers) {
+			if (writer.Axis >= 0) continue;
 			if (writer.Detached == SIZE_MAX) targets.emplace_back(writer.Node, writer.Port);
 			if (document.SourceAnimators)
 				for (const auto &binding : document.SourceAnimators->Bindings)
@@ -231,6 +357,56 @@ namespace engine::imagegraph {
 				!detail::SourceAnimatorAdd(finalBytes, 2 * (*bytes + extra)))
 				throw std::bad_alloc{};
 		};
+		detail::EvaluationVector<AxisTarget> axisTargets{detail::EvaluationAllocator<AxisTarget>(budget)};
+		const auto addAxisTarget = [&](size_t writer, size_t node, size_t input, size_t overlay) {
+			for (const auto &target : axisTargets) {
+				admit(1);
+				if (target.Writer == writer && target.Node == node && target.Input == input &&
+					target.Overlay == overlay)
+					return;
+			}
+			axisTargets.push_back({writer, node, input, overlay});
+		};
+		const auto addNodeAxisTarget = [&](size_t writer, std::string_view nodeId, std::string_view port) {
+			for (size_t node = 0; node < document.Nodes.size(); ++node) {
+				const auto &owner = document.Nodes[node];
+				if (!same(owner.Id, nodeId) || !owner.SourceSeparatedVec2Animators) continue;
+				for (size_t input = 0; input < owner.SourceSeparatedVec2Animators->Inputs.size(); ++input) {
+					const auto &axes = owner.SourceSeparatedVec2Animators->Inputs[input];
+					if (same(axes.Port, port) && axes.Initialized)
+						addAxisTarget(writer, node, input, SIZE_MAX);
+				}
+			}
+		};
+		for (size_t index = 0; index < writers.size(); ++index) {
+			const auto &writer = writers[index];
+			if (writer.Axis < 0) continue;
+			if (writer.Detached != SIZE_MAX)
+				addAxisTarget(index, SIZE_MAX, SIZE_MAX, writer.Detached);
+			else
+				addNodeAxisTarget(index, writer.Node, writer.Port);
+			if (document.SourceAnimators)
+				for (const auto &binding : document.SourceAnimators->Bindings) {
+					const auto &axes = binding.Axes;
+					if ((axes.Storage == GroupAxisStorage::Local ||
+						 axes.Storage == GroupAxisStorage::Shared) &&
+						same(axes.OwnerId, writer.Node) && same(axes.Port, writer.Port))
+						addNodeAxisTarget(index, binding.NodeId, binding.Port);
+				}
+		}
+		for (const auto &target : axisTargets) {
+			const auto &writer = writers[target.Writer];
+			const auto node =
+				target.Overlay != SIZE_MAX ? writer.Node : std::string_view(document.Nodes[target.Node].Id);
+			const auto port =
+				target.Overlay != SIZE_MAX
+					? writer.Port
+					: std::string_view(
+						  document.Nodes[target.Node].SourceSeparatedVec2Animators->Inputs[target.Input].Port
+					  );
+			for (const auto &key : writer.Keys)
+				chargeKey(key, node, port);
+		}
 		for (const auto &key : document.Keyframes)
 			if (!writerFor(key.NodeId, key.Port)) {
 				++finalCount;
@@ -245,7 +421,7 @@ namespace engine::imagegraph {
 				chargeKey(key, node, port);
 		}
 		for (const auto &writer : writers)
-			if (writer.Detached != SIZE_MAX)
+			if (writer.Axis < 0 && writer.Detached != SIZE_MAX)
 				for (const auto &key : writer.Keys)
 					chargeKey(key, writer.Node, writer.Port);
 		detail::EvaluationVector<std::pair<std::string_view, std::string_view>> newTracks{
@@ -277,7 +453,7 @@ namespace engine::imagegraph {
 		detail::EvaluationVector<size_t> newDetachedTracks{detail::EvaluationAllocator<size_t>(budget)};
 		if (document.SourceAnimators)
 			for (const auto &writer : writers) {
-				if (writer.Detached == SIZE_MAX) continue;
+				if (writer.Axis >= 0 || writer.Detached == SIZE_MAX) continue;
 				bool source = false;
 				for (const auto &key : writer.Keys)
 					if (same(key.Data->Interpolation, "source")) source = true;
@@ -293,6 +469,54 @@ namespace engine::imagegraph {
 						))
 						throw std::bad_alloc{};
 				}
+			}
+		size_t aggregateKeys = finalCount;
+		const auto axisCount =
+			[&](size_t node, size_t input, size_t overlay, const SourceSeparatedVec2Animator &axes) {
+				for (int axis = 0; axis < 2; ++axis) {
+					size_t count = axes.Axes[size_t(axis)].Keys.size();
+					for (const auto &target : axisTargets) {
+						admit(1);
+						if (target.Node == node && target.Input == input && target.Overlay == overlay &&
+							writers[target.Writer].Axis == axis)
+							count = writers[target.Writer].Keys.size();
+					}
+					if (count > Limits::MaximumKeyframes - aggregateKeys) return false;
+					aggregateKeys += count;
+				}
+				return true;
+			};
+		for (size_t node = 0; node < document.Nodes.size(); ++node)
+			if (document.Nodes[node].SourceSeparatedVec2Animators)
+				for (size_t input = 0;
+					 input < document.Nodes[node].SourceSeparatedVec2Animators->Inputs.size();
+					 ++input)
+					if (!axisCount(
+							node,
+							input,
+							SIZE_MAX,
+							document.Nodes[node].SourceSeparatedVec2Animators->Inputs[input]
+						))
+						return fail(
+							Status::LimitExceeded, "source axis fanout exceeds aggregate key count bounds"
+						);
+		// grug keep authored rows and retained generations inside their separate public count limits.
+		aggregateKeys = 0;
+		if (document.SourceAnimators)
+			for (size_t overlay = 0; overlay < document.SourceAnimators->DetachedValues.size(); ++overlay) {
+				const auto &stored = document.SourceAnimators->DetachedValues[overlay];
+				size_t count = stored.Keys.size();
+				for (const auto &writer : writers) {
+					admit(1);
+					if (writer.Axis < 0 && writer.Detached == overlay) count = writer.Keys.size();
+				}
+				if (count > Limits::MaximumKeyframes - aggregateKeys)
+					return fail(Status::LimitExceeded, "source retained key fanout exceeds aggregate bounds");
+				aggregateKeys += count;
+				if (stored.SeparatedVec2 && !axisCount(SIZE_MAX, SIZE_MAX, overlay, *stored.SeparatedVec2))
+					return fail(
+						Status::LimitExceeded, "source retained axis fanout exceeds aggregate bounds"
+					);
 			}
 		if (*oldBytes > UINT64_MAX / 2 || !detail::SourceAnimatorAdd(finalBytes, 2 * *oldBytes))
 			return fail(Status::LimitExceeded, "source key clone overlap overflows");
@@ -317,18 +541,22 @@ namespace engine::imagegraph {
 			}
 			return key;
 		};
+		const bool combinedWrites =
+			std::any_of(writers.begin(), writers.end(), [](const auto &writer) { return writer.Axis < 0; });
 		std::vector<Keyframe> finalKeys;
-		finalKeys.reserve(finalCount);
-		for (const auto &key : document.Keyframes)
-			if (!writerFor(key.NodeId, key.Port)) finalKeys.push_back(key);
-		for (const auto &[node, port] : targets) {
-			const auto *writer = writerFor(node, port);
-			const bool alias = node != writer->Node || port != writer->Port;
-			for (const auto &key : writer->Keys)
-				finalKeys.push_back(clone(key, node, port, alias));
+		if (combinedWrites) {
+			finalKeys.reserve(finalCount);
+			for (const auto &key : document.Keyframes)
+				if (!writerFor(key.NodeId, key.Port)) finalKeys.push_back(key);
+			for (const auto &[node, port] : targets) {
+				const auto *writer = writerFor(node, port);
+				const bool alias = node != writer->Node || port != writer->Port;
+				for (const auto &key : writer->Keys)
+					finalKeys.push_back(clone(key, node, port, alias));
+			}
 		}
 		for (const auto &writer : writers)
-			if (writer.Detached != SIZE_MAX) {
+			if (writer.Axis < 0 && writer.Detached != SIZE_MAX) {
 				auto &stored = candidate.SourceAnimators->DetachedValues[writer.Detached];
 				std::vector<Keyframe> keys;
 				keys.reserve(writer.Keys.size());
@@ -337,14 +565,31 @@ namespace engine::imagegraph {
 				stored.Keys = std::move(keys);
 				stored.Fixed.reset();
 			}
-		std::sort(finalKeys.begin(), finalKeys.end(), [&](const auto &a, const auto &b) {
-			admit(1);
-			const auto aSocket = std::tie(a.NodeId, a.Port), bSocket = std::tie(b.NodeId, b.Port);
-			admit(a.NodeId.size() + a.Port.size() + b.NodeId.size() + b.Port.size());
-			if (aSocket != bSocket) return aSocket < bSocket;
-			return CompareFrameTime(GetFrameTime(a), GetFrameTime(b)) < 0;
-		});
-		candidate.Keyframes = std::move(finalKeys);
+		for (const auto &target : axisTargets) {
+			const auto &writer = writers[target.Writer];
+			auto &axes =
+				target.Overlay != SIZE_MAX
+					? *candidate.SourceAnimators->DetachedValues[target.Overlay].SeparatedVec2
+					: candidate.Nodes[target.Node].SourceSeparatedVec2Animators->Inputs[target.Input];
+			const auto node =
+				target.Overlay != SIZE_MAX ? writer.Node : std::string_view(candidate.Nodes[target.Node].Id);
+			const bool alias = node != writer.Node || axes.Port != writer.Port;
+			std::vector<Keyframe> keys;
+			keys.reserve(writer.Keys.size());
+			for (const auto &key : writer.Keys)
+				keys.push_back(clone(key, node, axes.Port, alias));
+			axes.Axes[size_t(writer.Axis)].Keys = std::move(keys);
+		}
+		if (combinedWrites) {
+			std::sort(finalKeys.begin(), finalKeys.end(), [&](const auto &a, const auto &b) {
+				admit(1);
+				const auto aSocket = std::tie(a.NodeId, a.Port), bSocket = std::tie(b.NodeId, b.Port);
+				admit(a.NodeId.size() + a.Port.size() + b.NodeId.size() + b.Port.size());
+				if (aSocket != bSocket) return aSocket < bSocket;
+				return CompareFrameTime(GetFrameTime(a), GetFrameTime(b)) < 0;
+			});
+			candidate.Keyframes = std::move(finalKeys);
+		}
 		if (detail::ValidateSourceAnimatorState(candidate, diagnostic) != Status::Ok) return diagnostic.Code;
 		Plan plan;
 		if (Compile(candidate, plan, diagnostic, budget.Available()) != Status::Ok) return diagnostic.Code;

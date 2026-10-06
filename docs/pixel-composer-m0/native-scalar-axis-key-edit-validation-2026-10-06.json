@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-06",
+  "evidence_scope": "Core scalar X/Y key transactions and mixed combined/axis edits. This evidence does not qualify Studio scalar-axis gestures or complete the broader Composer goal.",
+  "tested_behavior": [
+    "Move, copy and delete scalar keys through captured shared aliases while preserving physical move IDs and clearing copied IDs and drivers.",
+    "Resolve scalar ownership independently of the combined animator, including local alias arrays and retired scalar generations.",
+    "Apply combined, X and Y edits in one transaction with signed fractional clocks; axis-only edits preserve the combined key vector, tracks, bindings and local separated flags.",
+    "Deduplicate agreeing alias pins; refuse conflicting destinations, stale payloads, invalid axes, non-scalar values, cold arrays and insufficient payload budgets without publishing a result.",
+    "Admit weighted name-lookup work before scalar resolution and charge axis fanout before cloning; round-trip accepted fixtures through native persistence and restore captured bindings."
+  ],
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "scalar-axis-key-edit-batch1-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5110,
+    "cpp_assertions": 2001105,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "totals_method": "Sum result rows that report cases/assertions, including the startup C++ fixture; Python and CLI totals are separate.",
+    "build": {
+      "iteration": 1,
+      "exit_code": 0,
+      "targets": 17,
+      "steps": 32,
+      "log": "scalar-axis-key-edit-build1.log"
+    },
+    "backend": "SDL offscreen with Vulkan for GPU checks.",
+    "profiling": "Existing ENGINE_PROFILE scope retained. No new timing was collected and no performance result is claimed.",
+    "build_warning": "GCC reported -Wmaybe-uninitialized for the selected optional in existing TimelineRegions.hpp code through ImageComposer.cpp. The joined build succeeded; this phase did not change those files."
+  },
+  "unchanged_evidence": {
+    "before": "scalar-axis-key-edit-source-before-build1.json",
+    "after": "scalar-axis-key-edit-source-after-batch1.json",
+    "frozen_source_paths": 46,
+    "peer_paths_unchanged": 43,
+    "source_hashes_equal": true,
+    "test_binaries_unchanged": 13,
+    "child_hashes_file": "scalar-axis-key-edit-child-hashes-batch1.json",
+    "child_hashes_equal": true
+  },
+  "tested_owned_file_hashes": {
+    "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp": "0e846ce13966a90ac62333b8bcf74aa64e940c1a3f727fef64eeb7efeadf45ac",
+    "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp": "968a6adfc21d5a1f520086c98ce9197817a582bb1aa96a78d77c7911343df871",
+    "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp": "0432330525fa8749ff0ec887cfc7783b18e3ac461e3b0db36021a8f77dd01851"
+  },
+  "remaining_gaps": [
+    "Studio scalar-axis selection, gestures and authoring remain open.",
+    "Licensed-reference parity remains open.",
+    "Headed Studio verification remains open.",
+    "The broader Composer goal remains active."
+  ]
+}
