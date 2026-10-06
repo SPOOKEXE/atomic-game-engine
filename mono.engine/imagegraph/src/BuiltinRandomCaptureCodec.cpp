@@ -21,6 +21,7 @@
 namespace engine::imagegraph {
 	namespace {
 		constexpr std::string_view DefaultsHeader = "imagegraph-builtin-random 5\n";
+		constexpr std::string_view ColdAxesHeader = "imagegraph-builtin-random 6\n";
 		constexpr std::string_view InactiveAxesHeader = "imagegraph-builtin-random 4\n";
 		constexpr std::string_view Header = "imagegraph-builtin-random 3\n";
 		constexpr std::string_view PreviousHeader = "imagegraph-builtin-random 2\n";
@@ -209,7 +210,7 @@ namespace engine::imagegraph {
 					Bool(expression.Enabled);
 				});
 				Values(n.SourceProperties);
-				if (ConstructorDefaults) {
+				if (ConstructorDefaults || ColdAxes) {
 					Bool(bool(n.SourceVec2Defaults));
 					if (n.SourceVec2Defaults)
 						List(n.SourceVec2Defaults->Inputs, [&](const auto &input) {
@@ -223,6 +224,7 @@ namespace engine::imagegraph {
 					List(n.SourceSeparatedVec2Animators->Inputs, [&](const auto &input) {
 						Text(input.Port);
 						if (InactiveAxes) Bool(input.Separated);
+						if (ColdAxes) Bool(input.Initialized);
 						for (const auto &axis : input.Axes)
 							ScalarKeys(axis);
 					});
@@ -265,17 +267,23 @@ namespace engine::imagegraph {
 			}
 			bool InactiveAxes = false;
 			bool ConstructorDefaults = false;
+			bool ColdAxes = false;
 			void All(std::span<const SourceBuiltinRandomCapture> captures) {
 				for (const auto &capture : captures)
-					if (capture.Authored.SourceSeparatedVec2Animators)
-						for (const auto &input : capture.Authored.SourceSeparatedVec2Animators->Inputs)
+					if (capture.Authored.SourceSeparatedVec2Animators) {
+						for (const auto &input : capture.Authored.SourceSeparatedVec2Animators->Inputs) {
 							if (!input.Separated) InactiveAxes = true;
+							if (!input.Initialized) ColdAxes = true;
+						}
+					}
 				for (const auto &capture : captures)
 					if (capture.Authored.SourceVec2Defaults) ConstructorDefaults = true;
 				if (ConstructorDefaults) InactiveAxes = true;
-				const auto header = ConstructorDefaults ? DefaultsHeader
-									: InactiveAxes		? InactiveAxesHeader
-														: Header;
+				if (ColdAxes) InactiveAxes = true;
+				const auto header = ColdAxes			  ? ColdAxesHeader
+									: ConstructorDefaults ? DefaultsHeader
+									: InactiveAxes		  ? InactiveAxesHeader
+														  : Header;
 				Out.write(header.data(), header.size());
 				Number(captures.size());
 				for (const auto &capture : captures)
@@ -499,7 +507,8 @@ namespace engine::imagegraph {
 					std::min(Limits::MaximumArrayElements, detail::SourceSeparatedVec2InputCount(n)),
 					[&](auto &input) {
 						return Text(input.Port) && (Version < 4 || Bool(input.Separated)) &&
-							   ScalarKeys(input.Axes[0]) && ScalarKeys(input.Axes[1]);
+							   (Version < 6 || Bool(input.Initialized)) && ScalarKeys(input.Axes[0]) &&
+							   ScalarKeys(input.Axes[1]);
 					}
 				);
 			}
@@ -668,7 +677,8 @@ namespace engine::imagegraph {
 			if (prior > budget.Available() || !charge->Resize(prior) || text.size() > budget.Available() ||
 				!charge->Resize(prior + text.size()))
 				return Fail(diagnostic, Status::LimitExceeded, "Builtin RNG replacement exceeds residency");
-			const uint8_t version = text.starts_with(DefaultsHeader)	   ? 5
+			const uint8_t version = text.starts_with(ColdAxesHeader)	   ? 6
+									: text.starts_with(DefaultsHeader)	   ? 5
 									: text.starts_with(InactiveAxesHeader) ? 4
 									: text.starts_with(Header)			   ? 3
 									: text.starts_with(PreviousHeader)	   ? 2

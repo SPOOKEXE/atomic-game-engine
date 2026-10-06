@@ -3032,7 +3032,15 @@ namespace engine::imagegraph {
 			if (document.FormatVersion < 9 ||
 				detail::ValidateSeparatedVec2(node, aggregateKeys, axesDiagnostic) != Status::Ok)
 				return {};
-			for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
+			for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+				if (!input.Initialized) {
+					stream << "source_vec2_axis_cold ";
+					WriteQuoted(stream, node.Id);
+					stream << ' ';
+					WriteQuoted(stream, input.Port);
+					stream << ' ' << input.Separated << '\n';
+					continue;
+				}
 				for (size_t axis = 0; axis < 2; ++axis) {
 					stream << "source_vec2_axis ";
 					WriteQuoted(stream, node.Id);
@@ -3045,6 +3053,7 @@ namespace engine::imagegraph {
 						return {};
 					stream << "source_vec2_axis_end\n";
 				}
+			}
 		}
 
 		if (!document.ProjectGlobalNodeId.empty()) {
@@ -3958,6 +3967,37 @@ namespace engine::imagegraph {
 				if (!reserveSlots(inputs, inputs.size() + 1)) goto limited;
 				inputs.push_back(std::move(value));
 				remember(inputs.back().Port);
+			} else if (marker == "source_vec2_axis_cold" && parsed.FormatVersion >= 9) {
+				std::string nodeId, port;
+				int separated = 0;
+				if (axisKeys || !readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> separated) ||
+					(separated != 0 && separated != 1) || HasTrailing(row) ||
+					!insertAxis(nodeId, port, "cold"))
+					goto malformed;
+				const auto node = std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const auto &n) {
+					return n.Id == nodeId;
+				});
+				if (node == parsed.Nodes.end() || !detail::SourceSeparatedVec2Input(*node, port))
+					goto malformed;
+				if (!node->SourceSeparatedVec2Animators) {
+					if (budget) {
+						auto storage = budget->Reserve(sizeof(SourceSeparatedVec2Data));
+						if (!storage) goto limited;
+						if (!candidateCharge->Merge(std::move(*storage))) std::terminate();
+					}
+					node->SourceSeparatedVec2Animators.emplace();
+				}
+				auto &inputs = node->SourceSeparatedVec2Animators->Inputs;
+				if (std::any_of(inputs.begin(), inputs.end(), [&](const auto &input) {
+						return input.Port == port;
+					}))
+					goto malformed;
+				if (inputs.size() >= Limits::MaximumArrayElements ||
+					inputs.size() >= detail::SourceSeparatedVec2InputCount(*node))
+					goto limited;
+				if (!reserveSlots(inputs, inputs.size() + 1)) goto limited;
+				inputs.push_back({std::move(port), {}, separated != 0, false});
+				remember(inputs.back().Port);
 			} else if (marker == "source_vec2_axis" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, axis;
 				if (axisKeys || !readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> token(axis)) ||
@@ -4001,7 +4041,7 @@ namespace engine::imagegraph {
 					if (budget && !rowQuoteCharge.Merge(std::move(*copyCharge))) std::terminate();
 					remember(input->Port);
 				}
-				if (input->Separated != (separated != 0)) goto malformed;
+				if (!input->Initialized || input->Separated != (separated != 0)) goto malformed;
 				axisKeys = &input->Axes[axis == "x" ? 0 : 1].Keys;
 				release(axisNode);
 				release(axisPort);
@@ -4429,6 +4469,7 @@ namespace engine::imagegraph {
 			for (const auto &node : parsed.Nodes) {
 				if (node.SourceSeparatedVec2Animators)
 					for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+						if (!input.Initialized) continue;
 						if (node.Id.size() > UINT64_MAX - input.Port.size()) goto limited;
 						auto lookupCharge = budget ? budget->Reserve(node.Id.size() + input.Port.size())
 												   : std::optional<detail::AllocationReservation>{};

@@ -47,6 +47,11 @@ namespace engine::imagegraph::detail {
 			if (input.Port == port) return &input;
 		return nullptr;
 	}
+	const SourceSeparatedVec2Animator *FindInitializedSeparatedVec2(const Node &node, std::string_view port) {
+		const auto *input = FindSeparatedVec2(node, port);
+		return input && input->Initialized ? input : nullptr;
+	}
+
 	namespace {
 		bool Add(uint64_t &bytes, uint64_t added) {
 			if (added > UINT64_MAX - bytes) return false;
@@ -133,6 +138,8 @@ namespace engine::imagegraph::detail {
 		std::array<const Keyframe *, Limits::MaximumKeyframes> identities{};
 		size_t identityCount = 0;
 		for (const auto &input : inputs) {
+			if (!input.Initialized && (!input.Axes[0].Keys.empty() || !input.Axes[1].Keys.empty()))
+				return fail(Status::InvalidValue, "cold scalar storage must not contain keys", input.Port);
 			if (!SourceSeparatedVec2Input(node, input.Port))
 				return fail(
 					Status::UnknownPort,
@@ -217,6 +224,8 @@ namespace engine::imagegraph::detail {
 		return bytes;
 	}
 	std::optional<uint64_t> SeparatedAnimatorBytes(const SourceSeparatedVec2Animator &input, bool retained) {
+		if (!input.Initialized && (!input.Axes[0].Keys.empty() || !input.Axes[1].Keys.empty()))
+			return std::nullopt;
 		uint64_t bytes = sizeof(SourceSeparatedVec2Animator);
 		if (input.Port.empty() || !Text(bytes, input.Port, retained)) return std::nullopt;
 		for (const auto &axis : input.Axes) {

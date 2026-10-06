@@ -2121,6 +2121,26 @@ namespace engine::imagegraphio {
 		if (!WritePxcxStructureEdits(imported, imported.Source.OriginalBytes, {}, checkedBytes, diagnostic))
 			return false;
 		if (!ValidFrameTime(captureTime)) return Reject(diagnostic, "PXC projection capture time is invalid");
+		if (authored.Nodes.size() > Limits::MaximumNodes)
+			return Reject(diagnostic, "PXC authored projection exceeds its node limit");
+		for (const auto &node : authored.Nodes) {
+			if (!node.SourceSeparatedVec2Animators) continue;
+			if (node.Id.size() > Limits::MaximumTextBytes)
+				return Reject(diagnostic, "PXC scalar owner identity exceeds its text limit");
+			if (node.SourceSeparatedVec2Animators->Inputs.size() > Limits::MaximumArrayElements)
+				return Reject(diagnostic, "PXC scalar input count exceeds its limit", node.Id);
+			for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+				if (input.Port.size() > Limits::MaximumTextBytes)
+					return Reject(diagnostic, "PXC scalar port identity exceeds its text limit", node.Id);
+				if (!input.Initialized)
+					return Reject(
+						diagnostic,
+						"PXC cold scalar storage needs retained initialization",
+						node.Id,
+						input.Port
+					);
+			}
+		}
 		Document initial = imported.Graph;
 		if (Migrate(initial, diagnostic) != Status::Ok) return false;
 		if (authored == initial || authored == imported.Graph) {

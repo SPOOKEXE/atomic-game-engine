@@ -9,7 +9,9 @@ namespace engine::imagegraph::detail {
 	const CatalogueInput *SourceSeparatedVec2Input(const Node &, std::string_view port);
 	size_t SourceSeparatedVec2InputCount(const Node &);
 	const SourceSeparatedVec2Animator *FindSeparatedVec2(const Node &, std::string_view port);
-	// Clone bytes use required size; retained bytes include existing capacities. Empty storage is absent.
+	const SourceSeparatedVec2Animator *FindInitializedSeparatedVec2(const Node &, std::string_view port);
+	// Clone bytes use required size; retained bytes include existing capacities. Cold storage retains only
+	// its local flag.
 	std::optional<uint64_t> SeparatedAnimatorBytes(const SourceSeparatedVec2Animator &, bool retained);
 	std::optional<uint64_t> SeparatedKeyBytes(const Keyframe &, bool retained);
 	std::optional<uint64_t> SeparatedScalarBytes(const SourceScalarAnimator &, bool retained);

@@ -159,6 +159,47 @@ TEST_CASE(
 	CHECK(ReadBuiltinRandomCapture(text, priorCaptures, diagnostic, 1) == Status::LimitExceeded);
 	CHECK(priorCaptures == restored);
 }
+TEST_CASE(
+	"Builtin capture v6 preserves cold separated axes and keeps initialized empty axes distinct",
+	"[builtin_random_codec]"
+) {
+	SourceBuiltinRandomCapture cold;
+	cold.Authored = {"mirror", "pc.mirror_polar", "", {}, {{"center", Vector2{99, 88}}}};
+	cold.Authored.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}});
+	auto &coldAxes = cold.Authored.SourceSeparatedVec2Animators->Inputs.front();
+	coldAxes.Separated = true;
+	coldAxes.Initialized = false;
+	cold.Authored.SourceVec2Defaults.emplace().Inputs.push_back({"center", Vector2{7, 8}});
+
+	std::string text;
+	Diagnostic diagnostic;
+	REQUIRE(WriteBuiltinRandomCapture({&cold, 1}, text, diagnostic) == Status::Ok);
+	CHECK(text.starts_with("imagegraph-builtin-random 6\n"));
+	std::vector<SourceBuiltinRandomCapture> restored;
+	REQUIRE(ReadBuiltinRandomCapture(text, restored, diagnostic) == Status::Ok);
+	REQUIRE(restored.size() == 1);
+	CHECK(restored.front() == cold);
+	CHECK_FALSE(restored.front().Authored.SourceSeparatedVec2Animators->Inputs.front().Initialized);
+	CHECK(restored.front().Authored.SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.empty());
+	CHECK(restored.front().Authored.SourceVec2Defaults->Inputs.front().Data == Vector2{7, 8});
+
+	auto prior = restored;
+	CHECK(ReadBuiltinRandomCapture(text, prior, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(prior == restored);
+
+	SourceBuiltinRandomCapture warm;
+	warm.Authored = cold.Authored;
+	warm.Authored.SourceSeparatedVec2Animators->Inputs.front().Separated = false;
+	warm.Authored.SourceSeparatedVec2Animators->Inputs.front().Initialized = true;
+	warm.Authored.SourceVec2Defaults = {};
+	REQUIRE(WriteBuiltinRandomCapture({&warm, 1}, text, diagnostic) == Status::Ok);
+	CHECK(text.starts_with("imagegraph-builtin-random 4\n"));
+	restored.clear();
+	REQUIRE(ReadBuiltinRandomCapture(text, restored, diagnostic) == Status::Ok);
+	REQUIRE(restored.size() == 1);
+	CHECK(restored.front() == warm);
+	CHECK(restored.front().Authored.SourceSeparatedVec2Animators->Inputs.front().Initialized);
+}
 TEST_CASE("Malformed durable builtin observations preserve prior owned captures", "[builtin_random_codec]") {
 	std::vector<SourceBuiltinRandomCapture> source{Fixture()}, prior{Fixture()};
 	prior[0].Authored.Id = "prior";
@@ -477,7 +518,7 @@ TEST_CASE(
 	CHECK(prior == before);
 	auto future = text;
 	future.replace(
-		0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 6\n"
+		0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 7\n"
 	);
 	CHECK(ReadBuiltinRandomCapture(future, prior, d) == Status::UnsupportedVersion);
 	CHECK(prior == before);

@@ -117,7 +117,10 @@ namespace engine::imagegraph::detail {
 				return fail(Status::LimitExceeded, "source authored axis lookup exceeds work bounds");
 			result.Axes = FindSeparatedVec2(*owner, result.Port);
 		}
-		if (!result.Axes) return fail(Status::UnsupportedExecution, "source scalar axis storage is absent");
+		if (!result.Axes || !result.Axes->Initialized)
+			return fail(
+				Status::UnsupportedExecution, "source scalar axis storage requires retained initialization"
+			);
 		if (!result.Track)
 			for (const auto &track : document.Tracks)
 				if (track.NodeId == ownerId && track.Port == result.Port) {

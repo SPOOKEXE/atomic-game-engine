@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "independent local cold Vec2 split flags, captured scalar initialization identity, native v9 transport, capture envelope v6 and faithful PXC refusal",
+  "behavior": [
+    "Initialized=false retains the local split flag with no scalar keys; initialized empty arrays stay distinct.",
+    "Bindings share only initialized physical scalar arrays; cold bindings retain local constructor history.",
+    "Explicit initialization replaces cold carriers with saved constructor scalar keys without changing the local split flag or combined identity.",
+    "Native v9 source_vec2_axis_cold markers and capture envelope v6 preserve cold state; older envelopes remain initialized.",
+    "PXC projection rejects cold desired carriers before its unchanged-document shortcut because source restore creates scalar arrays; diagnostic names are bounded."
+  ],
+  "builds": [
+    {
+      "log": "cold-flags-build1.log",
+      "exit_code": 1
+    },
+    {
+      "log": "cold-flags-build2.log",
+      "exit_code": 0,
+      "steps": 697
+    },
+    {
+      "log": "cold-flags-build3.log",
+      "exit_code": 0,
+      "steps": 3
+    }
+  ],
+  "issues_and_repairs": [
+    "Codec fixture used reset() on OwnedPayload3D; changed to assignment {}.",
+    "Moved PXC cold refusal before unchanged-projection shortcut and bounded diagnostic identity text.",
+    "IO fixture modified the checked import, so the untracked-projection guard rejected it before cold validation. Keep checked import immutable and mutate a desired copy.",
+    "Recovered codec snapshots stored as bare filenames into the owned patch so the v6 transport delta is included."
+  ],
+  "joined_batches": [
+    {
+      "results": "cold-flags-batch1-results.json",
+      "checks": 20,
+      "passed_checks": 19,
+      "failed_check": "io",
+      "failure_output": "PxcxSeparatedVec2.cpp:242 cold scalar storage diagnostic assertion failed; 279 of 280 IO cases passed.",
+      "socket_cases_excluded": 21
+    },
+    {
+      "results": "cold-flags-batch2-results.json",
+      "checks": 20,
+      "passed_checks": 20,
+      "native_cpu_cases": 5034,
+      "render_cases": 15,
+      "render_assertions": 477,
+      "startup_cases": 1,
+      "cli_cases": 16,
+      "python_cases": 101,
+      "binary_hashes_stable": true,
+      "child_hashes_stable": true,
+      "socket_cases_excluded": 0,
+      "previously_excluded_socket_cases_now_passed": 21
+    }
+  ],
+  "limits": [
+    "Automatic getter-driven initialization and separate/combine editor controls remain unfinished.",
+    "Detached scalar mode transitions and explicit same-base setInstance recapture remain unfinished.",
+    "Generic Vector and constructors without saved finite pairs or fixed metadata remain unrepresented.",
+    "Licensed runtime parity, headed Studio verification, profiling for this change and sanitizers have not run."
+  ],
+  "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05"
+}

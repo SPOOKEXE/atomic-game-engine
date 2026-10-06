@@ -1,3 +1,6 @@
+#include "../src/SourceAxisStorage.hpp"
+#include "../src/SourceSeparatedVec2.hpp"
+
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/GroupReplay.hpp>
 #include <engine/testing/Suite.hpp>
@@ -94,6 +97,7 @@ TEST_CASE(
 	SourceSeparatedVec2Animator localMode;
 	localMode.Port = std::string(Point);
 	localMode.Separated = true;
+	localMode.Initialized = false;
 	document.Nodes[1].SourceSeparatedVec2Animators.emplace().Inputs.push_back(localMode);
 	const std::array targets{SourceAxisInitialization{"copy", Point}};
 	GroupReplayState initialized;
@@ -347,4 +351,100 @@ TEST_CASE(
 	REQUIRE(InitializeSourceVec2Axes(document, secondTarget, first, 1, complete, diagnostic) == Status::Ok);
 	REQUIRE(complete.SharedSubtype("base", "point_i_1"));
 	CHECK(complete.SharedSubtype("base", "point_i_1")->SeparatedVec2->Axes[0].Keys.size() == 1);
+}
+
+TEST_CASE(
+	"Cold local flags roundtrip without becoming initialized empty arrays", "[source_axis_initialization]"
+) {
+	auto document = AliasedGraph(true);
+	for (size_t index = 0; index < 2; ++index)
+		document.Nodes[index].SourceSeparatedVec2Animators.emplace().Inputs.push_back(
+			{std::string(Point), {}, index == 1, false}
+		);
+	const auto text = Write(document);
+	REQUIRE_FALSE(text.empty());
+	CHECK(text.find("source_vec2_axis_cold ") != std::string::npos);
+	Document restored;
+	Diagnostic diagnostic;
+	REQUIRE(Read(text, restored, diagnostic) == Status::Ok);
+	CHECK(restored == document);
+	CHECK_FALSE(detail::FindInitializedSeparatedVec2(restored.Nodes[0], Point));
+	CHECK_FALSE(detail::FindInitializedSeparatedVec2(restored.Nodes[1], Point));
+	GroupReplayState empty, initial, bound;
+	REQUIRE(RebindGroupReplay(restored, empty, 1, initial, diagnostic) == Status::Ok);
+	const std::array bindings{Binding("copy")};
+	REQUIRE(BindGroupReplay(restored, bindings, initial, 1, bound, diagnostic) == Status::Ok);
+	REQUIRE(bound.Binding("copy", Point));
+	CHECK(bound.Binding("copy", Point)->Axes.Storage == GroupAxisStorage::Uninitialized);
+	uint64_t work = 0;
+	const auto cold = detail::ResolveSourceGetterAxes(
+		restored, restored.Nodes[1], Point, &bound, "base", Point, true, work
+	);
+	CHECK(cold.Separated);
+	CHECK(cold.Code == Status::UnsupportedExecution);
+	const std::array targets{
+		SourceAxisInitialization{"base", Point}, SourceAxisInitialization{"copy", Point}
+	};
+	GroupReplayState initialized;
+	REQUIRE(InitializeSourceVec2Axes(restored, targets, bound, 1, initialized, diagnostic) == Status::Ok);
+	REQUIRE(initialized.SharedSubtype("base", Point));
+	REQUIRE(initialized.SharedSubtype("copy", Point));
+	CHECK(initialized.SharedSubtype("base", Point)->SeparatedVec2->Initialized);
+	CHECK_FALSE(initialized.SharedSubtype("base", Point)->SeparatedVec2->Separated);
+	CHECK(initialized.SharedSubtype("base", Point)->SeparatedVec2->Axes[0].Keys.front().Data == Value{5.0});
+	CHECK(initialized.SharedSubtype("copy", Point)->SeparatedVec2->Initialized);
+	CHECK(initialized.SharedSubtype("copy", Point)->SeparatedVec2->Separated);
+	CHECK(initialized.SharedSubtype("copy", Point)->SeparatedVec2->Axes[0].Keys.front().Data == Value{7.0});
+	Document projected;
+	REQUIRE(ProjectGroupReplay(restored, initialized, 1, projected, diagnostic) == Status::Ok);
+	CHECK(projected.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Initialized);
+	CHECK(projected.Nodes[1].SourceSeparatedVec2Animators->Inputs.front().Initialized);
+
+	auto warm = document;
+	warm.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Initialized = true;
+	GroupReplayState warmInitial, warmBound;
+	REQUIRE(RebindGroupReplay(warm, empty, 1, warmInitial, diagnostic) == Status::Ok);
+	REQUIRE(BindGroupReplay(warm, bindings, warmInitial, 1, warmBound, diagnostic) == Status::Ok);
+	CHECK(warmBound.Binding("copy", Point)->Axes.Storage == GroupAxisStorage::Shared);
+	const auto warmText = Write(warm);
+	CHECK(warmText.find("source_vec2_axis ") != std::string::npos);
+	REQUIRE(Read(warmText, restored, diagnostic) == Status::Ok);
+	CHECK(restored == warm);
+}
+
+TEST_CASE(
+	"Cold scalar markers reject mixed storage and keys without changing prior output",
+	"[source_axis_initialization]"
+) {
+	auto document = AliasedGraph();
+	document.Nodes[0].SourceSeparatedVec2Animators.emplace().Inputs.push_back(
+		{std::string(Point), {}, true, false}
+	);
+	const auto text = Write(document);
+	REQUIRE_FALSE(text.empty());
+	Document output = document;
+	Diagnostic diagnostic;
+	const std::array malformed{
+		text + "source_vec2_axis_cold \"base\" \"point_i_0\" 1\n",
+		text + "source_vec2_axis \"base\" \"point_i_0\" x\nsource_vec2_axis_end\n",
+		text + "source_vec2_axis_cold \"copy\" \"point_i_0\" 2\n"
+	};
+	for (const auto &encoded : malformed) {
+		CHECK(Read(encoded, output, diagnostic) != Status::Ok);
+		CHECK(output == document);
+	}
+	auto warm = document;
+	warm.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Initialized = true;
+	const auto warmText = Write(warm);
+	CHECK(
+		Read(warmText + "source_vec2_axis_cold \"base\" \"point_i_0\" 1\n", output, diagnostic) != Status::Ok
+	);
+	CHECK(output == document);
+	AddAxes(document.Nodes[1], 1, 2);
+	auto &invalid = document.Nodes[1].SourceSeparatedVec2Animators->Inputs.front();
+	invalid.Initialized = false;
+	size_t count = 0;
+	CHECK(detail::ValidateSeparatedVec2(document.Nodes[1], count, diagnostic) == Status::InvalidValue);
+	CHECK_FALSE(detail::SeparatedAnimatorBytes(invalid, false));
+	CHECK(Write(document).empty());
 }

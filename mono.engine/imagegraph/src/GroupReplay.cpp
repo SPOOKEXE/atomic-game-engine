@@ -357,8 +357,9 @@ namespace engine::imagegraph {
 						};
 				} else {
 					const auto *overlay = previous.SharedSubtype(source->Id, binding.Port);
-					if ((overlay && overlay->SeparatedVec2) ||
-						detail::FindSeparatedVec2(*source, binding.Port))
+					if ((overlay && overlay->SeparatedVec2 && overlay->SeparatedVec2->Initialized) ||
+						(!(overlay && overlay->SeparatedVec2) &&
+						 detail::FindInitializedSeparatedVec2(*source, binding.Port)))
 						return {
 							GroupAxisStorage::Shared,
 							source->Id,
@@ -2389,7 +2390,7 @@ namespace engine::imagegraph {
 									   : detail::FindSeparatedVec2(*physical, binding->Axes.Port);
 				if (axes && !admit(axes->Axes[0].Keys.size() + axes->Axes[1].Keys.size()))
 					return fail(Status::LimitExceeded, "source warm axis validation exceeds work bounds");
-				if (!axes || !detail::SeparatedAnimatorBytes(*axes, false))
+				if (!axes || !axes->Initialized || !detail::SeparatedAnimatorBytes(*axes, false))
 					return fail(
 						Status::UnsupportedExecution,
 						"source warm scalar storage is absent",
@@ -2398,7 +2399,7 @@ namespace engine::imagegraph {
 					);
 				continue;
 			}
-			if (!binding && local) continue;
+			if (!binding && local && local->Initialized) continue;
 			if (binding && (binding->Axes.OwnerId != node->Id || binding->Axes.Port != target.Port ||
 							binding->Axes.InstanceBase != node->InstanceBase))
 				return fail(
@@ -2407,7 +2408,8 @@ namespace engine::imagegraph {
 					target.NodeId,
 					target.Port
 				);
-			if (binding && localOverlay && localOverlay->SeparatedVec2)
+			if (binding && localOverlay && localOverlay->SeparatedVec2 &&
+				localOverlay->SeparatedVec2->Initialized)
 				return fail(
 					Status::InvalidValue,
 					"source cold scalar identity already has retained storage",
@@ -3296,7 +3298,7 @@ namespace engine::imagegraph {
 							});
 						const auto *axes =
 							node == document.Nodes.end() ? nullptr : detail::FindSeparatedVec2(*node, port);
-						if (!axes) return false;
+						if (!axes || axes->Initialized != shared.SeparatedVec2->Initialized) return false;
 						if (!detached) return *axes == *shared.SeparatedVec2;
 						for (size_t axis = 0; axis < 2; ++axis) {
 							const auto &actual = axes->Axes[axis].Keys;

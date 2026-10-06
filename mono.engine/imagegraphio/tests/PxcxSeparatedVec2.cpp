@@ -180,7 +180,9 @@ TEST_CASE("PXC Vec2 constructor defaults stay separate from the current animator
 	CHECK(separatedNode.SourceVec2Defaults->Inputs.front().Data == Vector2{7, 8});
 	REQUIRE(separatedNode.SourceSeparatedVec2Animators);
 	REQUIRE(separatedNode.SourceSeparatedVec2Animators->Inputs.size() == 1);
-	const auto &axes = separatedNode.SourceSeparatedVec2Animators->Inputs.front().Axes;
+	const auto &separatedInput = separatedNode.SourceSeparatedVec2Animators->Inputs.front();
+	CHECK(separatedInput.Initialized);
+	const auto &axes = separatedInput.Axes;
 	REQUIRE(axes[0].Keys.size() == 1);
 	REQUIRE(axes[1].Keys.size() == 1);
 	CHECK(axes[0].Keys.front().Data == Value{7.0});
@@ -225,4 +227,33 @@ TEST_CASE("PXC Vec2 constructor defaults stay separate from the current animator
 	CHECK(unsupported.Graph.Nodes.front().Type != "pc.solid");
 	CHECK_FALSE(unsupported.Diagnostics.empty());
 	CHECK(unsupported.Diagnostics.front().Message.find("constructor default pair") != std::string::npos);
+
+	const auto priorGraph = separated.Graph;
+	const auto priorSource = separated.Source.OriginalBytes;
+	Document coldDesired = separated.Graph;
+	auto &coldAxes = coldDesired.Nodes.front().SourceSeparatedVec2Animators->Inputs.front();
+	coldAxes.Initialized = false;
+	coldAxes.Axes[0].Keys.clear();
+	coldAxes.Axes[1].Keys.clear();
+	currentDimension(coldDesired)->Data = Vector2{101, 102};
+	std::vector<std::byte> result{std::byte{0x77}};
+	CHECK_FALSE(WritePxcxProjection(separated, coldDesired, {}, result, diagnostic));
+	CHECK(result == std::vector<std::byte>{std::byte{0x77}});
+	CHECK(diagnostic.Message.find("cold scalar storage") != std::string::npos);
+	currentDimension(coldDesired)->Data = Vector2{99, 88};
+	CHECK_FALSE(WritePxcxProjection(separated, coldDesired, {}, result, diagnostic));
+	CHECK(result == std::vector<std::byte>{std::byte{0x77}});
+	CHECK(separated.Source.OriginalBytes == priorSource);
+	CHECK(separated.Graph == priorGraph);
+	coldDesired.Nodes.front().Id.assign(Limits::MaximumTextBytes + 1, 'x');
+	CHECK_FALSE(WritePxcxProjection(separated, coldDesired, {}, result, diagnostic));
+	CHECK(diagnostic.NodeId.empty());
+	CHECK(result == std::vector<std::byte>{std::byte{0x77}});
+	coldDesired.Nodes.front().Id = "node";
+	coldDesired.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Port.assign(
+		Limits::MaximumTextBytes + 1, 'x'
+	);
+	CHECK_FALSE(WritePxcxProjection(separated, coldDesired, {}, result, diagnostic));
+	CHECK(diagnostic.Port.empty());
+	CHECK(result == std::vector<std::byte>{std::byte{0x77}});
 }

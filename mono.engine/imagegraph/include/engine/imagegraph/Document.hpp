@@ -1348,6 +1348,8 @@ namespace engine::imagegraph {
 		std::array<SourceScalarAnimator, 2> Axes;
 		// combine keeps these tracks stored; only the selected animator supplies values.
 		bool Separated = true;
+		// cold properties retain their local mode without inventing a scalar array.
+		bool Initialized = true;
 		bool operator==(const SourceSeparatedVec2Animator &) const = default;
 	};
 	struct SourceSeparatedVec2Data {

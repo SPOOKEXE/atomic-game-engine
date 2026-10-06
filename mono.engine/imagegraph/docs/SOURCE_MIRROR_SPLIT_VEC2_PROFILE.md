@@ -130,6 +130,10 @@ the selected local property's identity. warm scalar mode changes sample and
 replace that independent owner, track and writer. changing a physical property's
 mode updates scalar aliases independently from combined aliases. linked numeric
 inputs bypass local axes; Mirror linked Paths still read local X as their ratio.
+cold local flag carriers keep Initialized=false and no scalar keys; initialized
+empty arrays remain distinct. native v9 cold markers and capture envelope v6
+preserve this distinction. PXC writeback refuses cold carriers because source
+restoration creates scalar storage; hosts must initialize before that export.
 cold aliases refuse execution until an explicit local initialization event.
 InitializeSourceVec2Axes creates driverless frame-zero scalar keys from retained
 constructor pairs or fixed catalogue constants. generated constructor flags
