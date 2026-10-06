@@ -13,6 +13,7 @@
 #include <array>
 #include <cstddef>
 #include <memory>
+#include <new>
 #include <string>
 #include <studio/ImageGraph.hpp>
 #include <vector>
@@ -205,6 +206,251 @@ TEST_CASE(
 	CHECK(history.CurrentSourceBytes() == sourceBefore);
 	REQUIRE(history.Redo(current, allow));
 	CHECK(history.CurrentSourceBytes() == sourceAfter);
+}
+
+TEST_CASE(
+	"collection metadata follows source and native history only after admission",
+	"[studio][source_history][collections]"
+) {
+	const auto destination = Destination();
+	const auto incoming = Incoming();
+	PxcxAppendResult appended;
+	Diagnostic diagnostic;
+	PxcxAppendOptions options;
+	options.Namespace = "imported";
+	REQUIRE(engine::imagegraphio::AppendPxcxProject(destination, incoming, options, appended, diagnostic));
+	const auto before = Import(destination);
+	const auto sourceBefore = Snapshot(destination.OriginalBytes);
+	const auto sourceAfter = Snapshot(appended.Project.Source.OriginalBytes);
+	using Metadata = History::CollectionMetadata;
+	using Collections = std::shared_ptr<const std::vector<Metadata>>;
+	const Collections empty = std::make_shared<const std::vector<Metadata>>();
+	const Collections imported = std::make_shared<const std::vector<Metadata>>(
+		std::vector<Metadata>{{"collection", R"({"members":["imported:number"]})"}}
+	);
+	const Collections edited = std::make_shared<const std::vector<Metadata>>(
+		std::vector<Metadata>{{"collection", R"({"members":["imported:number"],"label":"edited"})"}}
+	);
+	const Collections metadataOnly = std::make_shared<const std::vector<Metadata>>(
+		std::vector<Metadata>{{"collection", R"({"members":["imported:number"],"label":"metadata only"})"}}
+	);
+	History history;
+	Document current = before.Graph;
+	current.Nodes.front().Position = {-13, 29};
+	REQUIRE(history.TryRecord(before.Graph, current));
+	CHECK_FALSE(history.CurrentCollections());
+	const Collections initialCollections = std::make_shared<const std::vector<Metadata>>(
+		std::vector<Metadata>{{"destination", R"({"members":["number"]})"}}
+	);
+	const auto unchanged = Text(current);
+	const auto refuseInitialization = [](const Document &,
+										 const Document &,
+										 const History::SourceSnapshot &,
+										 const History::SourceSnapshot &) { return false; };
+	CHECK_FALSE(history.TryRecord(
+		current,
+		current,
+		sourceBefore,
+		sourceBefore,
+		initialCollections,
+		initialCollections,
+		refuseInitialization
+	));
+	CHECK_FALSE(history.CurrentSourceBytes());
+	CHECK_FALSE(history.CurrentCollections());
+	CHECK_FALSE(history.TargetCollections(false));
+	CHECK(Text(current) == unchanged);
+	const auto acceptInitialization = [](const Document &,
+										 const Document &,
+										 const History::SourceSnapshot &,
+										 const History::SourceSnapshot &) { return true; };
+	REQUIRE(history.TryRecord(
+		current,
+		current,
+		sourceBefore,
+		sourceBefore,
+		initialCollections,
+		initialCollections,
+		acceptInitialization
+	));
+	CHECK(history.CurrentCollections() == initialCollections);
+	CHECK(history.Undo(current));
+	CHECK(Text(current) == unchanged);
+	CHECK(history.CurrentCollections() == initialCollections);
+	REQUIRE(history.Undo(current));
+	CHECK(current == before.Graph);
+	CHECK(history.CurrentCollections() == initialCollections);
+	REQUIRE(history.Redo(current));
+	REQUIRE(history.Redo(current));
+	CHECK(history.CurrentCollections() == initialCollections);
+
+	Document afterAppend = appended.Project.Graph;
+	afterAppend.Nodes.front().Position = current.Nodes.front().Position;
+	int admissions = 0;
+	const auto admit = [&](const Document &,
+						   const Document &,
+						   const History::SourceSnapshot &,
+						   const History::SourceSnapshot &) {
+		++admissions;
+		CHECK(history.CurrentCollections() == initialCollections);
+		return true;
+	};
+	REQUIRE(history.TryRecord(
+		current, afterAppend, sourceBefore, sourceAfter, initialCollections, imported, admit
+	));
+	CHECK(history.CurrentCollections() == imported);
+
+	Document afterEdit = afterAppend;
+	afterEdit.Nodes.front().Position = {7, -2};
+	REQUIRE(history.TryRecord(afterAppend, afterEdit, sourceAfter, sourceAfter));
+	CHECK(history.CurrentCollections() == imported);
+	REQUIRE(history.TryRecord(afterEdit, afterEdit, sourceAfter, sourceAfter, imported, edited));
+	CHECK(history.CurrentCollections() == edited);
+	REQUIRE(history.TryRecord(afterEdit, afterEdit, sourceAfter, sourceAfter, edited, metadataOnly));
+	CHECK(history.CurrentCollections() == metadataOnly);
+	const auto admitUndo = [&](const Document &,
+							   const Document &,
+							   const History::SourceSnapshot &,
+							   const History::SourceSnapshot &) {
+		CHECK(history.TargetCollections(false) == edited);
+		CHECK(history.CurrentCollections() == metadataOnly);
+		return true;
+	};
+	CHECK(history.Undo(afterEdit, admitUndo));
+	CHECK(history.CurrentCollections() == edited);
+	const auto admitRedo = [&](const Document &,
+							   const Document &,
+							   const History::SourceSnapshot &,
+							   const History::SourceSnapshot &) {
+		CHECK(history.TargetCollections(true) == metadataOnly);
+		CHECK(history.CurrentCollections() == edited);
+		return true;
+	};
+	CHECK(history.Redo(afterEdit, admitRedo));
+	CHECK(history.CurrentCollections() == metadataOnly);
+	const auto beforeRefusalText = Text(afterEdit);
+	CHECK_FALSE(history.TryRecord(
+		afterEdit,
+		current,
+		sourceAfter,
+		sourceAfter,
+		metadataOnly,
+		empty,
+		[](const Document &,
+		   const Document &,
+		   const History::SourceSnapshot &,
+		   const History::SourceSnapshot &) { return false; }
+	));
+	CHECK(Text(afterEdit) == beforeRefusalText);
+	CHECK(history.CurrentCollections() == metadataOnly);
+	CHECK(history.CanUndo());
+
+	const auto rejectStale = [&](const Document &,
+								 const Document &,
+								 const History::SourceSnapshot &,
+								 const History::SourceSnapshot &) {
+		++admissions;
+		return true;
+	};
+	CHECK_FALSE(history.TryRecord(afterEdit, current, sourceAfter, sourceAfter, edited, empty, rejectStale));
+	CHECK(admissions == 1);
+
+	const Collections large = [&] {
+		auto entries = std::make_shared<std::vector<Metadata>>();
+		entries->reserve(64);
+		entries->push_back({"large", std::string(4096, 'x')});
+		return std::const_pointer_cast<const std::vector<Metadata>>(entries);
+	}();
+	History limited(8, sourceAfter->capacity() + 4 * Text(afterAppend).size() + 512);
+	CHECK_FALSE(limited.TryRecord(
+		afterAppend,
+		afterEdit,
+		sourceAfter,
+		sourceAfter,
+		imported,
+		large,
+		[&](const Document &,
+			const Document &,
+			const History::SourceSnapshot &,
+			const History::SourceSnapshot &) {
+			++admissions;
+			return true;
+		}
+	));
+	CHECK(admissions == 1);
+	CHECK_FALSE(limited.CurrentCollections());
+
+	const auto beforeAllocationText = Text(afterEdit);
+	CHECK_FALSE(history.TryRecord(
+		afterEdit,
+		current,
+		sourceAfter,
+		sourceAfter,
+		metadataOnly,
+		empty,
+		[](const Document &,
+		   const Document &,
+		   const History::SourceSnapshot &,
+		   const History::SourceSnapshot &) -> bool { throw std::bad_alloc{}; }
+	));
+	CHECK(history.CurrentCollections() == metadataOnly);
+	CHECK(history.CanUndo());
+	CHECK(Text(afterEdit) == beforeAllocationText);
+}
+
+TEST_CASE(
+	"shared collection metadata is charged once and survives refused restore admission",
+	"[studio][source_history][collections][budget]"
+) {
+	const auto archive = Destination();
+	const auto source = Snapshot(archive.OriginalBytes);
+	using Metadata = History::CollectionMetadata;
+	using Collections = History::CollectionSnapshot;
+	auto entries = std::make_shared<std::vector<Metadata>>();
+	entries->reserve(1);
+	entries->push_back({"collection", R"({"description":")" + std::string(32 * 1024, 'm') + "\"}"});
+	const Collections collections = entries;
+	const size_t managerBytes = entries->capacity() * sizeof(Metadata) + entries->front().NodeId.capacity() +
+								entries->front().MetadataJson.capacity();
+	Document current = Import(archive).Graph;
+	const size_t textBytes = Text(current).size();
+	const size_t byteCapacity = source->capacity() + managerBytes + 10 * textBytes + 512;
+	REQUIRE(byteCapacity < source->capacity() + 2 * managerBytes);
+	History history(16, byteCapacity);
+	REQUIRE(history.TryRecord(current, current, source, source, collections, collections));
+	for (int step = 0; step < 4; ++step) {
+		Document next = current;
+		next.Nodes.front().Position.X += 1;
+		REQUIRE(history.TryRecord(current, next, source, source));
+		current = std::move(next);
+		CHECK(history.CurrentCollections() == collections);
+	}
+	for (int step = 0; step < 4; ++step) {
+		REQUIRE(history.Undo(current));
+		CHECK(history.CurrentCollections() == collections);
+	}
+	for (int step = 0; step < 4; ++step) {
+		REQUIRE(history.Redo(current));
+		CHECK(history.CurrentCollections() == collections);
+	}
+	const auto documentBeforeRefusal = Text(current);
+	const auto targetBeforeRefusal = history.TargetCollections(false);
+	const auto refuse = [](const Document &,
+						   const Document &,
+						   const History::SourceSnapshot &,
+						   const History::SourceSnapshot &) { return false; };
+	CHECK_FALSE(history.Undo(current, refuse));
+	CHECK(Text(current) == documentBeforeRefusal);
+	CHECK(history.CurrentCollections() == collections);
+	CHECK(history.TargetCollections(false) == targetBeforeRefusal);
+	const auto failAllocation = [](const Document &,
+								   const Document &,
+								   const History::SourceSnapshot &,
+								   const History::SourceSnapshot &) -> bool { throw std::bad_alloc{}; };
+	CHECK_FALSE(history.Undo(current, failAllocation));
+	CHECK(Text(current) == documentBeforeRefusal);
+	CHECK(history.CurrentCollections() == collections);
+	CHECK(history.TargetCollections(false) == targetBeforeRefusal);
 }
 
 TEST_CASE(
@@ -442,7 +688,7 @@ TEST_CASE(
 		R"JSON({"attri":{"future_root":{"keep":1}},"nodes":[{"id":"number","type":"Node_Number_Simple","x":1,"y":2,"inputs":[{"r":{"d":4}}]},{"id":"existing","type":"Node_Cache_Array","x":0,"y":0,"inputs":[],"attri":{"serialize":true,"cache_group":["number"]}}],"aRegion":[{"l":"old","c":16777215,"fs":-1.5,"fe":4.25,"future":17}]})JSON"
 	);
 	const auto incoming = Archive(
-		R"JSON({"nodes":[{"id":"cache","type":"Node_Cache_Array","x":0,"y":0,"inputs":[],"attri":{"serialize":false,"cache_group":["number"]}}]})JSON"
+		R"JSON({"metadata":{"description":"loaded manager","author":"artist"},"nodes":[{"id":"cache","type":"Node_Cache_Array","x":0,"y":0,"inputs":[],"attri":{"serialize":false,"cache_group":["number"]}},{"id":"collection","type":"Node_Collection","x":0,"y":0,"inputs":[],"attri":{"custom_input_list":[],"custom_output_list":[]}}]})JSON"
 	);
 	const auto sourceBefore = Snapshot(destination.OriginalBytes);
 	PxcxAppendOptions options;
@@ -451,7 +697,14 @@ TEST_CASE(
 	Diagnostic error;
 	REQUIRE(engine::imagegraphio::AppendPxcxProject(destination, incoming, options, appended, error));
 	const auto sourceAfter = Snapshot(appended.Project.Source.OriginalBytes);
-	REQUIRE(appended.Nodes.size() == 1);
+	REQUIRE(appended.Nodes.size() == 2);
+	engine::imagegraphio::PxcxAppendPostLoad postLoad;
+	REQUIRE(engine::imagegraphio::PreparePxcxAppendPostLoad(appended, "incoming.pxcx", postLoad, error));
+	REQUIRE(postLoad.Collections.size() == 1);
+	CHECK_FALSE(postLoad.Source);
+	const auto collectionsBefore = std::make_shared<const std::vector<History::CollectionMetadata>>();
+	const auto collectionsAfter =
+		std::make_shared<const std::vector<History::CollectionMetadata>>(std::move(postLoad.Collections));
 	const std::array<std::string_view, 1> owners{appended.Nodes.front().NodeId};
 	auto before = Import(destination).Graph;
 	before.Outputs = {{"result", "number", "number"}};
@@ -477,7 +730,10 @@ TEST_CASE(
 				++admissions;
 				CHECK(*host.PreparedData(1, 1) == prior);
 				CHECK(remainingBytes > sourceBefore->capacity() + sourceAfter->capacity());
-				return history.TryRecord(before, after, sourceBefore, sourceAfter);
+				CHECK_FALSE(history.CurrentCollections());
+				return history.TryRecord(
+					before, after, sourceBefore, sourceAfter, collectionsBefore, collectionsAfter
+				);
 			});
 		CHECK(admissions == 1);
 		CHECK(accepted == !refuse);
@@ -487,9 +743,13 @@ TEST_CASE(
 			CHECK(error.Code == Status::LimitExceeded);
 			CHECK(*host.PreparedData(1, 1) == prior);
 			CHECK_FALSE(history.CurrentSourceBytes());
+			CHECK_FALSE(history.CurrentCollections());
 			continue;
 		}
 		CHECK(history.CurrentSourceBytes() == sourceAfter);
+		CHECK(history.CurrentCollections() == collectionsAfter);
+		CHECK(collectionsAfter->front().NodeId == appended.Nodes.back().NodeId);
+		CHECK(collectionsAfter->front().MetadataJson.find("loaded manager") != std::string::npos);
 		CHECK(host.PreparedData(1, 1)->Entries == prior.Entries);
 		REQUIRE(host.PreparedData(1, 1)->CacheGroups.Owners.size() == 2);
 		CHECK(host.PreparedData(1, 1)->CacheGroups.Owners.front() == prior.CacheGroups.Owners.front());
@@ -498,6 +758,12 @@ TEST_CASE(
 		REQUIRE(history.Undo(current));
 		CHECK(current == before);
 		CHECK(history.CurrentSourceBytes() == sourceBefore);
+		CHECK(history.CurrentCollections() == collectionsBefore);
+		REQUIRE(history.Redo(current));
+		CHECK(current == after);
+		CHECK(history.CurrentCollections() == collectionsAfter);
+		history.Clear();
+		CHECK_FALSE(history.CurrentCollections());
 	}
 }
 

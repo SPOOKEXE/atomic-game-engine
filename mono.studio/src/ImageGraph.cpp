@@ -13,6 +13,7 @@
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraph/WavClip.hpp>
+#include <engine/imagegraphio/PxcxAppend.hpp>
 
 #include <algorithm>
 #include <array>
@@ -3645,13 +3646,33 @@ namespace studio {
 	ImageGraphHistory::ImageGraphHistory(size_t capacity, size_t byteCapacity)
 		: Capacity(capacity), ByteCapacity(byteCapacity) {}
 
+	std::optional<size_t> ImageGraphHistory::CollectionBytes(const CollectionSnapshot &items) const {
+		if (!items) return size_t{0};
+		if (items->size() > engine::imagegraph::Limits::MaximumNodes ||
+			items->capacity() > ByteCapacity / sizeof(CollectionMetadata))
+			return {};
+		size_t remaining = ByteCapacity - items->capacity() * sizeof(CollectionMetadata);
+		for (const auto &item : *items) {
+			if (item.NodeId.empty() || item.NodeId.size() > engine::bake::PxcxLimits::MaximumNodeTextBytes ||
+				item.MetadataJson.size() > engine::bake::PxcxLimits::MaximumMetadataBytes ||
+				item.NodeId.capacity() > remaining)
+				return {};
+			remaining -= item.NodeId.capacity();
+			if (item.MetadataJson.capacity() > remaining) return {};
+			remaining -= item.MetadataJson.capacity();
+		}
+		return ByteCapacity - remaining;
+	}
+
 	bool ImageGraphHistory::Fits(
 		std::span<const Snapshot> undo,
 		std::span<const Snapshot> redo,
 		const SourceSnapshot &current,
 		const Snapshot *extra,
 		const SourceSnapshot &baseline,
-		size_t extraTextBytes
+		size_t extraTextBytes,
+		const CollectionSnapshot &currentCollections,
+		const CollectionSnapshot &baselineCollections
 	) const {
 		if (!ByteCapacity || extraTextBytes > ByteCapacity) return false;
 		size_t remaining = ByteCapacity - extraTextBytes;
@@ -3670,12 +3691,27 @@ namespace studio {
 			sources[sourceCount++] = source.get();
 			return true;
 		};
+		std::array<const std::vector<CollectionMetadata> *, engine::imagegraph::Limits::MaximumNodes + 2>
+			managers{};
+		size_t managerCount = 0;
+		const auto chargeCollections = [&](const CollectionSnapshot &items) {
+			if (!items) return true;
+			if (std::find(managers.begin(), managers.begin() + managerCount, items.get()) !=
+				managers.begin() + managerCount)
+				return true;
+			const auto bytes = CollectionBytes(items);
+			if (managerCount == managers.size() || !bytes || *bytes > remaining) return false;
+			remaining -= *bytes;
+			managers[managerCount++] = items.get();
+			return true;
+		};
 		const auto charge = [&](const Snapshot &entry) {
 			if (entry.Text.size() > remaining) return false;
 			remaining -= entry.Text.size();
-			return chargeSource(entry.Source ? entry.Source : baseline);
+			return chargeSource(entry.Source ? entry.Source : baseline) &&
+				   chargeCollections(entry.Collections ? entry.Collections : baselineCollections);
 		};
-		if (!chargeSource(current)) return false;
+		if (!chargeSource(current) || !chargeCollections(currentCollections)) return false;
 		for (const auto &entry : undo)
 			if (!charge(entry)) return false;
 		for (const auto &entry : redo)
@@ -3694,9 +3730,11 @@ namespace studio {
 			return;
 		}
 		// grug legacy Record stores before only. restoring an oversized after may still refuse.
-		Snapshot snapshot{engine::imagegraph::Write(before), CurrentSource};
+		Snapshot snapshot{engine::imagegraph::Write(before), CurrentSource, Collections};
 		size_t discard = UndoSnapshots.size() >= Capacity ? UndoSnapshots.size() - Capacity + 1 : 0;
-		while (!Fits(std::span(UndoSnapshots).subspan(discard), {}, CurrentSource, &snapshot)) {
+		while (
+			!Fits(std::span(UndoSnapshots).subspan(discard), {}, CurrentSource, &snapshot, {}, 0, Collections)
+		) {
 			if (discard == UndoSnapshots.size()) {
 				drop();
 				return;
@@ -3732,11 +3770,27 @@ namespace studio {
 		const SourceSnapshot &afterSource,
 		const SourceAdmission &admit
 	) try {
+		return TryRecord(before, after, beforeSource, afterSource, Collections, Collections, admit);
+	} catch (const std::bad_alloc &) {
+		return false;
+	}
+
+	bool ImageGraphHistory::TryRecord(
+		const Document &before,
+		const Document &after,
+		const SourceSnapshot &beforeSource,
+		const SourceSnapshot &afterSource,
+		const CollectionSnapshot &beforeCollections,
+		const CollectionSnapshot &afterCollections,
+		const SourceAdmission &admit
+	) try {
 		const auto sourceFits = [&](const SourceSnapshot &source) {
 			return !source || (!source->empty() && source->capacity() <= ByteCapacity &&
 							   source->capacity() <= engine::bake::PxcxLimits::MaximumArchiveBytes);
 		};
-		if (!sourceFits(beforeSource) || !sourceFits(afterSource)) return false;
+		if (!sourceFits(beforeSource) || !sourceFits(afterSource) || !CollectionBytes(beforeCollections) ||
+			!CollectionBytes(afterCollections))
+			return false;
 		const auto sameSource = [](const SourceSnapshot &a, const SourceSnapshot &b) {
 			return a == b || (a && b && *a == *b);
 		};
@@ -3751,9 +3805,25 @@ namespace studio {
 				return bool(entry.Source);
 			});
 		if (!initializeSource && !sameSource(CurrentSource, beforeSource)) return false;
-		if (before == after && sameSource(beforeSource, afterSource)) return true;
+		const auto sameCollections = [](const CollectionSnapshot &a, const CollectionSnapshot &b) {
+			return a == b || (a && b && *a == *b);
+		};
+		const bool initializeCollections =
+			!Collections && beforeCollections &&
+			std::none_of(
+				UndoSnapshots.begin(),
+				UndoSnapshots.end(),
+				[](const auto &entry) { return bool(entry.Collections); }
+			) &&
+			std::none_of(RedoSnapshots.begin(), RedoSnapshots.end(), [](const auto &entry) {
+				return bool(entry.Collections);
+			});
+		if (!initializeCollections && !sameCollections(Collections, beforeCollections)) return false;
+		if (!initializeCollections && before == after && sameSource(beforeSource, afterSource) &&
+			sameCollections(beforeCollections, afterCollections))
+			return true;
 		if (!Capacity || !ByteCapacity) return false;
-		Snapshot snapshot{engine::imagegraph::Write(before), beforeSource};
+		Snapshot snapshot{engine::imagegraph::Write(before), beforeSource, beforeCollections};
 		const std::string afterText = engine::imagegraph::Write(after);
 		if (snapshot.Text.empty() || afterText.empty() || snapshot.Text.size() > ByteCapacity ||
 			afterText.size() > ByteCapacity)
@@ -3762,9 +3832,16 @@ namespace studio {
 		const size_t extraBytes =
 			afterText.size() > snapshot.Text.size() ? afterText.size() - snapshot.Text.size() : 0;
 		size_t discard = UndoSnapshots.size() >= Capacity ? UndoSnapshots.size() - Capacity + 1 : 0;
-		while (
-			!Fits(std::span(UndoSnapshots).subspan(discard), {}, afterSource, &snapshot, baseline, extraBytes)
-		) {
+		while (!Fits(
+			std::span(UndoSnapshots).subspan(discard),
+			{},
+			afterSource,
+			&snapshot,
+			baseline,
+			extraBytes,
+			afterCollections,
+			initializeCollections ? beforeCollections : CollectionSnapshot{}
+		)) {
 			if (discard == UndoSnapshots.size()) return false;
 			++discard;
 		}
@@ -3779,8 +3856,12 @@ namespace studio {
 		if (initializeSource)
 			for (auto &entry : UndoSnapshots)
 				entry.Source = beforeSource;
+		if (initializeCollections)
+			for (auto &entry : UndoSnapshots)
+				entry.Collections = beforeCollections;
 		UndoSnapshots.push_back(std::move(snapshot));
 		CurrentSource = afterSource;
+		Collections = afterCollections;
 		return true;
 	} catch (const std::bad_alloc &) {
 		return false;
@@ -3824,10 +3905,19 @@ namespace studio {
 		auto &source = redo ? RedoSnapshots : UndoSnapshots;
 		auto &destination = redo ? UndoSnapshots : RedoSnapshots;
 		if (source.empty()) return false;
-		Snapshot current{engine::imagegraph::Write(document), CurrentSource};
+		Snapshot current{engine::imagegraph::Write(document), CurrentSource, Collections};
 		if (current.Text.empty()) return false;
 		const auto targetSource = source.back().Source;
-		if (!Fits(std::span(source).first(source.size() - 1), destination, targetSource, &current))
+		const auto targetCollections = source.back().Collections;
+		if (!Fits(
+				std::span(source).first(source.size() - 1),
+				destination,
+				targetSource,
+				&current,
+				{},
+				0,
+				targetCollections
+			))
 			return false;
 		Document restored;
 		engine::imagegraph::Diagnostic diagnostic;
@@ -3841,6 +3931,7 @@ namespace studio {
 		destination.push_back(std::move(current));
 		document = std::move(restored);
 		CurrentSource = targetSource;
+		Collections = targetCollections;
 		source.pop_back();
 		return true;
 	} catch (const std::bad_alloc &) {
@@ -3850,10 +3941,18 @@ namespace studio {
 	ImageGraphHistory::SourceSnapshot ImageGraphHistory::CurrentSourceBytes() const {
 		return CurrentSource;
 	}
+	ImageGraphHistory::CollectionSnapshot ImageGraphHistory::CurrentCollections() const {
+		return Collections;
+	}
+	ImageGraphHistory::CollectionSnapshot ImageGraphHistory::TargetCollections(bool redo) const {
+		const auto &source = redo ? RedoSnapshots : UndoSnapshots;
+		return source.empty() ? CollectionSnapshot{} : source.back().Collections;
+	}
 	void ImageGraphHistory::Clear() {
 		UndoSnapshots.clear();
 		RedoSnapshots.clear();
 		CurrentSource.reset();
+		Collections.reset();
 	}
 	bool ImageGraphHistory::CanUndo() const {
 		return !UndoSnapshots.empty();

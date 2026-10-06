@@ -1,0 +1,217 @@
+{
+  "phase": "grug retain Collection metadata with source and native history",
+  "date": "2026-10-07",
+  "scope": [
+    "grug keep immutable Collection manager snapshots beside source bytes, outside archive graph fields",
+    "grug admit source, managers and native undo together before publication",
+    "grug reuse current managers for ordinary edits and backfill prior native-only history at first manager admission",
+    "grug charge shared manager vector and string capacities once per retained payload",
+    "grug let private undo staging borrow target managers before history moves",
+    "grug check actual post-load Collection metadata with loaded cache journal admission"
+  ],
+  "owned_files": {
+    "mono.studio/include/studio/ImageGraph.hpp": "e4e862022e4ef6e1c88496e4fee67f0c6223729a013127220e1c4b0d60f85699",
+    "mono.studio/src/ImageGraph.cpp": "e7530ccf04aeaac6e410a32554b42d3e62078f84c6addda2f935c554b4c84ee7",
+    "mono.studio/tests/ImageGraphSourceHistory.cpp": "5a412cf87cbb7433ab3cae8eef514c15892dcc38382b35505a6cc594fff65505"
+  },
+  "checks": {
+    "joined_build": "grug 17 release-tests targets; j6; build1 and build2 failed, build3 passed",
+    "batch": "20/20 passed",
+    "cpp_cases": 5191,
+    "cpp_assertions": 2003585,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "grug approved offscreen Vulkan; studio/client/render serialized",
+    "frozen_source_files_unchanged": 104,
+    "peer_files_unchanged": 43,
+    "test_binaries_unchanged": 13,
+    "child_binaries_unchanged": 2,
+    "review": "grug Sol read caught manager baseline no-op before tests; repaired and re-reviewed; Luna edited owned tests",
+    "standalone_performance_profile": "grug not run",
+    "sanitizers": "grug not run"
+  },
+  "failures_and_repairs": [
+    {
+      "stage": "pretest review",
+      "cause": "grug no-change fast path skipped first manager baseline attachment",
+      "repair": "grug route first initialization through quota and admission before backfill",
+      "verified": "grug same-document baseline refusal and successful old-history backfill passed"
+    },
+    {
+      "stage": "build1",
+      "output": "ImageGraphAnimationControl.cpp:70:47: error: reference to detail is ambiguous",
+      "cause": "grug public PxcxAppend include exposed engine imagegraph detail through GroupReplay",
+      "repair": "grug forward declare metadata type in public header and keep defining include private"
+    },
+    {
+      "stage": "build2",
+      "output": "invalid application of sizeof to incomplete type studio::ImageGraphHistory::CollectionMetadata",
+      "cause": "grug repair script assertion stopped before adding private include; grug started rebuild prematurely",
+      "repair": "grug add PxcxAppend.hpp include directly to ImageGraph.cpp",
+      "result": "grug build3 and all20 checks passed"
+    }
+  ],
+  "limitations": [
+    "grug Studio append action still needs to stage these manager snapshots with source, cache and canvas owners",
+    "grug Open and Collection export/save manager lifecycle still needs wiring",
+    "grug headed Studio and licensed reference parity remain unverified",
+    "grug history retains manager payloads; producer owns JSON schema validation"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "build_logs": [
+      "collection-history-build1.log",
+      "collection-history-build2.log",
+      "collection-history-build3.log"
+    ],
+    "build_issues": [
+      "collection-history-build1-issues.json",
+      "collection-history-build2-issues.json"
+    ],
+    "results": "collection-history-batch1-results.json",
+    "source_integrity": "collection-history-source-integrity-batch1.json",
+    "peer_integrity": "collection-history-peer-integrity-batch1.json",
+    "child_integrity": "collection-history-child-hashes-batch1.json"
+  },
+  "commands_reference": "grug exact commands in collection-history-batch1-results.json; same joined20 commands as opaque-canvas validation",
+  "results_summary": [
+    {
+      "name": "bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129"
+    },
+    {
+      "name": "physics",
+      "binary_sha256": "98a65d0d27f6df49927341cbe4f90f69d851dbd4150b596f1134264f89d74261",
+      "exit_code": 0,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "98a65d0d27f6df49927341cbe4f90f69d851dbd4150b596f1134264f89d74261"
+    },
+    {
+      "name": "runner",
+      "binary_sha256": "14533a695b92ea77ee0e196b15cda483fc883ca0704c4740f7be9b9604862ace",
+      "exit_code": 0,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "14533a695b92ea77ee0e196b15cda483fc883ca0704c4740f7be9b9604862ace"
+    },
+    {
+      "name": "font",
+      "binary_sha256": "3128bf295f983d5966054cb498e1d85f17534603b7e94c29478e7e67838878a4",
+      "exit_code": 0,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "3128bf295f983d5966054cb498e1d85f17534603b7e94c29478e7e67838878a4"
+    },
+    {
+      "name": "export",
+      "binary_sha256": "997e60cc41ce0b9481ea3af45519d97f68eccaacd2228328fccfa2f99d5ccd1b",
+      "exit_code": 0,
+      "assertions": 3132,
+      "cases": 77,
+      "binary_sha256_after": "997e60cc41ce0b9481ea3af45519d97f68eccaacd2228328fccfa2f99d5ccd1b"
+    },
+    {
+      "name": "render",
+      "binary_sha256": "08f0f661ecde1a7de42569e0065589616e8462dee15751df767447c2ffb386ef",
+      "exit_code": 0,
+      "assertions": 477,
+      "cases": 15,
+      "binary_sha256_after": "08f0f661ecde1a7de42569e0065589616e8462dee15751df767447c2ffb386ef"
+    },
+    {
+      "name": "cli",
+      "exit_code": 0,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "binary_sha256": "4dc9e3139227adc952703000c3d02bb3d7c2e59d9453dcf7b246bbe48ba401b5",
+      "exit_code": 0,
+      "assertions": 12512,
+      "cases": 291,
+      "binary_sha256_after": "4dc9e3139227adc952703000c3d02bb3d7c2e59d9453dcf7b246bbe48ba401b5"
+    },
+    {
+      "name": "core",
+      "binary_sha256": "91951b6fdacc17de8286cb330cb7f76d2211dfd79a4036427d91a554c4e1d267",
+      "exit_code": 0,
+      "assertions": 1895145,
+      "cases": 2980,
+      "binary_sha256_after": "91951b6fdacc17de8286cb330cb7f76d2211dfd79a4036427d91a554c4e1d267"
+    },
+    {
+      "name": "assetc",
+      "binary_sha256": "3bf77444f70df9ee34c8714080fa4a71a2d90b5a3a6ddf4024a16e5ea463c9c9",
+      "exit_code": 0,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "3bf77444f70df9ee34c8714080fa4a71a2d90b5a3a6ddf4024a16e5ea463c9c9"
+    },
+    {
+      "name": "client",
+      "binary_sha256": "3a1d33c2be0cce2ce79b77e8f6768872e4587b684a2288507a25ba4d7b3aaefa",
+      "exit_code": 0,
+      "assertions": 23821,
+      "cases": 358,
+      "binary_sha256_after": "3a1d33c2be0cce2ce79b77e8f6768872e4587b684a2288507a25ba4d7b3aaefa"
+    },
+    {
+      "name": "studio",
+      "binary_sha256": "569c72ac559a1c7a5714d3b91c38cee6635e588892b1eebb2ded0497a216193a",
+      "exit_code": 0,
+      "assertions": 48368,
+      "cases": 1082,
+      "binary_sha256_after": "569c72ac559a1c7a5714d3b91c38cee6635e588892b1eebb2ded0497a216193a"
+    },
+    {
+      "name": "nodegraph",
+      "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "exit_code": 0,
+      "assertions": 345,
+      "cases": 37,
+      "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc"
+    },
+    {
+      "name": "ui",
+      "binary_sha256": "cd31d6b2fed7ad8d4a2328a5be46649df6b2f1aeb05a121bdc3e6652151142a9",
+      "exit_code": 0,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "cd31d6b2fed7ad8d4a2328a5be46649df6b2f1aeb05a121bdc3e6652151142a9"
+    },
+    {
+      "name": "startup",
+      "exit_code": 0,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "exit_code": 0
+    },
+    {
+      "name": "architecture",
+      "exit_code": 0
+    },
+    {
+      "name": "python",
+      "exit_code": 0,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "exit_code": 0
+    }
+  ]
+}

@@ -24,6 +24,10 @@
 #include <variant>
 #include <vector>
 
+namespace engine::imagegraphio {
+	struct PxcxCollectionMetadata;
+}
+
 namespace studio {
 
 	inline constexpr uint32_t IMAGE_COMPOSER_PREVIEW_MAXIMUM_DIMENSION = 128;
@@ -665,7 +669,8 @@ namespace studio {
 	class ImageGraphHistory {
 	  public:
 		// @param capacity Maximum undo and redo transitions retained together.
-		// @param byteCapacity Maximum serialized bytes retained across both stacks.
+		// @param byteCapacity grug cap serialized documents and shared source/manager payload across both
+		// stacks.
 		explicit ImageGraphHistory(size_t capacity = 128, size_t byteCapacity = 16 * 1024 * 1024);
 		// Records the state before one changed document operation.
 		// @param before Document before the edit.
@@ -695,6 +700,10 @@ namespace studio {
 		bool Redo(engine::imagegraph::Document &document, const Admission &admit);
 		// grug keep immutable authoritative source bytes beside native history snapshots.
 		using SourceSnapshot = std::shared_ptr<const std::vector<std::byte>>;
+		// grug Collection managers stay beside source history, never in invented archive fields.
+		// include PxcxAppend.hpp when constructing or reading manager fields.
+		using CollectionMetadata = engine::imagegraphio::PxcxCollectionMetadata;
+		using CollectionSnapshot = std::shared_ptr<const std::vector<CollectionMetadata>>;
 		// caller stages source/runtime together; refusal must preserve all external state.
 		using SourceAdmission = std::function<bool(
 			const engine::imagegraph::Document &,
@@ -711,10 +720,24 @@ namespace studio {
 			const SourceSnapshot &afterSource,
 			const SourceAdmission &admit = {}
 		);
+		// grug admit source, managers and native undo as one bounded transition.
+		bool TryRecord(
+			const engine::imagegraph::Document &before,
+			const engine::imagegraph::Document &after,
+			const SourceSnapshot &beforeSource,
+			const SourceSnapshot &afterSource,
+			const CollectionSnapshot &beforeCollections,
+			const CollectionSnapshot &afterCollections,
+			const SourceAdmission &admit = {}
+		);
 		bool Undo(engine::imagegraph::Document &document, const SourceAdmission &admit);
 		bool Redo(engine::imagegraph::Document &document, const SourceAdmission &admit);
 		// current immutable authoring baseline; source-aware hosts use SourceAdmission on restore.
 		SourceSnapshot CurrentSourceBytes() const;
+		// grug ordinary edits reuse the current manager snapshot without another payload copy.
+		CollectionSnapshot CurrentCollections() const;
+		// grug borrow the private target during undo/redo admission; absent target returns null.
+		CollectionSnapshot TargetCollections(bool redo) const;
 		void Clear();
 		bool CanUndo() const;
 		bool CanRedo() const;
@@ -725,17 +748,22 @@ namespace studio {
 		struct Snapshot {
 			std::string Text;
 			SourceSnapshot Source;
+			CollectionSnapshot Collections;
 		};
+		std::optional<size_t> CollectionBytes(const CollectionSnapshot &items) const;
 		bool Fits(
 			std::span<const Snapshot> undo,
 			std::span<const Snapshot> redo,
 			const SourceSnapshot &current,
 			const Snapshot *extra,
 			const SourceSnapshot &baseline = {},
-			size_t extraTextBytes = 0
+			size_t extraTextBytes = 0,
+			const CollectionSnapshot &currentCollections = {},
+			const CollectionSnapshot &baselineCollections = {}
 		) const;
 		bool Restore(engine::imagegraph::Document &document, bool redo, const SourceAdmission &admit);
 		SourceSnapshot CurrentSource;
+		CollectionSnapshot Collections;
 		std::vector<Snapshot> UndoSnapshots;
 		std::vector<Snapshot> RedoSnapshots;
 	};
