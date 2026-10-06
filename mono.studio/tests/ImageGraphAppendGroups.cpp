@@ -183,7 +183,12 @@ namespace {
 			if (track.NodeId == "base" && track.Port == "argument_value_2") track.Port = "argument_value_1";
 	}
 
-	Value InputValue(const Document &document, const GroupReplayState &replay, std::string_view nodeId) {
+	Value InputValue(
+		const Document &document,
+		const GroupReplayState &replay,
+		std::string_view nodeId,
+		std::string_view port = "argument_value_1"
+	) {
 		Diagnostic diagnostic;
 		Plan plan;
 		const auto compiled = Compile(document, plan, diagnostic);
@@ -195,8 +200,8 @@ namespace {
 		EvaluationSnapshot snapshot;
 		REQUIRE(EvaluateNodeInputs(document, plan, nodeId, request, snapshot, diagnostic) == Status::Ok);
 		const auto found =
-			std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [](const auto &value) {
-				return value.Port == "argument_value_1";
+			std::find_if(snapshot.Values().begin(), snapshot.Values().end(), [port](const auto &value) {
+				return value.Port == port;
 			});
 		REQUIRE(found != snapshot.Values().end());
 		return found->Data;
@@ -233,6 +238,91 @@ TEST_CASE(
 	REQUIRE(candidate.Host.Replay.Find("new-input"));
 	CHECK(candidate.Host.Replay.Find("new-input")->Domain.Kind == SourceSocketKind::Float);
 	CHECK(candidate.Host.Revision == 2);
+}
+
+TEST_CASE(
+	"append host automatically binds Lua alias inputs and retains inherited values",
+	"[studio][append_groups][lua_aliases]"
+) {
+	const auto document = GroupWithLuaAliases();
+	Plan plan;
+	Diagnostic diagnostic;
+	const auto compile = Compile(document, plan, diagnostic);
+	INFO(diagnostic.Message << " node=" << diagnostic.NodeId << " port=" << diagnostic.Port);
+	REQUIRE(compile == Status::Ok);
+
+	studio::ImageGraphGroupHost host;
+	EvaluationRequest request;
+	const bool prepared = host.Prepare(document, plan, 1, request, diagnostic);
+	INFO(
+		"status=" << static_cast<int>(diagnostic.Code) << " node=" << diagnostic.NodeId
+				  << " port=" << diagnostic.Port << " message=" << diagnostic.Message
+	);
+	REQUIRE(prepared);
+	CHECK(host.Replay.InstancesBound());
+	CHECK(host.Revision == 1);
+
+	for (const auto *node : {"copy", "sibling"}) {
+		for (size_t index = 0; index < 3; ++index) {
+			const auto port = "argument_value_" + std::to_string(index);
+			const auto *binding = host.Replay.Binding(node, port);
+			INFO("node=" << node << " port=" << port);
+			REQUIRE(binding);
+			CHECK(binding->OwnerId == "base");
+			CHECK(binding->Getter == GroupSubtypeAnimator::Animated);
+			CHECK(binding->Writer == GroupSubtypeAnimator::Animated);
+			CHECK(InputValue(document, host.Replay, node, port) == Value{double(index + 1) * 10});
+		}
+	}
+
+	Document persisted;
+	const bool projected = host.ProjectForSave(document, 1, persisted, diagnostic);
+	INFO(diagnostic.Message << " node=" << diagnostic.NodeId << " port=" << diagnostic.Port);
+	REQUIRE(projected);
+	REQUIRE(persisted.SourceAnimators);
+	Plan persistedPlan;
+	const auto persistedCompile = Compile(persisted, persistedPlan, diagnostic);
+	INFO(diagnostic.Message << " node=" << diagnostic.NodeId << " port=" << diagnostic.Port);
+	REQUIRE(persistedCompile == Status::Ok);
+
+	studio::ImageGraphGroupHost reopened;
+	EvaluationRequest reopenedRequest;
+	const bool reopenedPrepared = reopened.Prepare(persisted, persistedPlan, 3, reopenedRequest, diagnostic);
+	INFO(
+		"status=" << static_cast<int>(diagnostic.Code) << " node=" << diagnostic.NodeId
+				  << " port=" << diagnostic.Port << " message=" << diagnostic.Message
+	);
+	REQUIRE(reopenedPrepared);
+	CHECK(reopened.Replay.InstancesBound());
+	for (const auto *node : {"copy", "sibling"}) {
+		for (size_t index = 0; index < 3; ++index) {
+			const auto port = "argument_value_" + std::to_string(index);
+			const auto *binding = reopened.Replay.Binding(node, port);
+			INFO("reopened node=" << node << " port=" << port);
+			REQUIRE(binding);
+			CHECK(binding->OwnerId == "base");
+			CHECK(binding->Getter == GroupSubtypeAnimator::Animated);
+			CHECK(binding->Writer == GroupSubtypeAnimator::Animated);
+			CHECK(InputValue(persisted, reopened.Replay, node, port) == Value{double(index + 1) * 10});
+		}
+	}
+
+	studio::ImageGraphGroupHost refused;
+	refused.BorrowedBytes = Limits::MaximumEvaluationBytes - 1;
+	EvaluationRequest refusedRequest;
+	refusedRequest.GroupReplay = &refused.Replay;
+	refusedRequest.GroupAuthoringRevision = 1;
+	const bool refusedPrepare = refused.Prepare(document, plan, 1, refusedRequest, diagnostic);
+	INFO(
+		"status=" << static_cast<int>(diagnostic.Code) << " node=" << diagnostic.NodeId
+				  << " port=" << diagnostic.Port << " message=" << diagnostic.Message
+	);
+	CHECK_FALSE(refusedPrepare);
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	CHECK(refused.Revision == 0);
+	CHECK(refused.Replay.AuthoringRevision() == 0);
+	CHECK(refusedRequest.GroupReplay == &refused.Replay);
+	CHECK(refusedRequest.GroupAuthoringRevision == 1);
 }
 
 TEST_CASE(
@@ -333,24 +423,13 @@ TEST_CASE(
 	REQUIRE(compile == Status::Ok);
 	studio::ImageGraphGroupHost prepared;
 	EvaluationRequest clock;
-	const auto group = GroupDocument();
-	Plan groupPlan;
-	REQUIRE(Compile(group, groupPlan, diagnostic) == Status::Ok);
-	REQUIRE(prepared.Prepare(group, groupPlan, 1, clock, diagnostic));
-	GroupReplayState expanded;
-	REQUIRE(RebindGroupReplay(live, prepared.Replay, 1, expanded, diagnostic) == Status::Ok);
-	std::vector<GroupSubtypeBinding> bindings;
-	for (const auto *id : {"copy", "sibling"})
-		for (size_t index = 0; index < 3; ++index)
-			bindings.push_back(
-				{id,
-				 "base",
-				 GroupSubtypeAnimator::Animated,
-				 GroupSubtypeAnimator::Animated,
-				 "argument_value_" + std::to_string(index)}
-			);
-	GroupReplayState bound;
-	REQUIRE(BindGroupReplay(live, bindings, expanded, 1, bound, diagnostic) == Status::Ok);
+	const bool hostPrepared = prepared.Prepare(live, plan, 1, clock, diagnostic);
+	INFO(
+		"status=" << static_cast<int>(diagnostic.Code) << " node=" << diagnostic.NodeId
+				  << " port=" << diagnostic.Port << " message=" << diagnostic.Message
+	);
+	REQUIRE(hostPrepared);
+	REQUIRE(prepared.Replay.InstancesBound());
 	auto staged = live;
 	StageBaseMove(staged);
 	const SourceInputMove moves[] = {
@@ -363,10 +442,20 @@ TEST_CASE(
 	};
 	GroupReplayState detached;
 	REQUIRE(
-		RebindGroupReplayWithInputMoves(live, staged, moves, bound, 2, detached, diagnostic) == Status::Ok
+		RebindGroupReplayWithInputMoves(live, staged, moves, prepared.Replay, 2, detached, diagnostic) ==
+		Status::Ok
 	);
-	REQUIRE(detached.DetachedAnimators().size() == 1);
-	const std::string writerId = detached.DetachedAnimators().front().Id;
+	REQUIRE(detached.DetachedAnimators().size() == 3);
+	const std::vector<DetachedSourceAnimator> priorDetached(
+		detached.DetachedAnimators().begin(), detached.DetachedAnimators().end()
+	);
+	const auto valueWriter = std::find_if(
+		detached.DetachedAnimators().begin(), detached.DetachedAnimators().end(), [](const auto &writer) {
+			return writer.OwnerId == "base" && writer.OriginalPort == "argument_value_1";
+		}
+	);
+	REQUIRE(valueWriter != detached.DetachedAnimators().end());
+	const std::string writerId = valueWriter->Id;
 	REQUIRE(detached.Binding("copy", "argument_value_1"));
 	CHECK(detached.Binding("copy", "argument_value_1")->AnimatorPort == writerId);
 	const auto *priorWriter = detached.SharedSubtype("base", writerId);
@@ -397,8 +486,15 @@ TEST_CASE(
 	const bool accepted = candidate.Prepare(appended, staged, previous, 3, clock, diagnostic);
 	INFO(diagnostic.Message << " node=" << diagnostic.NodeId << " port=" << diagnostic.Port);
 	REQUIRE(accepted);
-	REQUIRE(candidate.Host.Replay.DetachedAnimators().size() == 1);
-	CHECK(candidate.Host.Replay.DetachedAnimators().front().Id == writerId);
+	REQUIRE(candidate.Host.Replay.DetachedAnimators().size() == priorDetached.size());
+	CHECK(
+		std::equal(
+			candidate.Host.Replay.DetachedAnimators().begin(),
+			candidate.Host.Replay.DetachedAnimators().end(),
+			priorDetached.begin(),
+			priorDetached.end()
+		)
+	);
 	REQUIRE(candidate.Host.Replay.Binding("copy", "argument_value_1"));
 	CHECK(candidate.Host.Replay.Binding("copy", "argument_value_1")->AnimatorPort == writerId);
 	REQUIRE(candidate.Host.Replay.SharedSubtype("base", writerId));

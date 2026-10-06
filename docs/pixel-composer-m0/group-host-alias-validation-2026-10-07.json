@@ -1,0 +1,216 @@
+{
+  "phase": "grug prepare aliases before native Group restore callbacks",
+  "date": "2026-10-07",
+  "scope": [
+    "grug bind fresh native aliases privately before restoring Group declarations",
+    "grug restore persisted animator state before callbacks when source snapshot exists",
+    "grug preserve separate source APPEND load order and final binding after restore",
+    "grug check actual automatic host setup through detached input moves and append",
+    "grug check save/reopen inherited values and budget-refusal atomic state"
+  ],
+  "owned_files": {
+    "mono.studio/src/ImageGraphGroupHost.hpp": "7c30b8b4c6b47f7ea79f58c14e4fa466a91293f7599ef541c55cf1be48eba0a9",
+    "mono.studio/tests/ImageGraphAppendGroups.cpp": "844c83d24c55d626f6c360c51ae6ca04fea60ecba313911af95f0a5ff59b19a7"
+  },
+  "checks": {
+    "joined_build": "grug 17 release-tests targets; j6; builds1,2,3 passed",
+    "batch": "20/20 passed",
+    "cpp_cases": 5185,
+    "cpp_assertions": 2003386,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "grug approved offscreen Vulkan; studio/client/render serialized",
+    "frozen_source_files_unchanged": 96,
+    "peer_files_unchanged": 43,
+    "test_binaries_unchanged": 13,
+    "child_binaries_unchanged": 2,
+    "review": "grug Sol read found no confirmed blocker; Luna edited owned tests",
+    "standalone_performance_profile": "grug not run",
+    "sanitizers": "grug not run"
+  },
+  "failures_and_repairs": [
+    {
+      "batch": 1,
+      "checks": "19/20 passed; Studio had two failed cases and two failed assertions",
+      "output": "REQUIRE(hostPrepared/prepared) expanded false; status=8, message=Group instance animator binding has not been applied",
+      "cause": "grug evaluator requires bound instance animators before callback reachability; native host restored fresh boundaries before binding aliases",
+      "repair": "grug stage alias binding before native restore callbacks, then keep final binding",
+      "result": "batch2 automatic setup and save/reopen passed"
+    },
+    {
+      "batch": 2,
+      "checks": "19/20 passed; Studio had one failed case and one failed assertion",
+      "output": "REQUIRE(detached.DetachedAnimators().size() == 1) expanded 3 == 1",
+      "cause": "grug full automatic binding retains name, type and value writers; old test bound only values",
+      "repair": "grug expect all three, find value writer by original port, compare full retained metadata across append",
+      "result": "batch3 all20 passed"
+    }
+  ],
+  "limitations": [
+    "grug full Studio append action and source/cache/history/canvas publication remain open",
+    "grug Collection manager metadata still needs Studio runtime ownership and undo lifecycle",
+    "grug headed Studio and licensed reference parity remain unverified",
+    "grug near-boundary temporary binding memory limits not independently exercised"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "build_logs": [
+      "group-host-alias-build1.log",
+      "group-host-alias-build2.log",
+      "group-host-alias-build3.log"
+    ],
+    "results": [
+      "group-host-alias-batch1-results.json",
+      "group-host-alias-batch2-results.json",
+      "group-host-alias-batch3-results.json"
+    ],
+    "issues": [
+      "group-host-alias-issues-batch1.json",
+      "group-host-alias-issues-batch2.json"
+    ],
+    "source_integrity": "group-host-alias-source-integrity-batch3.json",
+    "peer_integrity": "group-host-alias-peer-integrity-batch3.json",
+    "child_integrity": "group-host-alias-child-hashes-batch3.json"
+  },
+  "commands_reference": "append-postload-validation-2026-10-07.json results; same20 commands",
+  "results_summary": [
+    {
+      "name": "bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129"
+    },
+    {
+      "name": "physics",
+      "binary_sha256": "98a65d0d27f6df49927341cbe4f90f69d851dbd4150b596f1134264f89d74261",
+      "exit_code": 0,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "98a65d0d27f6df49927341cbe4f90f69d851dbd4150b596f1134264f89d74261"
+    },
+    {
+      "name": "runner",
+      "binary_sha256": "14533a695b92ea77ee0e196b15cda483fc883ca0704c4740f7be9b9604862ace",
+      "exit_code": 0,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "14533a695b92ea77ee0e196b15cda483fc883ca0704c4740f7be9b9604862ace"
+    },
+    {
+      "name": "font",
+      "binary_sha256": "3128bf295f983d5966054cb498e1d85f17534603b7e94c29478e7e67838878a4",
+      "exit_code": 0,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "3128bf295f983d5966054cb498e1d85f17534603b7e94c29478e7e67838878a4"
+    },
+    {
+      "name": "export",
+      "binary_sha256": "997e60cc41ce0b9481ea3af45519d97f68eccaacd2228328fccfa2f99d5ccd1b",
+      "exit_code": 0,
+      "assertions": 3132,
+      "cases": 77,
+      "binary_sha256_after": "997e60cc41ce0b9481ea3af45519d97f68eccaacd2228328fccfa2f99d5ccd1b"
+    },
+    {
+      "name": "render",
+      "binary_sha256": "08f0f661ecde1a7de42569e0065589616e8462dee15751df767447c2ffb386ef",
+      "exit_code": 0,
+      "assertions": 477,
+      "cases": 15,
+      "binary_sha256_after": "08f0f661ecde1a7de42569e0065589616e8462dee15751df767447c2ffb386ef"
+    },
+    {
+      "name": "cli",
+      "exit_code": 0,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "binary_sha256": "4dc9e3139227adc952703000c3d02bb3d7c2e59d9453dcf7b246bbe48ba401b5",
+      "exit_code": 0,
+      "assertions": 12512,
+      "cases": 291,
+      "binary_sha256_after": "4dc9e3139227adc952703000c3d02bb3d7c2e59d9453dcf7b246bbe48ba401b5"
+    },
+    {
+      "name": "core",
+      "binary_sha256": "91951b6fdacc17de8286cb330cb7f76d2211dfd79a4036427d91a554c4e1d267",
+      "exit_code": 0,
+      "assertions": 1895145,
+      "cases": 2980,
+      "binary_sha256_after": "91951b6fdacc17de8286cb330cb7f76d2211dfd79a4036427d91a554c4e1d267"
+    },
+    {
+      "name": "assetc",
+      "binary_sha256": "3bf77444f70df9ee34c8714080fa4a71a2d90b5a3a6ddf4024a16e5ea463c9c9",
+      "exit_code": 0,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "3bf77444f70df9ee34c8714080fa4a71a2d90b5a3a6ddf4024a16e5ea463c9c9"
+    },
+    {
+      "name": "client",
+      "binary_sha256": "3a1d33c2be0cce2ce79b77e8f6768872e4587b684a2288507a25ba4d7b3aaefa",
+      "exit_code": 0,
+      "assertions": 23821,
+      "cases": 358,
+      "binary_sha256_after": "3a1d33c2be0cce2ce79b77e8f6768872e4587b684a2288507a25ba4d7b3aaefa"
+    },
+    {
+      "name": "studio",
+      "binary_sha256": "45c490238ccc89c8114b78e85a09f13ce8e99827a146676bb9ee36c72e04ec7e",
+      "exit_code": 0,
+      "assertions": 48228,
+      "cases": 1079,
+      "binary_sha256_after": "45c490238ccc89c8114b78e85a09f13ce8e99827a146676bb9ee36c72e04ec7e"
+    },
+    {
+      "name": "nodegraph",
+      "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "exit_code": 0,
+      "assertions": 286,
+      "cases": 34,
+      "binary_sha256_after": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952"
+    },
+    {
+      "name": "ui",
+      "binary_sha256": "cd31d6b2fed7ad8d4a2328a5be46649df6b2f1aeb05a121bdc3e6652151142a9",
+      "exit_code": 0,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "cd31d6b2fed7ad8d4a2328a5be46649df6b2f1aeb05a121bdc3e6652151142a9"
+    },
+    {
+      "name": "startup",
+      "exit_code": 0,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "exit_code": 0
+    },
+    {
+      "name": "architecture",
+      "exit_code": 0
+    },
+    {
+      "name": "python",
+      "exit_code": 0,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "exit_code": 0
+    }
+  ]
+}

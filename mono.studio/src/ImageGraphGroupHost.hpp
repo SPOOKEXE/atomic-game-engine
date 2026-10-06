@@ -262,6 +262,26 @@ namespace studio {
 				for (const auto &binding : bindings)
 					scratch +=
 						binding.NodeId.capacity() + binding.OwnerId.capacity() + binding.Port.capacity();
+				// grug restore callbacks need bound aliases, even when those aliases sit outside the
+				// callback. this is native restore; source append still owns its separate load callback
+				// order.
+				if (!fresh.empty() && !rebound.InstancesBound() &&
+					std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+						return !node.InstanceBase.empty();
+					})) {
+					GroupReplayState callbackBindings;
+					const auto allowance = Budget(error, {}, {&Replay}, scratch);
+					const auto status =
+						document.SourceAnimators && !Replay.InstancesBound()
+							? RestoreSourceAnimatorBindings(
+								  document, rebound, revision, callbackBindings, error, allowance
+							  )
+							: BindGroupReplay(
+								  document, bindings, rebound, revision, callbackBindings, error, allowance
+							  );
+					if (status != Status::Ok) return false;
+					rebound = std::move(callbackBindings);
+				}
 				if (RestoreGroupDeclarations(
 						document,
 						plan,
