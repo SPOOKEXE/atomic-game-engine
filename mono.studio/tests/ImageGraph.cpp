@@ -27,6 +27,7 @@
 #include <new>
 #include <nodegraph/Editor.hpp>
 #include <nodegraph/Layout.hpp>
+#include <nodegraph/Registry.hpp>
 #include <string>
 #include <string_view>
 #include <studio/ImageGraph.hpp>
@@ -1368,6 +1369,85 @@ TEST_CASE(
 	CHECK((sinks[1] == studio::ImageComposerSinkRow{"broken-output", "absent", "image", false, false}));
 }
 
+TEST_CASE(
+	"opaque canvas ports are per-node and save keeps authored dynamic definitions", "[studio][imagegraph]"
+) {
+	constexpr std::string_view opaqueType = "pxcx.opaque/Vendor_Future";
+	Document source;
+	source.FormatVersion = 9;
+	source.Nodes.push_back(
+		{"opaque-a",
+		 std::string(opaqueType),
+		 "",
+		 {},
+		 {},
+		 {{"authored-input",
+		   engine::imagegraph::ValueType::Text,
+		   engine::imagegraph::Value{std::string("saved")}}}}
+	);
+	source.Nodes.front().DynamicOutputs = {{"authored-output", engine::imagegraph::ValueType::Text}};
+	source.Nodes.push_back({"opaque-b", std::string(opaqueType), "", {}, {}, {}});
+	source.Nodes.push_back({"opaque-empty", std::string(opaqueType), "", {}, {}, {}});
+	source.Groups.push_back({"opaque-group", "Opaque group", {}, {}});
+	source.Junctions.push_back(
+		{"opaque-junction", "opaque-group", engine::imagegraph::ValueType::Any, std::nullopt}
+	);
+	source.Links = {
+		{"opaque-a", "output-10", "opaque-b", "input-10"},
+		{"opaque-a", "output-2", "opaque-b", "input-2"},
+		{"opaque-a", "output-3", "opaque-junction", "junction-input"}
+	};
+
+	nodegraph::Graph canvas;
+	studio::ImageGraphCanvasIds ids;
+	std::string error;
+	CHECK(nodegraph::NodeTypes::Find(std::string(opaqueType)) == nullptr);
+	REQUIRE(studio::LoadImageGraphCanvas(source, canvas, ids, error));
+	CHECK(nodegraph::NodeTypes::Find(std::string(opaqueType)) == nullptr);
+	REQUIRE(ids.UnmappedLinks == std::vector<Link>{source.Links.back()});
+	const auto *opaqueA = canvas.Find(ids.ToCanvas.at("opaque-a"));
+	const auto *opaqueB = canvas.Find(ids.ToCanvas.at("opaque-b"));
+	const auto *opaqueEmpty = canvas.Find(ids.ToCanvas.at("opaque-empty"));
+	REQUIRE(opaqueA);
+	REQUIRE(opaqueB);
+	REQUIRE(opaqueEmpty);
+	REQUIRE(opaqueA->OutputPorts);
+	REQUIRE(opaqueB->InputPorts);
+	CHECK(opaqueA->OutputPorts->size() == 3);
+	CHECK((*opaqueA->OutputPorts)[0].Name == "output-2");
+	CHECK((*opaqueA->OutputPorts)[1].Name == "output-3");
+	CHECK((*opaqueA->OutputPorts)[2].Name == "output-10");
+	CHECK(opaqueB->InputPorts->size() == 2);
+	CHECK((*opaqueB->InputPorts)[0].Name == "input-2");
+	CHECK((*opaqueB->InputPorts)[1].Name == "input-10");
+	REQUIRE(opaqueEmpty->InputPorts);
+	CHECK(opaqueEmpty->InputPorts->empty());
+	REQUIRE(opaqueEmpty->OutputPorts);
+	CHECK(opaqueEmpty->OutputPorts->empty());
+	CHECK(opaqueA->DynamicInputs.size() == 1);
+	CHECK(opaqueA->DynamicInputs.front().Name == "authored-input");
+	CHECK(opaqueB->Type == opaqueA->Type);
+
+	Document saved;
+	REQUIRE(studio::SaveImageGraphCanvas(canvas, source, ids, saved, error));
+	REQUIRE(saved.Nodes.front().DynamicOutputs.size() == 1);
+	CHECK(saved.Nodes.front().DynamicOutputs.front().Id == "authored-output");
+	CHECK(saved == source);
+	CHECK(engine::imagegraph::Write(saved) == engine::imagegraph::Write(source));
+
+	const uint64_t originalSignature = canvas.Signature();
+	const auto originalMapping = ids.ToCanvas;
+	Document invalid = source;
+	invalid.Nodes.push_back(invalid.Nodes.front());
+	nodegraph::Graph candidateCanvas;
+	studio::ImageGraphCanvasIds candidateIds;
+	CHECK_FALSE(studio::LoadImageGraphCanvas(invalid, candidateCanvas, candidateIds, error));
+	CHECK(canvas.Signature() == originalSignature);
+	CHECK(canvas.Nodes().size() == source.Nodes.size());
+	CHECK(ids.ToCanvas == originalMapping);
+	CHECK(nodegraph::NodeTypes::Find(std::string(opaqueType)) == nullptr);
+}
+
 TEST_CASE("PXCX projection keeps foreign nodes opaque and archive fields unchanged", "[studio][imagegraph]") {
 	engine::bake::PxcxArchive archive;
 	archive.OriginalBytes = {std::byte{0x50}, std::byte{0x58}, std::byte{0x43}, std::byte{0x58}};
@@ -1397,7 +1477,6 @@ TEST_CASE("PXCX projection keeps foreign nodes opaque and archive fields unchang
 	CHECK(projection.Diagnostics.size() == 2);
 	CHECK(projection.Diagnostics[0].Code == engine::imagegraph::Status::UnknownNode);
 
-	studio::RegisterPxcxCanvasNodeTypes(archive);
 	nodegraph::Graph canvas;
 	studio::ImageGraphCanvasIds ids;
 	REQUIRE(studio::LoadImageGraphCanvas(projection.Graph, canvas, ids, error));
@@ -1467,7 +1546,6 @@ TEST_CASE("Studio PXCX Open adapter maps supported nodes and retains source byte
 	// Migration retains imported project settings in the current native grammar.
 	CHECK(imported.Graph.FormatVersion == 9);
 
-	studio::RegisterPxcxCanvasNodeTypes(imported.Source);
 	nodegraph::Graph canvas;
 	studio::ImageGraphCanvasIds ids;
 	std::string canvasError;

@@ -17,6 +17,7 @@
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Serialize.hpp>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("studio.nodegraph.serialize")
 
@@ -132,4 +133,49 @@ TEST_CASE("empty output override retains its presence after saving", "[nodegraph
 	REQUIRE(restored.Nodes()[0].OutputPorts);
 	CHECK(restored.Nodes()[0].OutputPorts->empty());
 	CHECK(restored.Hash(restored.Nodes()[0].Id) == graph.Hash(node));
+}
+
+TEST_CASE("input interface overrides survive serialization including empty presence", "[nodegraph]") {
+	RegisterFixtureNodes();
+	Graph graph;
+	const NodeId opaque = graph.Add("field.source", 0, 0);
+	const NodeId empty = graph.Add("field.source", 200, 0);
+	REQUIRE(opaque != NO_NODE);
+	REQUIRE(empty != NO_NODE);
+	Node *opaqueNode = graph.Find(opaque);
+	Node *emptyNode = graph.Find(empty);
+	REQUIRE(opaqueNode);
+	REQUIRE(emptyNode);
+	opaqueNode->Type = "plugin.future-serialized";
+	opaqueNode->InputPorts = std::vector<PortSpec>{PortSpec{"explicit-in", "data.FIELD"}};
+	opaqueNode->OutputPorts = std::vector<PortSpec>{PortSpec{"explicit-out", "data.NUMBER"}};
+	emptyNode->InputPorts.emplace();
+	emptyNode->OutputPorts.emplace();
+
+	const std::string text = Save(graph);
+	Graph loaded;
+	std::string error;
+	REQUIRE(Load(text, loaded, error));
+	REQUIRE(loaded.Nodes().size() == 2);
+	REQUIRE(loaded.Nodes()[0].InputPorts);
+	REQUIRE(loaded.Nodes()[0].OutputPorts);
+	REQUIRE(loaded.Nodes()[0].InputPorts->size() == 1);
+	REQUIRE(loaded.Nodes()[0].OutputPorts->size() == 1);
+	CHECK(loaded.Nodes()[0].InputPorts->front().Name == "explicit-in");
+	CHECK(loaded.Nodes()[0].InputPorts->front().Type == "data.FIELD");
+	CHECK(loaded.Nodes()[0].OutputPorts->front().Name == "explicit-out");
+	CHECK(loaded.Nodes()[0].OutputPorts->front().Type == "data.NUMBER");
+	CHECK(loaded.Nodes()[1].InputPorts.has_value());
+	CHECK(loaded.Nodes()[1].InputPorts->empty());
+	CHECK(loaded.Nodes()[1].OutputPorts.has_value());
+	CHECK(loaded.Nodes()[1].OutputPorts->empty());
+	CHECK(loaded.Hash(loaded.Nodes()[0].Id) == graph.Hash(opaque));
+	CHECK(loaded.Hash(loaded.Nodes()[1].Id) == graph.Hash(empty));
+	const std::string remappedSave = Save(loaded);
+	Graph reloaded;
+	REQUIRE(Load(remappedSave, reloaded, error));
+	CHECK(Save(reloaded) == remappedSave);
+	REQUIRE(reloaded.Nodes()[0].InputPorts);
+	CHECK(reloaded.Nodes()[0].InputPorts->front().Name == "explicit-in");
+	CHECK(reloaded.Nodes()[0].InputPorts->front().Type == "data.FIELD");
 }

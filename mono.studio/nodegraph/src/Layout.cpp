@@ -29,6 +29,7 @@ namespace nodegraph {
 			}
 			return derived;
 		}
+		if (node.InputPorts) return *node.InputPorts;
 		const NodeType *type = NodeTypes::Find(node.Type);
 		std::vector<PortSpec> inputs = type != nullptr ? type->Inputs : std::vector<PortSpec>{};
 		inputs.insert(inputs.end(), node.DynamicInputs.begin(), node.DynamicInputs.end());
@@ -232,7 +233,7 @@ namespace nodegraph {
 			layout.Width = std::max(layout.Width, body.Width + metrics.Padding * 2);
 
 		float y = metrics.HeaderHeight;
-		if (type == nullptr) {
+		if (type == nullptr && !node.InputPorts && !node.OutputPorts) {
 			// A type nobody registered. A header's worth of node, so it can be
 			// seen, moved and deleted.
 			layout.Height = y + metrics.Padding;
@@ -287,7 +288,7 @@ namespace nodegraph {
 			return layout;
 		}
 
-		if (!type->Subtitle.empty()) {
+		if (type && !type->Subtitle.empty()) {
 			y += metrics.RowHeight * 0.8f;
 		}
 
@@ -342,7 +343,7 @@ namespace nodegraph {
 		// output proxy carries: the same rule, asked of the derived interface.
 		const auto drawable = [&outputs, type, &node] {
 			if (!node.Compressed()) {
-				return HasPicture(*type);
+				return type && HasPicture(*type);
 			}
 			for (const PortSpec &port : outputs) {
 				const DataType *carried = DataTypes::Find(port.Type);
@@ -363,7 +364,7 @@ namespace nodegraph {
 		// **Reserved whether or not it is running**, so a node keeps its height
 		// when it starts. A graph that reflowed as it worked would move every
 		// node under the pointer at the moment somebody pressed one.
-		if (type->Async) {
+		if (type && type->Async) {
 			y += metrics.Padding * 0.5f;
 			layout.ProgressTop = y;
 			layout.ProgressHeight = metrics.RowHeight * 0.8f;

@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Registry.hpp>
@@ -292,4 +293,58 @@ TEST_CASE("empty output override invalidates an otherwise empty interface", "[no
 	CHECK(graph.Hash(node) != original);
 	CHECK(graph.Links().empty());
 	CHECK(graph.Find(node)->OutputPorts.has_value());
+}
+
+TEST_CASE("unknown nodes connect through explicit ports and retain them on absorb", "[nodegraph]") {
+	RegisterFixtureNodes();
+	Graph graph;
+	const NodeId source = graph.Add("field.source", 0.0f, 0.0f);
+	const NodeId sink = graph.Add("field.terrace", 240.0f, 0.0f);
+	const NodeId number = graph.Add("number.constant", 0.0f, 240.0f);
+	REQUIRE(source != NO_NODE);
+	REQUIRE(sink != NO_NODE);
+	REQUIRE(number != NO_NODE);
+
+	Node *sourceNode = graph.Find(source);
+	Node *sinkNode = graph.Find(sink);
+	REQUIRE(sourceNode);
+	REQUIRE(sinkNode);
+	sourceNode->Type = "plugin.future-source";
+	sourceNode->OutputPorts = std::vector<PortSpec>{Port("transmit", "data.FIELD")};
+	sinkNode->Type = "plugin.future-sink";
+	sinkNode->InputPorts = std::vector<PortSpec>{Port("receive", "data.FIELD")};
+
+	CHECK(graph.CanConnect(source, "transmit", sink, "receive") == LinkResult::Made);
+	CHECK(graph.Connect(source, "transmit", sink, "receive") == LinkResult::Made);
+	CHECK(graph.CanConnect(number, "Out", sink, "receive") == LinkResult::TypeMismatch);
+	CHECK(graph.CanConnect(source, "missing", sink, "receive") == LinkResult::NoSuchPort);
+	sinkNode->InputPorts->front().Type = "data.MISSPELLED";
+	CHECK(graph.CanConnect(source, "transmit", sink, "receive") == LinkResult::TypeMismatch);
+	sourceNode->OutputPorts->front().Type = "data.MISSPELLED";
+	CHECK(graph.CanConnect(source, "transmit", sink, "receive") == LinkResult::TypeMismatch);
+	sourceNode->OutputPorts->front().Type = "data.FIELD";
+	sinkNode->InputPorts->front().Type = "data.FIELD";
+
+	const uint64_t originalHash = graph.Hash(sink);
+	sinkNode->InputPorts->push_back(Port("second", "data.NUMBER"));
+	CHECK(graph.Hash(sink) != originalHash);
+
+	const auto sinkInGraph =
+		std::find_if(graph.Nodes().begin(), graph.Nodes().end(), [sink](const auto &node) {
+			return node.Id == sink;
+		});
+	REQUIRE(sinkInGraph != graph.Nodes().end());
+	const size_t sinkIndex = static_cast<size_t>(sinkInGraph - graph.Nodes().begin());
+	Graph copy;
+	const auto copied = copy.Absorb(graph, 400.0f, 0.0f);
+	REQUIRE(copied.size() == graph.Nodes().size());
+	const Node *absorbed = copy.Find(copied[sinkIndex]);
+	REQUIRE(absorbed);
+	REQUIRE(absorbed->InputPorts);
+	REQUIRE(absorbed->InputPorts->size() == sinkNode->InputPorts->size());
+	for (size_t index = 0; index < absorbed->InputPorts->size(); ++index) {
+		CHECK((*absorbed->InputPorts)[index].Name == (*sinkNode->InputPorts)[index].Name);
+		CHECK((*absorbed->InputPorts)[index].Type == (*sinkNode->InputPorts)[index].Type);
+	}
+	CHECK(absorbed->Type == sinkNode->Type);
 }

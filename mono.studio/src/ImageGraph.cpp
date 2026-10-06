@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -852,6 +853,12 @@ namespace studio {
 	}
 
 	void RegisterImageGraphNodeTypes() {
+		nodegraph::DataType opaque;
+		opaque.Id = "pxcx.opaque";
+		opaque.Label = "Opaque PXCX";
+		opaque.Tint = nodegraph::Colour::Hex(0x858585);
+		opaque.Description = "Positional archive connection; native execution is unavailable";
+		nodegraph::DataTypes::Register(opaque);
 		RegisterDataType(engine::imagegraph::ValueType::Boolean, "Boolean");
 		RegisterDataType(engine::imagegraph::ValueType::Integer, "Integer");
 		RegisterDataType(engine::imagegraph::ValueType::Scalar, "Scalar");
@@ -1071,6 +1078,62 @@ namespace studio {
 			return false;
 		}
 
+		// grug keep foreign interfaces on each candidate node, never in the shared type table.
+		using PhysicalPorts = std::pair<std::vector<nodegraph::PortSpec>, std::vector<nodegraph::PortSpec>>;
+		std::unordered_map<std::string, PhysicalPorts> opaquePorts;
+		for (const auto &node : document.Nodes) {
+			if (!node.Type.starts_with("pxcx.opaque/")) continue;
+			if (node.Id.size() > engine::imagegraph::Limits::MaximumTextBytes ||
+				node.Type.size() > engine::imagegraph::Limits::MaximumTextBytes) {
+				error = "opaque canvas identity exceeds text bounds";
+				return false;
+			}
+			opaquePorts.try_emplace(node.Id);
+		}
+		for (const auto &link : document.Links) {
+			const auto from = opaquePorts.find(link.FromNode), to = opaquePorts.find(link.ToNode);
+			if ((from != opaquePorts.end() &&
+				 (link.FromPort.empty() ||
+				  link.FromPort.size() > engine::imagegraph::Limits::MaximumTextBytes)) ||
+				(to != opaquePorts.end() &&
+				 (link.ToPort.empty() ||
+				  link.ToPort.size() > engine::imagegraph::Limits::MaximumTextBytes))) {
+				error = "opaque canvas port exceeds text bounds";
+				return false;
+			}
+			if (from != opaquePorts.end()) from->second.second.push_back({link.FromPort, "pxcx.opaque"});
+			if (to != opaquePorts.end()) to->second.first.push_back({link.ToPort, "pxcx.opaque"});
+		}
+		const auto physicalIndex = [](std::string_view name) -> std::optional<uint32_t> {
+			if (name.starts_with("input-"))
+				name.remove_prefix(6);
+			else if (name.starts_with("output-"))
+				name.remove_prefix(7);
+			else
+				return {};
+			uint32_t number = 0;
+			const auto parsed = std::from_chars(name.data(), name.data() + name.size(), number);
+			if (parsed.ec != std::errc{} || parsed.ptr != name.data() + name.size()) return {};
+			return number;
+		};
+		for (auto &[id, interfaces] : opaquePorts) {
+			(void)id;
+			for (auto *ports : {&interfaces.first, &interfaces.second}) {
+				std::sort(ports->begin(), ports->end(), [&](const auto &a, const auto &b) {
+					const auto left = physicalIndex(a.Name), right = physicalIndex(b.Name);
+					if (left != right) return left < right;
+					return a.Name < b.Name;
+				});
+				ports->erase(
+					std::unique(
+						ports->begin(),
+						ports->end(),
+						[](const auto &a, const auto &b) { return a.Name == b.Name; }
+					),
+					ports->end()
+				);
+			}
+		}
 		std::unordered_map<std::string, const Node *> nodesById;
 		nodesById.reserve(document.Nodes.size());
 		for (size_t index = 0; index < document.Nodes.size(); index++) {
@@ -1102,14 +1165,22 @@ namespace studio {
 			nodegraph::Node canvasNode;
 			canvasNode.Id = canvasId;
 			canvasNode.Type = authored.Type;
+			const auto physical = opaquePorts.find(authored.Id);
+			if (physical != opaquePorts.end()) {
+				canvasNode.InputPorts = std::move(physical->second.first);
+				canvasNode.OutputPorts = std::move(physical->second.second);
+				canvasNode.Label = "PXCX " + authored.Type.substr(std::string_view("pxcx.opaque/").size());
+				if (canvasNode.Label.size() > 96) canvasNode.Label = canvasNode.Label.substr(0, 93) + "...";
+			}
 			canvasNode.X = static_cast<float>(authored.Position.X);
 			canvasNode.Y = static_cast<float>(authored.Position.Y);
 			canvasNode.DynamicInputs.reserve(authored.DynamicInputs.size());
 			for (const engine::imagegraph::DynamicInput &input : authored.DynamicInputs) {
 				canvasNode.DynamicInputs.push_back({input.Id, CanvasType(input.Type)});
 			}
-			if (authored.Type == "pc.array_split" || !authored.DynamicOutputs.empty() ||
-				authored.Type == "pc.color_to_rgb" || authored.Type == "pc.color_to_hsv") {
+			if (physical == opaquePorts.end() &&
+				(authored.Type == "pc.array_split" || !authored.DynamicOutputs.empty() ||
+				 authored.Type == "pc.color_to_rgb" || authored.Type == "pc.color_to_hsv")) {
 				canvasNode.OutputPorts.emplace();
 				for (const auto &port : detail::ImageGraphOutputPorts(authored))
 					canvasNode.OutputPorts->push_back({std::string(port.Id), CanvasType(port.Type)});
@@ -1242,9 +1313,12 @@ namespace studio {
 			}
 			authored.Id = documentId;
 			authored.Type = canvasNode.Type;
-			authored.DynamicInputs.clear();
+			const bool opaque = authored.Type.starts_with("pxcx.opaque/");
+			// grug physical opaque ports stay in the archive; canvas save keeps authored definitions.
+			if (!opaque) authored.DynamicInputs.clear();
 			authored.DynamicInputs.reserve(canvasNode.DynamicInputs.size());
 			for (const nodegraph::PortSpec &input : canvasNode.DynamicInputs) {
+				if (opaque) continue;
 				const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(authored.Type);
 				const std::optional<engine::imagegraph::ValueType> valueType =
 					ValueTypeFromCanvas(input.Type);
@@ -1265,7 +1339,7 @@ namespace studio {
 				authored.DynamicInputs.push_back(std::move(authoredInput));
 			}
 
-			if (canvasNode.OutputPorts) {
+			if (canvasNode.OutputPorts && !opaque) {
 				const auto *schema = engine::imagegraph::FindSchema(authored.Type);
 				if (!schema ||
 					canvasNode.OutputPorts->size() > engine::imagegraph::Limits::MaximumArrayElements) {
@@ -3566,60 +3640,6 @@ namespace studio {
 		}
 		projection = std::move(candidate);
 		return true;
-	}
-
-	void RegisterPxcxCanvasNodeTypes(const engine::bake::PxcxArchive &archive) {
-		constexpr std::string_view OPAQUE_TYPE = "pxcx.opaque";
-		nodegraph::DataType dataType;
-		dataType.Id = std::string(OPAQUE_TYPE);
-		dataType.Label = "Opaque PXCX";
-		dataType.Tint = nodegraph::Colour::Hex(0x858585);
-		dataType.Description = "Positional archive connection; native execution is unavailable";
-		nodegraph::DataTypes::Register(dataType);
-
-		struct SocketIndexes {
-			std::map<uint32_t, bool> Inputs;
-			std::map<uint32_t, bool> Outputs;
-		};
-		std::unordered_map<std::string, std::string> labels;
-		std::unordered_map<std::string, SocketIndexes> sockets;
-		std::unordered_map<std::string, std::string> typeByNode;
-		typeByNode.reserve(archive.Nodes.size());
-		for (const engine::bake::PxcxNodeFact &fact : archive.Nodes) {
-			const std::string nodeType = PxcxOpaqueNodeType(fact.Type);
-			labels.try_emplace(nodeType, fact.Type);
-			sockets.try_emplace(nodeType);
-			typeByNode.emplace(fact.Id, nodeType);
-		}
-		for (const engine::bake::PxcxLinkFact &link : archive.Links) {
-			if (const auto from = typeByNode.find(link.FromNode); from != typeByNode.end())
-				sockets[from->second].Outputs.emplace(link.FromIndex, true);
-			if (const auto to = typeByNode.find(link.ToNode); to != typeByNode.end())
-				sockets[to->second].Inputs.emplace(link.ToInputIndex, true);
-		}
-
-		for (const auto &[id, foreignLabel] : labels) {
-			nodegraph::NodeType type;
-			type.Id = id;
-			type.Title = "PXCX " + foreignLabel;
-			if (type.Title.size() > 96) {
-				type.Title.resize(93);
-				type.Title += "...";
-			}
-			type.Category = "Imported PXCX";
-			type.Accent = nodegraph::Colour::Hex(0x585858);
-			type.Subtitle = "opaque, no execution";
-			const SocketIndexes &indexes = sockets.at(id);
-			for (const auto &[index, unused] : indexes.Inputs) {
-				(void)unused;
-				type.Inputs.push_back({PxcxInputPortId(index), std::string(OPAQUE_TYPE)});
-			}
-			for (const auto &[index, unused] : indexes.Outputs) {
-				(void)unused;
-				type.Outputs.push_back({PxcxOutputPortId(index), std::string(OPAQUE_TYPE)});
-			}
-			nodegraph::NodeTypes::Register(type);
-		}
 	}
 
 	ImageGraphHistory::ImageGraphHistory(size_t capacity, size_t byteCapacity)

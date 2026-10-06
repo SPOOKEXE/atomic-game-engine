@@ -512,7 +512,6 @@ TEST_CASE(
 	CHECK(imported.Graph.Nodes.front().Type == "pxcx.opaque/Vendor_Future");
 	Document document = imported.Graph;
 	document.Links.push_back({"missing-source", "missing-output", "future", "missing-input"});
-	studio::RegisterPxcxCanvasNodeTypes(source);
 	nodegraph::Graph graph;
 	studio::ImageGraphCanvasIds ids;
 	std::string error;
@@ -544,6 +543,13 @@ TEST_CASE(
 	retained = studio::detail::ImageGraphHistoryCanvasBytes(graph, ids);
 	REQUIRE(retained);
 	CHECK(*retained > withIds);
+	const uint64_t withOutputs = *retained;
+
+	canvasNode->InputPorts =
+		std::vector<nodegraph::PortSpec>{{std::string(1024, 'i'), std::string(128, 't')}};
+	retained = studio::detail::ImageGraphHistoryCanvasBytes(graph, ids);
+	REQUIRE(retained);
+	CHECK(*retained > withOutputs);
 
 	nodegraph::Value oversized;
 	oversized.Kind = nodegraph::WidgetKind::Text;

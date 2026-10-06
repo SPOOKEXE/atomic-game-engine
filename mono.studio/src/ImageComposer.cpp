@@ -2090,7 +2090,6 @@ namespace studio {
 					reference->Hash
 				};
 			}
-			RegisterPxcxCanvasNodeTypes(imported.Source);
 			state.ImportedPxcx = std::move(imported.Source);
 			state.PublishedPxcx = {};
 			state.PxcxCompletedPreview.reset();

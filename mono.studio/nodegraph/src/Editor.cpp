@@ -802,10 +802,6 @@ namespace nodegraph {
 			);
 		}
 
-		if (type == nullptr) {
-			return;
-		}
-
 		// The ports, with their names inside the body. Drawn after the header so
 		// a port on the first row is never painted over.
 		const float small = Look.Sizes.SmallSize * Scale;
@@ -835,6 +831,7 @@ namespace nodegraph {
 			);
 		}
 
+		if (type == nullptr) return;
 		for (const PlacedWidget &placed : layout.Widgets) {
 			DrawWidget(graph, node, placed);
 		}

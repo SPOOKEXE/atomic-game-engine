@@ -656,10 +656,6 @@ namespace studio {
 		const engine::bake::PxcxArchive &archive, PxcxImageGraphProjection &projection, std::string &error
 	);
 
-	// Registers generic grey sockets for the foreign positional indices in one archive.
-	// @param archive Parsed source project whose links define visible socket indices.
-	void RegisterPxcxCanvasNodeTypes(const engine::bake::PxcxArchive &archive);
-
 	std::string PxcxOpaqueNodeType(std::string_view foreignType);
 	std::string PxcxInputPortId(uint32_t inputIndex);
 	std::string PxcxOutputPortId(uint32_t outputIndex);

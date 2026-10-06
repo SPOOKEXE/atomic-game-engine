@@ -103,6 +103,11 @@ namespace nodegraph {
 			// node, which is what makes adding one safe.
 			out << "node | " << node.Id << " | " << node.Type << " | " << node.X << " | " << node.Y << " | "
 				<< node.Label << " | " << (node.Collapsed ? "collapsed" : "open") << "\n";
+			if (node.InputPorts) {
+				out << "inputs | " << node.Id << "\n";
+				for (const auto &port : *node.InputPorts)
+					out << "input | " << node.Id << " | " << port.Name << " | " << port.Type << "\n";
+			}
 			if (node.OutputPorts) {
 				out << "outputs | " << node.Id << "\n";
 				for (const auto &port : *node.OutputPorts)
@@ -350,6 +355,19 @@ namespace nodegraph {
 				continue;
 			}
 
+			if (fields[0] == "inputs" && fields.size() >= 2) {
+				if (const auto found = placed.find(Whole(fields[1])); found != placed.end())
+					if (auto *node = graph.Find(found->second)) node->InputPorts.emplace();
+				continue;
+			}
+			if (fields[0] == "input" && fields.size() >= 4) {
+				if (const auto found = placed.find(Whole(fields[1])); found != placed.end())
+					if (auto *node = graph.Find(found->second)) {
+						if (!node->InputPorts) node->InputPorts.emplace();
+						node->InputPorts->push_back({std::string(fields[2]), std::string(fields[3])});
+					}
+				continue;
+			}
 			if (fields[0] == "outputs" && fields.size() >= 2) {
 				if (const auto found = placed.find(Whole(fields[1])); found != placed.end())
 					if (auto *node = graph.Find(found->second)) node->OutputPorts.emplace();

@@ -13,6 +13,8 @@
 
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Layout.hpp>
+#include <nodegraph/Types.hpp>
+#include <vector>
 
 TEST_SUITE_ID("studio.nodegraph.layout")
 
@@ -102,4 +104,35 @@ TEST_CASE("instance inputs have canvas rows and hit-test layout", "[nodegraph]")
 	REQUIRE(port != nullptr);
 	CHECK(port->Y > 0.0f);
 	CHECK(port->Y < layout.Height);
+}
+
+TEST_CASE("unknown layouts use per-node explicit input interfaces", "[nodegraph]") {
+	RegisterFixtureNodes();
+	Node opaque;
+	opaque.Type = "plugin.future-layout";
+	opaque.InputPorts = std::vector<PortSpec>{PortSpec{"left", ANY_TYPE}, PortSpec{"right", ANY_TYPE}};
+	opaque.OutputPorts = std::vector<PortSpec>{PortSpec{"result", ANY_TYPE}};
+
+	const NodeLayout layout = LayoutOf(opaque);
+	CHECK(layout.Width > 0.0f);
+	CHECK(layout.Height > 0.0f);
+	CHECK(layout.Ports.size() == 3);
+	const PlacedPort *left = PortIn(layout, "left", true);
+	const PlacedPort *right = PortIn(layout, "right", true);
+	const PlacedPort *result = PortIn(layout, "result", false);
+	REQUIRE(left);
+	REQUIRE(right);
+	REQUIRE(result);
+	CHECK(left->X == 0.0f);
+	CHECK(right->X == 0.0f);
+	CHECK(result->X == layout.Width);
+
+	Node empty;
+	empty.Type = "plugin.empty-layout";
+	empty.InputPorts.emplace();
+	empty.OutputPorts.emplace();
+	const NodeLayout emptyLayout = LayoutOf(empty);
+	CHECK(emptyLayout.Width > 0.0f);
+	CHECK(emptyLayout.Height > 0.0f);
+	CHECK(emptyLayout.Ports.empty());
 }

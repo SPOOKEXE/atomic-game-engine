@@ -33,7 +33,8 @@ namespace studio::detail {
 		for (const auto &node : graph.Nodes()) {
 			if (!charge(node.Type.capacity()) || !charge(node.Label.capacity()) || !table(node.Widgets) ||
 				!ports(node.DynamicInputs) || !vector(node.Proxies) || !vector(node.Promoted) ||
-				(node.OutputPorts && !ports(*node.OutputPorts)))
+				(node.OutputPorts && !ports(*node.OutputPorts)) ||
+				(node.InputPorts && !ports(*node.InputPorts)))
 				return {};
 			for (const auto &[key, value] : node.Widgets)
 				if (!charge(key.capacity()) || !charge(value.Text.capacity())) return {};

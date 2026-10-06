@@ -149,7 +149,7 @@ namespace nodegraph {
 
 		const NodeType *sourceType = NodeTypes::Find(source->Type);
 		const NodeType *sinkType = NodeTypes::Find(sink->Type);
-		if (sourceType == nullptr || sinkType == nullptr) {
+		if ((!sourceType && !source->OutputPorts) || (!sinkType && !sink->InputPorts)) {
 			return LinkResult::NoSuchPort;
 		}
 
@@ -161,7 +161,9 @@ namespace nodegraph {
 			return LinkResult::NoSuchPort;
 		}
 
-		if (!DataTypes::CanConnect(out->Type, in->Type)) {
+		if ((out->Type != ANY_TYPE && !DataTypes::Find(out->Type)) ||
+			(in->Type != ANY_TYPE && !DataTypes::Find(in->Type)) ||
+			!DataTypes::CanConnect(out->Type, in->Type)) {
 			return LinkResult::TypeMismatch;
 		}
 
@@ -176,7 +178,7 @@ namespace nodegraph {
 
 	bool Graph::SetDynamicInputs(NodeId id, std::vector<PortSpec> inputs) {
 		Node *node = Find(id);
-		if (node == nullptr || node->Compressed()) return false;
+		if (node == nullptr || node->Compressed() || node->InputPorts) return false;
 
 		const NodeType *type = NodeTypes::Find(node->Type);
 		if (type == nullptr) return false;
@@ -691,14 +693,22 @@ namespace nodegraph {
 		std::unordered_map<NodeId, NodeId> made;
 
 		for (const Node &node : other.Nodes()) {
-			const NodeId id = Add(node.Type, node.X + dx, node.Y + dy);
+			NodeId id = Add(node.Type, node.X + dx, node.Y + dy);
 			if (id == NO_NODE) {
-				continue;
+				if (!node.InputPorts && !node.OutputPorts) continue;
+				// grug copy a retained interface without inventing an executable type.
+				Node retained;
+				retained.Id = Next++;
+				retained.Type = node.Type;
+				retained.X = node.X + dx;
+				retained.Y = node.Y + dy;
+				id = Adopt(retained);
 			}
 			Node *placed = Find(id);
 			placed->Widgets = node.Widgets;
 			placed->DynamicInputs = node.DynamicInputs;
 			placed->OutputPorts = node.OutputPorts;
+			placed->InputPorts = node.InputPorts;
 			placed->Label = node.Label;
 			placed->Collapsed = node.Collapsed;
 			placed->Proxies = node.Proxies;
@@ -793,6 +803,16 @@ namespace nodegraph {
 		}
 
 		uint64_t hash = MixText(SEED, node->Type);
+		const uint8_t inputsOverridden = node->InputPorts.has_value();
+		hash = Mix(hash, &inputsOverridden, sizeof(inputsOverridden));
+		if (node->InputPorts) {
+			const uint64_t count = node->InputPorts->size();
+			hash = Mix(hash, &count, sizeof(count));
+			for (const auto &port : *node->InputPorts) {
+				hash = MixText(hash, port.Name);
+				hash = MixText(hash, port.Type);
+			}
+		}
 		const uint8_t outputsOverridden = node->OutputPorts.has_value();
 		hash = Mix(hash, &outputsOverridden, sizeof(outputsOverridden));
 		if (node->OutputPorts) {
@@ -814,20 +834,20 @@ namespace nodegraph {
 				const auto found = node->Widgets.find(widget.Key);
 				hash = MixValue(hash, found == node->Widgets.end() ? widget.Default : found->second);
 			}
+		}
 
-			// The inputs, in port order, each contributing its own hash, which
-			// is what makes an edit upstream invalidate exactly the sub-tree
-			// below it.
-			for (const PortSpec &port : InputsOf(*node)) {
-				hash = MixText(hash, port.Name);
-				hash = MixText(hash, port.Type);
-				if (const Link *link = LinkInto(id, port.Name); link != nullptr) {
-					const uint64_t upstream = Hash(link->From);
-					hash = Mix(hash, &upstream, sizeof(upstream));
-					hash = MixText(hash, link->FromPort);
-				} else {
-					hash = Mix(hash, "unconnected", 11);
-				}
+		// The inputs, in port order, each contributing its own hash, which
+		// is what makes an edit upstream invalidate exactly the sub-tree
+		// below it.
+		for (const PortSpec &port : InputsOf(*node)) {
+			hash = MixText(hash, port.Name);
+			hash = MixText(hash, port.Type);
+			if (const Link *link = LinkInto(id, port.Name); link != nullptr) {
+				const uint64_t upstream = Hash(link->From);
+				hash = Mix(hash, &upstream, sizeof(upstream));
+				hash = MixText(hash, link->FromPort);
+			} else {
+				hash = Mix(hash, "unconnected", 11);
 			}
 		}
 

@@ -148,6 +148,9 @@ namespace nodegraph {
 		//@}
 		// An instance may replace the type's outputs when its authored shape changes.
 		std::optional<std::vector<PortSpec>> OutputPorts;
+		// grug node owns its complete input interface, even when its type is unavailable.
+		// empty override means no inputs; absent override uses fixed and dynamic declarations.
+		std::optional<std::vector<PortSpec>> InputPorts;
 
 		// Whether this node stands for a subtree rather than being one node.
 		//
