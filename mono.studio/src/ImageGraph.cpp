@@ -1,3 +1,4 @@
+#include "ImageGraphCapturedKeyEdit.hpp"
 #include "ImageGraphChoices.hpp"
 #include "ImageGraphInputs.hpp"
 #include "ImageGraphPorts.hpp"
@@ -2526,6 +2527,14 @@ namespace studio {
 			);
 			return false;
 		}
+		if (document.SourceAnimators)
+			return EditCapturedImageGraphKeys(
+				document,
+				document.Keyframes,
+				[&](const auto &, size_t current) { return current == index; },
+				[&](auto &key, size_t) { key.Kind = kind; },
+				error
+			);
 		document.Keyframes[index].Kind = kind;
 		if (kind == KeyframeKind::Adder)
 			document.FormatVersion = std::max(document.FormatVersion, uint32_t{9});
@@ -2577,6 +2586,20 @@ namespace studio {
 				return false;
 			}
 		}
+		if (document.SourceAnimators)
+			return EditCapturedImageGraphKeys(
+				document,
+				document.Keyframes,
+				[&](const auto &key, size_t) { return key.NodeId == frame.NodeId && key.Port == frame.Port; },
+				[&](auto &key, size_t) {
+					key.Interpolation = rule;
+					if (rule == "source") {
+						if (!key.Ease) key.Ease = engine::imagegraph::KeyframeEase{};
+					} else
+						key.Ease.reset();
+				},
+				error
+			);
 		if (rule == "source" && !EnsureSourceAnimationTrack(document, frame.NodeId, frame.Port, error))
 			return false;
 		SetTrackInterpolation(document, frame.NodeId, frame.Port, rule);
@@ -2611,6 +2634,20 @@ namespace studio {
 			);
 			return false;
 		}
+		if (document.SourceAnimators) {
+			const auto &frame = document.Keyframes[index];
+			return EditCapturedImageGraphKeys(
+				document,
+				document.Keyframes,
+				[&](const auto &key, size_t) { return key.NodeId == frame.NodeId && key.Port == frame.Port; },
+				[&](auto &key, size_t current) {
+					key.Interpolation = "source";
+					if (!key.Ease) key.Ease = engine::imagegraph::KeyframeEase{};
+					if (current == index) key.Ease = ease;
+				},
+				error
+			);
+		}
 		const std::string nodeId = document.Keyframes[index].NodeId;
 		const std::string port = document.Keyframes[index].Port;
 		if (!EnsureSourceAnimationTrack(document, nodeId, port, error)) return false;
@@ -2641,6 +2678,57 @@ namespace studio {
 				"source driver needs valid controls and no legacy sine driver"
 			);
 			return false;
+		}
+		if (document.SourceAnimators) {
+			uint64_t extra = 0;
+			if (driver) {
+				if (const auto *curve = std::get_if<KeyframeCurveDriver>(&*driver)) {
+					if (curve->Data.Anchors.capacity() >
+						Limits::MaximumEvaluationBytes / sizeof(std::array<double, 6>)) {
+						SetDiagnostic(
+							error,
+							Status::LimitExceeded,
+							frame.NodeId,
+							frame.Port,
+							"source driver retained curve exceeds bounds"
+						);
+						return false;
+					}
+					extra = curve->Data.Anchors.capacity() * sizeof(std::array<double, 6>);
+				}
+				if (const auto *audio = std::get_if<KeyframeAudioDriver>(&*driver)) {
+					if (audio->SourceId.capacity() > Limits::MaximumEvaluationBytes ||
+						audio->Metric.capacity() >
+							Limits::MaximumEvaluationBytes - audio->SourceId.capacity()) {
+						SetDiagnostic(
+							error,
+							Status::LimitExceeded,
+							frame.NodeId,
+							frame.Port,
+							"source driver retained text exceeds bounds"
+						);
+						return false;
+					}
+					extra = audio->SourceId.capacity() + audio->Metric.capacity();
+				}
+			}
+			return EditCapturedImageGraphKeys(
+				document,
+				document.Keyframes,
+				[&](const auto &key, size_t current) {
+					return driver ? key.NodeId == frame.NodeId && key.Port == frame.Port : current == index;
+				},
+				[&](auto &key, size_t current) {
+					if (driver) {
+						key.Interpolation = "source";
+						if (!key.Ease) key.Ease = KeyframeEase{};
+					}
+					if (current == index) key.SourceDriver = driver;
+				},
+				error,
+				extra,
+				extra + sizeof(driver)
+			);
 		}
 		Document candidate = document;
 		if (driver) {
@@ -2736,6 +2824,14 @@ namespace studio {
 				return false;
 			}
 		}
+		if (document.SourceAnimators)
+			return EditCapturedImageGraphKeys(
+				document,
+				document.Keyframes,
+				[&](const auto &, size_t current) { return current == index; },
+				[&](auto &key, size_t) { key.SineDriver = driver; },
+				error
+			);
 		document.Keyframes[index].SineDriver = std::move(driver);
 		if (document.Keyframes[index].SineDriver)
 			document.FormatVersion = std::max(document.FormatVersion, 6u);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ImageGraphCapturedKeyEdit.hpp"
 #include "TimelineKeyEditor.hpp"
 
 #include <cmath>
@@ -81,6 +82,26 @@ namespace studio {
 				error = {Status::LimitExceeded, {}, {}, "easing comparison exceeds its work budget"};
 				return false;
 			}
+			if (document.SourceAnimators)
+				return EditCapturedImageGraphKeys(
+					document,
+					Originals,
+					[](const auto &, size_t) { return true; },
+					[&](auto &key, size_t) {
+						auto &ease = *key.Ease;
+						if (Sides & 2) {
+							ease.In.X = std::clamp(ease.In.X + Delta, 0.0, 2.0);
+							ease.InType = ease.In.X == 0 ? "linear" : "bezier";
+						}
+						if (Sides & 1) {
+							ease.Out.X = std::clamp(ease.Out.X + Delta, 0.0, 2.0);
+							ease.OutType = ease.Out.X == 0 ? "linear" : "bezier";
+						}
+					},
+					error,
+					0,
+					(Originals.capacity() - Originals.size()) * sizeof(Keyframe)
+				);
 			// Validate every full original before the first staged mutation.
 			for (const auto &original : Originals) {
 				if (std::find(document.Keyframes.begin(), document.Keyframes.end(), original) ==

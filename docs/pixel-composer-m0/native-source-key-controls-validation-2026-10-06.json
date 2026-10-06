@@ -1,0 +1,187 @@
+{
+  "date": "2026-10-06",
+  "scope": "Captured combined source animator key metadata controls and shared easing gestures",
+  "implementation": [
+    "Key kind popup commits resolve the captured combined writer.",
+    "Easing and driver controls update canonical physical or retired keys and all captured aliases atomically.",
+    "Whole-track interpolation normalization edits the captured key map without replacing its generation.",
+    "Shared easing width gestures deduplicate equivalent alias selections and reject stale pins.",
+    "Adapter drafts admit clone bytes before allocation; spare vector backing and borrowed incoming driver payloads remain charged during core validation."
+  ],
+  "validation": {
+    "joined_checks": 20,
+    "all_exit_codes_zero": true,
+    "cpp_cases_including_startup": 5085,
+    "cpp_assertions": 2000188,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "offscreen_backend": "SDL offscreen / Vulkan",
+    "test_binary_hashes_unchanged": true,
+    "child_binary_hashes_unchanged": true,
+    "sources_frozen": true,
+    "owned_source_sha256": {
+      "mono.studio/src/ImageGraphCapturedKeyEdit.hpp": "3a71786fcee7d68c27a89f4ab78e12a42b83ec67cd5fd481dbf667a32a471483",
+      "mono.studio/src/ImageGraph.cpp": "7d31d5e2e70b31f1914072f134681c7e922199a3e4bf4c57bdc7835d2404d9eb",
+      "mono.studio/src/TimelineEaseEditor.hpp": "cf5a5b043522e3840f1feab1860898f604dc1b881a6b750c0dbd6170fde1d5b1",
+      "mono.studio/tests/TimelineSourceAliases.cpp": "083285f87801bbef19eb72e7a2127a00640c7189c6c4ae5b125e20c4ae9d2ae4"
+    },
+    "checks": [
+      {
+        "name": "bake",
+        "exit_code": 0,
+        "cases": 157,
+        "assertions": 15875,
+        "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129"
+      },
+      {
+        "name": "physics",
+        "exit_code": 0,
+        "cases": 43,
+        "assertions": 715,
+        "binary_sha256": "4ef77cab22739d91e9611a9231e479ec3e3314b1c3c6c30d93c8473113ecb2be"
+      },
+      {
+        "name": "runner",
+        "exit_code": 0,
+        "cases": 29,
+        "assertions": 296,
+        "binary_sha256": "19284acb54aa635b7bbb52f9fdadd5e72484898d83dcffdb2f532e801b9a1ddc"
+      },
+      {
+        "name": "font",
+        "exit_code": 0,
+        "cases": 37,
+        "assertions": 1686,
+        "binary_sha256": "0af4d7637e9dacd46e5be5e316bbe291f147f23b463f3f7f3fdcff3fc71f2e9a"
+      },
+      {
+        "name": "export",
+        "exit_code": 0,
+        "cases": 77,
+        "assertions": 3132,
+        "binary_sha256": "227594696d1f7e8616f60a3342a18462410b752a4189c310065818b6c266e17a"
+      },
+      {
+        "name": "render",
+        "exit_code": 0,
+        "cases": 15,
+        "assertions": 477,
+        "binary_sha256": "d6919feb43395285a1bcb4653ca7eda65f61e179922fe3ff9618eeb9db0caa15"
+      },
+      {
+        "name": "cli",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "io",
+        "exit_code": 0,
+        "cases": 280,
+        "assertions": 11938,
+        "binary_sha256": "e813343dc149679f23119b193bc668a887a6d961826b7dd95b53c82b9fe23d6e"
+      },
+      {
+        "name": "core",
+        "exit_code": 0,
+        "cases": 2958,
+        "assertions": 1894645,
+        "binary_sha256": "c85b0537dbbb114760d21b64e1e4bf1720422a394ba17daf9a962419b618be5b"
+      },
+      {
+        "name": "assetc",
+        "exit_code": 0,
+        "cases": 45,
+        "assertions": 509,
+        "binary_sha256": "7b9c35c1111c3f73bc13b2573d995d73373b0e38b2c22cb08d81e434295bf64d"
+      },
+      {
+        "name": "client",
+        "exit_code": 0,
+        "cases": 358,
+        "assertions": 23821,
+        "binary_sha256": "9f25231d48b5b8421b2edef74b8d3f4292ebf39542d7d7b4f11f8a2e54f0d2f7"
+      },
+      {
+        "name": "studio",
+        "exit_code": 0,
+        "cases": 1011,
+        "assertions": 46099,
+        "binary_sha256": "e12f1cbffebaaba341dd3577c8b065d540d6b9f8901914fbfd921850bcfc822c"
+      },
+      {
+        "name": "nodegraph",
+        "exit_code": 0,
+        "cases": 34,
+        "assertions": 286,
+        "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952"
+      },
+      {
+        "name": "ui",
+        "exit_code": 0,
+        "cases": 40,
+        "assertions": 704,
+        "binary_sha256": "2eea1ec453626fdd1feb55952a5efeefc8b51d6222b60db4b779936f306766d8"
+      },
+      {
+        "name": "startup",
+        "exit_code": 0,
+        "cases": 1,
+        "assertions": 5,
+        "binary_sha256": null
+      },
+      {
+        "name": "lint",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "architecture",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "python",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "format",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      },
+      {
+        "name": "diff",
+        "exit_code": 0,
+        "cases": null,
+        "assertions": null,
+        "binary_sha256": null
+      }
+    ]
+  },
+  "build": {
+    "targets": 17,
+    "exit_code": 0,
+    "steps": 7,
+    "source_edits_during_build_or_tests": false
+  },
+  "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+  "results": "source-key-controls-batch2-results.json",
+  "build_log": "source-key-controls-build1.log",
+  "remaining": [
+    "Scalar-axis timeline identities and gestures.",
+    "Initial imported aliases without durable native captures.",
+    "New-key authoring and captured track settings.",
+    "Licensed reference parity and headed Studio interaction remain unverified."
+  ],
+  "profiling": "Metadata edits run through the instrumented core transaction. No new timing result or performance improvement is claimed."
+}
