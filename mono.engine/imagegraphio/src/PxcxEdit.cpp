@@ -2305,8 +2305,7 @@ namespace engine::imagegraphio {
 		for (const auto &node : authored.Nodes)
 			if (node.SourceSeparatedVec2Animators) {
 				const auto &inputs = node.SourceSeparatedVec2Animators->Inputs;
-				if (inputs.size() > 5 ||
-					!Spend(
+				if (!Spend(
 						sizeof(SourceSeparatedVec2Data) + inputs.size() * sizeof(SourceSeparatedVec2Animator),
 						payloadBudget
 					))

@@ -1,4 +1,5 @@
 #include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/SourceKeyframeTransition.hpp>
 #include <engine/imagegraphio/PxcxEdit.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
 #include <engine/testing/Suite.hpp>
@@ -256,4 +257,199 @@ TEST_CASE("PXC Vec2 constructor defaults stay separate from the current animator
 	CHECK_FALSE(WritePxcxProjection(separated, coldDesired, {}, result, diagnostic));
 	CHECK(diagnostic.Port.empty());
 	CHECK(result == std::vector<std::byte>{std::byte{0x77}});
+}
+
+namespace {
+	Json ScalarRow(double frame, double value, const char *tail) {
+		return Json::array(
+			{Json::array({0, frame, "marker"}),
+			 value,
+			 Json::array({.25, -.5}),
+			 Json::array({.5, 1.25}),
+			 1,
+			 2,
+			 true,
+			 0,
+			 16777215,
+			 Json{{"future", tail}}}
+		);
+	}
+	PxcxImport ScalarProject(bool dynamic) {
+		const auto *entry = FindCatalogueEntry(dynamic ? "pc.gradient_points_n" : "pc.solid");
+		REQUIRE(entry);
+		Json inputs = Json::array();
+		const auto record = [](double offset) {
+			return Json{
+				{"anim", true},
+				{"sep_axis", true},
+				{"r", {{"d", Json::array({8, 8})}}},
+				{"animators",
+				 Json::array(
+					 {Json::array({ScalarRow(-1.5, 8 + offset, "x0"), ScalarRow(4.25, 10 + offset, "x1")}),
+					  Json::array({ScalarRow(-1.5, 12 + offset, "y0"), ScalarRow(4.25, 14 + offset, "y1")}),
+					  Json{{"future_axis", "keep"}}}
+				 )},
+				{"future_input", "keep"}
+			};
+		};
+		if (dynamic) {
+			REQUIRE(entry->DynamicGroupLength == 3);
+			for (int32_t index = 0; index < entry->DynamicFixedLength; ++index)
+				inputs.push_back(Json::object());
+			for (size_t index = 0; index < 6; ++index) {
+				inputs.push_back(record(double(index)));
+				inputs.push_back(Json{{"r", {{"d", 16777215}}}});
+				inputs.push_back(Json{{"r", {{"d", 6}}}});
+			}
+		} else {
+			const auto *input = FindCatalogueInput(*entry, "dimension");
+			REQUIRE(input);
+			for (int32_t index = 0; index <= input->SourceIndex; ++index)
+				inputs.push_back(Json::object());
+			inputs[input->SourceIndex] = record(0);
+		}
+		return Checked(
+			Json{
+				{"animator", {{"frames_total", 16}, {"playback", 0}, {"framerate", 30}}},
+				{"nodes",
+				 Json::array(
+					 {Json{
+						  {"id", "node"}, {"type", entry->SourceNode}, {"x", 0}, {"y", 0}, {"inputs", inputs}
+					  },
+					  Json{
+						  {"id", "sink"},
+						  {"type", "Node_Project_Output"},
+						  {"x", 100},
+						  {"y", 0},
+						  {"inputs", Json::array({Json{{"from_node", "node"}, {"from_index", 0}}})}
+					  }}
+				 )},
+				{"future_project", "keep"}
+			}
+		);
+	}
+	Document ScalarEdit(const Document &original, std::string_view port, const KeyframeSourceDriver &driver) {
+		Diagnostic error;
+		FrameTime time;
+		REQUIRE(SplitFrameTime(-1.5, time));
+		const SourceKeyframeIdentity identity{"node", port, time, 1};
+		std::vector<Keyframe> pins;
+		const auto captured = CaptureSourceKeyframes(original, {&identity, 1}, pins, error);
+		INFO(error.Message);
+		REQUIRE(captured == Status::Ok);
+		REQUIRE(pins.size() == 1);
+		auto replacement = pins.front();
+		replacement.Ease = KeyframeEase{"cut", "bezier", {.125, -.75}, {.625, 1.5}};
+		replacement.Kind = KeyframeKind::Adder;
+		replacement.SourceDriver = driver;
+		const SourceKeyframeEdit edit{&pins.front(), &replacement, false, 1};
+		Document changed;
+		const auto status = ApplySourceKeyframeEdits(original, {&edit, 1}, changed, error);
+		INFO(error.Message);
+		REQUIRE(status == Status::Ok);
+		return changed;
+	}
+	PxcxImport ReopenScalar(const std::vector<std::byte> &bytes) {
+		engine::bake::PxcxArchive archive;
+		std::string failure;
+		REQUIRE(engine::bake::ReadPxcx(bytes, archive, failure));
+		PxcxImport reopened;
+		REQUIRE(ImportPxcxImageGraph(archive, reopened, failure));
+		return reopened;
+	}
+	void CheckScalarRoundtrip(const PxcxImport &imported, const Document &desired, size_t sourceIndex) {
+		std::vector<std::byte> bytes;
+		Diagnostic error;
+		const bool written = WritePxcxProjection(imported, desired, {}, bytes, error);
+		INFO(error.Message);
+		REQUIRE(written);
+		const auto reopened = ReopenScalar(bytes);
+		const auto &expectedInputs = desired.Nodes.front().SourceSeparatedVec2Animators->Inputs;
+		const auto &actualInputs = reopened.Graph.Nodes.front().SourceSeparatedVec2Animators->Inputs;
+		REQUIRE(actualInputs.size() == expectedInputs.size());
+		for (size_t input = 0; input < actualInputs.size(); ++input) {
+			CHECK(actualInputs[input].Port == expectedInputs[input].Port);
+			for (size_t axis = 0; axis < 2; ++axis) {
+				const auto &actual = actualInputs[input].Axes[axis].Keys;
+				const auto &expected = expectedInputs[input].Axes[axis].Keys;
+				REQUIRE(actual.size() == expected.size());
+				for (size_t index = 0; index < actual.size(); ++index) {
+					auto key = actual[index];
+					CHECK_FALSE(key.SourceKeyId.empty());
+					if (key.Kind == KeyframeKind::Adder)
+						CHECK(key.SourceKeyId != expected[index].SourceKeyId);
+					key.SourceKeyId = expected[index].SourceKeyId;
+					CHECK(key == expected[index]);
+				}
+			}
+		}
+		CHECK(reopened.Graph.Keyframes == imported.Graph.Keyframes);
+		const auto before = Json::parse(
+			std::string_view(imported.Source.GraphJson.data(), imported.Source.GraphJson.size() - 1)
+		);
+		const auto after = Json::parse(
+			std::string_view(reopened.Source.GraphJson.data(), reopened.Source.GraphJson.size() - 1)
+		);
+		CHECK(after["future_project"] == before["future_project"]);
+		const auto &oldInput = before["nodes"][0]["inputs"][sourceIndex];
+		const auto &newInput = after["nodes"][0]["inputs"][sourceIndex];
+		CHECK(newInput["future_input"] == oldInput["future_input"]);
+		CHECK(newInput["r"] == oldInput["r"]);
+		CHECK(newInput["animators"][0] == oldInput["animators"][0]);
+		CHECK(newInput["animators"][2] == oldInput["animators"][2]);
+		CHECK(newInput["animators"][1][0][9] == oldInput["animators"][1][0][9]);
+		CHECK(newInput["animators"][1][0][0][2] == oldInput["animators"][1][0][0][2]);
+		CHECK(newInput["animators"][1][1] == oldInput["animators"][1][1]);
+		std::vector<std::byte> repeated;
+		REQUIRE(WritePxcxProjection(reopened, reopened.Graph, {}, repeated, error));
+		CHECK(repeated == bytes);
+		Document native;
+		REQUIRE(Read(Write(reopened.Graph), native, error) == Status::Ok);
+		CHECK(native == reopened.Graph);
+	}
+}
+
+TEST_CASE("PXC scalar metadata writes preserve signed clocks and opaque records", "[pxcx_vec2_axes]") {
+	const auto imported = ScalarProject(false);
+	REQUIRE(imported.Graph.Nodes.front().Type == "pc.solid");
+	const auto *input = FindCatalogueInput(*FindCatalogueEntry("pc.solid"), "dimension");
+	REQUIRE(input);
+	const std::array<KeyframeSourceDriver, 6> drivers{
+		KeyframeLinearDriver{.375},
+		KeyframeSnapDriver{.75},
+		KeyframeBounceDriver{4, .625, 3},
+		KeyframeElasticDriver{5, .75, 4},
+		KeyframeCurveDriver{},
+		KeyframeSineDriver{.125, 2, .25, .5}
+	};
+	for (const auto &driver : drivers) {
+		CAPTURE(driver.index());
+		const auto desired = ScalarEdit(imported.Graph, "dimension", driver);
+		CheckScalarRoundtrip(imported, desired, size_t(input->SourceIndex));
+	}
+}
+
+TEST_CASE("PXC native-only scalar audio refuses without replacing source bytes", "[pxcx_vec2_axes]") {
+	const auto imported = ScalarProject(false);
+	const auto desired =
+		ScalarEdit(imported.Graph, "dimension", KeyframeAudioDriver{"clip", "peak", 1, 2, .25});
+	const auto before = imported.Source.OriginalBytes;
+	auto bytes = before;
+	Diagnostic error;
+	CHECK_FALSE(WritePxcxProjection(imported, desired, {}, bytes, error));
+	CHECK(error.Code == Status::UnsupportedExecution);
+	CHECK(bytes == before);
+	CHECK(imported.Source.OriginalBytes == before);
+}
+
+TEST_CASE("PXC more than five separated inputs retain every declared component", "[pxcx_vec2_axes]") {
+	const auto imported = ScalarProject(true);
+	REQUIRE(imported.Graph.Nodes.front().Type == "pc.gradient_points_n");
+	REQUIRE(imported.Graph.Nodes.front().SourceSeparatedVec2Animators);
+	REQUIRE(imported.Graph.Nodes.front().SourceSeparatedVec2Animators->Inputs.size() == 6);
+	const auto desired = ScalarEdit(imported.Graph, "point_i_5", KeyframeLinearDriver{.25});
+	const auto *entry = FindCatalogueEntry("pc.gradient_points_n");
+	REQUIRE(entry->DynamicGroupLength == 3);
+	const size_t index = entry->DynamicFixedLength + 5 * entry->DynamicGroupLength;
+	CheckScalarRoundtrip(imported, desired, index);
 }
