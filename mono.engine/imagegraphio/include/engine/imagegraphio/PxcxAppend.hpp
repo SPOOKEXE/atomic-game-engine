@@ -37,6 +37,31 @@ namespace engine::imagegraphio {
 		// incoming collection metadata is applied by the host after APPENDING ends.
 		std::string MetadataJson;
 	};
+	// grug keep the source metadata manager as host data, not invented per-node archive fields.
+	struct PxcxCollectionMetadata {
+		// fresh durable Collection identity.
+		std::string NodeId;
+		// eleven manager fields from constructor defaults and the root deserialize callback.
+		std::string MetadataJson;
+		bool operator==(const PxcxCollectionMetadata &) const = default;
+	};
+	// grug stage metadata and the source path without changing the prepared append or live host.
+	struct PxcxAppendPostLoad {
+		// one manager per incoming top-level Collection, in source declaration order.
+		std::vector<PxcxCollectionMetadata> Collections;
+		// present only when the single top-level Collection's source-backed path changed.
+		std::optional<bake::PxcxArchive> Source;
+	};
+	// grug call after APPENDING callbacks end, before source, canvas and history publication.
+	// prepare default managers with non-null root overrides and the optional observed append path.
+	// failure preserves result; the caller retains the original native projection and Group captures.
+	[[nodiscard]] bool PreparePxcxAppendPostLoad(
+		const PxcxAppendResult &append,
+		std::string_view sourcePath,
+		PxcxAppendPostLoad &result,
+		imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = imagegraph::Limits::MaximumEvaluationBytes
+	);
 	// grug accept checked bake::ReadPxcx archives and append complete saved node records.
 	// remap only source-backed identity fields.
 	// names, expressions, cache membership strings and timeline references follow pinned APPEND policy.

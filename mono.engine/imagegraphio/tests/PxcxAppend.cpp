@@ -92,6 +92,34 @@ namespace {
 	Json Graph(const engine::imagegraphio::PxcxImport &project) {
 		return Json::parse(project.Source.GraphJson.begin(), project.Source.GraphJson.end() - 1);
 	}
+	Json Collection(std::string id, std::string parent = {}, std::string path = {}) {
+		Json attributes = {{"custom_input_list", Json::array()}, {"custom_output_list", Json::array()}};
+		if (!path.empty()) attributes["path"] = std::move(path);
+		Json node = {
+			{"id", std::move(id)},
+			{"type", "Node_Collection"},
+			{"x", 0},
+			{"y", 0},
+			{"inputs", Json::array()},
+			{"attri", std::move(attributes)}
+		};
+		if (!parent.empty()) node["group"] = std::move(parent);
+		return node;
+	}
+	PxcxAppendResult AppendIncoming(Json incoming) {
+		PxcxAppendOptions options;
+		options.Namespace = "postload";
+		PxcxAppendResult result;
+		engine::imagegraph::Diagnostic diagnostic;
+		const bool appended =
+			AppendPxcxProject(Destination(), Archive(incoming.dump()), options, result, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(appended);
+		return result;
+	}
+	Json ArchiveGraph(const engine::bake::PxcxArchive &archive) {
+		return Json::parse(archive.GraphJson.begin(), archive.GraphJson.end() - 1);
+	}
 }
 
 TEST_CASE(
@@ -478,4 +506,250 @@ TEST_CASE(
 	CHECK(result.Nodes == priorNodes);
 	CHECK(result.Project.Source.OriginalBytes == priorBytes);
 	CHECK(result.MetadataJson == priorMetadata);
+}
+
+TEST_CASE(
+	"PXC post-load prepares only top-level collection managers with source defaults and overrides",
+	"[imagegraphio][pxcx_append][post_load]"
+) {
+	Json metadata = {
+		{"description", "saved description"},
+		{"author", nullptr},
+		{"contact", "saved contact"},
+		{"file_id", nullptr},
+		{"tags", Json::array({"Animation", "Utility"})},
+		{"version", 121092},
+		{"isDefault", true},
+		{"preview_frames", nullptr},
+		{"deprecated", true},
+		{"aut_id", 71},
+		{"future_metadata", "ignored"}
+	};
+	Json incoming = {
+		{"metadata", metadata},
+		{"nodes",
+		 Json::array(
+			 {Collection("top"),
+			  Collection("nested", "top"),
+			  Json{
+				  {"id", "ordinary"},
+				  {"type", "Node_Number_Simple"},
+				  {"x", 0},
+				  {"y", 0},
+				  {"inputs", Json::array({ValueJson(4)})}
+			  },
+			  Json{
+				  {"id", "inline"},
+				  {"type", "Node_Collection_Inline"},
+				  {"x", 0},
+				  {"y", 0},
+				  {"inputs", Json::array()},
+				  {"attri", {{"members", Json::array({"ordinary"})}}}
+			  }}
+		 )}
+	};
+	auto appended = AppendIncoming(std::move(incoming));
+	const auto originalGraph = appended.Project.Source.GraphJson;
+	const auto originalBytes = appended.Project.Source.OriginalBytes;
+	PxcxAppendPostLoad loaded;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(PreparePxcxAppendPostLoad(appended, "ignored-multiple-root-path.pxcx", loaded, diagnostic));
+	INFO(diagnostic.Message);
+	REQUIRE(loaded.Collections.size() == 1);
+	CHECK(loaded.Collections.front().NodeId == "postload/top");
+	CHECK_FALSE(loaded.Source.has_value());
+	CHECK(appended.Project.Source.GraphJson == originalGraph);
+	CHECK(appended.Project.Source.OriginalBytes == originalBytes);
+	const auto manager = Json::parse(loaded.Collections.front().MetadataJson);
+	CHECK(manager["description"] == "saved description");
+	CHECK(manager["author"] == "");
+	CHECK(manager["contact"] == "saved contact");
+	CHECK(manager["alias"] == "");
+	CHECK(manager["file_id"] == 0);
+	CHECK(manager["tags"] == Json::array({"Animation", "Utility"}));
+	CHECK(manager["version"] == 121092);
+	CHECK(manager["isDefault"] == true);
+	CHECK(manager["preview_frames"] == 1);
+	CHECK(manager["deprecated"] == true);
+	CHECK(manager["aut_id"] == 71);
+	CHECK_FALSE(manager.contains("future_metadata"));
+}
+
+TEST_CASE(
+	"PXC post-load changes only a single collection source path and creates no node metadata fields",
+	"[imagegraphio][pxcx_append][post_load][path]"
+) {
+	Json incoming = {
+		{"metadata", {{"description", "manager only"}, {"file_id", 19}}},
+		{"nodes", Json::array({Collection("only", {}, "old-project.pxcx")})}
+	};
+	auto appended = AppendIncoming(std::move(incoming));
+	const auto priorGraph = appended.Project.Source.GraphJson;
+	const auto priorBytes = appended.Project.Source.OriginalBytes;
+	PxcxAppendPostLoad loaded;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(PreparePxcxAppendPostLoad(appended, "new-project.pxcx", loaded, diagnostic));
+	INFO(diagnostic.Message);
+	REQUIRE(loaded.Collections.size() == 1);
+	REQUIRE(loaded.Source.has_value());
+	CHECK(appended.Project.Source.GraphJson == priorGraph);
+	CHECK(appended.Project.Source.OriginalBytes == priorBytes);
+	auto expectedGraph = Json::parse(priorGraph.begin(), priorGraph.end() - 1);
+	auto graphCollection =
+		std::find_if(expectedGraph["nodes"].begin(), expectedGraph["nodes"].end(), [](const auto &node) {
+			return node.value("id", "") == "postload/only";
+		});
+	REQUIRE(graphCollection != expectedGraph["nodes"].end());
+	(*graphCollection)["attri"]["path"] = "new-project.pxcx";
+	const auto graph = ArchiveGraph(*loaded.Source);
+	CHECK(graph == expectedGraph);
+	const auto collection = std::find_if(graph["nodes"].begin(), graph["nodes"].end(), [](const auto &node) {
+		return node.value("id", "") == "postload/only";
+	});
+	REQUIRE(collection != graph["nodes"].end());
+	CHECK((*collection)["attri"]["path"] == "new-project.pxcx");
+	CHECK_FALSE((*collection)["attri"].contains("description"));
+	CHECK_FALSE((*collection)["attri"].contains("file_id"));
+	const auto manager = Json::parse(loaded.Collections.front().MetadataJson);
+	CHECK(manager["description"] == "manager only");
+	CHECK(manager["file_id"] == 19);
+}
+
+TEST_CASE(
+	"PXC post-load defaults an empty manager and skips source path for multiple top-level nodes",
+	"[imagegraphio][pxcx_append][post_load][defaults]"
+) {
+	Json incoming = {
+		{"nodes",
+		 Json::array(
+			 {Collection("only"),
+			  Json{
+				  {"id", "ordinary"},
+				  {"type", "Node_Number_Simple"},
+				  {"x", 0},
+				  {"y", 0},
+				  {"inputs", Json::array({ValueJson(2)})}
+			  }}
+		 )}
+	};
+	auto appended = AppendIncoming(std::move(incoming));
+	PxcxAppendPostLoad loaded;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(PreparePxcxAppendPostLoad(appended, "should-not-be-written.pxcx", loaded, diagnostic));
+	INFO(diagnostic.Message);
+	REQUIRE(loaded.Collections.size() == 1);
+	CHECK_FALSE(loaded.Source.has_value());
+	const auto manager = Json::parse(loaded.Collections.front().MetadataJson);
+	CHECK(manager["description"] == "");
+	CHECK(manager["author"] == "");
+	CHECK(manager["contact"] == "");
+	CHECK(manager["alias"] == "");
+	CHECK(manager["file_id"] == 0);
+	CHECK(manager["tags"].empty());
+	CHECK(manager["version"] == 121092);
+	CHECK(manager["isDefault"] == false);
+	CHECK(manager["preview_frames"] == 1);
+	CHECK(manager["deprecated"] == false);
+	CHECK(manager["aut_id"] == 0);
+}
+
+TEST_CASE(
+	"PXC post-load recognizes the pinned collection subclass whitelist in source order",
+	"[imagegraphio][pxcx_append][post_load][collections]"
+) {
+	const std::vector<std::string> types = {
+		"Node_Group",
+		"Node_Collection",
+		"Node_Canvas_Group",
+		"Node_DynaSurf",
+		"Node_Feedback",
+		"Node_Iterate",
+		"Node_Iterate_Each",
+		"Node_Iterate_Filter",
+		"Node_Iterate_Sort",
+		"Node_Iterator",
+		"Node_Pixel_Builder",
+		"Node_Smoke_Group",
+		"Node_Strand_Group",
+		"Node_VFX_Group"
+	};
+	Json sourceNodes = Json::array();
+	PxcxAppendResult appended;
+	for (size_t index = 0; index < types.size(); ++index) {
+		const auto id = "group-" + std::to_string(index);
+		sourceNodes.push_back(
+			{{"id", "fresh/" + id}, {"type", types[index]}, {"x", 0}, {"y", 0}, {"inputs", Json::array()}}
+		);
+		appended.Nodes.push_back({id, "fresh/" + id, true});
+	}
+	sourceNodes.push_back(
+		{{"id", "fresh/inline"},
+		 {"type", "Node_Collection_Inline"},
+		 {"x", 0},
+		 {"y", 0},
+		 {"inputs", Json::array()}}
+	);
+	appended.Nodes.push_back({"inline", "fresh/inline", true});
+	sourceNodes.push_back(
+		{{"id", "fresh/ordinary"},
+		 {"type", "Node_Number_Simple"},
+		 {"x", 0},
+		 {"y", 0},
+		 {"inputs", Json::array({ValueJson(1)})}}
+	);
+	appended.Nodes.push_back({"ordinary", "fresh/ordinary", true});
+	appended.Project.Source = Archive(Json{{"nodes", std::move(sourceNodes)}}.dump());
+
+	PxcxAppendPostLoad loaded;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(PreparePxcxAppendPostLoad(appended, "multiple-roots.pxcx", loaded, diagnostic));
+	INFO(diagnostic.Message);
+	REQUIRE(loaded.Collections.size() == types.size());
+	for (size_t index = 0; index < types.size(); ++index) {
+		CHECK(loaded.Collections[index].NodeId == "fresh/group-" + std::to_string(index));
+		CHECK(Json::parse(loaded.Collections[index].MetadataJson)["version"] == 121092);
+	}
+	CHECK_FALSE(loaded.Source.has_value());
+}
+
+TEST_CASE(
+	"PXC post-load metadata, budget, and stale mapping refusals preserve the prior result",
+	"[imagegraphio][pxcx_append][post_load][atomic]"
+) {
+	auto appended = AppendIncoming(
+		Json{{"metadata", {{"description", "valid"}}}, {"nodes", Json::array({Collection("only")})}}
+	);
+	PxcxAppendPostLoad prior;
+	prior.Collections = {{"older", "old manager"}};
+	prior.Source = Destination();
+	const auto priorCollections = prior.Collections;
+	const auto priorSourceGraph = prior.Source->GraphJson;
+	const auto priorSourceBytes = prior.Source->OriginalBytes;
+	engine::imagegraph::Diagnostic diagnostic;
+	auto malformed = appended;
+	malformed.MetadataJson = R"JSON({"description":"first","description":"second"})JSON";
+	CHECK_FALSE(PreparePxcxAppendPostLoad(malformed, "new.pxcx", prior, diagnostic));
+	CHECK(diagnostic.Code == engine::imagegraph::Status::InvalidValue);
+	CHECK(prior.Collections == priorCollections);
+	CHECK(prior.Source->GraphJson == priorSourceGraph);
+	CHECK(prior.Source->OriginalBytes == priorSourceBytes);
+
+	CHECK_FALSE(PreparePxcxAppendPostLoad(appended, "new.pxcx", prior, diagnostic, 1));
+	CHECK(diagnostic.Code == engine::imagegraph::Status::LimitExceeded);
+	CHECK(prior.Collections == priorCollections);
+	CHECK(prior.Source->GraphJson == priorSourceGraph);
+	CHECK(prior.Source->OriginalBytes == priorSourceBytes);
+
+	auto stale = appended;
+	stale.Nodes.front().NodeId = "missing-node";
+	CHECK_FALSE(PreparePxcxAppendPostLoad(stale, "new.pxcx", prior, diagnostic));
+	CHECK(diagnostic.Code == engine::imagegraph::Status::InvalidValue);
+	CHECK(prior.Collections == priorCollections);
+	CHECK(prior.Source->GraphJson == priorSourceGraph);
+	CHECK(prior.Source->OriginalBytes == priorSourceBytes);
+	CHECK_FALSE(PreparePxcxAppendPostLoad(appended, std::string_view("bad\0path", 8), prior, diagnostic));
+	CHECK(diagnostic.Code == engine::imagegraph::Status::InvalidValue);
+	CHECK(prior.Collections == priorCollections);
+	CHECK(prior.Source->GraphJson == priorSourceGraph);
+	CHECK(prior.Source->OriginalBytes == priorSourceBytes);
 }

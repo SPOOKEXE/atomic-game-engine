@@ -112,15 +112,12 @@ namespace engine::imagegraphio {
 						 record.Axes.Port.capacity() + record.Axes.InstanceBase.capacity();
 			return bytes;
 		}
-		std::optional<AppendJson> Parse(const bake::PxcxArchive &archive, AppendWork &work) {
-			if (archive.GraphJson.empty() || archive.GraphJson.back() != '\0') return std::nullopt;
+		std::optional<AppendJson> ParseText(std::string_view text, AppendWork &work) {
 			bool ambiguous = false;
 			std::vector<AppendJson, JsonAllocator<AppendJson>> keys;
 			std::vector<size_t, JsonAllocator<size_t>> nameLengths;
 			auto parsed = AppendJson::parse(
-				archive.GraphJson.begin(),
-				archive.GraphJson.end() - 1,
-				[&](int depth, AppendJson::parse_event_t event, AppendJson &item) {
+				text.begin(), text.end(), [&](int depth, AppendJson::parse_event_t event, AppendJson &item) {
 					if (depth > int(bake::PxcxLimits::MaximumJsonDepth))
 						throw std::length_error("append JSON depth");
 					if (event == AppendJson::parse_event_t::object_start) {
@@ -139,9 +136,15 @@ namespace engine::imagegraphio {
 					return true;
 				}
 			);
-			if (ambiguous || !parsed.is_object() || !parsed.contains("nodes") || !parsed["nodes"].is_array())
-				return std::nullopt;
+			if (ambiguous || !parsed.is_object()) return std::nullopt;
 			return parsed;
+		}
+		std::optional<AppendJson> Parse(const bake::PxcxArchive &archive, AppendWork &work) {
+			if (archive.GraphJson.empty() || archive.GraphJson.back() != '\0') return std::nullopt;
+			auto root =
+				ParseText(std::string_view(archive.GraphJson).substr(0, archive.GraphJson.size() - 1), work);
+			if (!root || !root->contains("nodes") || !root->at("nodes").is_array()) return std::nullopt;
+			return root;
 		}
 		void RecordWork(const AppendJson &value, AppendWork &work) {
 			work.Charge(1, 1);
@@ -497,6 +500,193 @@ namespace engine::imagegraphio {
 		return false;
 	} catch (const AppendJson::exception &) {
 		diagnostic = {Status::InvalidValue, {}, {}, "PXC append source record is malformed"};
+		return false;
+	}
+
+	bool PreparePxcxAppendPostLoad(
+		const PxcxAppendResult &append,
+		std::string_view sourcePath,
+		PxcxAppendPostLoad &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraphio.source_append_post_load");
+		const auto fail = [&](Status code, const char *message) {
+			diagnostic = {code, {}, {}, message};
+			return false;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+			append.Nodes.size() > Limits::MaximumNodes || result.Collections.size() > Limits::MaximumNodes ||
+			append.MetadataJson.size() > bake::PxcxLimits::MaximumMetadataBytes ||
+			sourcePath.size() > bake::PxcxLimits::MaximumNodeTextBytes)
+			return fail(Status::LimitExceeded, "PXC append post-load counts or bytes exceed bounds");
+		if (sourcePath.find('\0') != std::string_view::npos || append.Project.Source.MetadataNumber != 121092)
+			return fail(Status::InvalidValue, "PXC append post-load path or save version is invalid");
+		detail::ImportBudget budget(maximumBytes);
+		const auto sourceBytes = ImportBytes(append.Project);
+		if (!sourceBytes || !budget.Hold(*sourceBytes) || !budget.Hold(append.MetadataJson.capacity()) ||
+			!budget.Hold(sourcePath.size()) ||
+			!budget.Hold(append.Nodes.capacity() * sizeof(PxcxAppendedNode)) ||
+			!budget.Hold(result.Collections.capacity() * sizeof(PxcxCollectionMetadata)))
+			return fail(Status::LimitExceeded, "PXC append post-load owners exceed live bounds");
+		size_t maximumIdentityBytes = 0;
+		for (const auto &node : append.Nodes) {
+			maximumIdentityBytes = std::max({maximumIdentityBytes, node.NodeId.size(), node.SourceId.size()});
+			if (node.NodeId.empty() || node.SourceId.empty() ||
+				node.NodeId.size() > bake::PxcxLimits::MaximumNodeTextBytes ||
+				node.SourceId.size() > bake::PxcxLimits::MaximumNodeTextBytes ||
+				!budget.Hold(node.NodeId.capacity() + node.SourceId.capacity()))
+				return fail(
+					Status::InvalidValue, "PXC append post-load node identity is invalid or too large"
+				);
+		}
+		for (const auto &manager : result.Collections)
+			if (manager.NodeId.size() > bake::PxcxLimits::MaximumNodeTextBytes ||
+				manager.MetadataJson.size() > bake::PxcxLimits::MaximumMetadataBytes ||
+				!budget.Hold(manager.NodeId.capacity() + manager.MetadataJson.capacity()))
+				return fail(Status::LimitExceeded, "PXC append prior metadata exceeds live bounds");
+		if (result.Source && (!ArchiveBounds(*result.Source) || !budget.Hold(ArchiveBytes(*result.Source))))
+			return fail(Status::LimitExceeded, "PXC append prior post-load archive exceeds live bounds");
+		JsonScope scope(budget);
+		AppendWork work;
+		auto graph = Parse(append.Project.Source, work);
+		if (!graph) return fail(Status::InvalidValue, "PXC append post-load source JSON is invalid");
+		RecordWork(*graph, work);
+		const uint64_t originalDomBytes = CodecDomBytes(*graph);
+		constexpr uint64_t codecFixedBytes = 2ull * 1024 * 1024;
+		const auto &source = append.Project.Source;
+		const uint64_t validationBytes = ArchiveBytes(source) * 4 + originalDomBytes + codecFixedBytes;
+		if (!budget.Hold(validationBytes))
+			return fail(Status::LimitExceeded, "PXC append post-load source validation exceeds live bounds");
+		{
+			std::vector<std::byte> checked;
+			std::string failure;
+			if (!bake::WritePxcx(source, checked, failure) || checked != source.OriginalBytes)
+				return fail(Status::InvalidValue, "PXC append post-load source has untracked changes");
+		}
+		budget.Release(validationBytes);
+		AppendJson metadata = AppendJson::object();
+		if (!append.MetadataJson.empty()) {
+			auto parsed = ParseText(append.MetadataJson, work);
+			if (!parsed)
+				return fail(Status::InvalidValue, "PXC append root metadata is invalid or ambiguous");
+			RecordWork(*parsed, work);
+			metadata = std::move(*parsed);
+		}
+		AppendJson defaults = {
+			{"description", ""},
+			{"author", ""},
+			{"contact", ""},
+			{"alias", ""},
+			{"file_id", 0},
+			{"tags", AppendJson::array()},
+			{"version", 121092},
+			{"isDefault", false},
+			{"preview_frames", 1},
+			{"deprecated", false},
+			{"aut_id", 0}
+		};
+		// grug source deserialize keeps constructor values for missing or null fields.
+		for (auto &field : defaults.items()) {
+			const auto value = metadata.find(field.key());
+			if (value != metadata.end() && !value->is_null()) field.value() = *value;
+		}
+		const auto managerJson = defaults.dump();
+		if (managerJson.size() > bake::PxcxLimits::MaximumMetadataBytes)
+			return fail(Status::LimitExceeded, "PXC append metadata manager exceeds field bounds");
+		PxcxAppendPostLoad candidate;
+		if (!budget.Hold(append.Nodes.size() * sizeof(PxcxCollectionMetadata)))
+			return fail(Status::LimitExceeded, "PXC append metadata manager table exceeds live bounds");
+		candidate.Collections.reserve(append.Nodes.size());
+		if (!budget.Hold(
+				(candidate.Collections.capacity() - append.Nodes.size()) * sizeof(PxcxCollectionMetadata)
+			))
+			return fail(Status::LimitExceeded, "PXC append metadata manager capacity exceeds live bounds");
+		AppendJson seen = AppendJson::object(), sourceIds = AppendJson::object();
+		AppendJson *singleTopLevel = nullptr;
+		size_t topLevelCount = 0;
+		for (const auto &loaded : append.Nodes) {
+			work.Charge(seen.size() * 2 + sourceIds.size() * 2 + 1, maximumIdentityBytes + 1);
+			JsonString nodeId(loaded.NodeId.data(), loaded.NodeId.size());
+			JsonString sourceId(loaded.SourceId.data(), loaded.SourceId.size());
+			if (seen.contains(nodeId) || sourceIds.contains(sourceId))
+				return fail(Status::InvalidValue, "PXC append post-load identities are repeated");
+			seen[nodeId] = true;
+			sourceIds[sourceId] = true;
+			const auto node =
+				std::find_if(graph->at("nodes").begin(), graph->at("nodes").end(), [&](const auto &record) {
+					if (!record.is_object() || !record.contains("id") || !record["id"].is_string())
+						return false;
+					const auto &recordId = record["id"].template get_ref<const JsonString &>();
+					work.Charge(1, std::max(recordId.size(), loaded.NodeId.size()) + 1);
+					return recordId == nodeId;
+				});
+			if (node == graph->at("nodes").end())
+				return fail(Status::InvalidValue, "PXC append post-load node is missing from source");
+			if (!loaded.TopLevel) continue;
+			++topLevelCount;
+			singleTopLevel = &*node;
+			if (!GroupType(*node)) continue;
+			work.Charge(1, loaded.NodeId.size() + managerJson.size() + 2);
+			const uint64_t managerBytes = std::max(loaded.NodeId.size(), std::string{}.capacity()) + 1 +
+										  std::max(managerJson.size(), std::string{}.capacity()) + 1;
+			if (!budget.Hold(managerBytes))
+				return fail(Status::LimitExceeded, "PXC append metadata manager copies exceed live bounds");
+			candidate.Collections.push_back({loaded.NodeId, {managerJson.data(), managerJson.size()}});
+		}
+		if (topLevelCount == 1 && singleTopLevel && GroupType(*singleTopLevel) && !sourcePath.empty()) {
+			if (!singleTopLevel->contains("attri")) (*singleTopLevel)["attri"] = AppendJson::object();
+			auto &attributes = singleTopLevel->at("attri");
+			if (!attributes.is_object())
+				return fail(Status::InvalidValue, "PXC appended Collection attributes are malformed");
+			JsonString path(sourcePath.data(), sourcePath.size());
+			const auto oldPath = attributes.find("path");
+			if (oldPath == attributes.end() || *oldPath != path) {
+				attributes["path"] = std::move(path);
+				const auto serialized = graph->dump();
+				if (serialized.size() >= bake::PxcxLimits::MaximumGraphJsonBytes)
+					return fail(
+						Status::LimitExceeded, "PXC append post-load source JSON exceeds file bounds"
+					);
+				const uint64_t publicationBytes = ArchiveBytes(source) * 4 + serialized.size() * 8 +
+												  std::max(originalDomBytes, CodecDomBytes(*graph)) +
+												  codecFixedBytes;
+				if (!budget.Hold(publicationBytes))
+					return fail(
+						Status::LimitExceeded, "PXC append post-load publication exceeds live bounds"
+					);
+				bake::PxcxArchive updated = source;
+				updated.GraphJson.assign(serialized.data(), serialized.size());
+				updated.GraphJson.push_back('\0');
+				updated.Nodes.clear();
+				updated.Links.clear();
+				std::vector<std::byte> bytes;
+				std::string failure;
+				if (!bake::WritePxcx(updated, bytes, failure))
+					return fail(Status::InvalidValue, "PXC append post-load source write refused");
+				bake::PxcxArchive checked;
+				if (!bake::ReadPxcx(bytes, checked, failure))
+					return fail(Status::InvalidValue, "PXC append post-load source readback refused");
+				candidate.Source.emplace(std::move(checked));
+			}
+		}
+		static_assert(std::is_nothrow_move_assignable_v<PxcxAppendPostLoad>);
+		result = std::move(candidate);
+		diagnostic = {};
+		return true;
+	} catch (const AppendWorkExceeded &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC append post-load comparison work exceeds bounds"};
+		return false;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "PXC append post-load allocation exceeds live bounds"};
+		return false;
+	} catch (const std::length_error &) {
+		diagnostic = {
+			Status::LimitExceeded, {}, {}, "PXC append post-load string or JSON depth exceeds bounds"
+		};
+		return false;
+	} catch (const AppendJson::exception &) {
+		diagnostic = {Status::InvalidValue, {}, {}, "PXC append post-load source record is malformed"};
 		return false;
 	}
 }
