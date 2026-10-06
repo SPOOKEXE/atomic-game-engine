@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "backend": "offscreen Vulkan",
+  "scope": "typed cold Vec2 getter requests and retained Composer constructor events",
+  "changes": [
+    "actual cold getter returns SourceAxisInitializationRequired with delegated owner and port",
+    "Composer preview retains one constructor event per pending pulse",
+    "constructor and save projection use caller allowance beside retained previews, feedback, fonts, observations and audio; reserve source-cache loader allowance conservatively",
+    "refused read releases compile plan before constructor clone",
+    "native save projects retained physical scalar arrays",
+    "RunProfileWorkflow roadmap item moved to current v0.25 work; HLSL audit stays v0.26"
+  ],
+  "builds": [
+    {
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-receipts-build1.log",
+      "exit_code": 0,
+      "steps": 739
+    },
+    {
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-receipts-build2.log",
+      "exit_code": 0,
+      "steps": 3
+    },
+    {
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-receipts-build3.log",
+      "exit_code": 0,
+      "steps": 5
+    }
+  ],
+  "first_batch": {
+    "checks_passed": 19,
+    "checks_total": 20,
+    "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-receipts-batch1-issues.json",
+    "failure": "three new Studio fixtures used image output instead of declared surface_out; shared fixture repaired before joined repeat"
+  },
+  "final_batch": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "cpu_cases": 5038,
+    "vulkan_cases": 15,
+    "core_cases": 2936,
+    "studio_cases": 1002,
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-receipts-batch3-results.json",
+    "child_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-receipts-child-hashes-batch3.json",
+    "source_changes_during_build_and_tests": [],
+    "binaries_changed_during_tests": false
+  },
+  "covered": [
+    "overridden and inherited actual getter owner/port",
+    "prior snapshot preserved on cold read refusal",
+    "stale and caller-cap refusal preserve replay/request/save destination",
+    "retained constructor values and native round trip",
+    "two cold getter receipts hold frame 5 across playback 5,6,7; success completes once and next request accepts frame8"
+  ],
+  "limits": [
+    "cadence test exercises real getter and retained cadence seam, not full RefreshPreview/backend pulse integration",
+    "only Composer RefreshPreview consumes this typed request; synchronous inspections and other hosts still need integration",
+    "native save check covers projected physical scalar storage, not complete binding-time history across reopening",
+    "separate/combine controls, detached mode changes and repeated explicit same-base setInstance remain unfinished",
+    "new host path was not separately profiled; no performance claim",
+    "licensed reference parity and live Studio checks remain open",
+    "full 33-item Composer objective remains active",
+    "source-cache residency uses the conservative loader cap, not an exact retained-byte reading"
+  ],
+  "commit_review": {
+    "issue": "new helper referenced cache owner fields belonging to uncommitted peer changes",
+    "repair": "replace direct owner access with a conservative 16 MiB quote matching the existing Studio loader cap; rebuild all targets and repeat joined checks"
+  },
+  "prior_successful_batch": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "cpu_cases": 5038,
+    "vulkan_cases": 15,
+    "core_cases": 2936,
+    "studio_cases": 1002,
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-receipts-batch3-results.json",
+    "child_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-receipts-child-hashes-batch3.json",
+    "source_changes_during_build_and_tests": [],
+    "binaries_changed_during_tests": false
+  }
+}

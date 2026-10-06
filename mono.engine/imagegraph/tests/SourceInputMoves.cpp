@@ -1014,7 +1014,7 @@ TEST_CASE(
 	const auto retained = budget.Used();
 	CHECK(
 		detail::EvaluateSourceInput(coldDocument, "copy", Point0, request, budget, result, charge, error) ==
-		Status::UnsupportedExecution
+		Status::SourceAxisInitializationRequired
 	);
 	CHECK(result == Value{Vector2{77, 66}});
 	CHECK(charge.Bytes() == sizeof(Vector2));

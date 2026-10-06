@@ -11,7 +11,7 @@
 
 namespace studio {
 
-	// Sampling borrows declarations. Only explicit editor events refresh them.
+	// sampling borrows declarations; editor and constructor events refresh retained storage.
 	struct ImageGraphGroupHost {
 		engine::imagegraph::GroupReplayState Replay;
 		uint64_t Revision = 0;
@@ -21,10 +21,11 @@ namespace studio {
 			engine::imagegraph::Diagnostic &error,
 			std::initializer_list<const engine::imagegraph::Document *> documents = {},
 			std::initializer_list<const engine::imagegraph::GroupReplayState *> states = {},
-			uint64_t scratchBytes = 0
+			uint64_t scratchBytes = 0,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
 		) const {
 			using namespace engine::imagegraph;
-			uint64_t remaining = Limits::MaximumEvaluationBytes;
+			uint64_t remaining = std::min(maximumBytes, Limits::MaximumEvaluationBytes);
 			const auto charge = [&](uint64_t bytes) {
 				if (bytes >= remaining) {
 					error = {
@@ -290,6 +291,94 @@ namespace studio {
 				engine::imagegraph::Status::LimitExceeded, {}, {}, "Studio Group host allocation failed"
 			};
 			return false;
+		}
+
+		// owner-thread constructor events remain observable even when the following evaluation refuses.
+		bool RetainAxisRead(
+			const engine::imagegraph::Document &document,
+			uint64_t revision,
+			engine::imagegraph::EvaluationRequest &request,
+			const engine::imagegraph::Diagnostic &receipt,
+			engine::imagegraph::Diagnostic &error,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		) {
+			using namespace engine::imagegraph;
+			if (receipt.Code != Status::SourceAxisInitializationRequired || Revision != revision ||
+				request.GroupReplay != &Replay || request.GroupAuthoringRevision != revision ||
+				!Replay.InstancesBound() || Replay.AuthoringRevision() != revision) {
+				error = {
+					Status::InvalidValue, {}, {}, "source getter initialization receipt is stale or not bound"
+				};
+				return false;
+			}
+			if (receipt.NodeId.empty() || receipt.Port.empty() ||
+				receipt.NodeId.size() > Limits::MaximumTextBytes ||
+				receipt.Port.size() > Limits::MaximumTextBytes) {
+				error = {
+					Status::LimitExceeded,
+					{},
+					{},
+					"source getter initialization receipt identity exceeds bounds"
+				};
+				return false;
+			}
+			const auto *binding = Replay.Binding(receipt.NodeId, receipt.Port);
+			const auto *overlay = Replay.SharedSubtype(receipt.NodeId, receipt.Port);
+			if ((binding && binding->Axes.Storage != GroupAxisStorage::Uninitialized) ||
+				(!binding && overlay && overlay->SeparatedVec2 && overlay->SeparatedVec2->Initialized)) {
+				error = {
+					Status::InvalidValue,
+					receipt.NodeId,
+					receipt.Port,
+					"source getter initialization receipt already completed"
+				};
+				return false;
+			}
+			Diagnostic candidateError;
+			auto maximum = Budget(candidateError, {}, {}, sizeof(Diagnostic), maximumBytes);
+			for (const auto bytes :
+				 {receipt.NodeId.capacity(), receipt.Port.capacity(), receipt.Message.capacity()}) {
+				if (bytes >= maximum) {
+					error = {
+						Status::LimitExceeded, {}, {}, "source getter receipt leaves no constructor allowance"
+					};
+					return false;
+				}
+				maximum -= bytes;
+			}
+			if (!maximum) {
+				error = std::move(candidateError);
+				return false;
+			}
+			GroupReplayState initialized;
+			const SourceAxisInitialization target{receipt.NodeId, receipt.Port};
+			if (InitializeSourceVec2Axes(
+					document, {&target, 1}, Replay, revision, initialized, candidateError, maximum
+				) != Status::Ok) {
+				error = std::move(candidateError);
+				return false;
+			}
+			Replay = std::move(initialized);
+			request.GroupReplay = &Replay;
+			error = {};
+			return true;
+		}
+
+		bool ProjectForSave(
+			const engine::imagegraph::Document &document,
+			uint64_t revision,
+			engine::imagegraph::Document &projected,
+			engine::imagegraph::Diagnostic &error,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		) const {
+			using namespace engine::imagegraph;
+			if (Revision != revision || !Replay.InstancesBound() || Replay.AuthoringRevision() != revision) {
+				error = {Status::InvalidValue, {}, {}, "source constructor save projection is stale"};
+				return false;
+			}
+			const auto allowance = Budget(error, {}, {}, 0, maximumBytes);
+			if (!allowance) return false;
+			return ProjectGroupReplay(document, Replay, revision, projected, error, allowance) == Status::Ok;
 		}
 
 		bool Edit(

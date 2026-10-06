@@ -1,5 +1,7 @@
 #include "../src/ImageGraphGroupHost.hpp"
 
+#include "../src/ImageGraphComposerCadence.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -385,4 +387,172 @@ TEST_CASE(
 	CHECK_FALSE(history.CanUndo());
 	REQUIRE(history.Redo(document));
 	CHECK(document.Keyframes[0].Tick == 5);
+}
+
+namespace {
+	Document ColdGetterDocument() {
+		Document document;
+		document.FormatVersion = 9;
+		Node gradient{
+			"gradient",
+			"pc.gradient_points_n",
+			{},
+			{},
+			{{"dimension", Vector2{32, 32}}, {"dimension_unit", EnumValue{0}}, {"blend_mode", EnumValue{0}}}
+		};
+		gradient.DynamicInputs = {
+			{"point_i_0", ValueType::Vector2, Value{Vector2{99, 88}}},
+			{"point_i_1", ValueType::Vector2, Value{Vector2{30, 3}}}
+		};
+		gradient.SourceStaticInputs = {"point_i_0"};
+		gradient.SourceVec2Defaults.emplace().Inputs = {{"point_i_0", Vector2{7, 8}}};
+		gradient.SourceSeparatedVec2Animators.emplace().Inputs = {{"point_i_0", {}, true, false}};
+		document.Nodes.push_back(std::move(gradient));
+		document.Outputs = {{"out", "gradient", "surface_out"}};
+		return document;
+	}
+}
+
+TEST_CASE(
+	"Studio retains only observed constructor requests and projects their scalar storage for native save",
+	"[studio][group_host][source_axis_read]"
+) {
+	auto document = ColdGetterDocument();
+	const auto original = document;
+	Plan plan;
+	Diagnostic error;
+	const auto compileStatus = Compile(document, plan, error);
+	INFO(error.Message << " node=" << error.NodeId << " port=" << error.Port);
+	REQUIRE(compileStatus == Status::Ok);
+	studio::ImageGraphGroupHost host;
+	EvaluationRequest request;
+	REQUIRE(host.Prepare(document, plan, 1, request, error));
+	CHECK_FALSE(host.Replay.SharedSubtype("gradient", "point_i_0"));
+	EvaluationSnapshot inputs;
+	REQUIRE(
+		EvaluateNodeInputs(document, plan, "gradient", request, inputs, error) ==
+		Status::SourceAxisInitializationRequired
+	);
+	CHECK(error.NodeId == "gradient");
+	CHECK(error.Port == "point_i_0");
+	const auto receipt = error;
+	REQUIRE(host.RetainAxisRead(document, 1, request, error, error));
+	CHECK(request.GroupReplay == &host.Replay);
+	CHECK(document == original);
+	REQUIRE(host.Replay.SharedSubtype("gradient", "point_i_0"));
+	CHECK(host.Replay.SharedSubtype("gradient", "point_i_0")->SeparatedVec2->Initialized);
+	CHECK_FALSE(host.RetainAxisRead(document, 1, request, receipt, error));
+	REQUIRE(EvaluateNodeInputs(document, plan, "gradient", request, inputs, error) == Status::Ok);
+	const auto point = std::find_if(inputs.Values().begin(), inputs.Values().end(), [](const auto &value) {
+		return value.Port == "point_i_0";
+	});
+	REQUIRE(point != inputs.Values().end());
+	CHECK(point->Data == Value{Vector2{7, 8}});
+	Document saved;
+	REQUIRE(host.ProjectForSave(document, 1, saved, error));
+	CHECK(saved.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Initialized);
+	Document reopened;
+	REQUIRE(Read(Write(saved), reopened, error) == Status::Ok);
+	CHECK(reopened == saved);
+}
+
+TEST_CASE(
+	"Studio constructor requests reject stale state and live-budget refusal without replacing replay",
+	"[studio][group_host][source_axis_read]"
+) {
+	auto document = ColdGetterDocument();
+	Plan plan;
+	Diagnostic error;
+	const auto compileStatus = Compile(document, plan, error);
+	INFO(error.Message << " node=" << error.NodeId << " port=" << error.Port);
+	REQUIRE(compileStatus == Status::Ok);
+	studio::ImageGraphGroupHost host;
+	EvaluationRequest request;
+	REQUIRE(host.Prepare(document, plan, 1, request, error));
+	const Diagnostic receipt{
+		Status::SourceAxisInitializationRequired, "gradient", "point_i_0", "constructor"
+	};
+	const auto held = host.Replay.RetainedBytes();
+	const auto *requestReplay = request.GroupReplay;
+	const auto requestRevision = request.GroupAuthoringRevision;
+	CHECK_FALSE(host.RetainAxisRead(document, 1, request, receipt, error, 1));
+	CHECK(error.Code == Status::LimitExceeded);
+	CHECK(host.Replay.RetainedBytes() == held);
+	CHECK_FALSE(host.Replay.SharedSubtype("gradient", "point_i_0"));
+	CHECK(request.GroupReplay == requestReplay);
+	CHECK(request.GroupAuthoringRevision == requestRevision);
+	CHECK_FALSE(host.RetainAxisRead(document, 2, request, receipt, error));
+	CHECK(error.Code == Status::InvalidValue);
+	CHECK(host.Replay.RetainedBytes() == held);
+	CHECK_FALSE(host.Replay.SharedSubtype("gradient", "point_i_0"));
+	host.BorrowedBytes = Limits::MaximumEvaluationBytes - 1;
+	CHECK_FALSE(host.RetainAxisRead(document, 1, request, receipt, error));
+	CHECK(error.Code == Status::LimitExceeded);
+	CHECK(host.Replay.RetainedBytes() == held);
+	CHECK(request.GroupReplay == &host.Replay);
+	host.BorrowedBytes = 0;
+	Document saved = document;
+	CHECK_FALSE(host.ProjectForSave(document, 1, saved, error, 1));
+	CHECK(error.Code == Status::LimitExceeded);
+	CHECK(saved == document);
+	CHECK(host.Replay.RetainedBytes() == held);
+	CHECK(request.GroupReplay == requestReplay);
+	CHECK(request.GroupAuthoringRevision == requestRevision);
+	Document staleSaved = document;
+	CHECK_FALSE(host.ProjectForSave(document, 2, staleSaved, error));
+	CHECK(staleSaved == document);
+}
+
+TEST_CASE(
+	"Studio holds composer cadence while cold getter defaults are retained",
+	"[studio][group_host][source_axis_read][composer_cadence]"
+) {
+	auto document = ColdGetterDocument();
+	auto &gradient = document.Nodes.front();
+	gradient.SourceStaticInputs.push_back("point_i_1");
+	gradient.SourceVec2Defaults->Inputs.push_back({"point_i_1", Vector2{30, 3}});
+	gradient.SourceSeparatedVec2Animators->Inputs.push_back({"point_i_1", {}, true, false});
+	Plan plan;
+	Diagnostic error;
+	const auto compileStatus = Compile(document, plan, error);
+	INFO(error.Message << " node=" << error.NodeId << " port=" << error.Port);
+	REQUIRE(compileStatus == Status::Ok);
+	studio::ImageGraphGroupHost host;
+	studio::detail::ImageGraphComposerCadence cadence;
+	const studio::detail::ImageGraphComposerCadence::Identity identity{
+		engine::core::Name("cold-getter-preview"), "out", 1, 0, 0
+	};
+	studio::detail::ImageGraphObservations observations;
+	std::tm calendar{};
+	EvaluationSnapshot inputs;
+	EvaluationRequest request;
+
+	for (uint64_t pulse = 0; pulse < 3; ++pulse) {
+		const FrameTime playback{5 + pulse};
+		observations.Capture(1, playback, "scene", static_cast<double>(playback.Tick), calendar);
+		const auto frame = cadence.Begin(identity, playback, observations);
+		CHECK(frame == FrameTime{5});
+		REQUIRE(SetFrameTime(request, frame));
+		REQUIRE(host.Prepare(document, plan, 1, request, error));
+		const auto status = EvaluateNodeInputs(document, plan, "gradient", request, inputs, error);
+		if (pulse < 2) {
+			REQUIRE(status == Status::SourceAxisInitializationRequired);
+			CHECK(error.NodeId == "gradient");
+			CHECK(error.Port == (pulse == 0 ? "point_i_0" : "point_i_1"));
+			const auto receipt = error;
+			REQUIRE(host.RetainAxisRead(document, 1, request, receipt, error));
+			cadence.Pending();
+			CHECK(cadence.Frame == FrameTime{5});
+			CHECK_FALSE(cadence.Displayed);
+		} else {
+			INFO(error.Message << " node=" << error.NodeId << " port=" << error.Port);
+			REQUIRE(status == Status::Ok);
+			CHECK(cadence.Complete(frame));
+			CHECK(cadence.Displayed == FrameTime{5});
+			CHECK_FALSE(cadence.Held);
+		}
+	}
+
+	observations.Capture(1, FrameTime{8}, "scene", 8, calendar);
+	CHECK(cadence.Begin(identity, FrameTime{8}, observations) == FrameTime{8});
 }

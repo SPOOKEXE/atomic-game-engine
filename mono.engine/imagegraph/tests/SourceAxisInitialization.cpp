@@ -381,7 +381,10 @@ TEST_CASE(
 		restored, restored.Nodes[1], Point, &bound, "base", Point, true, work
 	);
 	CHECK(cold.Separated);
-	CHECK(cold.Code == Status::UnsupportedExecution);
+	CHECK(cold.Code == Status::SourceAxisInitializationRequired);
+	REQUIRE(cold.Owner);
+	CHECK(cold.Owner->Id == "copy");
+	CHECK(cold.Port == Point);
 	const std::array targets{
 		SourceAxisInitialization{"base", Point}, SourceAxisInitialization{"copy", Point}
 	};

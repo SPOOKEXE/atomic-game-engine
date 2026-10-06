@@ -1773,6 +1773,8 @@ namespace engine::imagegraph {
 		Cycle,
 		// A valid node has no implementation in the CPU evaluator.
 		UnsupportedExecution,
+		// actual getter needs its local scalar constructor event retained before retry.
+		SourceAxisInitializationRequired,
 	};
 
 	// A deterministic error location in authored text.

@@ -12846,6 +12846,17 @@ namespace engine::imagegraph {
 					}
 				}
 				detail::EvaluationVector<Value> separatedSamples{detail::EvaluationAllocator<Value>(budget)};
+				const auto axisReadDiagnostic = [&](const detail::SourceAxisStorageView &source,
+													std::string_view port) {
+					const bool initialization = source.Code == Status::SourceAxisInitializationRequired;
+					SetDiagnostic(
+						diagnostic,
+						source.Code,
+						std::string(source.Message),
+						initialization && source.Owner ? source.Owner->Id : node.Id,
+						std::string(initialization ? source.Port : port)
+					);
+				};
 				const auto separatedInput = [&](std::string_view port) -> detail::SourceAxisStorageView {
 					if (!detail::ReadsSourceInput(inputSelection, index, port) ||
 						(node.Type == "pc.mirror_polar" && detail::SourceMirrorVectorIndex(port)) ||
@@ -12881,9 +12892,7 @@ namespace engine::imagegraph {
 				const auto countSeparatedInput = [&](std::string_view port) {
 					const auto source = separatedInput(port);
 					if (source.Code != Status::Ok) {
-						SetDiagnostic(
-							diagnostic, source.Code, std::string(source.Message), node.Id, std::string(port)
-						);
+						axisReadDiagnostic(source, port);
 						return false;
 					}
 					separatedCount += source.Axes != nullptr;
@@ -12897,9 +12906,7 @@ namespace engine::imagegraph {
 				const auto sampleSeparatedInput = [&](std::string_view port) {
 					const auto source = separatedInput(port);
 					if (source.Code != Status::Ok) {
-						SetDiagnostic(
-							diagnostic, source.Code, std::string(source.Message), node.Id, std::string(port)
-						);
+						axisReadDiagnostic(source, port);
 						return false;
 					}
 					if (!source.Axes) return true;
@@ -13014,13 +13021,7 @@ namespace engine::imagegraph {
 								);
 						}
 						if (source.Code != Status::Ok) {
-							SetDiagnostic(
-								diagnostic,
-								source.Code,
-								std::string(source.Message),
-								node.Id,
-								std::string(port)
-							);
+							axisReadDiagnostic(source, port);
 							return diagnostic.Code;
 						}
 						if (const auto *axes = source.Axes) {

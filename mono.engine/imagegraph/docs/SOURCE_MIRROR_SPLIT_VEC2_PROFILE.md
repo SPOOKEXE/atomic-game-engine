@@ -143,7 +143,16 @@ split flag and combined identity. warm arrays keep their contents; existing
 cold descendants remain cold, while later binding can share the new array.
 new scalar carriers project and rebind without an authored array. key admission
 counts authored, retained and newly initialized arrays together.
-detached scalar mode changes remain unrepresented. getter-driven initialization and separate/combine controls still need host
+actual cold getter admission now returns SourceAxisInitializationRequired with
+owned local getter node/port names. skipped/frozen work and linked numeric inputs
+emit no request; local linked Paths request their own property. missing legacy
+or falsely warm storage still refuses without a constructor request. Studio's
+preview retains one admitted constructor event per pending pulse, preserving
+source-observable creation even if a later evaluation refuses. native save
+projects retained scalar storage before writing. both host transactions use the
+caller allowance after retained preview, feedback, font and observation owners;
+refused evaluation releases its compile plan before constructor cloning. explicit getter inspections,
+other hosts, detached mode changes and separate/combine controls still need host
 integration before those cases are covered. repeated explicit source `setInstance` must
 recopy the immediate base's current array even when its ID is unchanged; that
 transition remains separate from host reconciliation and is unfinished.

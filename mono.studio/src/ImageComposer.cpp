@@ -1823,6 +1823,49 @@ namespace studio {
 				terminal();
 		}
 
+		// core charges document and replay clones; studio charges the owners beside them.
+		// reserve the source-cache loader's separate 16 MiB allowance without borrowing its owner.
+		std::optional<uint64_t> GroupConstructorAllowance(const State &state, uint64_t scratchBytes = 0) {
+			using namespace engine::imagegraph;
+			uint64_t remaining = Limits::MaximumEvaluationBytes;
+			const auto charge = [&](std::optional<uint64_t> bytes) {
+				if (!bytes || *bytes >= remaining) return false;
+				remaining -= *bytes;
+				return true;
+			};
+			if (!charge(scratchBytes) || !charge(state.PreviewSequence.RetainedBytes()) ||
+				!charge(state.PreviewCache.RetainedBytes()) ||
+				!charge(ValueClonePayloadBytes(state.ValuePreview)) ||
+				!charge(ValueClonePayloadBytes(state.ArrayPreview)) ||
+				!charge(state.FeedbackHost.RetainedBytes()) || !charge(FontEditorHeldBytes(state)) ||
+				!charge(state.Host.RetainedObservationBytes()) || !charge(state.Host.LuaReceipts.Bytes) ||
+				!charge(state.PreviewObservations.Receipts.RetainedPayloadBytes()) ||
+				!charge(Limits::MaximumEvaluationBytes / 8))
+				return {};
+			const auto chargeVector = [&](const auto &values) {
+				using Item = typename std::decay_t<decltype(values)>::value_type;
+				if (values.capacity() > remaining / sizeof(Item)) return false;
+				return charge(values.capacity() * sizeof(Item));
+			};
+			const auto chargeAudio = [&](const auto &audio) {
+				if (audio.Channels.size() > Limits::MaximumAudioChannels || !chargeVector(audio.Samples) ||
+					!chargeVector(audio.Channels))
+					return false;
+				for (const auto &channel : audio.Channels)
+					if (!chargeVector(channel)) return false;
+				return true;
+			};
+			if (state.AudioFrames.size() > Limits::MaximumAudioCaptureFrames ||
+				state.AudioClips.size() > Limits::MaximumNodes || !chargeVector(state.AudioFrames) ||
+				!chargeVector(state.AudioClips))
+				return {};
+			for (const auto &frame : state.AudioFrames)
+				if (!charge(frame.SourceId.capacity()) || !charge(1) || !chargeAudio(frame)) return {};
+			for (const auto &clip : state.AudioClips)
+				if (!charge(clip.SourceId.capacity()) || !charge(1) || !chargeAudio(clip.Data)) return {};
+			return remaining;
+		}
+
 		bool SaveNativeGraph(State &state) {
 			const std::string_view graphName(state.GraphName);
 			const std::filesystem::path path =
@@ -1838,7 +1881,31 @@ namespace studio {
 									   "before native graph save";
 				return false;
 			}
-			const std::string text = engine::imagegraph::Write(state.Authored);
+			Document projected;
+			const Document *saved = &state.Authored;
+			if (state.GroupHost.Revision == state.DocumentRevision &&
+				state.GroupHost.Replay.InstancesBound()) {
+				const auto allowance = GroupConstructorAllowance(state);
+				if (!allowance) {
+					state.LastDiagnostic = {
+						Status::LimitExceeded, {}, {}, "retained Studio owners leave no source save allowance"
+					};
+					state.GraphIoMessage = state.LastDiagnostic.Message;
+					return false;
+				}
+				if (!state.GroupHost.ProjectForSave(
+						state.Authored, state.DocumentRevision, projected, state.LastDiagnostic, *allowance
+					)) {
+					state.GraphIoMessage = state.LastDiagnostic.Message;
+					return false;
+				}
+				saved = &projected;
+			}
+			const std::string text = engine::imagegraph::Write(*saved);
+			if (text.empty()) {
+				state.GraphIoMessage = "native graph has no valid save projection";
+				return false;
+			}
 			if (text.size() > IMAGE_GRAPH_FILE_MAXIMUM_BYTES) {
 				state.GraphIoMessage = "native graph exceeds the 8 MiB write limit";
 				return false;
@@ -2372,6 +2439,39 @@ namespace studio {
 				if (state.LuaHost) {
 					auto messages = state.LuaHost->TakeMessages();
 					if (!messages.empty()) state.LuaMessages = std::move(messages);
+				}
+				if (status == Status::SourceAxisInitializationRequired && composer) {
+					// refused evaluation no longer needs its plan while the constructor clone is live.
+					plan = {};
+					const auto fontContextBytes = SourceFontContextRetainedBytes(heldFontContext);
+					const auto allowance = GroupConstructorAllowance(state, keyHeld);
+					if (!allowance || !fontContextBytes || *fontContextBytes >= *allowance) {
+						state.LastDiagnostic = {
+							Status::LimitExceeded,
+							{},
+							{},
+							"retained Studio owners leave no source constructor allowance"
+						};
+						return;
+					}
+					if (!state.GroupHost.RetainAxisRead(
+							previewDocument,
+							state.DocumentRevision,
+							request,
+							diagnostic,
+							diagnostic,
+							*allowance - *fontContextBytes
+						)) {
+						state.LastDiagnostic = std::move(diagnostic);
+						return;
+					}
+					// one event per retained pulse keeps constructor retries out of the synchronous frame
+					// loop.
+					state.LastDiagnostic = {};
+					state.PreviewDirty = state.PreviewRequested = true;
+					if (auto *host = dynamic_cast<detail::ImageGraphComposerHost *>(state.Host.Composer))
+						host->Pending = true;
+					return;
 				}
 				if (status != Status::Ok) {
 					state.LastDiagnostic = std::move(diagnostic);

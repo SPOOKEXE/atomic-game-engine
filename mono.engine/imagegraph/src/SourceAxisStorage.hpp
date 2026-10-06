@@ -53,6 +53,8 @@ namespace engine::imagegraph::detail {
 								: FindSeparatedVec2(property, port);
 		if (!local || !local->Separated) return result;
 		result.Separated = true;
+		result.Owner = &property;
+		result.Port = port;
 		if (!AdmitSourceAxisWork(work, bindings.size()))
 			return fail(Status::LimitExceeded, "source axis binding lookup exceeds work bounds");
 		const auto binding = std::find_if(bindings.begin(), bindings.end(), [&](const auto &item) {
@@ -71,7 +73,8 @@ namespace engine::imagegraph::detail {
 		if (binding != bindings.end()) {
 			if (binding->Axes.Storage == GroupAxisStorage::Uninitialized)
 				return fail(
-					Status::UnsupportedExecution, "source axis storage requires retained initialization"
+					Status::SourceAxisInitializationRequired,
+					"source axis storage requires retained initialization"
 				);
 			if (binding->Axes.Storage != GroupAxisStorage::None) {
 				ownerId = binding->Axes.OwnerId;
@@ -117,10 +120,15 @@ namespace engine::imagegraph::detail {
 				return fail(Status::LimitExceeded, "source authored axis lookup exceeds work bounds");
 			result.Axes = FindSeparatedVec2(*owner, result.Port);
 		}
-		if (!result.Axes || !result.Axes->Initialized)
+		if (!result.Axes) return fail(Status::UnsupportedExecution, "source scalar axis storage is absent");
+		if (!result.Axes->Initialized) {
+			if (binding != bindings.end())
+				return fail(Status::UnsupportedExecution, "captured warm scalar storage is uninitialized");
 			return fail(
-				Status::UnsupportedExecution, "source scalar axis storage requires retained initialization"
+				Status::SourceAxisInitializationRequired,
+				"source scalar axis storage requires retained initialization"
 			);
+		}
 		if (!result.Track)
 			for (const auto &track : document.Tracks)
 				if (track.NodeId == ownerId && track.Port == result.Port) {
