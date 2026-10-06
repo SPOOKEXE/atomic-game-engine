@@ -229,7 +229,8 @@ namespace engine::imagegraph {
 		addedModes.push_back(std::string(transition.Port));
 		std::erase(removedModes, transition.Port);
 		if (owner == target) ownerAnimated = transition.Animated;
-		if (const auto *separated = detail::FindSeparatedVec2(*owner, animatorPort)) {
+		if (const auto *separated = detail::FindSeparatedVec2(*owner, animatorPort);
+			separated && separated->Separated) {
 			if (detached)
 				return fail(
 					Status::UnsupportedExecution, "fixed Mirror axes cannot have a detached dynamic animator"

@@ -1816,7 +1816,7 @@ namespace engine::imagegraph {
 			const auto *axes = found != owner.SharedSubtypes.end() && found->SeparatedVec2
 								   ? &*found->SeparatedVec2
 								   : authored;
-			if (!axes) return true;
+			if (!axes || !axes->Separated) return true;
 			handled = true;
 			const auto *pair = std::get_if<Vector2>(event.LocalValue);
 			if (!pair || !std::isfinite(pair->X) || !std::isfinite(pair->Y))

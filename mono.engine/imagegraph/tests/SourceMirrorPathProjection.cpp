@@ -651,3 +651,52 @@ TEST_CASE(
 	REQUIRE(Read(Write(projected), restored, diagnostic) == Status::Ok);
 	CHECK(restored == projected);
 }
+
+TEST_CASE("Inactive axes survive shared group edits and native reopen", "[mirror_axes]") {
+	auto document = Graph();
+	auto &original = document.Nodes.back();
+	original.SourceStaticInputs = {"center"};
+	original.SourceSeparatedVec2Animators.emplace().Inputs.push_back({"center", {}, false});
+	auto &axes = original.SourceSeparatedVec2Animators->Inputs[0].Axes;
+	axes[0].Keys = {{"mirror", "center", 0, .9, "source", KeyframeEase{}}};
+	axes[1].Keys = {{"mirror", "center", 0, 8., "source", KeyframeEase{}}};
+	document.Keyframes = {{"mirror", "center", 0, Vector2{.25, .5}, "source", KeyframeEase{}}};
+	document.Tracks = {{"mirror", "center", "hold"}};
+	Node alias = original;
+	alias.Id = "copy";
+	alias.InstanceBase = "mirror";
+	alias.SourceSeparatedVec2Animators = {};
+	document.Nodes.push_back(std::move(alias));
+	document.Outputs[0].NodeId = "copy";
+	Diagnostic diagnostic;
+	Document restored;
+	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
+	GroupReplayState empty, local, bound;
+	REQUIRE(RebindGroupReplay(restored, empty, 1, local, diagnostic) == Status::Ok);
+	const std::array bindings{GroupSubtypeBinding{
+		"copy", "mirror", GroupSubtypeAnimator::Static, GroupSubtypeAnimator::Static, "center"
+	}};
+	REQUIRE(BindGroupReplay(restored, bindings, local, 1, bound, diagnostic) == Status::Ok);
+	SolidPixel(Sample(restored, 10, 0, &bound), 40, 40);
+	const Value edited = Vector2{.75, .5};
+	GroupRefreshEvent event;
+	event.NodeId = "copy";
+	event.EditedPort = "center";
+	event.LocalValue = &edited;
+	event.At.Tick = 5;
+	GroupReplayState next;
+	REQUIRE(ReplayGroupAnimatorEdits(restored, {&event, 1}, bound, 1, next, diagnostic) == Status::Ok);
+	SolidPixel(Sample(restored, 10, 0, &next), 120, 40);
+	Document projected;
+	REQUIRE(ProjectGroupReplay(restored, next, 1, projected, diagnostic) == Status::Ok);
+	CHECK(projected.Nodes[2].SourceSeparatedVec2Animators == restored.Nodes[2].SourceSeparatedVec2Animators);
+	CHECK(projected.Keyframes != restored.Keyframes);
+	GroupReplayState rebound;
+	REQUIRE(RebindProjectedGroupReplay(projected, next, 1, rebound, diagnostic) == Status::Ok);
+	CHECK(rebound.SharedSubtypes().empty());
+	SolidPixel(Sample(projected, 10, 0, &rebound), 120, 40);
+	Document reopened;
+	REQUIRE(Read(Write(projected), reopened, diagnostic) == Status::Ok);
+	CHECK(reopened == projected);
+	SolidPixel(Sample(reopened, 10, 0, &rebound), 120, 40);
+}

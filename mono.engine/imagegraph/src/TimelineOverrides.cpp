@@ -129,6 +129,11 @@ namespace engine::imagegraph::detail {
 					return node.Id == key.NodeId;
 				});
 			if (node == document.Nodes.end()) return false;
+			const auto *axisOverlay =
+				request.GroupReplay ? request.GroupReplay->SharedSubtype(node->Id, key.Port) : nullptr;
+			const auto *axes = axisOverlay && axisOverlay->SeparatedVec2 ? &*axisOverlay->SeparatedVec2
+																		 : FindSeparatedVec2(*node, key.Port);
+			if (axes && axes->Separated) return true;
 			const auto mirrorMode =
 				SourceMirrorGetterAnimated(document, *node, key.Port, request.GroupReplay);
 			if (mirrorMode && !*mirrorMode) return true;

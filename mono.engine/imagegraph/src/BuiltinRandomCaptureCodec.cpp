@@ -19,6 +19,7 @@
 #include <type_traits>
 namespace engine::imagegraph {
 	namespace {
+		constexpr std::string_view InactiveAxesHeader = "imagegraph-builtin-random 4\n";
 		constexpr std::string_view Header = "imagegraph-builtin-random 3\n";
 		constexpr std::string_view PreviousHeader = "imagegraph-builtin-random 2\n";
 		constexpr std::string_view LegacyHeader = "imagegraph-builtin-random 1\n";
@@ -210,6 +211,7 @@ namespace engine::imagegraph {
 				if (n.SourceSeparatedVec2Animators)
 					List(n.SourceSeparatedVec2Animators->Inputs, [&](const auto &input) {
 						Text(input.Port);
+						if (InactiveAxes) Bool(input.Separated);
 						for (const auto &axis : input.Axes)
 							ScalarKeys(axis);
 					});
@@ -250,8 +252,14 @@ namespace engine::imagegraph {
 					Number(draw.Result);
 				});
 			}
+			bool InactiveAxes = false;
 			void All(std::span<const SourceBuiltinRandomCapture> captures) {
-				Out.write(Header.data(), Header.size());
+				for (const auto &capture : captures)
+					if (capture.Authored.SourceSeparatedVec2Animators)
+						for (const auto &input : capture.Authored.SourceSeparatedVec2Animators->Inputs)
+							if (!input.Separated) InactiveAxes = true;
+				const auto header = InactiveAxes ? InactiveAxesHeader : Header;
+				Out.write(header.data(), header.size());
 				Number(captures.size());
 				for (const auto &capture : captures)
 					Capture(capture);
@@ -451,9 +459,14 @@ namespace engine::imagegraph {
 				if (!present) return true;
 				if (!Admit(sizeof(SourceSeparatedVec2Data))) return false;
 				auto &data = n.SourceSeparatedVec2Animators.emplace();
-				return List(data.Inputs, 5, [&](auto &input) {
-					return Text(input.Port) && ScalarKeys(input.Axes[0]) && ScalarKeys(input.Axes[1]);
-				});
+				return List(
+					data.Inputs,
+					std::min(Limits::MaximumArrayElements, detail::SourceSeparatedVec2InputCount(n)),
+					[&](auto &input) {
+						return Text(input.Port) && (Version < 4 || Bool(input.Separated)) &&
+							   ScalarKeys(input.Axes[0]) && ScalarKeys(input.Axes[1]);
+					}
+				);
 			}
 			bool Capture(SourceBuiltinRandomCapture &c) {
 				std::string_view kind;
@@ -620,10 +633,11 @@ namespace engine::imagegraph {
 			if (prior > budget.Available() || !charge->Resize(prior) || text.size() > budget.Available() ||
 				!charge->Resize(prior + text.size()))
 				return Fail(diagnostic, Status::LimitExceeded, "Builtin RNG replacement exceeds residency");
-			const uint8_t version = text.starts_with(Header)		   ? 3
-									: text.starts_with(PreviousHeader) ? 2
-									: text.starts_with(LegacyHeader)   ? 1
-																	   : 0;
+			const uint8_t version = text.starts_with(InactiveAxesHeader) ? 4
+									: text.starts_with(Header)			 ? 3
+									: text.starts_with(PreviousHeader)	 ? 2
+									: text.starts_with(LegacyHeader)	 ? 1
+																		 : 0;
 			if (!version)
 				return Fail(
 					diagnostic, Status::UnsupportedVersion, "Builtin RNG capture header is unsupported"

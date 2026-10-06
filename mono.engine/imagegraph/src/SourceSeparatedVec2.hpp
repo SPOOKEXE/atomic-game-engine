@@ -2,10 +2,12 @@
 
 #include "EvaluationBudget.hpp"
 
-#include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
 
 namespace engine::imagegraph::detail {
+	const CatalogueInput *SourceSeparatedVec2Input(const Node &, std::string_view port);
+	size_t SourceSeparatedVec2InputCount(const Node &);
 	const SourceSeparatedVec2Animator *FindSeparatedVec2(const Node &, std::string_view port);
 	// Clone bytes use required size; retained bytes include existing capacities. Empty storage is absent.
 	std::optional<uint64_t> SeparatedAnimatorBytes(const SourceSeparatedVec2Animator &, bool retained);

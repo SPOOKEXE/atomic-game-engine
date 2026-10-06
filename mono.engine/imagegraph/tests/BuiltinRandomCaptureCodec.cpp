@@ -439,7 +439,7 @@ TEST_CASE(
 	CHECK(prior == before);
 	auto future = text;
 	future.replace(
-		0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 4\n"
+		0, std::string_view("imagegraph-builtin-random 3\n").size(), "imagegraph-builtin-random 5\n"
 	);
 	CHECK(ReadBuiltinRandomCapture(future, prior, d) == Status::UnsupportedVersion);
 	CHECK(prior == before);

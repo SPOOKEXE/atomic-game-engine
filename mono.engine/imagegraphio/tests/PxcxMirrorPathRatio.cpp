@@ -330,7 +330,7 @@ TEST_CASE(
 	auto node = std::find_if(desired.Nodes.begin(), desired.Nodes.end(), [](const auto &n) {
 		return n.Id == "mirror";
 	});
-	node->SourceSeparatedVec2Animators = {};
+	node->SourceSeparatedVec2Animators->Inputs[0].Separated = false;
 	Diagnostic diagnostic;
 	std::vector<std::byte> bytes;
 	const bool saved = WritePxcxProjection(imported, desired, {}, bytes, diagnostic);
@@ -449,4 +449,31 @@ TEST_CASE("PXC split key admission includes other nodes and dormant ordinary key
 	CHECK(failure.find("aggregate key bounds") != std::string::npos);
 	CHECK(prior.Graph == imported.Graph);
 	CHECK(prior.Source.OriginalBytes == imported.Source.OriginalBytes);
+}
+
+TEST_CASE(
+	"PXC combined animator edits retain inactive scalar tracks and opaque fields", "[pxcx_mirror_axes]"
+) {
+	const auto imported = Imported(true, false, true);
+	auto desired = imported.Graph;
+	auto node = std::find_if(desired.Nodes.begin(), desired.Nodes.end(), [](const auto &n) {
+		return n.Id == "mirror";
+	});
+	REQUIRE(node != desired.Nodes.end());
+	node->SourceSeparatedVec2Animators->Inputs[0].Separated = false;
+	const auto key = std::find_if(desired.Keyframes.begin(), desired.Keyframes.end(), [](const auto &k) {
+		return k.NodeId == "mirror" && k.Port == "center";
+	});
+	REQUIRE(key != desired.Keyframes.end());
+	key->Data = Vector2{.4, .8};
+	Diagnostic diagnostic;
+	std::vector<std::byte> bytes;
+	INFO(diagnostic.Message);
+	REQUIRE(WritePxcxProjection(imported, desired, {}, bytes, diagnostic));
+	const auto restored = ReadEdited(bytes);
+	CHECK(restored.Graph == desired);
+	CHECK(Center(restored)["sep_axis"] == false);
+	CHECK(Center(restored)["animators"] == Center(imported)["animators"]);
+	CHECK(Center(restored)["future"] == "keep-local");
+	CHECK(Center(restored)["r"] != Center(imported)["r"]);
 }

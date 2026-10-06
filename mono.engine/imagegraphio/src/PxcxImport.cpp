@@ -1608,9 +1608,9 @@ namespace engine::imagegraphio {
 			std::string_view port,
 			imagegraph::Document &animation,
 			detail::ImportBudget *budget = nullptr,
-			bool allowSeparatedMirror = false
+			bool allowSeparatedVec2 = false
 		) {
-			if ((record.value("sep_axis", false) && !allowSeparatedMirror) ||
+			if ((record.value("sep_axis", false) && !allowSeparatedVec2) ||
 				animation.Tracks.size() >= imagegraph::Limits::MaximumTracks)
 				return false;
 			int64_t end = 0, range = -1;
@@ -1704,7 +1704,7 @@ namespace engine::imagegraphio {
 			return true;
 		}
 
-		bool CatalogueMirrorAxes(
+		bool CatalogueVec2Axes(
 			const Json &record,
 			const imagegraph::CatalogueInput &input,
 			const std::string &nodeId,
@@ -1719,7 +1719,7 @@ namespace engine::imagegraphio {
 			};
 			const auto encoded = record.find("animators");
 			if (encoded != record.end() && !encoded->is_array())
-				return fail("Polar Mirror separated animator storage must be an array");
+				return fail("source Vec2 separated animator storage must be an array");
 			size_t aggregate = document.Keyframes.size();
 			for (const auto &other : document.Nodes)
 				if (&other != &node && other.SourceSeparatedVec2Animators)
@@ -1741,20 +1741,30 @@ namespace engine::imagegraphio {
 				if (aggregate > imagegraph::Limits::MaximumKeyframes ||
 					count > imagegraph::Limits::MaximumKeyframes - aggregate) {
 					if (budget) budget->Reject();
-					return fail("Polar Mirror axes and dormant keys exceed aggregate key bounds");
+					return fail("source Vec2 axes and dormant keys exceed aggregate key bounds");
 				}
 				aggregate += count;
 			}
 
 			Vector2 defaults;
-			if (budget && !budget->Hold(256 + 3 * input.Default.size())) return false;
-			const auto authoredDefault = imagegraph::CatalogueDefault(input);
-			if (input.Id == "constant_dimension" && document.Project)
-				defaults = {double(document.Project->SurfaceWidth), double(document.Project->SurfaceHeight)};
-			else if (authoredDefault && std::holds_alternative<Vector2>(*authoredDefault))
-				defaults = std::get<Vector2>(*authoredDefault);
-			else
-				return fail("Polar Mirror axis constructor default is not represented");
+			bool needsConstructor = false;
+			for (size_t axis = 0; axis < 2; ++axis) {
+				const Json *saved =
+					encoded != record.end() && axis < encoded->size() ? &(*encoded)[axis] : nullptr;
+				needsConstructor |= !saved || (saved->is_array() && saved->empty());
+			}
+			if (needsConstructor) {
+				if (budget && !budget->Hold(256 + 3 * input.Default.size())) return false;
+				const auto authoredDefault = imagegraph::CatalogueDefault(input);
+				if (node.Type == "pc.mirror_polar" && input.Id == "constant_dimension" && document.Project)
+					defaults = {
+						double(document.Project->SurfaceWidth), double(document.Project->SurfaceHeight)
+					};
+				else if (authoredDefault && std::holds_alternative<Vector2>(*authoredDefault))
+					defaults = std::get<Vector2>(*authoredDefault);
+				else
+					return fail("source Vec2 axis constructor default is not represented");
+			}
 			if (!node.SourceSeparatedVec2Animators) {
 				if (budget && !budget->Hold(sizeof(imagegraph::SourceSeparatedVec2Data))) return false;
 				node.SourceSeparatedVec2Animators.emplace();
@@ -1764,6 +1774,7 @@ namespace engine::imagegraphio {
 				return false;
 			inputs.push_back({std::string(input.Id), {}});
 			auto &native = inputs.back();
+			native.Separated = record.value("sep_axis", false);
 			const auto keyCount = [&]() {
 				size_t count = document.Keyframes.size();
 				for (const auto &other : document.Nodes)
@@ -1785,7 +1796,7 @@ namespace engine::imagegraphio {
 				if (existing > imagegraph::Limits::MaximumKeyframes ||
 					std::max(size_t{1}, count) > imagegraph::Limits::MaximumKeyframes - existing) {
 					if (budget) budget->Reject();
-					return fail("Polar Mirror axes and dormant keys exceed aggregate key bounds");
+					return fail("source Vec2 axes and dormant keys exceed aggregate key bounds");
 				}
 				if (!saved || (saved->is_array() && saved->empty())) {
 					if (!AdmitNativeSlots(keys, 1, budget) || !AdmitNativeText(nodeId, budget) ||
@@ -1812,13 +1823,13 @@ namespace engine::imagegraphio {
 							nullptr,
 							budget
 						))
-						return fail("Polar Mirror separated scalar keys have no exact native mapping");
+						return fail("source Vec2 separated scalar keys have no exact native mapping");
 					const std::string_view prefix = axis == 0 ? "animators/0/" : "animators/1/";
 					for (auto &key : keys) {
 						if (key.SourceKeyId.size() >
 								imagegraph::Limits::MaximumSourceKeyIdBytes - prefix.size() ||
 							!AdmitNativeTextSize(prefix.size() + key.SourceKeyId.size(), budget))
-							return fail("Polar Mirror physical axis key identity exceeds byte bounds");
+							return fail("source Vec2 physical axis key identity exceeds byte bounds");
 						key.SourceKeyId.insert(0, prefix);
 					}
 				}
@@ -1842,18 +1853,21 @@ namespace engine::imagegraphio {
 				return false;
 			}
 			const std::string id(input.Id);
-			bool separatedMirror = false;
+			bool separatedVec2 = false;
 			// A linked Vec2 path getter reads this consumer's local raw animator X.
-			if (entry.Type == "pc.mirror_polar" && input.SourceKind == "Vec2") {
+			if (input.Type == imagegraph::ValueType::Vector2 && input.SourceIndex >= 0 &&
+				(input.SourceKind == "Vec2" || input.SourceKind == "IVec2" ||
+				 input.SourceKind == "Dimension" || input.SourceKind == "Range")) {
 				parseLinkedLocalAnimator = true;
 				const auto separated = record.find("sep_axis");
 				if (separated != record.end() && !separated->is_boolean()) {
-					reason = "Polar Mirror separated axis flag is malformed";
+					reason = "source Vec2 separated axis flag is malformed";
 					return false;
 				}
-				if (separated != record.end() && separated->get<bool>()) {
-					separatedMirror = true;
-					if (!CatalogueMirrorAxes(record, input, nodeId, node, animation, reason, budget))
+				const auto axes = record.find("animators");
+				separatedVec2 = separated != record.end() && separated->get<bool>();
+				if (separatedVec2 || (axes != record.end() && (!axes->is_array() || !axes->empty()))) {
+					if (!CatalogueVec2Axes(record, input, nodeId, node, animation, reason, budget))
 						return false;
 				}
 			}
@@ -2025,7 +2039,7 @@ namespace engine::imagegraphio {
 					reason = "linked Quaternion metadata exceeds native track count bounds";
 					return false;
 				}
-				if (!CatalogueTrack(record, nodeId, id, animation, budget, separatedMirror)) {
+				if (!CatalogueTrack(record, nodeId, id, animation, budget, separatedVec2)) {
 					reason = "linked Quaternion getter metadata is not representable";
 					return false;
 				}
@@ -2049,10 +2063,11 @@ namespace engine::imagegraphio {
 			const auto stored = record.find("r");
 			if (stored == record.end()) return true;
 			// Reloading an empty list leaves valueAnimator's constructor key intact.
-			if (entry.Type == "pc.mirror_polar" && input.SourceKind == "Vec2" && stored->is_array() &&
+			if (parseLinkedLocalAnimator && input.Type == imagegraph::ValueType::Vector2 &&
+				entry.Type != "pc.group_input" && entry.Type != "pc.group_output" && stored->is_array() &&
 				stored->empty()) {
-				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget, separatedMirror)) {
-					reason = "empty Mirror constructor animator settings are not representable";
+				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget, separatedVec2)) {
+					reason = "empty source Vec2 constructor animator settings are not representable";
 					return false;
 				}
 				return true;
@@ -2072,7 +2087,7 @@ namespace engine::imagegraphio {
 			// Empty scalar HLSL animators return numeric zero in valueAnimator.getValue.
 			if (entry.Type == "pc.hlsl" && input.Id.starts_with("argument_value_") &&
 				input.Type != imagegraph::ValueType::Array && stored->is_array() && stored->empty()) {
-				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget, separatedMirror)) {
+				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget, separatedVec2)) {
 					reason = "empty HLSL animator settings are not representable";
 					return false;
 				}
@@ -2082,7 +2097,7 @@ namespace engine::imagegraphio {
 			if (record.value("anim", false) || (stored->is_array() && !stored->empty())) {
 				if ((entry.Type == "pc.group_input" || entry.Type == "pc.group_output") &&
 					stored->is_array() && stored->empty()) {
-					if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget, separatedMirror)) {
+					if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget, separatedVec2)) {
 						reason = "empty group animator settings are not representable";
 						return false;
 					}
@@ -2107,7 +2122,7 @@ namespace engine::imagegraphio {
 						&input,
 						budget
 					) ||
-					!CatalogueTrack(record, nodeId, id, animation, budget, separatedMirror)) {
+					!CatalogueTrack(record, nodeId, id, animation, budget, separatedVec2)) {
 					reason = "animated input " + id + " has no exact native keyframe mapping";
 					return false;
 				}
@@ -2116,7 +2131,7 @@ namespace engine::imagegraphio {
 			}
 			if ((entry.Type == "pc.group_input" || entry.Type == "pc.group_output") && stored->is_array() &&
 				stored->empty()) {
-				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget, separatedMirror)) {
+				if (mapped || !CatalogueTrack(record, nodeId, id, animation, budget, separatedVec2)) {
 					reason = "static empty group animator settings are not representable";
 					return false;
 				}
@@ -2144,7 +2159,7 @@ namespace engine::imagegraphio {
 			}
 			const Json &value = singleKey ? (*stored)[0][1] : (*stored)["d"];
 			if ((record.contains("on_end") || record.contains("loop_range")) &&
-				!CatalogueTrack(record, nodeId, id, animation, budget, separatedMirror)) {
+				!CatalogueTrack(record, nodeId, id, animation, budget, separatedVec2)) {
 				reason = "static compressed animator settings are not representable";
 				return false;
 			}
@@ -2204,7 +2219,7 @@ namespace engine::imagegraphio {
 						budget
 					)) {
 					if (!record.contains("on_end") && !record.contains("loop_range") &&
-						!CatalogueTrack(record, nodeId, id, animation, budget, separatedMirror)) {
+						!CatalogueTrack(record, nodeId, id, animation, budget, separatedVec2)) {
 						reason = "static compact animator settings are not representable";
 						return false;
 					}

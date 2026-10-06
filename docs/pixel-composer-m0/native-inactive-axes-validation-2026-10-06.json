@@ -1,0 +1,464 @@
+{
+  "scope": "native Polar Mirror retained axis activity; separate/combine authoring controls and general Vec2 support remain unfinished",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "verified_source_scripts": [
+    {
+      "path": "scripts/node_keyframe/node_keyframe.gml",
+      "bytes": 24794,
+      "sha256": "73a7fe4c85562db01192ae88c7ab35ebd16684f9d3831641e53a572b1480a49b",
+      "git_blob_sha1": "664ab1dd72723221dd2182a87a6ea4c2f9fd3327"
+    },
+    {
+      "path": "scripts/node_value/node_value.gml",
+      "bytes": 111774,
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125"
+    },
+    {
+      "path": "scripts/panel_animation_dopesheet/panel_animation_dopesheet.gml",
+      "bytes": 183889,
+      "sha256": "4c28791f249e057f68d449d7b3f5ea41c93a278b0a487de0396179069a451c27",
+      "git_blob_sha1": "ddea7c86342250dfb7a597f640d4437db28be565"
+    }
+  ],
+  "changes": [
+    "retained scalar axes have an independent Separated flag",
+    "inactive axes persist while ordinary combined keys supply values and receive mode/group edits",
+    "native format 9 optional matched X/Y mode markers; omitted mode stays active",
+    "capture v3 active storage and v4 mixed active/inactive storage; read v1 through v4",
+    "PXC import and inverse edits preserve inactive axis keys and opaque fields"
+  ],
+  "issues_repaired": [
+    {
+      "batch": 1,
+      "issue": "new PXC combined-key fixture named relative_dimension instead of center",
+      "repair": "use the fixture physical center port"
+    },
+    {
+      "review": "uniform solid-image equality did not prove sampling",
+      "repair": "removed redundant case; retained coordinate-color group edit, evaluation, projection and reopen proof"
+    },
+    {
+      "batch": 2,
+      "issue": "mixed capture fixture duplicated capture identity",
+      "repair": "second capture uses its own processor row"
+    }
+  ],
+  "verification": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-bake-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_bake"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.273,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-physics-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "e93999a9e8af414ee1ecaa39199c3713458ddcfe1e47ad6921e3981a09eb2b80",
+      "exit_code": 0,
+      "elapsed_seconds": 0.379,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "e93999a9e8af414ee1ecaa39199c3713458ddcfe1e47ad6921e3981a09eb2b80",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-runner-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph_runner"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "a0d889eac8296ab8849628afd9a765a1842a1a4fdbd484d2953ae27c910c90d6",
+      "exit_code": 0,
+      "elapsed_seconds": 0.334,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "a0d889eac8296ab8849628afd9a765a1842a1a4fdbd484d2953ae27c910c90d6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-font-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphfont"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "017e4061cd61d3bd152cb1c706dbe3e23848981e89dea108365af957b3b13368",
+      "exit_code": 0,
+      "elapsed_seconds": 0.482,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "017e4061cd61d3bd152cb1c706dbe3e23848981e89dea108365af957b3b13368",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-export-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphexport",
+        "~\"Local HTTP host serves source GET POST and enforces byte limits\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "5537565c472fd1eaa3b86ec82a71f3eb210692cfe7df0878e7ec41c416c23ba3",
+      "exit_code": 0,
+      "elapsed_seconds": 0.57,
+      "assertions": 3123,
+      "cases": 76,
+      "binary_sha256_after": "5537565c472fd1eaa3b86ec82a71f3eb210692cfe7df0878e7ec41c416c23ba3",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-render-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_render",
+        "[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "449c41eff06899687863594ffdfb7d9ce6291aa16d20bfde6d2b4ff365d0a94d",
+      "exit_code": 0,
+      "elapsed_seconds": 9.632,
+      "assertions": 863,
+      "cases": 15,
+      "binary_sha256_after": "449c41eff06899687863594ffdfb7d9ce6291aa16d20bfde6d2b4ff365d0a94d",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-cli-batch3.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_)",
+        "--output-on-failure",
+        "-j8"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.266,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-io-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "840c2136075db71290ae995405c723c4cc924848d947a90e8ec9d7992774ba99",
+      "exit_code": 0,
+      "elapsed_seconds": 3.388,
+      "assertions": 11720,
+      "cases": 277,
+      "binary_sha256_after": "840c2136075db71290ae995405c723c4cc924848d947a90e8ec9d7992774ba99",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-core-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "054637b4de24f43a8b4494537b01c6762cc902c8b048fbcbc550c25b3aa1f489",
+      "exit_code": 0,
+      "elapsed_seconds": 3.632,
+      "assertions": 1892583,
+      "cases": 2888,
+      "binary_sha256_after": "054637b4de24f43a8b4494537b01c6762cc902c8b048fbcbc550c25b3aa1f489",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-assetc-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_assetc"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "192e3235172ceef561e37e2b83047548ecffd6718fcd90a527b184d64d9a09e6",
+      "exit_code": 0,
+      "elapsed_seconds": 6.118,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "192e3235172ceef561e37e2b83047548ecffd6718fcd90a527b184d64d9a09e6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-client-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_client",
+        "~[.]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\",[argument_binding][gpu]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\",[argument-transform-gpu]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "9617a1b90cb9af2b6341cd8cfe84ce493a67f05cda535385437764d53da92d9c",
+      "exit_code": 0,
+      "elapsed_seconds": 3.302,
+      "assertions": 23113,
+      "cases": 355,
+      "binary_sha256_after": "9617a1b90cb9af2b6341cd8cfe84ce493a67f05cda535385437764d53da92d9c",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-studio-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_studio",
+        "~\"the assets panel lists what a listing origin holds\"~\"Studio factory MCP manifest is available\"~\"an origin with enumeration off says so rather than showing nothing\"~\"Studio keeps its optional control surface after an occupied port\"~\"hosting produces a session and an invitation to pass on\"~\"the collaborator count only moves what it changes\"~\"Studio normal MCP manifest is available\"~\"Studio factory startup refuses an occupied required control port\"~\"Studio Project ZIP contains every catalogue asset and hosts without source folders\"~\"the editor limit is enforced by the hosted stream\"~\"private edit streams require the invitation key after discovery\"~\"a hosted session carries an edit to a guest\"~\"hosting opens a session other editors can join\"~\"leaving takes the session and its socket down\"~\"leaving takes the session back down\"~\"a public session says so and carries no invitation\"~\"a listing origin refuses the wrong key\\, and the tab says which\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "dfdbb2c497959eeb6cf26336b754c28b393f2339a0487fe06ea5edd84bcb6234",
+      "exit_code": 0,
+      "elapsed_seconds": 9.597,
+      "assertions": 45143,
+      "cases": 981,
+      "binary_sha256_after": "dfdbb2c497959eeb6cf26336b754c28b393f2339a0487fe06ea5edd84bcb6234",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-nodegraph-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_nodegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "exit_code": 0,
+      "elapsed_seconds": 1.324,
+      "assertions": 286,
+      "cases": 34,
+      "binary_sha256_after": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-ui-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_ui"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "f4e7d25e578291592ab8d3b802f596a4c43c95a9de2f5a34ee934ac18b8801e4",
+      "exit_code": 0,
+      "elapsed_seconds": 0.618,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "f4e7d25e578291592ab8d3b802f596a4c43c95a9de2f5a34ee934ac18b8801e4",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-startup-batch3.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^studio_composer_startup_arguments$",
+        "-V"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.273,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-lint-batch3.log",
+      "command": [
+        "ruff",
+        "check",
+        "scripts/pixel-composer/generate-catalogue.py",
+        "scripts/tests/pixel_composer_catalogue_metadata_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.013
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-architecture-batch3.log",
+      "command": [
+        "cmake",
+        "-DGRAPH=.cache/build/release-tests/target-graph.json",
+        "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+        "-P",
+        "mono.tools/architecture/CheckTargetGraph.cmake"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.395
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-python-batch3.log",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "pixel_composer_*_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.527,
+      "python_cases": 100
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-format-batch3.log",
+      "command": [
+        "/usr/bin/clang-format-21",
+        "--dry-run",
+        "--Werror",
+        "mono.studio/src/ImageGraphCacheBackground.hpp",
+        "mono.studio/src/ImageGraphCacheBackground.cpp",
+        "mono.studio/tests/ImageGraphCacheBackground.cpp",
+        "mono.studio/src/ImageGraphCacheControls.hpp",
+        "mono.studio/tests/ImageGraphCacheControls.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+        "mono.studio/nodegraph/src/Editor.cpp",
+        "mono.studio/nodegraph/tests/Editor.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+        "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+        "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+        "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+        "mono.engine/imagegraph/src/DataReplay.cpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+        "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+        "mono.engine/imagegraph/tests/DataReplay.cpp",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+        "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+        "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+        "mono.engine/ui/src/Interface.cpp",
+        "mono.engine/ui/tests/Interface.cpp",
+        "mono.engine/ui/include/engine/ui/Interface.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+        "mono.engine/imagegraph/src/nodes/Path.hpp",
+        "mono.engine/imagegraph/tests/Catalogue.cpp",
+        "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+        "mono.studio/tests/ImageGraphPatternGroups.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+        "mono.engine/imagegraph/src/SourceModeTransition.cpp",
+        "mono.engine/imagegraph/src/GroupReplay.cpp",
+        "mono.engine/imagegraph/src/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/BuiltinRandomCaptureCodec.hpp",
+        "mono.engine/imagegraph/tests/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/tests/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/tests/SourceMirrorPathProjection.cpp",
+        "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "mono.engine/imagegraphio/tests/PxcxMirrorPathRatio.cpp"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.181
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/inactive-axes-diff-batch3.log",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.094
+    }
+  ],
+  "child_hashes": {
+    "before": {
+      ".cache/build/release-tests/tools/assetc": "b1f0f31a240c4744a687b86218eded7383f7c7f5755ce0aab413d83a4366ea39",
+      ".cache/build/release-tests/tools/imagegraph": "2b6ddad48fe5a6b9d05f7d3cf0f3b3873774c165ba61b75f771afade5f8485b7"
+    },
+    "after": {
+      ".cache/build/release-tests/tools/assetc": "b1f0f31a240c4744a687b86218eded7383f7c7f5755ce0aab413d83a4366ea39",
+      ".cache/build/release-tests/tools/imagegraph": "2b6ddad48fe5a6b9d05f7d3cf0f3b3873774c165ba61b75f771afade5f8485b7"
+    }
+  },
+  "excluded_socket_cases": {
+    "studio": [
+      "the assets panel lists what a listing origin holds",
+      "Studio factory MCP manifest is available",
+      "an origin with enumeration off says so rather than showing nothing",
+      "Studio keeps its optional control surface after an occupied port",
+      "hosting produces a session and an invitation to pass on",
+      "the collaborator count only moves what it changes",
+      "Studio normal MCP manifest is available",
+      "Studio factory startup refuses an occupied required control port",
+      "Studio Project ZIP contains every catalogue asset and hosts without source folders",
+      "the editor limit is enforced by the hosted stream",
+      "private edit streams require the invitation key after discovery",
+      "a hosted session carries an edit to a guest",
+      "hosting opens a session other editors can join",
+      "leaving takes the session and its socket down",
+      "leaving takes the session back down",
+      "a public session says so and carries no invitation",
+      "a listing origin refuses the wrong key, and the tab says which"
+    ],
+    "client": [
+      "client normal MCP surface is available",
+      "client MCP listener restarts with its reviewed normal manifest",
+      "client factory MCP surface is available"
+    ],
+    "export": [
+      "Local HTTP host serves source GET POST and enforces byte limits"
+    ]
+  },
+  "limits": [
+    "21 socket cases excluded after prior sandbox socket permission failures",
+    "no licensed reference runtime or matched source pixel captures",
+    "no live headed Studio verification",
+    "no general Vec2 authoring or separate/combine UI acceptance",
+    "no performance improvement claim or new benchmark"
+  ],
+  "environment": {
+    "preset": "release-tests",
+    "backend": "offscreen Vulkan",
+    "CCACHE_DIR": ".cache/ccache",
+    "MESA_SHADER_CACHE_DIR": ".cache/mesa-shader-cache"
+  }
+}

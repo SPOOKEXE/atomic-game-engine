@@ -3021,7 +3021,9 @@ namespace engine::imagegraph {
 					WriteQuoted(stream, node.Id);
 					stream << ' ';
 					WriteQuoted(stream, input.Port);
-					stream << ' ' << (axis == 0 ? "x" : "y") << '\n';
+					stream << ' ' << (axis == 0 ? "x" : "y");
+					if (!input.Separated) stream << " 0";
+					stream << '\n';
 					if (!detail::WriteKeyframeText(stream, input.Axes[axis].Keys, document.FormatVersion))
 						return {};
 					stream << "source_vec2_axis_end\n";
@@ -3915,13 +3917,17 @@ namespace engine::imagegraph {
 			} else if (marker == "source_vec2_axis" && parsed.FormatVersion >= 9) {
 				std::string nodeId, port, axis;
 				if (axisKeys || !readQuoted(row, nodeId) || !readQuoted(row, port) || !(row >> token(axis)) ||
-					HasTrailing(row) || (axis != "x" && axis != "y") ||
-					!detail::SourceMirrorVectorIndex(port) || !insertAxis(nodeId, port, axis))
+					(axis != "x" && axis != "y") || !insertAxis(nodeId, port, axis))
 					goto malformed;
+				int separated = 1;
+				row >> std::ws;
+				if (!row.eof() && (!(row >> separated) || HasTrailing(row))) goto malformed;
+				if (separated != 0 && separated != 1) goto malformed;
 				auto found = std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const auto &node) {
 					return node.Id == nodeId;
 				});
-				if (found == parsed.Nodes.end() || found->Type != "pc.mirror_polar") goto malformed;
+				if (found == parsed.Nodes.end() || !detail::SourceSeparatedVec2Input(*found, port))
+					goto malformed;
 				if (!found->SourceSeparatedVec2Animators) {
 					if (budget) {
 						auto storage = budget->Reserve(sizeof(SourceSeparatedVec2Data));
@@ -3946,11 +3952,12 @@ namespace engine::imagegraph {
 					} else
 						copiedPort = port;
 					if (!reserveSlots(inputs, inputs.size() + 1)) goto limited;
-					inputs.push_back({std::move(copiedPort), {}});
+					inputs.push_back({std::move(copiedPort), {}, separated != 0});
 					input = inputs.end() - 1;
 					if (budget && !rowQuoteCharge.Merge(std::move(*copyCharge))) std::terminate();
 					remember(input->Port);
 				}
+				if (input->Separated != (separated != 0)) goto malformed;
 				axisKeys = &input->Axes[axis == "x" ? 0 : 1].Keys;
 				release(axisNode);
 				release(axisPort);
@@ -12677,6 +12684,171 @@ namespace engine::imagegraph {
 							context.ValueViews.emplace_back(input.Id, &*selected->Default);
 					}
 				}
+				detail::EvaluationVector<Value> separatedSamples{detail::EvaluationAllocator<Value>(budget)};
+				const auto separatedInput =
+					[&](std::string_view port) -> const SourceSeparatedVec2Animator * {
+					if ((node.Type == "pc.mirror_polar" && detail::SourceMirrorVectorIndex(port)) ||
+						context.IsLinked(port) ||
+						!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, port))
+						return nullptr;
+					const auto &owner = inputOwner(port);
+					const auto ownerPort = inputAnimatorPort(port);
+					if (!detail::SourceSeparatedVec2Input(owner, ownerPort)) return nullptr;
+					const auto *overlay = request.GroupReplay
+											  ? request.GroupReplay->SharedSubtype(owner.Id, ownerPort)
+											  : nullptr;
+					const auto *axes = overlay && overlay->SeparatedVec2
+										   ? &*overlay->SeparatedVec2
+										   : detail::FindSeparatedVec2(owner, ownerPort);
+					return axes && axes->Separated ? axes : nullptr;
+				};
+				size_t separatedCount = 0;
+				for (const auto &input : catalogueEntry->Inputs)
+					separatedCount += separatedInput(input.Id) != nullptr;
+				for (const auto &input : node.DynamicInputs)
+					separatedCount += separatedInput(input.Id) != nullptr;
+				separatedSamples.reserve(separatedCount);
+				const auto sampleSeparatedInput = [&](std::string_view port) {
+					const auto *axes = separatedInput(port);
+					if (!axes) return true;
+					const auto &owner = inputOwner(port);
+					const auto ownerPort = inputAnimatorPort(port);
+					const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
+											  ? request.GroupReplay->Binding(node.Id, port)
+											  : nullptr;
+					const bool writerAnimated =
+						binding && !detail::InheritedMovedSourceGetter(node, port, binding)
+							? binding->Writer == GroupSubtypeAnimator::Animated
+							: std::find(
+								  owner.SourceAnimatedInputs.begin(),
+								  owner.SourceAnimatedInputs.end(),
+								  ownerPort
+							  ) != owner.SourceAnimatedInputs.end();
+					const bool getterAnimated = detail::SourcePropertyGetterAnimated(
+													document, document.Nodes[index], port, request.GroupReplay
+					)
+													.value_or(false);
+					const AnimationTrack *track = nullptr;
+					for (const auto &candidate : document.Tracks)
+						if (candidate.NodeId == owner.Id && candidate.Port == ownerPort) {
+							track = &candidate;
+							break;
+						}
+					Vector2 pair;
+					for (size_t axis = 0; axis < 2; ++axis) {
+						double value = 0;
+						const auto status = detail::SampleSeparatedScalar(
+							axes->Axes[axis],
+							track,
+							document.Timeline ? &*document.Timeline : nullptr,
+							request,
+							getterAnimated,
+							writerAnimated,
+							budget,
+							value,
+							diagnostic
+						);
+						if (status != Status::Ok) return false;
+						if (axis == 0)
+							pair.X = value;
+						else
+							pair.Y = value;
+					}
+					separatedSamples.emplace_back(pair);
+					bool replaced = false;
+					for (auto &view : context.ValueViews)
+						if (view.first == port) {
+							view.second = &separatedSamples.back();
+							replaced = true;
+						}
+					if (!replaced) context.ValueViews.emplace_back(port, &separatedSamples.back());
+					return true;
+				};
+				for (const auto &input : catalogueEntry->Inputs)
+					if (!sampleSeparatedInput(input.Id)) return diagnostic.Code;
+				for (const auto &input : node.DynamicInputs)
+					if (!sampleSeparatedInput(input.Id)) return diagnostic.Code;
+				std::array<Value, 5> mirrorAxisSamples{};
+				if (node.Type == "pc.mirror_polar") {
+					for (size_t i = 0; i < detail::SourceMirrorVectorPorts.size(); ++i) {
+						const auto port = detail::SourceMirrorVectorPorts[i];
+						const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
+												  ? request.GroupReplay->Binding(node.Id, port)
+												  : nullptr;
+						if (detail::InheritedMovedSourceGetter(node, port, binding)) binding = nullptr;
+						const auto rawPort = detail::SourceGetterPort(node, port, binding);
+						const Node &rawNode = binding ? timelineOverrides.Find(
+															nodeIndices.at(binding->OwnerId),
+															document.Nodes[nodeIndices.at(binding->OwnerId)]
+														)
+													  : node;
+						const Value *raw =
+							binding ? SharedGroupInputView(document, request.GroupReplay, node, port)
+									: nullptr;
+						const auto mode = detail::SourceMirrorGetterAnimated(
+							document, document.Nodes[index], port, request.GroupReplay
+						);
+						if (!raw && (!mode || *mode))
+							if (const auto *value = FindValue(rawNode, rawPort)) raw = &value->Data;
+						if (!raw)
+							for (const auto &key : document.Keyframes)
+								if (key.NodeId == rawNode.Id && key.Port == rawPort) {
+									raw = &key.Data;
+									break;
+								}
+						if (!raw)
+							if (const auto *value = FindValue(rawNode, rawPort)) raw = &value->Data;
+						const auto *sharedAxes = request.GroupReplay
+													 ? request.GroupReplay->SharedSubtype(rawNode.Id, rawPort)
+													 : nullptr;
+						const auto *axes = sharedAxes && sharedAxes->SeparatedVec2
+											   ? &*sharedAxes->SeparatedVec2
+											   : detail::FindSeparatedVec2(rawNode, rawPort);
+						if (axes && axes->Separated) {
+							const AnimationTrack *track = nullptr;
+							for (const auto &candidate : document.Tracks)
+								if (candidate.NodeId == rawNode.Id && candidate.Port == rawPort) {
+									track = &candidate;
+									break;
+								}
+							const bool writerAnimated =
+								binding ? binding->Writer == GroupSubtypeAnimator::Animated
+										: std::find(
+											  rawNode.SourceAnimatedInputs.begin(),
+											  rawNode.SourceAnimatedInputs.end(),
+											  rawPort
+										  ) != rawNode.SourceAnimatedInputs.end();
+							Vector2 pair;
+							for (size_t axis = 0; axis < 2; ++axis) {
+								double value = 0;
+								const Status status = detail::SampleSeparatedScalar(
+									axes->Axes[axis],
+									track,
+									document.Timeline ? &*document.Timeline : nullptr,
+									request,
+									mode.value_or(false),
+									writerAnimated,
+									budget,
+									value,
+									diagnostic
+								);
+								if (status != Status::Ok) return status;
+								if (axis == 0)
+									pair.X = value;
+								else
+									pair.Y = value;
+							}
+							mirrorAxisSamples[i] = pair;
+							raw = &mirrorAxisSamples[i];
+							if (!context.IsLinked(port)) {
+								// The separated animator replaces local raw storage, never a linked producer.
+								for (auto &view : context.ValueViews)
+									if (view.first == port) view.second = raw;
+							}
+						}
+						context.MirrorRawAnimators[i] = raw;
+					}
+				}
 				detail::EvaluationVector<detail::PcxInputProgram> pcxPrograms{
 					detail::EvaluationAllocator<detail::PcxInputProgram>(budget)
 				};
@@ -12736,87 +12908,6 @@ namespace engine::imagegraph {
 						diagnostic, context.FailureCode, context.FailureMessage, node.Id, context.FailurePort
 					);
 					return diagnostic.Code;
-				}
-				std::array<Value, 5> mirrorAxisSamples{};
-				if (node.Type == "pc.mirror_polar") {
-					for (size_t i = 0; i < detail::SourceMirrorVectorPorts.size(); ++i) {
-						const auto port = detail::SourceMirrorVectorPorts[i];
-						const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
-												  ? request.GroupReplay->Binding(node.Id, port)
-												  : nullptr;
-						if (detail::InheritedMovedSourceGetter(node, port, binding)) binding = nullptr;
-						const auto rawPort = detail::SourceGetterPort(node, port, binding);
-						const Node &rawNode = binding ? timelineOverrides.Find(
-															nodeIndices.at(binding->OwnerId),
-															document.Nodes[nodeIndices.at(binding->OwnerId)]
-														)
-													  : node;
-						const Value *raw =
-							binding ? SharedGroupInputView(document, request.GroupReplay, node, port)
-									: nullptr;
-						const auto mode = detail::SourceMirrorGetterAnimated(
-							document, document.Nodes[index], port, request.GroupReplay
-						);
-						if (!raw && (!mode || *mode))
-							if (const auto *value = FindValue(rawNode, rawPort)) raw = &value->Data;
-						if (!raw)
-							for (const auto &key : document.Keyframes)
-								if (key.NodeId == rawNode.Id && key.Port == rawPort) {
-									raw = &key.Data;
-									break;
-								}
-						if (!raw)
-							if (const auto *value = FindValue(rawNode, rawPort)) raw = &value->Data;
-						const auto *sharedAxes = request.GroupReplay
-													 ? request.GroupReplay->SharedSubtype(rawNode.Id, rawPort)
-													 : nullptr;
-						const auto *axes = sharedAxes && sharedAxes->SeparatedVec2
-											   ? &*sharedAxes->SeparatedVec2
-											   : detail::FindSeparatedVec2(rawNode, rawPort);
-						if (axes) {
-							const AnimationTrack *track = nullptr;
-							for (const auto &candidate : document.Tracks)
-								if (candidate.NodeId == rawNode.Id && candidate.Port == rawPort) {
-									track = &candidate;
-									break;
-								}
-							const bool writerAnimated =
-								binding ? binding->Writer == GroupSubtypeAnimator::Animated
-										: std::find(
-											  rawNode.SourceAnimatedInputs.begin(),
-											  rawNode.SourceAnimatedInputs.end(),
-											  rawPort
-										  ) != rawNode.SourceAnimatedInputs.end();
-							Vector2 pair;
-							for (size_t axis = 0; axis < 2; ++axis) {
-								double value = 0;
-								const Status status = detail::SampleSeparatedScalar(
-									axes->Axes[axis],
-									track,
-									document.Timeline ? &*document.Timeline : nullptr,
-									request,
-									mode.value_or(false),
-									writerAnimated,
-									budget,
-									value,
-									diagnostic
-								);
-								if (status != Status::Ok) return status;
-								if (axis == 0)
-									pair.X = value;
-								else
-									pair.Y = value;
-							}
-							mirrorAxisSamples[i] = pair;
-							raw = &mirrorAxisSamples[i];
-							if (!context.IsLinked(port)) {
-								// The separated animator replaces local raw storage, never a linked producer.
-								for (auto &view : context.ValueViews)
-									if (view.first == port) view.second = raw;
-							}
-						}
-						context.MirrorRawAnimators[i] = raw;
-					}
 				}
 				detail::SourceMirrorPathProjection mirrorPaths(context);
 				if (!mirrorPaths.Prepare()) {

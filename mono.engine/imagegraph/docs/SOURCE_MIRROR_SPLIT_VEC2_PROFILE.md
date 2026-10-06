@@ -1,10 +1,23 @@
-# Polar Mirror separated scalar animators
+# Source two-axis scalar animators
 
-The native CPU route represents source `sep_axis` storage for Polar Mirror's
-`relative_dimension`, `constant_dimension`, `position`, `center` and `scale`.
+grug represents source `sep_axis` storage on catalogue Vec2, IVec2, Dimension and Range
+inputs, including declared dynamic inputs. template-shaped names without
+a declared dynamic input refuse storage. generic Vector is not a two-axis alias.
+
+Polar Mirror keeps its local raw Path getter for `relative_dimension`,
+`constant_dimension`, `position`, `center` and `scale`.
 Each input owns its original X/Y scalar key lists. Shared property flags, end
 mode and loop range stay on the existing input and animation track. Dormant
 unsplit tuples and keys remain authored and survive saves unchanged.
+
+retained axis storage carries its own `Separated` flag. when false, ordinary
+Vec2 keys supply values and receive mode changes and group edits. inactive scalar
+keys still count toward bounds and survive projection, native saves and PXC edits.
+
+unlinked raw axes are sampled before PCX expressions. linked producers retain
+priority. consumer processing follows raw sampling; inactive combined drivers
+are not executed while split axes supply the value. source IVec2 fractional
+rounding and unit conversion are not established by the integer-endpoint tests.
 
 A static getter reads the first stored scalar key. An animated getter evaluates
 a lone-key driver before considering the original writer's static multi-key
@@ -33,8 +46,11 @@ does not establish the native GameMaker sort's tie order, so exact runner parity
 for that tie remains unverified.
 
 Native format 9 uses named `source_vec2_axis` X/Y blocks with the same full key
-grammar as ordinary keys. Complete authored builtin-random capture format 3
-owns these lists and reads formats 1 and 2 without axes. PXC import retains the
+grammar as ordinary keys. an optional final 0/1 on each axis header selects the
+animator; omission means active. X/Y modes must agree. complete authored
+builtin-random captures use format 3 for active axes and format 4 when any axes
+are inactive; format 4 stores the flag for every retained input. readers accept
+formats 1 and 2 without axes and format 3 with active axes. PXC import retains the
 physical scalar record identities separately for X and Y; inverse publication
 preserves opaque key tails, unused extra axes, dormant tuples, links and units.
 Empty saved PXC axes regain source constructor keys. Publishing a live empty
@@ -56,6 +72,11 @@ sampling use the same existing CPU document route; repeated seeks reconstruct
 the requested axes rather than retaining a sampled vector as authored state.
 Missing animation flags preserve static values. Explicit source animation
 enables sampled axis changes; both modes have literal client pixel fixtures.
+
+separate/combine authoring controls are still unfinished. this flag preserves
+the source storage distinction needed by those controls. generic Vector, dynamic
+HLSL property kinds and source constructors with unresolved defaults still need
+separate source-backed handling.
 
 This is a CPU reference profile. GPU acceptance and exact GameMaker runtime
 comparison are separate checks. The existing source Wiggle driver needs its

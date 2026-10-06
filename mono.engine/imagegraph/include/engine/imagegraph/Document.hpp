@@ -1334,6 +1334,8 @@ namespace engine::imagegraph {
 	struct SourceSeparatedVec2Animator {
 		std::string Port;
 		std::array<SourceScalarAnimator, 2> Axes;
+		// combine keeps these tracks stored; only the selected animator supplies values.
+		bool Separated = true;
 		bool operator==(const SourceSeparatedVec2Animator &) const = default;
 	};
 	struct SourceSeparatedVec2Data {

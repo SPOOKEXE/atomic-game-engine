@@ -3783,7 +3783,7 @@ namespace engine::imagegraphio {
 						return Reject(
 							diagnostic, "PXC separated animator has no physical input", node.Id, input.Port
 						);
-					(*record)["sep_axis"] = true;
+					(*record)["sep_axis"] = input.Separated;
 					if (before && *before == input) continue;
 					if (!record->contains("animators")) (*record)["animators"] = Json::array();
 					auto &saved = (*record)["animators"];

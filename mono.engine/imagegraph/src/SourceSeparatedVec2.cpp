@@ -1,6 +1,5 @@
 #include "SourceSeparatedVec2.hpp"
 
-#include "SourceMirrorAnimator.hpp"
 #include "TimelineDrivers.hpp"
 #include "TimelineSchedule.hpp"
 
@@ -13,6 +12,35 @@
 #include <tuple>
 
 namespace engine::imagegraph::detail {
+	const CatalogueInput *SourceSeparatedVec2Input(const Node &node, std::string_view port) {
+		const auto *entry = FindCatalogueEntry(node.Type);
+		if (!entry) return nullptr;
+		const auto *input = FindCatalogueInput(*entry, port);
+		if (!input) {
+			const auto declared =
+				std::find_if(node.DynamicInputs.begin(), node.DynamicInputs.end(), [&](const auto &value) {
+					return value.Id == port;
+				});
+			if (declared == node.DynamicInputs.end()) return nullptr;
+			size_t group = 0;
+			input = FindDynamicTemplate(*entry, port, group);
+		}
+		if (!input || input->SourceIndex < 0 || input->Type != ValueType::Vector2) return nullptr;
+		return input->SourceKind == "Vec2" || input->SourceKind == "IVec2" ||
+					   input->SourceKind == "Dimension" || input->SourceKind == "Range"
+				   ? input
+				   : nullptr;
+	}
+	size_t SourceSeparatedVec2InputCount(const Node &node) {
+		const auto *entry = FindCatalogueEntry(node.Type);
+		if (!entry) return 0;
+		size_t count = 0;
+		for (const auto &input : entry->Inputs)
+			count += SourceSeparatedVec2Input(node, input.Id) != nullptr;
+		for (const auto &input : node.DynamicInputs)
+			count += SourceSeparatedVec2Input(node, input.Id) != nullptr;
+		return count;
+	}
 	const SourceSeparatedVec2Animator *FindSeparatedVec2(const Node &node, std::string_view port) {
 		if (!node.SourceSeparatedVec2Animators) return nullptr;
 		for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
@@ -89,26 +117,31 @@ namespace engine::imagegraph::detail {
 			diagnostic = {code, node.Id, std::string(port), std::string(message)};
 			return code;
 		};
+		if (node.DynamicInputs.size() > MaximumDynamicInputsForNode(node))
+			return fail(Status::LimitExceeded, "separated Vec2 dynamic declarations exceed bounds");
 		const auto &inputs = node.SourceSeparatedVec2Animators->Inputs;
 		size_t totalKeys = aggregateKeys;
-		if (node.Type != "pc.mirror_polar" || inputs.empty())
-			return fail(Status::InvalidValue, "separated Vec2 storage requires a Polar Mirror input");
-		if (inputs.size() > SourceMirrorVectorPorts.size())
-			return fail(Status::LimitExceeded, "separated Vec2 input count exceeds Mirror controls");
-		std::array<bool, 5> ports{};
+		if (inputs.empty())
+			return fail(Status::InvalidValue, "separated Vec2 storage requires a source input");
+		if (inputs.size() > Limits::MaximumArrayElements ||
+			inputs.size() > SourceSeparatedVec2InputCount(node))
+			return fail(Status::LimitExceeded, "separated Vec2 input count exceeds declared source controls");
+		std::array<std::string_view, Limits::MaximumArrayElements> ports{};
+		size_t portCount = 0;
 		// One bounded stack table validates both time and source identity without uncharged heap scratch.
 		std::array<const Keyframe *, Limits::MaximumKeyframes> keys{};
 		std::array<const Keyframe *, Limits::MaximumKeyframes> identities{};
 		size_t identityCount = 0;
 		for (const auto &input : inputs) {
-			const auto port = SourceMirrorVectorIndex(input.Port);
-			if (!port)
+			if (!SourceSeparatedVec2Input(node, input.Port))
 				return fail(
-					Status::UnknownPort, "separated Vec2 storage has no source Mirror input", input.Port
+					Status::UnknownPort,
+					"separated Vec2 storage has no declared two-axis source input",
+					input.Port
 				);
-			if (ports[*port])
+			if (std::find(ports.begin(), ports.begin() + portCount, input.Port) != ports.begin() + portCount)
 				return fail(Status::DuplicateId, "separated Vec2 input is repeated", input.Port);
-			ports[*port] = true;
+			ports[portCount++] = input.Port;
 			for (const auto &axis : input.Axes) {
 				if (totalKeys > Limits::MaximumKeyframes ||
 					axis.Keys.size() > Limits::MaximumKeyframes - totalKeys)
@@ -185,7 +218,7 @@ namespace engine::imagegraph::detail {
 	}
 	std::optional<uint64_t> SeparatedAnimatorBytes(const SourceSeparatedVec2Animator &input, bool retained) {
 		uint64_t bytes = sizeof(SourceSeparatedVec2Animator);
-		if (!SourceMirrorVectorIndex(input.Port) || !Text(bytes, input.Port, retained)) return std::nullopt;
+		if (input.Port.empty() || !Text(bytes, input.Port, retained)) return std::nullopt;
 		for (const auto &axis : input.Axes) {
 			const auto count = SeparatedScalarBytes(axis, retained);
 			if (!count || !Add(bytes, *count)) return std::nullopt;
