@@ -746,9 +746,22 @@ TEST_CASE(
 	REQUIRE(documentBytes);
 	GroupReplayState admitted;
 	REQUIRE(BindGroupReplay(authored, bindings, localState, 1, admitted, diagnostic) == Status::Ok);
-	const uint64_t threshold = *documentBytes + admitted.RetainedBytes() + localState.RetainedBytes() +
-							   retained + authored.Nodes.size() * sizeof(const Node *) +
-							   std::size(bindings) * sizeof(const GroupSubtypeBinding *);
+	uint64_t minimumBytes = 0, maximumBytes = Limits::MaximumEvaluationBytes;
+	while (minimumBytes < maximumBytes) {
+		const uint64_t candidateBytes = minimumBytes + (maximumBytes - minimumBytes) / 2;
+		GroupReplayState probe;
+		REQUIRE(RebindGroupReplay(local, localState, 1, probe, diagnostic) == Status::Ok);
+		const auto status =
+			BindGroupReplay(authored, bindings, localState, 1, probe, diagnostic, candidateBytes);
+		if (status == Status::LimitExceeded)
+			minimumBytes = candidateBytes + 1;
+		else {
+			REQUIRE(status == Status::Ok);
+			maximumBytes = candidateBytes;
+		}
+	}
+	const uint64_t threshold = minimumBytes;
+	REQUIRE(threshold > *documentBytes + admitted.RetainedBytes() + localState.RetainedBytes() + retained);
 	CHECK(
 		BindGroupReplay(authored, bindings, localState, 1, destination, diagnostic, threshold - 1) ==
 		Status::LimitExceeded

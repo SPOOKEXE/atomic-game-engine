@@ -41,6 +41,17 @@ namespace engine::imagegraph {
 		std::vector<Keyframe> SubtypeKeys;
 		std::vector<Keyframe> ParentKeys;
 	};
+	enum class GroupAxisStorage : uint8_t { None, Uninitialized, Local, Shared };
+	// group binding copies the current scalar array, independently from the combined animator.
+	// an uninitialized array keeps its local constructor owner even if the base creates axes later.
+	struct GroupAxisBinding {
+		GroupAxisStorage Storage = GroupAxisStorage::None;
+		std::string OwnerId;
+		std::string Port;
+		std::string InstanceBase;
+		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
+		bool operator==(const GroupAxisBinding &) const = default;
+	};
 	struct GroupSubtypeBinding {
 		std::string NodeId;
 		std::string OwnerId;
@@ -54,6 +65,7 @@ namespace engine::imagegraph {
 		// Empty uses Port. An admitted detached animator uses its native Id.
 		// Inherited getters still resolve their current input index.
 		std::string AnimatorPort{};
+		GroupAxisBinding Axes{};
 	};
 	// Metadata for one retained animator whose original physical input was removed.
 	// The shared overlay owns its values and keys; this record never duplicates them.
@@ -72,7 +84,7 @@ namespace engine::imagegraph {
 		std::optional<Value> Fixed;
 		std::vector<Keyframe> Keys;
 		std::string Port = "subtype";
-		// Split axes share this original writer; delegated inputs never duplicate its keys.
+		// scalar storage may have a different owner from the combined animator.
 		OwnedPayload3D<SourceSeparatedVec2Animator> SeparatedVec2{};
 	};
 	// The host owns this immutable replay result. It never mutates the authored
@@ -105,7 +117,9 @@ namespace engine::imagegraph {
 		std::unique_ptr<Storage> Data;
 		friend struct detail::GroupReplayAccess;
 	};
-	// One explicit delayed setInstance transition. This does not run refresh callbacks.
+	// installs or reconciles source aliases without running refresh callbacks.
+	// unchanged immediate bases keep captured axes; new bindings resolve parent before child.
+	// repeated source setInstance axis recapture needs a distinct explicit transition.
 	// Local subtype effects on targets are retired when their input animator alias is installed.
 	// The byte bound includes the borrowed document and old/new owner overlap.
 	// Replaces instance bindings at the same revision, preserving frozen callback declarations.

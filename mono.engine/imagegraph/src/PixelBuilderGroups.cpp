@@ -81,13 +81,14 @@ namespace engine::imagegraph {
 				   other.Replay.Bindings(),
 				   [](const auto &a, const auto &b) {
 					   return a.NodeId == b.NodeId && a.OwnerId == b.OwnerId && a.Getter == b.Getter &&
-							  a.Writer == b.Writer && a.Port == b.Port && a.AnimatorPort == b.AnimatorPort;
+							  a.Writer == b.Writer && a.Port == b.Port && a.AnimatorPort == b.AnimatorPort &&
+							  a.Axes == b.Axes;
 				   }
 			   ) &&
 			   equal(
 				   Replay.SharedSubtypes(), other.Replay.SharedSubtypes(), [](const auto &a, const auto &b) {
 					   return a.NodeId == b.NodeId && a.Fixed == b.Fixed && a.Keys == b.Keys &&
-							  a.Port == b.Port;
+							  a.Port == b.Port && a.SeparatedVec2 == b.SeparatedVec2;
 				   }
 			   );
 	}

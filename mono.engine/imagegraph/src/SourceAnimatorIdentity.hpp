@@ -11,6 +11,13 @@ namespace engine::imagegraph::detail {
 		return binding.AnimatorPort.empty() ? std::string_view(binding.Port)
 											: std::string_view(binding.AnimatorPort);
 	}
+	inline bool BindingReferencesAxes(
+		const GroupSubtypeBinding &binding, std::string_view owner, std::string_view port
+	) noexcept {
+		if (binding.Axes.Storage != GroupAxisStorage::None)
+			return binding.Axes.OwnerId == owner && binding.Axes.Port == port;
+		return binding.OwnerId == owner && BindingAnimatorPort(binding) == port;
+	}
 	inline bool MovedSourceAnimator(const GroupSubtypeBinding &binding) noexcept {
 		return !binding.AnimatorPort.empty() && binding.AnimatorPort != binding.Port;
 	}

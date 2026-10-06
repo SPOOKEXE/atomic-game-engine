@@ -119,8 +119,10 @@ namespace engine::imagegraph {
 		uint64_t released = 0;
 		for (auto animator = owner.DetachedAnimators.begin(); animator != owner.DetachedAnimators.end();) {
 			if (std::any_of(owner.Bindings.begin(), owner.Bindings.end(), [&](const auto &binding) {
-					return binding.OwnerId == animator->OwnerId &&
-						   detail::BindingAnimatorPort(binding) == animator->Id;
+					return (binding.OwnerId == animator->OwnerId &&
+							detail::BindingAnimatorPort(binding) == animator->Id) ||
+						   (binding.Axes.Storage != GroupAxisStorage::None &&
+							binding.Axes.OwnerId == animator->OwnerId && binding.Axes.Port == animator->Id);
 				})) {
 				++animator;
 				continue;
@@ -181,8 +183,16 @@ namespace engine::imagegraph {
 			const auto retained = retainedAnimatorPort(binding);
 			return retained.empty() ? std::string_view(binding.Port) : retained;
 		};
+		struct AxisDefinition {
+			GroupAxisStorage Storage = GroupAxisStorage::None;
+			std::string_view OwnerId, Port, InstanceBase;
+			GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
+			bool Valid = true;
+			bool Ready = true;
+		};
 		uint64_t names = bindings.size() * sizeof(GroupSubtypeBinding);
-		const uint64_t scratchBytes = bindings.size() * sizeof(const GroupSubtypeBinding *) +
+		const uint64_t scratchBytes = bindings.size() * (sizeof(const GroupSubtypeBinding *) +
+														 sizeof(AxisDefinition) + sizeof(uint8_t)) +
 									  document.Nodes.size() * sizeof(const Node *);
 		const uint64_t priorBytes =
 			previous.RetainedBytes() + (&previous == &result ? 0 : result.RetainedBytes());
@@ -242,6 +252,181 @@ namespace engine::imagegraph {
 				mode = GroupSubtypeAnimator::Animated;
 			return mode;
 		};
+		std::vector<AxisDefinition> axisDefinitions(bindings.size());
+		std::vector<uint8_t> axisReady(bindings.size(), 0);
+		uint64_t axisBindingWork = 0;
+		bool axisWorkValid = true;
+		const auto admitAxisBindingWork = [&](uint64_t visits) {
+			if (visits > 64'000'000 - axisBindingWork) {
+				axisWorkValid = false;
+				return false;
+			}
+			axisBindingWork += visits;
+			return true;
+		};
+		const auto axisWriter = [&](std::string_view id,
+									std::string_view port,
+									GroupSubtypeAnimator fallback) {
+			if (!admitAxisBindingWork(previous.DetachedAnimators().size() + document.Nodes.size()))
+				return fallback;
+			if (const auto *detached = previous.DetachedAnimator(id, port)) return detached->Writer;
+			const auto *node = nodeById(id);
+			if (!node) return fallback;
+			if (!admitAxisBindingWork(node->SourceStaticInputs.size() + node->SourceAnimatedInputs.size()))
+				return fallback;
+			if (std::find(node->SourceStaticInputs.begin(), node->SourceStaticInputs.end(), port) !=
+				node->SourceStaticInputs.end())
+				return GroupSubtypeAnimator::Static;
+			if (std::find(node->SourceAnimatedInputs.begin(), node->SourceAnimatedInputs.end(), port) !=
+				node->SourceAnimatedInputs.end())
+				return GroupSubtypeAnimator::Animated;
+			return fallback;
+		};
+		const auto axisDefinition = [&](const GroupSubtypeBinding &binding) -> AxisDefinition {
+			if (!admitAxisBindingWork(document.Nodes.size()))
+				return {GroupAxisStorage::None, {}, {}, {}, GroupSubtypeAnimator::Static, false};
+			const auto *target = nodeById(binding.NodeId);
+			if (!target) return {};
+			if (!admitAxisBindingWork(target->DynamicInputs.size()))
+				return {GroupAxisStorage::None, {}, {}, {}, GroupSubtypeAnimator::Static, false};
+			if (!detail::SourceSeparatedVec2Input(*target, binding.Port)) return {};
+			if (!admitAxisBindingWork(previous.Bindings().size() + document.Nodes.size()))
+				return {GroupAxisStorage::None, {}, {}, {}, GroupSubtypeAnimator::Static, false};
+			const auto *old = previous.Binding(binding.NodeId, binding.Port);
+			if (old && old->OwnerId == binding.OwnerId && old->Axes.Storage != GroupAxisStorage::None &&
+				old->Axes.InstanceBase == target->InstanceBase)
+				return {
+					old->Axes.Storage,
+					old->Axes.OwnerId,
+					old->Axes.Port,
+					old->Axes.InstanceBase,
+					axisWriter(old->Axes.OwnerId, old->Axes.Port, old->Axes.Writer)
+				};
+			const Node *source = nodeById(target->InstanceBase);
+			if (source) {
+				if (!admitAxisBindingWork(
+						previous.Bindings().size() + previous.SharedSubtypes().size() +
+						(source->SourceSeparatedVec2Animators
+							 ? source->SourceSeparatedVec2Animators->Inputs.size()
+							 : 0)
+					))
+					return {GroupAxisStorage::None, {}, {}, {}, GroupSubtypeAnimator::Static, false};
+				if (!admitAxisBindingWork(bindings.size()))
+					return {GroupAxisStorage::None, {}, {}, {}, GroupSubtypeAnimator::Static, false};
+				const auto requested = std::find_if(bindings.begin(), bindings.end(), [&](const auto &item) {
+					return item.NodeId == source->Id && item.Port == binding.Port;
+				});
+				if (requested != bindings.end()) {
+					const size_t index = size_t(requested - bindings.begin());
+					if (!axisReady[index])
+						return {
+							GroupAxisStorage::None, {}, {}, {}, GroupSubtypeAnimator::Static, true, false
+						};
+					const auto &baseAxes = axisDefinitions[index];
+					if (baseAxes.Storage != GroupAxisStorage::None &&
+						baseAxes.Storage != GroupAxisStorage::Uninitialized)
+						return {
+							GroupAxisStorage::Shared,
+							baseAxes.OwnerId,
+							baseAxes.Port,
+							target->InstanceBase,
+							axisWriter(baseAxes.OwnerId, baseAxes.Port, baseAxes.Writer)
+						};
+					return {
+						GroupAxisStorage::Uninitialized,
+						target->Id,
+						binding.Port,
+						target->InstanceBase,
+						axisWriter(target->Id, binding.Port, GroupSubtypeAnimator::Static)
+					};
+				}
+				const auto *baseBinding = previous.Binding(source->Id, binding.Port);
+				if (baseBinding && baseBinding->Axes.Storage != GroupAxisStorage::None &&
+					baseBinding->Axes.InstanceBase == source->InstanceBase) {
+					if (baseBinding->Axes.Storage != GroupAxisStorage::Uninitialized)
+						return {
+							GroupAxisStorage::Shared,
+							baseBinding->Axes.OwnerId,
+							baseBinding->Axes.Port,
+							target->InstanceBase,
+							axisWriter(
+								baseBinding->Axes.OwnerId, baseBinding->Axes.Port, baseBinding->Axes.Writer
+							)
+						};
+				} else {
+					const auto *overlay = previous.SharedSubtype(source->Id, binding.Port);
+					if ((overlay && overlay->SeparatedVec2) ||
+						detail::FindSeparatedVec2(*source, binding.Port))
+						return {
+							GroupAxisStorage::Shared,
+							source->Id,
+							binding.Port,
+							target->InstanceBase,
+							axisWriter(source->Id, binding.Port, binding.Writer)
+						};
+				}
+			}
+			return {
+				GroupAxisStorage::Uninitialized,
+				target->Id,
+				binding.Port,
+				target->InstanceBase,
+				axisWriter(target->Id, binding.Port, GroupSubtypeAnimator::Static)
+			};
+		};
+		size_t unresolved = bindings.size();
+		while (unresolved) {
+			if (!admitAxisBindingWork(bindings.size()))
+				return fail(Status::LimitExceeded, "axis binding dependency checks exceed work bounds");
+			const size_t before = unresolved;
+			for (size_t index = 0; index < bindings.size(); ++index) {
+				if (axisReady[index]) continue;
+				const auto axes = axisDefinition(bindings[index]);
+				if (!axes.Valid || !axisWorkValid)
+					return fail(
+						Status::LimitExceeded, "axis binding exceeds work bounds", bindings[index].NodeId
+					);
+				if (!axes.Ready) continue;
+				axisDefinitions[index] = axes;
+				axisReady[index] = 1;
+				--unresolved;
+			}
+			if (unresolved == before)
+				return fail(Status::InvalidGroup, "axis bindings contain an unresolved instance dependency");
+		}
+		for (const auto &binding : bindings) {
+			for (const auto text :
+				 {std::string_view(binding.Axes.OwnerId),
+				  std::string_view(binding.Axes.Port),
+				  std::string_view(binding.Axes.InstanceBase)})
+				if (text.size() > Limits::MaximumTextBytes)
+					return fail(Status::LimitExceeded, "axis binding names exceed bounds", binding.NodeId);
+			if (binding.Axes.Storage == GroupAxisStorage::None &&
+				(!binding.Axes.OwnerId.empty() || !binding.Axes.Port.empty() ||
+				 !binding.Axes.InstanceBase.empty()))
+				return fail(
+					Status::InvalidGroup, "unspecified axis binding carries identity names", binding.NodeId
+				);
+			if (binding.Axes.Storage != GroupAxisStorage::None) {
+				const auto *old = previous.Binding(binding.NodeId, binding.Port);
+				if (!old || !(binding.Axes == old->Axes))
+					return fail(
+						Status::InvalidGroup, "axis identity requires an admitted binding", binding.NodeId
+					);
+			}
+			const auto &axes = axisDefinitions[size_t(&binding - bindings.data())];
+			if (!axes.Valid || !axisWorkValid)
+				return fail(Status::LimitExceeded, "axis binding exceeds work bounds", binding.NodeId);
+			for (const auto text : {axes.OwnerId, axes.Port, axes.InstanceBase}) {
+				const auto bytes = std::max(text.size(), std::string{}.capacity()) + 1;
+				if (bytes > UINT64_MAX - names)
+					return fail(Status::LimitExceeded, "axis binding names exceed bounds", binding.NodeId);
+				names += bytes;
+			}
+		}
+		if (names > *ownerBudget || scratchBytes > *ownerBudget - names ||
+			priorBytes > *ownerBudget - names - scratchBytes)
+			return fail(Status::LimitExceeded, "axis bindings exceed operation bounds");
 		std::vector<const GroupSubtypeBinding *> sorted;
 		sorted.reserve(bindings.size());
 		for (const auto &binding : bindings)
@@ -324,17 +509,35 @@ namespace engine::imagegraph {
 		auto bindingCharge = candidate->Budget.Reserve(names);
 		if (!bindingCharge) return fail(Status::LimitExceeded, "Group binding exceeds live operation budget");
 		// A revision refresh replaces bindings while retaining frozen callback declarations.
-		std::vector<GroupSubtypeBinding> replacementBindings(bindings.begin(), bindings.end());
-		for (auto &binding : replacementBindings) {
-			binding.Writer = writerMode(binding);
-			binding.AnimatorPort = retainedAnimatorPort(binding);
+		std::vector<GroupSubtypeBinding> replacementBindings;
+		replacementBindings.reserve(bindings.size());
+		for (const auto &binding : bindings) {
+			const auto &axes = axisDefinitions[size_t(&binding - bindings.data())];
+			if (!axes.Valid || !axisWorkValid)
+				return fail(Status::LimitExceeded, "axis binding exceeds work bounds", binding.NodeId);
+			replacementBindings.push_back(
+				{binding.NodeId,
+				 binding.OwnerId,
+				 binding.Getter,
+				 writerMode(binding),
+				 binding.Port,
+				 std::string(retainedAnimatorPort(binding)),
+				 {axes.Storage,
+				  std::string(axes.OwnerId),
+				  std::string(axes.Port),
+				  std::string(axes.InstanceBase),
+				  axes.Writer}}
+			);
 		}
 		uint64_t removedBytes = candidate->Bindings.size() * sizeof(GroupSubtypeBinding);
 		for (const auto &binding : candidate->Bindings)
 			removedBytes += std::max(binding.NodeId.size(), std::string{}.capacity()) + 1 +
 							std::max(binding.OwnerId.size(), std::string{}.capacity()) + 1 +
 							std::max(binding.Port.size(), std::string{}.capacity()) + 1 +
-							std::max(binding.AnimatorPort.size(), std::string{}.capacity()) + 1;
+							std::max(binding.AnimatorPort.size(), std::string{}.capacity()) + 1 +
+							std::max(binding.Axes.OwnerId.size(), std::string{}.capacity()) + 1 +
+							std::max(binding.Axes.Port.size(), std::string{}.capacity()) + 1 +
+							std::max(binding.Axes.InstanceBase.size(), std::string{}.capacity()) + 1;
 		candidate->Bindings.swap(replacementBindings);
 		std::vector<GroupSubtypeBinding>{}.swap(replacementBindings);
 		if (!candidate->Charge.Merge(std::move(*bindingCharge))) std::terminate();
@@ -434,13 +637,28 @@ namespace engine::imagegraph {
 		std::erase_if(candidate->Entries, [&](const auto &entry) { return !survives(entry.NodeId); });
 		for (const auto &binding : candidate->Bindings) {
 			if (sourceSurvives(binding.NodeId, binding.Port) &&
+				binding.Axes.Storage != GroupAxisStorage::None &&
+				!sourceSurvives(binding.Axes.OwnerId, binding.Axes.Port) &&
+				!previous.DetachedAnimator(binding.Axes.OwnerId, binding.Axes.Port)) {
+				diagnostic = {
+					Status::InvalidGroup,
+					binding.NodeId,
+					binding.Port,
+					"retained axis identity requires a physical input move transaction"
+				};
+				return diagnostic.Code;
+			}
+			if (sourceSurvives(binding.NodeId, binding.Port) &&
 				(sourceSurvives(binding.OwnerId, detail::BindingAnimatorPort(binding)) ||
 				 previous.DetachedAnimator(binding.OwnerId, detail::BindingAnimatorPort(binding))))
 				continue;
 			removedBytes += std::max(binding.NodeId.size(), std::string{}.capacity()) + 1;
 			removedBytes += std::max(binding.OwnerId.size(), std::string{}.capacity()) + 1;
 			removedBytes += std::max(binding.Port.size(), std::string{}.capacity()) + 1;
-			removedBytes += std::max(binding.AnimatorPort.size(), std::string{}.capacity()) + 1;
+			removedBytes += std::max(binding.AnimatorPort.size(), std::string{}.capacity()) + 1 +
+							std::max(binding.Axes.OwnerId.size(), std::string{}.capacity()) + 1 +
+							std::max(binding.Axes.Port.size(), std::string{}.capacity()) + 1 +
+							std::max(binding.Axes.InstanceBase.size(), std::string{}.capacity()) + 1;
 		}
 		std::erase_if(candidate->Bindings, [&](const auto &binding) {
 			return !sourceSurvives(binding.NodeId, binding.Port) ||
@@ -621,8 +839,10 @@ namespace engine::imagegraph {
 			if (!move.NewPort.empty() ||
 				std::none_of(
 					previous.Bindings().begin(), previous.Bindings().end(), [&](const auto &binding) {
-						return binding.OwnerId == move.NodeId &&
-							   detail::BindingAnimatorPort(binding) == move.OldPort &&
+						return ((binding.OwnerId == move.NodeId &&
+								 detail::BindingAnimatorPort(binding) == move.OldPort) ||
+								(binding.Axes.Storage != GroupAxisStorage::None &&
+								 binding.Axes.OwnerId == move.NodeId && binding.Axes.Port == move.OldPort)) &&
 							   !mapped(binding.NodeId, binding.Port).empty();
 					}
 				))
@@ -665,11 +885,15 @@ namespace engine::imagegraph {
 				detail::AliasedSourceInput(*originalNode, move.OldPort)->SourceArrayClassification;
 			if (originalNode->Type == "pc.hlsl" && move.OldPort.starts_with("argument_value_"))
 				metadata.ArrayClassification = physical->Type == ValueType::Array;
-			for (const auto &binding : previous.Bindings())
+			for (const auto &binding : previous.Bindings()) {
+				if (binding.Axes.Storage != GroupAxisStorage::None && binding.Axes.OwnerId == move.NodeId &&
+					binding.Axes.Port == move.OldPort)
+					metadata.Writer = binding.Axes.Writer;
 				if (binding.OwnerId == move.NodeId && detail::BindingAnimatorPort(binding) == move.OldPort) {
 					metadata.Writer = binding.Writer;
 					break;
 				}
+			}
 			if (track != original.Tracks.end()) {
 				metadata.Track = AnimationTrack{
 					track->NodeId, std::string(id), track->End, track->LoopRange, track->QuaternionMode
@@ -775,9 +999,26 @@ namespace engine::imagegraph {
 				}
 			if (target.empty() || animator.empty()) {
 				released += bytes(binding.NodeId) + bytes(binding.OwnerId) + bytes(binding.Port) +
-							bytes(binding.AnimatorPort);
+							bytes(binding.AnimatorPort) + bytes(binding.Axes.OwnerId) +
+							bytes(binding.Axes.Port) + bytes(binding.Axes.InstanceBase);
 				binding.NodeId.clear();
 				continue;
+			}
+			if (binding.Axes.Storage != GroupAxisStorage::None) {
+				auto axes = mapped(binding.Axes.OwnerId, binding.Axes.Port);
+				if (axes.empty())
+					for (size_t i = oldDetachedCount; i < candidate->DetachedAnimators.size(); ++i) {
+						const auto &detached = candidate->DetachedAnimators[i];
+						if (detached.OwnerId == binding.Axes.OwnerId &&
+							detached.OriginalPort == binding.Axes.Port) {
+							axes = detached.Id;
+							break;
+						}
+					}
+				if (axes.empty())
+					return fail(Status::InvalidGroup, "source axis identity was lost during input move");
+				if (!rename(binding.Axes.Port, axes))
+					return fail(Status::LimitExceeded, "source axis move names exceed live overlap bounds");
 			}
 			// Preserve the old writer independently when only its target moved.
 			const auto retained = animator == target ? std::string_view{} : animator;
@@ -1575,7 +1816,10 @@ namespace engine::imagegraph {
 				return refuse();
 			for (const auto &binding : previous.Bindings())
 				if (!Add(bytes, TextBytes(binding.NodeId)) || !Add(bytes, TextBytes(binding.OwnerId)) ||
-					!Add(bytes, TextBytes(binding.Port)) || !Add(bytes, TextBytes(binding.AnimatorPort)))
+					!Add(bytes, TextBytes(binding.Port)) || !Add(bytes, TextBytes(binding.AnimatorPort)) ||
+					!Add(bytes, TextBytes(binding.Axes.OwnerId)) ||
+					!Add(bytes, TextBytes(binding.Axes.Port)) ||
+					!Add(bytes, TextBytes(binding.Axes.InstanceBase)))
 					return refuse();
 			for (const auto &overlay : previous.SharedSubtypes()) {
 				if (overlay.SeparatedVec2) {
@@ -2460,8 +2704,7 @@ namespace engine::imagegraph {
 			if (replay.DetachedAnimator(overlay.NodeId, overlay.Port)) {
 				for (const auto &binding : replay.Bindings()) {
 					if (!admitVisit()) return diagnostic.Code;
-					if (binding.OwnerId == overlay.NodeId &&
-						detail::BindingAnimatorPort(binding) == overlay.Port &&
+					if (detail::BindingReferencesAxes(binding, overlay.NodeId, overlay.Port) &&
 						!addAxisTarget(overlay, binding.NodeId, binding.Port, true))
 						return diagnostic.Code;
 				}
@@ -2772,8 +3015,7 @@ namespace engine::imagegraph {
 				bool represented = true;
 				if (previous.DetachedAnimator(shared.NodeId, shared.Port)) {
 					for (const auto &binding : previous.Bindings())
-						if (binding.OwnerId == shared.NodeId &&
-							detail::BindingAnimatorPort(binding) == shared.Port)
+						if (detail::BindingReferencesAxes(binding, shared.NodeId, shared.Port))
 							represented =
 								represented && projectedAxesMatch(binding.NodeId, binding.Port, true);
 				} else

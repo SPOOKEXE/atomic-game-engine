@@ -118,9 +118,24 @@ the remapped scalar contents before retaining the detached replay.
 source `getAnimators` initializes local scalar storage lazily from local
 defaults. a group copy shares already-created axis arrays, but a copy made
 before initialization can create independent arrays later. axis storage can
-therefore have a different owner from the combined animator. the current
-shared-writer profile still needs that lazy ownership and default provenance
-before separate/combine controls can cover those constructor cases.
+therefore have a different owner from the combined animator. group replay now retains that binding-time distinction independently from the
+combined animator, including its original writer and immediate base. repeated
+host binding preserves a cold alias after the base creates axes. new binding
+copies the immediate base's current array rather than following combined owners.
+a charged dependency memo lets descendants see parents newly bound in the same
+transaction, regardless of request order.
+input moves, detachment, projection and rebinding preserve that scalar identity.
+scalar reads, edits and mode changes still need routing through this identity
+and source-backed local constructor defaults before separate/combine controls
+can cover those constructor cases. repeated explicit source `setInstance` must
+recopy the immediate base's current array even when its ID is unchanged; that
+transition remains separate from host reconciliation and is unfinished.
+source saves and restores local `def_val` separately from animator rows.
+import currently overwrites dynamic defaults with represented animator values;
+those values cannot supply constructor provenance. separated reads lazily store
+an axis array that later group binding can observe. native pure evaluation needs
+a retained initialization transition or receipt to preserve that history.
+
 the retained state must distinguish an uninitialized array from locally owned
 axes and a shared axis identity. looking only at the final document cannot
 recover whether group binding happened before or after axis creation.

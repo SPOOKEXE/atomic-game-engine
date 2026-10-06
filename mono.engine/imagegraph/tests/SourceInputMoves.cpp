@@ -497,6 +497,16 @@ namespace {
 		};
 	}
 
+	GroupSubtypeBinding GradientPointBinding(std::string_view nodeId) {
+		return {
+			std::string(nodeId),
+			"base",
+			GroupSubtypeAnimator::Animated,
+			GroupSubtypeAnimator::Animated,
+			std::string(Point0)
+		};
+	}
+
 	void RenamePointInputs(Node &node, std::string_view from, std::string_view to) {
 		for (auto &input : node.DynamicInputs)
 			if (input.Id == from) input.Id = to;
@@ -594,6 +604,10 @@ TEST_CASE("Dynamic Vec2 input move carries split edit overlay onto the new socke
 			CHECK(key.Port == Point1);
 	REQUIRE(moved.Binding("copy", Point0));
 	CHECK(moved.Binding("copy", Point0)->AnimatorPort == Point1);
+	CHECK(moved.Binding("copy", Point0)->OwnerId == "base");
+	CHECK(moved.Binding("copy", Point0)->Axes.Storage == GroupAxisStorage::Shared);
+	CHECK(moved.Binding("copy", Point0)->Axes.OwnerId == "base");
+	CHECK(moved.Binding("copy", Point0)->Axes.Port == Point1);
 
 	GroupReplayState cloned;
 	REQUIRE(RebindGroupReplay(staged, moved, 3, cloned, error) == Status::Ok);
@@ -636,6 +650,12 @@ TEST_CASE(
 	CHECK(refused.DetachedAnimators().empty());
 	CHECK(refused.Binding("copy", Point0)->AnimatorPort == bound.Binding("copy", Point0)->AnimatorPort);
 	const auto identity = detached.DetachedAnimators().front().Id;
+	const auto *detachedBinding = detached.Binding("copy", Point0);
+	REQUIRE(detachedBinding);
+	CHECK(detachedBinding->OwnerId == "base");
+	CHECK(detachedBinding->Axes.Storage == GroupAxisStorage::Shared);
+	CHECK(detachedBinding->Axes.OwnerId == "base");
+	CHECK(detachedBinding->Axes.Port == identity);
 	const auto *overlay = detached.SharedSubtype("base", identity);
 	REQUIRE(overlay);
 	CHECK(overlay->Port == identity);
@@ -674,6 +694,220 @@ TEST_CASE(
 	CHECK(projectedReplay.AuthoringRevision() == 3);
 	CHECK(projectedReplay.RetainedBytes() == reboundBytes);
 	CHECK(SamplePoint(staged, projectedReplay, "copy", Point0, 5) == expected);
+}
+
+TEST_CASE(
+	"Bound Vec2 axis storage keeps its captured owner across late initialization and nested aliases",
+	"[source_input_moves][mirror_axes]"
+) {
+	auto warmDocument = MakeGradientPointMoveGraph();
+	Diagnostic error;
+	GroupReplayState empty, warmInitial, warm;
+	REQUIRE(RebindGroupReplay(warmDocument, empty, 1, warmInitial, error) == Status::Ok);
+	auto bindings = GradientPointBindings();
+	REQUIRE(BindGroupReplay(warmDocument, bindings, warmInitial, 1, warm, error) == Status::Ok);
+	const auto *warmCopy = warm.Binding("copy", Point0);
+	REQUIRE(warmCopy);
+	CHECK(warmCopy->OwnerId == "base");
+	CHECK(warmCopy->Axes.Storage == GroupAxisStorage::Shared);
+	CHECK(warmCopy->Axes.OwnerId == "base");
+	CHECK(warmCopy->Axes.Port == Point0);
+	CHECK(warmCopy->Axes.InstanceBase == "base");
+	CHECK(warmCopy->Axes.Writer == GroupSubtypeAnimator::Animated);
+
+	auto coldDocument = MakeGradientPointMoveGraph();
+	coldDocument.Nodes.front().SourceSeparatedVec2Animators = {};
+	GroupReplayState coldInitial, cold;
+	REQUIRE(RebindGroupReplay(coldDocument, empty, 1, coldInitial, error) == Status::Ok);
+	REQUIRE(BindGroupReplay(coldDocument, bindings, coldInitial, 1, cold, error) == Status::Ok);
+	const auto *coldCopy = cold.Binding("copy", Point0);
+	REQUIRE(coldCopy);
+	CHECK(coldCopy->OwnerId == "base");
+	CHECK(coldCopy->Axes.Storage == GroupAxisStorage::Uninitialized);
+	CHECK(coldCopy->Axes.OwnerId == "copy");
+	CHECK(coldCopy->Axes.Port == Point0);
+	CHECK(coldCopy->Axes.InstanceBase == "base");
+
+	coldDocument.Nodes.front().SourceSeparatedVec2Animators =
+		warmDocument.Nodes.front().SourceSeparatedVec2Animators;
+	GroupReplayState revised, refreshed;
+	REQUIRE(RebindGroupReplay(coldDocument, cold, 2, revised, error) == Status::Ok);
+	REQUIRE(BindGroupReplay(coldDocument, bindings, revised, 2, refreshed, error) == Status::Ok);
+	const auto *retainedCold = refreshed.Binding("copy", Point0);
+	REQUIRE(retainedCold);
+	CHECK(retainedCold->OwnerId == "base");
+	CHECK(retainedCold->Axes.Storage == GroupAxisStorage::Uninitialized);
+	CHECK(retainedCold->Axes.OwnerId == "copy");
+	CHECK(retainedCold->Axes.Port == Point0);
+	CHECK(retainedCold->Axes.InstanceBase == "base");
+
+	Node late = coldDocument.Nodes[1];
+	late.Id = "late";
+	late.InstanceBase = "base";
+	Node nested = coldDocument.Nodes[1];
+	nested.Id = "nested";
+	nested.InstanceBase = "copy";
+	coldDocument.Nodes.push_back(std::move(late));
+	coldDocument.Nodes.push_back(std::move(nested));
+	bindings.push_back(GradientPointBinding("late"));
+	bindings.push_back(GradientPointBinding("nested"));
+	GroupReplayState aliasesInitial, aliases;
+	REQUIRE(RebindGroupReplay(coldDocument, refreshed, 3, aliasesInitial, error) == Status::Ok);
+	REQUIRE(BindGroupReplay(coldDocument, bindings, aliasesInitial, 3, aliases, error) == Status::Ok);
+	const auto *oldCopy = aliases.Binding("copy", Point0);
+	const auto *lateShared = aliases.Binding("late", Point0);
+	const auto *nestedCold = aliases.Binding("nested", Point0);
+	REQUIRE(oldCopy);
+	REQUIRE(lateShared);
+	REQUIRE(nestedCold);
+	CHECK(oldCopy->OwnerId == "base");
+	CHECK(oldCopy->Axes.Storage == GroupAxisStorage::Uninitialized);
+	CHECK(oldCopy->Axes.OwnerId == "copy");
+	CHECK(oldCopy->Axes.Port == Point0);
+	CHECK(oldCopy->Axes.InstanceBase == "base");
+	CHECK(lateShared->OwnerId == "base");
+	CHECK(lateShared->Axes.Storage == GroupAxisStorage::Shared);
+	CHECK(lateShared->Axes.OwnerId == "base");
+	CHECK(lateShared->Axes.Port == Point0);
+	CHECK(lateShared->Axes.InstanceBase == "base");
+	CHECK(nestedCold->OwnerId == "base");
+	CHECK(nestedCold->Axes.Storage == GroupAxisStorage::Uninitialized);
+	CHECK(nestedCold->Axes.OwnerId == "nested");
+	CHECK(nestedCold->Axes.Port == Point0);
+	CHECK(nestedCold->Axes.InstanceBase == "copy");
+
+	GroupReplayState unchanged;
+	REQUIRE(BindGroupReplay(coldDocument, bindings, aliasesInitial, 3, unchanged, error) == Status::Ok);
+	const auto retainedBytes = unchanged.RetainedBytes();
+	const auto oldRevision = unchanged.AuthoringRevision();
+	CHECK(
+		BindGroupReplay(coldDocument, bindings, aliasesInitial, 3, unchanged, error, 1) ==
+		Status::LimitExceeded
+	);
+	CHECK(unchanged.RetainedBytes() == retainedBytes);
+	CHECK(unchanged.AuthoringRevision() == oldRevision);
+	REQUIRE(unchanged.Binding("copy", Point0));
+	CHECK(unchanged.Binding("copy", Point0)->Axes == oldCopy->Axes);
+	CHECK(unchanged.Binding("late", Point0)->Axes == lateShared->Axes);
+	CHECK(unchanged.Binding("nested", Point0)->Axes == nestedCold->Axes);
+}
+
+TEST_CASE("Nested Vec2 captures only its immediate base axis state", "[source_input_moves][mirror_axes]") {
+	const auto makeNested = [] {
+		auto document = MakeGradientPointMoveGraph();
+		auto copyAxes = *document.Nodes[0].SourceSeparatedVec2Animators;
+		for (auto &input : copyAxes.Inputs)
+			for (auto &axis : input.Axes)
+				for (auto &key : axis.Keys) {
+					key.NodeId = "copy";
+					key.SourceKeyId = "copy-" + key.SourceKeyId;
+				}
+		document.Nodes[1].SourceSeparatedVec2Animators.emplace() = std::move(copyAxes);
+		Node nested = document.Nodes[1];
+		nested.Id = "nested";
+		nested.InstanceBase = "copy";
+		for (auto &input : nested.SourceSeparatedVec2Animators->Inputs)
+			for (auto &axis : input.Axes)
+				for (auto &key : axis.Keys) {
+					key.NodeId = "nested";
+					key.SourceKeyId = "nested-" + key.SourceKeyId;
+				}
+		document.Nodes.push_back(std::move(nested));
+		return document;
+	};
+	Diagnostic error;
+	auto warmDocument = makeNested();
+	GroupReplayState empty, warmInitial, warm;
+	REQUIRE(RebindGroupReplay(warmDocument, empty, 1, warmInitial, error) == Status::Ok);
+	const std::array nestedBinding{GradientPointBinding("nested")};
+	REQUIRE(BindGroupReplay(warmDocument, nestedBinding, warmInitial, 1, warm, error) == Status::Ok);
+	const auto *warmNested = warm.Binding("nested", Point0);
+	REQUIRE(warmNested);
+	CHECK(warmNested->OwnerId == "base");
+	CHECK(warmNested->Axes.Storage == GroupAxisStorage::Shared);
+	CHECK(warmNested->Axes.OwnerId == "copy");
+	CHECK(warmNested->Axes.Port == Point0);
+	CHECK(warmNested->Axes.InstanceBase == "copy");
+
+	auto coldDocument = makeNested();
+	coldDocument.Nodes[1].SourceSeparatedVec2Animators = {};
+	GroupReplayState coldInitial, cold;
+	REQUIRE(RebindGroupReplay(coldDocument, empty, 1, coldInitial, error) == Status::Ok);
+	REQUIRE(BindGroupReplay(coldDocument, nestedBinding, coldInitial, 1, cold, error) == Status::Ok);
+	const auto *coldNested = cold.Binding("nested", Point0);
+	REQUIRE(coldNested);
+	CHECK(coldNested->OwnerId == "base");
+	CHECK(coldNested->Axes.Storage == GroupAxisStorage::Uninitialized);
+	CHECK(coldNested->Axes.OwnerId == "nested");
+	CHECK(coldNested->Axes.Port == Point0);
+	CHECK(coldNested->Axes.InstanceBase == "copy");
+}
+
+TEST_CASE(
+	"Fresh same-transaction aliases capture their immediate source axis state",
+	"[source_input_moves][mirror_axes]"
+) {
+	const bool reverseBindings = GENERATE(false, true);
+	const auto axesFor = [](Node &node, double first) {
+		node.SourceSeparatedVec2Animators.emplace().Inputs.clear();
+		SourceSeparatedVec2Animator axes;
+		axes.Port = Point0;
+		axes.Axes[0].Keys = {{node.Id, std::string(Point0), 0, first, "source", KeyframeEase{}}};
+		axes.Axes[1].Keys = {{node.Id, std::string(Point0), 0, 2.0, "source", KeyframeEase{}}};
+		for (size_t axis = 0; axis < axes.Axes.size(); ++axis)
+			for (auto &key : axes.Axes[axis].Keys)
+				key.SourceKeyId = node.Id + "-" + std::to_string(axis);
+		node.SourceSeparatedVec2Animators->Inputs.push_back(std::move(axes));
+	};
+	const auto bindAliases = [&](bool baseWarm,
+								 bool copyWarm,
+								 GroupAxisStorage expectedStorage,
+								 std::string_view copyAxisOwner,
+								 std::string_view nestedAxisOwner) {
+		auto document = MakeGradientPointMoveGraph();
+		if (!baseWarm) document.Nodes[0].SourceSeparatedVec2Animators = {};
+		if (copyWarm)
+			axesFor(document.Nodes[1], 100.0);
+		else
+			document.Nodes[1].SourceSeparatedVec2Animators = {};
+		Node nested = document.Nodes[1];
+		nested.Id = "nested";
+		nested.InstanceBase = "copy";
+		if (nested.SourceSeparatedVec2Animators)
+			for (auto &input : nested.SourceSeparatedVec2Animators->Inputs)
+				for (auto &axis : input.Axes)
+					for (auto &key : axis.Keys) {
+						key.NodeId = "nested";
+						key.SourceKeyId = "nested-" + key.SourceKeyId;
+					}
+		document.Nodes.push_back(std::move(nested));
+		std::vector<GroupSubtypeBinding> bindings{
+			GradientPointBinding("copy"), GradientPointBinding("nested")
+		};
+		if (reverseBindings) std::reverse(bindings.begin(), bindings.end());
+		Diagnostic diagnostic;
+		GroupReplayState empty, initial, replay;
+		REQUIRE(RebindGroupReplay(document, empty, 1, initial, diagnostic) == Status::Ok);
+		REQUIRE(BindGroupReplay(document, bindings, initial, 1, replay, diagnostic) == Status::Ok);
+		const auto *copy = replay.Binding("copy", Point0);
+		const auto *nestedBinding = replay.Binding("nested", Point0);
+		REQUIRE(copy);
+		REQUIRE(nestedBinding);
+		CHECK(copy->OwnerId == "base");
+		CHECK(nestedBinding->OwnerId == "base");
+		CHECK(copy->Axes.Storage == expectedStorage);
+		CHECK(nestedBinding->Axes.Storage == expectedStorage);
+		CHECK(copy->Axes.OwnerId == copyAxisOwner);
+		CHECK(nestedBinding->Axes.OwnerId == nestedAxisOwner);
+		CHECK(copy->Axes.Port == Point0);
+		CHECK(nestedBinding->Axes.Port == Point0);
+		CHECK(copy->Axes.InstanceBase == "base");
+		CHECK(nestedBinding->Axes.InstanceBase == "copy");
+	};
+
+	bindAliases(true, false, GroupAxisStorage::Shared, "base", "base");
+	bindAliases(true, true, GroupAxisStorage::Shared, "base", "base");
+	bindAliases(false, true, GroupAxisStorage::Uninitialized, "copy", "nested");
 }
 
 TEST_CASE(

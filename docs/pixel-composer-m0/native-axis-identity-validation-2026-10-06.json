@@ -1,0 +1,108 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "retain binding-time scalar axis identities independently from combined animator identities.",
+  "function_logic": [
+    "group bindings retain uninitialized, local or shared axis state, original writer and immediate base; this pass produces uninitialized and shared bindings.",
+    "new aliases copy the immediate base current array. a charged dependency memo lets nested aliases consume newly bound parents regardless of request order.",
+    "ordinary host reconciliation preserves captured identity when its immediate base stays unchanged; later base allocation does not retroactively warm a cold alias.",
+    "physical input moves rename axis ports independently. detachment and retirement recognize scalar references even when combined identities differ.",
+    "clone, replacement, rename and retirement account for all three new owned identity strings. projection and projected rebinding match the scalar identity.",
+    "group comparison includes captured axis identity and scalar overlay contents."
+  ],
+  "native_checks": [
+    "warm base axes bind as shared storage; a cold base binds as uninitialized local storage.",
+    "cold aliases stay cold after late base allocation and unrelated revision reconciliation; newly bound aliases see the current base array.",
+    "nested aliases use the immediate base array, never an ancestor merely because combined ownership points there.",
+    "parent and child bound in one transaction use the newly derived parent identity, in either request order.",
+    "move and detach fixtures verify captured scalar ports while preserving the separate combined owner.",
+    "low-budget binding preserves a populated result; byte-boundary tests find the minimum admitted budget and verify refusal at minimum minus one."
+  ],
+  "issues_and_repairs": [
+    "immediate-base lookup followed ancestor ownership; removed ancestor traversal.",
+    "axis work admission omitted writer, overlay and authored-axis scans; charged each scan.",
+    "fresh same-transaction descendants observed stale parent state; added charged dependency memo.",
+    "new fixture assigned payload data directly to OwnedPayload3D; used emplace before assignment.",
+    "new fixture merge mixed loop and generated argument forms; corrected all three mismatched calls.",
+    "old byte-boundary test assumed a private scratch layout; replaced the hard-coded threshold with a measured admission search.",
+    "public API comment implied full repeated source setInstance semantics; documented host reconciliation and unfinished explicit recapture."
+  ],
+  "review": "read-only review found no additional confirmed issue in the dependency memo or measured byte-boundary test.",
+  "builds": [
+    {
+      "log": "axis-identity-build1.log",
+      "exit_code": 1
+    },
+    {
+      "log": "axis-identity-build2.log",
+      "exit_code": 1
+    },
+    {
+      "log": "axis-identity-build3.log",
+      "exit_code": 0
+    },
+    {
+      "log": "axis-identity-build4.log",
+      "exit_code": 0
+    }
+  ],
+  "joined_batches": [
+    {
+      "results": "axis-identity-batch1-results.json",
+      "passed_checks": 19,
+      "checks": 20,
+      "failure": "GroupReplay.cpp:758 hard-coded scratch admission threshold; no other check failed."
+    },
+    {
+      "results": "axis-identity-batch2-results.json",
+      "passed_checks": 20,
+      "checks": 20,
+      "all_passed": true,
+      "native_cpu_cases": 4997,
+      "render_cases": 15,
+      "startup_cases": 1,
+      "cli_cases": 16,
+      "python_cases": 100,
+      "binary_hashes_stable": true,
+      "child_hashes_stable": true,
+      "socket_cases_excluded": 21
+    }
+  ],
+  "source_review": {
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "scripts": [
+      {
+        "path": "scripts/node_group/node_group.gml",
+        "sha256": "12bcf43c0bfcb6d84ea8c788c4ff84bae4f805d1290ede309222f2cd03bbb019"
+      },
+      {
+        "path": "scripts/node_value/node_value.gml",
+        "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd"
+      },
+      {
+        "path": "scripts/node_value_vec2/node_value_vec2.gml",
+        "sha256": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112"
+      },
+      {
+        "path": "scripts/node_gradient_point_n/node_gradient_point_n.gml",
+        "sha256": "4bf3c140c198df497f338f56132ca8aa517da39ba8bbe03818e18c8e7ad3f739"
+      }
+    ],
+    "facts": [
+      "node_group.gml assigns each child the immediate base current animator array in instance topology order.",
+      "node_value.gml getAnimators stores lazily constructed local axes; node_value_vec2.gml separated reads call it. later group binding can observe this allocation.",
+      "node_value.gml saves def_val independently and restores a supplied non-noone value only when its array length matches the constructor default.",
+      "Gradient Points N constructs new point defaults as [0,0].",
+      "PxcxImport.cpp seeds dynamic.Default from catalogue defaults, then can overwrite it with imported animator data. it does not retain def_val."
+    ]
+  },
+  "limits": [
+    "scalar reads, edits and mode changes still need routing through captured axis identity.",
+    "lazy allocation needs authoritative local constructor default provenance and a retained initialization transition or receipt; mutable DynamicInput.Default cannot substitute for source def_val.",
+    "repeated explicit source setInstance must recopy current base axes even when the base ID is unchanged. that transition remains unfinished.",
+    "separate/combine authoring transactions, multi-time sampling and Studio controls remain unfinished.",
+    "no licensed runner comparison, performance measurement, sanitizer run or headed Studio verification was performed.",
+    "21 socket cases remain excluded in the restricted environment. this pass does not establish full Composer acceptance."
+  ],
+  "commit": "filesystem refuses .git writes; retain isolated owned patch."
+}
