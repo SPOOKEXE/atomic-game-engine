@@ -6,6 +6,7 @@
 #include "ImageGraphArguments.hpp"
 #include "ImageGraphArrayEditor.hpp"
 #include "ImageGraphArtworkEdit.hpp"
+#include "ImageGraphAxisControls.hpp"
 #include "ImageGraphCacheBackground.hpp"
 #include "ImageGraphCacheClearAction.hpp"
 #include "ImageGraphCacheControls.hpp"
@@ -4430,6 +4431,40 @@ namespace studio {
 			detail::ImageGraphCacheEditScope editKind(
 				state.CacheEditKind, detail::ImageGraphCacheEditKind::RenderOnly
 			);
+			if (const auto separated =
+					detail::DrawImageGraphAxisControl(node, property, state.GroupHost.Replay)) {
+				const std::string nodeId = node.Id, port(property);
+				CancelComposerPreview(state);
+				engine::imagegraph::EvaluationRequest request;
+				request.HostProvider = &HostFor(state);
+				request.AudioFrames = state.AudioFrames;
+				request.AudioClips = state.AudioClips;
+				engine::imagegraph::SourceFontContext fontContext;
+				if (!BindObservations(state, request, &fontContext)) return;
+				(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
+				const auto fontBytes = engine::imagegraph::SourceFontContextRetainedBytes(fontContext);
+				const auto allowance =
+					fontBytes ? GroupConstructorAllowance(state, *fontBytes) : std::nullopt;
+				if (!allowance) {
+					state.LastDiagnostic = {
+						Status::LimitExceeded, nodeId, port, "source axis edit host payload exceeds budget"
+					};
+					return;
+				}
+				if (state.GroupHost.ToggleAxes(
+						state.Authored,
+						state.History,
+						state.DocumentRevision,
+						{nodeId, port, *separated, true},
+						request,
+						state.LastDiagnostic,
+						*allowance
+					)) {
+					AuthoredDocumentChanged(state);
+					ReloadCanvas(state);
+				}
+				return;
+			}
 			detail::DrawAnimationTrackPolicy(
 				state.Authored, node, property, state.LastDiagnostic, [&](const auto &edit) {
 					return ApplyDocumentEdit(state, edit);

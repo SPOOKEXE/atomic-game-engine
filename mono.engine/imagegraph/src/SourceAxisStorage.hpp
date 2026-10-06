@@ -30,7 +30,8 @@ namespace engine::imagegraph::detail {
 		std::string_view legacyOwner,
 		std::string_view legacyPort,
 		bool legacyAnimated,
-		uint64_t &work
+		uint64_t &work,
+		bool requireSeparated = true
 	) {
 		SourceAxisStorageView result;
 		const auto fail = [&](Status code, std::string_view message) {
@@ -51,8 +52,8 @@ namespace engine::imagegraph::detail {
 		const auto *local = localOverlay != overlays.end() && localOverlay->SeparatedVec2
 								? &*localOverlay->SeparatedVec2
 								: FindSeparatedVec2(property, port);
-		if (!local || !local->Separated) return result;
-		result.Separated = true;
+		if (requireSeparated && (!local || !local->Separated)) return result;
+		result.Separated = local && local->Separated;
 		result.Owner = &property;
 		result.Port = port;
 		if (!AdmitSourceAxisWork(work, bindings.size()))

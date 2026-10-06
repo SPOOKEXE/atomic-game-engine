@@ -2,6 +2,7 @@
 
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/GroupReplay.hpp>
+#include <engine/imagegraph/SourceAxisTransition.hpp>
 #include <engine/imagegraph/SourceModeTransition.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -1395,4 +1396,52 @@ TEST_CASE(
 	staged.Links = {{"literal", "value", "copy", "argument_value_1"}};
 	CHECK(CaptureMove(staged, moved, "copy", "argument_value_1") == Value{223.});
 	CHECK(CaptureMove(staged, moved, "sibling", "argument_value_1") == Value{31.});
+}
+
+TEST_CASE(
+	"Axis controls convert detached physical storage without redirecting to the replacement input",
+	"[source_input_moves][source_axis_transition]"
+) {
+	auto original = MakeGradientPointMoveGraph();
+	const bool separated = GENERATE(false, true);
+	original.Nodes[1].SourceSeparatedVec2Animators->Inputs[0].Separated = separated;
+	original.Nodes[1].InstanceOverrides = {std::string(Point0)};
+	Diagnostic error;
+	GroupReplayState empty, initial, bound;
+	REQUIRE(RebindGroupReplay(original, empty, 1, initial, error) == Status::Ok);
+	const auto bindings = GradientPointBindings();
+	REQUIRE(BindGroupReplay(original, bindings, initial, 1, bound, error) == Status::Ok);
+	auto staged = original;
+	RemovePointInput(staged.Nodes[0], Point0);
+	RenamePointInputs(staged.Nodes[0], Point1, Point0);
+	const SourceInputMove moves[] = {{"base", Point0, ""}, {"base", Point1, Point0}};
+	GroupReplayState detached;
+	REQUIRE(
+		RebindGroupReplayWithInputMoves(original, staged, moves, bound, 2, detached, error) == Status::Ok
+	);
+	const auto identity = detached.DetachedAnimators().front().Id;
+	Document converted;
+	GroupReplayState convertedReplay;
+	EvaluationRequest request;
+	const auto status = ToggleSourceAxes(
+		staged, detached, 2, {"copy", Point0, !separated}, request, converted, convertedReplay, error
+	);
+	INFO(error.Message << ' ' << error.NodeId << ' ' << error.Port);
+	REQUIRE(status == Status::Ok);
+	CHECK(converted.Nodes[0] == staged.Nodes[0]);
+	CHECK(convertedReplay.Binding("copy", Point0)->AnimatorPort == identity);
+	CHECK(convertedReplay.Binding("copy", Point0)->Axes.Port == identity);
+	REQUIRE(convertedReplay.SharedSubtype("base", identity));
+	const auto &overlay = *convertedReplay.SharedSubtype("base", identity);
+	REQUIRE(overlay.SeparatedVec2);
+	if (separated) {
+		REQUIRE(overlay.Keys.size() == 2);
+		CHECK(overlay.Keys[0].Data == Value{Vector2{10, 2}});
+		CHECK(overlay.Keys[1].Data == Value{Vector2{20, 2}});
+		CHECK(overlay.Keys[1].SourceKeyId.empty());
+	} else {
+		REQUIRE(overlay.SeparatedVec2->Axes[0].Keys.size() == 1);
+		CHECK(overlay.SeparatedVec2->Axes[0].Keys[0].Data == Value{10.0});
+		CHECK(overlay.SeparatedVec2->Axes[1].Keys[0].Data == Value{1.0});
+	}
 }

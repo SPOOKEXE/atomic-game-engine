@@ -2,6 +2,7 @@
 
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/GroupReplay.hpp>
+#include <engine/imagegraph/SourceAxisTransition.hpp>
 #include <engine/imagegraph/SourceModeTransition.hpp>
 
 #include <algorithm>
@@ -161,7 +162,11 @@ namespace studio {
 			using namespace engine::imagegraph;
 			if (Revision != revision) {
 				GroupReplayState rebound, restored, bound;
-				if (RebindGroupReplay(document, Replay, revision, rebound, error) != Status::Ok) return false;
+				const auto prepareAllowance = Budget(error);
+				if (!prepareAllowance ||
+					RebindGroupReplay(document, Replay, revision, rebound, error, prepareAllowance) !=
+						Status::Ok)
+					return false;
 				std::vector<GroupBootstrapTarget> fresh;
 				std::vector<GroupSubtypeBinding> bindings;
 				const uint64_t scratchBudget = Budget(error, {&document}, {&Replay, &rebound});
@@ -379,6 +384,81 @@ namespace studio {
 			const auto allowance = Budget(error, {}, {}, 0, maximumBytes);
 			if (!allowance) return false;
 			return ProjectGroupReplay(document, Replay, revision, projected, error, allowance) == Status::Ok;
+		}
+
+		bool ToggleAxes(
+			engine::imagegraph::Document &document,
+			ImageGraphHistory &history,
+			uint64_t revision,
+			const engine::imagegraph::SourceAxisTransition &transition,
+			engine::imagegraph::EvaluationRequest request,
+			engine::imagegraph::Diagnostic &error,
+			uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		) try {
+			using namespace engine::imagegraph;
+			const auto initialAllowance = Budget(error, {&document}, {&Replay}, 0, maximumBytes);
+			if (!initialAllowance) return false;
+			ImageGraphGroupHost prepared;
+			const auto allowance = Budget(error, {}, {&Replay}, 0, maximumBytes);
+			if (!allowance) return false;
+			prepared.BorrowedBytes = Limits::MaximumEvaluationBytes - allowance;
+			prepared.Revision = Revision;
+			if (RebindGroupReplay(
+					document, Replay, revision, prepared.Replay, error, Budget(error, {}, {}, 0, maximumBytes)
+				) != Status::Ok)
+				return false;
+			const auto planAllowance = prepared.Budget(error, {&document}, {&prepared.Replay}) / 2;
+			if (!planAllowance) return false;
+			Plan plan;
+			if (Compile(document, plan, error, planAllowance) != Status::Ok) return false;
+			// reserve the admitted compiler workspace until its plan leaves the preparation overlap.
+			prepared.BorrowedBytes += planAllowance;
+			if (!prepared.Prepare(document, plan, revision, request, error)) return false;
+			plan = {};
+			prepared.BorrowedBytes -= planAllowance;
+			Document before, changed;
+			GroupReplayState changedReplay, rebound;
+			const auto projectAllowance = prepared.Budget(error);
+			if (!projectAllowance ||
+				ProjectGroupReplay(document, prepared.Replay, revision, before, error, projectAllowance) !=
+					Status::Ok)
+				return false;
+			const auto transitionAllowance = prepared.Budget(error, {&before});
+			if (!transitionAllowance || ToggleSourceAxes(
+											document,
+											prepared.Replay,
+											revision,
+											transition,
+											request,
+											changed,
+											changedReplay,
+											error,
+											transitionAllowance
+										) != Status::Ok)
+				return false;
+			const uint64_t nextRevision = revision == UINT64_MAX ? 1 : revision + 1;
+			const auto rebindAllowance = prepared.Budget(error, {&document, &before}, {&prepared.Replay});
+			if (!rebindAllowance || RebindProjectedGroupReplay(
+										changed, changedReplay, nextRevision, rebound, error, rebindAllowance
+									) != Status::Ok)
+				return false;
+			if (!history.TryRecord(before, changed)) {
+				error = {
+					Status::LimitExceeded,
+					std::string(transition.NodeId),
+					std::string(transition.Port),
+					"source axis edit exceeds undo history budget"
+				};
+				return false;
+			}
+			document = std::move(changed);
+			Replay = std::move(rebound);
+			Revision = nextRevision;
+			error = {};
+			return true;
+		} catch (const std::bad_alloc &) {
+			error = {engine::imagegraph::Status::LimitExceeded, {}, {}, "Studio axis edit allocation failed"};
+			return false;
 		}
 
 		bool Edit(

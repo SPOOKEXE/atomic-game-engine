@@ -16868,6 +16868,16 @@ namespace engine::imagegraph {
 		}
 	}
 
+	Status detail::CompileSourceDocument(
+		const Document &document,
+		Plan &plan,
+		EvaluationBudget &budget,
+		AllocationReservation &planCharge,
+		Diagnostic &diagnostic
+	) {
+		return CompileWithBudget(document, plan, diagnostic, budget, planCharge);
+	}
+
 	Status detail::EvaluateSourceInput(
 		const Document &document,
 		const Plan &plan,

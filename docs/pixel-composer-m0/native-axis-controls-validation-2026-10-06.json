@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "backend": "offscreen Vulkan",
+  "scope": "fixed catalogue Vec2 separate/combine transactions and Studio controls",
+  "changes": [
+    "paired atomic document/replay transaction with guarded source reads and caller byte allowance",
+    "separate copies raw combined components, times and easing into fresh scalar rows",
+    "combine clears the combined writer then samples the sorted scalar time union into fresh linear rows",
+    "local mode flag remains independent of shared physical scalar storage",
+    "detached Fixed payload participates in separation and is retired before combined keys are stored",
+    "Studio button and history transaction preserve owners on refusal"
+  ],
+  "builds": [
+    {
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-build1.log",
+      "exit_code": 1,
+      "steps_completed": 63,
+      "failure": "new test helper lacked FrameTime.hpp; repaired after complete joined build"
+    },
+    {
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-build2.log",
+      "exit_code": 0,
+      "steps": 35
+    },
+    {
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-build3.log",
+      "exit_code": 0,
+      "steps": 35
+    }
+  ],
+  "first_batch": {
+    "checks_passed": 19,
+    "checks_total": 20,
+    "issues": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-batch1-issues.json",
+    "failure": "invalid packed-array fixture and two detached Fixed handling defects; repaired together before joined repeat"
+  },
+  "final_batch": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "cpu_cases": 5051,
+    "vulkan_cases": 15,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-batch2-results.json",
+    "child_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-child-hashes-batch2.json",
+    "source_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-build3-source-hashes.json",
+    "source_changes_during_build_and_tests": [],
+    "binaries_changed_during_tests": false
+  },
+  "covered": [
+    "raw driven and Adder rows lose source driver, kind and key identity when split",
+    "signed fractional union with observed self input map",
+    "shared physical owner and selected local flag independence",
+    "cold flag-only mode, stale revision, small byte cap and aliased output refusal",
+    "detached combined and scalar identities survive conversion",
+    "implicit static row versus explicit empty Track",
+    "headless ImGui button clicks, host edit, serialized document undo/redo and history-cap refusal"
+  ],
+  "limits": [
+    "fixed catalogue Vec2 controls only; generic vector and HLSL constructor domains remain open",
+    "Studio action does not yet supply a live node-values map for self expressions; the core caller-provided map seam is tested",
+    "explicit same-base setInstance combined/scalar recapture remains open",
+    "history checks cover document snapshots, not complete binding-time identity across reopening and undo/redo",
+    "joined GPU checks cover existing Composer, Transform and skybox paths; no full preview pulse test for the new button action",
+    "new paths have profile scopes but no dedicated profile capture; no performance claim",
+    "licensed reference parity and headed Studio checks remain open",
+    "verification used the shared working tree with pending peer changes; standalone commit was not separately built",
+    "full 33-item Composer objective remains active"
+  ]
+}

@@ -5,6 +5,14 @@
 #include <engine/imagegraph/Document.hpp>
 
 namespace engine::imagegraph::detail {
+	// admit a transaction's compiled candidate alongside its other retained owners.
+	Status CompileSourceDocument(
+		const Document &document,
+		Plan &plan,
+		EvaluationBudget &budget,
+		AllocationReservation &planCharge,
+		Diagnostic &diagnostic
+	);
 	// compile and sample one immutable document under the same live byte ledger.
 	// caller keeps the document and prior result charged; the compiled plan stays local to this call.
 	Status EvaluateSourceInput(
