@@ -65,7 +65,7 @@ namespace engine::imagegraph::detail {
 		const SourceFrameCacheInputIndex &loads,
 		uint64_t totalFrames
 	) {
-		if (node.Type != "pc.cache" || request.NegativeFrame || request.Subframe != 0) return false;
+		if (node.Type != "pc.cache" || request.NegativeFrame) return false;
 		bool cleared = false;
 		const auto *row = current.Find(node, cleared);
 		if (!row && !cleared && !SourceFrameCacheSavedText(node).empty()) {

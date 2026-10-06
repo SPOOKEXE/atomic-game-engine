@@ -73,10 +73,10 @@ namespace engine::imagegraph::detail {
 			nonemptyGroup = group && !group->Elements.empty();
 			if (serialize && saved && saved->empty())
 				return c.Fail(Status::InvalidValue, "enabled serialized source cache text is empty", "cache");
-			if (c.Request.NegativeFrame || c.Request.Subframe != 0)
+			if (c.Request.NegativeFrame)
 				return c.Fail(
 					Status::UnsupportedExecution,
-					"native frame-cache storage requires integer nonnegative source frames"
+					"native frame-cache storage requires nonnegative source frames"
 				);
 			return true;
 		}
@@ -283,6 +283,8 @@ namespace engine::imagegraph::detail {
 			uint64_t count = 0, first = 0, last = 0, step = 1;
 			// Cache loads exactly TOTAL_FRAMES slots. Cache Array restores every serialized slot.
 			const uint64_t loadLimit = loadedNow && !array ? total + 2 : UINT64_MAX;
+			// grug source arrays truncate nonnegative clocks. animation getters keep the full clock;
+			// the cache owns one integer slot for every containing frame.
 			const auto *hit = c.Request.Tick + 2 < loadLimit
 								  ? SourceFrameCacheExistingFrame(previous, c.Request.Tick)
 								  : nullptr;

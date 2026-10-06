@@ -538,16 +538,6 @@ TEST_CASE(
 	CHECK(r.Random == initial.Random);
 	CHECK(r.Rigid == initial.Rigid);
 	q = Clock(1);
-	q.Subframe = .5;
-	q.DataReplay = &prior;
-	CHECK(EvaluateStateful(d, Compiled(d), "out", q, r, e) == Status::UnsupportedExecution);
-	SameOutput(r, initial);
-	CHECK(r.Data == initial.Data);
-	CHECK(r.Simulation == initial.Simulation);
-	CHECK(r.Surfaces == initial.Surfaces);
-	CHECK(r.Random == initial.Random);
-	CHECK(r.Rigid == initial.Rigid);
-	q = Clock(1);
 	q.NegativeFrame = true;
 	q.DataReplay = &prior;
 	CHECK(EvaluateStateful(d, Compiled(d), "out", q, r, e) == Status::UnsupportedExecution);
@@ -3135,4 +3125,106 @@ TEST_CASE(
 	CHECK(host.Output("out")->Pixels[0] == 99);
 	CHECK(Row(*request.DataReplay).FrameCacheConstructorCleared);
 	CHECK(Row(*request.DataReplay).LoadedCacheData == CookRow().LoadedCacheData);
+}
+
+TEST_CASE(
+	"Fractional Cache clocks reuse containing slots and skip unread getters",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene();
+	auto request = Clock(1);
+	request.Subframe = .25;
+	const auto captured = Run(document, request);
+	CHECK(Red(captured) == 10);
+	CHECK(Row(captured.Data).Values.back().Frame == 3);
+	AddUnreadableCacheGetters(document);
+	for (const double fraction : {0., .5, .999999}) {
+		request.Subframe = fraction;
+		const auto hit = Run(document, request, &captured.Data);
+		CHECK(Red(hit) == 10);
+		CHECK(hit.Data == captured.Data);
+	}
+}
+TEST_CASE(
+	"Fractional Cache capture samples the full upstream animation clock", "[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene();
+	document.Keyframes = {
+		{"input", "colour", 0, Colour{0, 0, 0, 255}, "linear", std::nullopt},
+		{"input", "colour", 1, Colour{100, 0, 0, 255}, "linear", std::nullopt}
+	};
+	auto request = Clock(0);
+	request.Subframe = .5;
+	const auto captured = Run(document, request);
+	CHECK(Red(captured) == 50);
+	request.Subframe = .75;
+	CHECK(Red(Run(document, request, &captured.Data)) == 50);
+	CHECK(Red(Run(document, request)) == 75);
+	request.Tick = 1;
+	request.Subframe = 0;
+	CHECK(Red(Run(document, request, &captured.Data)) == 100);
+}
+TEST_CASE(
+	"Fractional Cache Array clocks replace slots and retain integer range holes",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene(true);
+	auto request = Clock(1);
+	request.Subframe = .25;
+	const auto captured = Run(document, request);
+	CHECK(Slots(captured) == std::vector<int>{-1, 10, -1, -1, -1, -1});
+	ColourAt(document, 70);
+	request.Subframe = .75;
+	const auto replaced = Run(document, request, &captured.Data);
+	CHECK(Slots(replaced) == std::vector<int>{-1, 70, -1, -1, -1, -1});
+	CHECK(Row(replaced.Data).Values.size() == 3);
+	CHECK(Row(replaced.Data).Values.back().Frame == 3);
+	request.Tick = 2;
+	const auto next = Run(document, request, &replaced.Data);
+	CHECK(Slots(next) == std::vector<int>{-1, 70, 70, -1, -1, -1});
+	request.SourceCachePlayback->Playing = false;
+	request.Subframe = .5;
+	CHECK(Slots(Run(document, request, &next.Data)) == Slots(next));
+}
+TEST_CASE(
+	"Fractional cold Cache hits read both decoded and native saved slots", "[imagegraph][source_frame_cache]"
+) {
+	for (const bool native : {false, true}) {
+		auto document = Scene();
+		const auto row = CookRow();
+		DataReplayState loads{{row}};
+		document.Nodes[1].SourceProperties = native
+												 ? NativeNode(row).SourceProperties
+												 : std::vector<AuthoredValue>{{"cache", row.LoadedCacheData}};
+		AddUnreadableCacheGetters(document);
+		auto request = Clock(0, false);
+		request.Subframe = .75;
+		if (!native) request.SourceFrameCacheLoads = &loads;
+		const auto restored = Run(document, request);
+		CHECK(
+			std::get<Image>(restored.Output).Pixels == std::get<SurfaceValue>(row.Values[2].Data).Data.Pixels
+		);
+		CHECK(loads.Entries[0] == row);
+	}
+}
+TEST_CASE(
+	"Feedback host retains observed fractional Cache slots through backward seeks",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene();
+	const auto plan = Compiled(document);
+	CapturedFeedbackHost host;
+	Diagnostic diagnostic;
+	auto request = Clock(1);
+	request.Subframe = .25;
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	const auto captured = *request.DataReplay;
+	for (const double fraction : {.75, 0., .5}) {
+		request = Clock(1, false);
+		request.Subframe = fraction;
+		REQUIRE(
+			host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out")
+		);
+		CHECK(*request.DataReplay == captured);
+	}
 }

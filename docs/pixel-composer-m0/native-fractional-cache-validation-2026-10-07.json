@@ -1,0 +1,369 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug accept nonnegative fractional Cache and Cache Array clocks. integer containing slots retain existing saved packet format; upstream animation keeps full clock.",
+  "files": [
+    "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+    "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+    "mono.engine/imagegraph/tests/FrameCacheReplay.cpp"
+  ],
+  "contract_sources": {
+    "pixel_composer_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "pixel_composer_files": [
+      "scripts/__node_cache/__node_cache.gml:40-91",
+      "scripts/node_cache_array/node_cache_array.gml:63-83",
+      "scripts/animation_controller/animation_controller.gml:24-30,71"
+    ],
+    "gamemaker_html5_revision": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+    "array_index_conversion": "https://github.com/YoYoGames/GameMaker-HTML5/blob/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/yyVariable.js#L106-L120",
+    "integer_conversion": "https://github.com/YoYoGames/GameMaker-HTML5/blob/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/yyTypes.js#L288-L293",
+    "local_reference_hashes": {
+      "/tmp/composer-gamemaker-yyVariable.js": "da5d6a2fba34a237e563de92df55a3db96999f34b762d59dbae969b6bd08deb0",
+      "/tmp/composer-gamemaker-yyTypes.js": "10afe81c766f2cf932a37b3745f67f130acc919b67d60b096133fb8e99f153a1"
+    }
+  },
+  "acceptance": [
+    "fractional hits skip unread upstream getters",
+    "fractional misses sample full upstream colour animation",
+    "Cache Array replaces containing slot and preserves integer holes",
+    "cold native and decoded receipts recover containing slot without reading failed getters",
+    "CapturedFeedbackHost preserves observed slots through backward fractional seeks",
+    "negative frames remain explicit refusals"
+  ],
+  "builds": [
+    {
+      "command": "cmake --build .cache/build/release-tests --target test_bake test_imagegraphphysics test_imagegraph_runner test_imagegraphfont test_imagegraphexport test_render test_imagegraphio test_imagegraph test_assetc test_client test_studio test_nodegraph test_ui assetc imagegraph studio -j16",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-build1.log",
+      "notes": "grug caught linear-key fixture carrying source easing while reading. no tests ran before fixture repair."
+    },
+    {
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-build2.log",
+      "notes": "grug omitted source easing from linear fixture, then rebuilt all verification targets."
+    }
+  ],
+  "joined_batch": {
+    "driver": "/tmp/composer-fractional-cache-cpu-batch1.py",
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-batch1-console.log",
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-batch1-results.json",
+    "cpp_cases": 5265,
+    "startup_cases": 1,
+    "assertions_including_startup": 2006649,
+    "cli_cases": 16,
+    "python_cases": 101,
+    "checks": [
+      {
+        "name": "bake",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-bake-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_bake"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_bake",
+        "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+        "exit_code": 0,
+        "elapsed_seconds": 0.308,
+        "assertions": 15875,
+        "cases": 157,
+        "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "physics",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-physics-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+        "binary_sha256": "c34335461fbe313a6573af178d8c3b493e06cb95f3caa8230c1b3a79fe49087f",
+        "exit_code": 0,
+        "elapsed_seconds": 0.352,
+        "assertions": 715,
+        "cases": 43,
+        "binary_sha256_after": "c34335461fbe313a6573af178d8c3b493e06cb95f3caa8230c1b3a79fe49087f",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "runner",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-runner-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph_runner"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+        "binary_sha256": "166f4e3ac37d87faf2ab586aef4d096dea26eb030b8d34dcf498116c6f8da559",
+        "exit_code": 0,
+        "elapsed_seconds": 0.314,
+        "assertions": 296,
+        "cases": 29,
+        "binary_sha256_after": "166f4e3ac37d87faf2ab586aef4d096dea26eb030b8d34dcf498116c6f8da559",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "font",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-font-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+        "binary_sha256": "ccd33c60cea6aa9d798cca413c765b8f712d8d45711c638e17ec24ab2986eb52",
+        "exit_code": 0,
+        "elapsed_seconds": 0.503,
+        "assertions": 1686,
+        "cases": 37,
+        "binary_sha256_after": "ccd33c60cea6aa9d798cca413c765b8f712d8d45711c638e17ec24ab2986eb52",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "export",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-export-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+        "binary_sha256": "cac24a863eccf79ea8e98202f9d1e3e57c847386180528926b1857de4cc579f4",
+        "exit_code": 0,
+        "elapsed_seconds": 0.653,
+        "assertions": 3307,
+        "cases": 88,
+        "binary_sha256_after": "cac24a863eccf79ea8e98202f9d1e3e57c847386180528926b1857de4cc579f4",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "render",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-render-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_render",
+          "[gpu][imagegraph],[source-camera-host-gpu],[transform-host-gpu],[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],[sdf-host-gpu],[source_sdf],[sdf-capture],*Transform Image 3D*"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_render",
+        "binary_sha256": "13d37d80a6968ff6ba4fb50d7ec0caf08b1c240d08ab3b215a5dd11f9c1aeac9",
+        "exit_code": 0,
+        "elapsed_seconds": 3.009,
+        "assertions": 1988,
+        "cases": 31,
+        "binary_sha256_after": "13d37d80a6968ff6ba4fb50d7ec0caf08b1c240d08ab3b215a5dd11f9c1aeac9",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "cli",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-cli-batch1.log",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_)",
+          "--output-on-failure",
+          "-j8"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 3.261,
+        "ctest_cases": 16
+      },
+      {
+        "name": "io",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-io-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+        "binary_sha256": "9979d25588f85eeb4e587a1d3d2f0a72c3a41bda7bdadaa31cb72f6b0ce0d1e7",
+        "exit_code": 0,
+        "elapsed_seconds": 3.909,
+        "assertions": 13101,
+        "cases": 313,
+        "binary_sha256_after": "9979d25588f85eeb4e587a1d3d2f0a72c3a41bda7bdadaa31cb72f6b0ce0d1e7",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "core",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-core-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraph",
+        "binary_sha256": "392aeec9d2efeef61d123ebaf8a9520654a76a386f67325ccfb013ccdd0f106c",
+        "exit_code": 0,
+        "elapsed_seconds": 3.933,
+        "assertions": 1895236,
+        "cases": 2986,
+        "binary_sha256_after": "392aeec9d2efeef61d123ebaf8a9520654a76a386f67325ccfb013ccdd0f106c",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "assetc",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-assetc-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_assetc"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_assetc",
+        "binary_sha256": "52ac5a1f10813241519c512952ab2a1c58b8d96bec999c7072276ad89e2b1e7b",
+        "exit_code": 0,
+        "elapsed_seconds": 6.097,
+        "assertions": 509,
+        "cases": 45,
+        "binary_sha256_after": "52ac5a1f10813241519c512952ab2a1c58b8d96bec999c7072276ad89e2b1e7b",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "client",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-client-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_client",
+          "~[.],[argument_binding][gpu],[argument-transform-gpu]"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_client",
+        "binary_sha256": "0e932b09144d85d2705bf29e99fd38cae568b769c1a931b1eafd3e0086c1f713",
+        "exit_code": 0,
+        "elapsed_seconds": 4.755,
+        "assertions": 23853,
+        "cases": 359,
+        "binary_sha256_after": "0e932b09144d85d2705bf29e99fd38cae568b769c1a931b1eafd3e0086c1f713",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "studio",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-studio-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_studio",
+        "binary_sha256": "22dd49b4c3a39fadd57c20c227cabcf86ee1654e786af6b515b5d49ac610af2b",
+        "exit_code": 0,
+        "elapsed_seconds": 8.119,
+        "assertions": 49029,
+        "cases": 1100,
+        "binary_sha256_after": "22dd49b4c3a39fadd57c20c227cabcf86ee1654e786af6b515b5d49ac610af2b",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "nodegraph",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-nodegraph-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_nodegraph",
+        "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+        "exit_code": 0,
+        "elapsed_seconds": 1.323,
+        "assertions": 345,
+        "cases": 37,
+        "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "ui",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-ui-batch1.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_ui"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_ui",
+        "binary_sha256": "7f0580a11d94046c31c3dd72240c9084633cc1b83c7236335b686134c043cc7a",
+        "exit_code": 0,
+        "elapsed_seconds": 0.525,
+        "assertions": 704,
+        "cases": 40,
+        "binary_sha256_after": "7f0580a11d94046c31c3dd72240c9084633cc1b83c7236335b686134c043cc7a",
+        "binary_changed_during_test": false
+      },
+      {
+        "name": "startup",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-startup-batch1.log",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^studio_composer_startup_arguments$",
+          "-V"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.266,
+        "assertions": 5,
+        "cases": 1
+      },
+      {
+        "name": "lint",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-lint-batch1.log",
+        "command": [
+          "ruff",
+          "check",
+          "scripts/pixel-composer/generate-catalogue.py",
+          "scripts/tests/pixel_composer_catalogue_metadata_test.py"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.013
+      },
+      {
+        "name": "architecture",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-architecture-batch1.log",
+        "command": [
+          "cmake",
+          "-DGRAPH=.cache/build/release-tests/target-graph.json",
+          "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+          "-P",
+          "mono.tools/architecture/CheckTargetGraph.cmake"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.444
+      },
+      {
+        "name": "python",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-python-batch1.log",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "scripts/tests",
+          "-p",
+          "pixel_composer_*_test.py"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 1.699,
+        "python_cases": 101
+      },
+      {
+        "name": "format",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-format-batch1.log",
+        "exit_code": 0,
+        "elapsed_seconds": 3.449,
+        "command_note": "grug checked continuation C++ files with clang-format-21 --dry-run --Werror. full command retained in joined results."
+      },
+      {
+        "name": "diff",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-cpu-diff-batch1.log",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.104
+      }
+    ]
+  },
+  "consistency": {
+    "source_manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/fractional-cache-source-frozen-batch1.json",
+    "source_count": 3564,
+    "changed_sources": [],
+    "tested_binary_hashes_stable": true,
+    "child_tool_hashes": {
+      "before": {
+        ".cache/build/release-tests/tools/assetc": "798f062d51f4985a2c333823e5462ea1d52f504b6f3e3ed9ace4d47ff54cf2b5",
+        ".cache/build/release-tests/tools/imagegraph": "333348d66c9b15d92972cacb658f976f10993ecf1cd2687d5b7be43f0bcd2fea"
+      },
+      "after": {
+        ".cache/build/release-tests/tools/assetc": "798f062d51f4985a2c333823e5462ea1d52f504b6f3e3ed9ace4d47ff54cf2b5",
+        ".cache/build/release-tests/tools/imagegraph": "333348d66c9b15d92972cacb658f976f10993ecf1cd2687d5b7be43f0bcd2fea"
+      }
+    }
+  },
+  "limits": [
+    "grug has no licensed desktop Composer matched capture. HTML5 runtime source supports index conversion; desktop parity remains unverified.",
+    "grug kept negative frame refusals and integer saved receipts.",
+    "FeedbackReplay integer target gate, export fractional scheduling and mixed temporal hosts remain separate work.",
+    "headed Studio approval remains pending. no headed Studio run in this slice.",
+    "grug added no new algorithm or allocation. existing frame-cache profile scopes remain; no new performance measurement or speed claim."
+  ]
+}
