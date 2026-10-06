@@ -43,7 +43,7 @@ set_property(DIRECTORY APPEND
 # MONO_FUZZ_* option set on the command line.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
    NOT (MONO_FUZZ_GUI OR MONO_FUZZ_BAKE OR MONO_FUZZ_SHADER OR MONO_FUZZ_PRESENTATION OR
-        MONO_FUZZ_PORTAL_EXCHANGE))
+        MONO_FUZZ_PORTAL_EXCHANGE OR MONO_FUZZ_IMAGEGRAPH))
 	message(FATAL_ERROR
 		"Linux builds use GCC; this configure picked ${CMAKE_CXX_COMPILER_ID} (${CMAKE_CXX_COMPILER}).\n"
 		"  Reconfigure without a compiler override: `cmake --preset <name> --fresh`.")

@@ -391,6 +391,19 @@ bake-pxcx-fuzz runs="1000" compiler="clang++-21":
     "$fuzz_build/fuzz/fuzz_bake_pxcx" --write-seeds "$corpus"
     "$fuzz_build/fuzz/fuzz_bake_pxcx" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=2048 -malloc_limit_mb=128 -artifact_prefix="$artifacts/"
 
+# grug fuzz native sparse and nested cache packets with ASan and UBSan.
+imagegraph-frame-cache-fuzz runs="10000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/imagegraph-fuzz"
+    cmake --preset server -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_IMAGEGRAPH=ON
+    cmake --build "$fuzz_build" --target fuzz_imagegraph_frame_cache -j 4
+    corpus="$fuzz_build/fuzz/frame-cache-corpus"
+    artifacts="$fuzz_build/fuzz/frame-cache-artifacts"
+    mkdir -p "$corpus" "$artifacts"
+    "$fuzz_build/fuzz/fuzz_imagegraph_frame_cache" --write-seeds "$corpus"
+    "$fuzz_build/fuzz/fuzz_imagegraph_frame_cache" "$corpus" -runs={{runs}} -max_len=131072 -timeout=10 -rss_limit_mb=1024 -malloc_limit_mb=128 -artifact_prefix="$artifacts/"
+
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A

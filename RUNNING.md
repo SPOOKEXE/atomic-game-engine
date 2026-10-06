@@ -162,6 +162,7 @@ directory. Use the `bench` preset for comparable measurements.
 | `presentation-fuzz [runs] [compiler]` | Fuzz presentation-message parsing. Defaults: `10000`, `clang++-21`. |
 | `fuzz-ui [runs] [compiler]` | Fuzz GUI documents, text, bindings, and bake SVGs. Defaults: `1000`, `clang++-21`. |
 | `bake-pxcx-fuzz [runs] [compiler]` | Fuzz the bounded PXCX archive reader. Defaults: `1000`, `clang++-21`. |
+| `imagegraph-frame-cache-fuzz [runs] [compiler]` | Fuzz sparse and nested native frame-cache packets. Defaults: `10000`, `clang++-21`. |
 | `bakegraph-pipeline-set-bench [samples]` | Measure lookup across a large pipeline set. Default: `5`. |
 | `scheduler-timing-bench [samples]` | Verify and profile 80 scheduler fixtures in fresh processes. Default and maximum: `5`. |
 | `portal-exchange-bench [samples]` | Measure portal exchange. Default: `5`. |
