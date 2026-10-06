@@ -38,7 +38,6 @@
   "final_batch": {
     "checks_passed": 20,
     "checks_total": 20,
-    "cpu_cases": 5051,
     "vulkan_cases": 15,
     "python_cases": 101,
     "cli_cases": 16,
@@ -47,7 +46,10 @@
     "child_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-child-hashes-batch2.json",
     "source_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/axis-controls-build3-source-hashes.json",
     "source_changes_during_build_and_tests": [],
-    "binaries_changed_during_tests": false
+    "binaries_changed_during_tests": false,
+    "cpp_non_render_suite_cases": 5051,
+    "cpp_suite_cases": 5066,
+    "case_count_note": "non-render suite count includes client GPU-tagged tests; Vulkan render count is separate, not the total of all GPU work"
   },
   "covered": [
     "raw driven and Adder rows lose source driver, kind and key identity when split",

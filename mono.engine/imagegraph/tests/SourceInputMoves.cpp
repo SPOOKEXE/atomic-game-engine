@@ -1445,3 +1445,208 @@ TEST_CASE(
 		CHECK(overlay.SeparatedVec2->Axes[1].Keys[0].Data == Value{1.0});
 	}
 }
+
+TEST_CASE(
+	"Explicit same-base bind recaptures warmed axes without changing the local split flag",
+	"[group_instance_recapture]"
+) {
+	auto document = MakeGradientPointMoveGraph();
+	auto warmAxes = *document.Nodes[0].SourceSeparatedVec2Animators;
+	document.Nodes[0].SourceSeparatedVec2Animators = {};
+	Diagnostic error;
+	GroupReplayState empty, initial, cold;
+	REQUIRE(RebindGroupReplay(document, empty, 1, initial, error) == Status::Ok);
+	const auto bindings = GradientPointBindings();
+	REQUIRE(BindGroupReplay(document, bindings, initial, 1, cold, error) == Status::Ok);
+	CHECK(cold.Binding("copy", Point0)->Axes.Storage == GroupAxisStorage::Uninitialized);
+	document.Nodes[0].SourceSeparatedVec2Animators.emplace() = std::move(warmAxes);
+	GroupReplayState revised, ordinary, recaptured;
+	REQUIRE(RebindGroupReplay(document, cold, 2, revised, error) == Status::Ok);
+	REQUIRE(BindGroupReplay(document, bindings, revised, 2, ordinary, error) == Status::Ok);
+	CHECK(ordinary.Binding("copy", Point0)->Axes.Storage == GroupAxisStorage::Uninitialized);
+	const std::array targets{GroupInstanceRecapture{"copy", Point0}};
+	const auto status = RecaptureGroupInstances(document, targets, ordinary, 2, recaptured, error);
+	INFO(error.Message);
+	REQUIRE(status == Status::Ok);
+	CHECK(recaptured.Binding("copy", Point0)->Axes.Storage == GroupAxisStorage::Shared);
+	CHECK(recaptured.Binding("copy", Point0)->Axes.OwnerId == "base");
+	CHECK(SamplePoint(document, recaptured, "copy", Point0, 5) == Value{Vector2{15, 2}});
+	CHECK(document.Nodes[1].SourceSeparatedVec2Animators->Inputs[0].Separated);
+	REQUIRE(recaptured.SharedSubtype("copy", Point0));
+	CHECK(recaptured.SharedSubtype("copy", Point0)->SeparatedVec2->Separated);
+}
+
+TEST_CASE(
+	"Cold recapture preserves descendants' old local scalar generation across lazy reconstruction",
+	"[group_instance_recapture]"
+) {
+	auto document = MakeGradientPointMoveGraph();
+	document.Nodes[0].SourceSeparatedVec2Animators = {};
+	document.Nodes[1].InstanceOverrides = {std::string(Point0)};
+	Diagnostic error;
+	GroupReplayState empty, initial, bound, constructed;
+	REQUIRE(RebindGroupReplay(document, empty, 1, initial, error) == Status::Ok);
+	auto bindings = GradientPointBindings();
+	REQUIRE(BindGroupReplay(document, bindings, initial, 1, bound, error) == Status::Ok);
+	const std::array initialize{SourceAxisInitialization{"copy", Point0}};
+	REQUIRE(InitializeSourceVec2Axes(document, initialize, bound, 1, constructed, error) == Status::Ok);
+	Document projected;
+	REQUIRE(ProjectGroupReplay(document, constructed, 1, projected, error) == Status::Ok);
+	GroupReplayState projectedReplay;
+	REQUIRE(RebindProjectedGroupReplay(projected, constructed, 2, projectedReplay, error) == Status::Ok);
+	projected.Nodes[1].SourceSeparatedVec2Animators->Inputs[0].Axes[0].Keys[0].Data = 99.;
+	projected.Nodes[1].SourceSeparatedVec2Animators->Inputs[0].Axes[1].Keys[0].Data = 17.;
+	Node child = projected.Nodes[1];
+	child.Id = "child";
+	child.InstanceBase = "copy";
+	child.SourceSeparatedVec2Animators->Inputs[0].Initialized = false;
+	for (auto &axis : child.SourceSeparatedVec2Animators->Inputs[0].Axes)
+		axis.Keys.clear();
+	projected.Nodes.push_back(std::move(child));
+	bindings.push_back(GradientPointBinding("child"));
+	GroupReplayState staged, aliases;
+	REQUIRE(RebindGroupReplay(projected, projectedReplay, 3, staged, error) == Status::Ok);
+	REQUIRE(BindGroupReplay(projected, bindings, staged, 3, aliases, error) == Status::Ok);
+	CHECK(aliases.Binding("child", Point0)->Axes.OwnerId == "copy");
+	const auto oldValue = SamplePoint(projected, aliases, "child", Point0, 0);
+	CHECK(oldValue == Value{Vector2{99, 17}});
+	const std::array targets{GroupInstanceRecapture{"copy", Point0}};
+	uint64_t low = 1, high = Limits::MaximumEvaluationBytes;
+	const auto attempt = [&](uint64_t cap) {
+		GroupReplayState destination;
+		return RecaptureGroupInstances(projected, targets, aliases, 3, destination, error, cap);
+	};
+	REQUIRE(attempt(high) == Status::Ok);
+	while (low < high) {
+		const auto middle = low + (high - low) / 2;
+		if (attempt(middle) == Status::Ok)
+			high = middle;
+		else
+			low = middle + 1;
+	}
+	CHECK(attempt(low) == Status::Ok);
+	CHECK(attempt(low - 1) == Status::LimitExceeded);
+	GroupReplayState recaptured;
+	const auto status = RecaptureGroupInstances(projected, targets, aliases, 3, recaptured, error);
+	INFO(error.Message);
+	REQUIRE(status == Status::Ok);
+	CHECK(recaptured.Binding("copy", Point0)->Axes.Storage == GroupAxisStorage::Uninitialized);
+	REQUIRE(recaptured.DetachedAnimators().size() == 1);
+	const std::string retired = recaptured.DetachedAnimators()[0].Id;
+	CHECK(recaptured.Binding("child", Point0)->Axes.Port == retired);
+	CHECK(recaptured.Binding("child", Point0)->OwnerId == "base");
+	CHECK(recaptured.Binding("child", Point0)->AnimatorPort.empty());
+	CHECK(SamplePoint(projected, recaptured, "child", Point0, 0) == oldValue);
+	REQUIRE(InitializeSourceVec2Axes(projected, initialize, recaptured, 3, constructed, error) == Status::Ok);
+	CHECK(constructed.Binding("copy", Point0)->Axes.Storage == GroupAxisStorage::Local);
+	CHECK(constructed.Binding("child", Point0)->Axes.Port == retired);
+	CHECK(SamplePoint(projected, constructed, "child", Point0, 0) == oldValue);
+	Document saved;
+	REQUIRE(ProjectGroupReplay(projected, constructed, 3, saved, error) == Status::Ok);
+	GroupReplayState savedReplay;
+	REQUIRE(RebindProjectedGroupReplay(saved, constructed, 4, savedReplay, error) == Status::Ok);
+	CHECK(SamplePoint(saved, savedReplay, "child", Point0, 0) == oldValue);
+}
+
+TEST_CASE(
+	"Explicit nested recapture resolves parents first in either caller order", "[group_instance_recapture]"
+) {
+	auto document = MakeGradientPointMoveGraph();
+	auto warm = *document.Nodes[0].SourceSeparatedVec2Animators;
+	document.Nodes[0].SourceSeparatedVec2Animators = {};
+	Node child = document.Nodes[1];
+	child.Id = "child";
+	child.InstanceBase = "copy";
+	document.Nodes.push_back(std::move(child));
+	auto bindings = GradientPointBindings();
+	bindings.push_back(GradientPointBinding("child"));
+	Diagnostic error;
+	GroupReplayState empty, initial, cold;
+	REQUIRE(RebindGroupReplay(document, empty, 1, initial, error) == Status::Ok);
+	REQUIRE(BindGroupReplay(document, bindings, initial, 1, cold, error) == Status::Ok);
+	document.Nodes[0].SourceSeparatedVec2Animators.emplace() = std::move(warm);
+	std::array targets{GroupInstanceRecapture{"copy", Point0}, GroupInstanceRecapture{"child", Point0}};
+	const bool reversed = GENERATE(false, true);
+	if (reversed) std::reverse(targets.begin(), targets.end());
+	GroupReplayState changed;
+	const auto status = RecaptureGroupInstances(document, targets, cold, 1, changed, error);
+	INFO(error.Message);
+	REQUIRE(status == Status::Ok);
+	for (const auto *id : {"copy", "child"}) {
+		CHECK(changed.Binding(id, Point0)->Axes.Storage == GroupAxisStorage::Shared);
+		CHECK(changed.Binding(id, Point0)->Axes.OwnerId == "base");
+		CHECK(SamplePoint(document, changed, id, Point0, 5) == Value{Vector2{15, 2}});
+	}
+}
+
+TEST_CASE(
+	"Explicit bind replaces the old combined identity while siblings keep their detached animator",
+	"[group_instance_recapture]"
+) {
+	auto original = MakeMoveGraph();
+	for (auto &node : original.Nodes)
+		if (node.Id == "copy" || node.Id == "sibling") node.InstanceOverrides = {"argument_value_1"};
+	auto bound = BindMoveGraph(original);
+	auto document = original;
+	StageMove(document, "base");
+	SourceInputMove moves[6];
+	std::copy(std::begin(CopyMoves), std::end(CopyMoves), moves);
+	for (auto &move : moves)
+		move.NodeId = "base";
+	Diagnostic error;
+	GroupReplayState moved;
+	REQUIRE(RebindGroupReplayWithInputMoves(original, document, moves, bound, 2, moved, error) == Status::Ok);
+	const auto oldWriter = moved.Binding("copy", "argument_value_1")->AnimatorPort;
+	REQUIRE(oldWriter.starts_with("native:animator:"));
+	const std::array targets{GroupInstanceRecapture{"copy", "argument_value_1"}};
+	GroupReplayState recaptured;
+	const auto status = RecaptureGroupInstances(document, targets, moved, 2, recaptured, error);
+	INFO(error.Message);
+	REQUIRE(status == Status::Ok);
+	CHECK(recaptured.Binding("copy", "argument_value_1")->AnimatorPort.empty());
+	CHECK(recaptured.Binding("sibling", "argument_value_1")->AnimatorPort == oldWriter);
+	CHECK(CaptureMove(document, recaptured, "copy", "argument_value_1") == Value{30.});
+	CHECK(CaptureMove(document, recaptured, "sibling", "argument_value_1") == Value{20.});
+}
+
+TEST_CASE(
+	"Recapture rejects stale, duplicate, absent and tiny-cap events without replacing live owners",
+	"[group_instance_recapture]"
+) {
+	auto document = MakeGradientPointMoveGraph();
+	Diagnostic error;
+	GroupReplayState empty, initial, bound;
+	REQUIRE(RebindGroupReplay(document, empty, 1, initial, error) == Status::Ok);
+	const auto bindings = GradientPointBindings();
+	REQUIRE(BindGroupReplay(document, bindings, initial, 1, bound, error) == Status::Ok);
+	const auto before = bound.RetainedBytes();
+	const std::array targets{GroupInstanceRecapture{"copy", Point0}};
+	CHECK(RecaptureGroupInstances(document, targets, bound, 2, bound, error) == Status::InvalidValue);
+	CHECK(RecaptureGroupInstances(document, targets, bound, 1, bound, error, 1) == Status::LimitExceeded);
+	const std::array duplicate{targets[0], targets[0]};
+	CHECK(RecaptureGroupInstances(document, duplicate, bound, 1, bound, error) == Status::InvalidValue);
+	const std::array absent{GroupInstanceRecapture{"missing", Point0}};
+	CHECK(RecaptureGroupInstances(document, absent, bound, 1, bound, error) == Status::InvalidGroup);
+	CHECK(bound.RetainedBytes() == before);
+	CHECK(bound.Binding("copy", Point0)->Axes.OwnerId == "base");
+	REQUIRE(RecaptureGroupInstances(document, targets, bound, 1, bound, error) == Status::Ok);
+	CHECK(SamplePoint(document, bound, "copy", Point0, 5) == Value{Vector2{15, 2}});
+}
+
+TEST_CASE(
+	"Recapture bounds repeated long-name comparisons before replacing replay", "[group_instance_recapture]"
+) {
+	auto document = MakeGradientPointMoveGraph();
+	const std::string nodeId(16'384, 'x');
+	document.Nodes[1].Id = nodeId;
+	Diagnostic error;
+	GroupReplayState empty, initial, bound;
+	REQUIRE(RebindGroupReplay(document, empty, 1, initial, error) == Status::Ok);
+	const std::array bindings{GradientPointBinding(nodeId)};
+	REQUIRE(BindGroupReplay(document, bindings, initial, 1, bound, error) == Status::Ok);
+	const auto before = bound.RetainedBytes();
+	const std::array targets{GroupInstanceRecapture{nodeId, Point0}};
+	CHECK(RecaptureGroupInstances(document, targets, bound, 1, bound, error) == Status::LimitExceeded);
+	CHECK(bound.RetainedBytes() == before);
+	CHECK(bound.Binding(nodeId, Point0)->Axes.OwnerId == "base");
+}

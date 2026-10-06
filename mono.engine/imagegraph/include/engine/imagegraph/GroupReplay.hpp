@@ -119,13 +119,30 @@ namespace engine::imagegraph {
 	};
 	// installs or reconciles source aliases without running refresh callbacks.
 	// unchanged immediate bases keep captured axes; new bindings resolve parent before child.
-	// repeated source setInstance axis recapture needs a distinct explicit transition.
+	// explicit source setInstance uses RecaptureGroupInstances instead of reconciliation.
 	// Local subtype effects on targets are retired when their input animator alias is installed.
 	// The byte bound includes the borrowed document and old/new owner overlap.
 	// Replaces instance bindings at the same revision, preserving frozen callback declarations.
 	Status BindGroupReplay(
 		const Document &document,
 		std::span<const GroupSubtypeBinding> bindings,
+		const GroupReplayState &previous,
+		uint64_t authoringRevision,
+		GroupReplayState &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
+	// one explicit setInstance input event; the document already names its immediate base.
+	struct GroupInstanceRecapture {
+		std::string_view NodeId;
+		std::string_view Port;
+	};
+	// recopy immediate-base combined and scalar identities, parent before child.
+	// local getter mode and split flag survive. descendants retain old scalar generations.
+	// ordinary revision reconciliation never emits this event. refusal preserves all owners.
+	Status RecaptureGroupInstances(
+		const Document &document,
+		std::span<const GroupInstanceRecapture> targets,
 		const GroupReplayState &previous,
 		uint64_t authoringRevision,
 		GroupReplayState &result,

@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "backend": "offscreen Vulkan",
+  "scope": "explicit immediate-base animator recapture in native group replay",
+  "source_contract": {
+    "archive": "b69eca232217360cf1502ef0223523d818606652",
+    "file": "scripts/node_group/node_group.gml",
+    "lines": "142-155",
+    "behavior": "setInstance assigns each current input the immediate base combined animator and scalar animator array, including repeated same-base calls"
+  },
+  "changes": [
+    "new RecaptureGroupInstances event stays distinct from ordinary binding reconciliation",
+    "recopy combined and scalar identities from the immediate base in bounded parent-first order",
+    "retain old locally owned scalar generations under detached text identity while descendants still reference them",
+    "retarget scalar references without changing descendant combined writer identities",
+    "cold local carrier hides retired authored rows while retaining the local split flag",
+    "charge retained owners, borrowed targets, scratch, copied payloads and replacement overlap",
+    "weight repeated name comparisons and reject excess work before publication"
+  ],
+  "review_repairs_before_build": [
+    "preserve the original end-iterator state before appending a retained scalar overlay",
+    "construct charged metadata strings and remapped tracks with admitted capacities",
+    "avoid initializer-list string copies while checking borrowed binding names",
+    "weight name comparisons under the work cap",
+    "choose detached writer mode only from initialized scalar references"
+  ],
+  "build": {
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/instance-recapture-build1.log",
+    "exit_code": 0,
+    "steps": 306
+  },
+  "final_batch": {
+    "checks_passed": 20,
+    "checks_total": 20,
+    "vulkan_cases": 15,
+    "core_cases": 2952,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/instance-recapture-batch1-results.json",
+    "source_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/instance-recapture-build1-source-hashes.json",
+    "child_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/instance-recapture-child-hashes-batch1.json",
+    "owned_source_changes_during_build_and_tests": [],
+    "binaries_changed_during_tests": false,
+    "cpp_non_render_suite_cases": 5057,
+    "cpp_suite_cases": 5072,
+    "case_count_note": "non-render suite count includes client GPU-tagged tests; Vulkan render count is separate, not the total of all GPU work"
+  },
+  "covered": [
+    "explicit same-base warm-axis recapture versus ordinary cold reconciliation",
+    "descendant retains distinct old scalar values 99,17 while selected input recaptures a cold base",
+    "old scalar generation survives selected lazy reconstruction and native projection/rebind",
+    "nested selected inputs recapture correctly in either caller order",
+    "fresh combined writer replaces the selected detached alias while sibling retains the old writer",
+    "alias destination success and stale, duplicate, missing-target and small-cap atomic refusal",
+    "accepted byte threshold and one-byte-below refusal",
+    "long-name repeated comparison admission"
+  ],
+  "limits": [
+    "new event is a core replay API; no Studio setInstance control or callback route was added",
+    "projection/rebind test retains replay identity in-process; complete binding-time identity persistence across reopening and undo/redo remains open",
+    "local split flag and getter declaration are retained; generic vector and HLSL constructor domains remain open",
+    "new path has a profile scope but no dedicated profile capture; no performance claim",
+    "no licensed reference-build matched capture or headed Studio verification",
+    "joined GPU checks exercise existing Composer paths, not a new full recapture preview pulse",
+    "verification used the shared working tree with pending peer changes; standalone commit was not separately built",
+    "full 33-item Composer objective remains active"
+  ]
+}
