@@ -83,6 +83,10 @@ ENDFONT
 		SourceFontProvider *Target = nullptr;
 		std::array<uint32_t, 4> Characters{};
 		size_t Count = 0;
+		uint64_t RetainedBytes() const override {
+			const uint64_t targetBytes = Target ? Target->RetainedBytes() : 0;
+			return sizeof(*this) > UINT64_MAX - targetBytes ? UINT64_MAX : targetBytes + sizeof(*this);
+		}
 		bool Observe(
 			const SourceFontRequest &request,
 			uint64_t cap,
@@ -120,6 +124,7 @@ ENDFONT
 		Diagnostic DiagnosticValue;
 		std::string Failure;
 		uint64_t InputHash = 0;
+		bool LastRunCached = false;
 		explicit FontHostBoundary(Operation kind) : Kind(kind) {
 			SelectedPath = File.Path;
 			if (Outline()) {
@@ -191,22 +196,28 @@ ENDFONT
 		}
 		bool Run(uint64_t maximum = Limits::MaximumEvaluationBytes) {
 			if (!Owner.Bind(false, Held, Evaluation, maximum, DiagnosticValue)) return false;
+			auto *provider = Evaluation.FontProvider;
+			const uint64_t before = provider->RetainedBytes();
+			bool success = false;
 			if (Kind == Operation::UnicodeText) {
-				Trace.Target = Evaluation.FontProvider;
+				Trace.Target = provider;
 				Evaluation.FontProvider = &Trace;
-				return Evaluate(Graph, Compiled, "out", Evaluation, Output, DiagnosticValue, maximum) ==
-					   Status::Ok;
-			}
-			return Evaluation.FontProvider->Observe(Request, maximum, Observation, Failure);
+				success = Evaluate(Graph, Compiled, "out", Evaluation, Output, DiagnosticValue, maximum) ==
+						  Status::Ok;
+			} else
+				success = provider->Observe(Request, maximum, Observation, Failure);
+			if (success) LastRunCached = provider->RetainedBytes() == before;
+			return success;
 		}
 
 		void VerifyCounters(const std::vector<core::Counter> &counters) const {
 			const auto value = [&](std::string_view name) {
 				for (const auto &counter : counters)
 					if (counter.Name.Text() == name) return counter.Value;
-				Fail("missing actual byte/operation counter");
+				return 0.0;
 			};
-			if (value("imagegraphfont.font.input_bytes") != SelectedFileBytes ||
+			if (value("imagegraphfont.font.input_bytes") != (LastRunCached ? 0 : SelectedFileBytes) ||
+				value("imagegraphfont.font.cache_hits") != (LastRunCached ? 1 : 0) ||
 				value("imagegraphfont.font.converted_glyphs") != (Outline() ? (Distance() ? 2 : 3) : 1))
 				Fail("file read/conversion counts");
 			if (value("imagegraphfont.font.converted_payload_bytes") <= 0) Fail("converted pixels counter");

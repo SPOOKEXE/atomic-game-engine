@@ -65,6 +65,10 @@ namespace engine::imagegraph {
 	class SourceFontProvider {
 	  public:
 		virtual ~SourceFontProvider() = default;
+		// grug count owned provider storage live. Observe must admit growth beside its candidate.
+		virtual uint64_t RetainedBytes() const {
+			return 0;
+		}
 		virtual bool Observe(
 			const SourceFontRequest &,
 			uint64_t maximumOperationBytes,

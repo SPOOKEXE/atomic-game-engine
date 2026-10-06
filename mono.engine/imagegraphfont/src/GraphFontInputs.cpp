@@ -86,8 +86,9 @@ namespace engine::imagegraphfont {
 				diagnostic, imagegraph::Status::LimitExceeded, "font input revision exceeds bound"
 			);
 		const uint64_t maximum = std::min(maximumBytes, imagegraph::Limits::MaximumEvaluationBytes);
+		const uint64_t resident = RetainedBytes();
 		// Borrowed input, old owner, candidate clone and provider's independent exact grant table coexist.
-		if (Bytes > maximum || *bytes > (maximum - Bytes) / 4)
+		if (resident > maximum || *bytes > (maximum - resident) / 4)
 			return FontInputFail(
 				diagnostic,
 				imagegraph::Status::LimitExceeded,
@@ -98,16 +99,22 @@ namespace engine::imagegraphfont {
 			) != imagegraph::Status::Ok)
 			return false;
 		GraphFontConfiguration candidate = configuration;
-		auto provider = std::make_unique<GraphFontHost>(candidate.ReadGrants, policy);
 		const auto retained = GraphFontConfigurationRetainedBytes(candidate);
-		if (!retained || provider->RetainedBytes() > maximum - Bytes - *bytes ||
-			*retained > maximum - Bytes - *bytes - provider->RetainedBytes())
+		if (!retained || *retained > maximum - resident - *bytes)
+			return FontInputFail(
+				diagnostic, imagegraph::Status::LimitExceeded, "font configuration candidate exceeds budget"
+			);
+		auto provider = std::make_unique<GraphFontHost>(
+			candidate.ReadGrants, policy, maximum - resident - *bytes - *retained
+		);
+		if (provider->RetainedBytes() > maximum - resident - *bytes ||
+			*retained > maximum - resident - *bytes - provider->RetainedBytes())
 			return FontInputFail(
 				diagnostic,
 				imagegraph::Status::LimitExceeded,
 				"font configuration retained capacities exceed budget"
 			);
-		const uint64_t retainedBytes = *retained + provider->RetainedBytes();
+		const uint64_t retainedBytes = *retained;
 		Owned = std::move(candidate);
 		Provider = std::move(provider);
 		Bytes = retainedBytes;
@@ -135,8 +142,9 @@ namespace engine::imagegraphfont {
 		const auto context = imagegraph::SourceFontContextRetainedBytes(Owned.Context);
 		const auto prior = imagegraph::SourceFontContextRetainedBytes(heldContext);
 		const uint64_t maximum = std::min(maximumBytes, imagegraph::Limits::MaximumEvaluationBytes);
-		if (!context || !prior || Bytes > maximum || *prior > maximum - Bytes ||
-			*context > (maximum - Bytes - *prior) / 2)
+		const uint64_t resident = RetainedBytes();
+		if (!context || !prior || resident > maximum || *prior > maximum - resident ||
+			*context > (maximum - resident - *prior) / 2)
 			return FontInputFail(
 				diagnostic,
 				imagegraph::Status::LimitExceeded,
@@ -145,7 +153,7 @@ namespace engine::imagegraphfont {
 		auto candidate = Owned.Context;
 		candidate.Playing = playing;
 		const auto actual = imagegraph::SourceFontContextRetainedBytes(candidate);
-		if (!actual || *actual > maximum - Bytes - *prior)
+		if (!actual || *actual > maximum - resident - *prior)
 			return FontInputFail(
 				diagnostic, imagegraph::Status::LimitExceeded, "held font context capacity exceeds budget"
 			);

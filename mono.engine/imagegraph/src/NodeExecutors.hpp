@@ -108,6 +108,8 @@ namespace engine::imagegraph::detail {
 		std::vector<PcxMessage> PcxControlMessages;
 		HostCaptureReceiptSink *HostReceipts = nullptr;
 		std::span<const HostNodeCapture> ObservedHostCaptures;
+		AllocationReservation FontHostGrowthCharge;
+		AllocationReservation *FontHostResidency = nullptr;
 		SourceFontReceiptSink *FontReceipts = nullptr;
 		std::span<const SourceFontObservation> ObservedFonts;
 		// Borrowed nearest inline owner's fully resolved inputs, retained by the evaluation.

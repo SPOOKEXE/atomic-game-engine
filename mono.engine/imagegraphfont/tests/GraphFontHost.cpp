@@ -2,6 +2,7 @@
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraphfont/GraphFontHost.hpp>
+#include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -81,13 +82,40 @@ ENDFONT
 		SourceFontProvider &Provider;
 		std::vector<SourceFontObservation> Records;
 		explicit FontRecorder(SourceFontProvider &provider) : Provider(provider) {}
+		uint64_t RetainedBytes() const override {
+			uint64_t bytes = Provider.RetainedBytes();
+			if (sizeof(*this) > UINT64_MAX - bytes) return UINT64_MAX;
+			bytes += sizeof(*this);
+			const auto add = [&](uint64_t value) {
+				if (value > UINT64_MAX - bytes) return false;
+				bytes += value;
+				return true;
+			};
+			if (Records.capacity() > UINT64_MAX / sizeof(SourceFontObservation) ||
+				!add(Records.capacity() * sizeof(SourceFontObservation)))
+				return UINT64_MAX;
+			for (const auto &record : Records) {
+				const auto retained = SourceFontObservationRetainedBytes(record);
+				if (!retained || !add(*retained)) return UINT64_MAX;
+			}
+			return bytes;
+		}
 		bool Observe(
 			const SourceFontRequest &request,
 			uint64_t cap,
 			SourceFontObservation &output,
 			std::string &failure
 		) override {
-			if (!Provider.Observe(request, cap, output, failure)) return false;
+			const uint64_t held = RetainedBytes();
+			if (held > cap) return false;
+			// grug leave half remaining room for the test recording copy and metadata growth.
+			if (!Provider.Observe(request, (cap - held) / 2, output, failure)) return false;
+			const auto retained = SourceFontObservationRetainedBytes(output);
+			const uint64_t live = RetainedBytes();
+			const uint64_t metadata = (Records.size() + 1) * sizeof(SourceFontObservation);
+			if (!retained || live > cap || metadata > cap - live || *retained > cap - live - metadata)
+				return false;
+			Records.reserve(Records.size() + 1);
 			Records.push_back(output);
 			return true;
 		}
@@ -423,4 +451,233 @@ TEST_CASE("font path changes select only the matching exact read grant", "[graph
 	absent.ResolvedPath = (second.Directory / "ungranted.bdf").string();
 	CHECK_FALSE(host.Observe(absent, Limits::MaximumEvaluationBytes, output, failure));
 	CHECK(output == before);
+}
+
+TEST_CASE(
+	"font lifetime keeps source key bytes through overwrite deletion and recreation", "[graph_font_host]"
+) {
+	FontFile file;
+	auto request = FontRequest(file);
+	std::array grants{
+		engine::imagegraphfont::GraphFontFileGrant{"text", file.Path, false, "font"},
+		engine::imagegraphfont::GraphFontFileGrant{"other", file.Path, false, "fallback_font"}
+	};
+	engine::imagegraphfont::GraphFontHost host(grants, {});
+	SourceFontObservation output;
+	std::string failure;
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	const auto cachedBytes = host.RetainedBytes();
+	const auto oldFont = output.Font;
+	std::string replacement{BITMAP_FONT};
+	replacement.replace(replacement.find("DWIDTH 8 0"), 10, "DWIDTH 12 0");
+	{
+		std::ofstream stream(file.Path, std::ios::binary | std::ios::trunc);
+		stream << replacement;
+	}
+	request.Tick = 1;
+	request.Characters.push_back(67);
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	REQUIRE(output.Font->Data->Glyphs.size() == 4);
+	CHECK(output.Font->Data->Glyphs[1].Advance == 8);
+	CHECK_FALSE(output.Font->Data->Glyphs[3].Present);
+	CHECK(host.RetainedBytes() == cachedBytes);
+	request.Authored.Id = "other";
+	request.Role = "fallback_font";
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output.Font->Data->Glyphs[1].Advance == 8);
+	CHECK(host.RetainedBytes() == cachedBytes);
+	request.Authored.Id = "ungranted";
+	const auto prior = output;
+	CHECK_FALSE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output == prior);
+	request = FontRequest(file);
+	request.Antialias = true;
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output.Font->Data->Glyphs[1].Advance == 12);
+	CHECK(host.RetainedBytes() > cachedBytes);
+	request = FontRequest(file);
+	{ std::ofstream empty(file.Path, std::ios::binary | std::ios::trunc); }
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output.Font == oldFont);
+	REQUIRE(std::filesystem::remove(file.Path));
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output.Presence == SourceFontPresence::AbsentFile);
+	CHECK_FALSE(output.Font);
+	{
+		std::ofstream stream(file.Path, std::ios::binary);
+		stream << replacement;
+	}
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output.Font == oldFont);
+	engine::imagegraphfont::GraphFontHost fresh(grants, {});
+	REQUIRE(fresh.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output.Font->Data->Glyphs[1].Advance == 12);
+}
+
+TEST_CASE(
+	"font cache control keys and entry bound preserve held fonts without eviction", "[graph_font_host]"
+) {
+	FontFile file;
+	auto request = FontRequest(file);
+	std::vector<engine::imagegraphfont::GraphFontFileGrant> grants;
+	for (size_t i = 0; i <= 64; ++i) {
+		const auto path = file.Directory / ("font-" + std::to_string(i) + ".bdf");
+		std::filesystem::create_hard_link(file.Path, path);
+		grants.push_back({"text", path, false, "font"});
+	}
+	engine::imagegraphfont::GraphFontHost host(grants, {});
+	SourceFontObservation output;
+	std::string failure;
+	for (size_t i = 0; i < 64; ++i) {
+		request.ResolvedPath = grants[i].File.string();
+		INFO(failure);
+		REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	}
+	const auto prior = output;
+	const auto retained = host.RetainedBytes();
+	request.ResolvedPath = grants[64].File.string();
+	CHECK_FALSE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output == prior);
+	CHECK(host.RetainedBytes() == retained);
+	request.ResolvedPath = grants[0].File.string();
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	request.SignedDistanceField = true;
+	CHECK_FALSE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(failure.find("cache entry limit") != std::string::npos);
+	request.SignedDistanceField = false;
+	request.PixelSize = 20;
+	CHECK_FALSE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(failure.find("cache entry limit") != std::string::npos);
+	CHECK(host.RetainedBytes() == retained);
+}
+
+TEST_CASE("font cache refusal does not seed malformed or unadmitted bytes", "[graph_font_host]") {
+	FontFile file;
+	auto request = FontRequest(file);
+	std::array grants{engine::imagegraphfont::GraphFontFileGrant{"text", file.Path, false, "font"}};
+	engine::imagegraphfont::GraphFontHost host(grants, {});
+	const auto initial = host.RetainedBytes();
+	SourceFontObservation output;
+	std::string failure;
+	CHECK_FALSE(host.Observe(request, initial + 1, output, failure));
+	CHECK(host.RetainedBytes() == initial);
+	{
+		std::ofstream stream(file.Path, std::ios::binary | std::ios::trunc);
+		stream << "invalid font";
+	}
+	CHECK_FALSE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(host.RetainedBytes() == initial);
+	{
+		std::ofstream stream(file.Path, std::ios::binary | std::ios::trunc);
+		stream << BITMAP_FONT;
+	}
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output.Font->Data->Glyphs[1].Advance == 8);
+	CHECK(host.RetainedBytes() > initial);
+}
+
+TEST_CASE(
+	"font owner accounts live cache in old bindings and clears lifetime on replace", "[graph_font_host]"
+) {
+	using namespace engine::imagegraphfont;
+	FontFile file;
+	GraphFontConfiguration configuration;
+	configuration.Context.AliasMapKnown = true;
+	configuration.Context.Playing = false;
+	configuration.ReadGrants = {{"text", file.Path, false, "font"}};
+	GraphFontInputs owner;
+	Diagnostic diagnostic;
+	REQUIRE(owner.Replace(configuration, {}, Limits::MaximumEvaluationBytes, diagnostic));
+	const auto initial = owner.RetainedBytes();
+	EvaluationRequest request;
+	SourceFontContext held;
+	REQUIRE(owner.Bind(false, held, request, Limits::MaximumEvaluationBytes, diagnostic));
+	Document graph;
+	graph.FormatVersion = 9;
+	graph.Nodes = {
+		{"text",
+		 "pc.text",
+		 "",
+		 {},
+		 {{"text", std::string{"A"}},
+		  {"font", file.Path.string()},
+		  {"size", int64_t{10}},
+		  {"interpolate", EnumValue{1}}}}
+	};
+	graph.Outputs = {{"out", "text", "surface_out"}};
+	Plan plan;
+	REQUIRE(Compile(graph, plan, diagnostic) == Status::Ok);
+	Image output;
+	REQUIRE(Evaluate(graph, plan, "out", request, output, diagnostic) == Status::Ok);
+	CHECK(output.Width == 8);
+	const auto live = owner.RetainedBytes();
+	CHECK(live > initial);
+	CHECK(request.SourceFontHostResidentBytes + request.FontProvider->RetainedBytes() == live);
+	const auto prior = output;
+	CHECK(Evaluate(graph, plan, "out", request, output, diagnostic, live - 1) == Status::LimitExceeded);
+	CHECK(output == prior);
+	CHECK_FALSE(owner.Bind(false, held, request, live - 1, diagnostic));
+	CHECK_FALSE(owner.Replace(configuration, {}, live - 1, diagnostic));
+	CHECK(owner.RetainedBytes() == live);
+	std::string replacement{BITMAP_FONT};
+	replacement.replace(replacement.find("DWIDTH 8 0"), 10, "DWIDTH 12 0");
+	{
+		std::ofstream stream(file.Path, std::ios::binary | std::ios::trunc);
+		stream << replacement;
+	}
+	REQUIRE(Evaluate(graph, plan, "out", request, output, diagnostic) == Status::Ok);
+	CHECK(output.Width == 8);
+	REQUIRE(owner.Replace(configuration, {}, Limits::MaximumEvaluationBytes, diagnostic));
+	REQUIRE(owner.Bind(false, held, request, Limits::MaximumEvaluationBytes, diagnostic));
+	CHECK(owner.RetainedBytes() == initial);
+	REQUIRE(Evaluate(graph, plan, "out", request, output, diagnostic) == Status::Ok);
+	CHECK(output.Width == 12);
+}
+
+TEST_CASE("font host admits fixed cache metadata before constructing storage", "[graph_font_host]") {
+	using engine::imagegraphfont::GraphFontHost;
+	REQUIRE_THROWS_AS(GraphFontHost({}, {}, 1), std::length_error);
+	engine::imagegraphfont::GraphFontInputs owner;
+	engine::imagegraphfont::GraphFontConfiguration configuration;
+	configuration.Context.AliasMapKnown = true;
+	Diagnostic diagnostic;
+	CHECK_FALSE(owner.Replace(configuration, {}, 4096, diagnostic));
+	CHECK(owner.Revision() == 0);
+	CHECK(owner.RetainedBytes() == 0);
+}
+
+TEST_CASE(
+	"font lifetime cache refuses byte exhaustion without reading or evicting old keys", "[graph_font_host]"
+) {
+	FontFile file;
+	{
+		std::ofstream stream(file.Path, std::ios::binary | std::ios::trunc);
+		stream << BITMAP_FONT << std::string(1024 * 1024 - BITMAP_FONT.size(), '\n');
+	}
+	std::vector<engine::imagegraphfont::GraphFontFileGrant> grants;
+	for (size_t i = 0; i < 16; ++i) {
+		const auto path = file.Directory / ("padded-" + std::to_string(i) + ".bdf");
+		std::filesystem::create_hard_link(file.Path, path);
+		grants.push_back({"text", path, false, "font"});
+	}
+	engine::imagegraphfont::GraphFontHost host(grants, {});
+	auto request = FontRequest(file);
+	SourceFontObservation output;
+	std::string failure;
+	for (size_t i = 0; i < 15; ++i) {
+		request.ResolvedPath = grants[i].File.string();
+		INFO(failure);
+		REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	}
+	const auto prior = output;
+	const auto resident = host.RetainedBytes();
+	request.ResolvedPath = grants[15].File.string();
+	CHECK_FALSE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(failure.find("lifetime cache exceeds byte budget") != std::string::npos);
+	CHECK(output == prior);
+	CHECK(host.RetainedBytes() == resident);
+	request.ResolvedPath = grants[0].File.string();
+	REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure));
+	CHECK(output.Font->Data->Glyphs[1].Advance == 8);
+	CHECK(host.RetainedBytes() == resident);
 }

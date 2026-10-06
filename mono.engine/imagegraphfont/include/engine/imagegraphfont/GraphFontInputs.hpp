@@ -44,7 +44,7 @@ namespace engine::imagegraphfont {
 			return Version;
 		}
 		uint64_t RetainedBytes() const {
-			return Bytes;
+			return Bytes + (Provider ? Provider->RetainedBytes() : 0);
 		}
 
 	  private:

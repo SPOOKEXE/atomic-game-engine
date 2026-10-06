@@ -1761,7 +1761,7 @@ namespace engine::imagegraph {
 		const SourceFontContext *SourceFonts = nullptr;
 		std::span<const SourceFontObservation> FontObservations{};
 		SourceFontProvider *FontProvider = nullptr;
-		// Caller-owned font configuration and provider capacities remain resident during evaluation.
+		// grug count caller-owned configuration here. Provider reports its own live storage separately.
 		uint64_t SourceFontHostResidentBytes = 0;
 		// Host observations are captured once; the evaluator never reads a clock or source path.
 		std::span<const AuthoredValue> PcxObservations{};

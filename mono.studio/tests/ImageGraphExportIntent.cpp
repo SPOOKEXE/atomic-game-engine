@@ -611,7 +611,9 @@ TEST_CASE("Studio font bindings retain a held playback context", "[export_intent
 	CHECK(heldContext.Playing == true);
 	CHECK(request.FontProvider != nullptr);
 	CHECK(request.FontObservations.empty());
-	CHECK(request.SourceFontHostResidentBytes == inputs.RetainedBytes());
+	CHECK(
+		request.SourceFontHostResidentBytes + request.FontProvider->RetainedBytes() == inputs.RetainedBytes()
+	);
 }
 
 TEST_CASE("Studio refuses a font-bound operation without changing its request", "[export_intent][font]") {

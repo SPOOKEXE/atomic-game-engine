@@ -37,7 +37,7 @@ TEST_CASE(
 	CHECK(held.Playing == true);
 	CHECK(owner.Configuration().Context.Playing == false);
 	CHECK(held.Aliases[0].second == "/explicit/label.bdf");
-	CHECK(request.SourceFontHostResidentBytes == ownedBytes);
+	CHECK(request.SourceFontHostResidentBytes + request.FontProvider->RetainedBytes() == ownedBytes);
 	REQUIRE(request.FontProvider);
 	const auto provider = request.FontProvider;
 	const auto before = held;
@@ -45,7 +45,7 @@ TEST_CASE(
 	CHECK(diagnostic.Code == Status::LimitExceeded);
 	CHECK(held == before);
 	CHECK(request.FontProvider == provider);
-	CHECK(request.SourceFontHostResidentBytes == ownedBytes);
+	CHECK(request.SourceFontHostResidentBytes + request.FontProvider->RetainedBytes() == ownedBytes);
 }
 
 TEST_CASE(

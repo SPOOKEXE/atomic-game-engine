@@ -10563,7 +10563,12 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 		}
 		// Host ownership coexists with the held context and observations admitted below.
-		auto fontHostShadow = budget.Reserve(request.SourceFontHostResidentBytes);
+		const uint64_t fontProviderBytes = request.FontProvider ? request.FontProvider->RetainedBytes() : 0;
+		auto fontHostShadow =
+			request.SourceFontHostResidentBytes > budget.Available() ||
+					fontProviderBytes > budget.Available() - request.SourceFontHostResidentBytes
+				? std::optional<detail::AllocationReservation>{}
+				: budget.Reserve(request.SourceFontHostResidentBytes + fontProviderBytes);
 		if (!fontHostShadow) {
 			SetDiagnostic(
 				diagnostic,
@@ -11770,6 +11775,7 @@ namespace engine::imagegraph {
 				}
 				detail::NodeContext context(node, *catalogueEntry, request, budget);
 				context.EvaluationDocument = &document;
+				context.FontHostResidency = &*fontHostShadow;
 				context.PathShiftMemo = &pathShiftMemo;
 				if (hostReceipts) {
 					context.HostReceipts = &*hostReceipts;

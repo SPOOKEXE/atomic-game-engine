@@ -115,13 +115,40 @@ ENDFONT
 		SourceFontProvider &Provider;
 		std::vector<SourceFontObservation> Records;
 		explicit Recorder(SourceFontProvider &provider) : Provider(provider) {}
+		uint64_t RetainedBytes() const override {
+			uint64_t bytes = Provider.RetainedBytes();
+			if (sizeof(*this) > UINT64_MAX - bytes) return UINT64_MAX;
+			bytes += sizeof(*this);
+			const auto add = [&](uint64_t value) {
+				if (value > UINT64_MAX - bytes) return false;
+				bytes += value;
+				return true;
+			};
+			if (Records.capacity() > UINT64_MAX / sizeof(SourceFontObservation) ||
+				!add(Records.capacity() * sizeof(SourceFontObservation)))
+				return UINT64_MAX;
+			for (const auto &record : Records) {
+				const auto retained = SourceFontObservationRetainedBytes(record);
+				if (!retained || !add(*retained)) return UINT64_MAX;
+			}
+			return bytes;
+		}
 		bool Observe(
 			const SourceFontRequest &request,
 			uint64_t cap,
 			SourceFontObservation &output,
 			std::string &failure
 		) override {
-			if (!Provider.Observe(request, cap, output, failure)) return false;
+			const uint64_t held = RetainedBytes();
+			if (held > cap) return false;
+			// grug leave half remaining room for the test recording copy and metadata growth.
+			if (!Provider.Observe(request, (cap - held) / 2, output, failure)) return false;
+			const auto retained = SourceFontObservationRetainedBytes(output);
+			const uint64_t live = RetainedBytes();
+			const uint64_t metadata = (Records.size() + 1) * sizeof(SourceFontObservation);
+			if (!retained || live > cap || metadata > cap - live || *retained > cap - live - metadata)
+				return false;
+			Records.reserve(Records.size() + 1);
 			Records.push_back(output);
 			return true;
 		}

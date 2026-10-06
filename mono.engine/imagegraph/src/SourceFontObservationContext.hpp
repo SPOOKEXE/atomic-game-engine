@@ -55,7 +55,26 @@ namespace engine::imagegraph::detail {
 		if (!charge) return false;
 		SourceFontObservation candidate;
 		std::string failure;
-		if (!context.Request.FontProvider->Observe(request, maximum, candidate, failure))
+		const uint64_t before = context.Request.FontProvider->RetainedBytes();
+		const bool observed = context.Request.FontProvider->Observe(request, maximum, candidate, failure);
+		const uint64_t after = context.Request.FontProvider->RetainedBytes();
+		// grug transfer admitted workspace to persistent storage before validating provider output.
+		if (after > before) {
+			auto growth = charge->Split(after - before);
+			auto &residency =
+				context.FontHostResidency ? *context.FontHostResidency : context.FontHostGrowthCharge;
+			if (!growth || !residency.Merge(std::move(*growth)))
+				return context.Fail(
+					Status::LimitExceeded, "font provider growth exceeds operation reservation", request.Role
+				);
+		} else if (after < before && context.FontHostResidency) {
+			if (before - after > context.FontHostResidency->Bytes() ||
+				!context.FontHostResidency->Resize(context.FontHostResidency->Bytes() - (before - after)))
+				return context.Fail(
+					Status::LimitExceeded, "font provider residency is inconsistent", request.Role
+				);
+		}
+		if (!observed)
 			return context.Fail(
 				Status::UnsupportedExecution,
 				failure.empty() ? "font provider refused its request" : std::move(failure),
@@ -68,7 +87,7 @@ namespace engine::imagegraph::detail {
 				"font provider returned a mismatched or malformed observation",
 				request.Role
 			);
-		if (*retained > maximum || !charge->Resize(*retained))
+		if (*retained > charge->Bytes() || !charge->Resize(*retained))
 			return context.Fail(
 				Status::LimitExceeded, "font observation exceeds operation reservation", request.Role
 			);

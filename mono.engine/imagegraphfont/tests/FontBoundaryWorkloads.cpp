@@ -19,9 +19,11 @@ TEST_CASE(
 		DYNAMIC_SECTION("operation " << static_cast<int>(kind)) {
 			CAPTURE(static_cast<int>(kind));
 			FontHostBoundary fixture(kind);
+			engine::core::Metrics::Drain();
 			const auto run = fixture.Run();
 			INFO(fixture.Failure << fixture.DiagnosticValue.Message);
 			REQUIRE(run);
+			fixture.VerifyCounters(engine::core::Metrics::Drain());
 			const auto hash = fixture.Verify();
 			const auto priorObservation = fixture.Observation;
 			const auto priorImage = fixture.Output;
@@ -29,7 +31,9 @@ TEST_CASE(
 			CHECK(fixture.Observation == priorObservation);
 			CHECK(fixture.Output == priorImage);
 			CHECK(fixture.Verify() == hash);
+			engine::core::Metrics::Drain();
 			REQUIRE(fixture.Run());
+			fixture.VerifyCounters(engine::core::Metrics::Drain());
 			CHECK(fixture.Verify() == hash);
 			CHECK(fixture.InputHash != 0);
 		}

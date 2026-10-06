@@ -1,0 +1,292 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug keep bounded native font bytes alive by source key within one font host revision. licensed GameMaker font raster parity still unverified.",
+  "contract": {
+    "pixel_composer_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_font_key": "https://github.com/Ttanasart-pt/Pixel-Composer/blob/b69eca232217360cf1502ef0223523d818606652/scripts/node_text/node_text.gml#L321-L333",
+    "cache_entry_limit": 64,
+    "cache_payload_and_key_bytes_limit": 16777216,
+    "cache_scope": "GraphFontHost lifetime; successful GraphFontInputs.Replace starts a fresh host"
+  },
+  "behavior": [
+    "grug check exact grant, policy and file existence before every cache hit",
+    "grug retain successful raw bytes by resolved path, pixel size, antialias and sdf settings",
+    "grug decode new requested characters and measurements from retained bytes",
+    "grug keep bytes through overwrite and zero-byte replacement; deletion reports absent; recreation reuses retained bytes",
+    "grug share matching keys across granted nodes and roles",
+    "grug refuse cache exhaustion without eviction or candidate publication",
+    "grug count live provider storage at evaluation start and transfer admitted growth before validating provider output",
+    "grug include old cached storage in Bind and Replace coexistence checks"
+  ],
+  "iterations": [
+    {
+      "stage": "build1",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-build1.log"
+    },
+    {
+      "stage": "joined batch1",
+      "passed_checks": 18,
+      "failed_checks": {
+        "font": {
+          "exit_code": 42,
+          "failed_cases": 1,
+          "output": "REQUIRE(host.Observe(request, Limits::MaximumEvaluationBytes, output, failure)) expanded false",
+          "repair": "grug use 64 distinct granted paths with valid fixed-size BDF data for entry exhaustion"
+        },
+        "studio": {
+          "exit_code": 42,
+          "failed_cases": 1,
+          "output": "576 == 8944 failed",
+          "repair": "grug add provider residency to request configuration side of owner assertion"
+        }
+      },
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-batch1-results.json"
+    },
+    {
+      "stage": "repair review",
+      "changes": [
+        "grug admit fixed cache metadata before constructor allocation",
+        "grug bound recorder copying and count fixed adapter storage",
+        "grug check cold-read and warm-hit counters in existing font workloads"
+      ]
+    },
+    {
+      "stage": "build2",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-build2.log"
+    },
+    {
+      "stage": "bench build",
+      "exit_code": 0,
+      "log": ".cache/build/bench/font-lifetime-build.log"
+    },
+    {
+      "stage": "joined batch2",
+      "all_checks_passed": true,
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-batch2-results.json"
+    }
+  ],
+  "checks": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-bake-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-physics-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "55c7bd3496681a803d5d9db6ea5c7e3c412912f8d23257731aa346698e6312e6",
+      "exit_code": 0,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "55c7bd3496681a803d5d9db6ea5c7e3c412912f8d23257731aa346698e6312e6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-runner-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "be393e1bdb1594b272e3c7eb06e93b4727a1cf0e098df8928d7078322c62de43",
+      "exit_code": 0,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "be393e1bdb1594b272e3c7eb06e93b4727a1cf0e098df8928d7078322c62de43",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-font-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "c172f499551bdd406fcbcf96c01d811271e805ac09d2f1caa1619494b49aa94a",
+      "exit_code": 0,
+      "assertions": 1845,
+      "cases": 43,
+      "binary_sha256_after": "c172f499551bdd406fcbcf96c01d811271e805ac09d2f1caa1619494b49aa94a",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-export-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "e9128d41500d48ee4d24fac3ceb19a0548facf798b1e9806a3316faa4258eb3e",
+      "exit_code": 0,
+      "assertions": 3307,
+      "cases": 88,
+      "binary_sha256_after": "e9128d41500d48ee4d24fac3ceb19a0548facf798b1e9806a3316faa4258eb3e",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-render-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "eb22b32d0cc49d931a6c1fb58809b332480a40b4e8661401da04faacad175239",
+      "exit_code": 0,
+      "assertions": 1987,
+      "cases": 31,
+      "binary_sha256_after": "eb22b32d0cc49d931a6c1fb58809b332480a40b4e8661401da04faacad175239",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-cli-batch2.log",
+      "exit_code": 0,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-io-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "3252405b27e0084f532bf18c11e2b7bc020b4435d969a19ccb8b4891fbad9f99",
+      "exit_code": 0,
+      "assertions": 13101,
+      "cases": 313,
+      "binary_sha256_after": "3252405b27e0084f532bf18c11e2b7bc020b4435d969a19ccb8b4891fbad9f99",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-core-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "8a1d9cb5bbb8e2eac1bf8a79955bae1e402ba511b223c90ed6aefe86b28c9d28",
+      "exit_code": 0,
+      "assertions": 1895759,
+      "cases": 2989,
+      "binary_sha256_after": "8a1d9cb5bbb8e2eac1bf8a79955bae1e402ba511b223c90ed6aefe86b28c9d28",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-assetc-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "998ead1a961c33ae0870d0ce3c5006bb52c21a9908f5d3e205035b05a3193227",
+      "exit_code": 0,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "998ead1a961c33ae0870d0ce3c5006bb52c21a9908f5d3e205035b05a3193227",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-client-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "cd2233adcf547c2b73fb851c07a2abe0755f71d45352ec2833575ff53b66e6cb",
+      "exit_code": 0,
+      "assertions": 23853,
+      "cases": 359,
+      "binary_sha256_after": "cd2233adcf547c2b73fb851c07a2abe0755f71d45352ec2833575ff53b66e6cb",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-studio-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "88f170970a2b4298c0afe0fdd6efa1cf2f75f72ea2ea681d5e06f44bc706c97c",
+      "exit_code": 0,
+      "assertions": 49029,
+      "cases": 1100,
+      "binary_sha256_after": "88f170970a2b4298c0afe0fdd6efa1cf2f75f72ea2ea681d5e06f44bc706c97c",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-nodegraph-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "exit_code": 0,
+      "assertions": 345,
+      "cases": 37,
+      "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-ui-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "47e1d169da46566e446fa879c5cd8a7892fa30ce3fd81ed2bb814686c5b60af6",
+      "exit_code": 0,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "47e1d169da46566e446fa879c5cd8a7892fa30ce3fd81ed2bb814686c5b60af6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-startup-batch2.log",
+      "exit_code": 0,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-lint-batch2.log",
+      "exit_code": 0
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-architecture-batch2.log",
+      "exit_code": 0
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-python-batch2.log",
+      "exit_code": 0,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-format-batch2.log",
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-diff-batch2.log",
+      "exit_code": 0
+    }
+  ],
+  "aggregate": {
+    "checks": 20,
+    "cpp_cases": 5274,
+    "startup_cases": 1,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "render_cases": 31
+  },
+  "freeze": {
+    "source_files": 3564,
+    "changed_sources": [],
+    "changed_test_binaries": [],
+    "source_manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-source-frozen-batch2.json",
+    "child_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/font-lifetime-cpu-child-hashes-batch2.json",
+    "child_binaries_stable": true
+  },
+  "profile": {
+    "command": ".cache/build/bench/bench/bench_imagegraphfont --suite engine.imagegraphfont.bench.boundaries --samples 5",
+    "exit_code": 0,
+    "binary_sha256": "e7f9c91d1434dbeff865aa698093b8aff6bbcc27e2554c9c8305041cb994b891",
+    "binary_stable": true,
+    "heap_hooks_compiled": true,
+    "workloads": 7,
+    "calls_per_workload": 13,
+    "font_workloads": [
+      "bdf_coverage",
+      "bdf_distance",
+      "inter_coverage",
+      "inter_distance",
+      "unicode_text"
+    ],
+    "result": "grug observe one cold file read then 12 cache hits per font workload. existing phase, heap attribution, byte counters and output fingerprints pass. benchmark output stayed on stdout; no speedup claim."
+  },
+  "limits": [
+    "grug scope cache to one native host revision; source handle cache is global",
+    "grug keep native coverage and sdf profiles; no licensed platform raster parity claim",
+    "grug did not run headed Studio verification or licensed reference build"
+  ]
+}

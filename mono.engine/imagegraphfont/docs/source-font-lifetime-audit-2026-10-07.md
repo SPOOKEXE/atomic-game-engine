@@ -12,36 +12,48 @@ nonempty path and file existence. it does not inspect file length.
 
 ## native behavior
 
-[GraphFontHost.cpp](../src/GraphFontHost.cpp) requires an exact node, path, and
-role grant plus policy approval. each observation reads the current bounded
-file bytes. [GraphFontInputs.cpp](../src/GraphFontInputs.cpp) keeps its
-provider with the configuration revision. it does not cache raw font bytes.
+[GraphFontHost.cpp](../src/GraphFontHost.cpp) requires an exact node, path and
+role grant plus policy approval before every observation. grug check file
+existence before looking up retained bytes by resolved path, pixel size,
+antialias and sdf settings. cache holds at most 64 entries and 16 MiB of
+raw bytes plus key storage. full cache refuses growth without eviction.
+
+successful observations keep bytes through overwrite and zero-byte replacement.
+deleting the file reports absent without removing its key. recreating it reuses
+retained bytes. matching granted nodes and roles share a key, while requested
+characters and measurements are decoded anew from the retained file.
+
+[GraphFontInputs.cpp](../src/GraphFontInputs.cpp) keeps the provider with its
+configuration revision. successful Replace starts a fresh lifetime. Bind and
+Replace count live cached storage; core charges provider residency at evaluation
+start and transfers admitted growth before checking returned observations.
 
 [FontTextFontState.cpp](../../imagegraph/src/FontTextFontState.cpp) skips the
 provider while playing. [SourceFontObservationContext.hpp](../../imagegraph/src/SourceFontObservationContext.hpp)
 uses exact source receipts without calling the provider.
 
-source handles and native raw-byte retention do not promise the same lifetime.
-do not add a cache until admission is bounded and revision or recording
-semantics are defined.
+native revision lifetime differs from the source global GameMaker handle cache.
+coverage and distance output remain named native profiles. grug make no licensed
+raster or global handle lifetime parity claim.
 
-## mismatch and evidence
+## validation
 
-the concrete mismatch to test in a licensed build is overwriting an existing
-font at the same path and settings while paused. source code reuses its handle;
-native observation reads the new bytes. this audit makes no font completion or
-exact parity claim.
+[validation evidence](../../../docs/pixel-composer-m0/native-font-lifetime-validation-2026-10-07.json)
+records both joined check batches and their repairs. final 20 checks pass:
+5,274 C++ cases plus startup, 101 Python tests and 16 CLI checks. render includes
+31 cases under the approved offscreen Vulkan setup. sources and binaries stay
+unchanged throughout each joined batch.
 
-the recorded prior full batch in
-`.cache/build/release-tests/evidence/composer-continuation-2026-10-05/composer-gpu-expanded-batch1-results.json`
-reports the font row at 37 cases,
-1686 assertions, exit 0. the current `test_imagegraphfont` sha256 still matches
-that row: `93cd8d70799454ad3d95b4746a472edd2b76f815b6e1ea13329dcd596ee8e765`.
-this audit adds no tests and does not rerun them.
+[GraphFontHost.cpp tests](../tests/GraphFontHost.cpp) cover overwrite, zero-byte
+replacement, deletion, recreation, granted sharing, new characters, changed
+control keys, both cache limits, refused decode and revision replacement.
+[font workload tests](../tests/FontBoundaryWorkloads.cpp) check cold reads and
+warm hits beside real BDF, Inter, SDF and Unicode output.
 
-[GraphFontHost.cpp tests](../tests/GraphFontHost.cpp) cover held playback,
-missing files and exact receipt replay. those cases do not prove the overwrite
-and recreate behavior listed below.
+existing font boundary profile passes seven workloads, each with eight warmup
+calls and five samples. every font workload reads once then reports 12 hits;
+phase scopes, heap attribution, byte counts and output fingerprints pass. grug
+keep benchmark output on stdout and make no speedup claim.
 
 ## licensed follow-up
 
