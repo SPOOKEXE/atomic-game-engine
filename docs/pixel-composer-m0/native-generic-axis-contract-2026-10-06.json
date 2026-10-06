@@ -1,0 +1,127 @@
+{
+  "evidence_scope": "Pinned Pixel Composer source behavior only. This records source constraints and does not claim the engine implementation is complete.",
+  "source": {
+    "archive_commit": "b69eca232217360cf1502ef0223523d818606652",
+    "official_manifest": "/home/declan/Documents/GitHub/atomic-game-engine-hidden-docs/files/pixel-composer-com/official-source-b69eca232217360cf1502ef0223523d818606652-gml.json",
+    "extraction_root": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652",
+    "verification": "Each listed local file matched the official manifest byte count, SHA-256, and Git blob SHA-1."
+  },
+  "verified_files": [
+    {
+      "path": "scripts/node_value/node_value.gml",
+      "bytes": 111774,
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125",
+      "evidence_lines": "76-87",
+      "behavior": "setDefValue records the constructor value, sets sepable only for an array with length greater than one, derives animVector from that value, constructs the ordinary animator, and clears per-axis animators."
+    },
+    {
+      "path": "scripts/node_hlsl/node_hlsl.gml",
+      "bytes": 14583,
+      "sha256": "3eb726ee17c8a89304bef70d368cd32e7e8f29d36cff298e7e2dc803ad66bb3b",
+      "git_blob_sha1": "7a60693b3ccf106244cbfda3169b296e159a50fe",
+      "evidence_lines": [
+        "58-67",
+        "166-189"
+      ],
+      "behavior": "createNewInput constructs Argument value as a scalar float with value 0. During refresh, selecting Vec2 changes a current value that is not a two-element array to [0,0], then sets float type and vector display. Constructor state and refreshed value therefore carry different evidence."
+    },
+    {
+      "path": "scripts/__node_value_array/__node_value_array.gml",
+      "bytes": 2285,
+      "sha256": "03d55ab761a484368a582adfe4ac7fb05aee2b30a5a708797b03494c67a577f2",
+      "git_blob_sha1": "8c7eb63d68518b698fb76272d73df01a7a76d0eb",
+      "evidence_lines": [
+        "1-7",
+        "11-30",
+        "33-44"
+      ],
+      "behavior": "The generic Vector helper constructs with [] and def_length -1. Its getter returns the value without fixed-length normalization when def_length is -1; the animation getter uses the ordinary animator unless separate-axis mode is active."
+    },
+    {
+      "path": "scripts/panel_animation_dopesheet/panel_animation_dopesheet.gml",
+      "evidence_lines": "3953-3957",
+      "behavior": "The property-axis menu is offered only when the selected property reports sepable.",
+      "bytes": 183889,
+      "sha256": "4c28791f249e057f68d449d7b3f5ea41c93a278b0a487de0396179069a451c27",
+      "git_blob_sha1": "ddea7c86342250dfb7a597f640d4437db28be565"
+    }
+  ],
+  "generic_vector_input_inventory": {
+    "path": "docs/pixel-composer-m0/source-inputs.json",
+    "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+    "record_count": 9,
+    "default_interpretation": "All nine Vector records have an empty default field, meaning this inventory provides no concrete constructor value from which to infer initialized axes or a component count.",
+    "records": [
+      {
+        "node": "Node_3D_Particle",
+        "index": "11",
+        "name": "Spawn Data",
+        "array_depth": 2,
+        "source_line": 8469
+      },
+      {
+        "node": "Node_IsoSurf",
+        "index": "4",
+        "name": "Offsets",
+        "array_depth": 2,
+        "source_line": 53375
+      },
+      {
+        "node": "Node_Line",
+        "index": "28",
+        "name": "Segment",
+        "array_depth": 3,
+        "source_line": 56059
+      },
+      {
+        "node": "Node_Matrix_Multiply_Vector",
+        "index": "1",
+        "name": "Vector",
+        "array_depth": 1,
+        "source_line": 78861
+      },
+      {
+        "node": "Node_Particle",
+        "index": "62",
+        "name": "Spawn Data",
+        "array_depth": 2,
+        "source_line": 97218
+      },
+      {
+        "node": "Node_Segment_Filter",
+        "index": "0",
+        "name": "Segment",
+        "array_depth": 2,
+        "source_line": 120977
+      },
+      {
+        "node": "Node_VFX_Spawner",
+        "index": "62",
+        "name": "Spawn Data",
+        "array_depth": 2,
+        "source_line": 140388
+      },
+      {
+        "node": "Node_pSystem_3D_Spawn",
+        "index": "14",
+        "name": "Data",
+        "array_depth": 2,
+        "source_line": 150464
+      },
+      {
+        "node": "Node_pSystem_Spawn",
+        "index": "12",
+        "name": "Spawn Data",
+        "array_depth": 2,
+        "source_line": 154510
+      }
+    ]
+  },
+  "constraints_for_generalization": [
+    "Retain generic-input constructor provenance separately from the current evaluated value. The HLSL input demonstrates that refresh can replace a scalar constructor value with a vector-shaped current value.",
+    "Retain the source getter kind because generic Vector getters skip fixed-length verification and may return nested data unchanged.",
+    "Do not infer zero defaults, two-axis initialization, or axis count from the current value when constructor evidence is absent.",
+    "Native generic saved overrides and arbitrary vector arities remain open behavior requiring separate source tracing. This evidence does not resolve them or mark the axis work complete."
+  ]
+}

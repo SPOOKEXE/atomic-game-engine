@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-06",
+  "scope": "native wrapped-text workload profiling and qualification",
+  "preset": "bench",
+  "compiler_flags": "-O3 -g1 follows RelWithDebInfo base flags in the effective first-party compile command",
+  "backend": "CPU; native decoded BDF advances; heap hooks enabled",
+  "build": {
+    "command": "CCACHE_DIR=\"$PWD/.cache/ccache\" cmake --build .cache/build/bench --target bench_imagegraphfont -j6 -- -k0",
+    "exit_code": 0,
+    "steps": 39,
+    "log": ".cache/build/bench/wrapped-text-current-build-2026-10-06.log"
+  },
+  "profile": {
+    "command": ".cache/build/bench/bench/bench_imagegraphfont --suite engine.imagegraphfont.bench.wrapped-text --samples 5",
+    "exit_code": 0,
+    "binary_sha256": "300753473032a628a712be49f223a6b175d3484e417a5f2a3b460b65976982bb",
+    "workloads": 4,
+    "warmups_per_workload": 8,
+    "samples_per_workload": 5,
+    "total_verified_calls": 52,
+    "raw_results_destination": "stdout only; benchmark output was not written to file"
+  },
+  "cpu_tests": {
+    "command": ".cache/build/release-tests/tests/test_imagegraphfont",
+    "exit_code": 0,
+    "cases": 37,
+    "assertions": 1686,
+    "binary_sha256": "bdd83e52657204b0a0f6db6f823195f80155f5212ee8b25d6e786385278149fd"
+  },
+  "workloads": [
+    "128 A A lines using real BDF advances and full-text measurement",
+    "256 consecutive spaces retaining source trimming behavior",
+    "64 distinct fractional-width requests in one native measurement batch",
+    "signed character trimming through the granted font host retaining full paragraph extent"
+  ],
+  "verified": [
+    "all output and input hashes stable across each workload's 13 calls",
+    "heap hooks compiled in for every call",
+    "required phase scopes present with valid parent/depth hierarchy",
+    "no dropped heap scopes or frame spans",
+    "tagged allocated byte/block sums equal global allocation deltas",
+    "request byte counts, candidate/workspace bytes and work counters verified",
+    "signed trimming counters and resulting ink/blank-tail placement verified",
+    "tiny-cap refusal preserves previous font measurements and image output",
+    "both binaries unchanged during joined profile/test execution"
+  ],
+  "source_sha256": {
+    "mono.engine/imagegraphfont/benchmarks/WrappedText.cpp": "e8101a25c9fd2893b100fdd124a5de500ea45396d2da40d045da7626187a886f",
+    "mono.engine/imagegraphfont/benchmarks/FontBoundaryProfile.hpp": "ce6a15bc3dc31e64570e14231b2100992f835162beaba20f4d40c2eac8d22a15",
+    "mono.engine/imagegraphfont/tests/fixtures/WrappedTextBoundary.hpp": "6a33d381854b1073214783f7e2abdea1d415712982b3bf0e4dd4a77763702982",
+    "mono.engine/imagegraphfont/tests/fixtures/FontHostBoundary.hpp": "157703bb0913addcb1bb3e9b404ccc3c1a97faac5955a29f4493f429641bed3e",
+    "mono.engine/imagegraphfont/tests/WrappedTextWorkloads.cpp": "64b7452e19a05e1396e771a126009f5f35e91871acc303567277277f934550a9",
+    "mono.engine/imagegraph/src/SourceFont.cpp": "f5629f6904c1eea528b39966645c494e1a0f604139ada56e6d6062c0620706bc",
+    "mono.engine/imagegraph/src/nodes/SourceTextNodes.cpp": "4d52942d0f9255004151ee4ee6a9dfe4c07d8ce2d378b7f64bb9653395e4c364"
+  },
+  "limits": [
+    "profile reads are workload boundaries; benchmark collector totals include additional verification and snapshot overhead",
+    "no performance improvement claimed; one current-machine run",
+    "native BDF profile is not licensed platform font parity",
+    "profile fixture, workload and Justfile additions were pending peer changes and were not committed by this phase",
+    "full 33-item Composer objective remains active"
+  ]
+}
