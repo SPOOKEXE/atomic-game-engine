@@ -468,6 +468,9 @@ TEST_CASE("Catalogue IVec2 axes drive a matrix getter", "[mirror_axes]") {
 	const auto document = MatrixGetAxes();
 	CHECK(EvaluateCell(document, 0) == Value{13.0});
 	CHECK(EvaluateCell(document, 10) == Value{29.0});
+	auto overridden = document;
+	overridden.Nodes.front().SourceInputExpressions.front().Code = "value * 0";
+	CHECK(EvaluateCell(overridden, 10) == Value{13.0});
 }
 
 TEST_CASE("Linked Vec2 producer takes precedence over retained separated axes", "[mirror_axes]") {
@@ -591,4 +594,11 @@ TEST_CASE("Active axes leave unsupported combined drivers dormant", "[mirror_axe
 	combined.SourceDriver = KeyframeAudioDriver{"missing", "rms"};
 	document.Keyframes = {combined};
 	CHECK(EvaluateCell(document, 10) == Value{29.0});
+}
+
+TEST_CASE("Separated IVec2 axes round fractional source coordinates", "[mirror_axes]") {
+	const auto document = MatrixGetAxes();
+	CHECK(EvaluateCell(document, 7) == Value{29.0});
+	CHECK(EvaluateCell(document, 3) == Value{13.0});
+	CHECK(EvaluateCell(document, 5) == Value{13.0});
 }

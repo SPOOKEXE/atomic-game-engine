@@ -1853,6 +1853,14 @@ namespace engine::imagegraphio {
 				return false;
 			}
 			const std::string id(input.Id);
+			if (input.SourceKind == "IVec2") {
+				const auto unit = record.find("unit");
+				int64_t mode = 0;
+				if (unit != record.end() && (!WholeNumber(*unit, mode) || mode != 0)) {
+					reason = "source IVec2 nonconstant unit conversion is not represented";
+					return false;
+				}
+			}
 			bool separatedVec2 = false;
 			// A linked Vec2 path getter reads this consumer's local raw animator X.
 			if (input.Type == imagegraph::ValueType::Vector2 && input.SourceIndex >= 0 &&

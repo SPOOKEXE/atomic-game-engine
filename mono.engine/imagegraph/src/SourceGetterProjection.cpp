@@ -206,6 +206,136 @@ namespace engine::imagegraph::detail {
 				value
 			);
 		}
+		template <class T> std::optional<double> VectorNumber(const T &value) {
+			double number;
+			if constexpr (std::is_same_v<T, double> || std::is_same_v<T, int64_t> || std::is_same_v<T, bool>)
+				number = static_cast<double>(value);
+			else if constexpr (std::is_same_v<T, EnumValue>)
+				number = static_cast<double>(value.Value);
+			else
+				return std::nullopt;
+			if (!std::isfinite(number)) return std::nullopt;
+			return DriverRoundHalfEven(number);
+		}
+		std::optional<Vector2> IntegerPair(std::span<const ElementValue> row, bool resize) {
+			if (!resize && row.size() < 2) return std::nullopt;
+			if (resize && std::any_of(row.begin(), row.end(), [](const auto &element) {
+					return Components(element, false).has_value();
+				}))
+				return std::nullopt;
+			Vector2 pair{};
+			for (size_t axis = 0; axis < std::min<size_t>(2, row.size()); ++axis) {
+				const auto value = std::visit([](const auto &v) { return VectorNumber(v); }, row[axis]);
+				if (!value) return std::nullopt;
+				(axis == 0 ? pair.X : pair.Y) = *value;
+			}
+			return pair;
+		}
+		std::optional<Vector2> IntegerPair(const ElementValue &element) {
+			const auto tuple = Components(element, false);
+			if (!tuple || tuple->Count < 2) return std::nullopt;
+			const std::array<ElementValue, 2> pair{tuple->At(0), tuple->At(1)};
+			return IntegerPair(pair, false);
+		}
+		std::optional<Vector2> IntegerPair(const Value &value) {
+			if (const auto tuple = Components(value, false)) {
+				if (tuple->Count != 2) return std::nullopt;
+				const std::array<ElementValue, 2> pair{tuple->At(0), tuple->At(1)};
+				return IntegerPair(pair, false);
+			}
+			const auto scalar = std::visit([](const auto &v) { return VectorNumber(v); }, value);
+			if (!scalar) return std::nullopt;
+			return Vector2{*scalar, *scalar};
+		}
+		std::optional<Vector2> IntegerItemsPair(std::span<const SourceArrayItem> row, bool resize) {
+			if (!resize && row.size() < 2) return std::nullopt;
+			if (resize && std::any_of(row.begin(), row.end(), [](const auto &item) {
+					const auto *leaf = std::get_if<ElementValue>(&item.Data);
+					return !leaf || Components(*leaf, false).has_value();
+				}))
+				return std::nullopt;
+			Vector2 pair{};
+			for (size_t axis = 0; axis < std::min<size_t>(2, row.size()); ++axis) {
+				const auto *element = std::get_if<ElementValue>(&row[axis].Data);
+				if (!element) return std::nullopt;
+				const auto number = std::visit([](const auto &v) { return VectorNumber(v); }, *element);
+				if (!number) return std::nullopt;
+				(axis == 0 ? pair.X : pair.Y) = *number;
+			}
+			return pair;
+		}
+		bool IntegerItemsAreRows(const ArrayValue &array) {
+			return std::any_of(array.Items.begin(), array.Items.end(), [](const auto &item) {
+				const auto *leaf = std::get_if<ElementValue>(&item.Data);
+				return !leaf || Components(*leaf, false).has_value();
+			});
+		}
+		std::optional<Vector2> IntegerItemRow(const SourceArrayItem &item) {
+			if (const auto *row = std::get_if<std::vector<SourceArrayItem>>(&item.Data))
+				return IntegerItemsPair(*row, true);
+			if (const auto *leaf = std::get_if<ElementValue>(&item.Data)) {
+				if (Components(*leaf, false)) return IntegerPair(*leaf);
+				// source array_verify_new replaces a scalar row with two zeros.
+				return Vector2{};
+			}
+			return std::nullopt;
+		}
+		std::optional<uint64_t> IntegerVectorBytes(const Value &value) {
+			if (!ValidRuntimeValue(value)) return std::nullopt;
+			const auto *array = std::get_if<ArrayValue>(&value);
+			if (!array) return IntegerPair(value) ? std::optional<uint64_t>{0} : std::nullopt;
+			if (!array->Items.empty()) {
+				if (IntegerItemsAreRows(*array)) {
+					for (const auto &item : array->Items)
+						if (!IntegerItemRow(item)) return std::nullopt;
+					return array->Items.size() * sizeof(ElementValue);
+				}
+				if (array->Items.size() != 2 || !IntegerItemsPair(array->Items, false)) return std::nullopt;
+				return 0;
+			}
+			if (!array->Nested.empty()) {
+				if (!array->Elements.empty()) return std::nullopt;
+				for (const auto &row : array->Nested)
+					if (!IntegerPair(row, true)) return std::nullopt;
+				return array->Nested.size() * sizeof(ElementValue);
+			}
+			if (array->Elements.empty()) return 0;
+			if (PackedArray(*array)) {
+				for (const auto &element : array->Elements)
+					if (!IntegerPair(element)) return std::nullopt;
+				return array->Elements.size() * sizeof(ElementValue);
+			}
+			if (array->Elements.size() != 2 || !IntegerPair(array->Elements, false)) return std::nullopt;
+			return 0;
+		}
+		Value IntegerVector(const Value &value) {
+			const auto *array = std::get_if<ArrayValue>(&value);
+			if (!array) return *IntegerPair(value);
+			if (!array->Items.empty()) {
+				if (!IntegerItemsAreRows(*array)) return *IntegerItemsPair(array->Items, false);
+				ArrayValue result{ValueType::Vector2, {}};
+				result.Elements.reserve(array->Items.size());
+				for (const auto &item : array->Items)
+					result.Elements.emplace_back(*IntegerItemRow(item));
+				return result;
+			}
+			if (!array->Nested.empty()) {
+				ArrayValue result{ValueType::Vector2, {}};
+				result.Elements.reserve(array->Nested.size());
+				for (const auto &row : array->Nested)
+					result.Elements.emplace_back(*IntegerPair(row, true));
+				return result;
+			}
+			if (array->Elements.empty()) return ArrayValue{ValueType::Scalar, {}};
+			if (PackedArray(*array)) {
+				ArrayValue result{ValueType::Vector2, {}};
+				result.Elements.reserve(array->Elements.size());
+				for (const auto &element : array->Elements)
+					result.Elements.emplace_back(*IntegerPair(element));
+				return result;
+			}
+			return *IntegerPair(array->Elements, false);
+		}
 		bool NumericIntegerPayload(const Value &value) {
 			if (Components(value, true)) return true;
 			const auto *array = std::get_if<ArrayValue>(&value);
@@ -312,6 +442,19 @@ namespace engine::imagegraph::detail {
 						return true;
 					}
 				}
+				if (input.SourceKind == "IVec2" && input.Type == ValueType::Vector2) {
+					// pinned IVec2 constructors use constant units; import refuses other saved unit modes.
+					const auto *value = Context.Find(port);
+					if (!value) return true;
+					const auto bytes = IntegerVectorBytes(*value);
+					if (!bytes)
+						return Context.Fail(
+							Status::UnsupportedExecution, "source IVec2 getter shape is unrepresented", port
+						);
+					++count;
+					payloadBytes += *bytes;
+					return true;
+				}
 				if (!CatalogueSourceRawValue(input, Value{0.})) return true;
 				const auto *value =
 					SourceRangeMapped(Context, port) ? SourceMappedRange(Context, port) : Context.Find(port);
@@ -387,6 +530,11 @@ namespace engine::imagegraph::detail {
 							Projected.emplace_back(port, std::move(array));
 							return true;
 						}
+					}
+					if (input.SourceKind == "IVec2" && input.Type == ValueType::Vector2) {
+						if (const auto *value = Context.Find(port))
+							Projected.emplace_back(port, IntegerVector(*value));
+						return true;
 					}
 					if (!CatalogueSourceRawValue(input, Value{0.})) return true;
 					const auto *value = SourceRangeMapped(Context, port) ? SourceMappedRange(Context, port)

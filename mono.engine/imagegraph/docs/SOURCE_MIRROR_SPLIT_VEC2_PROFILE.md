@@ -16,8 +16,9 @@ keys still count toward bounds and survive projection, native saves and PXC edit
 
 unlinked raw axes are sampled before PCX expressions. linked producers retain
 priority. consumer processing follows raw sampling; inactive combined drivers
-are not executed while split axes supply the value. source IVec2 fractional
-rounding and unit conversion are not established by the integer-endpoint tests.
+are not executed while split axes supply the value. constant-unit IVec2 getters
+round both components after raw sampling and PCX. saved nonconstant IVec2 units
+remain unsupported and retain their source node instead of mapping it.
 
 A static getter reads the first stored scalar key. An animated getter evaluates
 a lone-key driver before considering the original writer's static multi-key

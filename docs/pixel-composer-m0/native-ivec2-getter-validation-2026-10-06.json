@@ -1,0 +1,663 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "Constant-unit source IVec2 getter conversion after sampled axes and PCX; source archive unit fidelity.",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "verified_shared_scripts": [
+    {
+      "path": "scripts/node_value_types/node_value_types.gml",
+      "bytes": 18980,
+      "sha256": "9574e5f50450dd94cfc682a346f586880271a8985b9cc3205da697811884fddf",
+      "git_blob_sha1": "e80a7e60dee220ea0d1817a695add1b50e213a88"
+    },
+    {
+      "path": "scripts/node_value/node_value.gml",
+      "bytes": 111774,
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125"
+    },
+    {
+      "path": "scripts/array_functions/array_functions.gml",
+      "bytes": 15807,
+      "sha256": "02b928bd2c3e0c94192aec6e0ccd3fcac0734e0a5bb1ad588117fde674018581",
+      "git_blob_sha1": "eb928684a551c8c98314385b52d692e58cda0bee"
+    },
+    {
+      "path": "scripts/node_value_vec2/node_value_vec2.gml",
+      "bytes": 11175,
+      "sha256": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112",
+      "git_blob_sha1": "0be29adbff288676aef0c4fca68d801d299ba4cf"
+    }
+  ],
+  "verified_constructors": {
+    "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+    "constructor_count": 24,
+    "constructors": [
+      {
+        "path": "scripts/node_fast3D_sphere/node_fast3D_sphere.gml",
+        "bytes": 1421,
+        "sha256": "4b966a64d55db288bf420cff3e7b2a0075a026a27010189fa0311bbf2a49f804",
+        "git_blob_sha1": "8a4922f68548125a2ad63d675b29dee407bc327c",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_fast3D_torus/node_fast3D_torus.gml",
+        "bytes": 1572,
+        "sha256": "dba3ef11592d3db4c1423466285f4eb32623ed0e9a9942bfda3b3b8374f0188b",
+        "git_blob_sha1": "a42a52588881a9b3b32f9c80c9ba7e23aee9b2da",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_gradient_grid/node_gradient_grid.gml",
+        "bytes": 23161,
+        "sha256": "9fe9e6fc350e91b424c3e38ec5d60eff6a6b8de0995a746dae243bd587dff7db",
+        "git_blob_sha1": "2466b61d3c2ea71efdc719cdbf210c995c154818",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_grid_warp/node_grid_warp.gml",
+        "bytes": 34541,
+        "sha256": "cfac88f03cef9fa4a44fe835e367cc7faf0a2754cf5ffdb8ab23dc475fb37d2a",
+        "git_blob_sha1": "e3f3af41265703ebb374c43f09773b53cdf27cbf",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_interpret_matrix/node_interpret_matrix.gml",
+        "bytes": 2089,
+        "sha256": "54512c0599b597695160a592e0af891a37b80805b75e84cd41b846112d9f3c19",
+        "git_blob_sha1": "a175a963ee5e1ce7fd509c030fa61d4dedf2a8eb",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_markov/node_markov.gml",
+        "bytes": 4863,
+        "sha256": "97406f6cea87d9baff8d7ead8b8734197b026a1befbbc7838cee9ab720d5133a",
+        "git_blob_sha1": "23d82914f266364625eb1aaca6e07ec401260495",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_matrix/node_matrix.gml",
+        "bytes": 1570,
+        "sha256": "d8d051f4a36aa7fe44c517dc6fe3dc47a741fa58ddc0770f89f495542144d33c",
+        "git_blob_sha1": "4713a38ab10730638281cbebc79ff08d17bbe672",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_matrix_crop/node_matrix_crop.gml",
+        "bytes": 1495,
+        "sha256": "10cceb6eef0c0852ecc055979535e1e232ff489c3c6f242d10315bff8e237e8b",
+        "git_blob_sha1": "354a6e62320391c39ea269796478a292effc06e4",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_matrix_get/node_matrix_get.gml",
+        "bytes": 1153,
+        "sha256": "8a29298531309655559cd3c61e3a3684ec408a8fe2ac55cdcd6f14e259090231",
+        "git_blob_sha1": "fb59ae58188f4d07e3cc80a923c02b9068d6ff5d",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_matrix_set/node_matrix_set.gml",
+        "bytes": 1361,
+        "sha256": "572185b1d50dacca5be3fd3670ca72045eefea2174b5ee749d08a4ca5d0443db",
+        "git_blob_sha1": "1d7039d49652e2a114ee3f3fe2c9a1c1c0b00ef3",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_mesh_create_lattice/node_mesh_create_lattice.gml",
+        "bytes": 2617,
+        "sha256": "f3685a0263cd4dfcd81a748dbad8ea99987ac4e038f8453bd514886a42c401be",
+        "git_blob_sha1": "00944b2d56bd9d1ef40e2ba834bfd2ce1959ffcf",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_mk_circuit/node_mk_circuit.gml",
+        "bytes": 11202,
+        "sha256": "8684413f739dfc4c219b2882e7826427938293e565645b3f005dc4ad6a6a8afa",
+        "git_blob_sha1": "15b1bdd6e0a31ce1e18234e08852f152df833f32",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_mk_jigsaw/node_mk_jigsaw.gml",
+        "bytes": 9176,
+        "sha256": "83f3c6c4c4905162cac8a1073fa2ac6316822e2d91c0b6f90f7abf0a7056653f",
+        "git_blob_sha1": "a38fa23f7e1fa9f90762fddf63538dd49b225df1",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_mk_tree_bush/node_mk_tree_bush.gml",
+        "bytes": 3550,
+        "sha256": "69a5a78a56d0f6ec8f5e59c759aabbce6d9e1d09d570aaf72b5e435462a90c01",
+        "git_blob_sha1": "1cd84697e7385879130c0288cf350bc3fb8905ca",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_mk_tree_root/node_mk_tree_root.gml",
+        "bytes": 12208,
+        "sha256": "c8b09e3484504e8cd3ac9e2d3b973b9fd49cdcb288f945599e35af29407c9e33",
+        "git_blob_sha1": "17d1470ddaccc5a3a312b948744e7fff3fe852e4",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_scatter/node_scatter.gml",
+        "bytes": 37063,
+        "sha256": "b8c4c347da2deec9a6af109c738c252d9b8c47e8718b278c90b39da94c0bc8fe",
+        "git_blob_sha1": "8f715ea1e57465b45ea0b2a060a245a1df9cc784",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_scatter_point_lattice/node_scatter_point_lattice.gml",
+        "bytes": 2283,
+        "sha256": "361059fd9de68ec7fe2407c9fc5977fd143580032e6410be016a681d590aae1b",
+        "git_blob_sha1": "d27871f6be020fcd0cda19322ec7fc151389d9c1",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_shape_3d/node_shape_3d.gml",
+        "bytes": 11348,
+        "sha256": "03069ddb32c31da79b29d9140493868360cc7cc6863381d67fb34638d22dd236",
+        "git_blob_sha1": "0c2ed3a4e38ee59c5ea662fa0782a0ebaa90739d",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_shuffle/node_shuffle.gml",
+        "bytes": 5800,
+        "sha256": "4b8fad8d83c033126958d1182a280ed8afdaf06370d0cb8fded2d969abe7770f",
+        "git_blob_sha1": "c79beaa84f8ee3569a1f712010ce578f8ff5ac87",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_simple_pattern/node_simple_pattern.gml",
+        "bytes": 3575,
+        "sha256": "2d814387f1ab3e49a61dc977953d0ab166c3473126ed02df56ef23f7e9d38a83",
+        "git_blob_sha1": "fbc1bf04b842cacb0866475e6f23476fda56af37",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_tiler/node_tiler.gml",
+        "bytes": 19594,
+        "sha256": "9a57f72230ff01d8003ab1d27720ac1e3b3e28adf8937a7056896af4401678d3",
+        "git_blob_sha1": "f5ca32d3ef8949d69734a2b6100b6cf8cdd03b00",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_verletSim_mesh_bridge/node_verletSim_mesh_bridge.gml",
+        "bytes": 6247,
+        "sha256": "2a53819440fda935a51ee89d628095185e7b6efc37828e6b58ce1e7bdf37f125",
+        "git_blob_sha1": "5bb4ee1a357682455fcc0879e8b44d27f7fa7a2a",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_verletSim_mesh_disk/node_verletSim_mesh_disk.gml",
+        "bytes": 5084,
+        "sha256": "0b5c29e151621ca685c664b5b9458b96246bf01940d297379fa22c138d76e9d2",
+        "git_blob_sha1": "e5139fc4a00ff59eb0fee8de0bcc0514506eb253",
+        "manifest_match": true
+      },
+      {
+        "path": "scripts/node_verletSim_mesh_grid/node_verletSim_mesh_grid.gml",
+        "bytes": 4384,
+        "sha256": "7af21d704798dadb970ff925d2ff3bc99ea652ecca2a9814ec6ba5f4b6979a75",
+        "git_blob_sha1": "c372a36d28fb0b0ac60d03df14e4c1cc1720464b",
+        "manifest_match": true
+      }
+    ]
+  },
+  "source_contract": [
+    "Current pinned IVec2 input constructors install no special validator or unit control. NodeValue defaults to constant unit mode 0.",
+    "IVec2 valueProcess rounds the first two components after optional units, including getValue(time,false).",
+    "Depth-two rows use array_verify_new(row,2); scalar rows become zeros, short rows extend and long rows truncate. Deeper inputs are not converted by the source getter.",
+    "Source stores unit mode in the top-level input record. Native import admits absent/unit=0 and retains unsupported or malformed modes as opaque source nodes."
+  ],
+  "changes": [
+    "Round supported numeric IVec2 scalar and coordinate array carriers with source half-even rounding after PCX, preserving raw authored storage.",
+    "Handle native flat pairs, packed vector rows, legacy nested rows and bounded PCX Items carriers.",
+    "Refuse deeper rows before truncation, including discarded tails; preserve original input views and payloads on refusal.",
+    "Validate PXC constant-unit mapping and source retention for nonconstant or malformed unit records."
+  ],
+  "reproduced_failure": {
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-core-batch1.log",
+    "message": "get:position:matrix coordinates must be finite integers",
+    "samples": [
+      {
+        "tick": 3,
+        "raw_x": 0.3,
+        "expected_cell": 13
+      },
+      {
+        "tick": 5,
+        "raw_x": 0.5,
+        "expected_cell": 13
+      },
+      {
+        "tick": 7,
+        "raw_x": 0.7,
+        "expected_cell": 29
+      }
+    ]
+  },
+  "repaired_check_issues": [
+    "Batch2 fixture used Scalar element type with general Items; corrected to Any and asserted payload validity before conversion.",
+    "Read-only review found deeper discarded tails could be normalized incorrectly; added whole-row preflight and an atomic refusal case before final build."
+  ],
+  "build_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-build4.log",
+  "checks": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-bake-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_bake"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.282,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-physics-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "83cd7c9d1bbaac5fd87efebcbfb2cd7bdab9b3ffcbde70afeea36e40dc54e751",
+      "exit_code": 0,
+      "elapsed_seconds": 0.386,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "83cd7c9d1bbaac5fd87efebcbfb2cd7bdab9b3ffcbde70afeea36e40dc54e751",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-runner-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph_runner"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "81dd4a6718d281a0d80dfd468d77fb3bcc68c8a49db661834cb38e699169540e",
+      "exit_code": 0,
+      "elapsed_seconds": 0.301,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "81dd4a6718d281a0d80dfd468d77fb3bcc68c8a49db661834cb38e699169540e",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-font-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphfont"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "56fe634717b4a452976a71242c283796032f9d0e8f7a9125bdccded0eda770bf",
+      "exit_code": 0,
+      "elapsed_seconds": 0.496,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "56fe634717b4a452976a71242c283796032f9d0e8f7a9125bdccded0eda770bf",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-export-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphexport",
+        "~\"Local HTTP host serves source GET POST and enforces byte limits\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "bb9415f992ee0ca5e5b39d64869ed6b500ea4977d428aa442e4b8594cbbc3b42",
+      "exit_code": 0,
+      "elapsed_seconds": 0.552,
+      "assertions": 3123,
+      "cases": 76,
+      "binary_sha256_after": "bb9415f992ee0ca5e5b39d64869ed6b500ea4977d428aa442e4b8594cbbc3b42",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-render-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_render",
+        "[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "fb034be4ba6094eba112e5e8086d368ed9f2078756b9049a0f23879c81c62384",
+      "exit_code": 0,
+      "elapsed_seconds": 9.471,
+      "assertions": 855,
+      "cases": 15,
+      "binary_sha256_after": "fb034be4ba6094eba112e5e8086d368ed9f2078756b9049a0f23879c81c62384",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-cli-batch4.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_)",
+        "--output-on-failure",
+        "-j8"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.272,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-io-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "6bbbded008cbc4681a0b0e868879b5f9397501f15558b5292b9bc0a7b07b8d33",
+      "exit_code": 0,
+      "elapsed_seconds": 3.279,
+      "assertions": 11846,
+      "cases": 279,
+      "binary_sha256_after": "6bbbded008cbc4681a0b0e868879b5f9397501f15558b5292b9bc0a7b07b8d33",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-core-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "1e185db663adbdb53f07ae5e453d1934d3f4f20e11646b62fb454c7636f93045",
+      "exit_code": 0,
+      "elapsed_seconds": 3.605,
+      "assertions": 1892696,
+      "cases": 2898,
+      "binary_sha256_after": "1e185db663adbdb53f07ae5e453d1934d3f4f20e11646b62fb454c7636f93045",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-assetc-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_assetc"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "eb31a4a04ee05d37a89837a230a933066b04e91a5363521a50292f9102fea13b",
+      "exit_code": 0,
+      "elapsed_seconds": 6.168,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "eb31a4a04ee05d37a89837a230a933066b04e91a5363521a50292f9102fea13b",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-client-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_client",
+        "~[.]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\",[argument_binding][gpu]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\",[argument-transform-gpu]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "b73a7a4465a60833afaeca8db4d0be0b4bb8267e33256d320b64a21b9c42d9f9",
+      "exit_code": 0,
+      "elapsed_seconds": 3.283,
+      "assertions": 23113,
+      "cases": 355,
+      "binary_sha256_after": "b73a7a4465a60833afaeca8db4d0be0b4bb8267e33256d320b64a21b9c42d9f9",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-studio-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_studio",
+        "~\"the assets panel lists what a listing origin holds\"~\"Studio factory MCP manifest is available\"~\"an origin with enumeration off says so rather than showing nothing\"~\"Studio keeps its optional control surface after an occupied port\"~\"hosting produces a session and an invitation to pass on\"~\"the collaborator count only moves what it changes\"~\"Studio normal MCP manifest is available\"~\"Studio factory startup refuses an occupied required control port\"~\"Studio Project ZIP contains every catalogue asset and hosts without source folders\"~\"the editor limit is enforced by the hosted stream\"~\"private edit streams require the invitation key after discovery\"~\"a hosted session carries an edit to a guest\"~\"hosting opens a session other editors can join\"~\"leaving takes the session and its socket down\"~\"leaving takes the session back down\"~\"a public session says so and carries no invitation\"~\"a listing origin refuses the wrong key\\, and the tab says which\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "c93370675aebea916f57fd2542fa6ab9afe0500bd0e3acabdedf14f230e0e4e8",
+      "exit_code": 0,
+      "elapsed_seconds": 9.582,
+      "assertions": 45143,
+      "cases": 981,
+      "binary_sha256_after": "c93370675aebea916f57fd2542fa6ab9afe0500bd0e3acabdedf14f230e0e4e8",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-nodegraph-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_nodegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "exit_code": 0,
+      "elapsed_seconds": 1.323,
+      "assertions": 286,
+      "cases": 34,
+      "binary_sha256_after": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-ui-batch4.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_ui"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "3a7678f0a81a43512fb9622be1f7d2662285f3601149d08eb487a9e90089fc91",
+      "exit_code": 0,
+      "elapsed_seconds": 0.496,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "3a7678f0a81a43512fb9622be1f7d2662285f3601149d08eb487a9e90089fc91",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-startup-batch4.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^studio_composer_startup_arguments$",
+        "-V"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.309,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-lint-batch4.log",
+      "command": [
+        "ruff",
+        "check",
+        "scripts/pixel-composer/generate-catalogue.py",
+        "scripts/tests/pixel_composer_catalogue_metadata_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.013
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-architecture-batch4.log",
+      "command": [
+        "cmake",
+        "-DGRAPH=.cache/build/release-tests/target-graph.json",
+        "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+        "-P",
+        "mono.tools/architecture/CheckTargetGraph.cmake"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.374
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-python-batch4.log",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "pixel_composer_*_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.435,
+      "python_cases": 100
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-format-batch4.log",
+      "command": [
+        "/usr/bin/clang-format-21",
+        "--dry-run",
+        "--Werror",
+        "mono.studio/src/ImageGraphCacheBackground.hpp",
+        "mono.studio/src/ImageGraphCacheBackground.cpp",
+        "mono.studio/tests/ImageGraphCacheBackground.cpp",
+        "mono.studio/src/ImageGraphCacheControls.hpp",
+        "mono.studio/tests/ImageGraphCacheControls.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+        "mono.studio/nodegraph/src/Editor.cpp",
+        "mono.studio/nodegraph/tests/Editor.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+        "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+        "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+        "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+        "mono.engine/imagegraph/src/DataReplay.cpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+        "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+        "mono.engine/imagegraph/tests/DataReplay.cpp",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+        "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+        "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+        "mono.engine/ui/src/Interface.cpp",
+        "mono.engine/ui/tests/Interface.cpp",
+        "mono.engine/ui/include/engine/ui/Interface.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+        "mono.engine/imagegraph/src/nodes/Path.hpp",
+        "mono.engine/imagegraph/tests/Catalogue.cpp",
+        "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+        "mono.studio/tests/ImageGraphPatternGroups.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+        "mono.engine/imagegraph/src/SourceModeTransition.cpp",
+        "mono.engine/imagegraph/src/GroupReplay.cpp",
+        "mono.engine/imagegraph/src/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/BuiltinRandomCaptureCodec.hpp",
+        "mono.engine/imagegraph/tests/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/tests/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/tests/SourceMirrorPathProjection.cpp",
+        "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "mono.engine/imagegraphio/tests/PxcxMirrorPathRatio.cpp",
+        "mono.engine/imagegraph/src/SourceSeparatedVec2.hpp",
+        "mono.engine/imagegraph/src/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorIdentity.hpp",
+        "mono.engine/imagegraph/src/SourceMirrorAnimator.hpp",
+        "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+        "mono.engine/imagegraph/src/SourceGetterProjection.cpp",
+        "mono.engine/imagegraph/tests/SourceGetterProjection.cpp"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.186
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/ivec2-getter-diff-batch4.log",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.148
+    }
+  ],
+  "native_non_render_cases": 4975,
+  "offscreen_vulkan_cases": 15,
+  "child_binary_hashes": {
+    "before": {
+      ".cache/build/release-tests/tools/assetc": "ceb8b5cee3698f8fb1dc8740e3a8a0d9e4b259097b4f90422b60b3f714645f2e",
+      ".cache/build/release-tests/tools/imagegraph": "df47228912ba201def782005c4aaec9f1219befc9d6274ec5fe3497507c7f340"
+    },
+    "after": {
+      ".cache/build/release-tests/tools/assetc": "ceb8b5cee3698f8fb1dc8740e3a8a0d9e4b259097b4f90422b60b3f714645f2e",
+      ".cache/build/release-tests/tools/imagegraph": "df47228912ba201def782005c4aaec9f1219befc9d6274ec5fe3497507c7f340"
+    }
+  },
+  "skipped_socket_cases": {
+    "studio": [
+      "the assets panel lists what a listing origin holds",
+      "Studio factory MCP manifest is available",
+      "an origin with enumeration off says so rather than showing nothing",
+      "Studio keeps its optional control surface after an occupied port",
+      "hosting produces a session and an invitation to pass on",
+      "the collaborator count only moves what it changes",
+      "Studio normal MCP manifest is available",
+      "Studio factory startup refuses an occupied required control port",
+      "Studio Project ZIP contains every catalogue asset and hosts without source folders",
+      "the editor limit is enforced by the hosted stream",
+      "private edit streams require the invitation key after discovery",
+      "a hosted session carries an edit to a guest",
+      "hosting opens a session other editors can join",
+      "leaving takes the session and its socket down",
+      "leaving takes the session back down",
+      "a public session says so and carries no invitation",
+      "a listing origin refuses the wrong key, and the tab says which"
+    ],
+    "client": [
+      "client normal MCP surface is available",
+      "client MCP listener restarts with its reviewed normal manifest",
+      "client factory MCP surface is available"
+    ],
+    "export": [
+      "Local HTTP host serves source GET POST and enforces byte limits"
+    ]
+  },
+  "limits": [
+    "21 socket tests excluded after reproduced sandbox socket denial.",
+    "Separate/combine authoring controls remain unfinished. This pass supplies their IVec2 getter behavior.",
+    "Long flat tuples, higher-depth arrays, text/resource conversion and nonconstant IVec2 units remain unrepresented.",
+    "No live Studio verification, licensed reference comparison, new performance profile or sanitizer run in this pass."
+  ]
+}

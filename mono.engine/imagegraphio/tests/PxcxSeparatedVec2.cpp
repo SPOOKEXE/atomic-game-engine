@@ -93,3 +93,33 @@ TEST_CASE("PXC separated Vec2 IVec2 and Range edits preserve inactive tracks", "
 		CHECK(record["r"] == inputs[input->SourceIndex]["r"]);
 	}
 }
+
+TEST_CASE("PXC IVec2 preserves only represented constant unit modes", "[pxcx_vec2_axes]") {
+	const auto *entry = FindCatalogueEntry("pc.matrix");
+	REQUIRE(entry);
+	const auto *input = FindCatalogueInput(*entry, "size");
+	REQUIRE(input);
+	Json record = {{"r", {{"d", Json::array({2, 3})}}}, {"anim", false}};
+	Json inputs = Json::array();
+	for (int32_t i = 0; i <= input->SourceIndex; ++i)
+		inputs.push_back(Json::object());
+	inputs[input->SourceIndex] = record;
+	Json root = {
+		{"nodes",
+		 Json::array(
+			 {Json{{"id", "node"}, {"type", entry->SourceNode}, {"x", 0}, {"y", 0}, {"inputs", inputs}}}
+		 )}
+	};
+	CHECK(Checked(root).Graph.Nodes.front().Type == "pc.matrix");
+	root["nodes"][0]["inputs"][input->SourceIndex]["unit"] = 0;
+	CHECK(Checked(root).Graph.Nodes.front().Type == "pc.matrix");
+	for (const Json &unit : std::array<Json, 3>{Json(1), Json("reference"), Json(true)}) {
+		root["nodes"][0]["inputs"][input->SourceIndex]["unit"] = unit;
+		const auto imported = Checked(root);
+		REQUIRE(imported.Graph.Nodes.size() == 1);
+		CHECK(imported.Graph.Nodes.front().Type != "pc.matrix");
+		REQUIRE_FALSE(imported.Diagnostics.empty());
+		CHECK(imported.Diagnostics.front().Message.find("unit") != std::string::npos);
+		CHECK(imported.Source.GraphJson == root.dump() + '\0');
+	}
+}

@@ -46,7 +46,9 @@ namespace {
 		Value result;
 		{
 			detail::SourceGetterProjection projection(context);
-			REQUIRE(projection.Prepare());
+			const bool prepared = projection.Prepare();
+			INFO(context.FailureMessage);
+			REQUIRE(prepared);
 			REQUIRE(context.Find(port));
 			result = *context.Find(port);
 		}
@@ -386,4 +388,79 @@ TEST_CASE(
 	detail::SourceGetterProjection projection(context);
 	REQUIRE(projection.Prepare());
 	CHECK(*context.Find(port) == Value{true});
+}
+
+TEST_CASE("Source IVec2 getters round scalar and array coordinate shapes", "[imagegraph][source_getter]") {
+	CHECK(Projected("pc.matrix_get", "position", Vector2{.7f, -1.5f}) == Value{Vector2{1, -2}});
+	CHECK(Projected("pc.matrix_get", "position", .5) == Value{Vector2{0, 0}});
+	CHECK(Projected("pc.matrix_get", "position", 1.5) == Value{Vector2{2, 2}});
+	CHECK(
+		Projected("pc.matrix_get", "position", ArrayValue{ValueType::Scalar, {.3, .7}}) ==
+		Value{Vector2{0, 1}}
+	);
+	CHECK(
+		Projected(
+			"pc.matrix_get",
+			"position",
+			ArrayValue{ValueType::Vector2, {Vector2{.7f, -1.5f}, Vector2{1.5f, .3f}}}
+		) == Value{ArrayValue{ValueType::Vector2, {Vector2{1, -2}, Vector2{2, 0}}}}
+	);
+	CHECK(
+		Projected("pc.matrix_get", "position", ArrayValue{ValueType::Scalar, {}, {{.3}, {.7, 1.5, 9.}}}) ==
+		Value{ArrayValue{ValueType::Vector2, {Vector2{0, 0}, Vector2{1, 2}}}}
+	);
+	ArrayValue arithmetic{ValueType::Any, {}};
+	arithmetic.Items = {{ElementValue{.7}}, {ElementValue{1.5}}};
+	REQUIRE(detail::ValidRuntimeValue(Value{arithmetic}));
+	CHECK(Projected("pc.matrix_get", "position", arithmetic) == Value{Vector2{1, 2}});
+	arithmetic.Items = {
+		{ElementValue{3.0}},
+		{std::vector<SourceArrayItem>{{ElementValue{.7}}, {ElementValue{1.5}}, {ElementValue{9.0}}}}
+	};
+	REQUIRE(detail::ValidRuntimeValue(Value{arithmetic}));
+	CHECK(
+		Projected("pc.matrix_get", "position", arithmetic) ==
+		Value{ArrayValue{ValueType::Vector2, {Vector2{0, 0}, Vector2{1, 2}}}}
+	);
+	CHECK(
+		Projected("pc.matrix_get", "position", ArrayValue{ValueType::Scalar, {}}) ==
+		Value{ArrayValue{ValueType::Scalar, {}}}
+	);
+}
+
+TEST_CASE("Source IVec2 getter budget refusal preserves raw input view", "[imagegraph][source_getter]") {
+	const auto *entry = FindCatalogueEntry("pc.matrix_get");
+	REQUIRE(entry);
+	Node node{"node", "pc.matrix_get", "", {}, {}, {}};
+	EvaluationRequest request;
+	detail::NodeContext context(node, *entry, request);
+	context.ByteBudget = 1;
+	Value raw = Vector2{.7f, -1.5f};
+	context.ValueViews.emplace_back("position", &raw);
+	detail::SourceGetterProjection projection(context);
+	CHECK_FALSE(projection.Prepare());
+	CHECK(context.FailureCode == Status::LimitExceeded);
+	CHECK(context.Find("position") == &raw);
+}
+
+TEST_CASE("Source IVec2 refuses deeper tails before resizing rows", "[imagegraph][source_getter]") {
+	const auto *entry = FindCatalogueEntry("pc.matrix_get");
+	REQUIRE(entry);
+	Node node{"node", "pc.matrix_get", "", {}, {}, {}};
+	EvaluationRequest request;
+	detail::NodeContext context(node, *entry, request);
+	context.ByteBudget = Limits::MaximumEvaluationBytes;
+	ArrayValue array{ValueType::Any, {}};
+	array.Items = {{std::vector<SourceArrayItem>{
+		{ElementValue{1.0}}, {ElementValue{2.0}}, {std::vector<SourceArrayItem>{{ElementValue{3.0}}}}
+	}}};
+	Value raw = std::move(array);
+	REQUIRE(detail::ValidRuntimeValue(raw));
+	const Value retained = raw;
+	context.ValueViews.emplace_back("position", &raw);
+	detail::SourceGetterProjection projection(context);
+	CHECK_FALSE(projection.Prepare());
+	CHECK(context.FailureCode == Status::UnsupportedExecution);
+	CHECK(context.Find("position") == &raw);
+	CHECK(raw == retained);
 }
