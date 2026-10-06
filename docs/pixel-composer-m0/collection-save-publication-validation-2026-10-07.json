@@ -1,0 +1,258 @@
+{
+  "phase": "grug publish source Collection files and wire Studio save controls",
+  "date": "2026-10-07",
+  "base_commit": "0bd635bf",
+  "scope": [
+    "grug prepare .pxcc and optional .meta before touching existing files",
+    "grug stage sibling files on the same filesystem and retain old saves until every replacement succeeds",
+    "grug restore earlier replacements after a later failure; retain and report backup directory when restore refuses",
+    "grug add source Collection selector and .pxcc save path to Composer",
+    "grug project prepared Group constructor state and unsaved native edits into a checked source before collection extraction",
+    "grug leave retained authoring archive, metadata managers and undo unchanged"
+  ],
+  "owned_files": {
+    "mono.studio/src/ImageGraphFileSetPublish.hpp": "0ff7a89b0342b8389f0a1fb1cb7c0eae45d5604b1e828b1d074d2e0df5d80617",
+    "mono.studio/include/studio/PxcxSave.hpp": "8fb42d838237f7f0ce29c8aa985cf77ec64c21c52414d12e48f7294a60a87c3b",
+    "mono.studio/src/PxcxSave.cpp": "839c54524f0758d271dc3f697dabe41515ddd4489134f65c6c32b3367c7f4855",
+    "mono.studio/src/ImageComposer.cpp": "384ffd7fd093b4ed3947b41b04a5df5dd1fb9783d15d7e0b6ecb1ed5fa4a2eff",
+    "mono.studio/tests/PxcxSave.cpp": "a650675ab2e28094d487c7051f870b6ee749c67ff6f8df5a79f5a60883389bd5",
+    "mono.studio/tests/ImageGraphFilePublish.cpp": "80943694eeec7a59aacdd6079a1dfde051e2c7ff3bb1b429b92d307891f6ed6e"
+  },
+  "compiled_shared_ui_sha256": "c13e2aa592b60ee58dfb29be24cf8bf13762027d1a91e0ba863e513ce12d9307",
+  "checks": {
+    "joined_build": "grug 17 release-tests targets with j6 passed in build7",
+    "batch": "20/20 passed",
+    "cpp_cases": 5210,
+    "cpp_assertions": 2004200,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "grug approved offscreen Vulkan; Studio, client and render serialized",
+    "frozen_source_files_unchanged": 1834,
+    "peer_files_unchanged": 43,
+    "test_binaries_unchanged": 13,
+    "child_binaries_unchanged": 2,
+    "review": "grug Sol read adapter and UI; Luna added save integration cases; root added unsaved projection and real second-file rollback/recovery tests",
+    "standalone_performance_profile": "grug not run; adapter has ENGINE_PROFILE and staged byte/file counters",
+    "sanitizers": "grug not run"
+  },
+  "failures_and_repairs": [
+    {
+      "stage": "build1",
+      "result": "failed",
+      "output": "AuthoredValue has no member named Id",
+      "repair": "grug use actual Port field in new test",
+      "log": "collection-publish-build1.log"
+    },
+    {
+      "stage": "batch1",
+      "result": "19/20 gates passed; Studio 1093/1094 cases passed",
+      "output": "REQUIRE(engine::bake::WritePxcx(source, bytes, failure)) was false",
+      "repair": "grug clear old node and link facts after changing fixture source JSON; writer correctly rejects stale facts",
+      "log": "collection-publish-studio-batch1.log"
+    },
+    {
+      "stage": "batch2",
+      "result": "19/20 gates passed; Studio 1093/1094 cases passed",
+      "output": "REQUIRE(engine::imagegraphio::ImportPxcxImageGraph(source, imported, failure)) was false",
+      "repair": "grug use supported Node_Group collection family for unsaved native test; base Node_Collection parent is not currently projected",
+      "diagnosis": "grug existing pxcimport reproduced source child has an unknown or non-group parent; same fixture with Node_Group imported successfully",
+      "log": "collection-publish-studio-batch2.log"
+    },
+    {
+      "stage": "build4 preparation",
+      "result": "test edit assertion stopped before writing; build4 performed no source compilation",
+      "repair": "grug fix exact edit match before freezing build5"
+    },
+    {
+      "stage": "batch3 launcher",
+      "result": "first launch stopped before any check because copied runner input named cache-region-batch3-results.json",
+      "repair": "grug restore existing cache-region-batch2-results.json input and run all twenty checks"
+    },
+    {
+      "stage": "read review before first build",
+      "result": "review caught destructor retry after reported rollback refusal",
+      "repair": "grug keep RestoreFailed backup directory untouched; test removes obstruction before destructor to verify no retry"
+    },
+    {
+      "stage": "final read after batch3",
+      "result": "grug found Metrics::Count can allocate after files were committed",
+      "repair": "grug count completed staging bytes/files before replacement; telemetry failure leaves old files untouched"
+    },
+    {
+      "stage": "final read after build6",
+      "result": "grug found recursive cleanup can allocate inside stage destructor",
+      "repair": "grug remove only known temporary/backup siblings and directory through noexcept filesystem overloads; final build7/batch4 cover this code"
+    }
+  ],
+  "limitations": [
+    "grug file set replacement is rollback for normal filesystem errors, not atomic visibility to concurrent readers or power-loss durability",
+    "grug preview PNG and PXZ packaging remain open",
+    "grug existing source writer uses conservative reserved scratch, not a process-wide allocator proof",
+    "grug Studio requires current prepared Group constructor state when saving edited groups",
+    "grug base Node_Collection native child membership remains unprojected; .pxcc pure save still preserves these checked source records",
+    "grug source single-key compaction and one-frame keyed exports still need full serializer coverage",
+    "grug headed Studio interaction and licensed reference parity remain unverified",
+    "grug whole Composer goal remains active"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "builds": [
+      "collection-publish-build1.log",
+      "collection-publish-build2.log",
+      "collection-publish-build3.log",
+      "collection-publish-build4.log",
+      "collection-publish-build5.log",
+      "collection-publish-build6.log",
+      "collection-publish-build7.log"
+    ],
+    "batches": [
+      "collection-publish-batch1-results.json",
+      "collection-publish-batch2-results.json",
+      "collection-publish-batch3-results.json",
+      "collection-publish-batch4-results.json"
+    ],
+    "source_integrity": "collection-publish-source-integrity-batch4.json",
+    "peer_integrity": "collection-publish-peer-integrity-batch4.json",
+    "child_integrity": "collection-publish-child-hashes-batch4.json"
+  },
+  "results_summary": [
+    {
+      "name": "bake",
+      "exit_code": 0,
+      "cases": 157,
+      "assertions": 15875,
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129"
+    },
+    {
+      "name": "physics",
+      "exit_code": 0,
+      "cases": 43,
+      "assertions": 715,
+      "binary_sha256": "3b2f2ea690b061d7a5ada43b0ca989c48c429909de81acf945034ae63561482b",
+      "binary_sha256_after": "3b2f2ea690b061d7a5ada43b0ca989c48c429909de81acf945034ae63561482b"
+    },
+    {
+      "name": "runner",
+      "exit_code": 0,
+      "cases": 29,
+      "assertions": 296,
+      "binary_sha256": "f59edd4f18106826ac463dc11ea2c29632f58d0be5350566b82f7d3fa1cac4ad",
+      "binary_sha256_after": "f59edd4f18106826ac463dc11ea2c29632f58d0be5350566b82f7d3fa1cac4ad"
+    },
+    {
+      "name": "font",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 1686,
+      "binary_sha256": "93cd8d70799454ad3d95b4746a472edd2b76f815b6e1ea13329dcd596ee8e765",
+      "binary_sha256_after": "93cd8d70799454ad3d95b4746a472edd2b76f815b6e1ea13329dcd596ee8e765"
+    },
+    {
+      "name": "export",
+      "exit_code": 0,
+      "cases": 77,
+      "assertions": 3132,
+      "binary_sha256": "ef61f29063e438232d596f350be1e2fada17ad3b79e6e0097faa41ba60952814",
+      "binary_sha256_after": "ef61f29063e438232d596f350be1e2fada17ad3b79e6e0097faa41ba60952814"
+    },
+    {
+      "name": "render",
+      "exit_code": 0,
+      "cases": 15,
+      "assertions": 477,
+      "binary_sha256": "0751bc59aa1384a0c152f2678978a528d8b97e9d218f313584da026c0f33932e",
+      "binary_sha256_after": "0751bc59aa1384a0c152f2678978a528d8b97e9d218f313584da026c0f33932e"
+    },
+    {
+      "name": "cli",
+      "exit_code": 0,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "exit_code": 0,
+      "cases": 298,
+      "assertions": 12777,
+      "binary_sha256": "dfd843e4a1c99dfaf48d699c2b5f9a34c63e7a4d5f2493329c09e3faafb22207",
+      "binary_sha256_after": "dfd843e4a1c99dfaf48d699c2b5f9a34c63e7a4d5f2493329c09e3faafb22207"
+    },
+    {
+      "name": "core",
+      "exit_code": 0,
+      "cases": 2980,
+      "assertions": 1895147,
+      "binary_sha256": "3b509b33c79312c0727322c2207c7038cf49be2bd5b343fc425ca33731ca3348",
+      "binary_sha256_after": "3b509b33c79312c0727322c2207c7038cf49be2bd5b343fc425ca33731ca3348"
+    },
+    {
+      "name": "assetc",
+      "exit_code": 0,
+      "cases": 45,
+      "assertions": 509,
+      "binary_sha256": "7182b77f87897d6cee3e9550ffb23486e58b173b7a9900e651063834b99f00de",
+      "binary_sha256_after": "7182b77f87897d6cee3e9550ffb23486e58b173b7a9900e651063834b99f00de"
+    },
+    {
+      "name": "client",
+      "exit_code": 0,
+      "cases": 358,
+      "assertions": 23821,
+      "binary_sha256": "903972ead44ee7bffdd6e5dd3a13490f69e7377739bd31b433141d5269b14039",
+      "binary_sha256_after": "903972ead44ee7bffdd6e5dd3a13490f69e7377739bd31b433141d5269b14039"
+    },
+    {
+      "name": "studio",
+      "exit_code": 0,
+      "cases": 1094,
+      "assertions": 48716,
+      "binary_sha256": "9094c65ef35ec0a16c13121e3c7f83b74b7077b7373ecbdc4cb5a3c4222343b4",
+      "binary_sha256_after": "9094c65ef35ec0a16c13121e3c7f83b74b7077b7373ecbdc4cb5a3c4222343b4"
+    },
+    {
+      "name": "nodegraph",
+      "exit_code": 0,
+      "cases": 37,
+      "assertions": 345,
+      "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc"
+    },
+    {
+      "name": "ui",
+      "exit_code": 0,
+      "cases": 40,
+      "assertions": 704,
+      "binary_sha256": "f7d3ff41ad81bcb10ed941b8f40081e188ef4c05f1fd65e353e44ee3b9cc026c",
+      "binary_sha256_after": "f7d3ff41ad81bcb10ed941b8f40081e188ef4c05f1fd65e353e44ee3b9cc026c"
+    },
+    {
+      "name": "startup",
+      "exit_code": 0,
+      "cases": 1,
+      "assertions": 5
+    },
+    {
+      "name": "lint",
+      "exit_code": 0
+    },
+    {
+      "name": "architecture",
+      "exit_code": 0
+    },
+    {
+      "name": "python",
+      "exit_code": 0,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "exit_code": 0
+    }
+  ]
+}

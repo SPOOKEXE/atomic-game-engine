@@ -1,3 +1,5 @@
+#include "ImageGraphAppendProject.hpp"
+
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -7,14 +9,81 @@
 #include <atomic>
 #include <chrono>
 #include <fstream>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <string_view>
 #include <studio/ImageGraph.hpp>
 #include <studio/PxcxSave.hpp>
 
 TEST_SUITE_ID("studio.pxcxsave")
 TEST_DEPENDS("engine.imagegraphio.pxcxstructureedit")
+TEST_DEPENDS("engine.imagegraphio.pxcxappend")
 TEST_DEPENDS("engine.imagegraphexport.pxcx_thumbnail")
 
 namespace {
+	using Json = nlohmann::ordered_json;
+	Json Collection(std::string id, std::string parent = {}) {
+		Json node = {
+			{"id", std::move(id)},
+			{"type", "Node_Collection"},
+			{"x", 0},
+			{"y", 0},
+			{"inputs", Json::array()},
+			{"attri", {{"custom_input_list", Json::array()}, {"custom_output_list", Json::array()}}}
+		};
+		if (!parent.empty()) node["group"] = std::move(parent);
+		return node;
+	}
+	engine::bake::PxcxArchive CollectionSource() {
+		Json root = Collection("selected", "outside");
+		root["x"] = 100;
+		root["y"] = 200;
+		root["future_root"] = {{"keep", 9}};
+		Json child = Collection("child", "selected");
+		child["x"] = 110;
+		child["y"] = 220;
+		Json opaque = {
+			{"id", "inside-opaque"},
+			{"type", "future.node"},
+			{"x", 111},
+			{"y", 222},
+			{"group", "child"},
+			{"inputs", Json::array({{{"from_node", "outside"}, {"from_index", 0}}})},
+			{"future_node", {{"keep", true}}}
+		};
+		Json graph = {
+			{"future_project", "preserve source only"},
+			{"nodes",
+			 Json::array(
+				 {root,
+				  child,
+				  opaque,
+				  {{"id", "outside"},
+				   {"type", "future.opaque"},
+				   {"x", 4},
+				   {"y", 5},
+				   {"inputs", Json::array({{{"from_node", "selected"}, {"from_index", 0}}})},
+				   {"future_node", {{"keep", true}}}}}
+			 )}
+		};
+		engine::bake::PxcxArchive archive;
+		archive.MetadataNumber = 121092;
+		archive.MetadataText = "1.22.10.201";
+		archive.GraphJson = graph.dump();
+		archive.GraphJson.push_back('\0');
+		std::vector<std::byte> bytes;
+		std::string failure;
+		REQUIRE(engine::bake::WritePxcx(archive, bytes, failure));
+		engine::bake::PxcxArchive checked;
+		REQUIRE(engine::bake::ReadPxcx(bytes, checked, failure));
+		return checked;
+	}
+	void WriteText(const std::filesystem::path &path, std::string_view text) {
+		std::ofstream stream(path, std::ios::binary);
+		REQUIRE(stream.is_open());
+		stream.write(text.data(), static_cast<std::streamsize>(text.size()));
+		REQUIRE(stream.good());
+	}
 	struct Directory {
 		inline static std::atomic<uint64_t> Serial{0};
 		std::filesystem::path Path =
@@ -56,6 +125,108 @@ namespace {
 		REQUIRE(stream.gcount() == count);
 		return bytes;
 	}
+	std::string ReadText(const std::filesystem::path &path) {
+		const auto bytes = Read(path);
+		return {reinterpret_cast<const char *>(bytes.data()), bytes.size()};
+	}
+}
+
+TEST_CASE(
+	"Studio PXC collection save writes the selected subtree and manager sidecar while retaining its source",
+	"[studio][pxcx_save][collection]"
+) {
+	const auto source = CollectionSource();
+	const auto originalBytes = source.OriginalBytes;
+	const auto originalGraph = source.GraphJson;
+	Directory directory;
+	const auto path = directory.Path / "selected.pxcc";
+	const std::string_view manager = R"JSON({"description":"saved collection","file_id":41})JSON";
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(studio::SavePxcxCollection(path, source, "selected", manager, diagnostic));
+	const auto firstGraph = Json::parse(ReadText(path));
+	REQUIRE(firstGraph["nodes"].size() == 3);
+	CHECK(firstGraph["nodes"][0]["id"] == "inside-opaque");
+	CHECK(firstGraph["nodes"][1]["id"] == "child");
+	CHECK(firstGraph["nodes"][2]["id"] == "selected");
+	CHECK(firstGraph["nodes"][0]["x"] == 11);
+	CHECK(firstGraph["nodes"][0]["y"] == 22);
+	CHECK(firstGraph["nodes"][0]["inputs"][0]["from_node"] == "outside");
+	CHECK(firstGraph["nodes"][0]["future_node"]["keep"] == true);
+	CHECK(firstGraph["nodes"][1]["x"] == 10);
+	CHECK(firstGraph["nodes"][1]["y"] == 20);
+	CHECK(firstGraph["nodes"][2]["x"] == 0);
+	CHECK(firstGraph["nodes"][2]["y"] == 0);
+	CHECK(firstGraph["nodes"][2]["group"] == -4);
+	CHECK(firstGraph["nodes"][2]["future_root"]["keep"] == 9);
+	const auto metadataPath = path.parent_path() / "selected.meta";
+	CHECK(Json::parse(ReadText(metadataPath))["description"] == "saved collection");
+	CHECK(source.OriginalBytes == originalBytes);
+	CHECK(source.GraphJson == originalGraph);
+
+	const std::string_view replacementManager = R"JSON({"description":"replacement"})JSON";
+	REQUIRE(studio::SavePxcxCollection(path, source, "selected", replacementManager, diagnostic));
+	CHECK(Json::parse(ReadText(metadataPath))["description"] == "replacement");
+	CHECK(source.OriginalBytes == originalBytes);
+}
+
+TEST_CASE(
+	"Studio PXC collection save refusals preserve both published files",
+	"[studio][pxcx_save][collection][atomic]"
+) {
+	const auto source = CollectionSource();
+	Directory directory;
+	const auto path = directory.Path / "keep.pxcc";
+	const auto metadataPath = directory.Path / "keep.meta";
+	WriteText(path, "prior collection");
+	WriteText(metadataPath, "prior metadata");
+	const auto priorCollection = Read(path);
+	const auto priorMetadata = Read(metadataPath);
+	engine::imagegraph::Diagnostic diagnostic;
+	CHECK_FALSE(studio::SavePxcxCollection(path, source, "missing", {}, diagnostic));
+	CHECK(Read(path) == priorCollection);
+	CHECK(Read(metadataPath) == priorMetadata);
+	CHECK_FALSE(
+		studio::SavePxcxCollection(directory.Path / "wrong.pxcx", source, "selected", {}, diagnostic)
+	);
+	CHECK(Read(path) == priorCollection);
+	CHECK(Read(metadataPath) == priorMetadata);
+	CHECK_FALSE(studio::SavePxcxCollection(path, source, "selected", {}, diagnostic, 1));
+	CHECK(Read(path) == priorCollection);
+	CHECK(Read(metadataPath) == priorMetadata);
+	auto malformed = source;
+	malformed.GraphJson = "{";
+	CHECK_FALSE(studio::SavePxcxCollection(path, malformed, "selected", {}, diagnostic));
+	CHECK(Read(path) == priorCollection);
+	CHECK(Read(metadataPath) == priorMetadata);
+	CHECK_FALSE(studio::SavePxcxCollection({}, source, "selected", {}, diagnostic));
+}
+
+TEST_CASE(
+	"Studio PXC collection save handles sidecar and parent publication failures without partial replacement",
+	"[studio][pxcx_save][collection][atomic]"
+) {
+	const auto source = CollectionSource();
+	Directory directory;
+	const auto path = directory.Path / "blocked.pxcc";
+	const auto metadataPath = directory.Path / "blocked.meta";
+	WriteText(path, "prior collection");
+	const auto priorCollection = Read(path);
+	REQUIRE(std::filesystem::create_directory(metadataPath));
+	const auto markerPath = metadataPath / "marker";
+	WriteText(markerPath, "keep marker");
+	engine::imagegraph::Diagnostic diagnostic;
+	CHECK_FALSE(studio::SavePxcxCollection(path, source, "selected", R"({"description":"x"})", diagnostic));
+	CHECK(Read(path) == priorCollection);
+	CHECK(ReadText(markerPath) == "keep marker");
+	const auto missingParent = directory.Path / "missing" / "collection.pxcc";
+	CHECK_FALSE(studio::SavePxcxCollection(missingParent, source, "selected", {}, diagnostic));
+	CHECK_FALSE(std::filesystem::exists(missingParent));
+
+	const auto noManagerPath = directory.Path / "no-manager.pxcc";
+	const auto untouchedMetadata = directory.Path / "no-manager.meta";
+	WriteText(untouchedMetadata, "existing metadata");
+	REQUIRE(studio::SavePxcxCollection(noManagerPath, source, "selected", {}, diagnostic));
+	CHECK(ReadText(untouchedMetadata) == "existing metadata");
 }
 
 TEST_CASE(
@@ -335,4 +506,69 @@ TEST_CASE(
 			   link.ToPort == "surface";
 	}));
 	CHECK(Render(reloaded.Graph).Pixels == Render(source.Graph).Pixels);
+}
+
+TEST_CASE(
+	"Studio collection publication includes an unsaved native source projection",
+	"[studio][pxcx_save][collection]"
+) {
+	using namespace engine::imagegraph;
+	auto source = CollectionSource();
+	auto graph = Json::parse(source.GraphJson.c_str());
+	graph["nodes"][0]["type"] = "Node_Group";
+	graph["nodes"][1]["type"] = "Node_Group";
+	graph["nodes"][0].erase("group");
+	graph["nodes"][2]["inputs"] = Json::array();
+	graph["nodes"][3]["inputs"] = Json::array();
+	graph["nodes"].push_back(
+		{{"id", "number"},
+		 {"type", "Node_Number_Simple"},
+		 {"group", "selected"},
+		 {"x", 120},
+		 {"y", 240},
+		 {"inputs", Json::array({{{"r", {{"d", 3}}}}})}}
+	);
+	source.GraphJson = graph.dump();
+	source.GraphJson.push_back('\0');
+	source.Nodes.clear();
+	source.Links.clear();
+	std::vector<std::byte> bytes;
+	std::string failure;
+	REQUIRE(engine::bake::WritePxcx(source, bytes, failure));
+	REQUIRE(engine::bake::ReadPxcx(bytes, source, failure));
+	const auto original = source.OriginalBytes;
+	engine::imagegraphio::PxcxImport imported;
+	const bool importedSource = engine::imagegraphio::ImportPxcxImageGraph(source, imported, failure);
+	INFO(failure);
+	REQUIRE(importedSource);
+	auto authored = imported.Graph;
+	const auto number = std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [](const Node &node) {
+		return node.Id == "number";
+	});
+	REQUIRE(number != authored.Nodes.end());
+	number->Position = {130, 250};
+	const auto value = std::find_if(number->Values.begin(), number->Values.end(), [](const auto &property) {
+		return property.Port == "value";
+	});
+	REQUIRE(value != number->Values.end());
+	value->Data = 7.0;
+	Diagnostic diagnostic;
+	engine::bake::PxcxArchive checked;
+	const bool projected =
+		studio::detail::PrepareImageGraphAppendDestination(imported, authored, {}, checked, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(projected);
+	Directory directory;
+	const auto path = directory.Path / "unsaved.pxcc";
+	REQUIRE(studio::SavePxcxCollection(path, checked, "selected", {}, diagnostic));
+	const auto saved = Json::parse(ReadText(path));
+	const auto savedNumber = std::find_if(saved["nodes"].begin(), saved["nodes"].end(), [](const auto &node) {
+		return node["id"] == "number";
+	});
+	REQUIRE(savedNumber != saved["nodes"].end());
+	CHECK((*savedNumber)["x"] == 30);
+	CHECK((*savedNumber)["y"] == 50);
+	CHECK((*savedNumber)["inputs"][0]["r"]["d"] == 7.0);
+	CHECK(source.OriginalBytes == original);
+	CHECK(imported.Source.OriginalBytes == original);
 }

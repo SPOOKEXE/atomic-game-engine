@@ -1,5 +1,7 @@
 #include "ImageGraphFilePublish.hpp"
 
+#include "ImageGraphFileSetPublish.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -161,3 +163,66 @@ TEST_CASE(
 	CHECK(Entries(directory) == 1);
 }
 #endif
+
+TEST_CASE(
+	"collection file commit restores earlier replacements when a later destination refuses",
+	"[studio][imagegraph][save]"
+) {
+	Directory directory;
+	Diagnostic diagnostic;
+	const auto first = directory.Path / "collection.pxcc";
+	const auto second = directory.Path / "collection.meta";
+	REQUIRE(Publish(first, "old collection", diagnostic));
+	REQUIRE(Publish(second, "old metadata", diagnostic));
+	const auto staging = directory.Path / "staging";
+	REQUIRE(std::filesystem::create_directory(staging));
+	{
+		studio::detail::ImageGraphFileSetStage stage;
+		stage.Directory = staging;
+		stage.Count = 2;
+		stage.Files[0] = {first, staging / "0.new", staging / "0.old"};
+		stage.Files[1] = {second, staging / "missing.new", staging / "1.old"};
+		REQUIRE(Publish(stage.Files[0].Temporary, "new collection", diagnostic));
+		CHECK_FALSE(stage.Commit());
+		CHECK(ReadFile(first) == "new collection");
+		CHECK(std::filesystem::exists(stage.Files[0].Backup));
+		REQUIRE(stage.Rollback());
+		CHECK(ReadFile(first) == "old collection");
+		CHECK(ReadFile(second) == "old metadata");
+	}
+	CHECK_FALSE(std::filesystem::exists(staging));
+	CHECK(Entries(directory) == 2);
+}
+
+TEST_CASE(
+	"failed collection restore retains old backup and the reported recovery directory",
+	"[studio][imagegraph][save]"
+) {
+	Directory directory;
+	Diagnostic diagnostic;
+	const auto first = directory.Path / "collection.pxcc";
+	const auto second = directory.Path / "collection.meta";
+	REQUIRE(Publish(first, "old collection", diagnostic));
+	REQUIRE(Publish(second, "old metadata", diagnostic));
+	const auto staging = directory.Path / "staging";
+	REQUIRE(std::filesystem::create_directory(staging));
+	{
+		studio::detail::ImageGraphFileSetStage stage;
+		stage.Directory = staging;
+		stage.Count = 2;
+		stage.Files[0] = {first, staging / "0.new", staging / "0.old"};
+		stage.Files[1] = {second, staging / "missing.new", staging / "1.old"};
+		REQUIRE(Publish(stage.Files[0].Temporary, "new collection", diagnostic));
+		REQUIRE_FALSE(stage.Commit());
+		REQUIRE(std::filesystem::remove(first));
+		REQUIRE(std::filesystem::create_directory(first));
+		REQUIRE(Publish(first / "keep", "other writer", diagnostic));
+		REQUIRE_FALSE(stage.Rollback());
+		CHECK(ReadFile(stage.Files[0].Backup) == "old collection");
+		// grug clear the obstruction, but destructor must leave the reported backup alone.
+		REQUIRE(std::filesystem::remove_all(first) == 2);
+	}
+	CHECK(ReadFile(staging / "0.old") == "old collection");
+	CHECK_FALSE(std::filesystem::exists(first));
+	CHECK(ReadFile(second) == "old metadata");
+}

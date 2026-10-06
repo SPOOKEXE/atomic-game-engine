@@ -1,9 +1,11 @@
 #include "ImageGraphFilePublish.hpp"
+#include "ImageGraphFileSetPublish.hpp"
 
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraphexport/PxcxThumbnail.hpp>
+#include <engine/imagegraphio/PxcxAppend.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
 
 #include <algorithm>
@@ -40,6 +42,44 @@ namespace studio {
 			return bytes;
 		}
 
+	}
+
+	bool SavePxcxCollection(
+		const std::filesystem::path &destination,
+		const engine::bake::PxcxArchive &source,
+		std::string_view collectionId,
+		std::optional<std::string_view> managerJson,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("studio pxc collection save");
+		diagnostic = {};
+		if (destination.empty() || destination.native().size() > 4096 || destination.extension() != ".pxcc")
+			return Reject(diagnostic, "enter a .pxcc collection path");
+		engine::imagegraphio::PxcxCollectionSave prepared;
+		if (!engine::imagegraphio::PreparePxcxCollectionSave(
+				source, collectionId, managerJson, prepared, diagnostic, maximumBytes
+			))
+			return false;
+		std::array<detail::ImageGraphFilePublication, 2> files;
+		files[0] = {
+			destination, std::as_bytes(std::span(prepared.GraphJson.data(), prepared.GraphJson.size()))
+		};
+		size_t count = 1;
+		if (prepared.MetadataJson) {
+			auto metadataPath = destination;
+			metadataPath.replace_extension(".meta");
+			const auto &metadata = *prepared.MetadataJson;
+			files[1] = {std::move(metadataPath), std::as_bytes(std::span(metadata.data(), metadata.size()))};
+			count = 2;
+		}
+		return detail::PublishImageGraphFileSet(std::span(files.data(), count), diagnostic, maximumBytes);
+	} catch (const std::bad_alloc &) {
+		return Reject(
+			diagnostic, "collection save allocation failed", engine::imagegraph::Status::LimitExceeded
+		);
+	} catch (const std::filesystem::filesystem_error &) {
+		return Reject(diagnostic, "collection save path is invalid");
 	}
 
 	bool SavePxcxProjection(

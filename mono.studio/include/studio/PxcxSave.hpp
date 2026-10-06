@@ -5,8 +5,21 @@
 #include <engine/imagegraph/FrameTime.hpp>
 
 #include <filesystem>
+#include <optional>
+#include <string_view>
 
 namespace studio {
+	// grug save a checked source Collection as .pxcc and optional .meta siblings. both are prepared
+	// before publication; failed replacement restores old files or reports retained backup paths.
+	// caller supplies source containing current edits. this leaves authoring and undo unchanged.
+	[[nodiscard]] bool SavePxcxCollection(
+		const std::filesystem::path &destination,
+		const engine::bake::PxcxArchive &source,
+		std::string_view collectionId,
+		std::optional<std::string_view> managerJson,
+		engine::imagegraph::Diagnostic &diagnostic,
+		uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+	);
 	// Validates all source edits before creating a temporary file, then atomically replaces the path.
 	// The retained archive remains the authoring baseline so undo can restore opaque source records.
 	[[nodiscard]] bool SavePxcxProjection(

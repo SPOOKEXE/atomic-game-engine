@@ -226,6 +226,8 @@ namespace studio {
 			char Search[96] = {};
 			char GraphName[256] = {};
 			char PxcxPath[4096] = {};
+			char PxcxCollectionPath[4096] = {};
+			std::string PxcxCollectionId;
 			char PxcxAppendPath[4096] = {};
 			char PxcxAppendNamespace[256] = "appended";
 			char PxcxAppendContext[256] = {};
@@ -2920,6 +2922,102 @@ namespace studio {
 			state.PxcxReferenceThumbnail = {};
 			state.PxcxOpenError.clear();
 			return true;
+		}
+
+		bool SaveCollection(State &state) try {
+			using namespace engine::imagegraphio;
+			ENGINE_PROFILE("studio.imagegraph.collection_save_action");
+			Diagnostic diagnostic;
+			const auto fail = [&](Status code, std::string message) {
+				state.LastDiagnostic = {code, {}, {}, std::move(message)};
+				state.PxcxOpenError = state.LastDiagnostic.Message;
+				return false;
+			};
+			if (!state.ImportedPxcx || !RetryCacheEdit(state)) return false;
+			if (state.HaveActiveEdit || state.Playback.Rendering || state.RangeExport)
+				return fail(
+					Status::InvalidValue, "finish the active edit or render before saving a collection"
+				);
+			const std::filesystem::path destination(state.PxcxCollectionPath);
+			if (destination.empty() || destination.extension() != ".pxcc")
+				return fail(Status::InvalidValue, "enter a .pxcc collection path");
+			const auto manager =
+				state.CollectionManagers
+					? std::find_if(
+						  state.CollectionManagers->begin(),
+						  state.CollectionManagers->end(),
+						  [&](const auto &item) { return item.NodeId == state.PxcxCollectionId; }
+					  )
+					: std::vector<PxcxCollectionMetadata>::const_iterator{};
+			if (!state.CollectionManagers || manager == state.CollectionManagers->end())
+				return fail(Status::InvalidValue, "select a source collection to save");
+			const auto allowance = GroupConstructorAllowance(state);
+			if (!allowance)
+				return fail(Status::LimitExceeded, "retained owners leave no collection save allowance");
+			uint64_t remaining = *allowance;
+			const auto charge = [&](std::optional<uint64_t> bytes) {
+				if (!bytes || *bytes >= remaining) return false;
+				remaining -= *bytes;
+				return true;
+			};
+			if (!charge(detail::ImageGraphHistoryArchiveBytes(*state.ImportedPxcx)) ||
+				!charge(DocumentRetainedPayloadBytes(state.Authored)) ||
+				!charge(DocumentRetainedPayloadBytes(state.PxcxProjection)) ||
+				!charge(detail::ImageGraphCollectionBytes(state.CollectionManagers)) ||
+				!charge(detail::ImageGraphHistoryCanvasBytes(state.Graph, state.Ids)) ||
+				!charge(state.GroupHost.Replay.RetainedBytes()))
+				return fail(Status::LimitExceeded, "collection save owners exceed live bytes");
+			Document projected;
+			const Document *saved = &state.Authored;
+			if (state.GroupHost.Replay.InstancesBound()) {
+				if (!state.GroupHost.ProjectForSave(
+						state.Authored, state.DocumentRevision, projected, diagnostic, remaining
+					))
+					return fail(diagnostic.Code, diagnostic.Message);
+				saved = &projected;
+			} else if (!state.Authored.Groups.empty()) {
+				return fail(
+					Status::InvalidValue, "refresh the collection preview before saving its constructor state"
+				);
+			}
+			if (!charge(DocumentRetainedPayloadBytes(projected)))
+				return fail(Status::LimitExceeded, "collection save projection exceeds live bytes");
+			engine::bake::PxcxArchive checked;
+			{
+				const auto archiveBytes = detail::ImageGraphHistoryArchiveBytes(*state.ImportedPxcx);
+				const auto documentBytes = DocumentRetainedPayloadBytes(*saved);
+				if (!archiveBytes || !documentBytes || *archiveBytes >= remaining / 32 ||
+					*documentBytes >= remaining / 32)
+					return fail(Status::LimitExceeded, "collection save import scratch exceeds allowance");
+				PxcxImport imported;
+				PxcxImportOptions options;
+				options.MaximumOperationBytes = remaining;
+				std::string error;
+				if (!ImportPxcxImageGraph(*state.ImportedPxcx, imported, error, options))
+					return fail(Status::InvalidValue, std::move(error));
+				if (!detail::PrepareImageGraphAppendDestination(
+						imported, *saved, GetImageGraphFrame(state.Playback), checked, diagnostic, remaining
+					))
+					return fail(diagnostic.Code, diagnostic.Message);
+			}
+			if (!SavePxcxCollection(
+					destination,
+					checked,
+					manager->NodeId,
+					std::string_view(manager->MetadataJson),
+					diagnostic,
+					remaining
+				))
+				return fail(diagnostic.Code, diagnostic.Message);
+			state.PxcxOpenError.clear();
+			state.LastDiagnostic = {};
+			return true;
+		} catch (const std::bad_alloc &) {
+			state.PxcxOpenError = "collection save allocation refused";
+			return false;
+		} catch (const std::filesystem::filesystem_error &) {
+			state.PxcxOpenError = "collection save path is invalid";
+			return false;
 		}
 
 		void RunAnimationControls(State &state, engine::render::Renderer &renderer) {
@@ -7308,6 +7406,30 @@ namespace studio {
 				);
 				ImGui::InputScalarN("Append offset", ImGuiDataType_Double, state.PxcxAppendOffset, 2);
 				if (ImGui::Button("Append PXCX")) AppendPxcx(state);
+				if (state.CollectionManagers && !state.CollectionManagers->empty()) {
+					const auto &collections = *state.CollectionManagers;
+					if (std::none_of(collections.begin(), collections.end(), [&](const auto &item) {
+							return item.NodeId == state.PxcxCollectionId;
+						}))
+						state.PxcxCollectionId = collections.front().NodeId;
+					if (ImGui::BeginCombo("Collection", state.PxcxCollectionId.c_str())) {
+						for (const auto &item : collections)
+							if (ImGui::Selectable(item.NodeId.c_str(), item.NodeId == state.PxcxCollectionId))
+								state.PxcxCollectionId = item.NodeId;
+						ImGui::EndCombo();
+					}
+					ImGui::InputTextWithHint(
+						"##image-pxcc-path",
+						"Path to .pxcc collection",
+						state.PxcxCollectionPath,
+						sizeof(state.PxcxCollectionPath)
+					);
+					ImGui::BeginDisabled(
+						state.HaveActiveEdit || state.Playback.Rendering || bool(state.RangeExport)
+					);
+					if (ImGui::Button("Save collection")) SaveCollection(state);
+					ImGui::EndDisabled();
+				}
 			}
 			if (!state.PxcxOpenError.empty()) ImGui::TextWrapped("PXCX: %s", state.PxcxOpenError.c_str());
 			if (state.ImportedPxcx.has_value()) {
