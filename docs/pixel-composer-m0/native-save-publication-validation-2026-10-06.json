@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-06",
+  "scope": "grug native graph save now shares staged close-and-rename publication with PXC saves",
+  "reproduced_failure": {
+    "method": "isolated C++ copy of old SaveNativeGraph ofstream write path, SIGXFSZ ignored, RLIMIT_FSIZE=8",
+    "old_file": "previous valid saved document",
+    "result": "write refused with exit 7, prior save replaced by xxxxxxxx"
+  },
+  "behavior": [
+    "native save checks its existing 8 MiB limit before publication",
+    "exclusive sibling creation preserves previous save until complete write, flush, close and rename",
+    "PXC save and prepared adoption use the same publisher",
+    "save export callbacks remain after successful file replacement"
+  ],
+  "owned_files": {
+    "mono.studio/src/ImageGraphFilePublish.hpp": "b0378007e17c232a3e178a1ceca3b65a903a81f54119127c7f4272474a0b3e22",
+    "mono.studio/tests/ImageGraphFilePublish.cpp": "b9325222fd703598b0e5eb60a9535a3cfacf7e645929c93ea6f48e43666c7529",
+    "mono.studio/src/PxcxSave.cpp": "2dabca6628e6718e34d9349c62fb7e90e3f63e190d27882af555079adab3f364"
+  },
+  "shared_file": "mono.studio/src/ImageComposer.cpp: include plus SaveNativeGraph publisher call only; peer hunks preserved",
+  "build": {
+    "preset": "release-tests (-O3)",
+    "targets": 17,
+    "exit_code": 0,
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/native-save-build1.log",
+    "warning": "existing TimelineRegions.hpp optional selected may be used uninitialized; no change made"
+  },
+  "validation": {
+    "checks": 20,
+    "all_exit_codes_zero": true,
+    "cpp_cases": 5158,
+    "cpp_assertions": 2002423,
+    "new_cases": 3,
+    "new_assertions": 43,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup": true,
+    "gpu": "approved SDL offscreen Vulkan suites included",
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/native-save-batch1-results.json"
+  },
+  "proof": [
+    "native graph save/reload preserves edited fractional key and node position",
+    "exact byte limit succeeds, lower limit preserves destination",
+    "missing parent, empty path, zero allowance and rename refusal preserve prior files",
+    "Linux real RLIMIT_FSIZE short write preserves old save, removes sibling and permits retry"
+  ],
+  "freeze": {
+    "source_paths": 75,
+    "unchanged_whole_peer_paths": 42,
+    "shared_composer_peer_hunks": "byte-for-byte unchanged after removing owned delta",
+    "test_binary_hashes": "13 unchanged",
+    "child_binary_hashes": "assetc and imagegraph unchanged",
+    "before": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/native-save-source-before-build1.json",
+    "after": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/native-save-source-after-batch1.json"
+  },
+  "review": "Sol read review found no confirmed blocker",
+  "limits": [
+    "grug did not capture a performance profile; no speed claim",
+    "close and rename does not promise power-loss durability",
+    "real short-write fixture runs on Linux; Windows and macOS not checked",
+    "headed Studio, licensed reference comparison, dev/server/ci builds and sanitizers not run"
+  ],
+  "remaining": "full project append and original 33-item Composer goal remain active"
+}

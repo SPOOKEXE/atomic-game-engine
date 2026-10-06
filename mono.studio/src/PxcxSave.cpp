@@ -1,3 +1,5 @@
+#include "ImageGraphFilePublish.hpp"
+
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/Surface.hpp>
@@ -5,8 +7,6 @@
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
 
 #include <algorithm>
-#include <atomic>
-#include <cstdio>
 #include <new>
 #include <studio/PxcxSave.hpp>
 
@@ -39,29 +39,7 @@ namespace studio {
 					return std::nullopt;
 			return bytes;
 		}
-		bool Publish(
-			const std::filesystem::path &destination, std::span<const std::byte> bytes, Diagnostic &diagnostic
-		) {
-			static std::atomic<uint64_t> serial{0};
-			auto temporary = destination;
-			temporary += ".atomic-pxc-" + std::to_string(serial.fetch_add(1)) + ".tmp";
-			FILE *stream = std::fopen(temporary.string().c_str(), "wbx");
-			if (!stream) return Reject(diagnostic, "could not create PXC temporary file");
-			const bool complete = std::fwrite(bytes.data(), 1, bytes.size(), stream) == bytes.size() &&
-								  std::fflush(stream) == 0;
-			const bool closed = std::fclose(stream) == 0;
-			std::error_code error;
-			if (!complete || !closed) {
-				std::filesystem::remove(temporary, error);
-				return Reject(diagnostic, "could not write complete PXC temporary file");
-			}
-			std::filesystem::rename(temporary, destination, error);
-			if (error) {
-				std::filesystem::remove(temporary, error);
-				return Reject(diagnostic, "could not replace PXC destination");
-			}
-			return true;
-		}
+
 	}
 
 	bool SavePxcxProjection(
@@ -84,7 +62,9 @@ namespace studio {
 		std::vector<std::byte> bytes;
 		if (!engine::imagegraphio::WritePxcxProjection(imported, authored, captureTime, bytes, diagnostic))
 			return false;
-		return Publish(destination, bytes, diagnostic);
+		return detail::PublishImageGraphFile(
+			destination, bytes, diagnostic, engine::bake::PxcxLimits::MaximumArchiveBytes
+		);
 	}
 
 	bool SavePxcxProjectionAndAdopt(
@@ -212,7 +192,10 @@ namespace studio {
 					diagnostic, "PXC preview identity backing exceeds admission", Status::LimitExceeded
 				);
 		}
-		if (!Publish(destination, bytes, diagnostic)) return false;
+		if (!detail::PublishImageGraphFile(
+				destination, bytes, diagnostic, engine::bake::PxcxLimits::MaximumArchiveBytes
+			))
+			return false;
 		engine::core::Metrics::Count("studio.pxc_save.published_bytes", double(bytes.size()));
 		published = std::move(next);
 		return true;

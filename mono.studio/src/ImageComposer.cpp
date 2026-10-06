@@ -20,6 +20,7 @@
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphExportIntent.hpp"
 #include "ImageGraphExportTriggers.hpp"
+#include "ImageGraphFilePublish.hpp"
 #include "ImageGraphFontArtifact.hpp"
 #include "ImageGraphFontBindings.hpp"
 #include "ImageGraphGroupHost.hpp"
@@ -1961,15 +1962,13 @@ namespace studio {
 				state.GraphIoMessage = "could not create imagegraphs directory: " + filesystemError.message();
 				return false;
 			}
-			std::ofstream file(path, std::ios::binary | std::ios::trunc);
-			if (!file) {
-				state.GraphIoMessage = "could not create native graph file";
-				return false;
-			}
-			file.write(text.data(), static_cast<std::streamsize>(text.size()));
-			file.flush();
-			if (!file) {
-				state.GraphIoMessage = "could not finish writing native graph file";
+			if (!detail::PublishImageGraphFile(
+					path,
+					std::as_bytes(std::span(text.data(), text.size())),
+					state.LastDiagnostic,
+					IMAGE_GRAPH_FILE_MAXIMUM_BYTES
+				)) {
+				state.GraphIoMessage = state.LastDiagnostic.Message;
 				return false;
 			}
 			state.GraphIoMessage = "saved " + path.filename().string();
