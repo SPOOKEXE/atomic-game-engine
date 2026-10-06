@@ -125,9 +125,14 @@ copies the immediate base's current array rather than following combined owners.
 a charged dependency memo lets descendants see parents newly bound in the same
 transaction, regardless of request order.
 input moves, detachment, projection and rebinding preserve that scalar identity.
-scalar reads, edits and mode changes still need routing through this identity
-and source-backed local constructor defaults before separate/combine controls
-can cover those constructor cases. repeated explicit source `setInstance` must
+scalar reads follow the delegated getter's captured axis identity; edits use
+the selected local property's identity. warm scalar mode changes sample and
+replace that independent owner, track and writer. changing a physical property's
+mode updates scalar aliases independently from combined aliases. linked numeric
+inputs bypass local axes; Mirror linked Paths still read local X as their ratio.
+cold aliases refuse execution before source-backed retained initialization.
+detached scalar mode changes remain unrepresented. source-backed constructor
+defaults are still needed before separate/combine controls cover those cases. repeated explicit source `setInstance` must
 recopy the immediate base's current array even when its ID is unchanged; that
 transition remains separate from host reconciliation and is unfinished.
 source saves and restores local `def_val` separately from animator rows.

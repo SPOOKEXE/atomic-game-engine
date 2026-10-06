@@ -39,6 +39,7 @@
 #include "SourceAnimatorIdentity.hpp"
 #include "SourceArgumentTransport.hpp"
 #include "SourceAtlasCodec.hpp"
+#include "SourceAxisStorage.hpp"
 #include "SourceFontReceipts.hpp"
 #include "SourceFontTransport.hpp"
 #include "SourceFrameCacheLookup.hpp"
@@ -12749,43 +12750,13 @@ namespace engine::imagegraph {
 					}
 				}
 				detail::EvaluationVector<Value> separatedSamples{detail::EvaluationAllocator<Value>(budget)};
-				const auto separatedInput =
-					[&](std::string_view port) -> const SourceSeparatedVec2Animator * {
+				const auto separatedInput = [&](std::string_view port) -> detail::SourceAxisStorageView {
 					if (!detail::ReadsSourceInput(inputSelection, index, port) ||
 						(node.Type == "pc.mirror_polar" && detail::SourceMirrorVectorIndex(port)) ||
 						context.IsLinked(port) ||
-						!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, port))
-						return nullptr;
-					const auto &owner = inputOwner(port);
-					const auto ownerPort = inputAnimatorPort(port);
-					const auto *detached = request.GroupReplay
-											   ? request.GroupReplay->DetachedAnimator(owner.Id, ownerPort)
-											   : nullptr;
-					if (detached ? detached->Type != ValueType::Vector2 ||
-									   !detail::SourceSeparatedVec2Input(node, port)
-								 : !detail::SourceSeparatedVec2Input(owner, ownerPort))
-						return nullptr;
-					const auto *overlay = request.GroupReplay
-											  ? request.GroupReplay->SharedSubtype(owner.Id, ownerPort)
-											  : nullptr;
-					const auto *axes = overlay && overlay->SeparatedVec2
-										   ? &*overlay->SeparatedVec2
-										   : detail::FindSeparatedVec2(owner, ownerPort);
-					return axes && detail::SourcePropertyGetterSeparated(
-									   document, document.Nodes[index], port, request.GroupReplay
-								   )
-							   ? axes
-							   : nullptr;
-				};
-				size_t separatedCount = 0;
-				for (const auto &input : catalogueEntry->Inputs)
-					separatedCount += separatedInput(input.Id) != nullptr;
-				for (const auto &input : node.DynamicInputs)
-					separatedCount += separatedInput(input.Id) != nullptr;
-				separatedSamples.reserve(separatedCount);
-				const auto sampleSeparatedInput = [&](std::string_view port) {
-					const auto *axes = separatedInput(port);
-					if (!axes) return true;
+						!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, port) ||
+						!detail::SourceSeparatedVec2Input(node, port))
+						return {};
 					const auto &owner = inputOwner(port);
 					const auto ownerPort = inputAnimatorPort(port);
 					const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
@@ -12799,30 +12770,58 @@ namespace engine::imagegraph {
 								  owner.SourceAnimatedInputs.end(),
 								  ownerPort
 							  ) != owner.SourceAnimatedInputs.end();
+					return detail::ResolveSourceGetterAxes(
+						document,
+						document.Nodes[index],
+						port,
+						request.GroupReplay,
+						owner.Id,
+						ownerPort,
+						writerAnimated,
+						scheduleWork
+					);
+				};
+				size_t separatedCount = 0;
+				const auto countSeparatedInput = [&](std::string_view port) {
+					const auto source = separatedInput(port);
+					if (source.Code != Status::Ok) {
+						SetDiagnostic(
+							diagnostic, source.Code, std::string(source.Message), node.Id, std::string(port)
+						);
+						return false;
+					}
+					separatedCount += source.Axes != nullptr;
+					return true;
+				};
+				for (const auto &input : catalogueEntry->Inputs)
+					if (!countSeparatedInput(input.Id)) return diagnostic.Code;
+				for (const auto &input : node.DynamicInputs)
+					if (!countSeparatedInput(input.Id)) return diagnostic.Code;
+				separatedSamples.reserve(separatedCount);
+				const auto sampleSeparatedInput = [&](std::string_view port) {
+					const auto source = separatedInput(port);
+					if (source.Code != Status::Ok) {
+						SetDiagnostic(
+							diagnostic, source.Code, std::string(source.Message), node.Id, std::string(port)
+						);
+						return false;
+					}
+					if (!source.Axes) return true;
+					const auto *axes = source.Axes;
 					const bool getterAnimated = detail::SourcePropertyGetterAnimated(
 													document, document.Nodes[index], port, request.GroupReplay
 					)
 													.value_or(false);
-					const AnimationTrack *track = nullptr;
-					if (const auto *detached =
-							request.GroupReplay ? request.GroupReplay->DetachedAnimator(owner.Id, ownerPort)
-												: nullptr)
-						if (detached->Track) track = &*detached->Track;
-					for (const auto &candidate : document.Tracks)
-						if (candidate.NodeId == owner.Id && candidate.Port == ownerPort) {
-							track = &candidate;
-							break;
-						}
 					Vector2 pair;
 					for (size_t axis = 0; axis < 2; ++axis) {
 						double value = 0;
 						const auto status = detail::SampleSeparatedScalar(
 							axes->Axes[axis],
-							track,
+							source.Track,
 							document.Timeline ? &*document.Timeline : nullptr,
 							request,
 							getterAnimated,
-							writerAnimated,
+							source.WriterAnimated,
 							budget,
 							value,
 							diagnostic
@@ -12878,38 +12877,96 @@ namespace engine::imagegraph {
 								}
 						if (!raw)
 							if (const auto *value = FindValue(rawNode, rawPort)) raw = &value->Data;
-						const auto *sharedAxes = request.GroupReplay
-													 ? request.GroupReplay->SharedSubtype(rawNode.Id, rawPort)
-													 : nullptr;
-						const auto *axes = sharedAxes && sharedAxes->SeparatedVec2
-											   ? &*sharedAxes->SeparatedVec2
-											   : detail::FindSeparatedVec2(rawNode, rawPort);
-						if (axes && detail::SourcePropertyGetterSeparated(
-										document, document.Nodes[index], port, request.GroupReplay
+						const bool writerAnimated = binding
+														? binding->Writer == GroupSubtypeAnimator::Animated
+														: std::find(
+															  rawNode.SourceAnimatedInputs.begin(),
+															  rawNode.SourceAnimatedInputs.end(),
+															  rawPort
+														  ) != rawNode.SourceAnimatedInputs.end();
+						detail::SourceAxisStorageView source;
+						const auto *linkedValue = context.IsLinked(port) ? context.Find(port) : nullptr;
+						const bool linkedPath = linkedValue && std::holds_alternative<Path2D>(*linkedValue);
+						if (detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, port)) {
+							if (linkedPath)
+								source = detail::ResolveLocalSourceAxes(
+									document,
+									document.Nodes[index],
+									port,
+									request.GroupReplay && request.GroupReplay->InstancesBound()
+										? request.GroupReplay->Bindings()
+										: std::span<const GroupSubtypeBinding>{},
+									request.GroupReplay ? request.GroupReplay->SharedSubtypes()
+														: std::span<const GroupSubtypeOverlay>{},
+									request.GroupReplay ? request.GroupReplay->DetachedAnimators()
+														: std::span<const DetachedSourceAnimator>{},
+									rawNode.Id,
+									rawPort,
+									writerAnimated,
+									scheduleWork
+								);
+							else if (!context.IsLinked(port))
+								source = detail::ResolveSourceGetterAxes(
+									document,
+									document.Nodes[index],
+									port,
+									request.GroupReplay,
+									rawNode.Id,
+									rawPort,
+									writerAnimated,
+									scheduleWork
+								);
+						}
+						if (source.Code != Status::Ok) {
+							SetDiagnostic(
+								diagnostic,
+								source.Code,
+								std::string(source.Message),
+								node.Id,
+								std::string(port)
+							);
+							return diagnostic.Code;
+						}
+						if (const auto *axes = source.Axes) {
+							bool axisGetterAnimated = mode.value_or(false);
+							if (linkedPath) {
+								if (!detail::AdmitSourceAxisWork(
+										scheduleWork,
+										document.Links.size() +
+											document.Nodes[index].SourceAnimatedInputs.size()
 									)) {
-							const AnimationTrack *track = nullptr;
-							for (const auto &candidate : document.Tracks)
-								if (candidate.NodeId == rawNode.Id && candidate.Port == rawPort) {
-									track = &candidate;
-									break;
+									SetDiagnostic(
+										diagnostic,
+										Status::LimitExceeded,
+										"source path axis mode lookup exceeds work bounds",
+										node.Id,
+										std::string(port)
+									);
+									return diagnostic.Code;
 								}
-							const bool writerAnimated =
-								binding ? binding->Writer == GroupSubtypeAnimator::Animated
-										: std::find(
-											  rawNode.SourceAnimatedInputs.begin(),
-											  rawNode.SourceAnimatedInputs.end(),
-											  rawPort
-										  ) != rawNode.SourceAnimatedInputs.end();
+								const bool localLink = std::any_of(
+									document.Links.begin(), document.Links.end(), [&](const auto &link) {
+										return link.ToNode == node.Id && link.ToPort == port;
+									}
+								);
+								if (localLink)
+									axisGetterAnimated =
+										std::find(
+											document.Nodes[index].SourceAnimatedInputs.begin(),
+											document.Nodes[index].SourceAnimatedInputs.end(),
+											port
+										) != document.Nodes[index].SourceAnimatedInputs.end();
+							}
 							Vector2 pair;
 							for (size_t axis = 0; axis < 2; ++axis) {
 								double value = 0;
 								const Status status = detail::SampleSeparatedScalar(
 									axes->Axes[axis],
-									track,
+									source.Track,
 									document.Timeline ? &*document.Timeline : nullptr,
 									request,
-									mode.value_or(false),
-									writerAnimated,
+									axisGetterAnimated,
+									source.WriterAnimated,
 									budget,
 									value,
 									diagnostic

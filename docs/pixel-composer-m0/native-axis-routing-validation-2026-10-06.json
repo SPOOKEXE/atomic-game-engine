@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "route retained scalar axes independently for reads, edits and represented warm mode changes.",
+  "function_logic": [
+    "reads choose the delegated getter property; edits choose the selected local property. physical scalar owner, port, track and writer come from independent axis identity.",
+    "without a binding, the delegated property uses its own scalar storage. legacy bindings with unspecified axes retain their original combined tuple fallback.",
+    "captured uninitialized scalar storage refuses execution; later base allocation cannot substitute for retained local initialization.",
+    "generic linked values bypass scalar storage. Mirror linked Paths still sample local X as their ratio; direct local links select local animation mode while inherited links retain admitted getter mode.",
+    "warm mode changes replace the scalar physical owner in the projected document. combined and scalar binding writers change independently with the corresponding physical property mode.",
+    "new getter and scalar storage lookups charge their scans. edit routing shares a work counter across events and charges aggregate storage and key lookups."
+  ],
+  "native_checks": [
+    "nested overridden alias reads and edits immediate-copy axes while combined owner remains base.",
+    "inherited nested getter reads an overridden immediate copy own axes even without a binding for that copy.",
+    "nested mode disable folds scalar keys into copy document storage at time zero. changing base mode makes combined writer static while copy-owned scalar writer remains animated.",
+    "projection and projected replay rebind retain edited scalar values and preserve unrelated base values.",
+    "cold alias refusal preserves prior sampled value and its reservation after late ancestor allocation.",
+    "Mirror linked Paths use scalar X independently from dormant combined tuples and Y. split, unsplit and directly linked static aliases select the represented local behavior."
+  ],
+  "issues_and_repairs": [
+    "read-only review caught a linked Path regression caused by suppressing all linked scalar sampling; kept local ratio sampling while numeric linked values bypass it.",
+    "no-binding delegated getter initially retained the caller combined tuple; changed fallback to the actual getter property scalar storage.",
+    "batch1 mode fixture inspected retired replay storage after successful document projection; checked folded document keys at source time zero.",
+    "batch1 split alias fixture lacked a local split flag; represented that flag explicitly and added unsplit and local static Path checks.",
+    "review found a new mode fixture targeting an unbound instance; changed it to the bound base to check independent combined and scalar writers."
+  ],
+  "builds": [
+    {
+      "log": "axis-routing-build1.log",
+      "exit_code": 0
+    },
+    {
+      "log": "axis-routing-build2.log",
+      "exit_code": 0
+    },
+    {
+      "log": "axis-routing-build3.log",
+      "exit_code": 0
+    }
+  ],
+  "joined_batches": [
+    {
+      "results": "axis-routing-batch1-results.json",
+      "passed_checks": 19,
+      "checks": 20,
+      "failed_check": "core",
+      "failure_output": "test cases: 2923 | 2921 passed | 2 failed; assertions: 1893309 | 1893244 passed | 65 failed",
+      "failures": [
+        "SourceInputMoves.cpp:914 REQUIRE(staticAxes) returned nullptr because projection retired replay axes.",
+        "SourceMirrorPathProjection.cpp:90 pixels red40 instead of120 in split alias fixture without a local split flag."
+      ]
+    },
+    {
+      "results": "axis-routing-batch2-results.json",
+      "passed_checks": 20,
+      "checks": 20,
+      "all_passed": true,
+      "native_cpu_cases": 4999,
+      "render_cases": 15,
+      "render_assertions": 922,
+      "startup_cases": 1,
+      "cli_cases": 16,
+      "python_cases": 100,
+      "binary_hashes_stable": true,
+      "child_hashes_stable": true,
+      "socket_cases_excluded": 21
+    }
+  ],
+  "review": "read-only final review found no additional confirmed regression in the resulting scalar routing and repaired fixtures.",
+  "source_review": {
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "facts": [
+      "node_value_vec2.gml Path branch calls its local __getAnimValue for the X ratio. its override samples separated arrays through getAnim.",
+      "node_value.gml getAnim delegates only when useInstance is true. an explicit value_from link prevents useInstance.",
+      "node_value.gml setAnim changes the property mode first, samples physical scalar animators directly and creates disabled keys at time zero."
+    ],
+    "scripts": [
+      {
+        "path": "scripts/node_value/node_value.gml",
+        "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd"
+      },
+      {
+        "path": "scripts/node_value_vec2/node_value_vec2.gml",
+        "sha256": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112"
+      },
+      {
+        "path": "scripts/node_group/node_group.gml",
+        "sha256": "12bcf43c0bfcb6d84ea8c788c4ff84bae4f805d1290ede309222f2cd03bbb019"
+      }
+    ]
+  },
+  "limits": [
+    "local constructor def_val provenance and retained lazy scalar initialization remain unfinished.",
+    "detached scalar mode changes explicitly refuse execution. repeated explicit same-base source setInstance recapture remains unfinished.",
+    "separate/combine authoring controls remain unfinished.",
+    "licensed reference runtime parity, headed Studio verification, performance profiling for this routing change and sanitizer checks were not run.",
+    "21 socket cases retain previously reproduced sandbox exclusions. offscreen Vulkan was approved; headed Studio remains unapproved.",
+    "git metadata is read-only; the owned patch is prepared but this pass cannot be committed in this environment."
+  ],
+  "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05"
+}

@@ -1,6 +1,7 @@
 #include "EvaluationAllocator.hpp"
 #include "GroupBoundary.hpp"
 #include "GroupReplayInternal.hpp"
+#include "SourceAxisStorage.hpp"
 #include "SourceLuaSockets.hpp"
 #include "ValuePayload.hpp"
 
@@ -2053,55 +2054,59 @@ namespace engine::imagegraph {
 			const GroupRefreshEvent &event,
 			GroupReplayAccess::Owner &owner,
 			const Document &document,
-			bool &handled
+			bool &handled,
+			uint64_t &axisWork
 		) {
 			handled = false;
-			std::string_view ownerId = event.NodeId, port = event.EditedPort;
-			bool animated = event.LocalAnimated;
-			for (const auto &binding : owner.Bindings)
-				if (binding.NodeId == event.NodeId && binding.Port == event.EditedPort) {
-					ownerId = binding.OwnerId;
-					port = BindingAnimatorPort(binding);
-					animated = binding.Writer == GroupSubtypeAnimator::Animated;
-					break;
-				}
-			for (const auto &binding : owner.Bindings)
-				if (binding.OwnerId == ownerId && BindingAnimatorPort(binding) == port) {
-					animated = binding.Writer == GroupSubtypeAnimator::Animated;
-					break;
-				}
-			const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
-				return n.Id == ownerId;
-			});
-			const auto *authored = node == document.Nodes.end() ? nullptr : FindSeparatedVec2(*node, port);
+			const auto admit = [&](uint64_t visits) {
+				return AdmitSourceAxisWork(axisWork, visits) ||
+					   context.Fail(
+						   Status::LimitExceeded,
+						   "split animator edit batch exceeds work bounds",
+						   event.EditedPort
+					   );
+			};
+			if (!admit(document.Nodes.size())) return false;
+			const auto selected =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+					return node.Id == event.NodeId;
+				});
+			if (selected == document.Nodes.end()) return true;
+			const auto source = ResolveLocalSourceAxes(
+				document,
+				*selected,
+				event.EditedPort,
+				owner.Bindings,
+				owner.SharedSubtypes,
+				owner.DetachedAnimators,
+				event.NodeId,
+				event.EditedPort,
+				event.LocalAnimated,
+				axisWork
+			);
+			if (source.Code != Status::Ok)
+				return context.Fail(source.Code, std::string(source.Message), event.EditedPort);
+			if (!source.Separated) return true;
+			const auto ownerId = std::string_view(source.Owner->Id), port = source.Port;
+			const bool animated = source.WriterAnimated;
+			const auto *axes = source.Axes;
+			if (!admit(owner.SharedSubtypes.size())) return false;
 			auto found = std::find_if(
 				owner.SharedSubtypes.begin(), owner.SharedSubtypes.end(), [&](const auto &overlay) {
 					return overlay.NodeId == ownerId && overlay.Port == port;
 				}
 			);
-			const auto *axes = found != owner.SharedSubtypes.end() && found->SeparatedVec2
-								   ? &*found->SeparatedVec2
-								   : authored;
-			const auto selected =
-				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
-					return node.Id == event.NodeId;
-				});
-			if (selected == document.Nodes.end() ||
-				!SourcePropertyLocallySeparated(*selected, event.EditedPort, nullptr))
-				return true;
-			if (!axes)
-				return context.Fail(
-					Status::UnsupportedExecution, "shared source axis storage is absent", port
-				);
 			handled = true;
 			const auto *pair = std::get_if<Vector2>(event.LocalValue);
 			if (!pair || !std::isfinite(pair->X) || !std::isfinite(pair->Y))
 				return context.Fail(Status::TypeMismatch, "split animator edits require a finite Vec2", port);
 			// Admission covers the final logical document before either axis grows.
+			if (!admit(document.Nodes.size() + owner.SharedSubtypes.size())) return false;
 			size_t total = document.Keyframes.size();
 			for (const auto &n : document.Nodes)
 				if (n.SourceSeparatedVec2Animators)
 					for (const auto &input : n.SourceSeparatedVec2Animators->Inputs) {
+						if (!admit(1 + owner.SharedSubtypes.size())) return false;
 						const auto replacement = std::find_if(
 							owner.SharedSubtypes.begin(), owner.SharedSubtypes.end(), [&](const auto &o) {
 								return o.NodeId == n.Id && o.Port == input.Port && o.SeparatedVec2;
@@ -2112,7 +2117,8 @@ namespace engine::imagegraph {
 						for (const auto &axis : stored.Axes)
 							total += axis.Keys.size();
 					}
-			for (const auto &overlay : owner.SharedSubtypes)
+			for (const auto &overlay : owner.SharedSubtypes) {
+				if (!admit(owner.DetachedAnimators.size())) return false;
 				if (overlay.SeparatedVec2 && std::any_of(
 												 owner.DetachedAnimators.begin(),
 												 owner.DetachedAnimators.end(),
@@ -2123,8 +2129,10 @@ namespace engine::imagegraph {
 											 ))
 					for (const auto &axis : overlay.SeparatedVec2->Axes)
 						total += axis.Keys.size();
+			}
 			const auto time = GetFrameTime(event.At);
 			for (const auto &axis : axes->Axes) {
+				if (!admit(axis.Keys.size())) return false;
 				const bool existing = std::any_of(axis.Keys.begin(), axis.Keys.end(), [&](const auto &key) {
 					return GetFrameTime(key) == time;
 				});
@@ -2203,10 +2211,11 @@ namespace engine::imagegraph {
 			NodeContext &context,
 			const GroupRefreshEvent &event,
 			GroupReplayAccess::Owner &owner,
-			const Document &document
+			const Document &document,
+			uint64_t &axisWork
 		) {
 			bool separated = false;
-			if (!EditSeparatedAnimator(context, event, owner, document, separated)) return false;
+			if (!EditSeparatedAnimator(context, event, owner, document, separated, axisWork)) return false;
 			if (separated) return true;
 
 			if (context.Authored.Type == "pc.group_input" && event.EditedPort == "parent_value") {
@@ -2330,13 +2339,14 @@ namespace engine::imagegraph {
 			diagnostic
 		);
 		if (!candidate) return diagnostic.Code;
+		uint64_t axisWork = 0;
 		for (const auto &edit : edits) {
 			const auto node =
 				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
 					return node.Id == edit.NodeId;
 				});
 			detail::NodeContext context(*node, *FindCatalogueEntry(node->Type), edit.At, candidate->Budget);
-			if (!detail::ApplySourceAnimatorEdit(context, edit, *candidate, document))
+			if (!detail::ApplySourceAnimatorEdit(context, edit, *candidate, document, axisWork))
 				return fail(context.FailureCode, context.FailureMessage, edit.NodeId, context.FailurePort);
 		}
 		detail::GroupReplayAccess::Install(result, std::move(candidate));

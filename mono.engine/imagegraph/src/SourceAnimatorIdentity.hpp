@@ -35,14 +35,21 @@ namespace engine::imagegraph::detail {
 	}
 	// shared keys keep their writer; an override still owns its getter's X/Y choice.
 	inline const Node *SourcePropertyGetterNode(
-		const Document &document, const Node &node, std::string_view port, uint64_t *work = nullptr
+		const Document &document,
+		const Node &node,
+		std::string_view port,
+		uint64_t *work = nullptr,
+		bool *workRefused = nullptr
 	) {
 		const Node *selected = &node;
 		for (size_t hop = 0; hop <= document.Nodes.size(); ++hop) {
 			if (work) {
 				const uint64_t scan =
 					1 + selected->InstanceOverrides.size() + document.Links.size() + document.Nodes.size();
-				if (scan > 64'000'000 - *work) return nullptr;
+				if (*work > 64'000'000 || scan > 64'000'000 - *work) {
+					if (workRefused) *workRefused = true;
+					return nullptr;
+				}
 				*work += scan;
 			}
 			const bool override =

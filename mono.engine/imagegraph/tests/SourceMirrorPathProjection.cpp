@@ -544,7 +544,12 @@ TEST_CASE(
 	Node copy = node;
 	copy.Id = "copy";
 	copy.InstanceBase = "mirror";
-	copy.SourceSeparatedVec2Animators = {};
+	copy.SourceStaticInputs.clear();
+	copy.SourceAnimatedInputs = {"center"};
+	for (auto &input : copy.SourceSeparatedVec2Animators->Inputs)
+		for (auto &axis : input.Axes)
+			for (auto &key : axis.Keys)
+				key.NodeId = "copy";
 	d.Nodes.push_back(std::move(copy));
 	d.Outputs[0].NodeId = "copy";
 	GroupReplayState empty, local, bound;
@@ -557,6 +562,14 @@ TEST_CASE(
 	SolidPixel(Sample(d, 5, 0, &bound), 120, 40);
 	SolidPixel(Sample(d, 0, 0, &bound), 40, 40);
 	d.Outputs[0].NodeId = "mirror";
+	SolidPixel(Sample(d, 5, 0, &bound), 40, 40);
+	d.Outputs[0].NodeId = "copy";
+	d.Nodes.back().SourceSeparatedVec2Animators->Inputs[0].Separated = false;
+	SolidPixel(Sample(d, 5, 0, &bound), 40, 40);
+	d.Nodes.back().SourceSeparatedVec2Animators->Inputs[0].Separated = true;
+	d.Links.push_back({"input", "value", "copy", "center"});
+	d.Nodes.back().SourceAnimatedInputs.clear();
+	d.Nodes.back().SourceStaticInputs = {"center"};
 	SolidPixel(Sample(d, 5, 0, &bound), 40, 40);
 }
 

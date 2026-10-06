@@ -1,6 +1,7 @@
 #include "EvaluationAllocator.hpp"
 #include "GroupReplayInternal.hpp"
 #include "SourceAnimatorIdentity.hpp"
+#include "SourceAxisStorage.hpp"
 #include "SourceSeparatedVec2.hpp"
 #include "TimelineOverrides.hpp"
 #include "ValuePayload.hpp"
@@ -215,6 +216,20 @@ namespace engine::imagegraph {
 		if (!detached && !Mode(*owner, animatorPort, ownerAnimated))
 			return fail(Status::InvalidValue, "source animator owner needs explicit provenance");
 		const bool ownerWasAnimated = ownerAnimated;
+		uint64_t axisWork = 0;
+		const auto sourceAxes = detail::ResolveLocalSourceAxes(
+			candidate,
+			*target,
+			transition.Port,
+			replay.InstancesBound() ? replay.Bindings() : std::span<const GroupSubtypeBinding>{},
+			replay.SharedSubtypes(),
+			replay.DetachedAnimators(),
+			ownerId,
+			animatorPort,
+			ownerAnimated,
+			axisWork
+		);
+		if (sourceAxes.Code != Status::Ok) return fail(sourceAxes.Code, std::string(sourceAxes.Message));
 		auto &removedModes = transition.Animated ? target->SourceStaticInputs : target->SourceAnimatedInputs;
 		auto &addedModes = transition.Animated ? target->SourceAnimatedInputs : target->SourceStaticInputs;
 		if (addedModes.size() == Limits::MaximumArrayElements)
@@ -228,8 +243,14 @@ namespace engine::imagegraph {
 		if (addedModes.size() == addedModes.capacity()) addedModes.reserve(addedModes.size() + 1);
 		addedModes.push_back(std::string(transition.Port));
 		std::erase(removedModes, transition.Port);
-		if (owner == target) ownerAnimated = transition.Animated;
+		const bool combinedWriterChanges = !detached && owner == target && animatorPort == transition.Port;
+		if (combinedWriterChanges) ownerAnimated = transition.Animated;
 		const auto refreshGetterMode = [&](GroupSubtypeBinding &binding) {
+			if ((binding.Axes.Storage == GroupAxisStorage::Local ||
+				 binding.Axes.Storage == GroupAxisStorage::Shared) &&
+				binding.Axes.OwnerId == target->Id && binding.Axes.Port == transition.Port)
+				binding.Axes.Writer =
+					transition.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
 			const auto selected =
 				std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const auto &node) {
 					return node.Id == binding.NodeId;
@@ -240,20 +261,27 @@ namespace engine::imagegraph {
 				binding.Getter = *mode ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
 		};
 
-		if (const auto *separated = detail::FindSeparatedVec2(*owner, animatorPort);
-			detail::SourcePropertyLocallySeparated(*target, transition.Port, &replay)) {
-			if (!separated) return fail(Status::UnsupportedExecution, "shared source axis storage is absent");
-			if (detached)
+		if (sourceAxes.Separated) {
+			if (sourceAxes.Detached)
 				return fail(
-					Status::UnsupportedExecution, "fixed Mirror axes cannot have a detached dynamic animator"
+					Status::UnsupportedExecution, "retained scalar axis mode transition is not represented"
 				);
+			const auto *separated = sourceAxes.Axes;
+			const auto axisOwner =
+				std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const auto &node) {
+					return node.Id == sourceAxes.Owner->Id;
+				});
+			const auto axisOwnerId = std::string_view(axisOwner->Id);
+			const auto axisPort = sourceAxes.Port;
+			const bool axisWriterChanges = axisOwner == target && axisPort == transition.Port;
+			const bool axisAnimated = axisWriterChanges ? transition.Animated : sourceAxes.WriterAnimated;
 			size_t aggregate = candidate.Keyframes.size();
 			for (const auto &node : candidate.Nodes)
 				if (node.SourceSeparatedVec2Animators)
 					for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
 						for (const auto &axis : input.Axes)
 							aggregate += axis.Keys.size();
-			uint64_t required = sizeof(SourceSeparatedVec2Animator) + TextBytes(animatorPort);
+			uint64_t required = sizeof(SourceSeparatedVec2Animator) + TextBytes(axisPort);
 			for (const auto &axis : separated->Axes) {
 				if (transition.Animated) {
 					if (axis.Keys.empty())
@@ -270,7 +298,7 @@ namespace engine::imagegraph {
 					aggregate = aggregate - axis.Keys.size() + 1;
 				if (!AddTransitionBytes(
 						required,
-						sizeof(Keyframe) + TextBytes(ownerId) + TextBytes(animatorPort) +
+						sizeof(Keyframe) + TextBytes(axisOwnerId) + TextBytes(axisPort) +
 							TextBytes("source") + 2 * TextBytes("linear")
 					))
 					return fail(Status::LimitExceeded, "source split mode key allocation overflows");
@@ -283,19 +311,16 @@ namespace engine::imagegraph {
 			EvaluationRequest at;
 			if (!SetFrameTime(at, transition.Time))
 				return fail(Status::InvalidValue, "source split mode clock is invalid");
-			const auto track =
-				std::find_if(candidate.Tracks.begin(), candidate.Tracks.end(), [&](const auto &t) {
-					return t.NodeId == ownerId && t.Port == animatorPort;
-				});
+
 			std::array<double, 2> samples{};
 			for (size_t index = 0; index < 2; ++index) {
 				status = detail::SampleSeparatedScalar(
 					separated->Axes[index],
-					track == candidate.Tracks.end() ? nullptr : &*track,
+					sourceAxes.Track,
 					candidate.Timeline ? &*candidate.Timeline : nullptr,
 					at,
 					true,
-					ownerAnimated,
+					axisAnimated,
 					budget,
 					samples[index],
 					diagnostic
@@ -303,7 +328,7 @@ namespace engine::imagegraph {
 				if (status != Status::Ok) return status;
 			}
 			SourceSeparatedVec2Animator replacement;
-			replacement.Port = std::string(animatorPort);
+			replacement.Port = std::string(axisPort);
 			replacement.Separated = separated->Separated;
 			for (size_t index = 0; index < 2; ++index) {
 				auto &keys = replacement.Axes[index].Keys;
@@ -313,8 +338,8 @@ namespace engine::imagegraph {
 					for (const auto &key : old)
 						keys.push_back(key);
 				Keyframe added{
-					std::string(ownerId),
-					std::string(animatorPort),
+					std::string(axisOwnerId),
+					std::string(axisPort),
 					0,
 					samples[index],
 					"source",
@@ -326,8 +351,8 @@ namespace engine::imagegraph {
 				if (transition.Animated && !SetFrameTime(keys.front(), transition.Time))
 					return fail(Status::InvalidValue, "source split retime clock is invalid");
 			}
-			for (auto &input : owner->SourceSeparatedVec2Animators->Inputs)
-				if (input.Port == animatorPort) {
+			for (auto &input : axisOwner->SourceSeparatedVec2Animators->Inputs)
+				if (input.Port == axisPort) {
 					input = std::move(replacement);
 					break;
 				}
@@ -346,7 +371,7 @@ namespace engine::imagegraph {
 				if (!next) return diagnostic.Code;
 				uint64_t retired = 0;
 				for (auto it = next->SharedSubtypes.begin(); it != next->SharedSubtypes.end();) {
-					if (it->NodeId != ownerId || it->Port != animatorPort) {
+					if (it->NodeId != axisOwnerId || it->Port != axisPort) {
 						++it;
 						continue;
 					}
@@ -360,10 +385,13 @@ namespace engine::imagegraph {
 				if (!next->Charge.Resize(next->Charge.Bytes() - retired)) std::terminate();
 				for (auto &binding : next->Bindings) {
 					refreshGetterMode(binding);
-					if (owner == target && binding.OwnerId == ownerId &&
+					if (combinedWriterChanges && binding.OwnerId == ownerId &&
 						detail::BindingAnimatorPort(binding) == animatorPort)
 						binding.Writer = transition.Animated ? GroupSubtypeAnimator::Animated
 															 : GroupSubtypeAnimator::Static;
+					if (axisWriterChanges && detail::BindingReferencesAxes(binding, axisOwnerId, axisPort))
+						binding.Axes.Writer = transition.Animated ? GroupSubtypeAnimator::Animated
+																  : GroupSubtypeAnimator::Static;
 				}
 				detail::GroupReplayAccess::Install(*replayResult, std::move(next));
 			}
@@ -677,7 +705,7 @@ namespace engine::imagegraph {
 			if (!next->Charge.Resize(next->Charge.Bytes() - retiredBytes)) std::terminate();
 			for (auto &binding : next->Bindings) {
 				refreshGetterMode(binding);
-				if (owner == target && binding.OwnerId == ownerId &&
+				if (combinedWriterChanges && binding.OwnerId == ownerId &&
 					detail::BindingAnimatorPort(binding) == animatorPort)
 					binding.Writer =
 						transition.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
