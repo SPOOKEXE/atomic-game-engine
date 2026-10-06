@@ -378,6 +378,93 @@ TEST_CASE(
 	CHECK(ui.Doc.Keyframes.size() == 5);
 }
 
+TEST_CASE(
+	"target paste popup navigates to a measured scalar component target",
+	"[studio][timeline_keys][timeline_source_axes]"
+) {
+	Timeline ui;
+	ui.UseSourceGraph();
+	auto &sourceX = ui.Doc.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.front();
+	sourceX.SourceDriver = KeyframeLinearDriver{.125};
+	ui.Frame();
+	ui.Frame();
+	REQUIRE(ui.RowAxes.size() == 6);
+	REQUIRE(ui.RowAxes[2] == 0);
+	const auto before = ui.Doc;
+	ui.Click(2);
+	REQUIRE(ui.Editor.Selection.size() == 1);
+	CHECK(ui.Editor.Selection.front().Axis == 0);
+	ui.Button("Copy keys");
+	REQUIRE(ui.Editor.Clipboard.size() == 1);
+	const auto clipboard = ui.Editor.Clipboard;
+	const auto clipboardAxes = ui.Editor.ClipboardAxes;
+	CHECK(clipboardAxes == std::vector<int8_t>{0});
+	ui.Button("Paste keys");
+	REQUIRE(ui.Focus("Target"));
+	const auto clickFocused = [&] {
+		auto *window = ui.Context->NavWindow;
+		REQUIRE(window != nullptr);
+		const auto rect = ImGui::WindowRectRelToAbs(window, window->NavRectRel[ui.Context->NavLayer]);
+		const ImVec2 point{(rect.Min.x + rect.Max.x) * .5f, (rect.Min.y + rect.Max.y) * .5f};
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(point.x, point.y);
+		ui.Frame();
+		io.AddMouseButtonEvent(0, true);
+		ui.Frame();
+		io.AddMouseButtonEvent(0, false);
+		ui.Frame();
+		ui.Frame();
+	};
+	clickFocused();
+	const auto componentId = [](ImGuiWindow *window) {
+		return ImHashStr("owner.center.y", 0, window->GetID("component-target"));
+	};
+	bool found = false;
+	for (size_t step = 0; step < 256; ++step) {
+		auto *window = ui.Context->NavWindow;
+		if (window && ui.Context->OpenPopupStack.size() == 2 && ui.Context->NavId == componentId(window)) {
+			found = true;
+			break;
+		}
+		ui.Key(ImGuiKey_DownArrow);
+	}
+	CAPTURE(ui.Context->OpenPopupStack.size(), ui.Context->NavId);
+	INFO((ui.Context->NavWindow ? ui.Context->NavWindow->Name : "no navigation window"));
+	REQUIRE(found);
+	clickFocused();
+	CHECK(ui.Editor.TargetNode == "owner");
+	CHECK(ui.Editor.TargetPort == "center");
+	CHECK(ui.Editor.TargetAxis == 1);
+	CHECK(ui.Doc == before);
+	ui.Button("Apply");
+	INFO(ui.Error.Message << " node=" << ui.Error.NodeId << " port=" << ui.Error.Port);
+	REQUIRE(ui.Changes == 1);
+	REQUIRE(ui.Editor.Selection.size() == 1);
+	CHECK(ui.Editor.Selection.front().NodeId == "owner");
+	CHECK(ui.Editor.Selection.front().Port == "center");
+	CHECK(ui.Editor.Selection.front().Axis == 1);
+	CHECK(ui.Editor.Selection.front().Time == FrameTime{5, .25, false});
+	CHECK(ui.Editor.Clipboard == clipboard);
+	CHECK(ui.Editor.ClipboardAxes == clipboardAxes);
+	CHECK(ui.Doc.Keyframes == before.Keyframes);
+	const auto &afterAxes = ui.Doc.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes;
+	const auto &beforeAxes = before.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes;
+	CHECK(afterAxes[0] == beforeAxes[0]);
+	const auto targetY =
+		std::find_if(afterAxes[1].Keys.begin(), afterAxes[1].Keys.end(), [](const auto &key) {
+			return GetFrameTime(key) == FrameTime{5, .25, false};
+		});
+	REQUIRE(targetY != afterAxes[1].Keys.end());
+	CHECK(targetY->Data == clipboard.front().Data);
+	CHECK(targetY->SourceKeyId.empty());
+	CHECK_FALSE(targetY->SourceDriver);
+	const auto after = ui.Doc;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == after);
+}
+
 TEST_CASE("timeline refused move Apply keeps popup and pinned keys", "[studio][timeline_history55]") {
 	Timeline ui;
 	ui.History = studio::ImageGraphHistory(128, 1);

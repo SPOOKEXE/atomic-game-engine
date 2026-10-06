@@ -1,0 +1,304 @@
+{
+  "date": "2026-10-06",
+  "evidence_scope": "grug add explicit scalar component paste. broader Composer goal still active.",
+  "changes": [
+    "grug let focused graph tracks and the key popup target an initialized X or Y component. copied scalar channels map to that one property, including independent clipboard snapshots whose source was removed.",
+    "grug use existing captured-writer copy and collision rules. pasted keys lose source IDs and drivers; other axes and combined keys stay unchanged.",
+    "grug refuse incompatible component clipboards before mapping and publish exact component selection only after the host accepts history.",
+    "grug charge mapped key backing, component selectors, target names, selected identities and menu scratch beside retained observations.",
+    "grug cover real popup mouse navigation, initial alias graph paste, history, native roundtrip, malformed selectors, unavailable storage and payload refusals."
+  ],
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "scalar-component-paste-batch2-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5147,
+    "cpp_assertions": 2001881,
+    "studio_test_cases": 1055,
+    "studio_assertions": 47402,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "final_build": {
+      "iteration": 4,
+      "exit_code": 0,
+      "targets": 17,
+      "steps": 3,
+      "log": "scalar-component-paste-build4.log"
+    },
+    "backend": "grug run approved SDL offscreen Vulkan checks and headless ImGui mouse gestures.",
+    "profiling": "existing source edit host scope covers this path. no new profile captured and no speed claim made.",
+    "skipped": "headed Studio and matched licensed reference parity remain open. dev/server/ci builds and sanitizers not run in this scoped release-tests batch."
+  },
+  "iteration_history": [
+    {
+      "stage": "read review",
+      "finding": "legacy name mapping, spare vector backing, menu string overlap and selection for skipped keys",
+      "repair": "grug keep explicit component mapping on one target, charge backing and bounded menu scratch, and refuse any incompatible component entry before mapping."
+    },
+    {
+      "stage": "build 1",
+      "exit_code": 1,
+      "log": "scalar-component-paste-build1.log",
+      "output": [
+        "SourceAxisObservation is not a member of engine::imagegraph",
+        "ObserveSourceKeyframeAxes is not a member of engine::imagegraph",
+        "could not convert Catch::MessageBuilder to bool"
+      ],
+      "repair": "grug added direct source key transition include. grug missed the INFO expression error and needed another build cycle."
+    },
+    {
+      "stage": "build 2",
+      "exit_code": 1,
+      "log": "scalar-component-paste-build2.log",
+      "output": [
+        "could not convert Catch::MessageBuilder to bool"
+      ],
+      "repair": "grug parenthesized the INFO ternary expression."
+    },
+    {
+      "stage": "build 3 and batch 1",
+      "build_exit_code": 0,
+      "failed_checks": 1,
+      "results_file": "scalar-component-paste-batch1-results.json",
+      "output": [
+        "TimelineDopesheetActions.cpp:610 REQUIRE(*remaining >= *held): 672 >= 696 failed"
+      ],
+      "repair": "grug derive capacity-test setup from Remaining after target-name payload charges; keep its insufficient-memory refusal assertion."
+    },
+    {
+      "stage": "build 4 and batch 2",
+      "result": "all 17 targets built and all 20 checks passed."
+    }
+  ],
+  "unchanged_evidence": {
+    "before": "scalar-component-paste-source-before-build4.json",
+    "after": "scalar-component-paste-source-after-batch2.json",
+    "frozen_relevant_source_paths": 65,
+    "source_hashes_equal": true,
+    "peer_files_unchanged": 43,
+    "shared_composer_unchanged": true,
+    "test_binaries_unchanged": 13,
+    "child_hashes_file": "scalar-component-paste-child-hashes-batch2.json",
+    "child_hashes_equal": true
+  },
+  "remaining_scope": [
+    "scalar metadata controls still need work.",
+    "headed Studio and licensed reference parity remain open.",
+    "other items in the original 33-item goal remain active."
+  ],
+  "checks": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-bake-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.285,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-physics-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "9bce7a548e6058fb87e49534b66ca6299bf416fb67c22411c57139e639ef4d4f",
+      "exit_code": 0,
+      "elapsed_seconds": 0.406,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "9bce7a548e6058fb87e49534b66ca6299bf416fb67c22411c57139e639ef4d4f",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-runner-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "c26394d0fe89989fddd8029f9a50b0e91b7d7bcece9bd59bbc8e607e8dee6385",
+      "exit_code": 0,
+      "elapsed_seconds": 0.315,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "c26394d0fe89989fddd8029f9a50b0e91b7d7bcece9bd59bbc8e607e8dee6385",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-font-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "96bfa2b46d329267df7dddce9405cec6a4ce28a5fdb4679d218c13b5605cdd4a",
+      "exit_code": 0,
+      "elapsed_seconds": 0.555,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "96bfa2b46d329267df7dddce9405cec6a4ce28a5fdb4679d218c13b5605cdd4a",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-export-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "4d0272770910c3c66c7de98ce1640d327d75ee0ebfe51d7245e99eb5a26e10e7",
+      "exit_code": 0,
+      "elapsed_seconds": 0.626,
+      "assertions": 3132,
+      "cases": 77,
+      "binary_sha256_after": "4d0272770910c3c66c7de98ce1640d327d75ee0ebfe51d7245e99eb5a26e10e7",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-render-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "53bd83c52fdd305743461abdafebb9b31d8d58e7bd32973b98c4db391627af74",
+      "exit_code": 0,
+      "elapsed_seconds": 1.486,
+      "assertions": 477,
+      "cases": 15,
+      "binary_sha256_after": "53bd83c52fdd305743461abdafebb9b31d8d58e7bd32973b98c4db391627af74",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-cli-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 3.3,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-io-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "4dfb7ddeab1fb5fe0bc63b543d078b8ab5589abe0e4f1dddeef444e069bf9834",
+      "exit_code": 0,
+      "elapsed_seconds": 3.519,
+      "assertions": 11938,
+      "cases": 280,
+      "binary_sha256_after": "4dfb7ddeab1fb5fe0bc63b543d078b8ab5589abe0e4f1dddeef444e069bf9834",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-core-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "31e9609af382f3b3c5ca1432a00e9909da94e97c855e00a1b75400b3441f18c6",
+      "exit_code": 0,
+      "elapsed_seconds": 3.833,
+      "assertions": 1895035,
+      "cases": 2976,
+      "binary_sha256_after": "31e9609af382f3b3c5ca1432a00e9909da94e97c855e00a1b75400b3441f18c6",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-assetc-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "2f155201b8bb3d185c24b740b1a1cd9aa1ce3a18da49460925167da05e6d9e47",
+      "exit_code": 0,
+      "elapsed_seconds": 6.119,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "2f155201b8bb3d185c24b740b1a1cd9aa1ce3a18da49460925167da05e6d9e47",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-client-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "e48844fd0fe8f50b244d455f07097bc4b40e831fe3cc9202db6872db93285bbe",
+      "exit_code": 0,
+      "elapsed_seconds": 4.695,
+      "assertions": 23821,
+      "cases": 358,
+      "binary_sha256_after": "e48844fd0fe8f50b244d455f07097bc4b40e831fe3cc9202db6872db93285bbe",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-studio-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "073aa3784d763b6500f2798153557cb3a306a97fbda297daab42e7f2d505e43e",
+      "exit_code": 0,
+      "elapsed_seconds": 7.345,
+      "assertions": 47402,
+      "cases": 1055,
+      "binary_sha256_after": "073aa3784d763b6500f2798153557cb3a306a97fbda297daab42e7f2d505e43e",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-nodegraph-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "exit_code": 0,
+      "elapsed_seconds": 1.328,
+      "assertions": 286,
+      "cases": 34,
+      "binary_sha256_after": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-ui-batch2.log",
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "aae297bc4de74ab39f49d8c0b83c63a6d3555f5cf4056f436c471d2e0961991f",
+      "exit_code": 0,
+      "elapsed_seconds": 0.525,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "aae297bc4de74ab39f49d8c0b83c63a6d3555f5cf4056f436c471d2e0961991f",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-startup-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.268,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-lint-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.013
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-architecture-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.43
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-python-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 1.65,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-format-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 1.828
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scalar-component-paste-diff-batch2.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.174
+    }
+  ],
+  "tested_owned_file_hashes": {
+    "mono.studio/include/studio/ImageGraph.hpp": "3a8065cd245ced6669cbb288e5f8c30c8b7feffcb5a60a9feaf1323683e03447",
+    "mono.studio/src/ImageGraph.cpp": "b1d2f64a3756351500dec51fb02b6c424962153e36243581135b8a815336b070",
+    "mono.studio/src/TimelineKeyEditor.hpp": "b7ceb60a9f5ea98bfb339885ce7a3b3360cd32a7f5437a0237ce08edc71ba770",
+    "mono.studio/src/TimelineDopesheet.hpp": "bb29fe6a58876f58ffdce77b4c8475cee2520b4598b3f7bd0f92e1ebcc85e3fc",
+    "mono.studio/tests/ImageGraph.cpp": "c5cd0c8f4cda3ce2d811d33280bbe6181546067d965408156cf66b8eb515c167",
+    "mono.studio/tests/TimelineKeyEditor.cpp": "b4b5fc9c4bdf6afad7a995dc59f014dc39b777b32b3a3b0b45bf02719ba24d6d",
+    "mono.studio/tests/TimelineScalarDopesheet.cpp": "57d4877d8df965dcf4202459ac7fd84d60130bd585b7b52c3521cf26152f8de2",
+    "mono.studio/tests/TimelineDopesheetActions.cpp": "e2f57c5322086dfefe950e0d0018fb5453d68dacf1d76030bce657aaa2618038"
+  }
+}

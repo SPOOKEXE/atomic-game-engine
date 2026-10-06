@@ -2537,7 +2537,9 @@ namespace studio {
 		std::string_view nodeId,
 		std::string_view property,
 		engine::imagegraph::Diagnostic &error,
-		uint64_t availableBytes
+		uint64_t availableBytes,
+		std::span<const int8_t> axes,
+		int8_t targetAxis
 	) {
 		using namespace engine::imagegraph;
 		error = {};
@@ -2545,6 +2547,11 @@ namespace studio {
 			SetDiagnostic(error, status, nodeId, property, message);
 			return false;
 		};
+		if ((!axes.empty() && axes.size() != clipboard.size()) || targetAxis < -1 || targetAxis > 1 ||
+			std::any_of(axes.begin(), axes.end(), [](int8_t axis) { return axis < -1 || axis > 1; }))
+			return fail(Status::InvalidValue, "clipboard component selectors are invalid");
+		if (targetAxis < 0 && std::any_of(axes.begin(), axes.end(), [](int8_t axis) { return axis >= 0; }))
+			return fail(Status::TypeMismatch, "scalar axis keys require a component paste target");
 		if (clipboard.empty() || clipboard.size() > Limits::MaximumKeyframes || !ValidFrameTime(cursor))
 			return fail(Status::InvalidValue, "clipboard or paste frame is invalid");
 		const auto *target = FindAuthoredNode(document, nodeId);
@@ -2565,14 +2572,22 @@ namespace studio {
 		bool multiple = false;
 		FrameTime anchor = GetFrameTime(clipboard.front());
 		uint64_t remaining = std::min(availableBytes, Limits::MaximumEvaluationBytes);
+		if (targetAxis >= 0 && clipboard.size() > remaining)
+			return fail(Status::LimitExceeded, "mapped component selectors exceed the payload budget");
+		if (targetAxis >= 0) remaining -= clipboard.size();
 		size_t longestPort = property.size();
 		for (const auto &entry : targetSchema->Properties)
 			longestPort = std::max(longestPort, entry.Id.size());
 		for (const auto &entry : target->DynamicInputs)
 			longestPort = std::max(longestPort, entry.Id.size());
 		for (const auto &key : clipboard) {
-			multiple =
-				multiple || key.NodeId != clipboard.front().NodeId || key.Port != clipboard.front().Port;
+			if (targetAxis >= 0) {
+				const auto *scalar = std::get_if<double>(&key.Data);
+				if ((!scalar || !std::isfinite(*scalar)) && !std::holds_alternative<int64_t>(key.Data))
+					return fail(Status::TypeMismatch, "component paste requires finite scalar keys");
+			}
+			multiple = targetAxis < 0 && (multiple || key.NodeId != clipboard.front().NodeId ||
+										  key.Port != clipboard.front().Port);
 			if (CompareFrameTime(GetFrameTime(key), anchor) < 0) anchor = GetFrameTime(key);
 			const auto bytes = KeyframePayloadBytes(key);
 			const uint64_t names = target->Id.size() + longestPort;
@@ -2582,6 +2597,17 @@ namespace studio {
 		}
 		std::vector<Keyframe> mapped;
 		mapped.reserve(clipboard.size());
+		const uint64_t spareKeys = (mapped.capacity() - clipboard.size()) * sizeof(Keyframe);
+		if (spareKeys > remaining)
+			return fail(Status::LimitExceeded, "mapped key capacity exceeds the payload budget");
+		remaining -= spareKeys;
+		std::vector<int8_t> mappedAxes;
+		if (targetAxis >= 0) {
+			mappedAxes.reserve(clipboard.size());
+			if (mappedAxes.capacity() - clipboard.size() > remaining)
+				return fail(Status::LimitExceeded, "mapped component capacity exceeds the payload budget");
+			remaining -= mappedAxes.capacity() - clipboard.size();
+		}
 		Diagnostic skipped;
 		for (const auto &key : clipboard) {
 			std::string_view destination = property;
@@ -2632,8 +2658,15 @@ namespace studio {
 			}
 			Keyframe clone;
 			Diagnostic diagnostic;
-			const auto status =
-				PrepareKeyframeCloneForProperty(document, key, nodeId, destination, clone, diagnostic);
+			Status status;
+			if (targetAxis >= 0) {
+				clone = key;
+				clone.NodeId = nodeId;
+				clone.Port = destination;
+				status = Status::Ok;
+			} else
+				status =
+					PrepareKeyframeCloneForProperty(document, key, nodeId, destination, clone, diagnostic);
 			if (status == Status::TypeMismatch) {
 				skipped = std::move(diagnostic);
 				continue;
@@ -2645,12 +2678,15 @@ namespace studio {
 			clone.SourceDriver.reset();
 			clone.SineDriver.reset();
 			mapped.push_back(std::move(clone));
+			if (targetAxis >= 0) mappedAxes.push_back(targetAxis);
 		}
 		if (mapped.empty()) {
 			error = std::move(skipped);
-			return true;
+			return targetAxis < 0;
 		}
-		if (!TransferImageGraphKeyframes(document, mapped, anchor, cursor, true, error, remaining))
+		if (!TransferImageGraphKeyframes(
+				document, mapped, anchor, cursor, true, error, remaining, mappedAxes
+			))
 			return false;
 		error = std::move(skipped);
 		return true;

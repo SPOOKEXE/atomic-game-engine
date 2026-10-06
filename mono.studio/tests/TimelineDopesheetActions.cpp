@@ -4,6 +4,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
 #include <iomanip>
 
 TEST_SUITE_ID("studio.timeline_dopesheet_actions")
@@ -602,8 +603,12 @@ TEST_CASE(
 	const auto held = ui.View.CacheBytes();
 	REQUIRE(held);
 	ui.Keys.Selection.clear();
+	const auto editorAllowance = ui.Keys.Remaining(true, true);
+	REQUIRE(editorAllowance);
+	const uint64_t spareSelection = ui.Keys.Selection.capacity() * sizeof(studio::ImageGraphKeyframeIdentity);
+	REQUIRE(*editorAllowance + spareSelection >= *held);
 	ui.Keys.Selection.reserve(
-		(Limits::MaximumEvaluationBytes - *held) / sizeof(studio::ImageGraphKeyframeIdentity)
+		(*editorAllowance + spareSelection - *held) / sizeof(studio::ImageGraphKeyframeIdentity)
 	);
 	const auto remaining = ui.Keys.Remaining(true, true);
 	REQUIRE(remaining);

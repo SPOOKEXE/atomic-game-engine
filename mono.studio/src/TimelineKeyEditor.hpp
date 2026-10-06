@@ -1,5 +1,7 @@
 #pragma once
 
+#include <engine/imagegraph/SourceKeyframeTransition.hpp>
+
 #include <algorithm>
 #include <bit>
 #include <imgui.h>
@@ -18,6 +20,7 @@ namespace studio {
 		bool Active = false, Copying = false;
 		uint64_t BorrowedBytes = 0, ObservationRevision = 0, OriginalObservationRevision = 0;
 		std::string TargetNode, TargetPort;
+		int8_t TargetAxis = -1;
 
 		static ImageGraphKeyframeIdentity
 		Identity(const engine::imagegraph::Keyframe &key, int8_t axis = -1) {
@@ -145,6 +148,9 @@ namespace studio {
 				if (BorrowedBytes > remaining) return std::nullopt;
 				remaining -= BorrowedBytes;
 			}
+			const uint64_t targetBytes = TargetNode.capacity() + TargetPort.capacity() + 2;
+			if (targetBytes > remaining) return std::nullopt;
+			remaining -= targetBytes;
 			const uint64_t pendingBytes = PreparedSelection.capacity() * sizeof(ImageGraphKeyframeIdentity);
 			if (pendingBytes > remaining) return std::nullopt;
 			remaining -= pendingBytes;
@@ -233,6 +239,7 @@ namespace studio {
 			Copying = paste;
 			TargetNode.clear();
 			TargetPort.clear();
+			TargetAxis = -1;
 			OriginalObservationRevision = ObservationRevision;
 			Active = true;
 			return true;
@@ -266,16 +273,58 @@ namespace studio {
 			uint64_t remaining = *budget;
 			std::vector<ImageGraphKeyframeIdentity> selection;
 			if (Copying && !TargetNode.empty()) {
-				if (std::any_of(OriginalAxes.begin(), OriginalAxes.end(), [](int8_t axis) {
-						return axis != -1;
-					})) {
-					error = {
-						Status::TypeMismatch, {}, {}, "scalar axis keys require a component paste target"
-					};
-					return false;
+				if (TargetAxis >= 0) {
+					const uint64_t perKey =
+						sizeof(ImageGraphKeyframeIdentity) + TargetNode.size() + TargetPort.size();
+					if (originals.size() > remaining / perKey) {
+						error = {
+							Status::LimitExceeded, {}, {}, "component selection exceeds the payload budget"
+						};
+						return false;
+					}
+					remaining -= originals.size() * perKey;
+					selection.reserve(originals.size());
+					const uint64_t spare =
+						(selection.capacity() - originals.size()) * sizeof(ImageGraphKeyframeIdentity);
+					if (spare > remaining) return false;
+					remaining -= spare;
+					for (const auto &key : originals) {
+						FrameTime time;
+						if (!ShiftFrameTime(GetFrameTime(key), Anchor, Destination, time)) {
+							error = {
+								Status::InvalidValue,
+								{},
+								{},
+								"component paste frame exceeds the authored range"
+							};
+							return false;
+						}
+						selection.push_back(
+							{TargetNode, TargetPort, time.NegativeFrame ? FrameTime{} : time, TargetAxis}
+						);
+					}
+					std::sort(selection.begin(), selection.end(), [](const auto &left, const auto &right) {
+						return CompareFrameTime(left.Time, right.Time) < 0;
+					});
+					selection.erase(
+						std::unique(
+							selection.begin(),
+							selection.end(),
+							[](const auto &left, const auto &right) { return left.Time == right.Time; }
+						),
+						selection.end()
+					);
 				}
 				if (!PasteImageGraphKeyframesToProperty(
-						document, originals, Destination, TargetNode, TargetPort, error, remaining
+						document,
+						originals,
+						Destination,
+						TargetNode,
+						TargetPort,
+						error,
+						remaining,
+						OriginalAxes,
+						TargetAxis
 					))
 					return false;
 			} else {
@@ -353,14 +402,19 @@ namespace studio {
 			ImGui::EndDisabled();
 			if (ImGui::BeginPopup("##key-transfer")) {
 				ImGui::TextUnformatted(Copying ? "Paste at frame" : "Move earliest key to frame");
-				if (Copying &&
-					ImGui::BeginCombo(
-						"Target",
-						TargetNode.empty() ? "Original properties" : (TargetNode + "." + TargetPort).c_str()
-					)) {
+				if (Copying && ImGui::BeginCombo(
+								   "Target",
+								   TargetNode.empty() ? "Original properties"
+													  : (TargetNode + "." + TargetPort +
+														 (TargetAxis < 0	? ""
+														  : TargetAxis == 0 ? ".x"
+																			: ".y"))
+															.c_str()
+							   )) {
 					if (ImGui::Selectable("Original properties", TargetNode.empty())) {
 						TargetNode.clear();
 						TargetPort.clear();
+						TargetAxis = -1;
 					}
 					for (const auto &node : document.Nodes) {
 						const auto *schema = engine::imagegraph::FindSchema(node.Type);
@@ -368,22 +422,56 @@ namespace studio {
 						for (const auto &property : schema->Properties) {
 							const std::string label = node.Id + "." + std::string(property.Id);
 							if (ImGui::Selectable(
-									label.c_str(), TargetNode == node.Id && TargetPort == property.Id
+									label.c_str(),
+									TargetNode == node.Id && TargetPort == property.Id && TargetAxis < 0
 								)) {
 								TargetNode = node.Id;
 								TargetPort = property.Id;
+								TargetAxis = -1;
 							}
 						}
 						for (const auto &property : node.DynamicInputs) {
 							if (!engine::imagegraph::IsAuthoredValueType(property.Type)) continue;
 							const std::string label = node.Id + "." + property.Id;
 							if (ImGui::Selectable(
-									label.c_str(), TargetNode == node.Id && TargetPort == property.Id
+									label.c_str(),
+									TargetNode == node.Id && TargetPort == property.Id && TargetAxis < 0
 								)) {
 								TargetNode = node.Id;
 								TargetPort = property.Id;
+								TargetAxis = -1;
 							}
 						}
+					}
+					const auto allowance = Remaining(true, true);
+					constexpr uint64_t menuScratch =
+						4 * (2 * engine::imagegraph::Limits::MaximumTextBytes + 4 + sizeof(std::string));
+					std::vector<engine::imagegraph::SourceAxisObservation> views;
+					engine::imagegraph::Diagnostic observationError;
+					if (allowance && *allowance > menuScratch &&
+						engine::imagegraph::ObserveSourceKeyframeAxes(
+							document, views, observationError, *allowance - menuScratch
+						) == engine::imagegraph::Status::Ok) {
+						ImGui::PushID("component-target");
+						for (const auto &view : views)
+							for (int8_t axis = 0; axis < 2; ++axis) {
+								std::string label;
+								label.reserve(view.NodeId.size() + view.Port.size() + 3);
+								label.append(view.NodeId)
+									.append(".")
+									.append(view.Port)
+									.append(axis == 0 ? ".x" : ".y");
+								if (ImGui::Selectable(
+										label.c_str(),
+										TargetNode == view.NodeId && TargetPort == view.Port &&
+											TargetAxis == axis
+									)) {
+									TargetNode = view.NodeId;
+									TargetPort = view.Port;
+									TargetAxis = axis;
+								}
+							}
+						ImGui::PopID();
 					}
 					ImGui::EndCombo();
 				}

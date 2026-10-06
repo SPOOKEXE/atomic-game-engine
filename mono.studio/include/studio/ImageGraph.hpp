@@ -442,7 +442,8 @@ namespace studio {
 		std::span<const int8_t> axes = {}
 	);
 
-	// Targeted source paste maps one property directly, or multiple properties by source display name.
+	// grug map one property directly, or multiple properties by source display name.
+	// an explicit component target accepts scalar keys; selectors describe clipboard channels.
 	bool PasteImageGraphKeyframesToProperty(
 		engine::imagegraph::Document &document,
 		std::span<const engine::imagegraph::Keyframe> clipboard,
@@ -450,7 +451,9 @@ namespace studio {
 		std::string_view nodeId,
 		std::string_view property,
 		engine::imagegraph::Diagnostic &error,
-		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+		std::span<const int8_t> axes = {},
+		int8_t targetAxis = -1
 	);
 
 	// Changes one saved interpolation rule.

@@ -2810,6 +2810,242 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"scalar clipboard paste targets one captured alias axis and keeps other writers intact",
+	"[studio][imagegraph][target_paste][mirror_axes]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 10;
+	Node owner{"owner", "pc.mirror_polar", {}, {}, {{"center", Vector2{.2, .3}}}};
+	owner.SourceAnimatedInputs = {"center"};
+	SourceSeparatedVec2Animator axes;
+	axes.Port = "center";
+	axes.Separated = true;
+	axes.Axes[0].Keys = {
+		Keyframe{"owner", "center", 0, .25, "source", KeyframeEase{}},
+		Keyframe{"owner", "center", 5, .75, "source", KeyframeEase{}}
+	};
+	axes.Axes[0].Keys[0].SourceKeyId = "owner-x0";
+	axes.Axes[0].Keys[1].SourceKeyId = "owner-x5";
+	axes.Axes[1].Keys = {
+		Keyframe{"owner", "center", 0, 2.0, "source", KeyframeEase{}},
+		Keyframe{"owner", "center", 5, 4.0, "source", KeyframeEase{}}
+	};
+	axes.Axes[1].Keys[0].SourceKeyId = "owner-y0";
+	axes.Axes[1].Keys[1].SourceKeyId = "owner-y5";
+	owner.SourceSeparatedVec2Animators.emplace().Inputs.push_back(axes);
+	Node alias = owner;
+	alias.Id = "alias";
+	alias.InstanceBase = "owner";
+	alias.SourceSeparatedVec2Animators = {};
+	document.Nodes = {owner, alias};
+	document.SourceAnimators.emplace();
+	GroupSubtypeBinding binding{
+		"alias", "owner", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "center"
+	};
+	binding.Axes = {GroupAxisStorage::Shared, "owner", "center", "owner", GroupSubtypeAnimator::Animated};
+	document.SourceAnimators->Bindings.push_back(binding);
+	document.Keyframes = {
+		{"owner", "center", 0, Vector2{.2, .3}, "source", KeyframeEase{}},
+		{"owner", "center", 5, Vector2{.8, .9}, "source", KeyframeEase{}},
+		{"alias", "center", 0, Vector2{.2, .3}, "source", KeyframeEase{}},
+		{"alias", "center", 5, Vector2{.8, .9}, "source", KeyframeEase{}}
+	};
+	document.Tracks = {{"owner", "center", "hold", -1}, {"alias", "center", "hold", -1}};
+	document.Outputs = {{"out", "owner", "surface_out"}};
+	Keyframe clipboard{"owner", "center", 0, .55, "source", KeyframeEase{}};
+	clipboard.SourceKeyId = "clipboard-x";
+	clipboard.SourceDriver = KeyframeLinearDriver{.25};
+	const std::array<int8_t, 1> sourceAxes{0};
+	Diagnostic error;
+	const auto original = document;
+	REQUIRE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document,
+			{&clipboard, 1},
+			{5},
+			"alias",
+			"center",
+			error,
+			Limits::MaximumEvaluationBytes,
+			sourceAxes,
+			1
+		)
+	);
+	INFO(error.Message << " node=" << error.NodeId << " port=" << error.Port);
+	const auto findAxis = [&](int axis, uint64_t tick) -> const Keyframe * {
+		const auto &keys =
+			document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[size_t(axis)].Keys;
+		const auto found = std::find_if(keys.begin(), keys.end(), [&](const auto &key) {
+			return GetFrameTime(key) == FrameTime{tick};
+		});
+		return found == keys.end() ? nullptr : &*found;
+	};
+	const auto *targetY = findAxis(1, 5);
+	REQUIRE(targetY);
+	CHECK(targetY->Data == Value{.55});
+	CHECK(targetY->SourceKeyId.empty());
+	CHECK_FALSE(targetY->SourceDriver);
+	const auto *sameTimeX = findAxis(0, 5);
+	REQUIRE(sameTimeX);
+	CHECK(sameTimeX->Data == Value{.75});
+	const auto combined =
+		std::find_if(document.Keyframes.begin(), document.Keyframes.end(), [](const auto &key) {
+			return key.NodeId == "owner" && GetFrameTime(key) == FrameTime{5};
+		});
+	REQUIRE(combined != document.Keyframes.end());
+	CHECK(combined->Data == Value{Vector2{.8, .9}});
+	CHECK(
+		document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.size() ==
+		original.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.size()
+	);
+	document = original;
+	auto second = clipboard;
+	second.NodeId = "removed-source";
+	second.Port = "other-property";
+	second.Tick = 2;
+	second.Data = .88;
+	const std::array copiedChannels{clipboard, second};
+	const std::array<int8_t, 2> copiedAxes{0, 1};
+	REQUIRE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document,
+			copiedChannels,
+			{6},
+			"alias",
+			"center",
+			error,
+			Limits::MaximumEvaluationBytes,
+			copiedAxes,
+			1
+		)
+	);
+	REQUIRE(findAxis(1, 6));
+	REQUIRE(findAxis(1, 8));
+	CHECK(findAxis(1, 6)->Data == Value{.55});
+	CHECK(findAxis(1, 8)->Data == Value{.88});
+	CHECK(document.Keyframes == original.Keyframes);
+	Document reopened;
+	REQUIRE(Read(Write(document), reopened, error) == Status::Ok);
+	CHECK(reopened == document);
+}
+
+TEST_CASE(
+	"axis-targeted paste rejects mismatched pins, malformed selectors and unavailable storage atomically",
+	"[studio][imagegraph][target_paste][mirror_axes]"
+) {
+	using namespace engine::imagegraph;
+	Document document;
+	document.FormatVersion = 10;
+	Node owner{"owner", "pc.mirror_polar", {}, {}, {{"center", Vector2{.2, .3}}}};
+	owner.SourceAnimatedInputs = {"center"};
+	SourceSeparatedVec2Animator axes;
+	axes.Port = "center";
+	axes.Axes[0].Keys = {Keyframe{"owner", "center", 0, .25, "source", KeyframeEase{}}};
+	axes.Axes[1].Keys = {Keyframe{"owner", "center", 0, 2.0, "source", KeyframeEase{}}};
+	owner.SourceSeparatedVec2Animators.emplace().Inputs.push_back(axes);
+	Node alias = owner;
+	alias.Id = "alias";
+	alias.InstanceBase = "owner";
+	alias.SourceSeparatedVec2Animators = {};
+	document.Nodes = {owner, alias};
+	document.SourceAnimators.emplace();
+	GroupSubtypeBinding binding{
+		"alias", "owner", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "center"
+	};
+	binding.Axes = {GroupAxisStorage::Shared, "owner", "center", "owner", GroupSubtypeAnimator::Animated};
+	document.SourceAnimators->Bindings.push_back(binding);
+	document.Keyframes = {{"owner", "center", 0, Vector2{.2, .3}, "source", KeyframeEase{}}};
+	document.Tracks = {{"owner", "center", "hold", -1}};
+	document.Outputs = {{"out", "owner", "surface_out"}};
+	Keyframe scalar{"owner", "center", 0, .5, "source", KeyframeEase{}};
+	Keyframe vector = scalar;
+	vector.Data = Vector2{.5, .6};
+	const std::array<int8_t, 1> x{0};
+	const auto before = document;
+	Diagnostic error;
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, {&scalar, 1}, {4}, "alias", "center", error, Limits::MaximumEvaluationBytes, x
+		)
+	);
+	CHECK(error.Code == Status::TypeMismatch);
+	CHECK(document == before);
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, {&vector, 1}, {4}, "alias", "center", error, Limits::MaximumEvaluationBytes, x, 0
+		)
+	);
+	CHECK(error.Code == Status::TypeMismatch);
+	CHECK(document == before);
+	const std::array mixedKeys{scalar, vector};
+	const std::array<int8_t, 2> mixedAxes{0, -1};
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, mixedKeys, {4}, "alias", "center", error, Limits::MaximumEvaluationBytes, mixedAxes, 0
+		)
+	);
+	CHECK(error.Code == Status::TypeMismatch);
+	CHECK(document == before);
+	const std::array<int8_t, 1> invalidAxis{2};
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document,
+			{&scalar, 1},
+			{4},
+			"alias",
+			"center",
+			error,
+			Limits::MaximumEvaluationBytes,
+			invalidAxis,
+			0
+		)
+	);
+	CHECK(error.Code == Status::InvalidValue);
+	CHECK(document == before);
+	auto secondScalar = scalar;
+	secondScalar.Tick = 1;
+	const std::array pair{scalar, secondScalar};
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, pair, {4}, "alias", "center", error, Limits::MaximumEvaluationBytes, x, 0
+		)
+	);
+	CHECK(error.Code == Status::InvalidValue);
+	CHECK(document == before);
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			document, {&scalar, 1}, {4}, "alias", "center", error, 1, x, 0
+		)
+	);
+	CHECK(error.Code == Status::LimitExceeded);
+	CHECK(document == before);
+
+	auto cold = document;
+	cold.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Initialized = false;
+	for (auto &axis : cold.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes)
+		axis.Keys.clear();
+	cold.SourceAnimators->Bindings.front().Axes.Storage = GroupAxisStorage::Uninitialized;
+	const auto coldBefore = cold;
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			cold, {&scalar, 1}, {4}, "alias", "center", error, Limits::MaximumEvaluationBytes, x, 0
+		)
+	);
+	CHECK(cold == coldBefore);
+
+	auto absent = document;
+	absent.Nodes.front().SourceSeparatedVec2Animators = {};
+	const auto absentBefore = absent;
+	CHECK_FALSE(
+		studio::PasteImageGraphKeyframesToProperty(
+			absent, {&scalar, 1}, {4}, "alias", "center", error, Limits::MaximumEvaluationBytes, x, 0
+		)
+	);
+	CHECK(absent == absentBefore);
+}
+
+TEST_CASE(
 	"typed Studio image previews convert every surface format atomically", "[studio][imagegraph][preview]"
 ) {
 	using engine::imagegraph::Image;

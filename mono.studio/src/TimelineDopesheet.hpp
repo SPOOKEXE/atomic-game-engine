@@ -873,11 +873,7 @@ namespace studio {
 				}
 			}
 			if (pasteRequested && paste && FocusedTrack) {
-				if (FocusedTrack->Axis >= 0)
-					error = {
-						Status::TypeMismatch, {}, {}, "scalar timeline paste requires a component target"
-					};
-				else if (editor.Begin(document, true, cursor, error)) {
+				if (editor.Begin(document, true, cursor, error)) {
 					const auto found = std::find_if(Tracks.begin(), Tracks.end(), [&](const auto &track) {
 						return track.NodeId == FocusedTrack->NodeId && track.Port == FocusedTrack->Port &&
 							   track.Axis == FocusedTrack->Axis;
@@ -885,6 +881,7 @@ namespace studio {
 					if (found != Tracks.end()) {
 						editor.TargetNode = FocusedTrack->NodeId;
 						editor.TargetPort = FocusedTrack->Port;
+						editor.TargetAxis = FocusedTrack->Axis;
 						if (!paste()) editor.Cancel();
 					} else
 						editor.Cancel();

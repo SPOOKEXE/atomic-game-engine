@@ -144,10 +144,26 @@ namespace {
 			ImGui::Begin("Scalar Dopesheet", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 			const auto paste = [&] {
 				++PasteCalls;
+				if (UseSourceRead && (!Read.Matches(Host, Revision) ||
+									  Keys.OriginalObservationRevision != Read.DisplayRevision))
+					return false;
+				const auto edit = [&](Document &staged, uint64_t allowance) {
+					return Keys.PrepareCommit(staged, Error, allowance);
+				};
 				const bool accepted =
-					studio::ApplyImageGraphDocumentEdit(Doc, History, [&](Document &staged) {
-						return Keys.PrepareCommit(staged, Error);
-					});
+					UseSourceRead ? studio::ApplyImageGraphSourceKeyEdit(
+										Doc,
+										History,
+										Host,
+										Revision,
+										{},
+										edit,
+										Error,
+										Limits::MaximumEvaluationBytes - *Read.RetainedBytes()
+									)
+								  : studio::ApplyImageGraphDocumentEdit(Doc, History, [&](Document &staged) {
+										return edit(staged, Limits::MaximumEvaluationBytes);
+									});
 				if (accepted) {
 					Keys.PublishCommit();
 					++Changes;
@@ -468,7 +484,7 @@ TEST_CASE(
 	CHECK(ui.Keys.ClipboardAxes == clipboardAxes);
 	CHECK(ui.Keys.Selection.size() == 1);
 	CHECK_FALSE(ui.Keys.Active);
-	CHECK(ui.PasteCalls == 0);
+	CHECK(ui.PasteCalls == 1);
 	CHECK(ui.Changes == 0);
 	CHECK_FALSE(ui.History.CanUndo());
 	CHECK(ui.Error.Code == Status::TypeMismatch);
@@ -728,4 +744,55 @@ TEST_CASE(
 	CHECK_FALSE(ui.History.CanUndo());
 	ui.View.Cancel();
 	ui.Up();
+}
+
+TEST_CASE(
+	"scalar alias clipboard pastes to the focused component through host history",
+	"[studio][timeline_scalar_dopesheet]"
+) {
+	Sheet ui;
+	ui.UseSourceRead = true;
+	ui.Revision = 1;
+	ui.Doc.SourceAnimators = {};
+	ui.Doc.Nodes[1].SourceSeparatedVec2Animators = {};
+	ui.Frame();
+	ui.Frame();
+	const auto x = ui.Marker("alias", 0, {1});
+	const auto y = ui.Marker("alias", 1, {4});
+	REQUIRE(x < ui.View.Markers.size());
+	REQUIRE(y < ui.View.Markers.size());
+	ui.Click(x);
+	ui.Chord(ImGuiKey_C);
+	const auto clipboard = ui.Keys.Clipboard;
+	const auto clipboardAxes = ui.Keys.ClipboardAxes;
+	REQUIRE(clipboard.size() == 1);
+	const auto before = *ui.Read.Snapshot;
+	ui.FocusTrack(y);
+	REQUIRE(ui.View.FocusedTrack);
+	CHECK(ui.View.FocusedTrack->Axis == 1);
+	ui.Cursor = {4};
+	ui.Mouse({ui.CanvasMin.x + 160, ui.View.Markers[y].Position.y});
+	ui.Chord(ImGuiKey_V);
+	INFO(ui.Error.Message);
+	REQUIRE(ui.PasteCalls == 1);
+	REQUIRE(ui.Changes == 1);
+	CHECK(ui.Keys.Clipboard == clipboard);
+	CHECK(ui.Keys.ClipboardAxes == clipboardAxes);
+	CHECK(ui.Doc.Keyframes == before.Keyframes);
+	const auto &axes = ui.Doc.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes;
+	CHECK(axes[0].Keys == before.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys);
+	REQUIRE(axes[1].Keys.size() == 2);
+	const auto &pasted = axes[1].Keys.back();
+	CHECK(GetFrameTime(pasted) == FrameTime{4});
+	CHECK(pasted.Data == clipboard.front().Data);
+	CHECK(pasted.SourceKeyId.empty());
+	CHECK_FALSE(pasted.SourceDriver);
+	CHECK_FALSE(pasted.SineDriver);
+	CHECK(ui.Keys.Selection == std::vector<studio::ImageGraphKeyframeIdentity>{{"alias", "center", {4}, 1}});
+	const auto after = ui.Doc;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	CHECK_FALSE(ui.History.CanUndo());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == after);
 }
