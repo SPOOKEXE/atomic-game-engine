@@ -1,0 +1,60 @@
+{
+  "scope": "grug expand Composer real-device verification from 15 to 22 selected render cases",
+  "source_head": "41234037",
+  "preset": "release-tests",
+  "environment": {
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_GPU_DRIVER": "vulkan"
+  },
+  "added_coverage": [
+    "source camera asynchronous host: seven surfaces, diffuse pixels, exact generation cancellation",
+    "source Transform asynchronous host: image/depth/mesh receipt and submitted cancellation",
+    "source SDF sphere: real texture publication, atlas and scatter controls",
+    "source cloud and terrain: distinct shader controls",
+    "source camera pass: seven outputs, tint and native numeric formats",
+    "source camera synchronous export: packed and floating formats",
+    "source instances: object matrix before instance scale, raw tint"
+  ],
+  "results": {
+    "gates": 20,
+    "failed": [],
+    "cpp_cases": 5248,
+    "cpp_assertions": 2005615,
+    "render_cases": 22,
+    "render_assertions": 1034,
+    "python_tests": 101,
+    "cli_checks": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5
+  },
+  "render_gate": {
+    "name": "render",
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/composer-gpu-expanded-render-batch1.log",
+    "command": [
+      ".cache/build/release-tests/tests/test_render",
+      "[gpu][imagegraph],[source-camera-host-gpu],[transform-host-gpu],[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
+    ],
+    "binary": ".cache/build/release-tests/tests/test_render",
+    "binary_sha256": "0751bc59aa1384a0c152f2678978a528d8b97e9d218f313584da026c0f33932e",
+    "exit_code": 0,
+    "elapsed_seconds": 2.478,
+    "assertions": 1034,
+    "cases": 22,
+    "binary_sha256_after": "0751bc59aa1384a0c152f2678978a528d8b97e9d218f313584da026c0f33932e",
+    "binary_changed_during_test": false
+  },
+  "joined_results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/composer-gpu-expanded-batch1-results.json",
+  "source_hash_manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/composer-gpu-expanded-source-before.json",
+  "frozen_sources": 1844,
+  "sources_changed": [],
+  "test_binaries_changed": [],
+  "child_binaries_changed": false,
+  "limits": [
+    "grug ran named native GPU fixture assertions; this is not licensed reference parity",
+    "other render tests outside the explicit filter remain outside this evidence",
+    "seven camera output layouts are checked; only assertions actually present in fixtures establish pixel behavior",
+    "headed Studio needs separate approval; prepared plan has not run",
+    "native wrapped-text measurement already has five-sample report at mono.engine/imagegraphfont/docs/wrapped-text-profile-2026-10-06.md",
+    "full 33-item goal remains active"
+  ]
+}
