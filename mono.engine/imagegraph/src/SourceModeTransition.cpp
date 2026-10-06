@@ -229,8 +229,20 @@ namespace engine::imagegraph {
 		addedModes.push_back(std::string(transition.Port));
 		std::erase(removedModes, transition.Port);
 		if (owner == target) ownerAnimated = transition.Animated;
+		const auto refreshGetterMode = [&](GroupSubtypeBinding &binding) {
+			const auto selected =
+				std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const auto &node) {
+					return node.Id == binding.NodeId;
+				});
+			if (selected == candidate.Nodes.end()) return;
+			if (const auto mode =
+					detail::SourcePropertyGetterAnimated(candidate, *selected, binding.Port, nullptr))
+				binding.Getter = *mode ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+		};
+
 		if (const auto *separated = detail::FindSeparatedVec2(*owner, animatorPort);
-			separated && separated->Separated) {
+			detail::SourcePropertyLocallySeparated(*target, transition.Port, &replay)) {
+			if (!separated) return fail(Status::UnsupportedExecution, "shared source axis storage is absent");
 			if (detached)
 				return fail(
 					Status::UnsupportedExecution, "fixed Mirror axes cannot have a detached dynamic animator"
@@ -292,6 +304,7 @@ namespace engine::imagegraph {
 			}
 			SourceSeparatedVec2Animator replacement;
 			replacement.Port = std::string(animatorPort);
+			replacement.Separated = separated->Separated;
 			for (size_t index = 0; index < 2; ++index) {
 				auto &keys = replacement.Axes[index].Keys;
 				const auto &old = separated->Axes[index].Keys;
@@ -346,9 +359,7 @@ namespace engine::imagegraph {
 				}
 				if (!next->Charge.Resize(next->Charge.Bytes() - retired)) std::terminate();
 				for (auto &binding : next->Bindings) {
-					if (binding.NodeId == transition.NodeId && binding.Port == transition.Port)
-						binding.Getter = transition.Animated ? GroupSubtypeAnimator::Animated
-															 : GroupSubtypeAnimator::Static;
+					refreshGetterMode(binding);
 					if (owner == target && binding.OwnerId == ownerId &&
 						detail::BindingAnimatorPort(binding) == animatorPort)
 						binding.Writer = transition.Animated ? GroupSubtypeAnimator::Animated
@@ -487,7 +498,18 @@ namespace engine::imagegraph {
 					return fail(Status::InvalidValue, "source sampler clock is invalid");
 				detail::TimelineOverrides values;
 				status = detail::ResolveTimelineOverrides(
-					candidate, needed, clock, budget, values, diagnostic, animatorPort, true
+					candidate,
+					needed,
+					clock,
+					budget,
+					values,
+					diagnostic,
+					animatorPort,
+					true,
+					{},
+					{},
+					nullptr,
+					true
 				);
 				if (status != Status::Ok) return status;
 				const Node &resolved = values.Find(size_t(owner - candidate.Nodes.begin()), *owner);
@@ -567,9 +589,7 @@ namespace engine::imagegraph {
 				!next->Charge.Resize(next->Charge.Bytes() - oldPayload))
 				std::terminate();
 			for (auto &binding : next->Bindings)
-				if (binding.NodeId == transition.NodeId && binding.Port == transition.Port)
-					binding.Getter =
-						transition.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+				refreshGetterMode(binding);
 			GroupReplayState replayCandidate;
 			detail::GroupReplayAccess::Install(replayCandidate, std::move(next));
 			auto stateCharge = budget.Reserve(replayCandidate.RetainedBytes());
@@ -656,9 +676,7 @@ namespace engine::imagegraph {
 			}
 			if (!next->Charge.Resize(next->Charge.Bytes() - retiredBytes)) std::terminate();
 			for (auto &binding : next->Bindings) {
-				if (binding.NodeId == transition.NodeId && binding.Port == transition.Port)
-					binding.Getter =
-						transition.Animated ? GroupSubtypeAnimator::Animated : GroupSubtypeAnimator::Static;
+				refreshGetterMode(binding);
 				if (owner == target && binding.OwnerId == ownerId &&
 					detail::BindingAnimatorPort(binding) == animatorPort)
 					binding.Writer =

@@ -94,7 +94,8 @@ namespace engine::imagegraph::detail {
 		bool rawSourceQuaternion,
 		std::span<const uint8_t> getters,
 		std::span<const SourceFrameCacheInputReads> getterReads,
-		const TimelineOverrides *previous
+		const TimelineOverrides *previous,
+		bool rawSourceAnimator
 	) try {
 		ENGINE_PROFILE("imagegraph.timeline");
 		if (needed.size() != document.Nodes.size() ||
@@ -143,7 +144,7 @@ namespace engine::imagegraph::detail {
 			sourceGetterWork += count;
 			return true;
 		};
-		for (size_t index = 0; index < document.Nodes.size(); ++index) {
+		for (size_t index = 0; !rawSourceAnimator && index < document.Nodes.size(); ++index) {
 			if (!consumers[index]) continue;
 			const auto &consumer = document.Nodes[index];
 			const auto selectWriter = [&](std::string_view port) {
@@ -220,7 +221,7 @@ namespace engine::imagegraph::detail {
 				request.GroupReplay ? request.GroupReplay->SharedSubtype(node->Id, key.Port) : nullptr;
 			const auto *axes = axisOverlay && axisOverlay->SeparatedVec2 ? &*axisOverlay->SeparatedVec2
 																		 : FindSeparatedVec2(*node, key.Port);
-			if (axes && !combinedWriters.contains({key.NodeId, key.Port})) return true;
+			if (!rawSourceAnimator && axes && !combinedWriters.contains({key.NodeId, key.Port})) return true;
 			const auto mirrorMode =
 				SourceMirrorGetterAnimated(document, *node, key.Port, request.GroupReplay);
 			if (mirrorMode && !*mirrorMode) return true;

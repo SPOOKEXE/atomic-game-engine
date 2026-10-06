@@ -1816,7 +1816,17 @@ namespace engine::imagegraph {
 			const auto *axes = found != owner.SharedSubtypes.end() && found->SeparatedVec2
 								   ? &*found->SeparatedVec2
 								   : authored;
-			if (!axes || !axes->Separated) return true;
+			const auto selected =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+					return node.Id == event.NodeId;
+				});
+			if (selected == document.Nodes.end() ||
+				!SourcePropertyLocallySeparated(*selected, event.EditedPort, nullptr))
+				return true;
+			if (!axes)
+				return context.Fail(
+					Status::UnsupportedExecution, "shared source axis storage is absent", port
+				);
 			handled = true;
 			const auto *pair = std::get_if<Vector2>(event.LocalValue);
 			if (!pair || !std::isfinite(pair->X) || !std::isfinite(pair->Y))

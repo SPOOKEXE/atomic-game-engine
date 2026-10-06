@@ -25,6 +25,7 @@ namespace engine::imagegraph::detail {
 
 	// The caller validates the original document/plan. Both old and new overrides use this live budget.
 	// Raw quaternion capture retains animator angles before the property getter converts Euler units.
+	// Raw source animator capture reads combined storage regardless of any property separation flag.
 	Status ResolveTimelineOverrides(
 		const Document &document,
 		std::span<const uint8_t> needed,
@@ -36,7 +37,8 @@ namespace engine::imagegraph::detail {
 		bool rawSourceQuaternion = false,
 		std::span<const uint8_t> getters = {},
 		std::span<const SourceFrameCacheInputReads> getterReads = {},
-		const TimelineOverrides *previous = nullptr
+		const TimelineOverrides *previous = nullptr,
+		bool rawSourceAnimator = false
 	);
 	// Adds newly needed nodes within the same immutable document/request observation.
 	// Already sampled nodes survive; all old/new payloads and replacement tables coexist under budget.

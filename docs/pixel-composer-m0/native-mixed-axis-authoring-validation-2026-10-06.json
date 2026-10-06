@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "Mixed local X/Y authoring modes over shared source animator storage, with paired getter-mode refresh.",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "verified_source_scripts": [
+    {
+      "path": "scripts/node_group/node_group.gml",
+      "bytes": 5083,
+      "sha256": "12bcf43c0bfcb6d84ea8c788c4ff84bae4f805d1290ede309222f2cd03bbb019",
+      "git_blob_sha1": "b180d800ed992381c99f92c5c222cf1a9d78718d",
+      "manifest_match": true
+    },
+    {
+      "path": "scripts/node_value/node_value.gml",
+      "bytes": 111774,
+      "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "git_blob_sha1": "b5830b52d06b0d29f3638e158a4911dcf9218125",
+      "manifest_match": true
+    }
+  ],
+  "source_contract": [
+    "setAnim and setValueDirect branch on the selected input local sep_axis flag even when useInstance delegates its getter.",
+    "Borrowed animator and animators storage retains the original writer mode.",
+    "setAnim captures raw animator values without property expression or unit conversion."
+  ],
+  "native_checks": [
+    "Opposite selected/writer separation flags toggle the selected axis or combined key lists while retaining the writer separation flag.",
+    "Group edit events update the selected axis or combined shared storage at the authored time.",
+    "Nonoverridden alias getters retain their inherited animation mode when their local mode is toggled.",
+    "Toggling an original writer refreshes delegated alias getter modes in the paired replay result."
+  ],
+  "builds": {
+    "initial": "mixed-axis-build1.log",
+    "initial_exit_code": 0,
+    "final": "mixed-axis-build2.log",
+    "final_exit_code": 0
+  },
+  "initial_batch": {
+    "results": "mixed-axis-batch1-results.json",
+    "checks_passed": 19,
+    "checks_total": 20,
+    "failures": "Three new test assertions assumed tick 4 was last in sorted key storage and compared promoted float values to double literals. Corrected key lookup and expected component conversion."
+  },
+  "final_batch": {
+    "results": "mixed-axis-batch2-results.json",
+    "checks": 20,
+    "all_passed": true,
+    "native_cpu_cases": 4981,
+    "render_cases": 15,
+    "startup_cases": 1,
+    "cli_cases": 16,
+    "python_cases": 100,
+    "binary_hashes_stable": true,
+    "child_binary_hashes_stable": true,
+    "child_hashes": "mixed-axis-child-hashes-batch2.json",
+    "network_cases_excluded": 21
+  },
+  "review": "Read-only review found no additional confirmed bug in this mixed-mode delta.",
+  "limits": [
+    "Separate/combine authoring controls and missing shared-axis constructor storage remain unfinished.",
+    "A faithful combine operation still needs selected-property dependency evaluation with units disabled.",
+    "No licensed reference runner comparison, performance measurement or live Studio verification was performed.",
+    "This pass does not establish full Composer acceptance."
+  ],
+  "commit": "The filesystem refuses .git/index.lock; isolated owned patch retained."
+}

@@ -55,15 +55,18 @@ namespace engine::imagegraph::detail {
 		}
 		return nullptr;
 	}
+	inline bool
+	SourcePropertyLocallySeparated(const Node &node, std::string_view port, const GroupReplayState *replay) {
+		const auto *overlay = replay ? replay->SharedSubtype(node.Id, port) : nullptr;
+		const auto *axes =
+			overlay && overlay->SeparatedVec2 ? &*overlay->SeparatedVec2 : FindSeparatedVec2(node, port);
+		return axes && axes->Separated;
+	}
 	inline bool SourcePropertyGetterSeparated(
 		const Document &document, const Node &node, std::string_view port, const GroupReplayState *replay
 	) {
 		const auto *selected = SourcePropertyGetterNode(document, node, port);
-		if (!selected) return false;
-		const auto *overlay = replay ? replay->SharedSubtype(selected->Id, port) : nullptr;
-		const auto *axes =
-			overlay && overlay->SeparatedVec2 ? &*overlay->SeparatedVec2 : FindSeparatedVec2(*selected, port);
-		return axes && axes->Separated;
+		return selected && SourcePropertyLocallySeparated(*selected, port, replay);
 	}
 	// source getters keep the local mode separate from the original animator writer.
 	inline std::optional<bool> SourcePropertyGetterAnimated(
@@ -72,20 +75,8 @@ namespace engine::imagegraph::detail {
 		const auto *binding = replay && replay->InstancesBound() ? replay->Binding(node.Id, port) : nullptr;
 		if (binding && !InheritedMovedSourceGetter(node, port, binding))
 			return binding->Getter == GroupSubtypeAnimator::Animated;
-		const Node *flagOwner = &node;
-		const bool ownLink = std::any_of(document.Links.begin(), document.Links.end(), [&](const auto &link) {
-			return link.ToNode == node.Id && link.ToPort == port;
-		});
-		const bool override = std::find(node.InstanceOverrides.begin(), node.InstanceOverrides.end(), port) !=
-							  node.InstanceOverrides.end();
-		if (!node.InstanceBase.empty() && !ownLink && !override) {
-			const auto base =
-				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
-					return item.Id == node.InstanceBase;
-				});
-			if (base == document.Nodes.end()) return std::nullopt;
-			flagOwner = &*base;
-		}
+		const Node *flagOwner = SourcePropertyGetterNode(document, node, port);
+		if (!flagOwner) return std::nullopt;
 		if (std::find(flagOwner->SourceAnimatedInputs.begin(), flagOwner->SourceAnimatedInputs.end(), port) !=
 			flagOwner->SourceAnimatedInputs.end())
 			return true;

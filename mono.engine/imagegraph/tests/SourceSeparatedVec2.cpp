@@ -778,3 +778,185 @@ TEST_CASE(
 		}
 	}
 }
+
+TEST_CASE("Source mode toggles use the selected alias separation mode", "[mirror_axes][groups]") {
+	{
+		auto document = MatrixGetAlias(false, true);
+		const auto originalKeys = document.Keyframes;
+		const GroupSubtypeBinding binding{
+			"alias", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"
+		};
+		GroupReplayState replay, changedReplay;
+		BindMatrixGetAlias(document, std::span{&binding, 1}, replay);
+		Document changed;
+		Diagnostic diagnostic;
+		REQUIRE(
+			ToggleSourceInputMode(
+				document,
+				replay,
+				1,
+				{"alias", "position", false, FrameTime{}},
+				changed,
+				changedReplay,
+				diagnostic
+			) == Status::Ok
+		);
+		const auto &writer = changed.Nodes.front();
+		const auto &axes = writer.SourceSeparatedVec2Animators->Inputs.front();
+		CHECK_FALSE(axes.Separated);
+		REQUIRE(axes.Axes[0].Keys.size() == 1);
+		REQUIRE(axes.Axes[1].Keys.size() == 1);
+		CHECK(axes.Axes[0].Keys.front().Data == Value{0.0});
+		CHECK(axes.Axes[1].Keys.front().Data == Value{0.0});
+		CHECK(changed.Keyframes == originalKeys);
+		CHECK(writer.SourceAnimatedInputs == document.Nodes.front().SourceAnimatedInputs);
+		CHECK(changed.Nodes.back().SourceStaticInputs == std::vector<std::string>{"position"});
+	}
+	{
+		auto document = MatrixGetAlias(true, false);
+		const auto originalAxes = document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front();
+		const GroupSubtypeBinding binding{
+			"alias", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"
+		};
+		GroupReplayState replay, changedReplay;
+		BindMatrixGetAlias(document, std::span{&binding, 1}, replay);
+		Document changed;
+		Diagnostic diagnostic;
+		REQUIRE(
+			ToggleSourceInputMode(
+				document,
+				replay,
+				1,
+				{"alias", "position", false, FrameTime{10, 0, false}},
+				changed,
+				changedReplay,
+				diagnostic
+			) == Status::Ok
+		);
+		const auto &axes = changed.Nodes.front().SourceSeparatedVec2Animators->Inputs.front();
+		CHECK(axes.Separated);
+		CHECK(axes == originalAxes);
+		std::vector<Keyframe> combined;
+		for (const auto &key : changed.Keyframes)
+			if (key.NodeId == "get" && key.Port == "position") combined.push_back(key);
+		REQUIRE(combined.size() == 1);
+		CHECK(combined.front().Tick == 0);
+		CHECK(combined.front().Data == Value{Vector2{1, 0}});
+	}
+}
+
+TEST_CASE("Group edit events update selected split or combined alias storage", "[mirror_axes][groups]") {
+	for (const auto [writerSeparated, localSeparated] : {std::pair{false, true}, std::pair{true, false}}) {
+		auto document = MatrixGetAlias(writerSeparated, localSeparated);
+		const auto originalAxes = document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front();
+		const GroupSubtypeBinding binding{
+			"alias", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"
+		};
+		GroupReplayState replay, edited;
+		BindMatrixGetAlias(document, std::span{&binding, 1}, replay);
+		const Value replacement = Vector2{.4f, .7f};
+		GroupRefreshEvent edit;
+		edit.NodeId = "alias";
+		edit.Reason = GroupRefreshReason::Edit;
+		edit.At.Tick = 4;
+		edit.EditedPort = "position";
+		edit.LocalValue = &replacement;
+		edit.LocalAnimated = true;
+		Diagnostic diagnostic;
+		REQUIRE(ReplayGroupAnimatorEdits(document, {&edit, 1}, replay, 1, edited, diagnostic) == Status::Ok);
+		const auto *overlay = edited.SharedSubtype("get", "position");
+		REQUIRE(overlay);
+		if (localSeparated) {
+			REQUIRE(overlay->SeparatedVec2);
+			CHECK(overlay->Keys.empty());
+			const auto &xKeys = overlay->SeparatedVec2->Axes[0].Keys;
+			const auto &yKeys = overlay->SeparatedVec2->Axes[1].Keys;
+			const auto xKey =
+				std::find_if(xKeys.begin(), xKeys.end(), [](const auto &key) { return key.Tick == 4; });
+			const auto yKey =
+				std::find_if(yKeys.begin(), yKeys.end(), [](const auto &key) { return key.Tick == 4; });
+			REQUIRE(xKey != xKeys.end());
+			REQUIRE(yKey != yKeys.end());
+			const auto pair = std::get<Vector2>(replacement);
+			CHECK(xKey->Data == Value{double(pair.X)});
+			CHECK(yKey->Data == Value{double(pair.Y)});
+		} else {
+			CHECK_FALSE(overlay->SeparatedVec2);
+			CHECK(std::any_of(overlay->Keys.begin(), overlay->Keys.end(), [&](const auto &key) {
+				return key.Tick == 4 && key.Data == replacement;
+			}));
+		}
+		CHECK(document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front() == originalAxes);
+	}
+}
+
+TEST_CASE("Mode transitions preserve delegated alias binding modes", "[mirror_axes][groups]") {
+	{
+		auto document = MatrixGetAlias(false, true, false);
+		const GroupSubtypeBinding binding{
+			"alias", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"
+		};
+		GroupReplayState replay, changedReplay;
+		BindMatrixGetAlias(document, std::span{&binding, 1}, replay);
+		Document changed;
+		Diagnostic diagnostic;
+		REQUIRE(
+			ToggleSourceInputMode(
+				document,
+				replay,
+				1,
+				{"alias", "position", false, FrameTime{}},
+				changed,
+				changedReplay,
+				diagnostic
+			) == Status::Ok
+		);
+		const auto &writer = changed.Nodes.front();
+		const auto &axes = writer.SourceSeparatedVec2Animators->Inputs.front();
+		CHECK_FALSE(axes.Separated);
+		REQUIRE(axes.Axes[0].Keys.size() == 1);
+		CHECK(axes.Axes[0].Keys.front().Data == Value{0.0});
+		CHECK(changed.Keyframes == document.Keyframes);
+		REQUIRE(changedReplay.Binding("alias", "position"));
+		CHECK(changedReplay.Binding("alias", "position")->Getter == GroupSubtypeAnimator::Animated);
+		CHECK(changedReplay.Binding("alias", "position")->Writer == GroupSubtypeAnimator::Animated);
+	}
+	{
+		auto document = MatrixGetAlias(false, false, false);
+		const GroupSubtypeBinding binding{
+			"alias", "get", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "position"
+		};
+		GroupReplayState replay, changedReplay;
+		BindMatrixGetAlias(document, std::span{&binding, 1}, replay);
+		Document changed;
+		Diagnostic diagnostic;
+		REQUIRE(
+			ToggleSourceInputMode(
+				document,
+				replay,
+				1,
+				{"get", "position", false, FrameTime{10, 0, false}},
+				changed,
+				changedReplay,
+				diagnostic
+			) == Status::Ok
+		);
+		REQUIRE(changedReplay.Binding("alias", "position"));
+		CHECK(changedReplay.Binding("alias", "position")->Getter == GroupSubtypeAnimator::Static);
+		CHECK(changedReplay.Binding("alias", "position")->Writer == GroupSubtypeAnimator::Static);
+		CHECK(
+			std::find(
+				changed.Nodes.front().SourceAnimatedInputs.begin(),
+				changed.Nodes.front().SourceAnimatedInputs.end(),
+				"position"
+			) == changed.Nodes.front().SourceAnimatedInputs.end()
+		);
+		CHECK(
+			std::find(
+				changed.Nodes.front().SourceStaticInputs.begin(),
+				changed.Nodes.front().SourceStaticInputs.end(),
+				"position"
+			) != changed.Nodes.front().SourceStaticInputs.end()
+		);
+	}
+}

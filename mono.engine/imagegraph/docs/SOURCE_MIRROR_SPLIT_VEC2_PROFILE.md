@@ -72,7 +72,11 @@ time and driver workspace before use. Group edits charge the old replay, new
 replay, copied axis keys and sort workspace before allocation. Projection
 preadmits the document clone, axis replacement and final combined key count.
 Mode changes admit the old document/replay, separate old destination and new
-key lists together. Failed evaluation and authoring leave the published owners
+key lists together. source `setAnim` and direct edits choose the selected input's
+local separation flag even when its getter delegates to a base. aliased writes
+retain the writer's separation flag and dormant key lists. paired mode changes
+refresh delegated getter flags from their logical property owners, independently
+of the shared writer. raw combined captures bypass property separation choices. Failed evaluation and authoring leave the published owners
 unchanged. No provider pointer or borrowed key list survives the call.
 
 Client frame scheduling includes authored separate-axis storage even when no
@@ -82,7 +86,7 @@ the requested axes rather than retaining a sampled vector as authored state.
 Missing animation flags preserve static values. Explicit source animation
 enables sampled axis changes; both modes have literal client pixel fixtures.
 
-mixed-mode instance authoring and separate/combine controls are still unfinished.
+separate/combine controls and missing shared-axis constructor storage are still unfinished.
 this flag preserves
 the source storage distinction needed by those controls. generic Vector, dynamic
 HLSL property kinds and source constructors with unresolved defaults still need
