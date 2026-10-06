@@ -4,8 +4,26 @@
 
 #include <cstdint>
 #include <span>
+#include <string_view>
+#include <vector>
 
 namespace engine::imagegraph {
+	struct SourceKeyframeIdentity {
+		std::string_view NodeId, Port;
+		FrameTime Time;
+		int8_t Axis = -1;
+	};
+	// Captures exact logical pins in selection order. Scalar pins read the independently captured
+	// writer even without local alias projections. A bounded Compile validates the document first.
+	// Failure preserves result; clocks are not clamped.
+	Status CaptureSourceKeyframes(
+		const Document &document,
+		std::span<const SourceKeyframeIdentity> selection,
+		std::vector<Keyframe> &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
+
 	struct SourceKeyframeEdit {
 		const Keyframe *Original = nullptr;
 		// Null removes the pinned key. Replacement keeps the original logical socket.

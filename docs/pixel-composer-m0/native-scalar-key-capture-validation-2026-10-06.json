@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-06",
+  "evidence_scope": "Bounded core key capture and Studio scalar key-capture/retiming adapters. This does not qualify visible scalar Dopesheet gestures or complete the broader Composer goal.",
+  "tested_behavior": [
+    "Capture combined, X and Y pins at the same socket and exact authored clock in selection order.",
+    "Read effective canonical scalar arrays for shared aliases even without local scalar key projections, including warm arrays whose selected local separated flag is false.",
+    "Preserve physical IDs for local captures and clear IDs for shared or retired scalar alias captures; resolve independent local scalar owners and retired generations.",
+    "Refuse cold arrays, duplicate identities, invalid selectors, missing keys, malformed uncaptured scalar payloads or clocks, and byte/work-limit overruns without replacing the destination snapshot.",
+    "Carry explicit axis selectors through Studio mixed retiming and clipboard copies, with signed fractional clocks, driver and ID reset on copy, atomic history, undo/redo and stale-pin refusal.",
+    "Use the same weighted axis lookup admission in capture and editing. A bounded Compile validates capture input while document, selection and old-result residency are admitted."
+  ],
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "scalar-key-capture-batch2-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5114,
+    "cpp_assertions": 2001211,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "totals_method": "Sum result rows that report cases/assertions, including the startup C++ fixture. Python and CLI totals are separate.",
+    "final_build": {
+      "iteration": 3,
+      "exit_code": 0,
+      "targets": 17,
+      "steps": 5,
+      "log": "scalar-key-capture-build3.log"
+    },
+    "backend": "SDL offscreen with Vulkan for GPU checks.",
+    "profiling": "Capture has ENGINE_PROFILE instrumentation. No new timing was collected and no performance result is claimed.",
+    "build_warning": "Build 1 reported the existing GCC -Wmaybe-uninitialized warning in TimelineRegions.hpp through ImageComposer.cpp; this phase did not edit those files."
+  },
+  "iteration_history": [
+    {
+      "stage": "build 1",
+      "result": "failed",
+      "cause": "The new fixture called reset() on OwnedPayload3D, which has no reset method. Replaced it with an empty assignment."
+    },
+    {
+      "stage": "build 2",
+      "result": "passed",
+      "steps": 3
+    },
+    {
+      "stage": "batch 1",
+      "result": "18 checks passed; core and Studio each had one failing case",
+      "cause": "Two new fixtures lacked a declared output required by Compile. Both were repaired together."
+    },
+    {
+      "stage": "build 3 and batch 2",
+      "result": "all targets built and all 20 checks passed"
+    }
+  ],
+  "unchanged_evidence": {
+    "before": "scalar-key-capture-source-before-build3.json",
+    "after": "scalar-key-capture-source-after-batch2.json",
+    "frozen_source_paths": 49,
+    "source_hashes_equal": true,
+    "peer_paths_unchanged_from_build1": 43,
+    "test_binaries_unchanged": 13,
+    "child_hashes_file": "scalar-key-capture-child-hashes-batch2.json",
+    "child_hashes_equal": true
+  },
+  "tested_owned_file_hashes": {
+    "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp": "29a5ba94c371068fbf61c1a0c69f1c81cb15b859519fc8a1a1440d80563cb82c",
+    "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp": "5189aed5c23cd052e3842e1bab8f369cb60feb9c5cd749a767ffe6a2d777ec16",
+    "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp": "7f5e3c0a37c17d50ff6a7ee669732bb4c35913927982ce0964f284d459d13328",
+    "mono.studio/include/studio/ImageGraph.hpp": "ee5b07563cd8f149b534c406a214c6f324c11f36a832d954d71cd1925596206d",
+    "mono.studio/src/ImageGraph.cpp": "2ff4c12055756dccb3e8f3bf464bcfea185adc12a2768b5b1ff9cd7507257fb5",
+    "mono.studio/tests/ImageGraph.cpp": "7fbc1c51dc7f7fd725a733bda4216910a3cceeb47f97d936b833da4f4ebad1db"
+  },
+  "remaining_gaps": [
+    "Visible scalar-axis Dopesheet rows, selection, gestures and key authoring remain open.",
+    "Initial uncaptured aliases need the existing source-capture envelope before scalar routing.",
+    "Licensed-reference parity remains open.",
+    "Headed Studio verification remains open.",
+    "The broader Composer goal remains active."
+  ]
+}

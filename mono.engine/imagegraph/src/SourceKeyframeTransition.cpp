@@ -47,7 +47,233 @@ namespace engine::imagegraph {
 				key.Kind
 			);
 		}
+		struct AxisLookupBound {
+			uint64_t Records = 0, NameBytes = 0;
+		};
+		void AdmitKeyWork(uint64_t &work, uint64_t amount) {
+			if (amount > 64'000'000 - work) throw KeyEditWorkExceeded{};
+			work += amount;
+		}
+		AxisLookupBound BoundAxisLookup(const Document &document, uint64_t &work) {
+			AxisLookupBound bound;
+			const auto admit = [&](uint64_t amount) { AdmitKeyWork(work, amount); };
+
+			bound.Records = document.Nodes.size() + document.Tracks.size();
+			const auto name = [&](std::string_view text) {
+				admit(1);
+				bound.NameBytes = std::max(bound.NameBytes, uint64_t(text.size()));
+			};
+			for (const auto &node : document.Nodes) {
+				name(node.Id);
+				bound.Records += node.SourceAnimatedInputs.size();
+				for (const auto &port : node.SourceAnimatedInputs)
+					name(port);
+				if (node.SourceSeparatedVec2Animators) {
+					bound.Records += 2 * node.SourceSeparatedVec2Animators->Inputs.size();
+					for (const auto &axes : node.SourceSeparatedVec2Animators->Inputs)
+						name(axes.Port);
+				}
+			}
+			for (const auto &track : document.Tracks) {
+				name(track.NodeId);
+				name(track.Port);
+			}
+			if (document.SourceAnimators) {
+				const auto &state = *document.SourceAnimators;
+				bound.Records +=
+					state.Bindings.size() + 2 * state.DetachedValues.size() + state.Detached.size();
+				for (const auto &binding : state.Bindings) {
+					name(binding.NodeId);
+					name(binding.OwnerId);
+					name(binding.Port);
+					name(binding.AnimatorPort);
+					name(binding.Axes.OwnerId);
+					name(binding.Axes.Port);
+				}
+				for (const auto &overlay : state.DetachedValues) {
+					name(overlay.NodeId);
+					name(overlay.Port);
+				}
+				for (const auto &retired : state.Detached) {
+					name(retired.OwnerId);
+					name(retired.Id);
+				}
+			}
+			return bound;
+		}
+		detail::SourceAxisStorageView ReadKeyAxes(
+			const Document &document,
+			const Node &node,
+			std::string_view port,
+			const AxisLookupBound &bound,
+			uint64_t &work
+		) {
+			const uint64_t nameBytes =
+				2 * (1 + std::max({bound.NameBytes, uint64_t(node.Id.size()), uint64_t(port.size())}));
+			if (bound.Records > (64'000'000 - work) / nameBytes) throw KeyEditWorkExceeded{};
+			AdmitKeyWork(work, bound.Records * nameBytes);
+			uint64_t visits = 0;
+			return detail::ResolveLocalSourceAxes(
+				document,
+				node,
+				port,
+				document.SourceAnimators
+					? std::span<const GroupSubtypeBinding>{document.SourceAnimators->Bindings}
+					: std::span<const GroupSubtypeBinding>{},
+				document.SourceAnimators
+					? std::span<const GroupSubtypeOverlay>{document.SourceAnimators->DetachedValues}
+					: std::span<const GroupSubtypeOverlay>{},
+				document.SourceAnimators
+					? std::span<const DetachedSourceAnimator>{document.SourceAnimators->Detached}
+					: std::span<const DetachedSourceAnimator>{},
+				{},
+				{},
+				false,
+				visits,
+				false
+			);
+		}
+
 	}
+	Status CaptureSourceKeyframes(
+		const Document &document,
+		std::span<const SourceKeyframeIdentity> selection,
+		std::vector<Keyframe> &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraph.source_keyframe_capture");
+		const auto fail = [&](Status code, std::string_view message) {
+			diagnostic = {code, {}, {}, std::string(message)};
+			return code;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || selection.empty() ||
+			selection.size() > Limits::MaximumKeyframes || result.size() > Limits::MaximumKeyframes)
+			return fail(Status::LimitExceeded, "source key capture count or byte bound is invalid");
+		const auto resident = DocumentRetainedPayloadBytes(document);
+		uint64_t borrowed = uint64_t(selection.size()) * sizeof(SourceKeyframeIdentity);
+		if (!resident || !detail::SourceAnimatorAdd(borrowed, *resident) ||
+			!detail::SourceAnimatorAdd(borrowed, uint64_t(result.capacity()) * sizeof(Keyframe)))
+			return fail(Status::LimitExceeded, "source key capture retained payload exceeds bounds");
+		size_t retainedKeys = 0;
+		for (const auto &key : result)
+			if (!detail::SourceAnimatorKey(borrowed, key, false, retainedKeys))
+				return fail(Status::LimitExceeded, "source key capture old snapshot exceeds bounds");
+		for (const auto &identity : selection) {
+			if (identity.Axis < -1 || identity.Axis > 1 || !ValidFrameTime(identity.Time))
+				return fail(Status::InvalidValue, "source key capture identity is invalid");
+			if (identity.NodeId.size() > Limits::MaximumTextBytes ||
+				identity.Port.size() > Limits::MaximumTextBytes ||
+				!detail::SourceAnimatorAdd(borrowed, identity.NodeId.size() + identity.Port.size()))
+				return fail(Status::LimitExceeded, "source key capture identity exceeds bounds");
+		}
+		detail::EvaluationBudget budget(maximumBytes);
+		auto held = budget.Reserve(borrowed);
+		if (!held) return fail(Status::LimitExceeded, "source key capture borrowed overlap exceeds bounds");
+		{
+			Plan plan;
+			if (Compile(document, plan, diagnostic, budget.Available()) != Status::Ok) return diagnostic.Code;
+		}
+		uint64_t work = 0;
+		const auto same = [&](std::string_view a, std::string_view b) {
+			AdmitKeyWork(work, 1 + std::min(a.size(), b.size()));
+			return a == b;
+		};
+		const auto bound =
+			std::any_of(selection.begin(), selection.end(), [](const auto &id) { return id.Axis >= 0; })
+				? BoundAxisLookup(document, work)
+				: AxisLookupBound{};
+		struct CaptureView {
+			const Keyframe *Key;
+			bool Alias;
+		};
+		detail::EvaluationVector<CaptureView> pins{detail::EvaluationAllocator<CaptureView>(budget)};
+		pins.reserve(selection.size());
+		uint64_t cloneBytes = uint64_t(selection.size()) * sizeof(Keyframe);
+		size_t cloneKeys = 0;
+		for (size_t index = 0; index < selection.size(); ++index) {
+			const auto &identity = selection[index];
+			for (size_t previous = 0; previous < index; ++previous) {
+				AdmitKeyWork(work, 1);
+				const auto &other = selection[previous];
+				if (identity.Axis == other.Axis && identity.Time == other.Time &&
+					same(identity.NodeId, other.NodeId) && same(identity.Port, other.Port))
+					return fail(Status::InvalidValue, "source key capture repeats an identity");
+			}
+			const Keyframe *found = nullptr;
+			bool alias = false;
+			if (identity.Axis < 0) {
+				for (const auto &key : document.Keyframes) {
+					AdmitKeyWork(work, 1);
+					if (GetFrameTime(key) == identity.Time && same(key.NodeId, identity.NodeId) &&
+						same(key.Port, identity.Port)) {
+						found = &key;
+						break;
+					}
+				}
+			} else {
+				const Node *node = nullptr;
+				for (const auto &entry : document.Nodes)
+					if (same(entry.Id, identity.NodeId)) {
+						node = &entry;
+						break;
+					}
+				if (!node) return fail(Status::UnknownNode, "source key capture axis node is absent");
+				if (!node->InstanceBase.empty()) {
+					bool captured = false;
+					if (document.SourceAnimators)
+						for (const auto &binding : document.SourceAnimators->Bindings)
+							if (same(binding.NodeId, identity.NodeId) && same(binding.Port, identity.Port)) {
+								captured = true;
+								break;
+							}
+					if (!captured)
+						return fail(Status::InvalidValue, "source axis alias requires captured bindings");
+				}
+				const auto axes = ReadKeyAxes(document, *node, identity.Port, bound, work);
+				if (axes.Code != Status::Ok) return fail(axes.Code, axes.Message);
+				alias = !same(axes.Owner->Id, identity.NodeId) || !same(axes.Port, identity.Port);
+				for (const auto &key : axes.Axes->Axes[size_t(identity.Axis)].Keys) {
+					AdmitKeyWork(work, 1);
+					if (GetFrameTime(key) == identity.Time) {
+						found = &key;
+						break;
+					}
+				}
+			}
+			if (!found) return fail(Status::InvalidValue, "selected source key no longer exists");
+			if (!detail::SourceAnimatorKey(cloneBytes, *found, true, cloneKeys) ||
+				!detail::SourceAnimatorAdd(cloneBytes, 2 * (identity.NodeId.size() + identity.Port.size())))
+				return fail(Status::LimitExceeded, "source key capture clones exceed bounds");
+			pins.push_back({found, alias});
+		}
+		// grug reserve clone and logical-name replacement overlap before copying any key payload.
+		if (cloneBytes > UINT64_MAX / 2)
+			return fail(Status::LimitExceeded, "source key capture clone overlap overflows");
+		auto clones = budget.Reserve(2 * cloneBytes);
+		if (!clones) return fail(Status::LimitExceeded, "source key capture clone overlap exceeds bounds");
+		std::vector<Keyframe> candidate;
+		candidate.reserve(selection.size());
+		if (candidate.capacity() > UINT64_MAX / sizeof(Keyframe) ||
+			uint64_t(candidate.capacity() - selection.size()) * sizeof(Keyframe) > budget.Available())
+			return fail(Status::LimitExceeded, "source key capture spare slots exceed bounds");
+		for (size_t index = 0; index < selection.size(); ++index) {
+			candidate.push_back(*pins[index].Key);
+			candidate.back().NodeId = selection[index].NodeId;
+			candidate.back().Port = selection[index].Port;
+			if (pins[index].Alias) candidate.back().SourceKeyId.clear();
+		}
+		result = std::move(candidate);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const KeyEditWorkExceeded &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "source key capture comparison work exceeds bounds"};
+		return diagnostic.Code;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "source key capture allocation exceeds bounds"};
+		return diagnostic.Code;
+	}
+
 	Status ApplySourceKeyframeEdits(
 		const Document &document,
 		std::span<const SourceKeyframeEdit> edits,
@@ -105,50 +331,10 @@ namespace engine::imagegraph {
 			admit(*aBytes + *bBytes);
 			return KeyPayload(a) == KeyPayload(b);
 		};
-		uint64_t axisLookupRecords = 0, axisNameBytes = 0;
-		if (std::any_of(edits.begin(), edits.end(), [](const auto &edit) { return edit.Axis >= 0; })) {
-			axisLookupRecords = document.Nodes.size() + document.Tracks.size();
-			const auto name = [&](std::string_view text) {
-				admit(1);
-				axisNameBytes = std::max(axisNameBytes, uint64_t(text.size()));
-			};
-			for (const auto &node : document.Nodes) {
-				name(node.Id);
-				axisLookupRecords += node.SourceAnimatedInputs.size();
-				for (const auto &port : node.SourceAnimatedInputs)
-					name(port);
-				if (node.SourceSeparatedVec2Animators) {
-					axisLookupRecords += 2 * node.SourceSeparatedVec2Animators->Inputs.size();
-					for (const auto &axes : node.SourceSeparatedVec2Animators->Inputs)
-						name(axes.Port);
-				}
-			}
-			for (const auto &track : document.Tracks) {
-				name(track.NodeId);
-				name(track.Port);
-			}
-			if (document.SourceAnimators) {
-				const auto &state = *document.SourceAnimators;
-				axisLookupRecords +=
-					state.Bindings.size() + 2 * state.DetachedValues.size() + state.Detached.size();
-				for (const auto &binding : state.Bindings) {
-					name(binding.NodeId);
-					name(binding.OwnerId);
-					name(binding.Port);
-					name(binding.AnimatorPort);
-					name(binding.Axes.OwnerId);
-					name(binding.Axes.Port);
-				}
-				for (const auto &overlay : state.DetachedValues) {
-					name(overlay.NodeId);
-					name(overlay.Port);
-				}
-				for (const auto &retired : state.Detached) {
-					name(retired.OwnerId);
-					name(retired.Id);
-				}
-			}
-		}
+		const auto axisBound =
+			std::any_of(edits.begin(), edits.end(), [](const auto &edit) { return edit.Axis >= 0; })
+				? BoundAxisLookup(document, work)
+				: AxisLookupBound{};
 		detail::EvaluationVector<WriterEdit> writers{detail::EvaluationAllocator<WriterEdit>(budget)};
 		detail::EvaluationVector<ResolvedEdit> resolved{detail::EvaluationAllocator<ResolvedEdit>(budget)};
 		for (const auto &edit : edits) {
@@ -172,32 +358,7 @@ namespace engine::imagegraph {
 					if (!captured)
 						return fail(Status::InvalidValue, "source axis alias requires captured bindings");
 				}
-				// grug charge name comparisons before the resolver's separate row-visit ledger.
-				const uint64_t lookupNameBytes =
-					2 *
-					(1 + std::max(
-							 {axisNameBytes, uint64_t(original.NodeId.size()), uint64_t(original.Port.size())}
-						 ));
-				if (axisLookupRecords > (64'000'000 - work) / lookupNameBytes) throw KeyEditWorkExceeded{};
-				admit(axisLookupRecords * lookupNameBytes);
-				uint64_t lookupVisits = 0;
-				const auto view = detail::ResolveLocalSourceAxes(
-					document,
-					*selected,
-					original.Port,
-					bindings,
-					document.SourceAnimators
-						? std::span<const GroupSubtypeOverlay>{document.SourceAnimators->DetachedValues}
-						: std::span<const GroupSubtypeOverlay>{},
-					document.SourceAnimators
-						? std::span<const DetachedSourceAnimator>{document.SourceAnimators->Detached}
-						: std::span<const DetachedSourceAnimator>{},
-					{},
-					{},
-					false,
-					lookupVisits,
-					false
-				);
+				const auto view = ReadKeyAxes(document, *selected, original.Port, axisBound, work);
 				if (view.Code != Status::Ok) return fail(view.Code, view.Message);
 				owner = view.Owner->Id;
 				port = view.Port;

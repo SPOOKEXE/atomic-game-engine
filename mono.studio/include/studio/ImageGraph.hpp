@@ -401,10 +401,11 @@ namespace studio {
 	struct ImageGraphKeyframeIdentity {
 		std::string NodeId, Port;
 		engine::imagegraph::FrameTime Time;
+		int8_t Axis = -1;
 		bool operator==(const ImageGraphKeyframeIdentity &) const = default;
 	};
 
-	// Captures bounded key payloads by durable property and exact authored time.
+	// Captures bounded key payloads by durable property, combined/X/Y selector and exact authored time.
 	bool CaptureImageGraphKeyframes(
 		const engine::imagegraph::Document &document,
 		std::span<const ImageGraphKeyframeIdentity> selection,
@@ -415,6 +416,7 @@ namespace studio {
 
 	// Moves pinned originals, or pastes driverless clones, with source nonnegative collision policy.
 	// A move refuses changed originals; the clipboard is an independent bounded snapshot.
+	// Optional axis selectors match pins by index; an empty span selects combined keys.
 	bool TransferImageGraphKeyframes(
 		engine::imagegraph::Document &document,
 		std::span<const engine::imagegraph::Keyframe> originals,
@@ -422,7 +424,8 @@ namespace studio {
 		const engine::imagegraph::FrameTime &newAnchor,
 		bool copy,
 		engine::imagegraph::Diagnostic &error,
-		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes
+		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
+		std::span<const int8_t> axes = {}
 	);
 
 	// Applies exact per-key destination clocks with the same collision and pinned-original policy.
@@ -435,7 +438,8 @@ namespace studio {
 		bool copy,
 		engine::imagegraph::Diagnostic &error,
 		uint64_t availableBytes = engine::imagegraph::Limits::MaximumEvaluationBytes,
-		bool clampZero = true
+		bool clampZero = true,
+		std::span<const int8_t> axes = {}
 	);
 
 	// Targeted source paste maps one property directly, or multiple properties by source display name.

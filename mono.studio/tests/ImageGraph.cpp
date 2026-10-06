@@ -1,3 +1,4 @@
+#include "../src/ImageGraphDocumentEdit.hpp"
 #include "../src/ImageGraphPreview.hpp"
 #include "../src/ImageGraphSourceTimelineTransition.hpp"
 #include "../src/KeyframeKindEditor.hpp"
@@ -3048,4 +3049,131 @@ TEST_CASE(
 	document = after;
 	REQUIRE(history.Undo(document));
 	CHECK(document == before);
+}
+
+TEST_CASE(
+	"Scalar key capture and retiming preserve mixed socket selectors", "[studio][imagegraph][timeline_keys]"
+) {
+	using namespace engine::imagegraph;
+	for (bool shared : {false, true}) {
+		Document document;
+		document.FormatVersion = shared ? 10 : 9;
+		document.Nodes = {{"owner", "pc.mirror_polar", {}, {}, {{"center", Vector2{.2, .3}}}}};
+		document.Outputs = {{"result", "owner", "surface_out"}};
+		document.Nodes.front().SourceAnimatedInputs = {"center"};
+		SourceSeparatedVec2Animator input;
+		input.Port = "center";
+		input.Separated = false;
+		for (size_t axis = 0; axis < 2; ++axis) {
+			Keyframe key{"owner", "center", 1, double(axis + 1), "source", KeyframeEase{}};
+			key.SourceKeyId = axis ? "y-key" : "x-key";
+			key.SourceDriver = KeyframeLinearDriver{.25};
+			REQUIRE(SetFrameTime(key, {1, .5, true}));
+			input.Axes[axis].Keys.push_back(key);
+		}
+		document.Nodes.front().SourceSeparatedVec2Animators.emplace().Inputs = {input};
+		Keyframe combined{"owner", "center", 1, Vector2{.2, .3}, "source", KeyframeEase{}};
+		REQUIRE(SetFrameTime(combined, {1, .5, true}));
+		document.Keyframes = {combined};
+		document.Tracks = {{"owner", "center", "hold", -1}};
+		if (shared) {
+			auto alias = document.Nodes.front();
+			alias.Id = "alias";
+			alias.InstanceBase = "owner";
+			for (auto &axis : alias.SourceSeparatedVec2Animators->Inputs.front().Axes)
+				for (auto &key : axis.Keys) {
+					key.NodeId = alias.Id;
+					key.SourceKeyId.clear();
+				}
+			document.Nodes.push_back(alias);
+			combined.NodeId = alias.Id;
+			document.Keyframes.push_back(combined);
+			document.Tracks.push_back({alias.Id, "center", "hold", -1});
+			document.SourceAnimators.emplace();
+			GroupSubtypeBinding binding{
+				alias.Id, "owner", GroupSubtypeAnimator::Animated, GroupSubtypeAnimator::Animated, "center"
+			};
+			binding.Axes = {
+				GroupAxisStorage::Shared, "owner", "center", "owner", GroupSubtypeAnimator::Animated
+			};
+			document.SourceAnimators->Bindings = {binding};
+		}
+		const std::string node = shared ? "alias" : "owner";
+		const std::array selection{
+			studio::ImageGraphKeyframeIdentity{node, "center", {1, .5, true}, 0},
+			studio::ImageGraphKeyframeIdentity{node, "center", {1, .5, true}, 1},
+			studio::ImageGraphKeyframeIdentity{node, "center", {1, .5, true}}
+		};
+		std::vector<Keyframe> captured;
+		Diagnostic error;
+		const bool captureOk = studio::CaptureImageGraphKeyframes(document, selection, captured, error);
+		INFO(error.Message);
+		REQUIRE(captureOk);
+		REQUIRE(captured.size() == 3);
+		CHECK(captured[0].Data == Value{1.0});
+		CHECK(captured[1].Data == Value{2.0});
+		CHECK(captured[2].Data == Value{Vector2{.2, .3}});
+		const std::array<int8_t, 3> axes{0, 1, -1};
+		const std::array<FrameTime, 3> destinations{{{2, .25, true}, {3, .75, false}, {4, .5, false}}};
+		studio::ImageGraphHistory history;
+		const auto before = document;
+		REQUIRE(studio::ApplyImageGraphDocumentEdit(document, history, [&](Document &candidate) {
+			return studio::RetimeImageGraphKeyframes(
+				candidate, captured, destinations, false, error, Limits::MaximumEvaluationBytes, false, axes
+			);
+		}));
+		const auto &movedAxes = document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front();
+		CHECK(GetFrameTime(movedAxes.Axes[0].Keys.front()) == destinations[0]);
+		CHECK(GetFrameTime(movedAxes.Axes[1].Keys.front()) == destinations[1]);
+		CHECK(movedAxes.Axes[0].Keys.front().SourceKeyId == "x-key");
+		CHECK(GetFrameTime(document.Keyframes.front()) == destinations[2]);
+		const auto accepted = document;
+		REQUIRE(history.Undo(document));
+		CHECK(document == before);
+		REQUIRE(history.Redo(document));
+		CHECK(document == accepted);
+		CHECK_FALSE(
+			studio::RetimeImageGraphKeyframes(
+				document,
+				captured,
+				destinations,
+				false,
+				error,
+				Limits::MaximumEvaluationBytes,
+				false,
+				std::span{axes.data(), size_t{2}}
+			)
+		);
+		CHECK(document == accepted);
+		CHECK_FALSE(
+			studio::RetimeImageGraphKeyframes(
+				document, captured, destinations, false, error, Limits::MaximumEvaluationBytes, false, axes
+			)
+		);
+		CHECK(document == accepted);
+		document = before;
+		REQUIRE(
+			studio::TransferImageGraphKeyframes(
+				document,
+				captured,
+				{1, .5, true},
+				{5, .25, false},
+				true,
+				error,
+				Limits::MaximumEvaluationBytes,
+				axes
+			)
+		);
+		for (const auto &axis : document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes) {
+			REQUIRE(axis.Keys.size() == 2);
+			const auto copy = std::find_if(axis.Keys.begin(), axis.Keys.end(), [](const auto &key) {
+				return GetFrameTime(key) == FrameTime{5, .25, false};
+			});
+			REQUIRE(copy != axis.Keys.end());
+			CHECK(copy->SourceKeyId.empty());
+			CHECK_FALSE(copy->SourceDriver);
+		}
+		Plan plan;
+		REQUIRE(Compile(document, plan, error) == Status::Ok);
+	}
 }

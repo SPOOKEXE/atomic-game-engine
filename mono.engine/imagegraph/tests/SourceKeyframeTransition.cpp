@@ -462,6 +462,145 @@ TEST_CASE(
 	Valid(result);
 }
 
+TEST_CASE(
+	"Keyframe capture preserves requested order and resolves canonical shared axes",
+	"[imagegraph][source_keys]"
+) {
+	const auto document = SharedAxes();
+	const SourceKeyframeIdentity requested[] = {
+		{"alias", "center", {5}, -1}, {"alias", "center", {5}, 0}, {"owner", "center", {0}, 1}
+	};
+	std::vector<Keyframe> captured;
+	Diagnostic diagnostic;
+	REQUIRE(CaptureSourceKeyframes(document, requested, captured, diagnostic) == Status::Ok);
+	REQUIRE(captured.size() == 3);
+	CHECK(captured[0].Data == Value{Vector2{.7, .8}});
+	CHECK(captured[0].NodeId == "alias");
+	CHECK(captured[0].SourceKeyId.empty());
+	CHECK(captured[1].Data == Value{double{.75}});
+	CHECK(captured[1].SourceKeyId.empty());
+	CHECK(captured[2].Data == Value{double{2}});
+	CHECK(captured[2].SourceKeyId == "y0");
+
+	auto projectionMissing = document;
+	projectionMissing.Nodes[1].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.clear();
+	REQUIRE(
+		CaptureSourceKeyframes(
+			projectionMissing, std::span{requested + 1, size_t{1}}, captured, diagnostic
+		) == Status::Ok
+	);
+	REQUIRE(captured.size() == 1);
+	CHECK(captured.front().Data == Value{double{.75}});
+	CHECK(captured.front().NodeId == "alias");
+	CHECK(captured.front().SourceKeyId.empty());
+
+	auto local = document;
+	auto &localAxes = local.Nodes[1].SourceSeparatedVec2Animators->Inputs.front();
+	localAxes.Axes[0].Keys[0].Data = .45;
+	localAxes.Axes[0].Keys[0].SourceKeyId = "local-x0";
+	local.SourceAnimators->Bindings.front().Axes = {
+		GroupAxisStorage::Local, "alias", "center", "owner", GroupSubtypeAnimator::Animated
+	};
+	const SourceKeyframeIdentity localRequest{"alias", "center", {0}, 0};
+	REQUIRE(CaptureSourceKeyframes(local, {&localRequest, 1}, captured, diagnostic) == Status::Ok);
+	REQUIRE(captured.size() == 1);
+	CHECK(captured.front().Data == Value{double{.45}});
+	CHECK(captured.front().SourceKeyId == "local-x0");
+}
+
+TEST_CASE(
+	"Keyframe capture refuses cold, duplicate and invalid requests without replacing output",
+	"[imagegraph][source_keys]"
+) {
+	const auto warm = SharedAxes();
+	const SourceKeyframeIdentity valid{"alias", "center", {0}, 0};
+	std::vector<Keyframe> captured{Keyframe{"sentinel", "port", 7, .125, "step", std::nullopt}};
+	const auto prior = captured;
+	Diagnostic diagnostic;
+	const SourceKeyframeIdentity duplicate[] = {valid, valid};
+	CHECK(CaptureSourceKeyframes(warm, duplicate, captured, diagnostic) == Status::InvalidValue);
+	CHECK(captured == prior);
+	const SourceKeyframeIdentity invalidAxis{"alias", "center", {0}, 2};
+	CHECK(CaptureSourceKeyframes(warm, {&invalidAxis, 1}, captured, diagnostic) == Status::InvalidValue);
+	CHECK(captured == prior);
+	const SourceKeyframeIdentity missing{"alias", "center", {99}, 0};
+	CHECK(CaptureSourceKeyframes(warm, {&missing, 1}, captured, diagnostic) == Status::InvalidValue);
+	CHECK(captured == prior);
+	CHECK(CaptureSourceKeyframes(warm, {&valid, 1}, captured, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(captured == prior);
+
+	auto cold = warm;
+	auto &input = cold.Nodes[1].SourceSeparatedVec2Animators->Inputs.front();
+	input.Initialized = false;
+	for (auto &axis : input.Axes)
+		axis.Keys.clear();
+	cold.SourceAnimators->Bindings.front().Axes = {
+		GroupAxisStorage::Uninitialized, "alias", "center", "owner", GroupSubtypeAnimator::Animated
+	};
+	CHECK(
+		CaptureSourceKeyframes(cold, {&valid, 1}, captured, diagnostic) ==
+		Status::SourceAxisInitializationRequired
+	);
+	CHECK(captured == prior);
+	// grug validate uncaptured arrays too; malformed scalar payloads cannot become trusted pins.
+	auto uncaptured = warm;
+	uncaptured.SourceAnimators = {};
+	uncaptured.Nodes.resize(1);
+	std::erase_if(uncaptured.Keyframes, [](const auto &key) { return key.NodeId != "owner"; });
+	std::erase_if(uncaptured.Tracks, [](const auto &track) { return track.NodeId != "owner"; });
+	const SourceKeyframeIdentity owner{"owner", "center", {0}, 0};
+	auto &malformed =
+		uncaptured.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.front();
+	malformed.Data = std::string{"not scalar"};
+	CHECK(CaptureSourceKeyframes(uncaptured, {&owner, 1}, captured, diagnostic) != Status::Ok);
+	CHECK(captured == prior);
+	malformed.Data = .25;
+	malformed.Subframe = 2;
+	CHECK(CaptureSourceKeyframes(uncaptured, {&owner, 1}, captured, diagnostic) != Status::Ok);
+	CHECK(captured == prior);
+}
+
+TEST_CASE("Keyframe capture follows retired scalar axis ownership", "[imagegraph][source_keys]") {
+	auto document = SharedAxes();
+	auto retiredAxes = document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front();
+	retiredAxes.Port = "native:animator:0";
+	for (auto &axis : retiredAxes.Axes)
+		for (auto &key : axis.Keys)
+			key.Port = retiredAxes.Port;
+	DetachedSourceAnimator metadata;
+	metadata.Id = "native:animator:0";
+	metadata.OwnerId = "owner";
+	metadata.OriginalPort = "center";
+	metadata.Writer = GroupSubtypeAnimator::Animated;
+	metadata.Type = ValueType::Vector2;
+	metadata.Track = AnimationTrack{"owner", metadata.Id, "hold", -1};
+	GroupSubtypeOverlay overlay;
+	overlay.NodeId = "owner";
+	overlay.Port = metadata.Id;
+	overlay.Fixed = Vector2{.1, .2};
+	overlay.SeparatedVec2.emplace() = retiredAxes;
+	document.SourceAnimators->Detached.push_back(metadata);
+	document.SourceAnimators->DetachedValues.push_back(overlay);
+	for (auto &binding : document.SourceAnimators->Bindings)
+		binding.Axes.Port = metadata.Id;
+	auto &currentAxes = document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front();
+	for (auto &axis : currentAxes.Axes)
+		for (auto &key : axis.Keys) {
+			key.Data = std::get<double>(key.Data) + 20;
+			key.SourceKeyId.clear();
+		}
+	Valid(document);
+	const SourceKeyframeIdentity identity{"alias", "center", {0}, 0};
+	std::vector<Keyframe> captured;
+	Diagnostic diagnostic;
+	REQUIRE(CaptureSourceKeyframes(document, {&identity, 1}, captured, diagnostic) == Status::Ok);
+	REQUIRE(captured.size() == 1);
+	CHECK(captured.front().Data == Value{double{.25}});
+	CHECK(captured.front().NodeId == "alias");
+	CHECK(captured.front().Port == "center");
+	CHECK(captured.front().SourceKeyId.empty());
+}
+
 TEST_CASE("Axis alias selections deduplicate and preserve results on conflict", "[imagegraph][source_keys]") {
 	const auto document = SharedAxes();
 	const auto a = AxisKey(document, "alias", 0, {}), b = AxisKey(document, "sibling", 0, {});
@@ -515,6 +654,7 @@ TEST_CASE("Axis resolver charges long names across repeated edits", "[imagegraph
 				key.NodeId = node.Id;
 		document.Nodes.push_back(std::move(node));
 	}
+	document.Outputs = {{"result", document.Nodes.front().Id, "surface_out"}};
 	const auto original =
 		document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.front();
 	auto moved = original;
@@ -528,4 +668,13 @@ TEST_CASE("Axis resolver charges long names across repeated edits", "[imagegraph
 	CHECK(ApplySourceKeyframeEdits(document, edits, result, error) == Status::LimitExceeded);
 	CHECK(error.Message == "source key edit comparison work exceeds bounds");
 	CHECK(result == before);
+	std::vector<SourceKeyframeIdentity> selected;
+	for (size_t index = 0; index < 16; ++index)
+		selected.push_back({document.Nodes[index].Id, "center", {0}, 0});
+	std::vector<Keyframe> snapshot{original};
+	const auto priorSnapshot = snapshot;
+	const auto captureStatus = CaptureSourceKeyframes(document, selected, snapshot, error);
+	INFO(error.Message);
+	CHECK(captureStatus == Status::LimitExceeded);
+	CHECK(snapshot == priorSnapshot);
 }

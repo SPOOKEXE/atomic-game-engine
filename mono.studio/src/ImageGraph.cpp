@@ -2292,6 +2292,27 @@ namespace studio {
 		if (selection.empty() || selection.size() > Limits::MaximumKeyframes ||
 			document.Keyframes.size() > Limits::MaximumKeyframes)
 			return fail(Status::LimitExceeded, "key selection is empty or exceeds the limit");
+		if (std::any_of(selection.begin(), selection.end(), [](const auto &id) { return id.Axis != -1; })) {
+			const uint64_t scratch =
+				selection.size() * (sizeof(SourceKeyframeIdentity) + sizeof(ImageGraphKeyframeIdentity));
+			if (scratch > availableBytes)
+				return fail(Status::LimitExceeded, "axis key capture identities exceed the payload budget");
+			try {
+				std::vector<SourceKeyframeIdentity> identities;
+				identities.reserve(selection.size());
+				for (const auto &id : selection)
+					identities.push_back({id.NodeId, id.Port, id.Time, id.Axis});
+				return CaptureSourceKeyframes(
+						   document,
+						   identities,
+						   result,
+						   error,
+						   std::min(availableBytes - scratch, Limits::MaximumEvaluationBytes)
+					   ) == Status::Ok;
+			} catch (const std::bad_alloc &) {
+				return fail(Status::LimitExceeded, "axis key capture identity allocation failed");
+			}
+		}
 		uint64_t remaining = std::min(availableBytes, Limits::MaximumEvaluationBytes);
 		for (const auto &key : result) {
 			const auto bytes = KeyframePayloadBytes(key);
@@ -2338,7 +2359,8 @@ namespace studio {
 		const engine::imagegraph::FrameTime &newAnchor,
 		bool copy,
 		engine::imagegraph::Diagnostic &error,
-		uint64_t availableBytes
+		uint64_t availableBytes,
+		std::span<const int8_t> axes
 	) {
 		using namespace engine::imagegraph;
 		if (!ValidFrameTime(oldAnchor) || !ValidFrameTime(newAnchor) ||
@@ -2371,7 +2393,9 @@ namespace studio {
 			destinations,
 			copy,
 			error,
-			availableBytes - destinations.size() * sizeof(FrameTime)
+			availableBytes - destinations.size() * sizeof(FrameTime),
+			true,
+			axes
 		);
 	}
 
@@ -2382,7 +2406,8 @@ namespace studio {
 		bool copy,
 		engine::imagegraph::Diagnostic &error,
 		uint64_t availableBytes,
-		bool clampZero
+		bool clampZero,
+		std::span<const int8_t> axes
 	) {
 		using namespace engine::imagegraph;
 		error = {};
@@ -2391,7 +2416,8 @@ namespace studio {
 			return false;
 		};
 		if (originals.empty() || originals.size() > Limits::MaximumKeyframes ||
-			document.Keyframes.size() > Limits::MaximumKeyframes || destinations.size() != originals.size())
+			document.Keyframes.size() > Limits::MaximumKeyframes || destinations.size() != originals.size() ||
+			(!axes.empty() && axes.size() != originals.size()))
 			return fail(Status::InvalidValue, "key transfer has an invalid count or authored frame");
 		uint64_t remaining = std::min(availableBytes, Limits::MaximumEvaluationBytes);
 		for (const auto &key : document.Keyframes) {
@@ -2400,7 +2426,8 @@ namespace studio {
 				return fail(Status::LimitExceeded, "key transfer exceeds the payload budget");
 			remaining -= *bytes;
 		}
-		if (document.SourceAnimators) {
+		if (document.SourceAnimators ||
+			std::any_of(axes.begin(), axes.end(), [](int8_t axis) { return axis != -1; })) {
 			for (size_t index = 0; index < originals.size(); ++index) {
 				const auto bytes = KeyframePayloadBytes(originals[index]);
 				if (!bytes || *bytes > remaining)
@@ -2422,7 +2449,9 @@ namespace studio {
 					replacements.back(),
 					clampZero && destinations[index].NegativeFrame ? FrameTime{} : destinations[index]
 				);
-				edits.push_back({&originals[index], &replacements.back(), copy});
+				edits.push_back(
+					{&originals[index], &replacements.back(), copy, axes.empty() ? int8_t{-1} : axes[index]}
+				);
 			}
 			Document candidate;
 			if (ApplySourceKeyframeEdits(document, edits, candidate, error, remaining - scratch) !=
