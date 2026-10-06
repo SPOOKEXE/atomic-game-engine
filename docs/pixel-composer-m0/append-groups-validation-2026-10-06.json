@@ -1,0 +1,328 @@
+{
+  "phase": "studio source append Group runtime candidate",
+  "date": "2026-10-06",
+  "scope": [
+    "grug bootstrap only incoming Group boundaries in source declaration order at caller signed fractional clock",
+    "grug preserve prepared destination capture, detached writer bindings and axis generations",
+    "grug restore live destination nodes, Groups, junctions, links, keys and tracks into private candidates",
+    "grug bind merged project after load callbacks, then project native capture identities",
+    "grug publish candidate only after every preparation accepts; caller owns source/cache/history publication"
+  ],
+  "contract": {
+    "input": "checked PxcxAppendResult from source archive already projected with unsaved destination edits; prepared destination Group host",
+    "maximum_bytes": "logical payload cap; caller excludes source archives and import metadata; helper charges documents, replay, copies, binding scratch and compiler overlap",
+    "opaque_callbacks": "whole callback document must compile; unrelated opaque nodes still refuse atomically"
+  },
+  "owned_files": {
+    "mono.studio/src/ImageGraphAppendGroups.hpp": "64588c01064860b4007c635f18b55833e829042d010b74e481adfce3c1019d1e",
+    "mono.studio/tests/ImageGraphAppendGroups.cpp": "2c783ad00f6edcd3624608352ab75d21a25183521e262779ac7e49577923b8ed"
+  },
+  "checks": {
+    "build": "joined 17 targets, release-tests, j6, keep going; build3 passed",
+    "batch": "20/20 passed",
+    "cpp_cases": 5177,
+    "cpp_assertions": 2003114,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "startup_cases": 1,
+    "startup_assertions": 5,
+    "gpu": "approved offscreen Vulkan suite runs; studio, client and render serialized",
+    "source_hashes_unchanged": 91,
+    "peer_files_unchanged": 43,
+    "test_binary_hashes_unchanged": 13,
+    "child_binary_hashes_unchanged": 2,
+    "standalone_performance_profile": "not run for this helper; ENGINE_PROFILE scope added"
+  },
+  "failures_and_repairs": [
+    {
+      "stage": "build1",
+      "error": "OwnedPayload3D SourceAnimators has no reset member",
+      "repair": "clear by supported empty assignment",
+      "result": "build2 passed"
+    },
+    {
+      "stage": "batch1",
+      "error": "new detached-writer fixture failed in automatic GroupHost::Prepare before append",
+      "repair": "prepare Group-only boundary, then expand and establish explicit core bindings before real input move",
+      "result": "batch2 passed; automatic Lua alias preparation cause remains unresolved"
+    }
+  ],
+  "open": [
+    "grug wire full source append action and source/cache/history/canvas transaction into Studio",
+    "grug apply source root metadata lifecycle",
+    "grug add compiler-owned opaque-tolerant callback closure",
+    "grug investigate automatic Lua alias host preparation separately with captured diagnostic",
+    "headed Studio workflow and licensed reference parity remain unverified"
+  ],
+  "artifacts": {
+    "root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "build_logs": [
+      "append-groups-build1.log",
+      "append-groups-build2.log",
+      "append-groups-build3.log"
+    ],
+    "results": [
+      "append-groups-batch1-results.json",
+      "append-groups-batch2-results.json"
+    ],
+    "issues": [
+      "append-groups-issues-build1.json",
+      "append-groups-issues-batch1.json"
+    ],
+    "integrity": [
+      "append-groups-source-before-build3.json",
+      "append-groups-source-before-build3-after-batch2.json",
+      "append-groups-peer-before.json",
+      "append-groups-peer-before-after-batch2.json",
+      "append-groups-child-hashes-batch2.json"
+    ]
+  },
+  "commands": {
+    "bake": [
+      ".cache/build/release-tests/tests/test_bake"
+    ],
+    "physics": [
+      ".cache/build/release-tests/tests/test_imagegraphphysics"
+    ],
+    "runner": [
+      ".cache/build/release-tests/tests/test_imagegraph_runner"
+    ],
+    "font": [
+      ".cache/build/release-tests/tests/test_imagegraphfont"
+    ],
+    "export": [
+      ".cache/build/release-tests/tests/test_imagegraphexport"
+    ],
+    "render": [
+      ".cache/build/release-tests/tests/test_render",
+      "[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
+    ],
+    "cli": [
+      "ctest",
+      "--test-dir",
+      ".cache/build/release-tests",
+      "-R",
+      "^(imagegraph_cli_|assetc_cli_)",
+      "--output-on-failure",
+      "-j8"
+    ],
+    "io": [
+      ".cache/build/release-tests/tests/test_imagegraphio"
+    ],
+    "core": [
+      ".cache/build/release-tests/tests/test_imagegraph"
+    ],
+    "assetc": [
+      ".cache/build/release-tests/tests/test_assetc"
+    ],
+    "client": [
+      ".cache/build/release-tests/tests/test_client",
+      "~[.],[argument_binding][gpu],[argument-transform-gpu]"
+    ],
+    "studio": [
+      ".cache/build/release-tests/tests/test_studio"
+    ],
+    "nodegraph": [
+      ".cache/build/release-tests/tests/test_nodegraph"
+    ],
+    "ui": [
+      ".cache/build/release-tests/tests/test_ui"
+    ],
+    "startup": [
+      "ctest",
+      "--test-dir",
+      ".cache/build/release-tests",
+      "-R",
+      "^studio_composer_startup_arguments$",
+      "-V"
+    ],
+    "lint": [
+      "ruff",
+      "check",
+      "scripts/pixel-composer/generate-catalogue.py",
+      "scripts/tests/pixel_composer_catalogue_metadata_test.py"
+    ],
+    "architecture": [
+      "cmake",
+      "-DGRAPH=.cache/build/release-tests/target-graph.json",
+      "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+      "-P",
+      "mono.tools/architecture/CheckTargetGraph.cmake"
+    ],
+    "python": [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts/tests",
+      "-p",
+      "pixel_composer_*_test.py"
+    ],
+    "format": [
+      "/usr/bin/clang-format-21",
+      "--dry-run",
+      "--Werror",
+      "mono.studio/src/ImageGraphCacheBackground.hpp",
+      "mono.studio/src/ImageGraphCacheBackground.cpp",
+      "mono.studio/tests/ImageGraphCacheBackground.cpp",
+      "mono.studio/src/ImageGraphCacheControls.hpp",
+      "mono.studio/tests/ImageGraphCacheControls.cpp",
+      "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+      "mono.studio/nodegraph/src/Editor.cpp",
+      "mono.studio/nodegraph/tests/Editor.cpp",
+      "mono.studio/include/studio/ImageGraph.hpp",
+      "mono.studio/src/ImageGraph.cpp",
+      "mono.studio/tests/ImageGraph.cpp",
+      "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+      "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+      "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+      "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+      "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+      "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+      "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+      "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+      "mono.studio/src/ImageComposer.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+      "mono.engine/imagegraph/src/DataReplay.cpp",
+      "mono.engine/imagegraph/src/Document.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+      "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+      "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+      "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+      "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+      "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+      "mono.engine/imagegraph/src/NodeExecutors.hpp",
+      "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+      "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+      "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+      "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+      "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+      "mono.engine/imagegraph/tests/DataReplay.cpp",
+      "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+      "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+      "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+      "mono.engine/ui/src/Interface.cpp",
+      "mono.engine/ui/tests/Interface.cpp",
+      "mono.engine/ui/include/engine/ui/Interface.hpp",
+      "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+      "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+      "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+      "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+      "mono.engine/imagegraph/src/nodes/Path.hpp",
+      "mono.engine/imagegraph/tests/Catalogue.cpp",
+      "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+      "mono.engine/imagegraph/src/PendingGraph.hpp",
+      "mono.engine/imagegraph/src/PendingGraph.cpp",
+      "mono.engine/imagegraph/tests/PendingGraph.cpp",
+      "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+      "mono.studio/tests/ImageGraphPatternGroups.cpp",
+      "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+      "mono.engine/imagegraph/src/SourceModeTransition.cpp",
+      "mono.engine/imagegraph/src/GroupReplay.cpp",
+      "mono.engine/imagegraph/src/BuiltinRandomCaptureCodec.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/BuiltinRandomCaptureCodec.hpp",
+      "mono.engine/imagegraph/tests/BuiltinRandomCaptureCodec.cpp",
+      "mono.engine/imagegraph/tests/SourceSeparatedVec2.cpp",
+      "mono.engine/imagegraph/tests/SourceMirrorPathProjection.cpp",
+      "mono.engine/imagegraphio/src/PxcxImport.cpp",
+      "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+      "mono.engine/imagegraphio/tests/PxcxMirrorPathRatio.cpp",
+      "mono.engine/imagegraph/src/SourceSeparatedVec2.hpp",
+      "mono.engine/imagegraph/src/SourceSeparatedVec2.cpp",
+      "mono.engine/imagegraph/src/SourceAnimatorIdentity.hpp",
+      "mono.engine/imagegraph/src/SourceMirrorAnimator.hpp",
+      "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+      "mono.engine/imagegraph/src/SourceGetterProjection.cpp",
+      "mono.engine/imagegraph/tests/SourceGetterProjection.cpp",
+      "mono.engine/imagegraph/src/SourceInputSelection.hpp",
+      "mono.engine/imagegraph/src/SourceInputEvaluation.hpp",
+      "mono.engine/imagegraph/src/PcxControls.cpp",
+      "mono.engine/imagegraph/tests/SourceInputEvaluation.cpp",
+      "mono.engine/imagegraph/tests/SourceInputMoves.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+      "mono.engine/imagegraph/src/PixelBuilderGroups.cpp",
+      "mono.engine/imagegraph/tests/GroupReplay.cpp",
+      "mono.engine/imagegraph/src/SourceAxisStorage.hpp",
+      "mono.engine/imagegraph/src/SourceVec2Defaults.hpp",
+      "mono.engine/imagegraph/src/SourceVec2Defaults.cpp",
+      "mono.engine/imagegraph/tests/SourceVec2Defaults.cpp",
+      "mono.engine/imagegraph/src/GroupClonePayload.cpp",
+      "mono.engine/imagegraph/src/SourceFont.cpp",
+      "mono.engine/imagegraph/src/SourceBuiltinRandom.cpp",
+      "mono.studio/src/SourceDynamicGroups.cpp",
+      "mono.studio/tests/ImageGraphSourceInputs.cpp",
+      "mono.engine/imagegraph/tests/SourceAxisInitialization.cpp",
+      "mono.engine/imagegraph/src/Catalogue.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp",
+      "mono.studio/src/ImageGraphGroupHost.hpp",
+      "mono.studio/tests/ImageGraphGroupHost.cpp",
+      "mono.engine/imagegraph/tests/SourceAxisReadRequests.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/SourceAxisTransition.hpp",
+      "mono.engine/imagegraph/src/SourceAxisTransition.cpp",
+      "mono.engine/imagegraph/tests/SourceAxisTransition.cpp",
+      "mono.studio/src/ImageGraphAxisControls.hpp",
+      "mono.studio/tests/ImageGraphAxisControls.cpp",
+      "mono.engine/imagegraph/src/GroupInstanceRecapture.cpp",
+      "mono.engine/imagegraph/src/SourceAnimatorPersistence.cpp",
+      "mono.engine/imagegraph/src/SourceAnimatorPersistence.hpp",
+      "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp",
+      "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp",
+      "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp",
+      "mono.studio/src/ImageGraph.cpp",
+      "mono.studio/src/TimelineDopesheet.hpp",
+      "mono.studio/tests/TimelineSourceAliases.cpp",
+      "mono.studio/src/ImageGraphCapturedKeyEdit.hpp",
+      "mono.studio/src/TimelineEaseEditor.hpp",
+      "mono.engine/imagegraph/include/engine/imagegraph/SourceTrackTransition.hpp",
+      "mono.engine/imagegraph/src/SourceTrackTransition.cpp",
+      "mono.engine/imagegraph/tests/SourceTrackTransition.cpp",
+      "mono.studio/src/TimelineKeyDelete.hpp",
+      "mono.studio/tests/TimelineKeyDelete.cpp",
+      "mono.studio/include/studio/ImageGraph.hpp",
+      "mono.studio/src/AnimationTrackPolicyEditor.hpp",
+      "mono.studio/src/ImageGraphSourceKeyEdit.hpp",
+      "mono.studio/src/ImageGraphKeyPinProjection.hpp",
+      "mono.studio/src/ImageComposer.cpp",
+      "mono.studio/src/KeyframeKindEditor.hpp",
+      "mono.studio/src/TimelineKeyEditor.hpp",
+      "mono.studio/tests/ImageGraphSourceKeyEdit.cpp",
+      "mono.studio/src/TimelineKeyActions.hpp",
+      "mono.studio/src/TimelineScalarKeys.hpp",
+      "mono.studio/tests/TimelineScalarKeys.cpp",
+      "mono.studio/tests/TimelineKeyEditor.cpp",
+      "mono.studio/tests/TimelineScalarDopesheet.cpp",
+      "mono.studio/tests/ComposerWorkflow.cpp",
+      "mono.studio/src/ImageGraphTimelineRead.hpp",
+      "mono.studio/tests/ImageGraphTimelineRead.cpp",
+      "mono.engine/imagegraph/src/GroupReplayInternal.hpp",
+      "mono.studio/tests/ImageGraph.cpp",
+      "mono.studio/tests/TimelineDopesheetActions.cpp",
+      "mono.studio/src/TimelineScalarKeyControls.hpp",
+      "mono.studio/src/KeyframeSourceDriverControls.hpp",
+      "mono.studio/tests/TimelineEaseEditor.cpp",
+      "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+      "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+      "mono.studio/src/ImageGraphFilePublish.hpp",
+      "mono.studio/tests/ImageGraphFilePublish.cpp",
+      "mono.studio/src/PxcxSave.cpp",
+      "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+      "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+      "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+      "mono.studio/tests/ImageGraphSourceHistory.cpp",
+      "mono.studio/src/ImageGraphHistorySource.hpp",
+      "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+      "mono.studio/src/ImageGraphAppendGroups.hpp",
+      "mono.studio/tests/ImageGraphAppendGroups.cpp"
+    ],
+    "diff": [
+      "git",
+      "diff",
+      "--check"
+    ]
+  }
+}
