@@ -157,3 +157,65 @@ TEST_CASE("Persisted Kisrhombille refusal preserves caller output", "[source_pat
 	CHECK(Evaluate(restored, plan, "out", {}, output, diagnostic) == Status::UnsupportedExecution);
 	CHECK(output == before);
 }
+
+TEST_CASE(
+	"Hilbert exact GPU coverage requests preserve the caller image on refusal", "[source_pattern_integration]"
+) {
+	const auto document = Generator("pc.hilbert");
+	Diagnostic diagnostic;
+	Document restored;
+	REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
+	Plan plan;
+	REQUIRE(Compile(restored, plan, diagnostic) == Status::Ok);
+	Image output = EvaluatePersisted(document);
+	const Image before = output;
+	EvaluationRequest request;
+	request.RequireSourceGpuRasterCoverage = true;
+	CHECK(Evaluate(restored, plan, "out", request, output, diagnostic) == Status::UnsupportedExecution);
+	CHECK(diagnostic.NodeId == "generator");
+	CHECK(output == before);
+	REQUIRE(Evaluate(restored, plan, "out", {}, output, diagnostic) == Status::Ok);
+	CHECK(output == before);
+}
+
+TEST_CASE(
+	"Generator row failures preserve a populated caller batch and permit recovery",
+	"[source_pattern_integration]"
+) {
+	for (const auto type : {"pc.hilbert", "pc.kisrhombille"}) {
+		DYNAMIC_SECTION(type) {
+			const auto scalar = Generator(type);
+			auto document = scalar;
+			ArrayValue rows;
+			const bool hilbert = std::string_view(type) == "pc.hilbert";
+			if (hilbert) {
+				rows.ElementType = ValueType::Integer;
+				rows.Elements = {int64_t{1}, int64_t{11}};
+			} else {
+				rows.ElementType = ValueType::Vector2;
+				rows.Elements = {Vector2{2, 2}, Vector2{0, 2}};
+			}
+			Set(document, hilbert ? "iteration" : "scale", std::move(rows));
+			Document restored;
+			Diagnostic diagnostic;
+			REQUIRE(Read(Write(document), restored, diagnostic) == Status::Ok);
+			Plan plan;
+			REQUIRE(Compile(restored, plan, diagnostic) == Status::Ok);
+			ImageArray output;
+			output.Images.push_back(EvaluatePersisted(scalar));
+			const ImageArray before = output;
+			CHECK(
+				EvaluateArray(restored, plan, "out", {}, output, diagnostic) ==
+				(hilbert ? Status::LimitExceeded : Status::InvalidValue)
+			);
+			CHECK(diagnostic.NodeId == "generator");
+			CHECK(diagnostic.Port == (hilbert ? "iteration" : "scale"));
+			CHECK(output.Images == before.Images);
+			CHECK(output.Items == before.Items);
+			REQUIRE(Compile(scalar, plan, diagnostic) == Status::Ok);
+			Image recovered;
+			REQUIRE(Evaluate(scalar, plan, "out", {}, recovered, diagnostic) == Status::Ok);
+			CHECK(recovered == before.Images.front());
+		}
+	}
+}

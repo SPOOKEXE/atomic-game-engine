@@ -74,6 +74,11 @@ namespace engine::imagegraph::detail {
 			}
 		};
 		bool Hilbert(NodeContext &context) {
+			if (context.Request.RequireSourceGpuRasterCoverage)
+				return context.Fail(
+					Status::UnsupportedExecution,
+					"Hilbert builtin lines require captured source GPU coverage for this request"
+				);
 			const int64_t iteration = std::max(int64_t{1}, context.Integer("iteration", 2));
 			constexpr int64_t MAXIMUM_ITERATION = 10; // At most 1,048,576 points and ten stack frames.
 			if (iteration > MAXIMUM_ITERATION)

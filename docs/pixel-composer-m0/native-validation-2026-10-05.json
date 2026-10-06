@@ -456,7 +456,7 @@
     ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/global-cache-core-batch1.log",
     ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/global-cache-studio-batch1.log"
   ],
-  "generator_scope": "Persisted Hilbert RGBA8 point ordering and gradient samples; all four Kisrhombille grouping choices, rotation/position/scale, all seven declared surface formats, processor rows and refusal preservation. Generator-specific Studio group/ungroup gestures were not checked.",
+  "generator_scope": "Persisted Hilbert RGBA8 point ordering and gradient samples; all four Kisrhombille grouping choices, rotation/position/scale, all seven declared surface formats, processor rows and refusal preservation. Headless Studio Ctrl+G and Ctrl+Shift+G now preserve generator values, links, formats and pixels through native group save/reopen; see native-generator-group-validation-2026-10-06.json. Live Studio backend gestures remain unverified.",
   "joined_scope": "Core, IO, export, physics, font, client CPU and selected argument GPU, full headless Studio, runner, assetc imagegraph and scoped renderer. This is not a whole-project or licensed reference parity claim.",
   "interrupted_builds": [
     {

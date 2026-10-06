@@ -1,0 +1,462 @@
+{
+  "date": "2026-10-06",
+  "base_revision": "344e31ab",
+  "scope": "Native Hilbert and Kisrhombille CPU evaluation, real headless Canvas Ctrl+G and Ctrl+Shift+G, authored values and stable IDs, crossing links and named outputs, native group save/reopen, pixel preservation, seven Kisrhombille surface formats, later processor-row refusal and recovery.",
+  "repair": "Hilbert now refuses RequireSourceGpuRasterCoverage before controls or image allocation. Its CPU pixel-centre line profile remains available for ordinary requests.",
+  "source_sha256": {
+    "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp": "9e9edaf5c0b559ba7fcea7b4ac28311cab8680ce09bed8452c58e84a566f2a09",
+    "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp": "1dc60c7d80bbcc3af2930a7e903aa123d12de0e95ffd593fc698a02feb27dec2",
+    "mono.studio/tests/ImageGraphPatternGroups.cpp": "4a5760acb4a7e87f50362029d89c5ba39fc0ecfcc0d874fde7e9cc9c81565972"
+  },
+  "runtime_gates": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-bake-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_bake"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.283,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-physics-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "c6dbf236240810807c54954612a7ded1f2c1f20833be71067908b11a66aa8888",
+      "exit_code": 0,
+      "elapsed_seconds": 0.363,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "c6dbf236240810807c54954612a7ded1f2c1f20833be71067908b11a66aa8888",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-runner-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph_runner"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "a55ded709731080b2c2e8b50002b8421418fe919ddf2ec8f2c3a6ecd34039627",
+      "exit_code": 0,
+      "elapsed_seconds": 0.311,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "a55ded709731080b2c2e8b50002b8421418fe919ddf2ec8f2c3a6ecd34039627",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-font-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphfont"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "a843d4594b2fe8d81e547c62821f6d0e196c459275ad6376e0896435654c5893",
+      "exit_code": 0,
+      "elapsed_seconds": 0.515,
+      "assertions": 1686,
+      "cases": 37,
+      "binary_sha256_after": "a843d4594b2fe8d81e547c62821f6d0e196c459275ad6376e0896435654c5893",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-export-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphexport",
+        "~\"Local HTTP host serves source GET POST and enforces byte limits\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "b6e21a962e125a9d0ad963412262e25cd8ed10f737c57353a9b40369f7b43472",
+      "exit_code": 0,
+      "elapsed_seconds": 0.532,
+      "assertions": 3123,
+      "cases": 76,
+      "binary_sha256_after": "b6e21a962e125a9d0ad963412262e25cd8ed10f737c57353a9b40369f7b43472",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-render-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_render",
+        "[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],*Transform Image 3D*"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "fc623f9294bb2692121cf9388aabd51b941945be6c4c77564bb7817136aa250b",
+      "exit_code": 0,
+      "elapsed_seconds": 14.58,
+      "assertions": 35318,
+      "cases": 15,
+      "binary_sha256_after": "fc623f9294bb2692121cf9388aabd51b941945be6c4c77564bb7817136aa250b",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-cli-batch3.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_)",
+        "--output-on-failure",
+        "-j8"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.274,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-io-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "b829d32e56ba07a034fde61ef9b26883478f10115ad8766e020b78abe896ae91",
+      "exit_code": 0,
+      "elapsed_seconds": 3.335,
+      "assertions": 11705,
+      "cases": 276,
+      "binary_sha256_after": "b829d32e56ba07a034fde61ef9b26883478f10115ad8766e020b78abe896ae91",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-core-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "f7bf747d705b0660337965b0071bf28a9de0054347d71e050a5183103652a89e",
+      "exit_code": 0,
+      "elapsed_seconds": 3.551,
+      "assertions": 1891510,
+      "cases": 2884,
+      "binary_sha256_after": "f7bf747d705b0660337965b0071bf28a9de0054347d71e050a5183103652a89e",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-assetc-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_assetc"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "6f91ed53f15199e3eaf6cf533985dc26714398d9e779e3e81fdaa6289ed80e76",
+      "exit_code": 0,
+      "elapsed_seconds": 6.149,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "6f91ed53f15199e3eaf6cf533985dc26714398d9e779e3e81fdaa6289ed80e76",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-client-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_client",
+        "~[.]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\",[argument_binding][gpu]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\",[argument-transform-gpu]~\"client normal MCP surface is available\"~\"client MCP listener restarts with its reviewed normal manifest\"~\"client factory MCP surface is available\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "b28f5dc41be795a1ae4bcfd7be8ef37fb6d3cacee18f50c1d389ec728690da88",
+      "exit_code": 0,
+      "elapsed_seconds": 3.341,
+      "assertions": 23116,
+      "cases": 355,
+      "binary_sha256_after": "b28f5dc41be795a1ae4bcfd7be8ef37fb6d3cacee18f50c1d389ec728690da88",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-studio-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_studio",
+        "~\"the assets panel lists what a listing origin holds\"~\"Studio factory MCP manifest is available\"~\"an origin with enumeration off says so rather than showing nothing\"~\"Studio keeps its optional control surface after an occupied port\"~\"hosting produces a session and an invitation to pass on\"~\"the collaborator count only moves what it changes\"~\"Studio normal MCP manifest is available\"~\"Studio factory startup refuses an occupied required control port\"~\"Studio Project ZIP contains every catalogue asset and hosts without source folders\"~\"the editor limit is enforced by the hosted stream\"~\"private edit streams require the invitation key after discovery\"~\"a hosted session carries an edit to a guest\"~\"hosting opens a session other editors can join\"~\"leaving takes the session and its socket down\"~\"leaving takes the session back down\"~\"a public session says so and carries no invitation\"~\"a listing origin refuses the wrong key\\, and the tab says which\""
+      ],
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "b347ea829ea2bdb1c93c520b40a7db10168efe8ae3d50916192c5dd9134512f0",
+      "exit_code": 0,
+      "elapsed_seconds": 10.981,
+      "assertions": 45143,
+      "cases": 981,
+      "binary_sha256_after": "b347ea829ea2bdb1c93c520b40a7db10168efe8ae3d50916192c5dd9134512f0",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-nodegraph-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_nodegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "exit_code": 0,
+      "elapsed_seconds": 1.322,
+      "assertions": 286,
+      "cases": 34,
+      "binary_sha256_after": "1a5fde203ccbcf0d49b38a90c3da65f60f3c1977cf7f6d98bb9138f9a434f952",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-ui-batch3.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_ui"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "408ea835e35641c78e0ca0237d27203f213520cb241f078364b88146eecd4bf1",
+      "exit_code": 0,
+      "elapsed_seconds": 0.497,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "408ea835e35641c78e0ca0237d27203f213520cb241f078364b88146eecd4bf1",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-startup-batch3.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^studio_composer_startup_arguments$",
+        "-V"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.26,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-lint-batch3.log",
+      "command": [
+        "ruff",
+        "check",
+        "scripts/pixel-composer/generate-catalogue.py",
+        "scripts/tests/pixel_composer_catalogue_metadata_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.012
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-architecture-batch3.log",
+      "command": [
+        "cmake",
+        "-DGRAPH=.cache/build/release-tests/target-graph.json",
+        "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+        "-P",
+        "mono.tools/architecture/CheckTargetGraph.cmake"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.382
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-python-batch3.log",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "pixel_composer_*_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.467,
+      "python_cases": 100
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-format-batch3.log",
+      "command": [
+        "/usr/bin/clang-format-21",
+        "--dry-run",
+        "--Werror",
+        "mono.studio/src/ImageGraphCacheBackground.hpp",
+        "mono.studio/src/ImageGraphCacheBackground.cpp",
+        "mono.studio/tests/ImageGraphCacheBackground.cpp",
+        "mono.studio/src/ImageGraphCacheControls.hpp",
+        "mono.studio/tests/ImageGraphCacheControls.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+        "mono.studio/nodegraph/src/Editor.cpp",
+        "mono.studio/nodegraph/tests/Editor.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+        "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+        "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+        "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+        "mono.engine/imagegraph/src/DataReplay.cpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+        "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+        "mono.engine/imagegraph/tests/DataReplay.cpp",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+        "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+        "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+        "mono.engine/ui/src/Interface.cpp",
+        "mono.engine/ui/tests/Interface.cpp",
+        "mono.engine/ui/include/engine/ui/Interface.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+        "mono.engine/imagegraph/src/nodes/Path.hpp",
+        "mono.engine/imagegraph/tests/Catalogue.cpp",
+        "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+        "mono.studio/tests/ImageGraphPatternGroups.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.846
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-diff-batch3.log",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.089
+    }
+  ],
+  "passed_processes": 20,
+  "other_suite_cases": 4957,
+  "renderer_vulkan_cases": 15,
+  "python_cases": 100,
+  "cli_cases": 16,
+  "restricted_checks": {
+    "reason": "Managed workspace prohibits socket creation. First joined batch reproduced socket permission failures. These checks were excluded by exact test names, with commas escaped for Catch2.",
+    "total": 21,
+    "by_suite": {
+      "studio": [
+        "the assets panel lists what a listing origin holds",
+        "Studio factory MCP manifest is available",
+        "an origin with enumeration off says so rather than showing nothing",
+        "Studio keeps its optional control surface after an occupied port",
+        "hosting produces a session and an invitation to pass on",
+        "the collaborator count only moves what it changes",
+        "Studio normal MCP manifest is available",
+        "Studio factory startup refuses an occupied required control port",
+        "Studio Project ZIP contains every catalogue asset and hosts without source folders",
+        "the editor limit is enforced by the hosted stream",
+        "private edit streams require the invitation key after discovery",
+        "a hosted session carries an edit to a guest",
+        "hosting opens a session other editors can join",
+        "leaving takes the session and its socket down",
+        "leaving takes the session back down",
+        "a public session says so and carries no invitation",
+        "a listing origin refuses the wrong key, and the tab says which"
+      ],
+      "client": [
+        "client normal MCP surface is available",
+        "client MCP listener restarts with its reviewed normal manifest",
+        "client factory MCP surface is available"
+      ],
+      "export": [
+        "Local HTTP host serves source GET POST and enforces byte limits"
+      ]
+    }
+  },
+  "issues": [
+    {
+      "issue": "Default ccache backing became read-only under the managed workspace.",
+      "resolution": "Build with CCACHE_DIR set to the workspace .cache/ccache.",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-build1.log"
+    },
+    {
+      "issue": "New test fixtures compared ImageArray directly and passed string_view to the string output API.",
+      "resolution": "Compare Images and Items independently; pass const std::string&.",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-build2.log"
+    },
+    {
+      "issue": "Hilbert returned Ok for a request requiring exact source GPU raster coverage.",
+      "resolution": "Add the explicit refusal before raster allocation; confirm populated output preservation and ordinary-request recovery.",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-core-batch1.log"
+    },
+    {
+      "issue": "Grouped skybox remained Pending at its ten-second deadline in two joined batches.",
+      "resolution": "Final joined batch passed all fifteen renderer cases after serializing renderer/client/Studio processes and giving Mesa a workspace shader-cache directory. No renderer code or test deadline changed. The exact timeout cause was not established.",
+      "evidence": [
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-render-batch1.log",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-render-batch2.log",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-render-batch3.log"
+      ]
+    },
+    {
+      "issue": "Restricted-check filter contained an unescaped comma in a Studio test name.",
+      "resolution": "Escape commas in exact-name exclusions; final Studio selection ran 981 cases.",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/generator-groups-studio-batch2.log"
+    }
+  ],
+  "profiling": "Wrapped-text profiling is recorded separately in mono.engine/imagegraphfont/docs/wrapped-text-profile-2026-10-06.md. No isolated generator speed or memory-performance claim is made by this validation pass.",
+  "limits": [
+    "The 21 socket checks remain unverified in this managed environment.",
+    "Headless ImGui gestures do not establish live Studio window/backend workflows.",
+    "Native pixel preservation does not establish licensed-reference captures or exact source GPU coverage.",
+    "This is scoped Composer integration validation, not whole-project acceptance."
+  ],
+  "test_environment": {
+    "preset": "release-tests",
+    "SDL_VIDEODRIVER": "offscreen",
+    "SDL_GPU_DRIVER": "vulkan",
+    "MESA_SHADER_CACHE_DIR": "/home/declan/Documents/GitHub/atomic-game-engine/.cache/mesa-shader-cache",
+    "gpu_processes_serialized": [
+      "render",
+      "client",
+      "studio"
+    ]
+  },
+  "child_binary_identity": {
+    "before": {
+      ".cache/build/release-tests/tools/assetc": "9aa8d0da8e9ed705937e896de55ec773c7b17c7560568e21aaa1be66114dfa4b",
+      ".cache/build/release-tests/tools/imagegraph": "95b5614fbb744510ef5caa499b7fab80c1e429f9376690b072d346a142a1881f"
+    },
+    "after": {
+      ".cache/build/release-tests/tools/assetc": "9aa8d0da8e9ed705937e896de55ec773c7b17c7560568e21aaa1be66114dfa4b",
+      ".cache/build/release-tests/tools/imagegraph": "95b5614fbb744510ef5caa499b7fab80c1e429f9376690b072d346a142a1881f"
+    }
+  }
+}
