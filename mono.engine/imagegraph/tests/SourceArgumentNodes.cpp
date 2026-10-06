@@ -102,7 +102,10 @@ TEST_CASE(
 		{" 0xff", 0},
 		{"0Xff", 0},
 		{"2e", 2},
-		{"1,000", 1}
+		{"1,000", 1},
+		{"+-12", 0},
+		{"++12", 0},
+		{"--12", 0}
 	};
 	for (const auto &[text, expected] : samples) {
 		auto host = Provider({{"name", text}});
@@ -427,4 +430,93 @@ TEST_CASE(
 	CHECK(Evaluated(Graph(), &host) == Value{int64_t{73}});
 	REQUIRE(host.PrepareOptions({}, Limits::MaximumEvaluationBytes, diagnostic) == Status::Ok);
 	CHECK(Evaluated(Graph(), &host) == Value{std::string{"fallback"}});
+}
+
+TEST_CASE("Argument Number accepts source unicode whitespace before numeric prefixes", "[source_argument]") {
+	const std::string_view spaces[]{
+		"\xc2\xa0",
+		"\xe1\x9a\x80",
+		"\xe2\x80\x80",
+		"\xe2\x80\x81",
+		"\xe2\x80\x82",
+		"\xe2\x80\x83",
+		"\xe2\x80\x84",
+		"\xe2\x80\x85",
+		"\xe2\x80\x86",
+		"\xe2\x80\x87",
+		"\xe2\x80\x88",
+		"\xe2\x80\x89",
+		"\xe2\x80\x8a",
+		"\xe2\x80\xa8",
+		"\xe2\x80\xa9",
+		"\xe2\x80\xaf",
+		"\xe2\x81\x9f",
+		"\xe3\x80\x80",
+		"\xef\xbb\xbf"
+	};
+	for (const auto space : spaces) {
+		const std::string prefix = " \t" + std::string(space) + " \t" + std::string(space);
+		auto host = Provider({{"name", prefix + "+.25e2tail"}});
+		CHECK(Evaluated(Graph(1), &host) == Value{25.});
+		CHECK(Evaluated(Graph(1, prefix + "-12.5suffix", "absent"), &host) == Value{-12.5});
+		host = Provider({{"name", prefix}});
+		CHECK(Evaluated(Graph(1), &host) == Value{0.});
+		host = Provider({{"name", prefix + "0xff"}});
+		CHECK(Evaluated(Graph(1), &host) == Value{0.});
+	}
+}
+TEST_CASE(
+	"Argument Number catches source nonnumeric unicode without widening whitespace", "[source_argument]"
+) {
+	const std::string samples[]{
+		"\xc2\x85"
+		"12",
+		"\xe1\xa0\x8e"
+		"12",
+		"\xe2\x80\x8b"
+		"12",
+		"\xc3\xa9"
+		"12",
+		"+\xc2\xa0"
+		"12",
+		"\xe2\x80\x83"
+		"invalid"
+	};
+	for (const auto &text : samples) {
+		auto host = Provider({{"name", text}});
+		CHECK(Evaluated(Graph(1), &host) == Value{0.});
+	}
+}
+
+TEST_CASE("Argument unicode whitespace preserves nonfinite receipt refusals", "[source_argument]") {
+	auto graph = Graph(1);
+	auto plan = Compiled(graph);
+	EvaluationRequest request;
+	HostNodeCapture prior;
+	Diagnostic diagnostic;
+	REQUIRE(PrepareHostCapture(graph, plan, "argument", request, prior, diagnostic) == Status::Ok);
+	prior.Outputs = {{"value", 77.}};
+	const auto original = prior;
+	const HostNodeInvocation invocation{
+		graph.Nodes[0], request, original.Inputs, {}, Limits::MaximumEvaluationBytes
+	};
+	for (const std::string text :
+		 {"\xc2\xa0"
+		  "Infinity",
+		  "\xef\xbb\xbf"
+		  "-Infinity",
+		  "\xe2\x80\x83"
+		  "1e999"}) {
+		auto host = Provider({{"name", text}});
+		std::string failure;
+		CHECK_FALSE(host.Capture(invocation, prior, failure));
+		CHECK_FALSE(failure.empty());
+		CHECK(prior.Authored == original.Authored);
+		CHECK(prior.Inputs == original.Inputs);
+		CHECK(prior.Outputs == original.Outputs);
+		CHECK(prior.Tick == original.Tick);
+		CHECK(prior.Subframe == original.Subframe);
+		CHECK(prior.State == original.State);
+		CHECK(prior.Failure == original.Failure);
+	}
 }

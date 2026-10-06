@@ -66,12 +66,43 @@ namespace engine::imagegraph {
 				}
 				return std::isfinite(number) ? std::optional<Value>{count ? number : 0.} : std::nullopt;
 			}
-			while (!input.empty() &&
-				   (input.front() == ' ' || input.front() == '\t' || input.front() == '\r' ||
-					input.front() == '\n' || input.front() == '\f' || input.front() == '\v'))
+			// grug match parseFloat leading whitespace without a locale or a Unicode database.
+			constexpr std::array<std::string_view, 19> unicodeSpaces{
+				"\xc2\xa0",
+				"\xe1\x9a\x80",
+				"\xe2\x80\x80",
+				"\xe2\x80\x81",
+				"\xe2\x80\x82",
+				"\xe2\x80\x83",
+				"\xe2\x80\x84",
+				"\xe2\x80\x85",
+				"\xe2\x80\x86",
+				"\xe2\x80\x87",
+				"\xe2\x80\x88",
+				"\xe2\x80\x89",
+				"\xe2\x80\x8a",
+				"\xe2\x80\xa8",
+				"\xe2\x80\xa9",
+				"\xe2\x80\xaf",
+				"\xe2\x81\x9f",
+				"\xe3\x80\x80",
+				"\xef\xbb\xbf"
+			};
+			while (!input.empty()) {
+				if (input.front() == ' ' || (input.front() >= '\t' && input.front() <= '\r')) {
+					input.remove_prefix(1);
+					continue;
+				}
+				const auto space = std::find_if(unicodeSpaces.begin(), unicodeSpaces.end(), [&](auto prefix) {
+					return input.starts_with(prefix);
+				});
+				if (space == unicodeSpaces.end()) break;
+				input.remove_prefix(space->size());
+			}
+			if (input.starts_with('+')) {
 				input.remove_prefix(1);
-			if (!input.empty() && static_cast<unsigned char>(input.front()) >= 0x80) return {};
-			if (input.starts_with('+')) input.remove_prefix(1);
+				if (input.starts_with('-')) return Value{0.};
+			}
 			if (input.starts_with("Infinity") || input.starts_with("-Infinity")) return {};
 			const auto numeric = input.starts_with('-') ? input.substr(1) : input;
 			if (numeric.empty() ||

@@ -1,0 +1,271 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug complete bounded primitive Number argument unicode whitespace and invalid-sign handling. source object/reference conversions still need exact final receipts.",
+  "contract": {
+    "pixel_composer_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "toNumber": "https://github.com/Ttanasart-pt/Pixel-Composer/blob/b69eca232217360cf1502ef0223523d818606652/scripts/string_decimal/string_decimal.gml#L39-L43",
+    "html5_real": "https://github.com/YoYoGames/GameMaker-HTML5/blob/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/functions/Function_String.js#L106-L159",
+    "ecmascript": "https://tc39.es/ecma262/2022/multipage/global-object.html#sec-parsefloat-string",
+    "unicode_whitespace": "https://tc39.es/ecma262/2025/multipage/text-processing.html#sec-trimstring",
+    "reference_hash": "8fea0cea0d55e9e6b1ba07aae1502d9f4e75aa4b6ccaffc66d047a8d5d2f9fd3"
+  },
+  "behavior": [
+    "grug trim all 19 UTF-8 non-ASCII whitespace prefixes plus existing ASCII whitespace before decimal-prefix parsing",
+    "grug preserve raw lowercase 0x dispatch before whitespace trimming",
+    "grug return zero for nonnumeric unicode and invalid paired signs",
+    "grug retain nonfinite and byte-bound refusals without publishing a replacement",
+    "grug use fixed std::array; scan borrows text and allocates nothing"
+  ],
+  "iterations": [
+    {
+      "stage": "build1",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-build1.log"
+    },
+    {
+      "stage": "joined batch1 reproduction",
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-batch1-results.json",
+      "failed_check": "core",
+      "exit_code": 42,
+      "failed_cases": 2,
+      "failed_assertions": 162,
+      "diagnostic": "argument Number conversion requires a bounded primitive or final source recording",
+      "other_checks_passed": 19
+    },
+    {
+      "stage": "build2",
+      "exit_code": 1,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-build2.log",
+      "issues": [
+        "test passed EvaluationInputValue span where invocation needs AuthoredValue span",
+        "test assumed HostNodeCapture equality operator exists"
+      ],
+      "repair": "grug use prepared receipt Inputs and compare fields directly"
+    },
+    {
+      "stage": "build3",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-build3.log"
+    },
+    {
+      "stage": "joined batch2",
+      "all_checks_passed": true,
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-batch2-results.json"
+    },
+    {
+      "stage": "build4",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-build4.log",
+      "change": "grug use std::array for fixed whitespace table"
+    },
+    {
+      "stage": "joined batch3 final",
+      "all_checks_passed": true,
+      "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-batch3-results.json"
+    }
+  ],
+  "reference_run": {
+    "command": "node /tmp/composer-argument-unicode-reference.js",
+    "exit_code": 0,
+    "cases": 86,
+    "results": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-html5-reference.json",
+    "notes": "grug execute extracted real() from pinned runtime, with source toNumber catch returning zero. this checks primitive text only, not desktop Composer."
+  },
+  "final": {
+    "checks": [
+      {
+        "name": "bake",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-bake-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_bake",
+        "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+        "exit_code": 0,
+        "elapsed_seconds": 0.273,
+        "assertions": 15875,
+        "cases": 157
+      },
+      {
+        "name": "physics",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-physics-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+        "binary_sha256": "f42bb6092e5afe23e308288f47c3517063881dd23489a44abc49875334075b2b",
+        "exit_code": 0,
+        "elapsed_seconds": 0.342,
+        "assertions": 715,
+        "cases": 43
+      },
+      {
+        "name": "runner",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-runner-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+        "binary_sha256": "d52e113ca87e05bf339a2880e26edf34b0260b9cf368b223b2dcb87f58441eca",
+        "exit_code": 0,
+        "elapsed_seconds": 0.319,
+        "assertions": 296,
+        "cases": 29
+      },
+      {
+        "name": "font",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-font-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+        "binary_sha256": "20d0871d5b106812715b0bbd12243fc8dcd2f50408238fcd61d49ba72988e949",
+        "exit_code": 0,
+        "elapsed_seconds": 0.523,
+        "assertions": 1686,
+        "cases": 37
+      },
+      {
+        "name": "export",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-export-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+        "binary_sha256": "7db935d648e64d3fd1cbebf000da11314c55f97f2fc11ce06d6be6fa7aec85de",
+        "exit_code": 0,
+        "elapsed_seconds": 0.626,
+        "assertions": 3307,
+        "cases": 88
+      },
+      {
+        "name": "render",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-render-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_render",
+        "binary_sha256": "08b6d0cb7a340afa07af3f4dd84f2fc76935039dbbc1da1732dcfe5ee6a7e141",
+        "exit_code": 0,
+        "elapsed_seconds": 2.911,
+        "assertions": 1987,
+        "cases": 31
+      },
+      {
+        "name": "cli",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-cli-batch3.log",
+        "exit_code": 0,
+        "elapsed_seconds": 3.249,
+        "ctest_cases": 16
+      },
+      {
+        "name": "io",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-io-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+        "binary_sha256": "81b796a096eed7861db0cd9848bea402f3cd9e08c69f92b068a298f55236ca1f",
+        "exit_code": 0,
+        "elapsed_seconds": 3.854,
+        "assertions": 13101,
+        "cases": 313
+      },
+      {
+        "name": "core",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-core-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraph",
+        "binary_sha256": "613de70d0d23de68f46a8cc7bf588504ed965a471e51aa51c072a9e3a5f769cf",
+        "exit_code": 0,
+        "elapsed_seconds": 3.854,
+        "assertions": 1895759,
+        "cases": 2989
+      },
+      {
+        "name": "assetc",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-assetc-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_assetc",
+        "binary_sha256": "c05352c5f8cc0e7e0f43f29d60d6c9bab21d449d2a9960def6445b37949dd855",
+        "exit_code": 0,
+        "elapsed_seconds": 6.098,
+        "assertions": 509,
+        "cases": 45
+      },
+      {
+        "name": "client",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-client-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_client",
+        "binary_sha256": "5d9d5bf53e15b81b275298f19319080ff6795d204bdcd9243e359c0edd17c51a",
+        "exit_code": 0,
+        "elapsed_seconds": 4.604,
+        "assertions": 23853,
+        "cases": 359
+      },
+      {
+        "name": "studio",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-studio-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_studio",
+        "binary_sha256": "e3dbef8a7607bb8fb20335881d6eedb2ea2075cae3792879a3a107a26cdb91b4",
+        "exit_code": 0,
+        "elapsed_seconds": 7.954,
+        "assertions": 49029,
+        "cases": 1100
+      },
+      {
+        "name": "nodegraph",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-nodegraph-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_nodegraph",
+        "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+        "exit_code": 0,
+        "elapsed_seconds": 1.325,
+        "assertions": 345,
+        "cases": 37
+      },
+      {
+        "name": "ui",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-ui-batch3.log",
+        "binary": ".cache/build/release-tests/tests/test_ui",
+        "binary_sha256": "e863805336a7f747000098712f2122c110165a673a578318bc97ff73393a6e26",
+        "exit_code": 0,
+        "elapsed_seconds": 0.564,
+        "assertions": 704,
+        "cases": 40
+      },
+      {
+        "name": "startup",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-startup-batch3.log",
+        "exit_code": 0,
+        "elapsed_seconds": 0.267,
+        "assertions": 5,
+        "cases": 1
+      },
+      {
+        "name": "lint",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-lint-batch3.log",
+        "exit_code": 0,
+        "elapsed_seconds": 0.015
+      },
+      {
+        "name": "architecture",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-architecture-batch3.log",
+        "exit_code": 0,
+        "elapsed_seconds": 0.439
+      },
+      {
+        "name": "python",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-python-batch3.log",
+        "exit_code": 0,
+        "elapsed_seconds": 1.582,
+        "python_cases": 101
+      },
+      {
+        "name": "format",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-format-batch3.log",
+        "exit_code": 0,
+        "elapsed_seconds": 3.195
+      },
+      {
+        "name": "diff",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-cpu-diff-batch3.log",
+        "exit_code": 0,
+        "elapsed_seconds": 0.089
+      }
+    ],
+    "cpp_cases": 5268,
+    "startup_cases": 1,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "render_cases": 31,
+    "source_manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/argument-unicode-source-frozen-batch3.json",
+    "source_count": 3564,
+    "changed_sources": [],
+    "binary_hashes_stable": true,
+    "child_tool_hashes_stable": true
+  },
+  "limits": [
+    "grug has not matched a licensed desktop reference build. HTML5 primitive conversion evidence does not prove desktop parity.",
+    "grug kept nonfinite refusal as the bounded native profile. source real can return Infinity.",
+    "grug has not completed source object/reference Number conversion.",
+    "headed Studio verification remains pending approval.",
+    "grug retained existing profile scope. no new performance measurement or speed claim."
+  ]
+}
