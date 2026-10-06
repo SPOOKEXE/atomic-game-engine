@@ -610,6 +610,13 @@ namespace engine::imagegraph {
 			return true;
 		};
 		const size_t oldDetachedCount = candidate->DetachedAnimators.size();
+		const auto renameAxes = [&](GroupSubtypeOverlay &overlay, std::string_view port) {
+			if (!overlay.SeparatedVec2) return true;
+			for (auto &axis : overlay.SeparatedVec2->Axes)
+				for (auto &key : axis.Keys)
+					if (!rename(key.Port, port)) return false;
+			return rename(overlay.SeparatedVec2->Port, port);
+		};
 		for (const auto &move : moves) {
 			if (!move.NewPort.empty() ||
 				std::none_of(
@@ -740,6 +747,18 @@ namespace engine::imagegraph {
 							Status::LimitExceeded, "detached source copied key identity exceeds bounds"
 						);
 			}
+			if (!overlay->SeparatedVec2) {
+				if (const auto *axes = detail::FindSeparatedVec2(*originalNode, move.OldPort)) {
+					const auto payload = detail::SeparatedAnimatorBytes(*axes, false);
+					auto charge = payload ? candidate->Budget.Reserve(*payload) : std::nullopt;
+					if (!charge)
+						return fail(Status::LimitExceeded, "detached source axes exceed overlap bounds");
+					overlay->SeparatedVec2.emplace() = *axes;
+					if (!candidate->Charge.Merge(std::move(*charge))) std::terminate();
+				}
+			}
+			if (!renameAxes(*overlay, id))
+				return fail(Status::LimitExceeded, "detached source axis names exceed overlap bounds");
 		}
 		uint64_t released = 0;
 		for (auto &binding : candidate->Bindings) {
@@ -771,6 +790,7 @@ namespace engine::imagegraph {
 			if (target.empty()) {
 				released += bytes(overlay.NodeId) + bytes(overlay.Port);
 				if (overlay.Fixed) released += detail::RetainedPayloadBytes(*overlay.Fixed);
+				released += detail::SeparatedOverlayBytes(overlay);
 				released += overlay.Keys.capacity() * sizeof(Keyframe);
 				for (const auto &key : overlay.Keys)
 					released += *KeyframePayloadBytes(key) - sizeof(Keyframe);
@@ -783,6 +803,8 @@ namespace engine::imagegraph {
 					return fail(
 						Status::LimitExceeded, "source input move key names exceed live overlap bounds"
 					);
+			if (!renameAxes(overlay, target))
+				return fail(Status::LimitExceeded, "source input move axis names exceed overlap bounds");
 			if (!rename(overlay.Port, target))
 				return fail(
 					Status::LimitExceeded, "source input move overlay names exceed live overlap bounds"
@@ -1846,6 +1868,17 @@ namespace engine::imagegraph {
 						for (const auto &axis : stored.Axes)
 							total += axis.Keys.size();
 					}
+			for (const auto &overlay : owner.SharedSubtypes)
+				if (overlay.SeparatedVec2 && std::any_of(
+												 owner.DetachedAnimators.begin(),
+												 owner.DetachedAnimators.end(),
+												 [&](const auto &animator) {
+													 return animator.OwnerId == overlay.NodeId &&
+															animator.Id == overlay.Port;
+												 }
+											 ))
+					for (const auto &axis : overlay.SeparatedVec2->Axes)
+						total += axis.Keys.size();
 			const auto time = GetFrameTime(event.At);
 			for (const auto &axis : axes->Axes) {
 				const bool existing = std::any_of(axis.Keys.begin(), axis.Keys.end(), [&](const auto &key) {
@@ -2367,45 +2400,119 @@ namespace engine::imagegraph {
 				!add(std::max(track.Port.size(), std::string{}.capacity()) + 1) ||
 				!add(std::max(track.End.size(), std::string{}.capacity()) + 1))
 				return fail(Status::LimitExceeded, "Group authored track clone exceeds bounds");
-		size_t combinedKeys = keyCount;
-		for (const auto &node : authored.Nodes)
-			if (node.SourceSeparatedVec2Animators)
-				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
-					const auto *effect = replay.SharedSubtype(node.Id, input.Port);
-					const auto &physical = effect && effect->SeparatedVec2 ? *effect->SeparatedVec2 : input;
-					for (const auto &axis : physical.Axes) {
-						if (axis.Keys.size() > Limits::MaximumKeyframes - combinedKeys)
-							return fail(
-								Status::LimitExceeded,
-								"Group projection ordinary and split keys exceed aggregate bounds",
-								node.Id,
-								input.Port
-							);
-						combinedKeys += axis.Keys.size();
+		struct ProjectedAxes {
+			std::string_view NodeId, Port;
+			const SourceSeparatedVec2Animator *Source;
+			bool Detached;
+		};
+		detail::EvaluationVector<ProjectedAxes> axisTargets{
+			detail::EvaluationAllocator<ProjectedAxes>(budget)
+		};
+		const auto admitAxisWork = [&](uint64_t visits) {
+			if (visits > 64'000'000 - projectionWork) {
+				fail(Status::LimitExceeded, "split projection exceeds work bounds");
+				return false;
+			}
+			projectionWork += visits;
+			return true;
+		};
+		const auto addAxisTarget = [&](const GroupSubtypeOverlay &overlay,
+									   std::string_view id,
+									   std::string_view port,
+									   bool detached) {
+			if (!admitAxisWork(authored.Nodes.size() + axisTargets.size())) return false;
+			const auto node = std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [&](const auto &n) {
+				return n.Id == id;
+			});
+			if (node != authored.Nodes.end() &&
+				!admitAxisWork(
+					node->DynamicInputs.size() + (node->SourceSeparatedVec2Animators
+													  ? node->SourceSeparatedVec2Animators->Inputs.size()
+													  : 0)
+				))
+				return false;
+			if (node == authored.Nodes.end() || !detail::SourceSeparatedVec2Input(*node, port) ||
+				(!detached && !detail::FindSeparatedVec2(*node, port)) ||
+				std::any_of(axisTargets.begin(), axisTargets.end(), [&](const auto &target) {
+					return target.NodeId == id && target.Port == port;
+				})) {
+				fail(Status::InvalidGroup, "split projection target is invalid", id, port);
+				return false;
+			}
+			const auto bytes = detail::SeparatedAnimatorBytes(*overlay.SeparatedVec2, false);
+			if (!bytes || !add(*bytes) || !add(std::max(port.size(), std::string{}.capacity()) + 1)) {
+				fail(Status::LimitExceeded, "split projection payload exceeds bounds", id, port);
+				return false;
+			}
+			for (const auto &axis : overlay.SeparatedVec2->Axes)
+				for (size_t key = 0; key < axis.Keys.size(); ++key) {
+					if (!admitAxisWork(1) || !add(std::max(id.size(), std::string{}.capacity()) + 1) ||
+						!add(std::max(port.size(), std::string{}.capacity()) + 1)) {
+						fail(Status::LimitExceeded, "split projection key names exceed bounds", id, port);
+						return false;
 					}
 				}
-		for (const auto &overlay : replay.SharedSubtypes())
-			if (overlay.SeparatedVec2) {
-				const auto node =
-					std::find_if(authored.Nodes.begin(), authored.Nodes.end(), [&](const auto &n) {
-						return n.Id == overlay.NodeId;
-					});
-				if (node == authored.Nodes.end() || !detail::FindSeparatedVec2(*node, overlay.Port))
-					return fail(
-						Status::InvalidGroup,
-						"split projection original writer is absent",
-						overlay.NodeId,
-						overlay.Port
-					);
-				const auto bytes = detail::SeparatedAnimatorBytes(*overlay.SeparatedVec2, false);
-				if (!bytes || !add(*bytes))
-					return fail(
-						Status::LimitExceeded,
-						"split projection overlap exceeds bounds",
-						overlay.NodeId,
-						overlay.Port
-					);
+			axisTargets.push_back({id, port, &*overlay.SeparatedVec2, detached});
+			return true;
+		};
+		for (const auto &overlay : replay.SharedSubtypes()) {
+			if (!overlay.SeparatedVec2) continue;
+			if (replay.DetachedAnimator(overlay.NodeId, overlay.Port)) {
+				for (const auto &binding : replay.Bindings()) {
+					if (!admitVisit()) return diagnostic.Code;
+					if (binding.OwnerId == overlay.NodeId &&
+						detail::BindingAnimatorPort(binding) == overlay.Port &&
+						!addAxisTarget(overlay, binding.NodeId, binding.Port, true))
+						return diagnostic.Code;
+				}
+			} else if (!addAxisTarget(overlay, overlay.NodeId, overlay.Port, false))
+				return diagnostic.Code;
+		}
+		size_t combinedKeys = keyCount;
+		const auto addAxisKeys = [&](const SourceSeparatedVec2Animator &input) {
+			for (const auto &axis : input.Axes) {
+				if (axis.Keys.size() > Limits::MaximumKeyframes - combinedKeys) return false;
+				combinedKeys += axis.Keys.size();
 			}
+			return true;
+		};
+		for (const auto &node : authored.Nodes) {
+			const size_t stored =
+				node.SourceSeparatedVec2Animators ? node.SourceSeparatedVec2Animators->Inputs.size() : 0;
+			if (!admitAxisWork(uint64_t(stored + 1) * axisTargets.size() * 4)) return diagnostic.Code;
+			size_t added = 0;
+			for (const auto &target : axisTargets) {
+				if (!admitVisit()) return diagnostic.Code;
+				if (target.NodeId != node.Id) continue;
+				if (!detail::FindSeparatedVec2(node, target.Port)) {
+					++added;
+					if (!addAxisKeys(*target.Source))
+						return fail(
+							Status::LimitExceeded,
+							"projected split keys exceed aggregate bounds",
+							node.Id,
+							target.Port
+						);
+				}
+			}
+			if (added && (!add((stored + added) * sizeof(SourceSeparatedVec2Animator)) ||
+						  (!node.SourceSeparatedVec2Animators && !add(sizeof(SourceSeparatedVec2Data)))))
+				return fail(Status::LimitExceeded, "projected split input storage exceeds bounds", node.Id);
+			if (node.SourceSeparatedVec2Animators)
+				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+					const auto replacement =
+						std::find_if(axisTargets.begin(), axisTargets.end(), [&](const auto &target) {
+							return target.NodeId == node.Id && target.Port == input.Port;
+						});
+					if (!addAxisKeys(replacement == axisTargets.end() ? input : *replacement->Source))
+						return fail(
+							Status::LimitExceeded,
+							"projected split keys exceed aggregate bounds",
+							node.Id,
+							input.Port
+						);
+				}
+		}
 
 		auto additionalAdmission = budget.Reserve(admitted - preadmitted);
 		if (!additionalAdmission || !reservation->Merge(std::move(*additionalAdmission)))
@@ -2415,17 +2522,38 @@ namespace engine::imagegraph {
 		);
 		core::Metrics::Count("imagegraph.group_projection.operations", 1);
 		Document candidate = authored;
-		for (const auto &overlay : replay.SharedSubtypes())
-			if (overlay.SeparatedVec2) {
-				auto node = std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const auto &n) {
-					return n.Id == overlay.NodeId;
-				});
-				for (auto &input : node->SourceSeparatedVec2Animators->Inputs)
-					if (input.Port == overlay.Port) {
-						input = *overlay.SeparatedVec2;
-						break;
-					}
+		for (auto &node : candidate.Nodes) {
+			size_t added = 0;
+			for (const auto &target : axisTargets)
+				if (target.NodeId == node.Id && !detail::FindSeparatedVec2(node, target.Port)) ++added;
+			if (added) {
+				if (!node.SourceSeparatedVec2Animators) node.SourceSeparatedVec2Animators.emplace();
+				node.SourceSeparatedVec2Animators->Inputs.reserve(
+					node.SourceSeparatedVec2Animators->Inputs.size() + added
+				);
 			}
+			for (const auto &target : axisTargets) {
+				if (target.NodeId != node.Id) continue;
+				const auto *old = detail::FindSeparatedVec2(node, target.Port);
+				SourceSeparatedVec2Animator replacement = *target.Source;
+				replacement.Port = std::string(target.Port);
+				if (target.Detached) replacement.Separated = old && old->Separated;
+				for (auto &axis : replacement.Axes)
+					for (auto &key : axis.Keys) {
+						key.NodeId = std::string(node.Id);
+						key.Port = std::string(target.Port);
+						if (target.Detached) key.SourceKeyId.clear();
+					}
+				auto &inputs = node.SourceSeparatedVec2Animators->Inputs;
+				const auto found = std::find_if(inputs.begin(), inputs.end(), [&](const auto &input) {
+					return input.Port == target.Port;
+				});
+				if (found == inputs.end())
+					inputs.push_back(std::move(replacement));
+				else
+					*found = std::move(replacement);
+			}
+		}
 
 		std::vector<Keyframe> finalKeys;
 		finalKeys.reserve(keyCount);
@@ -2596,13 +2724,61 @@ namespace engine::imagegraph {
 			}
 		for (const auto &shared : previous.SharedSubtypes()) {
 			if (shared.SeparatedVec2) {
-				const auto node =
-					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
-						return n.Id == shared.NodeId;
-					});
-				const auto *axes =
-					node == document.Nodes.end() ? nullptr : detail::FindSeparatedVec2(*node, shared.Port);
-				if (!axes || *axes != *shared.SeparatedVec2) {
+				const auto projectedAxesMatch =
+					[&](std::string_view id, std::string_view port, bool detached) {
+						const auto node =
+							std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
+								return n.Id == id;
+							});
+						const auto *axes =
+							node == document.Nodes.end() ? nullptr : detail::FindSeparatedVec2(*node, port);
+						if (!axes) return false;
+						if (!detached) return *axes == *shared.SeparatedVec2;
+						for (size_t axis = 0; axis < 2; ++axis) {
+							const auto &actual = axes->Axes[axis].Keys;
+							const auto &expected = shared.SeparatedVec2->Axes[axis].Keys;
+							if (actual.size() != expected.size()) return false;
+							for (size_t i = 0; i < actual.size(); ++i) {
+								const auto &a = actual[i];
+								const auto &e = expected[i];
+								if (a.NodeId != id || a.Port != port || !a.SourceKeyId.empty() ||
+									std::tie(
+										a.Tick,
+										a.Data,
+										a.Interpolation,
+										a.Ease,
+										a.SineDriver,
+										a.SourceDriver,
+										a.Subframe,
+										a.NegativeFrame,
+										a.Kind
+									) !=
+										std::tie(
+											e.Tick,
+											e.Data,
+											e.Interpolation,
+											e.Ease,
+											e.SineDriver,
+											e.SourceDriver,
+											e.Subframe,
+											e.NegativeFrame,
+											e.Kind
+										))
+									return false;
+							}
+						}
+						return true;
+					};
+				bool represented = true;
+				if (previous.DetachedAnimator(shared.NodeId, shared.Port)) {
+					for (const auto &binding : previous.Bindings())
+						if (binding.OwnerId == shared.NodeId &&
+							detail::BindingAnimatorPort(binding) == shared.Port)
+							represented =
+								represented && projectedAxesMatch(binding.NodeId, binding.Port, true);
+				} else
+					represented = projectedAxesMatch(shared.NodeId, shared.Port, false);
+				if (!represented) {
 					diagnostic = {
 						Status::InvalidValue,
 						shared.NodeId,

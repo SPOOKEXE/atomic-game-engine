@@ -100,6 +100,21 @@ used. it does not evaluate sibling getters to invent a fresh map. borrowed map,
 prior result and replacement result share one byte ledger; refused evaluation
 leaves the prior result and its reservation unchanged.
 
+physical input moves rename stored axis ports and every scalar key target under
+the replay's byte ledger. removing an original input retains its authored axes
+even without a prior edit overlay. surviving overridden getters sample those
+axes through the detached animator identity and its original track.
+projection copies detached axes into each surviving alias, preserves its local
+separation flag and clears copied source record identities. rebinding checks
+the remapped scalar contents before retaining the detached replay.
+
+source `getAnimators` initializes local scalar storage lazily from local
+defaults. a group copy shares already-created axis arrays, but a copy made
+before initialization can create independent arrays later. axis storage can
+therefore have a different owner from the combined animator. the current
+shared-writer profile still needs that lazy ownership and default provenance
+before separate/combine controls can cover those constructor cases.
+
 separate/combine controls and missing shared-axis constructor storage are still unfinished.
 this flag preserves
 the source storage distinction needed by those controls. generic Vector, dynamic

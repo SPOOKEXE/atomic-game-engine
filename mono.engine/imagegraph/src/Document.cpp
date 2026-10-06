@@ -12758,7 +12758,13 @@ namespace engine::imagegraph {
 						return nullptr;
 					const auto &owner = inputOwner(port);
 					const auto ownerPort = inputAnimatorPort(port);
-					if (!detail::SourceSeparatedVec2Input(owner, ownerPort)) return nullptr;
+					const auto *detached = request.GroupReplay
+											   ? request.GroupReplay->DetachedAnimator(owner.Id, ownerPort)
+											   : nullptr;
+					if (detached ? detached->Type != ValueType::Vector2 ||
+									   !detail::SourceSeparatedVec2Input(node, port)
+								 : !detail::SourceSeparatedVec2Input(owner, ownerPort))
+						return nullptr;
 					const auto *overlay = request.GroupReplay
 											  ? request.GroupReplay->SharedSubtype(owner.Id, ownerPort)
 											  : nullptr;
@@ -12798,6 +12804,10 @@ namespace engine::imagegraph {
 					)
 													.value_or(false);
 					const AnimationTrack *track = nullptr;
+					if (const auto *detached =
+							request.GroupReplay ? request.GroupReplay->DetachedAnimator(owner.Id, ownerPort)
+												: nullptr)
+						if (detached->Track) track = &*detached->Track;
 					for (const auto &candidate : document.Tracks)
 						if (candidate.NodeId == owner.Id && candidate.Port == ownerPort) {
 							track = &candidate;

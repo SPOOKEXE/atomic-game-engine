@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-06",
+  "preset": "release-tests",
+  "scope": "Retain two-axis storage through physical input moves, detached original writers, selected-input sampling and save projection.",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_contract_review": [
+    "node_value.gml separateAxis and combineAxis use the selected local separation flag, retain inactive storage and create fresh scalar or combined keys.",
+    "getAnimators initializes local axes from local defaults. Group copies can share already-created arrays, while a copy made before initialization can later create independent local axes. Combined and scalar animator ownership therefore cannot always be one owner.",
+    "Removed input objects retain their original physical animator through surviving aliases."
+  ],
+  "native_changes": [
+    "Rename axis storage and all scalar key ports alongside ordinary overlay ports, with overlap admission.",
+    "Copy authored axes into a newly detached overlay even when no prior live edit exists; release removed overlay axis payload.",
+    "Admit declared detached two-axis getters and retain the original animation track while sampling.",
+    "Project detached scalar arrays into surviving aliases, preserve local flags, remap key targets and clear copied source IDs.",
+    "Count detached edit keys and projected alias key copies under aggregate limits; charge target indexes, work and string replacement overlap.",
+    "Verify projected scalar fields before rebind; retain caller outputs on refusal."
+  ],
+  "review": {
+    "confirmed_defect": "String copy assignment could double NodeId capacity beyond the preadmitted replacement buffer. Construct a fresh string and move it instead.",
+    "added_coverage": [
+      "Inactive alias flag preservation",
+      "Copied source key identity clearing",
+      "Altered projected scalar rejection",
+      "Byte refusal preserving populated caller outputs"
+    ]
+  },
+  "builds": [
+    {
+      "log": "axis-moves-build1.log",
+      "exit_code": 0
+    },
+    {
+      "log": "axis-moves-build2.log",
+      "exit_code": 0
+    },
+    {
+      "log": "axis-moves-build3.log",
+      "exit_code": 0
+    },
+    {
+      "log": "axis-moves-build4.log",
+      "exit_code": 0
+    }
+  ],
+  "joined_batches": [
+    {
+      "results": "axis-moves-batch1-results.json",
+      "checks_passed": 19,
+      "checks_total": 20,
+      "failures": "New test cases used BindGroupReplay to change revisions; that API requires the existing revision. Another assertion expected an explicit AnimatorPort, though empty denotes the same input identity. Corrected both fixture assumptions."
+    },
+    {
+      "results": "axis-moves-batch2-results.json",
+      "checks_passed": 19,
+      "checks_total": 20,
+      "failures": "The moved-writer fixture retained an inherited getter at a current input index whose physical socket was removed. Changed the fixture to an overridden local getter for its retained writer."
+    },
+    {
+      "results": "axis-moves-batch3-results.json",
+      "checks_passed": 20,
+      "checks_total": 20,
+      "all_passed": true,
+      "native_cpu_cases": 4993,
+      "render_cases": 15,
+      "startup_cases": 1,
+      "cli_cases": 16,
+      "python_cases": 100,
+      "binary_hashes_stable": true,
+      "child_hashes_stable": true
+    }
+  ],
+  "limits": [
+    "Separate/combine authoring transactions and Studio controls remain unfinished.",
+    "Lazy local scalar storage ownership and constructor default provenance remain unfinished.",
+    "No licensed runner comparison, performance measurement, sanitizer run or headed Studio verification was performed.",
+    "Twenty-one socket-dependent cases remain excluded in the restricted environment.",
+    "This pass does not establish full Composer acceptance."
+  ],
+  "commit": "The filesystem refuses writes to .git; retain an isolated owned patch."
+}

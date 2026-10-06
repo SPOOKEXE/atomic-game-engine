@@ -1,3 +1,5 @@
+#include "../src/SourceInputEvaluation.hpp"
+
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/GroupReplay.hpp>
 #include <engine/imagegraph/SourceModeTransition.hpp>
@@ -5,6 +7,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+
+#include <algorithm>
+#include <array>
+#include <string>
 TEST_SUITE_ID("engine.imagegraph.source_input_moves")
 using namespace engine::imagegraph;
 TEST_CASE(
@@ -439,6 +445,236 @@ TEST_CASE(
 	GroupReplayState bound;
 	REQUIRE(BindGroupReplay(doc, {}, prior, 1, bound, error) == Status::Ok);
 	CHECK(CaptureMove(doc, bound, "record", "value_0") == Value{44.});
+}
+
+namespace {
+	constexpr std::string_view Point0 = "point_i_0";
+	constexpr std::string_view Point1 = "point_i_1";
+
+	Document MakeGradientPointMoveGraph() {
+		Document document;
+		document.FormatVersion = 9;
+		Node owner{"base", "pc.gradient_points_n", "", {}, {}};
+		owner.Values = {
+			{"dimension", Vector2{32, 32}}, {"dimension_unit", EnumValue{0}}, {"blend_mode", EnumValue{0}}
+		};
+		owner.DynamicInputs = {
+			{std::string(Point0), ValueType::Vector2, Vector2{10, 1}},
+			{std::string(Point1), ValueType::Vector2, Vector2{30, 3}}
+		};
+		owner.SourceAnimatedInputs = {std::string(Point0)};
+		SourceSeparatedVec2Animator axes;
+		axes.Port = Point0;
+		axes.Axes[0].Keys = {
+			{"base", std::string(Point0), 0, 10.0, "source", KeyframeEase{}},
+			{"base", std::string(Point0), 10, 20.0, "source", KeyframeEase{}}
+		};
+		axes.Axes[1].Keys = {{"base", std::string(Point0), 0, 2.0, "source", KeyframeEase{}}};
+		axes.Axes[0].Keys[0].SourceKeyId = "point-x-start";
+		axes.Axes[0].Keys[1].SourceKeyId = "point-x-end";
+		axes.Axes[1].Keys[0].SourceKeyId = "point-y-start";
+		owner.SourceSeparatedVec2Animators.emplace().Inputs.push_back(std::move(axes));
+		Node copy = owner;
+		copy.Id = "copy";
+		copy.InstanceBase = "base";
+		copy.SourceSeparatedVec2Animators.emplace().Inputs.clear();
+		SourceSeparatedVec2Animator local;
+		local.Port = Point0;
+		local.Separated = true;
+		copy.SourceSeparatedVec2Animators->Inputs.push_back(std::move(local));
+		document.Nodes = {std::move(owner), std::move(copy)};
+		document.Outputs = {{"image", "base", "surface_out"}};
+		return document;
+	}
+
+	std::vector<GroupSubtypeBinding> GradientPointBindings() {
+		return {
+			{"copy",
+			 "base",
+			 GroupSubtypeAnimator::Animated,
+			 GroupSubtypeAnimator::Animated,
+			 std::string(Point0)}
+		};
+	}
+
+	void RenamePointInputs(Node &node, std::string_view from, std::string_view to) {
+		for (auto &input : node.DynamicInputs)
+			if (input.Id == from) input.Id = to;
+		for (auto *ports : {&node.SourceAnimatedInputs, &node.SourceStaticInputs, &node.InstanceOverrides})
+			for (auto &port : *ports)
+				if (port == from) port = to;
+		if (node.SourceSeparatedVec2Animators)
+			for (auto &axes : node.SourceSeparatedVec2Animators->Inputs)
+				if (axes.Port == from) {
+					axes.Port = to;
+					for (auto &axis : axes.Axes)
+						for (auto &key : axis.Keys)
+							key.Port = to;
+				}
+	}
+
+	void RemovePointInput(Node &node, std::string_view port) {
+		std::erase_if(node.DynamicInputs, [&](const auto &input) { return input.Id == port; });
+		for (auto *ports : {&node.SourceAnimatedInputs, &node.SourceStaticInputs, &node.InstanceOverrides})
+			std::erase(*ports, port);
+		if (node.SourceSeparatedVec2Animators) {
+			std::erase_if(node.SourceSeparatedVec2Animators->Inputs, [&](const auto &axes) {
+				return axes.Port == port;
+			});
+			if (node.SourceSeparatedVec2Animators->Inputs.empty()) node.SourceSeparatedVec2Animators = {};
+		}
+	}
+
+	Value SamplePoint(
+		const Document &document,
+		const GroupReplayState &replay,
+		std::string_view nodeId,
+		std::string_view port,
+		uint64_t tick
+	) {
+		Plan plan;
+		Diagnostic diagnostic;
+		const auto compile = Compile(document, plan, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(compile == Status::Ok);
+		EvaluationRequest request;
+		request.Tick = tick;
+		request.GroupReplay = &replay;
+		request.GroupAuthoringRevision = replay.AuthoringRevision();
+		detail::EvaluationBudget budget(Limits::MaximumEvaluationBytes);
+		Value result;
+		detail::AllocationReservation charge;
+		const auto status = detail::EvaluateSourceInput(
+			document, plan, nodeId, port, request, budget, result, charge, diagnostic
+		);
+		INFO(diagnostic.Message);
+		REQUIRE(status == Status::Ok);
+		return result;
+	}
+}
+
+TEST_CASE("Dynamic Vec2 input move carries split edit overlay onto the new socket", "[source_input_moves]") {
+	auto original = MakeGradientPointMoveGraph();
+	original.Nodes[1].InstanceOverrides = {std::string(Point0)};
+	Diagnostic error;
+	GroupReplayState empty, initial, bound;
+	REQUIRE(RebindGroupReplay(original, empty, 1, initial, error) == Status::Ok);
+	auto bindings = GradientPointBindings();
+	REQUIRE(BindGroupReplay(original, bindings, initial, 1, bound, error) == Status::Ok);
+	const Value editedValue = Vector2{8, 4};
+	GroupRefreshEvent edit;
+	edit.NodeId = "copy";
+	edit.Reason = GroupRefreshReason::Edit;
+	edit.EditedPort = Point0;
+	edit.LocalValue = &editedValue;
+	edit.LocalAnimated = true;
+	edit.At.Tick = 5;
+	GroupReplayState edited;
+	REQUIRE(ReplayGroupAnimatorEdits(original, {&edit, 1}, bound, 1, edited, error) == Status::Ok);
+	const auto *beforeMove = edited.SharedSubtype("base", Point0);
+	REQUIRE(beforeMove);
+	REQUIRE(beforeMove->SeparatedVec2);
+
+	auto staged = original;
+	RemovePointInput(staged.Nodes[0], Point1);
+	RenamePointInputs(staged.Nodes[0], Point0, Point1);
+	const SourceInputMove moves[] = {
+		{"base", std::string(Point0), std::string(Point1)}, {"base", std::string(Point1), ""}
+	};
+	GroupReplayState moved;
+	const auto status = RebindGroupReplayWithInputMoves(original, staged, moves, edited, 2, moved, error);
+	INFO(error.Message);
+	REQUIRE(status == Status::Ok);
+	const auto *overlay = moved.SharedSubtype("base", Point1);
+	REQUIRE(overlay);
+	CHECK(overlay->Port == Point1);
+	REQUIRE(overlay->SeparatedVec2);
+	CHECK(overlay->SeparatedVec2->Port == Point1);
+	for (const auto &axis : overlay->SeparatedVec2->Axes)
+		for (const auto &key : axis.Keys)
+			CHECK(key.Port == Point1);
+	REQUIRE(moved.Binding("copy", Point0));
+	CHECK(moved.Binding("copy", Point0)->AnimatorPort == Point1);
+
+	GroupReplayState cloned;
+	REQUIRE(RebindGroupReplay(staged, moved, 3, cloned, error) == Status::Ok);
+	CHECK(SamplePoint(staged, cloned, "copy", Point0, 5) == Value{editedValue});
+}
+
+TEST_CASE(
+	"Deleting a dynamic Vec2 writer retains axes for overridden alias sampling and rebind",
+	"[source_input_moves]"
+) {
+	auto original = MakeGradientPointMoveGraph();
+	const bool separated = GENERATE(false, true);
+	original.Nodes[1].SourceSeparatedVec2Animators->Inputs[0].Separated = separated;
+	Diagnostic error;
+	GroupReplayState empty, initial, bound;
+	REQUIRE(RebindGroupReplay(original, empty, 1, initial, error) == Status::Ok);
+	auto bindings = GradientPointBindings();
+	REQUIRE(BindGroupReplay(original, bindings, initial, 1, bound, error) == Status::Ok);
+	auto staged = original;
+	RemovePointInput(staged.Nodes[0], Point0);
+	RenamePointInputs(staged.Nodes[0], Point1, Point0);
+	staged.Nodes[1].InstanceOverrides = {std::string(Point0)};
+	const SourceInputMove moves[] = {
+		{"base", std::string(Point0), ""}, {"base", std::string(Point1), std::string(Point0)}
+	};
+	GroupReplayState detached;
+	const auto status = RebindGroupReplayWithInputMoves(original, staged, moves, bound, 2, detached, error);
+	INFO(error.Message);
+	REQUIRE(status == Status::Ok);
+	REQUIRE(detached.DetachedAnimators().size() == 1);
+	GroupReplayState refused;
+	REQUIRE(BindGroupReplay(original, bindings, initial, 1, refused, error) == Status::Ok);
+	const auto retainedBytes = refused.RetainedBytes();
+	REQUIRE(
+		RebindGroupReplayWithInputMoves(original, staged, moves, bound, 2, refused, error, 1) ==
+		Status::LimitExceeded
+	);
+	CHECK(refused.RetainedBytes() == retainedBytes);
+	CHECK(refused.AuthoringRevision() == 1);
+	CHECK(refused.DetachedAnimators().empty());
+	CHECK(refused.Binding("copy", Point0)->AnimatorPort == bound.Binding("copy", Point0)->AnimatorPort);
+	const auto identity = detached.DetachedAnimators().front().Id;
+	const auto *overlay = detached.SharedSubtype("base", identity);
+	REQUIRE(overlay);
+	CHECK(overlay->Port == identity);
+	REQUIRE(overlay->SeparatedVec2);
+	CHECK(overlay->SeparatedVec2->Port == identity);
+	for (const auto &axis : overlay->SeparatedVec2->Axes)
+		for (const auto &key : axis.Keys)
+			CHECK(key.Port == identity);
+
+	const Value expected = separated ? Value{Vector2{15, 2}} : Value{Vector2{10, 1}};
+	CHECK(SamplePoint(staged, detached, "copy", Point0, 5) == expected);
+	GroupReplayState rebound;
+	REQUIRE(RebindGroupReplay(staged, detached, 3, rebound, error) == Status::Ok);
+	CHECK(SamplePoint(staged, rebound, "copy", Point0, 5) == expected);
+	Document projected = original;
+	const auto saved = Write(projected);
+	REQUIRE(ProjectGroupReplay(staged, rebound, 3, projected, error, 1) == Status::LimitExceeded);
+	CHECK(Write(projected) == saved);
+	REQUIRE(ProjectGroupReplay(staged, rebound, 3, projected, error) == Status::Ok);
+	const auto &projectedAxes = projected.Nodes[1].SourceSeparatedVec2Animators->Inputs[0];
+	CHECK(projectedAxes.Separated == separated);
+	for (const auto &axis : projectedAxes.Axes)
+		for (const auto &key : axis.Keys) {
+			CHECK(key.SourceKeyId.empty());
+			CHECK(key.NodeId == "copy");
+			CHECK(key.Port == Point0);
+		}
+	GroupReplayState projectedReplay;
+	REQUIRE(RebindProjectedGroupReplay(projected, rebound, 3, projectedReplay, error) == Status::Ok);
+	CHECK(SamplePoint(projected, projectedReplay, "copy", Point0, 5) == expected);
+	const auto reboundBytes = projectedReplay.RetainedBytes();
+	projected.Nodes[1].SourceSeparatedVec2Animators->Inputs[0].Axes[0].Keys[0].Data = 999.;
+	REQUIRE(
+		RebindProjectedGroupReplay(projected, rebound, 3, projectedReplay, error) == Status::InvalidValue
+	);
+	CHECK(projectedReplay.AuthoringRevision() == 3);
+	CHECK(projectedReplay.RetainedBytes() == reboundBytes);
+	CHECK(SamplePoint(staged, projectedReplay, "copy", Point0, 5) == expected);
 }
 
 TEST_CASE(
