@@ -2792,7 +2792,8 @@ namespace studio {
 			return accepted;
 		}
 
-		bool ApplyKeyEdit(State &state, const auto &edit, bool *unchanged = nullptr) {
+		bool
+		ApplyKeyEdit(State &state, const auto &edit, bool *unchanged = nullptr, uint64_t borrowedBytes = 0) {
 			if (!RetryCacheEdit(state)) return false;
 			CancelComposerPreview(state);
 			engine::imagegraph::EvaluationRequest request;
@@ -2805,7 +2806,11 @@ namespace studio {
 				return false;
 			(void)engine::imagegraph::SetFrameTime(request, GetImageGraphFrame(state.Playback));
 			const auto fontBytes = engine::imagegraph::SourceFontContextRetainedBytes(fontContext);
-			const auto allowance = fontBytes ? GroupConstructorAllowance(state, *fontBytes) : std::nullopt;
+			const auto allowance =
+				fontBytes && borrowedBytes <= engine::imagegraph::Limits::MaximumEvaluationBytes &&
+						*fontBytes <= engine::imagegraph::Limits::MaximumEvaluationBytes - borrowedBytes
+					? GroupConstructorAllowance(state, *fontBytes + borrowedBytes)
+					: std::nullopt;
 			if (!allowance) {
 				state.LastDiagnostic = {
 					Status::LimitExceeded, {}, {}, "source key edit host payload exceeds budget"
@@ -6751,16 +6756,17 @@ namespace studio {
 					state.Authored,
 					state.Keys,
 					state.LastDiagnostic,
-					[&](const Keyframe &key) {
-						if (SetImageGraphAuthorFrame(state.Playback, GetFrameTime(key)))
-							RequestPreview(state);
+					[&](const ImageGraphKeyframeIdentity &key) {
+						if (SetImageGraphAuthorFrame(state.Playback, key.Time)) RequestPreview(state);
 						if (const auto found = state.Ids.ToCanvas.find(key.NodeId);
 							found != state.Ids.ToCanvas.end()) {
 							state.Canvas.Select(found->second);
 							state.Canvas.Centre(state.Graph, found->second);
 						}
 					},
-					[&](const auto &edit) { return ApplyKeyEdit(state, edit); }
+					[&](const auto &edit, uint64_t borrowedBytes) {
+						return ApplyKeyEdit(state, edit, nullptr, borrowedBytes);
+					}
 				);
 
 				ImGui::EndTable();

@@ -1,0 +1,87 @@
+{
+  "date": "2026-10-06",
+  "evidence_scope": "grug show effective scalar alias rows without local arrays. broader Composer goal still active.",
+  "changes": [
+    "core borrows warm scalar storage under each logical input name; captured aliases read canonical or retired arrays through the existing ownership resolver.",
+    "cold arrays stay cold. whole-document validation, retained view backing, weighted lookup work and total logical key fanout bound observation. refusal keeps old views.",
+    "graph tracks and table rows use logical alias names with physical key clocks. display borrows values and stores only identity and geometry in its cache.",
+    "copy, move and Delete reach canonical storage without adding alias arrays. undo and redo refresh graph identities after document publication.",
+    "host staging charges temporary views and captured pin residency before replay and document copies. projection offsets only logical pin bytes charged again by its ledger.",
+    "successful table redraw keeps the last refused edit diagnostic."
+  ],
+  "validation": {
+    "evidence_directory": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+    "results_file": "effective-axis-views-batch1-results.json",
+    "checks": 20,
+    "failed_checks": 0,
+    "cpp_test_cases": 5135,
+    "cpp_assertions": 2001597,
+    "studio_test_cases": 1045,
+    "studio_assertions": 47138,
+    "core_test_cases": 2974,
+    "core_assertions": 1895015,
+    "python_cases": 101,
+    "cli_cases": 16,
+    "final_build": {
+      "iteration": 2,
+      "exit_code": 0,
+      "targets": 17,
+      "steps": 9,
+      "log": "effective-axis-views-build2.log"
+    },
+    "backend": "SDL offscreen with Vulkan for approved GPU checks; headless ImGui for graph and table gestures.",
+    "profiling": "grug added ENGINE_PROFILE to the observation boundary. no new profile captured and no speed claim made.",
+    "skipped": "headed Studio and licensed-reference verification remain open. dev/server/ci builds and sanitizers not run in this scoped release-tests batch.",
+    "totals_method": "sum C++ result rows, including the startup fixture. Python and CLI counts separate."
+  },
+  "iteration_history": [
+    {
+      "stage": "read review",
+      "finding": "temporary views and captured pins were charged after host staging",
+      "repair": "pass exact borrowed residency into the host allowance before staging; coordinate callback pin charge."
+    },
+    {
+      "stage": "build 1",
+      "result": "joined build failed; Ninja -k0 completed all queued work before any source repair",
+      "output": [
+        "OwnedPayload3D has no member named reset",
+        "OwnedPayload3D has no member named value",
+        "Limits has not been declared"
+      ],
+      "repair": "use empty assignment and dereference for payload wrappers; qualify imagegraph Limits in the host."
+    },
+    {
+      "stage": "build 2 and batch 1",
+      "result": "all 17 targets built and all 20 checks passed. no test failures."
+    }
+  ],
+  "unchanged_evidence": {
+    "before": "effective-axis-views-source-before-build2.json",
+    "after": "effective-axis-views-source-after-batch1.json",
+    "frozen_relevant_source_paths": 55,
+    "source_hashes_equal": true,
+    "peer_whole_files_unchanged": 42,
+    "shared_composer_peer_hunks_preserved": true,
+    "test_binaries_unchanged": 13,
+    "child_hashes_file": "effective-axis-views-child-hashes-batch1.json",
+    "child_hashes_equal": true,
+    "prior_owned_whole_files_unchanged": 4
+  },
+  "tested_owned_file_hashes": {
+    "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp": "f66b32807e0f9f9836cdb7ca67dac313e4735c0d52b4ae04e3dcbe4e663ad8fb",
+    "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp": "e278043c88b10085774f5e0da4cc1a479558e358b6d92f8012d971d28ec50043",
+    "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp": "18903bd19b6071c6278a76fc2c8684353f3119cbd6a31dea7bc36d6303e9a2b1",
+    "mono.studio/src/TimelineDopesheet.hpp": "b4504907f502dc23472f9fc25c34fbd52b87ba38b1360bd39190b357be3f5ead",
+    "mono.studio/src/TimelineKeyEditor.hpp": "322343a772fa6da613814c891c89a40efc1f54387a5b987681f7fcbfd1785fd9",
+    "mono.studio/src/TimelineScalarKeys.hpp": "24ee4dbb8b0fbabc0213e7b3bc0393c161cecd7829775b5db38c2b081a0b6bbb",
+    "mono.studio/src/ImageComposer.cpp": "9db0b0c89172c10b0e7fde134bb376a081a56e70e35dfac0f7283e20bc15f6c7",
+    "mono.studio/tests/TimelineScalarKeys.cpp": "8efea23945813343668b295fc18a4852a2425eaa36245b35861e7daa16a20c8d",
+    "mono.studio/tests/TimelineScalarDopesheet.cpp": "c99f2a49f75037283122ab03c718c456925e0d69a6223b113594f980d1ed7ed6"
+  },
+  "remaining_gaps": [
+    "initial uncaptured aliases still need the source-capture envelope.",
+    "component-target paste and scalar metadata authoring remain open.",
+    "duplicate-clock scalar selection still needs licensed-reference qualification.",
+    "licensed parity and headed Studio checks remain open. broader Composer goal stays active."
+  ]
+}

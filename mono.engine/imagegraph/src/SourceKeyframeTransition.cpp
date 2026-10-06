@@ -135,6 +135,122 @@ namespace engine::imagegraph {
 		}
 
 	}
+	Status ObserveSourceKeyframeAxes(
+		const Document &document,
+		std::vector<SourceAxisObservation> &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraph.source_axis_observation");
+		const auto fail = [&](Status code, std::string_view message) {
+			diagnostic = {code, {}, {}, std::string(message)};
+			return code;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+			result.capacity() > Limits::MaximumKeyframes)
+			return fail(Status::LimitExceeded, "source axis observation byte or count bound is invalid");
+		const auto resident = DocumentRetainedPayloadBytes(document);
+		uint64_t borrowed = result.capacity() * sizeof(SourceAxisObservation);
+		if (!resident || !detail::SourceAnimatorAdd(borrowed, *resident))
+			return fail(Status::LimitExceeded, "source axis observation retained payload exceeds bounds");
+		detail::EvaluationBudget budget(maximumBytes);
+		auto held = budget.Reserve(borrowed);
+		if (!held) return fail(Status::LimitExceeded, "source axis observation overlap exceeds bounds");
+		uint64_t work = 0, slots = 0;
+		for (const auto &node : document.Nodes) {
+			AdmitKeyWork(work, 1);
+			if (node.SourceSeparatedVec2Animators) slots += node.SourceSeparatedVec2Animators->Inputs.size();
+		}
+		if (document.SourceAnimators)
+			for (const auto &binding : document.SourceAnimators->Bindings) {
+				AdmitKeyWork(work, 1);
+				if (binding.Axes.Storage == GroupAxisStorage::Local ||
+					binding.Axes.Storage == GroupAxisStorage::Shared)
+					++slots;
+			}
+		if (slots > 2 * Limits::MaximumKeyframes)
+			return fail(Status::LimitExceeded, "source axis observation channel count exceeds bounds");
+		if (slots) {
+			Plan plan;
+			if (Compile(document, plan, diagnostic, budget.Available()) != Status::Ok) return diagnostic.Code;
+		}
+		const auto bound = slots ? BoundAxisLookup(document, work) : AxisLookupBound{};
+		const auto same = [&](std::string_view a, std::string_view b) {
+			AdmitKeyWork(work, 1 + std::min(a.size(), b.size()));
+			return a == b;
+		};
+		slots = std::min(slots, uint64_t(Limits::MaximumKeyframes));
+		auto backing = budget.Reserve(slots * sizeof(SourceAxisObservation));
+		if (!backing) return fail(Status::LimitExceeded, "source axis observation backing exceeds bounds");
+		std::vector<SourceAxisObservation> candidate;
+		candidate.reserve(size_t(slots));
+		auto spare = budget.Reserve((candidate.capacity() - slots) * sizeof(SourceAxisObservation));
+		if (!spare) return fail(Status::LimitExceeded, "source axis observation spare slots exceed bounds");
+		uint64_t keys = 0;
+		const auto observe = [&](const Node &node, std::string_view port) {
+			for (const auto &view : candidate)
+				if (same(view.NodeId, node.Id) && same(view.Port, port)) return Status::Ok;
+			if (!node.InstanceBase.empty()) {
+				bool captured = false;
+				if (document.SourceAnimators)
+					for (const auto &binding : document.SourceAnimators->Bindings)
+						if (same(binding.NodeId, node.Id) && same(binding.Port, port)) {
+							captured = true;
+							break;
+						}
+				if (!captured)
+					return fail(Status::InvalidValue, "source axis alias requires captured bindings");
+			}
+			const auto axes = ReadKeyAxes(document, node, port, bound, work);
+			if (axes.Code == Status::SourceAxisInitializationRequired) return Status::Ok;
+			if (axes.Code != Status::Ok) return fail(axes.Code, axes.Message);
+			const uint64_t count = axes.Axes->Axes[0].Keys.size() + axes.Axes->Axes[1].Keys.size();
+			if (candidate.size() >= Limits::MaximumKeyframes || count > Limits::MaximumKeyframes - keys)
+				return fail(
+					Status::LimitExceeded, "source axis observation logical key fanout exceeds bounds"
+				);
+			keys += count;
+			candidate.push_back(
+				{node.Id, port, axes.Axes, !same(axes.Owner->Id, node.Id) || !same(axes.Port, port)}
+			);
+			return Status::Ok;
+		};
+		for (const auto &node : document.Nodes) {
+			AdmitKeyWork(work, 1);
+			if (!node.SourceSeparatedVec2Animators) continue;
+			for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
+				AdmitKeyWork(work, 1);
+				if (input.Initialized && observe(node, input.Port) != Status::Ok) return diagnostic.Code;
+			}
+		}
+		if (document.SourceAnimators)
+			for (const auto &binding : document.SourceAnimators->Bindings) {
+				AdmitKeyWork(work, 1);
+				if (binding.Axes.Storage != GroupAxisStorage::Local &&
+					binding.Axes.Storage != GroupAxisStorage::Shared)
+					continue;
+				const Node *node = nullptr;
+				for (const auto &entry : document.Nodes)
+					if (same(entry.Id, binding.NodeId)) {
+						node = &entry;
+						break;
+					}
+				if (!node) return fail(Status::UnknownNode, "source axis observation node is absent");
+				if (observe(*node, binding.Port) != Status::Ok) return diagnostic.Code;
+			}
+		result = std::move(candidate);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const KeyEditWorkExceeded &) {
+		diagnostic = {
+			Status::LimitExceeded, {}, {}, "source axis observation comparison work exceeds bounds"
+		};
+		return diagnostic.Code;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, {}, {}, "source axis observation allocation exceeds bounds"};
+		return diagnostic.Code;
+	}
+
 	Status CaptureSourceKeyframes(
 		const Document &document,
 		std::span<const SourceKeyframeIdentity> selection,

@@ -8,6 +8,25 @@
 #include <vector>
 
 namespace engine::imagegraph {
+	// grug borrow storage under its logical channel name; view owns no authored data.
+	struct SourceAxisObservation {
+		// logical names borrowed from the document, rather than physical key names.
+		std::string_view NodeId, Port;
+		// effective warm storage, including a retained writer after its property was replaced.
+		const SourceSeparatedVec2Animator *Storage = nullptr;
+		// true when logical names differ from storage names and capture clears physical key ids.
+		bool Alias = false;
+	};
+	// grug borrow effective warm arrays once per logical input, including captured aliases.
+	// cold arrays stay cold. document mutation or destruction invalidates names and storage.
+	// failure preserves result; resident bytes, lookup work and logical key fanout are bounded.
+	Status ObserveSourceKeyframeAxes(
+		const Document &document,
+		std::vector<SourceAxisObservation> &result,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
+
 	struct SourceKeyframeIdentity {
 		std::string_view NodeId, Port;
 		FrameTime Time;

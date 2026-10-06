@@ -92,13 +92,17 @@ namespace {
 					 {"Key", "Frame", "Interpolation", "Ease in", "Ease out", "Driver", "Kind", "Action"})
 					ImGui::TableSetupColumn(name);
 				ImGui::TableHeadersRow();
-				const auto select = [&](const Keyframe &) { ++SelectCalls; };
-				const auto apply = [&](const auto &edit) {
+				const auto select = [&](const studio::ImageGraphKeyframeIdentity &) { ++SelectCalls; };
+				const auto apply = [&](const auto &edit, uint64_t borrowedBytes) {
+					if (borrowedBytes >= EditBudget) {
+						Error = {Status::LimitExceeded, {}, {}, "scalar table staging exceeds edit budget"};
+						return false;
+					}
 					bool unchanged = false;
 					const bool accepted = studio::ApplyImageGraphDocumentEdit(
 						Doc,
 						History,
-						[&](Document &candidate) { return edit(candidate, EditBudget); },
+						[&](Document &candidate) { return edit(candidate, EditBudget - borrowedBytes); },
 						&unchanged
 					);
 					return accepted || unchanged;
@@ -281,4 +285,25 @@ TEST_CASE(
 		CHECK(node.SourceSeparatedVec2Animators->Inputs.front().Axes[1].Keys.size() == 1);
 	REQUIRE(ui.History.Undo(ui.Doc));
 	CHECK(ui.Doc == reversed);
+}
+
+TEST_CASE("scalar table deletes through aliases without local arrays", "[studio][timeline_scalar_keys]") {
+	ScalarTimeline ui;
+	ui.Doc.Nodes[1].SourceSeparatedVec2Animators = {};
+	const auto before = ui.Doc;
+	ui.Frame();
+	const auto aliasRow = ui.DeleteId;
+	REQUIRE(ui.ClickDelete());
+	CHECK(ui.PublishedRowId == aliasRow);
+	CHECK_FALSE(ui.Doc.Nodes[1].SourceSeparatedVec2Animators);
+	CHECK(ui.Doc.Keyframes == before.Keyframes);
+	const auto &axes = ui.Doc.Nodes[0].SourceSeparatedVec2Animators->Inputs.front();
+	CHECK(axes.Axes[0].Keys == before.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys);
+	REQUIRE(axes.Axes[1].Keys.size() == 1);
+	CHECK(axes.Axes[1].Keys.front().SourceKeyId == "y-2");
+	const auto deleted = ui.Doc;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == before);
+	REQUIRE(ui.History.Redo(ui.Doc));
+	CHECK(ui.Doc == deleted);
 }

@@ -28,37 +28,45 @@ namespace studio {
 					   identity.Time == engine::imagegraph::GetFrameTime(key);
 			});
 		}
-		bool DrawRow(const engine::imagegraph::Keyframe &key, int8_t axis = -1) {
+		bool DrawRow(
+			std::string_view node, std::string_view port, engine::imagegraph::FrameTime time, int8_t axis
+		) {
 			using namespace engine::imagegraph;
-			const auto time = GetFrameTime(key);
-			if (axis < -1 || axis > 1 || !ValidFrameTime(time) ||
-				key.NodeId.size() > Limits::MaximumTextBytes || key.Port.size() > Limits::MaximumTextBytes)
+			if (axis < -1 || axis > 1 || !ValidFrameTime(time) || node.size() > Limits::MaximumTextBytes ||
+				port.size() > Limits::MaximumTextBytes)
 				return false;
 			// The entire authored identity scopes the row, including keys on the same property.
 			ImGuiID id = ImGui::GetCurrentWindow()->IDStack.back();
-			const auto nodeLength = key.NodeId.size(), portLength = key.Port.size();
+			const auto nodeLength = node.size(), portLength = port.size();
 			id = ImHashData(&nodeLength, sizeof(nodeLength), id);
-			id = ImHashData(key.NodeId.data(), key.NodeId.size(), id);
+			id = ImHashData(node.data(), node.size(), id);
 			id = ImHashData(&portLength, sizeof(portLength), id);
-			id = ImHashData(key.Port.data(), key.Port.size(), id);
+			id = ImHashData(port.data(), port.size(), id);
 			id = ImHashData(&axis, sizeof(axis), id);
 			id = ImHashData(&time.Tick, sizeof(time.Tick), id);
 			const uint64_t fraction = std::bit_cast<uint64_t>(time.Subframe == 0 ? 0.0 : time.Subframe);
 			id = ImHashData(&fraction, sizeof(fraction), id);
 			id = ImHashData(&time.NegativeFrame, sizeof(time.NegativeFrame), id);
 			ImGui::PushOverrideID(id);
-			const std::string label = key.NodeId + "." + key.Port + (axis < 0 ? "" : axis == 0 ? ".x" : ".y");
+			const std::string label = std::string(node) + "." + std::string(port) +
+									  (axis < 0	   ? ""
+									   : axis == 0 ? ".x"
+												   : ".y");
 			// grug keep selection in this column so later controls own their clicks.
-			const bool clicked = ImGui::Selectable(label.c_str(), Selected(key, axis));
+			const bool clicked = ImGui::Selectable(
+				label.c_str(), std::any_of(Selection.begin(), Selection.end(), [&](const auto &entry) {
+					return entry.NodeId == node && entry.Port == port && entry.Time == time &&
+						   entry.Axis == axis;
+				})
+			);
 			if (clicked) {
-				const auto identity = Identity(key, axis);
+				const ImageGraphKeyframeIdentity identity{std::string(node), std::string(port), time, axis};
 				const auto found = std::find(Selection.begin(), Selection.end(), identity);
 				if (ImGui::GetIO().KeyShift) {
 					if (found != Selection.end())
 						Selection.erase(found);
 					else if (Selection.size() < Limits::MaximumKeyframes) {
-						uint64_t bytes =
-							sizeof(ImageGraphKeyframeIdentity) + key.NodeId.size() + key.Port.size();
+						uint64_t bytes = sizeof(ImageGraphKeyframeIdentity) + node.size() + port.size();
 						for (const auto &entry : Selection)
 							bytes +=
 								sizeof(ImageGraphKeyframeIdentity) + entry.NodeId.size() + entry.Port.size();
@@ -69,6 +77,9 @@ namespace studio {
 			}
 			ImGui::PopID();
 			return clicked;
+		}
+		bool DrawRow(const engine::imagegraph::Keyframe &key, int8_t axis = -1) {
+			return DrawRow(key.NodeId, key.Port, engine::imagegraph::GetFrameTime(key), axis);
 		}
 		// grug capture keys and component selectors together; refusal preserves the previous snapshot.
 		static bool CaptureSelection(

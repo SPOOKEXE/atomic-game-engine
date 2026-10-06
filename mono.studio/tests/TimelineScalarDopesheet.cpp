@@ -549,3 +549,58 @@ TEST_CASE(
 	CHECK(ui.Doc == before);
 	CHECK_FALSE(ui.History.CanUndo());
 }
+
+TEST_CASE(
+	"scalar alias graph gestures borrow missing projections and refresh after history",
+	"[studio][timeline_scalar_dopesheet]"
+) {
+	Sheet ui;
+	ui.Doc.Nodes[1].SourceSeparatedVec2Animators = {};
+	const auto before = ui.Doc;
+	ui.Frame();
+	ui.Frame();
+	REQUIRE(ui.View.Markers.size() == 8);
+	const auto x = ui.Marker("alias", 0, {1});
+	REQUIRE(x < ui.View.Markers.size());
+	ui.Click(x);
+	ui.Chord(ImGuiKey_C);
+	REQUIRE(ui.Keys.Clipboard.size() == 1);
+	CHECK(ui.Keys.Clipboard.front().NodeId == "alias");
+	CHECK(ui.Keys.Clipboard.front().SourceKeyId.empty());
+	CHECK(ui.Keys.ClipboardAxes == std::vector<int8_t>{0});
+	const auto point = ui.View.Markers[x].Position;
+	ui.Down(point);
+	ui.Mouse({point.x + 4 * float(ui.View.PixelsPerFrame), point.y});
+	ui.Up();
+	INFO(ui.Error.Message);
+	REQUIRE(ui.Changes == 1);
+	CHECK_FALSE(ui.Doc.Nodes[1].SourceSeparatedVec2Animators);
+	CHECK(ui.Doc.Keyframes == before.Keyframes);
+	CHECK(
+		GetFrameTime(ui.Doc.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.front()) ==
+		FrameTime{5, 0, false}
+	);
+	CHECK(ui.Marker("alias", 0, {1}) == ui.View.Markers.size());
+	CHECK(ui.Marker("alias", 0, {5}) < ui.View.Markers.size());
+	const auto moved = ui.Doc;
+	REQUIRE(ui.History.Undo(ui.Doc));
+	++ui.Revision;
+	ui.Frame();
+	CHECK(ui.Doc == before);
+	CHECK(ui.Marker("alias", 0, {1}) < ui.View.Markers.size());
+	CHECK(ui.Marker("alias", 0, {5}) == ui.View.Markers.size());
+	REQUIRE(ui.History.Redo(ui.Doc));
+	++ui.Revision;
+	ui.Frame();
+	CHECK(ui.Doc == moved);
+	const auto target = ui.Marker("alias", 0, {5});
+	REQUIRE(target < ui.View.Markers.size());
+	ui.Click(target);
+	ui.Key(ImGuiKey_Delete);
+	REQUIRE(ui.Changes == 2);
+	CHECK_FALSE(ui.Doc.Nodes[1].SourceSeparatedVec2Animators);
+	CHECK(ui.Doc.Nodes[0].SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.empty());
+	CHECK(ui.Marker("alias", 0, {5}) == ui.View.Markers.size());
+	REQUIRE(ui.History.Undo(ui.Doc));
+	CHECK(ui.Doc == moved);
+}

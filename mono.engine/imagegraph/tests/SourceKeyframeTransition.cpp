@@ -677,4 +677,183 @@ TEST_CASE("Axis resolver charges long names across repeated edits", "[imagegraph
 	INFO(error.Message);
 	CHECK(captureStatus == Status::LimitExceeded);
 	CHECK(snapshot == priorSnapshot);
+	Document observationOwner = SharedAxes();
+	std::vector<SourceAxisObservation> observations;
+	REQUIRE(ObserveSourceKeyframeAxes(observationOwner, observations, error) == Status::Ok);
+	const auto priorObservations = observations;
+	CHECK(ObserveSourceKeyframeAxes(document, observations, error) == Status::LimitExceeded);
+	CHECK(error.Message == "source axis observation comparison work exceeds bounds");
+	REQUIRE(observations.size() == priorObservations.size());
+	for (size_t index = 0; index < observations.size(); ++index) {
+		CHECK(observations[index].NodeId == priorObservations[index].NodeId);
+		CHECK(observations[index].Port == priorObservations[index].Port);
+		CHECK(observations[index].Storage == priorObservations[index].Storage);
+		CHECK(observations[index].Alias == priorObservations[index].Alias);
+	}
+}
+
+TEST_CASE("Axis observations borrow warm canonical and local arrays", "[imagegraph][source_keys]") {
+	auto document = SharedAxes();
+	std::vector<SourceAxisObservation> observations;
+	Diagnostic diagnostic;
+	REQUIRE(ObserveSourceKeyframeAxes(document, observations, diagnostic) == Status::Ok);
+	REQUIRE(observations.size() == 3);
+	const auto find = [&](std::string_view id) -> const SourceAxisObservation * {
+		const auto it = std::find_if(observations.begin(), observations.end(), [&](const auto &entry) {
+			return entry.NodeId == id && entry.Port == "center";
+		});
+		return it == observations.end() ? nullptr : &*it;
+	};
+	const auto *owner = find("owner");
+	const auto *alias = find("alias");
+	const auto *sibling = find("sibling");
+	REQUIRE(owner);
+	REQUIRE(alias);
+	REQUIRE(sibling);
+	CHECK(owner->Storage == &document.Nodes[0].SourceSeparatedVec2Animators->Inputs.front());
+	CHECK_FALSE(owner->Alias);
+	CHECK(alias->Storage == owner->Storage);
+	CHECK(sibling->Storage == owner->Storage);
+	CHECK(alias->Alias);
+	CHECK(sibling->Alias);
+
+	// binding still names the canonical writer when its local projection is gone.
+	auto missingProjection = document;
+	missingProjection.Nodes[1].SourceSeparatedVec2Animators = {};
+	observations.clear();
+	REQUIRE(ObserveSourceKeyframeAxes(missingProjection, observations, diagnostic) == Status::Ok);
+	const auto projectedAlias = std::find_if(observations.begin(), observations.end(), [](const auto &entry) {
+		return entry.NodeId == "alias";
+	});
+	REQUIRE(projectedAlias != observations.end());
+	CHECK(
+		projectedAlias->Storage == &missingProjection.Nodes[0].SourceSeparatedVec2Animators->Inputs.front()
+	);
+	CHECK(projectedAlias->Alias);
+
+	auto local = document;
+	auto &localAxes = local.Nodes[1].SourceSeparatedVec2Animators->Inputs.front();
+	for (auto &key : localAxes.Axes[0].Keys)
+		key.Data = std::get<double>(key.Data) + 10;
+	local.SourceAnimators->Bindings.front().Axes = {
+		GroupAxisStorage::Local, "alias", "center", "owner", GroupSubtypeAnimator::Animated
+	};
+	observations.clear();
+	REQUIRE(ObserveSourceKeyframeAxes(local, observations, diagnostic) == Status::Ok);
+	const auto localAlias = std::find_if(observations.begin(), observations.end(), [](const auto &entry) {
+		return entry.NodeId == "alias";
+	});
+	REQUIRE(localAlias != observations.end());
+	CHECK(localAlias->Storage == &localAxes);
+	CHECK_FALSE(localAlias->Alias);
+}
+
+TEST_CASE("Axis observations retain retired writers and skip cold storage", "[imagegraph][source_keys]") {
+	auto document = SharedAxes();
+	auto retiredAxes = document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front();
+	retiredAxes.Port = "native:animator:0";
+	for (auto &axis : retiredAxes.Axes)
+		for (auto &key : axis.Keys)
+			key.Port = retiredAxes.Port;
+	DetachedSourceAnimator metadata;
+	metadata.Id = retiredAxes.Port;
+	metadata.OwnerId = "owner";
+	metadata.OriginalPort = "center";
+	metadata.Writer = GroupSubtypeAnimator::Animated;
+	metadata.Type = ValueType::Vector2;
+	metadata.Track = AnimationTrack{"owner", metadata.Id, "hold", -1};
+	GroupSubtypeOverlay overlay;
+	overlay.NodeId = "owner";
+	overlay.Port = metadata.Id;
+	overlay.Fixed = Vector2{.1, .2};
+	overlay.SeparatedVec2.emplace() = retiredAxes;
+	document.SourceAnimators->Detached.push_back(metadata);
+	document.SourceAnimators->DetachedValues.push_back(overlay);
+	for (auto &binding : document.SourceAnimators->Bindings)
+		binding.Axes.Port = metadata.Id;
+	for (auto &axis : document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes)
+		for (auto &key : axis.Keys) {
+			key.Data = std::get<double>(key.Data) + 20;
+			key.SourceKeyId.clear();
+		}
+	Valid(document);
+
+	std::vector<SourceAxisObservation> observations;
+	Diagnostic diagnostic;
+	REQUIRE(ObserveSourceKeyframeAxes(document, observations, diagnostic) == Status::Ok);
+	const auto retiredAlias = std::find_if(observations.begin(), observations.end(), [](const auto &entry) {
+		return entry.NodeId == "alias";
+	});
+	REQUIRE(retiredAlias != observations.end());
+	CHECK(retiredAlias->Storage == &*document.SourceAnimators->DetachedValues.front().SeparatedVec2);
+	CHECK(retiredAlias->Alias);
+
+	auto cold = SharedAxes();
+	auto &coldAxes = cold.Nodes[1].SourceSeparatedVec2Animators->Inputs.front();
+	coldAxes.Initialized = false;
+	for (auto &axis : coldAxes.Axes)
+		axis.Keys.clear();
+	cold.SourceAnimators->Bindings.front().Axes = {
+		GroupAxisStorage::Uninitialized, "alias", "center", "owner", GroupSubtypeAnimator::Animated
+	};
+	const auto coldBefore = cold;
+	observations.clear();
+	REQUIRE(ObserveSourceKeyframeAxes(cold, observations, diagnostic) == Status::Ok);
+	CHECK(cold == coldBefore);
+	CHECK(observations.size() == 2);
+	CHECK(std::none_of(observations.begin(), observations.end(), [](const auto &entry) {
+		return entry.NodeId == "alias";
+	}));
+
+	Document empty;
+	REQUIRE(ObserveSourceKeyframeAxes(empty, observations, diagnostic) == Status::Ok);
+	CHECK(observations.empty());
+}
+
+TEST_CASE("Axis observation bounds logical alias fanout", "[imagegraph][source_keys]") {
+	auto document = SharedAxes();
+	auto &ownerX = document.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys;
+	ownerX.clear();
+	ownerX.reserve(22'000);
+	for (uint64_t tick = 0; tick < 22'000; ++tick)
+		ownerX.push_back(AxisScalar("owner", 0, tick, double(tick), {}));
+	document.Nodes[1].SourceSeparatedVec2Animators = {};
+	document.Nodes[2].SourceSeparatedVec2Animators = {};
+
+	std::vector<SourceAxisObservation> observations{{"kept", "result", nullptr, false}};
+	const auto prior = observations;
+	Diagnostic diagnostic;
+	CHECK(ObserveSourceKeyframeAxes(document, observations, diagnostic) == Status::LimitExceeded);
+	CHECK(diagnostic.Message == "source axis observation logical key fanout exceeds bounds");
+	REQUIRE(observations.size() == prior.size());
+	CHECK(observations.front().NodeId == prior.front().NodeId);
+	CHECK(observations.front().Port == prior.front().Port);
+	CHECK(observations.front().Storage == prior.front().Storage);
+	CHECK(observations.front().Alias == prior.front().Alias);
+}
+
+TEST_CASE("Axis observation refusal preserves the borrowed result", "[imagegraph][source_keys]") {
+	auto document = SharedAxes();
+	std::vector<SourceAxisObservation> observations;
+	Diagnostic diagnostic;
+	REQUIRE(ObserveSourceKeyframeAxes(document, observations, diagnostic) == Status::Ok);
+	const auto prior = observations;
+	const auto unchanged = [&] {
+		if (observations.size() != prior.size()) return false;
+		for (size_t index = 0; index < prior.size(); ++index)
+			if (observations[index].NodeId != prior[index].NodeId ||
+				observations[index].Port != prior[index].Port ||
+				observations[index].Storage != prior[index].Storage ||
+				observations[index].Alias != prior[index].Alias)
+				return false;
+		return true;
+	};
+	CHECK(ObserveSourceKeyframeAxes(document, observations, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(unchanged());
+
+	auto malformed = document;
+	malformed.Nodes.front().SourceSeparatedVec2Animators->Inputs.front().Axes[0].Keys.front().Data =
+		std::string{"not scalar"};
+	CHECK(ObserveSourceKeyframeAxes(malformed, observations, diagnostic) != Status::Ok);
+	CHECK(unchanged());
 }

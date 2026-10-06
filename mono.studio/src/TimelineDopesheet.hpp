@@ -106,24 +106,19 @@ namespace studio {
 		}
 		// grug keep clocks and names in the display cache, never copies of authored key values.
 		template <class Visit>
-		static bool VisitMarkers(const engine::imagegraph::Document &document, const Visit &visit) {
+		static bool VisitMarkers(
+			const engine::imagegraph::Document &document,
+			std::span<const engine::imagegraph::SourceAxisObservation> axes,
+			const Visit &visit
+		) {
 			using namespace engine::imagegraph;
 			uint64_t work = 0;
 			for (const auto &key : document.Keyframes)
 				if (++work > 64'000'000 || !visit(key, key.NodeId, key.Port, int8_t{-1})) return false;
-			for (const auto &node : document.Nodes) {
-				if (++work > 64'000'000) return false;
-				if (!node.SourceSeparatedVec2Animators) continue;
-				for (const auto &input : node.SourceSeparatedVec2Animators->Inputs) {
-					if (++work > 64'000'000) return false;
-					if (!input.Initialized) continue;
-					for (int8_t axis = 0; axis < 2; ++axis) {
-						const auto &keys = input.Axes[size_t(axis)].Keys;
-						for (const auto &key : keys)
-							if (++work > 64'000'000 || !visit(key, node.Id, input.Port, axis)) return false;
-					}
-				}
-			}
+			for (const auto &view : axes)
+				for (int8_t axis = 0; axis < 2; ++axis)
+					for (const auto &key : view.Storage->Axes[size_t(axis)].Keys)
+						if (++work > 64'000'000 || !visit(key, view.NodeId, view.Port, axis)) return false;
 			return true;
 		}
 		bool UpdateBox(
@@ -210,12 +205,20 @@ namespace studio {
 			};
 			if (!retained || *retained > remaining) return refuse();
 			remaining -= *retained;
+			std::vector<SourceAxisObservation> axes;
+			if (ObserveSourceKeyframeAxes(document, axes, error, remaining) != Status::Ok) return false;
+			const auto resident = DocumentRetainedPayloadBytes(document);
+			const uint64_t views = axes.capacity() * sizeof(SourceAxisObservation);
+			if (!resident || *resident > remaining || views > remaining - *resident) return refuse();
+			remaining -= *resident + views;
 			using RowKey = std::tuple<std::string_view, std::string_view, int8_t>;
 			constexpr uint64_t perKey =
 				sizeof(Marker) + sizeof(Track) + sizeof(std::pair<const RowKey, size_t>) + 4 * sizeof(void *);
 			size_t count = 0;
 			if (!VisitMarkers(
-					document, [&](const Keyframe &key, std::string_view node, std::string_view port, int8_t) {
+					document,
+					axes,
+					[&](const Keyframe &key, std::string_view node, std::string_view port, int8_t) {
 						const uint64_t names = node.size() + port.size() + 2;
 						if (count >= Limits::MaximumKeyframes || !ValidFrameTime(GetFrameTime(key)) ||
 							node.size() > Limits::MaximumTextBytes ||
@@ -239,6 +242,7 @@ namespace studio {
 			std::map<RowKey, size_t> rows;
 			if (!VisitMarkers(
 					document,
+					axes,
 					[&](const Keyframe &key, std::string_view node, std::string_view port, int8_t axis) {
 						const auto [entry, inserted] = rows.emplace(RowKey{node, port, axis}, tracks.size());
 						if (inserted) tracks.push_back({std::string(node), std::string(port), axis});
