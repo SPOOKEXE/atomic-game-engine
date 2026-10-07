@@ -137,6 +137,9 @@ namespace nodegraph {
 		// is not carrying a landscape, which is most of them. The inspector then
 		// offers no 3-D button rather than a flat plane.
 		std::function<bool(const std::any &, Surface &)> Heights;
+
+		// grug union names registered member types; empty means one concrete type.
+		std::vector<std::string> Members;
 	};
 
 	// The wildcard, spelled once.
@@ -157,7 +160,7 @@ namespace nodegraph {
 		//         document naming a type this build does not have produces.
 		static const DataType *Find(const std::string &id);
 
-		// Identical ids, or either side being the wildcard.
+		// grug every possible output member must fit the input union or wildcard.
 		//
 		// **Deliberately not a conversion table.** An implicit conversion is a
 		// decision taken where nobody can see it, and "the drop went red" only

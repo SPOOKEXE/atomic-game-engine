@@ -47,11 +47,39 @@ namespace nodegraph {
 		return found == table.ById.end() ? nullptr : &table.Order[found->second];
 	}
 
-	bool DataTypes::CanConnect(const std::string &from, const std::string &to) {
-		if (from.empty() || to.empty()) {
-			return false;
+	namespace {
+		bool CollectMembers(
+			const std::string &id,
+			std::vector<std::string> &members,
+			std::vector<std::string> &path,
+			size_t &work
+		) {
+			if (++work > 1024 || path.size() >= 32 || id.empty()) return false;
+			if (std::find(path.begin(), path.end(), id) != path.end()) return false;
+			const auto *type = DataTypes::Find(id);
+			if (!type) return false;
+			if (type->Members.empty()) {
+				if (std::find(members.begin(), members.end(), id) == members.end()) members.push_back(id);
+				return true;
+			}
+			path.push_back(id);
+			for (const auto &member : type->Members)
+				if (member == ANY_TYPE || !CollectMembers(member, members, path, work)) return false;
+			path.pop_back();
+			return true;
 		}
-		return from == to || from == ANY_TYPE || to == ANY_TYPE;
+	}
+
+	bool DataTypes::CanConnect(const std::string &from, const std::string &to) {
+		std::vector<std::string> outputs, inputs, path;
+		size_t work = 0;
+		if (from != ANY_TYPE && !CollectMembers(from, outputs, path, work)) return false;
+		work = 0;
+		if (to != ANY_TYPE && !CollectMembers(to, inputs, path, work)) return false;
+		if (from == ANY_TYPE || to == ANY_TYPE) return true;
+		return std::all_of(outputs.begin(), outputs.end(), [&](const auto &member) {
+			return std::find(inputs.begin(), inputs.end(), member) != inputs.end();
+		});
 	}
 
 	const std::vector<DataType> &DataTypes::All() {

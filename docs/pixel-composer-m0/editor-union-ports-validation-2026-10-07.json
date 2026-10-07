@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add registered editor union types and link drag socket feedback",
+  "behavior": [
+    "registered durable union IDs list registered member IDs; nested unions supported",
+    "every possible output member must fit input; missing members, cycles and wildcard members refused",
+    "union traversal bounded at 1024 visits and 32 nesting levels",
+    "dynamic inputs and their suggestion flags survive save/load",
+    "drag uses actual fold endpoints and Graph::CanConnect, including direction and cycle refusal",
+    "incompatible socket circles and labels dim while dragging",
+    "top-right text lists compatible node:port IDs with a remaining count when long",
+    "one compatibility pass per frame reused for socket paint and hints"
+  ],
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-build-batch3.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-build-batch4.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-build-batch5.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-cpu-batch5-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5352,
+    "startup_test_cases": 1,
+    "python_tests": 104,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3582,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-source-stability-batch4.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-source-stability-batch5.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-math-cpu-child-hashes-batch5.json",
+    "read_review": "Sol read review of source arithmetic and fixtures, then unions and drag feedback"
+  },
+  "semantic_test_cases": 3,
+  "coverage": [
+    "registered nested unions and invalid members",
+    "union output refusing narrower input",
+    "dynamic input and output port save/load",
+    "headless ImGui dragging in both directions, socket tint and successful drop"
+  ],
+  "not_run": [
+    "headed live Studio, approval pending",
+    "dedicated performance profiling; no speed claim"
+  ],
+  "remaining_work": [
+    "core noise field payloads, typed consumers and dimension dropdown remain unbuilt; editor unions are not core schema unions"
+  ]
+}

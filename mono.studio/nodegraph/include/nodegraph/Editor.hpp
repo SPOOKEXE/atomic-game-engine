@@ -22,6 +22,8 @@
 #include <nodegraph/Layout.hpp>
 #include <nodegraph/Preview.hpp>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace nodegraph {
@@ -345,6 +347,10 @@ namespace nodegraph {
 		) const;
 
 		void HandleWidget(Graph &graph, NodeId node, const PlacedWidget &placed, float graphX);
+		bool DragCanConnect(const Graph &graph, NodeId node, const std::string &port, bool input) const;
+		void DrawDragHints(const Graph &graph) const;
+		bool DragPortAccepted(NodeId node, const std::string &port, bool input) const;
+		std::unordered_map<NodeId, std::unordered_set<std::string>> DragAccepted;
 		void Palette(Graph &graph);
 		void Menu(Graph &graph);
 

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Serialize.hpp>
+#include <nodegraph/Types.hpp>
 #include <string>
 #include <vector>
 
@@ -178,4 +179,27 @@ TEST_CASE("input interface overrides survive serialization including empty prese
 	REQUIRE(reloaded.Nodes()[0].InputPorts);
 	CHECK(reloaded.Nodes()[0].InputPorts->front().Name == "explicit-in");
 	CHECK(reloaded.Nodes()[0].InputPorts->front().Type == "data.FIELD");
+}
+
+TEST_CASE("registered union ports survive dynamic port save and load", "[nodegraph][union]") {
+	RegisterFixtureNodes();
+	DataType mixed;
+	mixed.Id = "fixture.union.saved";
+	mixed.Members = {"data.FIELD", "data.NUMBER"};
+	DataTypes::Register(mixed);
+	Graph graph;
+	const auto source = graph.Add("field.source", 0, 0);
+	const auto sink = graph.Add("field.blend", 260, 0);
+	REQUIRE(graph.SetDynamicInputs(sink, {PortSpec{"Extra", mixed.Id, false}}));
+	REQUIRE(graph.SetOutputs(source, {Port("Out", mixed.Id)}));
+	REQUIRE(graph.Connect(source, "Out", sink, "Extra") == LinkResult::Made);
+	const auto text = Save(graph);
+	Graph restored;
+	std::string error;
+	REQUIRE(Load(text, restored, error));
+	CHECK(Save(restored) == text);
+	REQUIRE(restored.Find(sink)->DynamicInputs.size() == 1);
+	CHECK_FALSE(restored.Find(sink)->DynamicInputs.front().Suggest);
+	CHECK(restored.CanConnect(source, "Out", sink, "Extra") == LinkResult::Made);
+	CHECK(restored.CanConnect(source, "Out", sink, "A") == LinkResult::TypeMismatch);
 }

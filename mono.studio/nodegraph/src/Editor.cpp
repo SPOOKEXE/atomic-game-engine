@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <imgui.h>
@@ -752,6 +753,53 @@ namespace nodegraph {
 		}
 	}
 
+	bool Canvas::DragCanConnect(const Graph &graph, NodeId node, const std::string &port, bool input) const {
+		if (Drag != Dragging::Link || DragNode == NO_NODE || input == DragFromInput) return false;
+		NodeId anchor = NO_NODE, target = NO_NODE;
+		std::string anchorPort, targetPort;
+		if (!Actual(graph, DragNode, DragPort, DragFromInput, anchor, anchorPort) ||
+			!Actual(graph, node, port, input, target, targetPort))
+			return false;
+		return (DragFromInput ? graph.CanConnect(target, targetPort, anchor, anchorPort)
+							  : graph.CanConnect(anchor, anchorPort, target, targetPort)) == LinkResult::Made;
+	}
+
+	bool Canvas::DragPortAccepted(NodeId node, const std::string &port, bool input) const {
+		const auto found = DragAccepted.find(node);
+		return found != DragAccepted.end() && found->second.contains((input ? "i:" : "o:") + port);
+	}
+
+	void Canvas::DrawDragHints(const Graph &graph) const {
+		if (Drag != Dragging::Link || DragNode == NO_NODE) return;
+		const float padding = Scaled(12), size = Scaled(Look.Sizes.SmallSize);
+		const float width = std::min(Scaled(360), ViewWidth - padding * 2);
+		const float height = ViewHeight - padding * 2;
+		if (width <= 0 || size <= 0 || height < size * 3) return;
+		std::string text = "Compatible ports";
+		size_t count = 0, shown = 0;
+		for (const auto &node : graph.Nodes()) {
+			if (!Visible(node)) continue;
+			for (const auto &port : Layout(node).Ports) {
+				if (!DragPortAccepted(node.Id, port.Name, port.Input)) continue;
+				++count;
+				const auto candidate = text + "\n" + std::to_string(node.Id) + ":" + port.Name;
+				if (ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, width, candidate.c_str()).y + size <=
+					height) {
+					text = candidate;
+					++shown;
+				}
+			}
+		}
+		if (count == 0) text += "\nnone";
+		if (shown < count) text += "\n+" + std::to_string(count - shown) + " more";
+		const auto extent = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, width, text.c_str());
+		const ImVec2 at(OriginX + ViewWidth - width - padding, OriginY + padding);
+		ImGui::GetWindowDrawList()->AddRectFilled(
+			{at.x - 4, at.y - 4}, {at.x + width + 4, at.y + extent.y + 4}, 0xE6000000
+		);
+		ImGui::GetWindowDrawList()->AddText(nullptr, size, at, 0xFFFFFFFF, text.c_str(), nullptr, width);
+	}
+
 	void Canvas::DrawNode(const Graph &graph, const Node &node, const NodeLayout &layout) const {
 		ImDrawList *draw = ImGui::GetWindowDrawList();
 		const NodeType *type = NodeTypes::Find(node.Type);
@@ -809,7 +857,10 @@ namespace nodegraph {
 			ImVec2 at;
 			ToScreen(node.X + port.X, node.Y + port.Y, at.x, at.y);
 
-			const bool wanted = Highlight.empty() || Highlight == port.Type;
+			const bool dragging = Drag == Dragging::Link && DragNode != NO_NODE;
+			const bool anchor = node.Id == DragNode && port.Name == DragPort && port.Input == DragFromInput;
+			const bool wanted = dragging ? anchor || DragPortAccepted(node.Id, port.Name, port.Input)
+										 : Highlight.empty() || DataTypes::CanConnect(port.Type, Highlight);
 			const uint32_t tint = wanted ? TintOf(port.Type) : Faded(TintOf(port.Type));
 			draw->AddCircleFilled(at, Look.Sizes.PortRadius * Scale * (wanted ? 1.0f : 0.7f), tint);
 			draw->AddCircle(at, Look.Sizes.PortRadius * Scale, Look.NodeBorder);
@@ -826,7 +877,7 @@ namespace nodegraph {
 				nullptr,
 				small,
 				ImVec2(port.Input ? at.x + 10.0f * Scale : at.x - 10.0f * Scale - width, at.y - small * 0.5f),
-				Look.Muted,
+				wanted ? Look.Muted : Faded(Look.Muted),
 				port.Name.c_str()
 			);
 		}
@@ -2037,6 +2088,16 @@ namespace nodegraph {
 
 		// --- painting ---------------------------------------------------------
 
+		DragAccepted.clear();
+		if (Drag == Dragging::Link && DragNode != NO_NODE) {
+			for (const auto &node : graph.Nodes()) {
+				if (!Visible(node)) continue;
+				for (const auto &port : Layout(node).Ports)
+					if (DragCanConnect(graph, node.Id, port.Name, port.Input))
+						DragAccepted[node.Id].insert((port.Input ? "i:" : "o:") + port.Name);
+			}
+		}
+
 		if (Signals.DrawBackground)
 			Signals.DrawBackground(graph, {OriginX, OriginY, ViewWidth, ViewHeight, PanX, PanY, Scale});
 		DrawGroups(graph);
@@ -2067,6 +2128,7 @@ namespace nodegraph {
 			}
 		}
 
+		DrawDragHints(graph);
 		draw->PopClipRect();
 
 		// --- keys and menus ---------------------------------------------------

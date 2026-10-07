@@ -108,6 +108,9 @@ namespace nodegraph {
 				for (const auto &port : *node.InputPorts)
 					out << "input | " << node.Id << " | " << port.Name << " | " << port.Type << "\n";
 			}
+			for (const auto &port : node.DynamicInputs)
+				out << "dynamic-input | " << node.Id << " | " << port.Name << " | " << port.Type << " | "
+					<< (port.Suggest ? "suggest" : "hidden") << "\n";
 			if (node.OutputPorts) {
 				out << "outputs | " << node.Id << "\n";
 				for (const auto &port : *node.OutputPorts)
@@ -366,6 +369,16 @@ namespace nodegraph {
 						if (!node->InputPorts) node->InputPorts.emplace();
 						node->InputPorts->push_back({std::string(fields[2]), std::string(fields[3])});
 					}
+				continue;
+			}
+			if (fields[0] == "dynamic-input" && fields.size() >= 4) {
+				if (const auto found = placed.find(Whole(fields[1])); found != placed.end())
+					if (auto *node = graph.Find(found->second))
+						node->DynamicInputs.push_back(
+							{std::string(fields[2]),
+							 std::string(fields[3]),
+							 fields.size() < 5 || fields[4] != "hidden"}
+						);
 				continue;
 			}
 			if (fields[0] == "outputs" && fields.size() >= 2) {

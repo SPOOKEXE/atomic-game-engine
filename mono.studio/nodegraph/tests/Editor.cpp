@@ -1,7 +1,10 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <imgui.h>
 #include <nodegraph/Editor.hpp>
 #include <nodegraph/Registry.hpp>
@@ -267,4 +270,81 @@ TEST_CASE("node marks highlight nodes without replacing selection", "[nodegraph]
 	DrawFrame(canvas, graph);
 	CHECK(highlightedVertices() > selectedOnly);
 	CHECK(canvas.Selection() == std::vector<nodegraph::NodeId>{selected});
+}
+
+TEST_CASE("link drag dims refused sockets and paints corner port hints", "[nodegraph][drag]") {
+	const bool reverse = GENERATE(false, true);
+	HeadlessContext context;
+	nodegraph::DataType number;
+	number.Id = "fixture.drag.number";
+	number.Tint = {1, 0, 0, 1};
+	nodegraph::DataTypes::Register(number);
+	nodegraph::DataType other;
+	other.Id = "fixture.drag.other";
+	other.Tint = {0, 1, 0, 1};
+	nodegraph::DataTypes::Register(other);
+	nodegraph::DataType either;
+	either.Id = "fixture.drag.union";
+	either.Tint = {0, 0, 1, 1};
+	either.Members = {number.Id, other.Id};
+	nodegraph::DataTypes::Register(either);
+	nodegraph::NodeType type;
+	type.Id = "fixture.drag.node";
+	type.Title = "Drag";
+	type.Inputs = {nodegraph::Port("good", either.Id), nodegraph::Port("bad", other.Id)};
+	type.Outputs = {nodegraph::Port("out", number.Id)};
+	nodegraph::NodeTypes::Register(type);
+	nodegraph::Graph graph;
+	const auto source = graph.Add(type.Id, 20, 100);
+	const auto target = graph.Add(type.Id, 280, 100);
+	nodegraph::Canvas canvas;
+	const auto origin = DrawFrame(canvas, graph);
+	const auto sourceLayout = nodegraph::LayoutOf(*graph.Find(source));
+	const auto socket = [](const auto &layout, const std::string &name) {
+		const auto found = std::find_if(layout.Ports.begin(), layout.Ports.end(), [&](const auto &port) {
+			return port.Name == name;
+		});
+		REQUIRE(found != layout.Ports.end());
+		return *found;
+	};
+	const auto output = socket(sourceLayout, "out");
+	const auto targetLayout = nodegraph::LayoutOf(*graph.Find(target));
+	const ImVec2 sourceAt(origin.x + 20 + output.X, origin.y + 100 + output.Y);
+	const ImVec2 targetAt(
+		origin.x + 280 + socket(targetLayout, "good").X, origin.y + 100 + socket(targetLayout, "good").Y
+	);
+	const auto anchor = reverse ? targetAt : sourceAt;
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(anchor.x, anchor.y);
+	DrawFrame(canvas, graph);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	DrawFrame(canvas, graph);
+	const auto layout = nodegraph::LayoutOf(*graph.Find(target));
+	const auto hasTint = [&](const nodegraph::PlacedPort &port, ImU32 tint) {
+		const ImVec2 at(origin.x + 280 + port.X, origin.y + 100 + port.Y);
+		const auto *data = ImGui::GetDrawData();
+		for (int list = 0; list < data->CmdListsCount; ++list)
+			for (const auto &vertex : data->CmdLists[list]->VtxBuffer)
+				if (vertex.col == tint && std::abs(vertex.pos.x - at.x) < 6 &&
+					std::abs(vertex.pos.y - at.y) < 6)
+					return true;
+		return false;
+	};
+	CHECK(hasTint(socket(layout, "good"), IM_COL32(0, 0, 255, 255)));
+	CHECK(hasTint(socket(layout, "bad"), IM_COL32(0, 255, 0, 51)));
+	bool cornerText = false;
+	const auto *data = ImGui::GetDrawData();
+	for (int list = 0; list < data->CmdListsCount; ++list)
+		for (const auto &vertex : data->CmdLists[list]->VtxBuffer)
+			if (vertex.col == IM_COL32(255, 255, 255, 255) && vertex.pos.x > origin.x + 200 &&
+				vertex.pos.y < origin.y + 70)
+				cornerText = true;
+	CHECK(cornerText);
+	const auto drop = reverse ? sourceAt : targetAt;
+	io.AddMousePosEvent(drop.x, drop.y);
+	DrawFrame(canvas, graph);
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	DrawFrame(canvas, graph);
+	REQUIRE(graph.Links().size() == 1);
+	CHECK(graph.Links().front().ToPort == "good");
 }

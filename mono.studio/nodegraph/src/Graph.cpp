@@ -186,7 +186,8 @@ namespace nodegraph {
 		for (const PortSpec &port : type->Inputs)
 			names.insert(port.Name);
 		for (const PortSpec &port : inputs) {
-			if (port.Name.empty() || DataTypes::Find(port.Type) == nullptr || !names.insert(port.Name).second)
+			if (port.Name.empty() || !DataTypes::CanConnect(port.Type, port.Type) ||
+				!names.insert(port.Name).second)
 				return false;
 		}
 
@@ -216,7 +217,8 @@ namespace nodegraph {
 		if (!node || node->Compressed() || !NodeTypes::Find(node->Type)) return false;
 		std::unordered_set<std::string> names;
 		for (const auto &port : outputs)
-			if (port.Name.empty() || !DataTypes::Find(port.Type) || !names.insert(port.Name).second)
+			if (port.Name.empty() || !DataTypes::CanConnect(port.Type, port.Type) ||
+				!names.insert(port.Name).second)
 				return false;
 		node->OutputPorts = std::move(outputs);
 		std::erase_if(Wires, [&](const auto &link) {

@@ -348,3 +348,41 @@ TEST_CASE("unknown nodes connect through explicit ports and retain them on absor
 	}
 	CHECK(absorbed->Type == sinkNode->Type);
 }
+
+TEST_CASE("union ports accept every possible output member", "[nodegraph][union]") {
+	RegisterFixtureNodes();
+	DataType mixed;
+	mixed.Id = "fixture.union.field-number";
+	mixed.Members = {"data.FIELD", "data.NUMBER"};
+	DataTypes::Register(mixed);
+	DataType nested;
+	nested.Id = "fixture.union.nested";
+	nested.Members = {mixed.Id, "data.FIELD"};
+	DataTypes::Register(nested);
+	CHECK(DataTypes::CanConnect("data.FIELD", mixed.Id));
+	CHECK(DataTypes::CanConnect("data.NUMBER", nested.Id));
+	CHECK(DataTypes::CanConnect(mixed.Id, nested.Id));
+	CHECK_FALSE(DataTypes::CanConnect(mixed.Id, "data.FIELD"));
+	CHECK_FALSE(DataTypes::CanConnect("data.TYPO", ANY_TYPE));
+	CHECK_FALSE(DataTypes::CanConnect("data.TYPO", "data.TYPO"));
+	DataType invalid;
+	invalid.Id = "fixture.union.invalid";
+	invalid.Members = {"data.TYPO"};
+	DataTypes::Register(invalid);
+	CHECK_FALSE(DataTypes::CanConnect(invalid.Id, ANY_TYPE));
+	invalid.Members = {invalid.Id};
+	DataTypes::Register(invalid);
+	CHECK_FALSE(DataTypes::CanConnect(invalid.Id, invalid.Id));
+	invalid.Members = {ANY_TYPE};
+	DataTypes::Register(invalid);
+	CHECK_FALSE(DataTypes::CanConnect("data.FIELD", invalid.Id));
+	Graph graph;
+	const auto source = graph.Add("field.source", 0, 0);
+	const auto sink = graph.Add("field.blend", 260, 0);
+	REQUIRE(graph.SetDynamicInputs(sink, {Port("Extra", mixed.Id)}));
+	CHECK(graph.Connect(source, "Out", sink, "Extra") == LinkResult::Made);
+	CHECK_FALSE(graph.SetDynamicInputs(sink, {Port("Bad", invalid.Id)}));
+	REQUIRE(graph.SetOutputs(source, {Port("Out", mixed.Id)}));
+	CHECK(graph.CanConnect(source, "Out", sink, "A") == LinkResult::TypeMismatch);
+	CHECK(graph.CanConnect(source, "Out", sink, "Extra") == LinkResult::Made);
+}
