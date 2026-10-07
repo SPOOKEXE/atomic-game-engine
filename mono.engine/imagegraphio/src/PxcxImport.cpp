@@ -6,6 +6,7 @@
 #include "OrdinarySourceGroups.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "PxcxNativePorts.hpp"
+#include "SourceNoiseFieldAnnotation.hpp"
 #include "TileProperties.hpp"
 
 #include <engine/imagegraph/Catalogue.hpp>
@@ -4361,6 +4362,25 @@ namespace engine::imagegraphio {
 											   : "source instance base is not a bounded durable name"
 					);
 				node.InstanceBase = base.get<std::string>();
+				result.Graph.FormatVersion = 9;
+			}
+			detail::SourceNoiseFieldAnnotation noiseField;
+			if (!detail::ReadSourceNoiseFieldAnnotation(source, node.Type, noiseField, failure)) return false;
+			if (noiseField.OutputType) {
+				if (node.Values.size() >= imagegraph::Limits::MaximumPropertiesPerNode ||
+					!AdmitNativeSlots(node.Values, node.Values.size() + 1, &operationBudget) ||
+					!AdmitNativeText("output_type", &operationBudget))
+					return Fail(failure, "noise field annotation exceeds native import bounds");
+				node.Values.push_back({"output_type", imagegraph::EnumValue{*noiseField.OutputType}});
+				result.Graph.FormatVersion = 9;
+			}
+			if (noiseField.OverrideInstance) {
+				if (!AdmitNativeSlots(
+						node.InstanceOverrides, node.InstanceOverrides.size() + 1, &operationBudget
+					) ||
+					!AdmitNativeText("output_type", &operationBudget))
+					return Fail(failure, "noise field override exceeds native import bounds");
+				node.InstanceOverrides.push_back("output_type");
 				result.Graph.FormatVersion = 9;
 			}
 			std::optional<std::string_view> cookedSelector;

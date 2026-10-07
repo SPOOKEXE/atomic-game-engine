@@ -1,3 +1,4 @@
+#include "CompactSourceAnimatorEdit.hpp"
 #include "CookedShaderAnnotation.hpp"
 #include "HlslSourceArguments.hpp"
 #include "ImageCacheAnnotation.hpp"
@@ -5,6 +6,7 @@
 #include "PxcxKeyProvenance.hpp"
 #include "PxcxNativePorts.hpp"
 #include "SourceInputProvenance.hpp"
+#include "SourceNoiseFieldAnnotation.hpp"
 #include "SourceTimelineProjection.hpp"
 #include "TileProperties.hpp"
 
@@ -3008,7 +3010,13 @@ namespace engine::imagegraphio {
 									diagnostic, "PXC global default has no codec", node.Id, input.Id
 								);
 							if (!synchronizeCompact(node, input.Id, *input.Default)) return false;
-							record["r"] = {{"d", std::move(*value)}};
+							if (!detail::WriteCompactSourceAnimatorValue(record, std::move(*value)))
+								return Reject(
+									diagnostic,
+									"PXC global default retains a noncompact animator",
+									node.Id,
+									input.Id
+								);
 						}
 						records.push_back(std::move(record));
 					}
@@ -3035,6 +3043,8 @@ namespace engine::imagegraphio {
 					return Reject(diagnostic, failure, node.Id, detail::ImageCacheData);
 				if (!detail::WriteCookedAnnotation(*source, node, failure))
 					return Reject(diagnostic, failure, node.Id, detail::CookedSelector);
+				if (!detail::WriteSourceNoiseFieldAnnotation(*source, node, failure))
+					return Reject(diagnostic, failure, node.Id, "output_type");
 				source->at("x") = node.Position.X;
 				source->at("y") = node.Position.Y;
 				const auto *oldMembership = NativeNode(working.Graph, node.Id);
@@ -3176,6 +3186,8 @@ namespace engine::imagegraphio {
 					}
 					for (const auto &value : node.Values) {
 						if (node.Type == "pc.group_input" && value.Port == "parent_value") continue;
+						if (imagegraph::IsNoiseImageGenerator(node.Type) && value.Port == "output_type")
+							continue;
 						const auto *oldNode = NativeNode(working.Graph, node.Id);
 						if (oldNode &&
 							std::any_of(oldNode->Values.begin(), oldNode->Values.end(), [&](const auto &old) {
@@ -3648,7 +3660,15 @@ namespace engine::imagegraphio {
 								return Reject(
 									diagnostic, "Puppet property has no inverse array", node.Id, property.Port
 								);
-							(*source)["inputs"][*index]["r"] = {{"d", std::move(*encoded)}};
+							if (!detail::WriteCompactSourceAnimatorValue(
+									(*source)["inputs"][*index], std::move(*encoded)
+								))
+								return Reject(
+									diagnostic,
+									"Puppet property retains a noncompact animator",
+									node.Id,
+									property.Port
+								);
 						} else
 							return Reject(
 								diagnostic,
