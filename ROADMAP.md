@@ -38,6 +38,8 @@ Milestone labels describe development scope, not release versions.
 
 ### v0.25
 
+Priority: Finish the imagegraph fundamental system first. Pause separate audio, mesh and animation work until it is complete, then revisit those tracks.
+
 - [_] Add custom profiles such as RenderPipeline: let RunProfileWorkflow select a workflow, expose its inputs and outputs as node ports, and open its inspector popup on double-click.
 
 Pixel Composer foundations:
