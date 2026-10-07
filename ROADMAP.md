@@ -82,6 +82,10 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate Studio camera rows and sequence previews; pass joined CPU validation.
 - [x] Integrate path extension, flattening and smoothing.
 - [x] Add bounded Path Bake with native save/reopen and downstream sampling; validate all 21 CPU workload profiles.
+- [x] Add bounded Mirror Polar CleanEdge sampling with source-derived pixel fixtures; validate all 22 CPU workload profiles.
+- [x] Preserve canonical cold Nine Slice state through frozen groups, native saves and logical drawing.
+- [x] Preserve expression-backed Combine keys through PXC save/reopen and re-separation for supported vector ports.
+- [_] Finish Draw Line 2 Points with captured shared shader state and matched primitive coverage; see the [source-state audit](mono.engine/imagegraph/docs/source-line2points-state.md).
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [x] Save completed image previews as PXC thumbnails with atomic publication.
 - [x] Preserve separate Mirror X/Y animators through group replay and PXC edits.
@@ -136,7 +140,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Verify modified-project compatibility.
 - [x] Verify skybox GPU pixels.
 
-The [October 7 parallel checks](docs/pixel-composer-m0/native-parallel-composer-validation-2026-10-07.json) cover typed noise, compound PXC edits, alias gestures, bounded audio and sequences, native ICO, weighted triangulation and native Draw Shape 3D. Profile all seven new noise workloads with heap hooks; remaining 3D executors and licensed parity stay open.
+The [joined parallel checks](docs/pixel-composer-m0/native-parallel-composer-validation-2026-10-07.json) include Mirror Polar CleanEdge, cold Nine Slice and Combine PXC persistence: 5,848 C++ cases, 116 Python checks, 16 CLI checks and all 22 CPU workload profiles pass. Remaining catalogue executors, live Studio verification and licensed parity stay open.
 
 The [October 5 continuation checks](docs/pixel-composer-m0/native-validation-2026-10-05.json) record joined CPU suites, native wrapped-text profiling and scoped Vulkan checks for Composer, Transform, cameras and grouped skyboxes. Licensed reference parity and live Studio remain open.
 
