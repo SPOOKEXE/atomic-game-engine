@@ -363,6 +363,13 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "be8890bee5d7c4629ae04e6f79cad9f5ef734639259355ff1c7f662f0ea3e4fa",
                 },
             ),
+            (
+                "scripts/node_pytagorean_tile/node_pytagorean_tile.gml",
+                {
+                    "bytes": 5194,
+                    "sha256": "6fae8079aaa9785e778df6b8cdeff8e528ea740d46f039cd326997476ac54964",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (
@@ -370,6 +377,7 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
             ("Node_Gabor_Noise", "v 4 4"),
             ("Node_Perlin", "v 4 4"),
             ("Node_Shard_Noise", "v 4 4"),
+            ("Node_Pytagorean_Tile", "v 0.25 0.25"),
         ):
             node = snapshot["nodes"][name]
             control = next(v for v in node["inputs"] if v["name"] == "Scale")

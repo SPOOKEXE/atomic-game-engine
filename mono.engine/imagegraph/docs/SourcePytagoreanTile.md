@@ -1,0 +1,19 @@
+# Source Pytagorean Tile
+
+`pc.pytagorean_tile` follows the pinned Pixel Composer source at `b69eca232217360cf1502ef0223523d818606652`: `scripts/node_pytagorean_tile/node_pytagorean_tile.gml` and `shaders/sh_pytagorean_tile/sh_pytagorean_tile.fsh`.
+
+The source has three defined render modes: Colored Tile evaluates the authored gradient at the cell hash plus Shift, Height Map applies Level In and Level Out to cell distance, and Texture Grid samples the source base sprite at the cell-local coordinate. The source selector clamps authored choices to these modes before execution. Fractional choices unsupported by the integer reader report `render_type`; the executor also guards against undefined converted modes that would leave the shader's `colr` uninitialized.
+
+The shader normalizes Scale by the raw output Dimension and four, transforms the UV-relative Position using output aspect and Rotation, then computes cell identity, random value, signed distance, and local texture coordinates. Phase is converted to radians and divided by four before rotating the cell grid. Gap is clamped to `[0,1]`, cubed, and used as the tile thickness. Anti Aliasing selects a dimension-scaled smoothstep at the edge; otherwise the shader uses a step.
+
+Scale, Rotation, and Gap maps interpolate the uploaded control lanes using sampled map RGB mean. Base, UV, and scalar-control maps use canonical nearest sampling with clamp; mapped gradients use bilinear filtering. UV maps flip green, mix the coordinates, and preserve sampled alpha even at zero UV Mix. The gradient supports the seven source blend modes. Texture Transform applies per-cell flip, rotation, translation, and scale using the authored transform ranges. A missing Texture in Texture Grid samples the source base sprite, matching the generator's one-pixel white fallback. The shader does not use its interpolation uniform. Texture sampling selects the oversample mode, but exact licensed-runtime filtering parity has not been verified.
+
+Raw Dimension determines shader coordinates and sprite coverage. Allocation uses half-even rounding and clamps each dimension to at least one pixel. Pixels outside the raw sprite footprint remain clear and skip shader-only controls. Position and Scale reference units use the first prepared Dimension row. Linked individual surfaces expose their dimensions and bypass units; a linked whole SurfaceArray projects to `[1,1]`. Dimension SurfaceArrays project per row and collapse when their dimensions are all equal.
+
+The executor supports the seven explicit output depths. The shared mask path applies after drawing; masking reads the selected typed output, applies mean mask RGB and mask alpha to output alpha, writes RGBA8 scratch, then converts back to the selected depth. Mask Alpha Only is not used by the pinned source path.
+
+Admission quotes all selected rows before outputs or observer callbacks. Covered allocated pixels cost 8192 work units and wholly uncovered pixels cost 512. The complete batch limit is 64 million work units. Whole-batch bytes reserve typed output, metadata, and mask scratch before execution.
+
+Inverse array processing uses the pinned processor's mirrored suffix table across all 29 physical input slots. This can select Gap and Seed together and repeat rows; it does not reverse only the compact list of batched arrays. Interpolate and Oversample are host attributes outside that slot table.
+
+Seed is required when a covered cell hash is evaluated. Zero consumed Scale or cell size and equal Height Map input levels return named diagnostics. An absent optional map follows the source helper's disabled-map path. Unconsumed controls are skipped when the source branch does not read them. CPU shader math is a bounded native translation; this does not claim licensed runtime pixel parity or CPU/GPU bit identity.

@@ -46,6 +46,7 @@ namespace engine::imagegraph::detail {
 					  SourceShardNoiseExecutors(),
 					  SourceStrandNoiseExecutors(),
 					  SourceWeaveExecutors(),
+					  SourcePytagoreanTileExecutors(),
 					  SourceTileTransformExecutors(),
 					  SourceErodeExecutors(),
 					  PathExecutors(),

@@ -3,6 +3,7 @@
 #include "Families.hpp"
 #include "Source2DComplexGenerator.hpp"
 #include "SourceNormalShaderCurve.hpp"
+#include "SourceShaderGradient.hpp"
 
 #include <algorithm>
 #include <array>
@@ -17,7 +18,6 @@ namespace engine::imagegraph::detail {
 	namespace {
 		constexpr uint64_t WEAVE_WORK_LIMIT = 64000000, WEAVE_PIXEL_WORK = 8192;
 		using Float2 = std::array<float, 2>;
-		using Float3 = std::array<float, 3>;
 		using Float4 = std::array<float, 4>;
 		struct WeaveInputs {
 			source2d::ComplexCanvas Canvas;
@@ -202,101 +202,6 @@ namespace engine::imagegraph::detail {
 			}
 			return true;
 		}
-		Float3 WeaveHsv(Float3 c) {
-			Float4 p = c[2] <= c[1] ? Float4{c[1], c[2], 0, -1.f / 3.f} : Float4{c[2], c[1], -1, 2.f / 3.f};
-			Float4 q = p[0] <= c[0] ? Float4{c[0], p[1], p[2], p[0]} : Float4{p[0], p[1], p[3], c[0]};
-			const float d = q[0] - std::min(q[3], q[1]), e = .0000000001f;
-			return {std::abs(q[2] + (q[3] - q[1]) / (6.f * d + e)), d / (q[0] + e), q[0]};
-		}
-		Float3 WeaveRgb(Float3 c) {
-			Float3 out{};
-			constexpr Float3 offset{1, 2.f / 3.f, 1.f / 3.f};
-			for (size_t lane = 0; lane < 3; ++lane) {
-				const float p = std::abs(WeaveFract(c[0] + offset[lane]) * 6.f - 3.f);
-				out[lane] = c[2] * WeaveMix(1.f, std::clamp(p - 1.f, 0.f, 1.f), c[1]);
-			}
-			return out;
-		}
-		Float3 WeaveGradientMix(Float3 a, Float3 b, float t, int64_t mode) {
-			Float3 out{};
-			if (mode == 2 || mode == 5) {
-				a = WeaveHsv(a);
-				b = WeaveHsv(b);
-				const float delta = WeaveFract(b[0] - a[0]);
-				float shortest = WeaveFract(2.f * delta) - delta;
-				if (mode == 5) shortest -= float(shortest > 0) - float(shortest < 0);
-				return WeaveRgb({a[0] + shortest * t, WeaveMix(a[1], b[1], t), WeaveMix(a[2], b[2], t)});
-			}
-			if (mode == 3) {
-				const auto toLms = [](Float3 c) {
-					for (auto &v : c)
-						v = std::pow(v, 2.2f);
-					return Float3{
-						std::pow(
-							std::max(0.f, .4121656120f * c[0] + .5362752080f * c[1] + .0514575653f * c[2]),
-							1.f / 3.f
-						),
-						std::pow(
-							std::max(0.f, .2118591070f * c[0] + .6807189584f * c[1] + .1074065790f * c[2]),
-							1.f / 3.f
-						),
-						std::pow(
-							std::max(0.f, .0883097947f * c[0] + .2818474174f * c[1] + .6302613616f * c[2]),
-							1.f / 3.f
-						)
-					};
-				};
-				a = toLms(a);
-				b = toLms(b);
-				for (size_t i = 0; i < 3; ++i) {
-					out[i] = WeaveMix(a[i], b[i], t);
-					out[i] = out[i] * out[i] * out[i];
-				}
-				return {
-					std::pow(
-						std::max(
-							0.f, 4.0767245293f * out[0] - 3.3072168827f * out[1] + .2307590544f * out[2]
-						),
-						1.f / 2.2f
-					),
-					std::pow(
-						std::max(
-							0.f, -1.2681437731f * out[0] + 2.6093323231f * out[1] - .3411344290f * out[2]
-						),
-						1.f / 2.2f
-					),
-					std::pow(
-						std::max(
-							0.f, -.0041119885f * out[0] - .7034763098f * out[1] + 1.7068625689f * out[2]
-						),
-						1.f / 2.2f
-					)
-				};
-			}
-			if (mode == 6) {
-				const auto toCmyk = [](Float3 c) {
-					const float k = 1.f - std::max({c[0], c[1], c[2]});
-					return Float4{
-						(1.f - c[0] - k) / (1.f - k),
-						(1.f - c[1] - k) / (1.f - k),
-						(1.f - c[2] - k) / (1.f - k),
-						k
-					};
-				};
-				const auto x = toCmyk(a), y = toCmyk(b);
-				Float4 m{};
-				for (size_t i = 0; i < 4; ++i)
-					m[i] = WeaveMix(x[i], y[i], t);
-				return {
-					(1.f - m[0]) * (1.f - m[3]), (1.f - m[1]) * (1.f - m[3]), (1.f - m[2]) * (1.f - m[3])
-				};
-			}
-			for (size_t i = 0; i < 3; ++i)
-				out[i] = mode == 4
-							 ? std::pow(WeaveMix(std::pow(a[i], 2.2f), std::pow(b[i], 2.2f), t), 1.f / 2.2f)
-							 : WeaveMix(a[i], b[i], t);
-			return out;
-		}
 		bool WeaveGradient(NodeContext &c, float progress, Float4 &out) {
 			const auto *value = c.Find("random_color");
 			const auto *gradient = value ? std::get_if<Gradient>(value) : nullptr;
@@ -333,7 +238,7 @@ namespace engine::imagegraph::detail {
 					}
 					if (gradient->Mode > 6) break;
 					const auto rgb =
-						WeaveGradientMix({a[0], a[1], a[2]}, {b[0], b[1], b[2]}, t, gradient->Mode);
+						ShaderGradientMix({a[0], a[1], a[2]}, {b[0], b[1], b[2]}, t, gradient->Mode);
 					out = {rgb[0], rgb[1], rgb[2], WeaveMix(a[3], b[3], t)};
 					for (float lane : out)
 						if (!WeaveFinite(c, "random_color", lane)) return false;

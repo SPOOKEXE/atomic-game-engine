@@ -1,0 +1,129 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.pytagorean_tile source equations. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_pytagorean_tile/node_pytagorean_tile.gml": "6fae8079aaa9785e778df6b8cdeff8e528ea740d46f039cd326997476ac54964",
+      "shaders/sh_pytagorean_tile/sh_pytagorean_tile.fsh": "cb6fca57c0d13ee0106bfa998032b0d3eed3061d19c9084b52d9b787617cf0f5",
+      "scripts/__node_shader/__node_shader.gml": "81b23b94aac6df118187510083d3f59c02b4bf09799e75c72ab5a19e7e17d45f",
+      "scripts/__node_shader_generator/__node_shader_generator.gml": "e917d1974118124fef04ce6121459b2c73b956201edd6ea36c71ad223fd3f6dd",
+      "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+      "scripts/gradients_function/gradients_function.gml": "a8206594b6d99c31776d4332b5cf48658666f6de7b2c2823d6901e89cef661fa",
+      "scripts/node_value/node_value.gml": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+      "scripts/node_processor/node_processor.gml": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourcePytagoreanTile.cpp",
+    "rules": [
+      "Colored Tile, Height Map and Texture Grid; source selector clamps authored modes, unsupported fractional integer choices report render_type",
+      "binary32 Pytagorean cell identity, signed distance, Phase and fractional-seed hash; signed Scale, Rotation, raw Dimension coverage and half-even allocation",
+      "Position host normalization occurs before float upload; Position and Scale Reference use first prepared Dimension row",
+      "mapped Scale retains two uniform lanes, fixing catalogue vector4 metadata; Rotation and Gap mean RGB maps preserve authored scalar/pair ranges",
+      "seven source gradient blend modes share extracted float color math with Weave; gradient maps use canonical bilinear clamp",
+      "UV nearest lookup flips green and preserves alpha at zero Mix; Texture Grid supports truchet flips/rotation/translation/scale, oversample modes and missing-texture white fallback",
+      "seven explicit surface depths followed by RGBA8 mask scratch and typed copy-back; Mask Alpha Only inert",
+      "individual Surface and whole SurfaceArray numeric getter projections, Dimension row/collapse behavior, all29 physical slots and four source schedules",
+      "inverse source processing mirrors full29-slot suffix table and can couple Gap/Seed and duplicate rows; sampler attributes remain outside that table",
+      "Format9 seed animation and inherited instances; aggregate64M work admission before observers/publication; covered8192work and uncovered512work perallocatedpixel",
+      "conservative bytes include typed targets, row metadata and mask scratch; finite shader prescan before output allocation"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-build-batch3.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-build-batch4.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-cpu-batch4-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5599,
+    "new_pytagorean_test_cases": 16,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3931,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-source-stability-batch3.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-source-stability-batch4.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-cpu-child-hashes-batch4.json",
+    "independent_reference_count": 40,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pytagorean-independent-reference.json"
+    ],
+    "read_review": "root reviewed pinned source contract, executor, shared gradient extraction, registration/projections, metadata and both fixtures; read fixture repairs before joined batches"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "checks": 20,
+      "passed": 19,
+      "failed_suite": "core",
+      "failed_test_cases": 4,
+      "failed_assertions": 8,
+      "failure_excerpts": [
+        "CHECK_FALSE( invalidMode.Ok )",
+        "CHECK( first.Pixels != animated.Pixels )",
+        "seed: Pytagorean requires resolved source Seed"
+      ],
+      "cause": "fixture expected unclamped enum; white gradient hid animation; temporary string port stored in string_view lost resolved seed",
+      "repair": "check source mode clamping and fractional refusal, author visible gradient, retain stable port string_view"
+    },
+    {
+      "batch": 2,
+      "checks": 20,
+      "passed": 19,
+      "failed_suite": "core",
+      "failed_test_cases": 1,
+      "failed_assertions": 1,
+      "failure_excerpts": [
+        "3:interpolate:source processor input slot layout is unresolved"
+      ],
+      "cause": "Pytagorean admission omitted synthetic Interpolate/Oversample host attributes",
+      "repair": "exclude sampler attributes from physical source-slot table; preserve runtime sampler reads"
+    },
+    {
+      "batch": 3,
+      "checks": 20,
+      "passed": 19,
+      "failed_suite": "core",
+      "failed_test_cases": 1,
+      "failed_assertions": 9,
+      "failure_excerpts": [
+        "CHECK( batch.Images[0] != batch.Images[4] )",
+        "CHECK( batch.Images[row] == expected.Output() )"
+      ],
+      "cause": "inverse fixture assumed compact Cartesian reversal; pinned source mirrors full physical-slot suffix table",
+      "repair": "match independently read source suffix indices, assert duplicate rows and observable Shift; preserve distinct-gradient Seed check in Expand"
+    }
+  ],
+  "not_run": [
+    "matched licensed Pixel Composer captures",
+    "headed live Studio verification",
+    "dedicated Pytagorean performance profiling",
+    "fresh dev/server/ci preset matrices",
+    "new sanitizer build"
+  ],
+  "limits": [
+    "source-equation references do not establish licensed runtime pixel parity",
+    "CPU libm, canonical sampler filtering and device float behavior can differ",
+    "ENGINE_PROFILE marks executor; no measured speed claim"
+  ],
+  "external_references": {
+    "glsl_common_functions": "https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html#common-functions"
+  },
+  "build_warnings_note": "initial rebuilds reported warnings in unchanged dependency sources; owned fixture gradient narrowing warning repaired before batch3; final incremental build warnings listed below",
+  "build_warnings": []
+}

@@ -43,6 +43,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceShardNoiseExecutors();
 	std::span<const ExecutorEntry> SourceStrandNoiseExecutors();
 	std::span<const ExecutorEntry> SourceWeaveExecutors();
+	std::span<const ExecutorEntry> SourcePytagoreanTileExecutors();
 	std::span<const ExecutorEntry> SourceTileTransformExecutors();
 	std::span<const ExecutorEntry> PathExecutors();
 	std::span<const ExecutorEntry> PointExecutors();
