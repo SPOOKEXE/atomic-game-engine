@@ -97,8 +97,10 @@ namespace {
 			for (size_t i = 0; i < Count; ++i) {
 				const auto &reading = Readings[i];
 				std::printf(
-					"# pixel-profile preset=%s backend=cpu kind=%u call=%zu warmup=%d nodes=%zu side=128 "
-					"palette_colours=%u tick=0 seed=0 output_fnv=%llu owner_ms=%.6f unmarked_ms=%.6f "
+					"# pixel-profile preset=%s backend=cpu kind=%u call=%zu warmup=%d nodes=%zu side=%u "
+					"format=%s "
+					"palette_colours=%u tick=0 seed=%.2f iteration=%u output_fnv=%llu owner_ms=%.6f "
+					"unmarked_ms=%.6f "
 					"heap_compiled=%d "
 					"allocated_bytes=%llu allocated_blocks=%llu process_live_bytes=%lld "
 					"process_peak_bytes=%lld "
@@ -108,7 +110,18 @@ namespace {
 					i + 1,
 					i < 8,
 					Graph.Authored.Nodes.size(),
+					Graph.OutputSide(),
+					Graph.OutputFormat(),
 					Graph.IsPalette() ? 512u : 0u,
+					(Graph.Workload == Fixture::Kind::GaussianRandom ||
+					 Graph.Workload == Fixture::Kind::AnisoBlend ||
+					 Graph.Workload == Fixture::Kind::AnisoMapped)
+						? 17.25
+						: 0.0,
+					(Graph.Workload == Fixture::Kind::FoldGreyscale ||
+					 Graph.Workload == Fixture::Kind::FoldMap || Graph.IsFieldSample())
+						? 3u
+						: 0u,
 					static_cast<unsigned long long>(Graph.ExpectedHash),
 					reading.Milliseconds,
 					reading.UnmarkedMilliseconds,
@@ -182,5 +195,40 @@ BENCH("CPU Bokeh 128x128 strength8 taps8 compiled-plan", 1) {
 }
 BENCH("CPU Bokeh 128x128 strength8 taps32 compiled-plan", 1) {
 	static Profile p(Fixture::Kind::Bokeh32);
+	p.Measure();
+}
+
+BENCH("CPU Fold Greyscale 64x64 iteration3 compiled-plan", 1) {
+	static Profile p(Fixture::Kind::FoldGreyscale);
+	p.Measure();
+}
+
+BENCH("CPU Fold Map 64x64 iteration3 compiled-plan", 1) {
+	static Profile p(Fixture::Kind::FoldMap);
+	p.Measure();
+}
+
+BENCH("CPU Gaussian random 64x64 seed17.25 compiled-plan", 1) {
+	static Profile p(Fixture::Kind::GaussianRandom);
+	p.Measure();
+}
+
+BENCH("CPU Gaussian conversion 64x64 two red samplers compiled-plan", 1) {
+	static Profile p(Fixture::Kind::GaussianConversion);
+	p.Measure();
+}
+
+BENCH("CPU Aniso Blend 64x64 two seeds compiled-plan", 1) {
+	static Profile p(Fixture::Kind::AnisoBlend);
+	p.Measure();
+}
+
+BENCH("CPU Aniso Waterfall 64x64 three mapped controls tile compiled-plan", 1) {
+	static Profile p(Fixture::Kind::AnisoMapped);
+	p.Measure();
+}
+
+BENCH("CPU Fold RGB field 32x32 Sample Vector3 compiled-plan", 1) {
+	static Profile p(Fixture::Kind::RasterRGB);
 	p.Measure();
 }

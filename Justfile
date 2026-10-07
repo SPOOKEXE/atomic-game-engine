@@ -479,13 +479,13 @@ imagegraph-cpu-milestone-bench samples="5":
     ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][cpu_milestones]'
     ATOMIC_IMAGEGRAPH_CPU_PRESET=release-tests ./.cache/build/release-tests/bench/bench_imagegraph --suite engine.imagegraph.bench.cpu-milestones --samples {{samples}}
 
-# Atlas, palette, edge and Bokeh CPU kernels. Analytical preflight and profiles stay on stdout.
+# Atlas, palette, filters and bounded noise kernels. Source-equation preflight and profiles stay on stdout.
 imagegraph-pixel-kernel-bench samples="5":
     test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
-    cmake --preset release-tests -DMONO_BUILD_BENCH=ON > /dev/null
-    cmake --build --preset release-tests --target test_imagegraph bench_imagegraph
-    ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][pixel_kernel_workloads]'
-    ATOMIC_IMAGEGRAPH_PIXEL_PRESET=release-tests ./.cache/build/release-tests/bench/bench_imagegraph --suite engine.imagegraph.bench.pixel-kernels --samples {{samples}}
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[imagegraph][pixel_kernel_workloads]'
+    ATOMIC_IMAGEGRAPH_PIXEL_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.pixel-kernels --samples {{samples}}
 
 # Source FFT conversion, path affine/remapping and captured Strand replay. Results stdout only.
 imagegraph-source-pipeline-bench samples="5":
