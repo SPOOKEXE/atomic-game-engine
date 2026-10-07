@@ -81,6 +81,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate camera capture routing and row receipts; pass joined CPU validation.
 - [x] Integrate Studio camera rows and sequence previews; pass joined CPU validation.
 - [x] Integrate path extension, flattening and smoothing.
+- [x] Add bounded Path Bake with native save/reopen and downstream sampling; validate all 21 CPU workload profiles.
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [x] Save completed image previews as PXC thumbnails with atomic publication.
 - [x] Preserve separate Mirror X/Y animators through group replay and PXC edits.
@@ -97,7 +98,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Preserve project-clock cache observations and refresh captured inputs without replacing cached frames; pass joined CPU validation.
 - [x] Preserve source timeline endpoints through native saves, PXC edits and integral-frame exports; pass joined CPU validation.
 - [x] Verify real font decoding, Unicode Text pixels and font artifacts; profile all seven boundary workloads.
-- [_] Add separate/combine X/Y animation controls.
+- [x] Add separate/combine X/Y controls with processed input receipts, numeric tuple playback and atomic undo; pass headless gesture and save/reopen checks. Live Studio verification remains open.
 - [_] Add source-compatible argument handling.
 - [_] Bind cache playback and loading to selected animation-region bounds.
 - [_] Complete remaining Composer GPU checks.
