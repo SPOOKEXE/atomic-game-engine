@@ -381,19 +381,34 @@ namespace studio {
 			bool copy,
 			engine::imagegraph::Diagnostic &error,
 			bool keepCopySelection = false
-		) {
+		) try {
 			using namespace engine::imagegraph;
 			const FrameTime anchor = identity.Time;
-			if ((copy && !keepCopySelection) ||
+			const bool replaceSelection =
+				(copy && !keepCopySelection) ||
 				std::find(editor.Selection.begin(), editor.Selection.end(), identity) ==
-					editor.Selection.end())
-				editor.Selection = {identity};
+					editor.Selection.end();
+			// Admit the gesture before replacing selection, including refused alias pins.
+			const auto selection = replaceSelection
+									   ? std::span<const ImageGraphKeyframeIdentity>{&identity, 1}
+									   : std::span<const ImageGraphKeyframeIdentity>{editor.Selection};
 			const auto budget = editor.Remaining(true, true);
 			const auto retained = CacheBytes();
-			const uint64_t clocks = editor.Selection.size() * sizeof(FrameTime);
-			if (!budget || !retained || *retained > *budget || clocks > *budget - *retained ||
-				!TimelineKeyEditor::CaptureSelection(
-					document, editor.Selection, Originals, OriginalAxes, error, *budget - *retained - clocks
+			const uint64_t clocks = selection.size() * sizeof(FrameTime) +
+									(replaceSelection ? sizeof(ImageGraphKeyframeIdentity) +
+															identity.NodeId.size() + identity.Port.size()
+													  : 0);
+			if (!budget || !retained || *retained > *budget || clocks > *budget - *retained) {
+				error = {
+					Status::LimitExceeded,
+					identity.NodeId,
+					identity.Port,
+					"key gesture exceeds the timeline payload budget"
+				};
+				return false;
+			}
+			if (!TimelineKeyEditor::CaptureSelection(
+					document, selection, Originals, OriginalAxes, error, *budget - *retained - clocks
 				))
 				return false;
 			OriginalObservationRevision = Revision;
@@ -414,11 +429,24 @@ namespace studio {
 			Destinations.reserve(Originals.size());
 			for (const auto &original : Originals)
 				Destinations.push_back(GetFrameTime(original));
+			if (replaceSelection) {
+				std::vector<ImageGraphKeyframeIdentity> candidate{identity};
+				editor.Selection.swap(candidate);
+			}
 			Dragging = true;
 			Scaling = scale;
 			Copying = copy;
 			TargetsValid = true;
 			return true;
+		} catch (const std::bad_alloc &) {
+			Cancel();
+			error = {
+				engine::imagegraph::Status::LimitExceeded,
+				identity.NodeId,
+				identity.Port,
+				"key gesture allocation failed"
+			};
+			return false;
 		}
 		bool Update(const engine::imagegraph::FrameTime &endpoint, engine::imagegraph::Diagnostic &error) {
 			using namespace engine::imagegraph;
