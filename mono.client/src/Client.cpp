@@ -5396,6 +5396,10 @@ namespace client {
 		// shutdown.
 		bool profileArtifactsWritten = true;
 		if (benchmarking) {
+			if (!LiveImageGraphs.LastError().empty()) {
+				ENGINE_ERROR("benchmark imagegraph: {}", LiveImageGraphs.LastError());
+				return EXIT_PROFILE_ARTIFACT;
+			}
 			const auto gpu = Renderer.MemoryStatistics();
 			const double frames = static_cast<double>(benchmark.FrameCount());
 			const std::array<engine::core::BenchmarkMetric, 8> metrics = {

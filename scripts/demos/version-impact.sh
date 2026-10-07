@@ -28,6 +28,11 @@ case "$output/" in "$build/"*) ;; *) echo "reports must be beneath the build dir
 test -x "$build/client/client"
 test -x "$build/server/server"
 test -f "$workloads"
+# Graph documents are staged beside shared examples, while the client resolves
+# them from its executable asset root. Join those two staged directories.
+if [[ -d "$build/assets/imagegraphs" && ! -e "$build/client/imagegraphs" ]]; then
+	ln -s "$build/assets/imagegraphs" "$build/client/imagegraphs"
+fi
 test -x /usr/bin/time || { echo "GNU time is required for peak process RSS" >&2; exit 2; }
 test ! -e "$output/manifest.json" || { echo "choose a fresh output directory: $output" >&2; exit 2; }
 revision=$(git -C "$root" rev-parse HEAD)

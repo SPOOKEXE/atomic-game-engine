@@ -834,6 +834,7 @@ namespace client {
 		const std::filesystem::path &directory
 	) {
 		if (!owner.IsValid()) return 0;
+		ENGINE_PROFILE_CAT("imagegraph refresh", engine::core::ProfileCategory::Render);
 		std::unordered_set<uint64_t> seen;
 		size_t updated = 0;
 		size_t ordinal = 0;
