@@ -14,6 +14,7 @@
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Assert.hpp>
+#include <engine/core/BenchmarkReport.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -979,7 +980,9 @@ namespace client {
 		// work, so it is off unless something wants it - and a run given
 		// `--profile-snapshot` and nothing else recorded nothing, then reported
 		// that it could not write the document.
-		FrameGraph::SetEnabled(Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty());
+		FrameGraph::SetEnabled(
+			Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty() || !Settings.BenchmarkReport.empty()
+		);
 
 		// **Sampled from the start of the run rather than from when the panel
 		// opens, whenever a report was asked for.** A slope is only as good as
@@ -2639,7 +2642,10 @@ namespace client {
 		}
 
 		const auto refreshFrameGraphCollection = [this]() {
-			FrameGraph::SetEnabled(Settings.ShowFrameGraph);
+			FrameGraph::SetEnabled(
+				Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty() ||
+				!Settings.BenchmarkReport.empty()
+			);
 			HeapProfile::SetSamplingEnabled(
 				Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
 			);
@@ -5219,9 +5225,39 @@ namespace client {
 		// first card says.
 		StartDiscord();
 
+		const bool benchmarking = !Settings.BenchmarkReport.empty();
+		if (benchmarking && (!HeapProfile::IsCompiledIn() || !std::isfinite(Settings.ProfileSeconds) ||
+							 Settings.ProfileSeconds <= 0.0)) {
+			ENGINE_ERROR("benchmark report requires allocator hooks and positive profile-seconds");
+			return EXIT_PROFILE_ARTIFACT;
+		}
+		engine::core::HeapTotals benchmarkHeap = HeapProfile::Totals();
+		engine::core::BenchmarkReport benchmark(benchmarkHeap);
+		const auto benchmarkStarted = std::chrono::steady_clock::now();
+		const auto initialGpu = Renderer.MemoryStatistics();
+		double benchmarkSeconds = 0.0;
+		uint64_t benchmarkDrawCalls = 0, benchmarkUploadedBytes = 0, benchmarkSubmittedFrames = 0;
+
 		while (Running) {
 			if (!PumpPresentationHost()) break;
+			if (benchmarking) LastFrame = {};
 			Step();
+			if (benchmarking) {
+				benchmarkHeap = HeapProfile::Totals();
+				benchmark.AddFrame(
+					FrameGraph::Spans(),
+					FrameGraph::FrameMilliseconds(),
+					FrameGraph::Dropped(),
+					benchmarkHeap,
+					FrameGraph::OffThreadDropped()
+				);
+				benchmarkDrawCalls += LastFrame.DrawCalls;
+				benchmarkUploadedBytes += LastFrame.UploadedBytes;
+				benchmarkSubmittedFrames += LastFrame.Submitted ? 1 : 0;
+				benchmarkSeconds =
+					std::chrono::duration<double>(std::chrono::steady_clock::now() - benchmarkStarted)
+						.count();
+			}
 			PumpPlayPresentation();
 			if (PresentationLink && !PumpPresentationHost()) break;
 
@@ -5230,7 +5266,8 @@ namespace client {
 				break;
 			}
 
-			if (Settings.ProfileSeconds > 0.0 && Clock.Now() >= Settings.ProfileSeconds) {
+			if (Settings.ProfileSeconds > 0.0 &&
+				(benchmarking ? benchmarkSeconds : Clock.Now()) >= Settings.ProfileSeconds) {
 				// **The pass counts are here because nothing else can report
 				// them.** A shadow pass or a surface pass that silently did not
 				// run looks exactly like one that ran and changed nothing, and
@@ -5325,6 +5362,40 @@ namespace client {
 		// snapshot taken after the world has gone is a snapshot of the
 		// shutdown.
 		bool profileArtifactsWritten = true;
+		if (benchmarking) {
+			const auto gpu = Renderer.MemoryStatistics();
+			const double frames = static_cast<double>(benchmark.FrameCount());
+			const std::array<engine::core::BenchmarkMetric, 8> metrics = {
+				{{"gpu_live_bytes", static_cast<double>(gpu.LiveBytes)},
+				 {"gpu_peak_bytes", static_cast<double>(gpu.PeakBytes)},
+				 {"gpu_allocated_bytes", static_cast<double>(gpu.AllocatedBytes - initialGpu.AllocatedBytes)},
+				 {"gpu_resources_created",
+				  static_cast<double>(
+					  (gpu.BufferAllocations - initialGpu.BufferAllocations) +
+					  (gpu.TransferBufferAllocations - initialGpu.TransferBufferAllocations) +
+					  (gpu.TextureAllocations - initialGpu.TextureAllocations)
+				  )},
+				 {"draw_calls_per_frame",
+				  frames > 0.0 ? static_cast<double>(benchmarkDrawCalls) / frames : 0.0},
+				 {"uploaded_bytes", static_cast<double>(benchmarkUploadedBytes)},
+				 {"uploaded_bytes_per_frame",
+				  frames > 0.0 ? static_cast<double>(benchmarkUploadedBytes) / frames : 0.0},
+				 {"submitted_frames", static_cast<double>(benchmarkSubmittedFrames)}}
+			};
+			if (!benchmark.Write(
+					Settings.BenchmarkReport,
+					benchmarkSeconds,
+					Settings.ProfileSeconds,
+					benchmarkHeap,
+					HeapProfile::IsCompiledIn(),
+					metrics
+				)) {
+				ENGINE_ERROR(
+					"benchmark run incomplete or could not write {}", Settings.BenchmarkReport.string()
+				);
+				profileArtifactsWritten = false;
+			}
+		}
 		if (!Settings.ProfileSnapshot.empty()) {
 			if (FrameGraph::WriteSnapshot(Settings.ProfileSnapshot)) {
 				ENGINE_INFO("frame graph written to {}", Settings.ProfileSnapshot.string());
