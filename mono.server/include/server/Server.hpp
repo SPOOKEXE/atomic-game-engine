@@ -251,6 +251,11 @@ namespace server {
 		// @since v0.16
 		std::filesystem::path ProfilePath;
 
+		// Full-interval benchmark report, measured after startup and before shutdown.
+		std::filesystem::path BenchmarkReport;
+		// Minimum wall-clock interval; tick and replay limits still end the run.
+		double BenchmarkSeconds = 5.0;
+
 		// Ticks between windowed snapshots of `ProfilePath`, each written beside it
 		// as `<stem>.window<NNNNN><extension>`. Zero writes none.
 		//

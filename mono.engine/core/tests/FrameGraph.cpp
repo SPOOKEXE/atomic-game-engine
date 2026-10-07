@@ -295,6 +295,8 @@ TEST_CASE("a scope on another thread is dropped and counted", "[framegraph]") {
 	REQUIRE(FrameGraph::Spans().size() == 1);
 	REQUIRE(FrameGraph::Spans()[0].Name == "main");
 	REQUIRE(FrameGraph::Dropped() == 1);
+	CHECK(FrameGraph::OffThreadDropped() == 1);
+	CHECK(FrameGraph::OwnerDropped() == 0);
 }
 
 TEST_CASE("a dropped scope reaches the metrics sink", "[framegraph]") {
@@ -884,6 +886,8 @@ TEST_CASE("a negative duration is refused rather than clamped", "[framegraph]") 
 
 	REQUIRE(FrameGraph::Spans().empty());
 	REQUIRE(FrameGraph::Dropped() == 1);
+	CHECK(FrameGraph::OffThreadDropped() == 0);
+	CHECK(FrameGraph::OwnerDropped() == 1);
 }
 
 TEST_CASE("a report from a worker thread is dropped, not recorded", "[framegraph]") {
@@ -897,6 +901,8 @@ TEST_CASE("a report from a worker thread is dropped, not recorded", "[framegraph
 
 	REQUIRE(FrameGraph::Spans().empty());
 	REQUIRE(FrameGraph::Dropped() == 1);
+	CHECK(FrameGraph::OffThreadDropped() == 1);
+	CHECK(FrameGraph::OwnerDropped() == 0);
 }
 
 TEST_CASE("reporting while collection is off does nothing at all", "[framegraph]") {
@@ -1360,4 +1366,27 @@ TEST_CASE("device time reaches the flamegraph as its own line", "[framegraph]") 
 	REQUIRE(totals.at("frame;opaque") == 9000.0);
 	REQUIRE(totals.at("frame;record") == 2000.0);
 	REQUIRE(totals.at("frame") == 1000.0);
+}
+
+TEST_CASE("owner losses and excluded workers publish separate consistent frame counts", "[framegraph]") {
+	Collecting collecting;
+	FrameGraph::BeginFrame();
+	FrameGraph::Report("bad owner report", ProfileCategory::ECS, -1.0f);
+	std::thread worker([] {
+		FrameGraph::Scope scope("worker", ProfileCategory::Engine);
+		FrameGraph::Report("worker report", ProfileCategory::ECS, 1.0f);
+	});
+	worker.join();
+	FrameGraph::EndFrame();
+	CHECK(FrameGraph::OwnerDropped() == 1);
+	CHECK(FrameGraph::OffThreadDropped() == 2);
+	CHECK(FrameGraph::Dropped() == 3);
+	FrameGraph::BeginFrame();
+	FrameGraph::EndFrame();
+	CHECK(FrameGraph::OwnerDropped() == 0);
+	CHECK(FrameGraph::OffThreadDropped() == 0);
+	CHECK(FrameGraph::Dropped() == 0);
+	FrameGraph::SetEnabled(false);
+	CHECK(FrameGraph::OwnerDropped() == 0);
+	CHECK(FrameGraph::OffThreadDropped() == 0);
 }

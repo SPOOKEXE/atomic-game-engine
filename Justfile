@@ -1774,3 +1774,5 @@ clean-all:
 bench-mesh-lod samples="5":
     cmake --build --preset bench --target bench_assets
     ./.cache/build/bench/bench/bench_assets --suite engine.assets.bench.mesh-decimate --samples {{samples}}
+
+import 'scripts/demos/version-impact.just'

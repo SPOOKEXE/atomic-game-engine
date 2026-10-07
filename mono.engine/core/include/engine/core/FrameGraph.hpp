@@ -514,6 +514,15 @@ namespace engine::core {
 		// count because a partial flame graph must not look complete.
 		static size_t Dropped();
 
+		// Scopes and reports excluded from the last completed frame because
+		// they originated outside its owning thread. These do not mean missing
+		// owner-thread wall time; worker traces belong to Tracy.
+		static size_t OffThreadDropped();
+
+		// Owner-thread spans lost to invalid durations, depth or storage limits.
+		// A nonzero count makes the recorded CPU category totals partial.
+		static size_t OwnerDropped();
+
 		// The counter `EndFrame` adds every frame's drops to.
 		//
 		// **Because the overlay was the only thing that could see them**, and a

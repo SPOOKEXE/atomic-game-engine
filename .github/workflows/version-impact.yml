@@ -1,0 +1,85 @@
+name: demo performance impact
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Baseline branch or commit carrying the benchmark recorder
+        default: origin/v0.24.1
+        required: true
+  pull_request:
+    paths:
+      - 'mono.engine/**'
+      - 'mono.client/**'
+      - 'mono.server/**'
+      - 'mono.tools/benchrunner/**'
+      - 'scripts/demos/version-impact*'
+      - 'scripts/demos/compare-version-impact.sh'
+      - '.github/workflows/version-impact.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-impact-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      # Both revisions use the same software Vulkan device. These measurements
+      # form their own baseline and are not compared to desktop GPU timings.
+      BUILD_JOBS: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Install build and software Vulkan dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build ccache time mesa-vulkan-drivers libvulkan1 \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxss-dev libxkbcommon-dev libxtst-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libibus-1.0-dev
+          for icd in /usr/share/vulkan/icd.d/lvp_icd*.json; do
+            if test -f "$icd"; then
+              echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+              break
+            fi
+          done
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: demo-impact-${{ runner.os }}-${{ github.sha }}
+          restore-keys: demo-impact-${{ runner.os }}-
+      - name: Fetch shader compiler dependencies
+        run: python3 mono.vendor/shaderc/utils/git-sync-deps
+      - name: Build, collect and compare three five-second runs
+        env:
+          BASELINE_REF: ${{ inputs.baseline || 'origin/v0.24.1' }}
+        run: |
+          rm -f docs/VERSION_IMPACT.md
+          bash scripts/demos/compare-version-impact.sh "$BASELINE_REF" docs/VERSION_IMPACT.md
+      - name: Publish comparison table in the job summary
+        if: always()
+        run: |
+          if test -s docs/VERSION_IMPACT.md; then
+            cat docs/VERSION_IMPACT.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Demo measurement did not complete. Inspect the failed step and retained evidence.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain measurement evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-impact
+          path: |
+            docs/VERSION_IMPACT.md
+            .cache/build/profile/version-impact/
+            .cache/build/version-impact-reference/.cache/build/profile/version-impact/
+          include-hidden-files: true
