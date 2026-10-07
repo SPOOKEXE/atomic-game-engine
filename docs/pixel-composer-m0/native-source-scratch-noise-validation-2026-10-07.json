@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.noise_scratch source equations; broader Composer work stays active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_noise_scratch/node_noise_scratch.gml": "2d213648d808d5746d8a72dad55645932fc9a2d82ab66518b96da7011cf5f495",
+      "shaders/sh_noise_scratch/sh_noise_scratch.fsh": "fe920c8e528e72932dd6e2dd92e2f6cbf09edd835f9c4e205b89351f9c9f21b5"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceScratchNoise.cpp",
+    "rules": [
+      "eighteen physical source slots; binary32 hash-based scratches and explicit mapped Thickness, Wavyness and Softness",
+      "mean RGB control maps; nearest UV sampling with Y flip and alpha retained at zero UV Mix",
+      "position normalization, rotation and Scale division; native aligned fine 2x2 quad derivatives include helper lanes outside canvas",
+      "source half-even Octaves within signed 32-bit range; nonpositive Octaves and uncovered pixels skip unused controls",
+      "typed output followed by mask staging; raw Atlas, zero Scale, equal smoothstep edges and consumed nonfinite arithmetic refused before outputs or observers",
+      "512 base work units per allocated pixel; covered batches add 4096 plus 8192 per nonnegative octave, cumulative 64M selected-batch cap",
+      "mapped endpoint pairs remain uniform controls; arrays of pairs form processor rows under all four schedules",
+      "Format9 animation and inherited instances, source Surface getters and seven color depths",
+      "retained pinned shader author attribution; constructor metadata evidence without catalogue regeneration"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scratch-noise-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scratch-noise-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scratch-noise-build-batch3.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scratch-noise-cpu-batch3-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5685,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3951,
+    "source_stability": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scratch-noise-source-stability-batch3.json",
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scratch-noise-cpu-child-hashes-batch3.json",
+    "independent_reference_cases": 41,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scratch-noise-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/scratch-noise-independent-reference.json"
+    ],
+    "new_scratch_test_cases": 15,
+    "read_review": "root read pinned source, runtime, wiring, metadata and fixtures; finite numerator guards added before smoothstep clamp"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "build_exit_code": 1,
+      "checks_run": false,
+      "cause": "two animation fixture mutations referenced nonexistent Keyframe.Value; corrected both to Keyframe.Data after full build ended"
+    },
+    {
+      "batch": 2,
+      "build_exit_code": 0,
+      "failed_checks": [
+        "core"
+      ],
+      "failures": [
+        "mask overflow fixture retained large default canvas and hit cumulative CPU work refusal first"
+      ],
+      "final_repairs": "set explicit 8x6 pixel dimensions before rebuilding batch3"
+    }
+  ],
+  "not_run": [
+    "matched licensed Pixel Composer captures",
+    "headed live Studio verification",
+    "dedicated Scratch Noise performance profiling",
+    "fresh dev/server/ci preset matrices",
+    "new sanitizer build"
+  ],
+  "limits": [
+    "independent binary32 source-equation fixtures do not establish licensed-runtime parity",
+    "generic GLSL fwidth can choose fine or coarse derivatives; native uses explicit fine quad convention",
+    "descending smoothstep edges have undefined GLSL behavior; native retains literal clamped polynomial",
+    "CPU libm, device floats and sampler behavior can differ; no measured speed claim"
+  ],
+  "external_references": {
+    "glsl_derivatives_and_smoothstep": "https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html"
+  },
+  "build_warnings_note": "final incremental build has no warnings; initial joined build reports warnings in unchanged sources"
+}

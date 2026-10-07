@@ -23,6 +23,7 @@
 #include "nodes/SourcePixelSort.hpp"
 #include "nodes/SourcePolar.hpp"
 #include "nodes/SourcePytagoreanTile.hpp"
+#include "nodes/SourceScratchNoise.hpp"
 #include "nodes/SourceShardNoise.hpp"
 #include "nodes/SourceStrandNoise.hpp"
 #include "nodes/SourceTileTransform.hpp"
@@ -893,6 +894,7 @@ namespace engine::imagegraph::detail {
 			: context.Authored.Type == "pc.noise_strand"	? AdmitSourceStrandNoise
 			: context.Authored.Type == "pc.weave"			? AdmitSourceWeave
 			: context.Authored.Type == "pc.pytagorean_tile" ? AdmitSourcePytagoreanTile
+			: context.Authored.Type == "pc.noise_scratch"	? AdmitSourceScratchNoise
 			: context.Authored.Type == "pc.wavelet_noise"	? AdmitSourceWaveletNoise
 			: context.Authored.Type == "pc.perlin_extra"	? AdmitSourcePerlinExtra
 			: (context.Authored.Type == "pc.perlin_cube" || context.Authored.Type == "pc.cellular_cube" ||

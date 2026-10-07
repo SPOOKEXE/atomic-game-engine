@@ -41,6 +41,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourcePerlinExecutors();
 	std::span<const ExecutorEntry> SourcePerlinExtraExecutors();
 	std::span<const ExecutorEntry> SourceWaveletNoiseExecutors();
+	std::span<const ExecutorEntry> SourceScratchNoiseExecutors();
 	std::span<const ExecutorEntry> SourceNoiseCubeExecutors();
 	std::span<const ExecutorEntry> SourceVoronoiExtraExecutors();
 	std::span<const ExecutorEntry> SourceShardNoiseExecutors();
