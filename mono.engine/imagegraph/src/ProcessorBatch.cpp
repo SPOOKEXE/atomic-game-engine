@@ -11,6 +11,7 @@
 #include "ValuePayload.hpp"
 #include "nodes/SourceBend.hpp"
 #include "nodes/SourceCaustic.hpp"
+#include "nodes/SourceCellular.hpp"
 #include "nodes/SourceDisplace.hpp"
 #include "nodes/SourceGlow.hpp"
 #include "nodes/SourceJpeg.hpp"
@@ -875,6 +876,7 @@ namespace engine::imagegraph::detail {
 							   : context.Authored.Type == "pc.pixel_sort" ? AdmitSourcePixelSort
 							   : context.Authored.Type == "pc.noise"	  ? AdmitSourceNoise
 							   : context.Authored.Type == "pc.caustic"	  ? AdmitSourceCaustic
+							   : context.Authored.Type == "pc.cellular"	  ? AdmitSourceCellular
 							   : context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
 							   : context.Authored.Type == "pc.tile"		  ? AdmitSourceTileTransform
 																		  : nullptr;

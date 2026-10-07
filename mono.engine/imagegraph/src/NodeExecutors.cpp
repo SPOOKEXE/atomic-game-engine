@@ -40,6 +40,7 @@ namespace engine::imagegraph::detail {
 					  SourcePixelSortExecutors(),
 					  SourceNoiseExecutors(),
 					  SourceCausticExecutors(),
+					  SourceCellularExecutors(),
 					  SourceTileTransformExecutors(),
 					  SourceErodeExecutors(),
 					  PathExecutors(),

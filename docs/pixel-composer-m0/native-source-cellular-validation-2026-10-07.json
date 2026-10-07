@@ -1,0 +1,107 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.cellular executor. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_cellular/node_cellular.gml": "46ef7597cebbb259cd95dcff09971cf38e1cf1c7b7ad08fadb688aae29ce8e19",
+      "scripts/node_value_dimension/node_value_dimension.gml": "7a31f24df14a2fe19f5566ab7d2e919f792faccac83ecbdff7f59a91e93f54e9",
+      "scripts/node_value_vec2/node_value_vec2.gml": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112",
+      "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+      "scripts/surface_functions/surface_functions.gml": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+      "shaders/sh_cell_noise/sh_cell_noise.fsh": "9106a4e00c82211ce40ed5f280659e49adf072ce7747e886acdb81560078447f",
+      "shaders/sh_cell_noise_edge/sh_cell_noise_edge.fsh": "41aac3ac8db4f0be27565e1ba32435e14bab6675cabb05d68e738f37c8da3e3d",
+      "shaders/sh_cell_noise_random/sh_cell_noise_random.fsh": "6f71adc6e128fdf1d6b34ae491ca0627eae69037505c40d0608fe0430917f5dd",
+      "shaders/sh_cell_noise_crystal/sh_cell_noise_crystal.fsh": "bfa378241243995d0fa2ab55b92d4091499bd85d12f41dffad779dfe3fa6cfc5"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceCellular.cpp",
+    "rules": [
+      "Point, Edge, Cell and Crystal preserve all three source pattern paths; Crystal ignores pattern and its Minimum loop has no accumulation",
+      "Edge and Cell second grid search always wraps and omits randomness; Cell nearest cutoff is one and uninitialized winners refuse",
+      "Cell applies octave amplitude twice for Additive; colored hashes and gap replacement preserve source blend and inversion order",
+      "Crystal uses second-nearest squared distance, 27 neighbors, fixed seed Z and coordinate octave updates",
+      "unmapped Scale scalars duplicate uniform endpoints; mapped scalar/range values preserve source depth; nearest maps use mean RGB and ignore alpha",
+      "28 physical source slots govern all four array schedules; unit and map metadata remain outside physical slots",
+      "Dimension surface arrays project before processor selection and equal sizes collapse; whole SurfaceArray Vec2 getters project [1,1]; scalar Scale getter gives two unmapped rows",
+      "Pixel and Reference units stay active; allocated half-even pixel centers provide UV while raw dimension controls aspect and position division",
+      "UV flips Y and retains alpha at zero Mix; all seven explicit output formats are supported; mask uses selected stored pixels through RGBA8 scratch",
+      "explicit seed required; raw Atlas bindings, consumed undefined powers, zero divisors, invalid integer conversions, absent winners and numeric overflow refuse by named port",
+      "complete selected batch admission precedes observers and outputs; cumulative 64000000 work cap and bounded retained bytes"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5514,
+    "new_cellular_test_cases": 16,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3906,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cpu-child-hashes-batch2.json",
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-independent-reference.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-independent-libm-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-sine-reference-comparison.json"
+    ],
+    "read_review": "pinned four shaders, Cellular node, source getters and map helper; root reviewed full native executor, integration and fixtures"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "checks": 20,
+      "passed": 19,
+      "failures": [
+        {
+          "test": "offcenter Edge",
+          "cause": "Independent NumPy and libm binary32 trig differ, amplified by fract sine hash",
+          "repair": "Use independently transcribed libm float references for two Edge cases, retain tolerance and both reference outputs"
+        },
+        {
+          "test": "Dimension SurfaceArray collapse",
+          "cause": "EvaluateArray requested scalar output for equal-size collapse",
+          "repair": "Use scalar Evaluate for collapsed equal-size case"
+        },
+        {
+          "test": "cumulative work",
+          "cause": "4200 dimension rows refused source array element bound before work quote",
+          "repair": "2000 rows of 3x3 reaches 69120000 work below array bound"
+        }
+      ],
+      "warnings": [
+        {
+          "file": "SourceCellularBatch.cpp",
+          "cause": "Unused Set and Array fixture helpers",
+          "repair": "Remove helpers"
+        }
+      ]
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Cellular performance profiling"
+  ],
+  "limits": [
+    "source-derived independent references do not establish licensed runtime pixel parity",
+    "NumPy and libm binary32 trig differ; sine hashing amplifies rounding. Two Edge references use independent libm transcription without widening tolerance",
+    "ENGINE_PROFILE marks executor work; no dedicated performance result is claimed"
+  ]
+}

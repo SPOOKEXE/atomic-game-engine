@@ -12825,6 +12825,8 @@ namespace engine::imagegraph {
 							 ((input.Id == "iteration" && input.SourceKind == "Int") ||
 							  ((input.Id == "gamma" || input.Id == "uv_mix") &&
 							   input.SourceKind == "Slider"))) ||
+							(node.Type == "pc.cellular" && input.Id == "scale" &&
+							 input.SourceKind == "Float") ||
 							(node.Type == "pc.gradient_cube" &&
 							 ((input.Id == "scale" && input.SourceKind == "Float") ||
 							  (input.Id == "position" && input.SourceKind == "Slider")));
@@ -12895,7 +12897,8 @@ namespace engine::imagegraph {
 							 (simpleShape && (input.Id == "center" || input.Id == "half_size")));
 						// Dimension projects surfaces before processor selection. Equal sizes collapse.
 						if ((simpleShape || node.Type == "pc.flow_noise" || node.Type == "pc.noise_bubble" ||
-							 node.Type == "pc.noise_cristal" || node.Type == "pc.gradient_cube") &&
+							 node.Type == "pc.noise_cristal" || node.Type == "pc.gradient_cube" ||
+							 node.Type == "pc.cellular") &&
 							input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {
 							if (const ImageArray *images =
@@ -13027,6 +13030,7 @@ namespace engine::imagegraph {
 							  (input.Id == "fixed_dimension" || input.Id == "offset" ||
 							   input.Id == "character_range")) ||
 							 (node.Type == "pc.padding" && input.Id == "dimension") ||
+							 (node.Type == "pc.cellular" && (input.Id == "position" || input.Id == "size")) ||
 							 (node.Type == "pc.stripe" && input.Id == "position") ||
 							 (node.Type == "pc.julia_set" &&
 							  (input.Id == "c" || input.Id == "position" || input.Id == "scale")) ||
@@ -13038,9 +13042,10 @@ namespace engine::imagegraph {
 						const bool generatorSurfaceRange =
 							(node.Type == "pc.gabor_noise" || node.Type == "pc.flow_noise" ||
 							 node.Type == "pc.noise_bubble" || node.Type == "pc.noise_cristal" ||
-							 node.Type == "pc.noise") &&
+							 node.Type == "pc.noise" || node.Type == "pc.cellular") &&
 							input.SourceKind == "SliRange" &&
-							(node.Type == "pc.noise" || input.Id == "level_in" || input.Id == "level_out" ||
+							(node.Type == "pc.noise" || node.Type == "pc.cellular" ||
+							 input.Id == "level_in" || input.Id == "level_out" ||
 							 (node.Type == "pc.flow_noise" && input.Id == "detail") ||
 							 (node.Type == "pc.noise_bubble" &&
 							  (input.Id == "scale" || input.Id == "opacity")));
@@ -13048,7 +13053,7 @@ namespace engine::imagegraph {
 							(sourceSurfaceVec2 &&
 							 (node.Type == "pc.julia_set" || node.Type == "pc.gabor_noise" ||
 							  node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal" ||
-							  node.Type == "pc.caustic")) ||
+							  node.Type == "pc.caustic" || node.Type == "pc.cellular")) ||
 									generatorSurfaceRange
 								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
 								: nullptr;
