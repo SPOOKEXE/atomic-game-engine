@@ -88,6 +88,9 @@ namespace engine::imagegraph::detail {
 		std::string_view firstOutput;
 		for (const PortSchema &port : schema->Ports) {
 			if (port.Direction != PortDirection::Output) continue;
+			if ((node.Type == "value.noise_field" || node.Type == "value.sample_noise") &&
+				!NoiseNodePort(node, port.Id, port.Direction))
+				continue;
 			if (firstOutput.empty()) firstOutput = port.Id;
 			outputCount++;
 			const uint64_t nameBytes = std::max<uint64_t>(port.Id.size(), std::string{}.capacity());
@@ -119,17 +122,50 @@ namespace engine::imagegraph::detail {
 			outputs.push_back({std::string(port), std::move(result)});
 			return true;
 		};
+		const auto noiseCoordinates = [&](uint8_t dimensions, std::array<double, 3> &coordinates) {
+			const auto *position = valueInput("position");
+			if (!position) return true;
+			if (dimensions == 1) {
+				if (const auto *v = std::get_if<double>(position)) {
+					coordinates[0] = *v;
+					return true;
+				}
+			}
+			if (dimensions == 2) {
+				if (const auto *v = std::get_if<Vector2>(position)) {
+					coordinates = {v->X, v->Y, 0};
+					return true;
+				}
+			}
+			if (dimensions == 3) {
+				if (const auto *v = std::get_if<Vector3>(position)) {
+					coordinates = {v->X, v->Y, v->Z};
+					return true;
+				}
+			}
+			failedPort = "position";
+			failureMessage = "noise coordinates must match field dimension";
+			return false;
+		};
+		const auto publishNoise = [&](uint8_t components, const std::array<double, 3> &values) {
+			if (components == 1)
+				outputs.push_back({"value", values[0]});
+			else if (components == 2)
+				outputs.push_back({"value", Vector2{values[0], values[1]}});
+			else
+				outputs.push_back({"value", Vector3{values[0], values[1], values[2]}});
+		};
 		if (node.Type == "value.noise_field") {
-			const auto type = NoiseGeneratorOutputType(node);
-			if (!type) {
-				failedPort = "dimension";
-				failureMessage = "noise field dimension must be 1, 2 or 3";
+			NoiseNodeChoices choices;
+			std::string_view invalid;
+			if (!ResolveNoiseNodeChoices(node, choices, invalid)) {
+				failedPort = invalid;
+				failureMessage = "noise selector is outside its defined choices";
 				return Status::InvalidValue;
 			}
-			if (!reservePayload(sizeof(NoiseFieldData), "field")) return Status::LimitExceeded;
-			NoiseFieldValue field;
-			auto &data = field.Data.emplace();
-			data.Dimensions = *type == ValueType::Noise1D ? 1 : *type == ValueType::Noise2D ? 2 : 3;
+			NoiseFieldData data;
+			data.Dimensions = choices.Dimensions;
+			data.Components = choices.Components;
 			const auto control = [&](std::string_view port, double fallback, double &result) {
 				const auto *input = valueInput(port);
 				result = fallback;
@@ -174,49 +210,69 @@ namespace engine::imagegraph::detail {
 					"noise control needs a finite numeric value; integer controls need integral values";
 				return Status::InvalidValue;
 			}
-			if (!ValidNoiseField(field)) {
-				failedPort = "field";
+			std::array<double, 3> coordinates{}, values{};
+			if (choices.Mode == 1 && !noiseCoordinates(data.Dimensions, coordinates))
+				return Status::TypeMismatch;
+			// grug validate a stack recipe before buying an owned generator payload.
+			if (!ValidNoiseRecipe(data)) {
+				failedPort = (!std::isfinite(data.Frequency) || data.Frequency <= 0 || data.Frequency > 8192)
+								 ? "frequency"
+							 : (data.Octaves < 1 || data.Octaves > 16) ? "octaves"
+																	   : "gain";
 				failureMessage = "noise field controls exceed finite recipe bounds";
 				return Status::InvalidValue;
 			}
-			outputs.push_back({"field", std::move(field)});
+			if (choices.Mode == 1 && !SampleNoiseRecipe(
+										 data,
+										 std::span(coordinates).first(data.Dimensions),
+										 std::span(values).first(data.Components)
+									 )) {
+				failedPort = choices.Mode == 1 ? "position" : "field";
+				failureMessage = "noise recipe or sample exceeds finite bounds";
+				return Status::InvalidValue;
+			}
+			if (choices.Mode == 1)
+				publishNoise(data.Components, values);
+			else {
+				if (!reservePayload(sizeof(NoiseFieldData), "field")) return Status::LimitExceeded;
+				NoiseFieldValue field;
+				field.Data.emplace() = std::move(data);
+				outputs.push_back({"field", std::move(field)});
+			}
 			return Status::Ok;
 		}
 		if (node.Type == "value.sample_noise") {
+			NoiseNodeChoices choices;
+			std::string_view invalid;
+			if (!ResolveNoiseNodeChoices(node, choices, invalid)) {
+				failedPort = invalid;
+				failureMessage = "noise selector is outside its defined choices";
+				return Status::InvalidValue;
+			}
 			const auto *input = valueInput("field");
 			const auto *field = input ? std::get_if<NoiseFieldValue>(input) : nullptr;
-			if (!field || !field->Data) {
+			if (!field || !field->Data || field->Data->Dimensions < 1 || field->Data->Dimensions > 3) {
 				failedPort = "field";
 				failureMessage = "noise sampler needs a valid field";
 				return Status::InvalidValue;
 			}
-			std::array<double, 3> coordinates{};
-			size_t count = 0;
-			const auto *position = valueInput("position");
-			if (!position)
-				count = field->Data->Dimensions;
-			else if (const auto *scalarPosition = std::get_if<double>(position)) {
-				coordinates[0] = *scalarPosition;
-				count = 1;
-			} else if (const auto *vectorPosition = std::get_if<Vector2>(position)) {
-				coordinates = {vectorPosition->X, vectorPosition->Y, 0};
-				count = 2;
-			} else if (const auto *vectorPosition = std::get_if<Vector3>(position)) {
-				coordinates = {vectorPosition->X, vectorPosition->Y, vectorPosition->Z};
-				count = 3;
-			}
-			if (count != field->Data->Dimensions) {
-				failedPort = "position";
-				failureMessage = "noise coordinates must match field dimension";
+			if (field->Data->Components != choices.Components) {
+				failedPort = "field";
+				failureMessage = "noise field result shape must match output type";
 				return Status::TypeMismatch;
 			}
-			double value = 0;
-			if (!SampleNoiseField(*field, std::span(coordinates).first(count), value)) {
+			std::array<double, 3> coordinates{}, values{};
+			if (!noiseCoordinates(field->Data->Dimensions, coordinates)) return Status::TypeMismatch;
+			if (!SampleNoiseField(
+					*field,
+					std::span(coordinates).first(field->Data->Dimensions),
+					std::span(values).first(choices.Components)
+				)) {
 				failedPort = "position";
 				failureMessage = "noise sample exceeds finite coordinate bounds";
 				return Status::InvalidValue;
 			}
-			outputs.push_back({"value", value});
+			publishNoise(choices.Components, values);
 			return Status::Ok;
 		}
 

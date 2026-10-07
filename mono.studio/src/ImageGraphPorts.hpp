@@ -32,11 +32,14 @@ namespace studio::detail {
 		for (const auto &port : schema->Ports) {
 			if (port.Direction != PortDirection::Output) continue;
 			if (channelArray && !ports.empty()) continue;
-			const auto type = node.Type == "value.noise_field" && port.Id == "field"
-								  ? NoiseGeneratorOutputType(node).value_or(port.Type)
-							  : channelArray ? ValueType::Array
-											 : port.Type;
-			ports.push_back({port.Id, type, PortDirection::Output});
+			if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
+				const auto instance = NoiseNodePort(node, port.Id, PortDirection::Output);
+				if (instance) ports.push_back(*instance);
+			} else {
+				ports.push_back(
+					{port.Id, channelArray ? ValueType::Array : port.Type, PortDirection::Output}
+				);
+			}
 		}
 		for (const auto &port : node.DynamicOutputs)
 			ports.push_back({port.Id, port.Type, PortDirection::Output});

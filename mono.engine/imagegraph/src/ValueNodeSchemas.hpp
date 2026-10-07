@@ -211,15 +211,21 @@ namespace engine::imagegraph::detail {
 		};
 		static const NodeSchema AUDIO_WINDOW{"image.audio_window", AUDIO_WINDOW_PORTS, AUDIO_WINDOW_PROPS};
 
-		static constexpr std::array<PortSchema, 5> NOISE_PORTS{
+		static constexpr std::array NOISE_COORDINATE_TYPES{T::Scalar, T::Vector2, T::Vector3};
+		static constexpr std::array<PortSchema, 7> NOISE_PORTS{
 			{{"seed", T::Integer, D::Input},
 			 {"frequency", T::Scalar, D::Input},
 			 {"octaves", T::Integer, D::Input},
 			 {"gain", T::Scalar, D::Input},
+			 {"position", T::Scalar, D::Input, NOISE_COORDINATE_TYPES},
+			 {"value", T::Scalar, D::Output},
 			 {"field", T::Noise2D, D::Output}}
 		};
-		static constexpr std::array<PropertySchema, 5> NOISE_PROPERTIES{
+		static constexpr std::array<PropertySchema, 8> NOISE_PROPERTIES{
 			{{"dimension", T::Enum},
+			 {"mode", T::Enum},
+			 {"output_type", T::Enum},
+			 {"position", T::Scalar},
 			 {"seed", T::Integer},
 			 {"frequency", T::Scalar},
 			 {"octaves", T::Integer},
@@ -233,7 +239,9 @@ namespace engine::imagegraph::detail {
 			 {"position", T::Scalar, D::Input, COORDINATE_TYPES},
 			 {"value", T::Scalar, D::Output}}
 		};
-		static constexpr std::array<PropertySchema, 1> SAMPLE_NOISE_PROPERTIES{{{"position", T::Any}}};
+		static constexpr std::array<PropertySchema, 2> SAMPLE_NOISE_PROPERTIES{
+			{{"position", T::Scalar}, {"output_type", T::Enum}}
+		};
 		static const NodeSchema SAMPLE_NOISE{
 			"value.sample_noise", SAMPLE_NOISE_PORTS, SAMPLE_NOISE_PROPERTIES
 		};

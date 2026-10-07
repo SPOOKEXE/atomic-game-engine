@@ -33,6 +33,7 @@
 #include "ImageGraphImageActions.hpp"
 #include "ImageGraphImageEdit.hpp"
 #include "ImageGraphInputs.hpp"
+#include "ImageGraphNoiseControls.hpp"
 #include "ImageGraphObservations.hpp"
 #include "ImageGraphPorts.hpp"
 #include "ImageGraphPreview.hpp"
@@ -4253,17 +4254,9 @@ namespace studio {
 				changed = DrawQuaternionValue(*rotation);
 			} else if (auto *choice = std::get_if<engine::imagegraph::EnumValue>(&replacement)) {
 				const Node *node = FindNode(state.Authored, nodeId);
-				if (node != nullptr && node->Type == "value.noise_field" && property.Port == "dimension") {
-					const char *names[] = {"1D Value Field", "2D Value Field", "3D Value Field"};
-					const auto selected = std::clamp<int64_t>(choice->Value, 1, 3);
-					if (ImGui::BeginCombo("##value", names[selected - 1])) {
-						for (int64_t dimension = 1; dimension <= 3; ++dimension)
-							if (ImGui::Selectable(names[dimension - 1], dimension == choice->Value)) {
-								choice->Value = dimension;
-								changed = true;
-							}
-						ImGui::EndCombo();
-					}
+				if (node != nullptr && detail::IsImageGraphNoiseSelector(node->Type, property.Port)) {
+					changed =
+						detail::DrawImageGraphNoiseChoice(node->Type, property.Port, *choice).value_or(false);
 				} else if (node != nullptr && node->Type == "image.transform_3d" &&
 						   property.Port == "projection") {
 					const char *selected = choice->Value == 0	? "Perspective"
@@ -4370,7 +4363,7 @@ namespace studio {
 				});
 				ReloadCanvas(state);
 			}
-			if (changed && authored && authored->Type == "value.noise_field" && editedPort == "dimension")
+			if (changed && authored && detail::IsImageGraphNoiseSelector(authored->Type, editedPort))
 				ReloadCanvas(state);
 			EndPropertyEdit(state, itemId, changed);
 			return changed;
@@ -5970,7 +5963,9 @@ namespace studio {
 				return true;
 			};
 			for (AuthoredValue &property : node->Values) {
-				if (!visibleVectorProperty(property.Port)) continue;
+				if (!visibleVectorProperty(property.Port) ||
+					!detail::ImageGraphNoisePropertyVisible(*node, property.Port))
+					continue;
 				if (node->Type == "pc.wav_file_read" && property.Port == "sync_length") continue;
 				ImGui::PushID(node->Id.c_str());
 				ImGui::PushID(property.Port.c_str());
@@ -5984,17 +5979,21 @@ namespace studio {
 					ImGui::PopID();
 					return;
 				}
-				DrawAnimationTrackControls(state, *node, property.Port);
+				if (!detail::IsImageGraphNoiseSelector(node->Type, property.Port))
+					DrawAnimationTrackControls(state, *node, property.Port);
 				ImGui::PopID();
 				ImGui::PopID();
 				if (state.DocumentRevision != revision) return;
 			}
 			for (const engine::imagegraph::PropertySchema &property : schema->Properties) {
-				if (!visibleVectorProperty(property.Id)) continue;
+				if (!visibleVectorProperty(property.Id) ||
+					!detail::ImageGraphNoisePropertyVisible(*node, property.Id))
+					continue;
 				if (node->Type == "pc.wav_file_read" && property.Id == "sync_length") continue;
 				if (FindValue(*node, property.Id) != nullptr) continue;
-				const std::optional<Value> initial =
-					ImageGraphPropertyDefault(state.Authored, node->Type, property.Id);
+				auto initial = ImageGraphPropertyDefault(state.Authored, node->Type, property.Id);
+				if (node->Type == "value.noise_field" && property.Id == "position")
+					initial = detail::ImageGraphNoisePositionDefault(*node);
 				const std::string propertyId(property.Id);
 				ImGui::PushID(node->Id.c_str());
 				ImGui::PushID(propertyId.c_str());

@@ -110,6 +110,12 @@ namespace engine::imagegraph {
 		Noise1D,
 		Noise2D,
 		Noise3D,
+		Noise1DVector2,
+		Noise2DVector2,
+		Noise3DVector2,
+		Noise1DVector3,
+		Noise2DVector3,
+		Noise3DVector3,
 	};
 
 	// Stable text name of a value type, as written in documents and catalogues.
@@ -778,7 +784,7 @@ namespace engine::imagegraph {
 
 	// grug fields own recipes or sampled pixels; no callback or host pointer crosses a graph.
 	struct NoiseFieldData {
-		uint8_t Dimensions = 2;
+		uint8_t Dimensions = 2, Components = 1;
 		int64_t Seed = 0, Octaves = 1;
 		double Frequency = 1, Gain = .5;
 		std::optional<Image> Raster;

@@ -880,6 +880,12 @@ namespace studio {
 		RegisterDataType(engine::imagegraph::ValueType::Noise1D, "1D Value Field");
 		RegisterDataType(engine::imagegraph::ValueType::Noise2D, "2D Value Field");
 		RegisterDataType(engine::imagegraph::ValueType::Noise3D, "3D Value Field");
+		RegisterDataType(engine::imagegraph::ValueType::Noise1DVector2, "1D Vector2 Field");
+		RegisterDataType(engine::imagegraph::ValueType::Noise2DVector2, "2D Vector2 Field");
+		RegisterDataType(engine::imagegraph::ValueType::Noise3DVector2, "3D Vector2 Field");
+		RegisterDataType(engine::imagegraph::ValueType::Noise1DVector3, "1D Vector3 Field");
+		RegisterDataType(engine::imagegraph::ValueType::Noise2DVector3, "2D Vector3 Field");
+		RegisterDataType(engine::imagegraph::ValueType::Noise3DVector3, "3D Vector3 Field");
 		for (auto index = static_cast<size_t>(engine::imagegraph::ValueType::Mesh2D);
 			 index <= static_cast<size_t>(engine::imagegraph::ValueType::Path3D);
 			 index++) {
@@ -962,6 +968,17 @@ namespace studio {
 				engine::imagegraph::ArrayValue{ValueType::Colour, {engine::imagegraph::Colour{0, 0, 0, 255}}}
 			};
 		if (propertyId == "use_mask_dimension") return engine::imagegraph::Value{true};
+		if ((nodeType == "value.noise_field" || nodeType == "value.sample_noise") &&
+			propertyId == "output_type")
+			return engine::imagegraph::Value{engine::imagegraph::EnumValue{1}};
+		if (nodeType == "value.noise_field") {
+			if (propertyId == "mode") return engine::imagegraph::Value{engine::imagegraph::EnumValue{0}};
+			if (propertyId == "position") return engine::imagegraph::Value{engine::imagegraph::Vector2{}};
+			if (propertyId == "dimension") return engine::imagegraph::Value{engine::imagegraph::EnumValue{2}};
+			if (propertyId == "frequency") return engine::imagegraph::Value{1.0};
+			if (propertyId == "octaves") return engine::imagegraph::Value{int64_t{1}};
+			if (propertyId == "gain") return engine::imagegraph::Value{.5};
+		}
 		if (propertyId == "mode") return engine::imagegraph::Value{int64_t{0}};
 		if (propertyId == "type") return engine::imagegraph::Value{int64_t{1}};
 		if (propertyId == "axis") return engine::imagegraph::Value{int64_t{1}};
@@ -976,12 +993,6 @@ namespace studio {
 			return engine::imagegraph::Value{false};
 		if (propertyId == "constant_dimension")
 			return engine::imagegraph::Value{engine::imagegraph::Vector2{64, 64}};
-		if (nodeType == "value.noise_field") {
-			if (propertyId == "dimension") return engine::imagegraph::Value{engine::imagegraph::EnumValue{2}};
-			if (propertyId == "frequency") return engine::imagegraph::Value{1.0};
-			if (propertyId == "octaves") return engine::imagegraph::Value{int64_t{1}};
-			if (propertyId == "gain") return engine::imagegraph::Value{.5};
-		}
 		if (nodeType == "value.sample_noise" && propertyId == "position")
 			return engine::imagegraph::Value{engine::imagegraph::Vector2{}};
 		if (propertyId == "position") return engine::imagegraph::Value{engine::imagegraph::Vector2{0.5, 0.5}};
@@ -1193,10 +1204,23 @@ namespace studio {
 			if (physical == opaquePorts.end() &&
 				(authored.Type == "pc.array_split" || !authored.DynamicOutputs.empty() ||
 				 authored.Type == "pc.color_to_rgb" || authored.Type == "pc.color_to_hsv" ||
-				 authored.Type == "value.noise_field")) {
+				 authored.Type == "value.noise_field" || authored.Type == "value.sample_noise")) {
 				canvasNode.OutputPorts.emplace();
 				for (const auto &port : detail::ImageGraphOutputPorts(authored))
 					canvasNode.OutputPorts->push_back({std::string(port.Id), CanvasType(port.Type)});
+			}
+			if (authored.Type == "value.noise_field" || authored.Type == "value.sample_noise") {
+				canvasNode.InputPorts.emplace();
+				if (const auto *schema = engine::imagegraph::FindSchema(authored.Type))
+					for (const auto &port : schema->Ports) {
+						if (port.Direction != engine::imagegraph::PortDirection::Input) continue;
+						const auto instance =
+							engine::imagegraph::NoiseNodePort(authored, port.Id, port.Direction);
+						if (instance)
+							canvasNode.InputPorts->push_back(
+								{std::string(instance->Id), CanvasPortType(*instance)}
+							);
+					}
 			}
 			if (const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(authored.Type)) {
 				for (const nodegraph::WidgetSpec &widget : type->Widgets) {
@@ -1658,11 +1682,23 @@ namespace studio {
 			});
 		if (declared == schema->Properties.end())
 			return fail(engine::imagegraph::Status::UnknownPort, "property is not declared");
-		if (node->Type == "value.noise_field" && property == "dimension") {
-			const auto *dimension = std::get_if<engine::imagegraph::EnumValue>(&value);
-			if (!dimension || dimension->Value < 1 || dimension->Value > 3)
+		const bool noiseNode = node->Type == "value.noise_field" || node->Type == "value.sample_noise";
+		const bool noiseSelector =
+			noiseNode && (property == "output_type" || (node->Type == "value.noise_field" &&
+														(property == "mode" || property == "dimension")));
+		if (noiseSelector) {
+			Node selected;
+			selected.Type = node->Type;
+			for (const auto &authored : node->Values)
+				if (authored.Port != property && (authored.Port == "mode" || authored.Port == "dimension" ||
+												  authored.Port == "output_type"))
+					selected.Values.push_back(authored);
+			selected.Values.push_back({std::string(property), value});
+			engine::imagegraph::NoiseNodeChoices choices;
+			std::string_view failed;
+			if (!engine::imagegraph::ResolveNoiseNodeChoices(selected, choices, failed))
 				return fail(
-					engine::imagegraph::Status::InvalidValue, "noise field dimension must be 1, 2 or 3"
+					engine::imagegraph::Status::InvalidValue, "noise selector is outside its declared choices"
 				);
 		}
 		const auto valueType = TypeOf(value);
@@ -1705,6 +1741,32 @@ namespace studio {
 			node->Values.push_back({std::string(property), std::move(value)});
 		} else {
 			existing->Data = std::move(value);
+		}
+		if (node->Type == "value.noise_field" && property == "dimension") {
+			engine::imagegraph::NoiseNodeChoices choices;
+			std::string_view failed;
+			if (engine::imagegraph::ResolveNoiseNodeChoices(*node, choices, failed))
+				for (auto &authored : node->Values)
+					if (authored.Port == "position") {
+						std::array<double, 3> coordinates{};
+						if (const auto *scalar = std::get_if<double>(&authored.Data))
+							coordinates[0] = *scalar;
+						else if (const auto *vector =
+									 std::get_if<engine::imagegraph::Vector2>(&authored.Data))
+							coordinates = {vector->X, vector->Y, 0};
+						else if (const auto *vector =
+									 std::get_if<engine::imagegraph::Vector3>(&authored.Data))
+							coordinates = {vector->X, vector->Y, vector->Z};
+						else
+							continue;
+						if (choices.Dimensions == 1)
+							authored.Data = coordinates[0];
+						else if (choices.Dimensions == 2)
+							authored.Data = engine::imagegraph::Vector2{coordinates[0], coordinates[1]};
+						else
+							authored.Data =
+								engine::imagegraph::Vector3{coordinates[0], coordinates[1], coordinates[2]};
+					}
 		}
 		PromoteFormatVersion(document);
 		return true;

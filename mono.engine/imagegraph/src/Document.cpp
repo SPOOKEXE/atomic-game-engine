@@ -858,18 +858,60 @@ namespace engine::imagegraph {
 		};
 
 		// Indexed by ValueType. Names are durable document text.
-		constexpr std::array<std::string_view, 45> TYPE_NAMES = {
-			"boolean",	"integer",	  "scalar",		  "text",		  "colour",
-			"vector2",	"image",	  "array",		  "gradient",	  "area",
-			"curve",	"vector4",	  "path2d",		  "vector3",	  "quaternion",
-			"enum",		"mesh",		  "audiobit",	  "mesh2d",		  "matrix",
-			"particle", "rigid",	  "fluid_domain", "smoke_domain", "strand",
-			"sdf",		"armature",	  "atlas",		  "tileset",	  "pixel_box",
-			"scene3d",	"material3d", "light3d",	  "buffer",		  "struct",
-			"any",		"node_ref",	  "pcx_node",	  "object",		  "dynamic_surface",
-			"path3d",	"font",		  "noise1d",	  "noise2d",	  "noise3d",
+		constexpr std::array<std::string_view, 51> TYPE_NAMES = {
+			"boolean",
+			"integer",
+			"scalar",
+			"text",
+			"colour",
+			"vector2",
+			"image",
+			"array",
+			"gradient",
+			"area",
+			"curve",
+			"vector4",
+			"path2d",
+			"vector3",
+			"quaternion",
+			"enum",
+			"mesh",
+			"audiobit",
+			"mesh2d",
+			"matrix",
+			"particle",
+			"rigid",
+			"fluid_domain",
+			"smoke_domain",
+			"strand",
+			"sdf",
+			"armature",
+			"atlas",
+			"tileset",
+			"pixel_box",
+			"scene3d",
+			"material3d",
+			"light3d",
+			"buffer",
+			"struct",
+			"any",
+			"node_ref",
+			"pcx_node",
+			"object",
+			"dynamic_surface",
+			"path3d",
+			"font",
+			"noise1d",
+			"noise2d",
+			"noise3d",
+			"noise1d_vector2",
+			"noise2d_vector2",
+			"noise3d_vector2",
+			"noise1d_vector3",
+			"noise2d_vector3",
+			"noise3d_vector3",
 		};
-		static_assert(static_cast<size_t>(ValueType::Noise3D) + 1 == TYPE_NAMES.size());
+		static_assert(static_cast<size_t>(ValueType::Noise3DVector3) + 1 == TYPE_NAMES.size());
 
 		constexpr std::array<std::string_view, 9> DEPTH_NAMES = {
 			"input", "inherited", "rgba4", "rgba8", "rgba16f", "rgba32f", "r8", "r16f", "r32f"
@@ -1018,6 +1060,18 @@ namespace engine::imagegraph {
 				return 1ull << 41;
 			case ValueType::Noise3D:
 				return 1ull << 42;
+			case ValueType::Noise1DVector2:
+				return 1ull << 43;
+			case ValueType::Noise2DVector2:
+				return 1ull << 44;
+			case ValueType::Noise3DVector2:
+				return 1ull << 45;
+			case ValueType::Noise1DVector3:
+				return 1ull << 46;
+			case ValueType::Noise2DVector3:
+				return 1ull << 47;
+			case ValueType::Noise3DVector3:
+				return 1ull << 48;
 			case ValueType::Any:
 				return ~0ull & ~(1ull << 32);
 			}
@@ -1042,6 +1096,12 @@ namespace engine::imagegraph {
 			return false;
 		}
 
+		bool IsNoisePortSelector(const Node &node, std::string_view port) {
+			return ((node.Type == "value.noise_field" || node.Type == "value.sample_noise") &&
+					port == "output_type") ||
+				   (node.Type == "value.noise_field" && (port == "mode" || port == "dimension"));
+		}
+
 		// A catalogue input's bypass junction forwards that input's value unchanged.
 		constexpr std::string_view BYPASS_SUFFIX = ".bypass";
 
@@ -1051,8 +1111,10 @@ namespace engine::imagegraph {
 				(side == PortDirection::Input || side == PortDirection::Output))
 				return ValueType::Any;
 			if (const PortSchema *port = FindPort(node.Type, id, side)) {
-				if (node.Type == "value.noise_field" && id == "field" && side == PortDirection::Output)
-					return NoiseGeneratorOutputType(node);
+				if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
+					const auto instance = NoiseNodePort(node, id, side);
+					return instance ? std::optional(instance->Type) : std::nullopt;
+				}
 				if (side == PortDirection::Output &&
 					(node.Type == "pc.rgb_channel" || node.Type == "pc.hsv_channel")) {
 					bool outputArray = false;
@@ -5429,15 +5491,45 @@ namespace engine::imagegraph {
 				SetDiagnostic(diagnostic, Status::DuplicateId, "duplicate node id", node.Id);
 				return diagnostic.Code;
 			}
-			if (node.Type == "value.noise_field" && !NoiseGeneratorOutputType(node)) {
-				SetDiagnostic(
-					diagnostic,
-					Status::InvalidValue,
-					"noise field dimension must be 1, 2 or 3",
-					node.Id,
-					"dimension"
-				);
-				return diagnostic.Code;
+			if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
+				NoiseNodeChoices choices;
+				std::string_view failedPort;
+				if (!ResolveNoiseNodeChoices(node, choices, failedPort)) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"noise selector is outside its declared choices",
+						node.Id,
+						failedPort
+					);
+					return diagnostic.Code;
+				}
+				if (node.Type == "value.noise_field" && choices.Mode == 1)
+					for (const auto &property : node.Values)
+						if (property.Port == "position") {
+							const auto position = NoiseNodePort(node, "position", PortDirection::Input);
+							if (!position || TypeOf(property.Data) != position->Type) {
+								SetDiagnostic(
+									diagnostic,
+									Status::TypeMismatch,
+									"noise coordinates must match the selected dimension",
+									node.Id,
+									"position"
+								);
+								return diagnostic.Code;
+							}
+						}
+				for (const auto &port : node.SourceAnimatedInputs)
+					if (IsNoisePortSelector(node, port)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidValue,
+							"noise port selectors cannot be animated",
+							node.Id,
+							port
+						);
+						return diagnostic.Code;
+					}
 			}
 			if (!IsNodeType(node.Type)) {
 				SetDiagnostic(diagnostic, Status::UnknownNode, "node type is not registered", node.Id);
@@ -6761,9 +6853,32 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
+			const auto &keyNode = document.Nodes[node->second];
+			if (IsNoisePortSelector(keyNode, keyframe.Port)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"noise port selectors cannot be animated",
+					keyframe.NodeId,
+					keyframe.Port
+				);
+				return diagnostic.Code;
+			}
 			const PropertySchema *property = FindProperty(document.Nodes[node->second].Type, keyframe.Port);
 			// A dynamic input with an authored type animates like a property.
 			std::optional<ValueType> keyedType = property ? std::optional{property->Type} : std::nullopt;
+			if ((keyNode.Type == "value.noise_field" || keyNode.Type == "value.sample_noise") &&
+				keyframe.Port == "position") {
+				const auto port = NoiseNodePort(keyNode, keyframe.Port, PortDirection::Input);
+				if (!port)
+					keyedType = std::nullopt;
+				else if (port->Alternatives.empty())
+					keyedType = port->Type;
+				else if (std::find(
+							 port->Alternatives.begin(), port->Alternatives.end(), TypeOf(keyframe.Data)
+						 ) != port->Alternatives.end())
+					keyedType = TypeOf(keyframe.Data);
+			}
 			if (document.FormatVersion >= 9 && keyframe.Interpolation == "source" &&
 				detail::SourceArgumentAuthoredDefault(
 					document.Nodes[node->second], keyframe.Port, keyframe.Data
@@ -6999,6 +7114,16 @@ namespace engine::imagegraph {
 			const bool empty = authored == authoredTracks.end();
 			const auto owner = nodeIndices.find(track.NodeId);
 			const Node *node = owner == nodeIndices.end() ? nullptr : &document.Nodes[owner->second];
+			if (node && IsNoisePortSelector(*node, track.Port)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"noise port selectors cannot be animated",
+					track.NodeId,
+					track.Port
+				);
+				return diagnostic.Code;
+			}
 			const bool sourceStatic =
 				node &&
 				std::find(node->SourceStaticInputs.begin(), node->SourceStaticInputs.end(), track.Port) !=
@@ -7328,14 +7453,40 @@ namespace engine::imagegraph {
 			const bool opaqueCallbackLink =
 				(from != nodeIndices.end() && detail::IsGroupCallbackOpaque(document.Nodes[from->second])) ||
 				(to != nodeIndices.end() && detail::IsGroupCallbackOpaque(document.Nodes[to->second]));
-			const auto *inputSchema =
+			const PortSchema *inputSchema =
 				to != nodeIndices.end()
 					? FindPort(document.Nodes[to->second].Type, link.ToPort, PortDirection::Input)
 					: nullptr;
-			const auto *outputSchema =
+			const PortSchema *outputSchema =
 				from != nodeIndices.end()
 					? FindPort(document.Nodes[from->second].Type, link.FromPort, PortDirection::Output)
 					: nullptr;
+			std::optional<PortSchema> noiseInput, noiseOutput;
+			if (to != nodeIndices.end()) {
+				const auto &node = document.Nodes[to->second];
+				if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
+					noiseInput = NoiseNodePort(node, link.ToPort, PortDirection::Input);
+					inputSchema = noiseInput ? &*noiseInput : nullptr;
+				}
+			}
+			if (from != nodeIndices.end()) {
+				const auto &node = document.Nodes[from->second];
+				if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
+					noiseOutput = NoiseNodePort(node, link.FromPort, PortDirection::Output);
+					outputSchema = noiseOutput ? &*noiseOutput : nullptr;
+				}
+			}
+			if (to != nodeIndices.end() && document.Nodes[to->second].Type == "value.noise_field" &&
+				link.ToPort == "position" && noiseInput && sourceType != targetType) {
+				SetDiagnostic(
+					diagnostic,
+					Status::TypeMismatch,
+					"noise coordinates must match the selected dimension",
+					link.ToNode,
+					link.ToPort
+				);
+				return diagnostic.Code;
+			}
 			const bool unionLink = (inputSchema && !inputSchema->Alternatives.empty()) ||
 								   (outputSchema && !outputSchema->Alternatives.empty());
 			const auto accepts = [&](ValueType type) {

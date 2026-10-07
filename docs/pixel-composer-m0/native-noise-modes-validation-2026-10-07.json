@@ -1,0 +1,78 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add generalized native noise Generator/Computed modes and independent coordinate/result dropdowns. broader Composer work remains active.",
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/ValueNodeEval.hpp",
+    "sampler": "mono.engine/imagegraph/src/NoiseField.cpp",
+    "rules": [
+      "one recipe and sampler for Generator plus Sample and Computed, tested across nine shapes",
+      "static mode Generator/Computed, coordinate dimensions 1D/2D/3D, result Scalar/Vector2/Vector3",
+      "stable separate result-channel seed mixing; channel zero preserves scalar behavior",
+      "exact coordinate and result signatures shared by compiler and Studio instance ports; explicit Sample Noise field unions",
+      "authored selectors cannot link or animate; old documents default to scalar 2D Generator",
+      "Studio keeps incompatible links; resizing coordinates retains axes and initializes new axes to zero",
+      "image generators retain Image and scalar 2D raster fields; no source RGB reinterpretation",
+      "bounded octaves, frequency, gain, coordinates and existing live payload admission"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-build-batch1-resume.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-build-batch3.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-cpu-batch3-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5455,
+    "startup_test_cases": 1,
+    "python_tests": 104,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3694,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-source-stability-batch3.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/noise-modes-cpu-child-hashes-batch3.json",
+    "read_review": "Sol read review, root integration review, Luna fixture implementation, collective repairs"
+  },
+  "issues": [
+    {
+      "stage": "pre-build review",
+      "cause": "missing Computed coordinates used a 2D editor default; malformed runtime field dimensions could violate span bounds",
+      "repair": "grug derive default coordinates from active instance port and validate dimensions before forming span"
+    },
+    {
+      "batch": 1,
+      "check": "build",
+      "output": "three std::array template argument deduction errors in NoiseModes.cpp and ImageGraphNoise.cpp; initial build terminated with code 143 after 702 tasks and resumed without edits",
+      "repair": "grug give test-data arrays explicit element and count types after the entire build failure list finished"
+    },
+    {
+      "batch": 2,
+      "checks": [
+        "core",
+        "studio"
+      ],
+      "output": "3151 of 3152 core cases and 1109 of 1111 Studio cases passed; linked selector returned UnknownPort, mode default was Integer, and resized coordinate link incorrectly compiled",
+      "repair": "grug assert UnknownPort for static selector links, place native defaults before generic mode default, and enforce exact Computed coordinate types before catalogue conversions"
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated noise performance profiling"
+  ],
+  "limits": [
+    "native recipe is value noise, not a source Simplex pixel parity claim",
+    "vector components are independent noise, not gradients, normals or curl",
+    "build timings and test durations are verification evidence, not a performance claim"
+  ]
+}

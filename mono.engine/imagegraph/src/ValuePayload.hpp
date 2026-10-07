@@ -63,7 +63,7 @@ namespace engine::imagegraph::detail {
 		return VALUE_PAYLOAD_TYPES[value.index()];
 	}
 	inline bool RepresentableArrayElementType(ValueType type) {
-		if (type == ValueType::Noise2D || type == ValueType::Noise3D) return true;
+		if (IsNoiseFieldType(type)) return true;
 		return type != ValueType::Array &&
 			   std::find(std::begin(VALUE_PAYLOAD_TYPES), std::end(VALUE_PAYLOAD_TYPES), type) !=
 				   std::end(VALUE_PAYLOAD_TYPES);
