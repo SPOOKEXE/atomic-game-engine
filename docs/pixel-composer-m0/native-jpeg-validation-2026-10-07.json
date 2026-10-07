@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.jpeg for the three defined source bases. licensed runtime parity remains unverified.",
+  "contract": {
+    "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_files_sha256": {
+      "scripts/node_jpeg/node_jpeg.gml": "b642a5d5174e93a83b0950dd81bbc2a9628a02b12b38d9072ecac0bf956210e1",
+      "shaders/sh_jpeg_dct/sh_jpeg_dct.fsh": "f755ef469a8c537261edbd308076d99815c52b3146a49dfdeb489d3be43dd404",
+      "shaders/sh_jpeg_recons/sh_jpeg_recons.fsh": "0f2ba926c45768768c03bd4f5d03e7f1431c15ca02e1a883dfd80dd2199310dd",
+      "scripts/node_value_int/node_value_int.gml": "75ae2d6a3df5c6d7f62e50adf0bfc1f1467c51e6519bb80011f6164536dff8d2",
+      "scripts/node_value_validators/node_value_validators.gml": "8a7ed3d6b7fa34e94e7d648b73679cf10a7956bce31c22a429d7b83f86c70b97",
+      "scripts/node_value_output/node_value_output.gml": "4b9bd058c0731ebb55e8662ba566d9e87d722e460e6288ae6574fc712ad9f69c",
+      "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+      "scripts/surface_functions/surface_functions.gml": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+      "scripts/mask_function/mask_function.gml": "94c22c8b1d3085c8ada6c673e5836326a8c866579b35ebb4487c343fb4f94023",
+      "scripts/_draw_defines/_draw_defines.gml": "f4702dd2337ca20635d699456b6ef27c11ff1aa890f91610629b4d91b94eb51c"
+    },
+    "executor": "mono.engine/imagegraph/src/nodes/SourceJpeg.cpp",
+    "tests": [
+      "mono.engine/imagegraph/tests/SourceJpeg.cpp",
+      "mono.engine/imagegraph/tests/SourceJpegBatch.cpp"
+    ],
+    "rules": [
+      "Cosine, Zigzag and SmoothZigzag shader bases, exact shader PI and host degree conversion",
+      "RGBA16Float coefficients and reconstruction scratch before requested-depth publication",
+      "nearest clamped samples and source loop order; compression ties round downward, including negative ties",
+      "Deconstruct Only skips DCT and always reconstructs; Reconstruction can exceed Patch Size; Reconstruct All chooses Patch Size",
+      "Patch Size minimum one, Reconstruction minimum zero, signed int32 shader counter bounds",
+      "main Atlas unwrap; raw mask Atlas refusal; shared processor finish, source arrays, Expand, animation and native serialization",
+      "all selected rows admitted before execution against 64000000 work units; actual scratch storage charged; named overflow diagnostics",
+      "Step explicitly refuses because both pinned shaders read uninitialized basis variables"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-build-batch3.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-cpu-batch3-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5437,
+    "new_jpeg_test_cases": 17,
+    "startup_test_cases": 1,
+    "python_tests": 104,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3691,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-source-stability-batch3.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-cpu-child-hashes-batch3.json",
+    "read_review": "Sol pinned-source, executor, wiring, fixture and docs reviews; root read review and collective fixture repairs"
+  },
+  "issues": [
+    {
+      "stage": "pre-build read review",
+      "cause": "draft batch fixtures borrowed temporaries and moved image arrays, duplicated controls, expected an array for one selected row, conflated mix and mask, and used an ineffective half-float tolerance",
+      "repair": "grug use stable borrowed lifetimes, replace existing controls, assert scalar single-row output, separate processor finish controls and tighten precision checks before first build"
+    },
+    {
+      "batch": 1,
+      "check": "build",
+      "output": "SourceJpegBatch.cpp:143: chained comparisons are not supported inside assertions, wrap the expression inside parentheses, or decompose it",
+      "cause": "Catch2 CHECK did not support an unparenthesized status OR",
+      "repair": "grug replace loose status OR with exact expected status for each refusal; no tests run against failed core build",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-build-batch1.log"
+    },
+    {
+      "batch": 2,
+      "checks": [
+        "core",
+        "format"
+      ],
+      "output": "3144 of 3145 core cases passed; SmoothZigzag and Zigzag both produced 0.39990234375; SourceJpeg.cpp had clang-format violations",
+      "cause": "zero-phase two-pixel fixture sampled triangle knots where smoothing preserves the same values; first fixture file was not formatted",
+      "repair": "grug move all three bases to phase 37 degrees and compare Cosine phase zero separately; format fixtures and repeat full joined build/check batch",
+      "evidence": [
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-cpu-core-batch2.log",
+        ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/jpeg-cpu-format-batch2.log"
+      ]
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated JPEG performance profiling"
+  ],
+  "limits": [
+    "source-derived tests do not establish licensed pixel parity or driver-specific floating-point behavior",
+    "Step source has undefined basis variables and is refused rather than guessed",
+    "finite half-float intermediates are required; native overflow diagnostics do not reproduce unspecified source-driver infinity handling",
+    "native JPEG has ENGINE_PROFILE imagegraph.source.jpeg; test durations are verification timings rather than a performance claim"
+  ]
+}

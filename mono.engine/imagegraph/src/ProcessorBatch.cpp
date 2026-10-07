@@ -12,6 +12,7 @@
 #include "nodes/SourceBend.hpp"
 #include "nodes/SourceDisplace.hpp"
 #include "nodes/SourceGlow.hpp"
+#include "nodes/SourceJpeg.hpp"
 #include "nodes/SourcePixelMath.hpp"
 #include "nodes/SourcePolar.hpp"
 #include "nodes/SourceTileTransform.hpp"
@@ -867,6 +868,7 @@ namespace engine::imagegraph::detail {
 							   : context.Authored.Type == "pc.pixel_math" ? AdmitSourcePixelMath
 							   : context.Authored.Type == "pc.glow"		  ? AdmitSourceGlow
 							   : context.Authored.Type == "pc.displace"	  ? AdmitSourceDisplace
+							   : context.Authored.Type == "pc.jpeg"		  ? AdmitSourceJpeg
 							   : context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
 							   : context.Authored.Type == "pc.tile"		  ? AdmitSourceTileTransform
 																		  : nullptr;
