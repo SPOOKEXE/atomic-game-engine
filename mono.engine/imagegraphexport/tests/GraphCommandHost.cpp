@@ -87,12 +87,14 @@ server.serve_forever()
 	engine::parallel::Process process;
 	REQUIRE(process.Start(python, {"-c", server}, scratch.Root));
 	const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-	while (!std::filesystem::is_regular_file(scratch.Root / "port") &&
-		   std::chrono::steady_clock::now() < until)
-		std::this_thread::sleep_for(std::chrono::milliseconds(5));
-	std::ifstream portFile(scratch.Root / "port");
 	std::string port;
-	portFile >> port;
+	while (std::chrono::steady_clock::now() < until) {
+		// write_text creates the file before its contents are ready.
+		std::ifstream portFile(scratch.Root / "port");
+		portFile >> port;
+		if (!port.empty()) break;
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
 	REQUIRE_FALSE(port.empty());
 	const std::string address = "http://127.0.0.1:" + port + "/text";
 	std::array<engine::imagegraphexport::GraphHttpGrant, 1> grants{
