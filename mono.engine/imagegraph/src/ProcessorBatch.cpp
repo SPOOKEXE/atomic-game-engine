@@ -17,6 +17,7 @@
 #include "nodes/SourceJpeg.hpp"
 #include "nodes/SourceNoise.hpp"
 #include "nodes/SourcePerlin.hpp"
+#include "nodes/SourcePerlinExtra.hpp"
 #include "nodes/SourcePixelMath.hpp"
 #include "nodes/SourcePixelSort.hpp"
 #include "nodes/SourcePolar.hpp"
@@ -889,6 +890,7 @@ namespace engine::imagegraph::detail {
 							   : context.Authored.Type == "pc.noise_strand"	   ? AdmitSourceStrandNoise
 							   : context.Authored.Type == "pc.weave"		   ? AdmitSourceWeave
 							   : context.Authored.Type == "pc.pytagorean_tile" ? AdmitSourcePytagoreanTile
+							   : context.Authored.Type == "pc.perlin_extra"	   ? AdmitSourcePerlinExtra
 							   : context.Authored.Type == "pc.polar"		   ? AdmitSourcePolar
 							   : context.Authored.Type == "pc.tile"			   ? AdmitSourceTileTransform
 																			   : nullptr;

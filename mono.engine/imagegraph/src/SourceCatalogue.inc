@@ -23600,7 +23600,7 @@ V	I	scale	1
 A	I	scale	1
 I	scale_mapped	Scale Mapped	-1	MapToggle	boolean	b 0	
 S	I	scale_mapped	?
-I	scale_map_range	Scale Map Range	-1	MapRange	vector4	w 0 0 4 4	
+I	scale_map_range	Scale Map Range	-1	MapRange	vector2	v 4 4	
 S	I	scale_map_range	?
 I	scale_map	Scale Map	13	Surface	image		
 S	I	scale_map	0

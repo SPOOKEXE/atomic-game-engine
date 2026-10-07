@@ -105826,6 +105826,7 @@
      "index": "2",
      "kind": "Vec2",
      "mapped": "range",
+     "mapped_range_type": "vector2",
      "name": "Scale",
      "source_array_classification": true
     },
@@ -156825,6 +156826,10 @@
   "scripts/node_pytagorean_tile/node_pytagorean_tile.gml": {
    "bytes": 5194,
    "sha256": "6fae8079aaa9785e778df6b8cdeff8e528ea740d46f039cd326997476ac54964"
+  },
+  "scripts/node_perlin_extra/node_perlin_extra.gml": {
+   "bytes": 3671,
+   "sha256": "c4aa6685ad6c0d6da8b48ce9019276453075138dcce5b6195e911088e46e10ee"
   }
  }
 }

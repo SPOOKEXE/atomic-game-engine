@@ -370,6 +370,13 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "6fae8079aaa9785e778df6b8cdeff8e528ea740d46f039cd326997476ac54964",
                 },
             ),
+            (
+                "scripts/node_perlin_extra/node_perlin_extra.gml",
+                {
+                    "bytes": 3671,
+                    "sha256": "c4aa6685ad6c0d6da8b48ce9019276453075138dcce5b6195e911088e46e10ee",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (
@@ -378,6 +385,7 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
             ("Node_Perlin", "v 4 4"),
             ("Node_Shard_Noise", "v 4 4"),
             ("Node_Pytagorean_Tile", "v 0.25 0.25"),
+            ("Node_Perlin_Extra", "v 4 4"),
         ):
             node = snapshot["nodes"][name]
             control = next(v for v in node["inputs"] if v["name"] == "Scale")
