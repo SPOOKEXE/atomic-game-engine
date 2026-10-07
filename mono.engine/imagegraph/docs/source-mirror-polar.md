@@ -10,7 +10,7 @@ Interpolation and depth follow the source attributes. Pixel, Bilinear, Bicubic a
 
 Safe drawing replaces the polar shader for R8/R16/R32 source surfaces. That branch stretches the original red channel with the source base texture filter, replicates red into RGB, and supplies alpha one. It does not evaluate spoke division, curves, polar transforms or CleanEdge. Inactive processors clone the source dimensions, depth and bytes, ignoring the active output-dimension controls.
 
-Path-to-Vec2 source getters require their authored path sampling ratio, which the common native Vec2 projection does not yet preserve for this route. They return an explicit unsupported diagnostic instead of using a fabricated vector. No filesystem, host RNG or persistent replay state is used.
+Before processor rows run, the native evaluator detects Path2D values on the five vector controls and samples each through `PathRuntime::PointRatio` with the consumer's local raw animator. It reads the ratio from `Vector2.X` or the first scalar or integer in a flat array value. When no raw local animator is available, it uses the constructor default, including raw project width for Constant Dimension. Each sampled point is installed as a Vec2 through evaluator-reserved value-view storage, and the original views and sample flags are restored afterward. Sampled Position and Center bypass Pixel/Reference conversion because their path points are already resolved coordinates. Missing or invalid ratios return an unsupported diagnostic. No filesystem, host RNG or persistent replay state is used.
 
 ## Admission and publication
 
