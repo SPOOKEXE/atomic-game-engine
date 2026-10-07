@@ -11,6 +11,7 @@
 #include "../SourcePathShiftMemo.hpp"
 #include "../SourcePathWeight.hpp"
 
+#include <engine/core/Metrics.hpp>
 #include <engine/imagegraph/Document.hpp>
 
 #include <algorithm>
@@ -77,6 +78,15 @@ namespace engine::imagegraph::detail {
 			const auto bytes = StorageBytes(path);
 			if (!bytes)
 				return context.Fail(Status::LimitExceeded, "path exceeds the anchor or weight limit", "path");
+			if (path.SourceOperation && path.SourceOperation->Kind == SourcePathOperationKind::Spiral) {
+				const auto work = SourceWeightRuntimeWork(&path, nullptr);
+				if (!work || *work > 64000000 / std::max<size_t>(context.ProcessorCount, 1))
+					return context.Fail(
+						Status::LimitExceeded,
+						"Source Spiral runtime exceeds whole processor work bounds",
+						"path"
+					);
+			}
 			if (!ValidSourcePath2D(path))
 				return context.Fail(Status::InvalidValue, "source path operation is invalid", "path");
 			if (path.SourceOperation) {
@@ -213,7 +223,8 @@ namespace engine::imagegraph::detail {
 
 				if ((operation.Kind == SourcePathOperationKind::Shift ||
 					 operation.Kind == SourcePathOperationKind::WeightAdjust ||
-					 operation.Kind == SourcePathOperationKind::Smoothen) &&
+					 operation.Kind == SourcePathOperationKind::Smoothen ||
+					 operation.Kind == SourcePathOperationKind::Spiral) &&
 					replacement.Inputs.empty() && !replacement.WeightSpatial) {
 					replacement.MinX = replacement.MinY = 0;
 					replacement.MaxX = replacement.MaxY = 1;
@@ -412,6 +423,12 @@ namespace engine::imagegraph::detail {
 				return SourceData->Sequential->CachedLength + (*Operation == SourcePathOperationKind::Extends
 																   ? SourceData->Sequential->ExtendLength
 																   : 0);
+			if (SourceData && SourceData->Spiral) {
+				const double frequency = std::max(1., std::abs(SourceData->Spiral->Frequency));
+				const double base = WeightSpatial ? WeightSpatial->Length(line)
+												  : (Inputs.empty() ? 0 : Inputs[0].Length(line));
+				return base * frequency * std::sqrt(std::abs(SourceData->Spiral->Amplitude) + 1 / frequency);
+			}
 			if (WeightSpatial) return WeightSpatial->Length(line);
 			if (Shape) return LengthTotal;
 			if (SourceMesh) return LengthSourceVerletPath(*SourceMesh, line);
@@ -561,6 +578,13 @@ namespace engine::imagegraph::detail {
 			return child ? child->AccumulatedCount(line) : 0;
 		}
 		double AccumulatedAt(size_t index, size_t line = 0) const {
+			if (SourceData && SourceData->Spiral) {
+				const double frequency = std::max(1., std::abs(SourceData->Spiral->Frequency));
+				const double base = WeightSpatial
+										? WeightSpatial->AccumulatedAt(index, line)
+										: (Inputs.empty() ? 0 : Inputs[0].AccumulatedAt(index, line));
+				return base * frequency * std::sqrt(std::abs(SourceData->Spiral->Amplitude) + 1 / frequency);
+			}
 			if (SourceData && SourceData->Baked) {
 				if (index >= AccumulatedCount(line)) return 0;
 				const auto &points = SourceData->Baked->Lines[line];
@@ -740,6 +764,137 @@ namespace engine::imagegraph::detail {
 				);
 			return out;
 		}
+
+		SourcePathPointBuffer SpiralPointInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
+			ENGINE_PROFILE("imagegraph.source.path_spiral.sample");
+			out.Position = {};
+			if (Inputs.empty() && !WeightSpatial) return out;
+			auto &context = *EvaluationContext;
+			if (!context.PathShiftMemo) {
+				context.Fail(
+					Status::UnsupportedExecution, "Source Spiral requires evaluation-owned memo", "path"
+				);
+				return out;
+			}
+			auto &memo = *context.PathShiftMemo;
+			const auto &op = *SourceData;
+			const auto &controls = *op.Spiral;
+			const auto key = SourceShiftRatioKey(ratio);
+			if (!key) {
+				context.Fail(Status::InvalidValue, "Source Spiral ratio cache key is undefined", "path");
+				return out;
+			}
+			std::array<SourcePathPointBuffer, 3> buffers = controls.Buffers;
+			if (!memo.ValidationProbe) {
+				auto *owner = memo.SpiralOwner(context, op);
+				if (!owner) return out;
+				buffers = owner->SpiralBuffers;
+				if (const auto *hit = memo.Find(context, op.EvaluationMemoId, *key, line)) {
+					out.Position = {hit->Point.X, hit->Point.Y};
+					out.Weight = hit->Point.Weight;
+					return out;
+				}
+			}
+			if (context.FailureCode != Status::Ok) return out;
+			const double original = ratio;
+			auto sample = [&](double r, size_t index) {
+				if (!memo.Step(context)) return false;
+				core::Metrics::Count("imagegraph.path.spiral.child_samples", 1);
+				if (WeightSpatial) {
+					auto child = buffers[index];
+					WeightSpatial->RatioInto(r, line, child);
+					buffers[index].Position = child.Position;
+					buffers[index].Weight = child.Weight;
+				} else
+					Inputs[0].PointRatioInto(r, line, buffers[index]);
+				return context.FailureCode == Status::Ok;
+			};
+			if (ratio < controls.Range.X || ratio > controls.Range.Y) {
+				if (!sample(ratio, 0)) return out;
+				out.Position = buffers[0].Position;
+				out.Weight = buffers[0].Weight;
+			} else {
+				double amplitude = controls.Amplitude;
+				if (!controls.AmplitudeCurve.empty())
+					amplitude *= SourceWeightCurve(
+						controls.AmplitudeCurve,
+						controls.ClampCurve
+							? (ratio - controls.Range.X) / (controls.Range.Y - controls.Range.X)
+							: ratio
+					);
+				const auto wrapped = [](double n) {
+					const double first = n * .9999 - std::trunc(n * .9999), sum = first + 1;
+					return sum - std::trunc(sum);
+				};
+				auto triple = [&]() {
+					if (!controls.Loop) ratio = std::clamp(ratio, 0., .99);
+					return sample(
+							   controls.Loop ? wrapped(ratio - .01) : std::clamp(ratio - .01, 0., .99), 1
+						   ) &&
+						   sample(controls.Loop ? wrapped(ratio) : std::clamp(ratio, 0., .99), 0) &&
+						   sample(controls.Loop ? wrapped(ratio + .01) : std::clamp(ratio + .01, 0., .99), 2);
+				};
+				if (!triple()) return out;
+				double direction = 0;
+				if (controls.Direction == 0) {
+					if (!triple()) return out;
+					direction = SourceWeightDirection(
+						buffers[2].Position.X - buffers[1].Position.X,
+						buffers[2].Position.Y - buffers[1].Position.Y
+					);
+				} else {
+					if (!sample(controls.Loop ? wrapped(ratio) : std::clamp(ratio, 0., .99), 0)) return out;
+					const double t = controls.DirectionCurve.empty()
+										 ? ratio
+										 : SourceWeightCurve(controls.DirectionCurve, ratio);
+					direction = controls.DirectionRange.X +
+								(controls.DirectionRange.Y - controls.DirectionRange.X) * t;
+				}
+				const double progress =
+					(controls.Phase / 360 + ratio * controls.Frequency) * std::numbers::pi * 2;
+				const double normal = std::sin(progress) * amplitude,
+							 tangent = std::cos(progress) * amplitude * controls.Spiral;
+				const double a = (direction + 90) * std::numbers::pi / 180,
+							 b = direction * std::numbers::pi / 180;
+				out.Position = {
+					buffers[0].Position.X + SourceShapeLengthdirComponent(normal * std::cos(a)) +
+						SourceShapeLengthdirComponent(tangent * std::cos(b)),
+					buffers[0].Position.Y + SourceShapeLengthdirComponent(-normal * std::sin(a)) +
+						SourceShapeLengthdirComponent(-tangent * std::sin(b))
+				};
+				out.Weight = buffers[0].Weight;
+				if (controls.UseWeight) {
+					const double weight =
+						controls.WeightRange.X +
+						(controls.WeightRange.Y - controls.WeightRange.X) * (.5 + std::cos(progress) * .5);
+					if (controls.WeightMode == 0)
+						out.Weight = weight;
+					else if (controls.WeightMode == 1)
+						out.Weight += weight;
+					else
+						out.Weight *= weight;
+				}
+			}
+			if (!std::isfinite(out.Position.X) || !std::isfinite(out.Position.Y) ||
+				!std::isfinite(out.Weight)) {
+				context.Fail(Status::InvalidValue, "Source Spiral sample is nonfinite", "path");
+				return out;
+			}
+			if (!memo.ValidationProbe) {
+				// Nested sampling can grow the owner vector, so reacquire by its stable evaluation identity.
+				memo.Owners[op.EvaluationMemoId - 1].SpiralBuffers = buffers;
+				if (!memo.Store(
+						context,
+						op.EvaluationMemoId,
+						*key,
+						line,
+						{out.Position.X, out.Position.Y, out.Weight},
+						original
+					))
+					return out;
+			}
+			return out;
+		}
 		SourcePathPointBuffer BakedPointInto(double distance, size_t line, SourcePathPointBuffer &out) const {
 			out.Position = {};
 			if (line >= SourceData->Baked->Lines.size()) return out;
@@ -774,6 +929,7 @@ namespace engine::imagegraph::detail {
 					return out;
 				}
 			}
+			if (SourceData && SourceData->Spiral) return SpiralPointInto(ratio, line, out);
 			if (SourceData && SourceData->Sequential) return SequentialPoint(ratio, line, false, out);
 			if (SourceData && SourceData->Baked) return BakedPointInto(ratio * Length(line), line, out);
 			if (Shape) {
@@ -808,6 +964,7 @@ namespace engine::imagegraph::detail {
 		}
 		SourcePathPointBuffer
 		PointDistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			if (SourceData && SourceData->Spiral) return SpiralPointInto(distance / Length(), line, out);
 			if (SourceData && SourceData->Baked) return BakedPointInto(distance, line, out);
 			if (Operation && *Operation == SourcePathOperationKind::Join && Inputs.empty()) return out;
 			if (SourceData && SourceData->Sequential) return SequentialPoint(distance, line, true, out);
@@ -954,6 +1111,11 @@ namespace engine::imagegraph::detail {
 			return p;
 		}
 		PathPoint PointDistance(double distance, size_t line = 0) const {
+			if (SourceData && SourceData->Spiral) {
+				SourcePathPointBuffer p;
+				SpiralPointInto(distance / Length(), line, p);
+				return {p.Position.X, p.Position.Y, p.Weight};
+			}
 			if (SourceData && SourceData->Baked) {
 				SourcePathPointBuffer out;
 				BakedPointInto(distance, line, out);
@@ -1027,6 +1189,11 @@ namespace engine::imagegraph::detail {
 				   *Operation != SourcePathOperationKind::WeightAdjust;
 		}
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
+			if (SourceData && SourceData->Spiral) {
+				SourcePathPointBuffer p;
+				SpiralPointInto(ratio, line, p);
+				return {p.Position.X, p.Position.Y, p.Weight};
+			}
 			if (SourceData && SourceData->Baked) return PointDistance(ratio * Length(line), line);
 			if (SourceData && SourceData->Sequential) {
 				SourcePathPointBuffer out;

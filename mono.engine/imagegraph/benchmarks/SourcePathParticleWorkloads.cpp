@@ -20,3 +20,8 @@ BENCH("CPU Particle3D vertices1530 prebuilt-state billboard", 1) {
 	static Profile<Fixture> p(Fixture::Kind::ParticleVertices);
 	p.Measure();
 }
+
+BENCH("CPU Spiral Path weighted line 64 downstream ratio samples compiled-plan", 1) {
+	static Profile<Fixture> p(Fixture::Kind::SpiralSamples);
+	p.Measure();
+}

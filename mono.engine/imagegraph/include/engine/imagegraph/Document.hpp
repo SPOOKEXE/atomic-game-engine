@@ -278,7 +278,8 @@ namespace engine::imagegraph {
 		Extends,
 		Flatten,
 		Smoothen,
-		Bake
+		Bake,
+		Spiral
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
@@ -353,6 +354,16 @@ namespace engine::imagegraph {
 		std::vector<std::vector<Vector3>> Lines;
 		bool operator==(const SourcePathBakedData2D &) const = default;
 	};
+	struct SourcePathSpiralData2D {
+		Vector2 Range{0, 1}, DirectionRange{}, WeightRange{0, 1};
+		double Frequency = 0, Amplitude = 0, Spiral = .75, Phase = 0;
+		bool ClampCurve = false, Loop = false, UseWeight = false;
+		uint8_t Direction = 0, WeightMode = 0;
+		std::vector<double> AmplitudeCurve, DirectionCurve;
+		std::array<SourcePathPointBuffer, 3> Buffers{};
+		std::vector<SourcePathSequentialCachePoint> Cache;
+		bool operator==(const SourcePathSpiralData2D &) const = default;
+	};
 	struct SourcePathData2D {
 		SourcePathOperationKind Kind = SourcePathOperationKind::Reverse;
 		std::vector<Path2D> Inputs;
@@ -377,6 +388,7 @@ namespace engine::imagegraph {
 		OwnedPayload3D<PathData3D> WeightInput3D;
 		OwnedPayload3D<SourcePathSequentialData2D> Sequential;
 		OwnedPayload3D<SourcePathBakedData2D> Baked;
+		OwnedPayload3D<SourcePathSpiralData2D> Spiral;
 		std::vector<double> WeightCurve;
 		double WeightValue = 0, WeightDirection = 0;
 		Vector2 WeightRange{0, 1};

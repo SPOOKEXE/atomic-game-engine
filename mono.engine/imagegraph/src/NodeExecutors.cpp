@@ -30,6 +30,7 @@ namespace engine::imagegraph::detail {
 					  SourcePathBakeExecutors(),
 					  SourceShape3DExecutors(),
 					  SourceParticle3DExecutors(),
+					  SourcePathSpiralExecutors(),
 					  OutlineExecutors(),
 					  BlurExecutors(),
 					  TransformExecutors(),
@@ -135,7 +136,9 @@ namespace engine::imagegraph::detail {
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
 				if (type == "pc.argument" && port == "default_value") return true;
 				if (type == "pc.points_triangulate" && port == "points") return true;
-				if ((type == "pc.path_sample" || type == "pc.path_smoothen") && port == "path") return true;
+				if ((type == "pc.path_sample" || type == "pc.path_smoothen" || type == "pc.path_spiral") &&
+					port == "path")
+					return true;
 				if (SourceFontInput(type, port)) return true;
 				if ((type == "pc.surface_to_buffer" && port == "surface") ||
 					(type == "pc.surface_from_buffer" && port == "input_0"))

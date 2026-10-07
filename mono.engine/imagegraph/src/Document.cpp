@@ -55,6 +55,7 @@
 #include "SourcePathSequentialCodec.hpp"
 #include "SourcePathShapeCodec.hpp"
 #include "SourcePathShiftMemo.hpp"
+#include "SourcePathSpiralCodec.hpp"
 #include "SourceRegionOrigin.hpp"
 #include "SourceRigidCodec.hpp"
 #include "SourceSeparatedVec2.hpp"
@@ -1417,6 +1418,22 @@ namespace engine::imagegraph {
 					detail::WriteSourcePathShape(stream, *operation.Shape);
 					return;
 				}
+				if (operation.Kind == SourcePathOperationKind::Spiral) {
+					stream << "spiral " << operation.Inputs.size() << ' ';
+					detail::WriteSourcePathSpiral(stream, *operation.Spiral);
+					stream << ' ' << bool(operation.WeightInput3D);
+					if (operation.WeightInput3D) {
+						stream << ' ';
+						PathValue3D child;
+						child.Data = operation.WeightInput3D;
+						WriteValue(stream, Value{std::move(child)});
+					}
+					for (const auto &child : operation.Inputs) {
+						stream << ' ' << (child.SourceOperation ? "po" : child.Segmented ? "ps" : "p") << ' ';
+						WritePathPayload(stream, child);
+					}
+					return;
+				}
 				if (operation.Kind == SourcePathOperationKind::VerletMesh) {
 					stream << "verlet ";
 					detail::WriteSourceVerletPath(stream, operation);
@@ -2374,6 +2391,59 @@ namespace engine::imagegraph {
 					auto &operation = path.SourceOperation.emplace();
 					operation.Kind = SourcePathOperationKind::Shape;
 					if (!detail::ReadSourcePathShape(stream, operation.Shape.emplace(), admit)) return false;
+					value = std::move(path);
+					return true;
+				}
+				if (kind == "spiral") {
+					if (!(stream >> count) || count > 1 ||
+						!admit(
+							sizeof(SourcePathData2D) + sizeof(SourcePathSpiralData2D) + count * sizeof(Path2D)
+						))
+						return false;
+					Path2D path;
+					auto &operation = path.SourceOperation.emplace();
+					operation.Kind = SourcePathOperationKind::Spiral;
+					if (!detail::ReadSourcePathSpiral(stream, operation.Spiral.emplace(), admit))
+						return false;
+					unsigned spatial = 0;
+					if (!(stream >> spatial) || spatial > 1 || (spatial && count)) return false;
+					if (spatial) {
+						Value child;
+						if (!ReadValue(
+								stream,
+								child,
+								version,
+								false,
+								budget,
+								outputCharge,
+								allocationRefused,
+								depth + 1,
+								arrayCount
+							))
+							return false;
+						auto *path3d = std::get_if<PathValue3D>(&child);
+						if (!path3d || !path3d->Data) return false;
+						operation.WeightInput3D = std::move(path3d->Data);
+					}
+					operation.Inputs.reserve(count);
+					for (size_t index = 0; index < count; ++index) {
+						Value child;
+						if (!ReadValue(
+								stream,
+								child,
+								version,
+								false,
+								budget,
+								outputCharge,
+								allocationRefused,
+								depth + 1,
+								arrayCount
+							))
+							return false;
+						auto *planar = std::get_if<Path2D>(&child);
+						if (!planar) return false;
+						operation.Inputs.push_back(std::move(*planar));
+					}
 					value = std::move(path);
 					return true;
 				}

@@ -7,7 +7,7 @@
 
 TEST_SUITE_ID("engine.imagegraph.source_path_particle_workloads")
 TEST_CASE(
-	"Path Bake and Particle CPU workloads retain source oracles and bounded outputs",
+	"Path Bake, Spiral and Particle CPU workloads retain source oracles and bounded outputs",
 	"[imagegraph][path_particle_workloads]"
 ) {
 	using Fixture = engine::imagegraph::testing::SourcePathParticleFixture;
@@ -15,7 +15,8 @@ TEST_CASE(
 		Fixture::Kind::PathLength,
 		Fixture::Kind::PathAmount,
 		Fixture::Kind::ParticleState,
-		Fixture::Kind::ParticleVertices
+		Fixture::Kind::ParticleVertices,
+		Fixture::Kind::SpiralSamples
 	);
 	INFO("workload=" << int(kind));
 	Fixture fixture(kind);

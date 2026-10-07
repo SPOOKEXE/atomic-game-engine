@@ -10,40 +10,98 @@ namespace engine::imagegraph::detail {
 		return retained ? SourcePath3DBytes<true>(data, depth) : SourcePath3DBytes<false>(data, depth);
 	}
 	std::optional<uint64_t> SourceWeightRuntimeWork(const Path2D *planar, const PathData3D *spatial) {
-		uint64_t total = 0;
-		const auto add = [&](uint64_t n) {
-			if (n > (uint64_t{1} << 24) - total) return false;
-			total += n;
-			return true;
-		};
-		const auto visit = [&](auto &&self, const Path2D *p, const PathData3D *s, size_t depth) -> bool {
-			if (depth > Limits::MaximumArrayDepth || !add(1)) return false;
+		constexpr uint64_t limit = uint64_t{1} << 24;
+		const auto visit =
+			[&](auto &&self, const Path2D *p, const PathData3D *s, size_t depth) -> std::optional<uint64_t> {
+			if (depth > Limits::MaximumArrayDepth) return {};
+			uint64_t total = 1;
+			auto add = [&](uint64_t n) {
+				if (n > limit - total) return false;
+				total += n;
+				return true;
+			};
+			auto child = [&](const Path2D *p, const PathData3D *s, uint64_t repeats) {
+				auto n = self(self, p, s, depth + 1);
+				return n && *n <= (limit - total) / repeats && add(*n * repeats);
+			};
 			if (p) {
-				if (!p->SourceOperation) return add(p->Anchors.size() * 33 + p->Weights.size() + 101);
+				if (p->Anchors.size() > Limits::MaximumPathAnchors ||
+					p->Weights.size() > Limits::MaximumPathWeights)
+					return {};
+				if (!p->SourceOperation) {
+					if (!add(p->Anchors.size() * 128 + p->Weights.size() + 101)) return {};
+					return total;
+				}
 				const auto &op = *p->SourceOperation;
-				if (op.Shape && !add(op.Shape->Points.size() + size_t(op.Shape->Loop))) return false;
-				for (const auto &child : op.Inputs)
-					if (!self(self, &child, nullptr, depth + 1)) return false;
-				if (op.WeightInput3D && !self(self, nullptr, op.WeightInput3D.operator->(), depth + 1))
-					return false;
+				if (op.Inputs.size() > Limits::MaximumArrayElements ||
+					op.CachedLengths.size() > Limits::MaximumArrayElements ||
+					op.WeightCurve.size() > Limits::MaximumArrayElements ||
+					op.BlendAccumulated.size() > Limits::MaximumArrayElements)
+					return {};
+				if (!add(
+						op.CachedLengths.size() + op.WeightCurve.size() + op.Reversed.size() +
+						op.BlendLengths.size() + op.BlendAccumulated.size()
+					))
+					return {};
+				for (const auto &row : op.BlendAccumulated)
+					if (!add(row.size())) return {};
+				if (op.Shape && !add(op.Shape->Points.size() * 4 + size_t(op.Shape->Loop))) return {};
+				if (op.Mesh && !add(op.Mesh->Simulation.Edges.size() * 16)) return {};
+				uint64_t repeats = 1;
+				if (op.Spiral) {
+					const auto &q = *op.Spiral;
+					if (q.Cache.size() > Limits::MaximumArrayElements ||
+						!add(
+							q.AmplitudeCurve.size() + q.DirectionCurve.size() +
+							q.Cache.size() * q.Cache.size() + 4096 + 256
+						))
+						return {};
+					repeats = q.Direction == 0 ? 6 : 4;
+				}
+				if (op.Baked) {
+					if (!add(4096 + op.Baked->Lines.size())) return {};
+					for (const auto &line : op.Baked->Lines)
+						if (!add(line.size() * 8)) return {};
+				}
+				if (op.Sequential) {
+					const auto &q = *op.Sequential;
+					if (q.SmoothSteps < 0 || q.SmoothSteps > int64_t(Limits::MaximumArrayElements) ||
+						!add(
+							q.Accumulated.size() + q.FlattenLengths.size() + q.FlattenOwners.size() +
+							q.Cache.size() * 4096 + 4096
+						))
+						return {};
+					if (op.Kind == SourcePathOperationKind::Smoothen)
+						repeats = 1 + 2 * uint64_t(q.SmoothSteps);
+				}
+				if (op.Kind == SourcePathOperationKind::Shift) repeats = 3;
+				if (op.Kind == SourcePathOperationKind::WeightAdjust && op.WeightType == 2) repeats = 3;
+				for (const auto &v : op.Inputs)
+					if (!child(&v, nullptr, repeats)) return {};
+				if (op.WeightInput3D && !child(nullptr, &*op.WeightInput3D, repeats)) return {};
 			} else if (s && s->SourcePresent) {
-				if (s->Source2D && !self(self, &*s->Source2D, nullptr, depth + 1)) return false;
+				if (s->Anchors.size() > Limits::MaximumPathAnchors ||
+					s->Resolution > Limits::MaximumArrayElements ||
+					s->Transforms.size() > Limits::MaximumArrayDepth)
+					return {};
+				if (!add(s->Transforms.size() * 64)) return {};
+				if (s->Source2D && !child(&*s->Source2D, nullptr, 1)) return {};
 				if (s->SourceOperation) {
-					for (const auto &child : s->SourceOperation->Inputs) {
-						if (!child.Data || !self(self, nullptr, child.Data.operator->(), depth + 1))
-							return false;
-					}
+					if (s->SourceOperation->Inputs.size() > Limits::MaximumArrayElements) return {};
+					for (const auto &v : s->SourceOperation->Inputs)
+						if (!v.Data || !child(nullptr, &*v.Data, 1)) return {};
 				} else if (!s->Source2D &&
 						   !add(
-							   s->SourcePolyline ? s->Anchors.size()
-												 : s->Anchors.size() * (uint64_t(s->Resolution) + 1)
+							   s->SourcePolyline ? s->Anchors.size() * 16
+												 : s->Anchors.size() * (uint64_t(s->Resolution) + 1) * 64
 						   ))
-					return false;
+					return {};
 			}
-			return true;
+			return total;
 		};
-		return visit(visit, planar, spatial, 0) ? std::optional<uint64_t>{total} : std::nullopt;
+		return visit(visit, planar, spatial, 0);
 	}
+
 	struct SourcePathWeightRuntime3D::Storage {
 		NodeContext &Context;
 		PathRuntime3D Runtime;

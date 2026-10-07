@@ -2,6 +2,7 @@
 #include "SourcePathBakePayload.hpp"
 #include "SourcePathSequentialPayload.hpp"
 #include "SourcePathShape.hpp"
+#include "SourcePathSpiralPayload.hpp"
 #include "SourceVerletPath.hpp"
 
 #include <engine/imagegraph/Document.hpp>
@@ -29,6 +30,14 @@ namespace engine::imagegraph::detail {
 		if (path.Loop || path.Segmented || !path.Anchors.empty() || !path.Weights.empty()) return false;
 		const auto &op = *path.SourceOperation;
 		if (op.Baked && op.Kind != SourcePathOperationKind::Bake) return false;
+		if (op.Kind == SourcePathOperationKind::Spiral) {
+			if (!op.Spiral || !ValidSourceSpiral(*op.Spiral, *count) || op.Inputs.size() > 1 ||
+				(!op.Inputs.empty() && op.WeightInput3D))
+				return false;
+			if (op.WeightInput3D && !ValidSourceWeightInput3D(*op.WeightInput3D, depth + 1, count))
+				return false;
+		} else if (op.Spiral)
+			return false;
 		if (op.Shape && op.Kind != SourcePathOperationKind::Shape) return false;
 		const bool sequential = SourceSequentialKind(op.Kind);
 		if (sequential) {
@@ -97,16 +106,16 @@ namespace engine::imagegraph::detail {
 				return false;
 			for (double value : op.WeightCurve)
 				if (!std::isfinite(value)) return false;
-		} else if ((!sequential && op.WeightInput3D) || !op.WeightCurve.empty() || op.WeightType ||
-				   op.WeightMode || op.WeightLoop || op.WeightValue != 0 || op.WeightDirection != 0 ||
-				   op.WeightRange != Vector2{0, 1})
+		} else if ((!sequential && op.Kind != SourcePathOperationKind::Spiral && op.WeightInput3D) ||
+				   !op.WeightCurve.empty() || op.WeightType || op.WeightMode || op.WeightLoop ||
+				   op.WeightValue != 0 || op.WeightDirection != 0 || op.WeightRange != Vector2{0, 1})
 			return false;
 		if (!std::isfinite(op.ShiftDistance) || !std::isfinite(op.ShiftRange.X) ||
 			!std::isfinite(op.ShiftRange.Y))
 			return false;
 		if (op.Kind != SourcePathOperationKind::Shift &&
 			(op.ShiftDistance != 0 || op.ShiftRange != Vector2{0, 1} || op.ShiftLoop ||
-			 (!sequential && op.EvaluationMemoId)))
+			 (!sequential && op.Kind != SourcePathOperationKind::Spiral && op.EvaluationMemoId)))
 			return false;
 		if (!std::isfinite(op.Offset) || !std::isfinite(op.BlendAmount)) return false;
 		if (op.Kind != SourcePathOperationKind::Offset && (op.Offset != 0 || op.ClampOffset)) return false;
@@ -152,8 +161,8 @@ namespace engine::imagegraph::detail {
 			op.Kind != SourcePathOperationKind::Blend && op.Kind != SourcePathOperationKind::Join &&
 			op.Kind != SourcePathOperationKind::Redistribute && op.Kind != SourcePathOperationKind::Skew &&
 			op.Kind != SourcePathOperationKind::Transform && op.Kind != SourcePathOperationKind::AreaMap &&
-			op.Kind != SourcePathOperationKind::Shift && op.Kind != SourcePathOperationKind::WeightAdjust &&
-			!sequential)
+			op.Kind != SourcePathOperationKind::Shift && op.Kind != SourcePathOperationKind::Spiral &&
+			op.Kind != SourcePathOperationKind::WeightAdjust && !sequential)
 			return false;
 		if (op.Kind != SourcePathOperationKind::Combine && op.Kind != SourcePathOperationKind::Join &&
 			op.Kind != SourcePathOperationKind::Blend && op.Inputs.size() > 1)
@@ -182,6 +191,7 @@ namespace engine::imagegraph::detail {
 			};
 			if (op.Sequential && !add(SourceSequentialBytes<Retained>(*op.Sequential))) return UINT64_MAX;
 			if (op.Baked && !add(SourceBakedBytes<Retained>(*op.Baked))) return UINT64_MAX;
+			if (op.Spiral && !add(SourceSpiralBytes<Retained>(*op.Spiral))) return UINT64_MAX;
 			if (op.WeightInput3D && !add(SourceWeightInput3DBytes(*op.WeightInput3D, Retained, depth + 1)))
 				return std::numeric_limits<uint64_t>::max();
 			if (!add((Retained ? op.WeightCurve.capacity() : op.WeightCurve.size()) * sizeof(double)))

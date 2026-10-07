@@ -123,7 +123,8 @@ namespace engine::imagegraph::detail {
 		} else if constexpr (std::is_same_v<Leaf, Path2D>) {
 			if (value.SourceOperation) {
 				auto &op = *value.SourceOperation;
-				if ((op.Kind == SourcePathOperationKind::Shift || SourceSequentialKind(op.Kind)) &&
+				if ((op.Kind == SourcePathOperationKind::Shift ||
+					 op.Kind == SourcePathOperationKind::Spiral || SourceSequentialKind(op.Kind)) &&
 					!callback(op, route))
 					return false;
 				for (size_t i = 0; i < op.Inputs.size(); ++i)

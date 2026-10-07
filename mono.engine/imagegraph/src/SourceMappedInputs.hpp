@@ -6,6 +6,9 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.path_spiral" && input.SourceKind == "CurveToggle" &&
+			(input.Id == "amplitude_curved" || input.Id == "angle_curved"))
+			return true;
 		if (entry.Type == "pc.noise_aniso" &&
 			(input.SourceKind == "ValueUnit" || input.SourceKind == "MaskAlphaOnly" ||
 			 input.SourceKind == "MapToggle" || input.SourceKind == "MapRange"))

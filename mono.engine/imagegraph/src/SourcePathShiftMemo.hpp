@@ -12,6 +12,8 @@ namespace engine::imagegraph::detail {
 			std::string NodeId, Port, Route;
 			std::array<SourcePathPointBuffer, 2> SequentialBuffers{};
 			bool SequentialInitialized = false;
+			std::array<SourcePathPointBuffer, 3> SpiralBuffers{};
+			bool SpiralInitialized = false;
 		};
 		struct Entry {
 			uint64_t OwnerId = 0;
@@ -92,6 +94,31 @@ namespace engine::imagegraph::detail {
 			return context.Fail(
 				Status::LimitExceeded, "Source sequential path sampling work exceeds bounds", "path"
 			);
+		}
+		Owner *SpiralOwner(NodeContext &context, const SourcePathData2D &op) {
+			if (!op.EvaluationMemoId || op.EvaluationMemoId > Owners.size()) {
+				context.Fail(Status::InvalidValue, "Source Spiral path lacks evaluation identity", "path");
+				return nullptr;
+			}
+			auto &owner = Owners[op.EvaluationMemoId - 1];
+			if (!owner.SpiralInitialized) {
+				owner.SpiralBuffers = op.Spiral->Buffers;
+				if (!ValidationProbe)
+					for (const auto &p : op.Spiral->Cache) {
+						const auto key = SourceShiftRatioKey(p.Coordinate);
+						if (!key || !Store(
+										context,
+										op.EvaluationMemoId,
+										*key,
+										p.Line,
+										{p.Point.Position.X, p.Point.Position.Y, p.Point.Weight},
+										p.Coordinate
+									))
+							return nullptr;
+					}
+				if (!ValidationProbe) owner.SpiralInitialized = true;
+			}
+			return &owner;
 		}
 		Owner *SequentialOwner(NodeContext &context, const SourcePathData2D &operation) {
 			if (!operation.EvaluationMemoId || operation.EvaluationMemoId > Owners.size()) {

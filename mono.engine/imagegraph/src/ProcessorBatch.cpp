@@ -290,7 +290,8 @@ namespace engine::imagegraph::detail {
 					leaf == input.Type ||
 					(leaf == ValueType::Font && SourceFontInput(context.Entry.Type, port)) ||
 					(leaf == ValueType::Path3D && port == "path" &&
-					 (context.Entry.Type == "pc.path_sample" || context.Entry.Type == "pc.path_smoothen")) ||
+					 (context.Entry.Type == "pc.path_sample" || context.Entry.Type == "pc.path_smoothen" ||
+					  context.Entry.Type == "pc.path_spiral")) ||
 					(leaf == ValueType::Atlas && input.Type == ValueType::Image) ||
 					(numeric && (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
 								 input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
@@ -847,7 +848,8 @@ namespace engine::imagegraph::detail {
 						kind != input.Type && !(kind == ValueType::Array && input.Depth > 0) &&
 						!(kind == ValueType::Path3D && input.Port == "path" &&
 						  (context.Entry.Type == "pc.path_sample" ||
-						   context.Entry.Type == "pc.path_smoothen")) &&
+						   context.Entry.Type == "pc.path_smoothen" ||
+						   context.Entry.Type == "pc.path_spiral")) &&
 						!(kind == ValueType::Atlas && input.Type == ValueType::Image &&
 						  (context.Entry.Type == "pc.wrap_area" || context.Entry.Type == "pc.bend" ||
 						   context.Entry.Type == "pc.pixel_math") &&
