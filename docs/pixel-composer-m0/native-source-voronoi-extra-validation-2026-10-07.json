@@ -1,0 +1,132 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded pc.voronoi_extra, hidden source-array Square mode and a sampleable scalar 2D field. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_voronoi_extra/node_voronoi_extra.gml": "be8b7a4b549c95466081151406da9041a95f970f1333cee3b5e23e9f9fd0bda7",
+      "shaders/sh_voronoi_extra/sh_voronoi_extra.fsh": "a2293ce6868f914596eb9bc161f8f43b8896471fa4b0902ab73734d4346bfcdd",
+      "scripts/__node_shader/__node_shader.gml": "81b23b94aac6df118187510083d3f59c02b4bf09799e75c72ab5a19e7e17d45f",
+      "scripts/__node_shader_generator/__node_shader_generator.gml": "e917d1974118124fef04ce6121459b2c73b956201edd6ea36c71ad223fd3f6dd"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceVoronoiExtra.cpp",
+    "rules": [
+      "pinned Block four triangular metrics, Triangle 25+49 searches and hidden Square 9+25 searches; missing nearest winners refuse",
+      "source scalar Mode clamps to Block/Triangle; linked numeric source arrays retain hidden Square and default zero branches",
+      "only tiled Triangle floors quarter turns and scale; source row-vector main transform and column-vector Block inner transform",
+      "raw Dimension sprite coverage and UVs with half-even allocation; uncovered pixels remain clear and do not consume shader seed or levels",
+      "Position reference units and Surface/whole SurfaceArray projections; Dimension SurfaceArray schedules and equal-size collapse",
+      "UV nearest lookup flips Y and preserves alpha at zero Mix; selected stored pixels mask through RGBA8 scratch and copy back to selected depth",
+      "all seven explicit surface depths, fourteen physical source slots, four processor schedules, seed/progress animation and inherited instances",
+      "64 million cumulative work cap and conservative retained bytes including requested field raster before output or observers",
+      "field output retains the stored red channel; scalar and processor-array integrations use the declared Noise2D output",
+      "covered Triangle/Square require explicit resolved seed; consumed tiled zero modulus, finite/storage overflow and raw Atlas bindings refuse"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-build-batch3.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-build-batch4.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-cpu-batch4-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5548,
+    "new_voronoi_extra_test_cases": 18,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3914,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-source-stability-batch3.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-source-stability-batch4.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-cpu-child-hashes-batch4.json",
+    "independent_reference_count": 29,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/voronoi-extra-independent-reference.json"
+    ],
+    "read_review": "root reviewed complete pinned shader and node, generator behavior, native executor, registration/projections, metadata and fixtures"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "build_failed": true,
+      "cause": "batch fixture used Catch::Approx without its header",
+      "repair": "include catch_approx.hpp; no stale-binary tests run"
+    },
+    {
+      "batch": 2,
+      "checks": 20,
+      "passed": 19,
+      "failures": [
+        {
+          "test": "source mode arrays",
+          "cause": "literal Enum ArrayValue is not an admitted authored source array",
+          "repair": "use linked pc.array numeric rows, matching supported source conversion"
+        },
+        {
+          "test": "inverse source array schedule",
+          "cause": "fixture expected progress and UV rows using wrong full-slot suffix indices",
+          "repair": "fourteen slots yield progress row%2 and UV row/2%2"
+        }
+      ]
+    },
+    {
+      "batch": 3,
+      "checks": 20,
+      "passed": 19,
+      "failures": [
+        {
+          "test": "Local HTTP host serves source GET POST and enforces byte limits",
+          "cause": "readiness checked file existence and read an empty port file",
+          "repair": "poll for nonempty port contents under existing steady-clock deadline",
+          "repair_commit": "a9017729"
+        }
+      ]
+    },
+    {
+      "stage": "batch3 harness launch",
+      "cause": "temporary harness referred to absent cache-region-batch3-results.json",
+      "repair": "retain original cache-region-batch2 input; launch failure occurred before checks"
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Extra Voronoi performance profiling"
+  ],
+  "limits": [
+    "independent source-equation references do not establish licensed runtime pixel parity",
+    "binary32 CPU libm sine/cosine may differ from shader device math",
+    "ENGINE_PROFILE marks executor work; no measured performance claim"
+  ],
+  "build_warnings": [
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:339:58: warning: \u2018a\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:339:58: warning: \u2018b\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:241:79: warning: \u2018multiplier\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/usr/include/c++/13/bits/stl_vector.h:106:49: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<boo",
+    "/usr/include/c++/13/bits/stl_vector.h:107:33: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<boo",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cxx",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/SourceFlipGrid.cpp:94:30: warning: variable \u2018s\u2019 set but not used [-Wunused-but-set-variable]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/SourceFlipParticles.cpp:37:30: warning: variable \u2018particleVel\u2019 set but not used [-Wunused-but-set-variable]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/CacheGroupReplay.cpp:1429:111: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOperation::MemberId\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/CacheGroupReplay.cpp:1429:111: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOperation::Members\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp:287:28: warning: \u2018*(std::_Optional_payload_base<long unsigned int>::_Storage<long unsigned int, true>*)((char*)&requestedFrame + offsetof(const std::optional<long unsigned int>,std::optional<long unsigned int>::<unna",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/FrameCacheReplay.cpp:2772:9: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOutput::Domain\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/FrameCacheReplay.cpp:2772:9: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOutput::Refusal\u2019 [-Wmissing-field-initializers]"
+  ],
+  "build_warnings_note": "initial warnings were in unchanged dependency sources; subsequent builds had no warnings"
+}

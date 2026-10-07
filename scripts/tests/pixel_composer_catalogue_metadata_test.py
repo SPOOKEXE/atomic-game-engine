@@ -327,13 +327,23 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
 
     def test_mapped_scale_preserves_the_two_source_components(self):
         snapshot = json.loads((REPOSITORY / "docs/pixel-composer-m0/source-inputs.json").read_text())
-        self.assertEqual(
-            {
-                "bytes": 4993,
-                "sha256": "9b659974876c3142c1c0ed02ca6133a62b93b83576f7ee8173efe9822cf7afe3",
-            },
-            snapshot["source_constructor_evidence"]["scripts/node_perlin/node_perlin.gml"],
-        )
+        for path, evidence in (
+            (
+                "scripts/node_perlin/node_perlin.gml",
+                {
+                    "bytes": 4993,
+                    "sha256": "9b659974876c3142c1c0ed02ca6133a62b93b83576f7ee8173efe9822cf7afe3",
+                },
+            ),
+            (
+                "scripts/node_voronoi_extra/node_voronoi_extra.gml",
+                {
+                    "bytes": 2125,
+                    "sha256": "be8b7a4b549c95466081151406da9041a95f970f1333cee3b5e23e9f9fd0bda7",
+                },
+            ),
+        ):
+            self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (
             ("Node_Herringbone_Tile", "v 0.25 0.25"),
             ("Node_Gabor_Noise", "v 4 4"),

@@ -290,7 +290,8 @@ namespace engine::imagegraph {
 					}
 				if (heads[index].Family == "generate" &&
 					(heads[index].Type.find("noise") != std::string_view::npos ||
-					 heads[index].Type == "pc.perlin" || heads[index].Type == "pc.cellular") &&
+					 heads[index].Type == "pc.perlin" || heads[index].Type == "pc.cellular" ||
+					 heads[index].Type == "pc.voronoi_extra") &&
 					std::any_of(node.Outputs.begin(), node.Outputs.end(), [](const auto &output) {
 						return output.Type == ValueType::Image;
 					}))

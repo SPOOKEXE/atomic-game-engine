@@ -12827,6 +12827,10 @@ namespace engine::imagegraph {
 							   input.SourceKind == "Slider"))) ||
 							(node.Type == "pc.cellular" && input.Id == "scale" &&
 							 input.SourceKind == "Float") ||
+							(node.Type == "pc.voronoi_extra" &&
+							 ((input.Id == "progress" && input.SourceKind == "Float") ||
+							  ((input.Id == "parameter_a" || input.Id == "uv_mix") &&
+							   input.SourceKind == "Slider"))) ||
 							(node.Type == "pc.perlin" &&
 							 ((input.Id == "scaling" && input.SourceKind == "Float") ||
 							  ((input.Id == "amplitude" || input.Id == "uv_mix") &&
@@ -12902,7 +12906,8 @@ namespace engine::imagegraph {
 						// Dimension projects surfaces before processor selection. Equal sizes collapse.
 						if ((simpleShape || node.Type == "pc.flow_noise" || node.Type == "pc.noise_bubble" ||
 							 node.Type == "pc.noise_cristal" || node.Type == "pc.gradient_cube" ||
-							 node.Type == "pc.cellular" || node.Type == "pc.perlin") &&
+							 node.Type == "pc.cellular" || node.Type == "pc.perlin" ||
+							 node.Type == "pc.voronoi_extra") &&
 							input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {
 							if (const ImageArray *images =
@@ -13041,13 +13046,14 @@ namespace engine::imagegraph {
 							 (node.Type == "pc.gabor_noise" &&
 							  (input.Id == "position" || input.Id == "scale" || input.Id == "augment")) ||
 							 ((node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal" ||
-							   node.Type == "pc.caustic" || node.Type == "pc.perlin") &&
+							   node.Type == "pc.caustic" || node.Type == "pc.perlin" ||
+							   node.Type == "pc.voronoi_extra") &&
 							  (input.Id == "position" || input.Id == "scale")));
 						const bool generatorSurfaceRange =
 							(node.Type == "pc.gabor_noise" || node.Type == "pc.flow_noise" ||
 							 node.Type == "pc.noise_bubble" || node.Type == "pc.noise_cristal" ||
 							 node.Type == "pc.noise" || node.Type == "pc.cellular" ||
-							 node.Type == "pc.perlin") &&
+							 node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra") &&
 							input.SourceKind == "SliRange" &&
 							(node.Type == "pc.noise" || node.Type == "pc.cellular" ||
 							 node.Type == "pc.perlin" || input.Id == "level_in" || input.Id == "level_out" ||
@@ -13059,7 +13065,7 @@ namespace engine::imagegraph {
 							 (node.Type == "pc.julia_set" || node.Type == "pc.gabor_noise" ||
 							  node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal" ||
 							  node.Type == "pc.caustic" || node.Type == "pc.cellular" ||
-							  node.Type == "pc.perlin")) ||
+							  node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra")) ||
 									generatorSurfaceRange
 								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
 								: nullptr;

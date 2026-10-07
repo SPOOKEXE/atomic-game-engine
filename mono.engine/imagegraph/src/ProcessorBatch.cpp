@@ -21,6 +21,7 @@
 #include "nodes/SourcePixelSort.hpp"
 #include "nodes/SourcePolar.hpp"
 #include "nodes/SourceTileTransform.hpp"
+#include "nodes/SourceVoronoiExtra.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -869,19 +870,20 @@ namespace engine::imagegraph::detail {
 				return context.Fail(Status::InvalidValue, "Displace requires Surface In", "surface_in");
 			context.DisplaceReferenceDimension = Vector2{double(source->Width), double(source->Height)};
 		}
-		const auto admission = context.Authored.Type == "pc.bend"		  ? AdmitSourceBend
-							   : context.Authored.Type == "pc.pixel_math" ? AdmitSourcePixelMath
-							   : context.Authored.Type == "pc.glow"		  ? AdmitSourceGlow
-							   : context.Authored.Type == "pc.displace"	  ? AdmitSourceDisplace
-							   : context.Authored.Type == "pc.jpeg"		  ? AdmitSourceJpeg
-							   : context.Authored.Type == "pc.pixel_sort" ? AdmitSourcePixelSort
-							   : context.Authored.Type == "pc.noise"	  ? AdmitSourceNoise
-							   : context.Authored.Type == "pc.caustic"	  ? AdmitSourceCaustic
-							   : context.Authored.Type == "pc.cellular"	  ? AdmitSourceCellular
-							   : context.Authored.Type == "pc.perlin"	  ? AdmitSourcePerlin
-							   : context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
-							   : context.Authored.Type == "pc.tile"		  ? AdmitSourceTileTransform
-																		  : nullptr;
+		const auto admission = context.Authored.Type == "pc.bend"			 ? AdmitSourceBend
+							   : context.Authored.Type == "pc.pixel_math"	 ? AdmitSourcePixelMath
+							   : context.Authored.Type == "pc.glow"			 ? AdmitSourceGlow
+							   : context.Authored.Type == "pc.displace"		 ? AdmitSourceDisplace
+							   : context.Authored.Type == "pc.jpeg"			 ? AdmitSourceJpeg
+							   : context.Authored.Type == "pc.pixel_sort"	 ? AdmitSourcePixelSort
+							   : context.Authored.Type == "pc.noise"		 ? AdmitSourceNoise
+							   : context.Authored.Type == "pc.caustic"		 ? AdmitSourceCaustic
+							   : context.Authored.Type == "pc.cellular"		 ? AdmitSourceCellular
+							   : context.Authored.Type == "pc.perlin"		 ? AdmitSourcePerlin
+							   : context.Authored.Type == "pc.voronoi_extra" ? AdmitSourceVoronoiExtra
+							   : context.Authored.Type == "pc.polar"		 ? AdmitSourcePolar
+							   : context.Authored.Type == "pc.tile"			 ? AdmitSourceTileTransform
+																			 : nullptr;
 		if (admission) {
 			uint64_t batchWork = 0;
 			for (size_t row = 0; row < count; ++row) {

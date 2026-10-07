@@ -156803,6 +156803,10 @@
   "scripts/node_perlin/node_perlin.gml": {
    "bytes": 4993,
    "sha256": "9b659974876c3142c1c0ed02ca6133a62b93b83576f7ee8173efe9822cf7afe3"
+  },
+  "scripts/node_voronoi_extra/node_voronoi_extra.gml": {
+   "bytes": 2125,
+   "sha256": "be8b7a4b549c95466081151406da9041a95f970f1333cee3b5e23e9f9fd0bda7"
   }
  }
 }
