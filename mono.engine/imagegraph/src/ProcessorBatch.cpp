@@ -12,6 +12,7 @@
 #include "nodes/SourceBend.hpp"
 #include "nodes/SourceGlow.hpp"
 #include "nodes/SourcePixelMath.hpp"
+#include "nodes/SourcePolar.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -828,16 +829,17 @@ namespace engine::imagegraph::detail {
 			selectedCharge->Reset();
 			if (!AdmitFontTextBatch(context, textBatch)) return false;
 		}
-		if (context.Authored.Type == "pc.bend" || context.Authored.Type == "pc.pixel_math" ||
-			context.Authored.Type == "pc.glow") {
+		const auto admission = context.Authored.Type == "pc.bend"		  ? AdmitSourceBend
+							   : context.Authored.Type == "pc.pixel_math" ? AdmitSourcePixelMath
+							   : context.Authored.Type == "pc.glow"		  ? AdmitSourceGlow
+							   : context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
+																		  : nullptr;
+		if (admission) {
 			uint64_t batchWork = 0;
 			for (size_t row = 0; row < count; ++row) {
 				uint64_t scratchOwned = 0;
 				if (!selectRow(row, scratchOwned)) return false;
-				if (!(context.Authored.Type == "pc.bend"   ? AdmitSourceBend(context, batchWork)
-					  : context.Authored.Type == "pc.glow" ? AdmitSourceGlow(context, batchWork)
-														   : AdmitSourcePixelMath(context, batchWork)))
-					return false;
+				if (!admission(context, batchWork)) return false;
 			}
 		}
 		for (size_t row = 0; row < count; row++) {

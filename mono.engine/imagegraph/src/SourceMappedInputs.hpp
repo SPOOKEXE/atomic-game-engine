@@ -6,6 +6,16 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.polar" &&
+			((input.SourceKind == "ValueUnit" && input.Id == "center_unit") ||
+			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||
+			 (input.SourceKind == "Attribute" && (input.Id == "interpolate" || input.Id == "oversample")) ||
+			 (input.SourceKind == "MapToggle" &&
+			  (input.Id == "angle_mapped" || input.Id == "blend_mapped" || input.Id == "twist_mapped")) ||
+			 (input.SourceKind == "MapRange" &&
+			  (input.Id == "angle_map_range" || input.Id == "blend_map_range" ||
+			   input.Id == "twist_map_range"))))
+			return true;
 		if (entry.Type == "pc.kuwahara" &&
 			((input.SourceKind == "Attribute" && (input.Id == "interpolate" || input.Id == "oversample")) ||
 			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||
@@ -136,6 +146,8 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.polar" && (port == "angle" || port == "blend" || port == "twist"))
+			return context.Boolean(std::string(port) + "_mapped");
 		if (context.Entry.Type == "pc.kuwahara" && port == "radius") return context.Boolean("radius_mapped");
 		if (context.Entry.Type == "pc.blobify" && port == "radius") return context.Boolean("radius_mapped");
 		if (context.Entry.Type == "pc.xdo_g_threshold" &&
@@ -177,6 +189,11 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.polar" && (port == "angle" || port == "blend" || port == "twist")) {
+			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+				return context.Find(std::string(port) + "_map_range");
+			return value;
+		}
 		if (context.Entry.Type == "pc.kuwahara" && port == "radius") {
 			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
 				return context.Find("radius_map_range");
@@ -296,11 +313,12 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if (context.Entry.Type == "pc.blobify" || context.Entry.Type == "pc.kuwahara" ||
-			context.Entry.Type == "pc.xdo_g_threshold" || context.Entry.Type == "pc.refract" ||
-			context.Entry.Type == "pc.herringbone_tile" || context.Entry.Type == "pc.gabor_noise" ||
-			context.Entry.Type == "pc.mirror_polar" || context.Entry.Type == "pc.stripe" ||
-			context.Entry.Type == "pc.dotted" || (context.Entry.Type == "pc.dither" && port == "contrast") ||
+		if (context.Entry.Type == "pc.polar" || context.Entry.Type == "pc.blobify" ||
+			context.Entry.Type == "pc.kuwahara" || context.Entry.Type == "pc.xdo_g_threshold" ||
+			context.Entry.Type == "pc.refract" || context.Entry.Type == "pc.herringbone_tile" ||
+			context.Entry.Type == "pc.gabor_noise" || context.Entry.Type == "pc.mirror_polar" ||
+			context.Entry.Type == "pc.stripe" || context.Entry.Type == "pc.dotted" ||
+			(context.Entry.Type == "pc.dither" && port == "contrast") ||
 			(context.Entry.Type == "pc.gradient" &&
 			 (port == "angle" || port == "radius" || port == "shift" || port == "scale")) ||
 			context.Entry.Type == "pc.ambient_occlusion" ||

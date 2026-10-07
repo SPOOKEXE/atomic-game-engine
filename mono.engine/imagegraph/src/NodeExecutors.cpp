@@ -34,6 +34,7 @@ namespace engine::imagegraph::detail {
 					  SourceBendExecutors(),
 					  SourcePixelMathExecutors(),
 					  SourceGlowExecutors(),
+					  SourcePolarExecutors(),
 					  SourceErodeExecutors(),
 					  PathExecutors(),
 					  PointExecutors(),

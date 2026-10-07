@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.polar. pinned shader arithmetic checked; licensed runtime parity remains unverified.",
+  "contract": {
+    "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_files": {
+      "scripts/node_polar/node_polar.gml": {
+        "bytes": 3364,
+        "sha256": "e86f42d91ceb93eee0549ab419576122dcdef626e89878855ceef5f67e0ec781",
+        "working_tree_matches_git_blob": true
+      },
+      "shaders/sh_polar/sh_polar.fsh": {
+        "bytes": 16711,
+        "sha256": "5b2f395ff04990716092220ed206f14c9a8635ce3def97ab964cb0242a4d4296"
+      },
+      "scripts/shader_functions/shader_functions.gml": {
+        "bytes": 10916,
+        "sha256": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/surface_functions/surface_functions.gml": {
+        "bytes": 37782,
+        "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+        "working_tree_matches_git_blob": true
+      }
+    },
+    "executor": "mono.engine/imagegraph/src/nodes/SourcePolar.cpp",
+    "tests": "mono.engine/imagegraph/tests/SourcePolar.cpp",
+    "rules": [
+      "forward and inverse source UV equations, linear/square-root/log radius, source angular clipping order",
+      "host double reference-center scaling before float shader upload; linked center values already carry pixels",
+      "mapped Angle, Blend and Twist: selected endpoints, low fallback, mean RGB and forced-nearest map stage",
+      "Tile before fract, Swap Axis, Blend extrapolation, direct raw texture clamp and Oversample omission",
+      "nearest, bilinear, bicubic, Lanczos and CleanEdge interpolation; main dimensions retained for auxiliary kernels",
+      "typed surface formats and finite HDR; shared mask, feather, Mix, Channel and inactive path",
+      "main SurfaceAtlas unwraps backing pixels; raw auxiliary Atlas refused with named ports",
+      "complete selected batch admitted before row execution and allocation, at most 64000000 work units",
+      "linked controls, processor arrays, Expand rows, animation and document round trips exercised"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/polar-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/polar-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/polar-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5391,
+    "new_polar_test_cases": 11,
+    "startup_test_cases": 1,
+    "python_tests": 104,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3677,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/polar-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/polar-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/polar-cpu-child-hashes-batch2.json",
+    "read_review": "Sol read review of source arithmetic, atlas handling and fixtures; fixture repair read reviewed; no remaining concrete defects"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "check": "core",
+      "output": "3098 of 3099 cases passed; CHECK(first.Pixels != later.Pixels) failed in Polar graph arrays preserve enum and scalar row values",
+      "cause": "fixture varied only across X, while forward Polar angle changes sampled Y",
+      "repair": "grug distinguish rows too and compare animated frames with direct 0-degree and 90-degree outputs",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/polar-cpu-core-batch1.log"
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Polar performance profiling"
+  ],
+  "limits": [
+    "native source-derived evidence does not establish licensed pixel parity or platform-specific texture filtering",
+    "nonfinite controls or derived coordinates, zero angular range and logarithmic zero radius return explicit diagnostics",
+    "all selected rows conservatively quote sampler work and feather passes before output allocation",
+    "Polar has ENGINE_PROFILE imagegraph.source.polar; joined suite durations are verification timings, not a performance claim"
+  ]
+}
