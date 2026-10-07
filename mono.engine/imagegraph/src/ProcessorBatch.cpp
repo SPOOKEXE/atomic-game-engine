@@ -10,6 +10,7 @@
 #include "SourceRetainedImageOutputs.hpp"
 #include "ValuePayload.hpp"
 #include "nodes/SourceBend.hpp"
+#include "nodes/SourceGlow.hpp"
 #include "nodes/SourcePixelMath.hpp"
 
 #include <algorithm>
@@ -827,13 +828,15 @@ namespace engine::imagegraph::detail {
 			selectedCharge->Reset();
 			if (!AdmitFontTextBatch(context, textBatch)) return false;
 		}
-		if (context.Authored.Type == "pc.bend" || context.Authored.Type == "pc.pixel_math") {
+		if (context.Authored.Type == "pc.bend" || context.Authored.Type == "pc.pixel_math" ||
+			context.Authored.Type == "pc.glow") {
 			uint64_t batchWork = 0;
 			for (size_t row = 0; row < count; ++row) {
 				uint64_t scratchOwned = 0;
 				if (!selectRow(row, scratchOwned)) return false;
-				if (!(context.Authored.Type == "pc.bend" ? AdmitSourceBend(context, batchWork)
-														 : AdmitSourcePixelMath(context, batchWork)))
+				if (!(context.Authored.Type == "pc.bend"   ? AdmitSourceBend(context, batchWork)
+					  : context.Authored.Type == "pc.glow" ? AdmitSourceGlow(context, batchWork)
+														   : AdmitSourcePixelMath(context, batchWork)))
 					return false;
 			}
 		}

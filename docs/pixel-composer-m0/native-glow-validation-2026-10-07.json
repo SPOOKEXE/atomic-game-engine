@@ -1,0 +1,98 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.glow. pinned shader arithmetic checked; licensed runtime parity remains unverified.",
+  "contract": {
+    "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_files": {
+      "scripts/node_glow/node_glow.gml": {
+        "bytes": 4180,
+        "sha256": "e60e286ccdddbe3f2e26dbd687e94fd715b2cfa08db899d84b31fb09b2f3ee3d",
+        "working_tree_matches_git_blob": true
+      },
+      "shaders/sh_glow/sh_glow.fsh": {
+        "bytes": 7756,
+        "sha256": "d7b7d55db77e0b5a7e37f910fee15f37e0af9c9a7debb9ec790b8f4b7f7b689b"
+      },
+      "scripts/surface_functions/surface_functions.gml": {
+        "bytes": 37782,
+        "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+        "working_tree_matches_git_blob": true
+      }
+    },
+    "executor": "mono.engine/imagegraph/src/nodes/SourceGlow.cpp",
+    "tests": "mono.engine/imagegraph/tests/SourceGlow.cpp",
+    "rules": [
+      "greyscale alpha-weighted Rec. 709 brightness and alpha coverage; source RGB/alpha early returns",
+      "first hit through inclusive angular endpoint, rings before Size, nearest clamped texture reads",
+      "ring distance or floored raw pixel distance; mapped Size and Strength; float GLSL falloff curve",
+      "physical blend slots 0, 1, 3, 4, 6, 7; scalar enum choices clamp, array choices retain raw values",
+      "Replace clamps strength, Darken uses strength twice, greyscale retains alpha and outer Alpha overrides ordinary target",
+      "texture and winning sample modulate color; Draw Original and no-hit defaults retained; unused Border retained",
+      "main SurfaceAtlas unwraps backing pixels; raw auxiliary Atlas refused with named ports",
+      "mask, feather, Mix and requested typed formats use shared processor path; inactive copy retained",
+      "complete selected batch admitted before row execution and allocation, at most 64000000 work units",
+      "array rows, linked controls, animation and document round trips exercised"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-build-batch3.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-cpu-batch3-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5380,
+    "new_glow_test_cases": 17,
+    "startup_test_cases": 1,
+    "python_tests": 104,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3673,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-source-stability-batch3.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-cpu-child-hashes-batch3.json",
+    "read_review": "Sol read review of source arithmetic, atlas handling and fixtures; no remaining concrete defects"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "check": "core",
+      "output": "3087 of 3088 cases passed; blend-slot fixture expected scalar slot 8 refusal but source clamps it to slot 7",
+      "repair": "grug assert scalar clamp equivalence and use an array for raw out-of-range refusal",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-cpu-core-batch1.log"
+    },
+    {
+      "batch": 2,
+      "check": "core",
+      "output": "3087 of 3088 cases passed; Compile returned TypeMismatch (7) for authored Enum array",
+      "repair": "grug supply enum array through linked junction, matching source array input path",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/glow-cpu-core-batch2.log"
+    },
+    {
+      "batch": 3,
+      "check": "harness launch before tests",
+      "output": "FileNotFoundError for cache-region-batch3-results.json",
+      "repair": "grug retain cache-region-batch2-results.json as command inventory when copying harness"
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Glow performance profiling"
+  ],
+  "limits": [
+    "native source-derived evidence does not establish licensed pixel parity",
+    "portable GLSL curves admit two through nine anchors; larger curves explicitly refused",
+    "all selected rows conservatively quote worst-case radial taps, including source early-return pixels",
+    "Glow has ENGINE_PROFILE imagegraph.source.glow; joined suite durations are verification timings, not a performance claim"
+  ]
+}

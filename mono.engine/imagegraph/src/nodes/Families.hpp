@@ -30,6 +30,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceBlendDepthExecutors();
 	std::span<const ExecutorEntry> SourceBendExecutors();
 	std::span<const ExecutorEntry> SourcePixelMathExecutors();
+	std::span<const ExecutorEntry> SourceGlowExecutors();
 	std::span<const ExecutorEntry> PathExecutors();
 	std::span<const ExecutorEntry> PointExecutors();
 	std::span<const ExecutorEntry> MeshExecutors();
