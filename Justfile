@@ -487,6 +487,22 @@ imagegraph-pixel-kernel-bench samples="5":
     ./.cache/build/profile/tests/test_imagegraph '[imagegraph][pixel_kernel_workloads]'
     ATOMIC_IMAGEGRAPH_PIXEL_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.pixel-kernels --samples {{samples}}
 
+# Bounded Path Bake and Particle CPU state/vertex workloads. Profiles stay on stdout.
+imagegraph-path-particle-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[imagegraph][path_particle_workloads]'
+    ATOMIC_IMAGEGRAPH_PIXEL_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.path-particle --samples {{samples}}
+
+# Shape raster and weighted topology CPU workloads. Profiles stay on stdout.
+imagegraph-shape-triangulate-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[imagegraph][shape_triangulate_workloads]'
+    ATOMIC_IMAGEGRAPH_PIXEL_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.shape-triangulate --samples {{samples}}
+
 # Source FFT conversion, path affine/remapping and captured Strand replay. Results stdout only.
 imagegraph-source-pipeline-bench samples="5":
     test "{{samples}}" -ge 1 -a "{{samples}}" -le 5

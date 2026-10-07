@@ -128,6 +128,27 @@ namespace engine::imagegraph::testing {
 				   : IsNoise()	   ? "RGBA32Float"
 								   : "RGBA8Unorm";
 		}
+		unsigned ProfileKind() const {
+			return unsigned(Workload);
+		}
+		size_t ProfileEvaluations() const {
+			return 1;
+		}
+		bool ProfileProcessors() const {
+			return true;
+		}
+		std::string_view ProfileWorkScope() const {
+			return "imagegraph.processor";
+		}
+		double ProfileSeed() const {
+			return Workload == Kind::GaussianRandom || Workload == Kind::AnisoBlend ||
+						   Workload == Kind::AnisoMapped
+					   ? 17.25
+					   : 0;
+		}
+		unsigned ProfileIterations() const {
+			return Workload == Kind::FoldGreyscale || Workload == Kind::FoldMap || IsFieldSample() ? 3 : 0;
+		}
 		void BuildNoise() {
 			const bool fold = Workload == Kind::FoldGreyscale || Workload == Kind::FoldMap || IsFieldSample();
 			const bool gaussian = Workload == Kind::GaussianRandom || Workload == Kind::GaussianConversion;
