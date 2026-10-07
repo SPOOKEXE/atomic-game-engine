@@ -5656,4 +5656,3 @@ Source: `24be7b2c61918b5df9d04fc59cd85ebcef69a6ff` (clean). Source diff SHA-256:
 | Terrain | uploaded_bytes | 24054.667 | 135.974 | 23868.000 | 24188.000 |
 | Terrain | uploaded_bytes_per_frame | 1.776 | 0.023 | 1.753 | 1.807 |
 | Terrain | uploaded_bytes_per_second | 4810.851 | 27.183 | 4773.537 | 4837.519 |
-
