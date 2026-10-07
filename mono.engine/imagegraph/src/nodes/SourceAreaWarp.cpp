@@ -1,3 +1,4 @@
+#include "../AtlasPayload.hpp"
 #include "Families.hpp"
 #include "SourceRefractClean.hpp"
 
@@ -62,10 +63,13 @@ namespace engine::imagegraph::detail {
 	bool SourceAreaWarp(NodeContext &context) {
 		ENGINE_PROFILE("imagegraph.source.area_warp");
 		const auto *input = context.Find("surface_in");
-		if (input && std::holds_alternative<AtlasValue>(*input))
+		const auto *atlas = input ? std::get_if<AtlasValue>(input) : nullptr;
+		if (atlas && (!atlas->Data || !ValidAtlasPayload(*atlas)))
+			return context.Fail(Status::InvalidValue, "Area Warp Atlas payload is invalid", "surface_in");
+		if (atlas && atlas->Data->Kind != AtlasKind::SurfaceAtlas)
 			return context.Fail(
 				Status::UnsupportedExecution,
-				"Area Warp Atlas draw and inactive payload require an Atlas-aware processor",
+				"Area Warp requires SurfaceAtlas rather than base Atlas",
 				"surface_in"
 			);
 		const Image *source = context.Input("surface_in");
@@ -92,6 +96,7 @@ namespace engine::imagegraph::detail {
 					Status::LimitExceeded, "Area Warp complete batch exceeds work limit", "surface_in"
 				);
 		}
+		// grug inactive surface_clone unwraps SurfaceAtlas before plain drawing.
 		bool failed = false;
 		if (CopyWhenInactive(context, failed)) return !failed;
 		const auto *areaValue = context.Find("area");
@@ -137,8 +142,20 @@ namespace engine::imagegraph::detail {
 			area.CenterY *= source->Height;
 			area.HalfHeight *= source->Height;
 		}
-		const double left = area.CenterX - area.HalfWidth, top = area.CenterY - area.HalfHeight,
-					 width = area.HalfWidth * 2, height = area.HalfHeight * 2;
+		double left = area.CenterX - area.HalfWidth, top = area.CenterY - area.HalfHeight,
+			   width = area.HalfWidth * 2, height = area.HalfHeight * 2;
+		double cosine = 1, sine = 0;
+		if (atlas) {
+			// grug source SurfaceAtlas.draw takes only the Area offset, then uses its own transform.
+			const auto &draw = *atlas->Data;
+			left += draw.Position.X;
+			top += draw.Position.Y;
+			width = source->Width * draw.Scale.X;
+			height = source->Height * draw.Scale.Y;
+			const double angle = draw.RotationDegrees * std::numbers::pi / 180;
+			cosine = std::cos(angle);
+			sine = std::sin(angle);
+		}
 		if (!std::isfinite(left) || !std::isfinite(top) || !std::isfinite(width) || !std::isfinite(height) ||
 			!std::isfinite(left + width) || !std::isfinite(top + height))
 			return context.Fail(Status::InvalidValue, "Area Warp rectangle is nonfinite", "area");
@@ -153,11 +170,12 @@ namespace engine::imagegraph::detail {
 		for (uint32_t y = 0; y < output->Height; ++y)
 			for (uint32_t x = 0; x < output->Width; ++x) {
 				if (!width || !height) continue;
-				const double u = (double(x) + .5 - left) / width, v = (double(y) + .5 - top) / height;
-				const double px = double(x) + .5, py = double(y) + .5;
-				if (px < std::min(left, left + width) || px >= std::max(left, left + width) ||
-					py < std::min(top, top + height) || py >= std::max(top, top + height))
+				const double dx = double(x) + .5 - left, dy = double(y) + .5 - top;
+				const double localX = cosine * dx - sine * dy, localY = sine * dx + cosine * dy;
+				if (localX < std::min(0., width) || localX >= std::max(0., width) ||
+					localY < std::min(0., height) || localY >= std::max(0., height))
 					continue;
+				const double u = localX / width, v = localY / height;
 				if (!std::isfinite(u) || !std::isfinite(v))
 					return context.Fail(
 						Status::InvalidValue, "Area Warp sampling coordinate is undefined", "area"
@@ -165,6 +183,12 @@ namespace engine::imagegraph::detail {
 				auto colour = red ? Texture(*source, u, v, Filtered(sampler))
 								  : source_refract_clean::Sample(*source, u, v, sampler);
 				if (red) colour = {colour[0], colour[0], colour[0], 1};
+				if (atlas) {
+					colour[0] *= atlas->Data->Blend.Red / 255.;
+					colour[1] *= atlas->Data->Blend.Green / 255.;
+					colour[2] *= atlas->Data->Blend.Blue / 255.;
+					colour[3] *= atlas->Data->Alpha;
+				}
 				if (!WritePixel(*output, x, y, colour))
 					return context.Fail(
 						Status::InvalidValue, "Area Warp sample exceeds surface range", "surface_out"

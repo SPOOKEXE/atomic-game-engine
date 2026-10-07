@@ -306,7 +306,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"Area Warp active and inactive paths retain every numeric surface format", "[source_2d][area_warp]"
+	"Area Warp ordinary and Atlas paths retain every numeric surface format", "[source_2d][area_warp]"
 ) {
 	for (SurfaceFormat format :
 		 {SurfaceFormat::RGBA4Unorm,
@@ -322,19 +322,26 @@ TEST_CASE(
 		for (uint32_t y = 0; y < 2; ++y)
 			for (uint32_t x = 0; x < 2; ++x)
 				REQUIRE(StoreSurfacePixel(image, x, y, {.25, .5, .75, .5}));
-		for (bool active : {false, true}) {
-			auto result = RunNode("pc.wrap_area", {{"surface_in", &image}}, {{"active", active}});
-			INFO(result.Message);
-			REQUIRE(result.Ok);
-			CHECK(result.Output().Format == format);
-			CHECK(result.Output().Pixels == image.Pixels);
-		}
+		AtlasValue atlas;
+		atlas.Data.emplace().Surface.Data = image;
+		atlas.Data->Kind = AtlasKind::SurfaceAtlas;
+		for (bool active : {false, true})
+			for (bool wrapped : {false, true}) {
+				auto result = wrapped
+								  ? RunNode("pc.wrap_area", {}, {{"surface_in", atlas}, {"active", active}})
+								  : RunNode("pc.wrap_area", {{"surface_in", &image}}, {{"active", active}});
+				INFO(result.Message);
+				REQUIRE(result.Ok);
+				CHECK(result.Output().Format == format);
+				CHECK(result.Output().Pixels == image.Pixels);
+			}
 	}
 }
 
-TEST_CASE("Area Warp rejects Atlas payloads before losing draw fields", "[source_2d][area_warp]") {
+TEST_CASE("Area Warp rejects base Atlas payloads as nonsurface inputs", "[source_2d][area_warp]") {
 	AtlasValue atlas;
 	atlas.Data.emplace().Surface.Data = Coordinates();
+	atlas.Data->Kind = AtlasKind::Atlas;
 	atlas.Data->Position = {1, 2};
 	for (bool active : {false, true}) {
 		const auto result = RunNode("pc.wrap_area", {}, {{"surface_in", atlas}, {"active", active}});
@@ -369,4 +376,51 @@ TEST_CASE(
 	document.Junctions[0].Default =
 		ArrayValue{ValueType::Area, {Area{std::numeric_limits<double>::infinity(), 0, 1, 1}}};
 	CHECK(Compile(document, plan, diagnostic) == Status::InvalidValue);
+}
+
+TEST_CASE(
+	"Area Warp refuses malformed SurfaceAtlas before allocating a draw target", "[source_2d][area_warp]"
+) {
+	for (int fault : {0, 1, 2}) {
+		AtlasValue atlas;
+		if (fault != 0) {
+			atlas.Data.emplace().Surface.Data = Coordinates();
+			atlas.Data->Kind = AtlasKind::SurfaceAtlas;
+			if (fault == 1)
+				atlas.Data->Position.X = std::numeric_limits<double>::infinity();
+			else
+				atlas.Data->Surface.Data.Pixels.pop_back();
+		}
+		const auto result = RunNode("pc.wrap_area", {}, {{"surface_in", atlas}});
+		CHECK_FALSE(result.Ok);
+		CHECK(result.Code == Status::InvalidValue);
+		CHECK(result.Port == "surface_in");
+		CHECK(result.Images.empty());
+	}
+}
+TEST_CASE(
+	"Area Warp admits every SurfaceAtlas image before starting an expensive batch", "[source_2d][area_warp]"
+) {
+	Document document;
+	document.FormatVersion = 9;
+	AtlasValue small, large;
+	small.Data.emplace().Surface.Data = Coordinates(2, 2);
+	large.Data.emplace().Surface.Data = Coordinates(512, 512);
+	small.Data->Kind = large.Data->Kind = AtlasKind::SurfaceAtlas;
+	document.Nodes = {{"warp", "pc.wrap_area", "", {}, {{"interpolate", EnumValue{6}}}}};
+	document.Junctions = {{"atlases", "", ValueType::Array, ArrayValue{ValueType::Atlas, {small, large}}}};
+	document.Links = {{"atlases", "value", "warp", "surface_in"}};
+	document.Outputs = {{"out", "warp", "surface_out"}};
+	auto plan = Compiled(document);
+	Diagnostic diagnostic;
+	ImageArray result;
+	result.Images = {{1, 1, {9, 8, 7, 6}, 0}};
+	const auto prior = result;
+	const auto evaluated = EvaluateArray(document, plan, "out", {}, result, diagnostic);
+	INFO(diagnostic.Message);
+	CHECK(evaluated == Status::LimitExceeded);
+	CHECK(diagnostic.NodeId == "warp");
+	CHECK(diagnostic.Port == "surface_in");
+	CHECK(result.Images == prior.Images);
+	CHECK(result.Items == prior.Items);
 }

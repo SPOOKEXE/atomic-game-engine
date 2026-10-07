@@ -1,0 +1,331 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug support active and inactive SurfaceAtlas in Area Warp, including compiled flat Atlas arrays. exact licensed raster parity remains unverified.",
+  "contract": {
+    "pixel_composer_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_base": "https://github.com/Ttanasart-pt/Pixel-Composer/blob/b69eca232217360cf1502ef0223523d818606652/",
+    "local_source_sha256": {
+      "scripts/node_wrap_area/node_wrap_area.gml": "dd0088788ca5d0d43a960788d3d8ce684741dba1df596c0b166bdc8ff26bf8dc",
+      "scripts/node_processor/node_processor.gml": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc",
+      "scripts/surface_functions/surface_functions.gml": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+      "scripts/__surface/__surface.gml": "7c6459408774b60db2c33bd706df390cc66f9e3d857642a913028f23cc24a54e"
+    },
+    "inspected_from": "local pinned scripts; source archive for sh_draw_r8/r16/r32 fragment shaders",
+    "licensed_reference_available": false,
+    "source_lines": {
+      "scripts/node_wrap_area/node_wrap_area.gml": [
+        31,
+        51
+      ],
+      "scripts/node_processor/node_processor.gml": [
+        208,
+        218
+      ],
+      "scripts/surface_functions/surface_functions.gml": {
+        "inactive_unwrap": [
+          40,
+          55
+        ],
+        "active_delegate": [
+          75,
+          87
+        ],
+        "inactive_clone": [
+          656,
+          675
+        ],
+        "array_clone": [
+          804,
+          815
+        ]
+      },
+      "scripts/__surface/__surface.gml": [
+        34,
+        38
+      ]
+    }
+  },
+  "behavior": [
+    "active SurfaceAtlas adds Area top-left offset to Atlas position, then uses Atlas scale and inverse rotation",
+    "active SurfaceAtlas ignores Area rectangle extents; zero Area extent can still draw, zero Atlas scale clears",
+    "apply RGB tint and Atlas alpha; packed colour alpha is ignored",
+    "inactive SurfaceAtlas unwraps backing pixels and copies them without transform, tint, alpha or Area controls",
+    "use actual backing dimensions and resolved destination format, not stored dimensions or original surface",
+    "allow selected Atlas-to-image array leaves only for pc.wrap_area surface_in",
+    "admit maximum original Atlas backing image over complete processor batch before output allocation",
+    "reject malformed Atlas and base Atlas with named diagnostics"
+  ],
+  "review": {
+    "initial_source_interpretation_corrected_before_build": "surface_clone uses draw_surface_safe, which unwraps SurfaceAtlas; it does not invoke Atlas.draw or SurfaceAtlas.clone. active draw_surface_ext_safe invokes Atlas.draw.",
+    "read_review": "Sol source review caught inactive helper difference; root corrected before building",
+    "test_review": "root corrected pixel expectations, verified same Area top-left for extent comparisons, explicit red destination format, array-based SurfacePixel indexing; removed duplicate cases"
+  },
+  "iterations": [
+    {
+      "stage": "build1",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-build1.log"
+    },
+    {
+      "stage": "joined batch1",
+      "passed_checks": 20,
+      "failed_checks": []
+    }
+  ],
+  "checks": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-bake-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.279,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-physics-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "b8d19125904344b83723ed89077f2185e4be11788966685feb2bc9c3a7bb718f",
+      "exit_code": 0,
+      "elapsed_seconds": 0.367,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "b8d19125904344b83723ed89077f2185e4be11788966685feb2bc9c3a7bb718f",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-runner-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "68f0a3421cec35b5bc3df4b76748b27205ce359fa16146f453b1bec54a5ca4e9",
+      "exit_code": 0,
+      "elapsed_seconds": 0.33,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "68f0a3421cec35b5bc3df4b76748b27205ce359fa16146f453b1bec54a5ca4e9",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-font-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "a8ef664a4de04cc454c136b30cd3c04725e7f8faa87c39f26985ed94e3e22039",
+      "exit_code": 0,
+      "elapsed_seconds": 0.552,
+      "assertions": 1845,
+      "cases": 43,
+      "binary_sha256_after": "a8ef664a4de04cc454c136b30cd3c04725e7f8faa87c39f26985ed94e3e22039",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-export-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "fcfea2095ab6436fda30d1d4bff8207be3ee3ac6e9a42c1ff09c5b5d544501c1",
+      "exit_code": 0,
+      "elapsed_seconds": 0.645,
+      "assertions": 3342,
+      "cases": 91,
+      "binary_sha256_after": "fcfea2095ab6436fda30d1d4bff8207be3ee3ac6e9a42c1ff09c5b5d544501c1",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-render-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "a329c21a1131f44037e8356a1957c2b9c1f9c0d604c556dbb624127c17966d00",
+      "exit_code": 0,
+      "elapsed_seconds": 3.02,
+      "assertions": 1987,
+      "cases": 31,
+      "binary_sha256_after": "a329c21a1131f44037e8356a1957c2b9c1f9c0d604c556dbb624127c17966d00",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-cli-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 3.264,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-io-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "9aa930e138494cf003b3e7f1a2cc8d6f6b1854ff3eb536be48ccc770fae4420a",
+      "exit_code": 0,
+      "elapsed_seconds": 3.759,
+      "assertions": 13101,
+      "cases": 313,
+      "binary_sha256_after": "9aa930e138494cf003b3e7f1a2cc8d6f6b1854ff3eb536be48ccc770fae4420a",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-core-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "a9bb098110936f51f2e2c2a1f2afd6aa0a1fd63c5665c302e6c95d192cd30fb1",
+      "exit_code": 0,
+      "elapsed_seconds": 3.917,
+      "assertions": 1896202,
+      "cases": 3013,
+      "binary_sha256_after": "a9bb098110936f51f2e2c2a1f2afd6aa0a1fd63c5665c302e6c95d192cd30fb1",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-assetc-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "c0e97936d33ca85d1e4f38ca72ac04333fd4d136260b2bc86260bc8481e2bbfb",
+      "exit_code": 0,
+      "elapsed_seconds": 6.126,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "c0e97936d33ca85d1e4f38ca72ac04333fd4d136260b2bc86260bc8481e2bbfb",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-client-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "c3ec4506aa559581a08f83c844d5cc72dcdd1c9f2a4020548e8f7fee2560fb73",
+      "exit_code": 0,
+      "elapsed_seconds": 4.764,
+      "assertions": 23853,
+      "cases": 359,
+      "binary_sha256_after": "c3ec4506aa559581a08f83c844d5cc72dcdd1c9f2a4020548e8f7fee2560fb73",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-studio-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "e9f29edbacbc93dc0dac3d2c89feff5f54b104a35132dd8ac7996b80383fcc81",
+      "exit_code": 0,
+      "elapsed_seconds": 8.112,
+      "assertions": 49029,
+      "cases": 1100,
+      "binary_sha256_after": "e9f29edbacbc93dc0dac3d2c89feff5f54b104a35132dd8ac7996b80383fcc81",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-nodegraph-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "exit_code": 0,
+      "elapsed_seconds": 1.328,
+      "assertions": 345,
+      "cases": 37,
+      "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-ui-batch1.log",
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "6a47c19639808899adb01007d717e430e594f54f40ef037306c811e7672d536c",
+      "exit_code": 0,
+      "elapsed_seconds": 0.481,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "6a47c19639808899adb01007d717e430e594f54f40ef037306c811e7672d536c",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-startup-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.263,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-lint-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.014
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-architecture-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.449
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-python-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 1.682,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-format-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 3.649
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-cpu-diff-batch1.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.085
+    }
+  ],
+  "counts": {
+    "cpp_cases": 5301,
+    "cpp_assertions": 2007803,
+    "startup_checks": 1,
+    "python_cases": 101,
+    "cli_checks": 16,
+    "render_cases": 31,
+    "new_cases": 10,
+    "area_warp_cases_total": 24
+  },
+  "build": {
+    "preset": "release-tests",
+    "batch_harness": "/tmp/composer-area-warp-atlas-cpu-batch1.py",
+    "gpu_environment": {
+      "SDL_VIDEODRIVER": "offscreen",
+      "SDL_GPU_DRIVER": "vulkan"
+    },
+    "gpu_checks_serialized": true
+  },
+  "freeze": {
+    "manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-atlas-source-frozen-batch1.json",
+    "manifest_sha256": "7f86c63e361094dafc483132e38de5d7ab3bfaff5992f13ef31dd0d0285236f9",
+    "paths": 3567,
+    "changed_during_build_and_tests": [],
+    "test_binaries_stable": true,
+    "child_binary_hashes": {
+      "before": {
+        ".cache/build/release-tests/tools/assetc": "5e74f549ac42fc1494b96ae41d52cd35812f7e8f2a7f64786a6a0bfc20776875",
+        ".cache/build/release-tests/tools/imagegraph": "95b6fef425182bf75d1ba171182ad2fe927a019fcb67dda96006e5a3b80397c0"
+      },
+      "after": {
+        ".cache/build/release-tests/tools/assetc": "5e74f549ac42fc1494b96ae41d52cd35812f7e8f2a7f64786a6a0bfc20776875",
+        ".cache/build/release-tests/tools/imagegraph": "95b6fef425182bf75d1ba171182ad2fe927a019fcb67dda96006e5a3b80397c0"
+      }
+    }
+  },
+  "profile": {
+    "scope": "imagegraph.source.area_warp",
+    "observed_in_joined_suite": true,
+    "benchmark_run": false,
+    "speed_claim": false,
+    "complete_batch_work_cap": 64000000
+  },
+  "limits": [
+    "nonzero-mode linked Area bypass requires originating surface getter context",
+    "sampler array depth remains unresolved; scalar links supported",
+    "other catalogue receivers are not enabled for Atlas array conversion without a receiver audit",
+    "base Atlas is not a source Surface and is explicitly refused",
+    "licensed captures unavailable; no exact raster-edge or GPU parity claim",
+    "headed Studio approval remains pending and was not run",
+    "no new sanitizer build or performance benchmark run"
+  ]
+}

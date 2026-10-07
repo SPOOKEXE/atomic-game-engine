@@ -781,6 +781,8 @@ namespace engine::imagegraph::detail {
 						!(kind == ValueType::Path3D && input.Port == "path" &&
 						  (context.Entry.Type == "pc.path_sample" ||
 						   context.Entry.Type == "pc.path_smoothen")) &&
+						!(kind == ValueType::Atlas && input.Type == ValueType::Image &&
+						  context.Entry.Type == "pc.wrap_area" && input.Port == "surface_in") &&
 						!((kind == ValueType::Scalar || kind == ValueType::Integer) &&
 						  (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
 						   input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
