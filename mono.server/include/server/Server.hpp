@@ -255,6 +255,8 @@ namespace server {
 		std::filesystem::path BenchmarkReport;
 		// Minimum wall-clock interval; tick and replay limits still end the run.
 		double BenchmarkSeconds = 5.0;
+		// Exclude connection startup and measure only after a viewer is admitted.
+		bool BenchmarkWaitForClient = false;
 
 		// Ticks between windowed snapshots of `ProfilePath`, each written beside it
 		// as `<stem>.window<NNNNN><extension>`. Zero writes none.

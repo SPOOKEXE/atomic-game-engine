@@ -129,6 +129,7 @@ int main(int argc, char **argv) {
 		"PATH",
 		"Write complete-run benchmark JSON; requires profile-seconds and heap hooks"
 	);
+	arguments.Flag("benchmark-wait-for-join", "Start benchmark measurement after the connected world joins");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
@@ -335,6 +336,17 @@ int main(int argc, char **argv) {
 	}
 	if (auto server = arguments.Get("connect")) {
 		options.ConnectAddress = std::string(*server);
+	}
+	options.BenchmarkWaitForJoin = arguments.Has("benchmark-wait-for-join");
+	if (options.BenchmarkWaitForJoin &&
+		(options.BenchmarkReport.empty() || options.ConnectAddress.empty() || options.DataFactory ||
+		 options.PresentationSession != 0 || !options.PresentationWorld.empty())) {
+		std::fprintf(
+			stderr,
+			"--benchmark-wait-for-join requires --benchmark-report and --connect without a data-factory or "
+			"presentation host\n"
+		);
+		return 2;
 	}
 	options.Browse = options.Browse || arguments.Has("browse");
 	options.BrowseSeconds = arguments.GetNumber("browse-seconds", options.BrowseSeconds);

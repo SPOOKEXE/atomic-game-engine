@@ -8,6 +8,7 @@ build="$root/.cache/build/profile"
 output=""
 label=""
 workloads="$root/scripts/demos/version-impact-workloads.tsv"
+allow_added_missing=false
 while (($#)); do
 	case "$1" in
 		--root) root=$(cd -- "$2" && pwd); shift 2 ;;
@@ -15,6 +16,7 @@ while (($#)); do
 		--output) output=$2; shift 2 ;;
 		--label) label=$2; shift 2 ;;
 		--workloads) workloads=$2; shift 2 ;;
+		--allow-added-missing) allow_added_missing=true; shift ;;
 		*) echo "unknown argument: $1" >&2; exit 2 ;;
 	esac
 done
@@ -49,7 +51,13 @@ json_string() {
 	printf '"%s"' "$value"
 }
 server_pid=""
+viewer_pid=""
 cleanup() {
+	if [[ -n "$viewer_pid" ]]; then
+		kill "$viewer_pid" 2>/dev/null || true
+		wait "$viewer_pid" 2>/dev/null || true
+		viewer_pid=""
+	fi
 	if [[ -n "$server_pid" ]]; then
 		kill "$server_pid" 2>/dev/null || true
 		wait "$server_pid" 2>/dev/null || true
@@ -63,7 +71,7 @@ manifest="$output/manifest.partial.json"
 	json_string "$label"
 	printf ',"machine":{"fingerprint":"%s","cpu":' "$machine"
 	json_string "$cpu"; printf ',"gpu":'; json_string "$gpu"; printf ',"os":'; json_string "$os"; printf ',"compiler":'; json_string "$compiler"
-	printf '},"settings":{"runs":3,"seconds":5,"preset":"profile","width":960,"height":540,"compute":"serial","max_fps":0},"workloads":['
+	printf '},"settings":{"runs":3,"seconds":5,"preset":"profile","width":960,"height":540,"compute":"serial","max_fps":0,"replica_viewer_max_fps":60},"workloads":['
 } > "$manifest"
 separator=""
 while read -r name kind asset availability; do
@@ -75,7 +83,7 @@ while read -r name kind asset availability; do
 	[[ -f "$path" ]] || path="$build/client/assets/examples/$asset_kind/$asset"
 	status=measured
 	if [[ ! -f "$path" ]]; then
-		[[ "$availability" == added ]] || { echo "missing required demo: $asset" >&2; exit 1; }
+		[[ "$availability" == added && "$allow_added_missing" == true ]] || { echo "missing required demo: $asset" >&2; exit 1; }
 		status=unavailable
 	fi
 	printf '%s{"name":"%s","kind":"%s","status":"%s"' "$separator" "$name" "$kind" "$status" >> "$manifest"
@@ -93,7 +101,7 @@ while read -r name kind asset availability; do
 		common=(--headless --frames 1000000000 --uncapped --max-fps 0 --width 960 --height 540 --force-serial-compute --profile-seconds 5 --benchmark-report "$report")
 		case "$kind" in
 			server-replica)
-				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/server/server" --game "$path" --listen 0 --transport datagram --force-serial-compute --benchmark-seconds 5 --benchmark-report "$report" > "$log" 2>&1 &
+				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/server/server" --game "$path" --listen 0 --transport datagram --force-serial-compute --benchmark-seconds 5 --benchmark-report "$report" --benchmark-wait-for-client > "$log" 2>&1 &
 				server_pid=$!
 				port=""
 				for ((attempt=0; attempt<600; attempt++)); do
@@ -103,10 +111,19 @@ while read -r name kind asset availability; do
 					sleep 0.1
 				 done
 				[[ -n "$port" ]] || { echo "server readiness timeout" >&2; exit 1; }
-				timeout --foreground --kill-after=10s 180s "$build/client/client" --headless --frames 1000000000 --uncapped --max-fps 0 --width 960 --height 540 --force-serial-compute --profile-seconds 5 --script "$path" --connect "127.0.0.1:$port" > "$output/$name/viewer-$run.log" 2>&1
-				grep -q 'joined: [1-9][0-9]* entities' "$output/$name/viewer-$run.log" || { echo "server viewer did not join" >&2; exit 1; }
+				timeout --foreground --kill-after=10s 180s "$build/client/client" --headless --frames 1000000000 --uncapped --max-fps 60 --width 960 --height 540 --force-serial-compute --script "$path" --connect "127.0.0.1:$port" > "$output/$name/viewer-$run.log" 2>&1 &
+				viewer_pid=$!
 				wait "$server_pid"
-				server_pid="" ;;
+				server_pid=""
+				if ! kill -0 "$viewer_pid" 2>/dev/null; then
+					wait "$viewer_pid" || true
+					viewer_pid=""
+					cat "$output/$name/viewer-$run.log" >&2
+					echo "server viewer exited before measurement completed" >&2
+					exit 1
+				fi
+				grep -q 'joined: [1-9][0-9]* entities' "$output/$name/viewer-$run.log" || { echo "server viewer did not join" >&2; exit 1; }
+				cleanup ;;
 			server)
 				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/server/server" --game "$path" --force-serial-compute --benchmark-seconds 5 --benchmark-report "$report" > "$log" 2>&1 ;;
 			replica)
@@ -121,7 +138,7 @@ while read -r name kind asset availability; do
 					sleep 0.1
 				 done
 				[[ -n "$port" ]] || { echo "server readiness timeout" >&2; exit 1; }
-				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/client/client" "${common[@]}" --script "$path" --connect "127.0.0.1:$port" > "$log" 2>&1
+				timeout --foreground --kill-after=10s 180s "${measure[@]}" "$build/client/client" "${common[@]}" --script "$path" --connect "127.0.0.1:$port" --benchmark-wait-for-join > "$log" 2>&1
 				grep -q 'joined: [1-9][0-9]* entities' "$log" || { echo "replication demo did not join" >&2; exit 1; }
 				cleanup ;;
 			client-world)

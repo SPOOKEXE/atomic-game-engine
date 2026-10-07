@@ -25,6 +25,6 @@ reference_output="$reference/.cache/build/profile/version-impact/$stamp"
 candidate_output="$candidate_build/version-impact/$stamp"
 # Use the candidate's workload list for both: additions are explicit unavailable
 # rows in the old revision, rather than disappearing from coverage.
-bash "$root/scripts/demos/version-impact.sh" --root "$reference" --build "$reference/.cache/build/profile" --output "$reference_output" --label "$baseline_ref" --workloads "$root/scripts/demos/version-impact-workloads.tsv"
+bash "$root/scripts/demos/version-impact.sh" --root "$reference" --build "$reference/.cache/build/profile" --output "$reference_output" --label "$baseline_ref" --workloads "$root/scripts/demos/version-impact-workloads.tsv" --allow-added-missing
 bash "$root/scripts/demos/version-impact.sh" --root "$root" --build "$candidate_build" --output "$candidate_output" --label "$(git -C "$root" branch --show-current)"
 "$candidate_build/tools/benchrunner" --demo-compare "$reference_output" "$candidate_output" --demo-document "$document"

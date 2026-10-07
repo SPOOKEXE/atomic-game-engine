@@ -131,6 +131,7 @@ int main(int argc, char **argv) {
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
 	arguments.Value("benchmark-report", "PATH", "Write full-runtime benchmark measurements as JSON");
 	arguments.Value("benchmark-seconds", "SECONDS", "Benchmark wall-clock interval (default 5)");
+	arguments.Flag("benchmark-wait-for-client", "Start benchmark timing after the first client is admitted");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
 	);
@@ -328,6 +329,7 @@ int main(int argc, char **argv) {
 		options.BenchmarkReport = std::filesystem::path(*report);
 	}
 	options.BenchmarkSeconds = arguments.GetNumber("benchmark-seconds", options.BenchmarkSeconds);
+	options.BenchmarkWaitForClient = arguments.Has("benchmark-wait-for-client");
 	if (auto report = arguments.Get("heap-report")) {
 		options.HeapReport = std::filesystem::path(*report);
 	}
