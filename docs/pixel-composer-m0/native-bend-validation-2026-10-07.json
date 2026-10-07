@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.bend Arc and Wave. source formulas verified; licensed GPU pixel parity remains unverified.",
+  "contract": {
+    "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_base": "https://github.com/Ttanasart-pt/Pixel-Composer/blob/b69eca232217360cf1502ef0223523d818606652/",
+    "official_source_verification": {
+      "commit": "b69eca232217360cf1502ef0223523d818606652",
+      "tree": "bb1c1e2c8419723ac9bdcf3cda8b6752b32563f6",
+      "script_files_checked": 1830,
+      "mismatches": []
+    },
+    "sha256": {
+      "scripts/node_bend/node_bend.gml": "401f23a8238cdadd6ca94411ba3fa29c63507453904ca48b6bbc0661a63ef6d7",
+      "scripts/surface_functions/surface_functions.gml": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+      "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+      "scripts/matrix_functions/matrix_functions.gml": "e1365be246c7cc85abe351783cbf896287e1c2729d77d896c9b14d529b2c8011",
+      "scripts/_draw_defines/_draw_defines.gml": "f4702dd2337ca20635d699456b6ef27c11ff1aa890f91610629b4d91b94eb51c",
+      "scripts/node_value_dimension/node_value_dimension.gml": "7a31f24df14a2fe19f5566ab7d2e919f792faccac83ecbdff7f59a91e93f54e9",
+      "shaders/sh_bend_draw/sh_bend_draw.fsh": "0c8c24df9cef7e841b68efe26900ea3c3f1a1bf3e261d3ac5999a094d2a165ce",
+      "shaders/sh_bend_draw/sh_bend_draw.vsh": "accd9b00f5fbd555c11caf31b9ba511e38165fb19c9cfd9685511a1a04cbb813"
+    },
+    "rounding_reference": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Maths_And_Numbers/Number_Functions/round.htm",
+    "rules": [
+      "Arc and Wave use source capped grids and column-first triangle order",
+      "Arc retains literal degree math, unscaled center offsets and negative lengthdir_y",
+      "Wave retains cross-axis frequency and phase, including fractional axis else branch",
+      "fixed fitting uses raw dimensions, output sizes use ties-to-even and native caps",
+      "dynamic output uses sampled bounds; centered signed transform scale and UV mapping preserved",
+      "output dimensions feed source sampling reference, including Bicubic, Lanczos and CleanEdge",
+      "active RGBA8 output and per-fragment source BLEND_ALPHA retained",
+      "inactive input format and pixels retained; active raw Atlas binding refused explicitly",
+      "all selected rows quoted before execution; complete batch capped at 64000000 work units",
+      "temporary vertices and output surfaces charged against evaluation byte budget"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/bend-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/bend-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/bend-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5336,
+    "startup_test_cases": 1,
+    "python_tests": 102,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "bend_semantic_cases": 16,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3578,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/bend-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/bend-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/bend-cpu-child-hashes-batch2.json",
+    "read_review": "Sol read-only review found no remaining concrete blocker in code or final fixtures",
+    "existing_build_warnings": [
+      "glslang ENABLE_HLSL deprecation, v0.26 audit already recorded",
+      "CacheGroupReplay.cpp and FrameCacheReplay.cpp missing-field-initializers"
+    ]
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "check": "build",
+      "output": "SourceBend.cpp:410: error: too many initializers for std::array<std::pair<std::string_view, Value>, 2>",
+      "repair": "grug add the aggregate brace layer to the malformed-control fixture",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/bend-build-batch1.log",
+      "tests": "not run against failed build; repaired full build followed by all 20 joined checks"
+    }
+  ],
+  "not_run": [
+    "headed live Studio, approval pending",
+    "licensed reference pixel captures, reference build unavailable",
+    "dedicated Bend performance profiling or sanitizer run; no speed claim"
+  ],
+  "limits": [
+    "native double CPU geometry and top-left raster coverage are not licensed float GPU capture parity",
+    "active Atlas texture binding remains an explicit source-compatible refusal",
+    "empty grids below two input pixels and undefined source switches remain named refusals",
+    "conservative native work cap can refuse large or costly filtered batches"
+  ]
+}

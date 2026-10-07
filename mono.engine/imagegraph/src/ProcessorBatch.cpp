@@ -9,6 +9,7 @@
 #include "SourceMappedInputs.hpp"
 #include "SourceRetainedImageOutputs.hpp"
 #include "ValuePayload.hpp"
+#include "nodes/SourceBend.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -782,7 +783,8 @@ namespace engine::imagegraph::detail {
 						  (context.Entry.Type == "pc.path_sample" ||
 						   context.Entry.Type == "pc.path_smoothen")) &&
 						!(kind == ValueType::Atlas && input.Type == ValueType::Image &&
-						  context.Entry.Type == "pc.wrap_area" && input.Port == "surface_in") &&
+						  (context.Entry.Type == "pc.wrap_area" || context.Entry.Type == "pc.bend") &&
+						  input.Port == "surface_in") &&
 						!((kind == ValueType::Scalar || kind == ValueType::Integer) &&
 						  (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
 						   input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
@@ -822,6 +824,13 @@ namespace engine::imagegraph::detail {
 			selected.clear();
 			selectedCharge->Reset();
 			if (!AdmitFontTextBatch(context, textBatch)) return false;
+		}
+		if (context.Authored.Type == "pc.bend") {
+			uint64_t batchWork = 0;
+			for (size_t row = 0; row < count; ++row) {
+				uint64_t scratchOwned = 0;
+				if (!selectRow(row, scratchOwned) || !AdmitSourceBend(context, batchWork)) return false;
+			}
 		}
 		for (size_t row = 0; row < count; row++) {
 			uint64_t scratchOwned = 0;
