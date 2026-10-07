@@ -73,7 +73,12 @@ TEST_CASE("every declared property obeys the class table's rules", "[client][inv
 }
 
 TEST_CASE("every authored GUI component has a replication policy", "[client][invariants][gui]") {
-	engine::gui::RegisterGuiComponents();
+	// grug register full host before first use freezes shared replication table.
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+	engine::physics::RegisterPhysicsComponents();
+	(void)engine::gui::RegisterGuiClasses();
+	(void)engine::script::ScriptClass();
 	const auto replicated = engine::replication::DefaultReplicatedComponents();
 	for (size_t index = 0; index < engine::ecs::Components::Count(); ++index) {
 		const auto &type =
