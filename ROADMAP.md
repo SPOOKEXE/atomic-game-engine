@@ -67,7 +67,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate Flow and Bubble noise generators.
 - [x] Add noise Generator/Computed modes with separate 1D/2D/3D coordinate and Scalar/Vector2/Vector3 output dropdowns.
 - [x] Add union ports, darken incompatible sockets while connecting, and display compatible port IDs.
-- [_] Extend source noise generators and their consumers to selectable typed field outputs.
+- [x] Extend source noise generators and their consumers to selectable typed field outputs; retain inherited choices through PXC saves.
 - [x] Integrate bounded Cristal noise generation and typed input projection.
 - [x] Integrate bounded Gradient Cube image and cross-section outputs; pass joined CPU validation.
 - [x] Integrate bounded Surface Project 3D outputs and source getters; pass joined CPU validation.
@@ -113,7 +113,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Finish remaining PXC edits.
 - [x] Finish selected-cache Clear.
 - [_] Finish text layout and rendering.
-- [_] Implement remaining 3D nodes.
+- [x] Add bounded source 3D recipe, geometry and projected raster stages.
+- [_] Integrate remaining 3D executors and verify native camera, viewport and texture-array behavior.
 - [_] Implement remaining catalogue executors.
 - [_] Integrate Studio camera previews.
 - [_] Integrate camera rendering.
@@ -128,6 +129,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Verify live Studio workflows.
 - [_] Verify modified-project compatibility.
 - [x] Verify skybox GPU pixels.
+
+The [October 7 parallel checks](docs/pixel-composer-m0/native-parallel-composer-validation-2026-10-07.json) cover typed noise, PXC annotations, alias drag/Delete, bounded audio and sequence copies, native ICO exports and isolated 3D stages. Full 3D execution remains open.
 
 The [October 5 continuation checks](docs/pixel-composer-m0/native-validation-2026-10-05.json) record joined CPU suites, native wrapped-text profiling and scoped Vulkan checks for Composer, Transform, cameras and grouped skyboxes. Licensed reference parity and live Studio remain open.
 
