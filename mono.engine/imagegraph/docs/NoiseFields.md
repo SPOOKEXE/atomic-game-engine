@@ -1,6 +1,6 @@
 # Noise fields
 
-`value.noise_field` uses one smooth value-noise recipe for Generator and Computed modes. three authored dropdowns select its ports:
+`value.noise_field` uses one analytic smooth value-noise recipe for Generator and Computed modes. three authored dropdowns select its ports:
 
 | choice | values | port effect |
 | --- | --- | --- |
@@ -22,7 +22,9 @@ dropdowns are static authored settings, never linked or animated controls. chang
 
 Studio dimension changes resize an authored position, preserving retained axes and filling new axes with zero. linked coordinates and animation keys remain authored and report mismatches when their shape disagrees. saved recipes without the new settings keep Generator mode, 2D coordinates, and Scalar output.
 
-existing image noise generators keep Image and scalar 2D Field outputs. the field owns the generated raster and samples normalized UV coordinates, clamped nearest pixels, and the red component. storage is allocated only when requested or linked; processor arrays produce arrays of fields, while Sample Noise requires a single field.
+existing image noise generators keep their Image output and a raster-backed 2D Field output. their output type dropdown selects Scalar from red, Vector2 from RG, or Vector3 from RGB. coordinates remain normalized 2D UVs, sampled at clamped nearest pixels. this dropdown changes the field result shape; Generator/Computed modes and 1D/2D/3D coordinate choices belong to the native analytic node.
+
+raster fields own the generated pixels. old saves default to Scalar/red. source instances inherit the field output type until explicitly overridden, and Studio displays the effective choice. storage is allocated only when requested or linked; processor arrays carry the selected field signature, while Sample Noise requires a single field.
 
 seed, frequency, octaves, and gain accept numeric controls; integer controls reject fractional values. recipes allow 1 to 16 octaves, frequency greater than zero through 8192, and gain from zero through one. coordinate bounds apply after frequency and octave scaling.
 
