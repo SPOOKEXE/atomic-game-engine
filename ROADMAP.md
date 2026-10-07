@@ -101,7 +101,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Complete remaining Composer GPU checks.
 - [_] Establish exact parity with a licensed reference build and matched captures.
 - [_] Finish Composer font loading.
-- [_] Finish Dopesheet gestures for shared source animator aliases.
+- [x] Verify shared-alias Dopesheet drag, Delete, copy, fractional scale, collisions, cancellation and undo/redo in headless gestures.
+- [_] Verify shared-alias Dopesheet workflows in live Studio.
 - [_] Finish Studio host workflows.
 - [_] Finish audio workflows.
 - [_] Finish cache groups.
@@ -114,7 +115,9 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Finish selected-cache Clear.
 - [_] Finish text layout and rendering.
 - [x] Add bounded source 3D recipe, geometry and projected raster stages.
-- [_] Integrate remaining 3D executors and verify native camera, viewport and texture-array behavior.
+- [x] Render bounded Draw Shape 3D surface, depth and rim outputs with explicit native projection and texture-array scheduling.
+- [_] Integrate remaining 3D executors and verify licensed renderer parity.
+- [x] Add bounded weighted Points Triangulate and preserve downstream corner weights.
 - [_] Implement remaining catalogue executors.
 - [_] Integrate Studio camera previews.
 - [_] Integrate camera rendering.
@@ -130,7 +133,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Verify modified-project compatibility.
 - [x] Verify skybox GPU pixels.
 
-The [October 7 parallel checks](docs/pixel-composer-m0/native-parallel-composer-validation-2026-10-07.json) cover typed noise, PXC annotations, alias drag/Delete, bounded audio and sequence copies, native ICO exports and isolated 3D stages. Full 3D execution remains open.
+The [October 7 parallel checks](docs/pixel-composer-m0/native-parallel-composer-validation-2026-10-07.json) cover typed noise, compound PXC edits, alias gestures, bounded audio and sequences, native ICO, weighted triangulation and native Draw Shape 3D. Profile all seven new noise workloads with heap hooks; remaining 3D executors and licensed parity stay open.
 
 The [October 5 continuation checks](docs/pixel-composer-m0/native-validation-2026-10-05.json) record joined CPU suites, native wrapped-text profiling and scoped Vulkan checks for Composer, Transform, cameras and grouped skyboxes. Licensed reference parity and live Studio remain open.
 
