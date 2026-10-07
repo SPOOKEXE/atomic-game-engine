@@ -12,6 +12,24 @@
 #include <tuple>
 
 namespace engine::imagegraph::detail {
+	bool SourceNumericVec2Tuple(const Value &value) {
+		const auto *array = std::get_if<ArrayValue>(&value);
+		if (!array || !array->Nested.empty() ||
+			(array->Items.empty() ? array->Elements.size() != 2
+								  : !array->Elements.empty() || array->Items.size() != 2))
+			return false;
+		for (size_t axis = 0; axis < 2; ++axis) {
+			const auto *component = array->Items.empty()
+										? &array->Elements[axis]
+										: std::get_if<ElementValue>(&array->Items[axis].Data);
+			if (!component) return false;
+			if (const auto *number = std::get_if<double>(component)) {
+				if (!std::isfinite(*number)) return false;
+			} else if (!std::holds_alternative<int64_t>(*component))
+				return false;
+		}
+		return true;
+	}
 	const CatalogueInput *SourceSeparatedVec2Input(const Node &node, std::string_view port) {
 		const auto *entry = FindCatalogueEntry(node.Type);
 		if (!entry) return nullptr;

@@ -789,8 +789,20 @@ namespace engine::imagegraph::detail {
 				const bool sourceEnum = sourceInput && sourceInput->Type == ValueType::Enum &&
 										sourceInput->SourceBehavior &&
 										sourceInput->SourceBehavior->FractionalInterpolation == true;
+				bool sourceVec2Tuple = detail::SourceSeparatedVec2Input(sampled, property.second) != nullptr;
+				if (!sourceVec2Tuple && request.GroupReplay) {
+					if (!admitGetterWork(request.GroupReplay->DetachedAnimators().size()))
+						return diagnostic.Code;
+					const auto *detached = request.GroupReplay->DetachedAnimator(sampled.Id, property.second);
+					sourceVec2Tuple =
+						detached &&
+						detail::SourceSeparatedVec2Input(sampled, detached->OriginalPort) != nullptr;
+				}
 				const bool sourceDomain =
 					sourceEnum || left->SourceDriver ||
+					(sourceVec2Tuple && right && detail::SourceNumericVec2Tuple(right->Data) &&
+					 (std::holds_alternative<Vector2>(left->Data) ||
+					  detail::SourceNumericVec2Tuple(left->Data))) ||
 					(configured != configuredTracks.end() && configured->second->QuaternionMode) ||
 					std::holds_alternative<ArrayValue>(left->Data) ||
 					std::holds_alternative<Gradient>(left->Data) ||
@@ -924,7 +936,8 @@ namespace engine::imagegraph::detail {
 							document.Timeline ? document.Timeline->Frames : keys.back()->Tick + 1
 						),
 						rawQuaternion,
-						&request
+						&request,
+						sourceVec2Tuple
 					);
 					if (status != Status::Ok) {
 						SetDiagnostic(

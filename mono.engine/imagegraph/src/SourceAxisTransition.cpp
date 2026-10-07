@@ -521,8 +521,21 @@ namespace engine::imagegraph {
 						transition.ObservedInputOwner
 					);
 					if (status != Status::Ok) return status;
-					if (!std::holds_alternative<Vector2>(value))
+					const bool numericTuple = detail::SourceNumericVec2Tuple(value);
+					const auto components = RawComponents(value);
+					if ((!std::holds_alternative<Vector2>(value) && !numericTuple) || !components ||
+						!std::isfinite(components->X) || !std::isfinite(components->Y))
 						return fail(Status::TypeMismatch, "source axis getter did not return Vec2");
+					const auto payloadBytes = detail::RetainedPayloadBytes(value);
+					if (detachedKeys) {
+						auto payload = owner->Budget.Reserve(payloadBytes);
+						if (!payload || !replayRows.Merge(std::move(*payload)))
+							return fail(
+								Status::LimitExceeded, "source retained tuple rows exceed replay budget"
+							);
+					}
+					if (!mutationCharge.Merge(std::move(valueCharge)))
+						return fail(Status::LimitExceeded, "source combined tuple ownership exceeds budget");
 					Keyframe raw;
 					if (!SetFrameTime(raw, time))
 						return fail(Status::InvalidValue, "source combined clock is invalid");

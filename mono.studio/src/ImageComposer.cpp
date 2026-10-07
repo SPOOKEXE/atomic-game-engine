@@ -276,6 +276,9 @@ namespace studio {
 			Diagnostic LastDiagnostic;
 			ImageGraphHistory History{MAXIMUM_HISTORY};
 			ImageGraphGroupHost GroupHost;
+			detail::ImageGraphAxisProcessingObservers AxisObservations;
+			std::string AxisSelectedNodeId;
+			Status AxisReceiptFailure = Status::Ok;
 			ImageGraphTimelineRead TimelineRead;
 			engine::imagegraph::CapturedFeedbackHost FeedbackHost;
 			detail::ImageGraphCacheEditObservation CacheEditObservation;
@@ -2236,8 +2239,16 @@ namespace studio {
 			return true;
 		}
 
+		std::string SelectedNodeId(const State &state);
+
 		void RefreshPreview(State &state, engine::render::Renderer &renderer) {
 			if (state.ExportIntent.Current) return;
+			const auto selectedAxisNode = SelectedNodeId(state);
+			if (state.AxisSelectedNodeId != selectedAxisNode) {
+				state.AxisSelectedNodeId = selectedAxisNode;
+				state.AxisObservations = {};
+				RequestPreview(state, true);
+			}
 			if (!RetryCacheEdit(state) || !state.PreviewDirty ||
 				(!state.LivePreview && !state.PreviewRequested))
 				return;
@@ -2293,6 +2304,46 @@ namespace studio {
 						CancelComposerPreview(StateRef, Renderer);
 				}
 			} finish{state, renderer, previewFrame};
+			detail::ImageGraphAxisProcessingObservers axisCandidate;
+			const std::string axisNode = SelectedNodeId(state);
+			const uint64_t axisRevision = state.DocumentRevision,
+						   axisInputRevision = state.EvaluationInputRevision;
+			bool axisEvaluated = false;
+			struct FinishAxisObservation {
+				State &StateRef;
+				detail::ImageGraphAxisProcessingObservers &Candidate;
+				const std::string &NodeId;
+				uint64_t Revision, InputRevision;
+				engine::imagegraph::FrameTime Frame;
+				bool &Evaluated;
+				~FinishAxisObservation() {
+					const auto *host = dynamic_cast<detail::ImageGraphComposerHost *>(StateRef.Host.Composer);
+					bool valid = StateRef.LastDiagnostic.Code == Status::Ok && !(host && host->Pending) &&
+								 SelectedNodeId(StateRef) == NodeId &&
+								 StateRef.DocumentRevision == Revision &&
+								 StateRef.EvaluationInputRevision == InputRevision &&
+								 GetImageGraphFrame(StateRef.Playback) == Frame;
+					for (const auto &owner : Candidate.Owners)
+						valid = valid && owner.Expected.GroupRevision ==
+											 StateRef.GroupHost.Replay.ObservationRevision();
+					if (!valid)
+						StateRef.AxisObservations = {};
+					else if (Evaluated) {
+						if (Candidate.Failure != Status::Ok) StateRef.AxisReceiptFailure = Candidate.Failure;
+						detail::PublishImageGraphAxisProcessingObservers(
+							StateRef.AxisObservations,
+							std::move(Candidate),
+							true,
+							NodeId,
+							Revision,
+							InputRevision,
+							Frame
+						);
+					}
+				}
+			} finishAxes{
+				state, axisCandidate, axisNode, axisRevision, axisInputRevision, previewFrame, axisEvaluated
+			};
 			state.PreviewDirty = false;
 			state.PreviewRequested = false;
 			state.HaveVector2Preview = false;
@@ -2365,12 +2416,37 @@ namespace studio {
 				};
 				return;
 			}
-			const uint64_t cacheHeld = cacheBytes + *valueHeld + *arrayHeld;
+			bool staleAxisMaps = false;
+			for (const auto &owner : state.AxisObservations.Owners)
+				staleAxisMaps = staleAxisMaps || owner.Expected.NodeId != axisNode ||
+								owner.Expected.AuthoringRevision != axisRevision ||
+								owner.Expected.InputRevision != axisInputRevision ||
+								owner.Expected.Frame != previewFrame ||
+								owner.Expected.GroupRevision != state.GroupHost.Replay.ObservationRevision();
+			if (staleAxisMaps) {
+				state.AxisObservations = {};
+				state.AxisReceiptFailure = Status::Ok;
+			}
+			uint64_t axisHeld = state.AxisObservations.RetainedBytes();
+			const uint64_t previewLimit = engine::imagegraph::Limits::MaximumEvaluationBytes;
+			if (axisHeld > previewLimit - std::min(cacheBytes + *valueHeld + *arrayHeld, previewLimit)) {
+				state.AxisObservations = {};
+				axisHeld = 0;
+				state.AxisReceiptFailure = Status::LimitExceeded;
+			}
+			uint64_t cacheHeld = cacheBytes + *valueHeld + *arrayHeld + axisHeld;
 			const uint64_t keyHeld = sizeof(detail::ImageGraphPreviewSequence::Key) +
 									 identity.Output.capacity() +
 									 IMAGE_COMPOSER_PREVIEW_DISPLAY_MAXIMUM_BYTES +
 									 sizeof(engine::assets::TextureData) + 2 * sizeof(std::vector<std::byte>);
 			const uint64_t maximumBytes = engine::imagegraph::Limits::MaximumEvaluationBytes;
+			if (axisHeld && (sequenceHeld > maximumBytes || cacheHeld > maximumBytes - sequenceHeld ||
+							 keyHeld >= maximumBytes - sequenceHeld - cacheHeld)) {
+				state.AxisObservations = {};
+				cacheHeld -= axisHeld;
+				axisHeld = 0;
+				state.AxisReceiptFailure = Status::LimitExceeded;
+			}
 			if (sequenceHeld > maximumBytes || cacheHeld > maximumBytes - sequenceHeld ||
 				keyHeld >= maximumBytes - sequenceHeld - cacheHeld) {
 				state.LastDiagnostic = {
@@ -2384,7 +2460,27 @@ namespace studio {
 				previewFrame,
 				detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
 			};
-			if (state.PreviewSequence.Matches(sequenceKey)) {
+			bool axisReceiptCurrent = true;
+			const auto *axisSelected = FindNode(state.Authored, axisNode);
+			const auto *axisSchema =
+				axisSelected ? engine::imagegraph::FindSchema(axisSelected->Type) : nullptr;
+			bool hasAxisControl = false;
+			if (axisSchema)
+				for (const auto &port : axisSchema->Ports)
+					if (port.Direction == engine::imagegraph::PortDirection::Input &&
+						engine::imagegraph::SupportsSourceAxisTransition(*axisSelected, port.Id))
+						hasAxisControl = true;
+			if (hasAxisControl) {
+				axisReceiptCurrent = !state.AxisObservations.Owners.empty();
+				for (const auto &owner : state.AxisObservations.Owners)
+					axisReceiptCurrent =
+						axisReceiptCurrent && owner.Candidate.Identity && owner.Expected.NodeId == axisNode &&
+						owner.Expected.AuthoringRevision == axisRevision &&
+						owner.Expected.InputRevision == axisInputRevision &&
+						owner.Expected.Frame == previewFrame &&
+						owner.Expected.GroupRevision == state.GroupHost.Replay.ObservationRevision();
+			}
+			if (axisReceiptCurrent && state.PreviewSequence.Matches(sequenceKey)) {
 				const auto selected = state.PreviewSequence.Selected();
 				if (selected.Image && !UploadPreview(state, renderer, *selected.Image)) return;
 				if (!selected.Image) state.HaveGoodPreview = false;
@@ -2413,14 +2509,17 @@ namespace studio {
 			if (imageOutput) {
 				state.HaveScalarPreview = false;
 				state.HaveArrayPreview = false;
-				if (const Image *cached = state.PreviewCache.Find(
-						state.DocumentRevision,
-						outputIndex,
-						previewPlayback.CurrentTick,
-						previewPlayback.Subframe,
-						previewPlayback.NegativeFrame,
-						detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
-					)) {
+				if (const Image *cached =
+						axisReceiptCurrent
+							? state.PreviewCache.Find(
+								  state.DocumentRevision,
+								  outputIndex,
+								  previewPlayback.CurrentTick,
+								  previewPlayback.Subframe,
+								  previewPlayback.NegativeFrame,
+								  detail::ImageGraphPlaybackObservation(previewDocument, previewPlayback)
+							  )
+							: nullptr) {
 					if (!UploadPreview(state, renderer, *cached)) return;
 					state.PreviewSequence.Clear();
 					state.PxcxCompletedPreview = completedPreview;
@@ -2479,6 +2578,24 @@ namespace studio {
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
 				}
+				if (!detail::PrepareImageGraphAxisProcessingObservers(
+						previewDocument,
+						plan,
+						state.GroupHost.Replay,
+						axisNode,
+						axisRevision,
+						axisInputRevision,
+						previewFrame,
+						axisCandidate,
+						diagnostic,
+						previewAllowance
+					)) {
+					state.AxisReceiptFailure = diagnostic.Code;
+					axisCandidate = {};
+					diagnostic = {};
+				}
+				request.SourceInputObserver = axisCandidate.Owners.empty() ? nullptr : &axisCandidate;
+				axisEvaluated = true;
 				studio::ImageGraphPreviewValue preview;
 				const auto status = detail::PrepareImageGraphPreviewResult(
 					previewDocument,
@@ -2492,6 +2609,8 @@ namespace studio {
 					diagnostic,
 					previewAllowance
 				);
+
+				request.SourceInputObserver = nullptr;
 
 				if (state.LuaHost) {
 					auto messages = state.LuaHost->TakeMessages();
@@ -5109,14 +5228,64 @@ namespace studio {
 					};
 					return;
 				}
-				if (state.GroupHost.ToggleAxes(
+				engine::imagegraph::Plan axisPlan;
+				if (engine::imagegraph::Compile(state.Authored, axisPlan, state.LastDiagnostic, *allowance) !=
+					Status::Ok)
+					return;
+				const auto axisOwner = engine::imagegraph::SourceInputExpressionOwner(
+					state.Authored, axisPlan, nodeId, port, &state.GroupHost.Replay
+				);
+				const detail::ImageGraphAxisObservationIdentity axisIdentity{
+					nodeId,
+					axisOwner ? std::string(*axisOwner) : std::string{},
+					state.DocumentRevision,
+					state.EvaluationInputRevision,
+					GetImageGraphFrame(state.Playback),
+					state.GroupHost.Replay.ObservationRevision()
+				};
+				const auto *axisObservation = state.AxisObservations.Find(axisIdentity);
+				if (!*separated && !axisObservation && state.AxisReceiptFailure != Status::Ok) {
+					state.LastDiagnostic = {
+						state.AxisReceiptFailure,
+						nodeId,
+						port,
+						"Source axis processing maps were unavailable within preview bounds"
+					};
+					return;
+				}
+				if (!*separated && !axisObservation &&
+					state.AxisObservations.FailureFor(axisIdentity) != Status::Ok) {
+					state.LastDiagnostic = {
+						state.AxisObservations.FailureFor(axisIdentity),
+						nodeId,
+						port,
+						"Source axis processing map was unavailable within preview receipt bounds"
+					};
+					return;
+				}
+				const detail::ImageGraphAxisObservation emptyAxisObservation;
+				axisPlan = {};
+				const auto mapsHeld = state.AxisObservations.RetainedBytes();
+				const auto selectedHeld = axisObservation
+											  ? axisObservation->RetainedBytes().value_or(*allowance)
+											  : emptyAxisObservation.RetainedBytes().value_or(*allowance);
+				const uint64_t actionMapsHeld = mapsHeld + (axisObservation ? 0 : selectedHeld);
+				if (actionMapsHeld >= *allowance) {
+					state.LastDiagnostic = {
+						Status::LimitExceeded, nodeId, port, "Retained axis maps leave no action allowance"
+					};
+					return;
+				}
+				if (detail::ApplyImageGraphAxisControlWithObservation(
+						state.GroupHost,
 						state.Authored,
 						state.History,
-						state.DocumentRevision,
+						axisObservation ? *axisObservation : emptyAxisObservation,
+						axisIdentity,
 						{nodeId, port, *separated, true},
 						request,
 						state.LastDiagnostic,
-						*allowance
+						*allowance - actionMapsHeld + selectedHeld
 					)) {
 					AuthoredDocumentChanged(state);
 					ReloadCanvas(state);

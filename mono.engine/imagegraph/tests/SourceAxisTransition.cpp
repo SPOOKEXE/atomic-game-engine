@@ -1,5 +1,6 @@
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/SourceAxisTransition.hpp>
+#include <engine/imagegraph/SourceInputProcessingObserver.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -364,6 +365,190 @@ TEST_CASE("Axis sample refusal leaves both aliased live owners unchanged", "[sou
 	CHECK(document == before);
 	CHECK(replay.RetainedBytes() == beforeBytes);
 	CHECK(replay.AuthoringRevision() == 1);
+}
+
+TEST_CASE(
+	"Axis combine retains numeric source tuples and refuses malformed getter shapes",
+	"[source_axis_transition]"
+) {
+	auto document = MirrorDocument(true);
+	const char *expression = "value + self.center";
+	bool malformed = false;
+	bool nonfinite = false;
+	SECTION("Numeric tuple") {}
+	SECTION("Extra component") {
+		expression = "[1, 2, 3]";
+		malformed = true;
+	}
+	SECTION("Nested component") {
+		expression = "[[1, 2], 3]";
+		malformed = true;
+	}
+	SECTION("Nonfinite component") {
+		expression = "[10 ** 1000, 2]";
+		malformed = nonfinite = true;
+	}
+	document.Nodes[1].SourceInputExpressions = {{"center", expression, true}};
+	Diagnostic diagnostic;
+	auto replay = BoundReplay(document, {}, diagnostic);
+	const auto before = document;
+	const auto replayBytes = replay.RetainedBytes();
+	const std::array observed{AuthoredValue{"center", Vector2{11, 22}}};
+	SourceAxisTransition transition{"mirror", "center", false};
+	transition.ObservedInputs = observed;
+	Document result = document;
+	GroupReplayState changed;
+	const auto status =
+		ToggleSourceAxes(document, replay, 1, transition, Request(replay), result, changed, diagnostic);
+	INFO(diagnostic.Message);
+	if (malformed) {
+		if (nonfinite)
+			CHECK(status != Status::Ok);
+		else
+			CHECK(status == Status::TypeMismatch);
+		CHECK(result == before);
+		CHECK(replay.RetainedBytes() == replayBytes);
+	} else {
+		REQUIRE(status == Status::Ok);
+		REQUIRE(result.Keyframes.size() == 3);
+		const std::array expected{Vector2{11, 24}, Vector2{11.5, 26}, Vector2{12, 28}};
+		for (size_t index = 0; index < result.Keyframes.size(); ++index) {
+			const auto &key = result.Keyframes[index];
+			const auto &tuple = std::get<ArrayValue>(key.Data);
+			REQUIRE(tuple.Items.size() == 2);
+			CHECK(std::get<double>(std::get<ElementValue>(tuple.Items[0].Data)) == expected[index].X);
+			CHECK(std::get<double>(std::get<ElementValue>(tuple.Items[1].Data)) == expected[index].Y);
+		}
+		Document restored;
+		REQUIRE(Read(Write(result), restored, diagnostic) == Status::Ok);
+		CHECK(restored == result);
+		Plan plan;
+		REQUIRE(Compile(restored, plan, diagnostic) == Status::Ok);
+		EvaluationRequest request;
+		request.Tick = 2;
+		request.Subframe = .5;
+		struct CenterObserver : SourceInputProcessingObserver {
+			std::optional<Vector2> Center;
+			std::string_view NodeId() const noexcept override {
+				return "mirror";
+			}
+			uint64_t RetainedBytes() const noexcept override {
+				return 0;
+			}
+			Status Observe(
+				FrameTime,
+				std::span<const EvaluationInputValue> values,
+				std::span<const EvaluationInputImage>,
+				std::span<const SnapshotImageArray>,
+				Diagnostic &,
+				uint64_t
+			) override {
+				for (const auto &input : values)
+					if (input.Port == "center") Center = std::get<Vector2>(input.Data);
+				return Status::Ok;
+			}
+		} observer;
+		request.SourceInputObserver = &observer;
+		Image output;
+		REQUIRE(Evaluate(restored, plan, "out", request, output, diagnostic) == Status::Ok);
+		REQUIRE(observer.Center);
+		CHECK(*observer.Center == Vector2{22.5, 50});
+		CHECK(output.Width == 1);
+		CHECK(output.Height == 1);
+		CHECK(restored == result);
+		Document mixed = restored;
+		mixed.Keyframes[1].Data = expected[1];
+		REQUIRE(Compile(mixed, plan, diagnostic) == Status::Ok);
+		const auto firstMixed = Evaluate(mixed, plan, "out", request, output, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(firstMixed == Status::Ok);
+		CHECK(*observer.Center == Vector2{22.5, 50});
+		request.Tick = 7;
+		const auto secondMixed = Evaluate(mixed, plan, "out", request, output, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(secondMixed == Status::Ok);
+		CHECK(*observer.Center == Vector2{23.5, 54});
+		Document separated;
+		GroupReplayState separatedReplay;
+		REQUIRE(
+			ToggleSourceAxes(
+				restored,
+				changed,
+				1,
+				{"mirror", "center", true},
+				Request(changed),
+				separated,
+				separatedReplay,
+				diagnostic
+			) == Status::Ok
+		);
+		const auto &axes = separated.Nodes[1].SourceSeparatedVec2Animators->Inputs.front();
+		REQUIRE(axes.Separated);
+		REQUIRE(axes.Axes[0].Keys.size() == expected.size());
+		REQUIRE(axes.Axes[1].Keys.size() == expected.size());
+		for (size_t index = 0; index < expected.size(); ++index) {
+			CHECK(axes.Axes[0].Keys[index].Data == Value{expected[index].X});
+			CHECK(axes.Axes[1].Keys[index].Data == Value{expected[index].Y});
+		}
+		uint64_t refusedBytes = 0, admittedBytes = Limits::MaximumEvaluationBytes;
+		while (admittedBytes - refusedBytes > 1) {
+			const uint64_t boundary = refusedBytes + (admittedBytes - refusedBytes) / 2;
+			Document candidate = document;
+			GroupReplayState candidateReplay;
+			const auto bounded = ToggleSourceAxes(
+				document,
+				replay,
+				1,
+				transition,
+				Request(replay),
+				candidate,
+				candidateReplay,
+				diagnostic,
+				boundary
+			);
+			if (bounded == Status::Ok) {
+				admittedBytes = boundary;
+			} else {
+				REQUIRE(bounded == Status::LimitExceeded);
+				CHECK(candidate == before);
+				CHECK(candidateReplay.RetainedBytes() == 0);
+				refusedBytes = boundary;
+			}
+		}
+		Document atBoundary = document;
+		GroupReplayState boundaryReplay;
+		REQUIRE(
+			ToggleSourceAxes(
+				document,
+				replay,
+				1,
+				transition,
+				Request(replay),
+				atBoundary,
+				boundaryReplay,
+				diagnostic,
+				admittedBytes
+			) == Status::Ok
+		);
+		atBoundary = document;
+		GroupReplayState refusedReplay;
+		CHECK(
+			ToggleSourceAxes(
+				document,
+				replay,
+				1,
+				transition,
+				Request(replay),
+				atBoundary,
+				refusedReplay,
+				diagnostic,
+				admittedBytes - 1
+			) == Status::LimitExceeded
+		);
+		CHECK(atBoundary == before);
+		CHECK(refusedReplay.RetainedBytes() == 0);
+		CHECK(replay.RetainedBytes() == replayBytes);
+	}
 }
 
 TEST_CASE(

@@ -6952,6 +6952,10 @@ namespace engine::imagegraph {
 					if (const auto *array = std::get_if<ArrayValue>(&keyframe.Data))
 						sourceArray = CatalogueAuthoredArray(*catalogue, *input, *array);
 			}
+			if (document.FormatVersion >= 9 && keyframe.Interpolation == "source" &&
+				detail::SourceSeparatedVec2Input(document.Nodes[node->second], keyframe.Port) &&
+				detail::SourceNumericVec2Tuple(keyframe.Data))
+				sourceArray = true;
 			const bool sourceEmptyKey =
 				SourceEmptyGroupVectorKey(document, document.Nodes[node->second], keyInput, keyframe.Port);
 			if (TypeOf(keyframe.Data) != *keyedType &&

@@ -3,8 +3,9 @@
 // Scalar key drivers follow node_keyframe_driver.gml; curve drivers sample its 32-interval curveMap.
 
 #include "AudioKeyDriver.hpp"
-#include "ValuePayload.hpp"
 #include "SourceGradientValue.hpp"
+#include "SourceSeparatedVec2.hpp"
+#include "ValuePayload.hpp"
 #include "nodes/Curve.hpp"
 
 #include <array>
@@ -174,14 +175,41 @@ namespace engine::imagegraph::detail {
 		Value &result,
 		int64_t quaternionMode = -1,
 		bool hasInterval = true,
-		bool rawSourceQuaternion = false
+		bool rawSourceQuaternion = false,
+		bool sourceVec2Tuple = false
 	) {
-		if (first.index() != last.index()) return Status::TypeMismatch;
+		const bool numericTuplePair =
+			sourceVec2Tuple && (std::holds_alternative<Vector2>(first) || SourceNumericVec2Tuple(first)) &&
+			(std::holds_alternative<Vector2>(last) || SourceNumericVec2Tuple(last));
+		if (first.index() != last.index() && !numericTuplePair) return Status::TypeMismatch;
 		if (!std::isfinite(baseRatio) || !ValidRuntimeValue(first) || !ValidRuntimeValue(last))
 			return Status::InvalidValue;
 		auto scalar = [&](double from, double to, double &driven) {
 			return driver(CurveLerp(from, to, baseRatio), from, to, driven) && std::isfinite(driven);
 		};
+		if (numericTuplePair &&
+			(std::holds_alternative<ArrayValue>(first) || std::holds_alternative<ArrayValue>(last))) {
+			const auto number = [](const Value &input, size_t axis) {
+				if (const auto *vector = std::get_if<Vector2>(&input))
+					return axis == 0 ? vector->X : vector->Y;
+				const auto &array = std::get<ArrayValue>(input);
+				const auto &component = array.Items.empty() ? array.Elements[axis]
+															: std::get<ElementValue>(array.Items[axis].Data);
+				if (const auto *real = std::get_if<double>(&component)) return *real;
+				return double(std::get<int64_t>(component));
+			};
+			// TimelineOverrides admits three largest-key payloads before this allocation.
+			static_assert(sizeof(SourceArrayItem) <= 3 * sizeof(ElementValue));
+			ArrayValue value{ValueType::Any, {}};
+			value.Items.reserve(2);
+			for (size_t axis = 0; axis < 2; ++axis) {
+				double component;
+				if (!scalar(number(first, axis), number(last, axis), component)) return Status::InvalidValue;
+				value.Items.push_back({ElementValue{component}});
+			}
+			result = std::move(value);
+			return Status::Ok;
+		}
 		auto integer = [&](int64_t from, int64_t to, int64_t &driven) {
 			double value;
 			if (!scalar(static_cast<double>(from), static_cast<double>(to), value)) return false;
@@ -396,7 +424,8 @@ namespace engine::imagegraph::detail {
 		Value &result,
 		double totalFrames = 1,
 		bool rawSourceQuaternion = false,
-		const EvaluationRequest *request = nullptr
+		const EvaluationRequest *request = nullptr,
+		bool sourceVec2Tuple = false
 	) {
 		if (const auto *gradient = std::get_if<Gradient>(&from)) {
 			const auto *target = std::get_if<Gradient>(&to);
@@ -503,11 +532,22 @@ namespace engine::imagegraph::detail {
 			 std::holds_alternative<KeyframeElasticDriver>(*driver) ||
 			 std::holds_alternative<KeyframeCurveDriver>(*driver))) {
 			if (const auto *array = std::get_if<ArrayValue>(&from);
-				array && (array->Elements.empty() || std::get<ArrayValue>(to).Elements.empty()))
+				array &&
+				!(sourceVec2Tuple && SourceNumericVec2Tuple(from) &&
+				  (std::holds_alternative<Vector2>(to) || SourceNumericVec2Tuple(to))) &&
+				(array->Elements.empty() || std::get<ArrayValue>(to).Elements.empty()))
 				return Status::UnsupportedExecution;
 		}
 		return ApplySourceDriverComponents(
-			from, to, interval ? ease : 0, scalar, result, quaternionMode, interval, rawSourceQuaternion
+			from,
+			to,
+			interval ? ease : 0,
+			scalar,
+			result,
+			quaternionMode,
+			interval,
+			rawSourceQuaternion,
+			sourceVec2Tuple
 		);
 	}
 

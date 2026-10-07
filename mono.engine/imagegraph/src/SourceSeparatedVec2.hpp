@@ -7,6 +7,7 @@
 
 namespace engine::imagegraph::detail {
 	const CatalogueInput *SourceSeparatedVec2Input(const Node &, std::string_view port);
+	bool SourceNumericVec2Tuple(const Value &);
 	size_t SourceSeparatedVec2InputCount(const Node &);
 	const SourceSeparatedVec2Animator *FindSeparatedVec2(const Node &, std::string_view port);
 	const SourceSeparatedVec2Animator *FindInitializedSeparatedVec2(const Node &, std::string_view port);
