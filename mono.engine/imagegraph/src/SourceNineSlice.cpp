@@ -23,6 +23,15 @@ namespace engine::imagegraph::detail {
 			return diagnostic.Code;
 		}
 		const auto &data = *value.Data;
+		if (data.NineSlice->Cold) {
+			diagnostic = {
+				Status::UnsupportedExecution,
+				data.OwnerNodeId,
+				"dyna_surf",
+				"cold Nine Slice owns no getter surface"
+			};
+			return diagnostic.Code;
+		}
 		if (data.RequireSourceGpuRasterCoverage) {
 			diagnostic = {
 				Status::UnsupportedExecution,

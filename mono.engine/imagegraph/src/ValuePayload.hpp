@@ -446,7 +446,8 @@ namespace engine::imagegraph::detail {
 		else if constexpr (std::is_same_v<T, ExecutionThreadValue>)
 			return runtime && !item.Id.empty() && item.Id.size() <= Limits::MaximumTextBytes;
 		else if constexpr (std::is_same_v<T, DynamicSurfaceValue>)
-			return runtime && ValidPixelBuilderPayload(item);
+			return (runtime || (item.Data && item.Data->NineSlice && item.Data->NineSlice->Cold)) &&
+				   ValidPixelBuilderPayload(item);
 		else if constexpr (std::is_same_v<T, PixelBoxValue>) {
 			if (!item.Data) return true;
 			for (double component : item.Data->BaseBounds)

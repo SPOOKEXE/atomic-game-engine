@@ -7,6 +7,8 @@ namespace engine::imagegraph {
 		Vector4 Splice;
 		int64_t FillingMode = 0;
 		int64_t Interpolation = 1, Oversample = 4;
+		// The constructor owns absent surfaces until its first source update.
+		bool Cold = false;
 		bool operator==(const SourceNineSliceRecipe &) const = default;
 	};
 }

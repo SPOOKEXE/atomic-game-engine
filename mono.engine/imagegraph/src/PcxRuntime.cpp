@@ -520,6 +520,15 @@ namespace engine::imagegraph {
 					const auto *builder = std::get_if<DynamicSurfaceValue>(&v(0));
 					double scaleX = n(3, 1), scaleY = n(4, 1);
 					const bool nineSlice = builder && builder->Data && builder->Data->NineSlice;
+					if (nineSlice && builder->Data->NineSlice->Cold && ValidPixelBuilderPayload(*builder)) {
+						// grug absent input draws no pixels, but source restores Normal blending.
+						ActiveBlend = PcxDrawBlend::SourceNormal;
+						if (!Context.Target) {
+							Fail("PCX draw requires an explicit owned target", Status::UnsupportedExecution);
+							return false;
+						}
+						return true;
+					}
 					if (nineSlice && Context.Request.RequireSourceGpuRasterCoverage) {
 						Error = {
 							Status::UnsupportedExecution,

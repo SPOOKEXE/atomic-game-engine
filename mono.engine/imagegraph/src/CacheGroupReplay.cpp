@@ -1,6 +1,7 @@
 #include "CacheGroupReplayClone.hpp"
 #include "EvaluationAllocator.hpp"
 #include "MeshPayload.hpp"
+#include "PixelBuilderPayload.hpp"
 #include "ValuePayload.hpp"
 #include "ValueText.hpp"
 
@@ -786,6 +787,23 @@ namespace engine::imagegraph {
 						return refuse(
 							parsed, "source cold constructor literal could not be admitted", node.Id, id
 						);
+					port.Data = std::move(value);
+				} else if (node.Type == "pc.9_slice" && id == "dyna_surf" &&
+						   expression == "new nineSliceSurf()") {
+					const auto authoredBytes = DocumentRetainedPayloadBytes(Document{});
+					auto payload = budget.Reserve(MeshAddBytes(
+						sizeof(PixelBuilderData) + std::max(node.Id.size(), std::string{}.capacity()),
+						authoredBytes.value_or(UINT64_MAX)
+					));
+					if (!payload || !constructors.Merge(std::move(*payload)))
+						return refuse(
+							Status::LimitExceeded, "source cold Nine Slice exceeds live bytes", node.Id, id
+						);
+					DynamicSurfaceValue value;
+					auto &data = value.Data.emplace();
+					data.OwnerNodeId = node.Id;
+					data.BaseDimension = {1, 1};
+					data.NineSlice.emplace().Cold = true;
 					port.Data = std::move(value);
 				} else if (const auto kind = ColdPathKind(node.Type, id, expression)) {
 					const uint64_t bytes =

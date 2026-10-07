@@ -174,7 +174,10 @@ namespace engine::imagegraph::detail {
 				dynamic = std::get_if<DynamicSurfaceValue>(value);
 		if (!surface && (!dynamic || !dynamic->Data))
 			return context.Fail(Status::InvalidValue, "PB Draw Surface requires an owned surface", "surface");
-		if (dynamic && dynamic->Data->NineSlice && context.Request.RequireSourceGpuRasterCoverage)
+		const bool cold = dynamic && dynamic->Data->NineSlice && dynamic->Data->NineSlice->Cold;
+		if (cold && !ValidPixelBuilderPayload(*dynamic))
+			return context.Fail(Status::InvalidValue, "PB cold Nine Slice recipe is invalid", "surface");
+		if (!cold && dynamic && dynamic->Data->NineSlice && context.Request.RequireSourceGpuRasterCoverage)
 			return context.Fail(
 				Status::UnsupportedExecution,
 				"Nine Slice exact GPU draw coverage requires a licensed renderer observation",
@@ -221,7 +224,7 @@ namespace engine::imagegraph::detail {
 			return context.Fail(Status::LimitExceeded, "PB Draw Surface dimensions exceed bounded canvas");
 		Image rendered;
 		std::optional<AllocationReservation> renderingCharge;
-		if (dynamic) {
+		if (dynamic && !cold) {
 			const uint64_t budget = context.AvailableBytes();
 			renderingCharge = context.ReserveWorkspace(budget, "surface");
 			if (!renderingCharge) return false;
@@ -239,6 +242,8 @@ namespace engine::imagegraph::detail {
 		Image *output =
 			context.NewImage("surface", uint32_t(width), uint32_t(height), SurfaceFormat::RGBA8Unorm);
 		if (!output) return false;
+		// grug cold Nine Slice draws nothing onto the admitted cleared canvas.
+		if (cold) return context.FailureCode == Status::Ok;
 		const bool crop = context.Boolean("crop");
 		for (uint32_t y = 0; y < output->Height; ++y)
 			for (uint32_t x = 0; x < output->Width; ++x) {

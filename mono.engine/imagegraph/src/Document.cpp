@@ -15,6 +15,7 @@
 #include "PcxControls.hpp"
 #include "PendingGraph.hpp"
 #include "PixelBoxMath.hpp"
+#include "PixelBuilderPayload.hpp"
 #include "PixelOps.hpp"
 #include "PixelOpsBasicFilters.hpp"
 #include "PixelOpsBlend.hpp"
@@ -1265,6 +1266,7 @@ namespace engine::imagegraph {
 		}
 
 		std::string ValueTag(const Value &value) {
+			if (std::holds_alternative<DynamicSurfaceValue>(value)) return "ninecold";
 			if (const auto *path = std::get_if<PathValue3D>(&value))
 				return path->Data && path->Data->SourceOperation
 						   ? "p3o"
@@ -1526,6 +1528,16 @@ namespace engine::imagegraph {
 				return;
 			}
 			stream << ValueTag(value) << ' ';
+			if (const auto *dynamic = std::get_if<DynamicSurfaceValue>(&value)) {
+				if (!dynamic->Data || !dynamic->Data->NineSlice || !dynamic->Data->NineSlice->Cold ||
+					!detail::ValidPixelBuilderPayload(*dynamic)) {
+					stream.setstate(std::ios::failbit);
+					return;
+				}
+				// grug native receipt records ownership, never fabricates a source surface.
+				detail::WriteTilesetString(stream, dynamic->Data->OwnerNodeId);
+				return;
+			}
 			if (const auto *strand = std::get_if<StrandValue>(&value)) {
 				stream << std::setprecision(17);
 				detail::WriteStrandValue(stream, *strand);
@@ -1751,6 +1763,20 @@ namespace engine::imagegraph {
 			TokenCharge tagCharge;
 			std::string tag;
 			if (!ReadToken(stream, tag, budget, tagCharge, allocationRefused)) return false;
+			if (tag == "ninecold" && version >= 9) {
+				const auto authoredBytes = DocumentRetainedPayloadBytes(Document{});
+				if (!authoredBytes || !admit(detail::MeshAddBytes(sizeof(PixelBuilderData), *authoredBytes)))
+					return false;
+				DynamicSurfaceValue dynamic;
+				auto &data = dynamic.Data.emplace();
+				if (!detail::ReadTilesetString(stream, data.OwnerNodeId, admit) || data.OwnerNodeId.empty())
+					return false;
+				data.BaseDimension = {1, 1};
+				data.NineSlice.emplace().Cold = true;
+				if (!detail::ValidPixelBuilderPayload(dynamic)) return false;
+				value = std::move(dynamic);
+				return true;
+			}
 			if (tag == "b") {
 				int stored = 0;
 				if (!(stream >> stored) || (stored != 0 && stored != 1)) return false;

@@ -392,8 +392,19 @@ namespace engine::imagegraph::detail {
 				data.Surfaces || data.Random || data.DataHistory || data.FrameCacheLoads ||
 				data.RigidHistory || data.SliceStack || data.Groups || !data.Entropy.empty() ||
 				!data.PcxObservations.empty() || !data.SimulationCacheCaptures.empty() ||
-				!data.ProjectName.empty() ||
-				!ValidSurfaceLayout(recipe.Source, data.MaximumImageDimension, Limits::MaximumArrayBytes) ||
+				!data.ProjectName.empty())
+				return false;
+			if (recipe.Cold)
+				return recipe.Source == Image{} && data.BaseDimension == Vector2{1, 1} &&
+					   recipe.Splice == Vector4{} && recipe.FillingMode == 0 && recipe.Interpolation == 1 &&
+					   recipe.Oversample == 4 && !data.RequireSourceGpuRasterCoverage && data.Tick == 0 &&
+					   data.Seed == 0 && data.Subframe == 0 && !data.NegativeFrame &&
+					   !data.ResetSurfaceReplay && data.MaximumImageDimension == Limits::MaximumDimension &&
+					   data.CirclePrecision == 24 && data.SimulationAuthoringRevision == 0 &&
+					   data.RigidAuthoringRevision == 0 && !data.RigidPlaying && !data.RigidFrameProgress &&
+					   data.GroupAuthoringRevision == 0 && !data.SourceCachePlayback &&
+					   PixelBuilderStorageBytes(value, true) <= Limits::MaximumEvaluationBytes;
+			if (!ValidSurfaceLayout(recipe.Source, data.MaximumImageDimension, Limits::MaximumArrayBytes) ||
 				!FiniteSurfaceSamples(recipe.Source) || recipe.Source.Width == 0 ||
 				recipe.Source.Height == 0 ||
 				data.BaseDimension != Vector2{double(recipe.Source.Width), double(recipe.Source.Height)} ||

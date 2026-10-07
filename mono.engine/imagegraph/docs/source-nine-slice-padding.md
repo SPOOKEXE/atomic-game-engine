@@ -19,4 +19,6 @@ The CPU profile uses pixel-center rectangular coverage, truncation for translate
 
 Generated recipes are runtime values. Authored graph serialization stores source controls/links and evaluation regenerates recipes. Deep cloning and retained-capacity accounting include original image bytes; no provider or borrowed view survives. Allocation and whole-batch work admission preserve previous caller results on refusal.
 
+Frozen cache groups can own the exact cold `new nineSliceSurf()` constructor without evaluating linked image producers. It owns no source or getter surface, zero splices, stretch filling and a logical 1 by 1 RGBA8 staging format. Width and height getters return one. Native `ninecold` receipts preserve only this bounded constructor state and its owner name; initialized dynamic recipes remain runtime values. A cold PCX draw leaves destination pixels unchanged and restores Normal blending for subsequent draws. Pixel Builder retains its admitted cleared-canvas route. These logical draw results do not claim source GPU allocation or ambient renderer-state parity.
+
 Nine Slice tests raw surface existence before initialization. Struct-backed Atlas/dynamic inputs therefore require observed previous outputs on both ports. The native path refuses them rather than flattening them into replacement raw images.
