@@ -122,10 +122,10 @@ namespace engine::imagegraph::detail {
 					!std::isfinite(vertex.ClipDepth) || !std::isfinite(vertex.TestDepth) ||
 					std::abs(vertex.Screen.X) > Limits::MaximumDimension * 4. ||
 					std::abs(vertex.Screen.Y) > Limits::MaximumDimension * 4. ||
-					std::abs(normalLength - 1.) > 1e-6)
+					(normalLength != 0 && std::abs(normalLength - 1.) > 1e-6))
 					return context.Fail(
 						Status::InvalidValue,
-						"Draw Shape 3D raster requires finite projected vertices and unit normals"
+						"Draw Shape 3D raster requires finite projected vertices and unit or zero normals"
 					);
 			}
 			const auto &vertices = triangle.Vertices;

@@ -8,7 +8,8 @@
 namespace engine::imagegraph::detail {
 	// Device-independent orthographic cut point. Screen is in pixels, Y downward.
 	// ClipDepth is the shader's gl_Position.z; TestDepth is normalized hardware depth.
-	// ViewNormal must already be normalized per vertex, as the source vertex shader does.
+	// ViewNormal is normalized per vertex. Native zero normals remain zero explicitly, avoiding
+	// undefined normalize-zero shader behavior while keeping the source Octahedron functional.
 	struct SourceShape3DRasterVertex {
 		Vector2 Screen{}, UV{};
 		double ClipDepth = 0, TestDepth = 0;

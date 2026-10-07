@@ -9,13 +9,16 @@ source retains a previous cached model.
 `SourceShape3DRaster.hpp` accepts explicitly projected orthographic triangles.
 It admits texture validation, triangle work, depth storage and three attachments
 before allocation. Failure preserves the previous result. Vertex normals must
-already be normalized; geometry preserves source zero normals rather than
-inventing them. The raster result contains raw shader attachments and optional
+already be normalized or zero; geometry preserves source zero normals, and
+the native CPU profile explicitly leaves zero normals at zero. The raster result contains raw shader attachments and optional
 straight-alpha background composition on the surface attachment alone.
 
-These stages do not register successful `pc.shape_3_d` execution. Integration
-still needs verified native world/view/projection matrices, framebuffer row
-mapping, zero-normal behavior, texture-array binding and source GPU blending.
-The geometry and raster suites passed the third joined Composer check batch;
-that acceptance covers these stages, not complete node execution or licensed
-reference parity.
+`SourceShape3DProjection.hpp` applies the source world stack and fixed camera
+with an explicit framebuffer profile. `SourceShape3DExecutor.cpp` registers
+`pc.shape_3_d`, binds processor-selected texture lists, and publishes the three
+computed attachments. Its engine conventions and remaining reference unknowns
+are documented in [the native execution profile](source-shape-3d-native-profile.md).
+
+These stages and their focused suites are subject to joined verification.
+Registration does not assert equivalence to the pinned Windows renderer or
+licensed reference parity.

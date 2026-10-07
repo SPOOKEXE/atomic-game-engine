@@ -26,6 +26,8 @@ namespace engine::imagegraph::detail {
 					  CurveExecutors(),
 					  ValueExecutors(),
 					  VectorExecutors(),
+					  SourcePointsTriangulateExecutors(),
+					  SourceShape3DExecutors(),
 					  OutlineExecutors(),
 					  BlurExecutors(),
 					  TransformExecutors(),
@@ -130,6 +132,7 @@ namespace engine::imagegraph::detail {
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
 				if (type == "pc.argument" && port == "default_value") return true;
+				if (type == "pc.points_triangulate" && port == "points") return true;
 				if ((type == "pc.path_sample" || type == "pc.path_smoothen") && port == "path") return true;
 				if (SourceFontInput(type, port)) return true;
 				if ((type == "pc.surface_to_buffer" && port == "surface") ||

@@ -83,7 +83,7 @@ TEST_CASE("Shape 3D projected raster refuses invalid normals atomically", "[imag
 	REQUIRE(harness.Draw(valid));
 	const auto previous = harness.Result.Images;
 	auto invalid = harness.Triangle();
-	invalid.Vertices[0].ViewNormal = {};
+	invalid.Vertices[0].ViewNormal = {2, 0, 0};
 	const std::array triangles{invalid};
 	CHECK_FALSE(harness.Draw(triangles));
 	CHECK(harness.Context.FailureCode == Status::InvalidValue);

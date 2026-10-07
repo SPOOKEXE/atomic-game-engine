@@ -272,6 +272,10 @@ namespace engine::imagegraph {
 				if (heads[index].Type == "pc.text")
 					for (CatalogueOutput &output : node.Outputs)
 						if (output.Id == "draw_data") output.Type = ValueType::Array;
+				// Source triangulation keeps all three numeric coordinates per triangle corner.
+				if (heads[index].Type == "pc.points_triangulate")
+					for (CatalogueOutput &output : node.Outputs)
+						if (output.Id == "triangles") output.Type = ValueType::Array;
 				// Only source Font getters accept the owned bitmap font carrier.
 				if (heads[index].Type == "pc.font_bitmap")
 					for (CatalogueOutput &output : node.Outputs)
@@ -422,9 +426,9 @@ namespace engine::imagegraph {
 				   array.Elements.empty() && array.Items.empty() && !array.Nested.empty() &&
 				   detail::ValidPayload(array, true);
 		// This Node-derived update consumes the full list of coordinate rows itself.
-		if (entry.Type == "pc.points_remap" && input.Id == "points" && input.SourceIndex == 0 &&
-			input.SourceKind == "Vec2" && input.Type == ValueType::Vector2 && input.ArrayDepthKnown &&
-			input.ArrayDepth == 2)
+		if ((entry.Type == "pc.points_remap" || entry.Type == "pc.points_triangulate") &&
+			input.Id == "points" && input.SourceIndex == 0 && input.SourceKind == "Vec2" &&
+			input.Type == ValueType::Vector2 && input.ArrayDepthKnown && input.ArrayDepth == 2)
 			return (array.ElementType == ValueType::Vector2 || array.ElementType == ValueType::Scalar ||
 					array.ElementType == ValueType::Integer || array.ElementType == ValueType::Any) &&
 				   detail::ValidPayload(array, true);

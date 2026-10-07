@@ -27,6 +27,7 @@
 #include "nodes/SourcePolar.hpp"
 #include "nodes/SourcePytagoreanTile.hpp"
 #include "nodes/SourceScratchNoise.hpp"
+#include "nodes/SourceShape3DExecutor.hpp"
 #include "nodes/SourceShardNoise.hpp"
 #include "nodes/SourceStrandNoise.hpp"
 #include "nodes/SourceTileTransform.hpp"
@@ -216,12 +217,48 @@ namespace engine::imagegraph::detail {
 					);
 				selected.Depth = !combine || *combine ? 1 : 0;
 			}
+			const bool shapeTexture = context.Entry.Type == "pc.shape_3_d" && port == "texture";
+			if (shapeTexture) {
+				selected.Depth = context.Boolean("array_texture", false) ? 1 : 0;
+				if (context.FailureCode != Status::Ok) return false;
+				if (selected.Images && selected.Depth == 1) {
+					const auto &array = *selected.Images;
+					bool nested = false;
+					for (const auto &item : array.Items)
+						nested = nested || std::holds_alternative<std::vector<ImageArrayItem>>(item.Data);
+					const auto validLeaf = [&](const ImageArrayItem &item) {
+						const auto *index = std::get_if<size_t>(&item.Data);
+						return index && *index < array.Images.size();
+					};
+					for (const auto &item : array.Items) {
+						if (!nested) {
+							if (!validLeaf(item))
+								return context.Fail(
+									Status::InvalidValue, "Shape 3D texture list has an invalid surface", port
+								);
+						} else {
+							const auto *children = std::get_if<std::vector<ImageArrayItem>>(&item.Data);
+							if (!children || !std::all_of(children->begin(), children->end(), validLeaf))
+								return context.Fail(
+									Status::InvalidValue,
+									"Shape 3D texture rows require flat surface lists",
+									port
+								);
+						}
+					}
+					if (!nested) return true;
+					selected.Count = array.Items.size();
+					selected.Batch = true;
+					rows.push_back(selected);
+					return true;
+				}
+			}
 			// Source Array Shift declares its array input depth 99 and consumes the entire shape.
 			if (input.ArrayDepth >= Limits::MaximumArrayDepth) return true;
 			if (context.Entry.Type == "pc.3_d_mesh_plane" && port == "both_side")
 				return context.Fail(Status::UnsupportedExecution, "source Both Side rejects arrays", port);
 			if (!mapped && !spriteShape && !atlasDraw && !hlslTuple && !occlusionUniformPair &&
-				!input.ArrayDepthKnown)
+				!shapeTexture && !input.ArrayDepthKnown)
 				return context.Fail(
 					Status::UnsupportedExecution, "source input array depth is dynamic", port
 				);
@@ -741,6 +778,12 @@ namespace engine::imagegraph::detail {
 				const size_t index =
 					input.Batch ? schedule[row][sourceInverse ? size_t(input.Index) : slot++] : 0;
 				if (input.Images) {
+					if (context.Entry.Type == "pc.shape_3_d" && input.Port == "texture" && input.Depth == 1) {
+						// Borrow the selected nested texture list through an internal row view.
+						selected.emplace_back(int64_t(index));
+						context.ValueViews.emplace_back("__shape3d_texture_row", &selected.back());
+						continue;
+					}
 					const size_t imageIndex = std::get<size_t>(input.Images->Items[index].Data);
 					context.Images.emplace_back(input.Port, &input.Images->Images[imageIndex]);
 				} else {
@@ -906,9 +949,10 @@ namespace engine::imagegraph::detail {
 			: (context.Authored.Type == "pc.perlin_cube" || context.Authored.Type == "pc.cellular_cube" ||
 			   context.Authored.Type == "pc.simplex_cube")
 				? AdmitSourceNoiseCube
-			: context.Authored.Type == "pc.polar" ? AdmitSourcePolar
-			: context.Authored.Type == "pc.tile"  ? AdmitSourceTileTransform
-												  : nullptr;
+			: context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
+			: context.Authored.Type == "pc.shape_3_d" ? AdmitSourceShape3D
+			: context.Authored.Type == "pc.tile"	  ? AdmitSourceTileTransform
+													  : nullptr;
 		if (admission) {
 			uint64_t batchWork = 0;
 			for (size_t row = 0; row < count; ++row) {

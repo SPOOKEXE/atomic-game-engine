@@ -192,6 +192,12 @@ namespace engine::imagegraph::detail {
 			return context.Fail(
 				Status::LimitExceeded, "Draw Shape 3D geometry exceeds element bounds", "shape"
 			);
+		// 64 units per source vertex conservatively cover constructor trig and normal math.
+		const uint64_t rows = context.ProcessorCount ? context.ProcessorCount : 1;
+		if (rows > 64000000 || vertices * 64 > 64000000 / rows)
+			return context.Fail(
+				Status::LimitExceeded, "Shape 3D geometry exceeds whole processor work bounds", "shape"
+			);
 		const uint64_t bytes = sizeof(MeshData3D) + sizeof(MeshTransform3D) +
 							   parts * (sizeof(MeshPart3D) + sizeof(MaterialValue3D)) +
 							   vertices * sizeof(MeshVertex3D) + edges * sizeof(MeshEdge3D);

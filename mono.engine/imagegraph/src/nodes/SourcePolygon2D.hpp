@@ -280,7 +280,9 @@ namespace engine::imagegraph::detail::polygon2d {
 	inline bool Delaunay(
 		std::span<const Vector2> points,
 		vector<std::array<uint32_t, 3>> &output,
-		std::span<const Vector2> polygon = {}
+		std::span<const Vector2> polygon = {},
+		bool filterToPolygon = true,
+		size_t maximumTriangles = Limits::MaximumLinks
 	) {
 		if (points.size() < 3) return true;
 		vector<Point> sourcePoints;
@@ -304,9 +306,11 @@ namespace engine::imagegraph::detail::polygon2d {
 			const auto edges = find_polygon_edges(bad);
 			for (const auto &triangle : bad)
 				vector_remove_triangle(triangles, triangle);
+			if (edges.size() / 2 > maximumTriangles || triangles.size() > maximumTriangles - edges.size() / 2)
+				return false;
 			for (size_t i = 0; i < edges.size(); i += 2)
 				triangles.push_back({edges[i], edges[i + 1], point});
-			if (triangles.size() > Limits::MaximumLinks) return false;
+			if (triangles.size() > maximumTriangles) return false;
 		}
 		for (const auto &triangle : triangles) {
 			if (share_vertexs(triangle, super)) continue;
@@ -319,7 +323,8 @@ namespace engine::imagegraph::detail::polygon2d {
 				(points[indices[0]].X + points[indices[1]].X + points[indices[2]].X) / 3,
 				(points[indices[0]].Y + points[indices[1]].Y + points[indices[2]].Y) / 3
 			};
-			if (PolygonContains(polygon.empty() ? points : polygon, center)) output.push_back(indices);
+			if (!filterToPolygon || PolygonContains(polygon.empty() ? points : polygon, center))
+				output.push_back(indices);
 		}
 		return true;
 	}
