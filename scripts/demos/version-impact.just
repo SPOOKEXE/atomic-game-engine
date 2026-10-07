@@ -5,7 +5,7 @@ demo-bench label="current":
     bash scripts/demos/version-impact.sh --label "{{label}}" --output ".cache/build/profile/version-impact/$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 # Build and recollect both revisions on the same machine, then enforce ceilings.
-demo-impact baseline="v0.24.1" document="docs/VERSION_IMPACT.md":
+demo-impact baseline="origin/v0.24.1" document="docs/VERSION_IMPACT.md":
     bash scripts/demos/compare-version-impact.sh "{{baseline}}" "{{document}}"
 
 # Compare an existing collection to the exact baseline embedded in the document.
@@ -19,4 +19,4 @@ demo-impact-check:
     ./{{build}}/tests/test_benchrunner '[benchrunner]'
 
 # Full correctness checks followed by measured performance regression checks.
-regression-check baseline="v0.24.1": check (demo-impact baseline)
+regression-check baseline="origin/v0.24.1": check (demo-impact baseline)
