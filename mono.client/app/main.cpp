@@ -132,6 +132,11 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
+	arguments.Value(
+		"benchmark-report",
+		"PATH",
+		"Write complete-run benchmark JSON; requires profile-seconds and heap hooks"
+	);
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
@@ -323,6 +328,16 @@ int main(int argc, char **argv) {
 	}
 	options.MaximumFrameRate = static_cast<uint32_t>(maximumFrameRate);
 	options.ProfileSeconds = arguments.GetNumber("profile-seconds", 0.0);
+	if (auto report = arguments.Get("benchmark-report")) {
+		options.BenchmarkReport = std::filesystem::path(*report);
+		if (options.BenchmarkReport.empty() || !std::isfinite(options.ProfileSeconds) ||
+			options.ProfileSeconds <= 0.0) {
+			std::fprintf(
+				stderr, "--benchmark-report requires a path and finite positive --profile-seconds\n"
+			);
+			return 2;
+		}
+	}
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
 	}
@@ -478,7 +493,7 @@ int main(int argc, char **argv) {
 	}
 
 	// A profiling run wants the graph collecting, or it measures nothing.
-	if (options.ProfileSeconds > 0.0) {
+	if (options.ProfileSeconds > 0.0 && options.BenchmarkReport.empty()) {
 		options.ShowFrameGraph = true;
 	}
 

@@ -2124,3 +2124,5 @@ metrics-lookup-bench:
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_core
     ATOMIC_METRICS_LOOKUP_PROFILE=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_core --suite engine.core.bench.instrumentation --samples 5
+
+import 'scripts/demos/version-impact.just'

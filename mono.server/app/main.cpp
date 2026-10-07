@@ -133,6 +133,8 @@ int main(int argc, char **argv) {
 	arguments.Value("physical-core", "N", "Physical-core slot assigned by a supervising driver");
 	arguments.Value("process-index", "N", "Stable child index assigned by a supervising driver");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
+	arguments.Value("benchmark-report", "PATH", "Write full-runtime benchmark measurements as JSON");
+	arguments.Value("benchmark-seconds", "SECONDS", "Benchmark wall-clock interval (default 5)");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
 	);
@@ -326,12 +328,17 @@ int main(int argc, char **argv) {
 	if (auto profile = arguments.Get("profile-out")) {
 		options.ProfilePath = std::filesystem::path(*profile);
 	}
+	if (auto report = arguments.Get("benchmark-report")) {
+		options.BenchmarkReport = std::filesystem::path(*report);
+	}
+	options.BenchmarkSeconds = arguments.GetNumber("benchmark-seconds", options.BenchmarkSeconds);
 	if (auto report = arguments.Get("heap-report")) {
 		options.HeapReport = std::filesystem::path(*report);
 	}
 	options.ProcessIndex =
 		static_cast<uint32_t>(std::max<int64_t>(0, arguments.GetInteger("process-index", 0)));
 	options.ProfilePath = server::ProcessOutputPath(options.ProfilePath, options.ProcessIndex);
+	options.BenchmarkReport = server::ProcessOutputPath(options.BenchmarkReport, options.ProcessIndex);
 	options.HeapReport = server::ProcessOutputPath(options.HeapReport, options.ProcessIndex);
 	options.ProfileWindowTicks =
 		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("profile-window", 0)));

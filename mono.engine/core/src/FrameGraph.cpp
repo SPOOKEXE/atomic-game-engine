@@ -112,6 +112,10 @@ namespace engine::core {
 			// under-reporting" is the worst possible failure.
 			std::atomic<size_t> DroppedThisFrame{0};
 			size_t PublishedDropped = 0;
+			std::atomic<size_t> OffThreadDroppedThisFrame{0};
+			size_t OwnerDroppedThisFrame = 0;
+			size_t PublishedOffThreadDropped = 0;
+			size_t PublishedOwnerDropped = 0;
 
 			// --- history ------------------------------------------------------
 			//
@@ -508,6 +512,8 @@ namespace engine::core {
 			state.PublishedMilliseconds = 0.0f;
 			state.PublishedUnmarked = 0.0f;
 			state.PublishedDropped = 0;
+			state.PublishedOffThreadDropped = 0;
+			state.PublishedOwnerDropped = 0;
 			for (auto &total : state.PublishedCategories) {
 				total = 0.0f;
 			}
@@ -540,6 +546,8 @@ namespace engine::core {
 		state.Depth = 0;
 		state.BuildingNameCount = 0;
 		state.DroppedThisFrame.store(0, std::memory_order_relaxed);
+		state.OffThreadDroppedThisFrame.store(0, std::memory_order_relaxed);
+		state.OwnerDroppedThisFrame = 0;
 
 		// Reserving once, on the first enabled frame, keeps the allocation out
 		// of every subsequent measurement.
@@ -921,7 +929,9 @@ namespace engine::core {
 
 		state.Published.swap(state.Building);
 		state.PublishedMilliseconds = total;
-		state.PublishedDropped = state.DroppedThisFrame.load(std::memory_order_relaxed);
+		state.PublishedOffThreadDropped = state.OffThreadDroppedThisFrame.load(std::memory_order_relaxed);
+		state.PublishedOwnerDropped = state.OwnerDroppedThisFrame;
+		state.PublishedDropped = state.PublishedOwnerDropped + state.PublishedOffThreadDropped;
 
 		// **Reported rather than left silent**, which is what `docs/ARCH_REVIEW.md`
 		// §A1 made this counter atomic for and what §G2 asks of it. This
@@ -970,6 +980,14 @@ namespace engine::core {
 
 	size_t FrameGraph::Dropped() {
 		return Get().PublishedDropped;
+	}
+
+	size_t FrameGraph::OffThreadDropped() {
+		return Get().PublishedOffThreadDropped;
+	}
+
+	size_t FrameGraph::OwnerDropped() {
+		return Get().PublishedOwnerDropped;
 	}
 
 	float FrameGraph::RecentMaximum(std::string_view name) {
@@ -1231,6 +1249,7 @@ namespace engine::core {
 		// stack, and a worker moving it would corrupt that thread's nesting.
 		if (std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
 			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			state.OffThreadDroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return NOT_RECORDING;
 		}
 
@@ -1239,6 +1258,7 @@ namespace engine::core {
 		// dropped span is recorded one level too deep.
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
 			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			state.OwnerDroppedThisFrame++;
 			state.Depth++;
 			return DEPTH_ONLY;
 		}
@@ -1343,6 +1363,7 @@ namespace engine::core {
 			if (state.Recording &&
 				std::this_thread::get_id() == state.Owner.load(std::memory_order_relaxed)) {
 				state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+				state.OwnerDroppedThisFrame++;
 			}
 			return;
 		}
@@ -1376,6 +1397,7 @@ namespace engine::core {
 		// record its own span hands the duration to whoever can.
 		if (std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
 			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			state.OffThreadDroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 
@@ -1385,11 +1407,13 @@ namespace engine::core {
 		// missing one.
 		if (!(milliseconds >= 0.0f)) {
 			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			state.OwnerDroppedThisFrame++;
 			return;
 		}
 
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
 			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			state.OwnerDroppedThisFrame++;
 			return;
 		}
 
@@ -1451,11 +1475,13 @@ namespace engine::core {
 
 		if (!(milliseconds >= 0.0f)) {
 			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			state.OwnerDroppedThisFrame++;
 			return;
 		}
 
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
 			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			state.OwnerDroppedThisFrame++;
 			return;
 		}
 

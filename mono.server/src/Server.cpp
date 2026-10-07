@@ -10,6 +10,7 @@
 #include <engine/control/features/PhysicsObservation.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
+#include <engine/core/BenchmarkReport.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
@@ -61,11 +62,13 @@
 #include <cdn/Origin.hpp>
 #include <cdn/Service.hpp>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <network/SessionKey.hpp>
+#include <optional>
 #include <server/ContentRelay.hpp>
 #include <server/PortalJournal.hpp>
 #include <server/Server.hpp>
@@ -766,6 +769,15 @@ namespace server {
 		// Stop is process-global because signal handlers cannot borrow a host. A
 		// fresh host must clear a prior host's stop before any early return.
 		StopRequested.store(false);
+		if (!Settings.BenchmarkReport.empty() && (!std::isfinite(Settings.BenchmarkSeconds) ||
+												  Settings.BenchmarkSeconds <= 0.0 || Settings.DataFactory)) {
+			ENGINE_ERROR("benchmark reports require a positive finite duration and a simulation world");
+			return false;
+		}
+		if (!Settings.BenchmarkReport.empty() && !engine::core::HeapProfile::IsCompiledIn()) {
+			ENGINE_ERROR("benchmark reports require allocator hooks; configure with MONO_HEAP_PROFILE=ON");
+			return false;
+		}
 		if (Settings.DataFactory && Settings.ControlPort < 0) {
 			ENGINE_ERROR("--data-factory requires --mcp-port so an external factory can create its world");
 			return false;
@@ -4185,6 +4197,13 @@ namespace server {
 		// card says.
 		StartDiscord();
 
+		std::optional<engine::core::BenchmarkReport> benchmark;
+		if (!Settings.BenchmarkReport.empty()) {
+			engine::core::FrameGraph::SetEnabled(true);
+			benchmark.emplace(engine::core::HeapProfile::Totals());
+		}
+		const auto benchmarkStarted = std::chrono::steady_clock::now();
+
 		while (Running && !StopRequested.load()) {
 			const uint64_t tickStarted = engine::core::Clock::Nanoseconds();
 
@@ -4422,6 +4441,15 @@ namespace server {
 
 			const uint64_t tickEnded = engine::core::Clock::Nanoseconds();
 			const auto spent = static_cast<double>(tickEnded - tickStarted) / 1e9;
+			if (benchmark) {
+				benchmark->AddFrame(
+					engine::core::FrameGraph::Spans(),
+					spent * 1000.0,
+					engine::core::FrameGraph::Dropped(),
+					engine::core::HeapProfile::Totals(),
+					engine::core::FrameGraph::OffThreadDropped()
+				);
+			}
 
 			totalTickSeconds += spent;
 			tickMilliseconds.push_back(static_cast<float>(spent * 1000.0));
@@ -4473,6 +4501,11 @@ namespace server {
 			if (Settings.Seconds > 0.0 && elapsed >= Settings.Seconds) {
 				break;
 			}
+			if (benchmark &&
+				std::chrono::duration<double>(std::chrono::steady_clock::now() - benchmarkStarted).count() >=
+					Settings.BenchmarkSeconds) {
+				break;
+			}
 
 			if (Settings.Unpaced || Replayer_) {
 				// A replay is not paced: it reproduces a run rather than
@@ -4497,6 +4530,32 @@ namespace server {
 				if (now - nextTickAt > budgetNanoseconds * 4) {
 					nextTickAt = now;
 				}
+			}
+		}
+
+		if (benchmark) {
+			const engine::core::HeapTotals finalHeap = engine::core::HeapProfile::Totals();
+			const double durationSeconds =
+				std::chrono::duration<double>(std::chrono::steady_clock::now() - benchmarkStarted).count();
+			const std::array<engine::core::BenchmarkMetric, 4> observations{{
+				{"tick_count", static_cast<double>(ticksSoFar())},
+				{"tick_rate_hz", Settings.TickRate},
+				{"tick_overruns", static_cast<double>(summary.Overruns)},
+				{"clients_admitted", Replication ? static_cast<double>(Replication->Stats().Admitted) : 0.0},
+			}};
+			if (!benchmark->Write(
+					Settings.BenchmarkReport,
+					durationSeconds,
+					Settings.BenchmarkSeconds,
+					finalHeap,
+					engine::core::HeapProfile::IsCompiledIn(),
+					std::span(observations).first(Replication ? observations.size() : observations.size() - 1)
+				)) {
+				ENGINE_ERROR(
+					"benchmark: incomplete measurement or could not write '{}'",
+					Settings.BenchmarkReport.string()
+				);
+				summary.Failed = true;
 			}
 		}
 

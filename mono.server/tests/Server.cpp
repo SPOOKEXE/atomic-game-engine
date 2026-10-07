@@ -2,6 +2,7 @@
 #include <engine/control/Server.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -30,6 +31,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
 #include <span>
@@ -86,6 +88,36 @@ TEST_CASE("a thousand worlds leave main for presentation and use every worker co
 	REQUIRE(plan.Processes == 12);
 	REQUIRE(plan.LocalWorlds == 0);
 	REQUIRE(plan.RemoteHosts == 11);
+}
+
+TEST_CASE("server benchmark duration rejects invalid intervals", "[server][benchmark]") {
+	server::Options options;
+	options.BenchmarkReport = "unused-benchmark.json";
+	options.BenchmarkSeconds = GENERATE(
+		0.0, -1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()
+	);
+	server::Server host;
+	CHECK_FALSE(host.Initialise(options));
+}
+
+TEST_CASE("server tick limit cannot produce an incomplete benchmark", "[server][benchmark]") {
+	server::Options options;
+	options.Entities = 4;
+	options.MaximumTicks = 1;
+	options.Unpaced = true;
+	options.BenchmarkReport = std::filesystem::temp_directory_path() / "atomic-short-benchmark.json";
+	std::filesystem::remove(options.BenchmarkReport);
+	server::Server host;
+	if (!engine::core::HeapProfile::IsCompiledIn()) {
+		CHECK_FALSE(host.Initialise(options));
+		return;
+	}
+	REQUIRE(host.Initialise(options));
+	const server::RunSummary summary = host.Run();
+	CHECK(summary.Failed);
+	CHECK_FALSE(std::filesystem::exists(options.BenchmarkReport));
+	host.Shutdown();
+	FrameGraph::SetEnabled(false);
 }
 
 TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][data-factory]") {

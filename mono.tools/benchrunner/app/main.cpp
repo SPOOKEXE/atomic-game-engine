@@ -22,6 +22,7 @@
 // number to an algorithm change is what this exists to serve.
 
 #include "BenchmarkReport.hpp"
+#include "DemoReport.hpp"
 
 #include <engine/core/Arguments.hpp>
 
@@ -148,6 +149,12 @@ namespace {
 }
 
 int main(int argc, char **argv) {
+	for (int index = 1; index < argc; ++index) {
+		const std::string_view option = argv[index];
+		if (option == "--demo-compare" || option == "--demo-table") {
+			return benchrunner::DemoReportMain(argc, argv);
+		}
+	}
 	engine::core::Arguments arguments(
 		"benchrunner", "Runs the benchmark suites a change could have affected."
 	);
@@ -164,6 +171,11 @@ int main(int argc, char **argv) {
 	arguments.Flag("all", "Run every suite, cache or not");
 	arguments.Flag("list", "List suites and signatures, run nothing");
 	arguments.Flag("accept", "Write what was measured as the new baseline");
+	arguments.Value("demo-table", "DIR", "Print a collected three-run demo baseline table");
+	arguments.Value("demo-compare", "BASE CURRENT", "Compare two collected demo report directories");
+	arguments.Value("demo-document", "PATH", "Write the generated demo Markdown report");
+	arguments.Value("demo-limit-percent", "PERCENT", "Demo cost ceiling increase (default 15)");
+	arguments.Flag("demo-advisory", "Report demo costs without enforcing ceilings or machine equality");
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {

@@ -236,6 +236,9 @@ namespace client {
 		// @since v0.18
 		std::filesystem::path HeapReport;
 
+		// Writes complete-run benchmark totals before teardown; requires allocator hooks.
+		std::filesystem::path BenchmarkReport;
+
 		// Fail the run when a tag climbs faster than this, in bytes a second.
 		// Zero checks nothing.
 		//
