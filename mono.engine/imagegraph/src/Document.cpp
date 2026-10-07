@@ -12831,8 +12831,9 @@ namespace engine::imagegraph {
 							   input.SourceKind == "Slider"))) ||
 							(node.Type == "pc.cellular" && input.Id == "scale" &&
 							 input.SourceKind == "Float") ||
-							((node.Type == "pc.perlin_extra" || node.Type == "pc.perlin_cube" ||
-							  node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube") &&
+							((node.Type == "pc.perlin_extra" || node.Type == "pc.wavelet_noise" ||
+							  node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
+							  node.Type == "pc.simplex_cube") &&
 							 (input.SourceKind == "Slider" || input.SourceKind == "Float" ||
 							  input.SourceKind == "Rotation" || input.SourceKind == "Int")) ||
 							(node.Type == "pc.pytagorean_tile" &&
@@ -12934,8 +12935,8 @@ namespace engine::imagegraph {
 							 node.Type == "pc.voronoi_extra" || node.Type == "pc.shard_noise" ||
 							 node.Type == "pc.noise_strand" || node.Type == "pc.weave" ||
 							 node.Type == "pc.pytagorean_tile" || node.Type == "pc.perlin_extra" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
-							 node.Type == "pc.simplex_cube") &&
+							 node.Type == "pc.wavelet_noise" || node.Type == "pc.perlin_cube" ||
+							 node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube") &&
 							input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {
 							if (const ImageArray *images =
@@ -13078,7 +13079,7 @@ namespace engine::imagegraph {
 							   node.Type == "pc.caustic" || node.Type == "pc.perlin" ||
 							   node.Type == "pc.voronoi_extra" || node.Type == "pc.shard_noise" ||
 							   node.Type == "pc.weave" || node.Type == "pc.pytagorean_tile" ||
-							   node.Type == "pc.perlin_extra") &&
+							   node.Type == "pc.perlin_extra" || node.Type == "pc.wavelet_noise") &&
 							  (input.Id == "position" || input.Id == "scale")) ||
 							 (node.Type == "pc.weave" && input.Id == "width"));
 						const bool generatorSurfaceRange =
@@ -13088,14 +13089,15 @@ namespace engine::imagegraph {
 							 node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra" ||
 							 node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand" ||
 							 node.Type == "pc.pytagorean_tile" || node.Type == "pc.perlin_extra" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
-							 node.Type == "pc.simplex_cube") &&
+							 node.Type == "pc.wavelet_noise" || node.Type == "pc.perlin_cube" ||
+							 node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube") &&
 							input.SourceKind == "SliRange" &&
 							(node.Type == "pc.noise" || node.Type == "pc.cellular" ||
 							 node.Type == "pc.perlin" || node.Type == "pc.perlin_extra" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
-							 node.Type == "pc.simplex_cube" || node.Type == "pc.noise_strand" ||
-							 input.Id == "level_in" || input.Id == "level_out" ||
+							 node.Type == "pc.wavelet_noise" || node.Type == "pc.perlin_cube" ||
+							 node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube" ||
+							 node.Type == "pc.noise_strand" || input.Id == "level_in" ||
+							 input.Id == "level_out" ||
 							 (node.Type == "pc.flow_noise" && input.Id == "detail") ||
 							 (node.Type == "pc.noise_bubble" &&
 							  (input.Id == "scale" || input.Id == "opacity")));
@@ -13107,7 +13109,7 @@ namespace engine::imagegraph {
 							  node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra" ||
 							  node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand" ||
 							  node.Type == "pc.weave" || node.Type == "pc.pytagorean_tile" ||
-							  node.Type == "pc.perlin_extra")) ||
+							  node.Type == "pc.perlin_extra" || node.Type == "pc.wavelet_noise")) ||
 									generatorSurfaceRange
 								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
 								: nullptr;

@@ -27,6 +27,7 @@
 #include "nodes/SourceStrandNoise.hpp"
 #include "nodes/SourceTileTransform.hpp"
 #include "nodes/SourceVoronoiExtra.hpp"
+#include "nodes/SourceWaveletNoise.hpp"
 #include "nodes/SourceWeave.hpp"
 
 #include <algorithm>
@@ -892,6 +893,7 @@ namespace engine::imagegraph::detail {
 			: context.Authored.Type == "pc.noise_strand"	? AdmitSourceStrandNoise
 			: context.Authored.Type == "pc.weave"			? AdmitSourceWeave
 			: context.Authored.Type == "pc.pytagorean_tile" ? AdmitSourcePytagoreanTile
+			: context.Authored.Type == "pc.wavelet_noise"	? AdmitSourceWaveletNoise
 			: context.Authored.Type == "pc.perlin_extra"	? AdmitSourcePerlinExtra
 			: (context.Authored.Type == "pc.perlin_cube" || context.Authored.Type == "pc.cellular_cube" ||
 			   context.Authored.Type == "pc.simplex_cube")

@@ -10,6 +10,10 @@ namespace engine::imagegraph::detail {
 			 entry.Type == "pc.simplex_cube") &&
 			input.SourceKind == "DimensionUnit")
 			return true;
+		if (entry.Type == "pc.wavelet_noise" &&
+			(input.SourceKind == "ValueUnit" || input.SourceKind == "MaskAlphaOnly" ||
+			 input.SourceKind == "MapToggle" || input.SourceKind == "MapRange"))
+			return true;
 		if (entry.Type == "pc.perlin_extra" &&
 			(input.SourceKind == "ValueUnit" || input.SourceKind == "MaskAlphaOnly" ||
 			 input.SourceKind == "MapToggle" || input.SourceKind == "MapRange"))
@@ -224,6 +228,9 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.wavelet_noise" &&
+			(port == "scale" || port == "progress" || port == "detail"))
+			return context.Boolean(std::string(port) + "_mapped");
 		if (context.Entry.Type == "pc.perlin_extra" &&
 			(port == "scale" || port == "parameter_a" || port == "parameter_b"))
 			return context.Boolean(std::string(port) + "_mapped");
@@ -288,6 +295,13 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.wavelet_noise" &&
+			(port == "scale" || port == "progress" || port == "detail")) {
+			if (SourceRangeMapped(context, port) && !context.IsLinked(port) &&
+				context.IsCatalogueDefault(port).value_or(false))
+				return context.Find(std::string(port) + "_map_range");
+			return value;
+		}
 		if (context.Entry.Type == "pc.perlin_extra" &&
 			(port == "scale" || port == "parameter_a" || port == "parameter_b")) {
 			if (SourceRangeMapped(context, port) && !context.IsLinked(port) &&
@@ -433,6 +447,10 @@ namespace engine::imagegraph::detail {
 	}
 	inline bool ReadSourceMappedRange(NodeContext &context, std::string_view port, Vector2 &range) {
 		const Value *value = SourceMappedRange(context, port);
+		if (!value && context.Entry.Type == "pc.wavelet_noise") {
+			range = port == "scale" ? Vector2{4, 4} : port == "detail" ? Vector2{0, 1.24} : Vector2{};
+			return true;
+		}
 		if (!value && context.Entry.Type == "pc.perlin_extra") {
 			range = port == "scale" ? Vector2{4, 4} : port == "parameter_b" ? Vector2{0, 1} : Vector2{};
 			return true;
@@ -483,15 +501,16 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if (context.Entry.Type == "pc.perlin_extra" || context.Entry.Type == "pc.pytagorean_tile" ||
-			context.Entry.Type == "pc.shard_noise" || context.Entry.Type == "pc.perlin" ||
-			context.Entry.Type == "pc.cellular" || context.Entry.Type == "pc.caustic" ||
-			context.Entry.Type == "pc.displace" || context.Entry.Type == "pc.polar" ||
-			context.Entry.Type == "pc.blobify" || context.Entry.Type == "pc.kuwahara" ||
-			context.Entry.Type == "pc.xdo_g_threshold" || context.Entry.Type == "pc.refract" ||
-			context.Entry.Type == "pc.herringbone_tile" || context.Entry.Type == "pc.gabor_noise" ||
-			context.Entry.Type == "pc.mirror_polar" || context.Entry.Type == "pc.stripe" ||
-			context.Entry.Type == "pc.dotted" || (context.Entry.Type == "pc.dither" && port == "contrast") ||
+		if (context.Entry.Type == "pc.wavelet_noise" || context.Entry.Type == "pc.perlin_extra" ||
+			context.Entry.Type == "pc.pytagorean_tile" || context.Entry.Type == "pc.shard_noise" ||
+			context.Entry.Type == "pc.perlin" || context.Entry.Type == "pc.cellular" ||
+			context.Entry.Type == "pc.caustic" || context.Entry.Type == "pc.displace" ||
+			context.Entry.Type == "pc.polar" || context.Entry.Type == "pc.blobify" ||
+			context.Entry.Type == "pc.kuwahara" || context.Entry.Type == "pc.xdo_g_threshold" ||
+			context.Entry.Type == "pc.refract" || context.Entry.Type == "pc.herringbone_tile" ||
+			context.Entry.Type == "pc.gabor_noise" || context.Entry.Type == "pc.mirror_polar" ||
+			context.Entry.Type == "pc.stripe" || context.Entry.Type == "pc.dotted" ||
+			(context.Entry.Type == "pc.dither" && port == "contrast") ||
 			(context.Entry.Type == "pc.gradient" &&
 			 (port == "angle" || port == "radius" || port == "shift" || port == "scale")) ||
 			context.Entry.Type == "pc.ambient_occlusion" ||

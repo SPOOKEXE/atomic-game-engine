@@ -398,6 +398,13 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "d30025de4fb3f251e23a2168eb2b1eb8cbfb01f4b828955d49256de8911d94d9",
                 },
             ),
+            (
+                "scripts/node_wavelet_noise/node_wavelet_noise.gml",
+                {
+                    "bytes": 1888,
+                    "sha256": "5f933aab1c4af2494a1fa61b2c48fcd47567e22ee972445ce97726cc90f9befc",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (
@@ -407,6 +414,7 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
             ("Node_Shard_Noise", "v 4 4"),
             ("Node_Pytagorean_Tile", "v 0.25 0.25"),
             ("Node_Perlin_Extra", "v 4 4"),
+            ("Node_Wavelet_Noise", "v 4 4"),
         ):
             node = snapshot["nodes"][name]
             control = next(v for v in node["inputs"] if v["name"] == "Scale")

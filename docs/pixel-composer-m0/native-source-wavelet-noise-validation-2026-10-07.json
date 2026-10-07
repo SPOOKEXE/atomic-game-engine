@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.wavelet_noise source equations; broader Composer work stays active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_wavelet_noise/node_wavelet_noise.gml": "5f933aab1c4af2494a1fa61b2c48fcd47567e22ee972445ce97726cc90f9befc",
+      "shaders/sh_noise_wavelet/sh_noise_wavelet.fsh": "d41985c673cf0bb3284094e992d1e772b288946555942191f2416e6891e9fb63"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceWaveletNoise.cpp",
+    "rules": [
+      "fifteen physical source slots; four binary32 wavelet layers and explicit mapped Scale, Progress and Detail controls",
+      "mean RGB control maps; UV Y flip and alpha retained even with zero UV Mix; typed output and mask staging",
+      "half-even dimensions and raw pixel-center coverage; uncovered output skips unused controls",
+      "active raw Atlas samplers, zero divisors, consumed nonfinite arithmetic and half-storage overflow refused before outputs or observers",
+      "512 base work units per allocated pixel plus 8192 per covered pixel; cumulative 64M selected-batch cap",
+      "mapped numeric pairs are uniform endpoints; arrays of pairs form processor rows under all four schedules",
+      "Format9 animation and inherited nodes; source Surface getters and seven color depths",
+      "correct Scale synthetic mapped range from Vector4 to source Vector2; retained shader MIT notice"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-build-batch3.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-build-batch4.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-build-batch5.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-build-batch6.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-cpu-batch6-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5670,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3947,
+    "source_stability": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-source-stability-batch6.json",
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-cpu-child-hashes-batch6.json",
+    "independent_reference_cases": 30,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/wavelet-noise-independent-reference.json"
+    ],
+    "new_wavelet_test_cases": 17,
+    "read_review": "root read runtime, pinned source, metadata and fixtures; runtime review confirmed mapped endpoint pair rules"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "build_exit_code": 1,
+      "checks_run": false,
+      "cause": "two std::array pair initializers lacked aggregate nesting; third diagnostic consequent to invalid structured bindings"
+    },
+    {
+      "batch": 2,
+      "build_exit_code": 1,
+      "checks_run": false,
+      "cause": "explicit string_view members did not repair the aggregate brace nesting; repaired both outer brace levels"
+    },
+    {
+      "batch": 3,
+      "build_exit_code": 0,
+      "failed_checks": [
+        "core"
+      ],
+      "failures": [
+        "Surface-linked mapped Progress expected two rows instead of one endpoint pair",
+        "Detail schedule used three scalar endpoints instead of processor rows of pairs",
+        "large Detail fixture overflowed seed hash first; zero Scale isolates consumed Detail overflow"
+      ],
+      "final_repairs": "corrected all three fixtures together before rebuilding batch4"
+    },
+    {
+      "batch": 4,
+      "build_exit_code": 0,
+      "failed_checks": [
+        "core"
+      ],
+      "failures": [
+        "inverse schedule reference assumed ordinary Cartesian reversal rather than pinned reversed physical-slot suffix indexing; 93 pixel comparisons failed in one test"
+      ],
+      "final_repairs": "attempted fifteen-slot source suffix correction before batch5"
+    },
+    {
+      "batch": 5,
+      "build_exit_code": 0,
+      "failed_checks": [
+        "core"
+      ],
+      "failures": [
+        "root hand-calculated suffix table included current slot, an off-by-one error; 90 pixel comparisons failed in one test"
+      ],
+      "final_repairs": "fixture independently calculates pinned suffix formula from explicit fifteen slot lengths before batch6"
+    }
+  ],
+  "not_run": [
+    "matched licensed Pixel Composer captures",
+    "headed live Studio verification",
+    "dedicated Wavelet performance profiling",
+    "fresh dev/server/ci preset matrices",
+    "new sanitizer build"
+  ],
+  "limits": [
+    "independent binary32 source-equation fixtures do not establish licensed-runtime parity",
+    "reversed smoothstep has undefined GLSL edge order; native uses literal clamped polynomial",
+    "CPU libm and device float behavior can differ; no measured speed claim"
+  ],
+  "external_references": {
+    "glsl_smoothstep": "https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html"
+  },
+  "build_warnings_note": "final incremental build has no warnings; initial full build includes warnings in unchanged sources",
+  "audit_note": "batch2 post-build source-stability snapshot overlapped its authorized fixture repair; no checks ran from failed build2. final batch6 source and binary hashes are stable."
+}

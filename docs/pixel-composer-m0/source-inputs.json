@@ -146586,6 +146586,7 @@
      "index": "2",
      "kind": "Vec2",
      "mapped": "range",
+     "mapped_range_type": "vector2",
      "name": "Scale",
      "source_array_classification": true
     },
@@ -156842,6 +156843,10 @@
   "scripts/node_simplex_cube/node_simplex_cube.gml": {
    "bytes": 1791,
    "sha256": "d30025de4fb3f251e23a2168eb2b1eb8cbfb01f4b828955d49256de8911d94d9"
+  },
+  "scripts/node_wavelet_noise/node_wavelet_noise.gml": {
+   "bytes": 1888,
+   "sha256": "5f933aab1c4af2494a1fa61b2c48fcd47567e22ee972445ce97726cc90f9befc"
   }
  }
 }
