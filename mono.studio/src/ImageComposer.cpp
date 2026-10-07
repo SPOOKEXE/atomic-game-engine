@@ -40,6 +40,7 @@
 #include "ImageGraphPreviewProvider.hpp"
 #include "ImageGraphPreviewResult.hpp"
 #include "ImageGraphPreviewSequence.hpp"
+#include "ImageGraphRasterNoiseControls.hpp"
 #include "ImageGraphRigid.hpp"
 #include "ImageGraphRigidMeshAction.hpp"
 #include "ImageGraphSourceEdit.hpp"
@@ -4257,6 +4258,11 @@ namespace studio {
 				if (node != nullptr && detail::IsImageGraphNoiseSelector(node->Type, property.Port)) {
 					changed =
 						detail::DrawImageGraphNoiseChoice(node->Type, property.Port, *choice).value_or(false);
+				} else if (node != nullptr &&
+						   detail::IsImageGraphRasterNoiseSelector(node->Type, property.Port)) {
+					choice->Value = engine::imagegraph::RasterNoiseComponents(*node, &state.Authored);
+					changed = detail::DrawImageGraphRasterNoiseChoice(node->Type, property.Port, *choice)
+								  .value_or(false);
 				} else if (node != nullptr && node->Type == "image.transform_3d" &&
 						   property.Port == "projection") {
 					const char *selected = choice->Value == 0	? "Perspective"
@@ -4363,7 +4369,9 @@ namespace studio {
 				});
 				ReloadCanvas(state);
 			}
-			if (changed && authored && detail::IsImageGraphNoiseSelector(authored->Type, editedPort))
+			if (changed && authored &&
+				(detail::IsImageGraphNoiseSelector(authored->Type, editedPort) ||
+				 detail::IsImageGraphRasterNoiseSelector(authored->Type, editedPort)))
 				ReloadCanvas(state);
 			EndPropertyEdit(state, itemId, changed);
 			return changed;
@@ -5979,7 +5987,8 @@ namespace studio {
 					ImGui::PopID();
 					return;
 				}
-				if (!detail::IsImageGraphNoiseSelector(node->Type, property.Port))
+				if (!detail::IsImageGraphNoiseSelector(node->Type, property.Port) &&
+					!detail::IsImageGraphRasterNoiseSelector(node->Type, property.Port))
 					DrawAnimationTrackControls(state, *node, property.Port);
 				ImGui::PopID();
 				ImGui::PopID();
@@ -5991,6 +6000,23 @@ namespace studio {
 					continue;
 				if (node->Type == "pc.wav_file_read" && property.Id == "sync_length") continue;
 				if (FindValue(*node, property.Id) != nullptr) continue;
+				if (detail::IsImageGraphRasterNoiseSelector(node->Type, property.Id)) {
+					AuthoredValue choice{
+						std::string(property.Id),
+						engine::imagegraph::EnumValue{
+							engine::imagegraph::RasterNoiseComponents(*node, &state.Authored)
+						}
+					};
+					ImGui::PushID(node->Id.c_str());
+					ImGui::PushID(choice.Port.c_str());
+					ImGui::TextUnformatted("Output Type");
+					ImGui::SameLine(92.0f);
+					const bool changed = DrawValueWidget(state, node->Id, choice);
+					ImGui::PopID();
+					ImGui::PopID();
+					if (changed) return;
+					continue;
+				}
 				auto initial = ImageGraphPropertyDefault(state.Authored, node->Type, property.Id);
 				if (node->Type == "value.noise_field" && property.Id == "position")
 					initial = detail::ImageGraphNoisePositionDefault(*node);

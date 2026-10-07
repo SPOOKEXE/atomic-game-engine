@@ -476,7 +476,8 @@ namespace engine::imagegraph {
 			{"image", ValueType::Image, PortDirection::Output},
 			{"field", ValueType::Noise2D, PortDirection::Output},
 		}};
-		constexpr std::array<PropertySchema, 18> SIMPLEX_PROPERTIES = {{
+		constexpr std::array<PropertySchema, 19> SIMPLEX_PROPERTIES = {{
+			{"output_type", ValueType::Enum},
 			{"width", ValueType::Integer},
 			{"height", ValueType::Integer},
 			{"seed", ValueType::Scalar},
@@ -1097,7 +1098,8 @@ namespace engine::imagegraph {
 		}
 
 		bool IsNoisePortSelector(const Node &node, std::string_view port) {
-			return ((node.Type == "value.noise_field" || node.Type == "value.sample_noise") &&
+			return ((node.Type == "value.noise_field" || node.Type == "value.sample_noise" ||
+					 IsNoiseImageGenerator(node.Type)) &&
 					port == "output_type") ||
 				   (node.Type == "value.noise_field" && (port == "mode" || port == "dimension"));
 		}
@@ -1105,14 +1107,17 @@ namespace engine::imagegraph {
 		// A catalogue input's bypass junction forwards that input's value unchanged.
 		constexpr std::string_view BYPASS_SUFFIX = ".bypass";
 
-		std::optional<ValueType> FindPortType(const Node &node, std::string_view id, PortDirection side) {
+		std::optional<ValueType> FindPortType(
+			const Node &node, std::string_view id, PortDirection side, const Document *document = nullptr
+		) {
 			// grug PCX-only reads also need a dependency; undeclared ports must not hide an opaque producer.
 			if (detail::IsGroupCallbackOpaque(node) && !id.empty() && id.size() <= Limits::MaximumTextBytes &&
 				(side == PortDirection::Input || side == PortDirection::Output))
 				return ValueType::Any;
 			if (const PortSchema *port = FindPort(node.Type, id, side)) {
-				if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
-					const auto instance = NoiseNodePort(node, id, side);
+				if (node.Type == "value.noise_field" || node.Type == "value.sample_noise" ||
+					(IsNoiseImageGenerator(node.Type) && side == PortDirection::Output && id == "field")) {
+					const auto instance = NoiseNodePort(node, id, side, document);
 					return instance ? std::optional(instance->Type) : std::nullopt;
 				}
 				if (side == PortDirection::Output &&
@@ -5491,7 +5496,8 @@ namespace engine::imagegraph {
 				SetDiagnostic(diagnostic, Status::DuplicateId, "duplicate node id", node.Id);
 				return diagnostic.Code;
 			}
-			if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
+			if (node.Type == "value.noise_field" || node.Type == "value.sample_noise" ||
+				IsNoiseImageGenerator(node.Type)) {
 				NoiseNodeChoices choices;
 				std::string_view failedPort;
 				if (!ResolveNoiseNodeChoices(node, choices, failedPort)) {
@@ -6588,7 +6594,9 @@ namespace engine::imagegraph {
 			}
 			for (size_t index = 0; index < node.InstanceOverrides.size(); ++index) {
 				const auto &port = node.InstanceOverrides[index];
-				const auto type = FindPortType(node, port, PortDirection::Input);
+				const auto type = IsNoiseImageGenerator(node.Type) && port == "output_type"
+									  ? std::optional<ValueType>{ValueType::Enum}
+									  : FindPortType(node, port, PortDirection::Input);
 				if (port.size() > Limits::MaximumTextBytes || !type ||
 					std::find(node.InstanceOverrides.begin(), node.InstanceOverrides.begin() + index, port) !=
 						node.InstanceOverrides.begin() + index) {
@@ -7330,7 +7338,9 @@ namespace engine::imagegraph {
 			}
 			std::optional<ValueType> source;
 			if (from != nodeIndices.end())
-				source = FindPortType(document.Nodes[from->second], link.FromPort, PortDirection::Output);
+				source = FindPortType(
+					document.Nodes[from->second], link.FromPort, PortDirection::Output, &document
+				);
 			else if (link.FromPort == "value")
 				source = document.Junctions[fromJunction->second].Type;
 			std::optional<ValueType> target;
@@ -7471,8 +7481,9 @@ namespace engine::imagegraph {
 			}
 			if (from != nodeIndices.end()) {
 				const auto &node = document.Nodes[from->second];
-				if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
-					noiseOutput = NoiseNodePort(node, link.FromPort, PortDirection::Output);
+				if (node.Type == "value.noise_field" || node.Type == "value.sample_noise" ||
+					(IsNoiseImageGenerator(node.Type) && link.FromPort == "field")) {
+					noiseOutput = NoiseNodePort(node, link.FromPort, PortDirection::Output, &document);
 					outputSchema = noiseOutput ? &*noiseOutput : nullptr;
 				}
 			}
@@ -8488,7 +8499,9 @@ namespace engine::imagegraph {
 			const auto port =
 				node == nodeIndices.end()
 					? std::optional<ValueType>{}
-					: FindPortType(document.Nodes[node->second], output.Port, PortDirection::Output);
+					: FindPortType(
+						  document.Nodes[node->second], output.Port, PortDirection::Output, &document
+					  );
 			if (!port) {
 				SetDiagnostic(
 					diagnostic,
@@ -8711,6 +8724,14 @@ namespace engine::imagegraph {
 				if (id == port) return domain;
 			for (const auto &[id, domain] : outputs->Domains)
 				if (id == port) return domain;
+			for (const auto &value : outputs->Values)
+				if (value.Port == port) {
+					if (const auto *field = std::get_if<NoiseFieldValue>(&value.Data))
+						return SourceSocketDomain{NoiseFieldType(*field), {}, {}};
+					if (const auto *array = std::get_if<ArrayValue>(&value.Data);
+						array && IsNoiseFieldType(array->ElementType))
+						return SourceSocketDomain{array->ElementType, {}, {}};
+				}
 		}
 		if (const auto *entry = FindCatalogueEntry(node.Type))
 			for (const auto &output : entry->Outputs)
@@ -9251,16 +9272,7 @@ namespace engine::imagegraph {
 			if (view && !view->Published) {
 				view->Data = nullptr;
 				view->Refusal = nullptr;
-				view->Domain.reset();
-				if (const auto *entry = FindCatalogueEntry(node.Type))
-					for (const auto &output : entry->Outputs)
-						if (output.Id == port) {
-							ValueType declared = output.Type;
-							if (node.Type == "pc.gradient_extract" || node.Type == "pc.gradient_sample")
-								declared = ValueType::Colour;
-							view->Domain = SourceSocketDomain{declared, {}, DeclaredSourceKind(declared)};
-							break;
-						}
+				view->Domain = FindOutputDomain(node, result, port);
 				view->Published = true;
 			}
 			return view;
@@ -12829,11 +12841,14 @@ namespace engine::imagegraph {
 							 ((input.Id == "iteration" && input.SourceKind == "Int") ||
 							  ((input.Id == "gamma" || input.Id == "uv_mix") &&
 							   input.SourceKind == "Slider"))) ||
+							(node.Type == "pc.fold_noise" && input.SourceKind == "ISlider") ||
 							(node.Type == "pc.cellular" && input.Id == "scale" &&
 							 input.SourceKind == "Float") ||
 							((node.Type == "pc.perlin_extra" || node.Type == "pc.wavelet_noise" ||
-							  node.Type == "pc.noise_scratch" || node.Type == "pc.perlin_cube" ||
-							  node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube") &&
+							  node.Type == "pc.noise_scratch" || node.Type == "pc.fold_noise" ||
+							  node.Type == "pc.noise_gaussian" || node.Type == "pc.noise_aniso" ||
+							  node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
+							  node.Type == "pc.simplex_cube") &&
 							 (input.SourceKind == "Slider" || input.SourceKind == "Float" ||
 							  input.SourceKind == "Rotation" || input.SourceKind == "Int")) ||
 							(node.Type == "pc.pytagorean_tile" &&
@@ -12936,8 +12951,9 @@ namespace engine::imagegraph {
 							 node.Type == "pc.noise_strand" || node.Type == "pc.weave" ||
 							 node.Type == "pc.pytagorean_tile" || node.Type == "pc.perlin_extra" ||
 							 node.Type == "pc.wavelet_noise" || node.Type == "pc.noise_scratch" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
-							 node.Type == "pc.simplex_cube") &&
+							 node.Type == "pc.fold_noise" || node.Type == "pc.noise_gaussian" ||
+							 node.Type == "pc.noise_aniso" || node.Type == "pc.perlin_cube" ||
+							 node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube") &&
 							input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {
 							if (const ImageArray *images =
@@ -13081,9 +13097,11 @@ namespace engine::imagegraph {
 							   node.Type == "pc.voronoi_extra" || node.Type == "pc.shard_noise" ||
 							   node.Type == "pc.weave" || node.Type == "pc.pytagorean_tile" ||
 							   node.Type == "pc.perlin_extra" || node.Type == "pc.wavelet_noise" ||
-							   node.Type == "pc.noise_scratch") &&
+							   node.Type == "pc.noise_scratch" || node.Type == "pc.fold_noise" ||
+							   node.Type == "pc.noise_gaussian" || node.Type == "pc.noise_aniso") &&
 							  (input.Id == "position" || input.Id == "scale")) ||
 							 (node.Type == "pc.noise_scratch" && input.Id == "octave_shift") ||
+							 (node.Type == "pc.fold_noise" && input.Id == "detail") ||
 							 (node.Type == "pc.weave" && input.Id == "width"));
 						const bool generatorSurfaceRange =
 							(node.Type == "pc.gabor_noise" || node.Type == "pc.flow_noise" ||
@@ -13093,15 +13111,18 @@ namespace engine::imagegraph {
 							 node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand" ||
 							 node.Type == "pc.pytagorean_tile" || node.Type == "pc.perlin_extra" ||
 							 node.Type == "pc.wavelet_noise" || node.Type == "pc.noise_scratch" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
-							 node.Type == "pc.simplex_cube") &&
+							 node.Type == "pc.fold_noise" || node.Type == "pc.noise_gaussian" ||
+							 node.Type == "pc.noise_aniso" || node.Type == "pc.perlin_cube" ||
+							 node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube") &&
 							input.SourceKind == "SliRange" &&
 							(node.Type == "pc.noise" || node.Type == "pc.cellular" ||
 							 node.Type == "pc.perlin" || node.Type == "pc.perlin_extra" ||
 							 node.Type == "pc.wavelet_noise" || node.Type == "pc.noise_scratch" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
-							 node.Type == "pc.simplex_cube" || node.Type == "pc.noise_strand" ||
-							 input.Id == "level_in" || input.Id == "level_out" ||
+							 node.Type == "pc.fold_noise" || node.Type == "pc.noise_gaussian" ||
+							 node.Type == "pc.noise_aniso" || node.Type == "pc.perlin_cube" ||
+							 node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube" ||
+							 node.Type == "pc.noise_strand" || input.Id == "level_in" ||
+							 input.Id == "level_out" ||
 							 (node.Type == "pc.flow_noise" && input.Id == "detail") ||
 							 (node.Type == "pc.noise_bubble" &&
 							  (input.Id == "scale" || input.Id == "opacity")));
@@ -13114,7 +13135,8 @@ namespace engine::imagegraph {
 							  node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand" ||
 							  node.Type == "pc.weave" || node.Type == "pc.pytagorean_tile" ||
 							  node.Type == "pc.perlin_extra" || node.Type == "pc.wavelet_noise" ||
-							  node.Type == "pc.noise_scratch")) ||
+							  node.Type == "pc.noise_scratch" || node.Type == "pc.fold_noise" ||
+							  node.Type == "pc.noise_gaussian" || node.Type == "pc.noise_aniso")) ||
 									generatorSurfaceRange
 								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
 								: nullptr;
@@ -16784,7 +16806,9 @@ namespace engine::imagegraph {
 					))
 					return diagnostic.Code;
 				NoiseFieldValue field;
-				field.Data.emplace().Raster = result;
+				auto &data = field.Data.emplace();
+				data.Components = RasterNoiseComponents(node, &document);
+				data.Raster = result;
 				catalogueResult.Values.push_back({"field", std::move(field)});
 				catalogueResult.Images.emplace_back("image", std::move(result));
 				producedCatalogue = true;

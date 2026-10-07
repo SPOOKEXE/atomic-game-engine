@@ -9,10 +9,13 @@
 #include "SourceMappedInputs.hpp"
 #include "SourceRetainedImageOutputs.hpp"
 #include "ValuePayload.hpp"
+#include "nodes/SourceAnisoNoise.hpp"
 #include "nodes/SourceBend.hpp"
 #include "nodes/SourceCaustic.hpp"
 #include "nodes/SourceCellular.hpp"
 #include "nodes/SourceDisplace.hpp"
+#include "nodes/SourceFoldNoise.hpp"
+#include "nodes/SourceGaussianNoise.hpp"
 #include "nodes/SourceGlow.hpp"
 #include "nodes/SourceJpeg.hpp"
 #include "nodes/SourceNoise.hpp"
@@ -894,6 +897,9 @@ namespace engine::imagegraph::detail {
 			: context.Authored.Type == "pc.noise_strand"	? AdmitSourceStrandNoise
 			: context.Authored.Type == "pc.weave"			? AdmitSourceWeave
 			: context.Authored.Type == "pc.pytagorean_tile" ? AdmitSourcePytagoreanTile
+			: context.Authored.Type == "pc.noise_gaussian"	? AdmitSourceGaussianNoise
+			: context.Authored.Type == "pc.noise_aniso"		? AdmitSourceAnisoNoise
+			: context.Authored.Type == "pc.fold_noise"		? AdmitSourceFoldNoise
 			: context.Authored.Type == "pc.noise_scratch"	? AdmitSourceScratchNoise
 			: context.Authored.Type == "pc.wavelet_noise"	? AdmitSourceWaveletNoise
 			: context.Authored.Type == "pc.perlin_extra"	? AdmitSourcePerlinExtra

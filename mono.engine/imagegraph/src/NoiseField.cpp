@@ -58,12 +58,38 @@ namespace engine::imagegraph {
 			}
 			*target = uint8_t(value->Value);
 		}
-		return node.Type == "value.noise_field" || node.Type == "value.sample_noise";
+		return node.Type == "value.noise_field" || node.Type == "value.sample_noise" ||
+			   IsNoiseImageGenerator(node.Type);
 	}
-	std::optional<PortSchema> NoiseNodePort(const Node &node, std::string_view id, PortDirection side) {
+	uint8_t RasterNoiseComponents(const Node &node, const Document *document) {
+		const Node *owner = &node;
+		if (document)
+			for (size_t hop = 0; hop < document->Nodes.size() && !owner->InstanceBase.empty(); ++hop) {
+				if (std::find(
+						owner->InstanceOverrides.begin(), owner->InstanceOverrides.end(), "output_type"
+					) != owner->InstanceOverrides.end())
+					break;
+				const auto base =
+					std::find_if(document->Nodes.begin(), document->Nodes.end(), [&](const auto &candidate) {
+						return candidate.Id == owner->InstanceBase && candidate.Type == owner->Type;
+					});
+				if (base == document->Nodes.end()) break;
+				owner = &*base;
+			}
+		NoiseNodeChoices choices;
+		std::string_view failed;
+		return ResolveNoiseNodeChoices(*owner, choices, failed) ? choices.Components : 0;
+	}
+	std::optional<PortSchema>
+	NoiseNodePort(const Node &node, std::string_view id, PortDirection side, const Document *document) {
 		NoiseNodeChoices choices;
 		std::string_view failed;
 		if (!ResolveNoiseNodeChoices(node, choices, failed)) return std::nullopt;
+		if (IsNoiseImageGenerator(node.Type)) {
+			if (side != PortDirection::Output || id != "field") return std::nullopt;
+			const auto type = NoiseFieldType(2, RasterNoiseComponents(node, document));
+			return type ? std::optional<PortSchema>{PortSchema{id, *type, side}} : std::nullopt;
+		}
 		if (node.Type == "value.noise_field") {
 			if (side == PortDirection::Output) {
 				if (choices.Mode == 0 && id == "field")
@@ -95,7 +121,7 @@ namespace engine::imagegraph {
 			const auto &data = *field.Data;
 			if (!ValidRecipe(data)) return false;
 			return !data.Raster ||
-				   (data.Dimensions == 2 && data.Components == 1 &&
+				   (data.Dimensions == 2 &&
 					ValidSurfaceLayout(*data.Raster, Limits::MaximumDimension, Limits::MaximumArrayBytes));
 		}
 	}
@@ -196,8 +222,11 @@ namespace engine::imagegraph {
 				image, axis(coordinates[0], image.Width), axis(coordinates[1], image.Height), pixel
 			))
 			return false;
-		values[0] = pixel[0];
-		return std::isfinite(values[0]);
+		for (size_t channel = 0; channel < values.size(); ++channel) {
+			values[channel] = pixel[channel];
+			if (!std::isfinite(values[channel])) return false;
+		}
+		return true;
 	}
 	bool SampleNoiseField(const NoiseFieldValue &field, std::span<const double> coordinates, double &value) {
 		return field.Data && field.Data->Components == 1 &&

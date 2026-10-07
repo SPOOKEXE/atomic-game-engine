@@ -968,7 +968,8 @@ namespace studio {
 				engine::imagegraph::ArrayValue{ValueType::Colour, {engine::imagegraph::Colour{0, 0, 0, 255}}}
 			};
 		if (propertyId == "use_mask_dimension") return engine::imagegraph::Value{true};
-		if ((nodeType == "value.noise_field" || nodeType == "value.sample_noise") &&
+		if ((nodeType == "value.noise_field" || nodeType == "value.sample_noise" ||
+			 engine::imagegraph::IsNoiseImageGenerator(nodeType)) &&
 			propertyId == "output_type")
 			return engine::imagegraph::Value{engine::imagegraph::EnumValue{1}};
 		if (nodeType == "value.noise_field") {
@@ -1204,9 +1205,10 @@ namespace studio {
 			if (physical == opaquePorts.end() &&
 				(authored.Type == "pc.array_split" || !authored.DynamicOutputs.empty() ||
 				 authored.Type == "pc.color_to_rgb" || authored.Type == "pc.color_to_hsv" ||
-				 authored.Type == "value.noise_field" || authored.Type == "value.sample_noise")) {
+				 authored.Type == "value.noise_field" || authored.Type == "value.sample_noise" ||
+				 engine::imagegraph::IsNoiseImageGenerator(authored.Type))) {
 				canvasNode.OutputPorts.emplace();
-				for (const auto &port : detail::ImageGraphOutputPorts(authored))
+				for (const auto &port : detail::ImageGraphOutputPorts(authored, &document))
 					canvasNode.OutputPorts->push_back({std::string(port.Id), CanvasType(port.Type)});
 			}
 			if (authored.Type == "value.noise_field" || authored.Type == "value.sample_noise") {
@@ -1682,7 +1684,8 @@ namespace studio {
 			});
 		if (declared == schema->Properties.end())
 			return fail(engine::imagegraph::Status::UnknownPort, "property is not declared");
-		const bool noiseNode = node->Type == "value.noise_field" || node->Type == "value.sample_noise";
+		const bool noiseNode = node->Type == "value.noise_field" || node->Type == "value.sample_noise" ||
+							   engine::imagegraph::IsNoiseImageGenerator(node->Type);
 		const bool noiseSelector =
 			noiseNode && (property == "output_type" || (node->Type == "value.noise_field" &&
 														(property == "mode" || property == "dimension")));
@@ -1732,6 +1735,14 @@ namespace studio {
 			vector != nullptr && (!std::isfinite(vector->X) || !std::isfinite(vector->Y))) {
 			return fail(engine::imagegraph::Status::InvalidValue, "vector value must be finite");
 		}
+		const bool addRasterOverride =
+			engine::imagegraph::IsNoiseImageGenerator(node->Type) && property == "output_type" &&
+			!node->InstanceBase.empty() &&
+			std::find(node->InstanceOverrides.begin(), node->InstanceOverrides.end(), property) ==
+				node->InstanceOverrides.end();
+		if (addRasterOverride &&
+			node->InstanceOverrides.size() >= engine::imagegraph::Limits::MaximumArrayElements)
+			return fail(engine::imagegraph::Status::LimitExceeded, "instance override limit reached");
 		auto existing = std::find_if(node->Values.begin(), node->Values.end(), [&](const auto &entry) {
 			return entry.Port == property;
 		});
@@ -1742,6 +1753,7 @@ namespace studio {
 		} else {
 			existing->Data = std::move(value);
 		}
+		if (addRasterOverride) node->InstanceOverrides.push_back(std::string(property));
 		if (node->Type == "value.noise_field" && property == "dimension") {
 			engine::imagegraph::NoiseNodeChoices choices;
 			std::string_view failed;

@@ -412,6 +412,27 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "2d213648d808d5746d8a72dad55645932fc9a2d82ab66518b96da7011cf5f495",
                 },
             ),
+            (
+                "scripts/node_fold_noise/node_fold_noise.gml",
+                {
+                    "bytes": 2053,
+                    "sha256": "226d1dc0825a74494825ff81665b30afa4a0e4a72f4973843498c15a4cc28aa8",
+                },
+            ),
+            (
+                "scripts/node_noise_gaussian/node_noise_gaussian.gml",
+                {
+                    "bytes": 1449,
+                    "sha256": "7132e26130d885d7bc7a838e60659936238f34deaf449074514b0278464a92eb",
+                },
+            ),
+            (
+                "scripts/node_noise_aniso/node_noise_aniso.gml",
+                {
+                    "bytes": 3341,
+                    "sha256": "e3378ed3548856fc5440d056ab4e829ca768c2671592a36c9241e782dd1021b5",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (

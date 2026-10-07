@@ -273,12 +273,17 @@ namespace engine::imagegraph::detail {
 					))
 					return false;
 				NoiseFieldValue field;
-				field.Data.emplace().Raster = image;
+				auto &data = field.Data.emplace();
+				data.Components = RasterNoiseComponents(context.Authored, context.EvaluationDocument);
+				if (data.Components == 0)
+					return context.Fail(
+						Status::InvalidValue, "invalid raster noise output type", "output_type"
+					);
+				data.Raster = image;
 				context.SetValue("field", std::move(field));
 			}
 			return context.FailureCode == Status::Ok;
 		}
-
 	}
 
 	Executor FindExecutor(std::string_view type) {

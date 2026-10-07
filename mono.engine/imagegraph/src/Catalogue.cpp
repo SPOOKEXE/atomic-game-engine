@@ -303,6 +303,10 @@ namespace engine::imagegraph {
 						(heads[index].Type == "pc.argument" && input.Id == "default_value"))
 						node.Properties.push_back({input.Id, input.Type});
 				}
+				if (std::any_of(node.Outputs.begin(), node.Outputs.end(), [](const auto &output) {
+						return output.Id == "field" && output.Type == ValueType::Noise2D;
+					}))
+					node.Properties.push_back({"output_type", ValueType::Enum});
 				for (const CatalogueOutput &output : node.Outputs)
 					node.Ports.push_back({output.Id, output.Type, PortDirection::Output});
 			}

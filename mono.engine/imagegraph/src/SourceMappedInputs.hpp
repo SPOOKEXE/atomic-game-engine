@@ -6,9 +6,16 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.noise_aniso" &&
+			(input.SourceKind == "ValueUnit" || input.SourceKind == "MaskAlphaOnly" ||
+			 input.SourceKind == "MapToggle" || input.SourceKind == "MapRange"))
+			return true;
 		if ((entry.Type == "pc.perlin_cube" || entry.Type == "pc.cellular_cube" ||
 			 entry.Type == "pc.simplex_cube") &&
 			input.SourceKind == "DimensionUnit")
+			return true;
+		if (entry.Type == "pc.fold_noise" &&
+			(input.SourceKind == "ValueUnit" || input.SourceKind == "MaskAlphaOnly"))
 			return true;
 		if (entry.Type == "pc.noise_scratch" &&
 			(input.SourceKind == "ValueUnit" || input.SourceKind == "MaskAlphaOnly" ||
@@ -232,6 +239,9 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.noise_aniso" &&
+			(port == "x_amount" || port == "y_amount" || port == "rotation"))
+			return context.Boolean(std::string(port) + "_mapped");
 		if (context.Entry.Type == "pc.noise_scratch" &&
 			(port == "thickness" || port == "wavyness" || port == "softness"))
 			return context.Boolean(std::string(port) + "_mapped");
@@ -302,6 +312,13 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.noise_aniso" &&
+			(port == "x_amount" || port == "y_amount" || port == "rotation")) {
+			if (SourceRangeMapped(context, port) && !context.IsLinked(port) &&
+				context.IsCatalogueDefault(port).value_or(false))
+				return context.Find(std::string(port) + "_map_range");
+			return value;
+		}
 		if (context.Entry.Type == "pc.noise_scratch" &&
 			(port == "thickness" || port == "wavyness" || port == "softness")) {
 			if (SourceRangeMapped(context, port) && !context.IsLinked(port) &&
@@ -461,6 +478,11 @@ namespace engine::imagegraph::detail {
 	}
 	inline bool ReadSourceMappedRange(NodeContext &context, std::string_view port, Vector2 &range) {
 		const Value *value = SourceMappedRange(context, port);
+		if (!value && context.Entry.Type == "pc.noise_aniso") {
+			const double fallback = port == "x_amount" ? 2 : port == "y_amount" ? 16 : 0;
+			range = SourceRangeMapped(context, port) ? Vector2{0, fallback} : Vector2{fallback, fallback};
+			return true;
+		}
 		if (!value && context.Entry.Type == "pc.noise_scratch") {
 			range = port == "softness" ? Vector2{0, 3} : port == "wavyness" ? Vector2{0, .5} : Vector2{};
 			return true;
@@ -519,16 +541,17 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if (context.Entry.Type == "pc.noise_scratch" || context.Entry.Type == "pc.wavelet_noise" ||
-			context.Entry.Type == "pc.perlin_extra" || context.Entry.Type == "pc.pytagorean_tile" ||
-			context.Entry.Type == "pc.shard_noise" || context.Entry.Type == "pc.perlin" ||
-			context.Entry.Type == "pc.cellular" || context.Entry.Type == "pc.caustic" ||
-			context.Entry.Type == "pc.displace" || context.Entry.Type == "pc.polar" ||
-			context.Entry.Type == "pc.blobify" || context.Entry.Type == "pc.kuwahara" ||
-			context.Entry.Type == "pc.xdo_g_threshold" || context.Entry.Type == "pc.refract" ||
-			context.Entry.Type == "pc.herringbone_tile" || context.Entry.Type == "pc.gabor_noise" ||
-			context.Entry.Type == "pc.mirror_polar" || context.Entry.Type == "pc.stripe" ||
-			context.Entry.Type == "pc.dotted" || (context.Entry.Type == "pc.dither" && port == "contrast") ||
+		if (context.Entry.Type == "pc.noise_aniso" || context.Entry.Type == "pc.noise_scratch" ||
+			context.Entry.Type == "pc.wavelet_noise" || context.Entry.Type == "pc.perlin_extra" ||
+			context.Entry.Type == "pc.pytagorean_tile" || context.Entry.Type == "pc.shard_noise" ||
+			context.Entry.Type == "pc.perlin" || context.Entry.Type == "pc.cellular" ||
+			context.Entry.Type == "pc.caustic" || context.Entry.Type == "pc.displace" ||
+			context.Entry.Type == "pc.polar" || context.Entry.Type == "pc.blobify" ||
+			context.Entry.Type == "pc.kuwahara" || context.Entry.Type == "pc.xdo_g_threshold" ||
+			context.Entry.Type == "pc.refract" || context.Entry.Type == "pc.herringbone_tile" ||
+			context.Entry.Type == "pc.gabor_noise" || context.Entry.Type == "pc.mirror_polar" ||
+			context.Entry.Type == "pc.stripe" || context.Entry.Type == "pc.dotted" ||
+			(context.Entry.Type == "pc.dither" && port == "contrast") ||
 			(context.Entry.Type == "pc.gradient" &&
 			 (port == "angle" || port == "radius" || port == "shift" || port == "scale")) ||
 			context.Entry.Type == "pc.ambient_occlusion" ||

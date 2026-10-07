@@ -7,8 +7,9 @@
 
 namespace studio::detail {
 	// Outputs are an instance interface. Changing it never mutates the shared type registry.
-	inline std::vector<engine::imagegraph::PortSchema>
-	ImageGraphOutputPorts(const engine::imagegraph::Node &node) {
+	inline std::vector<engine::imagegraph::PortSchema> ImageGraphOutputPorts(
+		const engine::imagegraph::Node &node, const engine::imagegraph::Document *document = nullptr
+	) {
 		using namespace engine::imagegraph;
 		std::vector<PortSchema> ports;
 		const auto *schema = FindSchema(node.Type);
@@ -32,8 +33,9 @@ namespace studio::detail {
 		for (const auto &port : schema->Ports) {
 			if (port.Direction != PortDirection::Output) continue;
 			if (channelArray && !ports.empty()) continue;
-			if (node.Type == "value.noise_field" || node.Type == "value.sample_noise") {
-				const auto instance = NoiseNodePort(node, port.Id, PortDirection::Output);
+			if (node.Type == "value.noise_field" || node.Type == "value.sample_noise" ||
+				(IsNoiseImageGenerator(node.Type) && port.Id == "field")) {
+				const auto instance = NoiseNodePort(node, port.Id, PortDirection::Output, document);
 				if (instance) ports.push_back(*instance);
 			} else {
 				ports.push_back(
