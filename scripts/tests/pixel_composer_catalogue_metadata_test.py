@@ -356,6 +356,13 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "87fb3005df645ebb638a0f310ccd1bb07e0c711169fa8b3554277cb90f69dc0c",
                 },
             ),
+            (
+                "scripts/node_weave/node_weave.gml",
+                {
+                    "bytes": 2923,
+                    "sha256": "be8890bee5d7c4629ae04e6f79cad9f5ef734639259355ff1c7f662f0ea3e4fa",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (

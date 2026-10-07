@@ -6,6 +6,11 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.weave" &&
+			((input.SourceKind == "ValueUnit" && (input.Id == "position_unit" || input.Id == "scale_unit")) ||
+			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||
+			 (input.SourceKind == "CurveToggle" && input.Id == "shading_curved")))
+			return true;
 		if (entry.Type == "pc.noise_strand" &&
 			((input.SourceKind == "ValueUnit" && input.Id == "position_unit") ||
 			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only")))

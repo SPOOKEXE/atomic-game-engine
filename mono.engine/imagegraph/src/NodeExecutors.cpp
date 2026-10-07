@@ -45,6 +45,7 @@ namespace engine::imagegraph::detail {
 					  SourceVoronoiExtraExecutors(),
 					  SourceShardNoiseExecutors(),
 					  SourceStrandNoiseExecutors(),
+					  SourceWeaveExecutors(),
 					  SourceTileTransformExecutors(),
 					  SourceErodeExecutors(),
 					  PathExecutors(),

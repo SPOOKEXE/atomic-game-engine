@@ -24,6 +24,7 @@
 #include "nodes/SourceStrandNoise.hpp"
 #include "nodes/SourceTileTransform.hpp"
 #include "nodes/SourceVoronoiExtra.hpp"
+#include "nodes/SourceWeave.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -885,6 +886,7 @@ namespace engine::imagegraph::detail {
 							   : context.Authored.Type == "pc.voronoi_extra" ? AdmitSourceVoronoiExtra
 							   : context.Authored.Type == "pc.shard_noise"	 ? AdmitSourceShardNoise
 							   : context.Authored.Type == "pc.noise_strand"	 ? AdmitSourceStrandNoise
+							   : context.Authored.Type == "pc.weave"		 ? AdmitSourceWeave
 							   : context.Authored.Type == "pc.polar"		 ? AdmitSourcePolar
 							   : context.Authored.Type == "pc.tile"			 ? AdmitSourceTileTransform
 																			 : nullptr;
