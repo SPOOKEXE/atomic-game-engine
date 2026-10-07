@@ -349,9 +349,12 @@ namespace engine::imagegraph::detail {
 					if (newline == std::string::npos) break;
 					offset = newline + 1;
 				}
-				if (options.Monospaced) candidate.Width = candidate.MonoWidth * characters;
 				if (candidate.RawText.empty()) candidate.Height = 0;
 			}
+			// Source unwrapped full-text width uses W times the whole raw character count,
+			// including newlines, even when proportional measurements were observed.
+			if (options.Monospaced && options.MaximumLineWidth == 0)
+				candidate.Width = candidate.MonoWidth * characters;
 		}
 		if (!std::isfinite(candidate.Width) || !std::isfinite(candidate.Height) ||
 			candidate.CharacterCount > Limits::MaximumArrayElements)
