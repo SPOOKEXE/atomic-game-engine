@@ -65,6 +65,9 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Decode bounded font bytes into glyph bitmaps and metrics.
 - [x] Decode real outline and bitmap font distance fields with bounded tracked storage.
 - [x] Integrate Flow and Bubble noise generators.
+- [x] Add noise Generator/Computed modes with separate 1D/2D/3D coordinate and Scalar/Vector2/Vector3 output dropdowns.
+- [x] Add union ports, darken incompatible sockets while connecting, and display compatible port IDs.
+- [_] Extend source noise generators and their consumers to selectable typed field outputs.
 - [x] Integrate bounded Cristal noise generation and typed input projection.
 - [x] Integrate bounded Gradient Cube image and cross-section outputs; pass joined CPU validation.
 - [x] Integrate bounded Surface Project 3D outputs and source getters; pass joined CPU validation.
