@@ -40,7 +40,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceCellularExecutors();
 	std::span<const ExecutorEntry> SourcePerlinExecutors();
 	std::span<const ExecutorEntry> SourcePerlinExtraExecutors();
-	std::span<const ExecutorEntry> SourcePerlinCubeExecutors();
+	std::span<const ExecutorEntry> SourceNoiseCubeExecutors();
 	std::span<const ExecutorEntry> SourceVoronoiExtraExecutors();
 	std::span<const ExecutorEntry> SourceShardNoiseExecutors();
 	std::span<const ExecutorEntry> SourceStrandNoiseExecutors();

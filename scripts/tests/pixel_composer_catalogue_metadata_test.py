@@ -384,6 +384,13 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "ccb69433c608f35af4f015ed9811ed7a65ab765c40c9000a71d0c82069bc3e1e",
                 },
             ),
+            (
+                "scripts/node_cellular_cube/node_cellular_cube.gml",
+                {
+                    "bytes": 1792,
+                    "sha256": "385b6fe46d838809562eb3cfb4bd7bcbb4dbd58afea1554334d4d3eff6cd17b8",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (

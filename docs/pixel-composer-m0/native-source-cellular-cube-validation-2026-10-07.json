@@ -1,0 +1,92 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.cellular_cube surface and cross-section source equations. Perlin and Cellular share the cube executor. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/__node_shader/__node_shader.gml": "81b23b94aac6df118187510083d3f59c02b4bf09799e75c72ab5a19e7e17d45f",
+      "scripts/__node_shader_generator/__node_shader_generator.gml": "e917d1974118124fef04ce6121459b2c73b956201edd6ea36c71ad223fd3f6dd",
+      "scripts/node_perlin_cube/node_perlin_cube.gml": "ccb69433c608f35af4f015ed9811ed7a65ab765c40c9000a71d0c82069bc3e1e",
+      "shaders/sh_perlin_cube/sh_perlin_cube.fsh": "2f0b0023eae390635144ebea73024cd93d5171514a13773de203eed63f1aad4e",
+      "scripts/node_cellular_cube/node_cellular_cube.gml": "385b6fe46d838809562eb3cfb4bd7bcbb4dbd58afea1554334d4d3eff6cd17b8",
+      "shaders/sh_cellular_cube/sh_cellular_cube.fsh": "ac6409d1ea4b564b9887e77f95ee7790a75c8394b20e15062909ff660c89f2b7"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceNoiseCube.cpp",
+    "rules": [
+      "fourteen source slots, two image outputs, cube and sphere ray marching shared with Perlin Cube",
+      "binary32 vector hash with sum offsets 0/1/2; 27-neighbor z/y/x search, Euclidean distance minimum initialized to one",
+      "normalized octave accumulation with constructor default one iteration; Perlin equations and four-iteration default preserved",
+      "camera X*Y*Z rotation with explicit cofactor inverse; object rotation, signed scale, position and axis permutations",
+      "surface misses preserve sampled RGB with zero alpha; cross-section samples selected plane with covered alpha one",
+      "source half-even allocation and raw dimension center coverage; uncovered pixels clear both outputs",
+      "nonpositive iteration skips seed and noise transforms before Level remapping; equal endpoints refused",
+      "seven explicit depths; finite shade prescan refuses arithmetic and half-storage overflow before allocation or observers",
+      "Cellular complete selected batch admission: 512 per allocated pixel, covered pixel adds 24576 plus 16384 per positive iteration, 64M cap; Perlin quote preserved",
+      "both surfaces and row records reserved; four schedules; source getter projections and numeric Vec3 array padding/truncation",
+      "Format9 animation and inherited instances; unused last octave coordinates do not cause overflow refusal",
+      "private cube helper namespace prevents unity symbol collisions"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cube-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cube-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cube-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5639,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3941,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cube-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cube-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cube-cpu-child-hashes-batch2.json",
+    "independent_reference_cases": 46,
+    "independent_pixel_references": 92,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cube-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/cellular-cube-independent-reference.json"
+    ],
+    "read_review": "root read pinned constructor/shader, shared runtime, getters, metadata, both fixtures and final namespace repair before joined builds",
+    "new_cellular_cube_test_cases": 13
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "stage": "joined build",
+      "build_exit_code": 1,
+      "build_errors": 1,
+      "failure_excerpt": "SourceNoiseCube.cpp:211:23: error: redefinition of float engine::imagegraph::detail::{anonymous}::Fract(float)",
+      "cause": "renamed cube source now shares a unity translation unit with SourceNoise.cpp, whose anonymous namespace also defines Fract",
+      "repair": "all cube helpers isolated in a private source_noise_cube namespace; public registry and admission qualify helper names; equations unchanged",
+      "checks_run": false
+    }
+  ],
+  "not_run": [
+    "matched licensed Pixel Composer captures",
+    "headed live Studio verification",
+    "dedicated Cellular Cube performance profiling",
+    "fresh dev/server/ci preset matrices",
+    "new sanitizer build"
+  ],
+  "limits": [
+    "source-equation references do not establish licensed runtime pixel parity",
+    "CPU libm and device float behavior can differ",
+    "stable executor profile scopes present; no measured speed claim"
+  ],
+  "external_references": {
+    "glsl_common_functions": "https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html"
+  },
+  "build_warnings_note": "initial build reported unchanged dependency warnings and an unused helper warning alongside the recorded redefinition error; final build emitted no warnings"
+}
