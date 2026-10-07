@@ -1,0 +1,75 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.pixel_sort executor. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_pixel_sort/node_pixel_sort.gml": "71cbfc22ad52552278fb779cac9a2912745fcb702e773c608375051ec4bc8f3b",
+      "shaders/sh_pixel_sort/sh_pixel_sort.fsh": "1a747b520ea1f624091e1dd0aa9a10090966233825a75d7ef81ce1a6c6625733",
+      "scripts/node_value_int/node_value_int.gml": "75ae2d6a3df5c6d7f62e50adf0bfc1f1467c51e6519bb80011f6164536dff8d2",
+      "scripts/surface_functions/surface_functions.gml": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+      "scripts/mask_function/mask_function.gml": "94c22c8b1d3085c8ada6c673e5836326a8c866579b35ebb4487c343fb4f94023"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourcePixelSort.cpp",
+    "rules": [
+      "half-even integer getters; floor division by 90 and signed modulo normalization for four directions",
+      "alternating neighbour-pair parity; vertical first pass starts at row one; out-of-bounds pixels preserved",
+      "strict RGB luminance threshold with shader float weights; alpha ignored for comparisons and full RGBA copied on source asymmetric ties",
+      "positive iterations quantize source through RGBA8 ping-pong scratch even when selected output format is float",
+      "nonpositive iteration bypasses finish modifiers; inactive copy preserves source; shared validation still rejects malformed inputs",
+      "shared mask feather, Mix, Channel, input row selection, safe main Atlas drawing and raw Atlas mask refusal",
+      "complete selected batch admitted before execution against 64000000 work units; actual scratch allocation charged to live byte budget"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-sort-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-sort-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-sort-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5467,
+    "new_pixel_sort_test_cases": 12,
+    "startup_test_cases": 1,
+    "python_tests": 104,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3699,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-sort-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-sort-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/pixel-sort-cpu-child-hashes-batch2.json",
+    "read_review": "Sol implementation and read review, Luna fixture drafts and repair, root shader-derived fixture and integration review"
+  },
+  "issues": [
+    {
+      "stage": "pre-build review",
+      "cause": "draft fixtures assumed sorted ascending input, missed vertical first-pass phase and RGBA8 scratch quantization, and contained a stray brace; memory case stopped before scratch admission",
+      "repair": "grug derive exact outputs from pinned shader, cover HDR/signed samples, remove stray brace and exercise scratch reservation directly"
+    },
+    {
+      "batch": 1,
+      "check": "core",
+      "output": "3163 of 3164 core cases passed; SourcePixelSort.cpp identity.Ok failed because shared ExecuteChecked validates malformed mask before native early return",
+      "repair": "grug retain shared validation; use valid black mask for bypass assertions and separately assert exact InvalidValue/mask refusal for iteration-zero and inactive paths"
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Pixel Sort performance profiling"
+  ],
+  "limits": [
+    "native source-derived fixtures do not establish licensed runtime pixel parity",
+    "ENGINE_PROFILE records executor work, but no dedicated performance result is claimed",
+    "build timings and test durations are verification evidence, not a performance claim"
+  ]
+}
