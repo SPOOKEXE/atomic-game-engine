@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.displace. pinned source arithmetic checked; licensed runtime parity remains unverified.",
+  "contract": {
+    "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_files": {
+      "scripts/node_displace/node_displace.gml": {
+        "bytes": 7600,
+        "sha256": "bffd5ada48215d8e2e09f1cd0d1d786771e1a3302bed8a8bd6e8e48632e884fe",
+        "working_tree_matches_git_blob": true
+      },
+      "shaders/sh_displace/sh_displace.fsh": {
+        "bytes": 14203,
+        "sha256": "07d3f43bdfe324332f13aff28e46aafb99581012de1f3d5e7aa8f240ce697cd5"
+      },
+      "scripts/node_processor/node_processor.gml": {
+        "bytes": 11806,
+        "sha256": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/node_value/node_value.gml": {
+        "bytes": 111774,
+        "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/node_value_vec2/node_value_vec2.gml": {
+        "bytes": 11175,
+        "sha256": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/shader_functions/shader_functions.gml": {
+        "bytes": 10916,
+        "sha256": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/surface_functions/surface_functions.gml": {
+        "bytes": 37782,
+        "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/_draw_defines/_draw_defines.gml": {
+        "bytes": 1424,
+        "sha256": "f4702dd2337ca20635d699456b6ef27c11ff1aa890f91610629b4d91b94eb51c",
+        "working_tree_matches_git_blob": true
+      }
+    },
+    "executor": "mono.engine/imagegraph/src/nodes/SourceDisplace.cpp",
+    "tests": [
+      "mono.engine/imagegraph/tests/SourceDisplace.cpp",
+      "mono.engine/imagegraph/tests/SourceDisplaceBatch.cpp"
+    ],
+    "rules": [
+      "Linear, Vector, Angle, Gradient, Radial and Zoom equations; separator mode 4 refuses explicitly",
+      "alpha-weighted luma, separated axes, neighboring mean RGB and source row-vector rotations",
+      "host double reference Position and Mid Point conversion before float upload, sharing source row zero across all selected rows; linked vectors already carry pixels",
+      "mapped Strength and Mid Value selected endpoints, scalar replication, catalogue range defaults and low endpoint fallback",
+      "nearest auxiliary texture stages; displacement and Strength texture2Dintp retain main-surface dimensions; Mid Value plain nearest",
+      "source float GLSL curve evaluator and bounded curve layout; source mode-dependent curve use",
+      "UV remapping inside each displacement step, including reposition; UV alpha ignored; Oversample Mode input ignored",
+      "iterative strength steps, reposition, fade distance, stop empty and Overwrite/Min/Max/Mix blending, including final second blend",
+      "RGBA8 scratch clipping and quantization before first pass and after every repeat; final requested depth and processor finish against original typed image",
+      "missing required maps copy original into requested format and bypass finish; inactive preserves original bytes and depth",
+      "main Atlas unwraps backing pixels; raw auxiliary Atlas bindings refuse with named ports",
+      "complete selected batch quote capped at 64000000 conservative work units and full coordinate path checked before output allocation",
+      "charged scratch storage, restored transient reference state, differing source dimensions, linked values, Expand, animation and native document round trips"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/displace-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/displace-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/displace-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5420,
+    "new_displace_test_cases": 16,
+    "startup_test_cases": 1,
+    "python_tests": 104,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3686,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/displace-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/displace-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/displace-cpu-child-hashes-batch2.json",
+    "read_review": "Sol source, implementation, shared wiring, docs and fixture read reviews; both post-batch fixture repairs independently confirmed; no remaining concrete defects"
+  },
+  "issues": [
+    {
+      "stage": "pre-build read review",
+      "cause": "draft lacked mapped helper include and scalar replication wiring; fixtures had clamp, gradient direction, endpoint and derived-overflow expectation errors",
+      "repair": "grug add mapped helper branches and explicit include, preserve named mid_value diagnostic, repair all identified fixture controls and expectations before first joined build"
+    },
+    {
+      "batch": 1,
+      "check": "core",
+      "output": "3126 of 3128 cases passed; shifted pixel expected red 70 but got 80; native graph Read(Write(document)) returned Status::Malformed",
+      "cause": "shift fixture expected original pixel label instead of displaced neighbor; graph fixture kept version 1 despite junction and array data",
+      "repair": "grug expect source neighbor label 80 and set fixture FormatVersion 9; both repairs applied together before second joined build",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/displace-cpu-core-batch1.log"
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Displace performance profiling"
+  ],
+  "limits": [
+    "native source-derived evidence does not establish licensed pixel parity or platform-specific filtering and format conversion behavior",
+    "nonfinite controls or derived coordinates and unsupported selectors return explicit named diagnostics",
+    "coordinate admission conservatively checks the full iterative path independently of later empty-pixel stops",
+    "RGBA8 scratch conversion intentionally clips finite HDR before displacement; typed processor finish can restore original HDR",
+    "standard sampler selector 6 follows the plain texture branch in sh_displace rather than extended CleanEdge behavior",
+    "Displace has ENGINE_PROFILE imagegraph.source.displace; joined suite durations are verification timings, not a performance claim"
+  ]
+}

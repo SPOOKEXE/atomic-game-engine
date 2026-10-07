@@ -35,6 +35,7 @@ namespace engine::imagegraph::detail {
 					  SourcePixelMathExecutors(),
 					  SourceGlowExecutors(),
 					  SourcePolarExecutors(),
+					  SourceDisplaceExecutors(),
 					  SourceTileTransformExecutors(),
 					  SourceErodeExecutors(),
 					  PathExecutors(),

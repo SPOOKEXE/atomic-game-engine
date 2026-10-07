@@ -10,6 +10,7 @@
 #include "SourceRetainedImageOutputs.hpp"
 #include "ValuePayload.hpp"
 #include "nodes/SourceBend.hpp"
+#include "nodes/SourceDisplace.hpp"
 #include "nodes/SourceGlow.hpp"
 #include "nodes/SourcePixelMath.hpp"
 #include "nodes/SourcePolar.hpp"
@@ -847,9 +848,25 @@ namespace engine::imagegraph::detail {
 				return false;
 			context.TileReferenceDimension = reference;
 		}
+		struct RestoreDisplaceReference {
+			NodeContext &Context;
+			std::optional<Vector2> Previous;
+			~RestoreDisplaceReference() {
+				Context.DisplaceReferenceDimension = Previous;
+			}
+		} restoreDisplaceReference{context, context.DisplaceReferenceDimension};
+		if (context.Authored.Type == "pc.displace") {
+			uint64_t scratchOwned = 0;
+			if (!selectRow(0, scratchOwned)) return false;
+			const auto *source = context.Input("surface_in");
+			if (!source)
+				return context.Fail(Status::InvalidValue, "Displace requires Surface In", "surface_in");
+			context.DisplaceReferenceDimension = Vector2{double(source->Width), double(source->Height)};
+		}
 		const auto admission = context.Authored.Type == "pc.bend"		  ? AdmitSourceBend
 							   : context.Authored.Type == "pc.pixel_math" ? AdmitSourcePixelMath
 							   : context.Authored.Type == "pc.glow"		  ? AdmitSourceGlow
+							   : context.Authored.Type == "pc.displace"	  ? AdmitSourceDisplace
 							   : context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
 							   : context.Authored.Type == "pc.tile"		  ? AdmitSourceTileTransform
 																		  : nullptr;

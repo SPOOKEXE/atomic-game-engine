@@ -99,6 +99,8 @@ namespace engine::imagegraph::detail {
 		std::vector<std::pair<std::string_view, const Value *>> ValueViews;
 		// grug Tile reference units use one raw preview-row output size across the selected batch.
 		std::optional<Vector2> TileReferenceDimension;
+		// grug source Displace reference units share main surface row zero.
+		std::optional<Vector2> DisplaceReferenceDimension;
 		// The executor may copy a bounded recipe; published values never retain this borrowed pointer.
 		const Document *EvaluationDocument = nullptr;
 		const PcxNameResolver *PcxNames = nullptr;
