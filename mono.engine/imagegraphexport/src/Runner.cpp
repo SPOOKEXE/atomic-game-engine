@@ -1138,7 +1138,7 @@ namespace engine::imagegraphexport::runner {
 	) {
 		const auto extension = path.extension().string();
 		if (extension == ".png") return WritePng(path, image, failure);
-		if (extension == ".bmp" || extension == ".exr") {
+		if (extension == ".bmp" || extension == ".exr" || extension == ".ico") {
 			std::vector<uint8_t> bytes;
 			if (!EncodeStill(extension, image, bytes, failure)) return false;
 			std::ofstream stream(path, std::ios::binary);
@@ -1152,7 +1152,7 @@ namespace engine::imagegraphexport::runner {
 			}
 			return true;
 		}
-		failure = "host still encoder needs PNG, BMP or EXR destination";
+		failure = "host still encoder needs PNG, BMP, EXR or ICO destination";
 		return false;
 	}
 
@@ -1513,8 +1513,10 @@ namespace engine::imagegraphexport::runner {
 			return 2;
 		}
 		if (pngOutput && outputFile.extension() != ".png" && outputFile.extension() != ".bmp" &&
-			outputFile.extension() != ".exr" && !arrayOutput && !animationOutput) {
-			errors << "error status=Arguments message=\"output path must use the .png, .bmp, .exr, .apng or "
+			outputFile.extension() != ".exr" && outputFile.extension() != ".ico" && !arrayOutput &&
+			!animationOutput) {
+			errors << "error status=Arguments message=\"output path must use the .png, .bmp, .exr, .ico, "
+					  ".apng or "
 					  ".json extension\"\n";
 			return 2;
 		}

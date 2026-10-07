@@ -347,7 +347,8 @@ namespace engine::imagegraphexport {
 			return false;
 		}
 		const bool native = nativeGif || (extension == ".png" && settings.PngSubformat == 2) ||
-							extension == ".bmp" || extension == ".exr" || extension == ".apng";
+							extension == ".bmp" || extension == ".exr" || extension == ".ico" ||
+							extension == ".apng";
 		if (native && settings.Animation != (extension == ".apng" || nativeGif)) {
 			failure = "native animation export uses .apng";
 			return false;

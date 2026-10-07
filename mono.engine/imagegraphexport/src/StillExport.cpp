@@ -1,5 +1,7 @@
 #include "StillExport.hpp"
 
+#include "IconExport.hpp"
+
 #include <engine/imagegraph/Document.hpp>
 
 #include <algorithm>
@@ -47,6 +49,7 @@ namespace engine::imagegraphexport::runner {
 			failure = "evaluated image violates export bounds";
 			return false;
 		}
+		if (extension == ".ico") return EncodeIcon(image, bytes, failure);
 		if (extension == ".bmp") {
 			const uint64_t rowBytes = (static_cast<uint64_t>(image.Width) * 3 + 3) & ~uint64_t{3};
 			const uint64_t size = 54 + rowBytes * image.Height;
