@@ -5248,6 +5248,7 @@ namespace client {
 		auto initialGpu = Renderer.MemoryStatistics();
 		double benchmarkSeconds = 0.0;
 		uint64_t benchmarkDrawCalls = 0, benchmarkUploadedBytes = 0, benchmarkSubmittedFrames = 0;
+		uint64_t benchmarkImageGraphDiagnosticFrames = 0;
 
 		while (Running) {
 			if (!PumpPresentationHost()) break;
@@ -5284,6 +5285,7 @@ namespace client {
 					benchmarkHeap,
 					FrameGraph::OffThreadDropped()
 				);
+				if (!LiveImageGraphs.LastError().empty()) ++benchmarkImageGraphDiagnosticFrames;
 				benchmarkDrawCalls += LastFrame.DrawCalls;
 				benchmarkUploadedBytes += LastFrame.UploadedBytes;
 				benchmarkSubmittedFrames += LastFrame.Submitted ? 1 : 0;
@@ -5396,13 +5398,13 @@ namespace client {
 		// shutdown.
 		bool profileArtifactsWritten = true;
 		if (benchmarking) {
-			if (!LiveImageGraphs.LastError().empty()) {
+			if (!LiveImageGraphs.LastError().empty() && LiveImageGraphs.PublishedTextureCount() == 0) {
 				ENGINE_ERROR("benchmark imagegraph: {}", LiveImageGraphs.LastError());
 				return EXIT_PROFILE_ARTIFACT;
 			}
 			const auto gpu = Renderer.MemoryStatistics();
 			const double frames = static_cast<double>(benchmark.FrameCount());
-			const std::array<engine::core::BenchmarkMetric, 8> metrics = {
+			const std::array<engine::core::BenchmarkMetric, 10> metrics = {
 				{{"gpu_live_bytes", static_cast<double>(gpu.LiveBytes)},
 				 {"gpu_peak_bytes", static_cast<double>(gpu.PeakBytes)},
 				 {"gpu_allocated_bytes", static_cast<double>(gpu.AllocatedBytes - initialGpu.AllocatedBytes)},
@@ -5417,7 +5419,10 @@ namespace client {
 				 {"uploaded_bytes", static_cast<double>(benchmarkUploadedBytes)},
 				 {"uploaded_bytes_per_frame",
 				  frames > 0.0 ? static_cast<double>(benchmarkUploadedBytes) / frames : 0.0},
-				 {"submitted_frames", static_cast<double>(benchmarkSubmittedFrames)}}
+				 {"submitted_frames", static_cast<double>(benchmarkSubmittedFrames)},
+				 {"imagegraph_published_textures",
+				  static_cast<double>(LiveImageGraphs.PublishedTextureCount())},
+				 {"imagegraph_diagnostic_frames", static_cast<double>(benchmarkImageGraphDiagnosticFrames)}}
 			};
 			if (!benchmark.Write(
 					Settings.BenchmarkReport,

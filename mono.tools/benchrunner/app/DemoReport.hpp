@@ -98,7 +98,8 @@ namespace benchrunner {
 
 	inline bool DemoDiagnostic(std::string_view name) {
 		return name == "draw_calls_per_frame" || name == "submitted_frames" || name == "frame_count" ||
-			   name == "duration_seconds" ||
+			   name == "duration_seconds" || name == "imagegraph_published_textures" ||
+			   name == "imagegraph_diagnostic_frames" ||
 			   (name.ends_with("_per_frame") && name.find("_ms_") == std::string_view::npos) ||
 			   name.starts_with("framegraph_") || name == "tick_count" || name == "tick_rate_hz" ||
 			   name == "tick_overruns" || name == "clients_admitted" ||
@@ -185,6 +186,10 @@ namespace benchrunner {
 				}
 				workload.Basis = std::move(basis);
 				DemoJson metrics = report.at("metrics");
+				if (entry.value("kind", "") == "client-world" &&
+					DemoNumber(metrics, "imagegraph_published_textures") < 1) {
+					throw std::runtime_error("imagegraph demo published no texture: " + name);
+				}
 				if (entry.value("kind", "") == "server-replica" &&
 					DemoNumber(metrics, "clients_admitted") < 1) {
 					throw std::runtime_error("server replication measurement admitted no client: " + name);
@@ -660,7 +665,8 @@ namespace benchrunner {
 				   "owning thread only; background workers are "
 				   "excluded. "
 				   "Off-thread rejected spans are visible as diagnostics. Owner-thread drops invalidate "
-				   "measurements.\n\n"
+				   "measurements. ImageGraph diagnostic frames include pending GPU captures and errors; "
+				   "published texture counts verify active graph output.\n\n"
 				<< "Run `just demo-bench` to collect three five-second samples per available demo. "
 				   "Run `just demo-impact` to compare with this reusable baseline, `just "
 				   "demo-impact-report <collection-directory>` to "

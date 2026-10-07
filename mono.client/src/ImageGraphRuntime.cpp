@@ -2069,6 +2069,15 @@ namespace client {
 		return updated;
 	}
 
+	size_t ImageGraphRuntime::PublishedTextureCount() const {
+		size_t count = 0;
+		for (const auto &[key, entry] : Entries) {
+			(void)key;
+			if (entry.Published) ++count;
+		}
+		return count;
+	}
+
 	void ImageGraphRuntime::RetireInactiveOwners(
 		engine::render::Renderer &renderer, std::span<const engine::core::Name> owners
 	) {

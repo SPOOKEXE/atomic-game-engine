@@ -144,7 +144,7 @@ namespace client {
 		void
 		RetireInactiveOwners(engine::render::Renderer &renderer, std::span<const engine::core::Name> owners);
 
-		// Most recent host or publication failure, cleared after a successful update.
+		// Most recent host, publication or pending-capture diagnostic for this frame.
 		const std::string &LastError() const {
 			return Error;
 		}
@@ -154,6 +154,8 @@ namespace client {
 		uint64_t DocumentParses() const {
 			return Parses;
 		}
+		// Live texture bindings that have completed a publication.
+		size_t PublishedTextureCount() const;
 		size_t CachedDocumentCount() const {
 			return Documents.size();
 		}

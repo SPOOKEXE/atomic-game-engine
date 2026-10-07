@@ -394,6 +394,11 @@ TEST_CASE("demo measurements require real GPU submissions and admitted viewers",
 		fixture.Manifest["workloads"][0]["kind"] = "client";
 		fixture.Report["metrics"]["submitted_frames"] = 0;
 	}
+	SECTION("imagegraph world publishes no texture") {
+		fixture.Manifest["workloads"][0]["kind"] = "client-world";
+		fixture.Report["metrics"]["submitted_frames"] = 3;
+		fixture.Report["metrics"]["imagegraph_published_textures"] = 0;
+	}
 	SECTION("replication server admits no viewer") {
 		fixture.Manifest["workloads"][0]["kind"] = "server-replica";
 		fixture.Report["metrics"]["clients_admitted"] = 0;
