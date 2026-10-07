@@ -504,6 +504,12 @@ namespace benchrunner {
 				continue;
 			}
 			if (oldWorkload.Status != "measured") {
+				if (candidate->second.Status != "measured") {
+					document << "| " << DemoCell(name) << " | Missing current measurement | | | | | FAIL |\n";
+					passed = false;
+					if (coverageValid) *coverageValid = false;
+					continue;
+				}
 				document << "| " << DemoCell(name) << " | "
 						 << (candidate->second.Status == "measured" ? "Added" : "Unavailable")
 						 << " | | | | | "
@@ -560,9 +566,15 @@ namespace benchrunner {
 			}
 		}
 		for (const auto &[name, workload] : current.Workloads) {
-			(void)workload;
+			if (workload.Status != "measured") {
+				passed = false;
+				if (coverageValid) *coverageValid = false;
+			}
 			if (!baseline.Workloads.contains(name))
-				document << "| " << DemoCell(name) << " | Added workload | | | | | Added |\n";
+				document << "| " << DemoCell(name) << " | "
+						 << (workload.Status == "measured" ? "Added workload | | | | | Added"
+														   : "Missing current measurement | | | | | FAIL")
+						 << " |\n";
 		}
 		document << '\n';
 		return passed;

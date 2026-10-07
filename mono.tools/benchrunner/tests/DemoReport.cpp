@@ -151,13 +151,20 @@ TEST_CASE(
 TEST_CASE("demo comparison refuses lost baseline coverage", "[benchrunner]") {
 	DemoFixture fixture;
 	fixture.Write();
-	const auto baseline = DemoLoad(fixture.Directory);
+	auto baseline = DemoLoad(fixture.Directory);
 	auto current = baseline;
 	SECTION("workload removed") {
 		current.Workloads.clear();
 	}
 	SECTION("workload unavailable") {
 		current.Workloads.at("Demo").Status = "unavailable";
+	}
+	SECTION("added workload absent on both revisions") {
+		baseline.Workloads.at("Demo").Status = "unavailable";
+		current.Workloads.at("Demo").Status = "unavailable";
+	}
+	SECTION("new unavailable workload") {
+		current.Workloads.emplace("Missing new demo", DemoWorkload{.Status = "unavailable"});
 	}
 	SECTION("metric removed") {
 		current.Workloads.at("Demo").Metrics.erase("physics_ms_per_frame");
@@ -377,4 +384,18 @@ TEST_CASE(
 	CHECK_FALSE(DemoCompareTable(document, baseline, current, DemoLimits{}));
 	CHECK(document.str().find("Input warning") != std::string::npos);
 	CHECK_FALSE(DemoDiagnostic("render_wall_ms_per_frame"));
+}
+
+TEST_CASE("demo measurements require real GPU submissions and admitted viewers", "[benchrunner]") {
+	DemoFixture fixture;
+	SECTION("client submits no GPU work") {
+		fixture.Manifest["workloads"][0]["kind"] = "client";
+		fixture.Report["metrics"]["submitted_frames"] = 0;
+	}
+	SECTION("replication server admits no viewer") {
+		fixture.Manifest["workloads"][0]["kind"] = "server-replica";
+		fixture.Report["metrics"]["clients_admitted"] = 0;
+	}
+	fixture.Write();
+	CHECK_THROWS(DemoLoad(fixture.Directory));
 }

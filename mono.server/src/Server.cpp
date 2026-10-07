@@ -769,6 +769,10 @@ namespace server {
 		// Stop is process-global because signal handlers cannot borrow a host. A
 		// fresh host must clear a prior host's stop before any early return.
 		StopRequested.store(false);
+		if (Settings.BenchmarkWaitForClient && (Settings.BenchmarkReport.empty() || !Settings.Listening)) {
+			ENGINE_ERROR("--benchmark-wait-for-client requires --benchmark-report and --listen");
+			return false;
+		}
 		if (!Settings.BenchmarkReport.empty() && (!std::isfinite(Settings.BenchmarkSeconds) ||
 												  Settings.BenchmarkSeconds <= 0.0 || Settings.DataFactory)) {
 			ENGINE_ERROR("benchmark reports require a positive finite duration and a simulation world");
@@ -4198,13 +4202,29 @@ namespace server {
 		StartDiscord();
 
 		std::optional<engine::core::BenchmarkReport> benchmark;
+		auto benchmarkStarted = std::chrono::steady_clock::now();
+		const auto benchmarkWaitStarted = benchmarkStarted;
+		uint64_t benchmarkInitialOverruns = 0;
 		if (!Settings.BenchmarkReport.empty()) {
 			engine::core::FrameGraph::SetEnabled(true);
-			benchmark.emplace(engine::core::HeapProfile::Totals());
+			if (!Settings.BenchmarkWaitForClient) benchmark.emplace(engine::core::HeapProfile::Totals());
 		}
-		const auto benchmarkStarted = std::chrono::steady_clock::now();
 
 		while (Running && !StopRequested.load()) {
+			if (!benchmark && Settings.BenchmarkWaitForClient) {
+				if (Replication && Replication->Carrying() > 0) {
+					benchmark.emplace(engine::core::HeapProfile::Totals());
+					benchmarkStarted = std::chrono::steady_clock::now();
+					benchmarkInitialOverruns = summary.Overruns;
+				} else if (std::chrono::duration<double>(
+							   std::chrono::steady_clock::now() - benchmarkWaitStarted
+						   )
+							   .count() >= 60.0) {
+					ENGINE_ERROR("benchmark: no client admitted within 60 seconds");
+					summary.Failed = true;
+					break;
+				}
+			}
 			const uint64_t tickStarted = engine::core::Clock::Nanoseconds();
 
 			engine::core::FrameGraph::BeginFrame();
@@ -4441,6 +4461,12 @@ namespace server {
 
 			const uint64_t tickEnded = engine::core::Clock::Nanoseconds();
 			const auto spent = static_cast<double>(tickEnded - tickStarted) / 1e9;
+			if (benchmark && Settings.BenchmarkWaitForClient &&
+				(!Replication || Replication->Carrying() == 0)) {
+				ENGINE_ERROR("benchmark: client disconnected before measurement finished");
+				summary.Failed = true;
+				break;
+			}
 			if (benchmark) {
 				benchmark->AddFrame(
 					engine::core::FrameGraph::Spans(),
@@ -4538,12 +4564,13 @@ namespace server {
 			const double durationSeconds =
 				std::chrono::duration<double>(std::chrono::steady_clock::now() - benchmarkStarted).count();
 			const std::array<engine::core::BenchmarkMetric, 4> observations{{
-				{"tick_count", static_cast<double>(ticksSoFar())},
+				{"tick_count", static_cast<double>(benchmark->FrameCount())},
 				{"tick_rate_hz", Settings.TickRate},
-				{"tick_overruns", static_cast<double>(summary.Overruns)},
+				{"tick_overruns", static_cast<double>(summary.Overruns - benchmarkInitialOverruns)},
 				{"clients_admitted", Replication ? static_cast<double>(Replication->Stats().Admitted) : 0.0},
 			}};
-			if (!benchmark->Write(
+			if (summary.Failed ||
+				!benchmark->Write(
 					Settings.BenchmarkReport,
 					durationSeconds,
 					Settings.BenchmarkSeconds,
@@ -4557,6 +4584,9 @@ namespace server {
 				);
 				summary.Failed = true;
 			}
+		} else if (!Settings.BenchmarkReport.empty()) {
+			ENGINE_ERROR("benchmark: run ended before a client was admitted");
+			summary.Failed = true;
 		}
 
 		summary.Ticks = ticksSoFar();

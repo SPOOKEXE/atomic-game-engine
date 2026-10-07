@@ -12,7 +12,6 @@ ServerRings server-replica Rings.luau required
 ServerPhysics server StressPhysics.luau required
 ImageGraph3D client-world Composer-3D-Reference.aworld added
 ImageGraphFeedback client-world Composer-Feedback-And-Fluid.aworld added
-ImageGraphFluid client-world Composer-Fluid-Particles.aworld added
 ImageGraphGui client-world Composer-Gui-And-Shader.aworld added
 ImageGraphMaterials client-world Composer-Material-Maps.aworld added
 ImageGraphFlipbook client-world Composer-Particle-Flipbook.aworld added

@@ -239,6 +239,9 @@ namespace client {
 		// Writes complete-run benchmark totals before teardown; requires allocator hooks.
 		std::filesystem::path BenchmarkReport;
 
+		// Measures a connected run only after the remote world has joined.
+		bool BenchmarkWaitForJoin = false;
+
 		// Fail the run when a tag climbs faster than this, in bytes a second.
 		// Zero checks nothing.
 		//
