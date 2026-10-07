@@ -45,6 +45,8 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic
 	);
 	// Channel zero uses source PCM16 quantization and /2 attenuation, independently of Mono.
+	// The capped transaction admits both vector objects and retained/replacement capacities.
+	// Refusal preserves samples, including its capacity.
 	Status BuildWavPreviewSamples(
 		const AudioBit &clip, uint64_t byteBudget, std::vector<float> &samples, Diagnostic &diagnostic
 	);

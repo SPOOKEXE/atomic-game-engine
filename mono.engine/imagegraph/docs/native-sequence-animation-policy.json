@@ -23,7 +23,7 @@
     "noone": -4,
     "array_safe_get_fast_default": 0
   },
-  "limits": "existing shared evaluation admission and array depth/count/byte limits; full temporary source tree and selected owned output overlap charged before construction",
+  "limits": "existing shared evaluation admission and array depth/count/byte limits; borrowed image input is fully shape-validated, only the selected frame or row is staged, and selected row staging plus owned output overlap is charged before construction; value-array conversion retains full temporary source tree admission",
   "ownership": "pure request clock, no ledger, wall clock or RNG; output copies retained storage",
   "open_gates": [
     "Licensed desktop fractional index coercion has not been measured.",

@@ -119,13 +119,16 @@ TEST_CASE(
 	AudioBit clip{{}, 48000, {{1, -1, .5, -0.5, .5 / 16384, 1.5 / 16384}, {0, 0, 0, 0, 0, 0}}};
 	Diagnostic diagnostic;
 	std::vector<float> samples{17};
-	const uint64_t budget = sizeof(samples) + 6 * sizeof(float);
+	const uint64_t budget = 2 * sizeof(samples) + (samples.capacity() + 6) * sizeof(float);
 	REQUIRE(BuildWavPreviewSamples(clip, budget, samples, diagnostic) == Status::Ok);
 	CHECK(samples == std::vector<float>{.5f, -.5f, .25f, -.25f, 0, 2.0f / 32768});
 	CHECK(BuildWavPreviewSamples(clip, budget - 1, samples, diagnostic) == Status::LimitExceeded);
 	CHECK(samples.front() == .5f);
 	clip.Channels[0][0] = 2;
-	CHECK(BuildWavPreviewSamples(clip, budget, samples, diagnostic) == Status::UnsupportedExecution);
+	CHECK(
+		BuildWavPreviewSamples(clip, Limits::MaximumEvaluationBytes, samples, diagnostic) ==
+		Status::UnsupportedExecution
+	);
 	clip.Channels.clear();
 	clip.Samples.clear();
 	CHECK(BuildWavPreviewSamples(clip, budget, samples, diagnostic) == Status::UnsupportedExecution);

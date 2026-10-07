@@ -5,6 +5,8 @@
 
 #include <cmath>
 #include <limits>
+#include <new>
+#include <stdexcept>
 
 namespace engine::imagegraph {
 	namespace {
@@ -70,8 +72,14 @@ namespace engine::imagegraph {
 		const auto &plane = detail::AudioChannel(clip, 0);
 		if (plane.empty())
 			return Fail(diagnostic, Status::UnsupportedExecution, "empty WAV has no audio preview");
-		if (byteBudget < sizeof(std::vector<float>) ||
-			plane.size() > (byteBudget - sizeof(std::vector<float>)) / sizeof(float))
+		const uint64_t cap = std::min(byteBudget, Limits::MaximumEvaluationBytes);
+		const uint64_t containerBytes = 2 * sizeof(std::vector<float>);
+		if (cap < containerBytes || samples.capacity() > (cap - containerBytes) / sizeof(float))
+			return Fail(
+				diagnostic, Status::LimitExceeded, "retained audio preview exceeds the resident byte budget"
+			);
+		const uint64_t available = cap - containerBytes - samples.capacity() * sizeof(float);
+		if (plane.size() > available / sizeof(float))
 			return Fail(diagnostic, Status::LimitExceeded, "audio preview exceeds the resident byte budget");
 		for (double sample : plane) {
 			const double quantized = detail::DriverRoundHalfEven(sample * 16384);
@@ -82,11 +90,23 @@ namespace engine::imagegraph {
 					"audio preview sample exceeds the source PCM16 range"
 				);
 		}
-		std::vector<float> candidate;
-		candidate.reserve(plane.size());
-		for (double sample : plane)
-			candidate.push_back(static_cast<float>(detail::DriverRoundHalfEven(sample * 16384) / 32768));
-		samples = std::move(candidate);
+		try {
+			std::vector<float> candidate;
+			candidate.reserve(plane.size());
+			if (candidate.capacity() > available / sizeof(float))
+				return Fail(
+					diagnostic,
+					Status::LimitExceeded,
+					"audio preview capacity exceeds the resident byte budget"
+				);
+			for (double sample : plane)
+				candidate.push_back(static_cast<float>(detail::DriverRoundHalfEven(sample * 16384) / 32768));
+			samples = std::move(candidate);
+		} catch (const std::bad_alloc &) {
+			return Fail(diagnostic, Status::LimitExceeded, "audio preview allocation failed");
+		} catch (const std::length_error &) {
+			return Fail(diagnostic, Status::LimitExceeded, "audio preview allocation length exceeded");
+		}
 		return Status::Ok;
 	}
 	Status WavPreviewSyncFrames(

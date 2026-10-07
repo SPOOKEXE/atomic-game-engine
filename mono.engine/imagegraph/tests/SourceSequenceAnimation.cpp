@@ -219,7 +219,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"Sequence admits complete temporary image trees while preserving unrelated live storage",
+	"Sequence copies only the selected frame while preserving unrelated live storage",
 	"[imagegraph][source_sequence_animation][evaluation_budget]"
 ) {
 	ImageArray images;
@@ -269,7 +269,7 @@ TEST_CASE(
 				CHECK(context.OutputImages.front().second == images.Images[1]);
 				if (attempt == 0) peak = budget.Peak();
 				CHECK(budget.Peak() == peak);
-				CHECK(budget.Peak() > budget.Used());
+				CHECK(budget.Peak() == budget.Used());
 				context.OutputImages.front().second.Pixels[0] = 99;
 				CHECK(images.Images[1].Pixels[0] == 40);
 			}
@@ -313,4 +313,54 @@ TEST_CASE(
 	REQUIRE(original.Items.size() == 3);
 	for (size_t i = 0; i < 3; ++i)
 		CHECK(original.Images[std::get<size_t>(original.Items[i].Data)].Pixels[0] == uint8_t(10 * (i + 1)));
+}
+
+TEST_CASE(
+	"Large borrowed image sequences admit one frame and validate unselected references",
+	"[imagegraph][source_sequence_animation][evaluation_budget]"
+) {
+	ImageArray images;
+	Image frame;
+	frame.Width = frame.Height = 64;
+	frame.Pixels.resize(64 * 64 * 4, 0);
+	for (size_t pixel = 0; pixel < frame.Pixels.size(); pixel += 4) {
+		frame.Pixels[pixel] = 42;
+		frame.Pixels[pixel + 3] = 255;
+	}
+	frame.Hash = SurfaceHash(frame);
+	for (size_t index = 0; index < 128; ++index) {
+		images.Items.push_back({images.Images.size()});
+		images.Images.push_back(frame);
+	}
+	const Node node{"sequence", "pc.sequence_anim", "", {}, {}};
+	const auto *entry = FindCatalogueEntry(node.Type);
+	const auto executor = detail::FindExecutor(node.Type);
+	REQUIRE(entry);
+	REQUIRE(executor);
+	EvaluationRequest clock;
+	clock.Tick = 127;
+	for (bool invalid : {false, true}) {
+		if (invalid) images.Items[0].Data = size_t{128};
+		detail::EvaluationBudget budget(32 * 1024);
+		detail::NodeContext context(node, *entry, clock, budget);
+		context.ByteBudget = 32 * 1024;
+		context.Values = {
+			{"sequence", ArrayValue{ValueType::Scalar, {}}}, {"speed", 1.}, {"overflow", EnumValue{1}}
+		};
+		context.ImageArrays = {{"surface_in", &images}};
+		const bool ok = executor(context);
+		INFO(context.FailureMessage);
+		if (invalid) {
+			CHECK_FALSE(ok);
+			CHECK(context.FailureCode == Status::InvalidValue);
+			CHECK(context.OutputImages.empty());
+		} else {
+			REQUIRE(ok);
+			REQUIRE(context.OutputImages.size() == 1);
+			CHECK(context.OutputImages.front().second == frame);
+			context.OutputImages.front().second.Pixels[0] = 99;
+			CHECK(images.Images.back().Pixels[0] == 42);
+			CHECK(budget.Peak() < images.Images.size() * frame.Pixels.size());
+		}
+	}
 }

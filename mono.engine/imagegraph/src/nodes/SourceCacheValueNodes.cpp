@@ -3,6 +3,7 @@
 #include "Families.hpp"
 
 #include <engine/imagegraph/DataReplay.hpp>
+#include <engine/imagegraph/FrameTime.hpp>
 
 #include <algorithm>
 
@@ -56,10 +57,6 @@ namespace engine::imagegraph::detail {
 				return c.Fail(
 					Status::UnsupportedExecution, "value cache needs an explicit data replay owner"
 				);
-			if (c.Request.NegativeFrame || c.Request.Subframe != 0)
-				return c.Fail(
-					Status::UnsupportedExecution, "value cache requires integer nonnegative source frames"
-				);
 			Diagnostic diagnostic;
 			if (ValidateDataReplay(*owner, c.ByteBudget, diagnostic) != Status::Ok)
 				return c.Fail(diagnostic.Code, diagnostic.Message);
@@ -70,7 +67,15 @@ namespace engine::imagegraph::detail {
 			const int64_t begin = c.Integer("start_frame", -1), end = c.Integer("stop_frame", -1);
 			const double first = begin < 0 ? 0 : double(begin) - 1,
 						 last = end < 0 ? total - 1 : double(end) - 1;
-			const bool capture = double(c.Request.Tick) >= first && double(c.Request.Tick) <= last;
+			const auto clock = FrameTimeToReal({c.Request.Tick, c.Request.Subframe, c.Request.NegativeFrame});
+			const bool capture = clock >= first && clock <= last;
+			// grug source indexes cache only inside the real-clock capture range.
+			// fractional writes still need observed GameMaker index coercion.
+			if (capture && (c.Request.NegativeFrame || c.Request.Subframe != 0))
+				return c.Fail(
+					Status::UnsupportedExecution,
+					"value cache capture requires integer nonnegative source frames"
+				);
 			const Image *surface = c.Input("value");
 			const ImageArray *surfaces = nullptr;
 			for (const auto &[port, array] : c.ImageArrays)

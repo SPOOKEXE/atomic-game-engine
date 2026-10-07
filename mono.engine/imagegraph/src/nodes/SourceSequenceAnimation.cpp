@@ -156,6 +156,18 @@ namespace engine::imagegraph::detail {
 					return c.Fail(
 						Status::InvalidValue, "Sequence image array shape is invalid", "surface_in"
 					);
+				// grug borrow the sequence, then copy only the chosen frame or row.
+				// full shape admission above still rejects invalid unselected references.
+				const auto &item = images->Items[size_t(selected)];
+				if (const auto *imageIndex = std::get_if<size_t>(&item.Data))
+					return CopySequenceImage(c, images->Images[*imageIndex]);
+				const auto &children = std::get<std::vector<ImageArrayItem>>(item.Data);
+				TreeCost rowCost;
+				if (!ImageCost(*images, children, rowCost, 1))
+					return c.Fail(Status::InvalidValue, "Selected sequence row is invalid", "surface_in");
+				auto rowCharge = c.ReserveWorkspace(rowCost.Bytes, "surface_in");
+				if (!rowCharge) return false;
+				return Publish(c, FromImages(*images, children), "surface_out", ValueType::Image);
 			} else {
 				cost.Bytes = RetainedPayloadBytes(*array);
 				if (!array->Items.empty()) {

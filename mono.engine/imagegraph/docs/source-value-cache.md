@@ -17,8 +17,12 @@ observation. GPU raster coverage observations do not establish struct identity.
 
 The implementation bounds history frames, recursive payloads and retained bytes
 before copying. Public evaluation rejects ticks above the fixed timeline limit;
-replay validation rejects oversized or unordered frame indices. Signed and
-fractional source cache indices return an unsupported-execution diagnostic.
+replay validation rejects oversized or unordered frame indices. The capture window compares the signed fractional clock before indexing. Clocks
+outside that window publish retained history without writing, including negative
+and fractional clocks. Inside the window, signed and fractional cache writes
+return an unsupported-execution diagnostic. The pinned source writes through
+`cache[CURRENT_FRAME]` directly; its fractional write coercion still requires
+a runtime observation rather than applying the separate read-index profile.
 
 `SourceRouting.cpp` checks native content behavior through compiled graphs,
 document round trips, sequential and direct-seek replay, nested arrays, selected
