@@ -12743,9 +12743,10 @@ namespace engine::imagegraph {
 							((node.Type == "pc.quarternion_lookat" &&
 							  (input.Id == "origin" || input.Id == "target" || input.Id == "up")) ||
 							 ((node.Type == "pc.gradient_cube" || node.Type == "pc.perlin_cube" ||
-							   node.Type == "pc.cellular_cube") &&
+							   node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube") &&
 							  (input.Id == "rotation" || input.Id == "rotation_2" || input.Id == "scale_2" ||
-							   ((node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube") &&
+							   ((node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
+								 node.Type == "pc.simplex_cube") &&
 								input.Id == "position"))));
 						if (sourceSurfaceVec3 && produced[sourceIndex]) {
 							const Image *surface = FindImageOutput(results[sourceIndex], link->FromPort);
@@ -12831,7 +12832,7 @@ namespace engine::imagegraph {
 							(node.Type == "pc.cellular" && input.Id == "scale" &&
 							 input.SourceKind == "Float") ||
 							((node.Type == "pc.perlin_extra" || node.Type == "pc.perlin_cube" ||
-							  node.Type == "pc.cellular_cube") &&
+							  node.Type == "pc.cellular_cube" || node.Type == "pc.simplex_cube") &&
 							 (input.SourceKind == "Slider" || input.SourceKind == "Float" ||
 							  input.SourceKind == "Rotation" || input.SourceKind == "Int")) ||
 							(node.Type == "pc.pytagorean_tile" &&
@@ -12933,7 +12934,8 @@ namespace engine::imagegraph {
 							 node.Type == "pc.voronoi_extra" || node.Type == "pc.shard_noise" ||
 							 node.Type == "pc.noise_strand" || node.Type == "pc.weave" ||
 							 node.Type == "pc.pytagorean_tile" || node.Type == "pc.perlin_extra" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube") &&
+							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
+							 node.Type == "pc.simplex_cube") &&
 							input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {
 							if (const ImageArray *images =
@@ -13086,13 +13088,14 @@ namespace engine::imagegraph {
 							 node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra" ||
 							 node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand" ||
 							 node.Type == "pc.pytagorean_tile" || node.Type == "pc.perlin_extra" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube") &&
+							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
+							 node.Type == "pc.simplex_cube") &&
 							input.SourceKind == "SliRange" &&
 							(node.Type == "pc.noise" || node.Type == "pc.cellular" ||
 							 node.Type == "pc.perlin" || node.Type == "pc.perlin_extra" ||
 							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
-							 node.Type == "pc.noise_strand" || input.Id == "level_in" ||
-							 input.Id == "level_out" ||
+							 node.Type == "pc.simplex_cube" || node.Type == "pc.noise_strand" ||
+							 input.Id == "level_in" || input.Id == "level_out" ||
 							 (node.Type == "pc.flow_noise" && input.Id == "detail") ||
 							 (node.Type == "pc.noise_bubble" &&
 							  (input.Id == "scale" || input.Id == "opacity")));

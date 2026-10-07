@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.simplex_cube surface and cross-section source equations. shared Perlin and Cellular cube behavior remains covered; broader Composer work stays active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/__node_shader/__node_shader.gml": "81b23b94aac6df118187510083d3f59c02b4bf09799e75c72ab5a19e7e17d45f",
+      "scripts/__node_shader_generator/__node_shader_generator.gml": "e917d1974118124fef04ce6121459b2c73b956201edd6ea36c71ad223fd3f6dd",
+      "scripts/node_perlin_cube/node_perlin_cube.gml": "ccb69433c608f35af4f015ed9811ed7a65ab765c40c9000a71d0c82069bc3e1e",
+      "shaders/sh_perlin_cube/sh_perlin_cube.fsh": "2f0b0023eae390635144ebea73024cd93d5171514a13773de203eed63f1aad4e",
+      "scripts/node_cellular_cube/node_cellular_cube.gml": "385b6fe46d838809562eb3cfb4bd7bcbb4dbd58afea1554334d4d3eff6cd17b8",
+      "shaders/sh_cellular_cube/sh_cellular_cube.fsh": "ac6409d1ea4b564b9887e77f95ee7790a75c8394b20e15062909ff660c89f2b7",
+      "scripts/node_simplex_cube/node_simplex_cube.gml": "d30025de4fb3f251e23a2168eb2b1eb8cbfb01f4b828955d49256de8911d94d9",
+      "shaders/sh_simplex_cube/sh_simplex_cube.fsh": "d290274d72adaf22751258d868460f3a8564291999803a79ba8c7868ffc328a8"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceNoiseCube.cpp",
+    "rules": [
+      "fourteen source slots and two image outputs; shared cube/sphere ray marching, camera inverse, object transforms and cross-section planes",
+      "binary32 skew/unskew, all six simplex ranks and equality ties, four normalized hash gradients and attenuated corner contributions",
+      "GLSL signed integer additions explicitly wrap low 32 bits without native signed overflow; out-of-range floored lattice coordinates refused",
+      "constructor defaults to four normalized octaves; nonpositive iteration skips seed and noise-coordinate processing before Level remap",
+      "source half-even dimension allocation and raw center coverage; misses preserve RGB with zero alpha, uncovered pixels clear both outputs",
+      "zero-length gradient refused at seed; consumed nonfinite arithmetic and half-storage overflow refused before outputs or observers",
+      "seven explicit color depths; both outputs and row records reserved before allocation",
+      "whole selected batch work quote: 512 per allocated pixel, covered pixel adds 24576 plus 16384 per positive iteration, 64M cap",
+      "all four schedules, source surface getters, numeric Vec3 array padding/truncation, Format9 seed animation and inherited instances"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-build-batch1.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-cpu-batch1-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5653,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3943,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-source-stability-batch1.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-cpu-child-hashes-batch1.json",
+    "independent_reference_cases": 54,
+    "independent_pixel_references": 108,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-independent-reference.json"
+    ],
+    "zero_gradient_evidence": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-zero-gradient-search.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-zero-gradient.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/simplex-cube-zero-gradient-fixture.json"
+    ],
+    "read_review": "root reviewed pinned constructor/shader, shared runtime, getters, metadata and both fixtures before the joined build",
+    "new_simplex_cube_test_cases": 14
+  },
+  "issues": [],
+  "prebuild_review_repairs": [
+    "integer sum and corner arithmetic implements GLSL wrap semantics, not overflow refusal",
+    "huge position fixture expects InvalidValue at noise_scale because its consumed binary32 skew sum overflows",
+    "constructor default comparison names its explicit four-iteration document accurately"
+  ],
+  "not_run": [
+    "matched licensed Pixel Composer captures",
+    "headed live Studio verification",
+    "dedicated Simplex Cube performance profiling",
+    "fresh dev/server/ci preset matrices",
+    "new sanitizer build"
+  ],
+  "limits": [
+    "source-equation references do not establish licensed runtime pixel parity",
+    "CPU libm and device float behavior can differ",
+    "stable executor profile scopes present; no measured speed claim"
+  ],
+  "external_references": {
+    "glsl_integer_arithmetic": "https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html"
+  },
+  "build_warnings_note": "four warnings in unchanged SourceFlipGrid, SourceFlipParticles and CacheGroupReplay sources; no build errors"
+}

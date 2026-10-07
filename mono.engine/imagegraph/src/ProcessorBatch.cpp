@@ -893,7 +893,8 @@ namespace engine::imagegraph::detail {
 			: context.Authored.Type == "pc.weave"			? AdmitSourceWeave
 			: context.Authored.Type == "pc.pytagorean_tile" ? AdmitSourcePytagoreanTile
 			: context.Authored.Type == "pc.perlin_extra"	? AdmitSourcePerlinExtra
-			: (context.Authored.Type == "pc.perlin_cube" || context.Authored.Type == "pc.cellular_cube")
+			: (context.Authored.Type == "pc.perlin_cube" || context.Authored.Type == "pc.cellular_cube" ||
+			   context.Authored.Type == "pc.simplex_cube")
 				? AdmitSourceNoiseCube
 			: context.Authored.Type == "pc.polar" ? AdmitSourcePolar
 			: context.Authored.Type == "pc.tile"  ? AdmitSourceTileTransform

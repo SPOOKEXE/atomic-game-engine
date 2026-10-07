@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -16,8 +17,10 @@ namespace engine::imagegraph::detail {
 	namespace {
 		namespace source_noise_cube {
 			constexpr uint64_t WORK_LIMIT = 64000000, BASE_WORK = 512, MARCH_WORK = 256 * 96,
-							   PERLIN_OCTAVE_WORK = 2048, CELLULAR_OCTAVE_WORK = 8192;
+							   PERLIN_OCTAVE_WORK = 2048, CELLULAR_OCTAVE_WORK = 8192,
+							   SIMPLEX_OCTAVE_WORK = 8192;
 			using F3 = std::array<float, 3>;
+			enum class NoiseKind { Perlin, Cellular, Simplex };
 			struct Matrix {
 				float Row[3][3]{};
 			};
@@ -29,7 +32,8 @@ namespace engine::imagegraph::detail {
 				float Width = 0, Height = 0, Ortho = 1, NoiseScale = 8, Seed = 0, Cross = 0, Low = 0,
 					  High = 1;
 				int32_t Iteration = 4, Shape = 0, Axis = 0, CrossAxis = 0;
-				bool Covered = false, Cellular = false;
+				bool Covered = false;
+				NoiseKind Kind = NoiseKind::Perlin;
 			};
 			bool Finite(NodeContext &c, std::string_view port, float value) {
 				return std::isfinite(value) ||
@@ -156,7 +160,9 @@ namespace engine::imagegraph::detail {
 			}
 
 			bool Prepare(NodeContext &c, Inputs &in) {
-				in.Cellular = c.Entry.Type == "pc.cellular_cube";
+				in.Kind = c.Entry.Type == "pc.cellular_cube"  ? NoiseKind::Cellular
+						  : c.Entry.Type == "pc.simplex_cube" ? NoiseKind::Simplex
+															  : NoiseKind::Perlin;
 				if (!source2d::ResolveGeneratorDimensions(c, nullptr, in.Canvas.Width, in.Canvas.Height))
 					return false;
 				if (in.Canvas.Width > c.Request.MaximumImageDimension ||
@@ -183,7 +189,12 @@ namespace engine::imagegraph::detail {
 				in.Format = *format;
 				in.Covered = in.Width > .5f && in.Height > .5f;
 				if (!in.Covered) return c.FailureCode == Status::Ok;
-				if (!Integer(c, "iteration", c.Integer("iteration", in.Cellular ? 1 : 4), in.Iteration) ||
+				if (!Integer(
+						c,
+						"iteration",
+						c.Integer("iteration", in.Kind == NoiseKind::Cellular ? 1 : 4),
+						in.Iteration
+					) ||
 					!Choice(c, "shape", in.Shape) || !Choice(c, "axis", in.Axis) ||
 					!Choice(c, "axis_2", in.CrossAxis))
 					return false;
@@ -300,6 +311,120 @@ namespace engine::imagegraph::detail {
 						}
 				return true;
 			}
+			bool SimplexHash(NodeContext &c, F3 point, float seed, float &out) {
+				const float coefficient = 128.852f + seed / 10000.f;
+				const float angle = point[0] * 12.9898f + point[1] * 78.233f + point[2] * coefficient;
+				if (!Finite(c, "seed", coefficient) || !Finite(c, "seed", angle)) return false;
+				out = Fract(std::sin(angle) * 43758.5453f) * 2.f - 1.f;
+				return Finite(c, "seed", out);
+			}
+			bool SimplexGradient(NodeContext &c, F3 point, float seed, F3 &gradient) {
+				constexpr std::array<float, 3> factors{1.f, 2.01f, 2.02f};
+				for (size_t lane = 0; lane < 3; ++lane) {
+					F3 input{point[0] * factors[lane], point[1] * factors[lane], point[2] * factors[lane]};
+					if (!SimplexHash(c, input, seed, gradient[lane])) return false;
+				}
+				const float length = std::sqrt(
+					gradient[0] * gradient[0] + gradient[1] * gradient[1] + gradient[2] * gradient[2]
+				);
+				if (length == 0)
+					return c.Fail(
+						Status::UnsupportedExecution,
+						"Noise Cube simplex gradient normalization is undefined",
+						"seed"
+					);
+				if (!Finite(c, "seed", length)) return false;
+				for (auto &value : gradient)
+					value /= length;
+				return VectorFinite(c, "seed", gradient);
+			}
+			bool SimplexIndex(NodeContext &c, float value, int32_t &out) {
+				const float integer = std::floor(value);
+				if (!std::isfinite(integer) ||
+					double(integer) < double(std::numeric_limits<int32_t>::min()) ||
+					double(integer) > double(std::numeric_limits<int32_t>::max()))
+					return c.Fail(
+						Status::UnsupportedExecution,
+						"Noise Cube simplex lattice exceeds shader integer range",
+						"noise_scale"
+					);
+				out = int32_t(integer);
+				return true;
+			}
+			int32_t SimplexAdd(int32_t left, int32_t right) {
+				// grug GLSL integer sums keep low 32 bits. native signed overflow must not happen.
+				return std::bit_cast<int32_t>(uint32_t(left) + uint32_t(right));
+			}
+
+			bool Simplex(NodeContext &c, F3 point, float seed, float &out) {
+				if (!VectorFinite(c, "noise_scale", point)) return false;
+				constexpr float skew = 1.f / 3.f, unskew = 1.f / 6.f;
+				const float sum = point[0] + point[1];
+				const float s = (sum + point[2]) * skew;
+				if (!Finite(c, "noise_scale", sum) || !Finite(c, "noise_scale", s)) return false;
+				std::array<int32_t, 3> cell{};
+				for (size_t lane = 0; lane < 3; ++lane)
+					if (!SimplexIndex(c, point[lane] + s, cell[lane])) return false;
+				const int32_t total = SimplexAdd(SimplexAdd(cell[0], cell[1]), cell[2]);
+				const float t = float(total) * unskew;
+				F3 origin{};
+				for (size_t lane = 0; lane < 3; ++lane)
+					origin[lane] = point[lane] - (float(cell[lane]) - t);
+				if (!VectorFinite(c, "noise_scale", origin)) return false;
+				std::array<int32_t, 3> first{}, second{};
+				if (origin[0] >= origin[1]) {
+					if (origin[1] >= origin[2]) {
+						first = {1, 0, 0};
+						second = {1, 1, 0};
+					} else if (origin[0] >= origin[2]) {
+						first = {1, 0, 0};
+						second = {1, 0, 1};
+					} else {
+						first = {0, 0, 1};
+						second = {1, 0, 1};
+					}
+				} else {
+					if (origin[1] < origin[2]) {
+						first = {0, 0, 1};
+						second = {0, 1, 1};
+					} else if (origin[0] < origin[2]) {
+						first = {0, 1, 0};
+						second = {0, 1, 1};
+					} else {
+						first = {0, 1, 0};
+						second = {1, 1, 0};
+					}
+				}
+				std::array<F3, 4> offsets{origin, F3{}, F3{}, F3{}}, corners{}, gradients{};
+				for (size_t lane = 0; lane < 3; ++lane) {
+					offsets[1][lane] = origin[lane] - float(first[lane]) + unskew;
+					offsets[2][lane] = origin[lane] - float(second[lane]) + 2.f * unskew;
+					offsets[3][lane] = origin[lane] - 1.f + 3.f * unskew;
+					corners[0][lane] = float(cell[lane]);
+					// grug shader computes every corner gradient before checking contribution.
+					const int32_t one = SimplexAdd(cell[lane], first[lane]),
+								  two = SimplexAdd(cell[lane], second[lane]),
+								  last = SimplexAdd(cell[lane], 1);
+					corners[1][lane] = float(one);
+					corners[2][lane] = float(two);
+					corners[3][lane] = float(last);
+				}
+				for (size_t corner = 0; corner < 4; ++corner)
+					if (!SimplexGradient(c, corners[corner], seed, gradients[corner])) return false;
+				std::array<float, 4> contributions{};
+				for (size_t corner = 0; corner < 4; ++corner) {
+					const auto &v = offsets[corner];
+					const auto &g = gradients[corner];
+					float weight = .5f - v[0] * v[0] - v[1] * v[1] - v[2] * v[2];
+					if (!Finite(c, "noise_scale", weight)) return false;
+					if (weight >= 0) {
+						weight *= weight;
+						contributions[corner] = weight * weight * (g[0] * v[0] + g[1] * v[1] + g[2] * v[2]);
+					}
+				}
+				out = 96.f * (contributions[0] + contributions[1] + contributions[2] + contributions[3]);
+				return Finite(c, "noise_scale", out);
+			}
 			bool Sample(NodeContext &c, const Inputs &in, F3 p, float &out) {
 				out = 0;
 				if (in.Iteration > 0) {
@@ -312,8 +437,11 @@ namespace engine::imagegraph::detail {
 					if (!Finite(c, "iteration", amplitude)) return false;
 					for (int32_t i = 0; i < in.Iteration; ++i) {
 						float value = 0;
-						if (!(in.Cellular ? Cell(c, p, in.Seed, value) : Noise(c, p, in.Seed, value)))
+						if (!(in.Kind == NoiseKind::Cellular  ? Cell(c, p, in.Seed, value)
+							  : in.Kind == NoiseKind::Simplex ? Simplex(c, p, in.Seed, value)
+															  : Noise(c, p, in.Seed, value)))
 							return false;
+						if (in.Kind == NoiseKind::Simplex) value = (value + 1.f) / 2.f;
 						out += value * amplitude;
 						if (!Finite(c, "iteration", out)) return false;
 						// grug final next-octave coordinates are never consumed.
@@ -397,10 +525,12 @@ namespace engine::imagegraph::detail {
 				const uint64_t pixels = uint64_t(in.Canvas.Width) * in.Canvas.Height,
 							   iterations = uint64_t(std::max(in.Iteration, 0));
 				const uint64_t cost =
-					BASE_WORK +
-					(in.Covered ? MARCH_WORK + 2 * iterations *
-												   (in.Cellular ? CELLULAR_OCTAVE_WORK : PERLIN_OCTAVE_WORK)
-								: 0);
+					BASE_WORK + (in.Covered
+									 ? MARCH_WORK + 2 * iterations *
+														(in.Kind == NoiseKind::Cellular ? CELLULAR_OCTAVE_WORK
+														 : in.Kind == NoiseKind::Simplex ? SIMPLEX_OCTAVE_WORK
+																						 : PERLIN_OCTAVE_WORK)
+									 : 0);
 				if (cost > WORK_LIMIT || work > WORK_LIMIT || pixels > (WORK_LIMIT - work) / cost)
 					return c.Fail(
 						Status::LimitExceeded,
@@ -420,8 +550,9 @@ namespace engine::imagegraph::detail {
 			bool Draw(NodeContext &c) {
 				ENGINE_PROFILE_DYNAMIC_STABLE(
 					"imagegraph.source",
-					c.Entry.Type == "pc.cellular_cube" ? std::string_view{"imagegraph.source.cellular_cube"}
-													   : std::string_view{"imagegraph.source.perlin_cube"},
+					c.Entry.Type == "pc.cellular_cube"	? std::string_view{"imagegraph.source.cellular_cube"}
+					: c.Entry.Type == "pc.simplex_cube" ? std::string_view{"imagegraph.source.simplex_cube"}
+														: std::string_view{"imagegraph.source.perlin_cube"},
 					core::ProfileCategory::Engine
 				);
 				Inputs in;
@@ -459,7 +590,8 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceNoiseCubeExecutors() {
 		static constexpr ExecutorEntry entries[]{
 			{"pc.perlin_cube", source_noise_cube::Draw, true},
-			{"pc.cellular_cube", source_noise_cube::Draw, true}
+			{"pc.cellular_cube", source_noise_cube::Draw, true},
+			{"pc.simplex_cube", source_noise_cube::Draw, true}
 		};
 		return entries;
 	}

@@ -6,7 +6,8 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
-		if ((entry.Type == "pc.perlin_cube" || entry.Type == "pc.cellular_cube") &&
+		if ((entry.Type == "pc.perlin_cube" || entry.Type == "pc.cellular_cube" ||
+			 entry.Type == "pc.simplex_cube") &&
 			input.SourceKind == "DimensionUnit")
 			return true;
 		if (entry.Type == "pc.perlin_extra" &&

@@ -391,6 +391,13 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "385b6fe46d838809562eb3cfb4bd7bcbb4dbd58afea1554334d4d3eff6cd17b8",
                 },
             ),
+            (
+                "scripts/node_simplex_cube/node_simplex_cube.gml",
+                {
+                    "bytes": 1791,
+                    "sha256": "d30025de4fb3f251e23a2168eb2b1eb8cbfb01f4b828955d49256de8911d94d9",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (
