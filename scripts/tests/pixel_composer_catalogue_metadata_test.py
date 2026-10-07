@@ -349,6 +349,13 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "8a8543c7fee2732fae85a338b7097e254b3d80eda8293f45b4eadd4146a48ffb",
                 },
             ),
+            (
+                "scripts/node_noise_strand/node_noise_strand.gml",
+                {
+                    "bytes": 2412,
+                    "sha256": "87fb3005df645ebb638a0f310ccd1bb07e0c711169fa8b3554277cb90f69dc0c",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (

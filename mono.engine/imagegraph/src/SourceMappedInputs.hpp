@@ -6,6 +6,10 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.noise_strand" &&
+			((input.SourceKind == "ValueUnit" && input.Id == "position_unit") ||
+			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only")))
+			return true;
 		if (entry.Type == "pc.shard_noise" &&
 			((input.SourceKind == "ValueUnit" && input.Id == "position_unit") ||
 			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||

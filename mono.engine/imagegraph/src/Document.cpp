@@ -12827,6 +12827,12 @@ namespace engine::imagegraph {
 							   input.SourceKind == "Slider"))) ||
 							(node.Type == "pc.cellular" && input.Id == "scale" &&
 							 input.SourceKind == "Float") ||
+							(node.Type == "pc.noise_strand" &&
+							 ((input.SourceKind == "Slider" &&
+							   (input.Id == "density" || input.Id == "slope" || input.Id == "thickness" ||
+								input.Id == "uv_mix")) ||
+							  (input.SourceKind == "Float" &&
+							   (input.Id == "curve_scale" || input.Id == "curve_shift")))) ||
 							(node.Type == "pc.shard_noise" &&
 							 ((input.Id == "progress" && input.SourceKind == "Float") ||
 							  ((input.Id == "sharpness" || input.Id == "uv_mix") &&
@@ -12911,7 +12917,8 @@ namespace engine::imagegraph {
 						if ((simpleShape || node.Type == "pc.flow_noise" || node.Type == "pc.noise_bubble" ||
 							 node.Type == "pc.noise_cristal" || node.Type == "pc.gradient_cube" ||
 							 node.Type == "pc.cellular" || node.Type == "pc.perlin" ||
-							 node.Type == "pc.voronoi_extra" || node.Type == "pc.shard_noise") &&
+							 node.Type == "pc.voronoi_extra" || node.Type == "pc.shard_noise" ||
+							 node.Type == "pc.noise_strand") &&
 							input.Id == "dimension" && input.SourceKind == "Dimension" &&
 							produced[sourceIndex]) {
 							if (const ImageArray *images =
@@ -13044,7 +13051,8 @@ namespace engine::imagegraph {
 							   input.Id == "character_range")) ||
 							 (node.Type == "pc.padding" && input.Id == "dimension") ||
 							 (node.Type == "pc.cellular" && (input.Id == "position" || input.Id == "size")) ||
-							 (node.Type == "pc.stripe" && input.Id == "position") ||
+							 ((node.Type == "pc.stripe" || node.Type == "pc.noise_strand") &&
+							  input.Id == "position") ||
 							 (node.Type == "pc.julia_set" &&
 							  (input.Id == "c" || input.Id == "position" || input.Id == "scale")) ||
 							 (node.Type == "pc.gabor_noise" &&
@@ -13058,10 +13066,11 @@ namespace engine::imagegraph {
 							 node.Type == "pc.noise_bubble" || node.Type == "pc.noise_cristal" ||
 							 node.Type == "pc.noise" || node.Type == "pc.cellular" ||
 							 node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra" ||
-							 node.Type == "pc.shard_noise") &&
+							 node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand") &&
 							input.SourceKind == "SliRange" &&
 							(node.Type == "pc.noise" || node.Type == "pc.cellular" ||
-							 node.Type == "pc.perlin" || input.Id == "level_in" || input.Id == "level_out" ||
+							 node.Type == "pc.perlin" || node.Type == "pc.noise_strand" ||
+							 input.Id == "level_in" || input.Id == "level_out" ||
 							 (node.Type == "pc.flow_noise" && input.Id == "detail") ||
 							 (node.Type == "pc.noise_bubble" &&
 							  (input.Id == "scale" || input.Id == "opacity")));
@@ -13071,7 +13080,7 @@ namespace engine::imagegraph {
 							  node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal" ||
 							  node.Type == "pc.caustic" || node.Type == "pc.cellular" ||
 							  node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra" ||
-							  node.Type == "pc.shard_noise")) ||
+							  node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand")) ||
 									generatorSurfaceRange
 								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
 								: nullptr;
