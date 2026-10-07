@@ -23752,10 +23752,36 @@ I	invert_mask	Invert mask	5	Bool	boolean	b 0
 S	I	invert_mask	0
 I	mask_feather	Mask feather	6	Slider	scalar	d 0	
 S	I	mask_feather	0
-I	operator	Operator	7	EScroll	enum	e 0	
+I	operator	Operator	7	EScroll	enum	e 0	Add;Subtract;Multiply;Divide;Power;Root;Sin;Cos;Tan;Modulo;Floor;Ceil;Round;Lerp;Abs;Clamp;Snap;Fract;Map;Log;Max;Min;Less than;Less than equal;Greater than;Greater than equal
 S	I	operator	0
-B	I	operator	0	general	1	default	?
-C	I	operator	unknown
+B	I	operator	0	general	1	default	26
+C	I	operator	resolved
+Q	I	operator	0	0	s "Add"
+Q	I	operator	1	0	s "Subtract"
+Q	I	operator	2	0	s "Multiply"
+Q	I	operator	3	0	s "Divide"
+Q	I	operator	4	0	s "Power"
+Q	I	operator	5	0	s "Root"
+Q	I	operator	6	0	s "Sin"
+Q	I	operator	7	0	s "Cos"
+Q	I	operator	8	0	s "Tan"
+Q	I	operator	9	0	s "Modulo"
+Q	I	operator	10	0	s "Floor"
+Q	I	operator	11	0	s "Ceil"
+Q	I	operator	12	0	s "Round"
+Q	I	operator	13	0	s "Lerp"
+Q	I	operator	14	0	s "Abs"
+Q	I	operator	15	0	s "Clamp"
+Q	I	operator	16	0	s "Snap"
+Q	I	operator	17	0	s "Fract"
+Q	I	operator	18	0	s "Map"
+Q	I	operator	19	0	s "Log"
+Q	I	operator	20	0	s "Max"
+Q	I	operator	21	0	s "Min"
+Q	I	operator	22	0	s "Less than"
+Q	I	operator	23	0	s "Less than equal"
+Q	I	operator	24	0	s "Greater than"
+Q	I	operator	25	0	s "Greater than equal"
 I	operand_type	Operand Type	10	EButton	enum	e 0	Vec4;Surface;Color
 S	I	operand_type	0
 B	I	operand_type	0	general	1	always	3

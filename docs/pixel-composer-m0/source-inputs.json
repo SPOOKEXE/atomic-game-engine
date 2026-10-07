@@ -106602,7 +106602,34 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Add",
+      "Subtract",
+      "Multiply",
+      "Divide",
+      "Power",
+      "Root",
+      "Sin",
+      "Cos",
+      "Tan",
+      "Modulo",
+      "Floor",
+      "Ceil",
+      "Round",
+      "Lerp",
+      "Abs",
+      "Clamp",
+      "Snap",
+      "Fract",
+      "Map",
+      "Log",
+      "Max",
+      "Min",
+      "Less than",
+      "Less than equal",
+      "Greater than",
+      "Greater than equal"
+     ],
      "default": "0",
      "extra": [
       "_scroll"
@@ -106614,15 +106641,120 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 26,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Add"
+       },
+       {
+        "choice_index": 1,
+        "label": "Subtract"
+       },
+       {
+        "choice_index": 2,
+        "label": "Multiply"
+       },
+       {
+        "choice_index": 3,
+        "label": "Divide"
+       },
+       {
+        "choice_index": 4,
+        "label": "Power"
+       },
+       {
+        "choice_index": 5,
+        "label": "Root"
+       },
+       {
+        "choice_index": 6,
+        "label": "Sin"
+       },
+       {
+        "choice_index": 7,
+        "label": "Cos"
+       },
+       {
+        "choice_index": 8,
+        "label": "Tan"
+       },
+       {
+        "choice_index": 9,
+        "label": "Modulo"
+       },
+       {
+        "choice_index": 10,
+        "label": "Floor"
+       },
+       {
+        "choice_index": 11,
+        "label": "Ceil"
+       },
+       {
+        "choice_index": 12,
+        "label": "Round"
+       },
+       {
+        "choice_index": 13,
+        "label": "Lerp"
+       },
+       {
+        "choice_index": 14,
+        "label": "Abs"
+       },
+       {
+        "choice_index": 15,
+        "label": "Clamp"
+       },
+       {
+        "choice_index": 16,
+        "label": "Snap"
+       },
+       {
+        "choice_index": 17,
+        "label": "Fract"
+       },
+       {
+        "choice_index": 18,
+        "label": "Map"
+       },
+       {
+        "choice_index": 19,
+        "label": "Log"
+       },
+       {
+        "choice_index": 20,
+        "label": "Max"
+       },
+       {
+        "choice_index": 21,
+        "label": "Min"
+       },
+       {
+        "choice_index": 22,
+        "label": "Less than"
+       },
+       {
+        "choice_index": 23,
+        "label": "Less than equal"
+       },
+       {
+        "choice_index": 24,
+        "label": "Greater than"
+       },
+       {
+        "choice_index": 25,
+        "label": "Greater than equal"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -156439,6 +156571,20 @@
    "mapping": "__gradTypes literal source order maps indices 0..3 to Linear, Circular, Radial, Diamond",
    "path": "scripts/node_gradient/node_gradient.gml",
    "sha256": "d55c626179c4ee3cf5511f140c2b83929f4dce92226daa9baec76b2bcc8fb624"
+  },
+  "Node_Pixel_Math::_scroll": {
+   "count": 26,
+   "mapping": "_scroll clones node_math_scroll index order, then appends four comparisons",
+   "paths": [
+    {
+     "path": "scripts/node_math/node_math.gml",
+     "sha256": "c93a3af03b1f032b5b4d8968245a50748e6fc36fe1218cc3ad7082f558d09d13"
+    },
+    {
+     "path": "scripts/node_pixel_math/node_pixel_math.gml",
+     "sha256": "4b15f23363583f476e7801f08574df9b5f4a162321851995185393ca20418359"
+    }
+   ]
   }
  },
  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
@@ -156694,6 +156840,10 @@
   "scripts/node_psystem_render/node_psystem_render.gml": {
    "bytes": 10574,
    "sha256": "f2b9cbeec08c6b91efabb79f58faa4119b4e5348984aae591b23594c3ca0e032"
+  },
+  "scripts/node_pixel_math/node_pixel_math.gml": {
+   "bytes": 4594,
+   "sha256": "4b15f23363583f476e7801f08574df9b5f4a162321851995185393ca20418359"
   }
  }
 }

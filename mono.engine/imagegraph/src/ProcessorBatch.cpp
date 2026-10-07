@@ -10,6 +10,7 @@
 #include "SourceRetainedImageOutputs.hpp"
 #include "ValuePayload.hpp"
 #include "nodes/SourceBend.hpp"
+#include "nodes/SourcePixelMath.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -783,7 +784,8 @@ namespace engine::imagegraph::detail {
 						  (context.Entry.Type == "pc.path_sample" ||
 						   context.Entry.Type == "pc.path_smoothen")) &&
 						!(kind == ValueType::Atlas && input.Type == ValueType::Image &&
-						  (context.Entry.Type == "pc.wrap_area" || context.Entry.Type == "pc.bend") &&
+						  (context.Entry.Type == "pc.wrap_area" || context.Entry.Type == "pc.bend" ||
+						   context.Entry.Type == "pc.pixel_math") &&
 						  input.Port == "surface_in") &&
 						!((kind == ValueType::Scalar || kind == ValueType::Integer) &&
 						  (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
@@ -825,11 +827,14 @@ namespace engine::imagegraph::detail {
 			selectedCharge->Reset();
 			if (!AdmitFontTextBatch(context, textBatch)) return false;
 		}
-		if (context.Authored.Type == "pc.bend") {
+		if (context.Authored.Type == "pc.bend" || context.Authored.Type == "pc.pixel_math") {
 			uint64_t batchWork = 0;
 			for (size_t row = 0; row < count; ++row) {
 				uint64_t scratchOwned = 0;
-				if (!selectRow(row, scratchOwned) || !AdmitSourceBend(context, batchWork)) return false;
+				if (!selectRow(row, scratchOwned)) return false;
+				if (!(context.Authored.Type == "pc.bend" ? AdmitSourceBend(context, batchWork)
+														 : AdmitSourcePixelMath(context, batchWork)))
+					return false;
 			}
 		}
 		for (size_t row = 0; row < count; row++) {

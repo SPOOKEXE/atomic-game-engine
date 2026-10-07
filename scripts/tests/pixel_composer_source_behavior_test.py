@@ -12,6 +12,7 @@ from source_behavior import (
     node_condition_choice_source,
     node_gradient_choice_source,
     node_math_choice_source,
+    node_pixel_math_choice_source,
     node_vector_math_choice_source,
     source_choice_map,
 )
@@ -98,7 +99,7 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
     def test_shape_scroll_sprite_counter_preserves_physical_selector_separators(self):
         body = 'shape_types = ["Rectangle","Ellipse","Regular Polygon",-1,"Star",-1,"Spring","Spring Sphere","Spiral"]; __ind=0; shapeScroll=array_map(shape_types,function(v,i) { return v == -1 ? -1 : new scrollItem(v,s_node_path_3d_shape,__ind++) });'
         self.assertEqual(choice_count('{data:shapeScroll,horizontal:1}', body, {}), 9)
-        flags = dict(array_map_verified=True, scroll_item_verified=True, separator_verified=True)
+        flags = {"array_map_verified": True, "scroll_item_verified": True, "separator_verified": True}
         mapped = source_choice_map('{data:shapeScroll,horizontal:1}', body, {}, **flags)
         self.assertEqual([entry["choice_index"] for entry in mapped], list(range(9)))
         self.assertEqual([entry["choice_index"] for entry in mapped if "separator" in entry], [3, 5])
@@ -178,7 +179,6 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
         )
 
     def test_comment_entries_are_not_source_choices(self):
-        root = self.make_root()
         choices = source_choice_map(
             '["Shape", /*"Mesh"*/ ]',
             "",
@@ -190,7 +190,6 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
         self.assertEqual([{"choice_index": 0, "label": "Shape"}], choices)
 
     def test_dynamic_array_entries_and_unverified_wrappers_stay_unknown(self):
-        root = self.make_root()
         self.assertIsNone(
             source_choice_map(
                 '["Known", runtime_label]',
@@ -329,6 +328,47 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertEqual((None, None), node_math_choice_source(root))
+
+    def test_pixel_math_operator_requires_the_verified_clone_append_and_immutable_menu(self):
+        root = self.make_root()
+        math = root / "scripts/node_math/node_math.gml"
+        math.parent.mkdir(parents=True)
+        labels = [
+            "Add", "Subtract", "Multiply", "Divide", "Power", "Root", "Sin", "Cos", "Tan", "Modulo",
+            "Floor", "Ceil", "Round", "Lerp", "Abs", "Clamp", "Snap", "Fract", "Map", "Log", "Max", "Min",
+        ]
+        math.write_text(
+            "global.node_math_names = [" + ", ".join(f'\"{label}\"' for label in labels) + "];\n"
+            "global.node_math_scroll = array_create_ext(array_length(global.node_math_names), "
+            "function(i) {return new scrollItem(global.node_math_names[i], s_node_math_operators, i)});\n"
+            'function Node_Math() { newInput(0, nodeValue_EScroll("Type", 0, global.node_math_scroll)).rejectArray(); }',
+            encoding="utf-8",
+        )
+        pixel_math = root / "scripts/node_pixel_math/node_pixel_math.gml"
+        pixel_math.parent.mkdir(parents=True)
+        valid = '''function Node_Pixel_Math() : Node_Processor() constructor {
+            _scroll = array_clone(global.node_math_scroll, 1);
+            array_append(_scroll, ["Less than", "Less than equal", "Greater than", "Greater than equal"]);
+            newInput(7, nodeValue_EScroll("Operator", 0, _scroll)).setPieMenu();
+        }'''
+        pixel_math.write_text(valid, encoding="utf-8")
+
+        found, evidence = node_pixel_math_choice_source(root)
+        self.assertEqual(labels + ["Less than", "Less than equal", "Greater than", "Greater than equal"], found)
+        self.assertEqual(26, evidence["count"])
+        self.assertEqual(["scripts/node_math/node_math.gml", "scripts/node_pixel_math/node_pixel_math.gml"],
+                         [item["path"] for item in evidence["paths"]])
+
+        for changed in (
+            valid.replace("array_clone(global.node_math_scroll, 1)", "array_clone(global.node_math_scroll, 0)"),
+            valid.replace('"Greater than equal"', '"Greater than or equal"'),
+            valid.replace('            newInput(7,', '            _scroll[0] = "changed";\n            newInput(7,'),
+            valid.replace('            newInput(7,', '            array_reverse(_scroll);\n            newInput(7,'),
+            valid.replace('            newInput(7,', '            array_sort(_scroll, true);\n            newInput(7,'),
+            valid.replace('            newInput(7,', '            array_copy(_scroll, 0, other, 0, 1);\n            newInput(7,'),
+        ):
+            pixel_math.write_text(changed, encoding="utf-8")
+            self.assertEqual((None, None), node_pixel_math_choice_source(root))
 
     def test_node_vector_math_generated_scroll_preserves_eight_source_indices(self):
         root = self.make_root()

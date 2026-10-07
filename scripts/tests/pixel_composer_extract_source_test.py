@@ -11,7 +11,8 @@ EXTRACTOR = REPOSITORY / "scripts/pixel-composer/extract-source.py"
 
 
 class PixelComposerExtractSourceTest(unittest.TestCase):
-    def extract(self, root: Path, include_condition: bool = False, include_gradient: bool = False, include_aliases: bool = False) -> dict:
+    def extract(self, root: Path, include_condition: bool = False, include_gradient: bool = False,
+                include_aliases: bool = False, include_pixel_math: bool = False) -> dict:
         script_root = root / "source"
         files = {
             "scripts/scrollBox/scrollBox.gml": "",
@@ -286,7 +287,7 @@ function Node_Path_Shape_3D(_x, _y, _group=noone) : Node(_x, _y, _group) constru
     static getPointRatio=function(_rat,_ind=0,out=undefined) { if(!is(out,__vec3P)) out=new __vec3P(); return out; }
 }
 """
-        if include_condition or include_gradient or include_aliases:
+        if include_condition or include_gradient or include_aliases or include_pixel_math:
             files["scripts/node_value_enum_scroll/node_value_enum_scroll.gml"] = '''
 #macro nodeValue_EScroll nodeValue_Enum_Scroll
 function __NodeValue_Enum_Scroll(_name, _node, _value, _data) : NodeValue(_name, _node, CONNECT_TYPE.input, VALUE_TYPE.integer, _value, "") constructor {
@@ -355,6 +356,21 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
     newInput(9, nodeValue_Slider("Scale", 1)).setMappable(13);
 }
 '''
+        if include_pixel_math:
+            files["scripts/node_math/node_math.gml"] = '''
+global.node_math_names = ["Add", "Subtract", "Multiply", "Divide", "Power", "Root", "Sin", "Cos", "Tan", "Modulo",
+    "Floor", "Ceil", "Round", "Lerp", "Abs", "Clamp", "Snap", "Fract", "Map", "Log", "Max", "Min"];
+global.node_math_scroll = array_create_ext(array_length(global.node_math_names),
+    function(i) { return new scrollItem(global.node_math_names[i], s_node_math_operators, i); });
+function Node_Math() { newInput(0, nodeValue_EScroll("Type", 0, global.node_math_scroll)).rejectArray(); }
+'''
+            files["scripts/node_pixel_math/node_pixel_math.gml"] = '''
+function Node_Pixel_Math(_x, _y) : Node(_x, _y) constructor {
+    _scroll = array_clone(global.node_math_scroll, 1);
+    array_append(_scroll, ["Less than", "Less than equal", "Greater than", "Greater than equal"]);
+    newInput(7, nodeValue_EScroll("Operator", 0, _scroll)).setPieMenu();
+}
+'''
         for relative, content in files.items():
             path = script_root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -389,12 +405,31 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
                 *(('Node_Condition',) if include_condition else ()),
                 *(('Node_Gradient',) if include_gradient else ()),
                 *(('Node_Choice_Alias',) if include_aliases else ()),
+                *(('Node_Pixel_Math',) if include_pixel_math else ()),
             ):
                 writer.writerow({"node_id": node})
 
         output = root / "source-inputs.json"
         subprocess.run([sys.executable, str(EXTRACTOR), str(script_root), str(matrix), str(output)], check=True)
         return json.loads(output.read_text(encoding="utf-8"))
+
+    def test_pixel_math_operator_keeps_all_26_raw_choice_indices_and_clamp_count(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary), include_pixel_math=True)
+        item = next(item for item in snapshot["nodes"]["Node_Pixel_Math"]["inputs"] if item["index"] == "7")
+        self.assertEqual("resolved", item["source_choices"]["status"])
+        self.assertEqual(26, len(item["choices"]))
+        self.assertEqual(list(range(26)), [choice["choice_index"] for choice in item["source_choices"]["entries"]])
+        self.assertEqual("Less than", item["source_choices"]["entries"][22]["label"])
+        self.assertEqual("Greater than equal", item["source_choices"]["entries"][25]["label"])
+        self.assertEqual({"mode": "default", "choice_count": 26}, item["source_behavior"]["choice_clamp"])
+        evidence = snapshot["source_choice_generated_evidence"]["Node_Pixel_Math::_scroll"]
+        self.assertEqual(
+            ["scripts/node_math/node_math.gml", "scripts/node_pixel_math/node_pixel_math.gml"],
+            [source["path"] for source in evidence["paths"]],
+        )
+        for source in evidence["paths"]:
+            self.assertRegex(source["sha256"], r"^[0-9a-f]{64}$")
 
     def test_lookat_replaces_inherited_physical_slots_and_preserves_source_output(self):
         with tempfile.TemporaryDirectory() as temporary:

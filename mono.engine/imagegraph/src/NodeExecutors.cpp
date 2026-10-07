@@ -32,6 +32,7 @@ namespace engine::imagegraph::detail {
 					  SourceAreaWarpExecutors(),
 					  SourceBlendDepthExecutors(),
 					  SourceBendExecutors(),
+					  SourcePixelMathExecutors(),
 					  SourceErodeExecutors(),
 					  PathExecutors(),
 					  PointExecutors(),

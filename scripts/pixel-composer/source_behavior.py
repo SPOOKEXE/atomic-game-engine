@@ -5,7 +5,6 @@ import json
 import re
 from pathlib import Path
 
-
 ENUM_SOURCES = {
     "EButton": "scripts/node_value_enum_button/node_value_enum_button.gml",
     "EScroll": "scripts/node_value_enum_scroll/node_value_enum_scroll.gml",
@@ -18,6 +17,8 @@ MATH_CHOICE_SOURCE = "scripts/node_math/node_math.gml"
 VECTOR_MATH_CHOICE_SOURCE = "scripts/node_vector_math/node_vector_math.gml"
 CONDITION_CHOICE_SOURCE = "scripts/node_condition/node_condition.gml"
 CONDITION_CHOICES = ["Equal", "Not equal", "Less ", "Less or equal ", "Greater ", "Greater or equal"]
+PIXEL_MATH_SOURCE = "scripts/node_pixel_math/node_pixel_math.gml"
+PIXEL_MATH_EXTRA_CHOICES = ["Less than", "Less than equal", "Greater than", "Greater than equal"]
 
 
 def _matching_end(text: str, opening: int) -> int | None:
@@ -232,7 +233,7 @@ def choice_source_evidence(root: Path) -> dict | None:
     item_body = source[item_body_start + 1:item_body_end - 1]
     box_body = source[box_body_start + 1:box_body_end - 1]
     ordered_mapping = bool(re.search(r"return\s+array_map\(arr,\s*function\(v,i\)[\s\S]*?return\s+new\s+scrollItem\(v,", array_body))
-    scroll_name = bool(re.search(r"^\s*name\s*=\s*_name\s*;", item_body, re.M))
+    scroll_name = bool(re.search(r"^\s*name\s*=\s*_name\s*;", item_body, re.MULTILINE))
     separator = bool(re.search(r"until\(data_list\[ind\]\s*!=\s*-1\s*\|\|\s*ind\s*==\s*curr_val\)", box_body))
     if not (ordered_mapping and scroll_name and separator):
         return None
@@ -315,6 +316,64 @@ def node_math_choice_source(root: Path) -> tuple[list[str] | None, dict | None]:
         node_name="Node_Math",
         sprite_name="s_node_math_operators",
     )
+
+
+def node_pixel_math_choice_source(root: Path) -> tuple[list[str] | None, dict | None]:
+    """Verify Pixel Math's cloned math menu and its four appended comparisons."""
+    math_labels, math_evidence = node_math_choice_source(root)
+    path = root / PIXEL_MATH_SOURCE
+    if math_labels is None or math_evidence is None or not path.is_file():
+        return None, None
+    source = _without_comments(path.read_text(encoding="utf-8"))
+    declarations = list(re.finditer(r"\bfunction\s+Node_Pixel_Math\s*\([^)]*\)[^{]*\{", source))
+    if len(declarations) != 1:
+        return None, None
+    opening = source.find("{", declarations[0].start())
+    end = _matching_end(source, opening)
+    if end is None:
+        return None, None
+    body = source[opening + 1:end - 1]
+    clone = re.compile(
+        r"\b_scroll\s*=\s*array_clone\s*\(\s*global\.node_math_scroll\s*,\s*1\s*\)\s*;"
+    )
+    append = re.compile(
+        r'\barray_append\s*\(\s*_scroll\s*,\s*\[\s*'
+        + r'"Less than"\s*,\s*"Less than equal"\s*,\s*"Greater than"\s*,\s*"Greater than equal"\s*'
+        + r'\]\s*\)\s*;'
+    )
+    input_declaration = re.compile(
+        r'\bnewInput\s*\(\s*7\s*,\s*nodeValue_EScroll\s*\(\s*"Operator"\s*,\s*0\s*,\s*_scroll\s*\)\s*\)'
+        r'\s*\.\s*setPieMenu\s*\(\s*\)\s*;'
+    )
+    clones = list(clone.finditer(body))
+    appends = list(append.finditer(body))
+    inputs = list(input_declaration.finditer(body))
+    if len(clones) != 1 or len(appends) != 1:
+        return None, None
+    if len(list(re.finditer(r"\barray_append\s*\(\s*_scroll\b", body))) != 1:
+        return None, None
+    if len(inputs) != 1 or not clones[0].start() < appends[0].start() < inputs[0].start():
+        return None, None
+    if re.search(r"\barray_(?:insert|delete|resize|push|pop)\s*\(\s*_scroll\b", body):
+        return None, None
+    writes = list(re.finditer(r"\b_scroll\s*(?:\[[^]]*\])?\s*(?:=|\+=|-=|\+\+|--)", body))
+    if len(writes) != 1 or writes[0].start() != clones[0].start():
+        return None, None
+    remaining = body
+    for match in sorted([clones[0], appends[0], inputs[0]], key=lambda match: match.start(), reverse=True):
+        remaining = remaining[:match.start()] + " " * (match.end() - match.start()) + remaining[match.end():]
+    remaining = re.sub(r"\b_scroll\s*\[\s*type\s*\]", "", remaining)
+    if re.search(r"\b_scroll\b", remaining):
+        return None, None
+    labels = math_labels + PIXEL_MATH_EXTRA_CHOICES
+    return labels, {
+        "paths": [
+            {"path": math_evidence["path"], "sha256": math_evidence["sha256"]},
+            {"path": PIXEL_MATH_SOURCE, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
+        ],
+        "count": len(labels),
+        "mapping": "_scroll clones node_math_scroll index order, then appends four comparisons",
+    }
 
 
 def node_vector_math_choice_source(root: Path) -> tuple[list[str] | None, dict | None]:

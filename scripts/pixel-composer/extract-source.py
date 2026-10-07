@@ -32,6 +32,7 @@ from source_behavior import (
     node_condition_choice_source,
     node_gradient_choice_source,
     node_math_choice_source,
+    node_pixel_math_choice_source,
     node_vector_math_choice_source,
     source_choice_map,
 )
@@ -364,6 +365,7 @@ source_index = SourceIndex(root, macros)
 source_classification = SourceArrayClassification(root, macros)
 source_choice_evidence = choice_source_evidence(root)
 math_choice_labels, math_choice_evidence = node_math_choice_source(root)
+pixel_math_choice_labels, pixel_math_choice_evidence = node_pixel_math_choice_source(root)
 vector_math_choice_labels, vector_math_choice_evidence = node_vector_math_choice_source(root)
 condition_choice_labels, condition_choice_evidence = node_condition_choice_source(root)
 gradient_choice_labels, gradient_choice_evidence = node_gradient_choice_source(root)
@@ -377,6 +379,8 @@ if source_choice_evidence is not None:
         if labels is not None and evidence is not None:
             source_choice_generated_evidence[expression] = evidence
             generated_choice_arrays[expression] = labels
+    if pixel_math_choice_labels is not None and pixel_math_choice_evidence is not None:
+        source_choice_generated_evidence["Node_Pixel_Math::_scroll"] = pixel_math_choice_evidence
     if condition_choice_labels is not None and condition_choice_evidence is not None:
         source_choice_generated_evidence["cond_array"] = condition_choice_evidence
         generated_choice_arrays["cond_array"] = condition_choice_labels
@@ -527,7 +531,18 @@ def parse(name, seen):
         if name == "Node_Path_Shape_3D":
             record_constructor_source(name)
         if entry["kind"] in ("EScroll", "EButton", "Enum_Scroll", "Enum_Button"):
-            if choice_expression and not dynamic_choices:
+            if name == "Node_Pixel_Math" and entry["index"] == "7":
+                if pixel_math_choice_labels is not None and pixel_math_choice_evidence is not None:
+                    source_choices = source_choice_map(
+                        "_scroll",
+                        body,
+                        choice_arrays,
+                        array_map_verified=source_choice_evidence is not None,
+                        scroll_item_verified=source_choice_evidence is not None,
+                        separator_verified=source_choice_evidence is not None,
+                        allowlisted_arrays={"_scroll": pixel_math_choice_labels},
+                    )
+            elif choice_expression and not dynamic_choices:
                 source_choices = source_choice_map(
                     choice_expression,
                     body,
@@ -541,6 +556,10 @@ def parse(name, seen):
                     # grug local helper aliases still need inspector labels and source evidence.
                     entry["choices"] = [choice["label"] for choice in source_choices if "label" in choice]
                     record_constructor_source(name)
+            if source_choices is not None and entry.get("choices") is None:
+                # grug verified Pixel Math clone also needs its inspector labels.
+                entry["choices"] = [choice["label"] for choice in source_choices if "label" in choice]
+                record_constructor_source(name)
             entry["source_choices"] = {
                 "status": "resolved" if source_choices is not None else "unknown",
                 "entries": source_choices,
@@ -552,7 +571,8 @@ def parse(name, seen):
         )
         dynamic_connectability = bool(re.search(r"\.isConnectable(?:Strict)?\s*=", body))
         resolved_choice_count = choice_count(choice_expression, body, choice_arrays) if choice_expression and not dynamic_choices else None
-        if choice_expression in generated_choice_arrays and source_choices is not None:
+        if (choice_expression in generated_choice_arrays or
+                name == "Node_Pixel_Math" and entry["index"] == "7" and pixel_math_choice_labels is not None) and source_choices is not None:
             resolved_choice_count = len(source_choices)
         behavior, evidence = enum_behavior(
             root,
