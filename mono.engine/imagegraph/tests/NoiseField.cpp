@@ -232,7 +232,8 @@ TEST_CASE("Noise generator rejects fractional integer controls without throwing"
 }
 
 TEST_CASE("Source noise fields sample the same raster as its selected image output", "[noise_field]") {
-	for (const auto *type : {"pc.noise_simplex", "pc.perlin", "pc.cellular", "pc.voronoi_extra"}) {
+	for (const auto *type :
+		 {"pc.noise_simplex", "pc.perlin", "pc.cellular", "pc.voronoi_extra", "pc.shard_noise"}) {
 		Document document;
 		document.FormatVersion = 9;
 		document.Nodes = {
@@ -246,7 +247,16 @@ TEST_CASE("Source noise fields sample the same raster as its selected image outp
 			  {"iteration", int64_t{2}}}},
 			{"sample", "value.sample_noise", "", {}, {{"position", Vector2{.25, .75}}}}
 		};
-		if (std::string_view(type) == "pc.voronoi_extra") document.Nodes[0].Values.pop_back();
+		if (std::string_view(type) == "pc.voronoi_extra" || std::string_view(type) == "pc.shard_noise")
+			document.Nodes[0].Values.pop_back();
+		if (std::string_view(type) == "pc.shard_noise") {
+			auto &controls = document.Nodes[0].Values;
+			controls.push_back({"scale_mapped", true});
+			controls.push_back({"progress_mapped", true});
+			controls.push_back({"sharpness_mapped", true});
+			controls.push_back({"progress", 0.0});
+			controls.push_back({"sharpness", 1.0});
+		}
 		document.Links = {{"source", "field", "sample", "field"}};
 		document.Outputs = {{"image", "source", "surface_out"}, {"sample", "sample", "value"}};
 		Plan plan;
@@ -263,7 +273,8 @@ TEST_CASE("Source noise fields sample the same raster as its selected image outp
 }
 
 TEST_CASE("Source noise processor arrays retain fields and sampler diagnoses field arrays", "[noise_field]") {
-	for (const auto *type : {"pc.noise_simplex", "pc.perlin", "pc.cellular", "pc.voronoi_extra"}) {
+	for (const auto *type :
+		 {"pc.noise_simplex", "pc.perlin", "pc.cellular", "pc.voronoi_extra", "pc.shard_noise"}) {
 		Document processor;
 		processor.FormatVersion = 9;
 		ArrayValue iterations;
@@ -281,6 +292,18 @@ TEST_CASE("Source noise processor arrays retain fields and sampler diagnoses fie
 		};
 		if (std::string_view(type) == "pc.voronoi_extra")
 			processor.Nodes[0].Values.back() = {"progress", ArrayValue{ValueType::Scalar, {0.0, 1.0}}};
+		if (std::string_view(type) == "pc.shard_noise")
+			processor.Nodes[0].Values.back() = {"rotation", ArrayValue{ValueType::Scalar, {0.0, 1.0}}};
+		if (std::string_view(type) == "pc.shard_noise") {
+			auto &controls = processor.Nodes[0].Values;
+			controls.insert(
+				controls.begin(),
+				{{"scale_mapped", true},
+				 {"progress_mapped", true},
+				 {"sharpness_mapped", true},
+				 {"sharpness", 1.0}}
+			);
+		}
 		processor.Outputs = {{"images", "source", "surface_out"}, {"fields", "source", "field"}};
 		Plan plan;
 		Diagnostic diagnostic;
@@ -291,7 +314,9 @@ TEST_CASE("Source noise processor arrays retain fields and sampler diagnoses fie
 		for (size_t row = 0; row < images.Images.size(); ++row) {
 			Document scalar = processor;
 			scalar.Nodes[0].Values.back().Data =
-				std::string_view(type) == "pc.voronoi_extra" ? Value{double(row)} : Value{int64_t(row + 1)};
+				(std::string_view(type) == "pc.voronoi_extra" || std::string_view(type) == "pc.shard_noise")
+					? Value{double(row)}
+					: Value{int64_t(row + 1)};
 			Plan scalarPlan;
 			REQUIRE(Compile(scalar, scalarPlan, diagnostic) == Status::Ok);
 			Image expected;

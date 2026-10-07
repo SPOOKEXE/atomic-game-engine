@@ -125437,6 +125437,7 @@
      "index": "2",
      "kind": "Vec2",
      "mapped": "range",
+     "mapped_range_type": "vector2",
      "name": "Scale",
      "source_array_classification": true
     },
@@ -156807,6 +156808,10 @@
   "scripts/node_voronoi_extra/node_voronoi_extra.gml": {
    "bytes": 2125,
    "sha256": "be8b7a4b549c95466081151406da9041a95f970f1333cee3b5e23e9f9fd0bda7"
+  },
+  "scripts/node_shard_noise/node_shard_noise.gml": {
+   "bytes": 1869,
+   "sha256": "8a8543c7fee2732fae85a338b7097e254b3d80eda8293f45b4eadd4146a48ffb"
   }
  }
 }

@@ -342,12 +342,20 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "be8b7a4b549c95466081151406da9041a95f970f1333cee3b5e23e9f9fd0bda7",
                 },
             ),
+            (
+                "scripts/node_shard_noise/node_shard_noise.gml",
+                {
+                    "bytes": 1869,
+                    "sha256": "8a8543c7fee2732fae85a338b7097e254b3d80eda8293f45b4eadd4146a48ffb",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (
             ("Node_Herringbone_Tile", "v 0.25 0.25"),
             ("Node_Gabor_Noise", "v 4 4"),
             ("Node_Perlin", "v 4 4"),
+            ("Node_Shard_Noise", "v 4 4"),
         ):
             node = snapshot["nodes"][name]
             control = next(v for v in node["inputs"] if v["name"] == "Scale")

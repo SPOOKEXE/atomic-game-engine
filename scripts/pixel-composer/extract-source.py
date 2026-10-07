@@ -76,6 +76,7 @@ MAPPED_RANGE_TYPE_OVERRIDES = {
     ("Node_Herringbone_Tile", "Scale"): "vector2",
     ("Node_Gabor_Noise", "Scale"): "vector2",
     ("Node_Perlin", "Scale"): "vector2",
+    ("Node_Shard_Noise", "Scale"): "vector2",
     ("Node_Noise_Simplex", "Iteration"): "vector2",
     ("Node_Noise_Simplex", "Scale"): "vector2",
     ("Node_Gradient", "Angle"): "vector2",

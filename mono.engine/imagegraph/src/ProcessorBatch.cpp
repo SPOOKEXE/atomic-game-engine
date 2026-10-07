@@ -20,6 +20,7 @@
 #include "nodes/SourcePixelMath.hpp"
 #include "nodes/SourcePixelSort.hpp"
 #include "nodes/SourcePolar.hpp"
+#include "nodes/SourceShardNoise.hpp"
 #include "nodes/SourceTileTransform.hpp"
 #include "nodes/SourceVoronoiExtra.hpp"
 
@@ -881,6 +882,7 @@ namespace engine::imagegraph::detail {
 							   : context.Authored.Type == "pc.cellular"		 ? AdmitSourceCellular
 							   : context.Authored.Type == "pc.perlin"		 ? AdmitSourcePerlin
 							   : context.Authored.Type == "pc.voronoi_extra" ? AdmitSourceVoronoiExtra
+							   : context.Authored.Type == "pc.shard_noise"	 ? AdmitSourceShardNoise
 							   : context.Authored.Type == "pc.polar"		 ? AdmitSourcePolar
 							   : context.Authored.Type == "pc.tile"			 ? AdmitSourceTileTransform
 																			 : nullptr;

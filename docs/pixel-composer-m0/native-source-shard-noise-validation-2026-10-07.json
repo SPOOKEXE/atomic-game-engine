@@ -1,0 +1,125 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded pc.shard_noise mapped source seam and a sampleable scalar 2D field. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_shard_noise/node_shard_noise.gml": "8a8543c7fee2732fae85a338b7097e254b3d80eda8293f45b4eadd4146a48ffb",
+      "shaders/sh_noise_shard/sh_noise_shard.fsh": "be189ba5f5493400017095479b75feb35ced8bf911bbf1966635d4f77c499c28",
+      "scripts/__node_shader/__node_shader.gml": "81b23b94aac6df118187510083d3f59c02b4bf09799e75c72ab5a19e7e17d45f",
+      "scripts/__node_shader_generator/__node_shader_generator.gml": "e917d1974118124fef04ce6121459b2c73b956201edd6ea36c71ad223fd3f6dd",
+      "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceShardNoise.cpp",
+    "rules": [
+      "27 source cells with two three-lane hashes, binary32 source transform and progress, exp2 weights and inverse-square-root slope",
+      "covered fragments require all three mapped toggles and an explicit resolved seed; unmapped source vec2 uniform and UseSurf state stays unresolved",
+      "mapped numeric endpoint pairs use raw unwarped nearest mean RGB; Scale keeps two axes without a map and mixes into equal axes with a map",
+      "raw fractional canvas and pixel-center coverage with half-even allocation; wholly uncovered target stays clear without consuming shader controls",
+      "Position Reference and Surface/whole SurfaceArray projection, Dimension varying rows and equal-size collapse",
+      "UV flips Y and keeps alpha at zero Mix; levels permit signed and reversed ranges, equal input levels refuse",
+      "seven explicit surface formats; selected typed pixels mask through RGBA8 scratch; Mask Alpha Only is inert",
+      "all fifteen physical slots, four processor schedules, animated seed/progress, inherited instances and Format9 persistence",
+      "64 million cumulative work cap before output or observers; 14336 units per covered allocated pixel and 512 per uncovered pixel",
+      "consumed negative sharpness and nested Scale uniforms refuse; actual mapped sharpness domain checked before first output",
+      "explicitly requested field retains stored red-channel raster; scalar and processor array integration validated"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-build-batch3.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-cpu-batch3-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5559,
+    "new_shard_test_cases": 11,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3918,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-source-stability-batch3.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-cpu-child-hashes-batch3.json",
+    "independent_reference_count": 16,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/shard-independent-reference.json"
+    ],
+    "read_review": "root reviewed complete pinned equations and shader setter behavior, complete native executor, projections, metadata, and both fixture files"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "build_failed": true,
+      "cause": "fixture used vector<Vector2> where ArrayValue requires vector<ElementValue>",
+      "repair": "use ElementValue storage; no stale-binary tests run"
+    },
+    {
+      "batch": 2,
+      "checks": 20,
+      "passed": 19,
+      "failures": [
+        {
+          "test": "RGBA8 mask staging",
+          "cause": "expected Image omitted its derived content hash",
+          "repair": "set expected.Hash = SurfaceHash(expected)"
+        },
+        {
+          "test": "Atlas sampler refusal",
+          "cause": "authored Atlas payload refused by graph compilation before the executor",
+          "repair": "exercise raw executor binding with the direct NodeContext harness"
+        }
+      ]
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Shard Noise performance profiling",
+    "fresh dev/server/ci preset matrices"
+  ],
+  "limits": [
+    "independent source-equation references do not establish licensed runtime pixel parity",
+    "CPU libm and device float behavior can differ",
+    "unmapped covered source controls need unresolved runtime evidence",
+    "ENGINE_PROFILE marks executor work; no measured performance claim"
+  ],
+  "external_references": {
+    "uniform_components": "https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_set_uniform_f.htm",
+    "negative_power_base": "https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html#exponential-functions"
+  },
+  "build_warnings": [
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:339:58: warning: \u2018a\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:339:58: warning: \u2018b\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:241:79: warning: \u2018multiplier\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/usr/include/c++/13/bits/stl_vector.h:106:49: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cx",
+    "/usr/include/c++/13/bits/stl_vector.h:107:33: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cx",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cxx11::basic_string<char, std::ch",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cxx11::basic_string<char, std::ch",
+    "/usr/include/c++/13/bits/stl_vector.h:106:49: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cx",
+    "/usr/include/c++/13/bits/stl_vector.h:107:33: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cx",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cxx11::basic_string<char, std::ch",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int, double, std::__cxx11::basic_string<char, std::ch",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/CacheGroupReplay.cpp:1429:111: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOperation::MemberId\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/CacheGroupReplay.cpp:1429:111: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOperation::Members\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp:287:28: warning: \u2018*(std::_Optional_payload_base<long unsigned int>::_Storage<long unsigned int, true>*)((char*)&requestedFrame + offsetof(const std::optional<long unsigned int>,std::optional<long unsigned int>::<unnamed>.std::_Optional_base<long ",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/SourceFlipGrid.cpp:94:30: warning: variable \u2018s\u2019 set but not used [-Wunused-but-set-variable]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/SourceFlipParticles.cpp:37:30: warning: variable \u2018particleVel\u2019 set but not used [-Wunused-but-set-variable]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/FrameCacheReplay.cpp:2772:9: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOutput::Domain\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/FrameCacheReplay.cpp:2772:9: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOutput::Refusal\u2019 [-Wmissing-field-initializers]"
+  ],
+  "build_warnings_note": "initial warnings were in unchanged dependency sources; later builds had no warnings"
+}

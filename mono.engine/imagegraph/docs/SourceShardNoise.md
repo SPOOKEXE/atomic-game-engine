@@ -1,0 +1,23 @@
+# Source Shard Noise
+
+`pc.shard_noise` implements the defined mapped seam of pinned `Node_Shard_Noise` and `sh_noise_shard` from `b69eca232217360cf1502ef0223523d818606652`. Source paths are `scripts/node_shard_noise/node_shard_noise.gml`, `scripts/__node_shader/__node_shader.gml`, `scripts/__node_shader_generator/__node_shader_generator.gml`, `scripts/shader_functions/shader_functions.gml`, and `shaders/sh_noise_shard/sh_noise_shard.fsh`. The shader names ENDESGA as its author and credits @Xor for the tanh deconstruction and optimization.
+
+Grug keep source math. Each of 27 cells uses two three-lane hashes with the source coefficients and Seed modulo 10000 divided by 100. Weight is exp2 of negative tau times squared displacement. The second hash chooses a slope, accumulated as weight times slope times inverse square root of one plus slope squared. The result divides by total weight and maps into `[0,1]` before levels.
+
+The transform uses raw Dimension aspect, Position divided by Dimension, the source row-vector rotation, and Scale divided by 16. Progress divides by 100. The source three-dimensional point adds Progress to both transformed axes, halves Progress for Z, then multiplies all three lanes by 16. Grug keep those separate operations because cancelling them changes float rounding.
+
+Covered fragments require Progress Mapped, Sharpness Mapped, and Scale Mapped enabled. The generic shader setter only calls its mapped helper when each toggle is enabled. Disabled scalar controls upload one value into a vec2; disabled controls also leave their UseSurf flag unchanged. [GameMaker requires the matching number of uniform components](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Asset_Management/Shaders/shader_set_uniform_f.htm). Native execution refuses an unmapped covered branch at the relevant control. It does not invent prior shader state.
+
+Mapped controls use their source two-lane values. Scalars duplicate; authored pairs retain both endpoints. Scale keeps anisotropic axes without a map. An active Scale Map mixes its two lanes into equal axes. Progress and Sharpness maps interpolate endpoint pairs. All maps sample nearest mean RGB, ignoring alpha, at raw unwarped texture coordinates. Missing maps use the low endpoint. Mapped nested Scale arrays refuse the source invalid nested vec2 uniform upload.
+
+Sharpness uses the source power of two times 20. Zero is valid. Consumed negative Sharpness refuses at its named port because [GLSL power is undefined for negative bases](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html#exponential-functions). Admission checks actual mapped sharpness values before allocating output. Nonfinite or unrepresentable controls, intermediate shader overflow, zero weight total, equal input levels, and floating storage overflow receive named diagnostics.
+
+Position Reference units use the first prepared Dimension row. Linked individual surfaces expose dimensions and bypass units; linked whole SurfaceArrays project `[1,1]`. The generic generator allocates half-even dimensions but draws a raw-size sprite. Raw pixel-center coordinates control coverage and UV reads. The target clears first, so wholly uncovered dimensions skip consumed Seed, levels, and mapped controls and stay clear. Covered output requires explicit resolved Seed.
+
+UV mapping flips Y, mixes coordinates, and retains UV alpha even at zero Mix. Raw Atlas UV, Mask, and consumed numeric map bindings refuse. Mask Alpha Only is inert. All seven explicit source depths are supported. Masking reads selected typed output, multiplies alpha by mean mask RGB times mask alpha, writes default RGBA8 scratch, then copies back to selected depth. Grug keep that precision loss.
+
+An explicitly requested field owns the generated raster as a two-dimensional scalar recipe sampled from its stored red channel. The surface output stays the same.
+
+Admission quotes every selected row before output or observer calls. Allocated pixels cost 14336 scalar work units when the sprite covers any pixel: 512 base plus 27 times 512. Wholly uncovered draws use 512 per allocated pixel. The complete batch cap is 64 million units. Conservative retained bytes include maximum selected dimensions, 16-byte target pixels, metadata, optional mask target, and requested field raster copy. Actual mask scratch charges four bytes per pixel.
+
+Grug claim source equations and bounded native behavior within this defined mapped seam. CPU math functions and GPU float behavior can differ. Licensed runtime pixel parity and measured performance are not claimed.
