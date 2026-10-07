@@ -1,2 +1,4 @@
 # Authored world containers embed external scripts and should not be line-merged.
 *.aworld binary
+# grug generated tab records keep empty final fields.
+mono.engine/imagegraph/src/SourceCatalogue.inc whitespace=-blank-at-eol

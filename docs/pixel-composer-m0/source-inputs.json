@@ -6556,14 +6556,7 @@
     },
     {
      "array_depth": 0,
-     "choices": [
-      "XYZ",
-      "Default axis for Godot, Maya, Houdini",
-      "XZ-Y",
-      "Default axis for Unreal Engine",
-      "X-ZY",
-      "Default axis for Blender, 3DsMax, PicoCAD"
-     ],
+     "choices": null,
      "default": "2",
      "extra": [
       "{ data: [ \n\t\t\tnew scrollItem(\"XYZ\").setTooltip(\"Default axis for Godot, Maya, Houdini\"), \n\t\t\tnew scrollItem(\"XZ-Y\").setTooltip(\"Default axis for Unreal Engine\"), \n\t\t\tnew scrollItem(\"X-ZY\").setTooltip(\"Default axis for Blender, 3DsMax, PicoCAD\") \n\t\t], update_hover: false }"
@@ -37596,10 +37589,7 @@
     },
     {
      "array_depth": 0,
-     "choices": [
-      "FPS",
-      "Duration"
-     ],
+     "choices": null,
      "default": "0",
      "extra": [
       "[ \"FPS\", \"Duration\" ]"
@@ -114779,14 +114769,7 @@
     },
     {
      "array_depth": 0,
-     "choices": [
-      "Same as input",
-      "Constant",
-      "Relative to input",
-      "Set dimension as a multiple of input surface.",
-      "Fit content",
-      "Automatically set dimension to fit content."
-     ],
+     "choices": null,
      "default": "OUTPUT_SCALING.constant",
      "extra": [
       "[\n        new scrollItem( \"Same as input\"),\n        new scrollItem( \"Constant\"),\n        new scrollItem( \"Relative to input\").setTooltip(\"Set dimension as a multiple of input surface.\"),\n        new scrollItem( \"Fit content\").setTooltip(\"Automatically set dimension to fit content.\"),\n    ]"
@@ -118650,13 +118633,7 @@
     },
     {
      "array_depth": 0,
-     "choices": [
-      "Single",
-      "widget_rotator_random_range",
-      "widget_rotator_random_span",
-      "widget_rotator_random_double_range",
-      "widget_rotator_random_double_span"
-     ],
+     "choices": null,
      "default": "0",
      "extra": [
       "types"
@@ -119831,18 +119808,7 @@
     },
     {
      "array_depth": 0,
-     "choices": [
-      "Spread Output",
-      "Create multiple surfaces for each surface separately.",
-      "Index",
-      "Mix all input surfaces using spawn index as array index.",
-      "Random",
-      "Mix all input surfaces with random array index.",
-      "Data",
-      "Using third value (if exists) to determine array index.",
-      "Texture",
-      "Use external surface to select array index."
-     ],
+     "choices": null,
      "default": "1",
      "extra": [
       "[ \n\t\tnew scrollItem( \"Spread Output\" ).setTooltip(\"Create multiple surfaces for each surface separately.\"), \n\t\tnew scrollItem( \"Index\"         ).setTooltip(\"Mix all input surfaces using spawn index as array index.\"), \n\t\tnew scrollItem( \"Random\"        ).setTooltip(\"Mix all input surfaces with random array index.\"), \n\t\tnew scrollItem( \"Data\"          ).setTooltip(\"Using third value (if exists) to determine array index.\"), \n\t\tnew scrollItem( \"Texture\"       ).setTooltip(\"Use external surface to select array index.\") \n\t]"
@@ -128822,12 +128788,7 @@
     },
     {
      "array_depth": 0,
-     "choices": [
-      "Same as input",
-      "Constant",
-      "Relative to input",
-      "Fit content"
-     ],
+     "choices": null,
      "default": "OUTPUT_SCALING.constant",
      "extra": [
       "__output_dim_enum"
@@ -137304,14 +137265,7 @@
     },
     {
      "array_depth": 0,
-     "choices": [
-      "Same as Input",
-      "Constant",
-      "Relative to Input",
-      "Set dimension as a multiple of input surface.",
-      "Fit Content",
-      "Automatically set dimension to fit content."
-     ],
+     "choices": null,
      "default": "OUTPUT_SCALING.same_as_input",
      "extra": [
       "[\n\t\tnew scrollItem(\"Same as Input\"),\n\t\tnew scrollItem(\"Constant\"),\n\t\tnew scrollItem(\"Relative to Input\").setTooltip(\"Set dimension as a multiple of input surface.\"),\n\t\tnew scrollItem(\"Fit Content\").setTooltip(\"Automatically set dimension to fit content.\"),\n\t]"

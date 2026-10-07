@@ -989,7 +989,7 @@ I	file_path	File Path	4	FPath	text	s ""
 S	I	file_path	0
 I	import_scale	Import Scale	6	Float	scalar	d 1	
 S	I	import_scale	0
-I	axis	Axis	7	EScroll	enum	e 2	XYZ;Default axis for Godot, Maya, Houdini;XZ-Y;Default axis for Unreal Engine;X-ZY;Default axis for Blender, 3DsMax, PicoCAD
+I	axis	Axis	7	EScroll	enum	e 2	
 S	I	axis	0
 B	I	axis	0	general	1	default	3
 C	I	axis	unknown
@@ -7619,7 +7619,7 @@ S	I	custom_range	0
 I	frame_range	Frame range	12	SliRange	vector2	v 0 -1	
 S	I	frame_range	1
 A	I	frame_range	1
-I	frame_timing	Frame Timing	26	EButton	enum	e 0	FPS;Duration
+I	frame_timing	Frame Timing	26	EButton	enum	e 0	
 S	I	frame_timing	0
 B	I	frame_timing	0	general	1	always	?
 C	I	frame_timing	unknown
@@ -25615,7 +25615,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	seed	Seed	17	Seed	scalar		
 S	I	seed	0
-I	output_dimension_type	Output Dimension Type	35	EScroll	enum	e 1	Same as input;Constant;Relative to input;Set dimension as a multiple of input surface.;Fit content;Automatically set dimension to fit content.
+I	output_dimension_type	Output Dimension Type	35	EScroll	enum	e 1	
 S	I	output_dimension_type	0
 B	I	output_dimension_type	0	general	1	default	4
 C	I	output_dimension_type	unknown
@@ -26561,7 +26561,7 @@ O	object	Object	0	rigid		s "objects"
 N	pc.rotation_random_data	Node_Rotation_Random_Data	Rotation Random	values	scripts/node_rotation_random_data/node_rotation_random_data.gml
 I	attribute_process	attribute process	-1	Bool	boolean	b 1	
 S	I	attribute_process	0
-I	type	Type	0	EScroll	enum	e 0	Single;widget_rotator_random_range;widget_rotator_random_span;widget_rotator_random_double_range;widget_rotator_random_double_span
+I	type	Type	0	EScroll	enum	e 0	
 S	I	type	0
 B	I	type	0	general	1	default	5
 C	I	type	unknown
@@ -26793,7 +26793,7 @@ S	I	dimension_unit	?
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
 A	I	surface_in	?
-I	array	Array	15	EScroll	enum	e 1	Spread Output;Create multiple surfaces for each surface separately.;Index;Mix all input surfaces using spawn index as array index.;Random;Mix all input surfaces with random array index.;Data;Using third value (if exists) to determine array index.;Texture;Use external surface to select array index.
+I	array	Array	15	EScroll	enum	e 1	
 S	I	array	0
 B	I	array	0	general	1	default	5
 C	I	array	unknown
@@ -28923,7 +28923,7 @@ S	I	attribute_process	0
 I	base_shape	Base Shape	0	Surface	image		
 S	I	base_shape	0
 A	I	base_shape	?
-I	output_dimension_type	Output Dimension Type	13	EScroll	enum	e 1	Same as input;Constant;Relative to input;Fit content
+I	output_dimension_type	Output Dimension Type	13	EScroll	enum	e 1	
 S	I	output_dimension_type	0
 B	I	output_dimension_type	0	general	1	default	4
 C	I	output_dimension_type	unknown
@@ -30683,7 +30683,7 @@ I	active	Active	11	Active	boolean	b 1
 S	I	active	0
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
-I	output_dimension_type	Output Dimension Type	9	EScroll	enum	e 0	Same as Input;Constant;Relative to Input;Set dimension as a multiple of input surface.;Fit Content;Automatically set dimension to fit content.
+I	output_dimension_type	Output Dimension Type	9	EScroll	enum	e 0	
 S	I	output_dimension_type	0
 B	I	output_dimension_type	0	general	1	default	4
 C	I	output_dimension_type	unknown

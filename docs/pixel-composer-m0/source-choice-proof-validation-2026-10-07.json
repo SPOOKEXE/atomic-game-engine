@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug repair source choice order/count evidence and stale catalogue labels. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_math/node_math.gml": "c93a3af03b1f032b5b4d8968245a50748e6fc36fe1218cc3ad7082f558d09d13",
+      "scripts/node_vector_math/node_vector_math.gml": "687144814ea6a0f8c1832c116157c7a2550caee688a236fa2ef7a2fa21148f98",
+      "scripts/node_pixel_math/node_pixel_math.gml": "4b15f23363583f476e7801f08574df9b5f4a162321851995185393ca20418359",
+      "scripts/node_condition/node_condition.gml": "3bc81b66c7ceed28aae33e62a7ddf713caa717307e7f926866ee5611904db834",
+      "scripts/node_gradient/node_gradient.gml": "d55c626179c4ee3cf5511f140c2b83929f4dce92226daa9baec76b2bcc8fb624",
+      "scripts/scrollBox/scrollBox.gml": "de682b47fff4d6ebef720aadfbd486af25266a32a009ff113c6158e0f9969b75",
+      "scripts/node_shape_polygon/node_shape_polygon.gml": "8a061fc8256a1df6491e6f280f1a27ee59fec07a623b66e3f14085c4dc88b837"
+    }
+  },
+  "contract": {
+    "verifier": "scripts/pixel-composer/source_behavior.py",
+    "extraction": "scripts/pixel-composer/extract-source.py",
+    "rules": [
+      "offset-preserving string/comment masking; typed delimiter checks on expressions rather than whole raw macro-bearing modules",
+      "every protected reference in the inspected scope needs an explicitly recognized definition or consumer; unrecognized mutations, aliases and escapes refuse evidence",
+      "local array proof feeds both choice labels and counts; generated math protects names and scroll arrays; Condition, Gradient and Pixel Math use the shared census",
+      "known pinned host consumers, primitive label copies and object name reads retain their exact source positions",
+      "unproven raw mapping clears legacy display labels; saved snapshot and generated catalogue clear seven lists previously marked unknown",
+      "generated tab records preserve mandatory empty final fields with a path-specific whitespace attribute"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-build-batch3.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-cpu-batch3-results.json",
+    "checks": 22,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5467,
+    "startup_test_cases": 1,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "typechecker": "mypy 2.4.0; changed source module, follow-imports=skip",
+    "pinned_nodes": 886,
+    "pinned_resolved_mapping_changes": 0,
+    "generated_menu_evidence_unchanged": true,
+    "unproven_label_lists_cleared": [
+      {
+        "node": "Node_3D_Mesh_Obj",
+        "input": "Axis"
+      },
+      {
+        "node": "Node_Export",
+        "input": "Frame Timing"
+      },
+      {
+        "node": "Node_Repeat",
+        "input": "Output Dimension Type"
+      },
+      {
+        "node": "Node_Rotation_Random_Data",
+        "input": "Type"
+      },
+      {
+        "node": "Node_Scatter",
+        "input": "Array"
+      },
+      {
+        "node": "Node_Sprite_Stack",
+        "input": "Output Dimension Type"
+      },
+      {
+        "node": "Node_Transform",
+        "input": "Output Dimension Type"
+      }
+    ],
+    "pinned_comparison": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-pinned-comparison-batch3.json",
+    "original_verifier_tests_retained": true,
+    "case_retention": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-case-retention.json",
+    "frozen_source_paths": 3717,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-source-stability-batch3.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-proof-cpu-child-hashes-batch3.json",
+    "read_review": "Sol source read review and implementation fallback, Luna fixture and small adapter edits, root reproduction/integration and final coverage review"
+  },
+  "issues": [
+    {
+      "stage": "reproduction",
+      "output": "reversing generated math scroll still emitted original-order evidence; reversed local literal choices still emitted original labels; legacy extractor retained Old/New labels after raw mapping became unknown",
+      "repair": "grug census protected references and clear unproven legacy labels"
+    },
+    {
+      "batch": 1,
+      "output": "19 of 22 checks passed; lint SIM102, seven mypy errors, pinned extraction lost 11 controls; runtime and 111 Python cases passed",
+      "repair": "grug scope delimiter checks to expressions because raw host macros are not standalone syntax; narrow optional parser results and recognize exact pinned read consumers"
+    },
+    {
+      "batch": 2,
+      "output": "20 of 22 checks passed; two mypy match assignment errors and Shape Polygon primitive-name getter not recognized; runtime and 109 Python cases passed",
+      "repair": "grug distinguish optional matches and recognize complete array_safe_get_fast(...).name assignment"
+    },
+    {
+      "stage": "final read review",
+      "output": "later fixture edit had dropped earlier mutation cases; direct malformed [\"A\") literal still emitted count one and label A; generated fixture placeholder formatting could interpret GML object braces",
+      "repair": "grug restore mutation coverage without removing original methods, add typed direct expression checks, and substitute only exact placeholder tokens before batch three"
+    }
+  ],
+  "limits": [
+    "recognized source scopes and host consumers, not a general GML interpreter or licensed runtime parity proof",
+    "snapshot update is limited to seven already-unproven label lists; unrelated pre-existing extraction differences were not regenerated",
+    "test durations and build timings are verification evidence, not performance claims"
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated source-extractor performance profiling"
+  ]
+}

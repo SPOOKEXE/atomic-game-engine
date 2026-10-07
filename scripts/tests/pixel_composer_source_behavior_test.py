@@ -118,6 +118,275 @@ class PixelComposerSourceBehaviorTest(unittest.TestCase):
         self.assertIsNone(choice_count("__gradTypes", body + " __gradTypes = [];", {}))
         self.assertIsNone(source_choice_map("__gradTypes", body, {}, array_map_verified=False, scroll_item_verified=True, separator_verified=True))
 
+    def test_local_choice_arrays_reject_unverified_consumers_and_object_mutation(self):
+        body = (
+            'var choices = [new scrollItem("A", sprite, 0), new scrollItem("B", sprite, 1)]; '
+            "node.setChoices(choices); "
+            "var mapped = array_map(choices, function(v,i) { return v == -1 ? -1 : "
+            "new scrollItem(v, sprite, index++); });"
+        )
+        self.assertEqual(2, choice_count("choices", body, {}))
+        for mutation in (
+            "receiver.array_length(choices);",
+            'receiver.nodeValue_EScroll("Type", 0, choices);',
+            "var object = {choices: choices};",
+            'var scrollItemAlias = choices[0]; scrollItemAlias.name = "Changed";',
+            'var choices = ["A", {label: "B"]];',
+        ):
+            with self.subTest(local_mutation=mutation):
+                self.assertIsNone(choice_count("choices", body + mutation, {}))
+
+    def test_local_choice_arrays_allow_only_proven_indexed_reads(self):
+        primitive_body = (
+            'var choices = ["A", "B"]; '
+            "node.setChoices(choices); "
+            'switch(choices[index]) { case "A": break; } '
+            "var label = choices[index];"
+        )
+        self.assertEqual(2, choice_count("choices", primitive_body, {}))
+
+        object_body = (
+            'var choices = [new scrollItem("A", sprite, 0), new scrollItem("B", sprite, 1)]; '
+            "node.setChoices(choices); "
+            'switch(choices[index].name) { case "A": break; } '
+            "var label = choices[index].name;"
+        )
+        self.assertEqual(2, choice_count("choices", object_body, {}))
+        for unsafe_read in (
+            'switch(choices[index]) { case "A": break; }',
+            "var label = choices[index];",
+        ):
+            with self.subTest(unsafe_read=unsafe_read):
+                self.assertIsNone(
+                    choice_count("choices", object_body + unsafe_read, {})
+                )
+
+    def test_local_choice_history_requires_the_source_array_in_first_row(self):
+        body = 'var choices = ["A", "B"]; node.setChoices(choices);'
+        self.assertEqual(
+            2,
+            choice_count(
+                "choices", body + " receiver.setHistory([choices, other]);", {}
+            ),
+        )
+        self.assertIsNone(
+            choice_count(
+                "choices", body + " receiver.setHistory([other, choices]);", {}
+            )
+        )
+        self.assertIsNone(
+            choice_count(
+                "choices", body + " receiver.setHistory([other], choices);", {}
+            )
+        )
+
+    def test_local_choice_array_rejects_mutation_aliases_and_escapes(self):
+        body = 'var choices = ["A", "B"]; node.setChoices(choices);'
+        self.assertEqual(2, choice_count("choices", body, {}))
+        flags = {
+            "array_map_verified": True,
+            "scroll_item_verified": True,
+            "separator_verified": True,
+        }
+        mapped = source_choice_map("choices", body, {}, **flags)
+        self.assertEqual(2, len(mapped))
+        self.assertEqual(["A", "B"], [entry["label"] for entry in mapped])
+        for escape in (
+            "array_reverse(choices);",
+            "array_sort(choices, true);",
+            "array_copy(choices, 0, other, 0, 2);",
+            'choices[0] = "Changed";',
+            "receiver.consume(choices);",
+            "var alias = choices;",
+            "object.choices = choices;",
+            "var nested = {data: choices};",
+        ):
+            with self.subTest(local_escape=escape):
+                self.assertIsNone(choice_count("choices", body + escape, {}))
+                self.assertIsNone(source_choice_map("choices", body + escape, {}, **flags))
+
+    def test_choice_literals_reject_mismatched_delimiters_and_ignore_comment_delimiters(self):
+        flags = {
+            "array_map_verified": True,
+            "scroll_item_verified": True,
+            "separator_verified": True,
+        }
+        malformed = (
+            '["A", "B")',
+            '["A", {label: "B"]',
+            '["A", ("B", "C"]',
+            '__enum_array_gen(["A", "B"), sprite)',
+            '__enum_array_gen(["A", {label: "B"], sprite)',
+            '__enum_array_gen(["A", ("B", "C"], sprite)',
+        )
+        for expression in malformed:
+            with self.subTest(malformed_choice_expression=expression):
+                self.assertIsNone(choice_count(expression, "", {}))
+                self.assertIsNone(source_choice_map(expression, "", {}, **flags))
+
+        body = (
+            'var choices = ["A [", /* ) ] } */ "B } )", "C /* label */"]; '
+            'node.setChoices(choices); // { ] )\n'
+        )
+        self.assertEqual(3, choice_count("choices", body, {}))
+        mapped = source_choice_map("choices", body, {}, **flags)
+        self.assertEqual(["A [", "B } )", "C /* label */"], [item["label"] for item in mapped])
+        self.assertEqual([0, 1, 2], [item["choice_index"] for item in mapped])
+
+    def test_generated_math_and_vector_math_globals_reject_mutation_and_escape(self):
+        cases = (
+            (
+                "node_math_choice_source", "node_math", "node_math_names",
+                "node_math_scroll", "Node_Math", "s_node_math_operators",
+            ),
+            (
+                "node_vector_math_choice_source", "node_vector_math", "node_vmath_names",
+                "node_vmath_scroll", "Node_Vector_Math", "s_node_vmath_operators",
+            ),
+        )
+        mutations = (
+            "array_reverse(global.{scroll});",
+            "array_sort(global.{scroll}, true);",
+            "array_copy(global.{scroll}, 0, other, 0, 2);",
+            "array_reverse(global.{names});",
+            "array_sort(global.{names}, true);",
+            "array_copy(global.{names}, 0, other, 0, 2);",
+            'global.{names}[0] = "Changed";',
+            'global.{scroll}[0] = "Changed";',
+            'global.{scroll}[0].name = "Changed";',
+            "var alias = global.{scroll};",
+            "object.data = global.{names};",
+            "var nested = {items: global.{scroll}};",
+            "foo(global.{names});",
+        )
+        for function_name, folder, names, scroll, node, sprite in cases:
+            with self.subTest(generated_source=folder):
+                root = self.make_root()
+                source = root / "scripts" / folder / f"{folder}.gml"
+                source.parent.mkdir(parents=True)
+                source.write_text(
+                    f'global.{names} = ["Add", "Subtract"];\n'
+                    f"global.{scroll} = array_create_ext(array_length(global.{names}), "
+                    f"function(i) {{return new scrollItem(global.{names}[i], {sprite}, i)}});\n"
+                    f'function {node}() {{ newInput(0, nodeValue_EScroll("Type", 0, '
+                    f'global.{scroll})).rejectArray(); }}',
+                    encoding="utf-8",
+                )
+                parser = globals()[function_name]
+                self.assertEqual(["Add", "Subtract"], parser(root)[0])
+                valid = source.read_text(encoding="utf-8")
+                for mutation in mutations:
+                    changed = (
+                        valid
+                        + "\n"
+                        + mutation.replace("{names}", names).replace("{scroll}", scroll)
+                    )
+                    source.write_text(changed, encoding="utf-8")
+                    with self.subTest(mutation=mutation):
+                        self.assertEqual((None, None), parser(root))
+
+                safe_reads = (
+                    f"array_length(global.{scroll});\n"
+                    f'array_safe_get(global.{names}, _type, "");\n'
+                    f"string_lower(global.{names}[typ]);\n"
+                    f'// global.{scroll}[0] = "comment";\n'
+                    f'var note = "global.{names}[0]";\n'
+                    f"other.global.{scroll}[0];"
+                )
+                source.write_text(valid + "\n" + safe_reads, encoding="utf-8")
+                self.assertEqual(["Add", "Subtract"], parser(root)[0])
+
+    def test_pixel_math_local_scroll_rejects_mutation_and_escape(self):
+        root = self.make_root()
+        math = root / "scripts/node_math/node_math.gml"
+        math.parent.mkdir(parents=True)
+        math.write_text(
+            'global.node_math_names = ["Add", "Subtract"];\n'
+            "global.node_math_scroll = array_create_ext(array_length(global.node_math_names), "
+            "function(i) {return new scrollItem(global.node_math_names[i], s_node_math_operators, i)});\n"
+            'function Node_Math() { newInput(0, nodeValue_EScroll("Type", 0, '
+            'global.node_math_scroll)).rejectArray(); }',
+            encoding="utf-8",
+        )
+        pixel_math = root / "scripts/node_pixel_math/node_pixel_math.gml"
+        pixel_math.parent.mkdir(parents=True)
+        valid = (
+            'function Node_Pixel_Math() { _scroll = array_clone(global.node_math_scroll, 1); '
+            'array_append(_scroll, ["Less than", "Less than equal", "Greater than", "Greater than equal"]); '
+            'newInput(7, nodeValue_EScroll("Operator", 0, _scroll)).setPieMenu(); }'
+        )
+        pixel_math.write_text(valid, encoding="utf-8")
+        self.assertIsNotNone(node_pixel_math_choice_source(root)[0])
+        for escape in (
+            "array_reverse(_scroll);",
+            "array_sort(_scroll, true);",
+            "array_copy(_scroll, 0, other, 0, 1);",
+            '_scroll[0] = "Changed";',
+            "receiver.consume(_scroll);",
+            "var alias = _scroll;",
+            "object.data = _scroll;",
+            "var nested = {items: _scroll};",
+        ):
+            pixel_math.write_text(valid.replace("newInput(7,", escape + " newInput(7,"), encoding="utf-8")
+            with self.subTest(pixel_math_escape=escape):
+                self.assertEqual((None, None), node_pixel_math_choice_source(root))
+
+    def test_condition_and_gradient_choice_arrays_reject_aliases_and_mutations(self):
+        root = self.make_root()
+        condition = root / "scripts/node_condition/node_condition.gml"
+        condition.parent.mkdir(parents=True)
+        condition_valid = (
+            'function Node_Condition() { cond_array = __enum_array_gen(["Equal", "Not equal", '
+            '"Less ", "Less or equal ", "Greater ", "Greater or equal"], s_node_condition_type); '
+            'newInput(1, nodeValue_EScroll("Condition", 0, cond_array)).rejectArray(); '
+            'switch(_cond) { case 0: res = _chck == _valu; break; case 1: res = _chck != _valu; break; '
+            'case 2: res = _chck < _valu; break; case 3: res = _chck <= _valu; break; '
+            'case 4: res = _chck > _valu; break; case 5: res = _chck >= _valu; break; } }'
+        )
+        condition.write_text(condition_valid, encoding="utf-8")
+        self.assertIsNotNone(node_condition_choice_source(root)[0])
+        for escape in (
+            "var alias = cond_array;",
+            'cond_array[0] = "Changed";',
+            "array_reverse(cond_array);",
+            "object.data = cond_array;",
+        ):
+            condition.write_text(condition_valid.replace("switch(_cond)", escape + " switch(_cond)"), encoding="utf-8")
+            with self.subTest(condition_escape=escape):
+                self.assertEqual((None, None), node_condition_choice_source(root))
+
+        gradient = root / "scripts/node_gradient/node_gradient.gml"
+        gradient.parent.mkdir(parents=True)
+        gradient_valid = (
+            'function Node_Gradient() { __gradTypes = __enum_array_gen(["Linear", "Circular", "Radial", "Diamond"], '
+            's_node_gradient_type); newInput(2, nodeValue_EScroll("Type", 0, __gradTypes)).setTopbar(); }'
+        )
+        gradient.write_text(gradient_valid, encoding="utf-8")
+        self.assertIsNotNone(node_gradient_choice_source(root)[0])
+        for escape in (
+            "var alias = __gradTypes;",
+            '__gradTypes[0] = "Changed";',
+            "array_reverse(__gradTypes);",
+            "object.data = __gradTypes;",
+        ):
+            gradient.write_text(gradient_valid.replace("newInput(2", escape + " newInput(2"), encoding="utf-8")
+            with self.subTest(gradient_escape=escape):
+                self.assertEqual((None, None), node_gradient_choice_source(root))
+
+    def test_fast_scroll_name_read_is_safe_but_bare_item_alias_is_not(self):
+        body = (
+            'var objectChoices = [new scrollItem("A", sprite, 0), new scrollItem("B", sprite, 1)]; '
+            "node.setChoices(objectChoices); "
+            "var label = array_safe_get_fast(objectChoices, index).name;"
+        )
+        self.assertEqual(2, choice_count("objectChoices", body, {}))
+        for unsafe_read in (
+            "var item = array_safe_get_fast(objectChoices, index);",
+            "var item = objectChoices[index];",
+        ):
+            with self.subTest(unsafe_read=unsafe_read):
+                self.assertIsNone(choice_count("objectChoices", body + unsafe_read, {}))
+
     def test_enum_helper_sprite_indices_do_not_change_choice_indices_or_count(self):
         body = 'var __slope = __enum_array_gen(["Linear","Smooth","Circular"], s_node_curve_type,, [2,4,5]);'
         self.assertEqual(3, choice_count("__slope", body, {}))

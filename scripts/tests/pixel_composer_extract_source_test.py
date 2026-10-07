@@ -12,7 +12,8 @@ EXTRACTOR = REPOSITORY / "scripts/pixel-composer/extract-source.py"
 
 class PixelComposerExtractSourceTest(unittest.TestCase):
     def extract(self, root: Path, include_condition: bool = False, include_gradient: bool = False,
-                include_aliases: bool = False, include_pixel_math: bool = False) -> dict:
+                include_aliases: bool = False, include_pixel_math: bool = False,
+                mutate_pixel_math_global: bool = False, include_mutated_local_choices: bool = False) -> dict:
         script_root = root / "source"
         files = {
             "scripts/scrollBox/scrollBox.gml": "",
@@ -345,6 +346,14 @@ function Node_Choice_Alias(_x, _y) : Node(_x, _y) constructor {
     newInput(4, nodeValue_EScroll("Sections", 0, sections));
 }
 """
+        if include_mutated_local_choices:
+            files["scripts/node_mutated_choices/node_mutated_choices.gml"] = """
+function Node_Mutated_Choices(_x, _y) : Node(_x, _y) constructor {
+    var modes = ["Old", "New"];
+    newInput(0, nodeValue_EScroll("Mode", 0, modes));
+    array_append(modes, ["Added later"]);
+}
+"""
         if include_gradient:
             files["scripts/node_gradient/node_gradient.gml"] = '''
 function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructor {
@@ -371,6 +380,8 @@ function Node_Pixel_Math(_x, _y) : Node(_x, _y) constructor {
     newInput(7, nodeValue_EScroll("Operator", 0, _scroll)).setPieMenu();
 }
 '''
+            if mutate_pixel_math_global:
+                files["scripts/node_math/node_math.gml"] += '\nglobal.node_math_names[0] = "Changed after menu generation";\n'
         for relative, content in files.items():
             path = script_root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -406,6 +417,7 @@ function Node_Pixel_Math(_x, _y) : Node(_x, _y) constructor {
                 *(('Node_Gradient',) if include_gradient else ()),
                 *(('Node_Choice_Alias',) if include_aliases else ()),
                 *(('Node_Pixel_Math',) if include_pixel_math else ()),
+                *(('Node_Mutated_Choices',) if include_mutated_local_choices else ()),
             ):
                 writer.writerow({"node_id": node})
 
@@ -430,6 +442,25 @@ function Node_Pixel_Math(_x, _y) : Node(_x, _y) constructor {
         )
         for source in evidence["paths"]:
             self.assertRegex(source["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_pixel_math_mutated_generated_global_does_not_emit_stale_choices(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(
+                Path(temporary), include_pixel_math=True, mutate_pixel_math_global=True
+            )
+        item = next(item for item in snapshot["nodes"]["Node_Pixel_Math"]["inputs"] if item["index"] == "7")
+        self.assertEqual({"status": "unknown", "entries": None}, item["source_choices"])
+        self.assertIsNone(item.get("choices"))
+        self.assertIsNone(item["source_behavior"]["choice_clamp"]["choice_count"])
+        self.assertNotIn("Node_Pixel_Math::_scroll", snapshot["source_choice_generated_evidence"])
+
+    def test_mutated_local_enum_does_not_emit_stale_choices(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary), include_mutated_local_choices=True)
+        item = snapshot["nodes"]["Node_Mutated_Choices"]["inputs"][0]
+        self.assertEqual({"status": "unknown", "entries": None}, item["source_choices"])
+        self.assertIsNone(item.get("choices"))
+        self.assertIsNone(item["source_behavior"]["choice_clamp"]["choice_count"])
 
     def test_lookat_replaces_inherited_physical_slots_and_preserves_source_output(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -696,8 +727,8 @@ function Node_Pixel_Math(_x, _y) : Node(_x, _y) constructor {
         self.assertEqual(2, fixed["source_behavior"]["choice_clamp"]["choice_count"])
         self.assertIn("scripts/node_choice_alias/node_choice_alias.gml", snapshot["source_constructor_evidence"])
         mutable = next(item for item in inputs if item["index"] == "3")
-        # grug legacy parser sees the final empty list; raw source choices stay unknown.
-        self.assertEqual([], mutable["choices"])
+        # grug hide legacy labels while raw source choices stay unknown.
+        self.assertIsNone(mutable["choices"])
         self.assertEqual({"status": "unknown", "entries": None}, mutable["source_choices"])
         self.assertIsNone(mutable["source_behavior"]["choice_clamp"]["choice_count"])
         sections = next(item for item in inputs if item["index"] == "4")

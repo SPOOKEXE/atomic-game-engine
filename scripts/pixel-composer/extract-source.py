@@ -560,6 +560,9 @@ def parse(name, seen):
                 # grug verified Pixel Math clone also needs its inspector labels.
                 entry["choices"] = [choice["label"] for choice in source_choices if "label" in choice]
                 record_constructor_source(name)
+            if source_choices is None and "choices" in entry:
+                # grug hide stale labels when raw source mapping not proven.
+                entry["choices"] = None
             entry["source_choices"] = {
                 "status": "resolved" if source_choices is not None else "unknown",
                 "entries": source_choices,

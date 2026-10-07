@@ -123,13 +123,169 @@ def _without_comments(text: str) -> str:
     return "".join(result)
 
 
+def _reference_code(text: str) -> str | None:
+    """grug hide strings and comments without moving the source reference offsets."""
+    result = list(text)
+    index = 0
+    while index < len(text):
+        start = index
+        if text.startswith("//", index):
+            end = text.find("\n", index + 2)
+            index = len(text) if end < 0 else end
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            if end < 0:
+                return None
+            index = end + 2
+        elif text[index] in "\"'":
+            quote = text[index]
+            index += 1
+            while index < len(text):
+                if text[index] == "\\":
+                    index += 2
+                elif text[index] == quote:
+                    index += 1
+                    break
+                else:
+                    index += 1
+            else:
+                return None
+        else:
+            index += 1
+            continue
+        result[start:index] = " " * (index - start)
+    return "".join(result)
+
+
+def _reference_expression_end(code: str, opening: int) -> int | None:
+    """grug check delimiter kinds inside the expression, never across unexpanded host macros."""
+    stack: list[str] = []
+    pairs = {")": "(", "]": "[", "}": "{"}
+    for index in range(opening, len(code)):
+        char = code[index]
+        if char in "([{":
+            stack.append(char)
+        elif char in ")]}":
+            if not stack or stack.pop() != pairs[char]:
+                return None
+            if not stack:
+                return index + 1
+    return None
+
+
+def _protected_references(
+    text: str, names: list[str], verified: list[tuple[int, int]], *, known_reads: bool = False, primitive_strings: bool = False
+) -> bool:
+    """grug every protected reference needs a verified use, not a list of guessed mutators."""
+    code = _reference_code(text)
+    if code is None:
+        return False
+    remaining = list(code)
+    def consume(start: int, end: int) -> None:
+        remaining[start:end] = " " * (end - start)
+    for verified_start, verified_end in verified:
+        consume(verified_start, verified_end)
+    if known_reads:
+        for name in names:
+            indexed = re.escape(name) + r"\s*\[\s*[A-Za-z_]\w*\s*\]"
+            scalar = indexed + (r"(?:\s*\.\s*name)?" if primitive_strings else r"\s*\.\s*name")
+            for pattern in [r"(?<![\w.])switch\s*\(\s*" + scalar + r"\s*\)",
+                            r"\bvar\s+[A-Za-z_]\w*\s*=\s*" + scalar + r"\s*;",
+                            r"\bvar\s+[A-Za-z_]\w*\s*=\s*array_safe_get_fast\s*\(\s*" + re.escape(name) + r"\s*,\s*[A-Za-z_]\w*\s*\)\s*\.\s*name\s*;"]:
+                for match in re.finditer(pattern, code):
+                    if not code[:match.start()].rstrip().endswith("."):
+                        consume(*match.span())
+            if primitive_strings:
+                # grug the pinned equation widget switches between two primitive label arrays.
+                widget = r"inputs\s*\[\s*2\s*\]\s*\.\s*getEditWidget\s*\(\s*\)\s*\.\s*data_list\s*=\s*curr_coor\s*\?\s*eq_type_pol\s*:\s*" + re.escape(name) + r"\s*;"
+                for match in re.finditer(widget, code):
+                    consume(*match.span())
+    if known_reads:
+        for call in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", code):
+            opening = code.find("(", call.start())
+            end = _reference_expression_end(code, opening)
+            if end is None:
+                return False
+            arguments = _split_top_level(text[opening + 1:end - 1])
+            function = call.group(1)
+            prefix = code[:call.start()].rstrip()
+            if function not in {"setChoices", "setHistory"} and (prefix.endswith(".") or (call.start() > 0 and re.match(r"[\w.]", code[call.start() - 1]))):
+                continue
+            allowed: list[str] = []
+            if function == "array_length" and len(arguments) == 1:
+                allowed = [arguments[0]]
+            elif function in {"nodeValue_EScroll", "nodeValue_EButton", "nodeValue_Enum_Scroll", "nodeValue_Enum_Button"} and len(arguments) == 3:
+                argument = arguments[2]
+                if argument.startswith("{") and argument.endswith("}"):
+                    fields = _split_top_level(argument[1:-1])
+                    data = [field.split(":", 1)[1].strip() for field in fields if ":" in field and field.split(":", 1)[0].strip() == "data"]
+                    allowed = data if len(data) == 1 else []
+                else:
+                    allowed = [argument]
+            elif function == "array_safe_get" and primitive_strings and len(arguments) in {2, 3} and re.fullmatch(r"[A-Za-z_]\w*", arguments[1]) and (len(arguments) == 2 or arguments[2] == '""'):
+                allowed = [arguments[0]]
+            elif function == "setHistory" and len(arguments) == 1 and prefix.endswith("."):
+                history = arguments[0]
+                if history.startswith("[") and history.endswith("]"):
+                    rows = _split_top_level(history[1:-1])
+                    allowed = rows[:1]
+            elif function == "setChoices" and len(arguments) == 1 and call.start() > 0 and prefix.endswith("."):
+                allowed = arguments
+            elif function in {"array_map", "array_map_ext"}:
+                mapped = _scroll_item_map_input(arguments)
+                allowed = [mapped] if mapped is not None else []
+            argument_index = 2 if function.startswith("nodeValue_") else 0
+            # grug delimiters locate the approved argument; other arguments stay protected.
+            spans: list[tuple[int, int]] = []
+            start, depth = opening + 1, 0
+            for index in range(opening + 1, end - 1):
+                char = code[index]
+                if char in "([{":
+                    depth += 1
+                elif char in ")]}":
+                    depth -= 1
+                elif char == "," and depth == 0:
+                    spans.append((start, index))
+                    start = index + 1
+            spans.append((start, end - 1))
+            if argument_index >= len(spans):
+                continue
+            left, right = spans[argument_index]
+            argument = _without_comments(text[left:right]).strip()
+            for name in names:
+                if name not in allowed:
+                    continue
+                if function == "setHistory" and argument.startswith("["):
+                    reference_match = re.match(r"\s*\[\s*(" + re.escape(name) + r")\s*(?=,|])", code[left:right])
+                    if reference_match:
+                        consume(left + reference_match.start(1), left + reference_match.end(1))
+                elif argument == name:
+                    reference_match = re.search(r"(?<![\w.])" + re.escape(name) + r"(?!\w)", code[left:right])
+                    if reference_match:
+                        consume(left + reference_match.start(), left + reference_match.end())
+                elif argument.startswith("{") and argument.endswith("}"):
+                    for match in re.finditer(r"\bdata\s*:\s*(" + re.escape(name) + r")\s*(?=,|})", code[left:right]):
+                        consume(left + match.start(1), left + match.end(1))
+    return not any(re.search(r"(?<![\w.])" + re.escape(name) + r"(?!\w)", "".join(remaining)) for name in names)
+
+
 def _local_source_array(expression: str, body: str) -> str | None:
-    assignment = re.search(r"\b" + re.escape(expression) + r"\s*=\s*(\[|(?:__enum_array_gen|array_map)\s*\()", body)
-    if assignment is None:
+    code = _reference_code(body)
+    if code is None:
+        return None
+    assignment = re.search(r"(?<![\w.])" + re.escape(expression) + r"\s*=\s*(\[|(?:__enum_array_gen|array_map)\s*\()", code)
+    if assignment is None or code[:assignment.start()].rstrip().endswith("."):
         return None
     opening = assignment.end() - 1
-    end = _matching_end(body, opening)
-    if end is None or re.search(r"\b" + re.escape(expression) + r"\s*(?:\[[^]]*\]\s*)?=|array_push\(\s*" + re.escape(expression) + r"\b", body[end:]):
+    end = _reference_expression_end(code, opening)
+    if end is None:
+        return None
+    initializer = body[assignment.start(1):end]
+    entries = _split_top_level(initializer[1:-1]) if initializer.startswith("[") else []
+    primitive_strings = bool(entries) and all(entry == "-1" or re.fullmatch(r'"(?:[^"\\]|\\.)*"', entry) for entry in entries)
+    if re.search(r"(?<![\w.])array_map_ext\s*\(\s*" + re.escape(expression) + r"\s*,", code):
+        primitive_strings = False
+    if not _protected_references(body, [expression], [(assignment.start(), end)], known_reads=True, primitive_strings=primitive_strings):
         return None
     return body[assignment.start(1):end]
 
@@ -150,7 +306,10 @@ def _scroll_item_map_input(arguments: list[str]) -> str | None:
 def _array_count(expression: str, body: str, global_arrays: dict[str, str], seen: set[str]) -> int | None:
     expression = expression.strip()
     if expression.startswith("["):
-        end = _matching_end(expression, 0)
+        code = _reference_code(expression)
+        if code is None:
+            return None
+        end = _reference_expression_end(code, 0)
         if end != len(expression):
             return None
         return len(_split_top_level(expression[1:-1]))
@@ -158,7 +317,10 @@ def _array_count(expression: str, body: str, global_arrays: dict[str, str], seen
     call = re.match(r"([A-Za-z_]\w*)\s*\(", expression)
     if call:
         opening = expression.find("(", call.start())
-        end = _matching_end(expression, opening)
+        code = _reference_code(expression)
+        if code is None:
+            return None
+        end = _reference_expression_end(code, opening)
         if end != len(expression):
             return None
         function = call.group(1)
@@ -191,6 +353,9 @@ def choice_count(argument: str, body: str, global_arrays: dict[str, str]) -> int
     """Resolve only literal or source-array choice lengths; names are never ordinals."""
     expression = argument.strip()
     if expression.startswith("{") and expression.endswith("}"):
+        code = _reference_code(expression)
+        if code is None or _reference_expression_end(code, 0) != len(expression):
+            return None
         fields = _split_top_level(expression[1:-1])
         data = next((field.split(":", 1)[1].strip() for field in fields if ":" in field and field.split(":", 1)[0].strip() == "data"), None)
         if data is None:
@@ -205,7 +370,10 @@ def _call_arguments(expression: str) -> tuple[str, list[str]] | None:
         return None
     text = expression.strip()
     opening = text.find("(", match.start())
-    end = _matching_end(text, opening)
+    code = _reference_code(text)
+    if code is None:
+        return None
+    end = _reference_expression_end(code, opening)
     if end != len(text):
         return None
     name = f"new {match.group(2)}" if match.group(1) else match.group(2)
@@ -227,7 +395,7 @@ def choice_source_evidence(root: Path) -> dict | None:
     item_body_end = _matching_end(source, item_body_start)
     box_body_start = source.find("{", scroll_box.start())
     box_body_end = _matching_end(source, box_body_start)
-    if not all((array_body_end, item_body_end, box_body_end)):
+    if array_body_end is None or item_body_end is None or box_body_end is None:
         return None
     array_body = source[array_body_start + 1:array_body_end - 1]
     item_body = source[item_body_start + 1:item_body_end - 1]
@@ -292,9 +460,20 @@ def _generated_scroll_choice_source(
         + re.escape(scroll_global)
         + r"\s*\)\s*\)\s*\.\s*rejectArray\s*\(\s*\)\s*;"
     )
-    if not labels or not scroll_mapping.search(code) or not typed_input.search(node_body):
+    mapping = scroll_mapping.search(code)
+    input_match = typed_input.search(node_body)
+    if not labels or mapping is None or input_match is None:
         return None, None
-    if re.search(re.escape(names_global) + r"\s*\[[^]]*\]\s*=", code):
+    verified = [(names_assignments[0].start(), array_end), mapping.span(),
+                (node_open + 1 + input_match.start(), node_open + 1 + input_match.end())]
+    read_patterns = [
+        r"(?<![\w.])array_length\s*\(\s*" + re.escape(scroll_global) + r"\s*\)",
+        r"(?<![\w.])array_safe_get\s*\(\s*" + re.escape(names_global) + r'\s*,\s*_type\s*,\s*""\s*\)',
+        r"(?<![\w.])string_lower\s*\(\s*" + re.escape(names_global) + r"\s*\[\s*typ\s*\]\s*\)",
+    ]
+    for pattern in read_patterns:
+        verified.extend(match.span() for match in re.finditer(pattern, code) if not code[:match.start()].rstrip().endswith("."))
+    if not _protected_references(code, [names_global, scroll_global], verified):
         return None, None
     return labels, {
         "path": source_path,
@@ -354,16 +533,13 @@ def node_pixel_math_choice_source(root: Path) -> tuple[list[str] | None, dict | 
         return None, None
     if len(inputs) != 1 or not clones[0].start() < appends[0].start() < inputs[0].start():
         return None, None
-    if re.search(r"\barray_(?:insert|delete|resize|push|pop)\s*\(\s*_scroll\b", body):
-        return None, None
-    writes = list(re.finditer(r"\b_scroll\s*(?:\[[^]]*\])?\s*(?:=|\+=|-=|\+\+|--)", body))
-    if len(writes) != 1 or writes[0].start() != clones[0].start():
-        return None, None
-    remaining = body
-    for match in sorted([clones[0], appends[0], inputs[0]], key=lambda match: match.start(), reverse=True):
-        remaining = remaining[:match.start()] + " " * (match.end() - match.start()) + remaining[match.end():]
-    remaining = re.sub(r"\b_scroll\s*\[\s*type\s*\]", "", remaining)
-    if re.search(r"\b_scroll\b", remaining):
+    operand = re.compile(
+        r"var\s+_oprand\s*=\s*type\s*<\s*array_length\s*\(\s*global\.node_math_names\s*\)\s*"
+        r"\?\s*global\.node_math_names\s*\[\s*type\s*\]\s*:\s*_scroll\s*\[\s*type\s*\]\s*;"
+    )
+    verified = [clones[0].span(), appends[0].span(), inputs[0].span()]
+    verified.extend(match.span() for match in operand.finditer(body))
+    if not _protected_references(body, ["_scroll", "global.node_math_scroll", "global.node_math_names"], verified):
         return None, None
     labels = math_labels + PIXEL_MATH_EXTRA_CHOICES
     return labels, {
@@ -420,6 +596,8 @@ def node_condition_choice_source(root: Path) -> tuple[list[str] | None, dict | N
     found = re.findall(r'"((?:[^"\\]|\\.)*)"', labels.group(1))
     if found != CONDITION_CHOICES:
         return None, None
+    if not _protected_references(body, ["cond_array"], [labels.span(), declaration.span()]):
+        return None, None
     return found, {
         "path": CONDITION_CHOICE_SOURCE,
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -452,6 +630,8 @@ def node_gradient_choice_source(root: Path) -> tuple[list[str] | None, dict | No
     expressions = _split_top_level(labels.group(1))
     if expressions != [json.dumps(x) for x in expected]:
         return None, None
+    if not _protected_references(body, ["__gradTypes"], [labels.span(), declaration.span()]):
+        return None, None
     return expected, {"path": source_path, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                       "count": 4, "mapping": "__gradTypes literal source order maps indices 0..3 to Linear, Circular, Radial, Diamond"}
 
@@ -465,6 +645,9 @@ def _resolved_source_array(
 ) -> list[str] | None:
     expression = expression.strip()
     if expression.startswith("{") and expression.endswith("}"):
+        code = _reference_code(expression)
+        if code is None or _reference_expression_end(code, 0) != len(expression):
+            return None
         fields = _split_top_level(expression[1:-1])
         data = next((field.split(":", 1)[1].strip() for field in fields if ":" in field and field.split(":", 1)[0].strip() == "data"), None)
         return _resolved_source_array(data, body, global_arrays, seen, array_map_verified) if data is not None else None
@@ -480,7 +663,10 @@ def _resolved_source_array(
         return None
 
     if expression.startswith("["):
-        end = _matching_end(expression, 0)
+        code = _reference_code(expression)
+        if code is None:
+            return None
+        end = _reference_expression_end(code, 0)
         if end != len(expression):
             return None
         return _split_top_level(expression[1:-1])
