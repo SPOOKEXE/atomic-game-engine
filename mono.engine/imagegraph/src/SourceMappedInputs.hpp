@@ -6,6 +6,11 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.tile" &&
+			((input.SourceKind == "DimensionUnit" && input.Id == "dimension_unit") ||
+			 (input.SourceKind == "ValueUnit" &&
+			  (input.Id == "spacing_unit" || input.Id == "posiiton_unit"))))
+			return true;
 		if (entry.Type == "pc.polar" &&
 			((input.SourceKind == "ValueUnit" && input.Id == "center_unit") ||
 			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||

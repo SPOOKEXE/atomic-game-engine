@@ -13,6 +13,7 @@
 #include "nodes/SourceGlow.hpp"
 #include "nodes/SourcePixelMath.hpp"
 #include "nodes/SourcePolar.hpp"
+#include "nodes/SourceTileTransform.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -829,10 +830,28 @@ namespace engine::imagegraph::detail {
 			selectedCharge->Reset();
 			if (!AdmitFontTextBatch(context, textBatch)) return false;
 		}
+		const auto previousTileReference = context.TileReferenceDimension;
+		struct RestoreTileReference {
+			NodeContext &Context;
+			std::optional<Vector2> Previous;
+			~RestoreTileReference() {
+				Context.TileReferenceDimension = Previous;
+			}
+		} restoreTileReference{context, previousTileReference};
+		if (context.Authored.Type == "pc.tile") {
+			size_t previewIndex = 0;
+			uint64_t scratchOwned = 0;
+			Vector2 reference;
+			if (!SourceTilePreviewIndex(context, count, previewIndex) ||
+				!selectRow(previewIndex, scratchOwned) || !SourceTileReferenceDimension(context, reference))
+				return false;
+			context.TileReferenceDimension = reference;
+		}
 		const auto admission = context.Authored.Type == "pc.bend"		  ? AdmitSourceBend
 							   : context.Authored.Type == "pc.pixel_math" ? AdmitSourcePixelMath
 							   : context.Authored.Type == "pc.glow"		  ? AdmitSourceGlow
 							   : context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
+							   : context.Authored.Type == "pc.tile"		  ? AdmitSourceTileTransform
 																		  : nullptr;
 		if (admission) {
 			uint64_t batchWork = 0;

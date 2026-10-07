@@ -1,0 +1,129 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.tile. pinned shader arithmetic checked; licensed runtime parity remains unverified.",
+  "contract": {
+    "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_files": {
+      "scripts/node_tile/node_tile.gml": {
+        "bytes": 3389,
+        "sha256": "8a1409de096bde953074443098a850bdb35cfb1b8e9eec9d2d57592ef381787c",
+        "working_tree_matches_git_blob": true
+      },
+      "shaders/sh_tile_ext/sh_tile_ext.fsh": {
+        "bytes": 3841,
+        "sha256": "4c1edb9f762719d899c31d9be19c507329d465a5e920ab2ebf33be1d53cef1dd"
+      },
+      "scripts/node_processor/node_processor.gml": {
+        "bytes": 11806,
+        "sha256": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/node_value/node_value.gml": {
+        "bytes": 111774,
+        "sha256": "6ca786dca5c9bb7a9116faaee9e8d24e0e5c86aea71ac376230fbccb491e17dd",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/node_value_vec2/node_value_vec2.gml": {
+        "bytes": 11175,
+        "sha256": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/node_value_dimension/node_value_dimension.gml": {
+        "bytes": 6400,
+        "sha256": "7a31f24df14a2fe19f5566ab7d2e919f792faccac83ecbdff7f59a91e93f54e9",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/node_value_types/node_value_types.gml": {
+        "bytes": 18980,
+        "sha256": "9574e5f50450dd94cfc682a346f586880271a8985b9cc3205da697811884fddf",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/shader_functions/shader_functions.gml": {
+        "bytes": 10916,
+        "sha256": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/surface_functions/surface_functions.gml": {
+        "bytes": 37782,
+        "sha256": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+        "working_tree_matches_git_blob": true
+      },
+      "scripts/_draw_defines/_draw_defines.gml": {
+        "bytes": 1424,
+        "sha256": "f4702dd2337ca20635d699456b6ef27c11ff1aa890f91610629b4d91b94eb51c",
+        "working_tree_matches_git_blob": true
+      }
+    },
+    "executor": "mono.engine/imagegraph/src/nodes/SourceTileTransform.cpp",
+    "tests": "mono.engine/imagegraph/tests/SourceTileTransform.cpp",
+    "rules": [
+      "fixed Pixel or Project dimensions and relative Amount; half-even allocation while retaining raw shader dimensions and quad coverage",
+      "host double reference Spacing and source-spelled posiiton use one raw preview-row output size across the selected batch",
+      "native SourceProperties Integer preview_index selects the reference row; default zero; retained by the existing native property codec",
+      "nearest UV red and flipped green, UV Mix, and map alpha multiplication even at zero Mix",
+      "position, scale, GLSL row-vector rotation, odd-row or odd-column shift and recomputed tile indices",
+      "floor-based negative modulo, Flip Grid, quarter-polar pattern, transparent spacing and bounds",
+      "normal source reset-state nearest raw main sampling; both raw main and UV Atlas bindings explicitly refused",
+      "typed surface depth, finite HDR, linked controls, processor arrays, Expand rows, animation and document round trips",
+      "complete selected batch validates controls, format, derived coordinates and at most 64000000 work units before row execution and output allocation"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-build-resume-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5404,
+    "new_tile_test_cases": 13,
+    "startup_test_cases": 1,
+    "python_tests": 104,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3681,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-cpu-child-hashes-batch2.json",
+    "read_review": "Sol read review of source arithmetic, reference dimensions, raw Atlas handling and fixtures; repaired rotation expectations independently confirmed; no remaining concrete defects"
+  },
+  "issues": [
+    {
+      "stage": "first build",
+      "output": "build exited 143 without a compiler diagnostic",
+      "cause": "termination cause unknown",
+      "repair": "grug wait for orphan compiler and build processes to finish, then resume the same build; resume exited zero",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-build-batch1.log"
+    },
+    {
+      "batch": 1,
+      "check": "core",
+      "output": "3110 of 3112 cases passed; Tile rotation expected red 30 but got 20; quarter-polar samples expected 30 and 10 but got 20 and 40",
+      "cause": "two fixtures assumed column-vector rotation; pinned GLSL uses row-vector multiplication",
+      "repair": "grug correct both expectations together. direct 90-degree output now checks all four labels: 20, 40, 10, 30",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/tile-cpu-core-batch1.log"
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Tile performance profiling"
+  ],
+  "limits": [
+    "native source-derived evidence does not establish licensed pixel parity",
+    "native preview_index does not claim a source PXC JSON preview key or Studio preview selector",
+    "ambient GPU filtering outside the normal source reset path remains unverified",
+    "source format-change allocation and driver conversion behavior remain unverified",
+    "nonfinite controls or derived coordinates, zero scale or repeat size, invalid preview rows and unsupported selectors return named diagnostics",
+    "all selected rows conservatively quote sampler work before output allocation",
+    "Tile has ENGINE_PROFILE imagegraph.source.tile; joined suite durations are verification timings, not a performance claim"
+  ]
+}

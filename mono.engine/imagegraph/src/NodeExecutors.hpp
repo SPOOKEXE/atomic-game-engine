@@ -97,6 +97,8 @@ namespace engine::imagegraph::detail {
 		std::vector<std::pair<std::string_view, Value>> Values;
 		// Temporary processor selections, borrowing bounded row values for one invocation.
 		std::vector<std::pair<std::string_view, const Value *>> ValueViews;
+		// grug Tile reference units use one raw preview-row output size across the selected batch.
+		std::optional<Vector2> TileReferenceDimension;
 		// The executor may copy a bounded recipe; published values never retain this borrowed pointer.
 		const Document *EvaluationDocument = nullptr;
 		const PcxNameResolver *PcxNames = nullptr;
