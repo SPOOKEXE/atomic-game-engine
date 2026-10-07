@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.perlin_cube surface and cross-section source equations. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/__node_shader/__node_shader.gml": "81b23b94aac6df118187510083d3f59c02b4bf09799e75c72ab5a19e7e17d45f",
+      "scripts/__node_shader_generator/__node_shader_generator.gml": "e917d1974118124fef04ce6121459b2c73b956201edd6ea36c71ad223fd3f6dd",
+      "scripts/node_perlin_cube/node_perlin_cube.gml": "ccb69433c608f35af4f015ed9811ed7a65ab765c40c9000a71d0c82069bc3e1e",
+      "shaders/sh_perlin_cube/sh_perlin_cube.fsh": "2f0b0023eae390635144ebea73024cd93d5171514a13773de203eed63f1aad4e"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourcePerlinCube.cpp",
+    "rules": [
+      "fourteen physical source slots, two image outputs, cube and sphere ray marching",
+      "binary32 source hash, eight-corner cubic interpolation and normalized octave accumulation",
+      "camera X*Y*Z rotation with explicit cofactor inverse; object rotation, signed scale, position and axis permutations",
+      "surface misses preserve sampled RGB with zero alpha; cross-section uses selected plane with covered alpha one",
+      "source half-even allocation and raw dimension center coverage; uncovered pixels clear both outputs",
+      "nonpositive iteration skips seed and noise transforms, then applies Level remapping; equal endpoints refused",
+      "seven explicit surface depths; finite shade prescan refuses overflow before allocation or observers",
+      "complete selected batch admission: 512 per allocated pixel, covered pixel adds 24576 plus 4096 per positive iteration, 64M cap",
+      "both output surfaces and row records reserved; all four source schedules; source getter projections and numeric Vec3 array padding/truncation",
+      "Format9 animation and inherited instances; unused last octave updates do not cause overflow refusal"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cube-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cube-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cube-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5626,
+    "new_perlin_cube_test_cases": 15,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3939,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cube-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cube-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cube-cpu-child-hashes-batch2.json",
+    "independent_reference_cases": 44,
+    "independent_pixel_references": 88,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cube-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cube-independent-reference.json"
+    ],
+    "read_review": "root read pinned shader, runtime, shared registration/projections, metadata, both fixtures and final repairs before joined builds"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "checks": 20,
+      "passed": 19,
+      "failed_suite": "core",
+      "failed_test_cases": 2,
+      "failed_assertions": 78,
+      "failure_excerpts": [
+        "0.13333334028720856 == Approx( 0.0 )",
+        "CHECK( surfaces.Images[row] == expectedSurface )",
+        "CHECK( crossSections.Images[row] == expectedCross )"
+      ],
+      "cause": "fixtures omitted Level remapping for zero octaves and compared direct executor images against wrapper-derived Image::Hash",
+      "repair": "correct golden RGB to .13333334028720856; compare both outputs dimensions, format and exact pixel bytes; executor unchanged"
+    }
+  ],
+  "not_run": [
+    "matched licensed Pixel Composer captures",
+    "headed live Studio verification",
+    "dedicated Perlin Cube performance profiling",
+    "fresh dev/server/ci preset matrices",
+    "new sanitizer build"
+  ],
+  "limits": [
+    "source-equation references do not establish licensed runtime pixel parity",
+    "CPU libm and device float behavior can differ",
+    "ENGINE_PROFILE marks executor; no measured speed claim"
+  ],
+  "external_references": {
+    "glsl_common_functions": "https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html"
+  },
+  "build_warnings_note": "initial rebuild reported warnings in unchanged dependency sources; final incremental build emitted none"
+}

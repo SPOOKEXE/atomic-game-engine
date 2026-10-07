@@ -43,6 +43,7 @@ namespace engine::imagegraph::detail {
 					  SourceCellularExecutors(),
 					  SourcePerlinExecutors(),
 					  SourcePerlinExtraExecutors(),
+					  SourcePerlinCubeExecutors(),
 					  SourceVoronoiExtraExecutors(),
 					  SourceShardNoiseExecutors(),
 					  SourceStrandNoiseExecutors(),

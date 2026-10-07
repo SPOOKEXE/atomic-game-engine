@@ -377,6 +377,13 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                     "sha256": "c4aa6685ad6c0d6da8b48ce9019276453075138dcce5b6195e911088e46e10ee",
                 },
             ),
+            (
+                "scripts/node_perlin_cube/node_perlin_cube.gml",
+                {
+                    "bytes": 1778,
+                    "sha256": "ccb69433c608f35af4f015ed9811ed7a65ab765c40c9000a71d0c82069bc3e1e",
+                },
+            ),
         ):
             self.assertEqual(evidence, snapshot["source_constructor_evidence"][path])
         for name, expected in (

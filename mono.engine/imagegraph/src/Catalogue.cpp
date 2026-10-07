@@ -432,6 +432,14 @@ namespace engine::imagegraph {
 			 (input.Id == "scale_2" && input.SourceIndex == 9)))
 			return (array.ElementType == ValueType::Scalar || array.ElementType == ValueType::Integer) &&
 				   array.Nested.empty() && array.Items.empty() && detail::ValidPayload(array, false);
+		if (entry.Type == "pc.perlin_cube" && input.SourceKind == "Vec3" &&
+			input.Type == ValueType::Vector3 && input.ArrayDepthKnown && input.ArrayDepth == 1 &&
+			((input.Id == "rotation" && input.SourceIndex == 2) ||
+			 (input.Id == "rotation_2" && input.SourceIndex == 8) ||
+			 (input.Id == "scale_2" && input.SourceIndex == 9) ||
+			 (input.Id == "position" && input.SourceIndex == 12)))
+			return (array.ElementType == ValueType::Scalar || array.ElementType == ValueType::Integer) &&
+				   array.Nested.empty() && array.Items.empty() && detail::ValidPayload(array, false);
 		// These compound controls are complete source values selected by the processor row.
 		if (entry.Type == "pc.gradient" &&
 			((input.Type == ValueType::Curve &&
