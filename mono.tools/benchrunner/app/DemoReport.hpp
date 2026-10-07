@@ -646,6 +646,8 @@ namespace benchrunner {
 				   "allocation overhead is included separately. "
 				<< "Render, physics, replication, script and imagegraph timings are CPU self "
 				   "milliseconds per frame; "
+				<< "Wall timing rows sum outermost inclusive owner-thread scopes for each subsystem, "
+				   "including nested waits. "
 				<< "replication includes Network category work. GPU memory is logical payload, not "
 				   "driver residency. "
 				<< "Timings are gated per iteration and per wall-clock second. Allocation churn is gated per "
@@ -660,8 +662,9 @@ namespace benchrunner {
 				   "measurements.\n\n"
 				<< "Run `just demo-bench` to collect three five-second samples per available demo. "
 				   "Run `just demo-impact` to compare with this reusable baseline, `just "
-				   "demo-impact-report` to "
-				   "refresh this document, and `just regression-check` for the regression process. "
+				   "demo-impact-report <collection-directory>` to "
+				   "refresh this document from saved samples, and `just regression-check` for the regression "
+				   "process. "
 				   "New workloads appear as Added because an older revision has no measurement to "
 				   "compare.\n\n";
 			DemoMetadata(document, baseline, baselineLabel);
