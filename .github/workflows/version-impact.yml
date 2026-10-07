@@ -9,6 +9,11 @@ on:
         required: true
   pull_request:
     paths:
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'Justfile'
+      - 'mono.build/**'
+      - 'mono.vendor/**'
       - 'mono.engine/**'
       - 'mono.client/**'
       - 'mono.server/**'
