@@ -38,6 +38,7 @@ namespace engine::imagegraph::detail {
 					  SourceDisplaceExecutors(),
 					  SourceJpegExecutors(),
 					  SourcePixelSortExecutors(),
+					  SourceNoiseExecutors(),
 					  SourceTileTransformExecutors(),
 					  SourceErodeExecutors(),
 					  PathExecutors(),

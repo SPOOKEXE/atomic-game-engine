@@ -13034,11 +13034,12 @@ namespace engine::imagegraph {
 							  (input.Id == "position" || input.Id == "scale" || input.Id == "augment")) ||
 							 ((node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal") &&
 							  (input.Id == "position" || input.Id == "scale")));
-						const bool gaborSurfaceRange =
+						const bool generatorSurfaceRange =
 							(node.Type == "pc.gabor_noise" || node.Type == "pc.flow_noise" ||
-							 node.Type == "pc.noise_bubble" || node.Type == "pc.noise_cristal") &&
+							 node.Type == "pc.noise_bubble" || node.Type == "pc.noise_cristal" ||
+							 node.Type == "pc.noise") &&
 							input.SourceKind == "SliRange" &&
-							(input.Id == "level_in" || input.Id == "level_out" ||
+							(node.Type == "pc.noise" || input.Id == "level_in" || input.Id == "level_out" ||
 							 (node.Type == "pc.flow_noise" && input.Id == "detail") ||
 							 (node.Type == "pc.noise_bubble" &&
 							  (input.Id == "scale" || input.Id == "opacity")));
@@ -13046,11 +13047,11 @@ namespace engine::imagegraph {
 							(sourceSurfaceVec2 &&
 							 (node.Type == "pc.julia_set" || node.Type == "pc.gabor_noise" ||
 							  node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal")) ||
-									gaborSurfaceRange
+									generatorSurfaceRange
 								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
 								: nullptr;
 						if ((!source || found == source->end()) && (surface || generatorSurfaceArray) &&
-							(input.SourceKind == "Dimension" || sourceSurfaceVec2 || gaborSurfaceRange)) {
+							(input.SourceKind == "Dimension" || sourceSurfaceVec2 || generatorSurfaceRange)) {
 							context.Values.emplace_back(
 								input.Id,
 								Vector2{

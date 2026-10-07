@@ -1,0 +1,97 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.noise executor. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_noise/node_noise.gml": "767f0322bd5ca9fe9d3ae577d85eb3a08da5b5c30790a79bfadfe5d56de3cd70",
+      "shaders/sh_noise/sh_noise.fsh": "e293214589ef098258a4464a91f87fc4a439029b7dea970d6ae912683e67679a"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceNoise.cpp",
+    "rules": [
+      "binary32 sine hash; signed fractional seeds blend adjacent source seed hashes before unclamped level remapping",
+      "Greyscale, RGB and HSV with source coordinate offsets and component ranges; scalar/tuple/array/surface dimension range projection",
+      "half-even dimensions with Pixel, Project and Mask units; zero and negative raw dimensions clamp allocation to one",
+      "nearest UV sampling, mapped Y flip, extrapolating UV Mix and mapped alpha even when UV Mix is zero",
+      "selected output depth stores before masking; mask uses mean RGB times alpha and default RGBA8 scratch; synthetic Mask Alpha Only is inert",
+      "raw Atlas sampler bindings, unresolved source seed and equal binary32 input levels refuse execution with named diagnostics",
+      "whole selected batch admitted against 64000000 work units before outputs; actual scratch and requested scalar 2D raster field copy charged to live byte budget",
+      "source inverse follows full eleven-slot suffix table, including singleton controls"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-build-batch3.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-build-batch4.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-build-batch5.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-build-batch6.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-cpu-batch6-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5482,
+    "new_noise_test_cases": 15,
+    "startup_test_cases": 1,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3898,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-source-stability-batch3.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-source-stability-batch4.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-source-stability-batch5.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-source-stability-batch6.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-cpu-child-hashes-batch6.json",
+    "independent_reference": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/source-noise-independent-reference.json",
+    "read_review": "source shader and executor read review; final root fixture lifetime and full-slot inverse review"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "check": "build",
+      "cause": "fixture Evaluate helper passed string_view where API takes string",
+      "repair": "explicit string conversion; no stale core binary checks run"
+    },
+    {
+      "batch": 2,
+      "check": "core",
+      "cause": "reference constants rounded after coordinate offset; row comparison included derived Hash; direct fixture port-name storage dangled",
+      "repair": "round shader constants first; compare dimensions, format and numeric pixel bytes; retain stable string_view port IDs"
+    },
+    {
+      "batch": 3,
+      "check": "core and harness",
+      "cause": "attempted seed repair omitted owned context seed; inverse fixture assumed compact Cartesian order; raw Catch pixel bytes were not UTF-8",
+      "repair": "supply owned fixture seed; derive inverse from full source slots; decode logs with replacement and compare unsigned pixel bytes"
+    },
+    {
+      "batches": [
+        4,
+        5
+      ],
+      "check": "core",
+      "cause": "remaining work fixture seed failure traced to temporary std::string stored as string_view",
+      "repair": "store stable caller port view; mirror evaluator borrowed inputs and explicit Pixel units; preserve zero observer/output checks"
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Noise performance profiling"
+  ],
+  "limits": [
+    "source-derived fixtures do not establish licensed runtime pixel parity; platform sine implementations can differ",
+    "ENGINE_PROFILE marks executor work; no dedicated performance result is claimed"
+  ]
+}

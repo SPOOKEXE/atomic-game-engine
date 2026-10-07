@@ -6,7 +6,7 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
-		if ((entry.Type == "pc.jpeg" || entry.Type == "pc.pixel_sort") &&
+		if ((entry.Type == "pc.jpeg" || entry.Type == "pc.pixel_sort" || entry.Type == "pc.noise") &&
 			input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only")
 			return true;
 		if (entry.Type == "pc.displace" &&
