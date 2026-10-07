@@ -164,7 +164,9 @@ TEST_CASE("demo comparison refuses lost baseline coverage", "[benchrunner]") {
 		current.Workloads.at("Demo").Status = "unavailable";
 	}
 	SECTION("new unavailable workload") {
-		current.Workloads.emplace("Missing new demo", DemoWorkload{.Status = "unavailable"});
+		DemoWorkload missing;
+		missing.Status = "unavailable";
+		current.Workloads.emplace("Missing new demo", std::move(missing));
 	}
 	SECTION("metric removed") {
 		current.Workloads.at("Demo").Metrics.erase("physics_ms_per_frame");
