@@ -912,7 +912,8 @@ namespace engine::imagegraph {
 			if (const auto *array = std::get_if<ArrayValue>(&value); array && !array->Nested.empty())
 				return array->ElementType != ValueType::Image && array->ElementType != ValueType::Array &&
 					   (array->ElementType < ValueType::Gradient ||
-						(array->ElementType == ValueType::Particle ||
+						(array->ElementType == ValueType::Area || array->ElementType == ValueType::Enum ||
+						 array->ElementType == ValueType::Particle ||
 						 array->ElementType == ValueType::Strand ||
 						 array->ElementType == ValueType::Tileset || array->ElementType == ValueType::Rigid ||
 						 array->ElementType == ValueType::Atlas)) &&
@@ -1148,7 +1149,8 @@ namespace engine::imagegraph {
 			if (!array.Nested.empty())
 				return array.ElementType != ValueType::Image && array.ElementType != ValueType::Array &&
 					   (array.ElementType < ValueType::Gradient ||
-						(array.ElementType == ValueType::Particle ||
+						(array.ElementType == ValueType::Area || array.ElementType == ValueType::Enum ||
+						 array.ElementType == ValueType::Particle ||
 						 array.ElementType == ValueType::Tileset || array.ElementType == ValueType::Rigid ||
 						 array.ElementType == ValueType::Atlas || array.ElementType == ValueType::Strand)) &&
 					   detail::ValidPayload(array, true);
@@ -1156,7 +1158,8 @@ namespace engine::imagegraph {
 				return detail::ValidPayload(array, false);
 			if (!array.Nested.empty() || !WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
 				array.ElementType == ValueType::Array ||
-				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Particle &&
+				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Area &&
+				 array.ElementType != ValueType::Enum && array.ElementType != ValueType::Particle &&
 				 array.ElementType != ValueType::Tileset && array.ElementType != ValueType::Rigid &&
 				 array.ElementType != ValueType::Atlas && array.ElementType != ValueType::Strand) ||
 				TypeName(array.ElementType).empty())
@@ -1827,7 +1830,8 @@ namespace engine::imagegraph {
 				const auto type = ParseType(typeName);
 				if (!type || *type == ValueType::Image || *type == ValueType::Array ||
 					(*type >= ValueType::Gradient &&
-					 !(version >= 9 && (*type == ValueType::Particle || *type == ValueType::Tileset ||
+					 !(version >= 9 && (*type == ValueType::Area || *type == ValueType::Enum ||
+										*type == ValueType::Particle || *type == ValueType::Tileset ||
 										*type == ValueType::Rigid || *type == ValueType::Atlas ||
 										*type == ValueType::Strand))))
 					return false;

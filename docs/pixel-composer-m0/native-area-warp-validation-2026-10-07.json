@@ -1,0 +1,349 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded ordinary-surface pc.wrap_area and retain typed Area/Enum control arrays. Atlas and exact licensed parity remain open.",
+  "contract": {
+    "pixel_composer_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sources": [
+      "scripts/node_wrap_area/node_wrap_area.gml",
+      "scripts/node_value_area/node_value_area.gml",
+      "scripts/node_value/node_value.gml",
+      "scripts/node_value_types/node_value_types.gml",
+      "scripts/node_attributes/node_attributes.gml",
+      "scripts/surface_functions/surface_functions.gml",
+      "scripts/surface_draw_functions/surface_draw_functions.gml",
+      "scripts/shader_functions/shader_functions.gml",
+      "shaders/sh_sample/sh_sample.fsh"
+    ],
+    "source_base": "https://github.com/Ttanasart-pt/Pixel-Composer/blob/b69eca232217360cf1502ef0223523d818606652/",
+    "inspected_from": "local pinned scripts and complete source archive",
+    "archive_sha256": "94de459ef48588f1c61b8f002c17b14f84525c139685e75dd1f10db632c21598",
+    "licensed_reference_available": false
+  },
+  "behavior": [
+    "ordinary surfaces draw into typed Area rectangle, clip and mirror",
+    "normalize authored padding/two-point modes before Reference-unit scaling",
+    "preserve all seven numeric surface formats; source red draw expands RGB with opaque alpha",
+    "use existing source CleanEdge kernel and inherited scalar sampler controls",
+    "admit largest original image and greatest original sampler work across whole batch before allocation",
+    "retain homogeneous flat/nested Area and Enum arrays with typed leaf and byte validation in document version 9",
+    "refuse Atlas, unresolved sampler-array depth and originating-surface Area bypass context by named diagnostics"
+  ],
+  "iterations": [
+    {
+      "stage": "build1",
+      "exit_code": 1,
+      "cause": "test called nonexistent FrameGraph::Enabled; corrected to IsEnabled"
+    },
+    {
+      "stage": "build2",
+      "exit_code": 0
+    },
+    {
+      "stage": "joined batch2",
+      "passed_checks": 19,
+      "failed_check": "core",
+      "failed_cases": 2,
+      "failed_assertions": 2,
+      "cause": "float executor registration refused; document reader refused homogeneous Area arrays"
+    },
+    {
+      "stage": "build3 diagnostics",
+      "exit_code": 0
+    },
+    {
+      "stage": "joined batch3 diagnostics",
+      "passed_checks": 19,
+      "failed_check": "core",
+      "failed_cases": 2,
+      "failed_assertions": 2
+    },
+    {
+      "stage": "build4",
+      "exit_code": 0
+    },
+    {
+      "stage": "joined batch4",
+      "passed_checks": 19,
+      "failed_check": "core",
+      "failed_cases": 1,
+      "failed_assertions": 1,
+      "cause": "junction validation still refused typed control arrays"
+    },
+    {
+      "stage": "build5",
+      "exit_code": 0
+    },
+    {
+      "stage": "joined batch5",
+      "passed_checks": 19,
+      "failed_check": "core",
+      "failed_cases": 1,
+      "failed_assertions": 1,
+      "cause": "test linked sampler array despite unresolved attribute array depth; corrected test to scalar link and explicit array refusal"
+    },
+    {
+      "stage": "build6",
+      "exit_code": 0
+    },
+    {
+      "stage": "joined batch6",
+      "passed_checks": 20,
+      "failed_checks": []
+    }
+  ],
+  "checks": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-bake-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "exit_code": 0,
+      "elapsed_seconds": 0.303,
+      "assertions": 15875,
+      "cases": 157,
+      "binary_sha256_after": "05c2b1ca7a2b07901d39677fc42ed7b285872de31803ff2f3db449bd67d26129",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-physics-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "bf732b9242cfcf2d1035903de8b8b4edc201bd5fcac6694548ba5ef90f2848eb",
+      "exit_code": 0,
+      "elapsed_seconds": 0.362,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "bf732b9242cfcf2d1035903de8b8b4edc201bd5fcac6694548ba5ef90f2848eb",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-runner-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "e59c7d5f04db64acb8a07d0fa12f228fdaa34ed952a7c58917b839e59950ead0",
+      "exit_code": 0,
+      "elapsed_seconds": 0.309,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "e59c7d5f04db64acb8a07d0fa12f228fdaa34ed952a7c58917b839e59950ead0",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-font-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "45557425f70b3f223da940275d0f0d5db64bb81c0d2408e5c41fb3f76ffa8535",
+      "exit_code": 0,
+      "elapsed_seconds": 0.525,
+      "assertions": 1845,
+      "cases": 43,
+      "binary_sha256_after": "45557425f70b3f223da940275d0f0d5db64bb81c0d2408e5c41fb3f76ffa8535",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-export-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "a06d06ed79248d93107f76fc08b2439b7715d1647deaee082236071fdc6b6832",
+      "exit_code": 0,
+      "elapsed_seconds": 0.673,
+      "assertions": 3342,
+      "cases": 91,
+      "binary_sha256_after": "a06d06ed79248d93107f76fc08b2439b7715d1647deaee082236071fdc6b6832",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-render-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "f8bed5e31a08f7f25f2a8a48de17fc8413bf90b28ad52a42d0a60fa777bc77cb",
+      "exit_code": 0,
+      "elapsed_seconds": 3.07,
+      "assertions": 1987,
+      "cases": 31,
+      "binary_sha256_after": "f8bed5e31a08f7f25f2a8a48de17fc8413bf90b28ad52a42d0a60fa777bc77cb",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-cli-batch6.log",
+      "exit_code": 0,
+      "elapsed_seconds": 3.273,
+      "ctest_cases": 16
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-io-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "7d66b998374cfce5fab6f4de3e3ef6a2f55ba611cc952f9de0c8d5cd5852a5aa",
+      "exit_code": 0,
+      "elapsed_seconds": 3.85,
+      "assertions": 13101,
+      "cases": 313,
+      "binary_sha256_after": "7d66b998374cfce5fab6f4de3e3ef6a2f55ba611cc952f9de0c8d5cd5852a5aa",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-core-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "5ee8ced9a96c4037f280d6de6d9af0f5f1db8ec5e98caebf91142627f04d5623",
+      "exit_code": 0,
+      "elapsed_seconds": 3.916,
+      "assertions": 1896004,
+      "cases": 3003,
+      "binary_sha256_after": "5ee8ced9a96c4037f280d6de6d9af0f5f1db8ec5e98caebf91142627f04d5623",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-assetc-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "7488c885efb5beaa776366718060ff7ba2dfb791d39994b380c88c145fb9e916",
+      "exit_code": 0,
+      "elapsed_seconds": 6.189,
+      "assertions": 509,
+      "cases": 45,
+      "binary_sha256_after": "7488c885efb5beaa776366718060ff7ba2dfb791d39994b380c88c145fb9e916",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-client-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "0f78e7f2af901f570af722e39a1c8ab8ecef5f5ab2b80e85420891b55fea3a84",
+      "exit_code": 0,
+      "elapsed_seconds": 4.774,
+      "assertions": 23853,
+      "cases": 359,
+      "binary_sha256_after": "0f78e7f2af901f570af722e39a1c8ab8ecef5f5ab2b80e85420891b55fea3a84",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-studio-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "64a0921f743ef7c65c4d26ff3a5b35bead622d7111f7f9df465b7f933eca0c22",
+      "exit_code": 0,
+      "elapsed_seconds": 8.066,
+      "assertions": 49029,
+      "cases": 1100,
+      "binary_sha256_after": "64a0921f743ef7c65c4d26ff3a5b35bead622d7111f7f9df465b7f933eca0c22",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-nodegraph-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "exit_code": 0,
+      "elapsed_seconds": 1.327,
+      "assertions": 345,
+      "cases": 37,
+      "binary_sha256_after": "30ce2f92b14cd63ab29f57a9f5bc2ccf68a315eba93740d0f755864e4a434bbc",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-ui-batch6.log",
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "73565a5cd12d8b013d98075c9bad4abc92294da4e419082632833f917d1c1f2c",
+      "exit_code": 0,
+      "elapsed_seconds": 0.503,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "73565a5cd12d8b013d98075c9bad4abc92294da4e419082632833f917d1c1f2c",
+      "binary_changed_during_test": false
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-startup-batch6.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.267,
+      "assertions": 5,
+      "cases": 1
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-lint-batch6.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.012
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-architecture-batch6.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.419
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-python-batch6.log",
+      "exit_code": 0,
+      "elapsed_seconds": 1.737,
+      "python_cases": 101
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-format-batch6.log",
+      "exit_code": 0,
+      "elapsed_seconds": 3.905
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-cpu-diff-batch6.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.096
+    }
+  ],
+  "counts": {
+    "cpp_cases": 5291,
+    "cpp_assertions": 2007605,
+    "startup_checks": 1,
+    "python_cases": 101,
+    "cli_checks": 16,
+    "render_cases": 31,
+    "new_area_warp_cases": 14
+  },
+  "build": {
+    "preset": "release-tests",
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-build6.log",
+    "batch_harness": "/tmp/composer-area-warp-cpu-batch6.py",
+    "gpu_environment": {
+      "SDL_VIDEODRIVER": "offscreen",
+      "SDL_GPU_DRIVER": "vulkan"
+    },
+    "gpu_checks_serialized": true
+  },
+  "freeze": {
+    "manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/area-warp-source-frozen-batch6.json",
+    "manifest_sha256": "77f832558278365e794a13d410b444fadae13461e361a1eac35ba23ae0935ec2",
+    "paths": 3566,
+    "changed_during_build_and_tests": [],
+    "test_binaries_stable": true,
+    "child_binary_hashes": {
+      "before": {
+        ".cache/build/release-tests/tools/assetc": "1ab1e3d3d1c0f44d81e99246f970709e6e327b42e3ee88318db36fb966ca4cbc",
+        ".cache/build/release-tests/tools/imagegraph": "3e6c1f4a3b28aa5c0a314b608262b88d86025fe9ce56fe2a2cadf445583b7731"
+      },
+      "after": {
+        ".cache/build/release-tests/tools/assetc": "1ab1e3d3d1c0f44d81e99246f970709e6e327b42e3ee88318db36fb966ca4cbc",
+        ".cache/build/release-tests/tools/imagegraph": "3e6c1f4a3b28aa5c0a314b608262b88d86025fe9ce56fe2a2cadf445583b7731"
+      }
+    }
+  },
+  "profile": {
+    "scope": "imagegraph.source.area_warp",
+    "observed_in_test": true,
+    "benchmark_run": false,
+    "speed_claim": false,
+    "complete_batch_work_cap": 64000000
+  },
+  "limits": [
+    "Atlas input explicitly unsupported pending Atlas-aware processor draw and inactive payload ownership",
+    "nonzero-mode linked Area bypass requires originating surface getter context",
+    "sampler arrays refused at unresolved source attribute array depth; scalar links supported",
+    "licensed matched captures unavailable; no exact raster or GPU edge parity claim",
+    "headed Studio approval remains pending and was not run",
+    "no new sanitizer build or performance benchmark run"
+  ]
+}
