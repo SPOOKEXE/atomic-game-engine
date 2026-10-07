@@ -32,14 +32,14 @@ namespace engine::imagegraph::detail {
 		bool Included(Vector2 a, Vector2 b) {
 			return b.Y < a.Y || (b.Y == a.Y && b.X > a.X);
 		}
-		double RoundEven(double value) {
+		double BendRoundEven(double value) {
 			const double lower = std::floor(value), fraction = value - lower;
 			return lower + (fraction > .5 || (fraction == .5 && std::fmod(lower, 2.) != 0));
 		}
 		bool BendSize(NodeContext &context, double value, uint32_t &result) {
 			if (!std::isfinite(value))
 				return context.Fail(Status::InvalidValue, "Bend dimension is nonfinite", "dimension");
-			const double size = std::clamp(RoundEven(value), 1., 16384.);
+			const double size = std::clamp(BendRoundEven(value), 1., 16384.);
 			if (size > Limits::MaximumDimension)
 				return context.Fail(
 					Status::LimitExceeded, "Bend dimensions exceed native limits", "dimension"

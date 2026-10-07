@@ -288,6 +288,12 @@ namespace engine::imagegraph {
 						else if (output.Id == "rotation" || output.Id == "alpha")
 							output.Type = ValueType::Scalar;
 					}
+				if (heads[index].Family == "generate" &&
+					heads[index].Type.find("noise") != std::string_view::npos &&
+					std::any_of(node.Outputs.begin(), node.Outputs.end(), [](const auto &output) {
+						return output.Type == ValueType::Image;
+					}))
+					node.Outputs.push_back({"field", "2D Field", -1, ValueType::Noise2D});
 				for (const CatalogueInput &input : node.Inputs) {
 					node.Ports.push_back({input.Id, input.Type, PortDirection::Input});
 					if (IsAuthoredValueType(input.Type) ||

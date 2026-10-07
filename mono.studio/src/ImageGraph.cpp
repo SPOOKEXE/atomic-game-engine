@@ -7,6 +7,7 @@
 
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
+#include <engine/imagegraph/NoiseField.hpp>
 #include <engine/imagegraph/SourceKeyframeTransition.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/SourceTrackTransition.hpp>
@@ -40,24 +41,11 @@ namespace studio {
 		using engine::imagegraph::Node;
 
 		constexpr std::string_view IMAGE_NODE_TYPES[] = {
-			"image.solid",
-			"image.gradient",
-			"image.noise_simplex",
-			"image.tile",
-			"image.blend",
-			"image.height_blend",
-			"image.passthrough",
-			"image.flip",
-			"image.invert",
-			"image.alpha_cutoff",
-			"image.offset",
-			"image.threshold",
-			"image.posterize",
-			"image.transform_3d",
-			"image.audio_recording",
-			"image.audio_volume",
-			"value.array",
-			"value.array_get"
+			"image.solid",	   "image.gradient",	 "image.noise_simplex",	  "image.tile",
+			"image.blend",	   "image.height_blend", "image.passthrough",	  "image.flip",
+			"image.invert",	   "image.alpha_cutoff", "image.offset",		  "image.threshold",
+			"image.posterize", "image.transform_3d", "image.audio_recording", "image.audio_volume",
+			"value.array",	   "value.array_get",	 "value.noise_field",	  "value.sample_noise"
 		};
 		constexpr std::string_view IMAGE_PORT_TYPE = "imagegraph.image";
 
@@ -70,6 +58,21 @@ namespace studio {
 		std::string CanvasType(engine::imagegraph::ValueType type) {
 			if (type == engine::imagegraph::ValueType::Image) return std::string(IMAGE_PORT_TYPE);
 			return "imagegraph." + std::string(engine::imagegraph::ValueTypeName(type));
+		}
+
+		std::string CanvasPortType(const engine::imagegraph::PortSchema &port) {
+			if (port.Alternatives.empty()) return CanvasType(port.Type);
+			nodegraph::DataType type;
+			type.Id = "imagegraph.union";
+			type.Tint = nodegraph::Colour::Hex(0xffffff);
+			for (const auto member : port.Alternatives) {
+				type.Id += "." + std::string(engine::imagegraph::ValueTypeName(member));
+				if (!type.Label.empty()) type.Label += " / ";
+				type.Label += engine::imagegraph::ValueTypeName(member);
+				type.Members.push_back(CanvasType(member));
+			}
+			nodegraph::DataTypes::Register(type);
+			return type.Id;
 		}
 
 		std::optional<engine::imagegraph::ValueType> ValueTypeFromCanvas(std::string_view type) {
@@ -125,6 +128,8 @@ namespace studio {
 		}
 
 		std::string NodeTitle(std::string_view type) {
+			if (type == "value.noise_field") return "Noise Generator";
+			if (type == "value.sample_noise") return "Computed Noise";
 			if (type == "image.solid") return "Solid";
 			if (type == "image.gradient") return "Gradient";
 			if (type == "image.noise_simplex") return "Simplex Noise";
@@ -872,6 +877,9 @@ namespace studio {
 		RegisterDataType(engine::imagegraph::ValueType::Enum, "Enum");
 		RegisterDataType(engine::imagegraph::ValueType::Mesh, "Mesh");
 		RegisterDataType(engine::imagegraph::ValueType::AudioBit, "Audio");
+		RegisterDataType(engine::imagegraph::ValueType::Noise1D, "1D Value Field");
+		RegisterDataType(engine::imagegraph::ValueType::Noise2D, "2D Value Field");
+		RegisterDataType(engine::imagegraph::ValueType::Noise3D, "3D Value Field");
 		for (auto index = static_cast<size_t>(engine::imagegraph::ValueType::Mesh2D);
 			 index <= static_cast<size_t>(engine::imagegraph::ValueType::Path3D);
 			 index++) {
@@ -887,7 +895,7 @@ namespace studio {
 				type.Category = std::move(category);
 				type.Accent = nodegraph::Colour::Hex(0x262626);
 				for (const engine::imagegraph::PortSchema &port : schema.Ports) {
-					nodegraph::PortSpec socket{std::string(port.Id), CanvasType(port.Type)};
+					nodegraph::PortSpec socket{std::string(port.Id), CanvasPortType(port)};
 					if (port.Direction == engine::imagegraph::PortDirection::Input) {
 						socket.Suggest =
 							imagegraph_choices::Suggested(imagegraph_choices::Input(schema.Type, port.Id));
@@ -968,6 +976,14 @@ namespace studio {
 			return engine::imagegraph::Value{false};
 		if (propertyId == "constant_dimension")
 			return engine::imagegraph::Value{engine::imagegraph::Vector2{64, 64}};
+		if (nodeType == "value.noise_field") {
+			if (propertyId == "dimension") return engine::imagegraph::Value{engine::imagegraph::EnumValue{2}};
+			if (propertyId == "frequency") return engine::imagegraph::Value{1.0};
+			if (propertyId == "octaves") return engine::imagegraph::Value{int64_t{1}};
+			if (propertyId == "gain") return engine::imagegraph::Value{.5};
+		}
+		if (nodeType == "value.sample_noise" && propertyId == "position")
+			return engine::imagegraph::Value{engine::imagegraph::Vector2{}};
 		if (propertyId == "position") return engine::imagegraph::Value{engine::imagegraph::Vector2{0.5, 0.5}};
 		if (propertyId == "opacity") return engine::imagegraph::Value{1.0};
 		if (propertyId == "iterations") return engine::imagegraph::Value{int64_t{1}};
@@ -1176,7 +1192,8 @@ namespace studio {
 			}
 			if (physical == opaquePorts.end() &&
 				(authored.Type == "pc.array_split" || !authored.DynamicOutputs.empty() ||
-				 authored.Type == "pc.color_to_rgb" || authored.Type == "pc.color_to_hsv")) {
+				 authored.Type == "pc.color_to_rgb" || authored.Type == "pc.color_to_hsv" ||
+				 authored.Type == "value.noise_field")) {
 				canvasNode.OutputPorts.emplace();
 				for (const auto &port : detail::ImageGraphOutputPorts(authored))
 					canvasNode.OutputPorts->push_back({std::string(port.Id), CanvasType(port.Type)});
@@ -1641,6 +1658,13 @@ namespace studio {
 			});
 		if (declared == schema->Properties.end())
 			return fail(engine::imagegraph::Status::UnknownPort, "property is not declared");
+		if (node->Type == "value.noise_field" && property == "dimension") {
+			const auto *dimension = std::get_if<engine::imagegraph::EnumValue>(&value);
+			if (!dimension || dimension->Value < 1 || dimension->Value > 3)
+				return fail(
+					engine::imagegraph::Status::InvalidValue, "noise field dimension must be 1, 2 or 3"
+				);
+		}
 		const auto valueType = TypeOf(value);
 		const auto *sourceInput = imagegraph_choices::Input(node->Type, property);
 		const bool sourceChoice =
@@ -1650,7 +1674,15 @@ namespace studio {
 		const bool sourceArray =
 			sourceEntry && sourceInput && array &&
 			engine::imagegraph::CatalogueAuthoredArray(*sourceEntry, *sourceInput, *array);
-		if (!sourceChoice && !sourceArray &&
+		const auto unionPort =
+			std::find_if(schema->Ports.begin(), schema->Ports.end(), [&](const auto &port) {
+				return port.Id == property && port.Direction == engine::imagegraph::PortDirection::Input;
+			});
+		const bool unionValue =
+			valueType && unionPort != schema->Ports.end() && !unionPort->Alternatives.empty() &&
+			std::find(unionPort->Alternatives.begin(), unionPort->Alternatives.end(), *valueType) !=
+				unionPort->Alternatives.end();
+		if (!sourceChoice && !sourceArray && !unionValue &&
 			!(sourceInput && engine::imagegraph::CatalogueSourceRawValue(*sourceInput, value)) &&
 			(!valueType || *valueType != declared->Type))
 			return fail(engine::imagegraph::Status::TypeMismatch, "value type does not match the schema");

@@ -211,12 +211,39 @@ namespace engine::imagegraph::detail {
 		};
 		static const NodeSchema AUDIO_WINDOW{"image.audio_window", AUDIO_WINDOW_PORTS, AUDIO_WINDOW_PROPS};
 
-		static const std::array<const NodeSchema *, 26> SCHEMAS{
-			{&NUMBER,		&BOOLEAN,	  &TEXT,   &VECTOR,		&MATH,		&COMPARE,
-			 &LOGIC,		&RGB,		  &HSV,	   &COLOR_DATA, &COLOR_MIX, &MAGNITUDE,
-			 &NORMALIZE,	&DIRECTION,	  &DOT,	   &CROSS,		&COUNT,		&REPLACE,
-			 &COMBINE,		&SPLIT,		  &LENGTH, &GET_CHAR,	&DELETE,	&AUDIO_RECORDING,
-			 &AUDIO_VOLUME, &AUDIO_WINDOW}
+		static constexpr std::array<PortSchema, 5> NOISE_PORTS{
+			{{"seed", T::Integer, D::Input},
+			 {"frequency", T::Scalar, D::Input},
+			 {"octaves", T::Integer, D::Input},
+			 {"gain", T::Scalar, D::Input},
+			 {"field", T::Noise2D, D::Output}}
+		};
+		static constexpr std::array<PropertySchema, 5> NOISE_PROPERTIES{
+			{{"dimension", T::Enum},
+			 {"seed", T::Integer},
+			 {"frequency", T::Scalar},
+			 {"octaves", T::Integer},
+			 {"gain", T::Scalar}}
+		};
+		static const NodeSchema NOISE_FIELD{"value.noise_field", NOISE_PORTS, NOISE_PROPERTIES};
+		static constexpr std::array FIELD_TYPES{T::Noise1D, T::Noise2D, T::Noise3D};
+		static constexpr std::array COORDINATE_TYPES{T::Scalar, T::Vector2, T::Vector3};
+		static constexpr std::array<PortSchema, 3> SAMPLE_NOISE_PORTS{
+			{{"field", T::Noise2D, D::Input, FIELD_TYPES},
+			 {"position", T::Scalar, D::Input, COORDINATE_TYPES},
+			 {"value", T::Scalar, D::Output}}
+		};
+		static constexpr std::array<PropertySchema, 1> SAMPLE_NOISE_PROPERTIES{{{"position", T::Any}}};
+		static const NodeSchema SAMPLE_NOISE{
+			"value.sample_noise", SAMPLE_NOISE_PORTS, SAMPLE_NOISE_PROPERTIES
+		};
+
+		static const std::array<const NodeSchema *, 28> SCHEMAS{
+			{&NUMBER,		&BOOLEAN,	   &TEXT,		 &VECTOR,	   &MATH,	   &COMPARE,
+			 &LOGIC,		&RGB,		   &HSV,		 &COLOR_DATA,  &COLOR_MIX, &MAGNITUDE,
+			 &NORMALIZE,	&DIRECTION,	   &DOT,		 &CROSS,	   &COUNT,	   &REPLACE,
+			 &COMBINE,		&SPLIT,		   &LENGTH,		 &GET_CHAR,	   &DELETE,	   &AUDIO_RECORDING,
+			 &AUDIO_VOLUME, &AUDIO_WINDOW, &NOISE_FIELD, &SAMPLE_NOISE}
 		};
 		for (const NodeSchema *schema : SCHEMAS)
 			if (schema->Type == type) return schema;

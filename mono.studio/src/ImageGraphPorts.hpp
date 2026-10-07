@@ -1,5 +1,6 @@
 #pragma once
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/NoiseField.hpp>
 
 #include <algorithm>
 #include <vector>
@@ -31,7 +32,11 @@ namespace studio::detail {
 		for (const auto &port : schema->Ports) {
 			if (port.Direction != PortDirection::Output) continue;
 			if (channelArray && !ports.empty()) continue;
-			ports.push_back({port.Id, channelArray ? ValueType::Array : port.Type, PortDirection::Output});
+			const auto type = node.Type == "value.noise_field" && port.Id == "field"
+								  ? NoiseGeneratorOutputType(node).value_or(port.Type)
+							  : channelArray ? ValueType::Array
+											 : port.Type;
+			ports.push_back({port.Id, type, PortDirection::Output});
 		}
 		for (const auto &port : node.DynamicOutputs)
 			ports.push_back({port.Id, port.Type, PortDirection::Output});

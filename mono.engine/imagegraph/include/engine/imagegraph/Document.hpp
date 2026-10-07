@@ -106,6 +106,10 @@ namespace engine::imagegraph {
 		Path3D,
 		// Owned runtime font metrics and glyph pixels, never a device handle.
 		Font,
+		// grug scalar fields accept one, two or three coordinates.
+		Noise1D,
+		Noise2D,
+		Noise3D,
 	};
 
 	// Stable text name of a value type, as written in documents and catalogues.
@@ -772,6 +776,19 @@ namespace engine::imagegraph {
 		bool operator==(const FontValue &) const = default;
 	};
 
+	// grug fields own recipes or sampled pixels; no callback or host pointer crosses a graph.
+	struct NoiseFieldData {
+		uint8_t Dimensions = 2;
+		int64_t Seed = 0, Octaves = 1;
+		double Frequency = 1, Gain = .5;
+		std::optional<Image> Raster;
+		bool operator==(const NoiseFieldData &) const = default;
+	};
+	struct NoiseFieldValue {
+		OwnedPayload3D<NoiseFieldData> Data;
+		bool operator==(const NoiseFieldValue &) const = default;
+	};
+
 	struct StructData;
 	struct StructValue {
 		OwnedPayload3D<StructData> Data;
@@ -928,7 +945,8 @@ namespace engine::imagegraph {
 		RigidValue,
 		AtlasValue,
 		StrandValue,
-		FontValue>;
+		FontValue,
+		NoiseFieldValue>;
 
 	// Source arrays may mix leaves, nested arrays and owned surfaces. No pointer survives evaluation.
 	struct SourceArrayItem {
@@ -997,7 +1015,8 @@ namespace engine::imagegraph {
 		RigidValue,
 		AtlasValue,
 		StrandValue,
-		FontValue>;
+		FontValue,
+		NoiseFieldValue>;
 
 	// Fields retain owned runtime values; nesting never creates shared mutable references.
 	struct StructData {
@@ -1047,6 +1066,8 @@ namespace engine::imagegraph {
 		ValueType Type;
 		// Whether the socket receives or produces data.
 		PortDirection Direction;
+		// grug explicit union members replace Type as the accepted set when present.
+		std::span<const ValueType> Alternatives{};
 	};
 
 	// One stable authored property declaration in a node schema.

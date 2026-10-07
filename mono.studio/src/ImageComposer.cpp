@@ -4177,7 +4177,29 @@ namespace studio {
 				(property.Port == "parent_value" && boundaryDeclaration &&
 				 boundaryDeclaration->Domain.Kind == engine::imagegraph::SourceSocketKind::Trigger) ||
 				(choiceInput && choiceInput->SourceKind == "Trigger");
-			if (triggerButton) {
+			bool coordinateTypeChanged = false;
+			if (authored && authored->Type == "value.sample_noise" && property.Port == "position") {
+				const int dimensions = std::holds_alternative<engine::imagegraph::Vector3>(replacement)	  ? 3
+									   : std::holds_alternative<engine::imagegraph::Vector2>(replacement) ? 2
+																										  : 1;
+				const char *names[] = {"1D", "2D", "3D"};
+				if (ImGui::BeginCombo("Coordinates##noise", names[dimensions - 1])) {
+					for (int dimension = 1; dimension <= 3; ++dimension)
+						if (ImGui::Selectable(names[dimension - 1], dimension == dimensions)) {
+							if (dimension == 1)
+								replacement = 0.0;
+							else if (dimension == 2)
+								replacement = engine::imagegraph::Vector2{};
+							else
+								replacement = engine::imagegraph::Vector3{};
+							coordinateTypeChanged = changed = true;
+						}
+					ImGui::EndCombo();
+				}
+			}
+			if (coordinateTypeChanged) {
+				// grug new coordinate widget starts next frame, preserving this dropdown edit.
+			} else if (triggerButton) {
 				changed = ImGui::Button("Trigger##value");
 				if (changed) replacement = true;
 			} else if (choiceInput && choiceInput->Type == engine::imagegraph::ValueType::Enum &&
@@ -4231,7 +4253,19 @@ namespace studio {
 				changed = DrawQuaternionValue(*rotation);
 			} else if (auto *choice = std::get_if<engine::imagegraph::EnumValue>(&replacement)) {
 				const Node *node = FindNode(state.Authored, nodeId);
-				if (node != nullptr && node->Type == "image.transform_3d" && property.Port == "projection") {
+				if (node != nullptr && node->Type == "value.noise_field" && property.Port == "dimension") {
+					const char *names[] = {"1D Value Field", "2D Value Field", "3D Value Field"};
+					const auto selected = std::clamp<int64_t>(choice->Value, 1, 3);
+					if (ImGui::BeginCombo("##value", names[selected - 1])) {
+						for (int64_t dimension = 1; dimension <= 3; ++dimension)
+							if (ImGui::Selectable(names[dimension - 1], dimension == choice->Value)) {
+								choice->Value = dimension;
+								changed = true;
+							}
+						ImGui::EndCombo();
+					}
+				} else if (node != nullptr && node->Type == "image.transform_3d" &&
+						   property.Port == "projection") {
 					const char *selected = choice->Value == 0	? "Perspective"
 										   : choice->Value == 1 ? "Orthographic"
 																: "Unknown";
@@ -4268,7 +4302,6 @@ namespace studio {
 			} else {
 				ImGui::TextDisabled("unsupported authored value");
 			}
-
 			const ImGuiID itemId = ImGui::GetID("##value");
 			BeginPropertyEdit(state, itemId);
 			// A combo selection finishes before the numeric field becomes the last ImGui
@@ -4337,6 +4370,8 @@ namespace studio {
 				});
 				ReloadCanvas(state);
 			}
+			if (changed && authored && authored->Type == "value.noise_field" && editedPort == "dimension")
+				ReloadCanvas(state);
 			EndPropertyEdit(state, itemId, changed);
 			return changed;
 		}

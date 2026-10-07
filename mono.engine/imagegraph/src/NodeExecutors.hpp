@@ -76,6 +76,7 @@ namespace engine::imagegraph::detail {
 		const CatalogueEntry &Entry;
 		const EvaluationRequest &Request;
 		bool InputProvenanceResolved = false;
+		bool NoiseFieldRequested = false;
 		// Only the branch selecting a catalogue fallback marks a port. Empty payloads carry no identity.
 		std::vector<std::string_view> CatalogueDefaultInputs;
 		std::vector<std::pair<std::string_view, std::string_view>> InputOwnerIds;

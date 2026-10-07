@@ -10,6 +10,7 @@
 #include "ValuePayload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/NoiseField.hpp>
 
 #include <algorithm>
 #include <array>
@@ -118,6 +119,107 @@ namespace engine::imagegraph::detail {
 			outputs.push_back({std::string(port), std::move(result)});
 			return true;
 		};
+		if (node.Type == "value.noise_field") {
+			const auto type = NoiseGeneratorOutputType(node);
+			if (!type) {
+				failedPort = "dimension";
+				failureMessage = "noise field dimension must be 1, 2 or 3";
+				return Status::InvalidValue;
+			}
+			if (!reservePayload(sizeof(NoiseFieldData), "field")) return Status::LimitExceeded;
+			NoiseFieldValue field;
+			auto &data = field.Data.emplace();
+			data.Dimensions = *type == ValueType::Noise1D ? 1 : *type == ValueType::Noise2D ? 2 : 3;
+			const auto control = [&](std::string_view port, double fallback, double &result) {
+				const auto *input = valueInput(port);
+				result = fallback;
+				if (!input) return true;
+				if (const auto *value = std::get_if<double>(input))
+					result = *value;
+				else if (const auto *value = std::get_if<int64_t>(input))
+					result = double(*value);
+				else if (const auto *value = std::get_if<EnumValue>(input))
+					result = double(value->Value);
+				else if (const auto *value = std::get_if<bool>(input))
+					result = *value ? 1 : 0;
+				else {
+					failedPort = std::string(port);
+					return false;
+				}
+				if (!std::isfinite(result)) {
+					failedPort = std::string(port);
+					return false;
+				}
+				return true;
+			};
+			const auto integerControl = [&](std::string_view port, int64_t fallback, int64_t &result) {
+				const auto *input = valueInput(port);
+				if (input)
+					if (const auto *value = std::get_if<int64_t>(input)) {
+						result = *value;
+						return true;
+					}
+				double value;
+				if (!control(port, double(fallback), value) || value < -0x1p63 || value >= 0x1p63 ||
+					std::trunc(value) != value) {
+					failedPort = std::string(port);
+					return false;
+				}
+				result = static_cast<int64_t>(value);
+				return true;
+			};
+			if (!integerControl("seed", 0, data.Seed) || !control("frequency", 1, data.Frequency) ||
+				!integerControl("octaves", 1, data.Octaves) || !control("gain", .5, data.Gain)) {
+				failureMessage =
+					"noise control needs a finite numeric value; integer controls need integral values";
+				return Status::InvalidValue;
+			}
+			if (!ValidNoiseField(field)) {
+				failedPort = "field";
+				failureMessage = "noise field controls exceed finite recipe bounds";
+				return Status::InvalidValue;
+			}
+			outputs.push_back({"field", std::move(field)});
+			return Status::Ok;
+		}
+		if (node.Type == "value.sample_noise") {
+			const auto *input = valueInput("field");
+			const auto *field = input ? std::get_if<NoiseFieldValue>(input) : nullptr;
+			if (!field || !field->Data) {
+				failedPort = "field";
+				failureMessage = "noise sampler needs a valid field";
+				return Status::InvalidValue;
+			}
+			std::array<double, 3> coordinates{};
+			size_t count = 0;
+			const auto *position = valueInput("position");
+			if (!position)
+				count = field->Data->Dimensions;
+			else if (const auto *scalarPosition = std::get_if<double>(position)) {
+				coordinates[0] = *scalarPosition;
+				count = 1;
+			} else if (const auto *vectorPosition = std::get_if<Vector2>(position)) {
+				coordinates = {vectorPosition->X, vectorPosition->Y, 0};
+				count = 2;
+			} else if (const auto *vectorPosition = std::get_if<Vector3>(position)) {
+				coordinates = {vectorPosition->X, vectorPosition->Y, vectorPosition->Z};
+				count = 3;
+			}
+			if (count != field->Data->Dimensions) {
+				failedPort = "position";
+				failureMessage = "noise coordinates must match field dimension";
+				return Status::TypeMismatch;
+			}
+			double value = 0;
+			if (!SampleNoiseField(*field, std::span(coordinates).first(count), value)) {
+				failedPort = "position";
+				failureMessage = "noise sample exceeds finite coordinate bounds";
+				return Status::InvalidValue;
+			}
+			outputs.push_back({"value", value});
+			return Status::Ok;
+		}
+
 		if (node.Type == "image.audio_recording") {
 			const std::string_view sourceId = text("source_id");
 			const auto capture = std::find_if(

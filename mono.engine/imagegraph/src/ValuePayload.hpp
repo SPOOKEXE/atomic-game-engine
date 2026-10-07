@@ -16,6 +16,7 @@
 #include "StrandPayload.hpp"
 
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/NoiseField.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -33,10 +34,11 @@ namespace engine::imagegraph::detail {
 		ValueType::Image,	ValueType::Buffer,		ValueType::NodeRef,		   ValueType::Path3D,
 		ValueType::PcxNode, ValueType::PixelBox,	ValueType::DynamicSurface, ValueType::Array,
 		ValueType::Sdf,		ValueType::FluidDomain, ValueType::Particle,	   ValueType::Tileset,
-		ValueType::Rigid,	ValueType::Atlas,		ValueType::Strand,		   ValueType::Font
+		ValueType::Rigid,	ValueType::Atlas,		ValueType::Strand,		   ValueType::Font,
+		ValueType::Noise1D
 	};
 	static_assert(std::size(VALUE_PAYLOAD_TYPES) == std::variant_size_v<Value>);
-	static_assert(std::variant_size_v<Value> == 40 && std::variant_size_v<ElementValue> == 39);
+	static_assert(std::variant_size_v<Value> == 41 && std::variant_size_v<ElementValue> == 40);
 	static_assert(std::is_same_v<std::variant_alternative_t<34, Value>, ParticleValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<33, ElementValue>, ParticleValue>);
 	static_assert(sizeof(ParticleValue) == 8 && sizeof(TilesetValue) == 8 && sizeof(Value) == 88);
@@ -53,10 +55,15 @@ namespace engine::imagegraph::detail {
 	static_assert(sizeof(FontValue) == 8 && sizeof(Value) == 88);
 	static_assert(std::is_same_v<std::variant_alternative_t<39, Value>, FontValue>);
 	static_assert(std::is_same_v<std::variant_alternative_t<38, ElementValue>, FontValue>);
+	static_assert(sizeof(NoiseFieldValue) == 8 && sizeof(Value) == 88);
+	static_assert(std::is_same_v<std::variant_alternative_t<40, Value>, NoiseFieldValue>);
+	static_assert(std::is_same_v<std::variant_alternative_t<39, ElementValue>, NoiseFieldValue>);
 	inline ValueType PayloadType(const Value &value) {
+		if (const auto *field = std::get_if<NoiseFieldValue>(&value)) return NoiseFieldType(*field);
 		return VALUE_PAYLOAD_TYPES[value.index()];
 	}
 	inline bool RepresentableArrayElementType(ValueType type) {
+		if (type == ValueType::Noise2D || type == ValueType::Noise3D) return true;
 		return type != ValueType::Array &&
 			   std::find(std::begin(VALUE_PAYLOAD_TYPES), std::end(VALUE_PAYLOAD_TYPES), type) !=
 				   std::end(VALUE_PAYLOAD_TYPES);
@@ -86,8 +93,10 @@ namespace engine::imagegraph::detail {
 		);
 	}
 
-	template <class T> inline ValueType PayloadType(const T &) {
-		if constexpr (std::is_same_v<T, ArraySelectorValue>)
+	template <class T> inline ValueType PayloadType(const T &item) {
+		if constexpr (std::is_same_v<T, NoiseFieldValue>)
+			return NoiseFieldType(item);
+		else if constexpr (std::is_same_v<T, ArraySelectorValue>)
 			return ValueType::Array;
 		else if constexpr (std::is_same_v<T, bool>)
 			return ValueType::Boolean;
@@ -179,7 +188,11 @@ namespace engine::imagegraph::detail {
 	inline bool ValidSelectorPayload(const ArraySelectorValue &item);
 
 	template <class T> inline uint64_t PayloadOwnedBytes(const T &item) {
-		if constexpr (std::is_same_v<T, DynamicSurfaceValue>)
+		if constexpr (std::is_same_v<T, NoiseFieldValue>)
+			return item.Data
+					   ? sizeof(NoiseFieldData) + (item.Data->Raster ? item.Data->Raster->Pixels.size() : 0)
+					   : 0;
+		else if constexpr (std::is_same_v<T, DynamicSurfaceValue>)
 			return PixelBuilderStorageBytes(item, false);
 		else if constexpr (std::is_same_v<T, PixelBoxValue>)
 			return item.Data ? sizeof(PixelBoxData) : 0;
@@ -291,7 +304,11 @@ namespace engine::imagegraph::detail {
 
 	// Retained storage uses container capacities; logical payload sizing remains size-based above.
 	template <class T> inline uint64_t RetainedPayloadBytes(const T &item) {
-		if constexpr (std::is_same_v<T, DynamicSurfaceValue>)
+		if constexpr (std::is_same_v<T, NoiseFieldValue>)
+			return item.Data ? sizeof(NoiseFieldData) +
+								   (item.Data->Raster ? item.Data->Raster->Pixels.capacity() : 0)
+							 : 0;
+		else if constexpr (std::is_same_v<T, DynamicSurfaceValue>)
 			return PixelBuilderStorageBytes(item, true);
 		else if constexpr (std::is_same_v<T, PixelBoxValue>)
 			return item.Data ? sizeof(PixelBoxData) : 0;
@@ -412,7 +429,9 @@ namespace engine::imagegraph::detail {
 	}
 
 	template <class T> inline bool ValidPayload(const T &item, bool runtime) {
-		if constexpr (std::is_same_v<T, FontValue>)
+		if constexpr (std::is_same_v<T, NoiseFieldValue>)
+			return runtime && ValidNoiseField(item);
+		else if constexpr (std::is_same_v<T, FontValue>)
 			return runtime && ValidFontPayload(item);
 		else if constexpr (std::is_same_v<T, ArraySelectorValue>)
 			return runtime && ValidSelectorPayload(item);

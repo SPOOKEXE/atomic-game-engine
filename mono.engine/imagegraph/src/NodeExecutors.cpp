@@ -242,7 +242,22 @@ namespace engine::imagegraph::detail {
 				if (images)
 					for (const Image &image : images->Images)
 						if (!validate(image, port)) return false;
-			return found->second.Run(context);
+			if (!found->second.Run(context)) return false;
+			if (context.NoiseFieldRequested && IsNoiseImageGenerator(context.Authored.Type)) {
+				if (context.OutputImages.empty())
+					return context.Fail(
+						Status::InvalidOutput, "noise generator produced no surface for its field", "field"
+					);
+				const auto &image = context.OutputImages.front().second;
+				if (!context.ReserveOutput(
+						sizeof(NoiseFieldData) + image.Pixels.size() + std::string{}.capacity(), "field"
+					))
+					return false;
+				NoiseFieldValue field;
+				field.Data.emplace().Raster = image;
+				context.SetValue("field", std::move(field));
+			}
+			return context.FailureCode == Status::Ok;
 		}
 
 	}

@@ -74,6 +74,7 @@
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/NoiseField.hpp>
 #include <engine/imagegraph/SliceStackReplay.hpp>
 #include <engine/imagegraph/SourceBuiltinRandom.hpp>
 #include <engine/imagegraph/SourceFont.hpp>
@@ -469,10 +470,11 @@ namespace engine::imagegraph {
 			{"curve", ValueType::Curve},
 		}};
 		const NodeSchema GRADIENT_SCHEMA{"image.gradient", GRADIENT_PORTS, GRADIENT_PROPERTIES};
-		constexpr std::array<PortSchema, 3> SIMPLEX_PORTS = {{
+		constexpr std::array<PortSchema, 4> SIMPLEX_PORTS = {{
 			{"uv_map", ValueType::Image, PortDirection::Input},
 			{"mask", ValueType::Image, PortDirection::Input},
 			{"image", ValueType::Image, PortDirection::Output},
+			{"field", ValueType::Noise2D, PortDirection::Output},
 		}};
 		constexpr std::array<PropertySchema, 18> SIMPLEX_PROPERTIES = {{
 			{"width", ValueType::Integer},
@@ -856,7 +858,7 @@ namespace engine::imagegraph {
 		};
 
 		// Indexed by ValueType. Names are durable document text.
-		constexpr std::array<std::string_view, 42> TYPE_NAMES = {
+		constexpr std::array<std::string_view, 45> TYPE_NAMES = {
 			"boolean",	"integer",	  "scalar",		  "text",		  "colour",
 			"vector2",	"image",	  "array",		  "gradient",	  "area",
 			"curve",	"vector4",	  "path2d",		  "vector3",	  "quaternion",
@@ -865,9 +867,9 @@ namespace engine::imagegraph {
 			"sdf",		"armature",	  "atlas",		  "tileset",	  "pixel_box",
 			"scene3d",	"material3d", "light3d",	  "buffer",		  "struct",
 			"any",		"node_ref",	  "pcx_node",	  "object",		  "dynamic_surface",
-			"path3d",	"font",
+			"path3d",	"font",		  "noise1d",	  "noise2d",	  "noise3d",
 		};
-		static_assert(static_cast<size_t>(ValueType::Font) + 1 == TYPE_NAMES.size());
+		static_assert(static_cast<size_t>(ValueType::Noise3D) + 1 == TYPE_NAMES.size());
 
 		constexpr std::array<std::string_view, 9> DEPTH_NAMES = {
 			"input", "inherited", "rgba4", "rgba8", "rgba16f", "rgba32f", "r8", "r16f", "r32f"
@@ -1010,6 +1012,12 @@ namespace engine::imagegraph {
 			case ValueType::Tileset:
 			case ValueType::Curve:
 				return 1ull << 38;
+			case ValueType::Noise1D:
+				return 1ull << 40;
+			case ValueType::Noise2D:
+				return 1ull << 41;
+			case ValueType::Noise3D:
+				return 1ull << 42;
 			case ValueType::Any:
 				return ~0ull & ~(1ull << 32);
 			}
@@ -1043,6 +1051,8 @@ namespace engine::imagegraph {
 				(side == PortDirection::Input || side == PortDirection::Output))
 				return ValueType::Any;
 			if (const PortSchema *port = FindPort(node.Type, id, side)) {
+				if (node.Type == "value.noise_field" && id == "field" && side == PortDirection::Output)
+					return NoiseGeneratorOutputType(node);
 				if (side == PortDirection::Output &&
 					(node.Type == "pc.rgb_channel" || node.Type == "pc.hsv_channel")) {
 					bool outputArray = false;
@@ -5419,6 +5429,16 @@ namespace engine::imagegraph {
 				SetDiagnostic(diagnostic, Status::DuplicateId, "duplicate node id", node.Id);
 				return diagnostic.Code;
 			}
+			if (node.Type == "value.noise_field" && !NoiseGeneratorOutputType(node)) {
+				SetDiagnostic(
+					diagnostic,
+					Status::InvalidValue,
+					"noise field dimension must be 1, 2 or 3",
+					node.Id,
+					"dimension"
+				);
+				return diagnostic.Code;
+			}
 			if (!IsNodeType(node.Type)) {
 				SetDiagnostic(diagnostic, Status::UnknownNode, "node type is not registered", node.Id);
 				return diagnostic.Code;
@@ -5730,7 +5750,14 @@ namespace engine::imagegraph {
 					  sourceArray->Elements.empty() && sourceArray->Nested.empty() &&
 					  sourceArray->Items.empty() &&
 					  (sourceInput->SourceKind == "Range" || sourceInput->SourceKind == "Vec2")));
-				if (TypeOf(value.Data) != property->Type &&
+				const auto *unionProperty = FindPort(node.Type, value.Port, PortDirection::Input);
+				const bool unionValue = unionProperty && !unionProperty->Alternatives.empty() &&
+										std::find(
+											unionProperty->Alternatives.begin(),
+											unionProperty->Alternatives.end(),
+											TypeOf(value.Data)
+										) != unionProperty->Alternatives.end();
+				if (TypeOf(value.Data) != property->Type && !unionValue &&
 					!(node.Type == "pc.group_input" && value.Port == "parent_value") &&
 					!detail::SourceArgumentAuthoredDefault(node, value.Port, value.Data) &&
 					!sourceArrayMatches && !sourceEnumMatches && !sourceEmptyMatches &&
@@ -7301,10 +7328,42 @@ namespace engine::imagegraph {
 			const bool opaqueCallbackLink =
 				(from != nodeIndices.end() && detail::IsGroupCallbackOpaque(document.Nodes[from->second])) ||
 				(to != nodeIndices.end() && detail::IsGroupCallbackOpaque(document.Nodes[to->second]));
-			if (sourceType != targetType && !opaqueCallbackLink && !arrayElement && !heightBlendArrayInput &&
-				!heightBlendArrayOutput && !catalogueArrayInput && !catalogueAtlasArrayInput &&
-				!catalogueStrandArrayInput && !sourceMaterialInput && !heightmapColourArrayInput &&
-				!sourceFontInput &&
+			const auto *inputSchema =
+				to != nodeIndices.end()
+					? FindPort(document.Nodes[to->second].Type, link.ToPort, PortDirection::Input)
+					: nullptr;
+			const auto *outputSchema =
+				from != nodeIndices.end()
+					? FindPort(document.Nodes[from->second].Type, link.FromPort, PortDirection::Output)
+					: nullptr;
+			const bool unionLink = (inputSchema && !inputSchema->Alternatives.empty()) ||
+								   (outputSchema && !outputSchema->Alternatives.empty());
+			const auto accepts = [&](ValueType type) {
+				if (!inputSchema || inputSchema->Alternatives.empty()) return type == targetType;
+				return std::find(inputSchema->Alternatives.begin(), inputSchema->Alternatives.end(), type) !=
+					   inputSchema->Alternatives.end();
+			};
+			const bool explicitUnion =
+				unionLink &&
+				(outputSchema && !outputSchema->Alternatives.empty()
+					 ? std::all_of(
+						   outputSchema->Alternatives.begin(), outputSchema->Alternatives.end(), accepts
+					   )
+					 : accepts(sourceType));
+			if (unionLink && !explicitUnion) {
+				SetDiagnostic(
+					diagnostic,
+					Status::TypeMismatch,
+					"link union includes incompatible port types",
+					link.ToNode,
+					link.ToPort
+				);
+				return diagnostic.Code;
+			}
+			if (sourceType != targetType && !explicitUnion && !opaqueCallbackLink && !arrayElement &&
+				!heightBlendArrayInput && !heightBlendArrayOutput && !catalogueArrayInput &&
+				!catalogueAtlasArrayInput && !catalogueStrandArrayInput && !sourceMaterialInput &&
+				!heightmapColourArrayInput && !sourceFontInput &&
 				!((catalogueLink || boundaryLink) && JunctionCompatible(sourceType, targetType))) {
 				SetDiagnostic(
 					diagnostic,
@@ -11778,6 +11837,21 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				detail::NodeContext context(node, *catalogueEntry, request, budget);
+				context.NoiseFieldRequested =
+					(output != document.Outputs.end() && output->NodeId == node.Id &&
+					 output->Port == "field") ||
+					std::any_of(
+						selectedOutputs.begin(),
+						selectedOutputs.end(),
+						[&](const auto *selected) {
+							return selected->NodeId == node.Id && selected->Port == "field";
+						}
+					) ||
+					std::any_of(
+						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const auto &link) {
+							return link.FromNode == node.Id && link.FromPort == "field";
+						}
+					);
 				context.EvaluationDocument = &document;
 				context.FontHostResidency = &*fontHostShadow;
 				context.PathShiftMemo = &pathShiftMemo;
@@ -16469,6 +16543,31 @@ namespace engine::imagegraph {
 					node.Id
 				);
 				return diagnostic.Code;
+			}
+			if (node.Type == "image.noise_simplex" &&
+				((output != document.Outputs.end() && output->NodeId == node.Id && output->Port == "field") ||
+				 std::any_of(
+					 selectedOutputs.begin(),
+					 selectedOutputs.end(),
+					 [&](const auto *selected) {
+						 return selected->NodeId == node.Id && selected->Port == "field";
+					 }
+				 ) ||
+				 std::any_of(plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const auto &link) {
+					 return link.FromNode == node.Id && link.FromPort == "field";
+				 }))) {
+				if (!admit(
+						sizeof(NoiseFieldData) + result.Pixels.size() + sizeof(AuthoredValue) +
+							sizeof(std::pair<std::string, Image>) + 2 * std::string{}.capacity(),
+						currentCharge,
+						"field"
+					))
+					return diagnostic.Code;
+				NoiseFieldValue field;
+				field.Data.emplace().Raster = result;
+				catalogueResult.Values.push_back({"field", std::move(field)});
+				catalogueResult.Images.emplace_back("image", std::move(result));
+				producedCatalogue = true;
 			}
 			const uint64_t resultBytes = producedValue		  ? ResultBytes(valueResult)
 										 : producedArray	  ? ResultBytes(arrayResult)
