@@ -26,7 +26,8 @@ TEST_CASE(
 		Fixture::Kind::GaussianConversion,
 		Fixture::Kind::AnisoBlend,
 		Fixture::Kind::AnisoMapped,
-		Fixture::Kind::RasterRGB
+		Fixture::Kind::RasterRGB,
+		Fixture::Kind::MirrorPolarCleanEdge
 	);
 	INFO("workload=" << int(kind));
 	Fixture fixture(kind);

@@ -257,8 +257,8 @@ TEST_CASE(
 		Pixel(run.Output(), 5, 4, {64, 128, 192, 128});
 	}
 	auto edge = RunNode("pc.mirror_polar", {{"surface_in", &source}}, {{"interpolate", EnumValue{6}}});
-	CHECK_FALSE(edge.Ok);
-	CHECK(edge.Code == Status::UnsupportedExecution);
+	REQUIRE(edge.Ok);
+	Pixel(edge.Output(), 5, 4, {64, 128, 192, 128});
 }
 TEST_CASE(
 	"Polar Mirror inactive clone ignores output dimensions and undefined spokes", "[source_2d][mirror_polar]"
@@ -649,4 +649,129 @@ TEST_CASE(
 		const uint8_t expected = index == 2 ? 20 : 40;
 		Pixel(run.Output(), 0, 0, {expected, expected, 0, 128});
 	}
+}
+TEST_CASE(
+	"Polar Mirror CleanEdge keeps pinned center texel when no neighboring colors match",
+	"[source_2d][mirror_polar]"
+) {
+	const auto source = Coordinates();
+	auto run = RunNode(
+		"pc.mirror_polar",
+		{{"surface_in", &source}},
+		{{"interpolate", EnumValue{6}}, {"spokes", 1.}, {"center", Vector2{}}, {"center_unit", EnumValue{0}}}
+	);
+	INFO(run.Message);
+	REQUIRE(run.Ok);
+	// Unique neighbors reject all slices. ceil(2.5,4.5)/(8+.0001) nearest reads select(2,4).
+	Pixel(run.Output(), 2, 3, {40, 80, 0, 128});
+	const auto nearest = RunNode(
+		"pc.mirror_polar",
+		{{"surface_in", &source}},
+		{{"interpolate", EnumValue{1}}, {"spokes", 1.}, {"center", Vector2{}}, {"center_unit", EnumValue{0}}}
+	);
+	REQUIRE(nearest.Ok);
+	Pixel(nearest.Output(), 2, 3, {40, 80, 0, 128});
+	CHECK(nearest.Output() == run.Output());
+	auto oversample = RunNode(
+		"pc.mirror_polar",
+		{{"surface_in", &source}},
+		{{"interpolate", EnumValue{6}},
+		 {"oversample", EnumValue{2}},
+		 {"spokes", 1.},
+		 {"center", Vector2{}},
+		 {"center_unit", EnumValue{0}}}
+	);
+	REQUIRE(oversample.Ok);
+	CHECK(oversample.Output() == run.Output());
+}
+TEST_CASE(
+	"Polar Mirror CleanEdge preserves floating RGBA and bounded compiled publication",
+	"[source_2d][mirror_polar]"
+) {
+	Image source{8, 8, std::vector<uint8_t>(8 * 8 * 16), 0, SurfaceFormat::RGBA32Float};
+	for (uint32_t y = 0; y < 8; ++y)
+		for (uint32_t x = 0; x < 8; ++x)
+			REQUIRE(StoreSurfacePixel(source, x, y, {2, -1, .25, .5}));
+	auto d = Graph();
+	d.Nodes[1].Values = {{"interpolate", EnumValue{6}}};
+	auto plan = Compiled(d);
+	const std::array<RequestImageSource, 1> sources{{{"source", source}}};
+	EvaluationRequest request;
+	request.ImageSources = sources;
+	Image output;
+	Diagnostic diag;
+	REQUIRE(Evaluate(d, plan, "mapped", request, output, diag) == Status::Ok);
+	SurfacePixel pixel;
+	REQUIRE(LoadSurfacePixel(output, 2, 3, pixel));
+	CHECK(pixel == SurfacePixel{2, -1, .25, .5});
+	const auto prior = output;
+	CHECK(Evaluate(d, plan, "mapped", request, output, diag, 1) == Status::LimitExceeded);
+	CHECK(output == prior);
+	d.Nodes[1].Values.push_back({"spokes", 0.});
+	plan = Compiled(d);
+	CHECK(Evaluate(d, plan, "mapped", request, output, diag) == Status::InvalidValue);
+	CHECK(diag.Port == "spokes");
+	CHECK(output == prior);
+	CHECK(sources[0].Data == source);
+}
+TEST_CASE(
+	"Polar Mirror CleanEdge quotes worst original interpolation before pixel allocation",
+	"[source_2d][mirror_polar]"
+) {
+	const auto source = Coordinates();
+	Node node{"polar", "pc.mirror_polar", "", {}, {}};
+	EvaluationRequest request;
+	detail::NodeContext context(node, *FindCatalogueEntry(node.Type), request);
+	context.ByteBudget = 1;
+	context.ProcessorCount = 256;
+	context.Images = {{"surface_in", &source}};
+	context.Values = {{"interpolate", EnumValue{1}}};
+	const Value modes = ArrayValue{ValueType::Enum, {EnumValue{1}, EnumValue{6}}};
+	const std::array<std::pair<std::string_view, const Value *>, 1> original{{{"interpolate", &modes}}};
+	context.ProcessorOriginalValues = original;
+	CHECK_FALSE(detail::FindExecutor(node.Type)(context));
+	CHECK(context.FailureCode == Status::LimitExceeded);
+	CHECK(context.FailureMessage.find("complete processor batch") != std::string::npos);
+	CHECK(context.OutputImages.empty());
+	detail::NodeContext inherited(node, *FindCatalogueEntry(node.Type), request);
+	inherited.ByteBudget = 1;
+	inherited.ProcessorCount = 256;
+	inherited.Images = context.Images;
+	inherited.InheritedInterpolation = 6;
+	CHECK_FALSE(detail::FindExecutor(node.Type)(inherited));
+	CHECK(inherited.FailureMessage.find("complete processor batch") != std::string::npos);
+	CHECK(inherited.OutputImages.empty());
+}
+
+TEST_CASE(
+	"Polar Mirror CleanEdge diagonal source slice fills a corner that nearest leaves black",
+	"[source_2d][mirror_polar]"
+) {
+	Image source{5, 5, std::vector<uint8_t>(5 * 5 * 4), 0};
+	for (uint32_t y = 0; y < 5; ++y)
+		for (uint32_t x = 0; x < 5; ++x) {
+			const uint8_t c = x + y >= 5 ? 255 : 0;
+			const size_t i = (y * 5 + x) * 4;
+			source.Pixels[i] = source.Pixels[i + 1] = source.Pixels[i + 2] = c;
+			source.Pixels[i + 3] = 255;
+		}
+	auto render = [&](int64_t mode) {
+		return RunNode(
+			"pc.mirror_polar",
+			{{"surface_in", &source}},
+			{{"interpolate", EnumValue{mode}},
+			 {"spokes", 1.},
+			 {"center", Vector2{2.01, 7.99 / 3.}},
+			 {"center_unit", EnumValue{0}},
+			 {"scale", Vector2{1, 2}}}
+		);
+	};
+	const auto nearest = render(1), clean = render(6);
+	INFO(clean.Message);
+	REQUIRE(nearest.Ok);
+	REQUIRE(clean.Ok);
+	// Source polar equations give uv=(2.99/5,2.99/5), local=(.9900598,.9900598).
+	// Up and Back reject. Corner has F=D=white,C=black; signed line distance(.02/sqrt2)<.5.
+	Pixel(nearest.Output(), 2, 2, {0, 0, 0, 255});
+	Pixel(clean.Output(), 2, 2, {255, 255, 255, 255});
 }

@@ -2,6 +2,7 @@
 #include "../SourceMirrorPathProjection.hpp"
 #include "Curve.hpp"
 #include "Sampler.hpp"
+#include "SourceRefractClean.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -19,7 +20,7 @@ namespace engine::imagegraph::detail {
 				if (id == port) return &value;
 			return c.Find(port);
 		}
-		std::optional<double> PolarNumber(const ElementValue &v) {
+		template <class Variant> std::optional<double> PolarNumber(const Variant &v) {
 			if (const auto *d = std::get_if<double>(&v)) return *d;
 			if (const auto *i = std::get_if<int64_t>(&v)) return double(*i);
 			if (const auto *e = std::get_if<EnumValue>(&v)) return double(e->Value);
@@ -265,9 +266,17 @@ namespace engine::imagegraph::detail {
 					if (const auto *i = std::get_if<int64_t>(&leaf)) curved |= *i != 0;
 				}
 			});
+			bool clean = ReadSampler(c).Interpolation == 6;
+			PolarLeaves(PolarOriginal(c, "interpolate"), [&](const auto &leaf) {
+				using T = std::remove_cvref_t<decltype(leaf)>;
+				if constexpr (!std::is_same_v<T, Image>) {
+					const auto mode = PolarNumber(leaf);
+					if (mode) clean |= *mode == 6 || (*mode == 0 && c.InheritedInterpolation == 6);
+				}
+			});
 			// Includes mapped reads, transcendental polar math, nine paired Lanczos taps and bounded curve
-			// Newton work.
-			const uint64_t cost = active ? (curved ? 704 : 128) : 1,
+			// Newton work. CleanEdge adds 21 texel reads and up to three edge-slicing passes.
+			const uint64_t cost = active ? (curved ? 704 : 128) + (clean ? 4096 : 0) : 1,
 						   rows = std::max(uint64_t{1}, uint64_t(c.ProcessorCount));
 			if (rows > PolarWorkLimit / cost || uint64_t(width) * height > PolarWorkLimit / cost / rows)
 				return c.Fail(
@@ -289,6 +298,7 @@ namespace engine::imagegraph::detail {
 			NodeContext &c, const Image &image, double u, double v, const SamplerSettings &settings
 		) {
 			if (!PolarCoordinate(c, u, v)) return {};
+			if (settings.Interpolation == 6) return source_refract_clean::Texture(image, u, v);
 			if (settings.Interpolation != 4) return TextureInterpolated(image, u, v, settings);
 			const double centerU = u - (Fract(u * image.Width) - .5) / image.Width;
 			const double centerV = v - (Fract(v * image.Height) - .5) / image.Height;
@@ -360,7 +370,7 @@ namespace engine::imagegraph::detail {
 		const Image *map = mapped ? c.Input("spokes_map") : nullptr;
 		const Curve *curve = nullptr;
 		if (!red) {
-			if (!SupportedSampler(c, settings)) return false;
+			if (settings.Interpolation != 6 && !SupportedSampler(c, settings)) return false;
 			if (!PolarCoordinate(c, reference.X, reference.Y) ||
 				!PolarCoordinate(c, position.X, position.Y) || !PolarCoordinate(c, center.X, center.Y) ||
 				!PolarCoordinate(c, scale.X, scale.Y) || !PolarCoordinate(c, rotation, angle) ||

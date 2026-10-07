@@ -29,18 +29,22 @@ namespace engine::imagegraph::testing {
 			GaussianConversion,
 			AnisoBlend,
 			AnisoMapped,
-			RasterRGB
+			RasterRGB,
+			MirrorPolarCleanEdge
 		};
 		Kind Workload;
 		Document Authored;
 		Plan Compiled;
 		Image Pixels;
+		std::vector<RequestImageSource> Sources;
 		EvaluatedValue Colours;
 		uint64_t ExpectedHash = 0;
 		static constexpr uint32_t Side = 128;
 		explicit SourcePixelKernelFixture(Kind kind) : Workload(kind) {
 			Authored.FormatVersion = 9;
-			if (IsNoise()) {
+			if (IsMirrorClean()) {
+				BuildMirrorClean();
+			} else if (IsNoise()) {
 				BuildNoise();
 			} else if (IsPalette()) {
 				ArrayValue palette{ValueType::Colour, {}};
@@ -114,13 +118,13 @@ namespace engine::imagegraph::testing {
 			CheckBudget();
 		}
 		bool IsNoise() const {
-			return Workload >= Kind::FoldGreyscale;
+			return Workload >= Kind::FoldGreyscale && Workload <= Kind::RasterRGB;
 		}
 		bool IsFieldSample() const {
 			return Workload == Kind::RasterRGB;
 		}
 		uint32_t OutputSide() const {
-			return IsFieldSample() ? 32 : IsNoise() ? 64 : Side;
+			return IsMirrorClean() ? 96 : IsFieldSample() ? 32 : IsNoise() ? 64 : Side;
 		}
 		const char *OutputFormat() const {
 			return IsFieldSample() ? "Vector3"
@@ -138,7 +142,7 @@ namespace engine::imagegraph::testing {
 			return true;
 		}
 		std::string_view ProfileWorkScope() const {
-			return "imagegraph.processor";
+			return IsMirrorClean() ? "imagegraph.source.mirror_polar" : "imagegraph.processor";
 		}
 		double ProfileSeed() const {
 			return Workload == Kind::GaussianRandom || Workload == Kind::AnisoBlend ||
@@ -148,6 +152,42 @@ namespace engine::imagegraph::testing {
 		}
 		unsigned ProfileIterations() const {
 			return Workload == Kind::FoldGreyscale || Workload == Kind::FoldMap || IsFieldSample() ? 3 : 0;
+		}
+		bool IsMirrorClean() const {
+			return Workload == Kind::MirrorPolarCleanEdge;
+		}
+		void BuildMirrorClean() {
+			Image source{96, 96, std::vector<uint8_t>(96 * 96 * 4)};
+			for (uint32_t y = 0; y < 96; ++y)
+				for (uint32_t x = 0; x < 96; ++x) {
+					const size_t offset = (size_t(y) * 96 + x) * 4;
+					source.Pixels[offset] = uint8_t(x);
+					source.Pixels[offset + 1] = uint8_t(y);
+					source.Pixels[offset + 3] = 128;
+				}
+			source.Hash = SurfaceHash(source);
+			Sources.push_back({"coordinates", std::move(source)});
+			Authored.Nodes = {
+				{"source", "image.captured", "", {}, {{"source_id", std::string{"coordinates"}}}},
+				{"mirror",
+				 "pc.mirror_polar",
+				 "",
+				 {},
+				 {{"interpolate", EnumValue{6}},
+				  {"spokes", 1.},
+				  {"center", Vector2{48, 48}},
+				  {"center_unit", EnumValue{0}},
+				  {"position", Vector2{}},
+				  {"position_unit", EnumValue{0}},
+				  {"rotation", 0.},
+				  {"angle", 0.},
+				  {"scale", Vector2{1, 1}},
+				  {"radial_scale", EnumValue{0}},
+				  {"reflective", false},
+				  {"trim_radius", .5}}}
+			};
+			Authored.Links = {{"source", "image", "mirror", "surface_in"}};
+			Authored.Outputs = {{"out", "mirror", "surface_out"}};
 		}
 		void BuildNoise() {
 			const bool fold = Workload == Kind::FoldGreyscale || Workload == Kind::FoldMap || IsFieldSample();
@@ -368,14 +408,53 @@ namespace engine::imagegraph::testing {
 		}
 		void Run() {
 			Diagnostic diagnostic;
+			EvaluationRequest request;
+			request.ImageSources = Sources;
 			if (IsPalette() || IsFieldSample())
 				Check(EvaluateValue(Authored, Compiled, "out", {}, Colours, diagnostic), diagnostic);
 			else
-				Check(Evaluate(Authored, Compiled, "out", {}, Pixels, diagnostic), diagnostic);
+				Check(Evaluate(Authored, Compiled, "out", request, Pixels, diagnostic), diagnostic);
 		}
 		uint64_t Verify() const {
 			uint64_t hash = 14695981039346656037ULL;
 			const auto byte = [&](uint8_t value) { hash = (hash ^ value) * 1099511628211ULL; };
+			if (IsMirrorClean()) {
+				if (Pixels.Width != 96 || Pixels.Height != 96 || Pixels.Format != SurfaceFormat::RGBA8Unorm ||
+					Pixels.Pixels.size() != 96 * 96 * 4)
+					Fail("polar clean output shape");
+				// grug unique colors reject slices. ceil(uv*(96+.0001))/(96+.0001) floors to the original
+				// texel.
+				for (uint32_t y = 0; y < 96; ++y)
+					for (uint32_t x = 0; x < 96; ++x) {
+						const double dx = double(x) + .5 - 48, dy = double(y) + .5 - 48;
+						const std::array<uint8_t, 4> expected =
+							dx * dx + dy * dy <= 24 * 24
+								? std::array<uint8_t, 4>{uint8_t(x), uint8_t(95 - y), 0, 128}
+								: std::array<uint8_t, 4>{};
+						for (size_t channel = 0; channel < 4; ++channel) {
+							const auto actual = Pixels.Pixels[(size_t(y) * 96 + x) * 4 + channel];
+							if (actual != expected[channel]) {
+								const size_t offset = (size_t(y) * 96 + x) * 4;
+								std::string observed, wanted;
+								for (size_t c = 0; c < 4; ++c) {
+									if (c) {
+										observed += ",";
+										wanted += ",";
+									}
+									observed += std::to_string(Pixels.Pixels[offset + c]);
+									wanted += std::to_string(expected[c]);
+								}
+								Fail(
+									"polar clean source coordinate oracle x=" + std::to_string(x) + " y=" +
+									std::to_string(y) + " actual=[" + observed + "] expected=[" + wanted + "]"
+								);
+							}
+							byte(actual);
+						}
+					}
+				if (Pixels.Hash != SurfaceHash(Pixels)) Fail("polar clean canonical hash");
+				return hash;
+			}
 			if (IsNoise()) {
 				if (IsFieldSample()) {
 					const auto *sample = std::get_if<Vector3>(&Colours.Data);
@@ -449,7 +528,23 @@ namespace engine::imagegraph::testing {
 		}
 		void CheckBudget() {
 			Diagnostic diagnostic;
-			if (IsFieldSample()) {
+			if (IsMirrorClean()) {
+				const auto previous = Pixels;
+				auto rejected = Authored;
+				rejected.Nodes[1].Values.push_back({"output_dimension", EnumValue{2}});
+				rejected.Nodes[1].Values.push_back({"constant_dimension", Vector2{128, 128}});
+				Plan plan;
+				Check(Compile(rejected, plan, diagnostic), diagnostic);
+				EvaluationRequest request;
+				request.ImageSources = Sources;
+				if (Evaluate(rejected, plan, "out", request, Pixels, diagnostic) != Status::LimitExceeded ||
+					Pixels != previous)
+					Fail("polar clean whole work refusal");
+				if (Evaluate(Authored, Compiled, "out", request, Pixels, diagnostic, 1) !=
+						Status::LimitExceeded ||
+					Pixels != previous)
+					Fail("polar clean byte refusal");
+			} else if (IsFieldSample()) {
 				const auto previous = Colours;
 				auto rejected = Authored;
 				rejected.Nodes[0].Values[0].Data = Vector2{128, 128};

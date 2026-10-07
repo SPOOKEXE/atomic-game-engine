@@ -72,3 +72,8 @@ BENCH("CPU Fold RGB field 32x32 Sample Vector3 compiled-plan", 1) {
 	static Profile<Fixture> p(Fixture::Kind::RasterRGB);
 	p.Measure();
 }
+
+BENCH("CPU Mirror Polar Clean Edge 96x96 unique coordinates trim24 compiled-plan", 1) {
+	static Profile<Fixture> p(Fixture::Kind::MirrorPolarCleanEdge);
+	p.Measure();
+}
