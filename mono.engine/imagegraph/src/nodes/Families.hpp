@@ -23,7 +23,9 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> ValueExecutors();
 	std::span<const ExecutorEntry> VectorExecutors();
 	std::span<const ExecutorEntry> SourcePointsTriangulateExecutors();
+	std::span<const ExecutorEntry> SourcePathBakeExecutors();
 	std::span<const ExecutorEntry> SourceShape3DExecutors();
+	std::span<const ExecutorEntry> SourceParticle3DExecutors();
 	std::span<const ExecutorEntry> OutlineExecutors();
 	std::span<const ExecutorEntry> BlurExecutors();
 	std::span<const ExecutorEntry> SourceErodeExecutors();

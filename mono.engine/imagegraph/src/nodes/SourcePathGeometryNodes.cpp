@@ -18,6 +18,16 @@ namespace engine::imagegraph::detail {
 									   (op.Mesh ? op.Mesh->Simulation.Edges.size() : 0);
 				if (extra > GEOMETRY_WORK_LIMIT - work) return false;
 				work += extra;
+				if (op.Baked) {
+					if (Limits::MaximumArrayElements > GEOMETRY_WORK_LIMIT - work) return false;
+					work += Limits::MaximumArrayElements;
+					if (op.Baked->Lines.size() > GEOMETRY_WORK_LIMIT - work) return false;
+					work += op.Baked->Lines.size();
+					for (const auto &line : op.Baked->Lines) {
+						if (line.size() > GEOMETRY_WORK_LIMIT - work) return false;
+						work += line.size();
+					}
+				}
 				for (const auto &child : op.Inputs)
 					if (!GeometryWork(child, work)) return false;
 			}

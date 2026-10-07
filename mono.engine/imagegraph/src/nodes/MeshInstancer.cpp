@@ -3,6 +3,7 @@
 #include "../SourceQuaternion.hpp"
 #include "../SourceRandom.hpp"
 #include "Path3D.hpp"
+#include "SourceMeshFlatten.hpp"
 namespace engine::imagegraph::detail {
 	namespace {
 		bool Vector(NodeContext &context, std::string_view id, Vector3 &result) {
@@ -89,99 +90,7 @@ namespace engine::imagegraph::detail {
 		bool FitsFloat(double value) {
 			return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
 		}
-		struct FlatCost {
-			uint64_t Bytes = sizeof(MeshData3D) + sizeof(MeshTransform3D);
-			size_t Parts = 0, Vertices = 0;
-		};
-		template <class T>
-		bool Flatten(
-			const T &value,
-			std::array<const MeshTransform3D *, 128> &chain,
-			size_t depth,
-			FlatCost &cost,
-			MeshData3D *output
-		) {
-			if constexpr (std::is_same_v<T, MeshValue3D>) {
-				if (!value.Data) return true;
-				const auto &mesh = *value.Data;
-				if (depth + mesh.LocalTransforms.size() > chain.size()) return false;
-				for (const auto &transform : mesh.LocalTransforms)
-					if (transform.Mirror) return true;
-				size_t count = depth;
-				for (size_t i = 0; i + 1 < mesh.LocalTransforms.size(); ++i)
-					chain[count++] = &mesh.LocalTransforms[i];
-				for (const auto &part : mesh.Parts) {
-					cost.Parts++;
-					cost.Vertices += part.Vertices.size();
-					if (cost.Parts > Limits::MaximumArrayElements ||
-						cost.Vertices > Limits::MaximumArrayElements)
-						return false;
-					const auto &material = mesh.Materials[part.MaterialIndex];
-					cost.Bytes = MeshAddBytes(
-						cost.Bytes,
-						sizeof(MeshPart3D) + sizeof(MaterialValue3D) +
-							part.Vertices.size() * sizeof(MeshVertex3D) + MaterialStorageBytes<true>(material)
-					);
-					if (cost.Bytes > Limits::MaximumArrayBytes) return false;
-					MeshPart3D *target = nullptr;
-					if (output) {
-						output->Materials.push_back(material);
-						output->Parts.emplace_back();
-						target = &output->Parts.back();
-						target->MaterialIndex = uint32_t(output->Materials.size() - 1);
-						target->Vertices.reserve(part.Vertices.size());
-					}
-					for (auto vertex : part.Vertices) {
-						for (double component :
-							 {vertex.Position.X,
-							  vertex.Position.Y,
-							  vertex.Position.Z,
-							  vertex.Normal.X,
-							  vertex.Normal.Y,
-							  vertex.Normal.Z,
-							  vertex.UV.X,
-							  vertex.UV.Y})
-							if (!FitsFloat(component)) return false;
-						vertex.Position = {
-							float(vertex.Position.X), float(vertex.Position.Y), float(vertex.Position.Z)
-						};
-						for (size_t i = count; i > 0; --i)
-							vertex.Position = SourceMeshPoint(*chain[i - 1], vertex.Position);
-						for (double component : {vertex.Position.X, vertex.Position.Y, vertex.Position.Z})
-							if (!FitsFloat(component)) return false;
-						vertex.Position = {
-							float(vertex.Position.X), float(vertex.Position.Y), float(vertex.Position.Z)
-						};
-						vertex.Normal = {
-							float(vertex.Normal.X), float(vertex.Normal.Y), float(vertex.Normal.Z)
-						};
-						vertex.UV = {float(vertex.UV.X), float(vertex.UV.Y)};
-						if (target) target->Vertices.push_back(vertex);
-					}
-				}
-				return true;
-			} else if constexpr (std::is_same_v<T, SceneValue3D> ||
-								 std::is_same_v<T, OwnedPayload3D<SceneData3D>>) {
-				const auto *data = [&]() {
-					if constexpr (std::is_same_v<T, SceneValue3D>)
-						return value.Data ? &*value.Data : nullptr;
-					else
-						return value ? &*value : nullptr;
-				}();
-				if (!data) return true;
-				if (depth >= chain.size()) return false;
-				if (data->Transform.Mirror) return true;
-				chain[depth] = &data->Transform;
-				for (const auto &child : data->Objects)
-					if (!std::visit(
-							[&](const auto &item) { return Flatten(item, chain, depth + 1, cost, output); },
-							child.Data
-						))
-						return false;
-				return true;
-			} else
-				return true;
-		}
+
 	}
 	bool SourceMeshInstancer(NodeContext &context) {
 		ENGINE_PROFILE("imagegraph.mesh.instancer");
@@ -281,9 +190,11 @@ namespace engine::imagegraph::detail {
 			return context.Fail(
 				Status::TypeMismatch, "instance random colors require a valid gradient", "random_colors"
 			);
-		FlatCost cost;
+		SourceMeshFlatCost cost;
 		std::array<const MeshTransform3D *, 128> chain{};
-		if (!std::visit([&](const auto &item) { return Flatten(item, chain, 0, cost, nullptr); }, *source))
+		if (!std::visit(
+				[&](const auto &item) { return SourceMeshFlatten(item, chain, 0, cost, nullptr); }, *source
+			))
 			return context.Fail(Status::LimitExceeded, "instance geometry flatten exceeds caps", "mesh");
 		if (!context.ReserveOutput(
 				MeshAddBytes(cost.Bytes, uint64_t(amount) * sizeof(MeshInstance3D)) + 64, "mesh"
@@ -316,8 +227,10 @@ namespace engine::imagegraph::detail {
 		data.Parts.reserve(cost.Parts);
 		data.Materials.reserve(cost.Parts);
 		data.Instances.reserve(size_t(amount));
-		FlatCost emitting;
-		if (!std::visit([&](const auto &item) { return Flatten(item, chain, 0, emitting, &data); }, *source))
+		SourceMeshFlatCost emitting;
+		if (!std::visit(
+				[&](const auto &item) { return SourceMeshFlatten(item, chain, 0, emitting, &data); }, *source
+			))
 			return context.Fail(Status::LimitExceeded, "instance geometry flatten exceeds caps", "mesh");
 		const Vector3 startEuler = SourceQuaternionToEuler(rotation),
 					  shiftEuler = SourceQuaternionToEuler(rotationShift);

@@ -7,6 +7,7 @@
 
 #include <engine/imagegraph/FluidDomain.hpp>
 #include <engine/imagegraph/Particle.hpp>
+#include <engine/imagegraph/Particle3D.hpp>
 #include <engine/imagegraph/Strand.hpp>
 #include <engine/imagegraph/Surface.hpp>
 
@@ -23,6 +24,7 @@
 #include <vector>
 
 namespace engine::imagegraph {
+	class SourceInputProcessingObserver;
 	// The value kinds supported by authored properties and graph ports.
 	enum class ValueType : uint8_t {
 		// Boolean property value.
@@ -275,7 +277,8 @@ namespace engine::imagegraph {
 		WeightAdjust,
 		Extends,
 		Flatten,
-		Smoothen
+		Smoothen,
+		Bake
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
@@ -345,6 +348,11 @@ namespace engine::imagegraph {
 		bool operator==(const SourcePathSequentialData2D &) const = default;
 	};
 	struct PathData3D;
+	struct SourcePathBakedData2D {
+		// Stored progress is separate from the default sampling weight.
+		std::vector<std::vector<Vector3>> Lines;
+		bool operator==(const SourcePathBakedData2D &) const = default;
+	};
 	struct SourcePathData2D {
 		SourcePathOperationKind Kind = SourcePathOperationKind::Reverse;
 		std::vector<Path2D> Inputs;
@@ -368,6 +376,7 @@ namespace engine::imagegraph {
 		// Source curveMap table uses TOTAL_FRAMES precision.
 		OwnedPayload3D<PathData3D> WeightInput3D;
 		OwnedPayload3D<SourcePathSequentialData2D> Sequential;
+		OwnedPayload3D<SourcePathBakedData2D> Baked;
 		std::vector<double> WeightCurve;
 		double WeightValue = 0, WeightDirection = 0;
 		Vector2 WeightRange{0, 1};
@@ -407,6 +416,7 @@ namespace engine::imagegraph {
 					   MapArea,
 					   WeightInput3D,
 					   Sequential,
+					   Baked,
 					   WeightCurve,
 					   WeightValue,
 					   WeightDirection,
@@ -446,6 +456,7 @@ namespace engine::imagegraph {
 					   other.MapArea,
 					   other.WeightInput3D,
 					   other.Sequential,
+					   other.Baked,
 					   other.WeightCurve,
 					   other.WeightValue,
 					   other.WeightDirection,
@@ -545,6 +556,10 @@ namespace engine::imagegraph {
 		bool Instanced = false;
 		MeshTransform3D InstanceObjectTransform;
 		std::vector<MeshInstance3D> Instances;
+		bool ParticleInstanced = false;
+		bool ParticleTransparent = false;
+		ParticleBlend3D ParticleBlend = ParticleBlend3D::Normal;
+		std::vector<ParticleRecord3D> ParticleRecords;
 		// CPU arrays may be cleared while source drawable buffers remain retained.
 		bool CpuVerticesPresent = true, CpuEdgesPresent = true;
 		bool operator==(const MeshData3D &) const = default;
@@ -1825,6 +1840,8 @@ namespace engine::imagegraph {
 		// Explicit source frame-cache observation, copied into retained recipes without a provider pointer.
 		std::optional<SourceCachePlaybackObservation> SourceCachePlayback{};
 		std::optional<SourceFrameCacheProjectObservation> SourceCacheProject{};
+		// Borrowed only during synchronous evaluation; never retained in replay state.
+		SourceInputProcessingObserver *SourceInputObserver = nullptr;
 	};
 
 	// Why parsing, compilation or evaluation failed.

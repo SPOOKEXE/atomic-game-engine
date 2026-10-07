@@ -131,3 +131,46 @@ TEST_CASE("rebinding one camera output to a plane preserves sibling aliases", "[
 	CHECK_FALSE(renderer.CancelTransformImage3D(owner, first, 1));
 	CHECK(renderer.CancelTransformImage3D(owner, second, 2));
 }
+
+TEST_CASE(
+	"source camera validates particle identity and finite separate metadata",
+	"[render][imagegraph][particle3d]"
+) {
+	using namespace engine;
+	auto request = Request();
+	imagegraph::MeshValue3D particleMesh;
+	auto &mesh = particleMesh.Data.emplace();
+	mesh.LocalTransforms.emplace_back();
+	mesh.Instanced = mesh.ParticleInstanced = true;
+	request.Scene.Data.emplace().Objects.emplace_back(imagegraph::SceneObject3D{std::move(particleMesh)});
+	CHECK(
+		render::imagegraph::ValidateSourceCamera3D(request) == render::imagegraph::SourceCamera3DStatus::Ok
+	);
+	auto &owned = *std::get<imagegraph::MeshValue3D>(request.Scene.Data->Objects[0].Data).Data;
+	owned.ParticleRecords.emplace_back();
+	CHECK(
+		render::imagegraph::ValidateSourceCamera3D(request) ==
+		render::imagegraph::SourceCamera3DStatus::InvalidScene
+	);
+	owned.Instances.emplace_back();
+	CHECK(
+		render::imagegraph::ValidateSourceCamera3D(request) == render::imagegraph::SourceCamera3DStatus::Ok
+	);
+	owned.ParticleRecords[0].Velocity[2] = std::numeric_limits<float>::infinity();
+	CHECK(
+		render::imagegraph::ValidateSourceCamera3D(request) ==
+		render::imagegraph::SourceCamera3DStatus::InvalidScene
+	);
+	owned.ParticleRecords[0].Velocity[2] = 0;
+	owned.ParticleInstanced = false;
+	CHECK(
+		render::imagegraph::ValidateSourceCamera3D(request) ==
+		render::imagegraph::SourceCamera3DStatus::InvalidScene
+	);
+	owned.ParticleInstanced = true;
+	owned.Instanced = false;
+	CHECK(
+		render::imagegraph::ValidateSourceCamera3D(request) ==
+		render::imagegraph::SourceCamera3DStatus::InvalidScene
+	);
+}

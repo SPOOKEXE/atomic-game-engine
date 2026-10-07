@@ -287,6 +287,15 @@ TEST_CASE("Pinned Pixel Composer metadata preserves hidden source constructors",
 	CHECK(selector->Default == "e 0");
 	CHECK(selector->Choices == "Index Loop;Index Ping-pong;Random");
 
+	const auto *particle = FindCatalogueEntry("pc.3_d_particle");
+	REQUIRE(particle);
+	const auto *paletteSelector = FindCatalogueInput(*particle, "attribute_array_select_color_by_index");
+	REQUIRE(paletteSelector);
+	CHECK(paletteSelector->SourceIndex == -1);
+	CHECK(paletteSelector->Type == ValueType::Enum);
+	CHECK(paletteSelector->Default == "e 0");
+	CHECK(paletteSelector->Choices == "Index Loop;Index Ping-pong;Random");
+
 	const auto *exportNode = FindCatalogueEntry("pc.export");
 	REQUIRE(exportNode);
 	const auto *framerateUnit = FindCatalogueInput(*exportNode, "framerate_unit");

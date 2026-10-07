@@ -8687,7 +8687,16 @@
      "index": "26",
      "kind": "Palette",
      "name": "Color by Index",
-     "source_array_classification": true
+     "source_array_classification": true,
+     "array_select": {
+      "default": 0,
+      "choices": [
+       "Index Loop",
+       "Index Ping-pong",
+       "Random"
+      ]
+     },
+     "array_select_id": "attribute_array_select_color_by_index"
     },
     {
      "array_depth": 1,

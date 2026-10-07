@@ -1,4 +1,5 @@
 #pragma once
+#include "SourcePathBakePayload.hpp"
 #include "SourcePathSequentialPayload.hpp"
 #include "SourcePathShape.hpp"
 #include "SourceVerletPath.hpp"
@@ -27,6 +28,7 @@ namespace engine::imagegraph::detail {
 		if (!path.SourceOperation) return true;
 		if (path.Loop || path.Segmented || !path.Anchors.empty() || !path.Weights.empty()) return false;
 		const auto &op = *path.SourceOperation;
+		if (op.Baked && op.Kind != SourcePathOperationKind::Bake) return false;
 		if (op.Shape && op.Kind != SourcePathOperationKind::Shape) return false;
 		const bool sequential = SourceSequentialKind(op.Kind);
 		if (sequential) {
@@ -139,6 +141,9 @@ namespace engine::imagegraph::detail {
 			return false;
 		if (op.Kind == SourcePathOperationKind::VerletMesh) return ValidSourceVerletPath(op);
 		if (op.Mesh || !op.CachedLengths.empty() || op.CachedTotalLength != 0) return false;
+		if (op.Kind == SourcePathOperationKind::Bake)
+			return op.Baked && op.Inputs.empty() && op.TrimRange == Vector2{0, 1} &&
+				   ValidSourceBaked(*op.Baked, *count);
 		if (op.Kind == SourcePathOperationKind::Shape)
 			return op.Inputs.empty() && op.Shape && op.TrimRange == Vector2{0, 1} &&
 				   ValidSourcePathShape(*op.Shape);
@@ -176,6 +181,7 @@ namespace engine::imagegraph::detail {
 				return true;
 			};
 			if (op.Sequential && !add(SourceSequentialBytes<Retained>(*op.Sequential))) return UINT64_MAX;
+			if (op.Baked && !add(SourceBakedBytes<Retained>(*op.Baked))) return UINT64_MAX;
 			if (op.WeightInput3D && !add(SourceWeightInput3DBytes(*op.WeightInput3D, Retained, depth + 1)))
 				return std::numeric_limits<uint64_t>::max();
 			if (!add((Retained ? op.WeightCurve.capacity() : op.WeightCurve.size()) * sizeof(double)))

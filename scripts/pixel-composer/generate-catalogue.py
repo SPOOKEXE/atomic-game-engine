@@ -664,8 +664,9 @@ for source_node, node in sorted(SNAPSHOT["nodes"].items()):
             lines.append("I\tmask_alpha_only\tMask Alpha Only\t-1\tMaskAlphaOnly\tboolean\tb 0\t")
         if item.get("array_select"):
             selector = item["array_select"]
+            selector_id = item.get("array_select_id", identifier + "_select")
             lines.append("\t".join([
-                "I", identifier + "_select", clean(item["name"]) + " Array Select", "-1",
+                "I", selector_id, clean(item["name"]) + " Array Select", "-1",
                 "SourceArraySelect", "enum", f"e {selector['default']}", ";".join(selector["choices"])
             ]))
         if item["kind"] == "Dimension" or item.get("unit"):

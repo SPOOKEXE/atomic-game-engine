@@ -33,6 +33,7 @@ namespace engine::imagegraph::detail {
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(data.Materials));
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(data.LocalTransforms));
 		bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(data.Instances));
+		bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(data.ParticleRecords));
 		for (const auto &part : data.Parts)
 			bytes = MeshAddBytes(bytes, MeshVectorBytes<retained>(part.Vertices));
 		for (const auto &material : data.Materials)
@@ -88,6 +89,12 @@ namespace engine::imagegraph::detail {
 			!MeshFinite(data.InstanceObjectTransform.Anchor) ||
 			!MeshFinite(data.InstanceObjectTransform.Rotation) ||
 			!MeshFinite(data.InstanceObjectTransform.Scale))
+			return false;
+		if ((data.ParticleInstanced &&
+			 (!data.Instanced || data.ParticleRecords.size() != data.Instances.size())) ||
+			(!data.ParticleInstanced && !data.ParticleRecords.empty()) ||
+			!ValidParticleRecords3D(data.ParticleRecords, Limits::MaximumArrayElements) ||
+			data.ParticleBlend < ParticleBlend3D::Normal || data.ParticleBlend > ParticleBlend3D::Maximum)
 			return false;
 		for (const auto &instance : data.Instances)
 			for (float value : instance.Fields)

@@ -263,6 +263,29 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
         self.assertIn('Q\tI\tfixed_choice\t1\t1\ts ""', lines)
         self.assertIn('Q\tI\tfixed_choice\t2\t0\ts "Gamma \\"quoted\\"\\tline"', lines)
 
+    def test_array_selector_can_use_a_source_attribute_identifier(self):
+        node = {
+            "display_name": "Particle", "family": "fixture", "base": None,
+            "file": "scripts/node_particle/node_particle.gml", "outputs": [],
+            "inputs": [{
+                "index": "26", "kind": "Palette", "name": "Color by Index",
+                "default": "[ca_white]", "extra": [], "array_depth": 1,
+                "array_select": {
+                    "default": 0,
+                    "choices": ["Index Loop", "Index Ping-pong", "Random"],
+                },
+                "array_select_id": "attribute_array_select_color_by_index",
+            }],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            lines = self.run_generator(Path(temporary), {"Node_Particle": node})
+
+        self.assertIn(
+            "I\tattribute_array_select_color_by_index\tColor by Index Array Select\t-1\t"
+            "SourceArraySelect\tenum\te 0\tIndex Loop;Index Ping-pong;Random",
+            lines,
+        )
+
     def test_unknown_choices_and_behavior_stay_explicit_and_templates_use_t_ids(self):
         with tempfile.TemporaryDirectory() as temporary:
             lines = self.run_generator(Path(temporary))

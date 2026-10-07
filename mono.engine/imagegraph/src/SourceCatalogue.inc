@@ -1475,6 +1475,8 @@ S	I	random_blend	0
 I	color_by_index	Color by Index	26	Palette	array	a colour 1 c 255 255 255 255	
 S	I	color_by_index	1
 A	I	color_by_index	1
+I	attribute_array_select_color_by_index	Color by Index Array Select	-1	SourceArraySelect	enum	e 0	Index Loop;Index Ping-pong;Random
+S	I	attribute_array_select_color_by_index	?
 I	alpha	Alpha	55	Range	vector2	v 1 1	
 S	I	alpha	1
 V	I	alpha	1

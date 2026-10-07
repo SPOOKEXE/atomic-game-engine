@@ -198,3 +198,47 @@ TEST_CASE(
 	);
 	CHECK(result.Pixels[0] == std::byte{0});
 }
+
+TEST_CASE(
+	"source particle camera preserves floating RGBA and drops inactive instances",
+	"[render][gpu][imagegraph][particle3d]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto request = Triangle();
+	request.Output = render::imagegraph::SourceCamera3DOutput::Diffuse;
+	request.Format = assets::TextureFormat::RGBA32_FLOAT;
+	auto &mesh = *std::get<imagegraph::MeshValue3D>(request.Scene.Data->Objects[0].Data).Data;
+	mesh.Instanced = mesh.ParticleInstanced = true;
+	mesh.ParticleBlend = imagegraph::ParticleBlend3D::Alpha;
+	mesh.ParticleTransparent = true;
+	imagegraph::MeshInstance3D transform;
+	transform.Fields[8] = transform.Fields[9] = transform.Fields[10] = 1;
+	mesh.Instances.push_back(transform);
+	imagegraph::ParticleRecord3D particle;
+	particle.Active = 1;
+	particle.Colour = {1.5f, .25f, .125f, .5f};
+	mesh.ParticleRecords.push_back(particle);
+	for (auto &vertex : mesh.Parts[0].Vertices)
+		vertex.Tint = {255, 255, 255, 255};
+	render::imagegraph::SourceCamera3DResult result;
+	REQUIRE(
+		render::imagegraph::ExecuteSourceCamera3D(fixture.Render, request, result) ==
+		render::imagegraph::SourceCamera3DStatus::Ok
+	);
+	REQUIRE(result.Pixels.size() == 4 * 4 * 16);
+	std::array<float, 4> pixel;
+	std::memcpy(pixel.data(), result.Pixels.data(), sizeof(pixel));
+	CHECK(pixel[0] == 1.5f);
+	CHECK(pixel[1] == .25f);
+	CHECK(pixel[2] == .125f);
+	CHECK(pixel[3] == .5f);
+	mesh.ParticleRecords[0].Active = 0;
+	REQUIRE(
+		render::imagegraph::ExecuteSourceCamera3D(fixture.Render, request, result) ==
+		render::imagegraph::SourceCamera3DStatus::Ok
+	);
+	std::memcpy(pixel.data(), result.Pixels.data(), sizeof(pixel));
+	CHECK(pixel == std::array<float, 4>{0, 0, 0, 0});
+}

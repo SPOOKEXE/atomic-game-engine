@@ -10,6 +10,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/SourceInstance3D.hpp>
+#include <engine/imagegraph/SourceParticle3DVertex.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/resources/Shaders.hpp>
@@ -55,6 +56,8 @@ namespace engine::render::imagegraph {
 			bool Mirrored = false;
 			bool Shadow = false;
 			bool Instanced = false;
+			bool Particle = false, ParticleTransparent = false;
+			source::ParticleBlend3D ParticleBlend = source::ParticleBlend3D::Normal;
 		};
 		struct Light {
 			const source::LightData3D *Data = nullptr;
@@ -72,6 +75,7 @@ namespace engine::render::imagegraph {
 			size_t VertexCount = 0, PartCount = 0, LightCount = 0;
 			uint32_t Directional = 0, Point = 0, DirectionalShadow = 0, PointShadow = 0;
 			bool Counting = false, LimitExceeded = false;
+			source::Vector3 CameraPosition;
 		};
 		template <class T> bool Emit(Prepared &out, std::vector<T> &storage, size_t &count, T value) {
 			if (sizeof(T) > out.MaximumPreparationBytes ||
@@ -136,6 +140,17 @@ namespace engine::render::imagegraph {
 			return bytes;
 		}
 		bool Mesh(const source::MeshData3D &mesh, const glm::mat4 &parent, Prepared &out, bool shadow) {
+			if (mesh.Instances.size() > source::Limits::MaximumArrayElements) return false;
+			for (const auto &instance : mesh.Instances)
+				for (float word : instance.Fields)
+					if (!std::isfinite(word)) return false;
+			if ((mesh.ParticleInstanced &&
+				 (!mesh.Instanced || mesh.ParticleRecords.size() != mesh.Instances.size())) ||
+				(!mesh.ParticleInstanced && !mesh.ParticleRecords.empty()) ||
+				!source::ValidParticleRecords3D(mesh.ParticleRecords, source::Limits::MaximumArrayElements) ||
+				mesh.ParticleBlend < source::ParticleBlend3D::Normal ||
+				mesh.ParticleBlend > source::ParticleBlend3D::Maximum)
+				return false;
 			if (shadow && mesh.Instanced) return true;
 			if (mesh.LocalTransforms.empty() || mesh.LocalTransforms.size() > 64 || mesh.Parts.size() > 1024)
 				return false;
@@ -169,11 +184,17 @@ namespace engine::render::imagegraph {
 							   mesh.Parts.capacity() * sizeof(source::MeshPart3D) +
 							   mesh.Edges.capacity() * sizeof(source::MeshEdge3D) +
 							   mesh.Materials.capacity() * sizeof(source::MaterialValue3D) +
-							   mesh.Instances.capacity() * sizeof(source::MeshInstance3D);
+							   mesh.Instances.capacity() * sizeof(source::MeshInstance3D) +
+							   mesh.ParticleRecords.capacity() * sizeof(source::ParticleRecord3D);
 			for (const auto &part : mesh.Parts)
 				out.SourceBytes += part.Vertices.capacity() * sizeof(source::MeshVertex3D);
 			const glm::mat4 objectTransform = Matrix(mesh.InstanceObjectTransform);
 			if (mesh.Instanced && !Finite(objectTransform)) return false;
+			std::array<double, 16> particleObject{};
+			if (mesh.ParticleInstanced)
+				for (size_t row = 0; row < 4; ++row)
+					for (size_t column = 0; column < 4; ++column)
+						particleObject[row * 4 + column] = objectTransform[column][row];
 			uint64_t verticesPerCopy = 0;
 			for (const auto &part : mesh.Parts) {
 				if (part.Vertices.size() > source::Limits::MaximumArrayElements - verticesPerCopy)
@@ -204,6 +225,7 @@ namespace engine::render::imagegraph {
 				const auto &world = transforms[transform];
 				for (size_t instanceIndex = 0; instanceIndex < (mesh.Instanced ? mesh.Instances.size() : 1);
 					 ++instanceIndex) {
+					if (mesh.ParticleInstanced && mesh.ParticleRecords[instanceIndex].Active == 0) continue;
 					for (const auto &part : mesh.Parts) {
 						if (part.MaterialIndex >= mesh.Materials.size() || part.Vertices.size() % 3 ||
 							part.Vertices.size() > source::Limits::MaximumArrayElements - out.VertexCount)
@@ -218,7 +240,27 @@ namespace engine::render::imagegraph {
 						for (size_t i = 0; i < part.Vertices.size(); ++i) {
 							const auto &v = part.Vertices[i];
 							glm::vec3 localPosition = Vec(v.Position), localNormal = Vec(v.Normal);
-							if (mesh.Instanced) {
+							glm::vec4 vertexColour = Color(v.Tint);
+							if (mesh.ParticleInstanced) {
+								source::SourceParticle3DVertex particleVertex;
+								if (!source::PrepareSourceParticle3DVertex(
+										v,
+										mesh.Instances[instanceIndex],
+										mesh.ParticleRecords[instanceIndex],
+										particleObject,
+										out.CameraPosition,
+										particleVertex
+									))
+									return false;
+								localPosition = Vec(particleVertex.Position);
+								localNormal = Vec(particleVertex.Normal);
+								vertexColour = {
+									particleVertex.Colour[0],
+									particleVertex.Colour[1],
+									particleVertex.Colour[2],
+									particleVertex.Colour[3]
+								};
+							} else if (mesh.Instanced) {
 								localPosition = glm::vec3(objectTransform * glm::vec4(localPosition, 1));
 								const auto &instance = mesh.Instances[instanceIndex];
 								const auto positioned = source::SourceInstancePosition3D(
@@ -230,7 +272,7 @@ namespace engine::render::imagegraph {
 							}
 							const glm::vec3 position = glm::vec3(partWorld * glm::vec4(localPosition, 1));
 							const glm::vec3 normal = glm::vec3(partWorld * glm::vec4(localNormal, 0));
-							Vertex vertex{position, normal, Vec(v.UV), Color(v.Tint), glm::vec3(0)};
+							Vertex vertex{position, normal, Vec(v.UV), vertexColour, glm::vec3(0)};
 							vertex.Barycentric[i % 3] = 1;
 							for (float n :
 								 {position.x,
@@ -240,7 +282,11 @@ namespace engine::render::imagegraph {
 								  normal.y,
 								  normal.z,
 								  vertex.UV.x,
-								  vertex.UV.y})
+								  vertex.UV.y,
+								  vertex.Color.x,
+								  vertex.Color.y,
+								  vertex.Color.z,
+								  vertex.Color.w})
 								if (!std::isfinite(n)) return false;
 							if (!Emit(out, out.Vertices, out.VertexCount, vertex)) return false;
 						}
@@ -255,7 +301,10 @@ namespace engine::render::imagegraph {
 									false,
 									glm::determinant(partWorld) < 0,
 									shadow,
-									mesh.Instanced
+									mesh.Instanced,
+									mesh.ParticleInstanced,
+									mesh.ParticleTransparent,
+									mesh.ParticleBlend
 								}
 							))
 							return false;
@@ -344,6 +393,9 @@ namespace engine::render::imagegraph {
 			return out.SourceBytes <= 64ull * 1024 * 1024;
 		}
 		bool Traverse(const SourceCamera3DRequest &request, Prepared &out) {
+			out.CameraPosition = {
+				request.CameraPosition[0], request.CameraPosition[1], request.CameraPosition[2]
+			};
 			size_t objects = 0;
 			if (request.Scene.Data && !Scene(*request.Scene.Data, glm::mat4(1), out, 0, objects, false))
 				return false;
@@ -392,7 +444,8 @@ namespace engine::render::imagegraph {
 			uint32_t cull,
 			bool mirrored,
 			uint32_t blend,
-			SourceCamera3DResources &resources
+			SourceCamera3DResources &resources,
+			bool depthWrite = true
 		) {
 			SDL_GPUVertexBufferDescription buffer{};
 			buffer.slot = 0;
@@ -408,7 +461,23 @@ namespace engine::render::imagegraph {
 			std::array<SDL_GPUColorTargetDescription, 4> colors{};
 			for (uint32_t i = 0; i < targets; ++i) {
 				colors[i].format = format;
-				if (blend < 2) {
+				if (blend >= 3) {
+					auto &state = colors[i].blend_state;
+					const uint32_t particleBlend = blend - 3;
+					state.enable_blend = true;
+					state.src_color_blendfactor =
+						particleBlend == 1 ? SDL_GPU_BLENDFACTOR_ONE : SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+					state.dst_color_blendfactor = particleBlend == 2
+													  ? SDL_GPU_BLENDFACTOR_ONE
+													  : SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+					state.src_alpha_blendfactor =
+						particleBlend == 1 ? SDL_GPU_BLENDFACTOR_ONE : SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+					state.dst_alpha_blendfactor = particleBlend == 1 || particleBlend == 2
+													  ? SDL_GPU_BLENDFACTOR_ONE
+													  : SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+					state.color_blend_op = state.alpha_blend_op =
+						particleBlend == 3 ? SDL_GPU_BLENDOP_MAX : SDL_GPU_BLENDOP_ADD;
+				} else if (blend < 2) {
 					colors[i].blend_state.enable_blend = true;
 					colors[i].blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
 					colors[i].blend_state.dst_color_blendfactor =
@@ -431,7 +500,7 @@ namespace engine::render::imagegraph {
 													   ? SDL_GPU_FRONTFACE_CLOCKWISE
 													   : SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
 				info.depth_stencil_state.enable_depth_test = blend != 1;
-				info.depth_stencil_state.enable_depth_write = true;
+				info.depth_stencil_state.enable_depth_write = depthWrite;
 				info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
 				info.target_info.has_depth_stencil_target = true;
 				info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
@@ -828,7 +897,7 @@ namespace engine::render::imagegraph {
 						uint32_t layer = 0) -> bool {
 			// Pipeline creation precedes opening the render pass. No device allocation is made while
 			// recording draws.
-			std::array<SDL_GPUGraphicsPipeline *, 4> pipelines{};
+			std::array<SDL_GPUGraphicsPipeline *, 36> pipelines{};
 			for (size_t mirrored = 0; mirrored < 2; ++mirrored)
 				for (size_t edge = 0; edge < 2; ++edge) {
 					pipelines[mirrored * 2 + edge] = Pipeline(
@@ -846,6 +915,28 @@ namespace engine::render::imagegraph {
 					);
 					if (!pipelines[mirrored * 2 + edge]) return false;
 				}
+			// Particle blending and depth writes belong to the source actor, across both geometry and colour.
+			for (const auto &part : prepared.Parts) {
+				if (!part.Particle || part.Shadow != (nativePass == 3) || !part.Count) continue;
+				const size_t slot = 4 + size_t(part.ParticleBlend) * 8 +
+									size_t(part.ParticleTransparent) * 4 + part.Mirrored * 2 + part.Edge;
+				if (pipelines[slot]) continue;
+				pipelines[slot] = Pipeline(
+					device,
+					vertexShader,
+					fragmentShader,
+					format,
+					targets.size(),
+					true,
+					part.Edge,
+					request.CullMode,
+					part.Mirrored,
+					3 + uint32_t(part.ParticleBlend),
+					resources,
+					!part.ParticleTransparent
+				);
+				if (!pipelines[slot]) return false;
+			}
 			auto *pass = BeginPass(command, targets, depthTexture, layer);
 			if (!pass) return false;
 			resources.CommandReferenced = true;
@@ -897,7 +988,11 @@ namespace engine::render::imagegraph {
 					{pointShadow[0], nearest},
 					{pointShadow[1], nearest}
 				};
-				SDL_BindGPUGraphicsPipeline(pass, pipelines[part.Mirrored * 2 + part.Edge]);
+				const size_t pipelineSlot = part.Particle ? 4 + size_t(part.ParticleBlend) * 8 +
+																size_t(part.ParticleTransparent) * 4 +
+																part.Mirrored * 2 + part.Edge
+														  : part.Mirrored * 2 + part.Edge;
+				SDL_BindGPUGraphicsPipeline(pass, pipelines[pipelineSlot]);
 				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 8);
 				if (!PushSourceFragmentUniforms(
 						command, std::as_bytes(std::span(&uniforms, 1)), CAMERA_UNIFORM_CUTS

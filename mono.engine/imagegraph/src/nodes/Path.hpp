@@ -51,6 +51,12 @@ namespace engine::imagegraph::detail {
 		std::vector<Vector2> JoinTranslations;
 		const SourcePathShapeData2D *Shape = nullptr;
 		NodeContext *EvaluationContext = nullptr;
+		struct BakedSampleMemo {
+			size_t Line;
+			double Distance;
+			Vector2 Position;
+		};
+		mutable std::vector<BakedSampleMemo> BakedSamples;
 
 	  public:
 		PathRuntime() = default;
@@ -79,7 +85,8 @@ namespace engine::imagegraph::detail {
 					operation.Shape ? operation.Shape->Points.size() + size_t(operation.Shape->Loop) : 0;
 				auto charge = context.ReserveWorkspace(
 					operation.Inputs.size() * (sizeof(PathRuntime) + sizeof(Vector2)) +
-						shapeSlots * 2 * sizeof(double),
+						shapeSlots * 2 * sizeof(double) +
+						(operation.Baked ? Limits::MaximumArrayElements * sizeof(BakedSampleMemo) : 0),
 					"path"
 				);
 				if (!charge) return false;
@@ -87,6 +94,27 @@ namespace engine::imagegraph::detail {
 				replacement.StorageCharge = std::move(*charge);
 				replacement.Operation = operation.Kind;
 				replacement.SourceData = &operation;
+				if (operation.Kind == SourcePathOperationKind::Bake) {
+					replacement.EvaluationContext = &context;
+					replacement.BakedSamples.reserve(Limits::MaximumArrayElements);
+					replacement.LengthTotal = operation.Baked->Lines.empty()
+												  ? 0
+												  : SourceBakedLength(operation.Baked->Lines.front());
+					if (!operation.Baked->Lines.empty() && operation.Baked->Lines.front().size() >= 2) {
+						const auto &line = operation.Baked->Lines.front();
+						replacement.MinX = replacement.MaxX = line.front().X;
+						replacement.MinY = replacement.MaxY = line.front().Y;
+						for (const auto &point : line) {
+							replacement.MinX = std::min(replacement.MinX, point.X);
+							replacement.MinY = std::min(replacement.MinY, point.Y);
+							replacement.MaxX = std::max(replacement.MaxX, point.X);
+							replacement.MaxY = std::max(replacement.MaxY, point.Y);
+						}
+						replacement.HasBoundary = true;
+					}
+					*this = std::move(replacement);
+					return true;
+				}
 				if (operation.Kind == SourcePathOperationKind::Smoothen)
 					replacement.Loop = operation.Sequential->SmoothLoop;
 				replacement.TrimRange = operation.TrimRange;
@@ -359,6 +387,7 @@ namespace engine::imagegraph::detail {
 			return nullptr;
 		}
 		size_t LineCount() const {
+			if (SourceData && SourceData->Baked) return SourceData->Baked->Lines.size();
 			if (SourceData && SourceData->Sequential && *Operation != SourcePathOperationKind::Smoothen)
 				return 1;
 			if (WeightSpatial) return WeightSpatial->LineCount();
@@ -366,7 +395,8 @@ namespace engine::imagegraph::detail {
 			if (!Operation) return 1;
 			if (*Operation == SourcePathOperationKind::Blend)
 				return SourceData->BlendInputsValid[0] ? Inputs[0].LineCount() : 1;
-			if (*Operation != SourcePathOperationKind::Combine && *Operation != SourcePathOperationKind::Join)
+			if (*Operation != SourcePathOperationKind::Bake &&
+				*Operation != SourcePathOperationKind::Combine && *Operation != SourcePathOperationKind::Join)
 				return Inputs.empty() ? 1 : Inputs[0].LineCount();
 			size_t count = 0;
 			for (const auto &child : Inputs)
@@ -374,6 +404,10 @@ namespace engine::imagegraph::detail {
 			return count;
 		}
 		double Length(size_t line = 0) const {
+			if (SourceData && SourceData->Baked)
+				return line < SourceData->Baked->Lines.size()
+						   ? SourceBakedLength(SourceData->Baked->Lines[line])
+						   : 0;
 			if (SourceData && SourceData->Sequential && *Operation != SourcePathOperationKind::Smoothen)
 				return SourceData->Sequential->CachedLength + (*Operation == SourcePathOperationKind::Extends
 																   ? SourceData->Sequential->ExtendLength
@@ -399,6 +433,8 @@ namespace engine::imagegraph::detail {
 						 : 0;
 		}
 		size_t SegmentCount(size_t line = 0) const {
+			if (SourceData && SourceData->Baked)
+				return line < SourceData->Baked->Lines.size() ? SourceData->Baked->Lines[line].size() : 0;
 			if (SourceData && SourceData->Sequential && *Operation != SourcePathOperationKind::Smoothen)
 				return SourceData->Sequential->CachedSegments;
 			if (WeightSpatial) return WeightSpatial->SegmentCount(line);
@@ -499,6 +535,10 @@ namespace engine::imagegraph::detail {
 		}
 
 		size_t AccumulatedCount(size_t line = 0) const {
+			if (SourceData && SourceData->Baked)
+				return line < SourceData->Baked->Lines.size() && SourceData->Baked->Lines[line].size() >= 2
+						   ? SourceData->Baked->Lines[line].size()
+						   : 0;
 			if (SourceData && SourceData->Sequential) return SourceData->Sequential->Accumulated.size();
 			if (WeightSpatial) return WeightSpatial->AccumulatedCount(line);
 			if (SourceMesh) {
@@ -521,6 +561,14 @@ namespace engine::imagegraph::detail {
 			return child ? child->AccumulatedCount(line) : 0;
 		}
 		double AccumulatedAt(size_t index, size_t line = 0) const {
+			if (SourceData && SourceData->Baked) {
+				if (index >= AccumulatedCount(line)) return 0;
+				const auto &points = SourceData->Baked->Lines[line];
+				double length = 0;
+				for (size_t i = 1; i <= index; ++i)
+					length += std::hypot(points[i].X - points[i - 1].X, points[i].Y - points[i - 1].Y);
+				return length;
+			}
 			if (SourceData && SourceData->Sequential)
 				return index < SourceData->Sequential->Accumulated.size()
 						   ? SourceData->Sequential->Accumulated[index]
@@ -692,6 +740,31 @@ namespace engine::imagegraph::detail {
 				);
 			return out;
 		}
+		SourcePathPointBuffer BakedPointInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			out.Position = {};
+			if (line >= SourceData->Baked->Lines.size()) return out;
+			const auto &points = SourceData->Baked->Lines[line];
+			const double length = SourceBakedLength(points);
+			if (length <= 0) return out;
+			distance = std::fmod(distance, length);
+			for (const auto &sample : BakedSamples) {
+				if (sample.Line == line && sample.Distance == distance) {
+					out.Position = sample.Position;
+					out.Weight = 1;
+					return out;
+				}
+			}
+			if (BakedSamples.size() >= Limits::MaximumArrayElements) {
+				EvaluationContext->Fail(
+					Status::LimitExceeded, "Baked path sample memo exceeds bounds", "path"
+				);
+				return out;
+			}
+			out.Position = SourceBakedPoint(points, distance);
+			if (std::isfinite(out.Position.X) && std::isfinite(out.Position.Y))
+				BakedSamples.push_back({line, distance, out.Position});
+			return out;
+		}
 		SourcePathPointBuffer PointRatioInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
 			if (Operation && Inputs.empty() && !WeightSpatial) {
 				if (*Operation == SourcePathOperationKind::Join) return out;
@@ -702,6 +775,7 @@ namespace engine::imagegraph::detail {
 				}
 			}
 			if (SourceData && SourceData->Sequential) return SequentialPoint(ratio, line, false, out);
+			if (SourceData && SourceData->Baked) return BakedPointInto(ratio * Length(line), line, out);
 			if (Shape) {
 				const auto point = PointRatio(ratio, line);
 				out.Position = {point.X, point.Y};
@@ -734,6 +808,7 @@ namespace engine::imagegraph::detail {
 		}
 		SourcePathPointBuffer
 		PointDistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			if (SourceData && SourceData->Baked) return BakedPointInto(distance, line, out);
 			if (Operation && *Operation == SourcePathOperationKind::Join && Inputs.empty()) return out;
 			if (SourceData && SourceData->Sequential) return SequentialPoint(distance, line, true, out);
 			if (Shape) {
@@ -879,6 +954,11 @@ namespace engine::imagegraph::detail {
 			return p;
 		}
 		PathPoint PointDistance(double distance, size_t line = 0) const {
+			if (SourceData && SourceData->Baked) {
+				SourcePathPointBuffer out;
+				BakedPointInto(distance, line, out);
+				return {out.Position.X, out.Position.Y, out.Weight};
+			}
 			if (SourceData && SourceData->Sequential) {
 				SourcePathPointBuffer out;
 				SequentialPoint(distance, line, true, out);
@@ -939,13 +1019,15 @@ namespace engine::imagegraph::detail {
 
 		bool HasSourceTangent() const {
 			if (!Operation) return true;
-			return *Operation != SourcePathOperationKind::Combine &&
+			return *Operation != SourcePathOperationKind::Bake &&
+				   *Operation != SourcePathOperationKind::Combine &&
 				   *Operation != SourcePathOperationKind::VerletMesh &&
 				   *Operation != SourcePathOperationKind::Join &&
 				   *Operation != SourcePathOperationKind::Shift &&
 				   *Operation != SourcePathOperationKind::WeightAdjust;
 		}
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
+			if (SourceData && SourceData->Baked) return PointDistance(ratio * Length(line), line);
 			if (SourceData && SourceData->Sequential) {
 				SourcePathPointBuffer out;
 				SequentialPoint(ratio, line, false, out);

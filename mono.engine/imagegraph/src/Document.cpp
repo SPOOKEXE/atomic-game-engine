@@ -50,6 +50,7 @@
 #include "SourceInputOrigin.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourceMirrorPathProjection.hpp"
+#include "SourcePathBakeCodec.hpp"
 #include "SourcePathSequentialCodec.hpp"
 #include "SourcePathShapeCodec.hpp"
 #include "SourcePathShiftMemo.hpp"
@@ -78,6 +79,7 @@
 #include <engine/imagegraph/SliceStackReplay.hpp>
 #include <engine/imagegraph/SourceBuiltinRandom.hpp>
 #include <engine/imagegraph/SourceFont.hpp>
+#include <engine/imagegraph/SourceInputProcessingObserver.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/StatefulTemporalCone.hpp>
@@ -1403,6 +1405,11 @@ namespace engine::imagegraph {
 		void WritePathPayload(std::ostream &stream, const Path2D &path) {
 			if (path.SourceOperation) {
 				const auto &operation = *path.SourceOperation;
+				if (operation.Kind == SourcePathOperationKind::Bake) {
+					stream << "bake ";
+					detail::WriteSourceBaked(stream, *operation.Baked);
+					return;
+				}
 				if (operation.Kind == SourcePathOperationKind::Shape) {
 					stream << "shape ";
 					detail::WriteSourcePathShape(stream, *operation.Shape);
@@ -2326,6 +2333,15 @@ namespace engine::imagegraph {
 				std::string kind;
 				size_t count = 0;
 				if (!ReadToken(stream, kind, budget, kindCharge, allocationRefused)) return false;
+				if (kind == "bake") {
+					if (!admit(sizeof(SourcePathData2D) + sizeof(SourcePathBakedData2D))) return false;
+					Path2D path;
+					auto &operation = path.SourceOperation.emplace();
+					operation.Kind = SourcePathOperationKind::Bake;
+					if (!detail::ReadSourceBaked(stream, operation.Baked.emplace(), admit)) return false;
+					value = std::move(path);
+					return true;
+				}
 				if (kind == "shape") {
 					if (!admit(sizeof(SourcePathData2D))) return false;
 					Path2D path;
@@ -9952,6 +9968,53 @@ namespace engine::imagegraph {
 		return nullptr;
 	}
 
+	static const Node *SourceExpressionOwner(
+		const Document &document,
+		const Plan &plan,
+		const Node &local,
+		std::string_view port,
+		const GroupReplayState *replay
+	) {
+		const auto *binding = replay ? replay->Binding(local.Id, port) : nullptr;
+		const Node *owner = EffectiveInputOwner(document, local, port);
+		if (binding && replay->InstancesBound() &&
+			!detail::InheritedMovedSourceGetter(local, port, binding)) {
+			const auto bound =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+					return node.Id == binding->OwnerId;
+				});
+			owner = bound == document.Nodes.end() ? nullptr : &*bound;
+		}
+		if (binding && detail::MovedSourceAnimator(*binding)) {
+			const bool linked =
+				std::any_of(
+					plan.EffectiveLinks.begin(),
+					plan.EffectiveLinks.end(),
+					[&](const auto &link) { return link.ToNode == local.Id && link.ToPort == port; }
+				) ||
+				std::any_of(plan.ResolvedInputs.begin(), plan.ResolvedInputs.end(), [&](const auto &input) {
+					return input.NodeId == local.Id && input.Port == port;
+				});
+			owner = linked ? &local : EffectiveInputOwner(document, local, port);
+		}
+		return owner;
+	}
+
+	std::optional<std::string_view> SourceInputExpressionOwner(
+		const Document &document,
+		const Plan &plan,
+		std::string_view nodeId,
+		std::string_view port,
+		const GroupReplayState *replay
+	) {
+		const auto local = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+			return node.Id == nodeId;
+		});
+		if (local == document.Nodes.end()) return std::nullopt;
+		const auto *owner = SourceExpressionOwner(document, plan, *local, port, replay);
+		return owner ? std::optional<std::string_view>{owner->Id} : std::nullopt;
+	}
+
 	static std::optional<bool> SourceTriggerInputValue(
 		const Document &document,
 		const Node &node,
@@ -10666,6 +10729,26 @@ namespace engine::imagegraph {
 		SimulationCapture *simulation = nullptr,
 		StatefulOutputCapture *batch = nullptr
 	) {
+
+		auto observerCharge =
+			budget.Reserve(request.SourceInputObserver ? request.SourceInputObserver->RetainedBytes() : 0);
+		if (!observerCharge) {
+			SetDiagnostic(
+				diagnostic, Status::LimitExceeded, "source processing receipt exceeds evaluation budget"
+			);
+			if (!request.SourceInputObserver ||
+				request.SourceInputObserver->CaptureRefused({}, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			observerCharge = budget.Reserve(request.SourceInputObserver->RetainedBytes());
+			if (!observerCharge) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"source processing receipt could not release its storage"
+				);
+				return diagnostic.Code;
+			}
+		}
 
 		const bool hasFrameCaches =
 			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
@@ -13729,26 +13812,8 @@ namespace engine::imagegraph {
 				pcxPrograms.reserve(inputCount);
 				const auto appendPcxProgram = [&](std::string_view port) {
 					if (!detail::ReadsSourceInput(inputSelection, index, port)) return;
-					const auto *binding =
-						request.GroupReplay ? request.GroupReplay->Binding(node.Id, port) : nullptr;
-					const Node *expressionOwner = &inputOwner(port);
-					if (binding && detail::MovedSourceAnimator(*binding)) {
-						const bool localLink = std::any_of(
-												   plan.EffectiveLinks.begin(),
-												   plan.EffectiveLinks.end(),
-												   [&](const auto &link) {
-													   return link.ToNode == node.Id && link.ToPort == port;
-												   }
-											   ) ||
-											   std::any_of(
-												   plan.ResolvedInputs.begin(),
-												   plan.ResolvedInputs.end(),
-												   [&](const auto &input) {
-													   return input.NodeId == node.Id && input.Port == port;
-												   }
-											   );
-						expressionOwner = localLink ? &node : EffectiveInputOwner(document, node, port);
-					}
+					const Node *expressionOwner =
+						SourceExpressionOwner(document, plan, node, port, request.GroupReplay);
 					if (!expressionOwner) return;
 					const auto &owner = *expressionOwner;
 					const auto found = std::find_if(
@@ -13878,6 +13943,7 @@ namespace engine::imagegraph {
 						owner.ImageArrayViews.emplace_back(array.Port, &array.Data);
 					owner.Captured = true;
 				}
+
 				if (nodeInputs && node.Id == nodeInputs->NodeId) {
 					const bool executeCaptured =
 						batch && (retainedTargets[index] || remainingConsumers[index] != 0);
@@ -14049,7 +14115,78 @@ namespace engine::imagegraph {
 					}
 					return Status::Ok;
 				}
-				if (!detail::RunProcessorBatch(context, executor) ||
+				struct ProcessingCapture {
+					SourceInputProcessingObserver *Observer;
+					detail::EvaluationBudget &Budget;
+					detail::AllocationReservation &Charge;
+					Diagnostic &Error;
+					FrameTime Frame;
+				} processingCapture{
+					request.SourceInputObserver, budget, *observerCharge, diagnostic, GetFrameTime(request)
+				};
+				const auto observeProcessing = [](detail::NodeContext &row, void *opaque) {
+					auto &state = *static_cast<ProcessingCapture *>(opaque);
+					if (!state.Observer || !state.Observer->ObservesFrame(state.Frame) ||
+						!state.Observer->ObservesNode(row.Authored.Id))
+						return true;
+					std::vector<EvaluationInputValue> values;
+					std::vector<EvaluationInputImage> images;
+					std::vector<SnapshotImageArray> arrays;
+					std::optional<SurfaceFormat> policy;
+					int64_t interpolation = 1;
+					auto charge = state.Budget.Reserve(0);
+					NodeInputCapture capture{
+						row.Authored.Id, &values, &images, &policy, &*charge, &arrays, &interpolation
+					};
+					// The processor has already selected and projected this successful row.
+					if (!CaptureNodeInputs(row, capture, {}, {})) {
+						Diagnostic refused{
+							row.FailureCode, row.Authored.Id, row.FailurePort, row.FailureMessage
+						};
+						if (state.Observer->CaptureRefused(row.Authored.Id, refused) != Status::Ok)
+							return false;
+						row.FailureCode = Status::Ok;
+						row.FailureMessage.clear();
+						row.FailurePort.clear();
+						return true;
+					}
+					const auto status = state.Observer->ObserveNode(
+						row.Authored.Id,
+						state.Frame,
+						values,
+						images,
+						arrays,
+						state.Error,
+						state.Budget.Available()
+					);
+					if (status != Status::Ok) return row.Fail(status, state.Error.Message);
+					if (!state.Charge.Resize(state.Observer->RetainedBytes())) {
+						Diagnostic refused{
+							Status::LimitExceeded,
+							{},
+							{},
+							"source processing receipt exceeds evaluation budget"
+						};
+						if (state.Observer->CaptureRefused(row.Authored.Id, refused) != Status::Ok)
+							return row.Fail(refused.Code, refused.Message);
+						if (!state.Charge.Resize(state.Observer->RetainedBytes())) {
+							refused = {
+								Status::LimitExceeded,
+								{},
+								{},
+								"source processing receipt exceeds evaluation budget"
+							};
+							if (state.Observer->CaptureRefused({}, refused) != Status::Ok ||
+								!state.Charge.Resize(state.Observer->RetainedBytes()))
+								return row.Fail(
+									Status::LimitExceeded,
+									"source processing receipt could not release its storage"
+								);
+						}
+					}
+					return true;
+				};
+				if (!detail::RunProcessorBatch(context, executor, observeProcessing, &processingCapture) ||
 					!detail::StampSourcePathShiftProducedValues(context) ||
 					context.FailureCode != Status::Ok) {
 					if (pendingPcxRoute) {
