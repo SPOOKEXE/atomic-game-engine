@@ -2,7 +2,7 @@
 # Recollect the reference and candidate on one host before enforcing ceilings.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
-baseline_ref=${1:-v0.24.1}
+baseline_ref=${1:-origin/v0.24.1}
 document=${2:-"$root/docs/VERSION_IMPACT.md"}
 reference="$root/.cache/build/version-impact-reference"
 candidate_build="$root/.cache/build/profile"
