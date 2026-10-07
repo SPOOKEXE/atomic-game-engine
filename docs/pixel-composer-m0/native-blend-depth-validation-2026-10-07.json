@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug implement bounded native pc.blend_depth colour and depth outputs. exact licensed raster parity remains unverified.",
+  "contract": {
+    "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_blend_depth/node_blend_depth.gml": "0337aa344414e361ce011cb4d2146601314bdb868d5a51d505ad1860292ffcc4",
+      "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+      "scripts/surface_functions/surface_functions.gml": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+      "scripts/node_data/node_data.gml": "73529e1178a4b2768d8a2ac405a7ba1dd3173d5c43f96cfc6c6942db015cbf7d"
+    },
+    "fragment_sha256": "18540e4b7aa525a05a6b37ea2c549badf7c6809d08482fd75132e68de981eaaf",
+    "source_base": "https://github.com/Ttanasart-pt/Pixel-Composer/blob/b69eca232217360cf1502ef0223523d818606652/",
+    "licensed_reference_available": false,
+    "fragment_archive_path": "shaders/sh_blend_depth/sh_blend_depth.fsh",
+    "rules": [
+      "first surface dimensions; both outputs RGBA8",
+      "independent row-vector transforms; positions subtracted after rotation and scale",
+      "all four comparison modes; alpha-squared foreground blend; minimum depth in every mode",
+      "missing or transparent second colour retains first colour and depth",
+      "raw depth is nearest clamp RGB mean times alpha, range-mapped; absent depth uses transformed Y",
+      "shader_set_surface forces nearest stage filtering after interpolation; colour kernels share first dimensions",
+      "red-only sampling retains zero green and blue",
+      "conservative complete-batch work admission before output allocation"
+    ],
+    "named_limits": [
+      "missing first surface reports invalid surface_1 because native evaluation has no retained node output",
+      "zero scale reports undefined source coordinates",
+      "Atlas source texture binding is unsupported and refused"
+    ]
+  },
+  "implementation": [
+    "mono.engine/imagegraph/src/nodes/SourceBlendDepth.cpp",
+    "mono.engine/imagegraph/src/nodes/Sampler.hpp",
+    "mono.engine/imagegraph/src/nodes/SourceRefractClean.hpp",
+    "mono.engine/imagegraph/src/nodes/Families.hpp",
+    "mono.engine/imagegraph/src/NodeExecutors.cpp"
+  ],
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/blend-depth-build-batch1.log",
+    "build_warning_categories": [
+      "-Wmaybe-uninitialized",
+      "-Wmissing-field-initializers"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/blend-depth-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5317,
+    "startup_test_cases": 1,
+    "python_tests": 101,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "blend_depth_semantic_cases": 16,
+    "backend": "SDL offscreen Vulkan",
+    "source_stability": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/blend-depth-source-stability-batch2.json",
+    "frozen_source_paths": 3569,
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/blend-depth-cpu-child-hashes-batch2.json"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "check": "studio",
+      "test": "value controls commit complete text and preserve numeric width / int32",
+      "output": [
+        "CHECK(widget.Changed): false",
+        "formatted value: \"0\" instead of \"1234567\""
+      ],
+      "source": "mono.studio/tests/ComponentPanel.cpp:494",
+      "result": "grug inspect existing simulated click/key driver. whole batch repeat with unchanged code passes. cause unproven; no speculative widget repair. intermittent check remains unresolved.",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/blend-depth-cpu-studio-batch1.log"
+    }
+  ],
+  "review_corrections_before_build": [
+    "forward reference dimensions once through non-CleanEdge sampler",
+    "skip second-transform validation when second colour absent",
+    "Empty oversample explicitly set in outside-coordinate test"
+  ],
+  "not_run": [
+    "headed live Studio, approval pending",
+    "licensed reference pixel capture, reference build unavailable",
+    "dedicated Blend Depth performance benchmark; instrumentation added but no speed claim"
+  ],
+  "coverage": [
+    "all comparison modes including ties and normalized enum bounds",
+    "squared alpha and minimum Greater-mode depth",
+    "depth alpha/range/red-channel and nearest/clamp overrides",
+    "position units, rotation, scale and shared Bicubic dimensions",
+    "seven surface formats and signed float to UNORM output",
+    "both outputs through grouped arrays, animation and save/load",
+    "whole-batch limit preserves previous public output",
+    "malformed surface, Atlas, missing first surface, nonfinite transforms and zero scale"
+  ]
+}

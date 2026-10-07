@@ -115,8 +115,11 @@ namespace engine::imagegraph::detail::source_refract_clean {
 		}
 		return rejected;
 	}
-	inline Rgba Texture(const Image &image, double u, double v) {
-		const Point size{image.Width + .0001, image.Height + .0001};
+	inline Rgba Texture(const Image &image, double u, double v, Vector2 dimension = {}) {
+		const Point size{
+			(dimension.X > 0 ? dimension.X : image.Width) + .0001,
+			(dimension.Y > 0 ? dimension.Y : image.Height) + .0001
+		};
 		Point px{u * size.X, v * size.Y};
 		const Point local{Fract(px.X), Fract(px.Y)},
 			direction{std::floor(local.X + .5) * 2 - 1, std::floor(local.Y + .5) * 2 - 1};
@@ -142,29 +145,30 @@ namespace engine::imagegraph::detail::source_refract_clean {
 		if (cs[0] >= 0) return cs;
 		return c;
 	}
-	inline Rgba Sample(const Image &image, double u, double v, const SamplerSettings &settings) {
-		if (settings.Interpolation != 6) return SampleTexture(image, u, v, settings);
-		if (u >= 0 && u <= 1 && v >= 0 && v <= 1) return Texture(image, u, v);
+	inline Rgba
+	Sample(const Image &image, double u, double v, const SamplerSettings &settings, Vector2 dimension = {}) {
+		if (settings.Interpolation != 6) return SampleTexture(image, u, v, settings, dimension);
+		if (u >= 0 && u <= 1 && v >= 0 && v <= 1) return Texture(image, u, v, dimension);
 		constexpr Rgba empty{}, black{0, 0, 0, 1};
 		switch (settings.Oversample) {
 		case 2:
 			return black;
 		case 3:
-			return Texture(image, std::clamp(u, 0., 1.), std::clamp(v, 0., 1.));
+			return Texture(image, std::clamp(u, 0., 1.), std::clamp(v, 0., 1.), dimension);
 		case 4:
-			return Texture(image, Fract(u), Fract(v));
+			return Texture(image, Fract(u), Fract(v), dimension);
 		case 6:
-			return v < 0 || v > 1 ? empty : Texture(image, Fract(u), v);
+			return v < 0 || v > 1 ? empty : Texture(image, Fract(u), v, dimension);
 		case 7:
-			return v < 0 || v > 1 ? black : Texture(image, Fract(u), v);
+			return v < 0 || v > 1 ? black : Texture(image, Fract(u), v, dimension);
 		case 8:
-			return Texture(image, Fract(u), std::clamp(v, 0., 1.));
+			return Texture(image, Fract(u), std::clamp(v, 0., 1.), dimension);
 		case 10:
-			return u < 0 || u > 1 ? empty : Texture(image, u, Fract(v));
+			return u < 0 || u > 1 ? empty : Texture(image, u, Fract(v), dimension);
 		case 11:
-			return u < 0 || u > 1 ? black : Texture(image, u, Fract(v));
+			return u < 0 || u > 1 ? black : Texture(image, u, Fract(v), dimension);
 		case 12:
-			return Texture(image, std::clamp(u, 0., 1.), Fract(v));
+			return Texture(image, std::clamp(u, 0., 1.), Fract(v), dimension);
 		default:
 			return empty;
 		}

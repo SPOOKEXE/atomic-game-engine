@@ -17,6 +17,8 @@ namespace engine::imagegraph::detail {
 		int64_t Interpolation = 1;
 		// 1 Empty, 2 Black, 3 Clamp, 4 Repeat XY, 6..8 repeat X, 10..12 repeat Y.
 		int64_t Oversample = 4;
+		// grug shader_set_surface can override the stage filter after interpolation setup.
+		bool ForceNearest = false;
 	};
 
 	inline SamplerSettings ReadSampler(const NodeContext &context) {
@@ -36,9 +38,9 @@ namespace engine::imagegraph::detail {
 		);
 	}
 
-	// gpu_set_tex_filter follows shader_set_interpolation: filtering is off only for Pixel and CleanEdge.
+	// grug interpolation selects filtering unless a later texture-stage binding forces nearest reads.
 	inline bool Filtered(const SamplerSettings &settings) {
-		return settings.Interpolation != 1 && settings.Interpolation != 6;
+		return !settings.ForceNearest && settings.Interpolation != 1 && settings.Interpolation != 6;
 	}
 
 	inline Rgba Texel(const Image &image, int64_t x, int64_t y) {
@@ -114,29 +116,34 @@ namespace engine::imagegraph::detail {
 	}
 
 	// sampleTexture without a UV map: inside [0, 1] reads normally, outside follows the Oversample mode.
-	inline Rgba SampleTexture(const Image &image, double u, double v, const SamplerSettings &settings) {
-		if (u >= 0.0 && v >= 0.0 && u <= 1.0 && v <= 1.0) return TextureInterpolated(image, u, v, settings);
+	inline Rgba SampleTexture(
+		const Image &image, double u, double v, const SamplerSettings &settings, Vector2 dimension = {}
+	) {
+		if (u >= 0.0 && v >= 0.0 && u <= 1.0 && v <= 1.0)
+			return TextureInterpolated(image, u, v, settings, dimension);
 		constexpr Rgba EMPTY{0, 0, 0, 0};
 		constexpr Rgba BLACK{0, 0, 0, 1};
 		switch (settings.Oversample) {
 		case 2:
 			return BLACK;
 		case 3:
-			return TextureInterpolated(image, std::clamp(u, 0.0, 1.0), std::clamp(v, 0.0, 1.0), settings);
+			return TextureInterpolated(
+				image, std::clamp(u, 0.0, 1.0), std::clamp(v, 0.0, 1.0), settings, dimension
+			);
 		case 4:
-			return TextureInterpolated(image, Fract(u), Fract(v), settings);
+			return TextureInterpolated(image, Fract(u), Fract(v), settings, dimension);
 		case 6:
-			return v < 0.0 || v > 1.0 ? EMPTY : TextureInterpolated(image, Fract(u), v, settings);
+			return v < 0.0 || v > 1.0 ? EMPTY : TextureInterpolated(image, Fract(u), v, settings, dimension);
 		case 7:
-			return v < 0.0 || v > 1.0 ? BLACK : TextureInterpolated(image, Fract(u), v, settings);
+			return v < 0.0 || v > 1.0 ? BLACK : TextureInterpolated(image, Fract(u), v, settings, dimension);
 		case 8:
-			return TextureInterpolated(image, Fract(u), std::clamp(v, 0.0, 1.0), settings);
+			return TextureInterpolated(image, Fract(u), std::clamp(v, 0.0, 1.0), settings, dimension);
 		case 10:
-			return u < 0.0 || u > 1.0 ? EMPTY : TextureInterpolated(image, u, Fract(v), settings);
+			return u < 0.0 || u > 1.0 ? EMPTY : TextureInterpolated(image, u, Fract(v), settings, dimension);
 		case 11:
-			return u < 0.0 || u > 1.0 ? BLACK : TextureInterpolated(image, u, Fract(v), settings);
+			return u < 0.0 || u > 1.0 ? BLACK : TextureInterpolated(image, u, Fract(v), settings, dimension);
 		case 12:
-			return TextureInterpolated(image, std::clamp(u, 0.0, 1.0), Fract(v), settings);
+			return TextureInterpolated(image, std::clamp(u, 0.0, 1.0), Fract(v), settings, dimension);
 		default:
 			return EMPTY;
 		}
