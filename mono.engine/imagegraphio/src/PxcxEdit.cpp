@@ -71,6 +71,72 @@ namespace engine::imagegraphio {
 			budget -= bytes;
 			return true;
 		}
+		bool SourceVec2Input(const CatalogueInput *input) {
+			return input && input->SourceIndex >= 0 && input->Type == ValueType::Vector2 &&
+				   (input->SourceKind == "Vec2" || input->SourceKind == "IVec2" ||
+					input->SourceKind == "Dimension" || input->SourceKind == "Range");
+		}
+		const CatalogueInput *SourceVec2Input(const Node &node, std::string_view port) {
+			const auto *entry = FindCatalogueEntry(node.Type);
+			if (!entry) return nullptr;
+			const auto *input = FindCatalogueInput(*entry, port);
+			if (!input &&
+				std::any_of(node.DynamicInputs.begin(), node.DynamicInputs.end(), [&](const auto &dynamic) {
+					return dynamic.Id == port;
+				})) {
+				size_t group = 0;
+				input = FindDynamicTemplate(*entry, port, group);
+			}
+			return SourceVec2Input(input) ? input : nullptr;
+		}
+		// Source numeric-pair JSON has no native carrier tag. Only comparison copies lose that tag.
+		bool NormalizeSourceVec2Comparison(Document &document, size_t &work) {
+			if (document.FormatVersion < 9) return true;
+			const auto normalize = [](Value &value) {
+				const auto *array = std::get_if<ArrayValue>(&value);
+				if (!array || !array->Nested.empty() ||
+					(array->Items.empty() ? array->Elements.size() != 2
+										  : !array->Elements.empty() || array->Items.size() != 2))
+					return;
+				std::array<double, 2> components{};
+				for (size_t axis = 0; axis < 2; ++axis) {
+					const auto *leaf = array->Items.empty()
+										   ? &array->Elements[axis]
+										   : std::get_if<ElementValue>(&array->Items[axis].Data);
+					if (!leaf) return;
+					if (const auto *real = std::get_if<double>(leaf))
+						components[axis] = *real;
+					else if (const auto *integer = std::get_if<int64_t>(leaf))
+						components[axis] = double(*integer);
+					else
+						return;
+					if (!std::isfinite(components[axis])) return;
+				}
+				value = Vector2{components[0], components[1]};
+			};
+			for (auto &key : document.Keyframes) {
+				if (!Spend(1, work)) return false;
+				if (key.Interpolation != "source" || !std::holds_alternative<ArrayValue>(key.Data)) continue;
+				for (const auto &node : document.Nodes) {
+					if (!Spend(1 + std::min(node.Id.size(), key.NodeId.size()), work)) return false;
+					if (node.Id != key.NodeId) continue;
+					if (!Spend(2 * (node.Type.size() + 1), work)) return false;
+					const auto *entry = FindCatalogueEntry(node.Type);
+					if (!entry) break;
+					if (!Spend(
+							2 *
+								(entry->Inputs.size() + entry->DynamicTemplate.size() +
+								 node.DynamicInputs.size() + 1) *
+								(key.Port.size() + 1),
+							work
+						))
+						return false;
+					if (SourceVec2Input(node, key.Port)) normalize(key.Data);
+					break;
+				}
+			}
+			return true;
+		}
 		// These candidates start empty, so one reserve has no old backing allocation to retain.
 		template <class T>
 		bool ReserveEmptyProjectionSlots(std::vector<T> &items, size_t count, size_t &budget) {
@@ -793,7 +859,8 @@ namespace engine::imagegraphio {
 			const auto *input = entry ? FindCatalogueInput(*entry, port) : nullptr;
 			const bool localMirrorVector =
 				node.Type == "pc.mirror_polar" && input && input->SourceKind == "Vec2";
-			if ((record.contains("from_node") && !localMirrorVector) || record.value("global_use", false))
+			if ((record.contains("from_node") && !localMirrorVector) ||
+				(record.value("global_use", false) && !SourceVec2Input(node, port)))
 				return true;
 			const auto identity = [&](const Keyframe &key) -> std::string_view {
 				const std::string_view id = key.SourceKeyId;
@@ -1413,9 +1480,11 @@ namespace engine::imagegraphio {
 						const auto *schema = FindCatalogueInput(*entry, operation.Port);
 						const bool localMirrorVector = node->Type == "pc.mirror_polar" && schema &&
 													   schema->SourceKind == "Vec2" && input;
+						const bool expressionKey =
+							!std::is_same_v<T, PxcxInputValueEdit> && SourceVec2Input(*node, operation.Port);
 						if (!input || !input->contains("r") ||
 							(input->contains("from_node") && !localMirrorVector) ||
-							input->value("global_use", false))
+							(input->value("global_use", false) && !expressionKey))
 							return Reject(
 								diagnostic,
 								"PXC edit input has no reversible fixed value",
@@ -1713,6 +1782,9 @@ namespace engine::imagegraphio {
 		// The import's minimum format is derived from retained source metadata, not an edited field.
 		intended.FormatVersion = projected.Graph.FormatVersion;
 		detail::RebaseKeyProvenance(intended, projected.Graph);
+		size_t comparisonWork = 64'000'000;
+		if (!NormalizeSourceVec2Comparison(intended, comparisonWork))
+			return Reject(diagnostic, "PXC numeric-pair comparison exceeds transaction work bounds");
 		if (intended != projected.Graph)
 			return Reject(diagnostic, "PXC edited projection changed unsupported or ambiguous semantics");
 		out = std::move(bytes);
@@ -2487,6 +2559,10 @@ namespace engine::imagegraphio {
 			if (native && native->Type == "pc.global_scope") entry = &globalEntry;
 			Json *savedInput =
 				entry && savedNode ? SourceInput(*keyRoot, *savedNode, *entry, key.Port) : nullptr;
+			// Expression-backed source Vec2 tracks are projected with their inactive scalar records below.
+			if (native && savedInput && savedInput->value("global_use", false) &&
+				SourceVec2Input(*native, key.Port))
+				continue;
 			if (savedInput && savedInput->contains("r") && (*savedInput)["r"].is_object()) continue;
 			if (savedInput && savedInput->contains("r") && (*savedInput)["r"].is_array() &&
 				std::any_of(desired.Keyframes.begin(), desired.Keyframes.end(), [&](const auto &wanted) {
@@ -2516,6 +2592,8 @@ namespace engine::imagegraphio {
 			auto *savedNode = SourceNode(*keyRoot, key.NodeId);
 			auto *savedInput =
 				entry && savedNode ? SourceInput(*keyRoot, *savedNode, *entry, key.Port) : nullptr;
+			if (savedInput && savedInput->value("global_use", false) && SourceVec2Input(*node, key.Port))
+				continue;
 			if (savedInput && savedInput->contains("r") && (*savedInput)["r"].is_array()) continue;
 			const auto old = std::find_if(
 				working.Graph.Keyframes.begin(), working.Graph.Keyframes.end(), [&](const auto &item) {
@@ -3873,7 +3951,10 @@ namespace engine::imagegraphio {
 				for (const auto port : ports) {
 					if (UnchangedHlslAnimator(working.Graph, desired, node, port)) continue;
 					auto *record = SourceInput(root, *source, *entry, port);
-					if (record && record->contains("r") && (*record)["r"].is_array() &&
+					const bool vectorExpression =
+						record && record->value("global_use", false) && SourceVec2Input(node, port);
+					if (record && record->contains("r") &&
+						((*record)["r"].is_array() || (vectorExpression && (*record)["r"].is_object())) &&
 						!AuthoredKeyRecord(desired, node, port, *record, diagnostic))
 						return false;
 				}
@@ -4198,6 +4279,10 @@ namespace engine::imagegraphio {
 		if (!canonicalizeTracks(desired) || !canonicalizeTracks(projected.Graph)) return false;
 		detail::CanonicalizeKeyOrder(desired);
 		detail::CanonicalizeKeyOrder(projected.Graph);
+		size_t pairComparisonWork = size_t(compactWorkRemaining);
+		if (!NormalizeSourceVec2Comparison(desired, pairComparisonWork))
+			return Reject(diagnostic, "PXC numeric-pair comparison exceeds transaction work bounds");
+		compactWorkRemaining = pairComparisonWork;
 		if (!ReconstructsSourceAnimators(authored, projected.Graph, diagnostic)) return false;
 		desired.SourceAnimators = {};
 		desired.FormatVersion = projected.Graph.FormatVersion;
