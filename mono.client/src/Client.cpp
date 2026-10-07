@@ -5231,10 +5231,21 @@ namespace client {
 			ENGINE_ERROR("benchmark report requires allocator hooks and positive profile-seconds");
 			return EXIT_PROFILE_ARTIFACT;
 		}
+		if (Settings.BenchmarkWaitForJoin &&
+			(!benchmarking || Settings.ConnectAddress.empty() || Settings.DataFactory ||
+			 Settings.PresentationSession != 0 || !Settings.PresentationWorld.empty())) {
+			ENGINE_ERROR(
+				"benchmark-wait-for-join requires a connected benchmark without a data-factory or "
+				"presentation host"
+			);
+			return EXIT_PROFILE_ARTIFACT;
+		}
 		engine::core::HeapTotals benchmarkHeap = HeapProfile::Totals();
 		engine::core::BenchmarkReport benchmark(benchmarkHeap);
-		const auto benchmarkStarted = std::chrono::steady_clock::now();
-		const auto initialGpu = Renderer.MemoryStatistics();
+		const auto benchmarkRunStarted = std::chrono::steady_clock::now();
+		auto benchmarkStarted = benchmarkRunStarted;
+		bool benchmarkMeasurementStarted = !Settings.BenchmarkWaitForJoin;
+		auto initialGpu = Renderer.MemoryStatistics();
 		double benchmarkSeconds = 0.0;
 		uint64_t benchmarkDrawCalls = 0, benchmarkUploadedBytes = 0, benchmarkSubmittedFrames = 0;
 
@@ -5242,7 +5253,29 @@ namespace client {
 			if (!PumpPresentationHost()) break;
 			if (benchmarking) LastFrame = {};
 			Step();
-			if (benchmarking) {
+			if (benchmarking && !benchmarkMeasurementStarted) {
+				// The joining frame contains bootstrap work. Start after it and
+				// include only the subsequent connected frames in the measured run.
+				if (Connection && Connection->Joined() && Connection->Live()) {
+					benchmarkHeap = HeapProfile::Totals();
+					benchmark = engine::core::BenchmarkReport(benchmarkHeap);
+					initialGpu = Renderer.MemoryStatistics();
+					benchmarkStarted = std::chrono::steady_clock::now();
+					benchmarkMeasurementStarted = true;
+				} else {
+					constexpr auto MAXIMUM_BENCHMARK_JOIN_WAIT = std::chrono::seconds(60);
+					if (std::chrono::steady_clock::now() - benchmarkRunStarted >=
+						MAXIMUM_BENCHMARK_JOIN_WAIT) {
+						ENGINE_ERROR("benchmark connected world did not join within 60 seconds");
+						return EXIT_PROFILE_ARTIFACT;
+					}
+				}
+			} else if (benchmarking) {
+				if (Settings.BenchmarkWaitForJoin &&
+					(!Connection || !Connection->Joined() || !Connection->Live())) {
+					ENGINE_ERROR("benchmark connected world disconnected before measurement finished");
+					return EXIT_PROFILE_ARTIFACT;
+				}
 				benchmarkHeap = HeapProfile::Totals();
 				benchmark.AddFrame(
 					FrameGraph::Spans(),

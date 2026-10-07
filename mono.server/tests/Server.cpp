@@ -100,6 +100,19 @@ TEST_CASE("server benchmark duration rejects invalid intervals", "[server][bench
 	CHECK_FALSE(host.Initialise(options));
 }
 
+TEST_CASE("waiting for a benchmark viewer requires a report and listener", "[server][benchmark]") {
+	server::Options options;
+	options.BenchmarkWaitForClient = true;
+	SECTION("without a report") {
+		options.Listening = true;
+	}
+	SECTION("without a listener") {
+		options.BenchmarkReport = "unused-benchmark.json";
+	}
+	server::Server host;
+	CHECK_FALSE(host.Initialise(options));
+}
+
 TEST_CASE("server tick limit cannot produce an incomplete benchmark", "[server][benchmark]") {
 	server::Options options;
 	options.Entities = 4;
