@@ -6,6 +6,14 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.caustic" &&
+			((input.SourceKind == "ValueUnit" && (input.Id == "position_unit" || input.Id == "scale_unit")) ||
+			 (input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only") ||
+			 (input.SourceKind == "MapToggle" &&
+			  (input.Id == "intensity_mapped" || input.Id == "progress_mapped")) ||
+			 (input.SourceKind == "MapRange" &&
+			  (input.Id == "intensity_map_range" || input.Id == "progress_map_range"))))
+			return true;
 		if ((entry.Type == "pc.jpeg" || entry.Type == "pc.pixel_sort" || entry.Type == "pc.noise") &&
 			input.SourceKind == "MaskAlphaOnly" && input.Id == "mask_alpha_only")
 			return true;
@@ -164,6 +172,8 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.caustic" && (port == "intensity" || port == "progress"))
+			return context.Boolean(port == "intensity" ? "intensity_mapped" : "progress_mapped");
 		if (context.Entry.Type == "pc.displace" && (port == "strength" || port == "mid_value"))
 			return context.Boolean(std::string(port) + "_mapped");
 		if (context.Entry.Type == "pc.polar" && (port == "angle" || port == "blend" || port == "twist"))
@@ -209,6 +219,11 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.caustic" && (port == "intensity" || port == "progress")) {
+			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
+				return context.Find(port == "intensity" ? "intensity_map_range" : "progress_map_range");
+			return value;
+		}
 		if (context.Entry.Type == "pc.displace" && (port == "strength" || port == "mid_value")) {
 			if (!context.IsLinked(port) && context.IsCatalogueDefault(port).value_or(false))
 				return context.Find(std::string(port) + "_map_range");
@@ -312,6 +327,10 @@ namespace engine::imagegraph::detail {
 	}
 	inline bool ReadSourceMappedRange(NodeContext &context, std::string_view port, Vector2 &range) {
 		const Value *value = SourceMappedRange(context, port);
+		if (!value && context.Entry.Type == "pc.caustic") {
+			range = port == "progress" ? Vector2{0, 0} : Vector2{0, 1};
+			return true;
+		}
 		if (!value && context.Entry.Type == "pc.kuwahara" && port == "radius") {
 			range = {0, 2};
 			return true;
@@ -338,12 +357,13 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if (context.Entry.Type == "pc.displace" || context.Entry.Type == "pc.polar" ||
-			context.Entry.Type == "pc.blobify" || context.Entry.Type == "pc.kuwahara" ||
-			context.Entry.Type == "pc.xdo_g_threshold" || context.Entry.Type == "pc.refract" ||
-			context.Entry.Type == "pc.herringbone_tile" || context.Entry.Type == "pc.gabor_noise" ||
-			context.Entry.Type == "pc.mirror_polar" || context.Entry.Type == "pc.stripe" ||
-			context.Entry.Type == "pc.dotted" || (context.Entry.Type == "pc.dither" && port == "contrast") ||
+		if (context.Entry.Type == "pc.caustic" || context.Entry.Type == "pc.displace" ||
+			context.Entry.Type == "pc.polar" || context.Entry.Type == "pc.blobify" ||
+			context.Entry.Type == "pc.kuwahara" || context.Entry.Type == "pc.xdo_g_threshold" ||
+			context.Entry.Type == "pc.refract" || context.Entry.Type == "pc.herringbone_tile" ||
+			context.Entry.Type == "pc.gabor_noise" || context.Entry.Type == "pc.mirror_polar" ||
+			context.Entry.Type == "pc.stripe" || context.Entry.Type == "pc.dotted" ||
+			(context.Entry.Type == "pc.dither" && port == "contrast") ||
 			(context.Entry.Type == "pc.gradient" &&
 			 (port == "angle" || port == "radius" || port == "shift" || port == "scale")) ||
 			context.Entry.Type == "pc.ambient_occlusion" ||

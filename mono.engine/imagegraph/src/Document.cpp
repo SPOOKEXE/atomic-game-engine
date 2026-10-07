@@ -13032,7 +13032,8 @@ namespace engine::imagegraph {
 							  (input.Id == "c" || input.Id == "position" || input.Id == "scale")) ||
 							 (node.Type == "pc.gabor_noise" &&
 							  (input.Id == "position" || input.Id == "scale" || input.Id == "augment")) ||
-							 ((node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal") &&
+							 ((node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal" ||
+							   node.Type == "pc.caustic") &&
 							  (input.Id == "position" || input.Id == "scale")));
 						const bool generatorSurfaceRange =
 							(node.Type == "pc.gabor_noise" || node.Type == "pc.flow_noise" ||
@@ -13046,7 +13047,8 @@ namespace engine::imagegraph {
 						const ImageArray *generatorSurfaceArray =
 							(sourceSurfaceVec2 &&
 							 (node.Type == "pc.julia_set" || node.Type == "pc.gabor_noise" ||
-							  node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal")) ||
+							  node.Type == "pc.flow_noise" || node.Type == "pc.noise_cristal" ||
+							  node.Type == "pc.caustic")) ||
 									generatorSurfaceRange
 								? FindImageArrayOutput(results[sourceIndex], link->FromPort)
 								: nullptr;

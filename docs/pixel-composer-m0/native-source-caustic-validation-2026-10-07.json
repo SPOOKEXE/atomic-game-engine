@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded native pc.caustic executor. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_caustic/node_caustic.gml": "494d1b352b246a2e7314ee6f06956c56d78945fbbd2f2aecb03db90d624065b1",
+      "scripts/__node_shader/__node_shader.gml": "81b23b94aac6df118187510083d3f59c02b4bf09799e75c72ab5a19e7e17d45f",
+      "scripts/__node_shader_generator/__node_shader_generator.gml": "e917d1974118124fef04ce6121459b2c73b956201edd6ea36c71ad223fd3f6dd",
+      "scripts/node_processor/node_processor.gml": "9e3513102079f0ca9cb9dcf58cce898cb2ac80f963415e65d8ac6ba017f827cc",
+      "scripts/node_value_vec2/node_value_vec2.gml": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112",
+      "scripts/surface_functions/surface_functions.gml": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2",
+      "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+      "shaders/sh_water_caustic/sh_water_caustic.fsh": "f18c8c948f23a7db18dc3e28f54d962ba4ba12ec66ed8a22c2be75ae45af6f02"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceCaustic.cpp",
+    "rules": [
+      "binary32 source simplex gradient with coefficient minus six, unnormalized gradients and seed-dependent permutations; each positive detail performs three samples and two gradient warps",
+      "covered positive detail requires mapped-enabled progress and intensity, with explicit two-lane upload and missing-map state reset; scalar values duplicate to both endpoints",
+      "active maps use mean RGB at original varying coordinates and ignore alpha; UV flips Y and retains alpha at zero UV Mix",
+      "raw sprite dimensions determine UVs and coverage; half-even allocation clamps to one; source clear leaves uncovered pixels transparent",
+      "Pixel and Reference units remain active; individual linked surfaces expose dimensions and bypass units; SurfaceArray through Vec2 getter becomes [1,1] because source is_surface excludes arrays",
+      "seven explicit source formats; each processor row stores selected depth before mask through default RGBA8 scratch; mask alpha is mean RGB times alpha",
+      "raw Atlas samplers, unresolved seed, unmapped source state and shader overflow refuse with named diagnostics",
+      "complete selected batch quotes cumulative work before outputs; 64000000-unit cap, conservative retained target quote and actual mask scratch charge",
+      "source inverse uses all twelve source input slots; unit and mapped metadata stay outside slot table"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-build-batch3.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-build-batch4.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-cpu-batch4-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5498,
+    "new_caustic_test_cases": 16,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3902,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-source-stability-batch3.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-source-stability-batch4.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-cpu-child-hashes-batch4.json",
+    "independent_reference": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/caustic-independent-reference.json",
+    "read_review": "pinned shader, generator, active processor, Vec2 getter and surface helper read review; root reviewed typed input normalization and fixtures"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "details": [
+        {
+          "phase": "build",
+          "severity": "warning",
+          "file": "mono.engine/imagegraph/tests/SourceCausticBatch.cpp",
+          "issue": "unused Set(Document&, std::string, Value) fixture helper",
+          "repair": "remove helper after all batch checks complete"
+        },
+        {
+          "phase": "core",
+          "issue": "SurfaceArray Vec2 fixture expected two rows; source surface_get_dimension rejects arrays and returns [1,1]",
+          "repair": "compare one scalar output with direct [1,1] and unit bypass"
+        },
+        {
+          "phase": "core",
+          "issue": "mask fixture mistook generator MRT _arr for processor outer array",
+          "repair": "compare each masked processor row with a standalone masked draw"
+        },
+        {
+          "phase": "core",
+          "issue": "batch scheduling failed without context diagnostic; read review also found Caustic unit metadata outside source slot table",
+          "repair": "add failure INFO; admit synthetic unit metadata separately while executor keeps units active; retain explicit mapped Vector2 ranges",
+          "limitation": "original undiagnosed failure persisted into batch2; metadata repair alone did not resolve it"
+        }
+      ]
+    },
+    {
+      "batch": 2,
+      "details": [
+        {
+          "phase": "core",
+          "issue": "uv_map processor array payload is invalid",
+          "cause": "fixture built ArrayValue.Items with ElementType Image, but item arrays require Any",
+          "repair": "use ElementType Any for fixture surface item arrays"
+        }
+      ]
+    },
+    {
+      "batch": 3,
+      "details": [
+        {
+          "phase": "core",
+          "issue": "uv_map executor requires homogeneous source array normalization",
+          "cause": "direct context fixture passed general item arrays; document evaluation normalizes homogeneous images into borrowed ImageArrays",
+          "repair": "supply typed ImageArray inputs with stable lifetime, matching evaluator boundary"
+        }
+      ]
+    },
+    {
+      "batch": 3,
+      "phase": "harness launch",
+      "details": {
+        "error": "FileNotFoundError cache-region-batch3-results.json",
+        "cause": "batch label replacement changed fixed prior result input",
+        "repair": "restore cache-region-batch2-results.json input",
+        "tests_launched_before_failure": false
+      }
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Caustic performance profiling"
+  ],
+  "limits": [
+    "default unmapped progress/intensity upload one scalar into vec2 and leave UseSurf state unchanged; prior shader state and driver behavior are not captured, so covered positive-detail execution refuses those controls",
+    "source-derived independent fixtures do not establish licensed runtime pixel parity; CPU/GPU math can differ",
+    "ENGINE_PROFILE marks executor work; no dedicated performance result is claimed"
+  ]
+}

@@ -36,6 +36,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourceJpegExecutors();
 	std::span<const ExecutorEntry> SourcePixelSortExecutors();
 	std::span<const ExecutorEntry> SourceNoiseExecutors();
+	std::span<const ExecutorEntry> SourceCausticExecutors();
 	std::span<const ExecutorEntry> SourceTileTransformExecutors();
 	std::span<const ExecutorEntry> PathExecutors();
 	std::span<const ExecutorEntry> PointExecutors();
